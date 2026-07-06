@@ -131,7 +131,7 @@ const BCS_VERSION: &str = concat!(
 #[async_trait]
 impl HealthPort for BootstrapHealthPort {
     async fn health(&self) -> serde_json::Value {
-        let is_master = self.state.leader_election.is_leader().await.unwrap_or(true);
+        let is_leader = self.state.leader_election.is_leader().await.unwrap_or(true);
         let leader_info = self
             .state
             .leader_election
@@ -144,9 +144,9 @@ impl HealthPort for BootstrapHealthPort {
             "status": "ok",
             "service": "bcs",
             "version": BCS_VERSION,
-            "is_master": is_master,
+            "is_leader": is_leader,
             "pod_ip": bcs_leader_election::get_local_ip(),
-            "master_info": leader_info.map(|m| serde_json::json!({
+            "leader_info": leader_info.map(|m| serde_json::json!({
                 "pod_ip": m.node_id,
                 "elected_at": m.elected_at_ms / 1_000,
             })),

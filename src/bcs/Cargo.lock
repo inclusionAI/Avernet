@@ -881,13 +881,9 @@ name = "bcs-leader-election"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "bcs-config-api",
  "bcs-service-api",
  "bcs-test-support",
- "chrono",
  "if-addrs",
- "serde",
- "serde_json",
  "tokio",
  "tracing",
 ]

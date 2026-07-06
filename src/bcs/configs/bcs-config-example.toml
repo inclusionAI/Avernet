@@ -67,6 +67,7 @@ type = "redis"
 
 [cache.redis]
 timeout_secs = 5
+key_prefix = "bcs:"
 
 [cache.redis.connection]
 type = "direct"

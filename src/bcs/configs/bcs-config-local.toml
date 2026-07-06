@@ -61,10 +61,8 @@ temperature = 0
 max_tokens = 4096
 structured_output = "json_schema"
 
-[master_election]
+[leader_election]
 enabled = false
-lock_ttl_secs = 30
-renewal_interval_secs = 10
 
 [database]
 type = "sqlite"

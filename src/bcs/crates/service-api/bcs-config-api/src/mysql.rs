@@ -92,10 +92,10 @@ pub struct DataSourceConfig {
 
     /// Connection provider configuration. The public provider is `direct`.
     ///
-    /// Internal builds can use values such as `zdas` here. Unknown
-    /// provider-specific fields are retained in `extra` so linked internal
-    /// plugin crates can validate and consume them without changing this
-    /// public config contract.
+    /// Linked builds can use external provider names here. Unknown
+    /// provider-specific fields are retained in `extra` so provider plugin
+    /// crates can validate and consume them without changing this public
+    /// config contract.
     #[serde(default)]
     pub connection: MysqlConnectionConfig,
 }
@@ -477,25 +477,25 @@ password = "bcsbcs"
     }
 
     #[test]
-    fn mysql_single_database_preserves_internal_connection_type() {
+    fn mysql_single_database_preserves_external_connection_type() {
         let toml = r#"
 database = "bcs"
 
 [connection]
-type = "zdas"
+type = "external-db"
 host = "127.0.0.1"
 port = 11306
-user = "mesh-routing-user"
+user = "db-routing-user"
 password = ""
-component = "zdas"
+component = "external-db"
 "#;
 
         let config: MysqlDbConfig = toml::from_str(toml).unwrap();
 
-        assert_eq!(config.connection.connection_type, "zdas");
+        assert_eq!(config.connection.connection_type, "external-db");
         assert_eq!(
             config.connection.extra.get("component").and_then(|v| v.as_str()),
-            Some("zdas")
+            Some("external-db")
         );
     }
 }

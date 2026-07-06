@@ -16,11 +16,10 @@ use redis::{AsyncCommands, ExistenceCheck, SetExpiry, SetOptions};
 pub struct RedisCachePlugin {
     connection: redis::aio::MultiplexedConnection,
     config: RedisCacheConfig,
-    zone: String,
 }
 
 impl RedisCachePlugin {
-    pub async fn connect(config: RedisCacheConfig, zone: impl Into<String>) -> CacheResult<Self> {
+    pub async fn connect(config: RedisCacheConfig) -> CacheResult<Self> {
         let client = redis::Client::open(connection_info(&config)?).map_err(cache_backend)?;
         let timeout = Duration::from_secs(config.timeout_secs.max(1));
         let connection_config = redis::AsyncConnectionConfig::new()
@@ -31,27 +30,18 @@ impl RedisCachePlugin {
             .await
             .map_err(cache_backend)?;
 
-        Ok(Self::from_connection(connection, config, zone))
+        Ok(Self::from_connection(connection, config))
     }
 
     pub fn from_connection(
         connection: redis::aio::MultiplexedConnection,
         config: RedisCacheConfig,
-        zone: impl Into<String>,
     ) -> Self {
-        Self {
-            connection,
-            config,
-            zone: zone.into(),
-        }
+        Self { connection, config }
     }
 
     pub fn config(&self) -> &RedisCacheConfig {
         &self.config
-    }
-
-    pub fn zone(&self) -> &str {
-        &self.zone
     }
 
     pub async fn ping(&self) -> CacheResult<bool> {

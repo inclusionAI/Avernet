@@ -120,39 +120,69 @@ impl Default for OutboundUrlSecurityConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Master election
+// Leader election
 // ---------------------------------------------------------------------------
 
-/// Master election configuration for distributed deployment.
-/// Uses the shared Redis-compatible cache configuration from BcsConfig.cache.
+/// Provider-specific leader-election options.
+pub type LeaderElectionProviderConfig = BTreeMap<String, serde_json::Value>;
+
+/// Leader election configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MasterElectionConfig {
-    /// Enable master election (default: false for standalone mode).
+#[serde(deny_unknown_fields)]
+pub struct LeaderElectionConfig {
+    /// Enable leader election (default: false for standalone mode).
     #[serde(default)]
     pub enabled: bool,
 
+    /// Distributed election provider to load when enabled.
+    #[serde(default)]
+    pub provider: Option<String>,
+
+    /// Lease timing used by lease-based election providers.
+    #[serde(default)]
+    pub lease: LeaderElectionLeaseConfig,
+
+    /// Provider-specific options keyed by provider name.
+    #[serde(default)]
+    pub providers: BTreeMap<String, LeaderElectionProviderConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeaderElectionLeaseConfig {
     /// Lock TTL in seconds (default: 30).
-    #[serde(default = "default_lock_ttl")]
-    pub lock_ttl_secs: u64,
+    #[serde(default = "default_lease_ttl")]
+    pub ttl_secs: u64,
 
     /// Renewal interval in seconds (default: 10).
-    #[serde(default = "default_renewal_interval")]
+    #[serde(default = "default_lease_renewal_interval")]
     pub renewal_interval_secs: u64,
 }
 
-fn default_lock_ttl() -> u64 {
+fn default_lease_ttl() -> u64 {
     30
 }
-fn default_renewal_interval() -> u64 {
+
+fn default_lease_renewal_interval() -> u64 {
     10
 }
 
-impl Default for MasterElectionConfig {
+impl Default for LeaderElectionLeaseConfig {
+    fn default() -> Self {
+        Self {
+            ttl_secs: default_lease_ttl(),
+            renewal_interval_secs: default_lease_renewal_interval(),
+        }
+    }
+}
+
+impl Default for LeaderElectionConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            lock_ttl_secs: default_lock_ttl(),
-            renewal_interval_secs: default_renewal_interval(),
+            provider: None,
+            lease: LeaderElectionLeaseConfig::default(),
+            providers: BTreeMap::new(),
         }
     }
 }

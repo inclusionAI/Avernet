@@ -142,8 +142,8 @@ pub mod state_machine_timeout_scanner;
 pub mod timeout_scanner;
 pub mod token_expiry_scanner;
 
-pub mod master_election {
-    pub use bcs_leader_election::{MasterInfo, MasterStatus, get_local_ip};
+pub mod leader_election {
+    pub use bcs_leader_election::get_local_ip;
 }
 
 // Re-export env utilities
@@ -208,14 +208,6 @@ pub async fn run_from_env_with_config_dir(config_dir: Option<&std::path::PathBuf
             "MySQL/OceanBase database backend selected; remote migrations are not auto-applied at service startup"
         );
     }
-    if let Some(ref election) = config.master_election {
-        if election.enabled {
-            tracing::warn!(
-                "Distributed master election is ignored in the public build; using standalone leader"
-            );
-        }
-    }
-
     let group_logger = config.group_logger.take();
     let server = BcsServer::new_with_storage(config).await?;
 

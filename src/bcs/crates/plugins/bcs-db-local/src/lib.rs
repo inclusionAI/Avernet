@@ -1,8 +1,8 @@
 //! Local database plugin implementations for the `bcs-db-api` contract.
 //!
 //! This crate contains dependency-light implementations for local development
-//! and contract tests. Internal SDK backed implementations such as ZDAS live
-//! in separate crates so they can be excluded from open-source distributions.
+//! and contract tests. Internal SDK backed implementations live in separate
+//! crates so they can be excluded from open-source distributions.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};

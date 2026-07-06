@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bcs_bot::BotCore;
-use bcs_bot_store::LayottoRegistry;
+use bcs_bot_store::PersistentBotRepo;
 use bcs_cache_local::InMemoryCachePlugin;
 use bcs_db_api::{DbPlugin, DbStatement};
 use bcs_db_local::LocalSqliteDbPlugin;
@@ -40,15 +40,15 @@ fn test_caps() -> BotCapabilities {
     }
 }
 
-async fn create_layotto_registry() -> LayottoRegistry {
+async fn create_persistent_bot_repo() -> PersistentBotRepo {
     let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
-    LayottoRegistry::with_plugins(cache, db, "test".to_string())
+    PersistentBotRepo::with_plugins(cache, db)
 }
 
 #[tokio::test]
 async fn bot_core_delegates_add_bot_info() {
-    let registry = Arc::new(create_layotto_registry().await);
+    let registry = Arc::new(create_persistent_bot_repo().await);
     registry.register("bot-1".to_string(), test_caps()).await.unwrap();
 
     let core = BotCore::with_repo(registry.clone());
@@ -60,7 +60,7 @@ async fn bot_core_delegates_add_bot_info() {
 
 #[tokio::test]
 async fn bot_core_get_bot_info_returns_none_when_not_set() {
-    let registry = Arc::new(create_layotto_registry().await);
+    let registry = Arc::new(create_persistent_bot_repo().await);
     registry.register("bot-1".to_string(), test_caps()).await.unwrap();
 
     let core = BotCore::with_repo(registry.clone());
@@ -70,7 +70,7 @@ async fn bot_core_get_bot_info_returns_none_when_not_set() {
 
 #[tokio::test]
 async fn bot_core_add_bot_info_unrecognized_key_ignored() {
-    let registry = Arc::new(create_layotto_registry().await);
+    let registry = Arc::new(create_persistent_bot_repo().await);
     registry.register("bot-1".to_string(), test_caps()).await.unwrap();
 
     let core = BotCore::with_repo(registry.clone());

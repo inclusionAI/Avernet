@@ -12,7 +12,7 @@
 //!
 //! Current `start_test_server` uses InMemory registry. These tests validate
 //! handler-layer field correctness (AC-42/43/44), NOT the unified DB query
-//! data source switch (AC-41 core). Layotto-backed verification is future work.
+//! data source switch (AC-41 core). Sidecar-backed verification is future work.
 
 mod helpers;
 

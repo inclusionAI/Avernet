@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use bcs_bot_store::LayottoRegistry;
+use bcs_bot_store::PersistentBotRepo;
 use bcs_cache_local::InMemoryCachePlugin;
 use bcs_db_api::{DbPlugin, DbStatement};
 use bcs_db_local::LocalSqliteDbPlugin;
@@ -39,19 +39,19 @@ fn test_caps() -> BotCapabilities {
     }
 }
 
-async fn create_layotto_registry() -> LayottoRegistry {
+async fn create_persistent_bot_repo() -> PersistentBotRepo {
     let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
-    LayottoRegistry::with_plugins(cache, db, "test".to_string())
+    PersistentBotRepo::with_plugins(cache, db)
 }
 
 // ============================================================
-// LayottoRegistry: add_bot_info / get_bot_info
+// PersistentBotRepo: add_bot_info / get_bot_info
 // ============================================================
 
 #[tokio::test]
-async fn layotto_add_bot_info_agent_token_stores_value() {
-    let registry = create_layotto_registry().await;
+async fn persistent_bot_repo_add_bot_info_agent_token_stores_value() {
+    let registry = create_persistent_bot_repo().await;
     registry.register("bot-1".to_string(), test_caps()).await.unwrap();
 
     registry.add_bot_info("bot-1", "agent_token", "eyJ.abc.xyz".to_string()).await;
@@ -61,8 +61,8 @@ async fn layotto_add_bot_info_agent_token_stores_value() {
 }
 
 #[tokio::test]
-async fn layotto_get_bot_info_returns_none_for_unset_token() {
-    let registry = create_layotto_registry().await;
+async fn persistent_bot_repo_get_bot_info_returns_none_for_unset_token() {
+    let registry = create_persistent_bot_repo().await;
     registry.register("bot-1".to_string(), test_caps()).await.unwrap();
 
     let value = registry.get_bot_info("bot-1", "agent_token").await;
@@ -70,8 +70,8 @@ async fn layotto_get_bot_info_returns_none_for_unset_token() {
 }
 
 #[tokio::test]
-async fn layotto_add_bot_info_unrecognized_key_is_ignored() {
-    let registry = create_layotto_registry().await;
+async fn persistent_bot_repo_add_bot_info_unrecognized_key_is_ignored() {
+    let registry = create_persistent_bot_repo().await;
     registry.register("bot-1".to_string(), test_caps()).await.unwrap();
 
     registry.add_bot_info("bot-1", "unknown_key", "value".to_string()).await;
@@ -81,23 +81,23 @@ async fn layotto_add_bot_info_unrecognized_key_is_ignored() {
 }
 
 #[tokio::test]
-async fn layotto_get_bot_info_nonexistent_bot_returns_none() {
-    let registry = create_layotto_registry().await;
+async fn persistent_bot_repo_get_bot_info_nonexistent_bot_returns_none() {
+    let registry = create_persistent_bot_repo().await;
     let value = registry.get_bot_info("ghost", "agent_token").await;
     assert_eq!(value, None);
 }
 
 #[tokio::test]
-async fn layotto_add_bot_info_nonexistent_bot_is_noop() {
-    let registry = create_layotto_registry().await;
+async fn persistent_bot_repo_add_bot_info_nonexistent_bot_is_noop() {
+    let registry = create_persistent_bot_repo().await;
     registry.add_bot_info("ghost", "agent_token", "token".to_string()).await;
     let value = registry.get_bot_info("ghost", "agent_token").await;
     assert_eq!(value, None);
 }
 
 #[tokio::test]
-async fn layotto_add_bot_info_overwrites_previous_value() {
-    let registry = create_layotto_registry().await;
+async fn persistent_bot_repo_add_bot_info_overwrites_previous_value() {
+    let registry = create_persistent_bot_repo().await;
     registry.register("bot-1".to_string(), test_caps()).await.unwrap();
 
     registry.add_bot_info("bot-1", "agent_token", "old-token".to_string()).await;
@@ -108,8 +108,8 @@ async fn layotto_add_bot_info_overwrites_previous_value() {
 }
 
 #[tokio::test]
-async fn layotto_add_bot_info_does_not_leak_to_get_agent_credentials_code() {
-    let registry = create_layotto_registry().await;
+async fn persistent_bot_repo_add_bot_info_does_not_leak_to_get_agent_credentials_code() {
+    let registry = create_persistent_bot_repo().await;
     registry.register("bot-1".to_string(), test_caps()).await.unwrap();
 
     registry.add_bot_info("bot-1", "agent_token", "secret-jwt".to_string()).await;
@@ -122,4 +122,4 @@ async fn layotto_add_bot_info_does_not_leak_to_get_agent_credentials_code() {
 // Note: MemoryBotRepo now genuinely stores `agent_token` / `client_kind` via
 // add_bot_info (see `memory_bot_repo_passes_bot_repo_contract` and server.rs
 // agent_token persistence). The earlier "noop" expectation is obsolete and was
-// removed; MemoryBotRepo must round-trip these keys like the layotto repo.
+// removed; MemoryBotRepo must round-trip these keys like the persistent repo.

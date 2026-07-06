@@ -35,7 +35,7 @@ pub fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
         max_history_per_session: 100,
         dingtalk_accounts: vec![],
         auth_token: None,
-        master_election: None,
+        leader_election: None,
         cache: Default::default(),
         database: Default::default(),
         mist: MistConfig::default(),
