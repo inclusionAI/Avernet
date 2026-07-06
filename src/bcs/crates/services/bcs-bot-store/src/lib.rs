@@ -1,6 +1,6 @@
-//! Plugin-backed bot registry implementation.
+//! Plugin-backed bot repository implementation.
 //!
-//! This module provides a bot registry backed by:
+//! This module provides a bot repository backed by:
 //! - **Cache plugin**: Dynamic status with TTL for failover recovery
 //! - **Database plugin**: Persistent storage for bot capabilities and tokens
 //! - **Process Memory**: streaming connection state and heartbeat tracking
@@ -39,17 +39,17 @@ pub use bcs_service_api::port::repo::BotRepoPort;
 pub use memory::MemoryBotRepo;
 pub use provider::{DbProviderStore, MemoryProviderStore};
 
-/// Distributed bot repository backed by DB + cache plugins.
-pub type LayottoBotRepo = LayottoRegistry;
-
 /// Maximum time before a bot registration expires (5 minutes).
 const BOT_EXPIRY: Duration = Duration::from_secs(300);
 
 /// Cache TTL for dynamic status (10 minutes = 10x heartbeat interval).
 const STATUS_CACHE_TTL_SECONDS: i64 = 600;
 
-/// Cache key prefix for bot status.
-const STATUS_CACHE_KEY_PREFIX: &str = "bcs:status:";
+/// Default cache key prefix used by legacy constructors.
+const DEFAULT_CACHE_KEY_PREFIX: &str = "bcs:";
+
+/// Cache key namespace for bot status.
+const STATUS_CACHE_KEY_NAMESPACE: &str = "status:";
 
 fn is_legacy_namespace(bot_uuid: &str, staff_no: &str) -> bool {
     let suffix = format!(":{}", staff_no);
@@ -188,13 +188,13 @@ impl RegisteredBotInner {
     }
 }
 
-/// Plugin-backed bot registry implementation.
+/// Persistent bot repository backed by cache and DB plugins.
 ///
 /// Uses a three-layer storage architecture:
 /// - Layer 1: Process memory for WebSocket connections and heartbeats
 /// - Layer 2: Cache plugin for dynamic status with TTL
 /// - Layer 3: Database plugin for persistent capabilities and tokens
-pub struct LayottoRegistry {
+pub struct PersistentBotRepo {
     // Layer 1: Process Memory
     /// Bot connections and state.
     bots: RwLock<HashMap<String, RegisteredBotInner>>,
@@ -207,14 +207,13 @@ pub struct LayottoRegistry {
 
     // Layer 2: Cache
     /// Cache plugin for dynamic status storage.
-    zcache: Arc<dyn CachePlugin>,
-    /// Diagnostic zone label from config. Routing is already bound inside the
-    /// bootstrapped CachePlugin handle.
-    zcache_zone: String,
+    cache: Arc<dyn CachePlugin>,
+    /// Business cache key prefix resolved from configuration.
+    cache_key_prefix: String,
 
     // Layer 3: Database
     /// DB plugin for persistent storage.
-    zdas: Arc<dyn DbPlugin>,
+    db: Arc<dyn DbPlugin>,
 
     /// SQL dialect flavor.
     flavor: DbSqlFlavor,
@@ -223,54 +222,56 @@ pub struct LayottoRegistry {
     pending_requests: RwLock<HashMap<String, oneshot::Sender<serde_json::Value>>>,
 }
 
-impl LayottoRegistry {
-    /// Create a new distributed registry with cache and DB plugins.
+impl PersistentBotRepo {
+    /// Create a new persistent bot repository with cache and DB plugins.
     pub fn with_plugins(
         cache: Arc<dyn CachePlugin>,
         db: Arc<dyn DbPlugin>,
-        zcache_zone: String,
     ) -> Self {
-        Self::with_plugins_flavor(cache, db, zcache_zone, DbSqlFlavor::Mysql)
+        Self::with_plugins_flavor(cache, db, DbSqlFlavor::Mysql)
     }
 
-    /// Create a new distributed registry with cache, DB plugins, and SQL flavor.
+    /// Create a new persistent bot repository with cache, DB plugins, and SQL flavor.
     pub fn with_plugins_flavor(
         cache: Arc<dyn CachePlugin>,
         db: Arc<dyn DbPlugin>,
-        zcache_zone: String,
         flavor: DbSqlFlavor,
+    ) -> Self {
+        Self::with_plugins_flavor_and_cache_key_prefix(
+            cache,
+            db,
+            flavor,
+            DEFAULT_CACHE_KEY_PREFIX,
+        )
+    }
+
+    /// Create a new distributed registry with an explicit business cache key prefix.
+    pub fn with_plugins_flavor_and_cache_key_prefix(
+        cache: Arc<dyn CachePlugin>,
+        db: Arc<dyn DbPlugin>,
+        flavor: DbSqlFlavor,
+        cache_key_prefix: impl Into<String>,
     ) -> Self {
         Self {
             bots: RwLock::new(HashMap::new()),
             token_to_bot: RwLock::new(HashMap::new()),
             binding_channel_index: Arc::new(RwLock::new(HashMap::new())),
             bot_info_overrides: RwLock::new(HashMap::new()),
-            zcache: cache,
-            zcache_zone,
-            zdas: db,
+            cache,
+            cache_key_prefix: cache_key_prefix.into(),
+            db,
             flavor,
             pending_requests: RwLock::new(HashMap::new()),
         }
-    }
-
-    /// Backward-compatible constructor name retained for existing callers.
-    pub fn with_zcache_client(
-        cache: Arc<dyn CachePlugin>,
-        db: Arc<dyn DbPlugin>,
-        zcache_zone: String,
-        _legacy_zdas_db: String,
-    ) -> Self {
-        Self::with_plugins(cache, db, zcache_zone)
     }
 
     /// Create a new distributed registry.
     pub fn new(
         cache: Arc<dyn CachePlugin>,
         db: Arc<dyn DbPlugin>,
-        zcache_zone: String,
-        _legacy_zdas_db: String,
+        _legacy_db: String,
     ) -> Self {
-        Self::with_plugins(cache, db, zcache_zone)
+        Self::with_plugins(cache, db)
     }
 
     /// Get current timestamp in milliseconds.
@@ -282,12 +283,21 @@ impl LayottoRegistry {
     }
 
     /// Build cache key for bot status.
+    #[cfg(test)]
     fn status_cache_key(bot_uuid: &str) -> String {
-        format!("{}{}", STATUS_CACHE_KEY_PREFIX, bot_uuid)
+        Self::status_cache_key_with_prefix(DEFAULT_CACHE_KEY_PREFIX, bot_uuid)
+    }
+
+    fn configured_status_cache_key(&self, bot_uuid: &str) -> String {
+        Self::status_cache_key_with_prefix(&self.cache_key_prefix, bot_uuid)
+    }
+
+    fn status_cache_key_with_prefix(cache_key_prefix: &str, bot_uuid: &str) -> String {
+        format!("{}{}{}", cache_key_prefix, STATUS_CACHE_KEY_NAMESPACE, bot_uuid)
     }
 
     async fn db_query(&self, sql: &str, params: Vec<Value>) -> bcs_db_api::DbResult<Vec<DbRow>> {
-        self.zdas.query(DbStatement::with_params(sql, params)).await
+        self.db.query(DbStatement::with_params(sql, params)).await
     }
 
     async fn db_execute_affected(
@@ -295,7 +305,7 @@ impl LayottoRegistry {
         sql: &str,
         params: Vec<Value>,
     ) -> bcs_db_api::DbResult<u64> {
-        self.zdas
+        self.db
             .execute(DbStatement::with_params(sql, params))
             .await
             .map(|result| result.affected_rows)
@@ -552,7 +562,7 @@ impl LayottoRegistry {
 
     /// Save dynamic status to the configured cache.
     async fn save_status_to_cache(&self, bot_uuid: &str, status: &BotDynamicStatus) {
-        let key = Self::status_cache_key(bot_uuid);
+        let key = self.configured_status_cache_key(bot_uuid);
         let now = Self::current_timestamp();
 
         info!(
@@ -561,13 +571,12 @@ impl LayottoRegistry {
             status = %status.status,
             dynamic_summary = ?status.dynamic_summary,
             load = ?status.load,
-            cache_zone = %self.zcache_zone,
             "Saving bot status to cache"
         );
 
         // HSET multiple fields
         if let Err(e) = self
-            .zcache
+            .cache
             .hash_set(&key, "status", status.status.as_bytes().to_vec())
             .await
         {
@@ -577,24 +586,24 @@ impl LayottoRegistry {
 
         if let Some(ref summary) = status.dynamic_summary {
             let _ = self
-                .zcache
+                .cache
                 .hash_set(&key, "dynamic_summary", summary.as_bytes().to_vec())
                 .await;
         }
         if let Some(load) = status.load {
             let _ = self
-                .zcache
+                .cache
                 .hash_set(&key, "load", load.to_string().into_bytes())
                 .await;
         }
         let _ = self
-            .zcache
+            .cache
             .hash_set(&key, "updated_at", now.to_string().into_bytes())
             .await;
 
         // Set TTL
         let _ = self
-            .zcache
+            .cache
             .expire(&key, Duration::from_secs(STATUS_CACHE_TTL_SECONDS as u64))
             .await;
 
@@ -603,10 +612,10 @@ impl LayottoRegistry {
 
     /// Load dynamic status from the configured cache.
     async fn load_status_from_cache(&self, bot_uuid: &str) -> BotDynamicStatus {
-        let key = Self::status_cache_key(bot_uuid);
+        let key = self.configured_status_cache_key(bot_uuid);
 
         match self
-            .zcache
+            .cache
             .hash_get_all(&key)
             .await
             .and_then(Self::cache_hash_to_strings)
@@ -1128,7 +1137,7 @@ fn sql_metric_actor_status(raw: &str) -> bcs_service_api::ActorStatus {
 }
 
 #[async_trait]
-impl BotMetricsSnapshotPort for LayottoRegistry {
+impl BotMetricsSnapshotPort for PersistentBotRepo {
     async fn bot_counts(&self) -> ServiceResult<Vec<BotMetricCount>> {
         let env = resolve_env();
         let sql = "SELECT actor_kind, status, visibility, COUNT(*) AS bot_count \
@@ -1193,7 +1202,7 @@ impl BotMetricsSnapshotPort for LayottoRegistry {
 }
 
 #[async_trait]
-impl BotRepoPort for LayottoRegistry {
+impl BotRepoPort for PersistentBotRepo {
     // ===== Registration & Discovery =====
 
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
@@ -2496,8 +2505,31 @@ mod tests {
 
     #[test]
     fn test_status_cache_key_format() {
-        let key = LayottoRegistry::status_cache_key("bot-123");
+        let key = PersistentBotRepo::status_cache_key("bot-123");
         assert_eq!(key, "bcs:status:bot-123");
+    }
+
+    #[test]
+    fn test_status_cache_key_uses_configured_prefix() {
+        let key = PersistentBotRepo::status_cache_key_with_prefix("tenant:", "bot-123");
+        assert_eq!(key, "tenant:status:bot-123");
+    }
+
+    #[test]
+    fn test_registry_status_cache_key_uses_constructor_prefix() {
+        let cache = Arc::new(bcs_cache_local::InMemoryCachePlugin::new());
+        let db = Arc::new(bcs_db_local::LocalSqliteDbPlugin::new().unwrap());
+        let registry = PersistentBotRepo::with_plugins_flavor_and_cache_key_prefix(
+            cache,
+            db,
+            DbSqlFlavor::Sqlite,
+            "tenant:",
+        );
+
+        assert_eq!(
+            registry.configured_status_cache_key("bot-123"),
+            "tenant:status:bot-123"
+        );
     }
 
     #[test]
@@ -2670,16 +2702,16 @@ mod tests {
 
     #[test]
     fn test_status_cache_key_with_special_chars() {
-        let key = LayottoRegistry::status_cache_key("bot-with-dashes_123");
+        let key = PersistentBotRepo::status_cache_key("bot-with-dashes_123");
         assert_eq!(key, "bcs:status:bot-with-dashes_123");
 
-        let key = LayottoRegistry::status_cache_key("中文机器人");
+        let key = PersistentBotRepo::status_cache_key("中文机器人");
         assert_eq!(key, "bcs:status:中文机器人");
     }
 
     #[test]
     fn test_current_timestamp() {
-        let ts = LayottoRegistry::current_timestamp();
+        let ts = PersistentBotRepo::current_timestamp();
         // Should be a reasonable timestamp (after 2020)
         assert!(ts > 1577836800000); // 2020-01-01 in ms
         // Should be before 2100
@@ -2821,7 +2853,7 @@ mod tests {
     #[ignore = "Requires external cache and database connections"]
     async fn integration_test_register_and_retrieve() {
         // This test documents the expected workflow:
-        // 1. Create LayottoRegistry with CachePlugin and DbPlugin handles
+        // 1. Create PersistentBotRepo with CachePlugin and DbPlugin handles
         // 2. Register a bot
         // 3. Retrieve the bot from memory (fast path)
         // 4. Verify capabilities are persisted to the database

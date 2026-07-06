@@ -6,9 +6,8 @@ use serde::{Deserialize, Serialize};
 
 /// Mist client configuration.
 ///
-/// Fields that map directly to `Layotto-MIST-*` Init metadata are documented
-/// against the upstream Layotto Go server constants in
-/// `pkg/services/secret/mist/utils/const.go`.
+/// Fields that map directly to secret-backend init metadata are kept as
+/// provider-neutral data here.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MistConfig {
     /// Enable mist. When false the client is constructed in a disabled state
@@ -16,8 +15,8 @@ pub struct MistConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 
-    /// gRPC endpoint of the local Layotto sidecar.
-    /// Must use the `http://` scheme — Layotto sidecars listen plaintext.
+    /// gRPC endpoint of the local secret sidecar.
+    /// Must use the `http://` scheme for plaintext local sidecars.
     #[serde(default = "default_endpoint")]
     pub endpoint: String,
 
@@ -35,7 +34,7 @@ pub struct MistConfig {
     #[serde(default)]
     pub app_name: String,
 
-    /// Optional overrides (passed through to Layotto metadata if non-empty).
+    /// Optional overrides passed through to provider metadata if non-empty.
     #[serde(default)]
     pub app_zone: Option<String>,
     #[serde(default)]

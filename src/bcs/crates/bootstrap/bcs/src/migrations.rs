@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 ///
 /// Excluded tables:
 /// - `bcs_group_session` (singular, legacy, no store reference)
-/// - `bcs_zdas_cursor_repro` (database client test table, non-business)
+/// - database client test tables (non-business)
 const SQLITE_DDL_STATEMENTS: &[&str] = &[
     // ── schema_migrations ─────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_schema_migrations (

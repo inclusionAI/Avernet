@@ -17,7 +17,7 @@ pub use bcs_config_api::{
 pub use bcs_config_api::{
     AuthChainConfig, AuthSdkConfig, DingTalkAccountConfig, FusionProviderConfig, LlmConfig,
     LlmProviderType, LogOutputConfig, LogOutputFormat, LoggingConfig, ManifestConfig,
-    MasterElectionConfig, StructuredOutputMode, SecurityConfig,
+    LeaderElectionConfig, StructuredOutputMode, SecurityConfig,
     deserialize_optional_secret, serialize_optional_secret,
 };
 #[allow(unused_imports)]
@@ -159,10 +159,10 @@ pub struct BcsConfig {
     )]
     pub auth_token: Option<Secret<String>>,
 
-    /// Master election configuration for distributed deployment.
-    /// When enabled, uses shared Redis-compatible cache to elect one pod as master per environment.
+    /// Leader election configuration for distributed deployment.
+    /// When enabled, uses a configured election provider to elect one leader per environment.
     #[serde(default)]
-    pub master_election: Option<MasterElectionConfig>,
+    pub leader_election: Option<LeaderElectionConfig>,
 
     /// Capability-local cache selector.
     #[serde(default)]
@@ -173,9 +173,10 @@ pub struct BcsConfig {
     pub database: DatabaseConfig,
 
     /// Mist (secret management) configuration. Disabled by default; when
-    /// enabled the BCS process talks to the local Layotto sidecar to fetch
-    /// secrets via the SecretService/SecretAccessPort stack. Use the `GET /admin/secret/:name`
-    /// route for end-to-end verification on dev machines.
+    /// enabled the BCS process talks to the configured local secret sidecar to
+    /// fetch secrets via the SecretService/SecretAccessPort stack. Use the
+    /// `GET /admin/secret/:name` route for end-to-end verification on dev
+    /// machines.
     #[serde(default)]
     pub mist: MistConfig,
 
@@ -578,7 +579,7 @@ impl Default for BcsConfig {
             store_messages: false,
             dingtalk_accounts: Vec::new(),
             auth_token: None,
-            master_election: None,
+            leader_election: None,
             cache: CacheConfig::default(),
             database: DatabaseConfig::default(),
             mist: MistConfig::default(),
@@ -1646,23 +1647,59 @@ port = 6379
     }
 
     #[test]
-    fn test_config_with_master_election() {
+    fn test_config_with_leader_election() {
         let json = r#"{
             "bind": "0.0.0.0",
             "port": 21000,
             "bots_base_dir": "/bots",
-            "master_election": {
+            "leader_election": {
                 "enabled": true,
-                "lock_ttl_secs": 30,
-                "renewal_interval_secs": 10
+                "provider": "distributed",
+                "lease": {
+                    "ttl_secs": 30,
+                    "renewal_interval_secs": 10
+                },
+                "providers": {
+                    "distributed": {
+                        "zone": "default",
+                        "lock_prefix": "bcs"
+                    }
+                }
             }
         }"#;
 
         let config: BcsConfig = serde_json::from_str(json).unwrap();
-        assert!(config.master_election.is_some());
-        let election = config.master_election.unwrap();
+        assert!(config.leader_election.is_some());
+        let election = config.leader_election.unwrap();
         assert!(election.enabled);
-        assert_eq!(election.lock_ttl_secs, 30);
+        assert_eq!(election.provider.as_deref(), Some("distributed"));
+        assert_eq!(election.lease.ttl_secs, 30);
+        assert_eq!(election.lease.renewal_interval_secs, 10);
+        let provider = election
+            .providers
+            .get("distributed")
+            .expect("distributed provider options");
+        assert_eq!(provider.get("zone").and_then(|value| value.as_str()), Some("default"));
+        assert_eq!(provider.get("lock_prefix").and_then(|value| value.as_str()), Some("bcs"));
+    }
+
+    #[test]
+    fn test_config_rejects_legacy_leader_election_fields() {
+        let toml = r#"
+bind = "0.0.0.0"
+port = 21000
+bots_base_dir = "/bots"
+
+[leader_election]
+enabled = true
+provider = "distributed"
+lock_ttl_secs = 30
+renewal_interval_secs = 10
+"#;
+
+        let err = toml::from_str::<BcsConfig>(toml)
+            .expect_err("legacy leader_election fields must be rejected");
+        assert!(err.to_string().contains("unknown field"));
     }
 
     #[test]
@@ -1680,18 +1717,34 @@ type = "direct"
 host = "127.0.0.1"
 port = 6379
 
-[master_election]
+[leader_election]
 enabled = true
-lock_ttl_secs = 30
+provider = "distributed"
+
+[leader_election.lease]
+ttl_secs = 30
+renewal_interval_secs = 10
+
+[leader_election.providers.distributed]
+zone = "default"
+lock_prefix = "bcs"
 "#;
 
         let config: BcsConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.bind, "0.0.0.0");
         assert_eq!(config.port, 21000);
         assert_eq!(config.cache.cache_type, "redis");
-        assert!(config.master_election.is_some());
-        let election = config.master_election.unwrap();
+        assert!(config.leader_election.is_some());
+        let election = config.leader_election.unwrap();
         assert!(election.enabled);
+        assert_eq!(election.provider.as_deref(), Some("distributed"));
+        assert_eq!(election.lease.ttl_secs, 30);
+        let provider = election
+            .providers
+            .get("distributed")
+            .expect("distributed provider options");
+        assert_eq!(provider.get("zone").and_then(|value| value.as_str()), Some("default"));
+        assert_eq!(provider.get("lock_prefix").and_then(|value| value.as_str()), Some("bcs"));
     }
 
     #[test]

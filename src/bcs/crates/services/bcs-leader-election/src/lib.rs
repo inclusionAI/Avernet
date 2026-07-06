@@ -6,7 +6,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use bcs_service_api::lifecycle::ServiceLifecycle;
 use bcs_service_api::{LeaderElectionPort, LeaderInfo, LeaderStatus, ServiceResult};
-use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 static LOCAL_IP: OnceLock<String> = OnceLock::new();
@@ -29,37 +28,6 @@ pub fn get_local_ip() -> &'static str {
         warn!("No non-loopback IP found, using 127.0.0.1");
         "127.0.0.1".to_string()
     })
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MasterStatus {
-    Master,
-    Standby,
-    Unknown,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MasterInfo {
-    pub pod_ip: String,
-    pub elected_at: i64,
-}
-
-impl MasterInfo {
-    pub fn new(pod_ip: String) -> Self {
-        Self {
-            pod_ip,
-            elected_at: chrono::Utc::now().timestamp(),
-        }
-    }
-
-    pub fn to_json(&self) -> String {
-        serde_json::to_string(self).unwrap_or_default()
-    }
-
-    pub fn from_json(s: &str) -> Option<Self> {
-        serde_json::from_str(s).ok()
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -128,11 +96,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn master_info_roundtrips_json() {
-        let info = MasterInfo::new("127.0.0.1".to_string());
-        let parsed = MasterInfo::from_json(&info.to_json()).unwrap();
-
-        assert_eq!(parsed.pod_ip, "127.0.0.1");
-    }
 }

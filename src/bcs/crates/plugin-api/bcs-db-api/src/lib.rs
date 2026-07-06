@@ -8,14 +8,14 @@
 //! owned by services.
 //!
 //! This is a deliberate tradeoff for the current BCS migration because the
-//! existing storage code uses MySQL/ZDAS-specific tables, joins, and upserts.
+//! existing storage code uses MySQL-compatible tables, joins, and upserts.
 //! A non-SQL backend or query-id based persistence port should be introduced
 //! above this driver-level API, for example as service repositories, a query
 //! builder, or an ORM-style layer. Dialect portability should live there, not
 //! as decorative metadata on a raw SQL statement.
 //!
 //! Services that want the same store implementation to run on both local SQLite
-//! and MySQL/ZDAS must choose SQL supported by both targets. The shared
+//! and MySQL-compatible backends must choose SQL supported by both targets. The shared
 //! `db_plugin_contract_tests` in `bcs-test-support` show the small common subset
 //! this contract itself relies on: positional `?` parameters, basic
 //! `CREATE TABLE`, `INSERT`, `DELETE`, and `SELECT` statements. Backend-specific
@@ -77,7 +77,7 @@ pub enum DbValue {
 ///
 /// This is not a backend capability negotiation mechanism. `DbPlugin` still
 /// receives raw SQL as-is; services use this enum only to choose their own SQL
-/// branch when they intentionally support both MySQL/ZDAS and local SQLite.
+/// branch when they intentionally support both MySQL-compatible backends and local SQLite.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DbSqlFlavor {
     Mysql,
@@ -380,7 +380,7 @@ impl DbStatement {
     ///
     /// The SQL text is passed to the selected backend as-is. Callers are
     /// responsible for using syntax supported by that backend. If the same
-    /// caller must run against both local SQLite and MySQL/ZDAS, keep the SQL
+    /// caller must run against both local SQLite and MySQL-compatible backends, keep the SQL
     /// to the documented common subset or isolate dialect-specific SQL in a
     /// service-owned store/repository.
     pub fn new(sql: impl Into<String>) -> Self {
@@ -394,7 +394,7 @@ impl DbStatement {
     ///
     /// The SQL text is passed to the selected backend as-is. Callers are
     /// responsible for using syntax supported by that backend. If the same
-    /// caller must run against both local SQLite and MySQL/ZDAS, keep the SQL
+    /// caller must run against both local SQLite and MySQL-compatible backends, keep the SQL
     /// to the documented common subset or isolate dialect-specific SQL in a
     /// service-owned store/repository.
     pub fn with_params(sql: impl Into<String>, params: Vec<DbValue>) -> Self {
@@ -478,7 +478,7 @@ impl DbHealth {
 ///
 /// A `DbPlugin` instance is expected to be bound to one configured logical
 /// datasource by the composition root. Services should not know concrete
-/// backend names such as ZDAS datasource IDs.
+/// provider-specific backend names or datasource IDs.
 #[async_trait]
 pub trait DbPlugin: Send + Sync + 'static {
     /// Run a SELECT-like statement and return named rows.

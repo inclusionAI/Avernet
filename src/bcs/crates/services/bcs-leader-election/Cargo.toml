@@ -9,12 +9,8 @@ version = { workspace = true }
 
 [dependencies]
 async-trait = { workspace = true }
-bcs-config-api = { workspace = true }
 bcs-service-api = { workspace = true }
-chrono = { workspace = true }
 if-addrs = "0.15"
-serde = { workspace = true }
-serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 

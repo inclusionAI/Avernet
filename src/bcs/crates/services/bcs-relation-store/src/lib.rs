@@ -277,7 +277,7 @@ impl RelationRepoPort for DbRelationStore {
         // SQLite cannot distinguish insert/update/no-op for this UPSERT shape
         // using affected_rows alone, so the local implementation keeps the
         // read-before-write approximation. It is suitable for single-box local
-        // tests, while MySQL/ZDAS keeps the production atomic affected-row
+        // tests, while MySQL-compatible backends keep the production atomic affected-row
         // semantics above.
         let forward_before = self.get_edge(human_id, bot_id, env).await?;
         let reverse_before = self.get_edge(bot_id, human_id, env).await?;

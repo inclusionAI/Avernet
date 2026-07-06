@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use bcs_bot_store::{LayottoRegistry, MemoryBotRepo};
+use bcs_bot_store::{PersistentBotRepo, MemoryBotRepo};
 use bcs_cache_local::InMemoryCachePlugin;
 use bcs_db_api::{DbPlugin, DbStatement, DbValue as Value};
 use bcs_db_local::LocalSqliteDbPlugin;
@@ -11,10 +11,10 @@ use bcs_test_support::contract::port::bot_metrics_snapshot_port_contract_tests;
 use bcs_test_support::contract::repo::bot_repo_port_contract_tests;
 
 #[tokio::test]
-async fn layotto_registry_passes_bot_repo_contract() {
+async fn persistent_bot_repo_passes_bot_repo_contract() {
     let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
-    let repo = LayottoRegistry::with_plugins(cache, db, "contract".to_string());
+    let repo = PersistentBotRepo::with_plugins(cache, db);
 
     bot_repo_port_contract_tests(&repo).await;
 }
@@ -53,10 +53,10 @@ async fn memory_unregister_soft_deletes_bot_from_default_reads() {
 }
 
 #[tokio::test]
-async fn layotto_unregister_marks_is_deleted_and_filters_default_reads() {
+async fn persistent_bot_repo_unregister_marks_is_deleted_and_filters_default_reads() {
     let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
-    let repo = LayottoRegistry::with_plugins(cache, db.clone(), "contract".to_string());
+    let repo = PersistentBotRepo::with_plugins(cache, db.clone());
     repo.register_with_owner_and_token(
         "soft-delete-bot".to_string(),
         BotCapabilities {
@@ -94,10 +94,10 @@ async fn layotto_unregister_marks_is_deleted_and_filters_default_reads() {
 }
 
 #[tokio::test]
-async fn layotto_register_after_soft_delete_does_not_clear_is_deleted_column() {
+async fn persistent_bot_repo_register_after_soft_delete_does_not_clear_is_deleted_column() {
     let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
-    let repo = LayottoRegistry::with_plugins(cache, db.clone(), "contract".to_string());
+    let repo = PersistentBotRepo::with_plugins(cache, db.clone());
     repo.register_with_owner_and_token(
         "soft-delete-bot".to_string(),
         BotCapabilities {
@@ -144,10 +144,10 @@ async fn layotto_register_after_soft_delete_does_not_clear_is_deleted_column() {
 }
 
 #[tokio::test]
-async fn layotto_registry_passes_bot_metrics_snapshot_contract() {
+async fn persistent_bot_repo_passes_bot_metrics_snapshot_contract() {
     let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
-    let repo = LayottoRegistry::with_plugins(cache, db.clone(), "contract".to_string());
+    let repo = PersistentBotRepo::with_plugins(cache, db.clone());
 
     seed_metrics_bot(&repo).await;
     seed_metrics_human_row(db.as_ref()).await;

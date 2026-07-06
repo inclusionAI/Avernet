@@ -100,6 +100,10 @@ fn default_timeout() -> u64 {
     5
 }
 
+fn default_key_prefix() -> String {
+    "bcs:".to_string()
+}
+
 impl RedisCacheConfig {
     /// Create default configuration (connects to 127.0.0.1:16379)
     pub fn new(app_name: impl Into<String>, cache_name: impl Into<String>) -> Self {
@@ -260,6 +264,10 @@ impl RedisPluginConfig {
             || self.connection.is_configured()
     }
 
+    pub fn effective_key_prefix(&self) -> String {
+        self.key_prefix.clone().unwrap_or_else(default_key_prefix)
+    }
+
     pub fn to_runtime_redis_config(&self) -> RedisCacheConfig {
         let connection = &self.connection;
         RedisCacheConfig {
@@ -365,7 +373,7 @@ impl RedisConnectionConfig {
     }
 }
 
-/// Optional key routing metadata for non-direct providers such as zcache.
+/// Optional key routing metadata for non-direct Redis-compatible providers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RedisRoutingConfig {
     #[serde(rename = "type", default = "default_routing_type")]
@@ -566,6 +574,7 @@ timeout_secs = 5
         assert_eq!(config.cache_type, "redis");
         assert_eq!(config.redis.connection.connection_type, "direct");
         assert_eq!(config.redis.connection.port, Some(6379));
+        assert_eq!(config.redis.effective_key_prefix(), "bcs:");
         let runtime = config.redis.to_runtime_redis_config();
         assert_eq!(runtime.host, "127.0.0.1");
         assert_eq!(runtime.port, 6379);
@@ -573,21 +582,27 @@ timeout_secs = 5
     }
 
     #[test]
-    fn cache_config_preserves_zcache_connection_type() {
+    fn redis_plugin_config_defaults_effective_key_prefix() {
+        let config = RedisPluginConfig::default();
+        assert_eq!(config.effective_key_prefix(), "bcs:");
+    }
+
+    #[test]
+    fn cache_config_preserves_external_connection_type() {
         let json = r#"{
             "type": "redis",
             "redis": {
                 "connection": {
-                    "type": "zcache",
+                    "type": "external-cache",
                     "host": "127.0.0.1",
                     "port": 16379,
                     "app_name": "bcs",
                     "cache_name": "bcsCache",
                     "route_type": "G",
-                    "component": "zcache"
+                    "component": "external-cache"
                 },
                 "routing": {
-                    "type": "zcache_context",
+                    "type": "external_context",
                     "default_route": "default"
                 }
             }
@@ -595,14 +610,14 @@ timeout_secs = 5
 
         let config: CacheConfig = serde_json::from_str(json).unwrap();
 
-        assert_eq!(config.redis.connection.connection_type, "zcache");
+        assert_eq!(config.redis.connection.connection_type, "external-cache");
         assert_eq!(
             config.redis.connection.extra.get("component").and_then(|v| v.as_str()),
-            Some("zcache")
+            Some("external-cache")
         );
         assert_eq!(
             config.redis.routing.as_ref().map(|routing| routing.routing_type.as_str()),
-            Some("zcache_context")
+            Some("external_context")
         );
     }
 }

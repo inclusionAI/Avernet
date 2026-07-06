@@ -11,8 +11,8 @@ capabilities such as cache or database access.
   `bcs-cache-local` or `bcs-db-local`.
 - Concrete implementation selection belongs to the composition root in
   `crates/bootstrap/bcs`.
-- Plugin API crates must not depend on internal SDKs, Layotto, ZCache, ZDAS,
-  service implementations, delivery adapters, or bootstrap.
+- Plugin API crates must not depend on internal SDKs, private infrastructure
+  providers, service implementations, delivery adapters, or bootstrap.
 
 ## Contract Shape
 

@@ -84,11 +84,11 @@ fn assert_empty_logical_db(logical_db: &str) -> DbResult<()> {
 ///
 /// Messages and workspace are NEVER persisted - they are lost on server restart.
 pub struct MySqlGroupStore {
-    /// MySQL/ZDAS-compatible persistent storage selected by the composition root.
-    zdas: DbPluginCompat,
+    /// Database plugin selected by the composition root.
+    db: DbPluginCompat,
     /// TODO: remove with DbPluginCompat once legacy helper signatures stop threading logical_db.
     /// Retained as an always-empty logical label for legacy helper signatures.
-    zdas_db: String,
+    logical_db: String,
     /// Environment for multi-tenancy.
     env: String,
     /// SQL dialect (MySQL vs SQLite).
@@ -103,8 +103,8 @@ impl MySqlGroupStore {
     /// Create a new MySqlGroupStore.
     pub fn new(db: Arc<dyn DbPlugin>, env: String) -> Self {
         Self {
-            zdas: DbPluginCompat::new(db),
-            zdas_db: String::new(),
+            db: DbPluginCompat::new(db),
+            logical_db: String::new(),
             env,
             flavor: DbSqlFlavor::Mysql,
             message_counts: RwLock::new(HashMap::new()),
@@ -115,8 +115,8 @@ impl MySqlGroupStore {
     /// Create a new MySqlGroupStore with SQLite dialect.
     pub fn sqlite(db: Arc<dyn DbPlugin>, env: String) -> Self {
         Self {
-            zdas: DbPluginCompat::new(db),
-            zdas_db: String::new(),
+            db: DbPluginCompat::new(db),
+            logical_db: String::new(),
             env,
             flavor: DbSqlFlavor::Sqlite,
             message_counts: RwLock::new(HashMap::new()),
@@ -382,9 +382,9 @@ impl MySqlGroupStore {
         );
 
         let rows = self
-            .zdas
+            .db
             .query_with(
-                &self.zdas_db,
+                &self.logical_db,
                 &sql,
                 vec![Value::from(group_id), Value::from(self.env.as_str())],
             )
@@ -466,9 +466,9 @@ impl MySqlGroupStore {
              WHERE group_id = ? AND env = ?";
 
         let rows = match self
-            .zdas
+            .db
             .query_with(
-                &self.zdas_db,
+                &self.logical_db,
                 sql,
                 vec![Value::from(group_id), Value::from(self.env.as_str())],
             )
@@ -528,8 +528,8 @@ impl MySqlGroupStore {
             self.flavor.unix_ts("gs.gmt_create"),
             self.flavor.unix_ts("gs.gmt_modified"),
         );
-        let rows = match self.zdas.query_with(
-            &self.zdas_db,
+        let rows = match self.db.query_with(
+            &self.logical_db,
             &sql,
             vec![Value::from(self.env.as_str()), Value::from(self.env.as_str())],
         ).await
@@ -655,8 +655,8 @@ impl MySqlGroupStore {
     /// Delete session from MySQL.
     async fn delete_group_from_mysql(&self, group_id: &str) -> ServiceResult<bool> {
         // Delete participants first
-        self.zdas.execute_with(
-            &self.zdas_db,
+        self.db.execute_with(
+            &self.logical_db,
             "DELETE FROM bcs_group_participants WHERE group_id = ? AND env = ?",
             vec![Value::from(group_id), Value::from(self.env.as_str())],
         ).await
@@ -667,9 +667,9 @@ impl MySqlGroupStore {
 
         // Delete group
         let deleted = self
-            .zdas
+            .db
             .execute_with(
-                &self.zdas_db,
+                &self.logical_db,
                 "DELETE FROM bcs_groups WHERE group_id = ? AND env = ?",
                 vec![Value::from(group_id), Value::from(self.env.as_str())],
             )
@@ -695,8 +695,8 @@ fn sql_metric_service_mode_to_option(raw: &str) -> Option<String> {
 #[async_trait]
 impl GroupMetricsSnapshotPort for MySqlGroupStore {
     async fn group_counts(&self) -> ServiceResult<Vec<GroupMetricCount>> {
-        let rows = self.zdas.query_with(
-            &self.zdas_db,
+        let rows = self.db.query_with(
+            &self.logical_db,
             "SELECT status, group_kind, group_strategy, service_mode, COUNT(*) AS group_count \
              FROM ( \
                  SELECT status, \
@@ -888,7 +888,7 @@ impl GroupRepoPort for MySqlGroupStore {
             )));
         }
 
-        self.zdas.plugin().transaction(steps).await.map_err(|e| {
+        self.db.plugin().transaction(steps).await.map_err(|e| {
             warn!(group_id = %group_id, error = %e, "upsert transaction failed");
             ServiceError::InternalError(e.to_string())
         })?;
@@ -943,9 +943,9 @@ impl GroupRepoPort for MySqlGroupStore {
             "SELECT 1 FROM bcs_group_participants WHERE group_id = ? AND bot_uuid = ? AND env = ?";
 
         let rows = self
-            .zdas
+            .db
             .query_with(
-                &self.zdas_db,
+                &self.logical_db,
                 check_sql,
                 vec![
                     Value::from(id),
@@ -967,8 +967,8 @@ impl GroupRepoPort for MySqlGroupStore {
         let role_str = Self::role_to_str(&participant.role);
         let actor_kind_str = Self::actor_kind_to_str(participant.actor_kind);
         let mode_str = Self::mode_to_str(participant.effective_mode());
-        self.zdas.execute_with(
-            &self.zdas_db,
+        self.db.execute_with(
+            &self.logical_db,
             "INSERT INTO bcs_group_participants (group_id, bot_uuid, role, env, actor_kind, mode) \
              VALUES (?, ?, ?, ?, ?, ?)",
             vec![
@@ -1001,9 +1001,9 @@ impl GroupRepoPort for MySqlGroupStore {
             "DELETE FROM bcs_group_participants WHERE group_id = ? AND bot_uuid = ? AND env = ?";
 
         let affected = self
-            .zdas
+            .db
             .execute_with(
-                &self.zdas_db,
+                &self.logical_db,
                 delete_sql,
                 vec![
                     Value::from(group_id),
@@ -1054,8 +1054,8 @@ impl GroupRepoPort for MySqlGroupStore {
         }
 
         let mode_str = Self::mode_to_str(mode);
-        self.zdas.execute_with(
-            &self.zdas_db,
+        self.db.execute_with(
+            &self.logical_db,
             "UPDATE bcs_group_participants SET mode = ? \
              WHERE group_id = ? AND bot_uuid = ? AND env = ?",
             vec![
@@ -1095,9 +1095,9 @@ impl GroupRepoPort for MySqlGroupStore {
         }
 
         // Persist to MySQL using parameter binding
-        self.zdas
+        self.db
             .execute_with(
-                &self.zdas_db,
+                &self.logical_db,
                 "UPDATE bcs_groups SET label = ? WHERE group_id = ? AND env = ?",
                 vec![
                     Value::from(label.as_deref()),
@@ -1131,8 +1131,8 @@ impl GroupRepoPort for MySqlGroupStore {
 
         // Persist to MySQL using parameter binding
         let status_str = Self::status_to_str(&status);
-        self.zdas.execute_with(
-            &self.zdas_db,
+        self.db.execute_with(
+            &self.logical_db,
             "UPDATE bcs_groups SET status = ? WHERE group_id = ? AND env = ?",
             vec![
                 Value::from(status_str),
@@ -1181,9 +1181,9 @@ impl GroupRepoPort for MySqlGroupStore {
             Value::Null
         };
 
-        self.zdas
+        self.db
             .execute_with(
-                &self.zdas_db,
+                &self.logical_db,
                 "UPDATE bcs_groups SET service_spec = ? WHERE group_id = ? AND env = ?",
                 vec![
                     spec_value,
@@ -1249,8 +1249,8 @@ impl GroupRepoPort for MySqlGroupStore {
             self.flavor.unix_ts("gmt_create"),
             self.flavor.unix_ts("gmt_modified"),
         );
-        let rows = match self.zdas.query_with(
-            &self.zdas_db,
+        let rows = match self.db.query_with(
+            &self.logical_db,
             &paginated_sql,
             vec![
                 Value::from(self.env.as_str()),
@@ -1384,7 +1384,7 @@ impl GroupRepoPort for MySqlGroupStore {
         info!(
             bot_uuid = %bot_uuid,
             env = %self.env,
-            zdas_db = %self.zdas_db,
+            logical_db = %self.logical_db,
             "find_by_participant: starting query"
         );
 
@@ -1413,9 +1413,9 @@ impl GroupRepoPort for MySqlGroupStore {
 
         let env = self.env.as_str();
         let rows = match self
-            .zdas
+            .db
             .query_with(
-                &self.zdas_db,
+                &self.logical_db,
                 &sql,
                 vec![
                     Value::from(env),
@@ -1601,7 +1601,7 @@ impl GroupRepoPort for MySqlGroupStore {
             params.push(Value::from(format!("%{}%", query.to_lowercase())));
         }
 
-        let rows = match self.zdas.query_with(&self.zdas_db, &sql, params).await {
+        let rows = match self.db.query_with(&self.logical_db, &sql, params).await {
             Ok(r) => {
                 info!(
                     row_count = r.len(),
@@ -1732,9 +1732,9 @@ impl GroupRepoPort for MySqlGroupStore {
     /// Count all groups.
     async fn count(&self) -> u64 {
         let rows = self
-            .zdas
+            .db
             .query_with(
-                &self.zdas_db,
+                &self.logical_db,
                 "SELECT COUNT(*) as cnt FROM bcs_groups WHERE env = ?",
                 vec![Value::from(self.env.as_str())],
             )
@@ -1755,9 +1755,9 @@ impl GroupRepoPort for MySqlGroupStore {
         let rows =
             match kind {
                 None => self
-                    .zdas
+                    .db
                     .query_with(
-                        &self.zdas_db,
+                        &self.logical_db,
                         "SELECT COUNT(*) as cnt FROM bcs_groups WHERE env = ?",
                         vec![Value::from(self.env.as_str())],
                     )
@@ -1765,8 +1765,8 @@ impl GroupRepoPort for MySqlGroupStore {
                     .unwrap_or_default(),
                 Some(k) => {
                     let kind_str = Self::group_kind_to_str(k);
-                    self.zdas.query_with(
-                    &self.zdas_db,
+                    self.db.query_with(
+                    &self.logical_db,
                     "SELECT COUNT(*) as cnt FROM bcs_groups WHERE env = ? AND group_kind = ?",
                     vec![Value::from(self.env.as_str()), Value::from(kind_str)],
                 ).await.unwrap_or_default()
@@ -1813,8 +1813,8 @@ impl GroupRepoPort for MySqlGroupStore {
                      LEFT JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ?",
                     created_ts_expr, updated_ts_expr,
                 );
-                self.zdas.query_with(
-                    &self.zdas_db,
+                self.db.query_with(
+                    &self.logical_db,
                     &sql,
                     vec![
                         Value::from(self.env.as_str()),
@@ -1840,8 +1840,8 @@ impl GroupRepoPort for MySqlGroupStore {
                      LEFT JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ?",
                     created_ts_expr, updated_ts_expr,
                 );
-                self.zdas.query_with(
-                    &self.zdas_db,
+                self.db.query_with(
+                    &self.logical_db,
                     &sql,
                     vec![
                         Value::from(self.env.as_str()),
@@ -1969,9 +1969,9 @@ impl GroupRepoPort for MySqlGroupStore {
     /// Count groups where the given bot is a participant.
     async fn count_by_participant(&self, bot_uuid: &str) -> u64 {
         let rows = self
-            .zdas
+            .db
             .query_with(
-                &self.zdas_db,
+                &self.logical_db,
                 "SELECT COUNT(DISTINCT gs.group_id) as cnt \
              FROM bcs_groups gs \
              JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ? \
@@ -2023,8 +2023,8 @@ impl GroupRepoPort for MySqlGroupStore {
             self.flavor.unix_ts("g.gmt_create"),
             self.flavor.unix_ts("g.gmt_modified"),
         );
-        let detail_rows = match self.zdas.query_with(
-            &self.zdas_db,
+        let detail_rows = match self.db.query_with(
+            &self.logical_db,
             &participant_paginated_sql,
             vec![
                 Value::from(self.env.as_str()),
@@ -2184,9 +2184,9 @@ impl GroupRepoPort for MySqlGroupStore {
                    WHERE env = ? AND group_kind = 'dm' AND dm_pair_key = ? LIMIT 1";
 
         let rows = match self
-            .zdas
+            .db
             .query_with(
-                &self.zdas_db,
+                &self.logical_db,
                 sql,
                 vec![Value::from(self.env.as_str()), Value::from(dm_pair_key)],
             )
@@ -2336,7 +2336,7 @@ impl GroupRepoPort for MySqlGroupStore {
             )));
         }
 
-        let tx_result = self.zdas.plugin().transaction(steps).await;
+        let tx_result = self.db.plugin().transaction(steps).await;
 
         match tx_result {
             Ok(results) => {
@@ -2426,9 +2426,9 @@ impl GroupRepoPort for MySqlGroupStore {
             "UPDATE bcs_groups SET visibility = ?, {} WHERE group_id = ? AND env = ?",
             self.flavor.set_modified_now(),
         );
-        self.zdas
+        self.db
             .execute_with(
-                &self.zdas_db,
+                &self.logical_db,
                 &update_sql,
                 vec![
                     Value::from(visibility),
@@ -2479,7 +2479,7 @@ impl GroupRepoPort for MySqlGroupStore {
             params.push(Value::from(format!("%{}%", escaped)));
         }
 
-        let rows = self.zdas.query_with(&self.zdas_db, &sql, params).await.unwrap_or_default();
+        let rows = self.db.query_with(&self.logical_db, &sql, params).await.unwrap_or_default();
         rows.first()
             .and_then(|row| db_get_column::<i64>(row, "cnt").ok())
             .unwrap_or(0) as u64
@@ -2537,7 +2537,7 @@ impl GroupRepoPort for MySqlGroupStore {
         );
         params.push(Value::from(self.env.as_str()));
 
-        let rows = match self.zdas.query_with(&self.zdas_db, &sql, params).await {
+        let rows = match self.db.query_with(&self.logical_db, &sql, params).await {
             Ok(r) => r,
             Err(e) => {
                 warn!(error = %e, "list_paginated_filtered: query failed");

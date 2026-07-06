@@ -185,7 +185,7 @@ pub async fn cache_plugin_contract_tests_with_options<P: CachePlugin>(
 /// Contract tests every DbPlugin implementation must pass.
 ///
 /// The SQL used here is intentionally limited to a small common subset so both
-/// SQLite local plugins and MySQL/ZDAS plugins can run it. Plugin-specific
+/// SQLite local plugins and MySQL-compatible plugins can run it. Plugin-specific
 /// contract tests may need their own setup when the target backend cannot
 /// execute this exact syntax.
 #[allow(

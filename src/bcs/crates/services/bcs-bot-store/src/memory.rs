@@ -948,7 +948,7 @@ impl BotRepoPort for MemoryBotRepo {
     /// In-memory implementation: only updates the in-process registry entry.
     /// File-based persistence is intentionally not extended for `status` in
     /// the local registry (MemoryBotRepo is a dev-only fallback; production runs
-    /// LayottoRegistry which persists to MySQL).
+    /// PersistentBotRepo which persists to MySQL).
     async fn update_actor_status(
         &self,
         bot_id: &str,

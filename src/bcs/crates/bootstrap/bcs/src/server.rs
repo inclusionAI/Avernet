@@ -25,9 +25,12 @@ use crate::auth_wiring::AuthPluginFactory;
 use crate::Result;
 use crate::config::{BcsConfig, CollaborationTemplateStorageKind, LlmConfig, LlmProviderType};
 use crate::lifecycle::LifecycleOrchestrator;
-use crate::plugins::{DbPluginKind, InfrastructurePlugins, build_registered_llm_provider};
+use crate::plugins::{
+    DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
+    build_registered_leader_election, build_registered_llm_provider,
+};
 use bcs_bot::{Bot, BotCore, ProviderBotEvents, ProviderCore, ProviderManagement};
-use bcs_bot_store::{DbProviderStore, LayottoRegistry, MemoryBotRepo, MemoryProviderStore};
+use bcs_bot_store::{DbProviderStore, PersistentBotRepo, MemoryBotRepo, MemoryProviderStore};
 use bcs_friend::{FriendCore, FriendRequestCore};
 use bcs_friend_store::{
     DbFriendRequestStore, DbFriendStore, MemoryFriendRepo, MemoryFriendRequestRepo,
@@ -345,7 +348,7 @@ pub struct BcsServerExtensions {
     pub auth_plugin_factories: Vec<AuthPluginFactory>,
     pub llm_provider: Option<Arc<dyn LlmChatCompletionPort>>,
     pub user_directory_plugin: Option<Arc<dyn UserDirectoryPlugin>>,
-    pub leader_election: Option<Arc<dyn LeaderElectionPort>>,
+    pub leader_election: Option<LeaderElectionRegistration>,
 }
 
 #[derive(Clone)]
@@ -826,20 +829,55 @@ fn create_standalone_leader_lifecycle() -> (
 }
 
 fn create_leader_lifecycle(
-    leader_election: Option<Arc<dyn LeaderElectionPort>>,
+    leader_election: Option<LeaderElectionRegistration>,
 ) -> (
     Arc<dyn LeaderElectionPort>,
     Arc<Mutex<LifecycleOrchestrator>>,
 ) {
-    if let Some(leader_election) = leader_election {
-        info!("Using injected leader election extension");
-        return (
-            leader_election,
-            Arc::new(Mutex::new(LifecycleOrchestrator::new())),
-        );
+    if let Some(registration) = leader_election {
+        let mut lifecycle = LifecycleOrchestrator::new();
+        if let Some(service) = registration.lifecycle {
+            lifecycle.register("leader_election", service);
+        }
+        info!("Using configured leader election provider");
+        return (registration.leader, Arc::new(Mutex::new(lifecycle)));
     }
 
     create_standalone_leader_lifecycle()
+}
+
+async fn create_configured_leader_election(
+    config: &BcsConfig,
+) -> Result<Option<LeaderElectionRegistration>> {
+    let Some(election) = config.leader_election.as_ref() else {
+        return Ok(None);
+    };
+    if !election.enabled {
+        return Ok(None);
+    }
+
+    let provider = election
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|provider| !provider.is_empty())
+        .ok_or_else(|| {
+            crate::BcsError::InvalidConfig(
+                "leader_election.provider is required when leader_election.enabled = true"
+                    .to_string(),
+            )
+        })?;
+
+    let provider_config = election.providers.get(provider).cloned().unwrap_or_default();
+
+    build_registered_leader_election(config, provider, provider_config)
+        .await?
+        .ok_or_else(|| {
+            crate::BcsError::InvalidConfig(format!(
+                "leader_election provider '{provider}' is not available in this binary"
+            ))
+        })
+        .map(Some)
 }
 
 fn lifecycle_with_leader<L>(
@@ -1879,12 +1917,13 @@ impl BcsServer {
         let cache_plugin = infrastructure_plugins
             .cache()
             .unwrap_or_else(|| Arc::new(bcs_cache_local::InMemoryCachePlugin::new()));
+        let cache_key_prefix = config.cache.redis.effective_key_prefix();
         info!(db_plugin = %db_kind, "Initializing DB-backed bot registry");
-        let bot_repo = Arc::new(LayottoRegistry::with_plugins_flavor(
+        let bot_repo = Arc::new(PersistentBotRepo::with_plugins_flavor_and_cache_key_prefix(
             cache_plugin,
             db_plugin.clone(),
-            infrastructure_plugins.cache_zone().to_string(),
             db_flavor,
+            cache_key_prefix,
         ));
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
         let bot_core_arc = Arc::new(BotCore::with_provider_repos(
@@ -1895,18 +1934,12 @@ impl BcsServer {
         ));
         let bot_registry: Arc<dyn BotRegistryCoreService> = bot_core_arc.clone();
 
-        if extensions.leader_election.is_none()
-            && config
-                .master_election
-                .as_ref()
-                .is_some_and(|election| election.enabled)
-        {
-            warn!(
-                "Distributed master election is not available in the public build; using standalone leader"
-            );
-        }
-        let (leader_election, lifecycle) =
-            create_leader_lifecycle(extensions.leader_election.clone());
+        let leader_election_registration = if extensions.leader_election.is_some() {
+            extensions.leader_election.clone()
+        } else {
+            create_configured_leader_election(&config).await?
+        };
+        let (leader_election, lifecycle) = create_leader_lifecycle(leader_election_registration);
 
         // Create group session storage.
         let (sessions, group_metrics_snapshot, group_repo): (

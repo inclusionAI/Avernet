@@ -8,11 +8,13 @@ use std::sync::Arc;
 use bcs_cache_api::CachePlugin;
 use bcs_cache_local::InMemoryCachePlugin;
 use bcs_cache_redis::RedisCachePlugin;
-use bcs_config_api::RedisCacheConfig;
+use bcs_config_api::{LeaderElectionProviderConfig, RedisCacheConfig};
 use bcs_db_api::DbPlugin;
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_db_mysql::{MysqlDbManager, MysqlDbPlugin};
 use bcs_llm_api::LlmChatCompletionPort;
+use bcs_service_api::LeaderElectionPort;
+use bcs_service_api::lifecycle::ServiceLifecycle;
 use futures::future::BoxFuture;
 
 use crate::config::{BcsConfig, DatabaseType};
@@ -54,7 +56,6 @@ impl fmt::Display for DbPluginKind {
 #[derive(Clone)]
 pub struct CachePluginRegistration {
     pub kind: CachePluginKind,
-    pub cache_zone: String,
     pub plugin: Arc<dyn CachePlugin>,
 }
 
@@ -92,6 +93,24 @@ pub struct LlmProviderFactory {
 
 inventory::collect!(LlmProviderFactory);
 
+#[derive(Clone)]
+pub struct LeaderElectionRegistration {
+    pub leader: Arc<dyn LeaderElectionPort>,
+    pub lifecycle: Option<Arc<dyn ServiceLifecycle>>,
+}
+
+pub type LeaderElectionBuild = fn(
+    BcsConfig,
+    LeaderElectionProviderConfig,
+) -> BoxFuture<'static, crate::Result<LeaderElectionRegistration>>;
+
+pub struct LeaderElectionFactory {
+    pub name: &'static str,
+    pub build: LeaderElectionBuild,
+}
+
+inventory::collect!(LeaderElectionFactory);
+
 async fn build_registered_cache_plugin(
     config: &BcsConfig,
     provider: &str,
@@ -128,6 +147,19 @@ pub fn build_registered_llm_provider(
     Ok(None)
 }
 
+pub async fn build_registered_leader_election(
+    config: &BcsConfig,
+    provider: &str,
+    provider_config: LeaderElectionProviderConfig,
+) -> crate::Result<Option<LeaderElectionRegistration>> {
+    for factory in inventory::iter::<LeaderElectionFactory> {
+        if factory.name == provider {
+            return Ok(Some((factory.build)(config.clone(), provider_config).await?));
+        }
+    }
+    Ok(None)
+}
+
 fn resolve_sqlite_path(config: &BcsConfig) -> String {
     let raw = config.database.sqlite.path.as_str();
     let p = std::path::Path::new(raw);
@@ -151,7 +183,6 @@ fn resolve_redis_config(config: &BcsConfig) -> crate::Result<RedisCacheConfig> {
 pub struct InfrastructurePlugins {
     cache_kind: CachePluginKind,
     db_kind: DbPluginKind,
-    cache_zone: String,
     cache: Option<Arc<dyn CachePlugin>>,
     db: Option<Arc<dyn DbPlugin>>,
 }
@@ -161,7 +192,6 @@ impl fmt::Debug for InfrastructurePlugins {
         f.debug_struct("InfrastructurePlugins")
             .field("cache_kind", &self.cache_kind)
             .field("db_kind", &self.db_kind)
-            .field("cache_zone", &self.cache_zone)
             .field("cache_ready", &self.cache.is_some())
             .field("db_ready", &self.db.is_some())
             .finish()
@@ -172,55 +202,46 @@ impl InfrastructurePlugins {
     pub fn from_parts(
         cache_kind: CachePluginKind,
         db_kind: DbPluginKind,
-        cache_zone: impl Into<String>,
         cache: Arc<dyn CachePlugin>,
         db: Arc<dyn DbPlugin>,
     ) -> Self {
         Self {
             cache_kind,
             db_kind,
-            cache_zone: cache_zone.into(),
             cache: Some(cache),
             db: Some(db),
         }
     }
 
     pub async fn from_config(config: &BcsConfig) -> crate::Result<Self> {
-        let (cache_kind, cache_zone, cache): (CachePluginKind, String, Arc<dyn CachePlugin>) =
+        let (cache_kind, cache): (CachePluginKind, Arc<dyn CachePlugin>) =
             if config.cache.is_configured() {
                 let cache_type = resolve_cache_type(config);
                 match cache_type {
                     "memory" => (
                         CachePluginKind::LocalMemory,
-                        "local".to_string(),
                         Arc::new(InMemoryCachePlugin::new()),
                     ),
                     "redis" => {
                         let redis = &config.cache.redis;
                         if redis.connection.connection_type == "direct" {
                             let redis_config = resolve_redis_config(config)?;
-                            let cache_zone = "bcs".to_string();
-                            let redis =
-                                RedisCachePlugin::connect(redis_config, cache_zone.clone())
-                                    .await
-                                    .map_err(|err| {
-                                        crate::BcsError::StorageInitError(format!(
-                                            "init redis cache plugin: {}",
-                                            err
-                                        ))
-                                    })?;
-                            (CachePluginKind::Redis, cache_zone, Arc::new(redis))
+                            let redis = RedisCachePlugin::connect(redis_config)
+                                .await
+                                .map_err(|err| {
+                                    crate::BcsError::StorageInitError(format!(
+                                        "init redis cache plugin: {}",
+                                        err
+                                    ))
+                                })?;
+                            (CachePluginKind::Redis, Arc::new(redis))
                         } else if let Some(registration) = build_registered_cache_plugin(
                             config,
                             &redis.connection.connection_type,
                         )
                         .await?
                         {
-                            (
-                                registration.kind,
-                                registration.cache_zone,
-                                registration.plugin,
-                            )
+                            (registration.kind, registration.plugin)
                         } else {
                             return Err(crate::BcsError::StorageInitError(format!(
                                 "cache.redis.connection.type = '{}' is not available in this binary",
@@ -231,11 +252,7 @@ impl InfrastructurePlugins {
                     other => {
                         if let Some(registration) = build_registered_cache_plugin(config, other).await?
                         {
-                            (
-                                registration.kind,
-                                registration.cache_zone,
-                                registration.plugin,
-                            )
+                            (registration.kind, registration.plugin)
                         } else {
                             return Err(crate::BcsError::StorageInitError(format!(
                                 "cache.type = '{}' is not available in this binary",
@@ -247,7 +264,6 @@ impl InfrastructurePlugins {
             } else {
                 (
                     CachePluginKind::LocalMemory,
-                    "local".to_string(),
                     Arc::new(InMemoryCachePlugin::new()),
                 )
             };
@@ -320,7 +336,6 @@ impl InfrastructurePlugins {
         Ok(Self {
             cache_kind,
             db_kind,
-            cache_zone,
             cache: Some(cache),
             db: Some(db),
         })
@@ -334,7 +349,6 @@ impl InfrastructurePlugins {
         Self {
             cache_kind: CachePluginKind::LocalMemory,
             db_kind: DbPluginKind::LocalSqlite,
-            cache_zone: "local".to_string(),
             cache: Some(Arc::new(InMemoryCachePlugin::new())),
             db: Some(Arc::new(db)),
         }
@@ -346,10 +360,6 @@ impl InfrastructurePlugins {
 
     pub fn db_kind(&self) -> DbPluginKind {
         self.db_kind.clone()
-    }
-
-    pub fn cache_zone(&self) -> &str {
-        &self.cache_zone
     }
 
     pub fn cache(&self) -> Option<Arc<dyn CachePlugin>> {
@@ -390,8 +400,7 @@ mod tests {
     ) -> BoxFuture<'static, crate::Result<CachePluginRegistration>> {
         Box::pin(async move {
             Ok(CachePluginRegistration {
-                kind: CachePluginKind::External("test-zcache".to_string()),
-                cache_zone: "test-zone".to_string(),
+                kind: CachePluginKind::External("test-external-cache".to_string()),
                 plugin: Arc::new(InMemoryCachePlugin::new()),
             })
         })
@@ -399,8 +408,33 @@ mod tests {
 
     inventory::submit! {
         CachePluginFactory {
-            name: "test-zcache",
+            name: "test-external-cache",
             build: test_cache_factory,
+        }
+    }
+
+    fn test_leader_factory(
+        _config: BcsConfig,
+        provider_config: LeaderElectionProviderConfig,
+    ) -> BoxFuture<'static, crate::Result<LeaderElectionRegistration>> {
+        Box::pin(async move {
+            if provider_config.get("zone").and_then(|value| value.as_str()) != Some("blue") {
+                return Err(crate::BcsError::InvalidConfig(
+                    "expected leader provider option zone = blue".to_string(),
+                ));
+            }
+
+            Ok(LeaderElectionRegistration {
+                leader: Arc::new(bcs_leader_election::StandaloneLeaderElection::local()),
+                lifecycle: None,
+            })
+        })
+    }
+
+    inventory::submit! {
+        LeaderElectionFactory {
+            name: "test-leader-options",
+            build: test_leader_factory,
         }
     }
 
@@ -435,7 +469,7 @@ mod tests {
     async fn registered_cache_factory_handles_non_direct_redis_connection() {
         let mut config = BcsConfig::default();
         config.cache.cache_type = "redis".to_string();
-        config.cache.redis.connection.connection_type = "test-zcache".to_string();
+        config.cache.redis.connection.connection_type = "test-external-cache".to_string();
 
         let infrastructure = InfrastructurePlugins::from_config(&config)
             .await
@@ -443,9 +477,8 @@ mod tests {
 
         assert_eq!(
             infrastructure.cache_kind(),
-            CachePluginKind::External("test-zcache".to_string())
+            CachePluginKind::External("test-external-cache".to_string())
         );
-        assert_eq!(infrastructure.cache_zone(), "test-zone");
     }
 
     #[tokio::test]
@@ -459,7 +492,26 @@ mod tests {
             .expect("inactive redis subconfig should not block memory cache");
 
         assert_eq!(infrastructure.cache_kind(), CachePluginKind::LocalMemory);
-        assert_eq!(infrastructure.cache_zone(), "local");
+    }
+
+    #[tokio::test]
+    async fn registered_leader_factory_receives_provider_options() {
+        let mut provider_config = LeaderElectionProviderConfig::new();
+        provider_config.insert(
+            "zone".to_string(),
+            serde_json::Value::String("blue".to_string()),
+        );
+
+        let registration = build_registered_leader_election(
+            &BcsConfig::default(),
+            "test-leader-options",
+            provider_config,
+        )
+        .await
+        .expect("leader factory should build")
+        .expect("leader factory should be registered");
+
+        assert!(registration.leader.is_leader().await.expect("is leader"));
     }
 
     #[test]
@@ -471,14 +523,12 @@ mod tests {
         let plugins = InfrastructurePlugins::from_parts(
             CachePluginKind::Redis,
             DbPluginKind::Mysql,
-            "custom-zone",
             cache.clone(),
             db.clone(),
         );
 
         assert_eq!(plugins.cache_kind(), CachePluginKind::Redis);
         assert_eq!(plugins.db_kind(), DbPluginKind::Mysql);
-        assert_eq!(plugins.cache_zone(), "custom-zone");
         assert!(Arc::ptr_eq(&plugins.cache().expect("cache handle"), &cache));
         assert!(Arc::ptr_eq(&plugins.db().expect("db handle"), &db));
     }

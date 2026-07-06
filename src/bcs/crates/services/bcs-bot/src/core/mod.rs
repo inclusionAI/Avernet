@@ -2,7 +2,7 @@ pub mod bot_core;
 mod ids;
 pub mod provider_core;
 
-pub use bcs_bot_store::{BotInfo, LayottoRegistry, MemoryBotRepo};
+pub use bcs_bot_store::{BotInfo, PersistentBotRepo, MemoryBotRepo};
 pub use bot_core::BotCore;
 pub use provider_core::ProviderCore;
 

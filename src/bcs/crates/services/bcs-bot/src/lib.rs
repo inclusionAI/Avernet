@@ -8,4 +8,4 @@ pub use application::{
 };
 #[allow(deprecated)]
 pub use core::BotRegistry;
-pub use core::{BotCore, BotInfo, LayottoRegistry, MemoryBotRepo, ProviderCore};
+pub use core::{BotCore, BotInfo, PersistentBotRepo, MemoryBotRepo, ProviderCore};
