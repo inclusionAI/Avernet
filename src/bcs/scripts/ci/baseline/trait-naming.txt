@@ -1,0 +1,5 @@
+# LINT-4 baseline: trait 命名 outlier（CONTEXT.md §5 偏离）
+# 格式：<trait 名>	<偏离编号: 描述>
+# 修复后从本文件删除。
+
+WorkerProfileService	历史命名 outlier，应改为 WorkerProfilePort（CONTEXT.md §3）

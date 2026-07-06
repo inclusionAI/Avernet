@@ -1,0 +1,32 @@
+{
+  "name": "bcs-panel-asset",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source BCS side-panel components bundled as a UMD asset.",
+  "type": "module",
+  "main": "dist/index.umd.js",
+  "files": [
+    "dist/index.umd.js",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "test:umd": "node test/umd-contract.mjs",
+    "typecheck": "tsc --noEmit",
+    "scan:public": "node scripts/public-scan.mjs"
+  },
+  "dependencies": {
+    "styled-components": "^6.0.7"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^8.1.0"
+  }
+}

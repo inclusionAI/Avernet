@@ -1,0 +1,10 @@
+{
+  "id": "plugin-name",
+  "name": "Plugin Name",
+  "description": "Installable OpenClaw plugin template.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

@@ -1,0 +1,21 @@
+[package]
+name         = "bcs-db-mysql"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bcs-config-api = { workspace = true }
+bcs-db-api     = { workspace = true }
+
+async-trait = { workspace = true }
+mysql_async = { workspace = true }
+tracing     = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

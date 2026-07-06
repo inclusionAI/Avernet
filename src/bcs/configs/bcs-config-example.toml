@@ -1,0 +1,217 @@
+# BCS deployment example.
+#
+# Copy this file, replace every example.com host and replace-with-* value,
+# then run. Do not commit real credentials.
+
+bind = "0.0.0.0"
+port = 21000
+bots_base_dir = "/var/lib/bcs/bots"
+
+max_history_per_session = 1000
+store_messages = false
+strict_container_validation = true
+
+# Switch for Provider 2.0 SSE gray-list mode. Default is false.
+# When false, Provider 2.0 downlink rolls out over SSE for all providers.
+# When true, only created_by entries in the gray list use SSE.
+provider_stream_gray_enabled = false
+
+# created_by staff IDs whose Provider 2.0 bots receive chat.send with SSE
+# transport when gray-list mode is enabled.
+provider_stream_gray_created_by = []
+
+max_groups_as_driver = 20
+max_group_members = 20
+max_groups_as_member = 100
+max_group_messages = 200
+group_chat_delay_min_ms = 1000
+group_chat_delay_max_ms = 3000
+
+bcs_endpoint = "https://bcs.example.com"
+botchat_url = "https://botchat.example.com"
+register_path = "/bcn/register"
+default_visibility = "protected"
+onboard_binding_enabled = false
+
+dingtalk_accounts = []
+api_keys = []
+allowed_switch_provider_ids = []
+
+[cors]
+allowed_origins = [
+  "https://bcs.example.com",
+  "https://botchat.example.com",
+]
+
+[metrics]
+enabled = true
+mode = "pull"
+endpoint_path = "/metrics"
+
+[llm]
+type = "none"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+# api_key = "replace-with-llm-api-key"
+model = "gpt-4.1-mini"
+timeout_ms = 120000
+temperature = 0
+max_tokens = 4096
+structured_output = "json_schema"
+
+[database]
+type = "mysql"
+
+[cache]
+type = "redis"
+
+[cache.redis]
+timeout_secs = 5
+
+[cache.redis.connection]
+type = "direct"
+host = "redis.example.com"
+port = 6379
+auth_mode = "redis"
+username = "replace-with-redis-username"
+password = "replace-with-redis-password"
+
+[database.mysql]
+database = "bcs"
+pool_size = 20
+min_pool_size = 5
+timeout_secs = 30
+stmt_cache_size = 0
+statement_protocol = "text"
+
+[database.mysql.connection]
+type = "direct"
+user = "replace-with-db-user"
+password = "replace-with-db-password"
+host = "oceanbase.example.com"
+port = 3306
+
+[logging]
+default_level = "info"
+console = true
+
+[[logging.outputs]]
+name = "main"
+path = "/var/log/bcs"
+file = "bcs.log"
+level = "info"
+rotation = "daily"
+targets = ["*", "!bcs_chat_digest", "!bcs_sse_detail"]
+max_keep_days = 7
+
+[[logging.outputs]]
+name = "messages"
+path = "/var/log/bcs"
+file = "bcs-messages.log"
+level = "info"
+rotation = "daily"
+targets = ["bcs_message"]
+max_keep_days = 7
+
+[[logging.outputs]]
+name = "chat-digest"
+path = "/var/log/bcs"
+file = "bcs-chat-digest.log"
+level = "info"
+rotation = "daily"
+targets = ["bcs_chat_digest"]
+max_keep_days = 7
+
+# SSE downlink detail log — per-frame consumption trace + lag alerts, keep 7 days
+[[logging.outputs]]
+name = "sse-detail"
+path = "/var/log/bcs"
+file = "bcs-sse-detail.log"
+level = "info"
+rotation = "daily"
+format = "json"
+targets = ["bcs_sse_detail"]
+max_keep_days = 7
+
+[logging.modules]
+hyper = "warn"
+tower_http = "warn"
+
+[auth]
+chain = ["oauth_session"]
+require_authentication = true
+
+[auth.oauth]
+jwt_secret = "replace-with-oauth-jwt-secret"
+idle_timeout_minutes = 30
+base_url = "https://bcs.example.com"
+cookie_secure = true
+
+[auth.oauth.providers.github]
+kind = "github"
+client_id = "replace-with-github-client-id"
+client_secret = "replace-with-github-client-secret"
+
+[bcsfuse]
+enabled = false
+url = "https://bcsfuse.example.com"
+fusion_timeout_ms = 120000
+sync_timeout_ms = 10000
+profile_id = "default"
+recommend_top_k = 10
+recommend_min_score = 0.1
+
+# =============================================================================
+# Message History Configuration
+# =============================================================================
+
+# Message history storage configuration
+[message_history]
+# Groups created at or after this timestamp (ms) use the new message store path.
+# Groups created before this timestamp fall back to the legacy history path.
+# Default: 2026-06-25 12:00:00 Asia/Shanghai (UTC+8) (1782360000000 ms), which is the go-live date.
+# Groups created before this date will use the legacy bot-based history path.
+cutoff_timestamp = 1782360000000
+
+# ManagerWorker sessions created at or after this timestamp (ms) use DB history.
+# Default: 2026-07-05 00:00:00 Asia/Shanghai (UTC+8) (1783180800000 ms).
+manager_worker_cutoff_timestamp = 1783180800000
+
+# Max visible history messages for a newly joined participant.
+# Set to a large value so new participants can see all history messages.
+new_participant_visible_limit = 100000000
+
+# Default page size when the caller does not specify a limit.
+# Set to a large value so the default limit is effectively disabled.
+default_page_limit = 100000000
+
+# Hard cap on page size to prevent excessive queries.
+# Set to a large value so the cap is effectively disabled.
+max_page_limit = 100000000
+
+[security_gateway]
+# provider 选择安全网关实现："noop"（开源默认，永远放行）| "agentpass"（AgentPass HTTP 网关）
+provider = "agentpass"
+dry_run = true
+timeout_ms = 300
+domain = "security-gateway.example.com"
+endpoint = "/api/security/check"
+
+[security.outbound_url]
+block_private_networks = true
+allow_loopback = false
+
+[invite]
+token_secret = "replace-with-invite-token-secret"
+default_ttl_seconds = 86400
+base_url = "https://bcs.example.com"
+group_link_url = "https://botchat.example.com/groups/{group_id}"
+session_link_url = "https://botchat.example.com/sessions/{session_id}"
+
+[manifest]
+schema_version = 1
+
+[[manifest.bundles]]
+name = "bcsPanel"
+type = "file"
+file = "assets/panel/dist/index.umd.js"

@@ -1,0 +1,9 @@
+{
+  "name": "@stagewise/toolbar",
+  "version": "0.6.2",
+  "description": "Local MIT no-op stub replacing the upstream AGPL-3.0-only @stagewise/toolbar. The umi stagewise feature is disabled (enableBy: config) in this project, so the toolbar is never loaded; this stub only keeps the AGPL package out of the lockfile for strict license compliance.",
+  "license": "MIT",
+  "main": "index.js",
+  "module": "index.js",
+  "types": "index.d.ts"
+}

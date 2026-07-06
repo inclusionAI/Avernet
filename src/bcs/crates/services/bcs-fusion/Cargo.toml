@@ -1,0 +1,23 @@
+[package]
+name = "bcs-fusion"
+description = "Context fusion service implementation for BCS"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+bcs-config-api = { workspace = true }
+bcs-fuse-client = { workspace = true }
+bcs-service-api = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+bcs-test-support = { workspace = true }
+tokio-test = "0.4"
+tempfile = { workspace = true }

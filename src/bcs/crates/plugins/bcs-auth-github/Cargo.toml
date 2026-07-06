@@ -1,0 +1,29 @@
+[package]
+name = "bcs-auth-github"
+description = "GitHub OAuth auth plugin for BCS"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+async-trait = { workspace = true }
+axum = { workspace = true }
+bcs-auth-api = { workspace = true }
+bcs-jwt = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+urlencoding = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+bcs-auth-oauth = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-user-identity = { workspace = true }
+bcs-test-support = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "bcs-auth-oauth"
+description = "Provider-agnostic OAuth session auth plugin for BCS"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+async-trait = { workspace = true }
+axum = { workspace = true }
+bcs-auth-api = { workspace = true }
+bcs-jwt = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,26 @@
+[package]
+name         = "bcs-service-api"
+description  = "BCS service trait contracts and domain types"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+fastrand    = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+strum       = { workspace = true }
+tokio       = { workspace = true }
+bcs-domain   = { workspace = true }
+bcs-protocol = { workspace = true }
+
+[dev-dependencies]
+bcs-test-support = { workspace = true }
+syn = { version = "2", features = ["full", "visit"] }

@@ -1,0 +1,51 @@
+[package]
+name         = "bcs-http"
+description  = "HTTP delivery adapter for BCS"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bcs-domain      = { workspace = true }
+bcs-group       = { workspace = true }
+bcs-callback    = { workspace = true }
+bcs-config-api  = { workspace = true }
+bcs-route-security = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-auth-api    = { workspace = true }
+bcs-jwt         = { workspace = true }
+bcs-services-container = { workspace = true }
+bcs-protocol    = { workspace = true }
+axum            = { workspace = true }
+async-trait     = { workspace = true }
+base64          = { workspace = true }
+serde           = { workspace = true }
+serde_json      = { workspace = true }
+serde_yaml      = { workspace = true }
+thiserror       = { workspace = true }
+strum           = { workspace = true }
+tokio           = { workspace = true }
+tracing         = { workspace = true }
+urlencoding     = { workspace = true }
+uuid            = { workspace = true }
+sha2            = { workspace = true }
+hex             = { workspace = true }
+
+[dev-dependencies]
+futures = { workspace = true }
+bcs-bot = { workspace = true }
+bcs-bot-store = { workspace = true }
+bcs-cli = { workspace = true }
+bcs-friend = { workspace = true }
+bcs-auth-local = { workspace = true }
+bcs-services-container = { workspace = true, features = ["test-support"] }
+bcs-test-support = { workspace = true }
+bcs-user-directory-api = { workspace = true }
+tempfile = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+tracing-subscriber = { workspace = true }

@@ -1,0 +1,5 @@
+# LINT-3 baseline: 已知偏离不阻塞 CI（每条对应 CONTEXT.md §5 偏离编号）
+# 格式：<文件路径>::<符号>	<偏离编号: 描述>
+# 修复后从本文件删除对应行。新增违规不允许（由 check-baseline-not-growing.sh 强制）。
+
+crates/service-api/bcs-protocol/src/lib.rs::std::env::var	偏离 #4: resolve_env() 待迁出到 bootstrap

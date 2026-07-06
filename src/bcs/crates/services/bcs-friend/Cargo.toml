@@ -1,0 +1,37 @@
+[package]
+name        = "bcs-friend"
+description = "Friend relationship and request management for BCS"
+edition     = { workspace = true }
+license     = { workspace = true }
+repository  = { workspace = true }
+rust-version = { workspace = true }
+version     = { workspace = true }
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+
+# Async
+async-trait = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# UUID generation
+uuid = { workspace = true }
+
+# Service traits
+bcs-service-api = { workspace = true }
+bcs-friend-store = { workspace = true }
+
+bcs-config     = { workspace = true }
+
+[dev-dependencies]
+bcs-db-local = { workspace = true }
+bcs-domain = { workspace = true }
+bcs-test-support = { workspace = true }
+tempfile = { workspace = true }
+tokio-test = "0.4"
+
+[lints]
+workspace = true

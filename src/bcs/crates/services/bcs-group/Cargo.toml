@@ -1,0 +1,40 @@
+[package]
+name = "bcs-group"
+description = "Group session service implementation for BCS"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+
+# Async trait
+async-trait = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# UUID
+uuid = { workspace = true }
+
+# Time
+chrono = "0.4"
+
+# Error types
+thiserror = { workspace = true }
+
+# JSON comparison (callback_config equality)
+serde_json = { workspace = true }
+
+# Workspace crates
+bcs-route-security = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-group-store = { workspace = true }
+
+[dev-dependencies]
+bcs-test-support = { workspace = true }
+tempfile   = { workspace = true }
+tokio-test = "0.4"

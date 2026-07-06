@@ -1,0 +1,20 @@
+[package]
+name = "bcs-security-gateway-local"
+description = "Local / noop implementations of port::security_gateway::SecurityGatewayPort"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bcs-security-gateway-api = { workspace = true }
+
+async-trait = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

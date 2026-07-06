@@ -1,0 +1,25 @@
+[package]
+name = "bcs-session"
+description = "Session service implementation for BCS"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+async-trait = { workspace = true }
+bcs-domain = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-session-store = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+bcs-group-store = { workspace = true }
+bcs-test-support = { workspace = true }
+tokio = { workspace = true }
+tokio-test = "0.4"
+
+[lints]
+workspace = true

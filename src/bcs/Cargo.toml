@@ -1,0 +1,246 @@
+[workspace]
+members = [
+    # bootstrap
+    "crates/bootstrap/bcs",
+    # adapters
+    "crates/adapters/http/bcs-http",
+    "crates/adapters/http/bcs-provider-http",
+    "crates/adapters/ws/bcs-ws",
+    # service-api
+    "crates/service-api/bcs-config-api",
+    "crates/service-api/bcs-service-api",
+    "crates/service-api/bcs-services-container",
+    # contracts
+    "crates/contracts/bcs-domain",
+    "crates/contracts/bcs-protocol",
+    # services
+    "crates/services/bcs-config",
+    "crates/services/bcs-friend",
+    "crates/services/bcs-friend-store",
+    "crates/services/bcs-group",
+    "crates/services/bcs-group-store",
+    "crates/services/bcs-message",
+    "crates/services/bcs-message-flow",
+    "crates/services/bcs-message-store",
+    "crates/services/bcs-bot",
+    "crates/services/bcs-bot-store",
+    "crates/services/bcs-callback",
+    "crates/services/bcs-collaboration-template",
+    "crates/services/bcs-collaboration-runtime",
+    "crates/services/bcs-collaboration-store",
+    "crates/services/bcs-judge",
+    "crates/services/bcs-jwt",
+    "crates/services/bcs-fusion",
+    "crates/services/bcs-leader-election",
+    "crates/services/bcs-relation",
+    "crates/services/bcs-relation-store",
+    "crates/services/bcs-user-identity",
+    "crates/services/bcs-proposal",
+    "crates/services/bcs-proposal-store",
+    "crates/services/bcs-route-security",
+    "crates/services/bcs-secret",
+    "crates/services/bcs-session",
+    "crates/services/bcs-session-store",
+    "crates/services/bcs-routing",
+    "crates/services/bcs-system-message",
+    # plugin-api
+    "crates/plugin-api/bcs-auth-api",
+    "crates/plugin-api/bcs-cache-api",
+    "crates/plugin-api/bcs-db-api",
+    "crates/plugin-api/bcs-llm-api",
+    "crates/plugin-api/bcs-security-gateway-api",
+    "crates/plugin-api/bcs-user-directory-api",
+    # plugins
+    "crates/plugins/bcs-cache-local",
+    "crates/plugins/bcs-cache-redis",
+    "crates/plugins/bcs-db-local",
+    "crates/plugins/bcs-db-mysql",
+    "crates/plugins/bcs-llm-openai-compatible",
+    "crates/plugins/bcs-secret-local",
+    "crates/plugins/bcs-security-gateway-local",
+    "crates/plugins/bcs-auth-session",
+    "crates/plugins/bcs-auth-google",
+    "crates/plugins/bcs-auth-github",
+    "crates/plugins/bcs-auth-wechat",
+    "crates/plugins/bcs-auth-alipay",
+    "crates/plugins/bcs-auth-local",
+    "crates/plugins/bcs-auth-oauth",
+    # external-clients
+    "crates/external-clients/bcs-fuse-client",
+    # tools
+    "crates/tools/bcs-admin",
+    "crates/tools/bcs-cli",
+    # auxiliary
+    "crates/auxiliary/ding-logger",
+    # test-support
+    "crates/test-support/bcs-test-support",
+]
+resolver = "2"
+
+[workspace.lints.rust]
+unsafe_code           = "deny"
+unused_qualifications = "deny"
+
+[workspace.lints.clippy]
+expect_used = "deny"
+unwrap_used = "deny"
+
+[workspace.package]
+edition      = "2024"
+license      = "Apache-2.0"
+repository   = "https://github.com/inclusionAI/bcs"
+rust-version = "1.91"
+version      = "0.1.0"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+# HTTP server
+axum       = { version = "0.8", features = ["ws"] }
+tower      = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+
+# Serialization
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+toml       = "0.8"
+
+# Error handling
+anyhow    = "1"
+thiserror = "2"
+strum = { version = "0.26", features = ["derive"] }
+inventory = "0.3"
+
+# Logging
+tracing            = "0.1"
+tracing-appender   = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "local-time"] }
+
+# Async
+async-trait = "0.1"
+futures     = "0.3"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls-native-roots"], default-features = false }
+
+# UUID
+uuid = { version = "1", features = ["v4"] }
+
+# Random
+fastrand = "2"
+
+# Regex
+regex = "1"
+
+# Time
+time = { version = "0.3", features = ["local-offset", "macros", "formatting"] }
+chrono = "0.4"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# URL encoding
+urlencoding = "2"
+url = "2"
+
+# Secrets handling
+secrecy = { version = "0.8", features = ["serde"] }
+
+# Crypto for signing
+sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+base64 = "0.22"
+
+# Crypto for Alipay RSA2 signing
+rsa = { version = "0.9", features = ["pem"] }
+pkcs1 = { version = "0.7", features = ["pem"] }
+pkcs8 = { version = "0.10", features = ["pem"] }
+rand = "0.8"
+
+# Metrics (optional)
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.18.2", default-features = false }
+
+# Directories
+dirs = "5"
+
+# Hostname
+hostname = "0.4"
+
+# Temp files
+tempfile = "3"
+
+# Local database implementation
+rusqlite = "0.32.1"
+mysql_async = "0.34.2"
+redis = { version = "0.27.6", features = ["tokio-comp"] }
+
+# Workspace crates
+bcs            = { path = "crates/bootstrap/bcs" }
+bcs-admin      = { path = "crates/tools/bcs-admin" }
+bcs-cli        = { path = "crates/tools/bcs-cli" }
+bcs-bot   = { path = "crates/services/bcs-bot" }
+bcs-bot-store = { path = "crates/services/bcs-bot-store" }
+bcs-callback   = { path = "crates/services/bcs-callback" }
+bcs-collaboration-template = { path = "crates/services/bcs-collaboration-template" }
+bcs-collaboration-runtime = { path = "crates/services/bcs-collaboration-runtime" }
+bcs-collaboration-store = { path = "crates/services/bcs-collaboration-store" }
+bcs-judge = { path = "crates/services/bcs-judge" }
+bcs-jwt = { path = "crates/services/bcs-jwt" }
+bcs-group      = { path = "crates/services/bcs-group" }
+bcs-group-store = { path = "crates/services/bcs-group-store" }
+bcs-message = { path = "crates/services/bcs-message" }
+bcs-message-flow = { path = "crates/services/bcs-message-flow" }
+bcs-message-store = { path = "crates/services/bcs-message-store" }
+bcs-routing    = { path = "crates/services/bcs-routing" }
+bcs-fusion      = { path = "crates/services/bcs-fusion" }
+bcs-leader-election = { path = "crates/services/bcs-leader-election" }
+bcs-fuse-client = { path = "crates/external-clients/bcs-fuse-client" }
+bcs-security-gateway-local = { path = "crates/plugins/bcs-security-gateway-local" }
+bcs-security-gateway-api = { path = "crates/plugin-api/bcs-security-gateway-api" }
+bcs-proposal   = { path = "crates/services/bcs-proposal" }
+bcs-proposal-store = { path = "crates/services/bcs-proposal-store" }
+bcs-friend     = { path = "crates/services/bcs-friend" }
+bcs-friend-store = { path = "crates/services/bcs-friend-store" }
+bcs-relation   = { path = "crates/services/bcs-relation" }
+bcs-relation-store = { path = "crates/services/bcs-relation-store" }
+bcs-secret         = { path = "crates/services/bcs-secret" }
+ding-logger    = { path = "crates/auxiliary/ding-logger" }
+bcs-service-api  = { path = "crates/service-api/bcs-service-api" }
+bcs-services-container = { path = "crates/service-api/bcs-services-container" }
+bcs-domain       = { path = "crates/contracts/bcs-domain" }
+bcs-protocol     = { path = "crates/contracts/bcs-protocol" }
+bcs-config-api   = { path = "crates/service-api/bcs-config-api" }
+bcs-test-support = { path = "crates/test-support/bcs-test-support" }
+bcs-http         = { path = "crates/adapters/http/bcs-http" }
+bcs-provider-http = { path = "crates/adapters/http/bcs-provider-http" }
+bcs-ws           = { path = "crates/adapters/ws/bcs-ws" }
+# New in C6
+bcs-config                 = { path = "crates/services/bcs-config" }
+bcs-route-security         = { path = "crates/services/bcs-route-security" }
+bcs-session                = { path = "crates/services/bcs-session" }
+bcs-session-store          = { path = "crates/services/bcs-session-store" }
+bcs-system-message         = { path = "crates/services/bcs-system-message" }
+bcs-cache-api              = { path = "crates/plugin-api/bcs-cache-api" }
+bcs-db-api                 = { path = "crates/plugin-api/bcs-db-api" }
+bcs-llm-api                = { path = "crates/plugin-api/bcs-llm-api" }
+bcs-user-directory-api     = { path = "crates/plugin-api/bcs-user-directory-api" }
+bcs-user-identity          = { path = "crates/services/bcs-user-identity" }
+bcs-auth-api               = { path = "crates/plugin-api/bcs-auth-api" }
+bcs-cache-local            = { path = "crates/plugins/bcs-cache-local" }
+bcs-cache-redis            = { path = "crates/plugins/bcs-cache-redis" }
+bcs-db-local               = { path = "crates/plugins/bcs-db-local" }
+bcs-db-mysql               = { path = "crates/plugins/bcs-db-mysql" }
+bcs-llm-openai-compatible = { path = "crates/plugins/bcs-llm-openai-compatible" }
+bcs-secret-local           = { path = "crates/plugins/bcs-secret-local" }
+bcs-auth-session           = { path = "crates/plugins/bcs-auth-session" }
+bcs-auth-google            = { path = "crates/plugins/bcs-auth-google" }
+bcs-auth-github            = { path = "crates/plugins/bcs-auth-github" }
+bcs-auth-wechat            = { path = "crates/plugins/bcs-auth-wechat" }
+bcs-auth-alipay            = { path = "crates/plugins/bcs-auth-alipay" }
+bcs-auth-local             = { path = "crates/plugins/bcs-auth-local" }
+bcs-auth-oauth             = { path = "crates/plugins/bcs-auth-oauth" }

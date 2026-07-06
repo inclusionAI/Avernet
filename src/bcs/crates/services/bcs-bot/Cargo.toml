@@ -1,0 +1,38 @@
+[package]
+name = "bcs-bot"
+description = "Bot service implementation for BCS"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+
+# Async trait
+async-trait = { workspace = true }
+
+serde_json = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# UUID generation
+uuid = { workspace = true }
+
+# Workspace crates
+bcs-config     = { workspace = true }
+bcs-route-security = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-bot-store = { workspace = true }
+bcs-user-directory-api = { workspace = true }
+
+[dev-dependencies]
+bcs-test-support = { workspace = true }
+bcs-cache-local = { workspace = true }
+bcs-db-api = { workspace = true }
+bcs-db-local = { workspace = true }
+tokio-test = "0.4"
+tempfile = { workspace = true }

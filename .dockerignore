@@ -1,0 +1,70 @@
+.git
+.idea
+.vscode
+.DS_Store
+**/.DS_Store
+
+# Environment and secrets
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+*.pem
+*.key
+
+# Local/private agent and tooling state
+.claude
+.codex
+.agents
+.codefuse
+.mcp.json
+.private_docs
+**/.claude
+**/.codex
+**/.agents
+**/.codefuse
+**/.mcp.json
+**/.private_docs
+CLAUDE.local.md
+aideskdop_bcs*.json
+**/CLAUDE.local.md
+**/aideskdop_bcs*.json
+
+# Build artifacts
+**/target
+**/node_modules
+dist
+build
+dist-webview
+*.tgz
+
+# Python artifacts
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+.uv
+
+# Local dev state
+scripts/.dependencies
+logs
+data
+tmp
+temp
+**/*.log
+*.db
+*.sqlite
+
+# Generated analysis and local worktrees
+.worktrees
+.sync_staging
+.code-review-graph
+.memsearch
+.omc
+.night-kit
+
+# Vendored internal-registry tarballs — MUST NOT leak to image
+src/bcs/bcs_single_pre_dir

@@ -1,0 +1,25 @@
+[package]
+name = "bcs-collaboration-template"
+description = "File-backed collaboration template service for BCS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+bcs-domain = { workspace = true }
+bcs-service-api = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+remote_name="${1:-origin}"
+remote_url="${2:-}"
+
+echo "== OCB pre-push gate =="
+echo "remote: ${remote_name} ${remote_url}"
+
+seen_ref=0
+status=0
+
+run_for_ref() {
+  local local_sha="$1"
+  local remote_sha="$2"
+  local base=""
+
+  if [[ "$local_sha" == "0000000000000000000000000000000000000000" ]]; then
+    return 0
+  fi
+
+  if [[ "$remote_sha" != "0000000000000000000000000000000000000000" ]]; then
+    base="$remote_sha"
+  elif git rev-parse --verify origin/dev >/dev/null 2>&1; then
+    base="$(git merge-base "$local_sha" origin/dev)"
+  else
+    base="$(git rev-list --max-parents=0 "$local_sha" | tail -1)"
+  fi
+
+  "$repo_root/scripts/ci/pre_push.sh" --base "$base" --head "$local_sha"
+}
+
+while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
+  [[ -n "${local_ref:-}" ]] || continue
+  seen_ref=1
+  run_for_ref "$local_sha" "$remote_sha" || status=$?
+done
+
+if [[ "$seen_ref" -eq 0 ]]; then
+  if git rev-parse --verify origin/dev >/dev/null 2>&1; then
+    run_for_ref HEAD "$(git merge-base HEAD origin/dev)" || status=$?
+  else
+    "$repo_root/scripts/ci/pre_push.sh" --base "$(git rev-list --max-parents=0 HEAD | tail -1)" --head HEAD || status=$?
+  fi
+fi
+
+exit "$status"

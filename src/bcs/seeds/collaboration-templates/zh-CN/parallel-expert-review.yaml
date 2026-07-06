@@ -1,0 +1,136 @@
+# 多专家并行协同模板。
+# 这个 YAML 只描述协同策略，不存储具体 bot id。
+# 创建群时，通过 CreateGroupRequest.participant_bindings 把下面的逻辑角色绑定到实际 bot。
+
+# name 是这个协同模板面向产品展示的名称。
+name: 多专家并行协同
+
+metadata:
+  # description 用来说明模板目标，不参与运行时调度。
+  description: 项目负责人先明确评审范围，多个专家 bot 并行评审，最后由项目负责人汇总结果。
+
+# participants 声明逻辑角色槽位。节点里的 assignee.binding 必须引用这些 key。
+# 实际 bot 由群运行时 binding 提供，BCS 会根据 driver_bot 自动推导 BCS participant role。
+participants:
+  # project_lead 负责界定评审范围，并汇总所有专家意见。
+  project_lead:
+    display_name: 项目负责人
+    description: 负责明确评审范围，并把各专家意见汇总成统一结论。
+    required: true
+
+  # solution_architect 负责评审技术可行性。
+  solution_architect:
+    display_name: 方案架构师
+    description: 负责评审技术可行性、架构选择和执行风险。
+    required: true
+
+  # risk_analyst 负责评审风险、合规和阻塞点。
+  risk_analyst:
+    display_name: 风险分析师
+    description: 负责评审运营风险、合规问题、阻塞点和注意事项。
+    required: true
+
+  # value_analyst 负责评审用户价值和业务影响。
+  value_analyst:
+    display_name: 价值分析师
+    description: 负责评审用户价值、业务影响、取舍和优先级。
+    required: true
+
+runtime:
+  # 结构化协同模板固定使用 state_machine。
+  kind: state_machine
+  state_machine:
+    defaults:
+      # node_timeout_ms 是每个节点等待 bot 最终响应的默认时间，单位是毫秒。
+      # 节点没有单独配置 node_timeout_ms 时，会继承这个值。
+      node_timeout_ms: 120000
+      # max_attempts 是节点失败后的默认尝试次数。
+      # 节点没有单独配置 max_attempts 时，会继承这个值。
+      max_attempts: 2
+
+    # nodes 定义工作流图。每个 map key 都是稳定的节点 id。
+    nodes:
+      # 入口节点：把用户请求整理成评审简报，然后并行分发给多个专家。
+      frame_review_scope:
+        # kind 固定为 bot_task，表示 BCS 会向指定 bot 发送指令，并等待最终响应。
+        kind: bot_task
+        # display_name 是面向产品展示的节点名称，不是节点 id。
+        display_name: 明确评审范围
+        # 范围界定应该较快完成，所以这里覆盖默认超时时间。
+        node_timeout_ms: 60000
+        assignee:
+          # type 固定为 bot_binding，表示运行时通过 participants 解析实际 bot。
+          type: bot_binding
+          # binding 必须引用一个 participant 槽位 key。
+          binding: project_lead
+        # instruction 会发送给被分配的 bot，不能为空。
+        instruction: 请把用户请求整理成一份简短评审简报，说明目标、已知约束和需要做出的决策。
+        # transitions 定义当前节点完成后的流转目标。
+        transitions:
+          # complete 是 bot_task 的正常完成结果。
+          complete:
+            # targets 是下一批节点 id。这里会并行进入多个专家评审节点。
+            targets:
+              - assess_solution_feasibility
+              - assess_operational_risk
+              - assess_business_value
+
+      # 并行节点 1：技术可行性评审。
+      assess_solution_feasibility:
+        kind: bot_task
+        display_name: 评审技术可行性
+        assignee:
+          type: bot_binding
+          binding: solution_architect
+        # 这个节点只关注可行性，不做最终汇总。
+        instruction: 请基于评审简报，从技术可行性角度进行评审，输出关键可行性判断和实现注意事项。
+        transitions:
+          complete:
+            # 汇总节点会等待所有并行节点全部完成。
+            targets:
+              - synthesize_review_result
+
+      # 并行节点 2：风险和合规评审。
+      assess_operational_risk:
+        kind: bot_task
+        display_name: 评审运营风险
+        assignee:
+          type: bot_binding
+          binding: risk_analyst
+        # 这个节点关注风险、阻塞点和缓解方案。
+        instruction: 请基于评审简报，从风险和合规角度进行评审，输出关键风险、阻塞点和缓解方案。
+        transitions:
+          complete:
+            # 汇总节点会等待所有并行节点全部完成。
+            targets:
+              - synthesize_review_result
+
+      # 并行节点 3：用户价值和业务影响评审。
+      assess_business_value:
+        kind: bot_task
+        display_name: 评审业务价值
+        assignee:
+          type: bot_binding
+          binding: value_analyst
+        # 这个节点关注价值判断和优先级建议。
+        instruction: 请基于评审简报，从用户价值和业务影响角度进行评审，输出价值判断和优先级建议。
+        transitions:
+          complete:
+            # 汇总节点会等待所有并行节点全部完成。
+            targets:
+              - synthesize_review_result
+
+      # 汇聚节点：所有并行专家节点完成后运行，产出面向用户的最终结果。
+      synthesize_review_result:
+        kind: bot_task
+        display_name: 汇总评审结果
+        # 汇总节点需要合并多个专家输出，所以给更多时间，并额外增加一次尝试机会。
+        node_timeout_ms: 180000
+        max_attempts: 3
+        assignee:
+          type: bot_binding
+          binding: project_lead
+        # 这个节点产出最终评审摘要。
+        instruction: 请把各专家评审结果合并成一份决策摘要，包含建议、依据、风险和下一步行动。
+        # final_output 表示这个节点的产物是本次协同运行的最终输出。
+        final_output: true

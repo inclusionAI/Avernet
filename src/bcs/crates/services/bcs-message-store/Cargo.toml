@@ -1,0 +1,30 @@
+[package]
+name = "bcs-message-store"
+description = "Message history persistence stores for BCS"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+async-trait = { workspace = true }
+bcs-db-api = { workspace = true }
+bcs-domain = { workspace = true }
+bcs-service-api = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+bcs-test-support = { workspace = true }
+bcs-db-local = { workspace = true }
+# migrations.rs is pulled into integration tests via #[path]; it needs sha2/hex
+# to compile (same versions as the bcs crate that owns the file).
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,37 @@
+[package]
+name = "bcs-routing"
+description = "Message routing service implementation for BCS"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+
+# Async trait
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Regex
+regex = { workspace = true }
+
+# Workspace crates
+bcs-service-api = { workspace = true }
+bcs-security-gateway-api = { workspace = true }
+
+[dev-dependencies]
+bcs-test-support = { workspace = true }
+bcs-security-gateway-local = { workspace = true }
+tokio-test = "0.4"

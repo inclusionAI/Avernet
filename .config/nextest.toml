@@ -1,0 +1,82 @@
+# cargo-nextest configuration
+# Docs: https://nexte.st/book/configuration.html
+#
+# This repo's BCS is a 30+ crate workspace. By default nextest serializes within a
+# single binary; here we set it to use all CPU cores for concurrency to speed things up.
+#
+# Common usage:
+#   cargo nextest run                         # default profile (uses all cores)
+#   cargo nextest run --profile quick         # fast tests only, skips slow-marked
+#   cargo nextest run --profile ci            # CI use, retries failed tests once to absorb flaky
+
+# ────────────────────────────────────────────────────────────────
+# default profile: daily dev, full concurrency + slow-test warning
+# ────────────────────────────────────────────────────────────────
+[profile.default]
+# Number of concurrent test processes. "num-cpus" uses all physical/logical cores.
+# nextest uses process-level isolation (each test in its own process), so saturating
+# the cores is generally safe. If tests flake on a shared resource (SQLite file / TCP
+# port), lower this or add a [[profile.default.overrides]] block.
+test-threads = "num-cpus"
+
+# Do not stop on first failure; finish the current binary so multiple failures
+# are visible in one run.
+fail-fast = false
+
+# Failure output capture strategy: "immediate" prints right away for fast triage.
+failure-output = "immediate"
+
+# Do not print output for passing tests (noise reduction).
+success-output = "never"
+
+# Slow-test threshold: check every 30s; if not finished after 3 consecutive checks
+# (=90s), mark as timed out and kill. Quickly surfaces hung tests (deadlock / waiting
+# on an unreachable port).
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+# Pre-test compilation reuses cargo; not reconfigured here (left to Cargo).
+
+# ────────────────────────────────────────────────────────────────
+# overrides: relax the timeout for tests marked #[ignore]
+# nexte.st supports metadata filters; here we give ignored tests a more lenient timeout.
+# ────────────────────────────────────────────────────────────────
+[[profile.default.overrides]]
+# Ignored tests do not run by default (cargo nextest skips ignored tests), but when
+# explicitly run via `cargo nextest run --run-ignored all`, relax the timeout to 5 min.
+filter = "test(=ignored)"
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+# ────────────────────────────────────────────────────────────────
+# quick profile: fast tests only, for quick feedback during iteration.
+# Skips tests marked #[ignore = "slow"] and fails slow tests outright.
+#
+# Note: this repo's nextest 0.9.138 ignores profile.*.extends, so the default fields
+# are inlined below; quick no longer relies on inheritance.
+# ────────────────────────────────────────────────────────────────
+[profile.quick]
+test-threads = "num-cpus"
+fail-fast = false
+failure-output = "immediate"
+success-output = "never"
+# Fail outright if not finished within one period, so slow tests do not drag iteration.
+slow-timeout = { period = "10s", terminate-after = 1 }
+
+# ────────────────────────────────────────────────────────────────
+# ci profile: CI environment, retry on failure to absorb flaky tests.
+#
+# Note: this repo's nextest 0.9.138 ignores profile.*.extends, so the default fields
+# are inlined below; ci no longer relies on inheritance.
+# ────────────────────────────────────────────────────────────────
+[profile.ci]
+test-threads = "num-cpus"
+# Retry a failed test once: if it passes on retry it counts as pass, reducing
+# network/timing-based flaky false reports.
+retries = 1
+# Stop on first failure on CI to save machine time (set to false to get all failures).
+fail-fast = true
+failure-output = "immediate"
+success-output = "never"
+slow-timeout = { period = "30s", terminate-after = 3 }
+# The JUnit report path is not hard-coded here: CI (see bcs-test.aci.yml) appends a
+# [profile.ci.junit] table with an absolute path, sidestepping different nextest
+# versions' interpretations of the relative-path base.

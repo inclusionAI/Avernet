@@ -1,0 +1,20 @@
+[package]
+name = "bcs-auth-local"
+description = "Local-dev + static test-double auth plugins for BCS"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+async-trait = { workspace = true }
+axum = { workspace = true }
+bcs-auth-api = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+bcs-test-support = { workspace = true }
+
+[lints]
+workspace = true

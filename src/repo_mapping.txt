@@ -1,0 +1,10 @@
+# Example repository mapping.
+#
+# Format:
+# <local-component-alias>:<repository-url>
+#
+# Replace these placeholders with your own component aliases and repository URLs.
+
+component-one:git@example.com:example-org/component-one.git
+component-two:git@example.com:example-org/component-two.git
+component-three:git@example.com:example-org/component-three.git

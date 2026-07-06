@@ -1,0 +1,57 @@
+[package]
+name        = "bcs-cli"
+description = "CLI tools for testing Bot Coordination Service"
+edition     = { workspace = true }
+license     = { workspace = true }
+repository  = { workspace = true }
+rust-version = { workspace = true }
+version     = { workspace = true }
+
+[[bin]]
+name = "bcs-cli"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+
+# Error handling
+anyhow    = { workspace = true }
+
+# Home directory
+dirs = { workspace = true }
+
+# Serialization
+serde      = { workspace = true }
+serde_json = { workspace = true }
+
+# CLI
+clap = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# HTTP client
+reqwest = { workspace = true }
+
+# URL encoding
+urlencoding = "2"
+
+# UUID
+uuid = { workspace = true }
+
+# Workspace crates
+bcs-config     = { workspace = true }
+bcs-config-api = { workspace = true }
+bcs-protocol    = { workspace = true }
+
+[build-dependencies]
+chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+serial_test = "3"
+
+[lints]
+workspace = true

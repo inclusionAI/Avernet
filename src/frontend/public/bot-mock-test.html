@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bot Mock 接口测试</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      color: white;
+      text-align: center;
+      margin-bottom: 30px;
+      font-size: 32px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .test-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+
+    .test-card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      transition: transform 0.2s;
+    }
+
+    .test-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 8px 12px rgba(0,0,0,0.15);
+    }
+
+    .test-card h3 {
+      color: #667eea;
+      margin-bottom: 10px;
+      font-size: 18px;
+    }
+
+    .test-card p {
+      color: #666;
+      font-size: 13px;
+      margin-bottom: 15px;
+      line-height: 1.5;
+    }
+
+    .test-card button {
+      width: 100%;
+      padding: 12px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .test-card button:hover {
+      background: #5568d3;
+    }
+
+    .test-card button:active {
+      background: #4557bb;
+    }
+
+    .result-panel {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+
+    .result-panel h2 {
+      color: #667eea;
+      margin-bottom: 15px;
+      font-size: 20px;
+    }
+
+    .result-item {
+      background: #f7fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 10px;
+      font-family: 'Monaco', 'Courier New', monospace;
+      font-size: 12px;
+    }
+
+    .result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .result-method {
+      color: #667eea;
+      font-weight: bold;
+    }
+
+    .result-status {
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .result-status.success {
+      background: #c6f6d5;
+      color: #276749;
+    }
+
+    .result-status.error {
+      background: #fed7d7;
+      color: #9b2c2c;
+    }
+
+    .result-data {
+      color: #2d3748;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .clear-btn {
+      width: 100%;
+      padding: 12px;
+      background: #e2e8f0;
+      color: #2d3748;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 10px;
+      transition: background 0.2s;
+    }
+
+    .clear-btn:hover {
+      background: #cbd5e0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🤖 Bot Mock 接口测试工具</h1>
+
+    <div class="test-grid">
+      <!-- 创建 Bot -->
+      <div class="test-card">
+        <h3>📝 创建 Bot</h3>
+        <p>POST /api/bots<br>创建新的 Bot，状态为 PENDING，2秒后自动变为 ACTIVE</p>
+        <button onclick="testCreateBot()">创建 Bot</button>
+      </div>
+
+      <!-- 获取 Bot 列表 (By Owner) -->
+      <div class="test-card">
+        <h3>📋 获取我的 Bot 列表</h3>
+        <p>GET /api/bots/by-owner<br>获取当前用户的所有 Bot，包含默认 Bot 和路径信息</p>
+        <button onclick="testGetBotsByOwner()">获取列表</button>
+      </div>
+
+      <!-- 获取 Bot 列表 (By Entity) -->
+      <div class="test-card">
+        <h3>🔍 筛选 Bot 列表</h3>
+        <p>GET /api/bots?entity_id=xxx<br>按 Entity ID 筛选 Bot 列表，支持分页</p>
+        <button onclick="testGetBotsByEntity()">筛选列表</button>
+      </div>
+
+      <!-- 获取 Bot 详情 -->
+      <div class="test-card">
+        <h3>🔎 获取 Bot 详情</h3>
+        <p>GET /api/bots/{bot_id}<br>获取指定 Bot 的详细信息</p>
+        <button onclick="testGetBotDetail()">获取详情</button>
+      </div>
+
+      <!-- 查询 Bot 状态 -->
+      <div class="test-card">
+        <h3>⏱️ 查询设备状态</h3>
+        <p>GET /api/bots/{bot_id}/status<br>查询 Bot 的设备分配状态，用于轮询</p>
+        <button onclick="testGetBotStatus()">查询状态</button>
+      </div>
+
+      <!-- 删除 Bot -->
+      <div class="test-card">
+        <h3>🗑️ 删除 Bot</h3>
+        <p>DELETE /api/bots/{bot_id}<br>软删除 Bot，状态变为 RELEASED</p>
+        <button onclick="testDeleteBot()">删除 Bot</button>
+      </div>
+    </div>
+
+    <div class="result-panel">
+      <h2>📊 测试结果</h2>
+      <button class="clear-btn" onclick="clearResults()">清空结果</button>
+      <div id="results"></div>
+    </div>
+  </div>
+
+  <script>
+    const resultsContainer = document.getElementById('results');
+    let lastCreatedBotId = 'default'; // 用于测试的 Bot ID
+
+    // 添加结果到面板
+    function addResult(method, url, response, isError = false) {
+      const resultItem = document.createElement('div');
+      resultItem.className = 'result-item';
+
+      const header = document.createElement('div');
+      header.className = 'result-header';
+
+      const methodSpan = document.createElement('span');
+      methodSpan.className = 'result-method';
+      methodSpan.textContent = `${method} ${url}`;
+
+      const statusSpan = document.createElement('span');
+      statusSpan.className = `result-status ${isError ? 'error' : 'success'}`;
+      statusSpan.textContent = isError ? 'ERROR' : response.success ? 'SUCCESS' : 'FAILED';
+
+      header.appendChild(methodSpan);
+      header.appendChild(statusSpan);
+
+      const data = document.createElement('pre');
+      data.className = 'result-data';
+      data.textContent = JSON.stringify(response, null, 2);
+
+      resultItem.appendChild(header);
+      resultItem.appendChild(data);
+
+      resultsContainer.insertBefore(resultItem, resultsContainer.firstChild);
+    }
+
+    // 清空结果
+    function clearResults() {
+      resultsContainer.innerHTML = '';
+    }
+
+    // 测试创建 Bot
+    async function testCreateBot() {
+      try {
+        const response = await fetch('/api/bots', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bot_name: '测试Bot',
+            bot_desc: '这是一个测试Bot',
+            entity_id: 'staff_xxx',
+            engine_types: ['moltis', 'openclaw']
+          })
+        });
+        const data = await response.json();
+        lastCreatedBotId = data.data.bot_id; // 保存 Bot ID 用于后续测试
+        addResult('POST', '/api/bots', data);
+      } catch (error) {
+        addResult('POST', '/api/bots', { error: error.message }, true);
+      }
+    }
+
+    // 测试获取 Bot 列表 (By Owner)
+    async function testGetBotsByOwner() {
+      try {
+        const response = await fetch('/api/bots/by-owner?user_id=staff_xxx');
+        const data = await response.json();
+        addResult('GET', '/api/bots/by-owner', data);
+      } catch (error) {
+        addResult('GET', '/api/bots/by-owner', { error: error.message }, true);
+      }
+    }
+
+    // 测试获取 Bot 列表 (By Entity)
+    async function testGetBotsByEntity() {
+      try {
+        const response = await fetch('/api/bots?entity_id=staff_xxx&page=1&page_size=10');
+        const data = await response.json();
+        addResult('GET', '/api/bots', data);
+      } catch (error) {
+        addResult('GET', '/api/bots', { error: error.message }, true);
+      }
+    }
+
+    // 测试获取 Bot 详情
+    async function testGetBotDetail() {
+      try {
+        const response = await fetch(`/api/bots/${lastCreatedBotId}`);
+        const data = await response.json();
+        addResult('GET', `/api/bots/${lastCreatedBotId}`, data);
+      } catch (error) {
+        addResult('GET', `/api/bots/${lastCreatedBotId}`, { error: error.message }, true);
+      }
+    }
+
+    // 测试查询 Bot 状态
+    async function testGetBotStatus() {
+      try {
+        const response = await fetch(`/api/bots/${lastCreatedBotId}/status`);
+        const data = await response.json();
+        addResult('GET', `/api/bots/${lastCreatedBotId}/status`, data);
+      } catch (error) {
+        addResult('GET', `/api/bots/${lastCreatedBotId}/status`, { error: error.message }, true);
+      }
+    }
+
+    // 测试删除 Bot
+    async function testDeleteBot() {
+      // 使用最后创建的 Bot ID，但不删除 default
+      const botIdToDelete = lastCreatedBotId === 'default'
+        ? '20260316_a1b2c3d4'
+        : lastCreatedBotId;
+
+      try {
+        const response = await fetch(`/api/bots/${botIdToDelete}`, {
+          method: 'DELETE'
+        });
+        const data = await response.json();
+        addResult('DELETE', `/api/bots/${botIdToDelete}`, data);
+      } catch (error) {
+        addResult('DELETE', `/api/bots/${botIdToDelete}`, { error: error.message }, true);
+      }
+    }
+
+    console.log('✅ Bot Mock 测试工具已加载');
+    console.log('💡 点击按钮测试各个 API 接口');
+  </script>
+</body>
+</html>

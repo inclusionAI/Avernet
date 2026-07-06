@@ -1,0 +1,24 @@
+[package]
+name = "bcs-services-container"
+description = "BCS service assembly container"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+bcs-service-api = { workspace = true }
+bcs-test-support = { workspace = true, optional = true }
+thiserror = { workspace = true }
+
+[features]
+test-support = ["dep:bcs-test-support"]
+
+[dev-dependencies]
+async-trait = { workspace = true }
+bcs-test-support = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

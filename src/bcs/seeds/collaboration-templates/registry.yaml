@@ -1,0 +1,20 @@
+# 模板注册表。前端推荐/筛选用，不参与协同运行时。
+# tags 描述模板包含的协同能力，便于用户按流程特征筛选。
+# priority 越小越靠前，相同 tag 下按此排序。
+
+templates:
+  write-and-review:
+    tags: [judge, branching, serial]
+    priority: 10
+
+  parallel-expert-review:
+    tags: [parallel]
+    priority: 15
+
+  solution-and-risk-review:
+    tags: [parallel]
+    priority: 20
+
+  single-bot-guided-answer:
+    tags: [single-step]
+    priority: 30

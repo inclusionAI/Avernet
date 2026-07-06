@@ -1,0 +1,486 @@
+//! Infrastructure plugin selection for the public BCS composition root.
+//!
+//! Public builds wire the configured cache and database adapters.
+
+use std::fmt;
+use std::sync::Arc;
+
+use bcs_cache_api::CachePlugin;
+use bcs_cache_local::InMemoryCachePlugin;
+use bcs_cache_redis::RedisCachePlugin;
+use bcs_config_api::RedisCacheConfig;
+use bcs_db_api::DbPlugin;
+use bcs_db_local::LocalSqliteDbPlugin;
+use bcs_db_mysql::{MysqlDbManager, MysqlDbPlugin};
+use bcs_llm_api::LlmChatCompletionPort;
+use futures::future::BoxFuture;
+
+use crate::config::{BcsConfig, DatabaseType};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CachePluginKind {
+    LocalMemory,
+    Redis,
+    External(String),
+}
+
+impl fmt::Display for CachePluginKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LocalMemory => f.write_str("memory"),
+            Self::Redis => f.write_str("redis"),
+            Self::External(provider) => f.write_str(provider),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DbPluginKind {
+    LocalSqlite,
+    Mysql,
+    External(String),
+}
+
+impl fmt::Display for DbPluginKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LocalSqlite => f.write_str("local-sqlite"),
+            Self::Mysql => f.write_str("mysql"),
+            Self::External(provider) => f.write_str(provider),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct CachePluginRegistration {
+    pub kind: CachePluginKind,
+    pub cache_zone: String,
+    pub plugin: Arc<dyn CachePlugin>,
+}
+
+pub type CachePluginBuild =
+    fn(BcsConfig) -> BoxFuture<'static, crate::Result<CachePluginRegistration>>;
+
+pub struct CachePluginFactory {
+    pub name: &'static str,
+    pub build: CachePluginBuild,
+}
+
+inventory::collect!(CachePluginFactory);
+
+#[derive(Clone)]
+pub struct DbPluginRegistration {
+    pub kind: DbPluginKind,
+    pub plugin: Arc<dyn DbPlugin>,
+}
+
+pub type DbPluginBuild = fn(BcsConfig) -> BoxFuture<'static, crate::Result<DbPluginRegistration>>;
+
+pub struct DbPluginFactory {
+    pub name: &'static str,
+    pub build: DbPluginBuild,
+}
+
+inventory::collect!(DbPluginFactory);
+
+pub type LlmProviderBuild = fn(BcsConfig) -> crate::Result<Arc<dyn LlmChatCompletionPort>>;
+
+pub struct LlmProviderFactory {
+    pub name: &'static str,
+    pub build: LlmProviderBuild,
+}
+
+inventory::collect!(LlmProviderFactory);
+
+async fn build_registered_cache_plugin(
+    config: &BcsConfig,
+    provider: &str,
+) -> crate::Result<Option<CachePluginRegistration>> {
+    for factory in inventory::iter::<CachePluginFactory> {
+        if factory.name == provider {
+            return Ok(Some((factory.build)(config.clone()).await?));
+        }
+    }
+    Ok(None)
+}
+
+async fn build_registered_db_plugin(
+    config: &BcsConfig,
+    provider: &str,
+) -> crate::Result<Option<DbPluginRegistration>> {
+    for factory in inventory::iter::<DbPluginFactory> {
+        if factory.name == provider {
+            return Ok(Some((factory.build)(config.clone()).await?));
+        }
+    }
+    Ok(None)
+}
+
+pub fn build_registered_llm_provider(
+    config: &BcsConfig,
+    provider: &str,
+) -> crate::Result<Option<Arc<dyn LlmChatCompletionPort>>> {
+    for factory in inventory::iter::<LlmProviderFactory> {
+        if factory.name == provider {
+            return Ok(Some((factory.build)(config.clone())?));
+        }
+    }
+    Ok(None)
+}
+
+fn resolve_sqlite_path(config: &BcsConfig) -> String {
+    let raw = config.database.sqlite.path.as_str();
+    let p = std::path::Path::new(raw);
+    if p.is_relative() {
+        if let Ok(data_dir) = std::env::var("BCS_DATA_DIR") {
+            return std::path::Path::new(&data_dir).join(raw).to_string_lossy().to_string();
+        }
+    }
+    raw.to_string()
+}
+
+fn resolve_cache_type(config: &BcsConfig) -> &str {
+    config.cache.cache_type.trim()
+}
+
+fn resolve_redis_config(config: &BcsConfig) -> crate::Result<RedisCacheConfig> {
+    Ok(config.cache.redis.to_runtime_redis_config())
+}
+
+#[derive(Clone)]
+pub struct InfrastructurePlugins {
+    cache_kind: CachePluginKind,
+    db_kind: DbPluginKind,
+    cache_zone: String,
+    cache: Option<Arc<dyn CachePlugin>>,
+    db: Option<Arc<dyn DbPlugin>>,
+}
+
+impl fmt::Debug for InfrastructurePlugins {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InfrastructurePlugins")
+            .field("cache_kind", &self.cache_kind)
+            .field("db_kind", &self.db_kind)
+            .field("cache_zone", &self.cache_zone)
+            .field("cache_ready", &self.cache.is_some())
+            .field("db_ready", &self.db.is_some())
+            .finish()
+    }
+}
+
+impl InfrastructurePlugins {
+    pub fn from_parts(
+        cache_kind: CachePluginKind,
+        db_kind: DbPluginKind,
+        cache_zone: impl Into<String>,
+        cache: Arc<dyn CachePlugin>,
+        db: Arc<dyn DbPlugin>,
+    ) -> Self {
+        Self {
+            cache_kind,
+            db_kind,
+            cache_zone: cache_zone.into(),
+            cache: Some(cache),
+            db: Some(db),
+        }
+    }
+
+    pub async fn from_config(config: &BcsConfig) -> crate::Result<Self> {
+        let (cache_kind, cache_zone, cache): (CachePluginKind, String, Arc<dyn CachePlugin>) =
+            if config.cache.is_configured() {
+                let cache_type = resolve_cache_type(config);
+                match cache_type {
+                    "memory" => (
+                        CachePluginKind::LocalMemory,
+                        "local".to_string(),
+                        Arc::new(InMemoryCachePlugin::new()),
+                    ),
+                    "redis" => {
+                        let redis = &config.cache.redis;
+                        if redis.connection.connection_type == "direct" {
+                            let redis_config = resolve_redis_config(config)?;
+                            let cache_zone = "bcs".to_string();
+                            let redis =
+                                RedisCachePlugin::connect(redis_config, cache_zone.clone())
+                                    .await
+                                    .map_err(|err| {
+                                        crate::BcsError::StorageInitError(format!(
+                                            "init redis cache plugin: {}",
+                                            err
+                                        ))
+                                    })?;
+                            (CachePluginKind::Redis, cache_zone, Arc::new(redis))
+                        } else if let Some(registration) = build_registered_cache_plugin(
+                            config,
+                            &redis.connection.connection_type,
+                        )
+                        .await?
+                        {
+                            (
+                                registration.kind,
+                                registration.cache_zone,
+                                registration.plugin,
+                            )
+                        } else {
+                            return Err(crate::BcsError::StorageInitError(format!(
+                                "cache.redis.connection.type = '{}' is not available in this binary",
+                                redis.connection.connection_type
+                            )));
+                        }
+                    }
+                    other => {
+                        if let Some(registration) = build_registered_cache_plugin(config, other).await?
+                        {
+                            (
+                                registration.kind,
+                                registration.cache_zone,
+                                registration.plugin,
+                            )
+                        } else {
+                            return Err(crate::BcsError::StorageInitError(format!(
+                                "cache.type = '{}' is not available in this binary",
+                                other
+                            )));
+                        }
+                    }
+                }
+            } else {
+                (
+                    CachePluginKind::LocalMemory,
+                    "local".to_string(),
+                    Arc::new(InMemoryCachePlugin::new()),
+                )
+            };
+
+        if cache_kind == CachePluginKind::Redis {
+            tracing::info!(
+                "Redis-compatible cache enabled; bot status and cache-backed features use Redis"
+            );
+        }
+
+        let (db_kind, db): (DbPluginKind, Arc<dyn DbPlugin>) = match &config.database.database_type {
+            DatabaseType::Sqlite => {
+                let path = resolve_sqlite_path(config);
+                let db = LocalSqliteDbPlugin::new_file(&path).map_err(|err| {
+                    crate::BcsError::StorageInitError(format!(
+                        "init local db plugin at '{}': {}",
+                        path, err
+                    ))
+                })?;
+                (DbPluginKind::LocalSqlite, Arc::new(db))
+            }
+            DatabaseType::Mysql => {
+                let mysql = &config.database.mysql;
+                let datasource_name = mysql.datasource_name();
+                if mysql.connection.connection_type != "direct" {
+                    if let Some(registration) = build_registered_db_plugin(
+                        config,
+                        &mysql.connection.connection_type,
+                    )
+                    .await?
+                    {
+                        (registration.kind, registration.plugin)
+                    } else {
+                        return Err(crate::BcsError::StorageInitError(format!(
+                            "database.mysql.connection.type = '{}' is not available in this binary",
+                            mysql.connection.connection_type
+                        )));
+                    }
+                } else {
+                    let manager = MysqlDbManager::new(mysql.clone()).await.map_err(|err| {
+                        crate::BcsError::StorageInitError(format!(
+                            "init mysql db plugin for datasource '{}': {}",
+                            datasource_name, err
+                        ))
+                    })?;
+                    if !manager.is_enabled() {
+                        return Err(crate::BcsError::StorageInitError(
+                            "database.type = 'mysql' selected but mysql manager is disabled"
+                                .to_string(),
+                        ));
+                    }
+                    (
+                        DbPluginKind::Mysql,
+                        Arc::new(MysqlDbPlugin::new(manager, datasource_name)),
+                    )
+                }
+            }
+            DatabaseType::Other(provider) => {
+                if let Some(registration) = build_registered_db_plugin(config, provider).await? {
+                    (registration.kind, registration.plugin)
+                } else {
+                    return Err(crate::BcsError::StorageInitError(format!(
+                        "database.type = '{}' is not available in this binary",
+                        provider
+                    )));
+                }
+            }
+        };
+
+        Ok(Self {
+            cache_kind,
+            db_kind,
+            cache_zone,
+            cache: Some(cache),
+            db: Some(db),
+        })
+    }
+
+    pub fn local_for_tests() -> Self {
+        let db = match LocalSqliteDbPlugin::new() {
+            Ok(db) => db,
+            Err(err) => panic!("init local db plugin for tests: {}", err),
+        };
+        Self {
+            cache_kind: CachePluginKind::LocalMemory,
+            db_kind: DbPluginKind::LocalSqlite,
+            cache_zone: "local".to_string(),
+            cache: Some(Arc::new(InMemoryCachePlugin::new())),
+            db: Some(Arc::new(db)),
+        }
+    }
+
+    pub fn cache_kind(&self) -> CachePluginKind {
+        self.cache_kind.clone()
+    }
+
+    pub fn db_kind(&self) -> DbPluginKind {
+        self.db_kind.clone()
+    }
+
+    pub fn cache_zone(&self) -> &str {
+        &self.cache_zone
+    }
+
+    pub fn cache(&self) -> Option<Arc<dyn CachePlugin>> {
+        self.cache.clone()
+    }
+
+    pub fn db(&self) -> Option<Arc<dyn DbPlugin>> {
+        self.db.clone()
+    }
+}
+
+pub fn select_cache_plugin_kind(config: &BcsConfig) -> CachePluginKind {
+    if config.cache.is_configured() {
+        match resolve_cache_type(config) {
+            "memory" => CachePluginKind::LocalMemory,
+            "redis" => CachePluginKind::Redis,
+            other => CachePluginKind::External(other.to_string()),
+        }
+    } else {
+        CachePluginKind::LocalMemory
+    }
+}
+
+pub fn select_db_plugin_kind(config: &BcsConfig) -> DbPluginKind {
+    match &config.database.database_type {
+        DatabaseType::Sqlite => DbPluginKind::LocalSqlite,
+        DatabaseType::Mysql => DbPluginKind::Mysql,
+        DatabaseType::Other(provider) => DbPluginKind::External(provider.clone()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_cache_factory(
+        _config: BcsConfig,
+    ) -> BoxFuture<'static, crate::Result<CachePluginRegistration>> {
+        Box::pin(async move {
+            Ok(CachePluginRegistration {
+                kind: CachePluginKind::External("test-zcache".to_string()),
+                cache_zone: "test-zone".to_string(),
+                plugin: Arc::new(InMemoryCachePlugin::new()),
+            })
+        })
+    }
+
+    inventory::submit! {
+        CachePluginFactory {
+            name: "test-zcache",
+            build: test_cache_factory,
+        }
+    }
+
+    #[test]
+    fn default_config_selects_memory_cache_and_local_db_plugins() {
+        let config = BcsConfig::default();
+
+        assert_eq!(
+            select_cache_plugin_kind(&config),
+            CachePluginKind::LocalMemory
+        );
+        assert_eq!(select_db_plugin_kind(&config), DbPluginKind::LocalSqlite);
+    }
+
+    #[test]
+    fn mysql_database_type_selects_mysql_kind() {
+        let mut config = BcsConfig::default();
+        config.database.database_type = DatabaseType::Mysql;
+
+        assert_eq!(select_db_plugin_kind(&config), DbPluginKind::Mysql);
+    }
+
+    #[test]
+    fn redis_cache_type_selects_redis_cache_kind() {
+        let mut config = BcsConfig::default();
+        config.cache.cache_type = "redis".to_string();
+
+        assert_eq!(select_cache_plugin_kind(&config), CachePluginKind::Redis);
+    }
+
+    #[tokio::test]
+    async fn registered_cache_factory_handles_non_direct_redis_connection() {
+        let mut config = BcsConfig::default();
+        config.cache.cache_type = "redis".to_string();
+        config.cache.redis.connection.connection_type = "test-zcache".to_string();
+
+        let infrastructure = InfrastructurePlugins::from_config(&config)
+            .await
+            .expect("registered cache factory should build");
+
+        assert_eq!(
+            infrastructure.cache_kind(),
+            CachePluginKind::External("test-zcache".to_string())
+        );
+        assert_eq!(infrastructure.cache_zone(), "test-zone");
+    }
+
+    #[tokio::test]
+    async fn memory_cache_ignores_redis_subconfig() {
+        let mut config = BcsConfig::default();
+        config.cache.cache_type = "memory".to_string();
+        config.cache.redis.connection.host = Some("127.0.0.1".to_string());
+
+        let infrastructure = InfrastructurePlugins::from_config(&config)
+            .await
+            .expect("inactive redis subconfig should not block memory cache");
+
+        assert_eq!(infrastructure.cache_kind(), CachePluginKind::LocalMemory);
+        assert_eq!(infrastructure.cache_zone(), "local");
+    }
+
+    #[test]
+    fn from_parts_uses_external_plugin_handles() {
+        let db = LocalSqliteDbPlugin::new().expect("local sqlite plugin");
+        let cache: Arc<dyn CachePlugin> = Arc::new(InMemoryCachePlugin::new());
+        let db: Arc<dyn DbPlugin> = Arc::new(db);
+
+        let plugins = InfrastructurePlugins::from_parts(
+            CachePluginKind::Redis,
+            DbPluginKind::Mysql,
+            "custom-zone",
+            cache.clone(),
+            db.clone(),
+        );
+
+        assert_eq!(plugins.cache_kind(), CachePluginKind::Redis);
+        assert_eq!(plugins.db_kind(), DbPluginKind::Mysql);
+        assert_eq!(plugins.cache_zone(), "custom-zone");
+        assert!(Arc::ptr_eq(&plugins.cache().expect("cache handle"), &cache));
+        assert!(Arc::ptr_eq(&plugins.db().expect("db handle"), &db));
+    }
+
+}

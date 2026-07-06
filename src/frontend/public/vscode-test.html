@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VSCode 消息通信测试</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      height: 100vh;
+      display: flex;
+    }
+
+    .container {
+      display: flex;
+      width: 100%;
+      height: 100%;
+    }
+
+    .left-panel {
+      width: 400px;
+      background: #252526;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      overflow-y: auto;
+      border-right: 1px solid #3e3e42;
+    }
+
+    .right-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+
+    h2 {
+      color: #4ec9b0;
+      font-size: 18px;
+      margin-bottom: 10px;
+    }
+
+    .button-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    button {
+      padding: 10px 16px;
+      background: #0e639c;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background: #1177bb;
+    }
+
+    button:active {
+      background: #094771;
+    }
+
+    .log-container {
+      flex: 1;
+      background: #1e1e1e;
+      border: 1px solid #3e3e42;
+      border-radius: 4px;
+      padding: 12px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    .log-item {
+      margin-bottom: 8px;
+      padding: 8px;
+      background: #2d2d30;
+      border-radius: 3px;
+      border-left: 3px solid #4ec9b0;
+    }
+
+    .log-time {
+      color: #858585;
+      font-size: 11px;
+      margin-bottom: 4px;
+    }
+
+    .log-type {
+      color: #4ec9b0;
+      font-weight: bold;
+    }
+
+    .log-data {
+      color: #ce9178;
+      margin-top: 4px;
+      padding-left: 12px;
+    }
+
+    input {
+      width: 100%;
+      padding: 8px 12px;
+      background: #3c3c3c;
+      border: 1px solid #3e3e42;
+      border-radius: 4px;
+      color: #d4d4d4;
+      font-size: 13px;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: #0e639c;
+    }
+
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    label {
+      color: #cccccc;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- 左侧控制面板 -->
+    <div class="left-panel">
+      <h2>🧪 VSCode 消息测试工具</h2>
+
+      <div class="button-group">
+        <button onclick="sendFileContext()">📁 发送 file-context</button>
+        <button onclick="sendSelectionContext()">📝 发送 selection-context</button>
+        <button onclick="sendFileSaved()">💾 发送 file-saved</button>
+        <button onclick="sendAuthToken()">🔑 发送 auth-token (模拟)</button>
+        <button onclick="sendCustomMessage()">⚡ 发送自定义消息</button>
+      </div>
+
+      <div class="input-group">
+        <label>自定义消息类型:</label>
+        <input type="text" id="customType" placeholder="例如: custom-event" value="custom-event">
+        <label>消息内容 (JSON):</label>
+        <input type="text" id="customData" placeholder='{"key": "value"}' value='{"data": "test"}'>
+      </div>
+
+      <button onclick="clearLogs()" style="background: #c5c5c5; color: #1e1e1e;">🗑️ 清空日志</button>
+
+      <h2 style="margin-top: 20px;">📊 接收日志</h2>
+      <div class="log-container" id="logContainer">
+        <div style="color: #858585; font-size: 12px;">等待接收消息...</div>
+      </div>
+    </div>
+
+    <!-- 右侧 iframe -->
+    <div class="right-panel">
+      <iframe id="webFrame" src="http://localhost:8000/?source=vscode"></iframe>
+    </div>
+  </div>
+
+  <script>
+    const iframe = document.getElementById('webFrame');
+    const logContainer = document.getElementById('logContainer');
+    let logCount = 0;
+
+    // 监听来自 iframe 的消息
+    window.addEventListener('message', (event) => {
+      addLog('收到来自 Web 的消息', event.data);
+    });
+
+    // 发送文件上下文
+    function sendFileContext() {
+      const message = {
+        type: 'file-context',
+        fileName: '/Users/demo/project/src/App.tsx',
+        fileType: 'tsx',
+        language: 'typescript',
+        content: 'export default function App() {\n  return <div>Hello World</div>;\n}',
+        lineCount: 3,
+        cursorPosition: { line: 2, character: 10 }
+      };
+      sendMessage(message);
+    }
+
+    // 发送选择内容
+    function sendSelectionContext() {
+      const message = {
+        type: 'selection-context',
+        selectedText: 'const result = calculate(a, b);',
+        fileName: '/Users/demo/project/src/utils.ts',
+        language: 'typescript',
+        range: {
+          start: { line: 42, character: 0 },
+          end: { line: 42, character: 32 }
+        }
+      };
+      sendMessage(message);
+    }
+
+    // 发送文件保存事件
+    function sendFileSaved() {
+      const message = {
+        type: 'file-saved',
+        fileName: '/Users/demo/project/src/App.tsx',
+        content: 'export default function App() {\n  return <div>Hello World Updated</div>;\n}',
+        timestamp: Date.now()
+      };
+      sendMessage(message);
+    }
+
+    // 模拟发送 auth token (这个通常是 VSCode 发给 Web)
+    function sendAuthToken() {
+      const message = {
+        type: 'auth-token-request',
+        requestId: Date.now()
+      };
+      sendMessage(message);
+    }
+
+    // 发送自定义消息
+    function sendCustomMessage() {
+      const type = document.getElementById('customType').value;
+      const dataStr = document.getElementById('customData').value;
+
+      let data = {};
+      try {
+        data = JSON.parse(dataStr);
+      } catch (e) {
+        alert('JSON 格式错误: ' + e.message);
+        return;
+      }
+
+      const message = {
+        type: type,
+        ...data
+      };
+      sendMessage(message);
+    }
+
+    // 发送消息到 iframe
+    function sendMessage(message) {
+      iframe.contentWindow.postMessage(message, '*');
+      addLog('发送到 Web', message);
+    }
+
+    // 添加日志
+    function addLog(title, data) {
+      logCount++;
+      const time = new Date().toLocaleTimeString('zh-CN');
+      const logItem = document.createElement('div');
+      logItem.className = 'log-item';
+      logItem.innerHTML = `
+        <div class="log-time">#${logCount} - ${time}</div>
+        <div class="log-type">${title}</div>
+        <div class="log-data">${JSON.stringify(data, null, 2)}</div>
+      `;
+
+      // 如果是第一条日志，清空提示文字
+      if (logCount === 1) {
+        logContainer.innerHTML = '';
+      }
+
+      logContainer.insertBefore(logItem, logContainer.firstChild);
+    }
+
+    // 清空日志
+    function clearLogs() {
+      logContainer.innerHTML = '<div style="color: #858585; font-size: 12px;">日志已清空</div>';
+      logCount = 0;
+    }
+
+    console.log('✅ VSCode 测试工具已加载');
+    console.log('📍 iframe URL:', iframe.src);
+  </script>
+</body>
+</html>

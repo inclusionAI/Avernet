@@ -1,0 +1,14 @@
+# Demo CODEOWNERS for OCB.
+#
+# Multiple owners can be listed on the same line. Every listed owner must have write
+# access to this repository.
+
+# Repository-wide fallback owners.
+* @carolynli @yuyiming @xianmuyq @totalfrank
+
+# Module-specific owners. Later matching rules override the repository-wide
+# fallback above.
+# /.github/ @carolynli @xianmuyq
+/docs/arch/ @carolynli @xianmuyq
+/src/bcs/ @carolynli @vzvince @questchaos @RaymondHX
+/src/plugin/ @RaymondHX @vzvince @carolynli @questchaos

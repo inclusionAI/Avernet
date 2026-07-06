@@ -1,0 +1,12 @@
+{
+  "name": "openclaw",
+  "version": "0.0.0-stub",
+  "type": "module",
+  "exports": {
+    "./plugin-sdk/core": "./plugin-sdk/core.js",
+    "./plugin-sdk/account-id": "./plugin-sdk/account-id.js",
+    "./plugin-sdk/channel-config-helpers": "./plugin-sdk/channel-config-helpers.js",
+    "./plugin-sdk/allow-from": "./plugin-sdk/allow-from.js",
+    "./plugin-sdk/runtime-store": "./plugin-sdk/runtime-store.js"
+  }
+}

@@ -1,0 +1,44 @@
+# bcs Context
+
+## Provides
+
+- BCS process entrypoint and composition root.
+- Config loading, logging bootstrap, runtime assembly, and adapter registration.
+- Concrete selection of services, plugins, and external clients from validated config.
+
+## Consumes
+
+- `bcs-config-api` config DTOs and bootstrap-owned config loading helpers.
+- `adapters/*`, `services/*`, `plugin-api/*`, `plugins/*`, and `external-clients/*` crates.
+- Process env, config files, and CLI flags.
+
+## Allowed dependencies
+
+- `service-api/*`
+- `adapters/*`
+- `services/*`
+- `plugin-api/*`
+- `plugins/*`
+- `external-clients/*`
+- Runtime/framework crates needed for startup and shutdown
+
+## Forbidden dependencies
+
+- New business rules duplicated from `services/*`
+- Request-time protocol handling beyond adapter registration
+- Contract definitions that belong in `service-api/*` or `plugin-api/*`
+- Test-only fixtures in production wiring
+
+## Configuration
+
+- This crate owns config file discovery, env parsing, and CLI/bootstrap flags.
+- Only this crate selects local, test, or remote concrete implementations.
+
+## Runtime ownership
+
+The crate owns process lifecycle, adapter mounting, and startup/shutdown wiring. It does not own request-time business policy.
+
+## Tests
+
+- `cargo test --package bcs --manifest-path src/bcs/Cargo.toml`
+- `cargo check --package bcs --all-targets --manifest-path src/bcs/Cargo.toml`

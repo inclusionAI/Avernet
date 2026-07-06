@@ -1,0 +1,283 @@
+/**
+ * 组件级别的 @apply 样式
+ *
+ * 注意：
+ * - 只用于全局通用的样式（如滚动条、动画效果）
+ * - 不要滥用 @apply，大部分样式应该用 CVA（components.ts）
+ * - @apply 适合：不太会变动、组合复杂的样式
+ */
+
+/* ============================================
+   自定义滚动条
+   ============================================ */
+
+/**
+ * 自定义滚动条样式
+ * 适用于内容区域的滚动
+ */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(203 213 225 / 50%) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-slate-300/50 rounded-full;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-400/60;
+}
+
+/* ============================================
+   通用悬浮效果
+   ============================================ */
+
+/**
+ * 悬浮卡片效果
+ * 卡片悬浮时轻微上移 + 阴影变深
+ */
+.hover-card {
+  @apply transition-all duration-200 hover:shadow-md hover:-translate-y-0.5;
+}
+
+/**
+ * 悬浮缩放效果
+ * 适用于图片、图标等
+ */
+.hover-scale {
+  @apply transition-transform duration-200 hover:scale-105;
+}
+
+/**
+ * 悬浮发光效果
+ * 适用于按钮、输入框等
+ */
+.hover-glow {
+  @apply transition-shadow duration-200 hover:shadow-lg hover:shadow-lavender-200/50;
+}
+
+/* ============================================
+   毛玻璃效果
+   ============================================ */
+
+/**
+ * 毛玻璃效果（Glassmorphism）
+ * 半透明背景 + 背景模糊
+ */
+.glass-effect {
+  @apply bg-white/80 backdrop-blur-md;
+}
+
+/**
+ * 深色毛玻璃效果
+ */
+.glass-effect-dark {
+  @apply bg-slate-900/80 backdrop-blur-md;
+}
+
+/* ============================================
+   渐变效果
+   ============================================ */
+
+/**
+ * 渐变文字
+ * 从 lavender-600 到 indigo-600 的渐变
+ */
+.gradient-text {
+  @apply bg-gradient-to-r from-lavender-600 to-indigo-600 bg-clip-text text-transparent;
+}
+
+/**
+ * 渐变背景（主题色）
+ */
+.gradient-bg-primary {
+  @apply bg-gradient-to-r from-lavender-600 to-indigo-600;
+}
+
+/**
+ * 渐变背景（柔和）
+ */
+.gradient-bg-soft {
+  @apply bg-gradient-to-br from-lavender-50 via-white to-indigo-50;
+}
+
+/* ============================================
+   Section 标题
+   ============================================ */
+
+/**
+ * Section 标题样式
+ * 小号、大写、加粗、灰色
+ */
+.section-title {
+  @apply flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4;
+}
+
+/* ============================================
+   输入框聚焦效果
+   ============================================ */
+
+/**
+ * 输入框聚焦环
+ * 统一的聚焦样式
+ */
+.focus-ring {
+  @apply focus:outline-none focus:ring-2 focus:ring-lavender-500 focus:ring-offset-1;
+}
+
+/**
+ * 输入框聚焦环（无偏移）
+ */
+.focus-ring-no-offset {
+  @apply focus:outline-none focus:ring-2 focus:ring-lavender-500 focus:ring-offset-0;
+}
+
+/* ============================================
+   加载动画
+   ============================================ */
+
+/**
+ * 脉冲动画（适用于骨架屏）
+ */
+.animate-pulse-slow {
+  animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/**
+ * 旋转动画（适用于加载图标）
+ */
+.animate-spin-slow {
+  animation: spin 3s linear infinite;
+}
+
+/* ============================================
+   文本截断
+   ============================================ */
+
+/**
+ * 单行文本截断
+ */
+.text-truncate {
+  @apply overflow-hidden text-ellipsis whitespace-nowrap;
+}
+
+/**
+ * 多行文本截断（2 行）
+ */
+.text-truncate-2 {
+  display: box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/**
+ * 多行文本截断（3 行）
+ */
+.text-truncate-3 {
+  display: box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ============================================
+   分隔线
+   ============================================ */
+
+/**
+ * 水平分隔线
+ */
+.divider-horizontal {
+  @apply border-t border-gray-200;
+}
+
+/**
+ * 垂直分隔线
+ */
+.divider-vertical {
+  @apply border-l border-gray-200;
+}
+
+/* ============================================
+   点状指示器
+   ============================================ */
+
+/**
+ * 在线状态点
+ */
+.status-dot-online {
+  @apply w-2 h-2 rounded-full bg-green-400 border-2 border-white;
+}
+
+/**
+ * 离线状态点
+ */
+.status-dot-offline {
+  @apply w-2 h-2 rounded-full bg-slate-300 border-2 border-white;
+}
+
+/**
+ * 忙碌状态点（带动画）
+ */
+.status-dot-busy {
+  @apply w-2 h-2 rounded-full bg-amber-400 border-2 border-white animate-pulse;
+}
+
+/* ============================================
+   aix-chat-ui Bubble 样式覆盖
+   ============================================ */
+
+/**
+ * AICoding 模式下隐藏 Bubble 内部的 Avatar
+ * 因为 avatar 已在外部渲染，Bubble 内部不需要重复显示
+ * Bubble 内部结构: Container > Avatar + ContentWrapper
+ */
+.aicoding-msg-bubble
+  > [class*='Container-aix-chat-ui']
+  > [class*='Avatar-aix-chat-ui'] {
+  display: none;
+}
+
+/* ============================================
+   隐藏滚动条
+   ============================================ */
+
+/**
+ * 隐藏滚动条（但保持滚动功能）
+ */
+.hide-scrollbar {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari and Opera */
+}
+
+/* ============================================
+   响应式工具类
+   ============================================ */
+
+/**
+ * 移动端隐藏
+ */
+.mobile-hide {
+  @apply hidden md:block;
+}
+
+/**
+ * 桌面端隐藏
+ */
+.desktop-hide {
+  @apply block md:hidden;
+}

@@ -1,0 +1,35 @@
+#!/bin/bash
+######################################################################
+# post-receive.hook
+# Server-side git hook for monorepo to multi-repo sync
+#
+# Branch naming: source "dev" -> target "sync_dev"
+#
+# Installation:
+#   1. Edit MONOREPO_DIR below
+#   2. ln -s /path/to/monorepo/scripts/post-receive.hook /path/to/monorepo.git/hooks/post-receive
+######################################################################
+
+# ============ Configuration ============
+MONOREPO_DIR="/path/to/monorepo/checkout"
+SYNC_SCRIPT="${MONOREPO_DIR}/scripts/sync_to_repos.sh"
+SYNC_BRANCHES="master,dev,dev_*"
+SYNC_LOG_FILE="${MONOREPO_DIR}/logs/sync.log"
+# ============ End Configuration ============
+
+mkdir -p "$(dirname "$SYNC_LOG_FILE")"
+exec >> "$SYNC_LOG_FILE" 2>&1
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"; }
+
+source "${MONOREPO_DIR}/scripts/lib/sync_common.sh" || { log "ERROR: Cannot source sync_common.sh"; exit 1; }
+
+while read oldrev newrev refname; do
+    branch="${refname#refs/heads/}"
+
+    if should_sync_branch "$branch" "$SYNC_BRANCHES"; then
+        log "Syncing branch: $branch"
+        cd "$MONOREPO_DIR" && git checkout -q "$branch"
+        "$SYNC_SCRIPT" && log "Sync complete: $branch" || log "Sync failed: $branch"
+    fi
+done

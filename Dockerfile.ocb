@@ -1,0 +1,157 @@
+FROM node:22-bookworm-slim AS builder
+
+ARG NPM_STRICT_SSL=true
+ARG RUST_VERSION=1.91.0
+# Single mirror switch. Empty = official upstream (international default).
+# Set USE_CN_MIRROR=1 for China-friendly mirrors; see docs/docker.md.
+ARG USE_CN_MIRROR=
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup \
+    PATH=/usr/local/cargo/bin:/usr/local/bin:$PATH \
+    HOME=/root \
+    OCB_HOME=/opt/ocb
+
+WORKDIR /opt/ocb
+
+RUN if [ "${USE_CN_MIRROR}" = "1" ]; then \
+        sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debian.sources; \
+    fi \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
+        curl \
+        git \
+        jq \
+        lsof \
+        make \
+        perl \
+        pkg-config \
+        procps \
+        protobuf-compiler \
+        python-is-python3 \
+        python3 \
+        python3-venv \
+        build-essential \
+        libssl-dev \
+        libsqlite3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN if [ "${USE_CN_MIRROR}" = "1" ]; then \
+        export RUSTUP_DIST_SERVER=https://mirrors.ustc.edu.cn/rust-static \
+               RUSTUP_UPDATE_ROOT=https://mirrors.ustc.edu.cn/rust-static/rustup; \
+        rustup_arch="$(dpkg --print-architecture)"; \
+        case "${rustup_arch}" in \
+            amd64) rustup_target="x86_64-unknown-linux-gnu" ;; \
+            arm64) rustup_target="aarch64-unknown-linux-gnu" ;; \
+            *) echo "unsupported rustup architecture: ${rustup_arch}" >&2; exit 1 ;; \
+        esac; \
+        curl --proto '=https' --tlsv1.2 -sSfL \
+            "${RUSTUP_UPDATE_ROOT}/dist/${rustup_target}/rustup-init" \
+            -o /tmp/rustup-init; \
+        chmod +x /tmp/rustup-init; \
+        /tmp/rustup-init -y --profile minimal --default-toolchain "${RUST_VERSION}"; \
+        rm -f /tmp/rustup-init; \
+    else \
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --profile minimal --default-toolchain "${RUST_VERSION}"; \
+    fi
+
+RUN if [ "${USE_CN_MIRROR}" = "1" ]; then \
+        mkdir -p "${CARGO_HOME}" \
+        && printf '[source.crates-io]\nreplace-with = "mirror"\n[source.mirror]\nregistry = "sparse+https://mirrors.aliyun.com/crates.io-index/"\n' > "${CARGO_HOME}/config.toml" \
+        && npm config set registry "https://registry.npmmirror.com"; \
+    fi \
+    && npm config set strict-ssl "${NPM_STRICT_SSL}" \
+    && corepack enable
+
+COPY . .
+
+# start_bcs_bots.sh is authored for BSD sed on macOS; patch the copied image
+# file so the same local 5bot path runs on GNU sed in Debian.
+RUN find scripts src/bcs/scripts -name '*.sh' -exec chmod +x {} + \
+    && perl -0pi -e "s/sed -i '' -e/sed -i -e/g" src/bcs/scripts/start_bcs_bots.sh
+
+RUN mkdir -p /tmp/bcs-panel-asset \
+    && cp -R src/bcs/assets/panel/. /tmp/bcs-panel-asset/ \
+    && cd /tmp/bcs-panel-asset \
+    && HUSKY=0 npm ci \
+    && npm run build \
+    && rm -rf /opt/ocb/src/bcs/assets/panel/dist /opt/ocb/src/bcs/assets/panel/node_modules \
+    && cp -R dist /opt/ocb/src/bcs/assets/panel/
+
+RUN cargo build --manifest-path src/bcs/Cargo.toml --package bcs --package bcs-cli --package bcs-admin \
+    && find src/bcs/target/debug -mindepth 1 -maxdepth 1 \
+        ! -name bcs \
+        ! -name bcs-cli \
+        ! -name bcs-admin \
+        -exec rm -rf {} +
+
+RUN mkdir -p /tmp/openclaw-channel-bcn \
+    && cp -R src/plugin/packages/openclaw-channel-bcn/. /tmp/openclaw-channel-bcn/ \
+    && cd /tmp/openclaw-channel-bcn \
+    && npm install \
+    && npm run build \
+    && npm prune --omit=dev \
+    && rm -rf /opt/ocb/src/plugin/packages/openclaw-channel-bcn/dist /opt/ocb/src/plugin/packages/openclaw-channel-bcn/node_modules \
+    && cp -R dist node_modules /opt/ocb/src/plugin/packages/openclaw-channel-bcn/ \
+    && mkdir -p /root/.openclaw/extensions \
+    && ln -sfn /opt/ocb/src/plugin/packages/openclaw-channel-bcn /root/.openclaw/extensions/openclaw-channel-bcn
+
+RUN cd src/frontend \
+    && HUSKY=0 npm ci \
+    && npm run build:oss \
+    && rm -rf node_modules .umi .umi-production .cache src/.umi
+
+FROM node:22-bookworm-slim AS runtime
+
+ARG OPENCLAW_VERSION=2026.6.1
+ARG NPM_STRICT_SSL=true
+ARG USE_CN_MIRROR=
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    HOME=/root \
+    OCB_HOME=/opt/ocb \
+    PATH=/usr/local/bin:$PATH
+
+WORKDIR /opt/ocb
+
+RUN if [ "${USE_CN_MIRROR}" = "1" ]; then \
+        sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debian.sources; \
+    fi \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
+        curl \
+        git \
+        jq \
+        lsof \
+        procps \
+        libsqlite3-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN if [ "${USE_CN_MIRROR}" = "1" ]; then npm config set registry "https://registry.npmmirror.com"; fi \
+    && npm config set strict-ssl "${NPM_STRICT_SSL}" \
+    && npm install -g "openclaw@${OPENCLAW_VERSION}"
+
+COPY --from=builder /opt/ocb /opt/ocb
+
+RUN mkdir -p /opt/ocb/scripts/.dependencies/logs /opt/ocb/scripts/.dependencies/data
+
+RUN mkdir -p /root/.openclaw/extensions \
+    && ln -sfn /opt/ocb/src/plugin/packages/openclaw-channel-bcn /root/.openclaw/extensions/openclaw-channel-bcn
+
+COPY docker/ocb-frontend-server.js /usr/local/bin/ocb-frontend-server
+COPY docker/ocb-entrypoint.sh /usr/local/bin/ocb-entrypoint
+
+RUN chmod +x /usr/local/bin/ocb-entrypoint /usr/local/bin/ocb-frontend-server
+
+EXPOSE 21000 8000
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=120s --retries=6 \
+    CMD curl -fsS "http://127.0.0.1:${BCS_PORT:-21000}/health" >/dev/null || exit 1
+
+ENTRYPOINT ["/usr/local/bin/ocb-entrypoint"]

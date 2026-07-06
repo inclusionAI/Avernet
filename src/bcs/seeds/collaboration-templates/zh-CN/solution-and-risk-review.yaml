@@ -1,0 +1,146 @@
+# 结构化协同的产品默认模板。
+# 这份 YAML 只描述协同策略，不保存具体 bot id。
+# 创建群组时，请通过 CreateGroupRequest.participant_bindings 把下面的逻辑角色绑定到实际 bot。
+
+# name 是产品侧展示名称，也会用于用户识别这份协同模板。
+name: 方案与风险评审
+
+metadata:
+  # description 用于说明模板目标，不参与运行时调度。
+  description: 一个可直接运行的结构化协同示例：先理解问题，再并行做方案分析和风险审查，最后汇总成用户可读答案。
+
+# participants 是逻辑角色/slot 声明。后续节点里的 assignee.binding 必须引用这里的 key。
+# 实际 bot 由 group runtime binding 提供，BCS 会按 driver_bot 自动推导 BCS participant role。
+participants:
+  # coordinator 是流程协调者，负责理解问题和最终汇总。
+  coordinator:
+    display_name: 协调者
+    description: 负责理解用户请求，并汇总多个分支结果生成最终答案。
+    required: true
+
+  # domain_expert 是方案分析角色。
+  domain_expert:
+    display_name: 方案专家
+    description: 负责分析方案可行性、执行路径和需要用户补充的信息。
+    required: true
+
+  # risk_reviewer 是风险审查角色。
+  risk_reviewer:
+    display_name: 风险审查员
+    description: 负责识别风险、约束、注意事项和降低风险的建议。
+    required: true
+
+runtime:
+  # kind 固定为 state_machine，表示按下面的节点图执行结构化协同。
+  kind: state_machine
+  state_machine:
+    defaults:
+      # node_timeout_ms 是每个节点等待 bot 返回 final 的默认超时时间，单位毫秒。
+      # 未在具体 node 上覆盖时，所有节点都会使用这个值。
+      node_timeout_ms: 120000
+      # max_attempts 是节点失败后的尝试上限配置；未在具体 node 上覆盖时使用这个默认值。
+      max_attempts: 2
+
+    # nodes 定义协同流程里的所有节点。每个节点 key 都是该节点的 id。
+    nodes:
+      # 入口节点：把用户请求整理成清晰的任务简报。
+      frame_task:
+        # kind 固定为 bot_task，表示向指定 bot 发送指令并等待最终响应。
+        kind: bot_task
+        # display_name 是产品侧展示名称，不是节点 id。
+        display_name: 理解问题
+        # 入口节点只需要产出简短任务简报，这里覆盖全局超时为 60 秒。
+        node_timeout_ms: 60000
+        assignee:
+          # type 固定为 bot_binding，表示通过 participants 中的绑定找到实际 bot。
+          type: bot_binding
+          # binding 必须引用 participants 里的某个 key。
+          binding: coordinator
+        # instruction 是发送给当前节点 assignee bot 的任务指令，不能为空。
+        instruction: |
+          你是结构化协同流程的协调者。请阅读用户请求，并输出一份简短任务简报。
+
+          简报必须包含：
+          1. 用户想解决的问题。
+          2. 需要重点分析的方案方向。
+          3. 需要重点关注的风险或约束。
+
+          请只输出任务简报，不要给最终答案。
+        # transitions 是当前节点完成后的流转规则。
+        transitions:
+          # complete 表示当前 bot_task 正常完成后的流转结果。
+          complete:
+            # targets 是下一批节点的 key；这里会同时进入两个并行分支。
+            targets:
+              - analyze_solution
+              - review_risks
+
+      # 并行分支 1：领域或方案分析。
+      analyze_solution:
+        kind: bot_task
+        display_name: 方案分析
+        assignee:
+          type: bot_binding
+          binding: domain_expert
+        # 这个节点只负责方案分析，最终整合交给 synthesize_final_answer。
+        instruction: |
+          你是方案分析专家。请基于上游任务简报，从可行性和执行路径角度分析用户请求。
+
+          请输出：
+          1. 推荐方案。
+          2. 关键理由。
+          3. 需要用户补充的信息。
+
+          请聚焦方案分析，不要做最终汇总。
+        transitions:
+          complete:
+            # 指向汇总节点。汇总节点会等待两个并行分支都完成后再运行。
+            targets:
+              - synthesize_final_answer
+
+      # 并行分支 2：风险、约束或质量审查。
+      review_risks:
+        kind: bot_task
+        display_name: 风险审查
+        assignee:
+          type: bot_binding
+          binding: risk_reviewer
+        # 这个节点只负责风险审查，最终整合交给 synthesize_final_answer。
+        instruction: |
+          你是风险审查专家。请基于上游任务简报，识别这个请求可能存在的风险、限制和注意事项。
+
+          请输出：
+          1. 主要风险。
+          2. 需要避免的做法。
+          3. 可以降低风险的建议。
+
+          请聚焦风险审查，不要做最终汇总。
+        transitions:
+          complete:
+            # 指向汇总节点。汇总节点会等待两个并行分支都完成后再运行。
+            targets:
+              - synthesize_final_answer
+
+      # 汇总节点：等待两个并行分支都完成后运行，并作为最终面向用户的输出。
+      synthesize_final_answer:
+        kind: bot_task
+        display_name: 汇总答案
+        # 汇总节点需要综合多个上游结果，给它更长的超时和更多失败重试空间。
+        node_timeout_ms: 180000
+        max_attempts: 3
+        assignee:
+          type: bot_binding
+          binding: coordinator
+        # 这个节点负责输出最终答案。
+        instruction: |
+          你是最终答案汇总者。请综合上游的方案分析和风险审查，输出一份可以直接展示给用户的答案。
+
+          最终答案必须包含：
+          1. 结论或推荐方案。
+          2. 关键理由。
+          3. 主要风险和注意事项。
+          4. 下一步建议。
+
+          请不要暴露内部协同过程，只输出最终答案。
+        # final_output 表示该节点产物会作为本次结构化协同的最终输出。
+        final_output: true

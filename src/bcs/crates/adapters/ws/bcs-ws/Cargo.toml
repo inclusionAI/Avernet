@@ -1,0 +1,37 @@
+[package]
+name         = "bcs-ws"
+description  = "WebSocket delivery adapter for BCS"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+axum        = { workspace = true }
+tokio       = { workspace = true }
+tokio-util  = { workspace = true }
+tracing     = { workspace = true }
+async-trait = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+base64      = { workspace = true }
+thiserror   = { workspace = true }
+futures     = { workspace = true }
+uuid        = { workspace = true }
+chrono      = { workspace = true }
+
+bcs-domain      = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-protocol    = { workspace = true }
+bcs-callback    = { workspace = true }
+bcs-route-security = { workspace = true }
+
+[dev-dependencies]
+tokio-test  = "0.4"
+tokio-tungstenite = "0.26"
+bcs-session = { workspace = true }
+bcs-test-support = { workspace = true }

@@ -1,0 +1,24 @@
+[package]
+name = "bcs-relation"
+description = "Social/relation graph service implementation for BCS (Human Actor V1)"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+
+# Async trait
+async-trait = { workspace = true }
+
+# Workspace crates
+bcs-service-api = { workspace = true }
+bcs-relation-store = { workspace = true }
+
+[dev-dependencies]
+bcs-db-local = { workspace = true }
+bcs-test-support = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }

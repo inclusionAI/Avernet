@@ -1,0 +1,29 @@
+[package]
+name = "bcs-message-flow"
+description = "Message and chat flow orchestration service for BCS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+regex = { workspace = true }
+tokio = { workspace = true }
+
+bcs-domain = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-protocol = { workspace = true }
+
+[dev-dependencies]
+bcs-test-support = { workspace = true }
+tokio = { workspace = true }

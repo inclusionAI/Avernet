@@ -1,0 +1,89 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.uv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+*.egg
+.coverage*
+htmlcov/
+*.pyi
+
+# Node.js
+node_modules/
+.npm/
+.umi/
+.umi-production/
+dist-webview/
+
+# Rust
+target/
+
+# Logs and runtime state
+*.log
+logs/
+data/
+tmp/
+temp/
+scripts/.dependencies/
+.quickstart-openclaw/
+.openclaw-host-bcn/
+.standalone-openclaw/
+test-bots/
+
+# Databases
+*.db
+*.sqlite
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+src/bcs/configs/bcs-config.toml
+*.pem
+*.key
+
+# IDE and OS metadata
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Local worktrees and generated analysis
+.worktrees/
+.sync_staging/
+.code-review-graph/
+.memsearch/
+.omc/
+.night-kit/
+
+# Local/private agent and tooling state
+.claude/
+.codex/
+.agents/
+.mcp.json
+src/bcs/.agent
+*.claude
+*.codex
+CLAUDE.local.md
+.planning
+.dev
+.private_docs/
+memory/
+skills-lock.json
+
+# Private/local API exports and release artifacts
+aideskdop_bcs*.json
+*.tgz
+
+# Local dependency checkouts
+src/bcs/submodules/
+src/bcs/testresult/

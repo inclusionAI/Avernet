@@ -1,0 +1,23 @@
+[package]
+name         = "bcs-test-support"
+description  = "Test fixtures for BCS service contracts"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bcs-domain      = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-auth-api    = { workspace = true }
+bcs-cache-api   = { workspace = true }
+bcs-db-api      = { workspace = true }
+bcs-session     = { workspace = true }
+axum            = { workspace = true }
+tokio           = { workspace = true }
+async-trait     = { workspace = true }
+serde_json      = { workspace = true }

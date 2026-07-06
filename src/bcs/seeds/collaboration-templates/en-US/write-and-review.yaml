@@ -1,0 +1,132 @@
+# Write & Review collaboration template.
+# This YAML describes only the collaboration strategy. It does not store concrete bot ids.
+# When creating a group, bind the logical roles below to actual bots via CreateGroupRequest.participant_bindings.
+
+# name is the product-facing display name for this collaboration template.
+name: Write & Review
+
+metadata:
+  # description explains the template goal. It is not used by runtime scheduling.
+  description: A writer produces a candidate answer that goes through automated quality review. If approved the editor polishes it; if rejected the writer revises it. The editor then produces the final response.
+
+# participants declares logical role slots. Node assignee.binding values must reference these keys.
+# Actual bots are supplied by group runtime binding; BCS infers BCS participant roles from driver_bot.
+participants:
+  # writer produces the initial draft and revises it when the quality review rejects it.
+  writer:
+    display_name: Writer
+    description: Produces the initial draft and revises it when the quality review rejects it.
+    required: true
+
+  # editor polishes approved drafts and produces the final response.
+  editor:
+    display_name: Editor
+    description: Polishes approved drafts and produces the final response for the user.
+    required: true
+
+runtime:
+  # Structured collaboration templates always use state_machine.
+  kind: state_machine
+  state_machine:
+    defaults:
+      # node_timeout_ms is the default time each node waits for a bot final response, in milliseconds.
+      # Nodes inherit this value unless they define their own node_timeout_ms.
+      node_timeout_ms: 120000
+      # max_attempts is the default retry budget for node failures.
+      # Nodes inherit this value unless they define their own max_attempts.
+      max_attempts: 2
+
+    # nodes defines the workflow graph. Each map key is the stable node id.
+    nodes:
+      # Entry node: produce a candidate answer, then the automated quality review decides the next path.
+      draft:
+        # kind is fixed to bot_task, meaning BCS sends an instruction to the assigned bot and waits for a final response.
+        kind: bot_task
+        # display_name is the product-facing label, not the node id.
+        display_name: Generate Draft
+        # Drafting is the most critical step; keep the default retry budget but use a shorter timeout.
+        node_timeout_ms: 90000
+        max_attempts: 2
+        assignee:
+          # type is fixed to bot_binding, meaning the runtime resolves the bot through participants.
+          type: bot_binding
+          # binding must reference one participant slot key.
+          binding: writer
+        # instruction is sent to the assigned bot and must not be empty.
+        instruction: |
+          Generate a candidate plan based on the user input.
+          The output must include a conclusion, rationale, risks, and next steps.
+        # judge runs after this node produces an artifact and selects the next path based on the quality review result.
+        judge:
+          # type is fixed to llm, meaning an LLM evaluates the node artifact using the criteria below.
+          type: llm
+          # criteria are the acceptance standards. Each criterion can affect the final outcome.
+          criteria:
+            - Does the answer clearly address the user question?
+            - Does it include a conclusion, rationale, risks, and next steps?
+            - Are there any obvious logical contradictions?
+            - Is it concrete enough to move directly into final synthesis?
+          # outcomes must correspond one-to-one with the transition keys on this node.
+          outcomes:
+            - approved
+            - rejected
+        # transitions defines where execution moves after this node completes. Here the quality review result selects the path.
+        transitions:
+          # approved means the draft passed the quality review and moves to polishing.
+          approved:
+            targets:
+              - polish
+          # rejected means the draft did not pass the quality review and needs revision.
+          rejected:
+            targets:
+              - revise
+
+      # Approved path: lightly polish the draft that passed the quality review.
+      polish:
+        kind: bot_task
+        display_name: Polish Draft
+        assignee:
+          type: bot_binding
+          binding: editor
+        # Polishing should preserve the original conclusion without introducing a new direction.
+        instruction: |
+          The draft passed the quality review. Lightly polish the draft output.
+          Preserve the original conclusion and do not introduce a new major direction.
+        transitions:
+          complete:
+            # Both paths converge at finalize.
+            targets:
+              - finalize
+
+      # Rejected path: revise the draft using the quality review result and upstream content.
+      revise:
+        kind: bot_task
+        display_name: Revise Draft
+        # Revision may need more time and one extra retry since the first draft was rejected.
+        node_timeout_ms: 180000
+        max_attempts: 3
+        assignee:
+          type: bot_binding
+          binding: writer
+        # This node revises the draft but does not produce the final answer.
+        instruction: |
+          The draft did not pass the quality review. Revise it using the review result and upstream content.
+          Fill in missing information and fix unclear or unreliable parts.
+        transitions:
+          complete:
+            # Both paths converge at finalize.
+            targets:
+              - finalize
+
+      # Final node: produce the final answer based on the path that actually ran.
+      finalize:
+        kind: bot_task
+        display_name: Finalize Response
+        assignee:
+          type: bot_binding
+          binding: editor
+        # This node produces the final answer.
+        instruction: |
+          Synthesize the output from the completed path into the final response.
+        # final_output marks this node artifact as the final output of the collaboration run.
+        final_output: true

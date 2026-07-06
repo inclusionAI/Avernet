@@ -1,0 +1,15 @@
+# TEST-1 baseline: 当前缺 conformance test 的核心 trait（CONTEXT.md §5 偏离 #6）
+# 格式：<trait 名>	<偏离编号: 描述>
+# 每补一个 conformance test 入口，从本文件删除对应行。
+# 注意：本 baseline 只允许减不允许增（由 check-baseline-not-growing.sh 强制）。
+
+BotRegistryService	偏离 #6: 待补 conformance test
+GroupService	偏离 #6: 待补 conformance test
+RoutingService	偏离 #6: 待补 conformance test
+FusionService	偏离 #6: 待补 conformance test
+ProposalService	偏离 #6: 待补 conformance test
+FriendService	偏离 #6: 待补 conformance test
+FriendRequestService	偏离 #6: 待补 conformance test
+RelationService	偏离 #6: 待补 conformance test
+ServiceGroupTemplateService	偏离 #6: 待补 conformance test
+ServiceGroupInstanceService	偏离 #6: 待补 conformance test

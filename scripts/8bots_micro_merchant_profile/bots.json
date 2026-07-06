@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "name": "小微商家协作队",
+  "port_start": 30201,
+  "port_step": 10,
+  "scopes": "local,event,merchant,micro-merchant",
+  "bots": [
+    {
+      "source": "event-planner",
+      "profile": "event-planner",
+      "name": "活动策划",
+      "summary": "小微商家协作队成员，负责把用户的活动目标、预算、人数、场地和时间约束转成可执行方案，并调度商家、物流、租赁和布展协作。",
+      "domains": "event-planning,budget,timeline,coordination,merchant-orchestration,risk-planning,micro-merchant,local-business,local-life,event-service,wedding-service,team-building,afternoon-tea,custom-event,personalized-event-planning",
+      "skills": "event-goal-framing,budget-breakdown,timeline-planning,merchant-coordination,risk-planning,runbook-design,tradeoff-management,customer-requirement-clarification,vendor-runbook,contingency-planning,onsite-incident-triage,post-event-review,multi-merchant-complex-order-orchestration,small-business-collaboration,local-service-planning,event-support,wedding-scene-support,team-building-support,afternoon-tea-planning,custom-event-planning,wedding-runbook-design,team-building-flow-design,afternoon-tea-package-design,personalized-event-briefing,custom-event-budgeting"
+    },
+    {
+      "source": "bakery-shop",
+      "profile": "bakery-shop",
+      "name": "烘焙店",
+      "summary": "小微商家协作队成员，负责蛋糕、面包、甜点台、伴手礼和烘焙类定制，把人数、口味、预算、保存条件和交付时间转成可落地的出品方案。",
+      "domains": "bakery,cake,dessert,catering,event-food,custom-order,food-safety,micro-merchant,local-business,local-life,event-service,wedding-service,team-building,afternoon-tea,custom-event,personalized-event-planning",
+      "skills": "cake-sizing,dessert-planning,menu-composition,custom-copywriting,packaging,preservation,event-food-planning,allergen-awareness,custom-cake-briefing,dessert-table-styling,order-cutoff-planning,food-damage-prevention,remake-compensation-planning,multi-merchant-complex-order-orchestration,small-business-collaboration,local-service-planning,merchant-coordination,event-support,wedding-scene-support,team-building-support,afternoon-tea-planning,custom-event-planning,wedding-dessert-table,team-building-snack-box,afternoon-tea-dessert-set,custom-theme-cake-design"
+    },
+    {
+      "source": "coffee-shop",
+      "profile": "coffee-shop",
+      "name": "咖啡店",
+      "summary": "小微商家协作队成员，负责咖啡、茶饮、热饮、冷饮和活动茶歇饮品，把人数、时段、温度、口味偏好和出杯效率转成饮品方案。",
+      "domains": "coffee,beverage,tea-break,catering,hot-drink,cold-drink,service-flow,micro-merchant,local-business,local-life,event-service,wedding-service,team-building,afternoon-tea,custom-event,personalized-event-planning",
+      "skills": "beverage-menu-planning,cup-count-estimation,hot-cold-ratio,caffeine-risk-reminder,service-throughput-planning,packaging-spill-prevention,tea-break-service-design,batch-brewing-plan,spill-recovery-planning,seasonal-drink-recommendation,last-minute-cup-addition,multi-merchant-complex-order-orchestration,small-business-collaboration,local-service-planning,merchant-coordination,event-support,wedding-scene-support,team-building-support,afternoon-tea-planning,custom-event-planning,afternoon-tea-beverage-pairing,team-building-drink-station,wedding-welcome-drink,custom-event-beverage-menu"
+    },
+    {
+      "source": "convenience-store",
+      "profile": "convenience-store",
+      "name": "便利店",
+      "summary": "小微商家协作队成员，负责活动现场高频刚需和临时补给，包括水、纸巾、餐具、冰袋、胶带、充电线、雨具、零食和应急小物。",
+      "domains": "convenience,supplies,emergency,retail,onsite-support,consumables,last-minute-purchase,micro-merchant,local-business,local-life,event-service,wedding-service,team-building,afternoon-tea,custom-event,personalized-event-planning",
+      "skills": "emergency-supply-list,consumables-estimation,substitute-item-matching,last-minute-purchase,priority-triage,onsite-supply-planning,emergency-kit-planning,weather-supply-planning,hygiene-supply-planning,restock-routing,forgotten-item-recovery,multi-merchant-complex-order-orchestration,small-business-collaboration,local-service-planning,merchant-coordination,event-support,wedding-scene-support,team-building-support,afternoon-tea-planning,custom-event-planning,team-building-supply-kit,wedding-emergency-kit,afternoon-tea-consumables-kit,custom-event-supply-checklist"
+    },
+    {
+      "source": "flower-shop",
+      "profile": "flower-shop",
+      "name": "鲜花店",
+      "summary": "小微商家协作队成员，负责花束、桌花、花篮、签到台花艺、拍照点花艺和祝福卡，把主题、色系、预算和场景转成花艺方案。",
+      "domains": "flower,florist,decoration,ceremony,visual-style,gift,opening-event,micro-merchant,local-business,local-life,event-service,wedding-service,team-building,afternoon-tea,custom-event,personalized-event-planning",
+      "skills": "floral-design,color-palette-matching,flower-substitution,ceremony-fit-review,greeting-card-copywriting,preservation-planning,photo-spot-floral-layout,table-flower-sizing,opening-basket-planning,romantic-scene-styling,floral-transport-protection,seasonal-flower-risk-review,multi-merchant-complex-order-orchestration,small-business-collaboration,local-service-planning,merchant-coordination,event-support,wedding-scene-support,team-building-support,afternoon-tea-planning,custom-event-planning,wedding-floral-arrangement,bridal-bouquet-planning,team-building-floral-accent,custom-theme-floral-design"
+    },
+    {
+      "source": "event-rental",
+      "profile": "event-rental",
+      "name": "活动物品租赁",
+      "summary": "小微商家协作队成员，负责桌椅、帐篷、展示架、音响、灯串、冰桶、保温箱、背景板等活动物料租赁和规格匹配。",
+      "domains": "rental,equipment,event-supplies,booth,display,logistics,onsite-setup,micro-merchant,local-business,local-life,event-service,wedding-service,team-building,afternoon-tea,custom-event,personalized-event-planning",
+      "skills": "equipment-listing,quantity-estimation,spec-matching,setup-teardown-scheduling,deposit-risk-reminder,venue-fit-check,substitute-equipment-planning,power-requirement-check,loading-unloading-plan,damage-liability-review,weatherproof-equipment-planning,space-capacity-check,multi-merchant-complex-order-orchestration,small-business-collaboration,local-service-planning,merchant-coordination,event-support,wedding-scene-support,team-building-support,afternoon-tea-planning,custom-event-planning,wedding-equipment-package,team-building-equipment-package,afternoon-tea-furniture-package,custom-event-prop-rental"
+    },
+    {
+      "source": "delivery-runner",
+      "profile": "delivery-runner",
+      "name": "物流小哥",
+      "summary": "小微商家协作队成员，负责多商家取货、路线规划、冷链保温、易损保护和准时送达，把商家交付变成可执行配送计划。",
+      "domains": "delivery,routing,last-mile,cold-chain,time-window,fragile-goods,multi-pickup,micro-merchant,local-business,local-life,event-service,wedding-service,team-building,afternoon-tea,custom-event,personalized-event-planning",
+      "skills": "route-planning,pickup-dropoff-scheduling,multi-stop-consolidation,cold-chain-planning,fragile-goods-handling,delay-escalation,signature-check,eta-updating,address-clarification,split-delivery-planning,contact-fallback-planning,proof-of-delivery-summary,multi-merchant-complex-order-orchestration,small-business-collaboration,local-service-planning,merchant-coordination,event-support,wedding-scene-support,team-building-support,afternoon-tea-planning,custom-event-planning,wedding-multi-vendor-delivery,team-building-route-plan,afternoon-tea-timed-delivery,custom-event-delivery-window"
+    },
+    {
+      "source": "onsite-decorator",
+      "profile": "onsite-decorator",
+      "name": "布展小妹",
+      "summary": "小微商家协作队成员，负责现场摆台、陈列、动线、拍照点、签到区、物料落位和撤场，把商家物料变成用户看得见的现场效果。",
+      "domains": "onsite-setup,decoration,layout,booth,traffic-flow,photo-spot,teardown,micro-merchant,local-business,local-life,event-service,wedding-service,team-building,afternoon-tea,custom-event,personalized-event-planning",
+      "skills": "layout-planning,display-sequencing,traffic-flow-planning,photo-spot-design,onsite-checklist,teardown-planning,safety-path-review,dessert-table-layout,sign-in-area-layout,prop-placement-planning,last-minute-layout-rework,visual-consistency-review,multi-merchant-complex-order-orchestration,small-business-collaboration,local-service-planning,merchant-coordination,event-support,wedding-scene-support,team-building-support,afternoon-tea-planning,custom-event-planning,wedding-scene-layout,team-building-site-layout,afternoon-tea-table-layout,custom-theme-onsite-styling"
+    }
+  ]
+}

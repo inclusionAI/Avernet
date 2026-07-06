@@ -1,0 +1,20 @@
+[package]
+name        = "ding-logger"
+description = "DingTalk group message logger for BCS"
+edition     = { workspace = true }
+license     = { workspace = true }
+repository  = { workspace = true }
+rust-version = { workspace = true }
+version     = { workspace = true }
+
+[dependencies]
+tokio        = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+anyhow       = { workspace = true }
+futures      = { workspace = true }
+tracing      = { workspace = true }
+reqwest      = { workspace = true }
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+base64       = "0.22"
+chrono       = { workspace = true }

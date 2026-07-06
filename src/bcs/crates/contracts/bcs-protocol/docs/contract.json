@@ -1,0 +1,9 @@
+{
+  "magic_key": "__bcs_coordination__",
+  "version": 1,
+  "tools": {
+    "bcs_assign_task": ["target_bot", "message", "response_mode?"],
+    "bcs_send_task_message": ["message"],
+    "bcs_task_complete": ["summary"]
+  }
+}

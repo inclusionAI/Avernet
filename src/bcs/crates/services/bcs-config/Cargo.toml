@@ -1,0 +1,19 @@
+[package]
+name         = "bcs-config"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bcs-config-api = { workspace = true }
+serde_yaml     = "0.9"
+thiserror      = { workspace = true }
+tokio          = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

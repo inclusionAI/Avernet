@@ -1,0 +1,28 @@
+services:
+  teamclaw:
+    image: ocb:local
+    build:
+      context: .
+      dockerfile: Dockerfile.ocb
+      args:
+        USE_CN_MIRROR: ${USE_CN_MIRROR:-0}
+    environment:
+      BCS_PORT: "${BCS_PORT:-21000}"
+      FRONTEND_PORT: "${FRONTEND_PORT:-8000}"
+      FRONTEND_BCS_TARGET: "http://127.0.0.1:${BCS_PORT:-21000}"
+      BCS_AUTH_MOCK: "${BCS_AUTH_MOCK:-1}"
+      BCS_MOCK_USER_ID: "${BCS_MOCK_USER_ID:-11111111}"
+      BCS_MOCK_USER_NICK_NAME: "${BCS_MOCK_USER_NICK_NAME:-Turing}"
+      BCS_MOCK_USER_CHANNEL: "${BCS_MOCK_USER_CHANNEL:-mock}"
+      OPENCLAW_MODEL_CONFIG_SOURCE: "/host-openclaw/openclaw.json"
+      OPENCLAW_OPENAI_BASE_URL: "${OPENCLAW_OPENAI_BASE_URL:-}"
+      OPENCLAW_OPENAI_API_KEY: "${OPENCLAW_OPENAI_API_KEY:-}"
+      OPENCLAW_OPENAI_MODEL_ID: "${OPENCLAW_OPENAI_MODEL_ID:-}"
+    ports:
+      - "${BCS_PORT:-21000}:${BCS_PORT:-21000}"
+      - "${FRONTEND_PORT:-8000}:${FRONTEND_PORT:-8000}"
+    volumes:
+      - type: bind
+        source: ${OPENCLAW_HOST_CONFIG_DIR:-${HOME}/.openclaw}
+        target: /host-openclaw
+        read_only: true

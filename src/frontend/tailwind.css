@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    /* primary = lavender-600 #2563eb */
+    --primary: 221 83% 53%;
+    /* SDK aix CSS variables — 与 lavender 色板对齐 */
+    --aix-color-primary: #2563eb;
+    --aix-color-primary-dark: #1d4ed8;
+    --aix-color-primary-bg: rgba(37, 99, 235, 0.08);
+    --aix-color-primary-bg-hover: rgba(37, 99, 235, 0.14);
+    --aix-color-primary-border: rgba(37, 99, 235, 0.3);
+    --primary-foreground: 0 0% 100%;
+    --secondary: 214 32% 91%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 214 32% 91%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 214 32% 91%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 221 83% 53%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer components {
+  .w-md-editor {
+    border-radius: 0 !important;
+  }
+}

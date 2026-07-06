@@ -1,0 +1,40 @@
+# 单 bot 引导回答模板。
+# 这份 YAML 描述一个只有一个逻辑 bot 角色的最小结构化协同。
+# 它不保存具体 bot id；创建群组时请通过 CreateGroupRequest.participant_bindings 绑定 assistant。
+
+# name 是这个协同模板面向产品展示的名称。
+name: 单 Bot 引导回答
+
+metadata:
+  # description 用来说明模板目标，不参与运行时调度。
+  description: 一个最小状态机群组示例：由一个 assistant bot 回答用户问题。
+
+# participants 声明逻辑角色槽位。这个最小模板只需要一个 assistant 槽位。
+participants:
+  # assistant 是唯一的 bot 角色，负责产出最终回答。
+  assistant:
+    display_name: 助手
+    description: 负责回答用户请求，并产出最终回复。
+    required: true
+
+runtime:
+  # 结构化协同模板固定使用 state_machine。
+  kind: state_machine
+  state_machine:
+    # nodes 定义工作流图。这个模板只有一个最终输出节点。
+    nodes:
+      # 单节点：直接回答用户问题。
+      answer_user_query:
+        # kind 固定为 bot_task，表示 BCS 会向指定 bot 发送指令，并等待最终响应。
+        kind: bot_task
+        # display_name 是面向产品展示的节点名称，不是节点 id。
+        display_name: 回答用户问题
+        assignee:
+          # type 固定为 bot_binding，表示运行时通过 participants 解析实际 bot。
+          type: bot_binding
+          # binding 必须引用一个 participant 槽位 key。
+          binding: assistant
+        # instruction 会发送给被分配的 bot，不能为空。
+        instruction: 请直接、简洁地回答用户问题。只返回最终答案。
+        # final_output 表示这个节点的产物是本次协同运行的最终输出。
+        final_output: true

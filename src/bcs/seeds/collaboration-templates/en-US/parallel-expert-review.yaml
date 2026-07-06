@@ -1,0 +1,136 @@
+# Parallel Expert Review collaboration template.
+# This YAML describes only the collaboration strategy. It does not store concrete bot ids.
+# When creating a group, bind the logical roles below to actual bots via CreateGroupRequest.participant_bindings.
+
+# name is the product-facing display name for this collaboration template.
+name: Parallel Expert Review
+
+metadata:
+  # description explains the template goal. It is not used by runtime scheduling.
+  description: A project lead frames the review scope, multiple specialist bots review in parallel, then the lead synthesizes a unified result.
+
+# participants declares logical role slots. Node assignee.binding values must reference these keys.
+# Actual bots are supplied by group runtime binding; BCS infers BCS participant roles from driver_bot.
+participants:
+  # project_lead frames the review scope and synthesizes all expert feedback.
+  project_lead:
+    display_name: Project Lead
+    description: Frames the review scope and synthesizes specialist feedback into one result.
+    required: true
+
+  # solution_architect reviews technical feasibility.
+  solution_architect:
+    display_name: Solution Architect
+    description: Reviews technical feasibility, architecture choices, and execution risks.
+    required: true
+
+  # risk_analyst reviews risk, compliance, and blockers.
+  risk_analyst:
+    display_name: Risk Analyst
+    description: Reviews operational risk, compliance concerns, blockers, and caveats.
+    required: true
+
+  # value_analyst reviews user value and business impact.
+  value_analyst:
+    display_name: Value Analyst
+    description: Reviews user value, business impact, tradeoffs, and prioritization.
+    required: true
+
+runtime:
+  # Structured collaboration templates always use state_machine.
+  kind: state_machine
+  state_machine:
+    defaults:
+      # node_timeout_ms is the default time each node waits for a bot final response, in milliseconds.
+      # Nodes inherit this value unless they define their own node_timeout_ms.
+      node_timeout_ms: 120000
+      # max_attempts is the default retry budget for node failures.
+      # Nodes inherit this value unless they define their own max_attempts.
+      max_attempts: 2
+
+    # nodes defines the workflow graph. Each map key is the stable node id.
+    nodes:
+      # Entry node: turn the user request into a review brief, then fan out to multiple experts.
+      frame_review_scope:
+        # kind is fixed to bot_task, meaning BCS sends an instruction to the assigned bot and waits for a final response.
+        kind: bot_task
+        # display_name is the product-facing label, not the node id.
+        display_name: Frame Review Scope
+        # Framing should be short, so override the default timeout for this node.
+        node_timeout_ms: 60000
+        assignee:
+          # type is fixed to bot_binding, meaning the runtime resolves the bot through participants.
+          type: bot_binding
+          # binding must reference one participant slot key.
+          binding: project_lead
+        # instruction is sent to the assigned bot and must not be empty.
+        instruction: Summarize the user query into a short review brief. Name the goal, known constraints, and expected decision.
+        # transitions defines where execution moves after this node completes.
+        transitions:
+          # complete is the normal outcome for a bot_task.
+          complete:
+            # targets is the next batch of node ids. Here execution fans out to multiple parallel expert nodes.
+            targets:
+              - assess_solution_feasibility
+              - assess_operational_risk
+              - assess_business_value
+
+      # Parallel node 1: technical feasibility review.
+      assess_solution_feasibility:
+        kind: bot_task
+        display_name: Assess Solution Feasibility
+        assignee:
+          type: bot_binding
+          binding: solution_architect
+        # This node focuses only on feasibility, not final synthesis.
+        instruction: Review the brief from a technical feasibility perspective. Return key feasibility findings and implementation caveats.
+        transitions:
+          complete:
+            # The synthesis node waits until all parallel nodes complete.
+            targets:
+              - synthesize_review_result
+
+      # Parallel node 2: risk and compliance review.
+      assess_operational_risk:
+        kind: bot_task
+        display_name: Assess Operational Risk
+        assignee:
+          type: bot_binding
+          binding: risk_analyst
+        # This node focuses on risks, blockers, and mitigations.
+        instruction: Review the brief from a risk and compliance perspective. Return key risks, blockers, and mitigations.
+        transitions:
+          complete:
+            # The synthesis node waits until all parallel nodes complete.
+            targets:
+              - synthesize_review_result
+
+      # Parallel node 3: user value and business impact review.
+      assess_business_value:
+        kind: bot_task
+        display_name: Assess Business Value
+        assignee:
+          type: bot_binding
+          binding: value_analyst
+        # This node focuses on value assessment and priority recommendation.
+        instruction: Review the brief from a user value and business impact perspective. Return value assessment and priority recommendation.
+        transitions:
+          complete:
+            # The synthesis node waits until all parallel nodes complete.
+            targets:
+              - synthesize_review_result
+
+      # Join node: runs after all parallel expert nodes complete and produces the user-facing output.
+      synthesize_review_result:
+        kind: bot_task
+        display_name: Synthesize Review Result
+        # Synthesis merges multiple expert outputs, so give it more time and one extra retry.
+        node_timeout_ms: 180000
+        max_attempts: 3
+        assignee:
+          type: bot_binding
+          binding: project_lead
+        # This node produces the final review summary.
+        instruction: Combine the specialist reviews into one decision summary. Include recommendation, rationale, risks, and next steps.
+        # final_output marks this node artifact as the final output of the collaboration run.
+        final_output: true

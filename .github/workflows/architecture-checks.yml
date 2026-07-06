@@ -1,0 +1,69 @@
+name: Architecture Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: architecture-checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bcs:
+    name: BCS architecture checks
+    runs-on: ubuntu-latest
+    env:
+      BCS_BASE_REF: origin/${{ github.base_ref || 'main' }}
+      CARGO_TERM_COLOR: always
+      PR_BODY_FILE: /tmp/pr_body.txt
+    defaults:
+      run:
+        working-directory: src/bcs
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq protobuf-compiler ripgrep
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Cache Cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src/bcs/target
+          key: ${{ runner.os }}-cargo-arch-${{ hashFiles('src/bcs/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install architecture check tools
+        run: cargo install cargo-machete cargo-public-api --locked
+
+      - name: Write pull request body
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: printf '%s' "$PR_BODY" > "$PR_BODY_FILE"
+
+      - name: Run architecture checks
+        run: bash scripts/ci/arch-check.sh

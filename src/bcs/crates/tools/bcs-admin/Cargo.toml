@@ -1,0 +1,29 @@
+[package]
+name = "bcs-admin"
+description = "Operator tools for Bot Coordination Service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+bcs = { workspace = true }
+bcs-db-api = { workspace = true }
+bcs-db-local = { workspace = true }
+bcs-db-mysql = { workspace = true }
+bcs-domain = { workspace = true }
+clap = { workspace = true }
+hex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

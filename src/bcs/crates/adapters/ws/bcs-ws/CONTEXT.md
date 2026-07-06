@@ -1,0 +1,43 @@
+# bcs-ws Context
+
+## Provides
+
+- WebSocket delivery adapter for BCS.
+- Bot runtime entry under `src/bot/`.
+- Workbench/Web entry under `src/web/`.
+- Shared connection-state helpers under `src/shared/`.
+- Implementations of `BotDeliveryPort` and `FrontendDeliveryPort`.
+
+## Consumes
+
+- `bcs-service-api` traits and DTOs.
+- `bcs-protocol` wire frames.
+
+## Allowed dependencies
+
+- `service-api/*`
+- WebSocket framework crates such as `axum`, `tokio`, and `futures`
+
+## Forbidden dependencies
+
+- `bootstrap/bcs`
+- `services/*` concrete crates
+- Legacy DingTalk runtime modules
+- Auxiliary Ding logger crate
+- generic `channel/` abstractions
+
+## Configuration
+
+- Bootstrap injects delivery services, auth mode, and connection-related limits.
+- The adapter must not select concrete routing or message-flow implementations at runtime.
+
+## Runtime ownership
+
+The adapter owns WebSocket streams, `mpsc::Sender`, connection registries,
+frontend envelope stamping, and disconnect cleanup. It does not own routing or
+message lifecycle business decisions.
+
+## Tests
+
+- `cargo test --package bcs-ws --manifest-path src/bcs/Cargo.toml`
+- `cargo check --workspace --all-targets --manifest-path src/bcs/Cargo.toml`

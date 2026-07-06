@@ -1,0 +1,132 @@
+# 写作质检协同模板。
+# 这个 YAML 只描述协同策略，不存储具体 bot id。
+# 创建群时，通过 CreateGroupRequest.participant_bindings 把下面的逻辑角色绑定到实际 bot。
+
+# name 是这个协同模板面向产品展示的名称。
+name: 写作质检协同
+
+metadata:
+  # description 用来说明模板目标，不参与运行时调度。
+  description: 写作者先产出候选回答，经过自动质检后，通过则润色、未通过则修订，最终由负责人生成回复。
+
+# participants 声明逻辑角色槽位。节点里的 assignee.binding 必须引用这些 key。
+# 实际 bot 由群运行时 binding 提供，BCS 会根据 driver_bot 自动推导 BCS participant role。
+participants:
+  # writer 负责生成初稿，并在质检未通过时修订。
+  writer:
+    display_name: 写作者
+    description: 负责生成初稿，并在质量检查未通过时完成修订。
+    required: true
+
+  # editor 负责润色已通过的初稿，并生成最终回复。
+  editor:
+    display_name: 编辑
+    description: 负责润色通过质检的初稿，并生成面向用户的最终回复。
+    required: true
+
+runtime:
+  # 结构化协同模板固定使用 state_machine。
+  kind: state_machine
+  state_machine:
+    defaults:
+      # node_timeout_ms 是每个节点等待 bot 最终响应的默认时间，单位是毫秒。
+      # 节点没有单独配置 node_timeout_ms 时，会继承这个值。
+      node_timeout_ms: 120000
+      # max_attempts 是节点失败后的默认尝试次数。
+      # 节点没有单独配置 max_attempts 时，会继承这个值。
+      max_attempts: 2
+
+    # nodes 定义工作流图。每个 map key 都是稳定的节点 id。
+    nodes:
+      # 入口节点：生成候选回答，然后经过自动质检决定走通过还是修订路径。
+      draft:
+        # kind 固定为 bot_task，表示 BCS 会向指定 bot 发送指令，并等待最终响应。
+        kind: bot_task
+        # display_name 是面向产品展示的节点名称，不是节点 id。
+        display_name: 生成初稿
+        # 初稿是最关键的节点，保留默认尝试次数，但缩短单次超时时间。
+        node_timeout_ms: 90000
+        max_attempts: 2
+        assignee:
+          # type 固定为 bot_binding，表示运行时通过 participants 解析实际 bot。
+          type: bot_binding
+          # binding 必须引用一个 participant 槽位 key。
+          binding: writer
+        # instruction 会发送给被分配的 bot，不能为空。
+        instruction: |
+          请根据用户输入生成一版候选方案。
+          输出需要包含：结论、依据、风险和下一步建议。
+        # judge 会在当前节点产出 artifact 后运行，并根据质检结果选择后续路径。
+        judge:
+          # type 固定为 llm，表示使用 LLM 按下面的标准评估节点产物。
+          type: llm
+          # criteria 是验收标准，每一项都可能影响最终 outcome。
+          criteria:
+            - 是否明确回答了用户问题？
+            - 是否包含结论、依据、风险和下一步建议？
+            - 是否存在明显逻辑矛盾？
+            - 是否足够具体，可以直接进入最终汇总？
+          # outcomes 必须和当前节点 transitions 里的 outcome key 一一对应。
+          outcomes:
+            - approved
+            - rejected
+        # transitions 定义当前节点完成后的流转目标。这里由质检结果选择路径。
+        transitions:
+          # approved 表示初稿通过质检，进入润色。
+          approved:
+            targets:
+              - polish
+          # rejected 表示初稿未通过质检，需要修订。
+          rejected:
+            targets:
+              - revise
+
+      # 通过路径：对已通过质检的初稿做轻量润色。
+      polish:
+        kind: bot_task
+        display_name: 润色初稿
+        assignee:
+          type: bot_binding
+          binding: editor
+        # 润色时应保持原结论不变，不引入新的大方向。
+        instruction: |
+          初稿已通过质检。请基于初稿内容做轻量润色。
+          保持原结论，不要引入新的大方向。
+        transitions:
+          complete:
+            # 通过和修订路径最终都汇聚到 finalize。
+            targets:
+              - finalize
+
+      # 修订路径：根据质检结果和上游内容修订初稿。
+      revise:
+        kind: bot_task
+        display_name: 修订初稿
+        # 修订节点可能需要更多时间，并额外增加一次尝试机会。
+        node_timeout_ms: 180000
+        max_attempts: 3
+        assignee:
+          type: bot_binding
+          binding: writer
+        # 修订时需要根据质检意见补齐和修正，但不直接产出最终回答。
+        instruction: |
+          初稿未通过质检。请根据质检结果和上游内容重新修订。
+          补齐缺失信息，修正不清晰或不可靠的部分。
+        transitions:
+          complete:
+            # 通过和修订路径最终都汇聚到 finalize。
+            targets:
+              - finalize
+
+      # 终点节点：基于实际运行过的路径生成最终回答。
+      finalize:
+        kind: bot_task
+        display_name: 生成最终回复
+        assignee:
+          type: bot_binding
+          binding: editor
+        # 这个节点产出最终回答。
+        instruction: |
+          请汇总已完成路径的输出，生成最终答复。
+        # final_output 表示这个节点的产物是本次协同运行的最终输出。
+        final_output: true

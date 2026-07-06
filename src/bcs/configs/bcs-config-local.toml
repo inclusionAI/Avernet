@@ -1,0 +1,171 @@
+# BCS local configuration for public development.
+#
+# This file is safe to publish: it uses loopback addresses, local SQLite storage,
+# local auth, and non-production placeholder values only.
+
+bind = "127.0.0.1"
+port = 21000
+bots_base_dir = "./data/bots"
+
+max_history_per_session = 1000
+store_messages = false
+strict_container_validation = false
+
+# Switch for Provider 2.0 SSE gray-list mode. Default is false.
+# When false, Provider 2.0 downlink rolls out over SSE for all providers.
+# When true, only created_by entries in the gray list use SSE.
+provider_stream_gray_enabled = false
+
+# created_by staff IDs whose Provider 2.0 bots receive chat.send with SSE
+# transport when gray-list mode is enabled.
+provider_stream_gray_created_by = []
+
+max_groups_as_driver = 20
+max_group_members = 20
+max_groups_as_member = 20
+max_group_messages = 1000
+group_chat_delay_min_ms = 0
+group_chat_delay_max_ms = 0
+
+bcs_endpoint = "http://127.0.0.1:21000"
+botchat_url = "http://localhost:8000"
+register_path = "/bcn/register"
+default_visibility = "protected"
+onboard_binding_enabled = false
+
+dingtalk_accounts = []
+api_keys = []
+allowed_switch_provider_ids = []
+
+[cors]
+allowed_origins = [
+  "http://localhost:8000",
+  "http://127.0.0.1:8000",
+  "http://localhost:21000",
+  "http://127.0.0.1:21000",
+]
+
+[metrics]
+enabled = false
+mode = "pull"
+endpoint_path = "/metrics"
+
+[llm]
+type = "none"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+# api_key = "replace-with-llm-api-key"
+model = "gpt-4.1-mini"
+timeout_ms = 120000
+temperature = 0
+max_tokens = 4096
+structured_output = "json_schema"
+
+[master_election]
+enabled = false
+lock_ttl_secs = 30
+renewal_interval_secs = 10
+
+[database]
+type = "sqlite"
+
+[database.sqlite]
+path = "bcs.db"
+
+[collaboration.templates]
+storage_type = "file"
+base_dir = "seeds/collaboration-templates"
+default_language = "zh-CN"
+
+[logging]
+default_level = "debug"
+console = true
+
+[[logging.outputs]]
+name = "messages"
+path = "./logs"
+file = "bcs-messages.log"
+level = "info"
+rotation = "daily"
+format = "json"
+targets = ["bcs_message"]
+max_keep_days = 7
+
+[[logging.outputs]]
+name = "chat-digest"
+path = "./logs"
+file = "bcs-chat-digest.log"
+level = "info"
+rotation = "daily"
+targets = ["bcs_chat_digest"]
+max_keep_days = 7
+
+[logging.tags]
+bcs_chat_digest = "off"
+
+[logging.modules]
+hyper = "warn"
+tower_http = "warn"
+
+[auth_sdk]
+client_id = ""
+secret_key = ""
+app_key = ""
+app_name = "bcs"
+remote_server_domain = ""
+use_remote_login_check = false
+
+[auth]
+chain = ["local", "session"]
+require_authentication = false
+mock_user_id = "000000"
+mock_user_name = "guest"
+allow_mock_headers = true
+
+[bcsfuse]
+enabled = false
+url = "http://127.0.0.1:8765"
+fusion_timeout_ms = 120000
+sync_timeout_ms = 10000
+profile_id = "default"
+recommend_top_k = 10
+recommend_min_score = 0.1
+
+# Message history storage configuration. Defaults below match the upstream
+# example so local development exercises the new message store path.
+[message_history]
+cutoff_timestamp = 1782360000000
+manager_worker_cutoff_timestamp = 1783180800000
+new_participant_visible_limit = 100000000
+
+# Default page size when the caller does not specify a limit.
+# Set to a large value so the default limit is effectively disabled.
+default_page_limit = 100000000
+
+# Hard cap on page size to prevent excessive queries.
+# Set to a large value so the cap is effectively disabled.
+max_page_limit = 100000000
+
+[security_gateway]
+# 开源默认：noop provider，不出网、永远放行。
+# noop 只需 provider 字段；dry_run / domain / endpoint / timeout_ms 仅 agentpass provider 使用。
+provider = "noop"
+
+[security.outbound_url]
+block_private_networks = true
+allow_loopback = false
+
+[invite]
+token_secret = "local-development-only-token-secret"
+default_ttl_seconds = 86400
+base_url = "http://127.0.0.1:21000"
+group_link_url = "http://localhost:8000/groups/{group_id}"
+session_link_url = "http://localhost:8000/sessions/{session_id}"
+
+[manifest]
+schema_version = 1
+
+[[manifest.bundles]]
+name = "bcsPanel"
+type = "file"
+file = "assets/panel/dist/index.umd.js"

@@ -1,0 +1,26 @@
+{
+  "name": "openclaw-plugins",
+  "description": "",
+  "version": "0.0.0",
+  "main": "dist/index.js",
+  "module": "dist/index.esm.js",
+  "typings": "dist/index.d.ts",
+  "scripts": {
+    "ci": "npm run lint --if-present",
+    "init:plugin": "node scripts/init-plugin-package.mjs",
+    "prePublishOnly": "echo \"true\""
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "paulApps/*"
+  ],
+  "devDependencies": {},
+  "engines": {
+    "install-node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://example.com/ocb/openclaw-plugins"
+  }
+}

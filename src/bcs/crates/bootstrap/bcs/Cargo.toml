@@ -1,0 +1,167 @@
+[package]
+name        = "bcs"
+description = "Bot Coordination Service for multi-bot collaboration"
+edition     = { workspace = true }
+license     = { workspace = true }
+repository  = { workspace = true }
+rust-version = { workspace = true }
+version     = { workspace = true }
+
+[[bin]]
+name = "bcs"
+path = "src/main.rs"
+
+[features]
+default = ["prometheus-metrics"]
+metrics = ["prometheus-metrics"]
+prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
+test-utils = []
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+
+# HTTP server
+axum           = { workspace = true }
+tower          = { workspace = true }
+tower-http     = { workspace = true, features = ["trace", "catch-panic"] }
+
+# Serialization
+serde      = { workspace = true }
+serde_json = { workspace = true }
+toml       = { workspace = true }
+
+# Error handling
+anyhow    = { workspace = true }
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-appender    = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Async
+async-trait = { workspace = true }
+futures     = { workspace = true }
+inventory   = { workspace = true }
+
+# HTTP client (for calling bot processes)
+reqwest = { workspace = true }
+
+# WebSocket client (for bot communication and DingTalk Stream Mode)
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+native-tls = "0.2"
+tokio-native-tls = "0.3"
+
+# UUID
+uuid = { workspace = true }
+
+# Random
+fastrand = { workspace = true }
+
+# Regex
+regex = { workspace = true }
+
+# Time
+time = { workspace = true }
+chrono = { workspace = true }
+
+# Crypto for Alibaba Cloud signing
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+# Directories (for config file discovery)
+dirs = { workspace = true }
+
+# Metrics (optional)
+metrics = { workspace = true, optional = true }
+metrics-exporter-prometheus = { workspace = true, optional = true }
+
+# Workspace crates
+bcs-domain      = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-services-container = { workspace = true }
+bcs-protocol    = { workspace = true }
+bcs-config      = { workspace = true }
+bcs-config-api  = { workspace = true }
+bcs-route-security = { workspace = true }
+bcs-cache-api   = { workspace = true }
+bcs-db-api      = { workspace = true }
+bcs-llm-api     = { workspace = true }
+bcs-user-directory-api = { workspace = true }
+bcs-auth-api    = { workspace = true }
+bcs-auth-session = { workspace = true }
+bcs-auth-google  = { workspace = true }
+bcs-auth-github  = { workspace = true }
+bcs-auth-wechat  = { workspace = true }
+bcs-auth-alipay  = { workspace = true }
+bcs-auth-local  = { workspace = true }
+bcs-auth-oauth  = { workspace = true }
+bcs-user-identity = { workspace = true }
+bcs-cache-local = { workspace = true }
+bcs-cache-redis = { workspace = true }
+bcs-db-local    = { workspace = true }
+bcs-db-mysql    = { workspace = true }
+bcs-ws          = { workspace = true }
+bcs-bot = { workspace = true }
+bcs-group    = { workspace = true }
+bcs-message-flow = { workspace = true }
+bcs-routing  = { workspace = true }
+bcs-security-gateway-api = { workspace = true }
+bcs-security-gateway-local = { workspace = true }
+bcs-fusion      = { workspace = true }
+bcs-fuse-client = { workspace = true }
+bcs-leader-election = { workspace = true }
+bcs-proposal    = { workspace = true }
+bcs-friend      = { workspace = true }
+bcs-relation    = { workspace = true }
+bcs-system-message = { workspace = true }
+bcs-secret   = { workspace = true }
+bcs-secret-local = { workspace = true }
+ding-logger  = { workspace = true }
+bcs-http      = { workspace = true }
+bcs-provider-http = { workspace = true }
+bcs-bot-store = { workspace = true }
+bcs-friend-store = { workspace = true }
+bcs-group-store = { workspace = true }
+bcs-relation-store = { workspace = true }
+bcs-session = { workspace = true }
+bcs-session-store = { workspace = true }
+bcs-message = { workspace = true }
+bcs-message-store = { workspace = true }
+bcs-callback = { workspace = true }
+bcs-collaboration-template = { workspace = true }
+bcs-collaboration-runtime = { workspace = true }
+bcs-collaboration-store = { workspace = true }
+bcs-judge = { workspace = true }
+bcs-llm-openai-compatible = { workspace = true }
+
+# URL encoding
+urlencoding = { workspace = true }
+
+# Secrets handling
+secrecy = { version = "0.8", features = ["serde"] }
+
+# Base64 encoding
+base64 = "0.22"
+
+# CLI argument parsing
+clap = { workspace = true }
+
+# Network interface enumeration
+if-addrs = "0.15"
+
+# URL query string parsing (for AxumRequestAdapter)
+form_urlencoded = "1"
+
+[build-dependencies]
+chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+dirs = "5.0"
+futures-util = "0.3"
+bcs = { path = ".", features = ["test-utils"] }
+bcs-cli = { workspace = true }
+serial_test = "3"

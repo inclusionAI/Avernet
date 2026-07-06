@@ -1,0 +1,39 @@
+[package]
+name         = "bcs-system-message"
+description  = "System message dispatching and notification for BCS"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Async
+async-trait = { workspace = true }
+
+# Serialization
+serde_json = { workspace = true }
+
+# Date / time
+chrono = { workspace = true }
+
+# UUID generation
+uuid = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Async utilities
+futures = { workspace = true }
+
+# Workspace crates
+bcs-domain      = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-protocol    = { workspace = true }
+
+[dev-dependencies]
+tokio           = { workspace = true, features = ["rt", "macros"] }
+bcs-test-support = { workspace = true }

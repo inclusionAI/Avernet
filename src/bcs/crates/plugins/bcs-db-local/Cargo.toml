@@ -1,0 +1,19 @@
+[package]
+name         = "bcs-db-local"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bcs-db-api = { workspace = true }
+async-trait = { workspace = true }
+rusqlite   = { workspace = true }
+
+[dev-dependencies]
+bcs-test-support = { workspace = true }
+tokio            = { workspace = true, features = ["macros", "rt"] }

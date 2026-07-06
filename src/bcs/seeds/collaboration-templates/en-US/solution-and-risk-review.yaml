@@ -1,0 +1,147 @@
+# Product default template for structured collaboration.
+# This YAML describes only the collaboration strategy. It does not store concrete bot ids.
+# When creating a group, bind the logical roles below to actual bots through CreateGroupRequest.participant_bindings.
+
+# name is the product-facing display name and helps users identify this collaboration template.
+name: Solution & Risk Review
+
+metadata:
+  # description explains the template goal. It is not used by runtime scheduling.
+  description: "A ready-to-run structured collaboration example: first frame the user request, then run solution analysis and risk review in parallel, then synthesize a user-facing answer."
+
+# participants declares logical role slots. Node assignee.binding values must reference these keys.
+# Actual bots are supplied by group runtime binding, and BCS infers BCS participant roles from driver_bot.
+participants:
+  # coordinator frames the request and synthesizes the final answer.
+  coordinator:
+    display_name: Coordinator
+    description: Frames the user request and synthesizes the final answer.
+    required: true
+
+  # domain_expert analyzes the solution direction.
+  domain_expert:
+    display_name: Domain Expert
+    description: Analyzes solution feasibility, execution path, and needed user inputs.
+    required: true
+
+  # risk_reviewer reviews risks and constraints.
+  risk_reviewer:
+    display_name: Risk Reviewer
+    description: Reviews risks, constraints, caveats, and mitigation suggestions.
+    required: true
+
+runtime:
+  # kind is fixed to state_machine, meaning structured collaboration runs through the node graph below.
+  kind: state_machine
+  state_machine:
+    defaults:
+      # node_timeout_ms is the default time each node waits for a bot final response, in milliseconds.
+      # Nodes inherit this value unless they define their own node_timeout_ms.
+      node_timeout_ms: 120000
+      # max_attempts is the default retry budget for node failures.
+      # Nodes inherit this value unless they define their own max_attempts.
+      max_attempts: 2
+
+    # nodes defines every node in the collaboration workflow. Each map key is the node id.
+    nodes:
+      # Entry node: turn the user request into a clear task brief.
+      frame_task:
+        # kind is fixed to bot_task, meaning BCS sends an instruction to the assigned bot and waits for a final response.
+        kind: bot_task
+        # display_name is the product-facing label, not the node id.
+        display_name: Frame Task
+        # The entry node only needs to produce a short brief, so override the global timeout to 60 seconds.
+        node_timeout_ms: 60000
+        assignee:
+          # type is fixed to bot_binding, meaning the runtime resolves the bot through participants.
+          type: bot_binding
+          # binding must reference one participant slot key.
+          binding: coordinator
+        # instruction is sent to the assigned bot and must not be empty.
+        instruction: |
+          You are the coordinator of a structured collaboration workflow. Read the user request and produce a short task brief.
+
+          The brief must include:
+          1. The problem the user wants to solve.
+          2. The solution direction that should be analyzed.
+          3. The risks or constraints that need attention.
+
+          Return only the task brief. Do not provide the final answer.
+        # transitions declares where execution moves after this node completes.
+        transitions:
+          # complete is the normal outcome for a bot_task.
+          complete:
+            # targets is the next batch of node ids. Here execution enters two parallel branches.
+            targets:
+              - analyze_solution
+              - review_risks
+
+      # Parallel branch 1: domain or solution analysis.
+      analyze_solution:
+        kind: bot_task
+        display_name: Analyze Solution
+        assignee:
+          type: bot_binding
+          binding: domain_expert
+        # This node only handles solution analysis. Final synthesis is handled by synthesize_final_answer.
+        instruction: |
+          You are the solution analysis expert. Based on the upstream task brief, analyze the user request from the perspective of feasibility and execution path.
+
+          Return:
+          1. Recommended solution.
+          2. Key rationale.
+          3. Information the user may need to provide.
+
+          Focus on solution analysis. Do not produce the final summary.
+        transitions:
+          complete:
+            # Point to the synthesis node. The synthesis node waits until both parallel branches complete.
+            targets:
+              - synthesize_final_answer
+
+      # Parallel branch 2: risk, constraint, or quality review.
+      review_risks:
+        kind: bot_task
+        display_name: Review Risks
+        assignee:
+          type: bot_binding
+          binding: risk_reviewer
+        # This node only handles risk review. Final synthesis is handled by synthesize_final_answer.
+        instruction: |
+          You are the risk review expert. Based on the upstream task brief, identify risks, limitations, and important caveats in the request.
+
+          Return:
+          1. Main risks.
+          2. Practices to avoid.
+          3. Suggestions to reduce risk.
+
+          Focus on risk review. Do not produce the final summary.
+        transitions:
+          complete:
+            # Point to the synthesis node. The synthesis node waits until both parallel branches complete.
+            targets:
+              - synthesize_final_answer
+
+      # Join node: runs after both parallel branches complete and produces the final user-facing output.
+      synthesize_final_answer:
+        kind: bot_task
+        display_name: Synthesize Final Answer
+        # The synthesis node combines multiple upstream results, so give it more time and retry budget.
+        node_timeout_ms: 180000
+        max_attempts: 3
+        assignee:
+          type: bot_binding
+          binding: coordinator
+        # This node produces the final answer.
+        instruction: |
+          You are the final answer synthesizer. Combine the upstream solution analysis and risk review into an answer that can be shown directly to the user.
+
+          The final answer must include:
+          1. Conclusion or recommended solution.
+          2. Key rationale.
+          3. Main risks and caveats.
+          4. Suggested next steps.
+
+          Do not expose the internal collaboration process. Return only the final answer.
+        # final_output marks this node artifact as the final output of the structured collaboration run.
+        final_output: true

@@ -1,0 +1,40 @@
+# Guided single answer template.
+# This YAML describes a minimal structured collaboration with one logical bot role.
+# It does not store a concrete bot id; bind assistant through CreateGroupRequest.participant_bindings when creating a group.
+
+# name is the product-facing display name for this collaboration template.
+name: Guided Single Answer
+
+metadata:
+  # description explains the template goal. It is not used by runtime scheduling.
+  description: A minimal state-machine group where one assistant bot answers the user query.
+
+# participants declares logical role slots. This minimal template needs only one assistant slot.
+participants:
+  # assistant is the only bot role and produces the final answer.
+  assistant:
+    display_name: Assistant
+    description: Answers the user request and produces the final response.
+    required: true
+
+runtime:
+  # kind is fixed to state_machine for structured collaboration templates.
+  kind: state_machine
+  state_machine:
+    # nodes defines the workflow graph. This template has a single final-output node.
+    nodes:
+      # Single node: answer the user query directly.
+      answer_user_query:
+        # kind is fixed to bot_task, meaning BCS sends an instruction to the assigned bot and waits for a final response.
+        kind: bot_task
+        # display_name is the product-facing label, not the node id.
+        display_name: Answer User Query
+        assignee:
+          # type is fixed to bot_binding, meaning the runtime resolves the bot through participants.
+          type: bot_binding
+          # binding must reference one participant slot key.
+          binding: assistant
+        # instruction is sent to the assigned bot and must not be empty.
+        instruction: Answer the user query directly and concisely. Return only the final answer.
+        # final_output marks this node artifact as the final output of the collaboration run.
+        final_output: true

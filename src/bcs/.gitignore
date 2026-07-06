@@ -1,0 +1,31 @@
+# Build output
+/target/
+
+# IDE
+/.idea/
+*.iml
+
+# macOS
+.DS_Store
+docs/temp
+bots-scenarios-test-dir
+three_bots_test_dir
+bcs_test_tmp
+bcs_bots_test_dir
+# Cargo.lock
+
+bcs.log
+# SQLite WAL/SHM runtime sidecar files (bcs.db itself ignored at repo root)
+bcs.db-shm
+bcs.db-wal
+.bcs.pid
+.bcs-env
+.backup*
+config/bcs-config.json
+
+CLAUDE.local.md
+.superpowers/
+
+# Local smoke-test scratch (not source)
+PR2_SMOKE_TEST_RESULTS.txt
+SMOKE_TEST_RUNTIME.md

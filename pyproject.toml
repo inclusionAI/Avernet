@@ -1,0 +1,14 @@
+[project]
+name = "ocb"
+version = "0.1.0"
+description = "A multi-bot AI workbench and coordination service."
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "Apache-2.0" }
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = []
