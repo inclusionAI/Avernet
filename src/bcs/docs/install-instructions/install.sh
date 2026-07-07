@@ -51,6 +51,7 @@ log_error() {
 
 HUMAN_TOKEN=""
 BOT_NAME=""
+BCS_ENDPOINT_EXPLICIT=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -64,6 +65,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --bcs-endpoint)
             BCS_ENDPOINT="$2"
+            BCS_ENDPOINT_EXPLICIT=true
             shift 2
             ;;
         --help)
@@ -135,6 +137,82 @@ if [ -z "$OPENCLAW_WORKSPACE" ]; then
     OPENCLAW_WORKSPACE="${HOME}/.openclaw"
     log_warn "OPENCLAW_WORKSPACE environment variable not set, using default: ${OPENCLAW_WORKSPACE}"
 fi
+
+derive_bcs_websocket_url() {
+    # Derive the WebSocket URL the plugin connects to from the HTTP endpoint.
+    #   http(s)://<host>:<port>  ->  ws(s)://<normalized-host>:<port>/ws/bot
+    # localhost is normalized to 127.0.0.1 so the URL matches the documented
+    # local-dev form (ws://127.0.0.1:21000/ws/bot).
+    local scheme="ws"
+    local host_port="$BCS_ENDPOINT"
+
+    case "$BCS_ENDPOINT" in
+        https://*)
+            scheme="wss"
+            host_port="${BCS_ENDPOINT#https://}"
+            ;;
+        http://*)
+            scheme="ws"
+            host_port="${BCS_ENDPOINT#http://}"
+            ;;
+        *)
+            log_error "Invalid BCS_ENDPOINT format (must start with http:// or https://): ${BCS_ENDPOINT}" >&2
+            exit 1
+            ;;
+    esac
+
+    host_port="${host_port//localhost/127.0.0.1}"
+    host_port="${host_port%/}"
+    printf '%s://%s/ws/bot' "$scheme" "$host_port"
+}
+
+write_openclaw_bcs_config() {
+    local config_file="${OPENCLAW_WORKSPACE}/openclaw.json"
+    local tmp_file
+    tmp_file="$(mktemp)"
+
+    mkdir -p "$OPENCLAW_WORKSPACE"
+
+    if [ -f "$config_file" ]; then
+        if ! jq --arg bcs_url "$BCS_URL" --arg force_bcs_url "$BCS_ENDPOINT_EXPLICIT" '
+            .channels = (.channels // {})
+            | .channels.bcs = (.channels.bcs // {})
+            | .channels.bcs.enabled = true
+            | if (($force_bcs_url == "true") or (((.channels.bcs.bcsUrl // "") | length) == 0)) then
+                .channels.bcs.bcsUrl = $bcs_url
+              else
+                .
+              end
+            | .channels.bcs.heartbeatIntervalMs = (.channels.bcs.heartbeatIntervalMs // 60000)
+        ' "$config_file" > "$tmp_file"; then
+            rm -f "$tmp_file"
+            log_error "Failed to update OpenClaw config: ${config_file}"
+            exit 1
+        fi
+    else
+        jq -n --arg bcs_url "$BCS_URL" '{
+            channels: {
+                bcs: {
+                    enabled: true,
+                    bcsUrl: $bcs_url,
+                    heartbeatIntervalMs: 60000
+                }
+            }
+        }' > "$tmp_file"
+    fi
+
+    mv "$tmp_file" "$config_file"
+    local effective_bcs_url
+    effective_bcs_url="$(jq -r '.channels.bcs.bcsUrl // empty' "$config_file" 2>/dev/null || true)"
+    log_success "OpenClaw BCS config written to: ${config_file}"
+    if [ "$effective_bcs_url" = "$BCS_URL" ]; then
+        log_info "  channels.bcs.bcsUrl: ${BCS_URL}"
+    else
+        log_info "  channels.bcs.bcsUrl preserved: ${effective_bcs_url}"
+    fi
+}
+
+BCS_URL="$(derive_bcs_websocket_url)"
 
 log_success "Environment check passed"
 echo ""
@@ -266,30 +344,6 @@ if [ "$SKIP_REGISTER" = false ]; then
 
     mkdir -p "$BCS_DIR"
 
-    # Derive the WebSocket URL the plugin connects to from the HTTP endpoint.
-    #   http(s)://<host>:<port>  ->  ws(s)://<normalized-host>:<port>/ws/bot
-    # localhost is normalized to 127.0.0.1 so the URL matches the documented
-    # local-dev form (ws://127.0.0.1:21000/ws/bot).
-    BCS_SCHEME="ws"
-    BCS_HOST_PORT="$BCS_ENDPOINT"
-    case "$BCS_ENDPOINT" in
-        https://*)
-            BCS_SCHEME="wss"
-            BCS_HOST_PORT="${BCS_ENDPOINT#https://}"
-            ;;
-        http://*)
-            BCS_SCHEME="ws"
-            BCS_HOST_PORT="${BCS_ENDPOINT#http://}"
-            ;;
-        *)
-            log_error "Invalid BCS_ENDPOINT format (must start with http:// or https://): ${BCS_ENDPOINT}"
-            exit 1
-            ;;
-    esac
-    # Normalize localhost -> 127.0.0.1 (only the host segment, before any port/path).
-    BCS_HOST_PORT="${BCS_HOST_PORT//localhost/127.0.0.1}"
-    BCS_URL="${BCS_SCHEME}://${BCS_HOST_PORT}/ws/bot"
-
     cat > "$SESSION_FILE" <<EOF
 {
   "bot_uuid": "${BOT_UUID}",
@@ -304,6 +358,14 @@ EOF
     log_success "Credentials saved to: ${SESSION_FILE}"
     echo ""
 fi
+
+# ============================================================================
+# Configure OpenClaw BCS channel
+# ============================================================================
+
+log_info "Writing OpenClaw BCS channel config..."
+write_openclaw_bcs_config
+echo ""
 
 # ============================================================================
 # Install BCN plugin
