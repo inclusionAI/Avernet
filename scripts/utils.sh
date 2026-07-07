@@ -1000,9 +1000,16 @@ check_relay_installed() {
 
 # ============ BCS 检查 ============
 
+# Resolve the bcs server binary path. Honors BCS_BIN override (set by
+# --with-bcs-coverage, which builds bcs into target/cov-e2e/.../debug);
+# falls back to target/debug/bcs (matches start_bcs_binary's BCS_BIN usage).
+bcs_bin_path() {
+    echo "${BCS_BIN:-${BCS_DIR}/target/debug/bcs}"
+}
+
 # 检查 BCS binary 是否存在
 check_bcs_binary() {
-    local bcs_bin="${BCS_DIR}/target/debug/bcs"
+    local bcs_bin; bcs_bin="$(bcs_bin_path)"
     if [ -f "$bcs_bin" ] && [ -x "$bcs_bin" ]; then
         return 0
     else
@@ -1010,9 +1017,16 @@ check_bcs_binary() {
     fi
 }
 
+# Resolve the bcs-cli binary path. Honors BCS_CLI_BIN override (set by
+# --with-bcs-coverage, which builds bcs-cli into target/cov-e2e/.../debug
+# rather than the default target/debug); falls back to target/debug/bcs-cli.
+bcs_cli_path() {
+    echo "${BCS_CLI_BIN:-${BCS_DIR}/target/debug/bcs-cli}"
+}
+
 # 检查 bcs-cli binary 是否存在
 check_bcs_cli_binary() {
-    local bcs_cli="${BCS_DIR}/target/debug/bcs-cli"
+    local bcs_cli; bcs_cli="$(bcs_cli_path)"
     if [ -f "$bcs_cli" ] && [ -x "$bcs_cli" ]; then
         return 0
     else

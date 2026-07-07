@@ -1,6 +1,15 @@
 # Build output
 /target/
 
+# Stray profraw from instrumented build scripts / proc-macros during
+# `cargo build` with RUSTFLAGS=-Cinstrument-coverage. These processes run
+# without LLVM_PROFILE_FILE and write default-*.profraw to cwd. Harmless
+# (cargo llvm-cov report only reads profraw under llvm-cov-target/), but
+# noisy and easy to accidentally commit. *.profraw catches the merged
+# output and any future naming too.
+default_*.profraw
+*.profraw
+
 # IDE
 /.idea/
 *.iml

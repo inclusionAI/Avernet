@@ -39,12 +39,6 @@ matches_any() {
   printf '%s\n' "$changed_files" | grep -Eq "$pattern"
 }
 
-run_required() {
-  echo ""
-  echo "== required: $* =="
-  "$@"
-}
-
 echo "base: $base"
 echo "head: $head"
 
@@ -55,7 +49,9 @@ fi
 
 if matches_any '^src/bcs/'; then
   if [[ "${OCB_PRE_PUSH_ENABLE_BCS:-1}" == "1" ]]; then
-    run_required "$repo_root/src/bcs/scripts/ci_test.sh" --base "$base" --head "$head" --fast-fail
+    echo ""
+    echo "== required: src/bcs/scripts/pre_push.sh --base $base --head $head =="
+    "$repo_root/src/bcs/scripts/pre_push.sh" --base "$base" --head "$head"
   else
     echo "bcs changes detected; BCS/BCN CI gate skipped (OCB_PRE_PUSH_ENABLE_BCS=0)"
   fi
