@@ -585,7 +585,7 @@ bots_dynamic_start_openclaw() {
 
     profile_dir="$(bcs_bot_profile_dir "$profile")"
     workspace_dir="$(bots_dynamic_workspace_dir "$name" "$profile" "$source")"
-    bcs_cli_dir="${BCS_DIR}/target/debug"
+    bcs_cli_dir="$(dirname "$(bcs_cli_path)")"
     existing_pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
     if [ -n "$existing_pids" ]; then
         log_error "${name} port ${port} is already in use by PID(s): $(echo "$existing_pids" | tr '\n' ' ' | xargs)"
@@ -666,7 +666,7 @@ bots_dynamic_wait_ready() {
 }
 
 bots_dynamic_onboard() {
-    local bcs_cli="${BCS_DIR}/target/debug/bcs-cli"
+    local bcs_cli; bcs_cli="$(bcs_cli_path)"
     local name profile port source summary domains skills scopes profile_dir session_file token
 
     while IFS=$'\t' read -r name profile port source summary domains skills scopes; do
@@ -936,7 +936,7 @@ bots_dynamic_prereqs() {
     fi
 
     if check_bcs_cli_binary; then
-        prereq_ok "bcs-cli: ${BCS_DIR}/target/debug/bcs-cli"
+        prereq_ok "bcs-cli: $(bcs_cli_path)"
     else
         prereq_error "bcs-cli not found. Run: $(singlebox_cmd setup bcs)"
         has_error=true
@@ -1352,7 +1352,7 @@ bots_prereqs() {
     fi
 
     if check_bcs_cli_binary; then
-        prereq_ok "bcs-cli: ${BCS_DIR}/target/debug/bcs-cli"
+        prereq_ok "bcs-cli: $(bcs_cli_path)"
     else
         prereq_error "bcs-cli not found. Run: $(singlebox_cmd setup bcs)"
         has_error=true

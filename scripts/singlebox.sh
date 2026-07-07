@@ -119,6 +119,7 @@ ENGINE_STATE_FILE="${LOG_DIR}/.engine_type"
 
 # ============ 运行模式 ============
 LOCAL_MODE=true
+with_bcs_coverage=0
 STANDALONE_MODE=false
 
 # Local Mode directories
@@ -397,6 +398,7 @@ show_help() {
     echo "  --profile-dir DIR            Bot persona source dir for 'bots' target; requires DIR/bots.json"
     echo "  --bcs-auto-onboard            Legacy compatibility flag; use bcs_bots for BCS + bots"
     echo "  --no-bcs-auto-onboard         Legacy compatibility flag; use bcs for BCS-only"
+    echo "  --with-bcs-coverage           Build instrumented bcs (target/cov-e2e) for e2e line coverage"
     echo "  -h, --help                    Show this help message"
     echo ""
     echo "Services:"
@@ -432,10 +434,80 @@ show_help() {
     echo ""
 }
 
+# 编译插编 bcs 到 target/cov-e2e/llvm-cov-target/ 并 export BCS_BIN/LLVM_PROFILE_FILE。
+# 由 --with-bcs-coverage 触发;缓存:已存在则 skip 编译。
+#
+# 路径布局:cargo llvm-cov report 从 <CARGO_TARGET_DIR>/llvm-cov-target/ 读 profraw
+# 和对象文件。故 build 时 CARGO_TARGET_DIR 必须 = target/cov-e2e/llvm-cov-target,
+# 使 bcs 落 .../llvm-cov-target/debug/bcs,profraw 也落 .../llvm-cov-target/*.profraw,
+# 与对象同层,report 一搜就对。
+prepare_bcs_coverage_bin() {
+    local cov_root="$BCS_DIR/target/cov-e2e"
+    local cov_dir="$cov_root/llvm-cov-target"
+    local cov_bin="$cov_dir/debug/bcs"
+
+    # 环境校验:cargo-llvm-cov + llvm-tools(rustup component list --installed
+    # 输出带 target 后缀,如 llvm-tools-x86_64-apple-darwin,用 ^llvm-tools 匹配)
+    if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
+        log_error "cargo-llvm-cov not installed. Run: cargo install cargo-llvm-cov --locked"
+        exit 1
+    fi
+    if ! rustup component list --installed 2>/dev/null | grep -q '^llvm-tools'; then
+        log_error "llvm-tools component not installed. Run: rustup component add llvm-tools"
+        exit 1
+    fi
+
+    # Keep the profraw dir present even on a cache hit (it may have been pruned).
+    mkdir -p "$cov_dir"
+
+    if [[ ! -x "$cov_bin" ]] || [[ "${BCS_COVERAGE_FORCE_REBUILD:-0}" == "1" ]]; then
+        if [[ "${BCS_COVERAGE_FORCE_REBUILD:-0}" == "1" ]]; then
+            log_info "Force-rebuilding instrumented bcs (BCS_COVERAGE_FORCE_REBUILD=1)..."
+        else
+            log_info "Building instrumented bcs for coverage (target/cov-e2e/llvm-cov-target)..."
+        fi
+        (
+            cd "$BCS_DIR"
+            # Manually set RUSTFLAGS to instrument the cargo build. Don't use
+            # `source <(cargo llvm-cov show-env)` + a bare `cargo build` —
+            # cargo-llvm-cov 0.8.x's wrapper only injects instrumentation flags
+            # for `cargo llvm-cov <subcommand>`, so a bare build yields a binary
+            # with zeroed __llvm_profile symbols that writes no profraw.
+            # -Clink-dead-code keeps LLVM's uncalled functions so line coverage
+            # attribution has the full function table.
+            # LLVM_PROFILE_FILE here redirects profraw emitted during the build
+            # itself (build scripts / proc-macros run instrumented but without a
+            # profile path, defaulting to default-*.profraw in each crate's
+            # cwd). Pointing it at target/tmp keeps the source tree clean; those
+            # build-time profiles are excluded from the report anyway (--package
+            # bcs). Runtime profraw (the bcs binary) is controlled by the
+            # LLVM_PROFILE_FILE set later for actual runs.
+            export RUSTFLAGS="-Cinstrument-coverage -Clink-dead-code"
+            export CARGO_INCREMENTAL=0
+            export CARGO_PROFILE_DEV_DEBUG=line-tables-only
+            export CARGO_TARGET_DIR="$cov_dir"
+            local build_tmp="$BCS_DIR/target/tmp"
+            mkdir -p "$build_tmp"
+            export LLVM_PROFILE_FILE="$build_tmp/build-%m-%p.profraw"
+            cargo build --package bcs --package bcs-cli
+        ) || { log_error "coverage build failed"; exit 1; }
+    else
+        log_info "Reusing cached instrumented bcs: $cov_bin"
+    fi
+
+    export BCS_BIN="$cov_bin"
+    export BCS_CLI_BIN="$cov_dir/debug/bcs-cli"
+    export LLVM_PROFILE_FILE="$cov_dir/bcs-%m-%p.profraw"
+}
+
 # ============ 当前默认安装流程 (无参数调用) ============
 setup_all_and_start() {
     # 加载之前保存的引擎类型
     load_engine_type
+
+    if [[ "$with_bcs_coverage" -eq 1 ]]; then
+        prepare_bcs_coverage_bin
+    fi
 
     # 显示模式信息
     if [ "$STANDALONE_MODE" = true ]; then
@@ -571,6 +643,10 @@ main() {
                 BCS_AUTO_ONBOARD=0
                 shift
                 ;;
+            --with-bcs-coverage)
+                with_bcs_coverage=1
+                shift
+                ;;
             -h|--help)
                 show_help
                 exit 0
@@ -669,6 +745,9 @@ main() {
             ;;
         start)
             load_engine_type
+            if [[ "$with_bcs_coverage" -eq 1 ]]; then
+                prepare_bcs_coverage_bin
+            fi
             for svc in "${services[@]}"; do
                 start_service "$svc"
             done

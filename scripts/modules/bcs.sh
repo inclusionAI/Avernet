@@ -713,7 +713,7 @@ onboard_default_openclaw_if_connected() {
         return 0
     fi
 
-    local bcs_cli="${BCS_DIR}/target/debug/bcs-cli"
+    local bcs_cli; bcs_cli="$(bcs_cli_path)"
     if [ ! -x "$bcs_cli" ]; then
         log_warn "bcs-cli not found or not executable: ${bcs_cli}; skipping default OpenClaw onboard"
         return 0
@@ -780,7 +780,8 @@ start_bcs_binary() {
     mkdir -p "${BCS_DATA_DIR}"
 
     # Start BCS service
-    SERVER_ENV="${BCS_SERVER_ENV}" nohup ./target/debug/bcs >> "${BCS_LOG}" 2>&1 &
+    local bcs_bin="${BCS_BIN:-./target/debug/bcs}"
+    SERVER_ENV="${BCS_SERVER_ENV}" nohup "$bcs_bin" >> "${BCS_LOG}" 2>&1 &
     local bcs_pid=$!
 
     # Verify process started successfully

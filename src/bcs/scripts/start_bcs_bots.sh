@@ -40,9 +40,9 @@ fi
 export BCS_API_BASE_URL
 export BCS_CONFIG_DIR
 export MOLTIS_BCS_CONFIG
-BCS_CLI="$PROJECT_ROOT/target/debug/bcs-cli"
+BCS_CLI="${BCS_CLI_BIN:-$PROJECT_ROOT/target/debug/bcs-cli}"
 BCS_ADMIN="$PROJECT_ROOT/target/debug/bcs-admin"
-BCS_BIN="$PROJECT_ROOT/target/debug/bcs"
+BCS_BIN="${BCS_BIN:-$PROJECT_ROOT/target/debug/bcs}"
 # use monorepo plugin source
 BCN_PLUGIN_SRC_DIR="$PROJECT_ROOT/../../src/plugin/packages/openclaw-channel-bcn"
 BCN_PLUGIN_PACKAGE_DIR="$BCN_PLUGIN_SRC_DIR/package"
@@ -989,8 +989,8 @@ start_bcs() {
     # ------------------------------------------------------------------------
     if [ "${BCS_AUTH_MOCK:-0}" = "1" ]; then
         export BCS_AUTH_MOCK=1
-        export BCS_MOCK_USER_ID="${BCS_MOCK_USER_ID:-11111111}"
-        export BCS_MOCK_USER_NICK_NAME="${BCS_MOCK_USER_NICK_NAME:-Local Developer}"
+        export BCS_MOCK_USER_ID="${BCS_MOCK_USER_ID:-001}"
+        export BCS_MOCK_USER_NICK_NAME="${BCS_MOCK_USER_NICK_NAME:-admin}"
         export BCS_MOCK_USER_CHANNEL="${BCS_MOCK_USER_CHANNEL:-mock}"
         warn "BCS_AUTH_MOCK enabled: user_id=$BCS_MOCK_USER_ID nick_name=$BCS_MOCK_USER_NICK_NAME channel=$BCS_MOCK_USER_CHANNEL" >&2
     fi
