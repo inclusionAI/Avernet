@@ -1619,17 +1619,18 @@ impl BcsServer {
 
         let (fusion, fuse_client) = create_fusion_service(&config);
         let bot_connections = Arc::new(BotConnectionRegistry::new());
-        let bot_use_cases = Arc::new(
-            Bot::new_with_friend(bot_registry.clone(), friend_store.clone())
-                .with_bot_core(bot_core_arc.clone())
-                .with_relation(
-                    relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>
-                )
-                .with_connection_control(
-                    bot_connections.clone()
-                        as Arc<dyn bcs_service_api::BotConnectionControlPort>,
-                ),
-        );
+        let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend_store.clone())
+            .with_bot_core(bot_core_arc.clone())
+            .with_relation(
+                relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>
+            )
+            .with_connection_control(
+                bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>
+            );
+        if let Some(user_directory) = user_directory.clone() {
+            bot_use_cases = bot_use_cases.with_user_directory(user_directory);
+        }
+        let bot_use_cases = Arc::new(bot_use_cases);
         let frontend_bot_query: Arc<dyn bcs_service_api::BotQueryService> = bot_use_cases.clone();
         let frontend_connections = Arc::new(WorkbenchConnectionRegistry::with_bot_query(
             frontend_bot_query,
@@ -2064,15 +2065,19 @@ impl BcsServer {
             (friend_store, friend_request_store)
         };
         let bot_connections = Arc::new(BotConnectionRegistry::new());
+        let mut bot_runtime_for_session =
+            Bot::new_with_friend(bot_registry.clone(), friend_svc.clone())
+                .with_bot_core(bot_core_arc.clone())
+                .with_connection_control(
+                    bot_connections.clone()
+                        as Arc<dyn bcs_service_api::BotConnectionControlPort>,
+                );
+        if let Some(user_directory) = user_directory.clone() {
+            bot_runtime_for_session =
+                bot_runtime_for_session.with_user_directory(user_directory);
+        }
         let bot_runtime_for_session: Arc<dyn bcs_service_api::BotRuntimeConnectionService> =
-            Arc::new(
-                Bot::new_with_friend(bot_registry.clone(), friend_svc.clone())
-                    .with_bot_core(bot_core_arc.clone())
-                    .with_connection_control(
-                        bot_connections.clone()
-                            as Arc<dyn bcs_service_api::BotConnectionControlPort>,
-                    ),
-            );
+            Arc::new(bot_runtime_for_session);
         let frontend_connections = Arc::new(WorkbenchConnectionRegistry::new());
         let run_channels = Arc::new(RunChannelManager::new());
         let frontend_run_channels = run_channels.clone();
