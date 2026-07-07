@@ -11,7 +11,7 @@ set -e  # Exit immediately on error
 # ============================================================================
 
 BCS_ENDPOINT="${BCS_ENDPOINT:-http://127.0.0.1:21000}"
-BCN_PLUGIN_PACKAGE="${BCN_PLUGIN_PACKAGE:-@alipay/openclaw-channel-bcn}"
+BCN_PLUGIN_PACKAGE="${BCN_PLUGIN_PACKAGE:-@avernet-plugin/openclaw-channel-bcn}"
 BCN_PLUGIN_VERSION="${BCN_PLUGIN_VERSION:-latest}"
 BCN_PLUGIN="${BCN_PLUGIN_PACKAGE}@${BCN_PLUGIN_VERSION}"
 BCN_PLUGIN_NAME="${BCN_PLUGIN_PACKAGE##*/}"
@@ -335,7 +335,7 @@ spin_pid=$!
 
 # Run the installation, saving output to a temp file for troubleshooting
 INSTALL_LOG="/tmp/bcs_plugin_install.log"
-NPM_CONFIG_REGISTRY=https://registry.antgroup-inc.cn openclaw plugins install "$BCN_PLUGIN" --dangerously-force-unsafe-install > "$INSTALL_LOG" 2>&1 || true
+openclaw plugins install "$BCN_PLUGIN" > "$INSTALL_LOG" 2>&1 || true
 
 # Stop the spinner
 kill "$spin_pid" 2>/dev/null
