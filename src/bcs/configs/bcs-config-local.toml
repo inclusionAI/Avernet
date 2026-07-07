@@ -146,7 +146,7 @@ max_page_limit = 100000000
 
 [security_gateway]
 # 开源默认：noop provider，不出网、永远放行。
-# noop 只需 provider 字段；dry_run / domain / endpoint / timeout_ms 仅 agentpass provider 使用。
+# 非 noop provider 由链接进二进制的插件注册，并通过 [security_gateway.providers.<provider>] 传递私有配置。
 provider = "noop"
 
 [security.outbound_url]

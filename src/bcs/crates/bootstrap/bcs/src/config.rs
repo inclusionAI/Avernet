@@ -1,5 +1,6 @@
 //! Configuration for the Bot Coordination Service.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use secrecy::Secret;
@@ -620,15 +621,17 @@ impl Default for BcsConfig {
     }
 }
 
+pub type SecurityGatewayProviderConfig = BTreeMap<String, serde_json::Value>;
+
 /// AI安全网关配置。
 ///
-/// `provider` 选择安全网关实现并在启动阶段注入对应 `SecurityGatewayPort`：
-/// - `"noop"`（默认）：开源版默认，永远放行；
-/// - `"agentpass"`：注入 AgentPass HTTP 安全网关 client（使用 `domain`/`endpoint`/`timeout_ms`）。
+/// `provider` 选择安全网关实现并在启动阶段注入对应 `SecurityGatewayPort`。
+/// 开源版内置 `"noop"`（永远放行）；其他 provider 由链接进二进制的插件注册。
 ///
 /// `dry_run` 是投递策略：true 仅观测（拦截只打日志），false 真正阻断。
-/// `domain`/`endpoint`/`timeout_ms` 仅被 `agentpass` provider 使用。
+/// provider 私有配置放在 `providers.<provider>` map 中，由具体插件解析。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SecurityGatewayConfig {
     #[serde(default = "default_security_provider")]
     pub provider: String,
@@ -637,13 +640,7 @@ pub struct SecurityGatewayConfig {
     pub dry_run: bool,
 
     #[serde(default)]
-    pub domain: String,
-
-    #[serde(default = "default_security_endpoint")]
-    pub endpoint: String,
-
-    #[serde(default = "default_security_timeout_ms")]
-    pub timeout_ms: u64,
+    pub providers: BTreeMap<String, SecurityGatewayProviderConfig>,
 }
 
 impl Default for SecurityGatewayConfig {
@@ -651,9 +648,7 @@ impl Default for SecurityGatewayConfig {
         Self {
             provider: default_security_provider(),
             dry_run: default_security_dry_run(),
-            domain: String::new(),
-            endpoint: default_security_endpoint(),
-            timeout_ms: default_security_timeout_ms(),
+            providers: BTreeMap::new(),
         }
     }
 }
@@ -664,14 +659,6 @@ fn default_security_provider() -> String {
 
 fn default_security_dry_run() -> bool {
     true
-}
-
-fn default_security_endpoint() -> String {
-    "/api/security/check".to_string()
-}
-
-fn default_security_timeout_ms() -> u64 {
-    300
 }
 
 fn standalone_env_config_path(config_dir: &Path) -> Option<PathBuf> {
@@ -1868,6 +1855,60 @@ skip_auth = true
         let err =
             toml::from_str::<BcsConfig>(toml).expect_err("top-level redis should be rejected");
         assert!(err.to_string().contains("redis"));
+    }
+
+    #[test]
+    fn test_security_gateway_provider_options_parse_as_map() {
+        let toml = r#"
+bind = "0.0.0.0"
+port = 21000
+bots_base_dir = "/bots"
+
+[security_gateway]
+provider = "agentpass"
+dry_run = false
+
+[security_gateway.providers.agentpass]
+domain = "security-gateway.example.com"
+endpoint = "/api/agentpass/zero_check.json"
+timeout_ms = 300
+"#;
+
+        let config: BcsConfig = toml::from_str(toml).unwrap();
+        let provider = config
+            .security_gateway
+            .providers
+            .get("agentpass")
+            .expect("agentpass provider config");
+
+        assert_eq!(config.security_gateway.provider, "agentpass");
+        assert!(!config.security_gateway.dry_run);
+        assert_eq!(
+            provider.get("endpoint").and_then(|value| value.as_str()),
+            Some("/api/agentpass/zero_check.json")
+        );
+        assert_eq!(
+            provider.get("timeout_ms").and_then(|value| value.as_u64()),
+            Some(300)
+        );
+    }
+
+    #[test]
+    fn test_security_gateway_rejects_legacy_top_level_provider_options() {
+        let toml = r#"
+bind = "0.0.0.0"
+port = 21000
+bots_base_dir = "/bots"
+
+[security_gateway]
+provider = "agentpass"
+dry_run = false
+endpoint = "/api/agentpass/zero_check.json"
+"#;
+
+        let err = toml::from_str::<BcsConfig>(toml)
+            .expect_err("legacy top-level provider options should be rejected");
+        assert!(err.to_string().contains("endpoint"));
     }
 
 }

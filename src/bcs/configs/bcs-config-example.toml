@@ -191,12 +191,10 @@ default_page_limit = 100000000
 max_page_limit = 100000000
 
 [security_gateway]
-# provider 选择安全网关实现："noop"（开源默认，永远放行）| "agentpass"（AgentPass HTTP 网关）
-provider = "agentpass"
+# provider 选择安全网关实现。开源默认只内置 "noop"（永远放行）。
+# 其他 provider 由链接进二进制的插件注册，并通过 [security_gateway.providers.<provider>] 传递私有配置。
+provider = "noop"
 dry_run = true
-timeout_ms = 300
-domain = "security-gateway.example.com"
-endpoint = "/api/security/check"
 
 [security.outbound_url]
 block_private_networks = true
