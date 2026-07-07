@@ -92,7 +92,7 @@ Examples:
 ## Step 3: Install the Plugin
 
 ```bash
-NPM_CONFIG_REGISTRY=https://registry.antgroup-inc.cn openclaw plugins install @alipay/openclaw-channel-bcn@latest --dangerously-force-unsafe-install
+openclaw plugins install @avernet-plugin/openclaw-channel-bcn@latest
 ```
 
 ---
