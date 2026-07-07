@@ -28,6 +28,7 @@ use crate::lifecycle::LifecycleOrchestrator;
 use crate::plugins::{
     DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
     build_registered_leader_election, build_registered_llm_provider,
+    build_registered_security_gateway,
 };
 use bcs_bot::{Bot, BotCore, ProviderBotEvents, ProviderCore, ProviderManagement};
 use bcs_bot_store::{DbProviderStore, PersistentBotRepo, MemoryBotRepo, MemoryProviderStore};
@@ -523,7 +524,8 @@ impl Default for BcsServerState {
                 frontend_run_channels.clone(),
             ));
         let frontend_delivery = maybe_wrap_frontend_delivery(&config, raw_frontend_delivery);
-        let interceptors = create_interceptor_chain(&config);
+        let interceptors =
+            create_interceptor_chain(&config).expect("default security gateway config is valid");
         let cutoff_timestamp = config.message_history.cutoff_timestamp;
         let manager_worker_cutoff_timestamp =
             config.message_history.manager_worker_cutoff_timestamp;
@@ -1103,7 +1105,7 @@ fn create_message_flow_services(
     message_flow
 }
 
-fn create_interceptor_chain(config: &BcsConfig) -> Arc<InterceptorChain> {
+fn create_interceptor_chain(config: &BcsConfig) -> crate::Result<Arc<InterceptorChain>> {
     let mut chain = InterceptorChain::new();
 
     #[cfg(feature = "prometheus-metrics")]
@@ -1116,29 +1118,24 @@ fn create_interceptor_chain(config: &BcsConfig) -> Arc<InterceptorChain> {
     }
 
     let sg = &config.security_gateway;
-    // The open-source base only ships the noop/local backend. Real gateway
-    // backends (e.g. AgentPass) live in the Ant overlay and are injected at the
-    // overlay composition root, never selected here.
-    let gateway: Option<Arc<dyn SecurityGatewayPort>> = match sg.provider.as_str() {
-        "noop" => {
-            info!(provider = "noop", dry_run = sg.dry_run, "Initializing noop security gateway interceptor");
-            Some(Arc::new(NoopSecurityGateway))
-        }
-        other => {
-            warn!(
-                provider = %other,
-                "security_gateway provider not available in the open-source base \
-                 (real backends are injected by the Ant overlay); falling back to noop"
-            );
-            Some(Arc::new(NoopSecurityGateway))
-        }
+    let provider = sg.provider.trim();
+    let gateway: Arc<dyn SecurityGatewayPort> = if provider.is_empty() || provider == "noop" {
+        info!(provider = "noop", dry_run = sg.dry_run, "Initializing noop security gateway interceptor");
+        Arc::new(NoopSecurityGateway)
+    } else {
+        let provider_config = sg.providers.get(provider).cloned().unwrap_or_default();
+        build_registered_security_gateway(config, provider, provider_config)?
+            .ok_or_else(|| {
+                crate::BcsError::InvalidConfig(format!(
+                    "security_gateway provider '{provider}' is not available in this binary"
+                ))
+            })?
+            .gateway
     };
 
-    if let Some(gateway) = gateway {
-        chain.push(SecurityInterceptor::new(gateway, sg.dry_run));
-    }
+    chain.push(SecurityInterceptor::new(gateway, sg.dry_run));
 
-    Arc::new(chain)
+    Ok(Arc::new(chain))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1629,7 +1626,8 @@ impl BcsServer {
                 frontend_run_channels.clone(),
             ));
         let frontend_delivery = maybe_wrap_frontend_delivery(&config, raw_frontend_delivery);
-        let interceptors = create_interceptor_chain(&config);
+        let interceptors = create_interceptor_chain(&config)
+            .expect("security gateway config is valid for in-memory server");
         let cutoff_timestamp = config.message_history.cutoff_timestamp;
         let manager_worker_cutoff_timestamp =
             config.message_history.manager_worker_cutoff_timestamp;
@@ -2070,7 +2068,7 @@ impl BcsServer {
                 frontend_run_channels.clone(),
             ));
         let frontend_delivery = maybe_wrap_frontend_delivery(&config, raw_frontend_delivery);
-        let interceptors = create_interceptor_chain(&config);
+        let interceptors = create_interceptor_chain(&config)?;
         let cutoff_timestamp = config.message_history.cutoff_timestamp;
         let manager_worker_cutoff_timestamp =
             config.message_history.manager_worker_cutoff_timestamp;

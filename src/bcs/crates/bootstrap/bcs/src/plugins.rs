@@ -13,11 +13,12 @@ use bcs_db_api::DbPlugin;
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_db_mysql::{MysqlDbManager, MysqlDbPlugin};
 use bcs_llm_api::LlmChatCompletionPort;
+use bcs_security_gateway_api::SecurityGatewayPort;
 use bcs_service_api::LeaderElectionPort;
 use bcs_service_api::lifecycle::ServiceLifecycle;
 use futures::future::BoxFuture;
 
-use crate::config::{BcsConfig, DatabaseType};
+use crate::config::{BcsConfig, DatabaseType, SecurityGatewayProviderConfig};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CachePluginKind {
@@ -111,6 +112,23 @@ pub struct LeaderElectionFactory {
 
 inventory::collect!(LeaderElectionFactory);
 
+#[derive(Clone)]
+pub struct SecurityGatewayRegistration {
+    pub gateway: Arc<dyn SecurityGatewayPort>,
+}
+
+pub type SecurityGatewayBuild = fn(
+    BcsConfig,
+    SecurityGatewayProviderConfig,
+) -> crate::Result<SecurityGatewayRegistration>;
+
+pub struct SecurityGatewayFactory {
+    pub name: &'static str,
+    pub build: SecurityGatewayBuild,
+}
+
+inventory::collect!(SecurityGatewayFactory);
+
 async fn build_registered_cache_plugin(
     config: &BcsConfig,
     provider: &str,
@@ -155,6 +173,19 @@ pub async fn build_registered_leader_election(
     for factory in inventory::iter::<LeaderElectionFactory> {
         if factory.name == provider {
             return Ok(Some((factory.build)(config.clone(), provider_config).await?));
+        }
+    }
+    Ok(None)
+}
+
+pub fn build_registered_security_gateway(
+    config: &BcsConfig,
+    provider: &str,
+    provider_config: SecurityGatewayProviderConfig,
+) -> crate::Result<Option<SecurityGatewayRegistration>> {
+    for factory in inventory::iter::<SecurityGatewayFactory> {
+        if factory.name == provider {
+            return Ok(Some((factory.build)(config.clone(), provider_config)?));
         }
     }
     Ok(None)
@@ -438,6 +469,28 @@ mod tests {
         }
     }
 
+    fn test_security_gateway_factory(
+        _config: BcsConfig,
+        provider_config: SecurityGatewayProviderConfig,
+    ) -> crate::Result<SecurityGatewayRegistration> {
+        if provider_config.get("mode").and_then(|value| value.as_str()) != Some("allow") {
+            return Err(crate::BcsError::InvalidConfig(
+                "expected security gateway provider option mode = allow".to_string(),
+            ));
+        }
+
+        Ok(SecurityGatewayRegistration {
+            gateway: Arc::new(bcs_security_gateway_local::NoopSecurityGateway),
+        })
+    }
+
+    inventory::submit! {
+        SecurityGatewayFactory {
+            name: "test-security-options",
+            build: test_security_gateway_factory,
+        }
+    }
+
     #[test]
     fn default_config_selects_memory_cache_and_local_db_plugins() {
         let config = BcsConfig::default();
@@ -512,6 +565,37 @@ mod tests {
         .expect("leader factory should be registered");
 
         assert!(registration.leader.is_leader().await.expect("is leader"));
+    }
+
+    #[tokio::test]
+    async fn registered_security_gateway_factory_receives_provider_options() {
+        let mut provider_config = SecurityGatewayProviderConfig::new();
+        provider_config.insert(
+            "mode".to_string(),
+            serde_json::Value::String("allow".to_string()),
+        );
+
+        let registration = build_registered_security_gateway(
+            &BcsConfig::default(),
+            "test-security-options",
+            provider_config,
+        )
+        .expect("security gateway factory should build")
+        .expect("security gateway factory should be registered");
+
+        let request = bcs_security_gateway_api::SecurityCheckRequest {
+            sender_bot_id: "sender".to_string(),
+            receiver_bot_id: "receiver".to_string(),
+            sender_agent_code: None,
+            receiver_agent_code: None,
+            agent_token: None,
+            message_content: "hello".to_string(),
+            message_id: "msg-1".to_string(),
+        };
+        assert!(matches!(
+            registration.gateway.check(request).await,
+            bcs_security_gateway_api::SecurityVerdict::Allow { task_id: None }
+        ));
     }
 
     #[test]
