@@ -7,8 +7,8 @@
 #
 #     ./scripts/singlebox.sh --local start bcs_bots
 #
-#   This onboards 5 bots (CEO-马斯克 / 产品-乔布斯 / 研发-Linus / 验证-图灵 /
-#   客服-张勇), which e2e resolves by name (see BOT_*_ID defaults in common.sh).
+#   This onboards 5 bots (CEO / 产品经理 / 研发 / 验证 / 客服), which e2e
+#   resolves by name (see BOT_*_ID defaults in common.sh).
 #   Override the BCS endpoint with BCS_API_BASE_URL if it is not on
 #   http://127.0.0.1:21000.
 #
@@ -157,7 +157,7 @@ fi
 # Always clean up leftover groups driven by the PMO bot before running tests.
 # The BCS enforces a per-driver active-group cap; without this, repeated e2e
 # runs accumulate groups and `POST /groups` starts returning 400.
-cleanup_driver_groups "$BOT_PMO_UUID"
+cleanup_driver_groups "$BOT_CEO_UUID"
 
 # ============================================================================
 # Run Tests

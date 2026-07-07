@@ -19,7 +19,7 @@ E2E_TESTS_GROUP=(
 
 test_create_group() {
     info "Group: create group"
-    api_post "/groups" "{\"driver_bot\":\"$BOT_PMO_UUID\"}"
+    api_post "/groups" "{\"driver_bot\":\"$BOT_CEO_UUID\"}"
     assert_eq "create group returns 200" "$HTTP_STATUS" "200"
     local group_id
     group_id=$(json_field "$RESPONSE" "id")
@@ -28,7 +28,7 @@ test_create_group() {
 
 test_create_group_with_members() {
     info "Group: create group with members"
-    local body="{\"driver_bot\":\"$BOT_PMO_UUID\",\"participants\":[{\"bot_uuid\":\"$BOT_TANGHUA_UUID\"},{\"bot_uuid\":\"$BOT_MENGCHANG_UUID\"}]}"
+    local body="{\"driver_bot\":\"$BOT_CEO_UUID\",\"participants\":[{\"bot_uuid\":\"$BOT_PM_UUID\"},{\"bot_uuid\":\"$BOT_ENG_UUID\"}]}"
     api_post "/groups" "$body"
     assert_eq "create group with members returns 200" "$HTTP_STATUS" "200"
     local group_id
@@ -44,7 +44,7 @@ test_create_group_with_members() {
 
 test_get_group_detail() {
     info "Group: get group detail"
-    api_post "/groups" "{\"driver_bot\":\"$BOT_PMO_UUID\"}"
+    api_post "/groups" "{\"driver_bot\":\"$BOT_CEO_UUID\"}"
     local group_id
     group_id=$(json_field "$RESPONSE" "id")
     # Get detail
@@ -59,7 +59,7 @@ test_get_group_detail() {
 test_list_groups() {
     info "Group: list groups"
     # Create a group to ensure at least one exists
-    api_post "/groups" "{\"driver_bot\":\"$BOT_PMO_UUID\"}"
+    api_post "/groups" "{\"driver_bot\":\"$BOT_CEO_UUID\"}"
     # List groups
     api_get "/groups?limit=50&group_kind=all"
     assert_eq "list groups returns 200" "$HTTP_STATUS" "200"
@@ -78,11 +78,11 @@ test_list_groups() {
 
 test_add_member() {
     info "Group: add member"
-    api_post "/groups" "{\"driver_bot\":\"$BOT_PMO_UUID\"}"
+    api_post "/groups" "{\"driver_bot\":\"$BOT_CEO_UUID\"}"
     local group_id
     group_id=$(json_field "$RESPONSE" "id")
     # Add a member
-    api_post "/groups/$group_id/members" "{\"bot_uuid\":\"$BOT_TANGHUA_UUID\"}"
+    api_post "/groups/$group_id/members" "{\"bot_uuid\":\"$BOT_PM_UUID\"}"
     assert_eq "add member returns 200" "$HTTP_STATUS" "200"
     # Verify member was added
     api_get "/groups/$group_id"
@@ -93,12 +93,12 @@ test_add_member() {
 
 test_remove_member() {
     info "Group: remove member"
-    local body="{\"driver_bot\":\"$BOT_PMO_UUID\",\"participants\":[{\"bot_uuid\":\"$BOT_TANGHUA_UUID\"}]}"
+    local body="{\"driver_bot\":\"$BOT_CEO_UUID\",\"participants\":[{\"bot_uuid\":\"$BOT_PM_UUID\"}]}"
     api_post "/groups" "$body"
     local group_id
     group_id=$(json_field "$RESPONSE" "id")
     # Remove the member
-    api_delete "/groups/$group_id/members/$BOT_TANGHUA_UUID"
+    api_delete "/groups/$group_id/members/$BOT_PM_UUID"
     assert_eq "remove member returns 200" "$HTTP_STATUS" "200"
     # Verify member was removed
     api_get "/groups/$group_id"
@@ -109,7 +109,7 @@ test_remove_member() {
 
 test_update_group_label() {
     info "Group: update group label"
-    api_post "/groups" "{\"driver_bot\":\"$BOT_PMO_UUID\"}"
+    api_post "/groups" "{\"driver_bot\":\"$BOT_CEO_UUID\"}"
     local group_id
     group_id=$(json_field "$RESPONSE" "id")
     # Update label (requires bot auth — may return 401 in human-only mock mode)
@@ -130,7 +130,7 @@ test_update_group_label() {
 
 test_update_group_visibility() {
     info "Group: update group visibility"
-    api_post "/groups" "{\"driver_bot\":\"$BOT_PMO_UUID\"}"
+    api_post "/groups" "{\"driver_bot\":\"$BOT_CEO_UUID\"}"
     local group_id
     group_id=$(json_field "$RESPONSE" "id")
     # Update visibility

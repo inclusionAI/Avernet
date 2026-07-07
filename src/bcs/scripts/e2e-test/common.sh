@@ -14,12 +14,12 @@ BCS_MOCK_USER_ID="${BCS_MOCK_USER_ID:-001}"
 BCS_MOCK_USER_NICK_NAME="${BCS_MOCK_USER_NICK_NAME:-admin}"
 
 # Bot IDs (must match the default 5bots_profile started by ./scripts/singlebox.sh --local start bcs_bots).
-# Role mapping: PMO=CEO, 测试Bot-A/B/C/D = 产品/研发/验证/客服.
-BOT_PMO_ID="${BOT_PMO_ID:-CEO-马斯克}"
-BOT_TANGHUA_ID="${BOT_TANGHUA_ID:-产品-乔布斯}"
-BOT_MENGCHANG_ID="${BOT_MENGCHANG_ID:-研发-Linus}"
-BOT_XIONGBING_ID="${BOT_XIONGBING_ID:-验证-图灵}"
-BOT_XIAHONG_ID="${BOT_XIAHONG_ID:-客服-张勇}"
+# Code names map to the 5bots_profile roles: CEO / 产品经理(PM) / 研发(ENG) / 验证(QA) / 客服(CS).
+BOT_CEO_ID="${BOT_CEO_ID:-CEO}"
+BOT_PM_ID="${BOT_PM_ID:-产品经理}"
+BOT_ENG_ID="${BOT_ENG_ID:-研发}"
+BOT_QA_ID="${BOT_QA_ID:-验证}"
+BOT_CS_ID="${BOT_CS_ID:-客服}"
 
 # ============================================================================
 # Colors
@@ -212,7 +212,7 @@ api_patch() {
 # ============================================================================
 
 # Resolve a bot name to its UUID by querying GET /bots.
-# Usage: uuid=$(resolve_bot_uuid "PMO")
+# Usage: uuid=$(resolve_bot_uuid "CEO")
 resolve_bot_uuid() {
     local name="$1"
     local url="${BCS_API_BASE_URL}/bots?limit=100"
@@ -235,17 +235,17 @@ except:
 }
 
 # Resolve all bot UUIDs. Call after BCS is healthy and bots are onboarded.
-# Sets BOT_PMO_UUID, BOT_TANGHUA_UUID, etc.
+# Sets BOT_CEO_UUID, BOT_PM_UUID, etc.
 resolve_all_bot_uuids() {
     info "Resolving bot UUIDs..."
-    BOT_PMO_UUID=$(resolve_bot_uuid "$BOT_PMO_ID")
-    BOT_TANGHUA_UUID=$(resolve_bot_uuid "$BOT_TANGHUA_ID")
-    BOT_MENGCHANG_UUID=$(resolve_bot_uuid "$BOT_MENGCHANG_ID")
-    BOT_XIONGBING_UUID=$(resolve_bot_uuid "$BOT_XIONGBING_ID")
-    BOT_XIAHONG_UUID=$(resolve_bot_uuid "$BOT_XIAHONG_ID")
+    BOT_CEO_UUID=$(resolve_bot_uuid "$BOT_CEO_ID")
+    BOT_PM_UUID=$(resolve_bot_uuid "$BOT_PM_ID")
+    BOT_ENG_UUID=$(resolve_bot_uuid "$BOT_ENG_ID")
+    BOT_QA_UUID=$(resolve_bot_uuid "$BOT_QA_ID")
+    BOT_CS_UUID=$(resolve_bot_uuid "$BOT_CS_ID")
 
     local failed=0
-    for var in BOT_PMO_UUID BOT_TANGHUA_UUID BOT_MENGCHANG_UUID BOT_XIONGBING_UUID BOT_XIAHONG_UUID; do
+    for var in BOT_CEO_UUID BOT_PM_UUID BOT_ENG_UUID BOT_QA_UUID BOT_CS_UUID; do
         if [ -z "${!var}" ]; then
             fail "Could not resolve UUID for $var"
             failed=$((failed + 1))
@@ -255,7 +255,7 @@ resolve_all_bot_uuids() {
         fail "Some bot UUIDs not resolved. Are bots onboarded?"
         return 1
     fi
-    pass "Bot UUIDs resolved (PMO=$BOT_PMO_UUID, 产品=$BOT_TANGHUA_UUID, ...)"
+    pass "Bot UUIDs resolved (CEO=$BOT_CEO_UUID, PM=$BOT_PM_UUID, ...)"
 }
 
 # ============================================================================
