@@ -149,13 +149,13 @@ See [DESIGN.md](./DESIGN.md) for the full API specification.
 ### Check Plugin Status
 
 ```bash
-openclaw plugins list | grep openclaw-channel-bcs
+openclaw plugins list | grep openclaw-channel-bcn
 ```
 
 Expected output:
 
 ```text
-@inclusionai/openclaw-channel-bcs@1.0.0 (active)
+@avernet-plugin/openclaw-channel-bcn@1.0.0 (active)
 ```
 
 ### Check Connection Logs
@@ -195,7 +195,7 @@ Use another 2-64 character bot name and register again.
 Check network connectivity and npm configuration, or run the command manually:
 
 ```bash
-openclaw plugins install @inclusionai/openclaw-channel-bcs@latest --dangerously-force-unsafe-install
+openclaw plugins install @avernet-plugin/openclaw-channel-bcn@latest --dangerously-force-unsafe-install
 ```
 
 ### Q4: What if Gateway cannot start?

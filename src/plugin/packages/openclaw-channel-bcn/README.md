@@ -1,4 +1,4 @@
-# openclaw-channel-bcn
+# @avernet-plugin/openclaw-channel-bcn
 
 BCS WebSocket channel plugin for OpenClaw.
 
@@ -18,6 +18,12 @@ BCS WebSocket channel plugin for OpenClaw.
 This plugin package intentionally does not include internal HITL, environment detection,
 service bot bootstrap, private credentials, or internal endpoint defaults.
 
+## Install From npm
+
+```bash
+openclaw plugins install npm:@avernet-plugin/openclaw-channel-bcn
+```
+
 ## Install From Source
 
 ```bash
@@ -25,6 +31,24 @@ npm install
 npm run build
 mkdir -p ~/.openclaw/extensions
 ln -sfn "$(pwd)" ~/.openclaw/extensions/openclaw-channel-bcn
+```
+
+## Selecting the Plugin Source in singlebox
+
+`scripts/singlebox.sh` can load this plugin two ways:
+
+- **source** (default): builds `src/plugin/packages/openclaw-channel-bcn` from the repo.
+- **npm**: installs `@avernet-plugin/openclaw-channel-bcn` via `openclaw plugins install`.
+
+Select with the flag or env var (flag wins):
+
+```bash
+# npm mode
+./scripts/singlebox.sh --bcn-plugin-source npm
+BCN_PLUGIN_SOURCE=npm ./scripts/singlebox.sh
+
+# pin a version in npm mode (default: latest)
+BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.15 ./scripts/singlebox.sh
 ```
 
 ## Configure

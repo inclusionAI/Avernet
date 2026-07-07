@@ -1117,3 +1117,106 @@ show_local_mode_info() {
     log_warn "========================================="
     echo ""
 }
+
+# ============ BCN plugin source mode ============
+# openclaw-channel-bcn can be provided two ways, selected by BCN_PLUGIN_SOURCE:
+#   source (default) - build from the in-repo src/plugin tree
+#   npm              - install @avernet-plugin/openclaw-channel-bcn via openclaw
+BCN_PLUGIN_NPM_PACKAGE="@avernet-plugin/openclaw-channel-bcn"
+
+bcn_plugin_mode() {
+    local mode="${BCN_PLUGIN_SOURCE:-source}"
+    case "$mode" in
+        source|npm)
+            printf '%s\n' "$mode"
+            ;;
+        *)
+            log_error "Invalid BCN_PLUGIN_SOURCE: '${mode}'. Valid values: source, npm"
+            return 1
+            ;;
+    esac
+}
+
+bcn_plugin_version() {
+    printf '%s\n' "${BCN_PLUGIN_VERSION:-latest}"
+}
+
+bcn_plugin_npm_spec() {
+    printf '%s@%s\n' "${BCN_PLUGIN_NPM_PACKAGE}" "$(bcn_plugin_version)"
+}
+
+# Resolve where an npm-installed BCN plugin lives. The native installer targets
+# the global extensions root (~/.openclaw/extensions); a custom
+# OPENCLAW_EXTENSIONS_ROOT (standalone) is checked first.
+bcn_plugin_resolve_npm_dir() {
+    local cand
+    for cand in \
+        "${OPENCLAW_EXTENSIONS_ROOT:-${HOME}/.openclaw/extensions}/openclaw-channel-bcn" \
+        "${HOME}/.openclaw/extensions/openclaw-channel-bcn"; do
+        if [ -d "$cand" ] && [ ! -L "$cand" ]; then
+            printf '%s\n' "$cand"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Install the published BCN plugin via OpenClaw's native installer and echo the
+# resolved install directory. Never falls back to a source build.
+bcn_plugin_ensure_npm() {
+    if ! check_command openclaw; then
+        log_error "openclaw not found; required for BCN_PLUGIN_SOURCE=npm. Run: ./scripts/singlebox.sh install-tools"
+        return 1
+    fi
+    local spec
+    spec="$(bcn_plugin_npm_spec)"
+    log_info "Installing BCN plugin from npm: ${spec}" >&2
+    if ! openclaw plugins install "npm:${spec}" --force --pin >&2; then
+        log_error "Failed to install BCN plugin from npm: npm:${spec}"
+        return 1
+    fi
+    local dir
+    if ! dir="$(bcn_plugin_resolve_npm_dir)"; then
+        log_error "BCN plugin installed but its directory was not found under the extensions root(s)"
+        return 1
+    fi
+    printf '%s\n' "$dir"
+}
+
+# Ensure ${link} is a symlink to ${target}. replace=1 permits replacing a link
+# that points elsewhere; a non-symlink at ${link} is kept unless replace=1
+# (then it is an error).
+ensure_bcn_symlink() {
+    local target="$1"
+    local link="$2"
+    local replace="${3:-0}"
+
+    mkdir -p "$(dirname "$link")"
+
+    if [ -L "$link" ]; then
+        local current_target
+        current_target="$(readlink "$link")"
+        if [ "$current_target" = "$target" ]; then
+            log_info "BCN plugin symlink already correct: ${link}"
+        elif [ "$replace" = "1" ]; then
+            rm -f "$link"
+            ln -s "$target" "$link"
+            log_info "BCN plugin relinked: ${link} -> ${target}"
+        else
+            log_info "BCN plugin symlink points elsewhere, keeping: ${link} -> ${current_target}"
+        fi
+        return 0
+    fi
+
+    if [ -e "$link" ]; then
+        if [ "$replace" = "1" ]; then
+            log_error "BCN plugin link path exists and is not a symlink: ${link}"
+            return 1
+        fi
+        log_info "BCN plugin path already exists, keeping: ${link}"
+        return 0
+    fi
+
+    ln -s "$target" "$link"
+    log_info "BCN plugin linked: ${link} -> ${target}"
+}

@@ -100,6 +100,24 @@ standalone 模式会写入：
 .standalone-openclaw/workspaces/<bot-profile>
 ```
 
+### 选择插件来源（source 还是 npm）
+
+`scripts/singlebox.sh` 加载 `openclaw-channel-bcn` 插件有两种方式：
+
+- **source**（默认）：从仓库内构建 `src/plugin/packages/openclaw-channel-bcn`。
+- **npm**：通过 `openclaw plugins install` 安装 `@avernet-plugin/openclaw-channel-bcn`。
+
+通过 flag 或环境变量选择（flag 优先级更高）：
+
+```bash
+# npm 模式
+./scripts/singlebox.sh --bcn-plugin-source npm
+BCN_PLUGIN_SOURCE=npm ./scripts/singlebox.sh
+
+# 在 npm 模式下指定版本（默认：latest）
+BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.15 ./scripts/singlebox.sh
+```
+
 ## 方式二：手动接入一个本机 OpenClaw profile
 
 下面示例使用仓库内隔离目录 `.openclaw-host-bcn/`，避免直接改写默认 `~/.openclaw/openclaw.json`。
@@ -109,8 +127,8 @@ standalone 模式会写入：
 ```bash
 cd src/plugin
 corepack enable
-pnpm install --filter openclaw-channel-bcn...
-pnpm --filter openclaw-channel-bcn build
+pnpm install --filter @avernet-plugin/openclaw-channel-bcn...
+pnpm --filter @avernet-plugin/openclaw-channel-bcn build
 cd ../..
 ```
 

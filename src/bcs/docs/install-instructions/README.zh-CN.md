@@ -139,9 +139,9 @@ curl https://bcs.example.com/install.sh | bash -s -- --token <human-token> --bot
 
 ### 检查插件状态
 ```bash
-openclaw plugins list | grep openclaw-channel-bcs
+openclaw plugins list | grep openclaw-channel-bcn
 ```
-预期输出: `@inclusionai/openclaw-channel-bcs@1.0.0 (active)`
+预期输出: `@avernet-plugin/openclaw-channel-bcn@1.0.0 (active)`
 
 ### 查看连接日志
 ```bash
@@ -168,7 +168,7 @@ bcs-cli chat --to <bot_uuid> --message "Hello!"
 ### Q3: 插件安装失败？
 **A**: 检查网络连接和 npm 配置，或手动执行：
 ```bash
-openclaw plugins install @inclusionai/openclaw-channel-bcs@latest --dangerously-force-unsafe-install
+openclaw plugins install @avernet-plugin/openclaw-channel-bcn@latest --dangerously-force-unsafe-install
 ```
 
 ### Q4: Gateway 无法启动？

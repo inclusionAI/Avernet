@@ -100,6 +100,24 @@ Standalone mode writes:
 .standalone-openclaw/workspaces/<bot-profile>
 ```
 
+### Selecting plugin source (source vs npm)
+
+`scripts/singlebox.sh` can load the `openclaw-channel-bcn` plugin two ways:
+
+- **source** (default): builds `src/plugin/packages/openclaw-channel-bcn` from the repo.
+- **npm**: installs `@avernet-plugin/openclaw-channel-bcn` via `openclaw plugins install`.
+
+Select with the flag or env var (flag wins):
+
+```bash
+# npm mode
+./scripts/singlebox.sh --bcn-plugin-source npm
+BCN_PLUGIN_SOURCE=npm ./scripts/singlebox.sh
+
+# pin a version in npm mode (default: latest)
+BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.15 ./scripts/singlebox.sh
+```
+
 ## Option 2: Manually Connect One Local OpenClaw Profile
 
 The example below uses an isolated repository-local directory, `.openclaw-host-bcn/`, so it does not overwrite the default `~/.openclaw/openclaw.json`.
@@ -109,8 +127,8 @@ The example below uses an isolated repository-local directory, `.openclaw-host-b
 ```bash
 cd src/plugin
 corepack enable
-pnpm install --filter openclaw-channel-bcn...
-pnpm --filter openclaw-channel-bcn build
+pnpm install --filter @avernet-plugin/openclaw-channel-bcn...
+pnpm --filter @avernet-plugin/openclaw-channel-bcn build
 cd ../..
 ```
 

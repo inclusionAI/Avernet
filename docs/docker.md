@@ -219,8 +219,8 @@ OpenClaw immediately** after the plugin has been built into `dist/`.
 # Run from the repository root.
 cd src/plugin
 corepack enable
-pnpm install --filter openclaw-channel-bcn...
-pnpm --filter openclaw-channel-bcn build
+pnpm install --filter @avernet-plugin/openclaw-channel-bcn...
+pnpm --filter @avernet-plugin/openclaw-channel-bcn build
 cd ../..
 
 # Symlink to the OpenClaw extensions directory.

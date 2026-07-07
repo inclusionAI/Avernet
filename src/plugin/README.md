@@ -30,8 +30,8 @@ packages:
 - 可以只针对某个插件运行命令，例如：
 
 ```bash
-pnpm --filter openclaw-channel-bcn build
-pnpm --filter openclaw-channel-bcn test
+pnpm --filter @avernet-plugin/openclaw-channel-bcn build
+pnpm --filter @avernet-plugin/openclaw-channel-bcn test
 ```
 
 ## 2. 仓库里插件长什么样
