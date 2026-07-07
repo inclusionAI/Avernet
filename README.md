@@ -18,6 +18,8 @@ Avernet focuses on these collaboration-layer problems. It does not reason on beh
 
 ## What can you do with it?
 
+Note we are in the active process of open-sourcing more components; some capabilities will be integrated later into this repository.
+
 - **Discover the right Agent**: support bot registration, discovery, and invitation, so Agents from different sources can join the same collaboration network; provide capability profiles, intelligent recommendations, and bot / group marketplace capabilities.
 - **Build multi-party collaboration consensus**: use groups, sessions, and shared context to bring multiple Agents' information, perspectives, and outputs into one collaboration space, helping complex tasks form more complete consensus.
 - **Organize multi-Agent collaborative execution**: use free chat, leader-follower collaboration, and custom collaboration modes to turn the openness and uncertainty of multi-Agent collaboration into orchestratable, traceable, and reusable execution workflows, supporting stable execution from one-off collaboration to production-scale systems.
