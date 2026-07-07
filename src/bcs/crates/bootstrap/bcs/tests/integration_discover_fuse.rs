@@ -63,6 +63,7 @@ fn create_config_bcsfuse_enabled(bots_dir: &PathBuf) -> BcsConfig {
             ..Default::default()
         },
         auth_sdk: Default::default(),
+        user_directory: Default::default(),
         auth: Default::default(),
         cors: Default::default(),
         group_logger: None,

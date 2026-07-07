@@ -156,7 +156,7 @@ pub use config::{
     AuthSdkConfig, BcsConfig, CacheConfig, DatabaseConfig, DatabaseType, DingTalkAccountConfig,
     InviteConfig, LlmConfig, LlmProviderType, LoggingConfig, MessageHistoryConfig, MetricsConfig,
     MetricsMode, MistConfig, RedisCacheConfig, SecurityGatewayProviderConfig,
-    StructuredOutputMode,
+    StructuredOutputMode, UserDirectoryConfig, UserDirectoryProviderConfig,
 };
 pub use error::{BcsError, Result};
 pub use plugins::{CachePluginKind, DbPluginKind, InfrastructurePlugins};

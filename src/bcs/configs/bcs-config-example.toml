@@ -138,6 +138,12 @@ max_keep_days = 7
 hyper = "warn"
 tower_http = "warn"
 
+[user_directory]
+# Optional external user directory. Enable this only when the selected provider
+# plugin is linked into the binary, then put provider-specific options under
+# [user_directory.providers.<provider>].
+enabled = false
+
 [auth]
 chain = ["oauth_session"]
 require_authentication = true

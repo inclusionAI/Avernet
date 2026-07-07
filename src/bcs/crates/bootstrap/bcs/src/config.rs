@@ -19,6 +19,7 @@ pub use bcs_config_api::{
     AuthChainConfig, AuthSdkConfig, DingTalkAccountConfig, FusionProviderConfig, LlmConfig,
     LlmProviderType, LogOutputConfig, LogOutputFormat, LoggingConfig, ManifestConfig,
     LeaderElectionConfig, StructuredOutputMode, SecurityConfig,
+    UserDirectoryConfig, UserDirectoryProviderConfig,
     deserialize_optional_secret, serialize_optional_secret,
 };
 #[allow(unused_imports)]
@@ -263,6 +264,11 @@ pub struct BcsConfig {
     /// and bot ownership verification.
     #[serde(default)]
     pub auth_sdk: AuthSdkConfig,
+
+    /// External user directory used to resolve stable user ids to display
+    /// metadata. Disabled by default; providers are supplied by linked plugins.
+    #[serde(default)]
+    pub user_directory: UserDirectoryConfig,
 
     /// Auth plugin chain configuration (`[auth]` section). Selects which auth
     /// plugins are enabled and in what order. Empty/omitted → build-profile
@@ -601,6 +607,7 @@ impl Default for BcsConfig {
             logging: LoggingConfig::default(),
             bcsfuse: BcsFuseConfig::default(),
             auth_sdk: AuthSdkConfig::default(),
+            user_directory: UserDirectoryConfig::default(),
             auth: AuthChainConfig::default(),
             cors: CorsConfig::default(),
             group_logger: None,
@@ -1909,6 +1916,59 @@ endpoint = "/api/agentpass/zero_check.json"
         let err = toml::from_str::<BcsConfig>(toml)
             .expect_err("legacy top-level provider options should be rejected");
         assert!(err.to_string().contains("endpoint"));
+    }
+
+    #[test]
+    fn test_user_directory_provider_options_parse_as_map() {
+        let toml = r#"
+bind = "0.0.0.0"
+port = 21000
+bots_base_dir = "/bots"
+
+[user_directory]
+enabled = true
+provider = "ldap"
+
+[user_directory.providers.ldap]
+base_url = "https://directory.example.com"
+timeout_ms = 300
+"#;
+
+        let config: BcsConfig = toml::from_str(toml).unwrap();
+        let provider = config
+            .user_directory
+            .providers
+            .get("ldap")
+            .expect("ldap provider config");
+
+        assert!(config.user_directory.enabled);
+        assert_eq!(config.user_directory.provider.as_deref(), Some("ldap"));
+        assert_eq!(
+            provider.get("base_url").and_then(|value| value.as_str()),
+            Some("https://directory.example.com")
+        );
+        assert_eq!(
+            provider.get("timeout_ms").and_then(|value| value.as_u64()),
+            Some(300)
+        );
+    }
+
+    #[test]
+    fn test_user_directory_rejects_legacy_top_level_provider_options() {
+        let toml = r#"
+bind = "0.0.0.0"
+port = 21000
+bots_base_dir = "/bots"
+
+[user_directory]
+enabled = true
+provider = "ldap"
+base_url = "https://directory.example.com"
+"#;
+
+        let err = toml::from_str::<BcsConfig>(toml)
+            .expect_err("legacy top-level provider options should be rejected");
+        assert!(err.to_string().contains("base_url"));
     }
 
 }
