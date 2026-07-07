@@ -123,11 +123,17 @@ impl ProcessManager {
         let client = reqwest::Client::new();
         let url = format!("http://127.0.0.1:{}/health", port);
         for _ in 0..30 {
-            match client.get(&url).timeout(Duration::from_secs(1)).send().await {
-                Ok(_) => {
+            match client
+                .get(&url)
+                .timeout(Duration::from_secs(1))
+                .send()
+                .await
+            {
+                Ok(response) if response.status().is_success() => {
                     println!("[BCS] Server ready on port {}", port);
                     return Ok(port);
                 }
+                Ok(_) => tokio::time::sleep(Duration::from_millis(100)).await,
                 Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
             }
         }
