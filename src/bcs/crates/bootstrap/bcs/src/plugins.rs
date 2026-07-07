@@ -16,9 +16,12 @@ use bcs_llm_api::LlmChatCompletionPort;
 use bcs_security_gateway_api::SecurityGatewayPort;
 use bcs_service_api::LeaderElectionPort;
 use bcs_service_api::lifecycle::ServiceLifecycle;
+use bcs_user_directory_api::UserDirectoryPlugin;
 use futures::future::BoxFuture;
 
-use crate::config::{BcsConfig, DatabaseType, SecurityGatewayProviderConfig};
+use crate::config::{
+    BcsConfig, DatabaseType, SecurityGatewayProviderConfig, UserDirectoryProviderConfig,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CachePluginKind {
@@ -129,6 +132,21 @@ pub struct SecurityGatewayFactory {
 
 inventory::collect!(SecurityGatewayFactory);
 
+#[derive(Clone)]
+pub struct UserDirectoryRegistration {
+    pub plugin: Arc<dyn UserDirectoryPlugin>,
+}
+
+pub type UserDirectoryBuild =
+    fn(BcsConfig, UserDirectoryProviderConfig) -> crate::Result<UserDirectoryRegistration>;
+
+pub struct UserDirectoryFactory {
+    pub name: &'static str,
+    pub build: UserDirectoryBuild,
+}
+
+inventory::collect!(UserDirectoryFactory);
+
 async fn build_registered_cache_plugin(
     config: &BcsConfig,
     provider: &str,
@@ -184,6 +202,19 @@ pub fn build_registered_security_gateway(
     provider_config: SecurityGatewayProviderConfig,
 ) -> crate::Result<Option<SecurityGatewayRegistration>> {
     for factory in inventory::iter::<SecurityGatewayFactory> {
+        if factory.name == provider {
+            return Ok(Some((factory.build)(config.clone(), provider_config)?));
+        }
+    }
+    Ok(None)
+}
+
+pub fn build_registered_user_directory(
+    config: &BcsConfig,
+    provider: &str,
+    provider_config: UserDirectoryProviderConfig,
+) -> crate::Result<Option<UserDirectoryRegistration>> {
+    for factory in inventory::iter::<UserDirectoryFactory> {
         if factory.name == provider {
             return Ok(Some((factory.build)(config.clone(), provider_config)?));
         }
@@ -491,6 +522,46 @@ mod tests {
         }
     }
 
+    struct TestUserDirectoryPlugin;
+
+    #[async_trait::async_trait]
+    impl UserDirectoryPlugin for TestUserDirectoryPlugin {
+        async fn lookup_by_staff_no(
+            &self,
+            staff_no: &str,
+        ) -> Result<
+            Option<bcs_user_directory_api::UserDirectoryProfile>,
+            bcs_user_directory_api::UserDirectoryError,
+        > {
+            Ok(Some(bcs_user_directory_api::UserDirectoryProfile {
+                staff_no: staff_no.to_string(),
+                nick_name: Some("test-user".to_string()),
+            }))
+        }
+    }
+
+    fn test_user_directory_factory(
+        _config: BcsConfig,
+        provider_config: UserDirectoryProviderConfig,
+    ) -> crate::Result<UserDirectoryRegistration> {
+        if provider_config.get("source").and_then(|value| value.as_str()) != Some("unit") {
+            return Err(crate::BcsError::InvalidConfig(
+                "expected user directory provider option source = unit".to_string(),
+            ));
+        }
+
+        Ok(UserDirectoryRegistration {
+            plugin: Arc::new(TestUserDirectoryPlugin),
+        })
+    }
+
+    inventory::submit! {
+        UserDirectoryFactory {
+            name: "test-user-directory-options",
+            build: test_user_directory_factory,
+        }
+    }
+
     #[test]
     fn default_config_selects_memory_cache_and_local_db_plugins() {
         let config = BcsConfig::default();
@@ -596,6 +667,32 @@ mod tests {
             registration.gateway.check(request).await,
             bcs_security_gateway_api::SecurityVerdict::Allow { task_id: None }
         ));
+    }
+
+    #[tokio::test]
+    async fn registered_user_directory_factory_receives_provider_options() {
+        let mut provider_config = UserDirectoryProviderConfig::new();
+        provider_config.insert(
+            "source".to_string(),
+            serde_json::Value::String("unit".to_string()),
+        );
+
+        let registration = build_registered_user_directory(
+            &BcsConfig::default(),
+            "test-user-directory-options",
+            provider_config,
+        )
+        .expect("user directory factory should build")
+        .expect("user directory factory should be registered");
+
+        let profile = registration
+            .plugin
+            .lookup_by_staff_no("197262")
+            .await
+            .expect("lookup should succeed")
+            .expect("profile should be found");
+        assert_eq!(profile.staff_no, "197262");
+        assert_eq!(profile.nick_name.as_deref(), Some("test-user"));
     }
 
     #[test]

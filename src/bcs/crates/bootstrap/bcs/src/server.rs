@@ -28,7 +28,7 @@ use crate::lifecycle::LifecycleOrchestrator;
 use crate::plugins::{
     DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
     build_registered_leader_election, build_registered_llm_provider,
-    build_registered_security_gateway,
+    build_registered_security_gateway, build_registered_user_directory,
 };
 use bcs_bot::{Bot, BotCore, ProviderBotEvents, ProviderCore, ProviderManagement};
 use bcs_bot_store::{DbProviderStore, PersistentBotRepo, MemoryBotRepo, MemoryProviderStore};
@@ -429,8 +429,34 @@ fn build_provider_services_with_webhook_url_guard(
     (provider_core, provider_bot_core, provider_management)
 }
 
-fn create_user_directory_plugin(_config: &BcsConfig) -> Option<Arc<dyn UserDirectoryPlugin>> {
-    None
+fn create_user_directory_plugin(
+    config: &BcsConfig,
+) -> crate::Result<Option<Arc<dyn UserDirectoryPlugin>>> {
+    let directory = &config.user_directory;
+    if !directory.enabled {
+        return Ok(None);
+    }
+
+    let provider = directory
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|provider| !provider.is_empty())
+        .ok_or_else(|| {
+            crate::BcsError::InvalidConfig(
+                "user_directory.provider is required when user_directory.enabled = true"
+                    .to_string(),
+            )
+        })?;
+
+    let provider_config = directory.providers.get(provider).cloned().unwrap_or_default();
+    build_registered_user_directory(config, provider, provider_config)?
+        .ok_or_else(|| {
+            crate::BcsError::InvalidConfig(format!(
+                "user_directory provider '{provider}' is not available in this binary"
+            ))
+        })
+        .map(|registration| Some(registration.plugin))
 }
 
 fn create_provider_stream_gray_list(config: &BcsConfig) -> Arc<ProviderStreamGrayList> {
@@ -464,7 +490,8 @@ impl Default for BcsServerState {
         // F.1/F.2 dual-write wiring: relation store must be created BEFORE
         // friend_store and provider_management so it can be injected into both.
         let relation_store: Arc<RelationCore> = Arc::new(RelationCore::memory());
-        let user_directory = create_user_directory_plugin(&config);
+        let user_directory = create_user_directory_plugin(&config)
+            .expect("default user directory config is valid");
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
                 &provider_repos,
@@ -1558,7 +1585,8 @@ impl BcsServer {
         // F.1/F.2 dual-write wiring: relation store must be created BEFORE
         // friend_store and provider_management so it can be injected into both.
         let relation_store: Arc<RelationCore> = Arc::new(RelationCore::memory());
-        let user_directory = create_user_directory_plugin(&config);
+        let user_directory = create_user_directory_plugin(&config)
+            .expect("user directory config is valid for in-memory server");
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
                 &provider_repos,
@@ -1870,10 +1898,10 @@ impl BcsServer {
         use bcs_service_api::BotRegistryCoreService;
 
         let outbound_url_guard = outbound_url_guard_from_config(&config);
-        let user_directory = extensions
-            .user_directory_plugin
-            .clone()
-            .or_else(|| create_user_directory_plugin(&config));
+        let user_directory = match extensions.user_directory_plugin.clone() {
+            Some(plugin) => Some(plugin),
+            None => create_user_directory_plugin(&config)?,
+        };
         info!(
             cache_plugin = %infrastructure_plugins.cache_kind(),
             db_plugin = %infrastructure_plugins.db_kind(),

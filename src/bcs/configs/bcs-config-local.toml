@@ -113,6 +113,12 @@ app_name = "bcs"
 remote_server_domain = ""
 use_remote_login_check = false
 
+[user_directory]
+# Optional external user directory. Public local builds keep this disabled;
+# linked plugins can enable a provider and pass options under
+# [user_directory.providers.<provider>].
+enabled = false
+
 [auth]
 chain = ["local", "session"]
 require_authentication = false

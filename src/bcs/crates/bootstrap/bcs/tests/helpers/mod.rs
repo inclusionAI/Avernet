@@ -60,6 +60,7 @@ pub fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
         logging: LoggingConfig::default(),
         bcsfuse: bcs_fuse_client::BcsFuseConfig::default(),
         auth_sdk: Default::default(),
+        user_directory: Default::default(),
         auth: Default::default(),
         cors: Default::default(),
         group_logger: None,

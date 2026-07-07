@@ -322,6 +322,31 @@ pub trait AuthSdkEnvView {
 }
 
 // ---------------------------------------------------------------------------
+// User directory
+// ---------------------------------------------------------------------------
+
+/// Provider-specific user-directory options.
+pub type UserDirectoryProviderConfig = BTreeMap<String, serde_json::Value>;
+
+/// Optional external user directory used to resolve stable user ids to display
+/// metadata. This does not authenticate requests or store users.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UserDirectoryConfig {
+    /// Enable user-directory lookups. Default is off for public/local builds.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// User-directory provider to load when enabled.
+    #[serde(default)]
+    pub provider: Option<String>,
+
+    /// Provider-specific options keyed by provider name.
+    #[serde(default)]
+    pub providers: BTreeMap<String, UserDirectoryProviderConfig>,
+}
+
+// ---------------------------------------------------------------------------
 // Auth plugin chain
 // ---------------------------------------------------------------------------
 
