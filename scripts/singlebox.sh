@@ -75,6 +75,8 @@ BCSFUSE_PORT="${BCSFUSE_PORT:-${DEFAULT_BCSFUSE_PORT}}"
 FRONTEND_PORT="${FRONTEND_PORT:-${DEFAULT_FRONTEND_PORT}}"
 CHAT_ENGINE="${CHAT_ENGINE:-openclaw}"
 BOTS_PROFILE_DIR="${BOTS_PROFILE_DIR:-}"
+BCN_PLUGIN_SOURCE="${BCN_PLUGIN_SOURCE:-source}"
+BCN_PLUGIN_VERSION="${BCN_PLUGIN_VERSION:-latest}"
 
 # openclaw 配置目录和模板路径
 OPENCLAW_CONFIG_DIR="${HOME}/.openclaw"
@@ -395,6 +397,9 @@ show_help() {
     echo "  --bcs-port, -bp PORT          Specify BCS port (default: ${DEFAULT_BCS_PORT})"
     echo "  --frontend-port, -fp PORT     Specify frontend dev server port (default: ${DEFAULT_FRONTEND_PORT})"
     echo "  --bcs-env local|dev           BCS runtime env; default: local with --local, otherwise dev"
+    echo "  --bcn-plugin-source source|npm  BCN plugin source: build from repo (source, default) or install"
+    echo "                                  @avernet-plugin/openclaw-channel-bcn (npm). Env: BCN_PLUGIN_SOURCE,"
+    echo "                                  BCN_PLUGIN_VERSION (npm mode, default latest)"
     echo "  --profile-dir DIR            Bot persona source dir for 'bots' target; requires DIR/bots.json"
     echo "  --bcs-auto-onboard            Legacy compatibility flag; use bcs_bots for BCS + bots"
     echo "  --no-bcs-auto-onboard         Legacy compatibility flag; use bcs for BCS-only"
@@ -617,6 +622,15 @@ main() {
                 save_engine_type
                 shift 2
                 ;;
+            --bcn-plugin-source)
+                if [ -z "$2" ] || [ "$2" = -* ]; then
+                    log_error "Mode required for $1 (source|npm)"
+                    show_help
+                    exit 1
+                fi
+                BCN_PLUGIN_SOURCE="$2"
+                shift 2
+                ;;
             --bcs-env)
                 if [ -z "$2" ] || [ "$2" = -* ]; then
                     log_error "BCS environment required for $1"
@@ -731,6 +745,12 @@ main() {
     else
         export SINGLEBOX_MODE=local
     fi
+    local resolved_bcn_mode
+    if ! resolved_bcn_mode="$(bcn_plugin_mode)"; then
+        exit 1
+    fi
+    export BCN_PLUGIN_SOURCE="$resolved_bcn_mode"
+    export BCN_PLUGIN_VERSION
     export SINGLEBOX_COMMAND="${command:-}"
 
     case "$command" in

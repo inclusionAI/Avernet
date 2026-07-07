@@ -43,10 +43,26 @@ export MOLTIS_BCS_CONFIG
 BCS_CLI="${BCS_CLI_BIN:-$PROJECT_ROOT/target/debug/bcs-cli}"
 BCS_ADMIN="$PROJECT_ROOT/target/debug/bcs-admin"
 BCS_BIN="${BCS_BIN:-$PROJECT_ROOT/target/debug/bcs}"
-# use monorepo plugin source
+# BCN plugin: source (build monorepo tree) or npm (consume installed package)
+BCN_PLUGIN_SOURCE="${BCN_PLUGIN_SOURCE:-source}"
+BCN_PLUGIN_VERSION="${BCN_PLUGIN_VERSION:-latest}"
 BCN_PLUGIN_SRC_DIR="$PROJECT_ROOT/../../src/plugin/packages/openclaw-channel-bcn"
 BCN_PLUGIN_PACKAGE_DIR="$BCN_PLUGIN_SRC_DIR/package"
-if [ -f "$BCN_PLUGIN_SRC_DIR/openclaw.plugin.json" ] && [ -f "$BCN_PLUGIN_SRC_DIR/dist/esm/index.js" ]; then
+if [ "$BCN_PLUGIN_SOURCE" = "npm" ]; then
+    BCN_PLUGIN_LOAD_DIR=""
+    for _bcn_cand in \
+        "${OPENCLAW_EXTENSIONS_ROOT:-$HOME/.openclaw/extensions}/openclaw-channel-bcn" \
+        "$HOME/.openclaw/extensions/openclaw-channel-bcn"; do
+        if [ -f "$_bcn_cand/openclaw.plugin.json" ] && [ -f "$_bcn_cand/dist/esm/index.js" ]; then
+            BCN_PLUGIN_LOAD_DIR="$_bcn_cand"
+            break
+        fi
+    done
+    if [ -z "$BCN_PLUGIN_LOAD_DIR" ]; then
+        echo "ERROR: BCN plugin (npm mode) not installed under extensions root; run singlebox setup first" >&2
+        exit 1
+    fi
+elif [ -f "$BCN_PLUGIN_SRC_DIR/openclaw.plugin.json" ] && [ -f "$BCN_PLUGIN_SRC_DIR/dist/esm/index.js" ]; then
     BCN_PLUGIN_LOAD_DIR="$BCN_PLUGIN_SRC_DIR"
 elif [ -f "$BCN_PLUGIN_PACKAGE_DIR/openclaw.plugin.json" ] && [ -f "$BCN_PLUGIN_PACKAGE_DIR/dist/esm/index.js" ]; then
     BCN_PLUGIN_LOAD_DIR="$BCN_PLUGIN_PACKAGE_DIR"
@@ -273,7 +289,6 @@ bot_config_base_matches_local() {
         --arg bcs_url "$BCS_URL" \
         --arg bot_id "$bot_id" \
         --arg workspace "$workspace_dir" \
-        --arg plugin_path "$BCN_PLUGIN_LOAD_DIR" \
         --argjson port "$port" \
         '
           .channels.bcs.enabled == true
@@ -281,7 +296,19 @@ bot_config_base_matches_local() {
           and .agents.defaults.workspace == $workspace
           and .gateway.port == $port
           and .gateway.mode == "local"
-          and ((.plugins.load.paths // []) | index($plugin_path) != null)
+        ' "$config_file" >/dev/null 2>&1
+}
+
+bot_config_plugin_matches_local() {
+    local profile="$1"
+    local config_file
+
+    config_file="$(profile_dir_for "$profile")/openclaw.json"
+
+    jq -e \
+        --arg plugin_path "$BCN_PLUGIN_LOAD_DIR" \
+        '
+          ((.plugins.load.paths // []) | index($plugin_path) != null)
         ' "$config_file" >/dev/null 2>&1
 }
 
@@ -313,6 +340,7 @@ bot_config_matches_local() {
     local profile_source="${4:-$profile}"
 
     bot_config_base_matches_local "$bot_id" "$profile" "$port" "$profile_source" || return 1
+    bot_config_plugin_matches_local "$profile" || return 1
     bot_config_identity_matches_local "$profile"
 }
 
@@ -1405,7 +1433,7 @@ link_bcn_plugin() {
     if [ ! -f "$project_bcn_path/package.json" ]; then
         cat > "$project_bcn_path/package.json" << 'PKGJSON'
 {
-  "name": "openclaw-channel-bcn",
+  "name": "@avernet-plugin/openclaw-channel-bcn",
   "version": "0.1.0",
   "main": "dist/index.js",
   "private": true
@@ -1415,7 +1443,7 @@ PKGJSON
     fi
 
     # Build BCN plugin when outputs are missing or TypeScript sources are newer.
-    if [ -d "$BCN_PLUGIN_SRC_DIR" ]; then
+    if [ "$BCN_PLUGIN_SOURCE" != "npm" ] && [ -d "$BCN_PLUGIN_SRC_DIR" ]; then
         if bcn_plugin_needs_build "$project_bcn_path"; then
             info "Building BCN plugin..."
             local npm_cmd="npm"
@@ -1436,6 +1464,11 @@ PKGJSON
     # Link BCN plugin to user extensions directory
     local user_ext_dir="$OPENCLAW_EXTENSIONS_ROOT"
     local user_bcn_link="$user_ext_dir/openclaw-channel-bcn"
+
+    if [ "$project_bcn_path" = "$user_bcn_link" ]; then
+        pass "BCN plugin already at extensions path: $user_bcn_link"
+        return 0
+    fi
 
     if [ ! -d "$user_ext_dir" ]; then
         mkdir -p "$user_ext_dir"
@@ -1581,7 +1614,7 @@ check_prerequisites() {
         profile_dir="$(profile_dir_for "$profile")"
         if [ -f "$profile_dir/openclaw.json" ] && ! bot_config_matches_local "$bot_id" "$profile" "$port" "$profile_source"; then
             if bot_config_base_matches_local "$bot_id" "$profile" "$port" "$profile_source"; then
-                info "$bot_id profile will be refreshed with current BCS session bot identity: $profile_dir"
+                info "$bot_id profile will be refreshed with current BCN plugin path or BCS session bot identity: $profile_dir"
             else
                 fail "$bot_id profile exists but does not match this singlebox local stack: $profile_dir"
                 info "Expected port=$port, BCS URL=$BCS_URL, workspace=$(workspace_dir_for "$bot_id" "$profile" "$profile_source")"

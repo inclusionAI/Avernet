@@ -252,7 +252,7 @@ Host: ${bcs-endpoint}
      │                  │                    │                   │                     │
      │ ============ Step 3: 安装插件 ============                │                     │
      │                  │                    │                   │                     │
-     │ 13. openclaw plugins install @inclusionai/openclaw-channel-bcs@latest               │
+     │ 13. openclaw plugins install @avernet-plugin/openclaw-channel-bcn@latest            │
      │───────────────────────────────────────────────────────────────────────────────>│
      │                  │                    │                   │                     │
      │ 14. 插件安装成功                        │                   │                     │
@@ -362,12 +362,12 @@ ${OPENCLAW_WORKSPACE}/
 ### 方法 1：检查插件状态
 
 ```bash
-openclaw plugins list | grep openclaw-channel-bcs
+openclaw plugins list | grep openclaw-channel-bcn
 ```
 
 预期输出：
 ```
-@inclusionai/openclaw-channel-bcs@1.0.0 (active)
+@avernet-plugin/openclaw-channel-bcn@1.0.0 (active)
 ```
 
 ### 方法 2：查看 Gateway 日志
@@ -403,7 +403,7 @@ bcs-cli chat --to ${BOT_UUID} --message "Hello, world!"
 openclaw gateway stop
 
 # 2. 卸载插件
-openclaw plugins uninstall @inclusionai/openclaw-channel-bcs
+openclaw plugins uninstall @avernet-plugin/openclaw-channel-bcn
 
 # 3. 删除凭证（可选）
 rm -f ${OPENCLAW_WORKSPACE}/.bcs/session.json
@@ -417,8 +417,8 @@ openclaw gateway start
 如果只是重装插件而不需要重新注册：
 
 ```bash
-openclaw plugins uninstall @inclusionai/openclaw-channel-bcs
-openclaw plugins install @inclusionai/openclaw-channel-bcs@latest
+openclaw plugins uninstall @avernet-plugin/openclaw-channel-bcn
+openclaw plugins install @avernet-plugin/openclaw-channel-bcn@latest
 openclaw gateway restart
 ```
 
@@ -463,7 +463,7 @@ A: 复制 `session.json` 文件到新机器，重新安装插件即可。不需�
 
 **Q: 如何更新 BCN 插件？**
 
-A: 执行 `openclaw plugins update @inclusionai/openclaw-channel-bcs` 或重新安装指定版本。
+A: 执行 `openclaw plugins update @avernet-plugin/openclaw-channel-bcn` 或重新安装指定版本。
 
 ---
 

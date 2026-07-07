@@ -86,6 +86,14 @@ bots_dynamic_workspace_dir() {
 }
 
 bots_bcn_plugin_load_dir() {
+    if [ "$(bcn_plugin_mode)" = "npm" ]; then
+        if ! bcn_plugin_resolve_npm_dir; then
+            log_error "BCN plugin (npm mode) not installed; run setup first"
+            return 1
+        fi
+        return 0
+    fi
+
     local plugin_src="${PROJECT_ROOT}/src/plugin/packages/openclaw-channel-bcn"
     local plugin_package="${plugin_src}/package"
     if [ -f "${plugin_src}/openclaw.plugin.json" ] && [ -f "${plugin_src}/dist/esm/index.js" ]; then
@@ -226,17 +234,16 @@ bots_dynamic_validate_manifest() {
     [ "$has_error" = false ]
 }
 
-bots_dynamic_config_matches() {
+bots_dynamic_config_base_matches() {
     local name="$1"
     local profile="$2"
     local port="$3"
     local source="${4:-$profile}"
-    local profile_dir workspace_dir config_file plugin_path bcs_url
+    local profile_dir workspace_dir config_file bcs_url
 
     profile_dir="$(bcs_bot_profile_dir "$profile")"
     workspace_dir="$(bots_dynamic_workspace_dir "$name" "$profile" "$source")"
     config_file="${profile_dir}/openclaw.json"
-    plugin_path="$(bots_bcn_plugin_load_dir)"
     bcs_url="ws://127.0.0.1:${BCS_PORT}/ws/bot"
 
     [ -f "$config_file" ] || return 1
@@ -244,7 +251,6 @@ bots_dynamic_config_matches() {
         --arg bcs_url "$bcs_url" \
         --arg bot_id "$name" \
         --arg workspace "$workspace_dir" \
-        --arg plugin_path "$plugin_path" \
         --argjson port "$port" \
         '
           .channels.bcs.enabled == true
@@ -253,8 +259,33 @@ bots_dynamic_config_matches() {
           and .agents.defaults.workspace == $workspace
           and .gateway.port == $port
           and .gateway.mode == "local"
-          and ((.plugins.load.paths // []) | index($plugin_path) != null)
         ' "$config_file" >/dev/null 2>&1
+}
+
+bots_dynamic_config_plugin_matches() {
+    local profile="$1"
+    local profile_dir config_file plugin_path
+
+    profile_dir="$(bcs_bot_profile_dir "$profile")"
+    config_file="${profile_dir}/openclaw.json"
+    plugin_path="$(bots_bcn_plugin_load_dir)"
+
+    [ -f "$config_file" ] || return 1
+    jq -e \
+        --arg plugin_path "$plugin_path" \
+        '
+          ((.plugins.load.paths // []) | index($plugin_path) != null)
+        ' "$config_file" >/dev/null 2>&1
+}
+
+bots_dynamic_config_matches() {
+    local name="$1"
+    local profile="$2"
+    local port="$3"
+    local source="${4:-$profile}"
+
+    bots_dynamic_config_base_matches "$name" "$profile" "$port" "$source" || return 1
+    bots_dynamic_config_plugin_matches "$profile"
 }
 
 bots_dynamic_runtime_matches() {
@@ -332,10 +363,14 @@ bots_dynamic_check_profile_configs() {
     while IFS=$'\t' read -r name profile port source summary domains skills scopes; do
         profile_dir="$(bcs_bot_profile_dir "$profile")"
         if [ -f "${profile_dir}/openclaw.json" ] && ! bots_dynamic_config_matches "$name" "$profile" "$port" "$source"; then
-            log_error "${name} profile exists but does not match this --profile-dir group: ${profile_dir}"
-            log_error "Expected port=${port}, BCS URL=ws://127.0.0.1:${BCS_PORT}/ws/bot, workspace=$(bots_dynamic_workspace_dir "$name" "$profile" "$source")"
-            log_error "Run $(singlebox_cmd clean bots) --profile-dir ${BOTS_PROFILE_DIR} after confirming this group is disposable."
-            has_error=true
+            if bots_dynamic_config_base_matches "$name" "$profile" "$port" "$source"; then
+                log_info "${name} profile will be refreshed with current BCN plugin path: ${profile_dir}"
+            else
+                log_error "${name} profile exists but does not match this --profile-dir group: ${profile_dir}"
+                log_error "Expected port=${port}, BCS URL=ws://127.0.0.1:${BCS_PORT}/ws/bot, workspace=$(bots_dynamic_workspace_dir "$name" "$profile" "$source")"
+                log_error "Run $(singlebox_cmd clean bots) --profile-dir ${BOTS_PROFILE_DIR} after confirming this group is disposable."
+                has_error=true
+            fi
         fi
     done < <(bots_dynamic_specs)
     [ "$has_error" = false ]
@@ -560,6 +595,8 @@ bots_dynamic_setup_profile() {
             log_info "Refreshing dynamic bot profile with model config: ${profile} (${name})"
         elif ! bots_dynamic_config_has_bcs_core_tools "$config_file"; then
             log_info "Refreshing dynamic bot profile with BCS core tool allowlist: ${profile} (${name})"
+        elif ! bots_dynamic_config_matches "$name" "$profile" "$port" "$source"; then
+            log_info "Refreshing dynamic bot profile with current local stack config: ${profile} (${name})"
         else
             log_info "Preserving existing dynamic bot profile: ${profile} (${name})"
             return 0
@@ -942,18 +979,22 @@ bots_dynamic_prereqs() {
         has_error=true
     fi
 
-    if check_node_available; then
-        prereq_ok "node: $(node --version 2>&1)"
-    else
-        prereq_error "Node.js >= 22 not found (required for BCN plugin). Install: brew install node@22 (macOS)"
-        has_error=true
-    fi
+    if [ "$(bcn_plugin_mode)" = "source" ]; then
+        if check_node_available; then
+            prereq_ok "node: $(node --version 2>&1)"
+        else
+            prereq_error "Node.js >= 22 not found (required to build BCN plugin in source mode). Install: brew install node@22 (macOS)"
+            has_error=true
+        fi
 
-    if check_command npm; then
-        prereq_ok "npm: $(npm --version 2>&1)"
+        if check_command npm; then
+            prereq_ok "npm: $(npm --version 2>&1)"
+        else
+            prereq_error "npm not found (required to build BCN plugin in source mode). Install Node.js 22+ with npm."
+            has_error=true
+        fi
     else
-        prereq_error "npm not found (required for BCN plugin). Install Node.js 22+ with npm."
-        has_error=true
+        prereq_ok "BCN plugin mode: npm (source build not required)"
     fi
 
     if bots_dynamic_validate_manifest; then
@@ -1156,6 +1197,8 @@ bots_run_stack_script() {
     OPENCLAW_EXTENSIONS_ROOT="${OPENCLAW_EXTENSIONS_ROOT:-}" \
     OPENCLAW_EXTENSIONS_REPLACE_LINKS="${OPENCLAW_EXTENSIONS_REPLACE_LINKS:-}" \
     OPENCLAW_LOG_ROOT="${OPENCLAW_LOG_ROOT:-}" \
+    BCN_PLUGIN_SOURCE="${BCN_PLUGIN_SOURCE:-source}" \
+    BCN_PLUGIN_VERSION="${BCN_PLUGIN_VERSION:-latest}" \
     SINGLEBOX_MODE="${SINGLEBOX_MODE:-local}" \
     BCS_BOTS_DETACHED=1 \
     RUN_ONBOARD_AFTER_START=0 \
@@ -1358,18 +1401,22 @@ bots_prereqs() {
         has_error=true
     fi
 
-    if check_node_available; then
-        prereq_ok "node: $(node --version 2>&1)"
-    else
-        prereq_error "Node.js >= 22 not found (required for BCN plugin). Install: brew install node@22 (macOS)"
-        has_error=true
-    fi
+    if [ "$(bcn_plugin_mode)" = "source" ]; then
+        if check_node_available; then
+            prereq_ok "node: $(node --version 2>&1)"
+        else
+            prereq_error "Node.js >= 22 not found (required to build BCN plugin in source mode). Install: brew install node@22 (macOS)"
+            has_error=true
+        fi
 
-    if check_command npm; then
-        prereq_ok "npm: $(npm --version 2>&1)"
+        if check_command npm; then
+            prereq_ok "npm: $(npm --version 2>&1)"
+        else
+            prereq_error "npm not found (required to build BCN plugin in source mode). Install Node.js 22+ with npm."
+            has_error=true
+        fi
     else
-        prereq_error "npm not found (required for BCN plugin). Install Node.js 22+ with npm."
-        has_error=true
+        prereq_ok "BCN plugin mode: npm (source build not required)"
     fi
 
     local stack_script="${BCS_DIR}/scripts/start_bcs_bots.sh"

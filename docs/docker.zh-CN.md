@@ -187,8 +187,8 @@ npm install -g "openclaw@>=2026.3.28"
 # 仓库根目录下执行
 cd src/plugin
 corepack enable
-pnpm install --filter openclaw-channel-bcn...
-pnpm --filter openclaw-channel-bcn build
+pnpm install --filter @avernet-plugin/openclaw-channel-bcn...
+pnpm --filter @avernet-plugin/openclaw-channel-bcn build
 cd ../..
 
 # 软链到 OpenClaw 扩展目录

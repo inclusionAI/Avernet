@@ -377,12 +377,28 @@ bcs_assign_bot_ports() {
 setup_bcn_plugin() {
     log_info "Setting up BCN plugin (openclaw-channel-bcn)..."
 
+    local mode
+    mode="$(bcn_plugin_mode)" || return 1
+
     local extensions_dir="${OPENCLAW_EXTENSIONS_ROOT:-${HOME}/.openclaw/extensions}"
     local plugin_link="${extensions_dir}/openclaw-channel-bcn"
-    local plugin_src="${PROJECT_ROOT}/src/plugin/packages/openclaw-channel-bcn"
     local replace_link="${OPENCLAW_EXTENSIONS_REPLACE_LINKS:-0}"
 
-    # Build BCN plugin (skip if already built)
+    if [ "$mode" = "npm" ]; then
+        local plugin_target
+        plugin_target="$(bcn_plugin_ensure_npm)" || return 1
+        # Native install may already sit at the link path; avoid self-linking.
+        if [ "$plugin_target" = "$plugin_link" ]; then
+            log_info "BCN plugin installed at ${plugin_link}"
+            return 0
+        fi
+        ensure_bcn_symlink "$plugin_target" "$plugin_link" "$replace_link"
+        return $?
+    fi
+
+    # ---- source mode (build from the in-repo tree) ----
+    local plugin_src="${PROJECT_ROOT}/src/plugin/packages/openclaw-channel-bcn"
+
     if [ -d "${plugin_src}" ]; then
         if [ -f "${plugin_src}/dist/esm/index.js" ] && [ -d "${plugin_src}/node_modules" ]; then
             log_info "BCN plugin already built, skipping"
@@ -427,38 +443,14 @@ setup_bcn_plugin() {
         fi
     fi
 
-    mkdir -p "${extensions_dir}"
-
-    if [ -L "${plugin_link}" ]; then
-        local current_target
-        current_target="$(readlink "${plugin_link}")"
-        if [ "$current_target" = "$plugin_src" ]; then
-            log_info "BCN plugin symlink already exists: ${plugin_link}"
-        elif [ "$replace_link" = "1" ]; then
-            rm -f "${plugin_link}"
-            ln -s "${plugin_src}" "${plugin_link}"
-            log_info "BCN plugin relinked: ${plugin_link} -> ${plugin_src}"
-        else
-            log_info "BCN plugin symlink points elsewhere, keeping: ${plugin_link} -> ${current_target}"
-        fi
-        return 0
-    elif [ -e "${plugin_link}" ]; then
-        if [ "$replace_link" = "1" ]; then
-            log_error "BCN plugin link path exists and is not a symlink: ${plugin_link}"
-            return 1
-        fi
-        log_info "BCN plugin path already exists, keeping: ${plugin_link}"
-        return 0
-    fi
-
     if [ ! -d "${plugin_src}" ]; then
         log_warn "BCN plugin source not found at ${plugin_src}, skipping symlink setup"
         log_warn "Per-bot OpenClaw processes will not auto-connect to BCS without the BCN plugin"
         return 0
     fi
 
-    ln -s "${plugin_src}" "${plugin_link}"
-    log_info "BCN plugin linked: ${plugin_link} -> ${plugin_src}"
+    ensure_bcn_symlink "$plugin_src" "$plugin_link" "$replace_link"
+    return $?
 }
 
 # Wait for BCS health endpoint
@@ -850,6 +842,8 @@ bcs_stop() {
 remove_owned_bcn_plugin_symlink() {
     local plugin_link="${OPENCLAW_EXTENSIONS_ROOT:-${HOME}/.openclaw/extensions}/openclaw-channel-bcn"
     local plugin_src="${PROJECT_ROOT}/src/plugin/packages/openclaw-channel-bcn"
+    local npm_dir
+    npm_dir="$(bcn_plugin_resolve_npm_dir 2>/dev/null || true)"
 
     if [ ! -e "$plugin_link" ] && [ ! -L "$plugin_link" ]; then
         log_info "No BCN plugin symlink to remove: ${plugin_link}"
@@ -863,7 +857,7 @@ remove_owned_bcn_plugin_symlink() {
 
     local current_target
     current_target="$(readlink "$plugin_link")"
-    if [ "$current_target" = "$plugin_src" ]; then
+    if [ "$current_target" = "$plugin_src" ] || { [ -n "$npm_dir" ] && [ "$current_target" = "$npm_dir" ]; }; then
         rm -f "$plugin_link"
         log_info "Removed BCN plugin symlink: ${plugin_link}"
     else

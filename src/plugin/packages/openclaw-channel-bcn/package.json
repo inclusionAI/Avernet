@@ -1,5 +1,5 @@
 {
-  "name": "openclaw-channel-bcn",
+  "name": "@avernet-plugin/openclaw-channel-bcn",
   "version": "1.0.15",
   "description": "Installable OpenClaw BCS WebSocket channel plugin package.",
   "dependencies": {
@@ -47,9 +47,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://example.com/ocb/openclaw-plugins"
+    "url": "git+https://github.com/inclusionAI/Avernet.git",
+    "directory": "src/plugin/packages/openclaw-channel-bcn"
   },
   "license": "MIT",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "files": [
     "dist",
     "src",
@@ -74,9 +79,9 @@
       "order": 100
     },
     "install": {
-      "npmSpec": "openclaw-channel-bcn",
+      "npmSpec": "@avernet-plugin/openclaw-channel-bcn",
       "localPath": "extensions/openclaw-channel-bcn",
-      "defaultChoice": "local"
+      "defaultChoice": "npm"
     }
   },
   "tshy": {
