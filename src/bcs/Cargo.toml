@@ -24,6 +24,8 @@ members = [
     "crates/services/bcs-message-store",
     "crates/services/bcs-bot",
     "crates/services/bcs-bot-store",
+    "crates/services/bcs-channel-store",
+    "crates/services/bcs-channel",
     "crates/services/bcs-callback",
     "crates/services/bcs-collaboration-template",
     "crates/services/bcs-collaboration-runtime",
@@ -46,6 +48,7 @@ members = [
     # plugin-api
     "crates/plugin-api/bcs-auth-api",
     "crates/plugin-api/bcs-cache-api",
+    "crates/plugin-api/bcs-channel-api",
     "crates/plugin-api/bcs-db-api",
     "crates/plugin-api/bcs-llm-api",
     "crates/plugin-api/bcs-security-gateway-api",
@@ -121,6 +124,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "local
 
 # Async
 async-trait = "0.1"
+bytes       = "1"
 futures     = "0.3"
 
 # HTTP client
@@ -185,6 +189,8 @@ bcs-admin      = { path = "crates/tools/bcs-admin" }
 bcs-cli        = { path = "crates/tools/bcs-cli" }
 bcs-bot   = { path = "crates/services/bcs-bot" }
 bcs-bot-store = { path = "crates/services/bcs-bot-store" }
+bcs-channel-store = { path = "crates/services/bcs-channel-store" }
+bcs-channel = { path = "crates/services/bcs-channel" }
 bcs-callback   = { path = "crates/services/bcs-callback" }
 bcs-collaboration-template = { path = "crates/services/bcs-collaboration-template" }
 bcs-collaboration-runtime = { path = "crates/services/bcs-collaboration-runtime" }
@@ -226,6 +232,7 @@ bcs-session                = { path = "crates/services/bcs-session" }
 bcs-session-store          = { path = "crates/services/bcs-session-store" }
 bcs-system-message         = { path = "crates/services/bcs-system-message" }
 bcs-cache-api              = { path = "crates/plugin-api/bcs-cache-api" }
+bcs-channel-api            = { path = "crates/plugin-api/bcs-channel-api" }
 bcs-db-api                 = { path = "crates/plugin-api/bcs-db-api" }
 bcs-llm-api                = { path = "crates/plugin-api/bcs-llm-api" }
 bcs-user-directory-api     = { path = "crates/plugin-api/bcs-user-directory-api" }

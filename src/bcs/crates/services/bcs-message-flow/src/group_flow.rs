@@ -1,9 +1,10 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 use bcs_domain::{NewMessage, SenderType};
 use bcs_protocol::{
-    BcsFrame, RequestFrame, build_chat_inject_frame, build_chat_send_frame, build_session_key, now_ms,
+    BcsFrame, RequestFrame, build_chat_inject_frame, build_chat_send_frame,
+    build_direct_chat_inject_frame, build_direct_chat_send_frame, build_session_key, now_ms,
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
@@ -20,7 +21,7 @@ use bcs_service_api::{
     MessageFlowService, MessageRole, Participant, ParticipantMode, ParticipantRole, PersistentGroupSendCommand,
     PersistentGroupSendOutcome, ProviderStreamGrayList, ProviderTransportPreference,
     RouteParticipantOverlay, RoutingDecision, RoutingCoreService, RoutingTarget, ServiceError, ServiceResult,
-    SessionManagementService,
+    SessionManagementService, ChannelService,
     SystemMessageEvent, SystemMessageService,
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
     TaskMessageCommand, TaskMessageOutcome, TaskRunAliasRegistration, WebSendCommand,
@@ -54,6 +55,7 @@ pub struct BcsMessageFlow {
     pub message_repo: Option<Arc<dyn MessageRepoPort>>,
     pub message_tracker: Arc<crate::message_tracker::MessageTracker>,
     pub provider_stream_gray_list: Option<Arc<ProviderStreamGrayList>>,
+    pub channel: Arc<OnceLock<Arc<dyn ChannelService>>>,
 }
 
 impl BcsMessageFlow {
@@ -79,7 +81,12 @@ impl BcsMessageFlow {
             message_repo: None,
             message_tracker: Arc::new(crate::message_tracker::MessageTracker::new()),
             provider_stream_gray_list: None,
+            channel: Arc::new(OnceLock::new()),
         }
+    }
+
+    pub fn channel_slot(&self) -> Arc<OnceLock<Arc<dyn ChannelService>>> {
+        self.channel.clone()
     }
 
     pub fn with_system_message(mut self, system_message: Arc<dyn SystemMessageService>) -> Self {
@@ -2035,8 +2042,24 @@ async fn frame_for_target(
         flow.registry.get_protocol_version(&target.bot_uuid).await,
         delivery_target,
     );
+    let context_projection =
+        context_projection_for_delivery(flow, group, cmd.session_id.as_deref()).await;
     match target.delivery_type {
         DeliveryType::Send => {
+            if context_projection == ContextProjection::DirectBot {
+                return build_direct_chat_send_frame(
+                    run_id,
+                    &cmd.group_id,
+                    content,
+                    &cmd.from_actor_id,
+                    sender_display_name,
+                    &target.bot_uuid,
+                    &cmd.attachments,
+                    &cmd.thinking,
+                    protocol_version,
+                    cmd.session_id.as_deref(),
+                );
+            }
             let protocol_group = group_context_input(group);
             build_chat_send_frame(
                 run_id,
@@ -2057,6 +2080,18 @@ async fn frame_for_target(
             )
         }
         DeliveryType::Inject => {
+            if context_projection == ContextProjection::DirectBot {
+                return build_direct_chat_inject_frame(
+                    run_id,
+                    &cmd.group_id,
+                    content,
+                    &cmd.from_actor_id,
+                    sender_display_name,
+                    &target.bot_uuid,
+                    protocol_version,
+                    cmd.session_id.as_deref(),
+                );
+            }
             let protocol_group = group_context_input(group);
             build_chat_inject_frame(
                 run_id,
@@ -2074,6 +2109,62 @@ async fn frame_for_target(
                 cmd.session_id.as_deref(),
             )
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContextProjection {
+    Group,
+    DirectBot,
+}
+
+async fn context_projection_for_delivery(
+    flow: &BcsMessageFlow,
+    group: &Group,
+    session_id: Option<&str>,
+) -> ContextProjection {
+    if let Some(projection) = context_projection_for_session(flow, session_id).await {
+        return projection;
+    }
+    if is_human_bot_dm(group) {
+        return ContextProjection::DirectBot;
+    }
+    ContextProjection::Group
+}
+
+async fn context_projection_for_session(
+    flow: &BcsMessageFlow,
+    session_id: Option<&str>,
+) -> Option<ContextProjection> {
+    let Some(session_id) = session_id else {
+        return None;
+    };
+    let Some(session_management) = flow.session_management.as_ref() else {
+        return None;
+    };
+    match session_management.get(session_id).await {
+        Ok(Some(session)) => context_projection_from_meta(session.meta.as_ref()),
+        Ok(None) => None,
+        Err(error) => {
+            warn!(%session_id, %error, "failed to load session for context projection");
+            None
+        }
+    }
+}
+
+fn context_projection_from_meta(meta: Option<&Value>) -> Option<ContextProjection> {
+    let Some(meta) = meta else {
+        return None;
+    };
+    let projection = meta
+        .get("channel")
+        .and_then(|channel| channel.get("context_projection"))
+        .or_else(|| meta.get("context_projection"))
+        .and_then(Value::as_str);
+    match projection {
+        Some("direct_bot") => Some(ContextProjection::DirectBot),
+        Some("group") => Some(ContextProjection::Group),
+        _ => None,
     }
 }
 

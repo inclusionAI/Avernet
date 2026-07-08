@@ -1,4 +1,5 @@
 pub mod bot;
+pub mod channel;
 pub mod collaboration_template;
 pub mod collaboration;
 pub mod friend;
@@ -10,6 +11,7 @@ pub mod session;
 pub mod user_identity;
 
 pub use bot::BotRepoPort;
+pub use channel::{ChannelBindingRepoPort, ConversationSessionRepoPort, ImParticipantRepoPort};
 pub use collaboration_template::{CollaborationTemplateEntry, CollaborationTemplateRepoPort};
 pub use collaboration::{
     CollaborationDefinitionRecord, CollaborationEventRecord, CollaborationEventRepoPort,

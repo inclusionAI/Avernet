@@ -3,7 +3,7 @@ use bcs_test_support::{
     NoopA2aChatRunService, NoopA2aChatService, NoopActorDirectoryService, NoopBotDeliveryPort,
     NoopBotDiscoveryService, NoopBotManagementService, NoopBotOnboardingService,
     NoopBotQueryService, NoopBotRegistryCoreService, NoopBotRunContextPort,
-    NoopBotRuntimeConnectionService, NoopCollaborationRuntimeService,
+    NoopBotRuntimeConnectionService, NoopChannelService, NoopCollaborationRuntimeService,
     NoopCollaborationTemplateService, NoopFriendCoreService,
     NoopFriendService, NoopFrontendDeliveryPort,
     NoopFusionCoreService, NoopGroupCoreService, NoopGroupFusionService,
@@ -63,6 +63,7 @@ fn build_succeeds_when_all_required_services_set() {
         .system_message(Arc::new(NoopSystemMessageService))
         .group_fusion(Arc::new(NoopGroupFusionService))
         .session_management(Arc::new(NoopSessionManagementService))
+        .channel(Arc::new(NoopChannelService))
         .secret(Arc::new(NoopSecretService))
         .build()
         .expect("all required services are wired");

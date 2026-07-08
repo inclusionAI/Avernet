@@ -3,6 +3,7 @@ pub mod assets;
 pub mod bot_chat;
 pub mod bot_events;
 pub mod bots;
+pub mod channel;
 pub mod collaboration_runs;
 mod caller;
 pub mod discover;

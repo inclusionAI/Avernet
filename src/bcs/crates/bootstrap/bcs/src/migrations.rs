@@ -123,6 +123,46 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_provider_ref_env ON bcs_provider_bot_bindings(env, provider_id, provider_bot_ref)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bot_uuid_env ON bcs_provider_bot_bindings(env, bot_uuid)",
 
+    // ── channel bindings ─────────────────────────────────
+    "CREATE TABLE IF NOT EXISTS bcs_channel_bindings (
+        id TEXT PRIMARY KEY,
+        channel_type TEXT NOT NULL,
+        account_ref TEXT NOT NULL,
+        target_json TEXT NOT NULL,
+        group_chat_scope TEXT DEFAULT NULL,
+        visibility TEXT NOT NULL,
+        env TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_by TEXT DEFAULT NULL,
+        created_at INTEGER NOT NULL,
+        config_json TEXT NOT NULL
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_channel_bindings_account ON bcs_channel_bindings(channel_type, account_ref, status)",
+
+    // ── channel conversations ─────────────────────────────
+    "CREATE TABLE IF NOT EXISTS bcs_channel_conversations (
+        binding_id TEXT NOT NULL,
+        im_conversation_id TEXT NOT NULL,
+        im_conversation_type TEXT NOT NULL,
+        session_scope TEXT NOT NULL,
+        im_user_id TEXT NOT NULL DEFAULT '',
+        bcs_session_id TEXT NOT NULL,
+        last_active_at INTEGER NOT NULL,
+        PRIMARY KEY (binding_id, im_conversation_id, session_scope, im_user_id)
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_channel_conversations_session ON bcs_channel_conversations(binding_id, bcs_session_id)",
+    "CREATE INDEX IF NOT EXISTS idx_channel_conversations_bcs_session ON bcs_channel_conversations(bcs_session_id, binding_id)",
+
+    // ── channel IM participants ───────────────────────────
+    "CREATE TABLE IF NOT EXISTS bcs_channel_im_participants (
+        channel_type TEXT NOT NULL,
+        account_ref TEXT NOT NULL,
+        im_user_id TEXT NOT NULL,
+        actor_id TEXT NOT NULL,
+        display_name TEXT DEFAULT NULL,
+        PRIMARY KEY (channel_type, account_ref, im_user_id)
+    )",
+
     // ── provider_credentials ──────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_provider_credentials (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

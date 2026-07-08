@@ -1,7 +1,7 @@
 //! No-op service implementations for tests and explicit test containers.
 
 use async_trait::async_trait;
-use bcs_domain::{SystemGroupMessage, SystemMessageEvent, SystemMessageEventKind};
+use bcs_domain::{ChannelBinding, SystemGroupMessage, SystemMessageEvent, SystemMessageEventKind};
 use bcs_service_api::core::{
     SystemMessageDispatchOutcome, SystemMessageDispatcherService, SystemMessageProducerService,
 };
@@ -1617,6 +1617,77 @@ impl FrontendDeliveryPort for NoopFrontendDeliveryPort {
     }
 
     async fn unregister_run(&self, _run_id: &str) -> ServiceResult<()> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct NoopChannelDeliveryPort;
+
+#[async_trait]
+impl ChannelDeliveryPort for NoopChannelDeliveryPort {
+    async fn is_available(&self, _binding: &ChannelBindingRef) -> bool {
+        false
+    }
+
+    async fn deliver_event(
+        &self,
+        _event: ChannelOutboundEvent,
+    ) -> ServiceResult<ChannelDeliveryResult> {
+        Ok(ChannelDeliveryResult {
+            delivered: false,
+            error: None,
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct NoopChannelService;
+
+#[async_trait]
+impl ChannelService for NoopChannelService {
+    async fn handle_inbound(
+        &self,
+        _msg: InboundMessage,
+    ) -> Result<(), ChannelUseCaseError> {
+        Ok(())
+    }
+
+    async fn try_outbound(
+        &self,
+        _msg: OutboundMessage,
+    ) -> Result<(), ChannelUseCaseError> {
+        Ok(())
+    }
+
+    async fn create_binding(
+        &self,
+        _cmd: CreateBindingCommand,
+    ) -> Result<ChannelBinding, ChannelUseCaseError> {
+        Err(ChannelUseCaseError::InvalidParams("noop".to_string()))
+    }
+
+    async fn list_bindings(&self) -> Result<Vec<ChannelBinding>, ChannelUseCaseError> {
+        Ok(Vec::new())
+    }
+
+    async fn set_binding_status(
+        &self,
+        _id: &str,
+        _active: bool,
+    ) -> Result<(), ChannelUseCaseError> {
+        Ok(())
+    }
+
+    async fn update_binding_config(
+        &self,
+        _id: &str,
+        _config: serde_json::Value,
+    ) -> Result<(), ChannelUseCaseError> {
+        Ok(())
+    }
+
+    async fn delete_binding(&self, _id: &str) -> Result<(), ChannelUseCaseError> {
         Ok(())
     }
 }

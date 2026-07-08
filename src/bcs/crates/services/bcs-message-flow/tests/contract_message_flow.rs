@@ -8,7 +8,8 @@ use bcs_service_api::{
     GroupCoreService, GroupStatus, GroupStrategy, HumanActor, MessageFlowService, MessageRole, Participant,
     ParticipantMode, ParticipantRole, PersistentGroupSendCommand, ProviderStreamGrayList,
     ProviderTransportPreference, RedactedToken, ServiceError, WebSendCommand,
-    Session, SessionHistoryCommand, SessionKind, SessionManagementService, SessionStatus, SessionUseCaseError,
+    ServiceResult, Session, SessionHistoryCommand, SessionKind, SessionManagementService,
+    SessionStatus, SessionUseCaseError,
     interceptor::{BlockReason, InterceptorDecision, MessageInterceptor, OutboundMessage},
 };
 use serde_json::json;
@@ -1620,6 +1621,58 @@ async fn web_send_in_human_bot_dm_uses_dm_routing_and_keeps_frontend_echo() {
 }
 
 #[tokio::test]
+async fn web_send_in_human_bot_dm_omits_group_context_by_default() -> ServiceResult<()> {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    make_human_bot_dm(&support).await;
+    support.registry.set_protocol_version("bot-driver", 3).await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_web_send(WebSendCommand {
+        caller: CallerContext::Human(HumanActor {
+            actor_id: "human_1".to_string(),
+            staff_no: "1".to_string(),
+        }),
+        group_id: "group-1".to_string(),
+        session_id: None,
+        from_actor_id: "human_1".to_string(),
+        from_name: Some("Human One".to_string()),
+        message: "hello direct".to_string(),
+        mentions: vec!["bot-driver".to_string()],
+        attachments: None,
+        thinking: None,
+        idempotency_key: None,
+        sender_conn_id: None,
+    })
+    .await?;
+
+    let frames = support.bot_delivery.frames().await;
+    let Some(BcsFrame::Request(req)) = frames.first() else {
+        return Err(ServiceError::InternalError("expected request frame".to_string()));
+    };
+    let Some(params) = req.params.as_ref() else {
+        return Err(ServiceError::InternalError("expected params".to_string()));
+    };
+    let Some(text) = params["message"]["content"][0]["text"].as_str() else {
+        return Err(ServiceError::InternalError("expected text".to_string()));
+    };
+    assert_eq!(text, "hello direct");
+    let Some(participants) = params["session_context"]["participants"].as_array() else {
+        return Err(ServiceError::InternalError("expected participants".to_string()));
+    };
+    assert_eq!(participants.len(), 0);
+    assert!(params["session_context"].get("group_type").is_none());
+    assert!(params["session_context"].get("routing_mode").is_none());
+    assert!(params["session_context"].get("recipient_role").is_none());
+    Ok(())
+}
+
+#[tokio::test]
 async fn web_send_blocking_interceptor_prevents_bot_delivery() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let flow = BcsMessageFlow::new(
@@ -1955,6 +2008,79 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
     assert_eq!(params["bcs_group_id"], "group-1");
     assert_eq!(params["bcs_session_id"], session_id);
     assert_eq!(params["session_key"], "group:group-1");
+}
+
+#[tokio::test]
+async fn web_send_direct_bot_projection_hides_bcs_group_context() -> ServiceResult<()> {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let session_id = "group-1:abcdef12";
+    support.registry.set_protocol_version("bot-driver", 3).await;
+    let mut session = test_session(
+        session_id,
+        "group-1",
+        vec![
+            Participant::bot("bot-driver", ParticipantRole::Driver),
+            {
+                let mut human = Participant::human("human_1", ParticipantRole::Observer);
+                human.mode = Some(ParticipantMode::Present);
+                human.bot_name = Some("张三".to_string());
+                human
+            },
+        ],
+    );
+    session.meta = Some(json!({
+        "channel": {
+            "source": "dingtalk",
+            "context_projection": "direct_bot"
+        }
+    }));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_session_management(Arc::new(StaticSessionManagement::new(session)));
+
+    flow.handle_web_send(WebSendCommand {
+        caller: CallerContext::Human(HumanActor {
+            actor_id: "human_1".to_string(),
+            staff_no: "1".to_string(),
+        }),
+        group_id: "group-1".to_string(),
+        session_id: Some(session_id.to_string()),
+        from_actor_id: "human_1".to_string(),
+        from_name: Some("张三".to_string()),
+        message: "帮我查一下".to_string(),
+        mentions: vec![],
+        attachments: None,
+        thinking: None,
+        idempotency_key: None,
+        sender_conn_id: None,
+    })
+    .await?;
+
+    let frames = support.bot_delivery.frames().await;
+    let Some(BcsFrame::Request(req)) = frames.first() else {
+        return Err(ServiceError::InternalError("expected request frame".to_string()));
+    };
+    let Some(params) = req.params.as_ref() else {
+        return Err(ServiceError::InternalError("expected params".to_string()));
+    };
+    let Some(text) = params["message"]["content"][0]["text"].as_str() else {
+        return Err(ServiceError::InternalError("expected text".to_string()));
+    };
+    assert_eq!(text, "帮我查一下");
+    assert_eq!(params["session_context"]["session_id"], session_id);
+    let Some(participants) = params["session_context"]["participants"].as_array() else {
+        return Err(ServiceError::InternalError("expected participants".to_string()));
+    };
+    assert_eq!(participants.len(), 0);
+    assert!(params["session_context"].get("group_type").is_none());
+    assert!(params["session_context"].get("routing_mode").is_none());
+    assert!(params["session_context"].get("recipient_role").is_none());
+    Ok(())
 }
 
 #[tokio::test]

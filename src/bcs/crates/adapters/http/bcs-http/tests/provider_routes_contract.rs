@@ -663,6 +663,49 @@ async fn register_provider_rejects_private_webhook_url() {
 }
 
 #[tokio::test]
+async fn register_provider_persists_protocol_version() {
+    let TestApp {
+        app,
+        provider_repo,
+        _temp_dir,
+        ..
+    } = test_app();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/providers")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Provider",
+                        "webhook_url": "https://provider.example.com/bcs/webhook",
+                        "protocol_version": "2.0",
+                        "auth": {
+                            "mode": "provider_admin"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    let provider_id = body["provider_id"].as_str().unwrap();
+    let stored = provider_repo
+        .get_provider(provider_id)
+        .await
+        .expect("get provider")
+        .expect("provider exists");
+    let config: Value = serde_json::from_str(&stored.config).unwrap();
+    assert_eq!(config["downlink"]["protocol_version"], "2.0");
+}
+
+#[tokio::test]
 async fn register_static_bearer_provider_bot_returns_runtime_token() {
     let TestApp { app, _temp_dir, .. } = test_app();
     let provider = register_provider(

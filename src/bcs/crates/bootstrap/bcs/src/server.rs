@@ -1,9 +1,12 @@
 //! HTTP server for the Bot Coordination Service.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use async_trait::async_trait;
 use axum::extract::MatchedPath;
 use axum::extract::ws::WebSocketUpgrade as WsUpgrade;
 use axum::{
@@ -27,11 +30,18 @@ use crate::config::{BcsConfig, CollaborationTemplateStorageKind, LlmConfig, LlmP
 use crate::lifecycle::LifecycleOrchestrator;
 use crate::plugins::{
     DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
+    build_registered_channel_provider,
     build_registered_leader_election, build_registered_llm_provider,
     build_registered_security_gateway, build_registered_user_directory,
 };
 use bcs_bot::{Bot, BotCore, ProviderBotEvents, ProviderCore, ProviderManagement};
 use bcs_bot_store::{DbProviderStore, PersistentBotRepo, MemoryBotRepo, MemoryProviderStore};
+use bcs_channel::{BcsChannelService, ChannelServiceInboundSink};
+use bcs_channel_api::{ChannelHttpIngressRegistry, ChannelProvider, ChannelProviderRegistry};
+use bcs_channel_store::{
+    DbChannelBindingStore, DbConversationSessionStore, DbImParticipantStore,
+    MemoryChannelBindingRepo, MemoryConversationSessionRepo, MemoryImParticipantRepo,
+};
 use bcs_friend::{FriendCore, FriendRequestCore};
 use bcs_friend_store::{
     DbFriendRequestStore, DbFriendStore, MemoryFriendRepo, MemoryFriendRequestRepo,
@@ -69,7 +79,7 @@ use bcs_security_gateway_api::SecurityGatewayPort;
 use bcs_service_api::lifecycle::ServiceLifecycle;
 use bcs_service_api::{
     A2aChatRunService, A2aChatService, BotDeliveryPort, BotDeliveryTarget, BotRegistryCoreService,
-    BotMetricsSnapshotPort, BotRunContextPort, CollaborationTemplateService,
+    BotMetricsSnapshotPort, BotRunContextPort, ChannelService, CollaborationTemplateService,
     DirectChatClientKind, DirectChatRunEvent, DirectChatRunLifecycleHook,
     DirectChatRunReason, DirectChatRunSnapshotPort, FrontendDeliveryPort, GroupCoreService,
     GroupHistoryBotRequestPort, GroupManagementService, GroupMessageHistoryService,
@@ -79,7 +89,10 @@ use bcs_service_api::{
     ProviderCredentialRepoPort, ProviderManagementService, ProviderRepoPort, ProviderStreamGrayList,
     RoutingCoreService, SessionManagementService, WsCloseReason, WsErrorKind,
     WsLifecycleInstrumentationHook, WsPeer,
-    port::repo::{MessageRepoPort, SessionRepoPort},
+    port::repo::{
+        ChannelBindingRepoPort, ConversationSessionRepoPort, ImParticipantRepoPort,
+        MessageRepoPort, SessionRepoPort,
+    },
 };
 use bcs_services_container::{Services, ServicesBuilder};
 use bcs_session::SessionManagementServiceImpl;
@@ -132,6 +145,237 @@ fn build_file_collaboration_template_service_with_judge_templates(
         )
         .with_judge_templates_enabled(judge_templates_enabled),
     )
+}
+
+type ChannelSlot = Arc<OnceLock<Arc<dyn ChannelService>>>;
+
+type ChannelRepos = (
+    Arc<dyn ChannelBindingRepoPort>,
+    Arc<dyn ConversationSessionRepoPort>,
+    Arc<dyn ImParticipantRepoPort>,
+);
+
+struct ChannelRuntime {
+    service: Arc<dyn ChannelService>,
+    http_ingress: Option<Arc<ChannelHttpIngressRegistry>>,
+    lifecycles: Vec<Arc<dyn ServiceLifecycle>>,
+}
+
+#[derive(Debug, Default)]
+struct DisabledChannelService;
+
+#[async_trait]
+impl ChannelService for DisabledChannelService {
+    async fn handle_inbound(
+        &self,
+        _msg: bcs_service_api::application::channel::InboundMessage,
+    ) -> std::result::Result<(), bcs_service_api::application::channel::ChannelUseCaseError> {
+        Ok(())
+    }
+
+    async fn try_outbound(
+        &self,
+        _msg: bcs_service_api::application::channel::OutboundMessage,
+    ) -> std::result::Result<(), bcs_service_api::application::channel::ChannelUseCaseError> {
+        Ok(())
+    }
+
+    async fn create_binding(
+        &self,
+        _cmd: bcs_service_api::application::channel::CreateBindingCommand,
+    ) -> std::result::Result<
+        bcs_domain::ChannelBinding,
+        bcs_service_api::application::channel::ChannelUseCaseError,
+    > {
+        Err(bcs_service_api::application::channel::ChannelUseCaseError::InvalidParams(
+            "channel bridge is disabled".to_string(),
+        ))
+    }
+
+    async fn list_bindings(
+        &self,
+    ) -> std::result::Result<
+        Vec<bcs_domain::ChannelBinding>,
+        bcs_service_api::application::channel::ChannelUseCaseError,
+    > {
+        Ok(Vec::new())
+    }
+
+    async fn set_binding_status(
+        &self,
+        _id: &str,
+        _active: bool,
+    ) -> std::result::Result<(), bcs_service_api::application::channel::ChannelUseCaseError> {
+        Ok(())
+    }
+
+    async fn update_binding_config(
+        &self,
+        _id: &str,
+        _config: serde_json::Value,
+    ) -> std::result::Result<(), bcs_service_api::application::channel::ChannelUseCaseError> {
+        Ok(())
+    }
+
+    async fn delete_binding(
+        &self,
+        _id: &str,
+    ) -> std::result::Result<(), bcs_service_api::application::channel::ChannelUseCaseError> {
+        Ok(())
+    }
+}
+
+fn now_ms() -> u64 {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_millis() as u64,
+        Err(_) => 0,
+    }
+}
+
+fn channel_bridge_enabled(config: &BcsConfig) -> bool {
+    config.channels.enabled
+}
+
+fn memory_channel_repos(data_dir: Option<PathBuf>) -> ChannelRepos {
+    match data_dir {
+        Some(dir) => (
+            Arc::new(MemoryChannelBindingRepo::with_data_dir(dir.clone())),
+            Arc::new(MemoryConversationSessionRepo::with_data_dir(dir.clone())),
+            Arc::new(MemoryImParticipantRepo::with_data_dir(dir)),
+        ),
+        None => (
+            Arc::new(MemoryChannelBindingRepo::new()),
+            Arc::new(MemoryConversationSessionRepo::new()),
+            Arc::new(MemoryImParticipantRepo::new()),
+        ),
+    }
+}
+
+async fn channel_repos_with_storage(
+    infrastructure_plugins: &InfrastructurePlugins,
+) -> crate::Result<ChannelRepos> {
+    let db_plugin = infrastructure_plugins.db().ok_or_else(|| {
+        crate::BcsError::StorageInitError(
+            "channel storage: DbPlugin handle unavailable".to_string(),
+        )
+    })?;
+    match infrastructure_plugins.db_kind() {
+        DbPluginKind::LocalSqlite => {
+            info!("Initializing SQLite channel storage");
+            Ok((
+                Arc::new(DbChannelBindingStore::sqlite(db_plugin.clone())),
+                Arc::new(DbConversationSessionStore::sqlite(db_plugin.clone())),
+                Arc::new(DbImParticipantStore::sqlite(db_plugin)),
+            ))
+        }
+        DbPluginKind::Mysql => {
+            info!("Initializing MySQL channel storage");
+            Ok((
+                Arc::new(DbChannelBindingStore::mysql(db_plugin.clone())),
+                Arc::new(DbConversationSessionStore::mysql(db_plugin.clone())),
+                Arc::new(DbImParticipantStore::mysql(db_plugin)),
+            ))
+        }
+        DbPluginKind::External(provider) => {
+            Err(crate::BcsError::StorageInitError(format!(
+                "external database plugin '{provider}' has no channel storage wiring"
+            )))
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_channel_runtime(
+    config: &BcsConfig,
+    channel_slot: ChannelSlot,
+    channel_repos: ChannelRepos,
+    session_repo: Arc<dyn SessionRepoPort>,
+    message_flow: Arc<dyn MessageFlowService>,
+    collaboration_runtime: Arc<dyn bcs_service_api::CollaborationRuntimeService>,
+    group: Arc<dyn GroupCoreService>,
+    registry: Arc<dyn BotRegistryCoreService>,
+) -> Result<ChannelRuntime> {
+    if !channel_bridge_enabled(config) {
+        info!("channel bridge disabled");
+        return Ok(ChannelRuntime {
+            service: Arc::new(DisabledChannelService),
+            http_ingress: None,
+            lifecycles: Vec::new(),
+        });
+    }
+
+    let (channel_bindings, channel_conversations, channel_im_participants) = channel_repos;
+    let providers = build_configured_channel_providers(
+        config,
+        channel_bindings.clone(),
+    )?;
+    let provider_registry = Arc::new(
+        ChannelProviderRegistry::new(providers.clone())
+            .map_err(|error| crate::BcsError::InvalidConfig(error.to_string()))?,
+    );
+    let channel_service: Arc<dyn ChannelService> = Arc::new(BcsChannelService::new(
+        channel_bindings,
+        channel_conversations,
+        channel_im_participants,
+        session_repo,
+        message_flow,
+        collaboration_runtime,
+        group,
+        registry,
+        provider_registry,
+        Arc::new(now_ms),
+        Arc::new(|| uuid::Uuid::new_v4().to_string()),
+    ));
+    if channel_slot.set(channel_service.clone()).is_err() {
+        warn!("message-flow channel slot already initialized");
+    }
+    let sink: Arc<dyn bcs_channel_api::ChannelInboundSink> =
+        Arc::new(ChannelServiceInboundSink::new(channel_service.clone()));
+    let ingress = Arc::new(
+        ChannelHttpIngressRegistry::new(providers.clone(), sink.clone())
+            .map_err(|error| crate::BcsError::InvalidConfig(error.to_string()))?,
+    );
+    let http_ingress = if ingress.route_specs().is_empty() {
+        None
+    } else {
+        Some(ingress)
+    };
+    let mut lifecycles = Vec::new();
+    for provider in providers {
+        if let Some(lifecycle) = provider.stream_lifecycle(sink.clone()) {
+            lifecycles.push(lifecycle);
+        }
+    }
+
+    Ok(ChannelRuntime {
+        service: channel_service,
+        http_ingress,
+        lifecycles,
+    })
+}
+
+fn build_configured_channel_providers(
+    config: &BcsConfig,
+    channel_bindings: Arc<dyn ChannelBindingRepoPort>,
+) -> Result<Vec<Arc<dyn ChannelProvider>>> {
+    let mut providers = Vec::new();
+    for (provider_name, provider_config) in config.channels.enabled_provider_configs() {
+        match build_registered_channel_provider(
+            config,
+            &provider_name,
+            provider_config,
+            channel_bindings.clone(),
+            Arc::new(now_ms),
+        )? {
+            Some(provider) => providers.push(provider),
+            None => {
+                return Err(crate::BcsError::InvalidConfig(format!(
+                    "channel provider '{provider_name}' is configured but not available in this binary"
+                )));
+            }
+        }
+    }
+    Ok(providers)
 }
 
 fn build_file_collaboration_template_service(
@@ -286,6 +530,9 @@ pub struct BcsServerState {
     /// Runtime gray list controlling provider 2.0 SSE rollout by bot creator.
     pub provider_stream_gray_list: Arc<ProviderStreamGrayList>,
 
+    /// Host-mounted channel provider HTTP ingress routes.
+    pub channel_http_ingress: Option<Arc<ChannelHttpIngressRegistry>>,
+
     /// Snapshot port for low-cardinality group metrics.
     pub group_metrics_snapshot: Arc<dyn GroupMetricsSnapshotPort>,
 
@@ -328,6 +575,7 @@ impl std::fmt::Debug for BcsServerState {
             .field("lifecycle", &"<LifecycleOrchestrator>")
             .field("provider_credentials", &"<ProviderCredentialRepoPort>")
             .field("provider_stream_gray_list", &"<ProviderStreamGrayList>")
+            .field("channel_http_ingress", &self.channel_http_ingress.is_some())
             .field("group_metrics_snapshot", &"<GroupMetricsSnapshotPort>")
             .field("group_session_metrics_snapshot", &"<GroupSessionMetricsSnapshotPort>")
             .field("bot_metrics_snapshot", &"<BotMetricsSnapshotPort>")
@@ -634,7 +882,7 @@ impl Default for BcsServerState {
                 sessions.clone(),
             ))
         };
-        let message_flow = create_message_flow_services(
+        let (message_flow, channel_slot) = create_message_flow_services(
             bot_registry.clone(),
             sessions.clone(),
             router.clone(),
@@ -701,6 +949,18 @@ impl Default for BcsServerState {
             .with_callback_url_guard(outbound_url_guard.clone())
             .with_frontend_delivery(frontend_delivery.clone()),
         );
+        let channel_runtime = build_channel_runtime(
+            &config,
+            channel_slot,
+            memory_channel_repos(None),
+            session_repo.clone(),
+            message_flow.clone(),
+            collaboration_runtime.clone(),
+            sessions.clone(),
+            bot_registry.clone(),
+        )
+        .expect("default channel runtime must initialize");
+        let channel_service = channel_runtime.service.clone();
         let provider_bot_events: Arc<dyn ProviderBotEventService> = Arc::new(
             ProviderBotEvents::new(
                 provider_bot_core.clone(),
@@ -741,6 +1001,7 @@ impl Default for BcsServerState {
             .group_fusion(group_fusion)
             .system_message(system_message)
             .session_management(session_management.clone())
+            .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
             .build()
             .expect("services must be fully wired");
@@ -767,6 +1028,7 @@ impl Default for BcsServerState {
         );
 
         let (leader_election, lifecycle) = create_standalone_leader_lifecycle();
+        register_channel_lifecycles(&lifecycle, &channel_runtime.lifecycles);
 
         let auth_config = crate::auth_wiring::resolve_auth_config(
             &config.auth,
@@ -792,6 +1054,7 @@ impl Default for BcsServerState {
             fuse_client: None,
             provider_credentials: provider_repos.provider_credentials.clone(),
             provider_stream_gray_list,
+            channel_http_ingress: channel_runtime.http_ingress.clone(),
             group_metrics_snapshot,
             group_session_metrics_snapshot,
             bot_metrics_snapshot,
@@ -945,6 +1208,27 @@ fn register_late_lifecycles(
             .try_lock()
             .expect("orchestrator should be uncontended at registration time");
         guard.register("fuse_client", adapter as Arc<dyn ServiceLifecycle>);
+    }
+}
+
+fn register_channel_lifecycles(
+    lifecycle: &Arc<Mutex<LifecycleOrchestrator>>,
+    channel_lifecycles: &[Arc<dyn ServiceLifecycle>],
+) {
+    if channel_lifecycles.is_empty() {
+        return;
+    }
+    let mut guard = lifecycle
+        .try_lock()
+        .expect("orchestrator should be uncontended at registration time");
+    for (idx, service) in channel_lifecycles.iter().enumerate() {
+        let name = match idx {
+            0 => "channel_provider",
+            1 => "channel_provider_1",
+            2 => "channel_provider_2",
+            _ => "channel_provider_extra",
+        };
+        guard.register(name, service.clone());
     }
 }
 
@@ -1110,7 +1394,7 @@ fn create_message_flow_services(
     system_message: Arc<dyn bcs_service_api::SystemMessageService>,
     message_repo: Option<Arc<dyn MessageRepoPort>>,
     provider_stream_gray_list: Arc<ProviderStreamGrayList>,
-) -> Arc<dyn MessageFlowService> {
+) -> (Arc<dyn MessageFlowService>, ChannelSlot) {
     let mut message_flow = BcsMessageFlow::new(
         group,
         routing,
@@ -1127,9 +1411,10 @@ fn create_message_flow_services(
     if let Some(repo) = message_repo {
         message_flow = message_flow.with_message_repo(repo);
     }
+    let channel_slot = message_flow.channel_slot();
     let message_flow: Arc<dyn MessageFlowService> = Arc::new(message_flow);
 
-    message_flow
+    (message_flow, channel_slot)
 }
 
 fn create_interceptor_chain(config: &BcsConfig) -> crate::Result<Arc<InterceptorChain>> {
@@ -1732,7 +2017,7 @@ impl BcsServer {
             callback_url_guard.clone(),
             provider_stream_gray_list.clone(),
         );
-        let message_flow = create_message_flow_services(
+        let (message_flow, channel_slot) = create_message_flow_services(
             bot_registry.clone(),
             sessions.clone(),
             router.clone(),
@@ -1776,6 +2061,18 @@ impl BcsServer {
         // Build services bundle
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
         provider_transport.set_ingest(message_flow.clone(), bot_run_context.clone());
+        let channel_runtime = build_channel_runtime(
+            &config,
+            channel_slot,
+            memory_channel_repos(None),
+            session_repo.clone(),
+            message_flow.clone(),
+            collaboration_runtime.clone(),
+            sessions.clone(),
+            bot_registry.clone(),
+        )
+        .expect("in-memory channel runtime must initialize");
+        let channel_service = channel_runtime.service.clone();
         let provider_bot_events: Arc<dyn ProviderBotEventService> = Arc::new(
             ProviderBotEvents::new(
                 provider_bot_core.clone(),
@@ -1820,6 +2117,7 @@ impl BcsServer {
             .group_fusion(use_cases.group_fusion)
             .system_message(use_cases.system_message)
             .session_management(session_management.clone())
+            .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
             .build()
             .expect("services must be fully wired");
@@ -1840,6 +2138,7 @@ impl BcsServer {
 
         let (leader_election, lifecycle) = create_standalone_leader_lifecycle();
         register_late_lifecycles(&lifecycle, fuse_client.as_ref());
+        register_channel_lifecycles(&lifecycle, &channel_runtime.lifecycles);
         let auth_config = crate::auth_wiring::resolve_auth_config(
             &config.auth,
             crate::config_loader::Environment::resolve().as_str(),
@@ -1863,6 +2162,7 @@ impl BcsServer {
             fuse_client,
             provider_credentials: provider_repos.provider_credentials.clone(),
             provider_stream_gray_list,
+            channel_http_ingress: channel_runtime.http_ingress.clone(),
             group_metrics_snapshot,
             group_session_metrics_snapshot,
             bot_metrics_snapshot,
@@ -2216,7 +2516,7 @@ impl BcsServer {
             outbound_url_guard.clone(),
             provider_stream_gray_list.clone(),
         );
-        let message_flow = create_message_flow_services(
+        let (message_flow, channel_slot) = create_message_flow_services(
             bot_registry.clone(),
             sessions.clone(),
             router.clone(),
@@ -2272,6 +2572,23 @@ impl BcsServer {
         // Build services bundle
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
         provider_transport.set_ingest(message_flow.clone(), bot_run_context.clone());
+        let channel_repos = if channel_bridge_enabled(&config) {
+            channel_repos_with_storage(&infrastructure_plugins).await?
+        } else {
+            memory_channel_repos(None)
+        };
+        let channel_runtime = build_channel_runtime(
+            &config,
+            channel_slot,
+            channel_repos,
+            session_repo.clone(),
+            message_flow.clone(),
+            collaboration_runtime.clone(),
+            sessions.clone(),
+            bot_registry.clone(),
+        )?;
+        let channel_service = channel_runtime.service.clone();
+        register_channel_lifecycles(&lifecycle, &channel_runtime.lifecycles);
         let provider_bot_events: Arc<dyn ProviderBotEventService> = Arc::new(
             ProviderBotEvents::new(
                 provider_bot_core.clone(),
@@ -2320,6 +2637,7 @@ impl BcsServer {
             .group_fusion(use_cases.group_fusion)
             .system_message(use_cases.system_message)
             .session_management(session_management.clone())
+            .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
             .build()
             .expect("services must be fully wired");
@@ -2369,6 +2687,7 @@ impl BcsServer {
             fuse_client,
             provider_credentials: provider_repos.provider_credentials.clone(),
             provider_stream_gray_list,
+            channel_http_ingress: channel_runtime.http_ingress.clone(),
             group_metrics_snapshot,
             group_session_metrics_snapshot,
             bot_metrics_snapshot,
@@ -2895,6 +3214,30 @@ mod tests {
         config.collaboration.templates.storage_type = CollaborationTemplateStorageKind::Mysql;
 
         let _service = build_standalone_collaboration_template_service(&config);
+    }
+
+    #[test]
+    fn configured_missing_channel_provider_fails_startup() {
+        let mut config = BcsConfig::default();
+        config.channels.enabled = true;
+        config.channels.providers.insert(
+            "missing-provider".to_string(),
+            bcs_config_api::ChannelProviderConfig {
+                enabled: true,
+                ..Default::default()
+            },
+        );
+
+        let result = build_configured_channel_providers(
+            &config,
+            Arc::new(MemoryChannelBindingRepo::new()),
+        );
+
+        assert!(matches!(
+            result,
+            Err(crate::BcsError::InvalidConfig(message))
+                if message.contains("missing-provider")
+        ));
     }
 
     #[tokio::test]

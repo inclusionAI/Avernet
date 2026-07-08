@@ -1,19 +1,43 @@
 use axum::{
-    routing::{delete, get, patch, post, put},
+    routing::{delete, get, patch, post, put, MethodRouter},
     Router,
 };
+use bcs_channel_api::ChannelHttpMethod;
 
 use crate::routes;
 use crate::state::HttpAppState;
 
 pub fn build_router(state: HttpAppState) -> Router {
-    build_api_routes()
+    mount_channel_http_ingress(build_api_routes(), &state)
         .route("/health", get(routes::health::health))
         .with_state(state)
 }
 
 pub fn build_api_router(state: HttpAppState) -> Router {
-    build_api_routes().with_state(state)
+    mount_channel_http_ingress(build_api_routes(), &state).with_state(state)
+}
+
+fn mount_channel_http_ingress(
+    mut router: Router<HttpAppState>,
+    state: &HttpAppState,
+) -> Router<HttpAppState> {
+    let Some(ingress) = state.channel_http_ingress.as_ref() else {
+        return router;
+    };
+    for spec in ingress.route_specs() {
+        router = router.route(&spec.path, channel_http_method_router(spec.method));
+    }
+    router
+}
+
+fn channel_http_method_router(method: ChannelHttpMethod) -> MethodRouter<HttpAppState> {
+    match method {
+        ChannelHttpMethod::Get => get(routes::channel::provider_http_ingress),
+        ChannelHttpMethod::Post => post(routes::channel::provider_http_ingress),
+        ChannelHttpMethod::Put => put(routes::channel::provider_http_ingress),
+        ChannelHttpMethod::Patch => patch(routes::channel::provider_http_ingress),
+        ChannelHttpMethod::Delete => delete(routes::channel::provider_http_ingress),
+    }
 }
 
 fn build_api_routes() -> Router<HttpAppState> {
@@ -53,6 +77,15 @@ fn build_api_routes() -> Router<HttpAppState> {
         .route(
             "/bot/events/coordination",
             post(routes::bot_events::post_coordination_event),
+        )
+        .route(
+            "/channels/bindings",
+            get(routes::channel::list_bindings).post(routes::channel::create_binding),
+        )
+        .route(
+            "/channels/bindings/{id}",
+            patch(routes::channel::set_binding_status)
+                .delete(routes::channel::delete_binding),
         )
         .route(
             "/providers/{provider_id}/bots",

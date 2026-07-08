@@ -8,7 +8,7 @@ use std::sync::Arc;
 use bcs_service_api::{
     A2aChatRunService, A2aChatService, ActorDirectoryService, BotDeliveryPort, BotDiscoveryService,
     BotManagementService, BotOnboardingService, BotQueryService, BotRegistryCoreService,
-    BotRunContextPort, BotRuntimeConnectionService, CollaborationRuntimeService,
+    BotRunContextPort, BotRuntimeConnectionService, ChannelService, CollaborationRuntimeService,
     CollaborationTemplateService,
     FriendCoreService, FriendService, FrontendDeliveryPort,
     FusionCoreService, Group, GroupCoreService, GroupFusionService, GroupManagementService,
@@ -99,6 +99,8 @@ pub struct Services {
     pub group_fusion: Arc<dyn GroupFusionService>,
     /// Session management application service.
     pub session_management: Arc<dyn SessionManagementService>,
+    /// Channel(IM bridge) application service.
+    pub channel: Arc<dyn ChannelService>,
     /// Secret access application service (mist in prod, in-memory/env in dev).
     pub secret: Arc<dyn SecretService>,
 }
@@ -153,6 +155,7 @@ pub struct ServicesBuilder {
     system_message: Option<Arc<dyn SystemMessageService>>,
     group_fusion: Option<Arc<dyn GroupFusionService>>,
     session_management: Option<Arc<dyn SessionManagementService>>,
+    channel: Option<Arc<dyn ChannelService>>,
     secret: Option<Arc<dyn SecretService>>,
 }
 
@@ -375,6 +378,12 @@ impl ServicesBuilder {
         self
     }
 
+    /// Set the channel application service.
+    pub fn channel(mut self, service: Arc<dyn ChannelService>) -> Self {
+        self.channel = Some(service);
+        self
+    }
+
     /// Set the secret access application service.
     pub fn secret(mut self, service: Arc<dyn SecretService>) -> Self {
         self.secret = Some(service);
@@ -422,6 +431,7 @@ impl ServicesBuilder {
             system_message: required(self.system_message, "system_message")?,
             group_fusion: required(self.group_fusion, "group_fusion")?,
             session_management: required(self.session_management, "session_management")?,
+            channel: required(self.channel, "channel")?,
             secret: required(self.secret, "secret")?,
         })
     }
@@ -433,7 +443,8 @@ impl ServicesBuilder {
             NoopA2aChatRunService, NoopA2aChatService, NoopActorDirectoryService,
             NoopBotDeliveryPort, NoopBotDiscoveryService, NoopBotManagementService,
             NoopBotOnboardingService, NoopBotQueryService, NoopBotRegistryCoreService,
-            NoopBotRunContextPort, NoopBotRuntimeConnectionService, NoopFriendCoreService, NoopFriendService,
+            NoopBotRunContextPort, NoopBotRuntimeConnectionService, NoopChannelService,
+            NoopFriendCoreService, NoopFriendService,
             NoopFrontendDeliveryPort, NoopFusionCoreService, NoopGroupCoreService,
             NoopGroupFusionService, NoopGroupManagementService, NoopGroupMessageHistoryService,
             NoopGroupProposalService, NoopGroupQueryService, NoopHumanActorService,
@@ -549,6 +560,7 @@ impl ServicesBuilder {
             session_management: self
                 .session_management
                 .unwrap_or_else(|| Arc::new(NoopSessionManagementService)),
+            channel: self.channel.unwrap_or_else(|| Arc::new(NoopChannelService)),
             secret: self.secret.unwrap_or_else(|| Arc::new(NoopSecretService)),
         }
     }
