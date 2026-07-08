@@ -38,6 +38,10 @@ jobs:
 
       - name: Detect BCS changes vs base
         id: changes
+        # Run from the repo root: all git-diff pathspecs here are repo-relative
+        # ("-- src/bcs"), which only resolve correctly from the root. The job default
+        # working-directory is src/bcs, so override to the workspace root.
+        working-directory: ${{ github.workspace }}
         shell: bash
         run: |
           # Make sure the base ref is present locally (shallow clones may not have it).
