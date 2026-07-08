@@ -145,3 +145,127 @@ jobs:
 
       - name: Run unit tests
         run: npm test -- --runInBand --passWithNoTests
+
+  backend:
+    name: Backend unit tests
+    runs-on: ubuntu-latest
+    env:
+      # PR: compare against the PR's base branch. push/dispatch: compare against dev
+      # (the repo default branch) so coverage-gated diff detection still has a base.
+      BACKEND_BASE_REF: origin/${{ github.base_ref || 'dev' }}
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect backend changes vs base
+        id: changes
+        # Run from the repo root so the "-- src/backend" pathspec resolves; the job
+        # default working-directory is src/backend, so override to the workspace root.
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          # Make sure the base ref is present locally (shallow clones may not have it).
+          git fetch --no-tags --depth=1 origin "${BACKEND_BASE_REF#origin/}" 2>/dev/null || true
+          # Diff the base ref against the working tree. PR runs check out a merge commit,
+          # for which "<base>...HEAD" collapses to nothing; diffing base against the tree
+          # sees all PR-introduced changes regardless of the merge-commit checkout.
+          mapfile -t files < <(git diff --name-only "${BACKEND_BASE_REF}" -- src/backend || true)
+          n=${#files[@]}
+          if [ "$n" -eq 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No changes under src/backend vs ${BACKEND_BASE_REF}; skipping backend tests."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Detected ${n} changed file(s) under src/backend vs ${BACKEND_BASE_REF}."
+            printf '%s\n' "${files[@]}" | sed 's/^/  - /'
+          fi
+
+      - name: Set up Python
+        if: steps.changes.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          # Backend targets Python >=3.12,<3.13 (see src/backend/pyproject.toml).
+          python-version: '3.12'
+
+      - name: Install uv
+        if: steps.changes.outputs.skip != 'true'
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: src/backend/uv.lock
+
+      - name: Run unit tests with coverage
+        if: steps.changes.outputs.skip != 'true'
+        # ci_test.sh runs pytest with coverage and enforces the case-pass-rate /
+        # line-coverage / changed-line-coverage gates via scripts/ci/report_check.py.
+        run: bash scripts/ci_test.sh --base "$BACKEND_BASE_REF"
+
+      - name: Upload backend test results
+        if: always() && steps.changes.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-testresult
+          path: src/backend/pytest_report/
+          if-no-files-found: ignore
+
+  engine:
+    name: Engine unit tests
+    runs-on: ubuntu-latest
+    env:
+      ENGINE_BASE_REF: origin/${{ github.base_ref || 'dev' }}
+    defaults:
+      run:
+        working-directory: src/engine
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect engine changes vs base
+        id: changes
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          git fetch --no-tags --depth=1 origin "${ENGINE_BASE_REF#origin/}" 2>/dev/null || true
+          mapfile -t files < <(git diff --name-only "${ENGINE_BASE_REF}" -- src/engine || true)
+          n=${#files[@]}
+          if [ "$n" -eq 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No changes under src/engine vs ${ENGINE_BASE_REF}; skipping engine tests."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Detected ${n} changed file(s) under src/engine vs ${ENGINE_BASE_REF}."
+            printf '%s\n' "${files[@]}" | sed 's/^/  - /'
+          fi
+
+      - name: Set up Python
+        if: steps.changes.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          # Engine targets Python >=3.12 (see src/engine/pyproject.toml).
+          python-version: '3.12'
+
+      - name: Install uv
+        if: steps.changes.outputs.skip != 'true'
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: src/engine/uv.lock
+
+      - name: Run unit tests with coverage
+        if: steps.changes.outputs.skip != 'true'
+        run: bash scripts/ci_test.sh --base "$ENGINE_BASE_REF"
+
+      - name: Upload engine test results
+        if: always() && steps.changes.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-testresult
+          path: src/engine/pytest_report/
+          if-no-files-found: ignore
