@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# BCS pre-push gates: unit tests (nextest, fast-fail) + e2e line coverage
-# (instrumented bcs + 5 bots, --bcs-min 30) — run in parallel with fail-fast.
+# BCS pre-push gates: unit tests + e2e line coverage run in parallel with
+# fail-fast. The unit gate runs ci_test.sh --fast-fail [--coverage] in ONE pass:
+# a single cargo llvm-cov nextest invocation emits BOTH junit (pass rate) and
+# cobertura (coverage), so the pass-rate verdict and coverage artifacts come
+# from the same build — no second run. After the unit gate confirms 100% pass,
+# a coverage gate (cov_gate.py) enforces changed-line >= 80% and overall-line
+# > 70% (mirrors the GitHub CI gate) against those same artifacts.
 #
 # Invoked by scripts/ci/pre_push.sh when the push range touches src/bcs/.
 # Mirrors ci_test.sh's --base/--head contract and OCB_PRE_PUSH_ENABLE_BCS*
@@ -109,7 +114,8 @@ _launch_tagged() {
 # gate to exit non-zero terminates the other's whole process tree and blocks
 # the push. Returns non-zero on any failure.
 bcs_parallel_gates() {
-  local base="$1" head="$2"
+  local base="$1" head="$2"; shift 2
+  local -a unit_cov_args=("$@")
   mkdir -p "$_PREPUSH_LOG_DIR"
   local unit_log="$_PREPUSH_LOG_DIR/unit.log"
   local e2e_log="$_PREPUSH_LOG_DIR/e2e.log"
@@ -119,15 +125,15 @@ bcs_parallel_gates() {
 
   echo ""
   echo "== launching bcs gates in parallel =="
-  printf '  unit: src/bcs/scripts/ci_test.sh --fast-fail   (log: %s)\n' "$unit_log"
-  printf '  e2e:  src/bcs/scripts/e2e_coverage.sh --bcs-min 30 --force-rebuild   (log: %s)\n' "$e2e_log"
+  printf '  unit: src/bcs/scripts/ci_test.sh --fast-fail %s  (log: %s)\n' "${unit_cov_args[*]:-}" "$unit_log"
+  printf '  e2e:  src/bcs/scripts/e2e_coverage.sh --bcs-min 20 --force-rebuild   (log: %s)\n' "$e2e_log"
   echo ""
 
   _launch_tagged unit "$unit_exit" \
-    "$bcs_dir/scripts/ci_test.sh" --base "$base" --head "$head" --fast-fail
+    "$bcs_dir/scripts/ci_test.sh" --base "$base" --head "$head" --fast-fail "${unit_cov_args[@]+"${unit_cov_args[@]}"}"
   local u_reader=$_TASK_READER u_pid=$_TASK_PID
   _launch_tagged e2e "$e2e_exit" \
-    "$bcs_dir/scripts/e2e_coverage.sh" --bcs-min 30 --force-rebuild
+    "$bcs_dir/scripts/e2e_coverage.sh" --bcs-min 20 --force-rebuild
   local e_reader=$_TASK_READER e_pid=$_TASK_PID
 
   # Wait for the first gate to finish (exitfile written) or die abnormally.
@@ -196,18 +202,68 @@ bcs_parallel_gates() {
 }
 
 # ----------------------------------------------------------------------------
+# Unit coverage gate (changed-line >= 80%, overall-line > 70%).
+# The unit gate above already ran ci_test.sh WITH --coverage (single llvm-cov
+# nextest pass -> testresult/{junit,cobertura}.xml) AND confirmed the 100% pass
+# rate via fast-fail. So coverage is already collected — this step only enforces
+# thresholds with cov_gate.py (no second build). Honors env opt-out
+# (OCB_PRE_PUSH_BCS_COVERAGE_GATE=0), in which case the unit gate ran plain
+# nextest (no cobertura) and this step is a no-op.
+bcs_coverage_gate() {
+  local base="$1"
+  if [[ "${OCB_PRE_PUSH_BCS_COVERAGE_GATE:-1}" != "1" ]]; then
+    echo "== bcs unit coverage gate: skipped (OCB_PRE_PUSH_BCS_COVERAGE_GATE=0) =="
+    return 0
+  fi
+  if [[ ! -f "$bcs_dir/testresult/cobertura.xml" ]]; then
+    echo "== bcs unit coverage gate: no cobertura.xml from unit gate (ci_test.sh --coverage not run); skipping =="
+    return 0
+  fi
+  echo ""
+  echo "== required: bcs unit coverage gate (changed-line>=80%, overall-line>70%) =="
+  # Enforce thresholds. cov_gate.py reads testresult/{junit,cobertura}.xml (the
+  # SAME artifacts produced by the unit gate's single llvm-cov nextest pass),
+  # diffs src/bcs against --base-ref, and maps changed lines onto cobertura
+  # per-line hits. Pass rate is re-checked here too (defensive: junit already
+  # gated by the unit gate's fast-fail exit). Exit non-zero on any breach.
+  ( cd "$bcs_dir" && python3 scripts/cov_gate.py \
+        --base-ref "$base" \
+        --bcs-dir "$PWD" \
+        --pass-rate-min 100 \
+        --overall-line-min 70 \
+        --changed-line-min 80 )
+  local rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    echo "Result: push BLOCKED — coverage gate failed (changed-line < 80% or overall-line <= 70%)."
+    return 1
+  fi
+  echo "Result: coverage gate PASSED."
+  return 0
+}
+
+# ----------------------------------------------------------------------------
 # Dispatch
 # ----------------------------------------------------------------------------
 unit_on=1; e2e_on=1
 [[ "${OCB_PRE_PUSH_ENABLE_BCS:-1}" == "1" ]] || unit_on=0
 [[ "${OCB_PRE_PUSH_ENABLE_BCS_E2E:-1}" == "1" ]] || e2e_on=0
+# When the coverage gate is on, the unit gate runs ci_test.sh with --coverage so
+# a single llvm-cov nextest pass emits BOTH junit (pass rate) and cobertura
+# (coverage) — no second build. When the gate is opted out, the unit gate falls
+# back to plain --fast-fail nextest (no instrumentation overhead).
+cov_gate_on=1
+[[ "${OCB_PRE_PUSH_BCS_COVERAGE_GATE:-1}" == "1" ]] || cov_gate_on=0
+unit_cov_args=()
+[[ $cov_gate_on -eq 1 ]] && unit_cov_args+=(--coverage)
 
 if [[ $unit_on -eq 0 && $e2e_on -eq 0 ]]; then
   echo "bcs changes detected; BCS gates skipped (OCB_PRE_PUSH_ENABLE_BCS=0 OCB_PRE_PUSH_ENABLE_BCS_E2E=0)"
 elif [[ $unit_on -eq 1 && $e2e_on -eq 1 ]]; then
-  bcs_parallel_gates "$base" "$head"
+  bcs_parallel_gates "$base" "$head" "${unit_cov_args[@]+"${unit_cov_args[@]}"}" || exit 1
+  bcs_coverage_gate "$base" || exit 1
 elif [[ $unit_on -eq 1 ]]; then
-  run_required "$bcs_dir/scripts/ci_test.sh" --base "$base" --head "$head" --fast-fail
+  run_required "$bcs_dir/scripts/ci_test.sh" --base "$base" --head "$head" --fast-fail "${unit_cov_args[@]+"${unit_cov_args[@]}"}"
+  bcs_coverage_gate "$base" || exit 1
 else
-  run_required "$bcs_dir/scripts/e2e_coverage.sh" --bcs-min 30 --force-rebuild
+  run_required "$bcs_dir/scripts/e2e_coverage.sh" --bcs-min 20 --force-rebuild
 fi

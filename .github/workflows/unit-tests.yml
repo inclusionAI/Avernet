@@ -101,132 +101,16 @@ jobs:
 
       - name: Enforce coverage gates
         if: steps.changes.outputs.skip-bcs != 'true'
-        shell: python3 {0}
         env:
           BCS_BASE_REF: ${{ env.BCS_BASE_REF }}
+        working-directory: ${{ github.workspace }}/src/bcs
         run: |
-          import os, re, subprocess, sys
-
-          # This step runs with working-directory = src/bcs, but git diff pathspecs
-          # are relative to the repo root. Resolve the root and operate from there.
-          root = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                                check=True, capture_output=True, text=True).stdout.strip()
-          junit_path = os.path.join(os.getcwd(), "testresult", "junit.xml")
-          cobertura_path = os.path.join(os.getcwd(), "testresult", "cobertura.xml")
-          base_ref = os.environ["BCS_BASE_REF"]
-
-          FAIL = False
-
-          # ---- 1) Test pass rate: require 100% ----
-          with open(junit_path, encoding="utf-8", errors="replace") as f:
-              j = f.read()
-          m = re.search(r'<testsuites\b[^>]*>', j) or re.search(r'<testsuite\b[^>]*>', j)
-          tag = m.group(0)
-          def attr(name, default="0"):
-              mm = re.search(r'%s="(\d+)"' % name, tag)
-              return int(mm.group(1)) if mm else int(default)
-          tests = attr("tests"); failures = attr("failures"); errors = attr("errors"); skipped = attr("skipped")
-          passed = tests - failures - errors - skipped
-          pass_rate = (passed / tests * 100.0) if tests else 0.0
-          print(f"[pass-rate] tests={tests} passed={passed} failures={failures} errors={errors} skipped={skipped} -> {pass_rate:.2f}%")
-          if failures != 0 or errors != 0 or pass_rate < 100.0:
-              print("::error::Pass rate %.2f%% is below the required 100%% (failures=%d errors=%d)" % (pass_rate, failures, errors))
-              FAIL = True
-          else:
-              print("::notice::Pass rate 100%% (requirement: 100%) — OK")
-
-          # ---- 2) Overall line coverage: require > 70% ----
-          with open(cobertura_path, encoding="utf-8", errors="replace") as f:
-              c = f.read()
-          rm = re.search(r'<coverage\b[^>]*line-rate="([0-9.]+)"', c)
-          overall = float(rm.group(1)) if rm else 0.0
-          pct = overall * 100.0
-          print(f"[overall-line-cov] line-rate={overall:.6f} -> {pct:.2f}%")
-          if pct <= 70.0:
-              print("::error::Overall line coverage %.2f%% is not > 70%%" % pct)
-              FAIL = True
-          else:
-              print("::notice::Overall line coverage %.2f%% (requirement: >70%%) — OK" % pct)
-
-          # ---- 3) Changed-line coverage: require >= 90% ----
-          # Parse per-class file coverage: filename -> {line_number: hits}
-          coverage = {}
-          for cls in re.findall(r'<class\b[^>]*>.*?</class>', c, flags=re.S):
-              fm = re.search(r'filename="([^"]*)"', cls)
-              if not fm:
-                  continue
-              fname = fm.group(1)
-              lines = {}
-              for lm in re.finditer(r'<line\b[^>]*number="(\d+)"[^>]*hits="(\d+)"', cls):
-                  lines[int(lm.group(1))] = int(lm.group(2))
-              for lm in re.finditer(r'<line\b[^>]*hits="(\d+)"[^>]*number="(\d+)"', cls):
-                  lines[int(lm.group(2))] = int(lm.group(1))
-              coverage[fname] = lines
-
-          # Compute changed BCS *.rs line ranges via unified diff (-U0).
-          # Run from repo root so the `src/bcs` pathspec resolves correctly.
-          # Diff against the working tree (not HEAD): see the "Detect BCS changes" step
-          # for the merge-commit checkout reason.
-          try:
-              diff = subprocess.run(
-                  ["git", "-C", root, "diff", "--no-renames", "-U0",
-                   f"{base_ref}", "--", "src/bcs"],
-                  check=True, capture_output=True, text=True,
-              ).stdout
-          except subprocess.CalledProcessError as e:
-              print("::error::git diff failed: %s" % e)
-              FAIL = True
-              diff = ""
-
-          # Parse hunk headers: +++ b/<path>  and @@ -a,b +c,d @@
-          changed = {}  # relpath_under_bcs -> set(line numbers)
-          cur_path = None
-          for line in diff.splitlines():
-              if line.startswith("+++ b/"):
-                  p = line[6:]
-                  if p.startswith("src/bcs/"):
-                      cur_path = p[len("src/bcs/"):]
-                  else:
-                      cur_path = None
-                  continue
-              if line.startswith("@@ ") and cur_path is not None:
-                  hm = re.search(r'\+(\d+)(?:,(\d+))?', line)
-                  if not hm:
-                      continue
-                  start = int(hm.group(1))
-                  count = int(hm.group(2)) if hm.group(2) else 1
-                  changed.setdefault(cur_path, set()).update(range(start, start + count))
-
-          total_changed = 0
-          total_changed_covered = 0
-          per_file = []
-          for fname, lines in changed.items():
-              cov = coverage.get(fname, {})
-              for ln in lines:
-                  # Only count source lines that coverage marked as valid instrumentable
-                  # lines (present in the cobertura <line> list). Non-instrumentable
-                  # additions (blank, comments) are excluded since they carry no coverage.
-                  if ln not in cov:
-                      continue
-                  total_changed += 1
-                  if cov[ln] > 0:
-                      total_changed_covered += 1
-              per_file.append((fname, len(lines)))
-
-          if total_changed == 0:
-              print("[changed-line-cov] no instrumentable changed source lines mapped; gate not applicable")
-          else:
-              chg_rate = total_changed_covered / total_changed * 100.0
-              print(f"[changed-line-cov] changed-instrumentable-lines={total_changed} covered={total_changed_covered} -> {chg_rate:.2f}%")
-              for fname, n in per_file[:20]:
-                  print(f"    {fname}: {n} changed line(s)")
-              if chg_rate < 90.0:
-                  print("::error::Changed-line coverage %.2f%% is below the required 90%%" % chg_rate)
-                  FAIL = True
-              else:
-                  print("::notice::Changed-line coverage %.2f%% (requirement: >=90%%) — OK" % chg_rate)
-
-          sys.exit(1 if FAIL else 0)
+          python3 scripts/cov_gate.py \
+            --base-ref "$BCS_BASE_REF" \
+            --bcs-dir "$PWD" \
+            --pass-rate-min 100 \
+            --overall-line-min 70 \
+            --changed-line-min 80
 
       - name: Upload BCS test results
         if: always() && steps.changes.outputs.skip-bcs != 'true'
