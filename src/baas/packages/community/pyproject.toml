@@ -1,0 +1,151 @@
+[project]
+dependencies = [
+    "redis==7.4.0",
+    "sqlalchemy>=2.0.48",
+    "apscheduler>=3.10.0,<4.0.0",
+    "jinja2>=3.1.0",
+    "gmssl>=3.2.1",
+    "dependency-injector>=4.49.1",
+    "pydantic>=2.10,<2.13",
+    "pydantic-settings>=2.14",
+    "aiosqlite>=0.22.1",
+    "aiohttp>=3.13.5",
+    "websockets>=15.0",
+    "docker>=7.0",
+    "websocket-client>=1.6.0",
+    "httpx>=0.24.0",
+    "socksio>=1.0.0",
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "opentelemetry-instrumentation-fastapi>=0.63b1",
+    "opentelemetry-instrumentation-asgi>=0.63b1",
+    "opentelemetry-exporter-otlp-proto-http>=1.42.1",
+    "kubernetes>=31.0.0",
+    "tenacity>=9.0.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "aiomysql>=0.2.0",
+    "cryptography>=3.0.0",
+    "pyyaml>=6.0.0",
+    "greenlet>=2.0.0",
+]
+description = "secbaas community edition"
+name = "secbaas-community"
+readme = "README.md"
+requires-python = ">=3.12.0,<3.13.0"
+version = "0.1.0"
+
+# --- 包索引配置 ---
+[[tool.uv.index]]
+default = true
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple"
+
+# --- 依赖分组配置 ---
+[dependency-groups]
+dev = [
+  "ruff>=0.8.0",
+  "black>=26.1.0",
+  "flake8>=7.3.0",
+  "pytest>=9.0.2",
+  "pytest-asyncio>=0.25.0",
+  "httpx>=0.27.0",
+  "pre-commit>=3.6.0",
+  "debugpy>=1.8.0",
+  "mypy>=1.20.2",
+  "basedpyright>=1.39.8",
+  "types-pyyaml>=6.0.12.20260508",
+  "pytest-cov>=7.1.0",
+  "pytest-rerunfailures>=16.3",
+  "pytestarch>=4.0.0,<5.0.0",
+]
+
+# --- 代码检查工具 Ruff 配置 ---
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+ignore = ["E501", "ASYNC109"] # 忽略行超长; timeout 参数是传递给下游的语义参数，不适用 asyncio.timeout
+select = ["E", "F", "I", "N", "UP", "ASYNC"] # 激活：错误、逻辑、导入排序、命名规范、语法升级提示、异步检查
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "E402",    # 测试文件允许在 docstring 或 pytestmark 之后导入
+    "N",       # 测试文件允许任意命名风格（N802,N803,N806,N815,N816,N817等）
+    "E731",    # 测试中允许 lambda 赋值给变量
+    "ASYNC240",# 测试中允许 async 函数使用 os.path
+    "F401",    # side-effect 导入在测试中常见且有意义
+    "F841",    # 测试中变量"赋值给返回值但后续仅用 .assert_called_once_with 验证 mock 调用的模式很常见
+]
+
+[tool.ruff.format]
+# 开启自动格式化（类似 Black 的行为）
+indent-style = "space"
+quote-style = "double"
+
+# --- 静态类型检查 Pyright 配置 ---
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+include = ["src"]
+
+[tool.pyright.diagnosticSeverityOverrides]
+reportUnusedCoroutine = "error"
+reportMissingTypeStubs = "warning"
+
+# --- 静态类型检查 Mypy 配置 ---
+[tool.mypy]
+files = ["src"] # 指定只检查 src 目录
+ignore_missing_imports = true
+pretty = true # 格式化输出，让错误提示更易读
+python_version = "3.12"
+show_error_codes = true # 允许在代码中使用特定的注释来忽略某些检查
+strict = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+disallow_any_generics = false
+warn_return_any = false
+warn_unreachable = false
+check_untyped_defs = true
+
+# --- 测试工具 Pytest 配置 ---
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"
+addopts = "--reruns 2 --reruns-delay 1"
+markers = [
+  "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+  "e2e: marks tests as end-to-end API tests (requires running app)",
+  "requires_app: marks tests that require a running application instance",
+  "crud: marks e2e tests for CRUD operations",
+  "sync: marks e2e tests for synchronous/device operations",
+  "async_hook: marks e2e tests for async hook operations",
+  "mock_paas_hook_failure: marks e2e tests for mock hook execution failure",
+  "mock_paas_create_failure: marks e2e tests for mock device creation failure",
+  "mock_paas_destroy_failure: marks e2e tests for mock device destroy failure",
+  "mock_paas_device_not_found: marks e2e tests for mock device not found (idempotent destroy)",
+]
+
+# --- 构建后端定义 ---
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[tool.hatch.build.targets.wheel]
+# 只包含 src 目录下的代码，不把测试代码打进 whl 包
+packages = ["src/secbaas"]
+
+[tool.hatch.version]
+# 动态版本：自动从代码中的 __version__ 变量读取
+path = "src/secbaas/__about__.py"
+
+[tool.hatch.build]
+# 排除不需要的文件
+exclude = [
+  "*.log",
+  ".github",
+]
