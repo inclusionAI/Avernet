@@ -122,3 +122,28 @@ async fn test_health_server_error_human() {
         .code(1)
         .stdout(predicate::str::contains("✗ BCS health check failed"));
 }
+
+// Structured mode with an unreachable BCS endpoint (connection refused):
+// health_check() returns Err, which under --json MUST surface as a structured
+// JSON "unhealthy" result rather than a raw error/traceback on stderr. Covers
+// the Err arm of the structured_mode health fork in main.rs.
+#[tokio::test]
+async fn test_health_unreachable_json() {
+    // Bind a TCP socket then drop it so the port is guaranteed free -> the
+    // bcs-cli health request gets a connection-refused Err (no server there).
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let unreachable_url = format!("http://127.0.0.1:{}", port);
+
+    let mut cmd = Command::cargo_bin("bcs-cli").unwrap();
+    cmd.arg("--json")
+        .arg("--url")
+        .arg(&unreachable_url)
+        .arg("health");
+    cmd.assert()
+        .failure()
+        .code(1)
+        .stdout(predicate::str::contains("\"status\":\"unhealthy\""))
+        .stdout(predicate::str::contains("BCS health check failed"));
+}

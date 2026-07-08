@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 
 
 def gh(msg):
@@ -57,23 +58,34 @@ def main():
 
     # ---- 1) Test pass rate ----
     try:
-        with open(junit_path, encoding="utf-8", errors="replace") as f:
-            j = f.read()
-    except OSError as e:
-        gh("::error::junit.xml not found at %s: %s" % (junit_path, e))
+        junit_root = ET.parse(junit_path).getroot()
+    except (OSError, ET.ParseError) as e:
+        gh("::error::failed to read or parse junit.xml at %s: %s" % (junit_path, e))
         sys.exit(1)
-    m = re.search(r'<testsuites\b[^>]*>', j) or re.search(r'<testsuite\b[^>]*>', j)
-    if not m:
-        gh("::error::could not parse <testsuite(s)> header from junit.xml")
-        sys.exit(1)
-    tag = m.group(0)
 
-    def attr(name, default="0"):
-        mm = re.search(r'%s="(\d+)"' % name, tag)
-        return int(mm.group(1)) if mm else int(default)
+    def attr(el, name, default="0"):
+        val = el.get(name)
+        if val is None:
+            return int(default)
+        try:
+            return int(val)
+        except ValueError:
+            return int(default)
 
-    tests = attr("tests"); failures = attr("failures")
-    errors = attr("errors"); skipped = attr("skipped")
+    # junit's root may be <testsuites> (counts on the aggregate root) or a bare
+    # <testsuite>. Accept counts from whichever level carries them; fall back to
+    # summing child <testsuite> entries when the root itself has none.
+    if junit_root.tag == "testsuites" and junit_root.get("tests") is None:
+        suites = list(junit_root.iter("testsuite"))
+        tests = sum(attr(s, "tests") for s in suites)
+        failures = sum(attr(s, "failures") for s in suites)
+        errors = sum(attr(s, "errors") for s in suites)
+        skipped = sum(attr(s, "skipped") for s in suites)
+    else:
+        tests = attr(junit_root, "tests")
+        failures = attr(junit_root, "failures")
+        errors = attr(junit_root, "errors")
+        skipped = attr(junit_root, "skipped")
     passed = tests - failures - errors - skipped
     pass_rate = (passed / tests * 100.0) if tests else 0.0
     gh("[pass-rate] tests=%d passed=%d failures=%d errors=%d skipped=%d -> %.2f%%"
@@ -88,13 +100,12 @@ def main():
 
     # ---- 2) Overall line coverage ----
     try:
-        with open(cobertura_path, encoding="utf-8", errors="replace") as f:
-            c = f.read()
-    except OSError as e:
-        gh("::error::cobertura.xml not found at %s: %s" % (cobertura_path, e))
+        cobertura_root = ET.parse(cobertura_path).getroot()
+    except (OSError, ET.ParseError) as e:
+        gh("::error::failed to read or parse cobertura.xml at %s: %s" % (cobertura_path, e))
         sys.exit(1)
-    rm = re.search(r'<coverage\b[^>]*line-rate="([0-9.]+)"', c)
-    overall = float(rm.group(1)) if rm else 0.0
+    lr = cobertura_root.get("line-rate")
+    overall = float(lr) if lr is not None else 0.0
     pct = overall * 100.0
     gh("[overall-line-cov] line-rate=%.6f -> %.2f%%" % (overall, pct))
     if pct <= args.overall_line_min:
@@ -108,16 +119,19 @@ def main():
     # ---- 3) Changed-line coverage ----
     # Parse per-class file coverage: filename -> {line_number: hits}
     coverage = {}
-    for cls in re.findall(r'<class\b[^>]*>.*?</class>', c, flags=re.S):
-        fm = re.search(r'filename="([^"]*)"', cls)
-        if not fm:
+    for cls in cobertura_root.iter("class"):
+        fname = cls.get("filename")
+        if not fname:
             continue
-        fname = fm.group(1)
         lines = {}
-        for lm in re.finditer(r'<line\b[^>]*number="(\d+)"[^>]*hits="(\d+)"', cls):
-            lines[int(lm.group(1))] = int(lm.group(2))
-        for lm in re.finditer(r'<line\b[^>]*hits="(\d+)"[^>]*number="(\d+)"', cls):
-            lines[int(lm.group(2))] = int(lm.group(1))
+        for line in cls.iter("line"):
+            num = line.get("number")
+            hits = line.get("hits")
+            if num is not None and hits is not None:
+                try:
+                    lines[int(num)] = int(hits)
+                except ValueError:
+                    continue
         coverage[fname] = lines
 
     # repo root = parent that contains .git; bcs-dir lives under it.

@@ -378,13 +378,13 @@ _get_bot_data_dir() {
         [[ -f "$session_file" ]] || continue
         local match
         match="$(python3 -c "
-import json
+import json, sys
 try:
-    d=json.load(open('$session_file'))
-    print('1' if d.get('bot_uuid')=='$bot_uuid' else '0')
+    d=json.load(open(sys.argv[1]))
+    print('1' if d.get('bot_uuid')==sys.argv[2] else '0')
 except Exception:
     print('0')
-")"
+" "$session_file" "$bot_uuid")"
         if [[ "$match" == "1" ]]; then
             # session_file = <root>/<slug>/.bcs/session.json -> profile dir = <root>/<slug>
             dirname "$(dirname "$session_file")"
@@ -406,13 +406,13 @@ get_bot_token() {
         return
     fi
     python3 -c "
-import json
+import json, sys
 try:
-    d=json.load(open('$dir/.bcs/session.json'))
+    d=json.load(open(sys.argv[1] + '/.bcs/session.json'))
     print(d.get('token','') or '')
 except Exception:
     print('')
-"
+" "$dir"
 }
 
 # Ensure BCS_CLI_TOKEN is populated for the given bot; return 1 (skip) if not.
@@ -443,11 +443,11 @@ _cli_json_field() {
 import json,sys
 try:
     d=json.load(sys.stdin)
-    v=d.get('$key','')
+    v=d.get(sys.argv[1],'') if len(sys.argv)>1 else ''
     print(v if v is not None else '')
 except Exception:
     print('')
-"
+" "$key"
 }
 
 # True if $1 (JSON/string) contains substring $2.
@@ -487,6 +487,10 @@ bcs_cli() {
     shift
     args+=("$@")
     local out rc
+    # Secure per-call temp file for stderr (replaces the insecure hardcoded
+    # /tmp/bcs_cli.err — symlink/race safe via mktemp). Cleaned up on return.
+    local err_file
+    err_file="$(mktemp -t bcs_cli.err.XXXXXX 2>/dev/null || mktemp)"
     # Self-resolving subcommands (visibility/friend/session/connect) read the
     # bot UUID from $BOT_DATA_DIR/.bcs/session.json, not from --token. Set it
     # inline for THIS call only (no leak to the parent shell). For tokenless
@@ -496,14 +500,15 @@ bcs_cli() {
         bot_dir="$(_get_bot_data_dir "$bot")"
     fi
     if [[ -n "$bot_dir" ]]; then
-        out="$( BOT_DATA_DIR="$bot_dir" $bin "${args[@]}" 2>/tmp/bcs_cli.err )" && rc=$? || rc=$?
+        out="$( BOT_DATA_DIR="$bot_dir" $bin "${args[@]}" 2>"$err_file" )" && rc=$? || rc=$?
     else
-        out="$( $bin "${args[@]}" 2>/tmp/bcs_cli.err )" && rc=$? || rc=$?
+        out="$( $bin "${args[@]}" 2>"$err_file" )" && rc=$? || rc=$?
     fi
     BCS_CLI_STDOUT="$out"
     BCS_CLI_EXIT="$rc"
-    if [[ "$rc" -ne 0 ]] && [[ -s /tmp/bcs_cli.err ]]; then
-        warn "bcs-cli $sub exited $rc: $(head -c 200 /tmp/bcs_cli.err)"
+    if [[ "$rc" -ne 0 ]] && [[ -s "$err_file" ]]; then
+        warn "bcs-cli $sub exited $rc: $(head -c 200 "$err_file")"
     fi
+    rm -f "$err_file"
     return "$rc"
 }
