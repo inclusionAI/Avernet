@@ -1,0 +1,10 @@
+DELETE FROM baas_tenant WHERE creator = 'test_user';
+DELETE FROM baas_api_key  WHERE creator = 'test_user';
+DELETE FROM baas_device_template  WHERE creator = 'test_user';
+DELETE FROM baas_bot  WHERE creator = 'test_user';
+DELETE FROM baas_device  WHERE creator = 'test_user';
+DELETE FROM baas_bot_device_rel  WHERE creator = 'test_user';
+DELETE FROM baas_publish   WHERE creator = 'test_user';
+DELETE FROM baas_publish_batch    WHERE creator = 'test_user';
+DELETE FROM baas_publish_record     WHERE creator = 'test_user';
+DELETE FROM baas_bot_session  WHERE invoker  = 'test_user';

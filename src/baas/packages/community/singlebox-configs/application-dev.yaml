@@ -1,0 +1,54 @@
+
+workers: 1
+
+module_config:
+  web:
+    # 本地模式，避免端口冲突，设置为 8890
+    port: 8890
+  mist:
+    enabled: true
+    tenant: "ALIPAY"
+    mode: "dev"
+    app_name: "secbaas"
+
+user_config:
+  # 插件配置
+  plugins:
+    sandbox:
+      # local proc
+      arca: local_proc
+    database:
+      plugin_database: "SQLITE_ORM"    # ZDAS_SQL (Production RAW SQL, migrating to orm) | ZDAS_ORM (production ORM) | SQLITE_ORM (test only)
+      database_url: "sqlite:////tmp/secbaas_singlebox.db"
+    secret: "stub"
+    cache: "stub"
+    bot_service: "local"
+
+  buservice:
+    base_url: "http://pubbuservice.stable.alipay.net"
+    get_login_user_path: "/pub/getLoginUser.json"
+    app_name: "secbaas"
+
+  bot_service:
+    adapter_port: 20003
+    ws_path: "/api/openclaw/ws"
+    connect_timeout: 10
+    request_timeout: 300
+
+  teamclaw:
+    base_url: "https://agentclawproxy.stable.alipay.net"
+    timeout: 30
+
+  # BCN 下行协议配置（开发环境）
+  bcn:
+    api_key:
+      prefix: "9acXMLaU"  # BCN 专用 API Key 前缀
+
+  # Arca 沙箱配置（开发环境）
+  arca:
+    enabled: true
+    base_url: "http://arca-sandbox.stable.alipay.net:8080"
+    template_id: "ARCA-TEMPLATE-0000000095b3fe16"
+    oss_mount_id: "OSS_antsys-agentclaw-dev_LTAI5tG1fzUhh7Nry3FsP9kc"
+    api_key: "@other_manual_agentclaw_arca_api_key"
+    default_ttl_minutes: 1440 # 分钟 => 1 天
