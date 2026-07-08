@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "properties": {
+    "bot_id": {
+      "type": "string"
+    },
+    "bot_name": {
+      "type": "string"
+    },
+    "enabled_count": {
+      "type": "integer"
+    },
+    "job_count": {
+      "type": "integer"
+    },
+    "next_run_at_ms": {
+      "type": "integer"
+    },
+    "owner_id": {
+      "type": "string"
+    },
+    "running": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "bot_id",
+    "bot_name",
+    "enabled_count",
+    "job_count",
+    "next_run_at_ms",
+    "owner_id",
+    "running"
+  ],
+  "additionalProperties": false
+}

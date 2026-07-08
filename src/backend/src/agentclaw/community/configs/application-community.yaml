@@ -1,0 +1,161 @@
+# Community deploy-profile configuration — the community OVERLAY.
+#
+# Loaded as the overlay ON TOP OF the neutral ``application.yaml`` base when
+# DEPLOY_PROFILE=community (see core/config/yaml_provider.py). The base is now
+# corp-free (every corp-specific block lives only in the corp env overlays), so
+# merging it is safe — it contributes neutral structural defaults and empty
+# placeholders for corp blocks the community never reads. Keep every value here
+# vendor-neutral: no company endpoints, no secret-store references, no
+# company-internal identifiers (enforced by the shipped-surface guard test).
+#
+# Anything a community operator must set per-deployment (DB URL, Redis, S3,
+# secrets) comes from environment variables where noted; this file carries only
+# safe, non-secret defaults.
+app_name: "agentclaw"
+
+user_config:
+  # ── Neutral application policy ────────────────────────────────────────────
+
+  # Bot workspace filesystem layout (consumed by WorkspaceConfig). Neutral
+  # local paths; a community host can point these anywhere it mounts bot files.
+  workspace:
+    openclaw_root: "./data/workspace/openclaw"
+    claude_code_root: "./data/workspace/claude_code"
+
+  # Operator whitelist gating admin endpoints. Empty = no privileged operators
+  # by default; a community deployment lists its own admin subject ids.
+  whitelist:
+    operator_names: []
+
+  # Browser CORS allow-list. Inherits the neutral base (localhost origins) so a
+  # local dev UI works out of the box.
+  # TODO(community): add your deployed frontend origin(s) here so browsers there
+  # can call the API — allow_credentials=True forbids a "*" wildcard, e.g.:
+  #   cors:
+  #     allow_origins:
+  #       - "https://your-frontend.example.com"
+
+  # Per-owner device allocation policy (neutral knobs only).
+  device_allocation:
+    mode: "multi"
+    max_devices_per_entity: 5
+
+  # OSS↔NAS migration mount roots (host-side paths, deployment-neutral).
+  # NOTE: the OssToNasConfig provider reads these as FLAT user_config keys
+  # (not nested) — keep them top-level.
+  oss_mount_root: "./data/oss"
+  nas_mount_root: "./data/nas"
+
+  # Bot-data object-store location embedded in the composed bot config artifact.
+  # Object-storage CREDENTIALS are not here — they come from the active
+  # SecretResolver / AWS env chain (see the object_storage block below).
+  bot_oss_config:
+    endpoint: ""
+    bucket_name: "agentclaw"
+
+  # Device backend (BaaS) the community runtime talks to. The container runtime
+  # itself is owned/operated separately; point api_base_url at that backend.
+  # tenant/template are neutral placeholders — set per deployment.
+  baas:
+    api_base_url: "http://localhost:8890"
+    tenant: "community"
+    template_uuid: ""
+
+  # Bot-discovery backend URL (empty = discovery inert).
+  bcsfuse:
+    base_url: ""
+
+  # ECB downstream-sync URL (empty = the ECB sync leg is inert).
+  ecb:
+    base_url: ""
+
+  # Dormant-bot recycle: dry-run by default (never mutates without opt-in).
+  dormant:
+    dry_run: true
+
+  # In-process task-queue worker: off by default (enable once a handler + table
+  # exist).
+  task_queue_worker:
+    enabled: false
+
+  # Desktop-bot periodic scan: off by default (safe — no background mutation).
+  desktop_bot_periodic_scan:
+    enabled: false
+    apply_owner_whitelist: []
+    global_dry_run: false
+
+  # ── Community infrastructure plugin config (B3/B4) ────────────────────────
+
+  # BCS unified-auth delegation — consumed by the community OidcAuthPlugin
+  # (class name retained; it no longer verifies OIDC JWTs locally). The plugin
+  # forwards inbound cookies to BCS ``GET {base_url}{user_path}`` and maps the
+  # returned user. ``operator_subjects`` lists the BCS user_ids allowed through
+  # require_operator. Omit this block entirely to accept code defaults.
+  #
+  # Prerequisite: BCS must have OAuth configured ([auth.oauth] with jwt_secret,
+  # a valid base_url, and >=1 provider); otherwise /auth/user returns 404.
+  bcs:
+    base_url: "http://127.0.0.1:21000"
+    user_path: "/auth/user"
+    timeout: 10
+    operator_subjects: []
+
+  # Relational store — consumed by the community CommunityDatabase.
+  # SQLAlchemy URL (SQLite file / Postgres / MySQL). The DATABASE_URL env var,
+  # if set, takes precedence (keep passwords out of this file). The schema is
+  # operator-provisioned — the app does not create tables.
+  database:
+    url: "sqlite:///./data/agentclaw.db"
+
+  # Cache + distributed lock — consumed by the community CommunityCache.
+  # Set redis_url to a Redis endpoint for a multi-worker deploy (KV + SET NX
+  # lock). Leave empty for the in-process fallback (single-process only — an
+  # in-process lock is unsafe across workers). The REDIS_URL env var, if set,
+  # takes precedence.
+  cache:
+    redis_url: ""
+
+  # Object storage — consumed by the community object-storage impls.
+  # backend = "fs" (local filesystem under fs_root, the zero-dependency default)
+  # or "s3" (S3-compatible: MinIO / AWS S3 / R2 / the Aliyun-OSS S3 endpoint).
+  # S3 credentials come from the standard AWS env chain
+  # (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) — never put them here.
+  object_storage:
+    backend: "fs"
+    fs_root: "./data/objstore"
+    s3:
+      endpoint: ""        # e.g. "http://localhost:9000" for MinIO; empty = AWS default
+      bucket: ""
+      region: "us-east-1"
+      secure: true
+
+  # Secret resolution — consumed by the community CommunitySecretResolver.
+  # get_secret(name) reads "{env_prefix}{NAME}_USER" / "{env_prefix}{NAME}_VALUE"
+  # from the environment (NAME upper-cased, '-' → '_').
+  secret:
+    env_prefix: "AGENTCLAW_SECRET_"
+
+  # Secret-registry key NAMES the app resolves via SecretResolver. Left unset:
+  # the dormant-token feature uses a local fallback and git-sync degrades to its
+  # on-disk source when no repo-URL secret name is configured.
+  # TODO(community): if you provision these secrets, register their names here
+  # (matching the keys your CommunitySecretResolver / env-var scheme expects):
+  #   secret_names:
+  #     dormant_internal_token: "AGENTCLAW_SECRET_..."   # gates /api/internal/dormant/*
+  #     aiworkbench_repo_url: "AGENTCLAW_SECRET_..."      # skills source repo URL
+
+  # MCP catalog — consumed by the community CommunityMCPCenter.
+  # Optional path to a local MCP-server catalog file (same shape as
+  # configs/local-mcp-servers.yaml). Empty = no marketplace catalog; bring-your-own
+  # MCP servers (configured per user) still work, and permission is allow-all.
+  mcp:
+    registry_config_path: ""
+
+  # Harness-internal LLM utility. Left unset = disabled (feature-off). The
+  # harness is an internal dev/diagnostic tool; a community deployment that wants
+  # it sets its own OpenAI-compatible endpoint + secret name here (or via the
+  # LLM_BASE_URL / LLM_SECRET_NAME / LLM_AUTH_TOKEN env vars).
+  # TODO(community):
+  #   llm:
+  #     base_url: "https://your-openai-compatible-endpoint"
+  #     secret_name: "AGENTCLAW_SECRET_..."

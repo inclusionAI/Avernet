@@ -1,0 +1,126 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentclaw/kernel/bot_config/artifact.schema.json",
+  "title": "BotConfigArtifact",
+  "description": "Published, cross-boundary bot-config contract an external engine consumes to boot a bot. Field names are the external API; evolve via schema_version. The language-neutral source of truth for the BotConfigArtifact dataclass.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "version",
+    "engine_type",
+    "mcp",
+    "skills",
+    "resources",
+    "identity_files",
+    "stores",
+    "engine_overrides",
+    "engine_ext"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "description": "Contract version. Distinct from the per-bot content 'version'."
+    },
+    "version": {
+      "type": ["integer", "null"],
+      "description": "Per-bot content version. Always present; an integer for a published service-bot snapshot, null for a live personal/draft bot."
+    },
+    "engine_type": {
+      "type": "string",
+      "description": "Target engine, e.g. 'openclaw' (ARCA) or 'teclaw' (external)."
+    },
+    "engine_overrides": {
+      "type": "object",
+      "description": "Bot-specific overrides (e.g. channels) the engine applies to its own base config. The engine base config (teclaw.json / openclaw.json) is engine-owned and NOT produced here.",
+      "additionalProperties": true
+    },
+    "mcp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["servers"],
+      "properties": {
+        "servers": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/mcpServerRef" }
+        }
+      }
+    },
+    "skills": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/skillRef" }
+    },
+    "resources": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/fileRef" }
+    },
+    "identity_files": {
+      "type": "array",
+      "description": "User/platform-authored workspace files (e.g. RULES.md). Engine-generated files are referenced via engine_ext, not here.",
+      "items": { "$ref": "#/definitions/fileRef" }
+    },
+    "stores": {
+      "type": "object",
+      "description": "Physical coordinates of content stores, keyed by store_id (the source scheme; name it for the store, not the scope). Location only — NEVER credentials. A ref {store:'skill-repo', path:'team/x'} resolves against stores['skill-repo'].",
+      "additionalProperties": { "$ref": "#/definitions/storeRef" }
+    },
+    "engine_ext": {
+      "type": "object",
+      "description": "Opaque, engine-owned free-form JSON (pointers/metadata, e.g. MEMORY.md/IDENTITY.md references). The backend stores/freezes/returns it verbatim and never interprets it.",
+      "additionalProperties": true
+    }
+  },
+  "definitions": {
+    "storeRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "description": "Content store coordinates (location only, never credentials).",
+      "properties": {
+        "type": { "type": "string", "description": "Store kind, e.g. 'oss' | 'nas'." },
+        "bucket": { "type": ["string", "null"], "description": "OSS bucket (store authority)." },
+        "base": { "type": ["string", "null"], "description": "Key prefix within the bucket / root path." },
+        "endpoint": { "type": ["string", "null"], "description": "Optional access endpoint; engine config supplies it if absent." },
+        "region": { "type": ["string", "null"] }
+      }
+    },
+    "fileRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "store", "path"],
+      "description": "A file reference: 'store' keys into 'stores' for the physical location; 'path' is relative within that store.",
+      "properties": {
+        "name": { "type": "string" },
+        "store": { "type": "string", "description": "store_id key into 'stores'." },
+        "path": { "type": "string", "description": "Path relative to the store (e.g. 'data/foo.csv')." }
+      }
+    },
+    "skillRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "scope", "store", "path"],
+      "properties": {
+        "name": { "type": "string" },
+        "scope": { "type": "string", "enum": ["shared", "user"] },
+        "store": { "type": "string", "description": "store_id key into 'stores'." },
+        "path": { "type": "string", "description": "Path relative to the store (e.g. 'team/weather'); placement decided by the engine owner." }
+      }
+    },
+    "mcpServerRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server_code"],
+      "properties": {
+        "server_code": { "type": "string" },
+        "name": { "type": ["string", "null"] },
+        "endpoint": { "type": ["string", "null"], "description": "May carry an inlined ?authorization=<token> query." },
+        "transport": { "type": ["string", "null"] },
+        "headers": {
+          "type": "object",
+          "description": "May carry inlined secret headers (e.g. x-ling-auth).",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    }
+  }
+}

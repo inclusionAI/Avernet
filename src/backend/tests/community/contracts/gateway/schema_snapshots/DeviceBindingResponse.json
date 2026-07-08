@@ -1,0 +1,102 @@
+{
+  "$defs": {
+    "DeviceBindingStatus": {
+      "description": "Device binding status enumeration.",
+      "enum": [
+        "PENDING",
+        "ACTIVE",
+        "FAILED",
+        "RELEASED"
+      ],
+      "title": "DeviceBindingStatus",
+      "type": "string"
+    },
+    "EntityType": {
+      "description": "Entity type enumeration.",
+      "enum": [
+        "staff",
+        "team",
+        "proj"
+      ],
+      "title": "EntityType",
+      "type": "string"
+    },
+    "Env": {
+      "description": "Environment enumeration.",
+      "enum": [
+        "dev",
+        "pre",
+        "prod"
+      ],
+      "title": "Env",
+      "type": "string"
+    }
+  },
+  "description": "Device binding response.",
+  "properties": {
+    "id": {
+      "description": "Binding ID",
+      "title": "Id",
+      "type": "integer"
+    },
+    "entity_id": {
+      "description": "Entity ID (user/team)",
+      "title": "Entity Id",
+      "type": "string"
+    },
+    "entity_type": {
+      "$ref": "#/$defs/EntityType",
+      "description": "Entity type"
+    },
+    "device_id": {
+      "description": "Device ID",
+      "title": "Device Id",
+      "type": "string"
+    },
+    "device_provider": {
+      "description": "Device provider (local/arca/daas)",
+      "title": "Device Provider",
+      "type": "string"
+    },
+    "env": {
+      "$ref": "#/$defs/Env",
+      "description": "Environment"
+    },
+    "device_props": {
+      "additionalProperties": true,
+      "description": "Device properties",
+      "title": "Device Props",
+      "type": "object"
+    },
+    "status": {
+      "$ref": "#/$defs/DeviceBindingStatus",
+      "description": "Binding status"
+    },
+    "last_alive_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Last alive timestamp",
+      "title": "Last Alive At"
+    }
+  },
+  "required": [
+    "id",
+    "entity_id",
+    "entity_type",
+    "device_id",
+    "device_provider",
+    "env",
+    "device_props",
+    "status"
+  ],
+  "title": "DeviceBindingResponse",
+  "type": "object"
+}

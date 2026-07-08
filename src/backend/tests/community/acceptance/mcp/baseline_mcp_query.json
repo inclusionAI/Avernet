@@ -1,0 +1,14 @@
+{
+  "market_list": {
+    "entries_count": 0,
+    "success": true
+  },
+  "permission_fixture_authorized": {
+    "has_permission": true,
+    "success": true
+  },
+  "tenants": {
+    "entries_count": 0,
+    "success": true
+  }
+}

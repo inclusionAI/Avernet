@@ -1,0 +1,64 @@
+{
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "message": {
+      "title": "Message",
+      "type": "string"
+    },
+    "server_code": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Server Code"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "sync_error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sync Error"
+    },
+    "requires_api_key": {
+      "default": false,
+      "title": "Requires Api Key",
+      "type": "boolean"
+    },
+    "requires_permission": {
+      "default": false,
+      "title": "Requires Permission",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "success",
+    "message"
+  ],
+  "title": "AddMCPResponse",
+  "type": "object"
+}

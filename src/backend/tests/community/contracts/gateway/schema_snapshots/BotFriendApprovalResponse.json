@@ -1,0 +1,86 @@
+{
+  "description": "Bot好友审批单响应模型",
+  "properties": {
+    "uuid": {
+      "description": "审批链接唯一ID",
+      "title": "Uuid",
+      "type": "string"
+    },
+    "approval_type": {
+      "default": "MANUAL",
+      "description": "审批类型",
+      "title": "Approval Type",
+      "type": "string"
+    },
+    "require_approval": {
+      "default": true,
+      "description": "是否需要审批",
+      "title": "Require Approval",
+      "type": "boolean"
+    },
+    "approval_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "审批链接地址",
+      "title": "Approval Url"
+    },
+    "request_message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "申请附言",
+      "title": "Request Message"
+    },
+    "approval_time": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "审批时间",
+      "title": "Approval Time"
+    },
+    "reject_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "拒绝原因",
+      "title": "Reject Reason"
+    },
+    "status": {
+      "default": "PENDING",
+      "description": "审批状态",
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "uuid"
+  ],
+  "title": "BotFriendApprovalResponse",
+  "type": "object"
+}

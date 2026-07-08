@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "integer"
+    },
+    "requester_entity_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "target_bot_id": {
+      "type": "string"
+    },
+    "target_entity_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "requester_entity_id",
+    "status",
+    "target_bot_id",
+    "target_entity_id"
+  ],
+  "additionalProperties": false
+}

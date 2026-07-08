@@ -1,0 +1,30 @@
+{
+  "diagnose_records_no_seed": {
+    "items_count": 0,
+    "page": 1,
+    "size": 20,
+    "success": true,
+    "total": 0
+  },
+  "patch_records_no_seed": {
+    "bot_id": "bot_baseline",
+    "entity_id": "e2e_user",
+    "items_count": 0,
+    "success": true
+  },
+  "patches_no_seed": {
+    "bot_id": "bot_baseline",
+    "entity_id": "e2e_user",
+    "success": true,
+    "templates_count": 0
+  },
+  "template_missing": {
+    "detail": "Template 999999 not found",
+    "status_code": 404
+  },
+  "templates_no_seed": {
+    "items_count": 0,
+    "success": true,
+    "total": 0
+  }
+}

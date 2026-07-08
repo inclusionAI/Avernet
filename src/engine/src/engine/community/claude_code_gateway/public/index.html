@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Teamclaw AI Coding Relay Gateway Debug</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --panel: #121933;
+        --panel-2: #1a2345;
+        --text: #e8ecff;
+        --muted: #99a3c7;
+        --line: #2a3768;
+        --accent: #7aa2ff;
+        --accent-2: #55d6be;
+        --danger: #ff7b8b;
+        --warn: #ffca6a;
+        --tool-bg: #1e2a4a;
+        --thinking-bg: #1a1a3a;
+        --thinking-border: #8866dd;
+        --hitl-bg: #1a2a1a;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: linear-gradient(180deg, #09101f 0%, #0b1020 100%);
+        color: var(--text);
+      }
+      .app {
+        display: grid;
+        grid-template-columns: 360px 1fr 420px;
+        height: 100vh;
+        gap: 1px;
+        background: var(--line);
+      }
+      .panel {
+        background: var(--bg);
+        padding: 18px;
+        overflow-y: auto;
+      }
+      aside.panel {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        overflow-y: auto;
+      }
+      section.panel {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        overflow-y: auto;
+      }
+      main.panel {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
+      }
+      h1, h2, h3 { margin: 0 0 12px; }
+      h1 { font-size: 18px; }
+      h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 14px;
+        margin-bottom: 14px;
+      }
+      label {
+        display: block;
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+      input, textarea, select {
+        width: 100%;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--text);
+        padding: 10px 12px;
+        outline: none;
+      }
+      textarea { min-height: 80px; resize: vertical; }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 14px;
+        color: #06101e;
+        background: var(--accent);
+        font-weight: 700;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      button.secondary { background: #c1cbf3; }
+      button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+      button.warn { background: var(--warn); }
+      button.danger { background: var(--danger); }
+      button.hitl { background: var(--accent-2); }
+      button:disabled { opacity: .4; cursor: not-allowed; }
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        padding: 6px 10px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        font-size: 12px;
+      }
+      .dot { width: 8px; height: 8px; border-radius: 999px; background: #6b7280; }
+      .dot.ok { background: var(--accent-2); }
+      .dot.err { background: var(--danger); }
+      .log, .chat {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .msg, .evt {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        background: var(--panel);
+      }
+      .msg.user { border-color: #4060ba; }
+      .msg.assistant { border-color: #2e8f80; }
+      .msg.thinking {
+        border-color: var(--thinking-border);
+        background: var(--thinking-bg);
+        border-left: 3px solid var(--thinking-border);
+      }
+      .msg.thinking .meta {
+        color: #9977cc;
+        cursor: pointer;
+        user-select: none;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .msg.thinking .meta::before { content: '💭 '; }
+      .msg.thinking .toggle-icon {
+        display: inline-block;
+        transition: transform .15s;
+        font-size: 10px;
+      }
+      .msg.thinking.collapsed .toggle-icon { transform: rotate(-90deg); }
+      .msg.thinking .collapse-hint {
+        font-size: 10px;
+        color: #7755aa;
+        margin-left: 6px;
+      }
+      .msg.thinking pre {
+        color: #b8a0e8;
+        font-style: italic;
+        font-size: 11.5px;
+        line-height: 1.5;
+        max-height: 400px;
+        overflow: auto;
+        transition: max-height .2s;
+      }
+      .msg.thinking.collapsed pre {
+        max-height: 0;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+      }
+      .msg.thinking.collapsed .collapse-hint { display: inline; }
+      .msg.thinking:not(.collapsed) .collapse-hint { display: none; }
+      .msg.tool_use { border-color: #5577aa; background: var(--tool-bg); border-left: 3px solid #5577aa; }
+      .msg.tool_use .meta { color: #6699cc; }
+      .msg.tool_use .meta::before { content: '🔧 '; }
+      .msg.tool_use pre { font-size: 11.5px; }
+      .msg.human_input {
+        border-color: #44aa77;
+        background: var(--hitl-bg);
+        border-left: 3px solid #44aa77;
+      }
+      .msg.human_input .meta {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .approval-badge {
+        display: inline-block;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        padding: 2px 7px;
+        border-radius: 4px;
+        vertical-align: middle;
+      }
+      .approval-badge.waiting { background: rgba(255,202,106,.2); color: var(--warn); }
+      .approval-badge.responding { background: rgba(122,162,255,.2); color: var(--accent); }
+      .approval-badge.resolved { background: rgba(85,214,190,.2); color: var(--accent-2); }
+      .msg.human_resolved { border-color: #44aa77; background: var(--hitl-bg); opacity: .7; border-left: 3px solid #44aa77; }
+      /* inline ask-user question blocks */
+      .ask-block {
+        background: rgba(85,214,190,.06);
+        border: 1px solid rgba(85,214,190,.2);
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin-top: 8px;
+      }
+      .ask-block .q-header { font-weight: 700; font-size: 13px; margin-bottom: 4px; color: var(--accent-2); }
+      .ask-block .q-text { font-size: 13px; margin-bottom: 8px; }
+      .ask-options { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+      .ask-options button {
+        font-size: 12px;
+        padding: 6px 12px;
+        border-radius: 8px;
+        background: var(--panel-2);
+        color: var(--text);
+        border: 1px solid var(--line);
+      }
+      .ask-options button.selected {
+        border-color: var(--accent-2);
+        background: rgba(85,214,190,.15);
+        color: var(--accent-2);
+        font-weight: 700;
+      }
+      .ask-actions { margin-top: 8px; display: flex; gap: 8px; }
+      .ask-actions button { font-size: 12px; padding: 6px 14px; }
+      .msg.human_input.resolved {
+        opacity: .6;
+        pointer-events: none;
+      }
+      .msg.human_input.resolved .ask-block::after {
+        content: '✓ Resolved';
+        display: block;
+        margin-top: 6px;
+        font-size: 11px;
+        color: var(--accent-2);
+      }
+      .meta {
+        font-size: 11px;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+      }
+      .toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px; gap: 10px; }
+      .hitl-banner {
+        background: var(--hitl-bg);
+        border: 1px solid var(--accent-2);
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 10px;
+      }
+      .hitl-banner .title {
+        font-weight: 700;
+        color: var(--accent-2);
+        margin-bottom: 8px;
+        font-size: 14px;
+      }
+      .hitl-question {
+        background: rgba(85,214,190,.08);
+        border: 1px solid rgba(85,214,190,.2);
+        border-radius: 10px;
+        padding: 12px;
+        margin-bottom: 10px;
+      }
+      .hitl-question .q-header { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+      .hitl-question .q-text { font-size: 13px; margin-bottom: 8px; }
+      .hitl-options { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+      .hitl-options button { font-size: 12px; padding: 7px 12px; border-radius: 8px; }
+      .hitl-options button.selected { outline: 2px solid var(--accent-2); outline-offset: 1px; }
+      .hitl-input { margin-top: 6px; }
+      .hitl-input input { padding: 8px 10px; font-size: 13px; }
+      .legend {
+        display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; font-size: 11px;
+      }
+      .legend-item {
+        padding: 3px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+      }
+      .legend-user { background: rgba(64,96,186,.2); border-color: #4060ba; }
+      .legend-assistant { background: rgba(46,143,128,.2); border-color: #2e8f80; }
+      .legend-thinking { background: var(--thinking-bg); border-color: var(--thinking-border); color: #b8a0e8; }
+      .legend-tool { background: var(--tool-bg); border-color: #5577aa; }
+      .legend-hitl { background: var(--hitl-bg); border-color: #44aa77; }
+      .legend-interaction { background: rgba(85, 214, 190, 0.15); border-color: var(--accent-2); color: var(--accent-2); }
+      .legend-mode { background: rgba(170, 136, 255, 0.15); border-color: #aa88ff; color: #aa88ff; }
+	      .legend-system { background: rgba(122,162,255,.1); border-color: #5577aa; color: #88aadd; }
+	      /* system event messages */
+	      .msg.system_event {
+	        border-color: #445588;
+	        background: rgba(30,40,70,.5);
+	        border-left: 3px solid #5577aa;
+	        font-size: 11px;
+	      }
+	      .msg.system_event .meta { color: #7799cc; }
+	      .msg.system_event pre {
+	        font-size: 11px;
+	        color: #99bbdd;
+	      }
+	      .msg.system_event.lifecycle-start pre { border-left: 2px solid #55d6be; padding-left: 8px; }
+	      .msg.system_event.lifecycle-end pre { border-left: 2px solid #7aa2ff; padding-left: 8px; }
+	      .msg.system_event.message-start pre { border-left: 2px solid #aa88ff; padding-left: 8px; }
+	      .msg.system_event.message-stop pre { border-left: 2px solid #8866cc; padding-left: 8px; }
+	      .msg.system_event.assistant-stats pre { border-left: 2px solid #55d6be; padding-left: 8px; }
+	      .msg.system_event.command-end pre { border-left: 2px solid #6699cc; padding-left: 8px; }
+	      .msg.system_event.block-start-tool_use pre { color: #88aadd; }
+	      .msg.system_event.block-start-thinking pre { color: #b8a0e8; }
+      @media (max-width: 1200px) {
+        .app { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="panel">
+        <div class="toolbar">
+          <h1>Gateway Debug</h1>
+          <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">Disconnected</span></div>
+        </div>
+
+        <div class="card">
+          <h2>Connection</h2>
+          <label for="wsUrl">WS URL</label>
+          <input id="wsUrl" value="ws://127.0.0.1:18900" />
+          <div class="row" style="margin-top:10px;">
+            <div>
+              <label for="clientId">client.id</label>
+              <input id="clientId" value="debug-page" />
+            </div>
+            <div>
+              <label for="clientVersion">client.version</label>
+              <input id="clientVersion" value="0.1.0" />
+            </div>
+          </div>
+          <div class="btns">
+            <button id="connectBtn">Connect</button>
+            <button id="disconnectBtn" class="secondary">Disconnect</button>
+            <button id="checkClaudeBtn" class="ghost">Health Check</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Session</h2>
+          <label for="sessionKey">sessionKey</label>
+          <input id="sessionKey" value="agent:main:main" />
+          <label for="cwd" style="margin-top:10px;">cwd (workspace)</label>
+          <input id="cwd" value="" placeholder="/path/to/project" />
+          <div id="cwdStatus" style="font-size:11px;color:var(--muted);margin-top:4px;min-height:16px;"></div>
+          <div class="btns">
+            <button id="newSessionBtn" class="secondary">New Session</button>
+            <button id="applyCwdBtn" class="ghost">Apply cwd</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Send Message</h2>
+          <label for="mode">mode</label>
+          <select id="mode">
+            <option value="">(SDK default)</option>
+            <option value="default">default</option>
+            <option value="acceptEdits">acceptEdits</option>
+            <option value="bypassPermissions">bypassPermissions</option>
+            <option value="plan">plan</option>
+          </select>
+          <label for="message">message</label>
+          <textarea id="message">Hello, please introduce yourself.</textarea>
+          <div class="btns">
+            <button id="sendBtn">chat.send</button>
+            <button id="historyBtn" class="ghost">chat.history</button>
+            <button id="abortBtn" class="warn">chat.abort</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Test Interaction</h2>
+          <div class="btns">
+            <button id="testSelectBtn" class="secondary">单选问题</button>
+            <button id="testMultiSelectBtn" class="secondary">多选问题</button>
+            <button id="testInputBtn" class="secondary">文本输入</button>
+            <button id="testMixedBtn" class="secondary">混合问题</button>
+          </div>
+        </div>
+      </aside>
+
+      <main class="panel">
+        <div class="toolbar" style="flex-shrink:0;">
+          <h1>Chat</h1>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <span id="runStatus" class="status" style="display:none;"></span>
+            <label style="display:inline-flex;align-items:center;gap:4px;margin:0;cursor:pointer;font-size:12px;">
+              <input type="checkbox" id="showThinking" checked style="width:auto;" /> Thinking
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:4px;margin:0;cursor:pointer;font-size:12px;">
+              <input type="checkbox" id="showTool" checked style="width:auto;" /> Tools
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:4px;margin:0;cursor:pointer;font-size:12px;">
+              <input type="checkbox" id="showSystem" checked style="width:auto;" /> System
+            </label>
+            <button id="clearChatBtn" class="ghost">Clear</button>
+          </div>
+        </div>
+        <div class="legend" style="flex-shrink:0;">
+          <span class="legend-item legend-user">User</span>
+          <span class="legend-item legend-assistant">Assistant</span>
+          <span class="legend-item legend-thinking">Thinking</span>
+          <span class="legend-item legend-tool">Tool</span>
+          <span class="legend-item legend-hitl">Confirm</span>
+          <span class="legend-item legend-interaction">AskUser</span>
+          <span class="legend-item legend-mode">ModeSwitch</span>
+	          <span class="legend-item legend-system">System</span>
+        </div>
+        <div id="hitlBanner" style="display:none;flex-shrink:0;"></div>
+        <div id="chat" class="chat" style="flex:1;overflow-y:auto;"></div>
+      </main>
+
+      <section class="panel">
+        <div class="toolbar">
+          <h1>Raw Events</h1>
+          <button id="clearEventBtn" class="ghost">Clear</button>
+        </div>
+        <div id="events" class="log"></div>
+      </section>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

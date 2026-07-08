@@ -1,0 +1,23 @@
+"""Service API Protocol for public-bot lifecycle + friend approvals."""
+from __future__ import annotations
+
+from typing import Any, Dict, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class BotPublicServiceProtocol(Protocol):
+    """Service API for bot publishing + friend-request workflow."""
+
+    def public_bot(self, *args: Any, **kwargs: Any) -> Dict[str, Any]: ...
+
+    def handle_public_approval_callback(self, *args: Any, **kwargs: Any) -> Dict[str, Any]: ...
+
+    def create_friend_request_approval(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def handle_friend_request_approval_callback(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def search_public_bots_by_keyword(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def list_my_bot_friends(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def get_friend_record(self, *args: Any, **kwargs: Any) -> Any: ...

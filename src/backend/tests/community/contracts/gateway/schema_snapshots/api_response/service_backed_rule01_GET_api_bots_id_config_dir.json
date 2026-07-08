@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "string"
+    },
+    "error_code": {
+      "type": "integer"
+    },
+    "message": {
+      "type": "string"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "data",
+    "error_code",
+    "message",
+    "success"
+  ],
+  "additionalProperties": false
+}

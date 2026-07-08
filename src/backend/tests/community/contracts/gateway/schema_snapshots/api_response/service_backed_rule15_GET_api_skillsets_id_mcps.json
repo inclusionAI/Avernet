@@ -1,0 +1,52 @@
+{
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "integer"
+    },
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "server_code": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "icon",
+          "id",
+          "name",
+          "server_code",
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "count",
+    "data",
+    "success"
+  ],
+  "additionalProperties": false
+}

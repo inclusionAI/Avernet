@@ -1,0 +1,216 @@
+"""Tests for selected access router endpoints.
+
+PUT /api/v1/access/bots-ceiling
+
+Covered branches:
+- happy path (operator user) → success=True with echoed entityId/ceiling
+- service error (patched ``PolicyService.set_bots_ceiling``) → success=False, error_code=500
+- quota happy path with no seed rows → zero quota envelope
+- quota config parse errors through the real service → success=False, error_code=500
+
+In local mode ``AuthPlugin.is_operator_allowed`` returns True for every
+user, so any seeded staff user satisfies ``require_operator`` — mirroring
+the operator-flow setup in ``test_bot_admin_router.py``.
+"""
+from __future__ import annotations
+
+from unittest.mock import patch
+
+from tests.community.factories.access import make_staff_user
+from tests.community.framework import (
+    CaseInput,
+    ExpectError,
+    ExpectSuccess,
+    endpoint_test,
+)
+
+
+# ============================================================================
+# Seed helpers
+# ============================================================================
+
+
+def _seed_operator(world):
+    """Seed an operator (caller) and the target user whose ceiling is set."""
+    make_staff_user(world, user_id="u_operator")
+    make_staff_user(world, user_id="u_target")
+
+
+def _seed_operator_with_service_error(world):
+    """Seed operator + target, then patch ``set_bots_ceiling`` to raise."""
+    make_staff_user(world, user_id="u_operator")
+    make_staff_user(world, user_id="u_target")
+
+    from agentclaw.community.core.access.services.policy_service import PolicyService
+
+    def mock_set_bots_ceiling(*args, **kwargs):
+        raise RuntimeError("Mock policy service error")
+
+    patcher = patch.object(PolicyService, "set_bots_ceiling", mock_set_bots_ceiling)
+    patcher.start()
+    world._set_bots_ceiling_error_patcher = patcher
+
+
+def _seed_quota_invalid_daily_config(world):
+    """Seed invalid daily quota config so the real service raises."""
+    _seed_system_config(
+        world,
+        config_key="daily_container_quota",
+        config_value="not-a-number",
+    )
+
+
+def _seed_quota_total_limit_error(world):
+    """Seed invalid total limit config so the real service raises."""
+    _seed_system_config(
+        world,
+        config_key="daily_container_quota",
+        config_value="10",
+    )
+    _seed_system_config(
+        world,
+        config_key="total_container_limit",
+        config_value="not-a-number",
+    )
+
+
+def _seed_system_config(world, *, config_key: str, config_value: str):
+    """Seed access quota config via the real system config service."""
+    from agentclaw.community.core.system_config import SystemConfigService
+    from agentclaw.community.utils import env_utils
+
+    env = env_utils.get_current_env()
+    service = world.get(SystemConfigService)
+    service.create_category(
+        category="system",
+        category_name="系统配置",
+        description="access quota endpoint test",
+        env=env,
+        operator="endpoint-test",
+    )
+    service.set_config(
+        category="system",
+        config_key=config_key,
+        config_value=config_value,
+        env=env,
+        description="access quota endpoint test",
+        operator="endpoint-test",
+    )
+
+
+# ============================================================================
+# Extra assertions
+# ============================================================================
+
+
+def _assert_ceiling_echoed(response, world):
+    """Assert the response echoes the entity id and ceiling that were set."""
+    data = response.json()["data"]
+    assert data.get("entityId") == "u_target", f"Expected entityId=u_target, got {data}"
+    assert data.get("ceiling") == 10, f"Expected ceiling=10, got {data}"
+
+
+def _assert_ceiling_persisted(response, world):
+    """Assert the value was actually written through the real PolicyService."""
+    from agentclaw.community.core.access.services.policy_service import PolicyService
+
+    svc = world.get(PolicyService)
+    assert svc.get_bots_ceiling(entity_id="u_target") == 10
+
+
+# ============================================================================
+# GET /api/v1/access/quota
+# ============================================================================
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/v1/access/quota",
+    scenario="happy_no_seed_defaults",
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "error_code": 200,
+            "data": {
+                "quota": 0,
+                "totalLimit": 0,
+                "activeCount": 0,
+                "effectiveQuota": 0,
+                "updateTime": "",
+            },
+        },
+    ),
+)
+def get_quota_happy_no_seed_defaults():
+    """Quota endpoint returns deterministic zero defaults without config rows."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/v1/access/quota",
+    scenario="invalid_daily_quota_config",
+    seed=_seed_quota_invalid_daily_config,
+    expect=ExpectError(
+        status=200,
+        json_contains={"success": False, "error_code": 500},
+    ),
+)
+def get_quota_invalid_daily_quota_config():
+    """Quota endpoint returns an error envelope for invalid daily quota config."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/v1/access/quota",
+    scenario="invalid_total_limit_config",
+    seed=_seed_quota_total_limit_error,
+    expect=ExpectError(
+        status=200,
+        json_contains={"success": False, "error_code": 500},
+    ),
+)
+def get_quota_invalid_total_limit_config():
+    """Quota endpoint returns an error envelope for invalid total limit config."""
+
+
+# ============================================================================
+# PUT /api/v1/access/bots-ceiling
+# ============================================================================
+
+
+@endpoint_test(
+    method="PUT",
+    path="/api/v1/access/bots-ceiling",
+    scenario="ok_set_ceiling",
+    seed=_seed_operator,
+    input=CaseInput(
+        json_body={"entity_id": "u_target", "ceiling": 10},
+        headers={"x-user-id": "u_operator"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True},
+    ),
+    extra_assertions=(_assert_ceiling_echoed, _assert_ceiling_persisted),
+)
+def set_bots_ceiling_ok():
+    """Operator sets a target user's BOT ceiling; value is echoed and persisted."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/api/v1/access/bots-ceiling",
+    scenario="service_error",
+    seed=_seed_operator_with_service_error,
+    input=CaseInput(
+        json_body={"entity_id": "u_target", "ceiling": 10},
+        headers={"x-user-id": "u_operator"},
+    ),
+    expect=ExpectError(
+        status=200,
+        json_contains={"success": False, "error_code": 500},
+    ),
+)
+def set_bots_ceiling_service_error():
+    """Set ceiling returns success=False, error_code=500 when the service raises."""

@@ -1,0 +1,11 @@
+# Prod-side local MCP server definitions.
+#
+# These servers are not fetched from MCP Center, but they are still used by
+# the production MCP Center plugin as fallback metadata for LOCAL/stdio MCPs.
+# The key is used as serverCode. ``args`` is normalized to stdio
+# ``arguments`` before sync.
+servers:
+  hitl:
+    command: "python3"
+    args:
+      - "/home/admin/hitl/hitl_mcp_server.py"

@@ -1,0 +1,131 @@
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "connection": {
+                "type": "object",
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "engine_type": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "target": {
+                    "type": "string"
+                  },
+                  "token": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "available",
+                  "engine_type",
+                  "message",
+                  "target",
+                  "token",
+                  "type",
+                  "url"
+                ],
+                "additionalProperties": false
+              },
+              "device_id": {
+                "type": "string"
+              },
+              "device_props": {
+                "type": "object",
+                "properties": {
+                  "callback_token": {
+                    "type": "string"
+                  },
+                  "sandbox_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "callback_token",
+                  "sandbox_id"
+                ],
+                "additionalProperties": false
+              },
+              "device_provider": {
+                "type": "string"
+              },
+              "entity_id": {
+                "type": "string"
+              },
+              "entity_type": {
+                "type": "string"
+              },
+              "env": {
+                "type": "string"
+              },
+              "id": {
+                "type": "integer"
+              },
+              "last_alive_at": {
+                "type": "null"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "connection",
+              "device_id",
+              "device_props",
+              "device_provider",
+              "entity_id",
+              "entity_type",
+              "env",
+              "id",
+              "last_alive_at",
+              "status"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "total": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "total"
+      ],
+      "additionalProperties": false
+    },
+    "error_code": {
+      "type": "integer"
+    },
+    "message": {
+      "type": "string"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "data",
+    "error_code",
+    "message",
+    "success"
+  ],
+  "additionalProperties": false
+}

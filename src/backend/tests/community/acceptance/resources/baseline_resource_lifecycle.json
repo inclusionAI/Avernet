@@ -1,0 +1,20 @@
+{
+  "node_list": [
+    {
+      "name": "Baseline Node",
+      "node_address": "ipfs://baseline",
+      "resource_type": "node",
+      "status": "active",
+      "url": null
+    }
+  ],
+  "url_list": [
+    {
+      "name": "Baseline URL",
+      "node_address": null,
+      "resource_type": "url",
+      "status": "active",
+      "url": "https://baseline.example.com"
+    }
+  ]
+}

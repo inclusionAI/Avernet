@@ -1,0 +1,29 @@
+{
+  "description": "Batch set environment result.",
+  "properties": {
+    "total": {
+      "description": "Total requested",
+      "title": "Total",
+      "type": "integer"
+    },
+    "updated": {
+      "description": "Successfully updated",
+      "title": "Updated",
+      "type": "integer"
+    },
+    "updated_ids": {
+      "description": "Updated binding IDs",
+      "items": {
+        "type": "integer"
+      },
+      "title": "Updated Ids",
+      "type": "array"
+    }
+  },
+  "required": [
+    "total",
+    "updated"
+  ],
+  "title": "BatchSetDeviceEnvResult",
+  "type": "object"
+}

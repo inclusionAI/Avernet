@@ -1,0 +1,118 @@
+"""Canonical action_taken values for ac_governance_audit.
+
+Naming convention: ``{subject}_{verb}`` — who did what.
+
+- notification_*  — System lifecycle actions on notifications
+- user_*          — User feedback actions
+- system_*        — System auto-resolution actions
+- scan_skip_*     — Scan-stage skip / filter actions
+- admin_*         — Admin emergency actions
+"""
+from __future__ import annotations
+
+
+class AuditAction:
+    """Canonical action_taken values for ac_governance_audit.
+
+    Designed as a class constant set (not ``enum.Enum``) for compatibility
+    with the existing ``action_taken: str`` column type.
+    """
+
+    # ── Notification lifecycle ────────────────────────
+    NOTIFICATION_CREATED = "notification_created"           # Notification row created (was: enqueued)
+    NOTIFICATION_SENT = "notification_sent"                 # First delivery succeeded (was: first_delivered)
+    NOTIFICATION_SEND_FAILED = "notification_send_failed"   # Delivery failed (was: first_delivery_failed)
+    REMIND_SENT = "remind_sent"                             # Reminder sent (was: reminded)
+    REMIND_FAILED = "remind_failed"                         # Reminder send failed (unchanged)
+    REMIND_SCHEDULED = "remind_scheduled"                   # Reminder notify created (not yet sent)
+
+    # ── User feedback ─────────────────────────────────
+    USER_OPTIMIZED = "user_optimized"           # User optimized → waiting_review (was: feedback_optimized)
+    USER_NEED_TIME = "user_need_time"           # User needs time → scheduled (was: feedback_need_time)
+    USER_DISPUTE = "user_dispute"               # User dispute → waiting_review (was: feedback_dispute)
+    USER_WHITELIST = "user_whitelisted"         # User whitelisted → waiting_review (was: feedback_whitelist)
+    USER_PENDING_FEEDBACK = "user_pending_feedback"  # Card shown, awaiting feedback (new)
+    FEEDBACK_DUPLICATE_IGNORED = "feedback_duplicate_ignored"  # 重复反馈被忽略 (§7.4.1)
+    FEEDBACK_TERMINAL_IGNORED = "feedback_terminal_ignored"    # 终态工单反馈被忽略 (§7.4.1)
+
+    # ── System auto ───────────────────────────────────
+    SYSTEM_RESOLVED = "system_resolved"         # Consecutive normal days → closed (was: auto_resolved)
+    EXPIRED = "expired"                         # No-response expired (was: expired_unresolved)
+    MUTE_EXPIRED = "mute_expired"               # Mute period expired, still actionable (unchanged)
+    OUT_OF_SCOPE = "out_of_scope"               # Data no longer in scope → closed (unchanged)
+
+    # ── Scan skip ─────────────────────────────────────
+    SCAN_SKIP_NOT_READY = "scan_skip_not_ready"     # Data not ready (was: data_not_ready)
+    SCAN_SKIP_WHITELIST = "scan_skip_whitelist"     # Whitelist filtered (was: whitelist_filtered)
+    SCAN_SKIP_MUTED = "scan_skip_muted"             # Already in mute period (was: muted)
+    SCAN_SKIP_COOLDOWN = "scan_skip_cooldown"       # Cooldown period (was: cooldown_filtered)
+
+    # ── Admin emergency ───────────────────────────────
+    ADMIN_CANCEL_PENDING = "admin_cancel_pending"   # Cancel pending (was: emergency_cancelled)
+    ADMIN_CLOSE_ALL = "admin_close_all"             # Close all open/muted (was: admin_closed_all)
+    ADMIN_PAUSE = "admin_pause"                     # Emergency pause (was: emergency_paused)
+    ADMIN_RESUME = "admin_resume"                   # Emergency resume (was: emergency_resumed)
+    ADMIN_WHITELIST = "admin_whitelisted"           # Emergency whitelist (was: emergency_whitelisted)
+
+    # ── Whitelist management (new) ──────────────────
+    WHITELIST_REMOVED = "whitelist_removed"             # 管理员删除白名单条目
+
+    # ── Task record / ticket lifecycle (new) ──────────
+    ENQUEUED = "enqueued"                           # 新工单+first_send notify 创建 (§7.1.4)
+    WHITELIST_CLOSED = "whitelist_closed"           # 白名单命中关闭 active 工单 (§7.2.7)
+    COOLDOWN_FILTERED = "cooldown_filtered"         # cooldown 期内跳过建单 (§7.1.4 Step 5)
+    STILL_ACTIONABLE = "still_actionable"           # 仍有 active 工单, 刷新快照 (§7.1.4 Step 4)
+    AUTO_SILENCED = "auto_silenced"                 # 不在治理范围, 自动静默 (§7.2.6)
+    AUTO_SILENCE_CONVERGED = "auto_silence_converged"  # 连续 N 天 normal, 收敛关闭 (§7.2.6)
+    AUTO_SILENCE_RESUMED = "auto_silence_resumed"   # 从 normal 恢复 actionable, 恢复提醒 (§7.1.4)
+    SCHEDULE_DUE = "schedule_due"                   # 排期观察到期 → waiting_review (§7.3.4)
+    PAUSED_FOR_REVIEW = "paused_for_review"         # 管理员暂停 → waiting_review (§7.5.1)
+
+    # ── Admin review (new) ────────────────────────────
+    REVIEW_APPROVE_CLOSE = "review_approve_close"       # 管理员审核通过关闭 (§7.5.2)
+    REVIEW_APPROVE_WHITELIST = "review_approve_whitelist"  # 管理员审核通过加白 (§7.5.2)
+    REVIEW_REJECT_FOR_REOPEN = "review_reject_for_reopen"  # 管理员打回, 释放 active_worker (§7.5.2)
+
+    # ── Notify delivery (new) ────────────────────────
+    NOTIFY_CANCELLED_NOT_ACTIONABLE = "notify_cancelled_not_actionable"  # open+非actionable 取消 pending
+    NOTIFY_CANCELLED_NON_OPEN = "notify_cancelled_non_open"              # 非open 取消 pending
+    NOTIFY_FAILED_TERMINAL = "notify_failed_terminal"                    # 达到 max_send_attempts 终态失败
+    BATCH_QUALITY_SKIP_SILENCE = "batch_quality_skip_silence"            # 数据质量校验失败, 跳过自动静默
+
+    # ── Admin emergency delete ──────────────────────────
+    RECORDS_DELETED = "records_deleted"                     # 管理员删除 task_record 行
+    NOTIFICATIONS_DELETED = "notifications_deleted"         # 管理员删除 notify_log 行
+
+    # ── Point-to-point delivery (manual testing tool) ────
+    POINT_TO_POINT_NOTIFY_CREATED = "point_to_point_notify_created"      # p2p 自动创建了通知
+    POINT_TO_POINT_DELIVERED = "point_to_point_delivered"                 # p2p 发送成功
+    POINT_TO_POINT_DELIVERY_FAILED = "point_to_point_delivery_failed"     # p2p 发送失败
+    POINT_TO_POINT_TICKET_NOT_FOUND = "point_to_point_ticket_not_found"   # p2p 未找到活跃工单
+    POINT_TO_POINT_TICKET_NOT_OPEN = "point_to_point_ticket_not_open"     # p2p 工单不在 open 态
+    POINT_TO_POINT_NOT_ACTIONABLE = "point_to_point_not_actionable"       # p2p 工单 latest_decision 非 actionable
+
+
+# Backward-compatible mapping: old action_taken values that may still appear
+# in queries (e.g. ``get_last_scan_time``). During transition, queries must
+# accept both old and new values.
+LEGACY_ACTION_MAP: dict[str, str] = {
+    "enqueued": AuditAction.NOTIFICATION_CREATED,
+    "first_delivered": AuditAction.NOTIFICATION_SENT,
+    "first_delivery_failed": AuditAction.NOTIFICATION_SEND_FAILED,
+    "reminded": AuditAction.REMIND_SENT,
+    "feedback_optimized": AuditAction.USER_OPTIMIZED,
+    "feedback_need_time": AuditAction.USER_NEED_TIME,
+    "feedback_dispute": AuditAction.USER_DISPUTE,
+    "feedback_whitelist": AuditAction.USER_WHITELIST,
+    "auto_resolved": AuditAction.SYSTEM_RESOLVED,
+    "expired_unresolved": AuditAction.EXPIRED,
+    "data_not_ready": AuditAction.SCAN_SKIP_NOT_READY,
+    "whitelist_filtered": AuditAction.SCAN_SKIP_WHITELIST,
+    "muted": AuditAction.SCAN_SKIP_MUTED,
+    "cooldown_filtered": AuditAction.SCAN_SKIP_COOLDOWN,
+    "emergency_cancelled": AuditAction.ADMIN_CANCEL_PENDING,
+    "admin_closed_all": AuditAction.ADMIN_CLOSE_ALL,
+    "emergency_paused": AuditAction.ADMIN_PAUSE,
+    "emergency_resumed": AuditAction.ADMIN_RESUME,
+    "emergency_whitelisted": AuditAction.ADMIN_WHITELIST,
+}

@@ -1,0 +1,56 @@
+{
+  "type": "object",
+  "properties": {
+    "access_mode": {
+      "type": "string"
+    },
+    "agent_code": {
+      "type": "string"
+    },
+    "agent_id": {
+      "type": "string"
+    },
+    "certificate_url": {
+      "type": "string"
+    },
+    "credential_id": {
+      "type": "string"
+    },
+    "expire_at": {
+      "type": "string"
+    },
+    "mcps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "mcp_code": {
+            "type": "string"
+          },
+          "mcp_desc": {
+            "type": "string"
+          },
+          "mcp_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mcp_code",
+          "mcp_desc",
+          "mcp_name"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "access_mode",
+    "agent_code",
+    "agent_id",
+    "certificate_url",
+    "credential_id",
+    "expire_at",
+    "mcps"
+  ],
+  "additionalProperties": false
+}

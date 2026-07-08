@@ -1,0 +1,37 @@
+{
+  "properties": {
+    "cli_code": {
+      "title": "Cli Code",
+      "type": "string"
+    },
+    "cli_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cli Name"
+    },
+    "cli_desc": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cli Desc"
+    }
+  },
+  "required": [
+    "cli_code"
+  ],
+  "title": "CLIInSetResponse",
+  "type": "object"
+}

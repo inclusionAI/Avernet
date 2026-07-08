@@ -1,0 +1,88 @@
+{
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "integer"
+    },
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "bot_id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "mcps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "icon": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "server_code": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "description",
+                "icon",
+                "id",
+                "name",
+                "server_code",
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "description",
+          "id",
+          "is_default",
+          "mcps",
+          "name",
+          "user_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "count",
+    "data",
+    "success"
+  ],
+  "additionalProperties": false
+}

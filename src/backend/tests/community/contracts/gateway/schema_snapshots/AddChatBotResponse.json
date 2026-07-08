@@ -1,0 +1,34 @@
+{
+  "description": "添加专家Bot响应",
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "integer"
+    },
+    "user_id": {
+      "title": "User Id",
+      "type": "string"
+    },
+    "bot_id": {
+      "title": "Bot Id",
+      "type": "string"
+    },
+    "owner_id": {
+      "title": "Owner Id",
+      "type": "string"
+    },
+    "status": {
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "user_id",
+    "bot_id",
+    "owner_id",
+    "status"
+  ],
+  "title": "AddChatBotResponse",
+  "type": "object"
+}

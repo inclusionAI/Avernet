@@ -1,0 +1,128 @@
+{
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "integer"
+    },
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "bolt_id": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "category_path": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "env": {
+            "type": "string"
+          },
+          "git_path": {
+            "type": "string"
+          },
+          "gmt_created": {
+            "type": "string"
+          },
+          "gmt_modified": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_schema": {
+            "type": "string"
+          },
+          "is_builtin": {
+            "type": "boolean"
+          },
+          "is_public": {
+            "type": "boolean"
+          },
+          "link_name": {
+            "type": "string"
+          },
+          "mcp_dependencies": {
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "output_schema": {
+            "type": "string"
+          },
+          "package_url": {
+            "type": "string"
+          },
+          "risk_tags": {
+            "type": "array"
+          },
+          "skill_uuid": {
+            "type": "string"
+          },
+          "source_type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "zip_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bolt_id",
+          "category",
+          "category_path",
+          "description",
+          "env",
+          "git_path",
+          "gmt_created",
+          "gmt_modified",
+          "id",
+          "input_schema",
+          "is_builtin",
+          "is_public",
+          "link_name",
+          "mcp_dependencies",
+          "name",
+          "output_schema",
+          "package_url",
+          "risk_tags",
+          "skill_uuid",
+          "source_type",
+          "status",
+          "tags",
+          "user_id",
+          "version",
+          "zip_url"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "count",
+    "data",
+    "success"
+  ],
+  "additionalProperties": false
+}

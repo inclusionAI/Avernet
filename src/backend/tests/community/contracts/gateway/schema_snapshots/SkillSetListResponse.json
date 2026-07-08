@@ -1,0 +1,181 @@
+{
+  "$defs": {
+    "SkillInSetSummary": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Description"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description"
+      ],
+      "title": "SkillInSetSummary",
+      "type": "object"
+    },
+    "SkillSetResponse": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Description"
+        },
+        "is_default": {
+          "title": "Is Default",
+          "type": "boolean"
+        },
+        "is_builtin": {
+          "title": "Is Builtin",
+          "type": "boolean"
+        },
+        "user_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "User Id"
+        },
+        "bot_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "default",
+          "title": "Bot Id"
+        },
+        "engine_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Engine Type"
+        },
+        "gmt_created": {
+          "title": "Gmt Created",
+          "type": "string"
+        },
+        "gmt_modified": {
+          "title": "Gmt Modified",
+          "type": "string"
+        },
+        "is_active": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "title": "Is Active"
+        },
+        "skills": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SkillInSetSummary"
+          },
+          "title": "Skills",
+          "type": "array"
+        },
+        "type": {
+          "default": "custom",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "is_default",
+        "is_builtin",
+        "user_id",
+        "gmt_created",
+        "gmt_modified"
+      ],
+      "title": "SkillSetResponse",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "data": {
+      "items": {
+        "$ref": "#/$defs/SkillSetResponse"
+      },
+      "title": "Data",
+      "type": "array"
+    },
+    "count": {
+      "title": "Count",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "success",
+    "data",
+    "count"
+  ],
+  "title": "SkillSetListResponse",
+  "type": "object"
+}

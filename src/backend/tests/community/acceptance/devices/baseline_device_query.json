@@ -1,0 +1,15 @@
+{
+  "by_id_missing": {
+    "error_code": 40405,
+    "success": false
+  },
+  "get_missing": {
+    "error_code": 40402,
+    "success": false
+  },
+  "list_no_seed": {
+    "entries_count": 0,
+    "success": true,
+    "total": 0
+  }
+}
