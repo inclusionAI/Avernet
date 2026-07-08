@@ -1,0 +1,238 @@
+# Evaluation System Configuration Example
+# 评测系统配置示例
+#
+# 复制此文件为 eval_config.yaml 并根据实际情况修改
+# Copy this file to eval_config.yaml and modify as needed
+
+# ============================================================================
+# General Settings / 总体设置
+# ============================================================================
+
+# Enable/Disable evaluation system
+# 是否启用评测系统
+enabled: true
+
+# ============================================================================
+# Langfuse Configuration / Langfuse 配置
+# ============================================================================
+
+# Langfuse API credentials
+# Langfuse API 凭证
+langfuse:
+  # Public key (required for tracing)
+  # 公钥（追踪必需）
+  public_key: "${LANGFUSE_PUBLIC_KEY}"
+
+  # Secret key (required for full API access)
+  # 私钥（完整 API 访问必需）
+  secret_key: "${LANGFUSE_SECRET_KEY}"
+
+  # Langfuse host URL
+  # Langfuse 服务地址
+  host: "https://cloud.langfuse.com"
+  # For self-hosted: host: "https://langfuse.your-domain.com"
+
+# ============================================================================
+# Intent Detection / 意图检测配置
+# ============================================================================
+
+intent_detection:
+  # Model used for intent detection
+  # 意图检测使用的模型
+  model: "claude-haiku"
+
+  # Minimum confidence threshold for intent detection
+  # 意图检测最小置信度阈值
+  confidence_threshold: 0.7
+
+  # Maximum intents to detect per message
+  # 单条消息最大检测意图数
+  max_intents_per_message: 3
+
+# ============================================================================
+# Task Tracking / 任务跟踪配置
+# ============================================================================
+
+task_tracking:
+  # Maximum tasks per intent
+  # 单个意图最大任务数
+  max_tasks_per_intent: 10
+
+  # Task timeout in seconds
+  # 任务超时时间（秒）
+  timeout_seconds: 300
+
+# ============================================================================
+# Validation Layers / 三层验证配置
+# ============================================================================
+
+validation:
+  # L0: Content & Data Security Check
+  # L0: 内容安全与数据安全检查
+  l0:
+    enabled: true
+    # Security check rules
+    # 安全检查规则
+    check_sensitive_data: true
+    check_pii: true
+    check_harmful_content: true
+
+  # L1: Lightweight LLM Validation
+  # L1: 轻量 LLM 验证
+  l1:
+    enabled: true
+    model: "claude-haiku"
+    max_tokens: 500
+    # Confidence threshold for L1 to pass
+    # L1 通过的置信度阈值
+    confidence_threshold: 0.8
+
+  # L2: Rewrite Validation with Sonnet
+  # L2: Sonnet 重写验证
+  l2:
+    enabled: true
+    model: "claude-sonnet"
+    max_tokens: 2000
+    # Maximum rewrite retry attempts
+    # 最大重写重试次数
+    max_retries: 3
+
+  # Token limit ratio (relative to input tokens)
+  # Token 上限比例（相对于输入 Token 数）
+  max_token_ratio: 0.5
+
+# ============================================================================
+# Acceptance Criteria / 验收标准配置
+# ============================================================================
+
+acceptance_criteria:
+  # Model for generating acceptance criteria
+  # 验收标准生成模型
+  generation_model: "claude-sonnet"
+
+  # Minimum and maximum number of criteria
+  # 验收标准数量范围
+  min_criteria_count: 3
+  max_criteria_count: 10
+
+# ============================================================================
+# Completion Check / 完成检查配置
+# ============================================================================
+
+completion_check:
+  model: "claude-haiku"
+  confidence_threshold: 0.8
+
+# ============================================================================
+# Monitoring & Metrics / 监控指标配置
+# ============================================================================
+
+monitoring:
+  # Enable metrics collection
+  # 是否启用指标收集
+  enabled: true
+
+  # Metrics export interval in seconds
+  # 指标导出间隔（秒）
+  export_interval_seconds: 60
+
+  # Prometheus metrics endpoint
+  # Prometheus 指标端点
+  prometheus:
+    enabled: true
+    port: 9090
+    path: "/metrics"
+
+# ============================================================================
+# Grayscale Release / 灰度发布配置
+# ============================================================================
+
+grayscale:
+  # Enable grayscale release
+  # 是否启用灰度发布
+  enabled: false
+
+  # Percentage of traffic to enable evaluation (0-100)
+  # 启用评测的流量百分比
+  traffic_percentage: 10
+
+  # User whitelist for early access
+  # 白名单用户列表
+  whitelist_users:
+    - "user-001"
+    - "user-002"
+
+  # Environment filter
+  # 环境过滤
+  environments:
+    - "staging"
+    - "canary"
+
+# ============================================================================
+# Rule Validation / 规则验证配置
+# ============================================================================
+
+rules:
+  # Global rules (applied to all users)
+  # 全局规则（应用于所有用户）
+  global:
+    - id: "block-secret-key"
+      type: "BLOCK"
+      pattern: "(?i)(secret[_-]?key|secretkey|sk-[a-zA-Z0-9]{8,})"
+      description: "Block secret keys and API keys"
+
+    - id: "block-password"
+      type: "BLOCK"
+      pattern: "(?i)(password|密码|passwd)\\s*[:=]\\s*[^\\s]+"
+      description: "Block password exposure"
+
+    - id: "block-token"
+      type: "BLOCK"
+      pattern: "(?i)(token|tokens?|access_token)\\s*[:=]\\s*[a-zA-Z0-9_-]{20,}"
+      description: "Block token exposure"
+
+    - id: "warn-error-handling"
+      type: "WARN"
+      pattern: "def\\s+\\w+\\([^)]*\\):[^]*?(?!try:|except)"
+      description: "Warn about missing error handling"
+      condition: "function_without_try_except"
+
+  # Team-specific rules (override global)
+  # 团队规则（覆盖全局）
+  teams: {}
+
+  # Personal rules (highest priority)
+  # 个人规则（最高优先级）
+  personal: {}
+
+# ============================================================================
+# Logging / 日志配置
+# ============================================================================
+
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+
+  # Log format
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+  # Log file path (optional)
+  # 日志文件路径（可选）
+  # file: "/var/log/intent_eval/eval.log"
+
+# ============================================================================
+# Performance Tuning / 性能调优
+# ============================================================================
+
+performance:
+  # Async processing pool size
+  # 异步处理池大小
+  pool_size: 4
+
+  # Maximum concurrent evaluations
+  # 最大并发评测数
+  max_concurrent: 10
+
+  # Request timeout in seconds
+  # 请求超时时间（秒）
+  request_timeout: 30

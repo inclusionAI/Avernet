@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Engine Proxy Engine Status",
+  "description": "Contract schema for Engine Proxy /engine/status response",
+  "type": "object",
+  "required": ["engine", "active_connections", "process"],
+  "properties": {
+    "engine": {"type": "string"},
+    "active_connections": {"type": "integer"},
+    "process": {
+      "type": "object",
+      "required": ["running", "command_enabled", "managed_process"],
+      "properties": {
+        "running": {"type": "boolean"},
+        "pid": {"type": ["integer", "null"]},
+        "exit_code": {},
+        "last_error": {},
+        "command_enabled": {"type": "boolean"},
+        "managed_process": {"type": "boolean"}
+      }
+    },
+    "transition": {}
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Engine Proxy Model",
+  "description": "Contract schema for Engine Proxy model item",
+  "type": "object",
+  "required": ["id", "provider", "name", "capabilities"],
+  "properties": {
+    "id": {"type": "string"},
+    "provider_id": {"type": "string"},
+    "provider": {"type": "string"},
+    "name": {"type": "string"},
+    "display_name": {"type": "string"},
+    "description": {"type": "string"},
+    "enterprise_enabled": {"type": "boolean"},
+    "enterprise_default": {"type": "boolean"},
+    "capabilities": {
+      "type": "object",
+      "required": ["context_window", "max_output_tokens", "vision", "function_calling", "streaming"],
+      "properties": {
+        "context_window": {"type": "integer"},
+        "max_output_tokens": {"type": "integer"},
+        "vision": {"type": "boolean"},
+        "function_calling": {"type": "boolean"},
+        "reasoning": {"type": "boolean"},
+        "streaming": {"type": "boolean"}
+      }
+    }
+  }
+}

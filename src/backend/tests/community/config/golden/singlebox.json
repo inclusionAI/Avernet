@@ -1,0 +1,333 @@
+{
+  "raw_user_config": {
+    "aceagent_client": {
+      "app_id": "agentclaw",
+      "app_secret": "noop",
+      "base_url": "http://127.0.0.1:9999"
+    },
+    "agentclawproxy": {
+      "base_url": "http://127.0.0.1:9999"
+    },
+    "aidesktop_root": "~/.aidesktop",
+    "antcode": {
+      "base_url": "https://code.teamclaw.com",
+      "private_token": "dummy-antcode-token",
+      "timeout": 30
+    },
+    "app": {
+      "description": "Single Box mode — no external network.",
+      "local_debug": true,
+      "title": "AgentClaw Single Box",
+      "version": "1.0.0"
+    },
+    "arca_sandbox": {
+      "aicoding_template_id": "ARCA-TEMPLATE-SINGLEBOX-AICODING",
+      "api_key": "noop",
+      "base_url": "http://127.0.0.1:9999",
+      "default_ttl_minutes": 1440,
+      "oss_mount_id": "noop",
+      "template_id": "ARCA-TEMPLATE-SINGLEBOX"
+    },
+    "baas": {
+      "api_base_url": "http://localhost:8890",
+      "arca_template_id": "ARCA-TEMPLATE-000000007026d3c6",
+      "arca_template_id_pre": "ARCA-TEMPLATE-000000001403860d",
+      "desktop_template_uuid": "TEMPLATE-f996ecc77d224ef7bd80757d8d2bcd0d",
+      "personal_bot_template_uuid": "TEMPLATE-54942a40aa794eaaae2be166f94890ed",
+      "teclaw_template_uuid": "TEMPLATE-3106e731ffb04e0285e27c387e153737",
+      "template_uuid": "TEMPLATE-4d0e2849d7004111836333de782b95d8",
+      "tenant": "team_claw"
+    },
+    "bcn": {
+      "base_url": "http://localhost:21000"
+    },
+    "bcsfuse": {
+      "base_url": "https://bcsfuse-pre.teamclaw.com"
+    },
+    "bot_oss_config": {
+      "access_key_secret": "oss_m_manual_agentclaw_botdata",
+      "bucket_name": "antsys-agentclaw-dev",
+      "endpoint": "cn-heyuan-alipay-office.oss-alipay.aliyuncs.com",
+      "region": "cn-heyuan-alipay"
+    },
+    "buservice": {
+      "app_name": "agentclaw",
+      "base_url": "http://127.0.0.1:9999",
+      "get_login_user_path": "/pub/getLoginUser.json"
+    },
+    "business": {
+      "retry_count": 3,
+      "timeout": 30
+    },
+    "codefuse_token": {
+      "master_key_secret": "other_manual_agentclaw_codefuse_token_key"
+    },
+    "cors": {
+      "allow_origin_regex": [],
+      "allow_origins": [
+        "http://localhost",
+        "http://localhost:3000",
+        "http://localhost:8080",
+        "http://localhost:8888"
+      ]
+    },
+    "daas_device_config": {
+      "adapter_service_port": 20003,
+      "local_device_mock_host": "agentclawdevice-local.stable.teamclaw.net"
+    },
+    "daas_sdk_config": {
+      "endpoint": "https://xhuntercore-pre.teamclaw.com",
+      "partner_id": "a2dd39c227",
+      "scene_code": "default"
+    },
+    "daas_sdk_config_prod": {
+      "endpoint": "https://xhuntercore-prod.teamclaw.com",
+      "partner_id": "a2dd39c227",
+      "scene_code": "default"
+    },
+    "desktop_bot_periodic_scan": {
+      "apply_owner_whitelist": [],
+      "enabled": true,
+      "global_dry_run": false
+    },
+    "device_allocation": {
+      "max_devices_per_entity": 5,
+      "mode": "multi"
+    },
+    "device_provider": "daas",
+    "dima": {
+      "access_key": "dummy-access-key",
+      "access_secret": "dummy-secret-16b",
+      "aixcore_base_url": "https://aixcore.teamclaw.com",
+      "aixcore_base_url_pre": "https://aixcore-pre.teamclaw.com",
+      "base_url": "https://devapi.teamclaw.com",
+      "tenant": "alipay",
+      "timeout": 30
+    },
+    "dingtalk": {
+      "app_key": "dummy-dingtalk-app-key",
+      "app_secret": "dummy-dingtalk-app-secret",
+      "robot_code": "dummy-dingtalk-app-key"
+    },
+    "dormant": {
+      "dry_run": true
+    },
+    "ecb": {
+      "base_url": "https://ecb-pre.teamclaw.com"
+    },
+    "economy_governance": {
+      "dry_run": true,
+      "iframe_callback_url": "http://localhost:8888/api/economy/governance/card-callback",
+      "notify_channel": "tc_card",
+      "scan_hour": 14,
+      "scan_minute": 0,
+      "tc_card_id": "card_cb190863",
+      "tc_card_preview_url": "https://teamclaw.com/preview",
+      "tc_card_template_id": "7f1e01ed-194a-4c25-916c-0388f67e3517.schema"
+    },
+    "features": {
+      "enable_cache": true,
+      "enable_metrics": false,
+      "max_connections": 100
+    },
+    "git_sync": {
+      "bolt_shared_dir_name": "bolt_shared",
+      "enable_oss_sync": false
+    },
+    "health_check": {
+      "bcs_url": "http://localhost:21000"
+    },
+    "local_git_repo_dir": "/tmp/aiworkbench-singlebox",
+    "masa_agent_eval": {
+      "base_url": "http://127.0.0.1:9999",
+      "base_url_pre": "http://127.0.0.1:9999"
+    },
+    "mock_tcauth": true,
+    "nas_mount_root": "/home/admin/.bot_shared_nas/arca/arcaagentclaw",
+    "openclaw": {
+      "skills_repo_url": "git@code.teamclaw.com:security_release/aiworkbench.git"
+    },
+    "oss_mount_root": "/aidesktop",
+    "secret_names": {
+      "aiworkbench_repo_url": "other_manual_agentclaw_aiworkbench_repo_url"
+    },
+    "skill": {
+      "oss": {
+        "upload_prefix": "aidesktop/aidesktop_pre/bolt_shared/skills-upload"
+      }
+    },
+    "skill_center": {
+      "app_key": "noop",
+      "base_url": "http://127.0.0.1:9999",
+      "nas_sync_enabled": false,
+      "source": "teamclaw",
+      "team_id": "400003"
+    },
+    "skill_scan": {
+      "auth_app_key": "agentclaw",
+      "enable_scheduled_scan": false,
+      "git_download_dir": "/home/admin/logs/tmp/sec/code",
+      "max_concurrent_scans": 3,
+      "mist_mode": "dev",
+      "scan_interval_hours": 1,
+      "scheduled_scan_paths": [
+        "/aidesktop/skills"
+      ],
+      "storage_dir": "./data/skills_scan"
+    },
+    "token_exchange": {
+      "agent_id": "singlebox_AGENT_LOCAL",
+      "api_path": "/api/v1/login/token/exchange",
+      "app_key": "antacl_singlebox",
+      "buc_url": "http://127.0.0.1:9999",
+      "secret_key": "c2luZ2xlYm94"
+    },
+    "whitelist": {
+      "operator_names": []
+    },
+    "workspace": {
+      "claude_code_root": "~/.claude_code",
+      "openclaw_root": "~/.openclaw"
+    }
+  },
+  "typed": {
+    "aix": {
+      "preview_url": ""
+    },
+    "baas": {
+      "api_base_url": "http://localhost:8890",
+      "api_base_url_pre": "http://localhost:8888",
+      "default_ttl_minutes": 1440,
+      "desktop_template_uuid": "TEMPLATE-f996ecc77d224ef7bd80757d8d2bcd0d",
+      "desktop_ttl_minutes": 0,
+      "personal_bot_template_uuid": "TEMPLATE-54942a40aa794eaaae2be166f94890ed",
+      "teclaw_template_uuid": "TEMPLATE-3106e731ffb04e0285e27c387e153737",
+      "template_uuid": "TEMPLATE-4d0e2849d7004111836333de782b95d8",
+      "tenant": "team_claw"
+    },
+    "bcn": {
+      "base_url": "http://localhost:21000",
+      "base_url_pre": "",
+      "provider_admin_token_pre": "",
+      "provider_admin_token_prod": "",
+      "provider_id_pre": "",
+      "provider_id_prod": ""
+    },
+    "bcsfuse": {
+      "base_url": "https://bcsfuse-pre.teamclaw.com",
+      "base_url_pre": "",
+      "raw": {
+        "base_url": "https://bcsfuse-pre.teamclaw.com"
+      }
+    },
+    "bot_chat": {
+      "langfuse_base_url": "",
+      "langfuse_public_key": "",
+      "langfuse_secret_key": ""
+    },
+    "bot_oss": {
+      "bucket_name": "antsys-agentclaw-dev",
+      "endpoint": "cn-heyuan-alipay-office.oss-alipay.aliyuncs.com",
+      "secret_name": "oss_m_manual_agentclaw_botdata"
+    },
+    "cors": {
+      "allow_origin_regex": [],
+      "allow_origins": [
+        "http://localhost",
+        "http://localhost:3000",
+        "http://localhost:8080",
+        "http://localhost:8888"
+      ]
+    },
+    "desktop_bot_periodic_scan": {
+      "apply_owner_whitelist": [],
+      "enabled": true,
+      "global_dry_run": false
+    },
+    "device_allocation": {
+      "arca_legacy_tenant": "legacy",
+      "max_devices_per_entity": 5,
+      "mode": "multi"
+    },
+    "device_provider": {
+      "default_provider": "daas"
+    },
+    "dormant_config": {
+      "dry_run": true
+    },
+    "dormant_notify": {
+      "action_link_pattern": ""
+    },
+    "ecb": {
+      "base_url": "https://ecb-pre.teamclaw.com",
+      "base_url_pre": ""
+    },
+    "kb": {
+      "base_url": "",
+      "function_name": "",
+      "instance_name": "",
+      "interface_name": "",
+      "token": ""
+    },
+    "llm_harness": {
+      "base_url": "",
+      "secret_name": ""
+    },
+    "masa_agent_eval": {
+      "base_url": "http://127.0.0.1:9999",
+      "base_url_pre": "http://127.0.0.1:9999"
+    },
+    "oss_to_nas": {
+      "nas_root": "/home/admin/.bot_shared_nas/arca/arcaagentclaw",
+      "oss_root": "/aidesktop"
+    },
+    "secret_names": {
+      "aiworkbench_repo_url": "other_manual_agentclaw_aiworkbench_repo_url",
+      "dormant_internal_token": ""
+    },
+    "skill_scan": {
+      "auth_app_key": "agentclaw",
+      "auth_app_secret": "",
+      "auth_endpoint": "",
+      "enable_scheduled_scan": false,
+      "enabled": true,
+      "env": "prod",
+      "git_download_dir": "/home/admin/logs/tmp/sec/code",
+      "max_concurrent_scans": 3,
+      "mist_mode": "dev",
+      "scan_interval_hours": 1,
+      "scan_interval_minutes": 0,
+      "storage_dir": "./data/skills_scan"
+    },
+    "task_queue_worker": {
+      "batch_size": 10,
+      "enabled": false,
+      "lease_seconds": 60,
+      "max_concurrency": 10,
+      "poll_interval_seconds": 2.0,
+      "poll_jitter_seconds": 0.5,
+      "retry_backoff_max_seconds": 60.0,
+      "retry_backoff_min_seconds": 1.0
+    },
+    "whitelist": {
+      "operator_names": []
+    },
+    "workspace": {
+      "claude_code_root": "~/.claude_code",
+      "claude_code_session_root": "/home/admin/.claude",
+      "openclaw_root": "~/.openclaw"
+    },
+    "workspace_hosting": {
+      "access_key": "dummy-access-key",
+      "access_secret": "dummy-secret-16b",
+      "aixcore_base_url": "https://aixcore.teamclaw.com",
+      "aixcore_base_url_pre": "https://aixcore-pre.teamclaw.com",
+      "base_url": "https://devapi.teamclaw.com",
+      "tenant": "alipay",
+      "timeout": 30
+    },
+    "yuque": {
+      "user_api": ""
+    }
+  }
+}

@@ -1,0 +1,270 @@
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "active_engine": {
+            "type": "string"
+          },
+          "binding_id": {
+            "type": "null"
+          },
+          "bot_desc": {
+            "type": "string"
+          },
+          "bot_id": {
+            "type": "string"
+          },
+          "bot_name": {
+            "type": "string"
+          },
+          "bot_type": {
+            "type": "string"
+          },
+          "creator_id": {
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "engine_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "entity_type": {
+            "type": "string"
+          },
+          "env": {
+            "type": "string"
+          },
+          "ext": {
+            "type": "object",
+            "properties": {
+              "avatar_url": {
+                "type": "string"
+              },
+              "bot_type": {
+                "type": "string"
+              },
+              "bot_work_dir": {
+                "type": "string"
+              },
+              "can_edit_bot": {
+                "type": "boolean"
+              },
+              "engine_paths": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              },
+              "env": {
+                "type": "string"
+              },
+              "friend_approval": {
+                "type": "string"
+              },
+              "passport": {
+                "type": "object",
+                "properties": {
+                  "is_first_bot": {
+                    "type": "boolean"
+                  },
+                  "status": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "is_first_bot",
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              "permission_owner": {
+                "type": "string"
+              },
+              "public_approval": {
+                "type": "object",
+                "properties": {
+                  "applicant": {
+                    "type": "string"
+                  },
+                  "approval_url": {
+                    "type": "string"
+                  },
+                  "friend_approval": {
+                    "type": "string"
+                  },
+                  "permission_owner": {
+                    "type": "string"
+                  },
+                  "processed_at": {
+                    "type": "string"
+                  },
+                  "public": {
+                    "type": "string"
+                  },
+                  "puid": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "applicant",
+                  "approval_url",
+                  "friend_approval",
+                  "permission_owner",
+                  "processed_at",
+                  "public",
+                  "puid",
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              "start_message": {
+                "type": "string"
+              },
+              "start_status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "avatar_url",
+              "bot_type",
+              "bot_work_dir",
+              "can_edit_bot",
+              "engine_paths",
+              "env",
+              "friend_approval",
+              "passport",
+              "permission_owner",
+              "public_approval",
+              "start_message",
+              "start_status"
+            ],
+            "additionalProperties": false
+          },
+          "gmt_create": {
+            "type": "string"
+          },
+          "gmt_modified": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "is_delete": {
+            "type": "integer"
+          },
+          "modifier_id": {
+            "type": "string"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_name": {
+            "type": "string"
+          },
+          "public": {
+            "type": "string"
+          },
+          "share_policy": {
+            "type": "object",
+            "properties": {
+              "allowed_staff_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "visibility": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "allowed_staff_ids",
+              "visibility"
+            ],
+            "additionalProperties": false
+          },
+          "status": {
+            "type": "string"
+          },
+          "template_config": {
+            "type": "object",
+            "properties": {
+              "architect_bot_id": {
+                "type": "string"
+              },
+              "template": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "architect_bot_id",
+              "template"
+            ],
+            "additionalProperties": false
+          },
+          "template_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "active_engine",
+          "binding_id",
+          "bot_desc",
+          "bot_id",
+          "bot_name",
+          "bot_type",
+          "creator_id",
+          "device_id",
+          "engine_types",
+          "entity_id",
+          "entity_type",
+          "env",
+          "ext",
+          "gmt_create",
+          "gmt_modified",
+          "id",
+          "is_delete",
+          "modifier_id",
+          "owner_id",
+          "owner_name",
+          "public",
+          "share_policy",
+          "status",
+          "template_config",
+          "template_type"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "error_code": {
+      "type": "integer"
+    },
+    "message": {
+      "type": "string"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "data",
+    "error_code",
+    "message",
+    "success"
+  ],
+  "additionalProperties": false
+}

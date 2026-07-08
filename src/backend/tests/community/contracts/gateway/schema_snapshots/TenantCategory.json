@@ -1,0 +1,52 @@
+{
+  "description": "租户类目",
+  "properties": {
+    "parentCode": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parentcode"
+    },
+    "parentType": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parenttype"
+    },
+    "code": {
+      "title": "Code",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "children": {
+      "default": [],
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Children",
+      "type": "array"
+    }
+  },
+  "required": [
+    "code",
+    "name"
+  ],
+  "title": "TenantCategory",
+  "type": "object"
+}

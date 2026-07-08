@@ -1,0 +1,19 @@
+"""Service API Protocol for bot publish CRUD."""
+from __future__ import annotations
+
+from typing import Any, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class BotPublishServiceProtocol(Protocol):
+    """Service API for bot-publish record management."""
+
+    def create_first_publish_for_bot(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def delete_service_bot(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def get_publish_by_id(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def get_bot_stage_binding_info(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def offline_publish(self, *args: Any, **kwargs: Any) -> Any: ...

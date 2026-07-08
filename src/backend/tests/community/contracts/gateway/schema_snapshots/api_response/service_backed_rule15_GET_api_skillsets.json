@@ -1,0 +1,104 @@
+{
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "integer"
+    },
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "bot_id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "engine_type": {
+            "type": "string"
+          },
+          "gmt_created": {
+            "type": "string"
+          },
+          "gmt_modified": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "is_builtin": {
+            "type": "boolean"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "description",
+                "id",
+                "name",
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "type": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "description",
+          "engine_type",
+          "gmt_created",
+          "gmt_modified",
+          "id",
+          "is_active",
+          "is_builtin",
+          "is_default",
+          "name",
+          "skills",
+          "type",
+          "user_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "count",
+    "data",
+    "success"
+  ],
+  "additionalProperties": false
+}

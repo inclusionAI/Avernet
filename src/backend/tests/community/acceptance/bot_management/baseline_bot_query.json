@@ -1,0 +1,17 @@
+{
+  "check_name_available": {
+    "bot_name": "NonExistent_Baseline_Bot",
+    "exists": false,
+    "success": true
+  },
+  "get_missing": {
+    "data_is_none": true,
+    "error_code": 404,
+    "success": false
+  },
+  "list_no_seed": {
+    "entries_count": 0,
+    "success": true,
+    "total": 0
+  }
+}

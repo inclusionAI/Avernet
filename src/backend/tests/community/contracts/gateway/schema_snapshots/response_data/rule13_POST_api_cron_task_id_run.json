@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "properties": {
+    "bot_id": {
+      "type": "string"
+    },
+    "bot_name": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "owner_id": {
+      "type": "string"
+    },
+    "ran": {
+      "type": "boolean"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "bot_id",
+    "bot_name",
+    "ok",
+    "owner_id",
+    "ran",
+    "reason"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,35 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "archDomainCode": {
+        "type": "string"
+      },
+      "archDomainName": {
+        "type": "string"
+      },
+      "categories": {
+        "type": "array"
+      },
+      "code": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "site": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "archDomainCode",
+      "archDomainName",
+      "categories",
+      "code",
+      "name",
+      "site"
+    ],
+    "additionalProperties": false
+  }
+}

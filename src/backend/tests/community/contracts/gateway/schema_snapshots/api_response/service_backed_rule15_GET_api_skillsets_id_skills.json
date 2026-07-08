@@ -1,0 +1,68 @@
+{
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "integer"
+    },
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "git_path": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "skill_uuid": {
+            "type": "null"
+          },
+          "source_type": {
+            "type": "null"
+          },
+          "status": {
+            "type": "null"
+          },
+          "tags": {
+            "type": "array"
+          },
+          "version": {
+            "type": "null"
+          }
+        },
+        "required": [
+          "category",
+          "description",
+          "git_path",
+          "id",
+          "name",
+          "skill_uuid",
+          "source_type",
+          "status",
+          "tags",
+          "version"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "count",
+    "data",
+    "success"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+.venvb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+package-lock.json
+
+# Workspace (user data)
+workspace/
+cache/
+.dev/
+.omc/
+
+# Claude local settings
+.claude/
+# Personal Claude Code instructions (not checked in). The shared CLAUDE.md is committed.
+CLAUDE.local.md
+
+# Local test logs
+scripts/.local_logs/

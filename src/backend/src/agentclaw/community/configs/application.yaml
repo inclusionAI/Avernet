@@ -1,0 +1,179 @@
+# 基础配置
+app_name: "agentclaw"
+enable_sidecar: true
+workers: 6
+
+# Sidecar配置
+sidecar_config:
+  host: "localhost"
+  max_send_message_length: 4194304 # 4MB
+  max_receive_message_length: 4194304 # 4MB
+
+log_config:
+  trace_log_dir: ""
+  log_level: "INFO"
+  log_dir: ""
+
+# 中间件配置总览
+module_config:
+  # 1. RPC相关中间件
+  rpc:
+    # TR (SofaRPC) 配置
+    tr:
+      sub:
+        - "com.alipay.basementurl.facade.URLFacadeV2:1.0"
+        - "com.alibaba.masterdata.client.service.Employee360Service:1.0"
+  drm:
+    enabled: true
+
+  # mist相关
+  mist:
+    enabled: true
+    tenant: "ALIPAY" # 必填，主站为'ALIPAY'
+    mode: "prod" # 必填，需与机密平台上配置的'mode'一致
+    app_name: "agentclaw" # 需与机密平台上的授权应用一致
+
+  zdas:
+    enabled: true
+    datasources:
+      - database: "agentclawdb_ds"
+        user: "xx:agentclaw:xx"
+        password: ""
+        host: "127.0.0.1" # 访问地址,Mesh模式用 127.0.0.1,集群模式用 zdas-pool.{domainname}
+        port: "11306" # ZDAS 服务器端口号
+  zcache:
+    enabled: true
+    caches:
+      - cache_name: "agentclawTBaseCache"
+        route_type: "G" # GZone缓存
+  # 12. web是一个asgi服务，包含上面所有的中间件配置能力
+  web:
+    port: 8888
+    start: "agentclaw.community.adapters.http.app:app"
+    workers: 8  # 并发 worker 数量，提升吞吐量
+
+  sofa:
+    start: "agentclaw.corp.adapters.http.sofa_app:app"
+
+# 用户自定义配置 - 可以在这里添加任何自定义字段
+user_config:
+  app:
+    title: "My SOFAPy App"
+    version: "1.0.0"
+    description: "Custom SOFAPy application"
+    local_debug: true
+
+  features:
+    enable_cache: true
+    enable_metrics: false
+    max_connections: 100
+
+  business:
+    timeout: 30
+    retry_count: 3
+
+  # NOTE: corp auth/identity blocks (token_exchange / antbuservice_client /
+  # buservice / aceagent_client) are NOT in this neutral base — each corp env
+  # overlay (application-{prod,default,dev,singlebox}.yaml) carries its own values.
+  # Community binds BCS-delegated auth (see application-community.yaml `bcs`); it
+  # never reads these blocks.
+
+  # NOTE: daas_sdk_config / daas_sdk_config_prod (DaaS device SDK, xhuntercore)
+  # are corp-only — carried by each corp env overlay, not this neutral base.
+
+  # OpenClaw 技能仓库配置
+  # 仓库地址优先读环境变量 AIWORKBENCH_REPO_URL；未设时由密钥库解析（secret 名是
+  # 部署相关配置项，corp env overlay 提供，见 di/config secret-name 配置）。
+  openclaw:
+    skills_repo_url: ""
+
+  # NOTE: aidesktop_root / local_git_repo_dir (corp host mount paths) are
+  # environment-specific — carried by the corp env overlays; the neutral base
+  # sets neither (community uses the config.py neutral defaults).
+
+  # GitSyncService 配置（中性开关）
+  git_sync:
+    bolt_shared_dir_name: "bolt_shared"
+    # 是否启用后台同步到对象存储
+    enable_oss_sync: true
+
+  # Skill Scan SDK 配置（中性 knobs）；corp auth endpoint/secret + 扫描路径 +
+  # git_download_dir 由 corp env overlay 提供。
+  skill_scan:
+    storage_dir: "./data/skills_scan"
+    enable_scheduled_scan: false
+    scan_interval_hours: 1
+    max_concurrent_scans: 3
+    auth_app_key: "agentclaw"
+    mist_mode: "dev"
+
+  daas_device_config:
+    adapter_service_port: 20003
+
+  # 设备分配管控配置
+  device_allocation:
+    mode: "multi" # "single" | "multi"
+    max_devices_per_entity: 5 # 多设备模式下的上限
+
+  # NOTE: arca_sandbox (ARCA container-runtime SDK) is corp-only — carried by the
+  # corp env overlays. The community build has no ARCA runtime.
+
+  # NOTE: skill (OSS skill-upload prefix), bot_oss_config (bot-data object store
+  # endpoint/bucket + secret name), codefuse_token (token-vault secret name), and
+  # skill_center (SkillCenter open API) are deployment-specific — carried by the
+  # corp env overlays and the community overlay. The neutral base sets none of
+  # them (community reads its own bot_oss_config from application-community.yaml;
+  # the config.py defaults are neutral).
+
+  # 设备提供者配置 — 中性默认；corp 环境 overlay 覆盖为 arca/daas
+  device_provider: "local" # 可选: local, daas, arca
+
+  # 健康检查配置
+  health_check:
+    bcs_url: "http://localhost:21000"  # local/dev 默认
+
+  # NOTE: antcode (corp Git platform integration) is corp-only — carried by the
+  # corp env overlays; the community build has no AntCode integration.
+
+  # NOTE: bcsfuse (Bot Discover backend URL) and baas (Bot publish backend +
+  # container templates/tenant) are environment-specific — the neutral base sets
+  # no corp endpoint. Corp env overlays carry the real URLs/templates; community
+  # sets its own in application-community.yaml; the config.py defaults are neutral.
+
+  # NOTE: masa_agent_eval (evaluation service) endpoint is environment-specific —
+  # carried by the corp env overlays; config.py default is neutral (localhost).
+
+  # 桌面 Bot 周期性健康检查（DesktopBotLifecycle）
+  # 行为说明：
+  #   - apply_owner_whitelist 为空 → 所有 owner 仅打日志，不会真改 DB（安全默认）
+  #   - apply_owner_whitelist 包含具体工号 → 仅这些工号的 bot 被真实更新；其余 owner 仅打日志
+  #   - apply_owner_whitelist 含 "*" 或 "ALL" → 全员真改（最终态）
+  #   - global_dry_run: true → 全员只打日志（最强 kill switch，覆盖 whitelist）
+  #   - enabled: false → 完全不启动定时任务（启动恢复 PENDING 仍跑）
+  # 各 profile 可在 application-{env}.yaml 中覆盖此块。
+  desktop_bot_periodic_scan:
+    enabled: true
+    apply_owner_whitelist: []
+    global_dry_run: false
+
+  # NOTE: dima (applicationCoding 7x24 hosting API + credentials) is corp-only —
+  # carried by the corp env overlays; the community build has no DIMA hosting.
+
+  # 操作员白名单（控制 /api/v1/access/allow、/disallow 等管理接口的调用权限）
+  # 中性默认为空（无特权操作员）；corp env overlay 提供工号列表，community 在
+  # application-community.yaml 中列自己的 admin subject id。
+  whitelist:
+    operator_names: []
+
+  # 浏览器 CORS allow-list — 中性默认仅 localhost origin。corp env overlay 追加
+  # 公司前端 origin + envspot/tern-dev 正则；community 在
+  # application-community.yaml 中列自己的前端 origin。allow_credentials=True 下不能
+  # 用 "*" 通配，必须显式枚举 origin 或用正则匹配。
+  cors:
+    allow_origins:
+      - "http://localhost"
+      - "http://localhost:3000"
+      - "http://localhost:8080"
+      - "http://localhost:8888"
+    allow_origin_regex: []
+

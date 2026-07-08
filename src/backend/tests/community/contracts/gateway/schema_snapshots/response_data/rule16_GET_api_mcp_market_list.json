@@ -1,0 +1,195 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "accessLevel": {
+        "type": "string"
+      },
+      "archDomainCode": {
+        "type": "string"
+      },
+      "buCode": {
+        "type": "string"
+      },
+      "category": {
+        "type": "string"
+      },
+      "codeRepoUrl": {
+        "type": "string"
+      },
+      "creator": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "userName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "userName"
+        ],
+        "additionalProperties": false
+      },
+      "description": {
+        "type": "string"
+      },
+      "endpoints": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "env": {
+              "type": "string"
+            },
+            "headers": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            },
+            "networkType": {
+              "type": "string"
+            },
+            "transportProtocol": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "env",
+            "headers",
+            "networkType",
+            "transportProtocol",
+            "url"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "hostAppName": {
+        "type": "string"
+      },
+      "hostPlatform": {
+        "type": "string"
+      },
+      "icon": {
+        "type": "string"
+      },
+      "launchChannels": {
+        "type": "array"
+      },
+      "name": {
+        "type": "string"
+      },
+      "networkTypes": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "owner": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "userName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "userName"
+        ],
+        "additionalProperties": false
+      },
+      "platformServerCode": {
+        "type": "string"
+      },
+      "productCode": {
+        "type": "string"
+      },
+      "runMode": {
+        "type": "string"
+      },
+      "serverCode": {
+        "type": "string"
+      },
+      "site": {
+        "type": "string"
+      },
+      "source": {
+        "type": "string"
+      },
+      "status": {
+        "type": "string"
+      },
+      "stdioConfigs": {
+        "type": "null"
+      },
+      "tags": {
+        "type": "array"
+      },
+      "tenant": {
+        "type": "string"
+      },
+      "tools": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "description",
+            "name"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "vendor": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "accessLevel",
+      "archDomainCode",
+      "buCode",
+      "category",
+      "codeRepoUrl",
+      "creator",
+      "description",
+      "endpoints",
+      "hostAppName",
+      "hostPlatform",
+      "icon",
+      "launchChannels",
+      "name",
+      "networkTypes",
+      "owner",
+      "platformServerCode",
+      "productCode",
+      "runMode",
+      "serverCode",
+      "site",
+      "source",
+      "status",
+      "stdioConfigs",
+      "tags",
+      "tenant",
+      "tools",
+      "vendor"
+    ],
+    "additionalProperties": false
+  }
+}

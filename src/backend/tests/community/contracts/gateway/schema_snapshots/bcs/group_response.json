@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BCS Group Response",
+  "description": "Contract schema for BCS /groups and /groups/{id} responses",
+  "type": "object",
+  "required": ["id", "driver_bot", "participants", "group_kind", "status", "created_at", "updated_at"],
+  "properties": {
+    "id": {"type": "string"},
+    "label": {"type": "string"},
+    "driver_bot": {"type": "string"},
+    "participants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["actor_kind", "mode", "role"],
+        "properties": {
+          "actor_kind": {"type": "string"},
+          "bot_name": {"type": "string"},
+          "bot_uuid": {"type": "string"},
+          "mode": {"type": "string"},
+          "role": {"type": "string"},
+          "staff_id": {"type": "string"},
+          "nickName": {"type": "string"}
+        }
+      }
+    },
+    "group_kind": {"type": "string"},
+    "group_strategy": {"type": "string"},
+    "status": {"type": "string"},
+    "created_at": {"type": "integer"},
+    "updated_at": {"type": "integer"},
+    "message_count": {"type": "integer"},
+    "latest_running_session_id": {"type": "string"},
+    "workspace": {"type": "object"},
+    "service_group_uuid": {"type": "string"},
+    "service_mode": {"type": "string"},
+    "service_spec": {},
+    "dm_pair_key": {"type": "string"},
+    "context": {},
+    "chat_url": {"type": "string"},
+    "created": {"type": "boolean"}
+  }
+}

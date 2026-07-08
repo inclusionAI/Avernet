@@ -1,0 +1,226 @@
+# Single Box 专属配置 — 完全无外网依赖；本地 + CI 同源
+#
+# 设计原则：
+# 1. 这个文件只写「跟 application.yaml（base）/application-dev.yaml 不同」的覆盖项
+#    sofapy_base.Config.from_yaml 会把 application.yaml 当 base 自动 merge，
+#    所以 base 里已经有的字段（如 sidecar_config / log_config 等）不用重复写
+# 2. 所有外网域名替换成 127.0.0.1（端口 9999，本机没起服务就连接拒绝，
+#    业务调用时会快速失败 — 不会卡 30s timeout）
+# 3. mist.enabled / zdas / zcache / mcp 等"必须出公司内网"的中间件全部关闭
+# 4. baas.api_base_url 保留 http://localhost:8890（这是 singlebox 唯一的真依赖）
+#
+# 跟 application-dev.yaml 的隔离边界详见 docs/singlebox-eval/singlebox-env-design.md
+#
+# 维护提示：每次 application.yaml (base) 或 application-dev.yaml 新增
+# 涉及外网的 url / base_url 字段时，需在本文件对应位置追加 127.0.0.1:9999
+# 覆盖，否则 singlebox 模式下会静默走真实外网。CI 暂无自动检测。
+
+# ─────────────────── module_config 覆盖 ───────────────────
+module_config:
+  mist:
+    enabled: false   # singlebox 不走 service mesh
+  zdas:
+    enabled: false   # singlebox 用 SQLite，不连 ZDAS
+  zcache:
+    enabled: false   # singlebox 用本地内存 cache
+  mcp:
+    pub: []          # singlebox 不发布 MCP 服务
+    sub: []          # singlebox 不订阅外网 MCP
+
+# ─────────────────── user_config 覆盖 ───────────────────
+user_config:
+  app:
+    title: "AgentClaw Single Box"
+    description: "Single Box mode — no external network."
+    local_debug: true
+
+  # token_exchange — 外网替换为本地 mock
+  token_exchange:
+    buc_url: "http://127.0.0.1:9999"
+    api_path: "/api/v1/login/token/exchange"
+    app_key: "antacl_singlebox"
+    secret_key: "c2luZ2xlYm94"
+    agent_id: "singlebox_AGENT_LOCAL"
+
+  # antbuservice_client removed: no community/singlebox code reads it, and it
+  # carried a real corp endpoint + secret. Corp overlays provide it where needed.
+
+  # 外网→本地 mock
+  buservice:
+    base_url: "http://127.0.0.1:9999"
+    get_login_user_path: "/pub/getLoginUser.json"
+    app_name: "agentclaw"
+
+  aceagent_client:
+    base_url: "http://127.0.0.1:9999"
+    app_id: "agentclaw"
+    app_secret: "noop"
+
+  # 本机工作目录（acceptance fixture 依赖）
+  aidesktop_root: "~/.aidesktop"
+  device_provider: "daas"
+
+  workspace:
+    openclaw_root: "~/.openclaw"
+    claude_code_root: "~/.claude_code"
+
+  openclaw:
+    skills_repo_url: "git@code.teamclaw.com:security_release/aiworkbench.git"
+
+  local_git_repo_dir: "/tmp/aiworkbench-singlebox"
+
+  daas_device_config:
+    adapter_service_port: 20003
+    local_device_mock_host: "agentclawdevice-local.stable.teamclaw.net"
+    # 注：这个域名必须有 /etc/hosts 127.0.0.1 映射（CI 也要加）
+
+  arca_sandbox:
+    base_url: "http://127.0.0.1:9999"
+    template_id: "ARCA-TEMPLATE-SINGLEBOX"
+    oss_mount_id: "noop"
+    api_key: "noop"
+    default_ttl_minutes: 1440
+    aicoding_template_id: "ARCA-TEMPLATE-SINGLEBOX-AICODING"
+
+  skill_center:
+    base_url: "http://127.0.0.1:9999"
+    source: "teamclaw"
+    app_key: "noop"
+    team_id: "400003"
+    nas_sync_enabled: false   # 关掉 NAS sync
+
+  git_sync:
+    enable_oss_sync: false   # 关掉 OSS sync
+
+  mock_tcauth: true
+
+  agentclawproxy:
+    base_url: "http://127.0.0.1:9999"
+
+  # BaaS — singlebox 模式下唯一的真本机依赖
+  # template/tenant relocated from the (now-neutral) application.yaml base — value
+  # preserved as-is (pre-existing: singlebox never overrode these; out of scope
+  # for the config-neutralization change).
+  baas:
+    api_base_url: "http://localhost:8890"
+    template_uuid: "TEMPLATE-4d0e2849d7004111836333de782b95d8"
+    tenant: "team_claw"
+    arca_template_id_pre: "ARCA-TEMPLATE-000000001403860d"
+    arca_template_id: "ARCA-TEMPLATE-000000007026d3c6"
+    # Relocated from di/config.py neutral defaults (C1).
+    desktop_template_uuid: "TEMPLATE-f996ecc77d224ef7bd80757d8d2bcd0d"
+    teclaw_template_uuid: "TEMPLATE-3106e731ffb04e0285e27c387e153737"
+    personal_bot_template_uuid: "TEMPLATE-54942a40aa794eaaae2be166f94890ed"
+
+  # BCN host — singlebox points at the local BCS (relocated from the hardcoded
+  # dev default in bcn_service.py). No provider creds: singlebox never registers.
+  bcn:
+    base_url: "http://localhost:21000"
+
+  # Relocated from the (now-neutral) application.yaml base — singlebox inherited
+  # these (pre-existing: never mocked to 127.0.0.1; out of scope here).
+  bcsfuse:
+    base_url: "https://bcsfuse-pre.teamclaw.com"
+
+  # ECB 下游同步地址（bot-init）— relocated from sync_to_downstream.py.
+  ecb:
+    base_url: "https://ecb-pre.teamclaw.com"
+
+  daas_sdk_config:
+    partner_id: "a2dd39c227"
+    scene_code: "default"
+    endpoint: "https://xhuntercore-pre.teamclaw.com"
+
+  daas_sdk_config_prod:
+    partner_id: "a2dd39c227"
+    scene_code: "default"
+    endpoint: "https://xhuntercore-prod.teamclaw.com"
+
+# MasaAgentEval API 配置（评测服务）— singlebox 本地 mock
+  masa_agent_eval:
+    base_url: "http://127.0.0.1:9999"
+    base_url_pre: "http://127.0.0.1:9999"
+
+  # ── DingTalk 通用配置（与 BCS bcs-config-*.toml [[dingtalk_accounts]] 对齐） ──
+  # singlebox 用 AI coding 应用凭证联调钉钉发送
+  # 机器人名称：TeamClaw个人机器人
+  dingtalk:
+    app_key: "dummy-dingtalk-app-key"
+    app_secret: "dummy-dingtalk-app-secret"
+    robot_code: "dummy-dingtalk-app-key"
+
+  # ── Economy / Governance ──────────────────────────────────────────
+  economy_governance:
+    dry_run: true
+    notify_channel: "tc_card"
+    tc_card_id: "card_cb190863"            # Aix 卡片组件 ID (v3 React)
+    tc_card_template_id: "7f1e01ed-194a-4c25-916c-0388f67e3517.schema"  # 治理通知卡片壳模板
+    tc_card_preview_url: "https://teamclaw.com/preview"          # TC 卡片 detailLink 预览页
+    iframe_callback_url: "http://localhost:8888/api/economy/governance/card-callback"
+    scan_hour: 14
+    scan_minute: 0
+
+  # 沉寂 Bot 回收 — singlebox 本地联调
+  # internal_token 不放 yaml；singlebox 走 LocalSecretResolver 返 None
+  # → BotDormantModule 落到 _SINGLEBOX_FALLBACK_TOKEN（
+  # "singlebox-dormant-token-local"，硬编码在 bot_dormant_module.py 里）
+  dormant:
+    dry_run: true
+
+  # Relocated from the (now-neutral) application.yaml base — singlebox inherited
+  # these (pre-existing: never mocked to localhost; out of scope here).
+  skill:
+    oss:
+      upload_prefix: "aidesktop/aidesktop_pre/bolt_shared/skills-upload"
+
+  bot_oss_config:
+    endpoint: "cn-heyuan-alipay-office.oss-alipay.aliyuncs.com"
+    bucket_name: "antsys-agentclaw-dev"
+    region: "cn-heyuan-alipay"
+    access_key_secret: "oss_m_manual_agentclaw_botdata"
+
+  # skill_scan neutral fields only. auth_endpoint/auth_app_secret removed (real
+  # corp endpoint + secret); they default to "" (scan auth inert locally). Corp
+  # overlays supply the real auth values.
+  skill_scan:
+    scheduled_scan_paths:
+      - "/aidesktop/skills"
+    git_download_dir: "/home/admin/logs/tmp/sec/code"
+
+  codefuse_token:
+    # Mist secret 名（非凭证本身）；InfrastructureModule 经 SecretResolver 取真实 AES key
+    # singlebox 走 LocalSecretResolver 返 None → MasterKey 落空串（feature-off）
+    master_key_secret: "other_manual_agentclaw_codefuse_token_key"
+
+  # Relocated from the (now-neutral) application.yaml base — singlebox inherited
+  # these (pre-existing: never mocked to localhost; out of scope here).
+  antcode:
+    base_url: "https://code.teamclaw.com"
+    private_token: "dummy-antcode-token"
+    timeout: 30
+
+  dima:
+    base_url: "https://devapi.teamclaw.com"
+    access_key: "dummy-access-key"
+    access_secret: "dummy-secret-16b"
+    tenant: "alipay"
+    timeout: 30
+    # Relocated from di/config.py neutral defaults (C1).
+    aixcore_base_url: "https://aixcore.teamclaw.com"
+    aixcore_base_url_pre: "https://aixcore-pre.teamclaw.com"
+
+  # OSS↔NAS mount roots — relocated from di/config.py neutral defaults (C1).
+  oss_mount_root: "/aidesktop"
+  nas_mount_root: "/home/admin/.bot_shared_nas/arca/arcaagentclaw"
+
+  # Operator whitelist — empty in community source (no real employee ids ship
+  # here). Singlebox uses LocalPolicyService, which bypasses the whitelist; a
+  # local operator can add their own id if running with a stricter auth plugin.
+  whitelist:
+    operator_names: []
+
+  # Secret-registry key names. dormant token left unset -> local fallback token.
+  # The aiworkbench name matches LocalSecretResolver's key so git-sync resolves
+  # the skills repo URL from this file's openclaw.skills_repo_url.
+  secret_names:
+    aiworkbench_repo_url: "other_manual_agentclaw_aiworkbench_repo_url"

@@ -1,0 +1,31 @@
+{
+  "servers": {
+    "mcp.singlebox.acceptance": {
+      "serverCode": "mcp.singlebox.acceptance",
+      "server_code": "mcp.singlebox.acceptance",
+      "platformServerCode": "mcp.singlebox.acceptance",
+      "hostPlatform": "SINGLEBOX",
+      "name": "Singlebox Acceptance MCP",
+      "description": "Fixture-backed MCP server for singlebox acceptance tests",
+      "accessLevel": "PUBLIC",
+      "runMode": "REMOTE",
+      "status": "ONLINE",
+      "networkTypes": ["INTERNET", "OFFICE"],
+      "tools": [
+        {
+          "name": "search",
+          "description": "Acceptance fixture search tool",
+          "inputSchema": {"type": "object", "properties": {}}
+        }
+      ],
+      "endpoints": [
+        {
+          "env": "PRE",
+          "networkType": "INTERNET",
+          "transportProtocol": "STREAMABLE_HTTP",
+          "url": "https://singlebox.acceptance.invalid/mcp"
+        }
+      ]
+    }
+  }
+}

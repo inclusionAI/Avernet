@@ -1,0 +1,85 @@
+{
+  "description": "连接信息",
+  "properties": {
+    "type": {
+      "default": "websocket",
+      "title": "Type",
+      "type": "string"
+    },
+    "target": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Target"
+    },
+    "token": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Token"
+    },
+    "engine_type": {
+      "default": "openclaw",
+      "title": "Engine Type",
+      "type": "string"
+    },
+    "url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Url"
+    },
+    "headers": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Headers"
+    },
+    "use_proxy": {
+      "default": false,
+      "title": "Use Proxy",
+      "type": "boolean"
+    },
+    "sandbox_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sandbox Id"
+    }
+  },
+  "title": "ConnectionInfo",
+  "type": "object"
+}

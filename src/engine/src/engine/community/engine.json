@@ -1,0 +1,210 @@
+{
+  "engine": {
+    "default": "openclaw",
+    "fallback": null
+  },
+  "engines": {
+    "hermes": {
+      "process": {
+        "start_cmd": ["sudo", "supervisorctl", "start", "hermes"],
+        "stop_cmd": ["sudo", "supervisorctl", "stop", "hermes"],
+        "restart_cmd": ["sudo", "supervisorctl", "restart", "hermes"],
+        "startup_timeout_sec": 600,
+        "graceful_timeout_sec": 60,
+        "healthcheck_tcp": "127.0.0.1:18765",
+        "healthcheck_http": "http://127.0.0.1:18765/health"
+      },
+      "sandbox_setup": {
+        "engine_dirs": ["hermes"],
+        "rsync_pairs": [
+          {
+            "name": "shared",
+            "source": "/home/admin/nfs/skills-repo",
+            "target": "/home/admin/.hermes/skills-repo",
+            "mode": "one-way",
+            "interval": 7200,
+            "exclude": [".*", ".*.??????"]
+          },
+          {
+            "name": "user",
+            "source": "/home/admin/.hermes",
+            "target": "/home/admin/nfs/bot-data/hermes",
+            "mode": "two-way",
+            "interval": 300,
+            "exclude": ["node_modules/", "skills-repo/"]
+          }
+        ]
+      }
+    },
+    "openclaw": {
+      "process": {
+        "start_cmd": ["sudo", "supervisorctl", "start", "openclaw"],
+        "stop_cmd": ["sudo", "supervisorctl", "stop", "openclaw"],
+        "restart_cmd": ["sudo", "supervisorctl", "restart", "openclaw"],
+        "startup_timeout_sec": 600,
+        "graceful_timeout_sec": 60,
+        "healthcheck_tcp": "127.0.0.1:18789",
+        "healthcheck_http": "http://127.0.0.1:18789/readyz"
+      },
+      "sandbox_setup": {
+        "engine_dirs": ["openclaw", "openclaw_conf"],
+        "symlinks": [
+          {
+            "source": "/home/admin/nfs/bot-data/openclaw_conf",
+            "target": "/home/admin/.config/openclaw"
+          }
+        ],
+        "rsync_pairs": [
+          {
+            "name": "user",
+            "source": "/home/admin/.openclaw",
+            "target": "/home/admin/nfs/bot-data/openclaw",
+            "mode": "two-way",
+            "interval": 300,
+            "exclude": ["node_modules/", "skills-repo/"]
+          },
+          {
+            "name": "shared",
+            "source": "/home/admin/nfs/skills-repo",
+            "target": "/home/admin/.openclaw/workspace/skills/skills-repo",
+            "mode": "one-way",
+            "interval": 7200,
+            "exclude": [".*", ".*.??????"]
+          }
+        ]
+      }
+    },
+    "aicoding": {
+      "process": {
+        "start_cmd": ["sudo", "supervisorctl", "start", "relay"],
+        "stop_cmd": ["sudo", "supervisorctl", "stop", "relay"],
+        "restart_cmd": ["sudo", "supervisorctl", "restart", "relay"],
+        "startup_timeout_sec": 30,
+        "graceful_timeout_sec": 10,
+        "healthcheck_tcp": "127.0.0.1:18900"
+      },
+      "sandbox_setup": {
+        "engine_dirs": ["aicoding", "claude"],
+        "rsync_pairs": [
+          {
+            "name": "user",
+            "source": "/home/admin/.aicoding",
+            "target": "/home/admin/nfs/bot-data/aicoding",
+            "mode": "two-way",
+            "interval": 300,
+            "exclude": [
+              "node_modules/",
+              "skills-repo/",
+              ".cache/",
+              "*.tmp",
+              "*.db",
+              "workspace/.npm/",
+              "teamclaw-aicoding-relay/node_modules/",
+              "teamclaw-aicoding-relay/dist/",
+              "teamclaw-aicoding-relay/.cache/",
+              ".npm/"
+            ]
+          },
+          {
+            "name": "claude",
+            "source": "/home/admin/.claude",
+            "target": "/home/admin/nfs/bot-data/claude",
+            "mode": "two-way",
+            "interval": 300,
+            "exclude": [
+              "plugins/"
+            ]
+          },
+          {
+            "name": "shared",
+            "source": "/home/admin/nfs/skills-repo",
+            "target": "/home/admin/.aicoding/skills-repo",
+            "mode": "one-way",
+            "interval": 7200,
+            "exclude": [".*", ".*.??????"]
+          }
+        ]
+      },
+      "relay_url": "ws://localhost:18900",
+      "connection_timeout": 15.0
+    },
+    "claude_code": {
+      "process": {
+        "start_cmd": [],
+        "stop_cmd": [],
+        "restart_cmd": [],
+        "startup_timeout_sec": 5,
+        "graceful_timeout_sec": 5
+      },
+      "sandbox_setup": {
+        "engine_dirs": ["claude_code", "claude"],
+        "rsync_pairs": [
+          {
+            "name": "user",
+            "source": "/home/admin/.claude_code",
+            "target": "/home/admin/nfs/bot-data/claude_code",
+            "mode": "two-way",
+            "interval": 300,
+            "exclude": [
+              "node_modules/",
+              "skills-repo/",
+              ".cache/",
+              "*.tmp",
+              "*.db"
+            ]
+          },
+          {
+            "name": "claude",
+            "source": "/home/admin/.claude",
+            "target": "/home/admin/nfs/bot-data/claude",
+            "mode": "two-way",
+            "interval": 300,
+            "exclude": [
+              "plugins/"
+            ]
+          },
+          {
+            "name": "shared",
+            "source": "/home/admin/nfs/skills-repo",
+            "target": "/home/admin/.claude_code/skills-repo",
+            "mode": "one-way",
+            "interval": 7200,
+            "exclude": [".*", ".*.??????"]
+          }
+        ]
+      },
+      "relay_url": "ws://localhost:18900",
+      "connection_timeout": 15.0
+    }
+  },
+  "mcp_token_header_name": "x-moltis-mcp-token",
+  "mcp_token_forward_to_wss": false,
+  "mcp_token_store_path": "~/.moltis/token-store.json",
+  "mcp_token_persist_enabled": false,
+  "mcporter_config_path": "~/.mcporter/mcporter.json",
+  "max_connections": 0,
+  "dingtalk": {
+    "access_key_id": "",
+    "access_key_secret": "",
+    "robot_code": ""
+  },
+  "process": {
+    "openclaw": {
+      "start_cmd": ["sudo", "supervisorctl", "start", "openclaw"],
+      "stop_cmd": ["sudo", "supervisorctl", "stop", "openclaw"],
+      "restart_cmd": ["sudo", "supervisorctl", "restart", "openclaw"],
+      "startup_timeout_sec": 600,
+      "graceful_timeout_sec": 60,
+      "healthcheck_tcp": "127.0.0.1:18789",
+      "healthcheck_http": "http://127.0.0.1:18789/readyz"
+    },
+    "aicoding": {
+      "start_cmd": ["sudo", "supervisorctl", "start", "relay"],
+      "stop_cmd": ["sudo", "supervisorctl", "stop", "relay"],
+      "restart_cmd": ["sudo", "supervisorctl", "restart", "relay"],
+      "startup_timeout_sec": 30,
+      "graceful_timeout_sec": 10,
+      "healthcheck_tcp": "127.0.0.1:18900"
+    }
+  }
+}

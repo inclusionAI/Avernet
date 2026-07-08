@@ -1,0 +1,20 @@
+{
+  "description": "Bot list data.",
+  "properties": {
+    "total": {
+      "title": "Total",
+      "type": "integer"
+    },
+    "items": {
+      "items": {},
+      "title": "Items",
+      "type": "array"
+    }
+  },
+  "required": [
+    "total",
+    "items"
+  ],
+  "title": "BotListData",
+  "type": "object"
+}

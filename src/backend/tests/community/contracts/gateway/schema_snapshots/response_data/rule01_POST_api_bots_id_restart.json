@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "properties": {
+    "bot_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "bot_id",
+    "status"
+  ],
+  "additionalProperties": false
+}

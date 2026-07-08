@@ -1,0 +1,20 @@
+{
+  "check_after_disallow": {
+    "label": 0,
+    "staffNo": "e2e_user"
+  },
+  "quota_no_seed": {
+    "activeCount": 0,
+    "effectiveQuota": 0,
+    "quota": 0,
+    "totalLimit": 0,
+    "updateTime": ""
+  },
+  "users_compete": [
+    {
+      "status": "REFUSE",
+      "userId": "u_e2e_001",
+      "userType": "COMPETE"
+    }
+  ]
+}

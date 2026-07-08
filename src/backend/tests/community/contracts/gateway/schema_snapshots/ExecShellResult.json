@@ -1,0 +1,36 @@
+{
+  "description": "Shell execution result.",
+  "properties": {
+    "total": {
+      "description": "Total number of commands",
+      "title": "Total",
+      "type": "integer"
+    },
+    "successful": {
+      "description": "Successful executions",
+      "title": "Successful",
+      "type": "integer"
+    },
+    "failed": {
+      "description": "Failed executions",
+      "title": "Failed",
+      "type": "integer"
+    },
+    "results": {
+      "description": "Execution details",
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Results",
+      "type": "array"
+    }
+  },
+  "required": [
+    "total",
+    "successful",
+    "failed"
+  ],
+  "title": "ExecShellResult",
+  "type": "object"
+}

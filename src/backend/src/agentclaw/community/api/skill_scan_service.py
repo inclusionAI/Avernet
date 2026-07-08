@@ -1,0 +1,23 @@
+"""Service API Protocol for skill scanning."""
+from __future__ import annotations
+
+from typing import Any, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class SkillScanServiceProtocol(Protocol):
+    """Service API for scanning skill repositories."""
+
+    def exec_task(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def exec_center_task(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def start(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def stop(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def is_running(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def start_daily_task(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def stop_daily_task(self, *args: Any, **kwargs: Any) -> Any: ...

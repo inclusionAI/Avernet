@@ -1,0 +1,147 @@
+{
+  "$defs": {
+    "MCPServerInSetResponse": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "server_code": {
+          "title": "Server Code",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Icon"
+        },
+        "status": {
+          "default": "ONLINE",
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "server_code",
+        "name"
+      ],
+      "title": "MCPServerInSetResponse",
+      "type": "object"
+    },
+    "SkillSetWithMCPsItem": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "is_default": {
+          "title": "Is Default",
+          "type": "boolean"
+        },
+        "user_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Id"
+        },
+        "bot_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "default",
+          "title": "Bot Id"
+        },
+        "mcps": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MCPServerInSetResponse"
+          },
+          "title": "Mcps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "is_default"
+      ],
+      "title": "SkillSetWithMCPsItem",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "data": {
+      "items": {
+        "$ref": "#/$defs/SkillSetWithMCPsItem"
+      },
+      "title": "Data",
+      "type": "array"
+    },
+    "count": {
+      "title": "Count",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "success",
+    "data",
+    "count"
+  ],
+  "title": "SkillSetsWithMCPsResponse",
+  "type": "object"
+}

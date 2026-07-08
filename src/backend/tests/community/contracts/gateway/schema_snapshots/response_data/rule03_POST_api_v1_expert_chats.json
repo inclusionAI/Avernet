@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "properties": {
+    "bot_id": {
+      "type": "string"
+    },
+    "id": {
+      "type": "integer"
+    },
+    "owner_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "user_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "bot_id",
+    "id",
+    "owner_id",
+    "status",
+    "user_id"
+  ],
+  "additionalProperties": false
+}

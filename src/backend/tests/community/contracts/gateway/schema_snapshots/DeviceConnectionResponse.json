@@ -1,0 +1,51 @@
+{
+  "description": "Device connection information response.",
+  "properties": {
+    "type": {
+      "description": "Connection type (local/remote)",
+      "title": "Type",
+      "type": "string"
+    },
+    "target": {
+      "description": "Connection target (host:port)",
+      "title": "Target",
+      "type": "string"
+    },
+    "token": {
+      "description": "Connection token",
+      "title": "Token",
+      "type": "string"
+    },
+    "engine_type": {
+      "description": "Engine type",
+      "title": "Engine Type",
+      "type": "string"
+    },
+    "available": {
+      "default": true,
+      "description": "Whether the device is reachable",
+      "title": "Available",
+      "type": "boolean"
+    },
+    "message": {
+      "default": "",
+      "description": "Human-readable status message when unavailable",
+      "title": "Message",
+      "type": "string"
+    },
+    "url": {
+      "default": "",
+      "description": "HTTP base URL (plan-01 added; e.g. http://10.0.0.1:20010)",
+      "title": "Url",
+      "type": "string"
+    }
+  },
+  "required": [
+    "type",
+    "target",
+    "token",
+    "engine_type"
+  ],
+  "title": "DeviceConnectionResponse",
+  "type": "object"
+}

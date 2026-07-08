@@ -1,0 +1,98 @@
+{
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "active_engine": {
+            "type": "string"
+          },
+          "binding_id": {
+            "type": "integer"
+          },
+          "bot_desc": {
+            "type": "string"
+          },
+          "bot_id": {
+            "type": "string"
+          },
+          "bot_name": {
+            "type": "string"
+          },
+          "bot_type": {
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "engine_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "entity_type": {
+            "type": "string"
+          },
+          "env": {
+            "type": "string"
+          },
+          "ext": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "friend_record_approval": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "active_engine",
+          "binding_id",
+          "bot_desc",
+          "bot_id",
+          "bot_name",
+          "bot_type",
+          "device_id",
+          "engine_types",
+          "entity_id",
+          "entity_type",
+          "env",
+          "ext",
+          "friend_record_approval",
+          "id",
+          "owner_id",
+          "owner_name",
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "total": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "items",
+    "total"
+  ],
+  "additionalProperties": false
+}

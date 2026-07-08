@@ -1,0 +1,132 @@
+{
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "bot": {
+            "type": "object",
+            "properties": {
+              "active_engine": {
+                "type": "string"
+              },
+              "binding_id": {
+                "type": "integer"
+              },
+              "bot_desc": {
+                "type": "string"
+              },
+              "bot_id": {
+                "type": "string"
+              },
+              "bot_name": {
+                "type": "string"
+              },
+              "engine_types": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "entity_id": {
+                "type": "string"
+              },
+              "entity_type": {
+                "type": "string"
+              },
+              "id": {
+                "type": "integer"
+              },
+              "owner_id": {
+                "type": "string"
+              },
+              "owner_name": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "active_engine",
+              "binding_id",
+              "bot_desc",
+              "bot_id",
+              "bot_name",
+              "engine_types",
+              "entity_id",
+              "entity_type",
+              "id",
+              "owner_id",
+              "owner_name",
+              "status"
+            ],
+            "additionalProperties": false
+          },
+          "env": {
+            "type": "string"
+          },
+          "ext": {
+            "type": "null"
+          },
+          "gmt_create": {
+            "type": "string"
+          },
+          "gmt_modified": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "requester_entity_id": {
+            "type": "string"
+          },
+          "requester_name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target_bot_id": {
+            "type": "string"
+          },
+          "target_entity_id": {
+            "type": "string"
+          },
+          "target_name": {
+            "type": "string"
+          },
+          "target_owner_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot",
+          "env",
+          "ext",
+          "gmt_create",
+          "gmt_modified",
+          "id",
+          "requester_entity_id",
+          "requester_name",
+          "status",
+          "target_bot_id",
+          "target_entity_id",
+          "target_name",
+          "target_owner_name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "total": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "items",
+    "total"
+  ],
+  "additionalProperties": false
+}

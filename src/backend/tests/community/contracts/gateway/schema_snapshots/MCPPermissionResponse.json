@@ -1,0 +1,43 @@
+{
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "has_permission": {
+      "title": "Has Permission",
+      "type": "boolean"
+    },
+    "access_level": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Access Level"
+    },
+    "tool_permissions": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tool Permissions"
+    }
+  },
+  "required": [
+    "success",
+    "has_permission"
+  ],
+  "title": "MCPPermissionResponse",
+  "type": "object"
+}

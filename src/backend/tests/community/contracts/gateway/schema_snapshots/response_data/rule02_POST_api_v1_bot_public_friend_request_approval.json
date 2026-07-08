@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "properties": {
+    "approval_id": {
+      "type": "integer"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "approval_id",
+    "status"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BCS Bot Onboard Response",
+  "description": "Contract schema for BCS /admin/bots/onboard response",
+  "type": "object",
+  "required": ["bot_uuid", "onboarded", "name", "capabilities", "created_by"],
+  "properties": {
+    "bot_uuid": {"type": "string"},
+    "onboarded": {"type": "boolean"},
+    "name": {"type": "string"},
+    "capabilities": {
+      "type": "object",
+      "required": ["name", "summary", "hidden", "visibility"],
+      "properties": {
+        "name": {"type": "string"},
+        "summary": {"type": "string"},
+        "hidden": {"type": "boolean"},
+        "visibility": {"type": "string"},
+        "skills": {"type": "array"},
+        "domains": {"type": "array"}
+      }
+    },
+    "created_by": {"type": "string"}
+  }
+}
