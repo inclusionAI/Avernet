@@ -42,7 +42,11 @@ jobs:
         run: |
           # Make sure the base ref is present locally (shallow clones may not have it).
           git fetch --no-tags --depth=1 origin "${BCS_BASE_REF#origin/}" 2>/dev/null || true
-          mapfile -t files < <(git diff --name-only "${BCS_BASE_REF}...HEAD" -- src/bcs || true)
+          # Compare the base ref against the working tree (not HEAD). PR runs check out a
+          # merge commit as HEAD, for which "<base>...HEAD" collapses to nothing (merge-base
+          # == base) and would wrongly report zero changes. Diffing base against the tree
+          # instead sees all PR-introduced changes regardless of merge-commit checkout.
+          mapfile -t files < <(git diff --name-only "${BCS_BASE_REF}" -- src/bcs || true)
           n=${#files[@]}
           echo "bcs-changed-files-count=${n}" >> "$GITHUB_OUTPUT"
           if [ "$n" -eq 0 ]; then
@@ -157,10 +161,12 @@ jobs:
 
           # Compute changed BCS *.rs line ranges via unified diff (-U0).
           # Run from repo root so the `src/bcs` pathspec resolves correctly.
+          # Diff against the working tree (not HEAD): see the "Detect BCS changes" step
+          # for the merge-commit checkout reason.
           try:
               diff = subprocess.run(
                   ["git", "-C", root, "diff", "--no-renames", "-U0",
-                   f"{base_ref}...HEAD", "--", "src/bcs"],
+                   f"{base_ref}", "--", "src/bcs"],
                   check=True, capture_output=True, text=True,
               ).stdout
           except subprocess.CalledProcessError as e:
