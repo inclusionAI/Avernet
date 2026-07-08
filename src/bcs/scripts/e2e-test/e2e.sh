@@ -81,12 +81,13 @@ done
 
 source "$SCRIPT_DIR/group.sh"
 source "$SCRIPT_DIR/friends.sh"
+source "$SCRIPT_DIR/cli.sh"
 
 # ============================================================================
 # Collect All Tests (Bash 3.2 compatible — no associative arrays)
 # ============================================================================
 
-ALL_SUITES=(group friends)
+ALL_SUITES=(group friends cli)
 ALL_TESTS=()
 
 for test_name in "${E2E_TESTS_GROUP[@]}"; do
@@ -94,6 +95,9 @@ for test_name in "${E2E_TESTS_GROUP[@]}"; do
 done
 for test_name in "${E2E_TESTS_FRIENDS[@]}"; do
     ALL_TESTS+=("friends:$test_name")
+done
+for test_name in "${E2E_TESTS_CLI[@]}"; do
+    ALL_TESTS+=("cli:$test_name")
 done
 
 # ============================================================================
@@ -108,6 +112,10 @@ if [ "$LIST_ONLY" = true ]; then
     done
     echo "  friends:"
     for test_name in "${E2E_TESTS_FRIENDS[@]}"; do
+        echo "    - $test_name"
+    done
+    echo "  cli:"
+    for test_name in "${E2E_TESTS_CLI[@]}"; do
         echo "    - $test_name"
     done
     exit 0
@@ -154,10 +162,12 @@ else
     resolve_all_bot_uuids || exit 2
 fi
 
-# Always clean up leftover groups driven by the PMO bot before running tests.
+# Always clean up leftover groups driven by the test bots before running tests.
 # The BCS enforces a per-driver active-group cap; without this, repeated e2e
 # runs accumulate groups and `POST /groups` starts returning 400.
+# Clean CEO (default driver) and PM (CLI group tests driver) to ensure a clean state.
 cleanup_driver_groups "$BOT_CEO_UUID"
+cleanup_driver_groups "$BOT_PM_UUID"
 
 # ============================================================================
 # Run Tests

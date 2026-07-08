@@ -307,3 +307,203 @@ except Exception:
         info "No existing groups to clean up"
     fi
 }
+
+# ============================================================================
+# bcs-cli E2E helpers
+# ============================================================================
+
+# Ensure SCRIPT_DIR is set when common.sh is sourced standalone (e2e.sh
+# normally sets it before sourcing common.sh). The helpers below derive
+# repo_root from $SCRIPT_DIR/../../../.. .
+if [[ -z "${SCRIPT_DIR:-}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+# Cached bcs-cli binary path and per-bot token (resolved once per run).
+BCS_CLI_BIN_PATH=""
+BCS_CLI_TOKEN=""
+
+# Resolve the bcs-cli binary. Priority:
+#   1. $BCS_CLI_BIN (coverage script injects the instrumented build)
+#   2. src/bcs/target/debug/bcs-cli
+#   3. fallback: cargo run -p bcs-cli --quiet -- (with warn)
+# Echoes the invocation prefix; returns 0 if a real binary is in hand, 1 on fallback-only.
+get_bcs_cli_bin() {
+    if [[ -n "${BCS_CLI_BIN:-}" && -x "${BCS_CLI_BIN:-}" ]]; then
+        BCS_CLI_BIN_PATH="${BCS_CLI_BIN:-}"
+        return 0
+    fi
+    local repo_root
+    repo_root="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+    local debug_bin="$repo_root/src/bcs/target/debug/bcs-cli"
+    if [[ -x "$debug_bin" ]]; then
+        BCS_CLI_BIN_PATH="$debug_bin"
+        return 0
+    fi
+    warn "bcs-cli binary not found; falling back to 'cargo run' (slow; build first for speed)"
+    BCS_CLI_BIN_PATH="cargo run -p bcs-cli --quiet --"
+    return 1
+}
+
+# Resolve the bots' data root in the singlebox standalone layout.
+# singlebox --standalone lays bots out as
+#   .standalone-openclaw/profiles/<role-slug>/.bcs/session.json
+# (slugs: ceo, product-manager, engineering, verification, customer-service).
+# Override the root with $BCS_BOTS_DATA_DIR if the layout differs.
+_get_bot_data_root() {
+    if [[ -n "${BCS_BOTS_DATA_DIR:-}" ]]; then
+        echo "$BCS_BOTS_DATA_DIR"
+        return
+    fi
+    local repo_root
+    repo_root="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+    echo "$repo_root/.standalone-openclaw/profiles"
+}
+
+# Echo the driven bot's profile directory (the dir containing .bcs/session.json
+# whose bot_uuid matches BOT_<NAME>_UUID). Empty if unresolved. bcs_cli sets
+# BOT_DATA_DIR to this for the call so self-resolving subcommands (visibility,
+# friend, session, connect) resolve the correct bot without a global side effect.
+_get_bot_data_dir() {
+    local bot_name="$1"
+    local bot_uuid_var="BOT_${bot_name}_UUID"
+    local bot_uuid="${!bot_uuid_var:-}"
+    if [[ -z "$bot_uuid" ]]; then
+        echo ""
+        return
+    fi
+    local root session_file
+    root="$(_get_bot_data_root)"
+    for session_file in "$root"/*/.bcs/session.json; do
+        [[ -f "$session_file" ]] || continue
+        local match
+        match="$(python3 -c "
+import json
+try:
+    d=json.load(open('$session_file'))
+    print('1' if d.get('bot_uuid')=='$bot_uuid' else '0')
+except Exception:
+    print('0')
+")"
+        if [[ "$match" == "1" ]]; then
+            # session_file = <root>/<slug>/.bcs/session.json -> profile dir = <root>/<slug>
+            dirname "$(dirname "$session_file")"
+            return
+        fi
+    done
+    echo ""
+}
+
+# Echo a bot's BCS token from its session.json; empty string if unavailable.
+# Requires resolve_all_bot_uuids to have run first.
+# Usage: token=$(get_bot_token CEO)
+get_bot_token() {
+    local bot_name="$1"
+    local dir
+    dir="$(_get_bot_data_dir "$bot_name")"
+    if [[ -z "$dir" ]]; then
+        echo ""
+        return
+    fi
+    python3 -c "
+import json
+try:
+    d=json.load(open('$dir/.bcs/session.json'))
+    print(d.get('token','') or '')
+except Exception:
+    print('')
+"
+}
+
+# Ensure BCS_CLI_TOKEN is populated for the given bot; return 1 (skip) if not.
+# Always fetches fresh per call — do NOT cache across bots (a cached CEO token
+# would be reused for PM and auth the wrong identity on self-resolving commands).
+ensure_cli_token() {
+    local bot="$1"
+    BCS_CLI_TOKEN="$(get_bot_token "$bot")"
+    if [[ -z "$BCS_CLI_TOKEN" ]]; then
+        warn "no token for '$bot' (session.json not found); skipping bcs-cli auth case"
+        return 1
+    fi
+    return 0
+}
+
+# Mark the current case as skipped with a warn log; returns 77 so the caller
+# can `skip_case "reason" || return 77` without incrementing failure counters.
+skip_case() {
+    warn "SKIP: $1"
+    return 77
+}
+
+# Extract a top-level field from a JSON string via python3. Usage:
+#   val=$(_cli_json_field "$json" "group_id")
+_cli_json_field() {
+    local json="$1" key="$2"
+    printf '%s' "$json" | python3 -c "
+import json,sys
+try:
+    d=json.load(sys.stdin)
+    v=d.get('$key','')
+    print(v if v is not None else '')
+except Exception:
+    print('')
+"
+}
+
+# True if $1 (JSON/string) contains substring $2.
+_cli_contains() { [[ "$1" == *"$2"* ]]; }
+
+# Run bcs-cli as <bot> with <args>. Injects --base-url at top level and
+# --token right after the subcommand name (token is a per-subcommand clap arg,
+# not top-level). Captures stdout into BCS_CLI_STDOUT and exit code into
+# BCS_CLI_EXIT; returns bcs-cli's exit code.
+#
+# Usage: bcs_cli CEO list            -> bcs-cli list --token T        (MOLTIS_BCS_URL env set)
+#        bcs_cli CEO get "$uuid"     -> bcs-cli get --token T "$uuid" (MOLTIS_BCS_URL env set)
+# For token-less subcommands (health), pass bot="" — no --token is injected.
+bcs_cli() {
+    local bot="$1"; shift
+    local bin
+    get_bcs_cli_bin >/dev/null
+    bin="$BCS_CLI_BIN_PATH"
+    local sub="$1"
+    local args=()
+    # bcs-cli's top-level URL flag is -u/--url (NOT --base-url), and
+    # confirm-group-help reuses --url/<URL> for the confirm URL. To avoid any
+    # flag-namespace collision, inject the base URL via the MOLTIS_BCS_URL env
+    # var (which bcs-cli reads for -u/--url) instead of a CLI flag.
+    export MOLTIS_BCS_URL="$BCS_API_BASE_URL"
+    if [[ -z "$sub" ]]; then
+        BCS_CLI_STDOUT=""
+        BCS_CLI_EXIT=2
+        warn "bcs_cli: no subcommand given"
+        return 2
+    fi
+    args+=("$sub")
+    if [[ -n "$bot" ]]; then
+        ensure_cli_token "$bot" >/dev/null || { BCS_CLI_STDOUT=""; BCS_CLI_EXIT=126; return 126; }
+        args+=(--token "$BCS_CLI_TOKEN")
+    fi
+    shift
+    args+=("$@")
+    local out rc
+    # Self-resolving subcommands (visibility/friend/session/connect) read the
+    # bot UUID from $BOT_DATA_DIR/.bcs/session.json, not from --token. Set it
+    # inline for THIS call only (no leak to the parent shell). For tokenless
+    # calls (bot=""), leave the env untouched.
+    local bot_dir=""
+    if [[ -n "$bot" ]]; then
+        bot_dir="$(_get_bot_data_dir "$bot")"
+    fi
+    if [[ -n "$bot_dir" ]]; then
+        out="$( BOT_DATA_DIR="$bot_dir" $bin "${args[@]}" 2>/tmp/bcs_cli.err )" && rc=$? || rc=$?
+    else
+        out="$( $bin "${args[@]}" 2>/tmp/bcs_cli.err )" && rc=$? || rc=$?
+    fi
+    BCS_CLI_STDOUT="$out"
+    BCS_CLI_EXIT="$rc"
+    if [[ "$rc" -ne 0 ]] && [[ -s /tmp/bcs_cli.err ]]; then
+        warn "bcs-cli $sub exited $rc: $(head -c 200 /tmp/bcs_cli.err)"
+    fi
+    return "$rc"
+}
