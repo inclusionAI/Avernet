@@ -494,7 +494,7 @@ prepare_bcs_coverage_bin() {
             local build_tmp="$BCS_DIR/target/tmp"
             mkdir -p "$build_tmp"
             export LLVM_PROFILE_FILE="$build_tmp/build-%m-%p.profraw"
-            cargo build --package bcs --package bcs-cli
+            cargo build --workspace
         ) || { log_error "coverage build failed"; exit 1; }
     else
         log_info "Reusing cached instrumented bcs: $cov_bin"

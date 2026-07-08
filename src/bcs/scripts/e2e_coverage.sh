@@ -20,7 +20,7 @@ set -euo pipefail
 #   bash src/bcs/scripts/e2e_coverage.sh              # full flow
 #   bash src/bcs/scripts/e2e_coverage.sh --skip-start # instrumented bcs already running; run e2e + stop + aggregate only
 #   bash src/bcs/scripts/e2e_coverage.sh --no-stop    # do not stop bcs after running (debug; no aggregation)
-#   bash src/bcs/scripts/e2e_coverage.sh --bcs-min 30 # additionally gate coverage >= 30%
+#   bash src/bcs/scripts/e2e_coverage.sh --bcs-min 20 # additionally gate coverage >= 20%
 #   bash src/bcs/scripts/e2e_coverage.sh --force-rebuild # force-rebuild instrumented bcs (ignore cache)
 #
 # Coverage scope: bcs server (crate bcs) only; excludes the 5 bots / Python.
@@ -184,11 +184,11 @@ if [[ "$no_stop" -eq 0 ]]; then
   (
     cd "$bcs_dir"
     export CARGO_TARGET_DIR="$cov_dir"
-    cargo llvm-cov report --package bcs --cobertura \
+    cargo llvm-cov report --cobertura \
       --output-path "$out_xml" \
       --fail-under-lines="$bcs_min" > /dev/null 2>&1
     cobertura_status=$?
-    cargo llvm-cov report --package bcs > "$report_file" 2>&1
+    cargo llvm-cov report > "$report_file" 2>&1
     exit "$cobertura_status"
   )
   cov_status=$?

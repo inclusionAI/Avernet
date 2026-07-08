@@ -65,7 +65,7 @@ use bcs_protocol::{BCS_PROTOCOL_VERSION, BotConnectParams};
 // disable agentpass, agentpass token should be auto injected into the http headers
 const AUTH_VIA_AGENT_PASS: bool = false;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Default)]
 struct StructuredResult {
     status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1658,10 +1658,23 @@ async fn main() -> Result<()> {
                 client.set_oauth_headers(headers.clone());
             }
             let healthy = client.health_check().await?;
-            if healthy {
-                println!("✓ BCS is healthy at {}", bcs_url);
+            if structured_mode {
+                let result = StructuredResult {
+                    status: if healthy { "healthy".to_string() } else { "unhealthy".to_string() },
+                    message: Some(format!("BCS is {} at {}", if healthy { "healthy" } else { "unhealthy" }, bcs_url)),
+                    ..Default::default()
+                };
+                emit_structured_result(&result);
+                if !healthy {
+                    std::process::exit(1);
+                }
             } else {
-                println!("✗ BCS health check failed");
+                if healthy {
+                    println!("✓ BCS is healthy at {}", bcs_url);
+                } else {
+                    println!("✗ BCS health check failed");
+                    std::process::exit(1);
+                }
             }
         }
 
