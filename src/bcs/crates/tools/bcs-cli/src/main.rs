@@ -1657,7 +1657,26 @@ async fn main() -> Result<()> {
             if let Some(ref headers) = oauth_headers {
                 client.set_oauth_headers(headers.clone());
             }
-            let healthy = client.health_check().await?;
+            let healthy = match client.health_check().await {
+                Ok(h) => h,
+                Err(e) => {
+                    // Under structured_mode, a network/connection error must
+                    // surface as a structured JSON result (honoring the output
+                    // contract), not a raw traceback on stderr. Human mode
+                    // propagates the error unchanged.
+                    if structured_mode {
+                        let result = StructuredResult {
+                            status: "unhealthy".to_string(),
+                            message: Some(format!("BCS health check failed: {}", e)),
+                            ..Default::default()
+                        };
+                        emit_structured_result(&result);
+                        std::process::exit(1);
+                    } else {
+                        return Err(e);
+                    }
+                }
+            };
             if structured_mode {
                 let result = StructuredResult {
                     status: if healthy { "healthy".to_string() } else { "unhealthy".to_string() },

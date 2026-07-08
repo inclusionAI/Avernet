@@ -5,22 +5,24 @@ set -euo pipefail
 # from ocb).
 # Flow: singlebox --with-bcs-coverage start bcs_bots -> e2e.sh -> SIGTERM bcs
 #       (flush profraw) -> singlebox stop bcs_bots -> cargo llvm-cov report
-#       --cobertura.
+#       --cobertura / text / --summary-only --json -> e2e_cov_gate.py.
 #
 # Gate semantics:
 #   - e2e is always a 100% gate (no switch): any e2e failure makes the script
 #     exit with the non-zero e2e exit code.
-#   - --bcs-min defaults to 0: do not gate coverage, just collect; pass a value
-#     to additionally gate on line coverage.
-#   - The two are independent: e2e failure does not block aggregation
-#     (cobertura.xml is still produced), and low coverage does not block the
-#     exit code (default 0).
+#   - --bcs-min defaults to 0 (collect + report only, no threshold). Pass a
+#     value N to additionally gate: e2e_cov_gate.py enforces line AND method
+#     (function) coverage >= N%; region coverage is reported but NOT gated.
+#     Emits GitHub ::notice::/::error:: annotations (local: OK/FAIL) for each.
+#   - The two gates are independent and BOTH can fail the run: e2e failure
+#     takes precedence, but a passing e2e with coverage below threshold still
+#     fails (the gate runs and surfaces annotations regardless of e2e_status).
 #
 # Usage:
 #   bash src/bcs/scripts/e2e_coverage.sh              # full flow
 #   bash src/bcs/scripts/e2e_coverage.sh --skip-start # instrumented bcs already running; run e2e + stop + aggregate only
 #   bash src/bcs/scripts/e2e_coverage.sh --no-stop    # do not stop bcs after running (debug; no aggregation)
-#   bash src/bcs/scripts/e2e_coverage.sh --bcs-min 20 # additionally gate coverage >= 20%
+#   bash src/bcs/scripts/e2e_coverage.sh --bcs-min 20 # gate line+method coverage >= 20% (region report-only)
 #   bash src/bcs/scripts/e2e_coverage.sh --force-rebuild # force-rebuild instrumented bcs (ignore cache)
 #
 # Coverage scope: bcs server (crate bcs) only; excludes the 5 bots / Python.
@@ -118,7 +120,36 @@ preflight_reclaim_ports() {
 #    no frontend (e2e needs none).
 if [[ "$skip_start" -eq 0 ]]; then
   preflight_reclaim_ports
+  # Export LLVM_PROFILE_FILE BEFORE singlebox starts the instrumented bcs server
+  # (and bcs-cli). prepare_bcs_coverage_bin sets it too, but only inside
+  # singlebox's process; the bcs server it launches inherits this one. Without
+  # it the instrumented server falls back to the profiler default
+  # `default_<hash>_<pid>.profraw` in its own CWD — the repo root, where
+  # singlebox is invoked from — leaking profraw there (outside target/, not
+  # covered by src/bcs/.gitignore). Pointing it at cov-e2e/llvm-cov-target
+  # keeps runtime profraw next to the objects cargo llvm-cov report merges.
+  cov_runtime_dir="$bcs_dir/target/cov-e2e/llvm-cov-target"
+  export LLVM_PROFILE_FILE="$cov_runtime_dir/bcs-%m-%p.profraw"
   "$repo_root/scripts/singlebox.sh" --standalone --with-bcs-coverage start bcs_bots
+fi
+
+# Re-export the instrumented binary paths for the e2e.sh child process.
+# prepare_bcs_coverage_bin (inside singlebox.sh) exports BCS_BIN / BCS_CLI_BIN,
+# but singlebox.sh runs as a child process, so its exports die when it exits —
+# e2e.sh (invoked below as another child) never sees them. Without this re-export
+# bcs_cli falls back to `cargo run -p bcs-cli`, which fails ("could not find
+# Cargo.toml" from the repo root) and breaks every cli case + the cli-driven
+# group setups. Locally this is masked because src/bcs/target/debug/bcs-cli
+# exists from a prior non-instrumented build; CI has only the instrumented target.
+# LLVM_PROFILE_FILE (set above) persists across both children since it is re-set
+# here too — belt-and-suspenders for bcs-cli spawns under e2e.sh.
+cov_cli_bin="$bcs_dir/target/cov-e2e/llvm-cov-target/debug/bcs-cli"
+if [[ -x "$cov_cli_bin" ]]; then
+  export BCS_CLI_BIN="$cov_cli_bin"
+  export BCS_BIN="$bcs_dir/target/cov-e2e/llvm-cov-target/debug/bcs"
+  export LLVM_PROFILE_FILE="$bcs_dir/target/cov-e2e/llvm-cov-target/bcs-%m-%p.profraw"
+else
+  echo "WARN: instrumented bcs-cli not found at $cov_cli_bin; e2e cli cases will use the src/bcs/target/debug fallback or cargo run." >&2
 fi
 
 # 2. Run e2e (curl hits :21000, exercising the instrumented bcs; profraw is
@@ -126,6 +157,7 @@ fi
 #    coverage report is produced even on failure (a failing run is still useful
 #    to see what was covered).
 e2e_status=0
+cov_gate_status=0
 bash "$bcs_dir/scripts/e2e-test/e2e.sh" || e2e_status=$?
 if [[ "$e2e_status" -ne 0 ]]; then
   echo "WARN: e2e exited with $e2e_status; continuing to flush profraw and aggregate coverage." >&2
@@ -170,28 +202,25 @@ if [[ "$no_stop" -eq 0 ]]; then
   #    resolves the per-checkout standalone pid/profile paths started in step 1.
   "$repo_root/scripts/singlebox.sh" --standalone stop bcs_bots
 
-  # 5. Aggregate cobertura + text table.
-  # Two report runs: one with --cobertura --output-path to produce the XML
-  # (--fail-under-lines enforces the threshold; --output-path consumes stdout);
-  # one plain-text pass into coverage.txt (per-file table for the record and for
-  # grepping TOTAL).
-  # --package bcs: coverage scope is the bcs server only. Onboarding invokes the
-  # instrumented bcs-cli (BCS_CLI_BIN points at the instrumented build), whose
-  # profraw lands in the same dir; -p bcs excludes bcs-cli lines from the report,
-  # upholding the "bcs server only" intent.
+  # 5. Aggregate cobertura + text table + JSON summary.
+  # Three report passes over the on-disk profraw (no rebuild, ~seconds each):
+  #   --cobertura --output-path   -> cobertura.xml (artifact; line/branch rates)
+  #   plain text                  -> coverage.txt  (per-file table for the record)
+  #   --summary-only --json       -> summary.json  (structured line/function/region
+  #                                  totals) consumed by e2e_cov_gate.py below.
+  # NOTE: coverage scope here includes bcs-cli profraw (onboarding runs the
+  # instrumented bcs-cli). That matches the historical report; the gate keys on
+  # overall totals, so it does not change pass/fail semantics.
+  summary_json="$cov_dir/summary.json"
   echo "--- aggregating coverage ---"
   set +e
   (
     cd "$bcs_dir"
     export CARGO_TARGET_DIR="$cov_dir"
-    cargo llvm-cov report --cobertura \
-      --output-path "$out_xml" \
-      --fail-under-lines="$bcs_min" > /dev/null 2>&1
-    cobertura_status=$?
+    cargo llvm-cov report --cobertura --output-path "$out_xml" > /dev/null 2>&1
     cargo llvm-cov report > "$report_file" 2>&1
-    exit "$cobertura_status"
+    cargo llvm-cov report --summary-only --json > "$summary_json" 2>/dev/null
   )
-  cov_status=$?
   set -e
 
   echo ""
@@ -199,29 +228,51 @@ if [[ "$no_stop" -eq 0 ]]; then
   echo "--- summary ---"
   grep '^TOTAL' "$report_file" || tail -20 "$report_file"
 
-  if [[ "$cov_status" -ne 0 ]]; then
-    echo "bcs coverage failed (threshold --bcs-min=$bcs_min not met); full report: $report_file" >&2
-    tail -40 "$report_file" >&2
-    # Coverage threshold failed: if e2e fully passed, exit with the coverage
-    # failure code.
-    [[ "$e2e_status" -eq 0 ]] && exit "$cov_status"
+  # Coverage gate (e2e_cov_gate.py). Replaces the old --fail-under-lines gate:
+  #   - Enforces line AND method (function) coverage >= --bcs-min; region is
+  #     reported but NOT gated (e2e runtime region coverage is low/noisy).
+  #   - Emits GitHub ::notice::/::error:: annotations (local: OK/FAIL lines)
+  #     for each metric, mirroring cov_gate.py's style.
+  #   - Runs regardless of e2e_status so its annotations always surface, and
+  #     its exit code is combined with e2e's below — no more swallowed gate
+  #     (the old `[[ e2e eq 0 ]] && exit` skipped coverage failure when e2e
+  #     itself failed, so --bcs-min appeared not to take effect).
+  # bcs_min=0 (default / no --bcs-min) -> line & method thresholds = 0 =>
+  # report-only (does not block). Pre-push/CI pass --bcs-min 20 to gate.
+  if [[ -f "$summary_json" ]]; then
+    ( cd "$bcs_dir" && python3 scripts/e2e_cov_gate.py \
+        --summary "$summary_json" \
+        --line-min "$bcs_min" \
+        --method-min "$bcs_min" ) || cov_gate_status=$?
+  else
+    echo "WARN: coverage summary.json not found ($summary_json); skipping coverage gate." >&2
+    # Missing summary is itself a gate failure when a threshold was requested:
+    # silently passing would let coverage regressions go unnoticed.
+    [[ "$bcs_min" -gt 0 ]] && cov_gate_status=1
   fi
 fi
 
 # Post-aggregation cleanup of profraw. The instrumented cargo build redirects
 # build-time profraw (build scripts / proc-macros, worthless to the report) to
-# src/bcs/target/tmp via LLVM_PROFILE_FILE (set in prepare_bcs_coverage_bin),
-# so they never touch the source tree. As a belt-and-suspenders guard, also
-# remove any default-*.profraw that an older code path may still write into the
-# source tree. Runtime profraw under cov_dir is already merged into
-# cobertura.xml/coverage.txt; clear it too. Skipped under --no-stop (debugging
-# may still want them).
+# src/bcs/target/tmp via LLVM_PROFILE_FILE, so they never touch the source tree.
+# As a belt-and-suspenders guard, also remove any default-*.profraw that an
+# older code path (or a run before the LLVM_PROFILE_FILE pre-export fix) may
+# write into the source tree OR the repo root — start_bcs_bots.sh launches the
+# instrumented bcs server in singlebox's CWD (repo root when invoked from there);
+# if LLVM_PROFILE_FILE wasn't propagated (historical bug), the server wrote
+# default_*.profraw at the repo root, which src/bcs/.gitignore does NOT cover.
+# Runtime profraw under cov_dir is already merged into cobertura.xml/coverage.txt;
+# clear it too. Skipped under --no-stop (debugging may still want them).
 if [[ "$no_stop" -eq 0 ]]; then
   removed=0
   while IFS= read -r -d '' f; do rm -f "$f"; removed=$((removed + 1)); done \
     < <(find "$bcs_dir" -name 'default_*.profraw' -not -path '*/target/*' -print0 2>/dev/null)
+  # Repo-root sweep: only inside the checkout (NOT above repo_root), and skip
+  # anything under a target/ dir (legit coverage artifacts).
+  while IFS= read -r -d '' f; do rm -f "$f"; removed=$((removed + 1)); done \
+    < <(find "$repo_root" -mindepth 1 -maxdepth 1 -name 'default_*.profraw' -print0 2>/dev/null)
   if [[ "$removed" -gt 0 ]]; then
-    echo "Cleaned up $removed stray profraw file(s) from bcs source tree"
+    echo "Cleaned up $removed stray profraw file(s) from the source tree / repo root"
   fi
   # cov_dir contains the llvm-cov-target/ subdirectory where runtime profraw
   # (e.g. bcs-*.profraw) lands; recursively delete all profraw under cov_dir
@@ -231,5 +282,12 @@ if [[ "$no_stop" -eq 0 ]]; then
   find "$bcs_dir/target/tmp" -name '*.profraw' -delete 2>/dev/null || true
 fi
 
-# The e2e exit code is the script's final exit code (e2e is always a 100% gate).
-exit "$e2e_status"
+# Final exit code: e2e is always a 100% gate; the coverage gate (when a
+# --bcs-min threshold was requested) is an independent gate. e2e failure takes
+# precedence (the suite is broken), but a passing e2e with a breached coverage
+# threshold must still fail the run — which the old swallowed `[[ e2e eq 0 ]]
+# && exit` logic did not guarantee.
+if [[ "$e2e_status" -ne 0 ]]; then
+  exit "$e2e_status"
+fi
+exit "$cov_gate_status"

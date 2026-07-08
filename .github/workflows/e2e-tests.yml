@@ -1,0 +1,190 @@
+name: E2E Tests
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+  push:
+    branches:
+      - dev
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Independent concurrency group from Unit Tests so this job does not cancel (or
+# get cancelled by) the unit/architecture jobs on the same ref; only superseded
+# runs of *this* workflow are cancelled.
+concurrency:
+  group: e2e-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bcs-e2e:
+    name: BCS e2e (coverage gated)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+      # PR: compare against the PR's base branch. push/dispatch: compare against
+      # dev so change detection still has a base.
+      BCS_BASE_REF: origin/${{ github.base_ref || 'dev' }}
+      # standalone mode writes OpenClaw profile/workspace/plugin state under
+      # <checkout>/.standalone-openclaw (per-runner isolation, no shared home).
+      SINGLEBOX_MODE: standalone
+      # Source-build the in-repo BCN plugin (no private registry). singlebox's
+      # setup_bcn_plugin runs npm install + build + symlink automatically.
+      BCN_PLUGIN_SOURCE: source
+      # No model credentials: the 5 OpenClaw gateways connect to BCS, get tokens,
+      # and onboard without ever calling a model. e2e exercises BCS routing /
+      # session / group / friend / cli paths via HTTP + bcs-cli only, so empty
+      # model config is sufficient (start_bcs_bots.sh documents this path). If a
+      # gateway refuses to boot without a model in CI, seed a dummy provider in
+      # ~/.openclaw/openclaw.json as the documented fallback.
+      OPENCLAW_MODEL_CONFIG_SOURCE: /dev/null
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect BCS changes vs base
+        id: changes
+        shell: bash
+        run: |
+          # Ensure the base ref is present locally (shallow clones may lack it).
+          git fetch --no-tags --depth=1 origin "${BCS_BASE_REF#origin/}" 2>/dev/null || true
+          # Always run on manual dispatch so an operator can force an e2e pass.
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "skip-bcs=false" >> "$GITHUB_OUTPUT"
+            echo "Manual dispatch; running e2e regardless of changed files."
+            exit 0
+          fi
+          # Diff base against the working tree so PR-merge-commit checkouts
+          # still report all PR-introduced changes (same reasoning as the unit
+          # job: "<base>...HEAD" collapses on a merge commit). Run the job when
+          # either src/bcs OR this workflow file itself changed — the latter so
+          # changes to the e2e job are exercised, not silently skipped.
+          mapfile -t bcs_files < <(git diff --name-only "${BCS_BASE_REF}" -- src/bcs || true)
+          mapfile -t wf_files < <(git diff --name-only "${BCS_BASE_REF}" -- .github/workflows/e2e-tests.yml || true)
+          n_bcs=${#bcs_files[@]}
+          n_wf=${#wf_files[@]}
+          echo "bcs-changed-files-count=${n_bcs}" >> "$GITHUB_OUTPUT"
+          if [ "$n_bcs" -eq 0 ] && [ "$n_wf" -eq 0 ]; then
+            echo "skip-bcs=true" >> "$GITHUB_OUTPUT"
+            echo "No changes under src/bcs or the e2e workflow file vs ${BCS_BASE_REF}; skipping BCS e2e."
+          else
+            echo "skip-bcs=false" >> "$GITHUB_OUTPUT"
+            echo "Detected ${n_bcs} src/bcs + ${n_wf} e2e-workflow file(s) changed vs ${BCS_BASE_REF}; running e2e."
+          fi
+
+      - name: Install system dependencies
+        if: steps.changes.outputs.skip-bcs != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            protobuf-compiler \
+            jq \
+            lsof \
+            curl \
+            git \
+            procps \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            libsqlite3-dev
+
+      - name: Install Rust toolchain
+        if: steps.changes.outputs.skip-bcs != 'true'
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          # llvm-tools: required by the manual -Cinstrument-coverage build in
+          # prepare_bcs_coverage_bin (singlebox.sh). cargo-llvm-cov: required by
+          # the e2e_coverage.sh aggregation step (cargo llvm-cov report).
+          rustup component add llvm-tools
+          cargo install cargo-llvm-cov --locked
+          rustc --version
+          cargo --version
+
+      - name: Set up Node.js
+        if: steps.changes.outputs.skip-bcs != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # No `cache: npm` here: the BCN plugin build uses `npm install`
+          # (not `npm ci`) under src/plugin, and src/plugin/package-lock.json is
+          # git-ignored (src/plugin/.gitignore), so there is no committed
+          # lockfile in the checkout for setup-node to key on. setup-node's
+          # cache errors the job when the dependency path doesn't resolve. The
+          # BCN deps are small; the npm fetch is a tolerable network round-trip.
+          # To re-enable, commit the lockfile (drop it from .gitignore) first.
+
+      - name: Install OpenClaw
+        if: steps.changes.outputs.skip-bcs != 'true'
+        run: |
+          # Pin the same version the Docker image ships so CI mirrors the
+          # environment the bots run in locally under singlebox.
+          npm install -g openclaw@2026.6.1
+          openclaw --version || true
+
+      - name: Cache Cargo registry and git
+        if: steps.changes.outputs.skip-bcs != 'true'
+        uses: actions/cache@v4
+        with:
+          # Cache only the registry/git fetch — NOT src/bcs/target. The
+          # instrumented coverage build lives under target/cov-e2e/llvm-cov-target
+          # (a separate CARGO_TARGET_DIR) and --force-rebuild rebuilds it fresh
+          # every run so coverage always reflects the pushed source. Caching the
+          # instrumented artifacts would risk stale coverage across commits.
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-e2e-${{ hashFiles('src/bcs/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-e2e-
+            ${{ runner.os }}-cargo-
+
+      - name: Run BCS e2e with coverage
+        if: steps.changes.outputs.skip-bcs != 'true'
+        # e2e_coverage.sh does the entire flow in one command:
+        #   singlebox --standalone --with-bcs-coverage start bcs_bots
+        #     -> builds the instrumented bcs in target/cov-e2e/llvm-cov-target,
+        #        starts BCS + 5 OpenClaw bots (BCN plugin built by setup_bcn_plugin)
+        #   e2e.sh                      -> 60 cases (group/friends/cli)
+        #   SIGTERM bcs                 -> flush profraw
+        #   singlebox stop bcs_bots     -> tear down
+        #   cargo llvm-cov report --cobertura --fail-under-lines=20
+        #     -> aggregate + enforce e2e line-coverage gate
+        # --force-rebuild (mirroring pre_push): always rebuild the instrumented
+        # binary from the pushed source instead of reusing a cached one, so the
+        # measured coverage is correct. Exits non-zero on ANY e2e failure OR
+        # e2e line-coverage < 20%.
+        run: bash src/bcs/scripts/e2e_coverage.sh --bcs-min 20 --force-rebuild
+
+      - name: Stop stack (best-effort cleanup)
+        if: always() && steps.changes.outputs.skip-bcs != 'true'
+        # e2e_coverage.sh stops the stack itself on the happy path; this catches
+        # the timeout / kill cases so no ports are left occupied. Never fails the
+        # job: a stop failure on an already-stopped (or never-started) stack is
+        # not interesting.
+        continue-on-error: true
+        run: |
+          ./scripts/singlebox.sh --standalone stop bcs_bots || true
+
+      - name: Upload e2e coverage artifacts
+        if: always() && steps.changes.outputs.skip-bcs != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bcs-e2e-coverage
+          path: |
+            src/bcs/target/cov-e2e/cobertura.xml
+            src/bcs/target/cov-e2e/coverage.txt
+            src/bcs/target/cov-e2e/summary.json
+          if-no-files-found: ignore
