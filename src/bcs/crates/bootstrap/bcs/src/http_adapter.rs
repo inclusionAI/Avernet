@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_fuse_client::FuseClient;
+pub use bcs_http::state::BotRuntimeTokenResolverPort;
 use bcs_http::state::{
     BcsHttpAuthBotRuntimeTokenResolver, BotRequestPort, ChainUserIdentityPort, HealthPort,
     HttpAppState, VisibilitySyncPort, VisibilitySyncRequest,
@@ -17,6 +18,38 @@ use tokio::sync::mpsc;
 
 use crate::server::BcsServerState;
 
+pub struct BotRuntimeTokenResolverBuildContext {
+    pub base: Arc<dyn BotRuntimeTokenResolverPort>,
+}
+
+pub type RegisteredBotRuntimeTokenResolverBuild =
+    fn(BotRuntimeTokenResolverBuildContext) -> Option<Arc<dyn BotRuntimeTokenResolverPort>>;
+
+pub struct BotRuntimeTokenResolverFactoryRegistration {
+    pub name: &'static str,
+    pub build: RegisteredBotRuntimeTokenResolverBuild,
+}
+
+inventory::collect!(BotRuntimeTokenResolverFactoryRegistration);
+
+pub fn build_bot_runtime_token_resolver(
+    base: Arc<dyn BotRuntimeTokenResolverPort>,
+) -> Arc<dyn BotRuntimeTokenResolverPort> {
+    let mut resolver = base;
+    for registration in inventory::iter::<BotRuntimeTokenResolverFactoryRegistration> {
+        if let Some(next) = (registration.build)(BotRuntimeTokenResolverBuildContext {
+            base: Arc::clone(&resolver),
+        }) {
+            tracing::info!(
+                resolver = registration.name,
+                "registered bot runtime token resolver"
+            );
+            resolver = next;
+        }
+    }
+    resolver
+}
+
 pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppState {
     let config = state.config.clone();
     let max_group_messages = if config.max_group_messages > 0 {
@@ -30,11 +63,13 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
         ..state.services.clone()
     };
 
+    let runtime_token_resolver = build_bot_runtime_token_resolver(Arc::new(
+        BcsHttpAuthBotRuntimeTokenResolver::default()
+            .with_credentials(state.provider_credentials.clone()),
+    ));
+
     HttpAppState::new(services_with_secret)
-        .with_bot_runtime_token_resolver(Arc::new(
-            BcsHttpAuthBotRuntimeTokenResolver::default()
-                .with_credentials(state.provider_credentials.clone()),
-        ))
+        .with_bot_runtime_token_resolver(runtime_token_resolver)
         .with_health(Arc::new(BootstrapHealthPort {
             state: Arc::clone(&state),
         }))
@@ -255,5 +290,74 @@ impl VisibilitySyncPort for BootstrapVisibilitySyncPort {
         );
 
         bcs_fusion::sync_worker_with_retry(&fuse_client, &request.bot_uuid, &sync_req).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bcs_bot_store::MemoryProviderStore;
+    use bcs_service_api::{ProviderCredential, ProviderCredentialRepoPort};
+
+    struct RegisteredAgentpassResolver {
+        fallback: Arc<dyn BotRuntimeTokenResolverPort>,
+    }
+
+    #[async_trait]
+    impl BotRuntimeTokenResolverPort for RegisteredAgentpassResolver {
+        async fn resolve_agentpass_agent_code(&self, _token: &str) -> Option<String> {
+            Some("registered-agent-code".to_string())
+        }
+
+        async fn try_provider_admin(&self, token: &str) -> Option<String> {
+            self.fallback.try_provider_admin(token).await
+        }
+    }
+
+    fn build_registered_agentpass_resolver(
+        ctx: BotRuntimeTokenResolverBuildContext,
+    ) -> Option<Arc<dyn BotRuntimeTokenResolverPort>> {
+        Some(Arc::new(RegisteredAgentpassResolver { fallback: ctx.base }))
+    }
+
+    inventory::submit! {
+        BotRuntimeTokenResolverFactoryRegistration {
+            name: "test-agentpass",
+            build: build_registered_agentpass_resolver,
+        }
+    }
+
+    #[tokio::test]
+    async fn registered_runtime_token_resolver_extends_default_resolver() {
+        let credentials = Arc::new(MemoryProviderStore::new());
+        credentials
+            .insert_credential(ProviderCredential {
+                provider_id: "provider-1".to_string(),
+                credential_kind: "provider_admin".to_string(),
+                secret_value: "provider-admin-token".to_string(),
+                disabled: false,
+                created_at: 0,
+                updated_at: 0,
+            })
+            .await
+            .expect("insert provider admin credential");
+        let credentials: Arc<dyn ProviderCredentialRepoPort> = credentials;
+        let resolver = build_bot_runtime_token_resolver(Arc::new(
+            BcsHttpAuthBotRuntimeTokenResolver::default()
+                .with_credentials(credentials),
+        ));
+
+        let agent_code = resolver
+            .resolve_agentpass_agent_code("agentpass.header.sig")
+            .await;
+
+        assert_eq!(agent_code.as_deref(), Some("registered-agent-code"));
+        assert_eq!(
+            resolver
+                .try_provider_admin("provider-admin-token")
+                .await
+                .as_deref(),
+            Some("provider-1")
+        );
     }
 }
