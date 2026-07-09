@@ -505,3 +505,85 @@ def test_resolve_ext_inline_wins_over_marker(repo_oss, oss):
     )
     assert resolved == {"config_artifact": {"a": 1}}
     assert oss.store == {}  # no get/put occurred
+
+
+def test_write_strips_stale_marker_end_to_end(repo_oss, oss):
+    # A caller hands ext carrying BOTH a fresh inline artifact and a stale marker
+    # (the degrade-path shape). The write must persist only the inline artifact,
+    # and the read must never fetch the stale key. Exercised through the public
+    # API, not the private helper.
+    rec = repo_oss.insert(_data(status="DRAFT"))
+    repo_oss.update_status_with_ext(
+        rec.id, "DRAFT",
+        {
+            "config_artifact": _small_artifact(),
+            "config_artifact_oss": {"oss_key": "stale/key", "offloaded": True},
+        },
+        source_status="DRAFT",
+    )
+    raw = _raw_ext(repo_oss, rec.id)
+    assert _ARTIFACT_OSS_MARKER not in raw
+    assert raw["config_artifact"] == _small_artifact()
+    got = repo_oss.get_by_id(rec.id)
+    assert got.ext["config_artifact"] == _small_artifact()
+    assert oss.store == {}  # stale key never fetched
+
+
+def test_update_source_none_existing_row_uploads(repo_oss, oss):
+    # source_status=None against an existing row still takes the write (affected
+    # > 0) → the large artifact IS uploaded.
+    rec = repo_oss.insert(_data(status="DRAFT"))
+    out = repo_oss.update_status_with_ext(
+        rec.id, "DRAFT", {"config_artifact": _big_artifact()}, source_status=None,
+    )
+    assert out is not None
+    assert oss.put_calls == 1
+    assert out.ext["config_artifact"] == _big_artifact()
+
+
+def test_update_source_none_missing_row_does_not_upload(repo_oss, oss):
+    # The exact round-2 orphan gap: source_status=None against a nonexistent
+    # publish_id → affected == 0 → must NOT upload (no row to reference it).
+    out = repo_oss.update_status_with_ext(
+        999999, "DRAFT", {"config_artifact": _big_artifact()}, source_status=None,
+    )
+    assert out is None
+    assert oss.put_calls == 0
+    assert oss.store == {}
+
+
+def test_delete_tolerates_sweep_failure(tmp_path):
+    # delete()'s best-effort cleanup must never fail the DB delete, even if the
+    # object-storage sweep raises (e.g. an impl lacking or breaking list_objects).
+    class _FakeOSSListRaises(_FakeOSS):
+        def list_objects(self, prefix: str, max_keys: int = 1000):
+            raise RuntimeError("list_objects unavailable")
+
+    fake = _FakeOSSListRaises()
+    repo = _repo_with(tmp_path, fake)
+    rec = repo.insert(_data(ext={"config_artifact": _big_artifact()}))
+    assert fake.put_calls == 1  # it did offload
+    # Sweep raises inside delete → swallowed → DB delete still reports success.
+    assert repo.delete(rec.id) is True
+    assert repo.get_by_id(rec.id) is None
+
+
+def _artifact_of_json_size(nbytes):
+    """A ``{"b": "x"*k}`` artifact whose JSON is exactly ``nbytes`` bytes."""
+    import json
+
+    base = len(json.dumps({"b": ""}, ensure_ascii=False).encode("utf-8"))
+    return {"b": "x" * (nbytes - base)}
+
+
+def test_threshold_boundary(tmp_path):
+    fake = _FakeOSS()
+    repo = _repo_with(tmp_path, fake)
+    # Exactly at the threshold → inline (the check is ``> threshold``).
+    at = _artifact_of_json_size(_ARTIFACT_OSS_THRESHOLD_BYTES)
+    repo.insert(_data(publish_bot_id="b-at", ext={"config_artifact": at}))
+    assert fake.put_calls == 0
+    # One byte over → offloaded.
+    over = _artifact_of_json_size(_ARTIFACT_OSS_THRESHOLD_BYTES + 1)
+    repo.insert(_data(publish_bot_id="b-over", ext={"config_artifact": over}))
+    assert fake.put_calls == 1
