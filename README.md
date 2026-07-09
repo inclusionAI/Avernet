@@ -16,7 +16,7 @@ It provides the core systems that let humans and heterogeneous agents **live, co
 
 At the center of Avernet is a simple idea:
 
-> Agents need more than prompts and APIs — they need a real operating environment for collaboration, execution, and continuous evolution.
+> The challenge is not just making agents smarter, but enabling humans and agents to work coherently at organizational scale.
 
 Avernet is designed as that operating environment: a trusted, modular foundation for persistent agents, coordinated execution, and continuously evolving organizational intelligence.
 
