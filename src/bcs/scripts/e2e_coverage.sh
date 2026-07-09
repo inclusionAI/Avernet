@@ -130,6 +130,21 @@ if [[ "$skip_start" -eq 0 ]]; then
   # keeps runtime profraw next to the objects cargo llvm-cov report merges.
   cov_runtime_dir="$bcs_dir/target/cov-e2e/llvm-cov-target"
   export LLVM_PROFILE_FILE="$cov_runtime_dir/bcs-%m-%p.profraw"
+  # Enable BCS_DEBUG so bcs's debug_middleware logs every non-/health request as
+  # `[→BCS] METHOD PATH` to bcs.log (singlebox redirects bcs stderr there). The
+  # endpoint-coverage report below diffs those hits against router.rs's full
+  # registered endpoint set. Exported here so the bcs server singlebox launches
+  # inherits it (bcs-cli spawns under e2e.sh inherit it too, but their requests
+  # still hit the running bcs server and are logged server-side — what we want).
+  export BCS_DEBUG=true
+  # Match start_bcs_binary: BCS_LOG = ${LOG_DIR}/bcs.log where
+  # LOG_DIR=${DEP_DIR}/logs and DEP_DIR=<repo>/scripts/.dependencies (DEP_DIR is
+  # resolved relative to singlebox's own SCRIPT_DIR = <repo>/scripts, NOT the
+  # repo root). singlebox redirects bcs's stderr to it; debug_middleware writes
+  # there with BCS_DEBUG=true above. The file is truncated right before e2e runs
+  # below so the endpoint report counts only the e2e suite's hits, not singlebox's
+  # bot-onboarding setup requests nor a stale log from a prior run.
+  bcs_log="$repo_root/scripts/.dependencies/logs/bcs.log"
   "$repo_root/scripts/singlebox.sh" --standalone --with-bcs-coverage start bcs_bots
 fi
 
@@ -158,6 +173,14 @@ fi
 #    to see what was covered).
 e2e_status=0
 cov_gate_status=0
+# Baseline the BCS_DEBUG hit log so the endpoint-coverage report (run at
+# aggregation time) counts only this e2e suite's requests, not singlebox's
+# bot-onboarding setup nor a prior run's stale log. bcs appends to bcs_log, so
+# truncating here is safe (it is already running; it keeps its file offset and
+# the next line lands at the new EOF). Skipped under --skip-start only if the
+# caller also set BCS_LOG to point elsewhere — otherwise reuse the default.
+bcs_log="${bcs_log:-$repo_root/scripts/.dependencies/logs/bcs.log}"
+: > "$bcs_log" 2>/dev/null || true
 bash "$bcs_dir/scripts/e2e-test/e2e.sh" || e2e_status=$?
 if [[ "$e2e_status" -ne 0 ]]; then
   echo "WARN: e2e exited with $e2e_status; continuing to flush profraw and aggregate coverage." >&2
@@ -250,6 +273,21 @@ if [[ "$no_stop" -eq 0 ]]; then
     # silently passing would let coverage regressions go unnoticed.
     [[ "$bcs_min" -gt 0 ]] && cov_gate_status=1
   fi
+
+  # Adapters endpoint coverage (report-only, never gates): of all HTTP routes
+  # registered in bcs-http's router.rs, which does this e2e run exercise? Diff
+  # the BCS_DEBUG hit log (collected above) against the parsed endpoint set.
+  # See scripts/adapters_endpoint_coverage.py for the over/under-count self-checks.
+  endpoint_txt="$cov_dir/endpoint_coverage.txt"
+  endpoint_xml="$cov_dir/endpoint_coverage.xml"
+  # The script prints only a short summary to stdout (no per-endpoint detail);
+  # the full covered/uncovered lists go to the .txt and structured .xml files.
+  ( cd "$bcs_dir" && python3 scripts/adapters_endpoint_coverage.py \
+      --router crates/adapters/http/bcs-http/src/router.rs \
+      --log "$bcs_log" \
+      --out-txt "$endpoint_txt" \
+      --out-xml "$endpoint_xml" ) \
+      || echo "WARN: endpoint coverage report failed (see stderr above)" >&2
 fi
 
 # Post-aggregation cleanup of profraw. The instrumented cargo build redirects
