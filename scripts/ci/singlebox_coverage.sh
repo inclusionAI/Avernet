@@ -4,9 +4,11 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"
 
+export PATH="${HOME}/.cargo/bin:${PATH}"
+
 coverage_root="${SINGLEBOX_COVERAGE_ROOT:-$repo_root/scripts/.dependencies/coverage/singlebox}"
 report_dir="$coverage_root/reports"
-mode="${SINGLEBOX_COVERAGE_MODE:-mock}"
+mode="${SINGLEBOX_COVERAGE_MODE:-real}"
 
 usage() {
   cat <<USAGE
@@ -14,14 +16,11 @@ Usage: scripts/ci/singlebox_coverage.sh [OPTIONS]
 
 Singlebox coverage gate entrypoint used by pre-push and PR CI.
 
-Current GitHub bootstrap behavior:
-  - default mode is mock, so pre-push can enforce the architecture before the
-    real open-source singlebox startup path is fully stable;
-  - set SINGLEBOX_COVERAGE_MODE=real to attempt the live singlebox path.
+The default mode is real: pre-push starts the local singlebox coverage stack.
 
 Options:
   --coverage-root DIR     Coverage output root, default: $coverage_root
-  --mode mock|real        Override SINGLEBOX_COVERAGE_MODE
+  --mode real             Override SINGLEBOX_COVERAGE_MODE
   -h, --help              Show this help
 USAGE
 }
@@ -57,43 +56,6 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-write_mock_reports() {
-  mkdir -p "$report_dir"
-  cat > "$report_dir/summary.json" <<JSON
-{
-  "mode": "mock",
-  "status": "passed",
-  "systems": {
-    "backend": {"core": null, "router_api": null, "plugin_api": null},
-    "baas": {"core": null, "router_api": null, "plugin_api": null},
-    "bcs": {"core": null, "router_api": null, "plugin_api": null},
-    "engine": {"core": null, "router_api": null, "plugin_api": null}
-  },
-  "note": "Mock singlebox coverage gate. The pre-push architecture is active; real coverage is enabled by SINGLEBOX_COVERAGE_MODE=real after open-source singlebox startup is stabilized."
-}
-JSON
-  cat > "$report_dir/summary.md" <<MD
-# Singlebox Coverage Gate
-
-- mode: mock
-- status: passed
-- note: pre-push invoked the singlebox coverage gate; real startup is deferred to SINGLEBOX_COVERAGE_MODE=real.
-MD
-  cat > "$report_dir/dashboard.html" <<HTML
-<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<title>Singlebox Coverage Gate</title>
-<body>
-  <h1>Singlebox Coverage Gate</h1>
-  <p>Mode: mock</p>
-  <p>Status: passed</p>
-  <p>The pre-push architecture invoked this gate. Switch to <code>SINGLEBOX_COVERAGE_MODE=real</code> when open-source singlebox startup is stable.</p>
-</body>
-</html>
-HTML
-}
-
 run_real_singlebox() {
   mkdir -p "$coverage_root/raw" "$report_dir"
   echo "singlebox coverage real mode"
@@ -110,11 +72,6 @@ run_real_singlebox() {
 }
 
 case "$mode" in
-  mock)
-    echo "singlebox coverage gate: mock mode"
-    echo "coverage reports: $report_dir"
-    write_mock_reports
-    ;;
   real)
     run_real_singlebox
     ;;
