@@ -326,22 +326,6 @@ class CronRuntimeTargetMixin:
             failed_target["instance_health_status"] = instance_health_status
         return failed_target
 
-    def _should_fan_out_runtime_operation(
-        self,
-        target: CronRuntimeTarget,
-        *,
-        method: str,
-        path: str,
-    ) -> bool:
-        if target.runtime_stage == RUNTIME_STAGE_DRAFT:
-            return False
-        if target.bot_type != "service":
-            return False
-        method_upper = method.upper()
-        return method_upper == "PUT" or (
-            method_upper == "POST" and path.rstrip("/").endswith("/run")
-        )
-
     async def _forward_runtime_target_request(
         self,
         target: CronRuntimeTarget,
