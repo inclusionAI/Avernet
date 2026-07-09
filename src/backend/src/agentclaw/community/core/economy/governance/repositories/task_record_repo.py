@@ -441,6 +441,14 @@ class TaskRecordRepository:
             else:
                 db_ticket.review_reason = review_reason
 
+            # Clear remind_at on feedback transitions — both target states
+            # (waiting_review / scheduled) are blocked: scan/reminder/dispatch all
+            # gate on governance_status='open', so a leftover remind_at would be a
+            # dead, semantically-wrong field. Mirrors ``pause_ticket``/``close_ticket``
+            # which also null remind_at when leaving the open state. Fixes TC-37
+            # (waiting_review ticket upload refresh must not see a stale remind_at).
+            db_ticket.remind_at = None
+
             try:
                 s.commit()
             except Exception:
