@@ -10,6 +10,8 @@ coverage_root="${SINGLEBOX_COVERAGE_ROOT:-$repo_root/scripts/.dependencies/cover
 report_dir="$coverage_root/reports"
 mode="${SINGLEBOX_COVERAGE_MODE:-real}"
 acceptance_target="${SINGLEBOX_COVERAGE_ACCEPTANCE_TARGET:-tests/community/acceptance/cron/test_cron_query_lifecycle.py}"
+coverage_standalone_root=""
+coverage_standalone_runtime=""
 
 usage() {
   cat <<USAGE
@@ -60,8 +62,8 @@ done
 run_real_singlebox() {
   rm -rf "$coverage_root/raw" "$report_dir"
   mkdir -p "$coverage_root/raw" "$report_dir"
-  local coverage_standalone_root="$coverage_root/standalone-openclaw"
-  local coverage_standalone_runtime="$coverage_root/standalone-runtime"
+  coverage_standalone_root="$coverage_root/standalone-openclaw"
+  coverage_standalone_runtime="$coverage_root/standalone-runtime"
   echo "singlebox coverage real mode"
   echo "coverage_root: $coverage_root"
   echo "standalone_openclaw_root: $coverage_standalone_root"
@@ -75,7 +77,12 @@ run_real_singlebox() {
       bash "$repo_root/scripts/singlebox.sh" --standalone stop all || true
   }
   trap cleanup_real_singlebox EXIT
+  env OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE=mock \
+    STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
+    STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
+    bash "$repo_root/scripts/singlebox.sh" --standalone setup all
   env SINGLEBOX_COVERAGE=1 SINGLEBOX_COVERAGE_DIR="$coverage_root/raw" OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE=mock \
+    BACKEND_READY_ATTEMPTS="${BACKEND_READY_ATTEMPTS:-120}" \
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
     bash "$repo_root/scripts/singlebox.sh" --standalone start all

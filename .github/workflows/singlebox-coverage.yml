@@ -1,0 +1,154 @@
+name: Singlebox Coverage
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+    paths:
+      - "scripts/**"
+      - "src/backend/**"
+      - "src/baas/**"
+      - "src/bcs/**"
+      - "src/engine/**"
+      - "src/frontend/**"
+      - "src/plugin/**"
+      - ".github/workflows/singlebox-coverage.yml"
+  push:
+    branches:
+      - dev
+      - main
+    paths:
+      - "scripts/**"
+      - "src/backend/**"
+      - "src/baas/**"
+      - "src/bcs/**"
+      - "src/engine/**"
+      - "src/frontend/**"
+      - "src/plugin/**"
+      - ".github/workflows/singlebox-coverage.yml"
+  workflow_dispatch:
+    inputs:
+      use_cn_mirror:
+        description: "Use public China mirrors for dependency downloads"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: singlebox-coverage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  singlebox-coverage:
+    name: Singlebox coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      OCB_SKIP_GIT_HOOKS: "1"
+      SINGLEBOX_MODEL_CONFIG_MODE: mock
+      SINGLEBOX_COVERAGE_MODE: real
+      USE_CN_MIRROR: ${{ inputs.use_cn_mirror && '1' || '' }}
+      BCN_PLUGIN_SOURCE: source
+      CARGO_TERM_COLOR: always
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ github.workspace }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup component add llvm-tools
+          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+          rustc --version
+          cargo --version
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            git \
+            jq \
+            libsqlite3-dev \
+            libssl-dev \
+            lsof \
+            pkg-config \
+            procps \
+            protobuf-compiler
+
+      - name: Install Python tooling
+        run: |
+          python -m pip install --upgrade pip uv
+          uv --version
+
+      - name: Install OpenClaw CLI
+        run: |
+          npm install -g openclaw@2026.6.1
+          openclaw --version || true
+
+      - name: Validate shell scripts
+        run: |
+          bash -n scripts/singlebox.sh
+          bash -n scripts/ci/singlebox_coverage.sh
+          find scripts/modules -name "*.sh" -print0 | xargs -0 -n1 bash -n
+
+      - name: Run singlebox coverage
+        run: |
+          echo "SINGLEBOX_COVERAGE_MODE=${SINGLEBOX_COVERAGE_MODE}"
+          bash scripts/ci/singlebox_coverage.sh
+
+      - name: Verify singlebox coverage artifacts
+        run: |
+          python3 scripts/ci/verify_singlebox_coverage_artifacts.py \
+            --reports-dir scripts/.dependencies/coverage/singlebox/reports
+
+      - name: Show singlebox diagnostics on failure
+        if: failure()
+        run: |
+          bash scripts/singlebox.sh --standalone status all || true
+          bash scripts/singlebox.sh --local status all || true
+          find scripts/.dependencies/logs -maxdepth 2 -type f -print -exec tail -n 160 {} \; || true
+          find .standalone-openclaw -type f -name "*.log" -print -exec tail -n 160 {} \; || true
+
+      - name: Stop singlebox
+        if: always()
+        run: |
+          bash scripts/singlebox.sh --standalone stop all || true
+          bash scripts/singlebox.sh --local stop all || true
+
+      - name: Upload singlebox artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: singlebox-coverage-artifacts
+          path: |
+            scripts/.dependencies/logs/**
+            scripts/.dependencies/coverage/singlebox/**
+            scripts/.dependencies/standalone/**
+            .standalone-openclaw/logs/**
+          if-no-files-found: ignore

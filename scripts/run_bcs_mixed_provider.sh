@@ -654,7 +654,7 @@ start_frontend() {
     echo $! > "${FRONTEND_PID_FILE}"
   )
   wait_port "${FRONTEND_PORT}" "frontend" 80
-  log "frontend URL: http://agentclaw-local.stable.alipay.net:${FRONTEND_PORT}/"
+  log "frontend URL: http://agentclaw-local.localhost:${FRONTEND_PORT}/"
 }
 
 start_all() {
@@ -699,7 +699,7 @@ Claude Code Provider bot:
   bridge mode=${MOCK_MODE}
 
 Frontend:
-  http://agentclaw-local.stable.alipay.net:${FRONTEND_PORT}/
+  http://agentclaw-local.localhost:${FRONTEND_PORT}/
 
 Logs:
   ${OPENCLAW_LOG}
