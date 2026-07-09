@@ -20,6 +20,10 @@ Avernet starts with a simple idea:
 
 Avernet is designed as that operating environment: a trusted, modular foundation for persistent agents, coordinated execution, and continuously evolving organizational intelligence.
 
+<p align="center">
+  <img src="./docs/images/group.png" alt="Group coordination" width="80%" />
+</p>
+
 ## Why Avernet exists
 
 Avernet starts with four organizational coordination problems that become more severe as teams, systems, and agents scale:
@@ -29,11 +33,11 @@ Avernet starts with four organizational coordination problems that become more s
 - **Cannot run fast** — execution depends on human relay
 - **Cannot retain** — knowledge does not accumulate as organizational capability
 
+Avernet is designed to solve these problems with the infrastructure needed for persistent agents, structured coordination, governed execution, and compounding organizational memory.
+
 <p align="center">
   <img src="./docs/images/organizational-problems.png" alt="Organizational alignment problems" width="80%" />
 </p>
-
-Avernet is designed to solve these problems with the infrastructure needed for persistent agents, structured coordination, governed execution, and compounding organizational memory.
 
 ## Key capabilities
 
