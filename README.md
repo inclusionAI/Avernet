@@ -18,7 +18,9 @@ Avernet starts with a simple idea:
 
 > The challenge is not just making agents smarter, but enabling humans and agents to work coherently at organizational scale.
 
-Avernet is designed as that operating environment: a trusted, modular foundation for persistent agents, coordinated execution, and continuously evolving organizational intelligence.
+Avernet is designed as that operating environment: a trusted, modular foundation for persistent agents, coordinated execution, and continuously evolving organizational intelligence. 
+
+Avernet is in production at Ant Group, where it powers over 10,000 agents/bots as of early July 2026.
 
 <p align="center">
   <img src="./docs/images/group.png" alt="Group coordination" width="80%" />
