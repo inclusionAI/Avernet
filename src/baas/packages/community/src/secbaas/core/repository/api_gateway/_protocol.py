@@ -38,8 +38,14 @@ class APIKeyRepository(Protocol):
         """根据前缀查询"""
         ...
 
-    def get_by_prefix_and_status(self, prefix: str, status: str) -> APIKeyRecord | None:
-        """根据前缀和状态查询"""
+    def get_by_prefix_and_status(
+        self, prefix: str, status: str, env: str | None = None
+    ) -> APIKeyRecord | None:
+        """根据前缀和状态查询
+
+        Args:
+            env: 可选环境过滤；传入时仅返回该环境的记录，避免共享 DB 跨环境互认。
+        """
         ...
 
     def list_keys(

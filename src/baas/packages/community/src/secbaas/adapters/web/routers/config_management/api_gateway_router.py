@@ -160,7 +160,7 @@ async def create_bot_key(
 @router.post(
     "/app",
     summary="创建 App API Key",
-    description='创建一个 app_type 为 app 的 API Key，自动设置 app_type=app。任何已认证用户均可创建，owner 自动填充为当前用户，policy 默认不允许访问任何 bot (allowed_bots=["NONE"])，后续通过 grant/revoke 接口管理',
+    description="创建一个 app_type 为 app 的 API Key，自动设置 app_type=app。任何已认证用户均可创建，owner 自动填充为当前用户，policy 默认不允许访问任何 bot (allowed_bots=[])，后续通过 grant/revoke 接口管理",
     response_model=ApiResponse,
     responses={
         200: {"description": "API Key 创建成功"},
@@ -183,7 +183,7 @@ async def create_app_key(
         **data.model_dump(),
         app_type="app",
         owner=operator,
-        policy='{"allowed_bots":["NONE"]}',
+        policy='{"allowed_bots":[]}',
     )
     try:
         key = await service.create_key(create_data, op_ctx)
@@ -383,8 +383,7 @@ async def get_allowed_bots(
         )
 
     policy = parse_policy(_checked.policy)
-    # 过滤 NONE 哨兵值，对外返回语义为空列表
-    bots = [b for b in policy.allowed_bots if b != "NONE"]
+    bots = policy.allowed_bots
     logger.info(f"Get allowed_bots: prefix={api_key_prefix}, count={len(bots)}")
     return ApiResponse(data={"allowed_bots": bots})
 
@@ -416,9 +415,6 @@ async def grant_allowed_bot(
 
     policy = parse_policy(_key.policy)
 
-    # 如果当前是 NONE 哨兵，清空后替换为实际 bot_id
-    if policy.allowed_bots == ["NONE"]:
-        policy.allowed_bots = []
     if data.bot_id not in set(policy.allowed_bots):
         policy.allowed_bots.append(data.bot_id)
 

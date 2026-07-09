@@ -98,6 +98,39 @@ class TestVerify:
 
         assert result is None
 
+    async def test_verify_passes_current_env_to_repository(self, validator, repo):
+        """verify 必须把当前环境透传给 repository，钉死当前 env 过滤。"""
+        repo.get_by_prefix_and_status.return_value = _make_record()
+
+        with (
+            patch(
+                "secbaas.core.service.api_gateway._key_gen.APIKeyGenerator.verify_key",
+                return_value=True,
+            ),
+            patch(
+                "secbaas.core.service.api_gateway._key_validator.env_utils.get_current_env",
+                return_value="prod",
+            ),
+        ):
+            await validator.verify("xK9mP2nQ1234567890123456789012345")
+
+        args, kwargs = repo.get_by_prefix_and_status.call_args
+        # env 通过关键字传入
+        assert kwargs.get("env") == "prod"
+
+    async def test_verify_cross_env_returns_none(self, validator, repo):
+        """跨环境的 key（repository 按 env 过滤后查不到）→ None，统一 401 不泄露。"""
+        # repository 在当前 env 下查不到（跨环境记录被过滤）→ 返回 None
+        repo.get_by_prefix_and_status.return_value = None
+
+        with patch(
+            "secbaas.core.service.api_gateway._key_validator.env_utils.get_current_env",
+            return_value="prod",
+        ):
+            result = await validator.verify("xK9mP2nQ1234567890123456789012345")
+
+        assert result is None
+
 
 # ==================== verify_sync ====================
 
@@ -136,3 +169,22 @@ class TestVerifySync:
             result = validator.verify_sync("xK9mP2nQ1234567890123456789012345")
 
         assert result is None
+
+    def test_verify_sync_passes_current_env_to_repository(self, validator, repo):
+        """verify_sync 必须把当前环境透传给 repository。"""
+        repo.get_by_prefix_and_status.return_value = _make_record()
+
+        with (
+            patch(
+                "secbaas.core.service.api_gateway._key_gen.APIKeyGenerator.verify_key",
+                return_value=True,
+            ),
+            patch(
+                "secbaas.core.service.api_gateway._key_validator.env_utils.get_current_env",
+                return_value="prod",
+            ),
+        ):
+            validator.verify_sync("xK9mP2nQ1234567890123456789012345")
+
+        args, kwargs = repo.get_by_prefix_and_status.call_args
+        assert kwargs.get("env") == "prod"

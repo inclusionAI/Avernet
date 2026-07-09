@@ -492,12 +492,12 @@ class TestCreateAppKey:
         assert create_dto.app_type == "app"
 
     @pytest.mark.asyncio
-    async def test_create_app_key_default_policy_is_none_sentinel(
+    async def test_create_app_key_default_policy_is_deny_all(
         self,
         op_ctx: OperationContext,
         mock_service: AsyncMock,
     ) -> None:
-        """create_app_key sets default policy to '{\"allowed_bot\":[\"NONE\"]}'."""
+        """create_app_key sets default policy to '{\"allowed_bots\":[]}' (deny all)."""
         from secbaas.api.api_gateway import AppAPIKeyCreate
 
         data = AppAPIKeyCreate(app_id="my-app")
@@ -517,7 +517,7 @@ class TestCreateAppKey:
             env="test",
             creator="user-001",
             modifier=None,
-            policy='{"allowed_bots":["NONE"]}',
+            policy='{"allowed_bots":[]}',
             gmt_create=datetime(2024, 1, 1),
             gmt_modified=datetime(2024, 1, 1),
         )
@@ -525,7 +525,7 @@ class TestCreateAppKey:
         await create_app_key(data, op_ctx=op_ctx, service=mock_service)
         call_args = mock_service.create_key.call_args
         create_dto = call_args[0][0]
-        assert create_dto.policy == '{"allowed_bots":["NONE"]}'
+        assert create_dto.policy == '{"allowed_bots":[]}'
 
     @pytest.mark.asyncio
     async def test_api_key_error(
@@ -842,11 +842,11 @@ class TestGetAllowedBots:
         self,
         sample_app_key_response: APIKeyResponse,
     ) -> None:
-        """Key with None policy → return empty list."""
+        """Key with None policy → legacy allow-all, normalized to ['*']."""
         key = sample_app_key_response.model_copy(update={"policy": None})
         result = await get_allowed_bots("sk-app", key)
         assert isinstance(result, ApiResponse)
-        assert result.data == {"allowed_bots": []}
+        assert result.data == {"allowed_bots": ["*"]}
 
     @pytest.mark.asyncio
     async def test_none_sentinel_filtered_out(
@@ -942,7 +942,7 @@ class TestGrantAllowedBot:
         self,
         mock_service: AsyncMock,
     ) -> None:
-        """When policy is ['NONE'], grant clears NONE and appends the real bot_id."""
+        """When policy is ['NONE'], grant normalizes it to empty and appends the bot_id."""
         none_policy_key = APIKeyResponse(
             id=60,
             app_id="my-app",

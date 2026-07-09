@@ -79,7 +79,7 @@ class AppAPIKeyCreate(BaseModel):
     """创建 App API Key 请求（app_type 固定为 app）
 
     owner 由服务端从 OperationContext 自动填充，无需客户端指定。
-    policy 默认不允许访问任何 bot (allowed_bots=["NONE"])，后续通过 allowed-bots API 授权。
+    policy 默认不允许访问任何 bot (allowed_bots=[])，后续通过 allowed-bots API 授权。
     """
 
     app_id: str = Field(..., min_length=1, max_length=128, description="应用ID")
