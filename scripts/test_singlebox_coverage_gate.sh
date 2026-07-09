@@ -21,6 +21,10 @@ case ":${PATH}:" in
   *":${HOME}/.cargo/bin:"*) ;;
   *) echo "missing cargo path in PATH" >&2; exit 11 ;;
 esac
+if [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" != "mock" ]; then
+  echo "singlebox coverage should force SINGLEBOX_MODEL_CONFIG_MODE=mock" >&2
+  exit 12
+fi
 printf '%s\n' "$*" >> "${SINGLEBOX_STUB_LOG:?}"
 exit 0
 SH
