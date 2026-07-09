@@ -4,7 +4,7 @@
 
 这份文档列出本地 quick start 需要的第三方工具。它是给人和 agent 在执行安装或启动前阅读的依赖说明。
 
-适用平台：macOS、Debian / Ubuntu、Fedora。本文面向 `singlebox.sh --local` 和 `singlebox.sh --standalone` 本机路径；Docker 源码构建路径只需要可选工具里的 Docker 依赖，详细流程见 [Docker Guide](docker.zh-CN.md)。
+适用平台：macOS、Debian / Ubuntu、Fedora。本文面向 `singlebox.sh` 本机隔离路径；Docker 源码构建路径只需要可选工具里的 Docker 依赖，详细流程见 [Docker Guide](docker.zh-CN.md)。
 
 在仓库根目录先跑安全预检：
 
@@ -42,7 +42,7 @@
 | SQLite 开发库 | BCS 本地存储 | `pkg-config --modversion sqlite3` | macOS 通常自带；Linux 需要安装 dev 包。 |
 | OpenSSL 开发库 | Rust TLS / native-tls 相关依赖编译 | `pkg-config --modversion openssl` | Linux 需要安装 `libssl-dev` / `openssl-devel`；macOS 建议使用 Homebrew 的 `openssl@3`。 |
 | Node.js 22+ | 构建 BCN 插件和运行前端 | `node --version` | `singlebox.sh` 会拒绝更低的主版本。 |
-| npm | 安装/构建 BCN 插件，以及安装前端依赖 | `npm --version` | local 和 standalone 路径都会用 npm 做插件和前端准备。 |
+| npm | 安装/构建 BCN 插件，以及安装前端依赖 | `npm --version` | 本机 singlebox 路径会用 npm 做插件和前端准备。 |
 | OpenClaw `>= 2026.3.28` | 启动本地 5bot stack | `openclaw --version` | `install-tools` 检测到缺失或低于最低版本时，会询问是否安装指定版本。 |
 | `jq` | 生成和复用 5bot OpenClaw JSON 配置 | `jq --version` | 本地 5bot stack 需要用它安全处理模型配置和 bot 配置。 |
 | `curl` | 健康检查和手动下载 | `curl --version` | 脚本和手动安装命令都会用到。 |
@@ -137,11 +137,5 @@ jq --version
 预检通过后，再继续主流程：
 
 ```bash
-./scripts/singlebox.sh --local
-```
-
-如果你希望使用 repo 内隔离的 BCS runtime 和 OpenClaw root：
-
-```bash
-./scripts/singlebox.sh --standalone
+./scripts/singlebox.sh
 ```

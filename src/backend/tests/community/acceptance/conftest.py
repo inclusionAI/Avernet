@@ -228,7 +228,7 @@ def live_baas():
 
 @pytest.fixture(scope="function")
 def live_backend(live_baas):
-    """Start a real --local backend, yield base_url; stop + clean on teardown.
+    """Start a real singlebox backend, yield base_url; stop + clean on teardown.
 
     function scope: each test gets a fresh in-memory SQLite + clean test-bots/,
     so flows don't collide on auto-increment ids (HANDOFF §6.3). Slow but
@@ -272,7 +272,7 @@ def live_backend(live_baas):
 
     # local_setup.sh forks a nohup'd python and returns; monitor the port, not proc.
     subprocess.run(
-        ["bash", str(LOCAL_SETUP), "--local", "start", "backend"],
+        ["bash", str(LOCAL_SETUP), "start", "backend"],
         cwd=str(PROJECT_ROOT), env=env, timeout=180, check=False,
     )
     try:
@@ -281,7 +281,7 @@ def live_backend(live_baas):
         yield BACKEND_URL
     finally:
         subprocess.run(
-            ["bash", str(LOCAL_SETUP), "--local", "stop", "backend"],
+            ["bash", str(LOCAL_SETUP), "stop", "backend"],
             cwd=str(PROJECT_ROOT), check=False,
         )
         time.sleep(2)

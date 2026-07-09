@@ -33,11 +33,11 @@ Common replacements:
   ./scripts/local_setup.sh check
     -> ./scripts/singlebox.sh check
 
-  ./scripts/local_setup.sh --local start bcs
-    -> ./scripts/singlebox.sh --local --bcs-env local start bcs
+  ./scripts/local_setup.sh start bcs
+    -> ./scripts/singlebox.sh --bcs-env local start bcs
 
-  ./scripts/local_setup.sh --local start bcs_frontend
-    -> ./scripts/singlebox.sh --local --bcs-env local start bcs_frontend
+  ./scripts/local_setup.sh start bcs_frontend
+    -> ./scripts/singlebox.sh --bcs-env local start bcs_frontend
 
   ./scripts/local_setup.sh status
     -> ./scripts/singlebox.sh status
@@ -56,12 +56,12 @@ reject_internal_dev_mode() {
   for arg in "$@"; do
     case "$arg" in
       --dev|-d|--bcs-env=dev)
-        die "Internal dev mode is not supported by local_setup.sh. Use ./scripts/singlebox.sh --local --bcs-env local ..."
+        die "Internal dev mode is not supported by local_setup.sh. Use ./scripts/singlebox.sh --bcs-env local ..."
         ;;
     esac
 
     if [ "$previous" = "--bcs-env" ] && [ "$arg" = "dev" ]; then
-      die "Internal dev mode is not supported by local_setup.sh. Use ./scripts/singlebox.sh --local --bcs-env local ..."
+      die "Internal dev mode is not supported by local_setup.sh. Use ./scripts/singlebox.sh --bcs-env local ..."
     fi
 
     previous="$arg"
@@ -81,7 +81,19 @@ main() {
   reject_internal_dev_mode "$@"
 
   warn "scripts/local_setup.sh is deprecated; forwarding to scripts/singlebox.sh"
-  exec "$SINGLEBOX" "$@"
+  local args=()
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --local|-l)
+        warn "Ignoring deprecated local_setup mode flag ${arg}; singlebox uses isolated standalone paths by default."
+        ;;
+      *)
+        args+=("$arg")
+        ;;
+    esac
+  done
+  exec "$SINGLEBOX" "${args[@]}"
 }
 
 main "$@"

@@ -14,31 +14,29 @@
 
 | 入口 | 适合谁 | 做什么 |
 | --- | --- | --- |
-| `./scripts/singlebox.sh --local` | 日常本机开发和联调 | 使用本机默认路径启动 BCS、5 个 OpenClaw demo bot 和前端。 |
-| `./scripts/singlebox.sh --standalone` | 隔离试跑的用户 | 使用仓库内隔离的 runtime 、OpenClaw root，减少对本机默认 OpenClaw 配置的影响。 |
+| `./scripts/singlebox.sh` | 日常本机开发、首次试跑用户 | 使用仓库内隔离 runtime 启动 BAAS、backend、BCS、5 个 OpenClaw demo bot、demo bot 和前端。 |
+| `./scripts/singlebox.sh --standalone` | 兼容旧文档或旧脚本 | 默认隔离 singlebox 模式的显式别名。 |
 | `./scripts/singlebox.sh check` | 只想先做预检的用户 | 检查所需工具、源码目录和端口；不安装、不构建、不启动、不停止进程。 |
 | `./scripts/singlebox.sh install-tools` | 希望脚本辅助安装依赖的用户 | 检查并安装缺失工具。可能写入用户目录或调用本机包管理器，执行前请确认可以接受。 |
 
-当前 `all` 组是 BCS + frontend。默认配置下，BCS 启动时会拉起 5 个本地 OpenClaw demo bot，并通过 BCN 插件接入 BCS。
+当前 `all` 组会启动 BAAS、backend、BCS、5 个本地 OpenClaw demo bot、demo bot 和 frontend。默认配置下，BCS 启动时会拉起 5 个本地 OpenClaw demo bot，并通过 BCN 插件接入 BCS。
 
-## 2. `--local` 和 `--standalone` 的区别
+## 2. 运行目录隔离
 
-两种模式启动的组件一致，区别主要是运行目录和 OpenClaw 隔离范围。
+`singlebox.sh` 只保留一种支持模式：隔离 singlebox 模式。它默认不会把 5bot profile、workspace 和插件链接写入本机默认 OpenClaw 目录。
 
-| 维度 | `--local` | `--standalone` |
-| --- | --- | --- |
-| 适合场景 | 日常开发和联调 | 隔离试跑 |
-| 默认组件 | BCS + 5 bot + frontend | BCS + 5 bot + frontend |
-| BCS runtime | `scripts/.dependencies/bcs_data`、`scripts/.dependencies/bcs-config` | `scripts/.dependencies/standalone/bcs_data`、`scripts/.dependencies/standalone/bcs-config` |
-| 5bot profile | `$HOME/.openclaw-<bot-profile>` | `.standalone-openclaw/profiles/<bot-profile>` |
-| 5bot workspace | `src/bcs/bcs_bots_test_dir/<bot-profile-source>/workspace` | `.standalone-openclaw/workspaces/<bot-profile>` |
-| BCN plugin link | `$HOME/.openclaw/extensions/openclaw-channel-bcn` | `.standalone-openclaw/extensions/openclaw-channel-bcn` |
-| 主要日志 | `scripts/.dependencies/logs/`、`src/bcs/bcs_bots_test_dir/logs/` | `scripts/.dependencies/logs/`、`scripts/.dependencies/standalone/`、`.standalone-openclaw/logs/` |
+| 维度 | 路径 |
+| --- | --- |
+| BCS runtime | `scripts/.dependencies/standalone/bcs_data`、`scripts/.dependencies/standalone/bcs-config` |
+| 5bot profile | `.standalone-openclaw/profiles/<bot-profile>` |
+| 5bot workspace | `.standalone-openclaw/workspaces/<bot-profile>` |
+| BCN plugin link | `.standalone-openclaw/extensions/openclaw-channel-bcn` |
+| 主要日志 | `scripts/.dependencies/logs/`、`scripts/.dependencies/standalone/`、`.standalone-openclaw/logs/` |
 
 默认 5bot 本地栈里，`<bot-profile-source>` 是 `ceo`、`product-manager`、
 `engineering`、`verification` 或 `customer-service`。
 
-默认不建议同时运行 `--local` 和 `--standalone`。
+默认端口同一时间只能被一个 singlebox stack 使用，包括 `21000`、`8000` 和 `30001` 到 `30041`。
 
 ## 3. 可选：本地配置
 
@@ -82,13 +80,13 @@ USE_CN_MIRROR=1
 
 运行 `singlebox.sh` 时也会安装仓库级 pre-push hook，即设置 `core.hooksPath=.githooks`。如果某次命令需要跳过 hook 安装，可以设置 `OCB_SKIP_GIT_HOOKS=1`。
 
-预检通过后，启动本机默认路径：
+预检通过后，启动默认隔离路径：
 
 ```bash
-./scripts/singlebox.sh --local
+./scripts/singlebox.sh
 ```
 
-首次启动会安装前端依赖、构建 BCS / bcs-cli / bcs-admin、构建并链接 BCN 插件，然后启动 BCS、5 个 OpenClaw demo bot 和前端。完成后访问：
+首次启动会安装前端依赖、构建 BCS / bcs-cli / bcs-admin、构建并链接 BCN 插件，然后启动 BAAS、backend、BCS、5 个 OpenClaw demo bot、demo bot 和前端。完成后访问：
 
 ```text
 http://127.0.0.1:8000/
@@ -96,17 +94,16 @@ http://127.0.0.1:8000/
 
 如果修改过 `FRONTEND_PORT`，或启动时传入了 `--frontend-port/-fp`，请访问对应端口。
 
-## 5. 使用隔离路径试跑
+## 5. 启动默认隔离路径
 
-如果希望把 BCS runtime、OpenClaw profile、workspace 和插件 link 都放在仓库内隔离目录：
+BCS runtime、OpenClaw profile、workspace 和插件 link 默认都放在仓库内隔离目录：
 
 ```bash
-./scripts/singlebox.sh --standalone check
-./scripts/singlebox.sh --standalone
+./scripts/singlebox.sh check
+./scripts/singlebox.sh
 ```
 
-standalone 适合试跑和排障；日常开发仍建议使用 `--local`。
-本地 standalone 路径默认使用仓库内隔离目录，不写入真实 `~/.openclaw`。
+`--standalone` 仍可作为默认模式的显式兼容写法。默认路径不写入真实 `~/.openclaw`。
 
 ## 6. 可选：模型配置
 
@@ -175,58 +172,39 @@ curl --noproxy '*' -fsS "${BCS_HTTP_URL}/health"
 ./scripts/singlebox.sh status
 ```
 
-查看 standalone 隔离路径的状态：
+查看隔离路径的状态：
 
 ```bash
-./scripts/singlebox.sh --standalone status
+./scripts/singlebox.sh status
 ```
 
 ## 8. 常用操作
 
-停止默认 local 路径：
+停止默认隔离路径：
 
 ```bash
 ./scripts/singlebox.sh stop
 ```
 
-停止 standalone 隔离路径：
-
-```bash
-./scripts/singlebox.sh --standalone stop
-```
-
-重启默认 local 路径：
+重启默认隔离路径：
 
 ```bash
 ./scripts/singlebox.sh restart
 ```
 
-清理 local 路径的 BCS 中间状态：
+清理 BCS 中间状态：
 
 ```bash
 ./scripts/singlebox.sh clean bcs
 ```
 
-清理 standalone 隔离路径的 BCS 中间状态：
-
-```bash
-./scripts/singlebox.sh --standalone clean bcs
-```
-
-`clean bcs` 会先停止 BCS 和本地 5bot stack，然后清理对应模式下的 BCS SQLite 数据、生成配置、PID 文件和本仓库 BCN plugin symlink。普通 `start` / `restart` 不会默认清理 `bcs.db*` 或 bot workspace。
+`clean bcs` 会先停止 BCS 和本地 5bot stack，然后清理 BCS SQLite 数据、生成配置、PID 文件和本仓库 BCN plugin symlink。普通 `start` / `restart` 不会默认清理 `bcs.db*` 或 bot workspace。
 
 ## 9. 常见问题
 
 ### BCS 没启动
 
-先看当前模式对应的日志：
-
-```bash
-tail -n 100 scripts/.dependencies/logs/bcs_bots_stack.log
-tail -n 100 src/bcs/bcs_bots_test_dir/logs/bcs.log
-```
-
-standalone 模式再看：
+先看隔离 stack 日志：
 
 ```bash
 tail -n 100 scripts/.dependencies/standalone/bcs_bots_stack.log
@@ -246,12 +224,6 @@ tail -n 100 .standalone-openclaw/logs/bcs.log
 
 ```bash
 test -f src/plugin/packages/openclaw-channel-bcn/dist/esm/index.js
-test -L "$HOME/.openclaw/extensions/openclaw-channel-bcn"
-```
-
-standalone 模式确认：
-
-```bash
 test -L .standalone-openclaw/extensions/openclaw-channel-bcn
 ```
 
@@ -261,24 +233,11 @@ test -L .standalone-openclaw/extensions/openclaw-channel-bcn
 ./scripts/singlebox.sh setup bcs
 ```
 
-standalone 模式：
-
-```bash
-./scripts/singlebox.sh --standalone setup bcs
-```
-
 ### Bot 没有全部接入
 
 先看 5bot stack 日志，再看对应 profile 下的 `.bcs/session.json` 是否生成。
 
-local 模式：
-
-```bash
-tail -n 100 scripts/.dependencies/logs/bcs_bots_stack.log
-test -f "$HOME/.openclaw-ceo/.bcs/session.json"
-```
-
-standalone 模式：
+隔离路径：
 
 ```bash
 tail -n 100 scripts/.dependencies/standalone/bcs_bots_stack.log
@@ -314,8 +273,7 @@ FRONTEND_PORT=<可用的前端端口>
 也可以在启动时显式传入：
 
 ```bash
-./scripts/singlebox.sh --local --bcs-port <可用的 BCS 端口> --frontend-port <可用的前端端口>
-./scripts/singlebox.sh --standalone --bcs-port <可用的 BCS 端口> --frontend-port <可用的前端端口>
+./scripts/singlebox.sh --bcs-port <可用的 BCS 端口> --frontend-port <可用的前端端口>
 ```
 
 如果是 5bot 端口被占用，可以在当前 shell 或 `.env.local` 中启用自动选择：

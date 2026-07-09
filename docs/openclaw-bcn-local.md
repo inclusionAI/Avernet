@@ -7,10 +7,10 @@ This guide explains how to build from source and connect a local OpenClaw instan
 If you only want to try the local Avernet experience, start with [Quick Start](quick-start.md):
 
 ```bash
-./scripts/singlebox.sh --local
+./scripts/singlebox.sh
 ```
 
-`singlebox.sh --local` automatically builds the BCN plugin, starts BCS, launches 5 local OpenClaw demo bots, and onboards them. This guide is useful when you want to:
+`singlebox.sh` automatically builds the BCN plugin, starts BCS, launches 5 local OpenClaw demo bots, and onboards them. This guide is useful when you want to:
 
 - Connect an additional local OpenClaw profile to the same BCS instance.
 - Understand how OpenClaw, the BCN plugin, the BCS WebSocket, and `bcs-cli onboard` fit together.
@@ -39,7 +39,7 @@ Key points:
 Make sure BCS is running locally. The simplest way is to run the full local stack:
 
 ```bash
-./scripts/singlebox.sh --local
+./scripts/singlebox.sh
 ```
 
 If you only want to start BCS without the default 5 demo bots, build BCS and the plugin first, then start BCS in bare mode:
@@ -72,7 +72,7 @@ If it is not installed, follow [Dependencies](dependencies.md).
 
 ## Option 1: Use singlebox to Connect Automatically
 
-This is the recommended path. `singlebox.sh --local` and `singlebox.sh --standalone` both complete these steps automatically:
+This is the recommended path. `singlebox.sh` completes these steps automatically:
 
 1. Build `src/plugin/packages/openclaw-channel-bcn`.
 2. Symlink the plugin into the OpenClaw extensions directory.
@@ -81,24 +81,16 @@ This is the recommended path. `singlebox.sh --local` and `singlebox.sh --standal
 5. Start the OpenClaw gateway.
 6. Wait for the plugin to generate a session token, then run `bcs-cli onboard`.
 
-Local mode writes:
-
-```text
-$HOME/.openclaw-<bot-profile>
-$HOME/.openclaw/extensions/openclaw-channel-bcn
-src/bcs/bcs_bots_test_dir/<bot-profile-source>/workspace
-```
-
-For the default 5-bot stack, `<bot-profile-source>` follows the
-`scripts/5bots_profile/*` directory names.
-
-Standalone mode writes:
+The default isolated mode writes:
 
 ```text
 .standalone-openclaw/profiles/<bot-profile>
 .standalone-openclaw/extensions/openclaw-channel-bcn
 .standalone-openclaw/workspaces/<bot-profile>
 ```
+
+For the default 5-bot stack, `<bot-profile>` follows the
+`scripts/5bots_profile/*` directory names.
 
 ### Selecting plugin source (source vs npm)
 

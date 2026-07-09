@@ -13,7 +13,6 @@ set -e
 #   ./scripts/singlebox.sh clean [service|group|all]    # Clean local runtime data for target
 #   ./scripts/singlebox.sh status [group|service|all]   # Show status (default: current all group)
 #   ./scripts/singlebox.sh check [service|group|all]    # Check prerequisites (default: current all group)
-#   ./scripts/singlebox.sh --local [command]            # Opt out of isolated standalone paths
 #
 # Compatibility:
 #
@@ -369,18 +368,12 @@ show_help() {
     echo ""
     echo "Local development environment manager."
     echo ""
-    echo "Modes:"
-    echo "  --standalone, -s Use isolated standalone BCS + OpenClaw paths (default)"
-    echo "                  - Starts the same BCS 5bot stack + frontend flow"
+    echo "Mode:"
+    echo "  (default)       Isolated standalone BCS + OpenClaw paths"
+    echo "                  - Starts BAAS + Backend + BCS + 5 bots + demo bot + frontend"
     echo "                  - Writes BCS runtime under scripts/.dependencies/standalone"
     echo "                  - Writes OpenClaw profiles, workspaces, and plugin link under .standalone-openclaw"
-    echo ""
-    echo "  --local, -l     Opt out of standalone paths and use local full-stack defaults"
-    echo "                  - Services: BAAS + Backend + BCS + Frontend"
-    echo "                  - Auth: BCS local mock identity"
-    echo "                  - BCS: SERVER_ENV=local, no external MySQL/Redis services"
-    echo ""
-    echo "  (default)       Same as --standalone"
+    echo "  --standalone, -s Compatibility alias for the default mode"
     echo ""
     echo "Commands:"
     echo "  install-tools                  Install/upgrade dev tools (node, npm, uv, openclaw, ...)"
@@ -395,12 +388,11 @@ show_help() {
     echo "  (no arguments)                 Default standalone stack: setup/start BAAS + Backend + BCS + bots + demo bot + Frontend"
     echo ""
     echo "Options:"
-    echo "  --standalone, -s              Use isolated standalone BCS + OpenClaw + frontend flow; forwards remaining args"
-    echo "  --local, -l                   Opt out of standalone paths and use local full-stack defaults"
+    echo "  --standalone, -s              Compatibility alias for the default isolated standalone flow"
     echo "  --openclaw-version, -ov VERSION Specify openclaw npm version/range (default: ${DEFAULT_OPENCLAW_VERSION})"
     echo "  --bcs-port, -bp PORT          Specify BCS port (default: ${DEFAULT_BCS_PORT})"
     echo "  --frontend-port, -fp PORT     Specify frontend dev server port (default: ${DEFAULT_FRONTEND_PORT})"
-    echo "  --bcs-env local|dev           BCS runtime env; default: local with --local, otherwise dev"
+    echo "  --bcs-env local|dev           BCS runtime env; default: local"
     echo "  --bcn-plugin-source source|npm  BCN plugin source: build from repo (source, default) or install"
     echo "                                  @avernet-plugin/openclaw-channel-bcn (npm). Env: BCN_PLUGIN_SOURCE,"
     echo "                                  BCN_PLUGIN_VERSION (npm mode, default latest)"
@@ -438,7 +430,6 @@ show_help() {
     echo "  $0 clean bots                  Clean only local bot profiles/workspaces"
     echo "  $0 check                       Check prerequisites"
     echo "  $0 check                       Check the isolated standalone local stack"
-    echo "  $0 --local start all           Start all group using non-standalone local paths"
     echo "  $0 status                      Show service status"
     echo ""
 }
@@ -576,16 +567,15 @@ main() {
 
     while [ $# -gt 0 ]; do
         case $1 in
-            --dev|-d)
-                STANDALONE_MODE=false
-                LOCAL_MODE=false
-                BCS_SERVER_ENV=dev
-                shift
-                ;;
             --local|-l)
-                STANDALONE_MODE=false
-                LOCAL_MODE=true
-                shift
+                log_error "--local has been removed. singlebox.sh now always uses isolated standalone paths."
+                log_error "Run ./scripts/singlebox.sh ${*:2} without --local."
+                exit 1
+                ;;
+            --dev|-d)
+                log_error "--dev is not supported by the open-source singlebox entrypoint."
+                log_error "Run ./scripts/singlebox.sh without mode flags."
+                exit 1
                 ;;
             --standalone|-s)
                 STANDALONE_MODE=true

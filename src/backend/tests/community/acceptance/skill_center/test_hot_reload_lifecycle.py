@@ -1,6 +1,6 @@
 """Route-B acceptance: skill_center full physical hot-reload lifecycle.
 
-Starts a real --local backend, runs HOT_RELOAD_LIFECYCLE end-to-end, and
+Starts a real singlebox backend, runs HOT_RELOAD_LIFECYCLE end-to-end, and
 asserts physical artifacts (dirs + bot-nas symlinks). Off by default; enable
 with RUN_ACCEPTANCE=1 (the live_backend fixture also requires 8888 free).
 """

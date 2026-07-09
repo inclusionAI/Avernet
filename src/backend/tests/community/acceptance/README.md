@@ -1,6 +1,6 @@
 # tests/acceptance/ — 路 B live-backend acceptance
 
-Route-B tests start a **real backend** (`--local`, in-memory SQLite) and assert
+Route-B tests start a **real singlebox backend** (in-memory SQLite) and assert
 both API responses and **physical artifacts** (symlinks/files/dirs) on disk.
 The business flow is shared with route-A e2e via `tests/_flows/<module>/`.
 

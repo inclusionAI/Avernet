@@ -7,10 +7,10 @@
 如果你只是想跑通 Avernet 本地体验，优先使用 [Quick Start](quick-start.zh-CN.md)：
 
 ```bash
-./scripts/singlebox.sh --local
+./scripts/singlebox.sh
 ```
 
-`singlebox.sh --local` 会自动构建 BCN 插件、启动 BCS、拉起 5 个本地 OpenClaw demo bot，并完成 onboard。本指南适合以下场景：
+`singlebox.sh` 会自动构建 BCN 插件、启动 BCS、拉起 5 个本地 OpenClaw demo bot，并完成 onboard。本指南适合以下场景：
 
 - 想把一个额外的本机 OpenClaw profile 接入同一个 BCS。
 - 想理解 OpenClaw、BCN 插件、BCS WebSocket 和 `bcs-cli onboard` 之间的关系。
@@ -39,7 +39,7 @@ Local OpenClaw gateway
 先确保 BCS 在本机运行。最简单的方式是直接跑完整 local stack：
 
 ```bash
-./scripts/singlebox.sh --local
+./scripts/singlebox.sh
 ```
 
 如果你只想启动 BCS，不想同时启动默认 5 个 demo bot，可以先构建 BCS 和插件，再以 bare BCS 模式启动：
@@ -72,7 +72,7 @@ openclaw --version
 
 ## 方式一：使用 singlebox 自动接入
 
-这是推荐路径。`singlebox.sh --local` 和 `singlebox.sh --standalone` 都会自动完成以下动作：
+这是推荐路径。`singlebox.sh` 会自动完成以下动作：
 
 1. 构建 `src/plugin/packages/openclaw-channel-bcn`。
 2. 将插件软链到 OpenClaw extension 目录。
@@ -81,24 +81,16 @@ openclaw --version
 5. 启动 OpenClaw gateway。
 6. 等待插件生成 session token 后执行 `bcs-cli onboard`。
 
-local 模式会写入：
-
-```text
-$HOME/.openclaw-<bot-profile>
-$HOME/.openclaw/extensions/openclaw-channel-bcn
-src/bcs/bcs_bots_test_dir/<bot-profile-source>/workspace
-```
-
-默认 5bot 本地栈里，`<bot-profile-source>` 对应 `scripts/5bots_profile/*`
-下的人设目录名。
-
-standalone 模式会写入：
+默认隔离模式会写入：
 
 ```text
 .standalone-openclaw/profiles/<bot-profile>
 .standalone-openclaw/extensions/openclaw-channel-bcn
 .standalone-openclaw/workspaces/<bot-profile>
 ```
+
+默认 5bot 本地栈里，`<bot-profile>` 对应 `scripts/5bots_profile/*`
+下的人设目录名。
 
 ### 选择插件来源（source 还是 npm）
 

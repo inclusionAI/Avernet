@@ -24,11 +24,7 @@ log_error() {
 }
 
 singlebox_mode_option() {
-    if [ "${SINGLEBOX_MODE:-standalone}" = "standalone" ] || [ "${STANDALONE_MODE:-true}" = true ]; then
-        echo "--standalone"
-    else
-        echo "--local"
-    fi
+    echo "--standalone"
 }
 
 singlebox_cmd() {

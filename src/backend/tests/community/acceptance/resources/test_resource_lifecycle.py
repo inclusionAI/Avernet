@@ -1,6 +1,6 @@
 """Route-B acceptance: resources daas lifecycle on live backend.
 
-Starts a real --local backend, exercises:
+Starts a real singlebox backend, exercises:
   - URL CRUD via run_flow_live (resources-url-resource-crud FlowCase)
   - Node CRUD via run_flow_live (resources-node-resource-crud FlowCase)
   - File daas round-trip via httpx (mkdir Form + multipart upload + list +

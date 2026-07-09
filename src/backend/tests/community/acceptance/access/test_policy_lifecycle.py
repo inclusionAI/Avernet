@@ -1,6 +1,6 @@
 """Route-B acceptance: access full whitelist + user CRUD lifecycle.
 
-Starts a real --local backend (in-memory SQLite via local_setup.sh --local),
+Starts a real singlebox backend (in-memory SQLite via local_setup.sh),
 runs ACCESS_LIFECYCLE_FLOWS end-to-end through httpx, then independently
 re-reads the access endpoints to assert the DB state matches a baseline.
 

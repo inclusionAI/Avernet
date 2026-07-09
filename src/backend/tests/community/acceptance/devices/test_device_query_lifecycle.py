@@ -1,6 +1,6 @@
 """Route-B acceptance: devices read-only query lifecycle on live backend.
 
-Starts a real --local backend (in-memory SQLite via local_setup.sh --local),
+Starts a real singlebox backend (in-memory SQLite via local_setup.sh),
 runs the 3 read-only flows + asserts no-data state matches baseline.
 
 devices write paths (apply/release/connection/exec_shell/callback/batch — 8

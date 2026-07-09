@@ -75,7 +75,7 @@ Use this path if you want the fastest native local development stack and accept 
 ./scripts/singlebox.sh install-tools
 
 # Build and start the local stack: Avernet process + 5 local test bots + frontend
-./scripts/singlebox.sh --local
+./scripts/singlebox.sh
 ```
 
 > **Note**:
@@ -96,19 +96,19 @@ To clean up duplicate demo bots, run the following commands to clear the local d
 
 ```bash
 ./scripts/singlebox.sh clean bcs    # delete bcs.db + rm -rf every bot profile directory
-./scripts/singlebox.sh --local      # start a fresh Avernet session
+./scripts/singlebox.sh              # start a fresh Avernet session
 ```
 
 ### 2. Manual dependency and environment setup (advanced)
 
-Use this path if your host toolchain is already ready and you want to start the full local stack from an isolated directory, such as an independent OpenClaw directory.
+Use this path if your host toolchain is already ready and you want to start the full local stack without running the interactive installer.
 
 ```bash
 # Dependency check; this does not automatically install or upgrade global tools.
 ./scripts/singlebox.sh check
 
-# Build and start
-./scripts/singlebox.sh --standalone
+# Build and start. --standalone is accepted as an explicit alias for the default mode.
+./scripts/singlebox.sh
 ```
 
 > **Note**: `check` only validates required dependencies. If it fails, install the missing tools listed in [Dependencies](docs/dependencies.md). See [Quick Start](docs/quick-start.md) for details.
@@ -168,18 +168,14 @@ Stop services with the command for the path you used:
 # Docker path
 docker compose down
 
-# singlebox --local path
+# singlebox path
 ./scripts/singlebox.sh stop
-
-# singlebox --standalone path
-./scripts/singlebox.sh --standalone stop
 ```
 
 #### 3. Other notes
 
-- `--local` is the daily native development path.
-- `--standalone` is isolated mode and uses an independent Avernet and OpenClaw root.
-- Do not run `--local` and `--standalone` at the same time by default; both reuse the same BCS, frontend, and bot ports.
+- `singlebox.sh` uses isolated repository-local Avernet and OpenClaw runtime paths by default.
+- `--standalone` remains accepted as a compatibility alias for that default mode.
 
 ## Open Integration: Connecting a Heterogeneous Agent Ecosystem
 

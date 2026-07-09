@@ -1,6 +1,6 @@
 """Route-B acceptance: bot_collaborator query lifecycle on live backend.
 
-Starts a real --local backend, runs 3 read-only flows + asserts JSON baseline.
+Starts a real singlebox backend, runs 3 read-only flows + asserts JSON baseline.
 
 The 2 exempt paths (AgentPass admin sync, cross-process lock concurrency)
 are NOT exercised — see findings/bot_collaborator-passport-and-concurrency.md.

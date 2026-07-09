@@ -23,37 +23,35 @@ Common entry points:
 | Entry | Best for | Purpose |
 | --- | --- | --- |
 | [README.md](../README.md) | First-time readers | Product positioning, capability status, recommended startup paths, and documentation navigation. |
-| `./scripts/singlebox.sh --local` | Daily local developers | Starts BCS, the local 5-bot stack, and the frontend using the default local paths. |
-| `./scripts/singlebox.sh --standalone` | Users who want an isolated trial run | Uses a repo-local isolated BCS runtime and OpenClaw root to avoid touching the default local OpenClaw configuration. |
+| `./scripts/singlebox.sh` | Daily local developers and first-time users | Starts BAAS, backend, BCS, the local 5-bot stack, demo bot, and frontend using repo-local isolated runtime paths. |
+| `./scripts/singlebox.sh --standalone` | Compatibility with older docs or scripts | Explicit alias for the default isolated singlebox mode. |
 | `./scripts/singlebox.sh install-tools` | Users who want script-assisted dependency installation | Interactively checks and installs missing tools, explaining write paths and impact before it writes. |
 | `./scripts/singlebox.sh check` | Users who only want a preflight | Checks dependencies, directories, and ports; except for initializing a few local runtime directories, it does not install, build, start, or stop processes. |
 
-The current `all` group defaults to BCS + frontend. When BCS starts, it brings
-up 5 local OpenClaw bots and connects them to BCS through the BCN plugin.
+The current `all` group starts BAAS, backend, BCS, the local 5-bot stack, demo
+bot, and frontend. When BCS starts, it brings up 5 local OpenClaw bots and
+connects them to BCS through the BCN plugin.
 
-## Difference between `--local` and `--standalone`
+## Runtime isolation
 
-Both modes start the same components: BCS, the local 5-bot stack, and the
-frontend workbench. The main differences are runtime directories and OpenClaw
-isolation.
+`singlebox.sh` has one supported mode: the isolated singlebox mode. It avoids
+writing the 5-bot profiles, workspaces, and plugin link into the default
+OpenClaw home directory.
 
-| Dimension | `--local` | `--standalone` |
-| --- | --- | --- |
-| Best for | Daily development and integration | Isolated trial runs that should not affect the default local OpenClaw configuration |
-| Default components | BCS + 5 bots + frontend | BCS + 5 bots + frontend |
-| BCS runtime | `scripts/.dependencies/bcs_data`, `scripts/.dependencies/bcs-config` | `scripts/.dependencies/standalone/bcs_data`, `scripts/.dependencies/standalone/bcs-config` |
-| 5-bot profile | `$HOME/.openclaw-<bot-profile>` | `.standalone-openclaw/profiles/<bot-profile>` |
-| 5-bot workspace | `src/bcs/bcs_bots_test_dir/<bot-profile-source>/workspace` | `.standalone-openclaw/workspaces/<bot-profile>` |
-| BCN plugin link | `$HOME/.openclaw/extensions/openclaw-channel-bcn` | `.standalone-openclaw/extensions/openclaw-channel-bcn` |
-| Main logs | `scripts/.dependencies/logs/` and `src/bcs/bcs_bots_test_dir/logs/` | `scripts/.dependencies/logs/`, `scripts/.dependencies/standalone/`, and `.standalone-openclaw/logs/` |
+| Dimension | Path |
+| --- | --- |
+| BCS runtime | `scripts/.dependencies/standalone/bcs_data`, `scripts/.dependencies/standalone/bcs-config` |
+| 5-bot profile | `.standalone-openclaw/profiles/<bot-profile>` |
+| 5-bot workspace | `.standalone-openclaw/workspaces/<bot-profile>` |
+| BCN plugin link | `.standalone-openclaw/extensions/openclaw-channel-bcn` |
+| Main logs | `scripts/.dependencies/logs/`, `scripts/.dependencies/standalone/`, and `.standalone-openclaw/logs/` |
 
 For the default local 5-bot stack, `<bot-profile-source>` is one of
 `ceo`, `product-manager`, `engineering`, `verification`, or
 `customer-service`.
 
-The current flow does not make `--local` and `--standalone` two environments
-that can run at the same time. By default, both reuse ports such as `21000`,
-`8000`, and `30001` through `30041`.
+Only one singlebox stack should listen on the default ports at a time:
+`21000`, `8000`, and `30001` through `30041`.
 
 ## Shortest path
 
@@ -61,7 +59,7 @@ If you want the script to check and install missing tools:
 
 ```bash
 ./scripts/singlebox.sh install-tools
-./scripts/singlebox.sh --local
+./scripts/singlebox.sh
 ```
 
 If you only want to preflight dependencies and ports, then decide how to install
@@ -71,17 +69,10 @@ missing tools yourself:
 ./scripts/singlebox.sh check
 ```
 
-After the preflight passes, start the default local path:
+After the preflight passes, start the default isolated path:
 
 ```bash
-./scripts/singlebox.sh --local
-```
-
-If you want to use the repo-local isolated BCS runtime and OpenClaw root:
-
-```bash
-./scripts/singlebox.sh --standalone check
-./scripts/singlebox.sh --standalone
+./scripts/singlebox.sh
 ```
 
 Frontend URL:
@@ -202,24 +193,18 @@ Check overall status:
 ./scripts/singlebox.sh status
 ```
 
-Check the standalone isolated path status:
+Check the isolated path status:
 
 ```bash
-./scripts/singlebox.sh --standalone status
+./scripts/singlebox.sh status
 ```
 
 ## Common operations
 
-Stop the default local path:
+Stop the default isolated path:
 
 ```bash
 ./scripts/singlebox.sh stop
-```
-
-Stop the standalone isolated path:
-
-```bash
-./scripts/singlebox.sh --standalone stop
 ```
 
 Restart:
@@ -228,35 +213,22 @@ Restart:
 ./scripts/singlebox.sh restart
 ```
 
-Clean intermediate BCS state for the local path:
+Clean intermediate BCS state:
 
 ```bash
 ./scripts/singlebox.sh clean bcs
 ```
 
-Clean intermediate BCS state for the standalone isolated path:
-
-```bash
-./scripts/singlebox.sh --standalone clean bcs
-```
-
 `clean bcs` first stops BCS and the local 5-bot stack, then removes the BCS
 sqlite data, generated configuration, PID files, and this repository's BCN
-plugin symlink for the selected mode. Normal `start` / `restart` does not clean
+plugin symlink. Normal `start` / `restart` does not clean
 `bcs.db*` or bot workspaces by default.
 
 ## Troubleshooting
 
 ### 1. BCS did not start
 
-Start with the logs for the current mode:
-
-```bash
-tail -n 100 scripts/.dependencies/logs/bcs_bots_stack.log
-tail -n 100 src/bcs/bcs_bots_test_dir/logs/bcs.log
-```
-
-For standalone mode, also check:
+Start with the isolated stack logs:
 
 ```bash
 tail -n 100 scripts/.dependencies/standalone/bcs_bots_stack.log
@@ -278,12 +250,6 @@ Check the plugin build output and symlink:
 
 ```bash
 test -f src/plugin/packages/openclaw-channel-bcn/dist/esm/index.js
-test -L "$HOME/.openclaw/extensions/openclaw-channel-bcn"
-```
-
-For standalone mode, check:
-
-```bash
 test -L .standalone-openclaw/extensions/openclaw-channel-bcn
 ```
 
@@ -293,25 +259,12 @@ If the plugin build output does not exist, rerun:
 ./scripts/singlebox.sh setup bcs
 ```
 
-Or for standalone:
-
-```bash
-./scripts/singlebox.sh --standalone setup bcs
-```
-
 ### 3. Bots did not all connect
 
 Check the 5-bot stack log first, then check whether `.bcs/session.json` exists
 under the corresponding profile.
 
-Local mode:
-
-```bash
-tail -n 100 scripts/.dependencies/logs/bcs_bots_stack.log
-test -f "$HOME/.openclaw-ceo/.bcs/session.json"
-```
-
-Standalone mode:
+Check the isolated stack:
 
 ```bash
 tail -n 100 scripts/.dependencies/standalone/bcs_bots_stack.log
@@ -345,12 +298,11 @@ FRONTEND_PORT=<available-frontend-port>
 You can also pass them explicitly at startup:
 
 ```bash
-./scripts/singlebox.sh --local --bcs-port <available-bcs-port> --frontend-port <available-frontend-port>
-./scripts/singlebox.sh --standalone --bcs-port <available-bcs-port> --frontend-port <available-frontend-port>
+./scripts/singlebox.sh --bcs-port <available-bcs-port> --frontend-port <available-frontend-port>
 ```
 
-The current default does not support running `--local` and `--standalone` at
-the same time. If you just ran the other mode, stop that mode first.
+The default ports cannot be shared by two singlebox stacks. If another checkout
+is already running, stop that stack first or choose different ports.
 
 ## This is not a production deployment guide
 
