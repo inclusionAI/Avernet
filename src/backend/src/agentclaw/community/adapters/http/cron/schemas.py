@@ -12,6 +12,7 @@ class ApiResponse(BaseModel):
     message: str = "OK"
     error_code: int = 200
     data: Union[dict, list, None] = None
+    failed_targets: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CronListApiResponse(ApiResponse):

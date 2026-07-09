@@ -14,7 +14,6 @@ Architecture compliance:
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 from typing import Any, Optional
 
 from injector import inject
@@ -37,6 +36,14 @@ from agentclaw.community.core.service_bot.repository.bot_publish_repository impo
     BotPublishRepositoryProtocol,
 )
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
+from agentclaw.community.core.cron.services.cron_runtime_targets import (
+    CronRuntimeTarget,
+    CronRuntimeTargetMixin,
+    RUNTIME_STAGE_DRAFT,
+    RUNTIME_STAGE_ONLINE,
+    RUNTIME_STAGE_VERIFY,
+    VALID_RUNTIME_STAGES,
+)
 from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
@@ -44,29 +51,7 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 
-RUNTIME_STAGE_DRAFT = "draft"
-RUNTIME_STAGE_VERIFY = "verify"
-RUNTIME_STAGE_ONLINE = "online"
-VALID_RUNTIME_STAGES = {
-    RUNTIME_STAGE_DRAFT,
-    RUNTIME_STAGE_VERIFY,
-    RUNTIME_STAGE_ONLINE,
-}
-
-
-@dataclass(frozen=True)
-class CronRuntimeTarget:
-    bot_id: str
-    bot_name: str
-    owner_id: str
-    bot_type: str
-    runtime_stage: str
-    binding_id: int
-    publish_id: int | None = None
-    publish_status: str | None = None
-
-
-class CronRelayService:
+class CronRelayService(CronRuntimeTargetMixin):
     """Cron 中继服务 — 转发请求到各 Bot 的 Adapter"""
 
     @inject
@@ -139,6 +124,8 @@ class CronRelayService:
             bot_targets, bot_failed_targets = self._build_runtime_targets(bot, user_id)
             targets.extend(bot_targets)
             failed_targets.extend(bot_failed_targets)
+        targets, instance_failed_targets = self._expand_runtime_targets(targets)
+        failed_targets.extend(instance_failed_targets)
 
         tasks = []
         for target in targets:
@@ -153,8 +140,6 @@ class CronRelayService:
         success_bots = []
         for target, result in zip(targets, results):
             bot_id_val = target.bot_id
-            bot_name = target.bot_name
-            owner_id = target.owner_id
 
             if isinstance(result, Exception):
                 logger.error(
@@ -176,20 +161,14 @@ class CronRelayService:
                     task_id = cron.get("task_id") or cron.get("id")
                     dedupe_key = (
                         f"{target.bot_id}:{target.owner_id}:"
-                        f"{target.runtime_stage}:{task_id}"
+                        f"{target.runtime_stage}:{target.device_uuid or ''}:"
+                        f"{task_id}"
                     )
                     if task_id and dedupe_key in seen_task_ids:
                         continue
                     if task_id:
                         seen_task_ids.add(dedupe_key)
-                    cron["bot_id"] = bot_id_val
-                    cron["bot_name"] = bot_name
-                    cron["owner_id"] = owner_id
-                    cron["runtime_stage"] = target.runtime_stage
-                    if target.publish_id is not None:
-                        cron["publish_id"] = target.publish_id
-                    if target.publish_status is not None:
-                        cron["publish_status"] = target.publish_status
+                    self._decorate_runtime_item(cron, target)
                     all_crons.append(cron)
                     added += 1
                 if added < len(bot_crons):
@@ -260,6 +239,8 @@ class CronRelayService:
             bot_targets, bot_failed_targets = self._build_runtime_targets(bot, user_id)
             targets.extend(bot_targets)
             failed_targets.extend(bot_failed_targets)
+        targets, instance_failed_targets = self._expand_runtime_targets(targets)
+        failed_targets.extend(instance_failed_targets)
 
         # 并发获取每个 runtime target 的 running 任务
         tasks = []
@@ -281,14 +262,7 @@ class CronRelayService:
             if isinstance(data, dict):
                 running_list = data.get("running", [])
                 for item in running_list:
-                    item["bot_id"] = target.bot_id
-                    item["bot_name"] = target.bot_name
-                    item["owner_id"] = target.owner_id
-                    item["runtime_stage"] = target.runtime_stage
-                    if target.publish_id is not None:
-                        item["publish_id"] = target.publish_id
-                    if target.publish_status is not None:
-                        item["publish_status"] = target.publish_status
+                    self._decorate_runtime_item(item, target)
                 all_running.extend(running_list)
             elif result.get("success") is False:
                 failed_targets.append(
@@ -602,99 +576,6 @@ class CronRelayService:
 
         return targets, failed_targets
 
-    async def _fetch_runtime_target_crons(
-        self,
-        target: CronRuntimeTarget,
-        user_id: str,
-        path: str = "/api/cron",
-    ) -> dict:
-        try:
-            device = self._device_provider.get_device(binding_id=target.binding_id)
-            device_status = device.status if hasattr(device, 'status') else device.get("status")
-            if device_status != DeviceBindingStatus.ACTIVE:
-                return {
-                    "success": False,
-                    "reason": "binding_not_active",
-                    "error": (
-                        f"Bot {target.bot_id} stage={target.runtime_stage} "
-                        f"device not ACTIVE (status={device_status})"
-                    ),
-                }
-        except Exception as e:
-            return {"success": False, "reason": "device_unavailable", "error": str(e)}
-
-        try:
-            if target.runtime_stage == RUNTIME_STAGE_DRAFT:
-                ctx = self._resolver.resolve_for_bot(target.bot_id, target.owner_id)
-            else:
-                ctx = self._resolver.resolve_for_binding(
-                    target.binding_id,
-                    target.owner_id,
-                    bot_id=target.bot_id,
-                )
-        except Exception as e:
-            return {"success": False, "reason": "resolver_failed", "error": str(e)}
-
-        try:
-            result = await self._transport.invoke(ctx.conn_info, "GET", path)
-        except Exception as e:
-            logger.error(
-                "[_fetch_runtime_target_crons] Adapter request failed for "
-                "bot=%s stage=%s: %s",
-                target.bot_id,
-                target.runtime_stage,
-                e,
-            )
-            return {"success": False, "reason": "cron_api_failed", "error": str(e)}
-
-        if not result.get("success", True):
-            return {
-                "success": False,
-                "reason": "cron_api_failed",
-                "error": result.get("message") or result.get("error") or "cron api failed",
-            }
-
-        return result
-
-    def _failed_target(
-        self,
-        target: CronRuntimeTarget,
-        reason: str,
-        message: str,
-    ) -> dict[str, Any]:
-        return self._failed_target_from_values(
-            bot_id=target.bot_id,
-            bot_name=target.bot_name,
-            owner_id=target.owner_id,
-            runtime_stage=target.runtime_stage,
-            publish_id=target.publish_id,
-            reason=reason,
-            message=message,
-        )
-
-    def _failed_target_from_values(
-        self,
-        *,
-        bot_id: str,
-        bot_name: str,
-        owner_id: str,
-        runtime_stage: str,
-        publish_id: int | None,
-        reason: str,
-        message: str,
-    ) -> dict[str, Any]:
-        failed_target: dict[str, Any] = {
-            "bot_id": bot_id,
-            "bot_name": bot_name,
-            "owner_id": owner_id,
-            "runtime_stage": runtime_stage,
-            "reason": reason,
-            "message": message,
-        }
-        if publish_id is not None:
-            failed_target["publish_id"] = publish_id
-        return failed_target
-
     def _resolve_published_runtime_target(
         self,
         bot: dict,
@@ -824,7 +705,7 @@ class CronRelayService:
         # 检查设备状态是否为 ACTIVE
         try:
             device = self._device_provider.get_device(binding_id=target.binding_id)
-            device_status = device.status if hasattr(device, 'status') else device.get("status")
+            device_status = self._read_field(device, "status")
             if device_status != DeviceBindingStatus.ACTIVE:
                 raise CronRelayError(
                     f"Bot {bot_id} runtime_stage={runtime_stage} "
@@ -837,18 +718,52 @@ class CronRelayService:
                 raise
             raise ValueError(f"Device not available: {e}")
 
+        if self._should_fan_out_runtime_operation(
+            target,
+            method=method,
+            path=path,
+        ):
+            expanded_targets, failed_targets = self._expand_runtime_target(
+                target,
+                device=device,
+            )
+            if any(expanded.device_uuid for expanded in expanded_targets):
+                result = await self._forward_multi_instance_request(
+                    expanded_targets,
+                    method=method,
+                    path=path,
+                    body=body,
+                    params=params,
+                    failed_targets=failed_targets,
+                )
+                logger.info(
+                    "[forward_request] Fan-out for bot %s stage=%s: %s %s "
+                    "succeeded=%s failed=%s",
+                    bot_id,
+                    runtime_stage,
+                    method,
+                    path,
+                    result["data"]["succeeded"],
+                    result["data"]["failed"],
+                )
+                return result
+            if failed_targets and not expanded_targets:
+                return {
+                    "success": False,
+                    "message": "runtime instances unavailable",
+                    "data": {
+                        "results": [],
+                        "succeeded": 0,
+                        "failed": len(failed_targets),
+                    },
+                    "failed_targets": failed_targets,
+                }
+
         # 2. 通过 DeviceContextResolver 拿 DeviceContext(全仓唯一 provider 解析点),
         # 替代旧的 ``get_device_connection_v2`` — 后者对 baas service bot 落 direct
         # 分支丢 binding_id,transport fallback 裸 httpx 直发 ARCA-SANDBOX 内网 → 500。
         # 走 resolver → 永填 binding_id → transport 走 baas proxypass。
-        if runtime_stage == RUNTIME_STAGE_DRAFT:
-            ctx = self._resolver.resolve_for_bot(bot_id, user_id)
-        else:
-            ctx = self._resolver.resolve_for_binding(
-                target.binding_id,
-                user_id,
-                bot_id=bot_id,
-            )
+        ctx = self._resolve_runtime_context(target)
 
         # 3. 通过中继 transport 转发请求
         result = await self._transport.invoke(ctx.conn_info, method, path, body, params)
