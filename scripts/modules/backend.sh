@@ -5,6 +5,8 @@ _BACKEND_SH_LOADED=1
 
 # 服务专属常量
 BACKEND_LOG="${LOG_DIR}/backend.log"
+BACKEND_LOCAL_HOST="${BACKEND_LOCAL_HOST:-agentclaw-local.localhost}"
+BACKEND_DEVICE_LOCAL_HOST="${BACKEND_DEVICE_LOCAL_HOST:-agentclawdevice-local.localhost}"
 
 backend_setup() {
     if ! check_directory_exists "${BACKEND_DIR}" "backend"; then
@@ -158,6 +160,17 @@ backend_ready() {
     curl --noproxy '*' --connect-timeout 1 --max-time 2 -s "http://127.0.0.1:8888/api/health" > /dev/null 2>&1
 }
 
+backend_host_needs_hosts_entry() {
+    case "$1" in
+        *.localhost|localhost|127.0.0.1)
+            return 1
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
 backend_prereqs() {
     local has_error=false
 
@@ -171,16 +184,16 @@ backend_prereqs() {
         has_error=true
     fi
 
-    # Hosts: agentclaw-local + agentclawdevice-local
+    # Hosts: local backend + device endpoints
     local missing_hosts=()
-    if ! grep -q "127.0.0.1.*agentclaw-local.stable.alipay.net" /etc/hosts 2>/dev/null; then
-        missing_hosts+=("agentclaw-local.stable.alipay.net")
+    if backend_host_needs_hosts_entry "${BACKEND_LOCAL_HOST}" && ! grep -q "127.0.0.1.*${BACKEND_LOCAL_HOST}" /etc/hosts 2>/dev/null; then
+        missing_hosts+=("${BACKEND_LOCAL_HOST}")
     fi
-    if ! grep -q "127.0.0.1.*agentclawdevice-local.stable.alipay.net" /etc/hosts 2>/dev/null; then
-        missing_hosts+=("agentclawdevice-local.stable.alipay.net")
+    if backend_host_needs_hosts_entry "${BACKEND_DEVICE_LOCAL_HOST}" && ! grep -q "127.0.0.1.*${BACKEND_DEVICE_LOCAL_HOST}" /etc/hosts 2>/dev/null; then
+        missing_hosts+=("${BACKEND_DEVICE_LOCAL_HOST}")
     fi
     if [ ${#missing_hosts[@]} -eq 0 ]; then
-        prereq_ok "hosts: agentclaw-local + agentclawdevice-local bound to 127.0.0.1"
+        prereq_ok "hosts: ${BACKEND_LOCAL_HOST} + ${BACKEND_DEVICE_LOCAL_HOST} resolve locally"
     else
         for host in "${missing_hosts[@]}"; do
             prereq_error "hosts: $host not bound to 127.0.0.1 in /etc/hosts"
