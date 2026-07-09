@@ -7,6 +7,7 @@ Covers:
 - Empty string biz_task_id is not replaced by run_id (is not None check)
 """
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -109,6 +110,15 @@ def _make_runner(
     )
 
 
+async def _flush_background_report() -> None:
+    """让出事件循环,等待 _fire_and_forget_report create_task 执行完毕。
+
+    log-relation 上报现在在后台 create_task 中运行,deliver_message 返回时
+    尚未发生。测试需要 yield 一次让后台任务跑完后再断言 report 调用。
+    """
+    await asyncio.sleep(0)
+
+
 # ==================== Tests: BotRunner._report_log_relation integration ======
 
 
@@ -131,6 +141,7 @@ class TestBotRunnerLogRelationIntegration:
             message_id="test-msg-id",
         )
 
+        await _flush_background_report()
         mock_bot_service_plugin.report.assert_called_once()
         payload = mock_bot_service_plugin.report.call_args[0][0]
         assert isinstance(payload, LogRelationPayload)
@@ -162,6 +173,9 @@ class TestBotRunnerLogRelationIntegration:
             message_id="test-msg-id",
         )
 
+        # 后台任务自主失败并被吞掉,主链路无感知
+        await _flush_background_report()
+
 
 # ==================== Tests: metadata biz fields ====================
 
@@ -188,6 +202,7 @@ class TestMetadataBizFields:
             message_id="test-msg-id",
         )
 
+        await _flush_background_report()
         payload = mock_bot_service_plugin.report.call_args[0][0]
         assert payload.biz_task_id == "custom-task-456"
         assert payload.biz_scene == "custom_scene"
@@ -210,6 +225,7 @@ class TestMetadataBizFields:
             message_id="run-abc-123",
         )
 
+        await _flush_background_report()
         payload = mock_bot_service_plugin.report.call_args[0][0]
         assert payload.biz_task_id == "run-abc-123"
 
@@ -231,6 +247,7 @@ class TestMetadataBizFields:
             message_id="test-msg-id",
         )
 
+        await _flush_background_report()
         payload = mock_bot_service_plugin.report.call_args[0][0]
         assert payload.biz_scene == "default"
 
@@ -256,6 +273,7 @@ class TestMetadataBizFields:
             message_id="run-abc-123",
         )
 
+        await _flush_background_report()
         payload = mock_bot_service_plugin.report.call_args[0][0]
         assert payload.biz_task_id == ""
         # It should NOT be "run-abc-123"
@@ -278,6 +296,7 @@ class TestMetadataBizFields:
             message_id="run-xyz-789",
         )
 
+        await _flush_background_report()
         payload = mock_bot_service_plugin.report.call_args[0][0]
         assert payload.biz_task_id == "run-xyz-789"
 
@@ -304,6 +323,9 @@ class TestMetadataBizFields:
             message_id="test-msg-id",
         )
 
+        # 后台任务自主失败并被吞掉,主链路无感知
+        await _flush_background_report()
+
     @pytest.mark.asyncio
     async def test_report_log_relation_uses_entity_id_for_user_id(
         self,
@@ -322,6 +344,7 @@ class TestMetadataBizFields:
             message_id="test-msg-id",
         )
 
+        await _flush_background_report()
         payload = mock_bot_service_plugin.report.call_args[0][0]
         # user_id should come from binding_info.entity_id
         assert payload.user_id == ENTITY_ID
@@ -344,6 +367,7 @@ class TestMetadataBizFields:
             message_id="test-msg-id",
         )
 
+        await _flush_background_report()
         payload = mock_bot_service_plugin.report.call_args[0][0]
         assert payload.refs == [
             {"ref_type": "session_key", "ref_value": "agent:main:sess-001"}
