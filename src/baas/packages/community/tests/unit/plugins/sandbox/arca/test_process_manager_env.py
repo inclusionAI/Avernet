@@ -228,3 +228,29 @@ def test_create_openclaw_config_rejects_non_object_singlebox_model_config(
             workspace_dir=workspace_dir,
             entity_id="mock-user",
         )
+
+
+def test_merge_singlebox_model_config_noops_without_configured_file(monkeypatch):
+    config = {"models": {"mode": "merge", "providers": {"existing": {}}}}
+    monkeypatch.delenv("SINGLEBOX_MODEL_CONFIG_FILE", raising=False)
+
+    pm._merge_singlebox_model_config(config)
+
+    assert config["models"]["providers"] == {"existing": {}}
+
+
+def test_merge_singlebox_model_config_rejects_missing_file(monkeypatch, tmp_path):
+    missing_config = tmp_path / "missing-openclaw.json"
+    monkeypatch.setenv("SINGLEBOX_MODEL_CONFIG_FILE", str(missing_config))
+
+    with pytest.raises(pm.DeviceAllocateError, match="does not exist"):
+        pm._merge_singlebox_model_config({})
+
+
+def test_merge_singlebox_model_config_rejects_invalid_json(monkeypatch, tmp_path):
+    invalid_config = tmp_path / "invalid-openclaw.json"
+    invalid_config.write_text("{", encoding="utf-8")
+    monkeypatch.setenv("SINGLEBOX_MODEL_CONFIG_FILE", str(invalid_config))
+
+    with pytest.raises(pm.DeviceAllocateError, match="is not valid JSON"):
+        pm._merge_singlebox_model_config({})
