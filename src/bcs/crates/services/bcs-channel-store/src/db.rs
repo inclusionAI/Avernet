@@ -209,7 +209,10 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
         self.execute(
             "set_binding_status",
             DbStatement::with_params(
-                "UPDATE bcs_channel_bindings SET status = ? WHERE id = ?",
+                format!(
+                    "UPDATE bcs_channel_bindings SET status = ?, {} WHERE id = ?",
+                    self.flavor.set_modified_now()
+                ),
                 vec![DbValue::from(binding_status_to_str(status)), DbValue::from(id)],
             ),
         )
@@ -222,7 +225,10 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
         self.execute(
             "set_binding_config",
             DbStatement::with_params(
-                "UPDATE bcs_channel_bindings SET config_json = ? WHERE id = ?",
+                format!(
+                    "UPDATE bcs_channel_bindings SET config_json = ?, {} WHERE id = ?",
+                    self.flavor.set_modified_now()
+                ),
                 vec![DbValue::from(config_json), DbValue::from(id)],
             ),
         )
@@ -298,7 +304,7 @@ impl DbConversationSessionStore {
                     "im_user_id",
                 ],
                 &["im_conversation_type", "bcs_session_id", "last_active_at"],
-                &[],
+                &[("gmt_modified", self.flavor.now())],
             )
         )
     }
@@ -455,7 +461,7 @@ impl DbImParticipantStore {
             self.flavor.on_conflict_update(
                 &["channel_type", "account_ref", "im_user_id"],
                 &["actor_id", "display_name"],
-                &[],
+                &[("gmt_modified", self.flavor.now())],
             )
         )
     }
@@ -886,6 +892,101 @@ mod tests {
                     .is_some()
             );
         }
+
+        Ok(())
+    }
+
+    async fn query_string(
+        db: &dyn DbPlugin,
+        sql: impl Into<String>,
+        column: &'static str,
+    ) -> ServiceResult<String> {
+        let rows = db
+            .query(DbStatement::new(sql.into()))
+            .await
+            .map_err(|err| test_db_error("query string", err))?;
+        rows.first()
+            .expect("expected row")
+            .get_string(column)
+            .map_err(|err| test_db_error("read string", err))?
+            .ok_or_else(|| ServiceError::InternalError(format!("missing {}", column)))
+    }
+
+    async fn force_old_modified(db: &dyn DbPlugin, table: &str) -> ServiceResult<()> {
+        db.execute(DbStatement::new(format!(
+            "UPDATE {table} SET gmt_modified = '2000-01-01 00:00:00'"
+        )))
+        .await
+        .map(|_| ())
+        .map_err(|err| test_db_error("force old modified", err))
+    }
+
+    #[tokio::test]
+    async fn sqlite_write_paths_refresh_gmt_modified() -> ServiceResult<()> {
+        let db = sqlite_db().await?;
+        let db_plugin: Arc<dyn DbPlugin> = db;
+        let binding_repo = DbChannelBindingStore::sqlite(db_plugin.clone());
+        let conversation_repo = DbConversationSessionStore::sqlite(db_plugin.clone());
+        let participant_repo = DbImParticipantStore::sqlite(db_plugin.clone());
+
+        binding_repo.create(binding()).await?;
+        force_old_modified(db_plugin.as_ref(), "bcs_channel_bindings").await?;
+        binding_repo.set_status("binding_1", false).await?;
+        assert_ne!(
+            query_string(
+                db_plugin.as_ref(),
+                "SELECT gmt_modified FROM bcs_channel_bindings WHERE id = 'binding_1'",
+                "gmt_modified",
+            )
+            .await?,
+            "2000-01-01 00:00:00"
+        );
+
+        force_old_modified(db_plugin.as_ref(), "bcs_channel_bindings").await?;
+        binding_repo
+            .set_config("binding_1", serde_json::json!({"send_mode": {"mode": "normal"}}))
+            .await?;
+        assert_ne!(
+            query_string(
+                db_plugin.as_ref(),
+                "SELECT gmt_modified FROM bcs_channel_bindings WHERE id = 'binding_1'",
+                "gmt_modified",
+            )
+            .await?,
+            "2000-01-01 00:00:00"
+        );
+
+        conversation_repo
+            .upsert(conversation(SessionScope::Conversation, None, "session_old", 100))
+            .await?;
+        force_old_modified(db_plugin.as_ref(), "bcs_channel_conversations").await?;
+        conversation_repo
+            .upsert(conversation(SessionScope::Conversation, None, "session_new", 200))
+            .await?;
+        assert_ne!(
+            query_string(
+                db_plugin.as_ref(),
+                "SELECT gmt_modified FROM bcs_channel_conversations \
+                 WHERE binding_id = 'binding_1' AND im_conversation_id = 'conversation_1'",
+                "gmt_modified",
+            )
+            .await?,
+            "2000-01-01 00:00:00"
+        );
+
+        participant_repo.upsert(participant("actor_1", "Alice")).await?;
+        force_old_modified(db_plugin.as_ref(), "bcs_channel_im_participants").await?;
+        participant_repo.upsert(participant("actor_2", "Alice New")).await?;
+        assert_ne!(
+            query_string(
+                db_plugin.as_ref(),
+                "SELECT gmt_modified FROM bcs_channel_im_participants \
+                 WHERE channel_type = 'dingtalk' AND account_ref = 'robot_1' AND im_user_id = 'staff_1'",
+                "gmt_modified",
+            )
+            .await?,
+            "2000-01-01 00:00:00"
+        );
 
         Ok(())
     }

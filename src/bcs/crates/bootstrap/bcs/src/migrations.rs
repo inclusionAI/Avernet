@@ -5,7 +5,7 @@
 //! record; later schema changes should be added as new versions.
 
 use bcs_db_api::{
-    DbError, DbPlugin, DbResult, DbStatement, DbValue, db_get_column,
+    DbError, DbPlugin, DbResult, DbStatement, DbTransactionStep, DbValue, db_get_column,
 };
 use sha2::{Digest, Sha256};
 
@@ -630,10 +630,16 @@ struct SqliteMigration {
     name: &'static str,
 }
 
-const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[SqliteMigration {
-    version: 1,
-    name: "init_schema",
-}];
+const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
+    SqliteMigration {
+        version: 1,
+        name: "init_schema",
+    },
+    SqliteMigration {
+        version: 2,
+        name: "channel_binding_audit_timestamps",
+    },
+];
 
 pub fn sqlite_target_version() -> i64 {
     SQLITE_VERSIONED_MIGRATIONS
@@ -787,6 +793,8 @@ async fn apply_sqlite_migration(db: &dyn DbPlugin, migration: &SqliteMigration) 
         return Ok(());
     }
 
+    apply_sqlite_migration_body(db, migration).await?;
+
     db.execute(DbStatement::with_params(
         "INSERT INTO bcs_schema_migrations (version, name, dialect, checksum) VALUES (?, ?, ?, ?)",
         vec![
@@ -798,6 +806,89 @@ async fn apply_sqlite_migration(db: &dyn DbPlugin, migration: &SqliteMigration) 
     ))
     .await?;
     Ok(())
+}
+
+async fn apply_sqlite_migration_body(
+    db: &dyn DbPlugin,
+    migration: &SqliteMigration,
+) -> DbResult<()> {
+    match migration.version {
+        2 => repair_sqlite_channel_bindings_audit_schema(db).await,
+        _ => Ok(()),
+    }
+}
+
+async fn repair_sqlite_channel_bindings_audit_schema(db: &dyn DbPlugin) -> DbResult<()> {
+    if !table_exists(db, "bcs_channel_bindings").await? {
+        return Ok(());
+    }
+    let columns = sqlite_table_columns(db, "bcs_channel_bindings").await?;
+    let has_created_at = columns.iter().any(|column| column == "created_at");
+    let has_gmt_create = columns.iter().any(|column| column == "gmt_create");
+    let has_gmt_modified = columns.iter().any(|column| column == "gmt_modified");
+    if has_gmt_create && has_gmt_modified && !has_created_at {
+        return Ok(());
+    }
+
+    let gmt_create_expr = sqlite_channel_audit_expr(
+        has_gmt_create,
+        has_created_at,
+        "gmt_create",
+    );
+    let gmt_modified_expr = sqlite_channel_audit_expr(
+        has_gmt_modified,
+        has_created_at,
+        "gmt_modified",
+    );
+    db.transaction(vec![
+        DbTransactionStep::Execute(DbStatement::new(
+            "DROP TABLE IF EXISTS bcs_channel_bindings__audit_migration",
+        )),
+        DbTransactionStep::Execute(DbStatement::new(
+            "CREATE TABLE bcs_channel_bindings__audit_migration (
+                id TEXT PRIMARY KEY,
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                channel_type TEXT NOT NULL,
+                account_ref TEXT NOT NULL,
+                target_json TEXT NOT NULL,
+                group_chat_scope TEXT DEFAULT NULL,
+                visibility TEXT NOT NULL,
+                env TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_by TEXT DEFAULT NULL,
+                config_json TEXT NOT NULL
+            )",
+        )),
+        DbTransactionStep::Execute(DbStatement::new(format!(
+            "INSERT INTO bcs_channel_bindings__audit_migration \
+             (id, gmt_create, gmt_modified, channel_type, account_ref, target_json, group_chat_scope, \
+              visibility, env, status, created_by, config_json) \
+             SELECT id, {gmt_create_expr}, {gmt_modified_expr}, channel_type, account_ref, target_json, group_chat_scope, \
+                    visibility, env, status, created_by, config_json \
+             FROM bcs_channel_bindings"
+        ))),
+        DbTransactionStep::Execute(DbStatement::new("DROP TABLE bcs_channel_bindings")),
+        DbTransactionStep::Execute(DbStatement::new(
+            "ALTER TABLE bcs_channel_bindings__audit_migration RENAME TO bcs_channel_bindings",
+        )),
+    ])
+    .await?;
+    Ok(())
+}
+
+fn sqlite_channel_audit_expr(
+    has_audit_column: bool,
+    has_created_at: bool,
+    audit_column: &'static str,
+) -> &'static str {
+    if has_audit_column {
+        audit_column
+    } else if has_created_at {
+        "datetime(created_at / 1000, 'unixepoch')"
+    } else {
+        "CURRENT_TIMESTAMP"
+    }
 }
 
 #[derive(Debug)]
@@ -865,6 +956,15 @@ async fn table_exists(db: &dyn DbPlugin, table: &str) -> DbResult<bool> {
     Ok(!rows.is_empty())
 }
 
+async fn sqlite_table_columns(db: &dyn DbPlugin, table: &str) -> DbResult<Vec<String>> {
+    let rows = db
+        .query(DbStatement::new(format!("PRAGMA table_info({table})")))
+        .await?;
+    rows.into_iter()
+        .map(|row| db_get_column(&row, "name"))
+        .collect()
+}
+
 fn sqlite_migration_checksum(migration: &SqliteMigration) -> String {
     let mut hasher = Sha256::new();
     hasher.update(migration.version.to_string().as_bytes());
@@ -926,22 +1026,34 @@ mod tests {
         assert!(columns.iter().any(|column| column == "agent_code"));
         assert_eq!(
             migration_rows(&db).await?,
-            vec![(1, "init_schema".to_string(), "sqlite".to_string())]
+            vec![
+                (1, "init_schema".to_string(), "sqlite".to_string()),
+                (
+                    2,
+                    "channel_binding_audit_timestamps".to_string(),
+                    "sqlite".to_string()
+                )
+            ]
         );
         Ok(())
     }
 
     #[tokio::test]
-    async fn sqlite_baseline_migration_has_no_repair_steps() -> DbResult<()> {
+    async fn sqlite_migration_plan_reports_init_and_channel_audit_versions() -> DbResult<()> {
         let db = LocalSqliteDbPlugin::new()?;
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 1);
+        assert_eq!(report.pending_versions.len(), 2);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
         assert!(report.pending_versions[0].repairs.is_empty());
+        assert_eq!(report.pending_versions[1].version, 2);
+        assert_eq!(
+            report.pending_versions[1].name,
+            "channel_binding_audit_timestamps"
+        );
         Ok(())
     }
 
@@ -954,8 +1066,102 @@ mod tests {
 
         assert_eq!(
             migration_rows(&db).await?,
-            vec![(1, "init_schema".to_string(), "sqlite".to_string())]
+            vec![
+                (1, "init_schema".to_string(), "sqlite".to_string()),
+                (
+                    2,
+                    "channel_binding_audit_timestamps".to_string(),
+                    "sqlite".to_string()
+                )
+            ]
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_migrations_repair_legacy_channel_binding_created_at() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                dialect TEXT NOT NULL,
+                checksum TEXT NOT NULL,
+                applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )",
+        ))
+        .await?;
+        db.execute(DbStatement::with_params(
+            "INSERT INTO bcs_schema_migrations (version, name, dialect, checksum) VALUES (?, ?, ?, ?)",
+            vec![
+                DbValue::from(1_i64),
+                DbValue::from("init_schema"),
+                DbValue::from("sqlite"),
+                DbValue::from(sqlite_migration_checksum(&SQLITE_VERSIONED_MIGRATIONS[0])),
+            ],
+        ))
+        .await?;
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_channel_bindings (
+                id TEXT PRIMARY KEY,
+                channel_type TEXT NOT NULL,
+                account_ref TEXT NOT NULL,
+                target_json TEXT NOT NULL,
+                group_chat_scope TEXT DEFAULT NULL,
+                visibility TEXT NOT NULL,
+                env TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_by TEXT DEFAULT NULL,
+                created_at INTEGER NOT NULL,
+                config_json TEXT NOT NULL
+            )",
+        ))
+        .await?;
+        db.execute(DbStatement::with_params(
+            "INSERT INTO bcs_channel_bindings \
+             (id, channel_type, account_ref, target_json, group_chat_scope, visibility, env, status, created_by, created_at, config_json) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            vec![
+                DbValue::from("legacy_binding"),
+                DbValue::from("dingtalk"),
+                DbValue::from("robot_1"),
+                DbValue::from(r#"{"type":"group","group_id":"group_1"}"#),
+                DbValue::from("per_sender"),
+                DbValue::from("full_transcript"),
+                DbValue::from("dev"),
+                DbValue::from("active"),
+                DbValue::from("creator"),
+                DbValue::from(100_i64),
+                DbValue::from(r#"{"send_mode":{"mode":"normal"}}"#),
+            ],
+        ))
+        .await?;
+
+        run_sqlite_migrations(&db).await?;
+
+        let columns = column_names(&db, "bcs_channel_bindings").await?;
+        assert!(columns.iter().any(|column| column == "gmt_create"));
+        assert!(columns.iter().any(|column| column == "gmt_modified"));
+        assert!(!columns.iter().any(|column| column == "created_at"));
+        db.execute(DbStatement::with_params(
+            "INSERT INTO bcs_channel_bindings \
+             (id, channel_type, account_ref, target_json, group_chat_scope, visibility, env, status, created_by, config_json) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            vec![
+                DbValue::from("new_binding"),
+                DbValue::from("dingtalk"),
+                DbValue::from("robot_2"),
+                DbValue::from(r#"{"type":"group","group_id":"group_2"}"#),
+                DbValue::from("per_sender"),
+                DbValue::from("full_transcript"),
+                DbValue::from("dev"),
+                DbValue::from("active"),
+                DbValue::from("creator"),
+                DbValue::from(r#"{"send_mode":{"mode":"normal"}}"#),
+            ],
+        ))
+        .await?;
+
         Ok(())
     }
 
