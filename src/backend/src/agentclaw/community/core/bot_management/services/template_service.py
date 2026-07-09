@@ -94,13 +94,13 @@ class TemplateService:
     def _encrypt_token_field(
         self, template_config: Dict[str, Any], template_type: Optional[str]
     ) -> Dict[str, Any]:
-        """仅 applicationCoding 且 token 为明文时加密 token 字段。幂等。
+        """仅 coding 类模板（applicationCoding / personalCoding）且 token 为明文时加密 token 字段。幂等。
 
         门控由显式 template_type 参数决定（不依赖 template_config 字典内键），
-        与 DeviceService.apply_device 读取门控对称。master_key 空（singlebox）
-        时 vault.encrypt 退化为原样返回，无需在此特判。
+        与 DeviceService.apply_device / BaasDeviceService 读取门控对称。master_key 空
+        （singlebox）时 vault.encrypt 退化为原样返回，无需在此特判。
         """
-        if template_type != "applicationCoding":
+        if template_type not in ("applicationCoding", "personalCoding"):
             return template_config
         token = template_config.get("token")
         if not isinstance(token, str) or not token or token.startswith(CIPHER_PREFIX):
@@ -122,8 +122,9 @@ class TemplateService:
         Args:
             bot_id: Bot ID
             template_config: Template configuration dictionary (stored in ext field)
-            template_type: Optional template type gate; when ``applicationCoding``,
-                the ``token`` field of template_config is encrypted before persist.
+            template_type: Optional template type gate; when ``applicationCoding``
+                or ``personalCoding``, the ``token`` field of template_config is
+                encrypted before persist.
 
         Returns:
             Created template record
@@ -220,7 +221,7 @@ class TemplateService:
         return None
 
     def get_decrypted_codefuse_token(self, bot_id: str) -> Optional[str]:
-        """读取 applicationCoding bot 已落库的 codefuse token 并解密为明文 auth_code。
+        """读取 coding 类（applicationCoding / personalCoding）bot 已落库的 codefuse token 并解密为明文 auth_code。
 
         ``ac_templates.ext.token`` 落库前已由 ``_encrypt_token_field`` 加密
         （``enc:v1:`` 前缀）；这里用 vault 解密回明文，供运行中容器刷新
@@ -231,9 +232,9 @@ class TemplateService:
         master_key 空（singlebox）时 ``decrypt_or_passthrough`` 退化为原样返回，
         与本地无密钥场景兼容。
 
-        门控与 ``_encrypt_token_field`` 对称：仅 applicationCoding bot 的 token
-        才落库加密；调用方（``BotService.update_bot``）应先校验
-        ``bot.template_type == "applicationCoding"`` 再调用本方法。此处只负责
+        门控与 ``_encrypt_token_field`` 对称：仅 coding 类模板（applicationCoding
+        / personalCoding）bot 的 token 才落库加密；调用方（``BotService.update_bot``）
+        应先校验 ``bot.template_type`` 属于 coding 类再调用本方法。此处只负责
         取值与解密，前缀缺失时 ``decrypt_or_passthrough`` 原样透传（兼容历史明文）。
 
         Args:
@@ -274,8 +275,9 @@ class TemplateService:
         Args:
             bot_id: Bot ID
             template_config: New template configuration dictionary
-            template_type: Optional template type gate; when ``applicationCoding``,
-                the ``token`` field of template_config is encrypted before persist.
+            template_type: Optional template type gate; when ``applicationCoding``
+                or ``personalCoding``, the ``token`` field of template_config is
+                encrypted before persist.
 
         Returns:
             Updated template record or None if not found
@@ -440,8 +442,9 @@ class TemplateService:
         Args:
             bot_id: Bot ID
             template_config: Template configuration dictionary
-            template_type: Optional template type gate; when ``applicationCoding``,
-                the ``token`` field of template_config is encrypted before persist.
+            template_type: Optional template type gate; when ``applicationCoding``
+                or ``personalCoding``, the ``token`` field of template_config is
+                encrypted before persist.
 
         Returns:
             Created or updated template record

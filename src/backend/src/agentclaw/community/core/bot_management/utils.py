@@ -161,6 +161,8 @@ def build_aix_extra_envs(
         典型场景:
         - applicationCoding: {"BOT_TYPE": "application", "AIX_DEVFLOW_INFO": ..., "GIT_ADDRESSES": ...}
         - personalCoding: {"BOT_TYPE": "personal"}（通常没有 devflow / repos）
+        - 两者均可携带 model / runtime 入参，有值即写入 RELAY_DEFAULT_MODEL /
+          RELAY_DEFAULT_RUNTIME（覆盖容器写死默认）。
     """
     envs: Dict[str, str] = {}
 
@@ -191,11 +193,11 @@ def build_aix_extra_envs(
         if repo_list:
             envs["GIT_ADDRESSES"] = json.dumps(repo_list, ensure_ascii=False)
 
-        # RELAY_DEFAULT_MODEL / RELAY_DEFAULT_RUNTIME：仅 applicationCoding 下发 model / runtime，
-        # 作为容器内 relay 的默认配置（覆盖容器写死默认）。显式判 template_type，避免
-        # personalCoding 等被误注入；有值才写。create / restart 都经本函数，env 经 extra_envs
-        # 透传到 arca/baas 两条分支。
-        if (template_type or "") == "applicationCoding":
+        # RELAY_DEFAULT_MODEL / RELAY_DEFAULT_RUNTIME：applicationCoding 与 personalCoding
+        # 均下发 model / runtime，作为容器内 relay 的默认配置（覆盖容器写死默认）。显式判
+        # template_type，避免非 coding 模板被误注入；有值才写。create / restart 都经本函数，
+        # env 经 extra_envs 透传到 arca/baas 两条分支。
+        if (template_type or "") in ("applicationCoding", "personalCoding"):
             model = template_config.get("model")
             if isinstance(model, str) and model.strip():
                 envs["RELAY_DEFAULT_MODEL"] = model.strip()

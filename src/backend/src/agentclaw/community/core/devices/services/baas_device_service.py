@@ -521,7 +521,7 @@ class BaasDeviceService(DeviceService):
 
         raw_codefuse_token = (
             template_config.get("token")
-            if template_type == "applicationCoding"
+            if template_type in ("applicationCoding", "personalCoding")
             else None
         )
         codefuse_token = (

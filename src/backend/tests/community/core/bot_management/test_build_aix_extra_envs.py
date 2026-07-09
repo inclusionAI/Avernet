@@ -3,7 +3,7 @@
 覆盖：
 - applicationCoding + 非空 model → 写 ``RELAY_DEFAULT_MODEL``（strip 后）。
 - applicationCoding + 非空 runtime → 写 ``RELAY_DEFAULT_RUNTIME``（strip 后）。
-- personalCoding + model / runtime → **不写**（门控仅 applicationCoding）。
+- personalCoding + model / runtime → 照样写（门控覆盖两类 coding 模板）。
 - applicationCoding + 缺失 / 空 / 非字符串 model / runtime → 不写。
 - model / runtime 与 BOT_TYPE / AIX_DEVFLOW_INFO / GIT_ADDRESSES 共存。
 - template_config=None 时不写（只可能有 BOT_TYPE）。
@@ -25,11 +25,11 @@ class TestRelayDefaultModel:
         envs = build_aix_extra_envs({"model": "  m1  "}, template_type="applicationCoding")
         assert envs["RELAY_DEFAULT_MODEL"] == "m1"
 
-    def test_personal_coding_does_not_inject_model(self):
-        """门控仅 applicationCoding：personalCoding 即使带 model 也不写 RELAY_DEFAULT_MODEL。"""
+    def test_personal_coding_injects_model(self):
+        """门控覆盖两类 coding 模板：personalCoding 带 model 同样写 RELAY_DEFAULT_MODEL。"""
         envs = build_aix_extra_envs({"model": "antchat/x"}, template_type="personalCoding")
-        assert "RELAY_DEFAULT_MODEL" not in envs
-        assert envs == {"BOT_TYPE": "personal"}
+        assert envs["RELAY_DEFAULT_MODEL"] == "antchat/x"
+        assert envs["BOT_TYPE"] == "personal"
 
     def test_application_coding_without_model(self):
         envs = build_aix_extra_envs({"devflow_workflow": "d.yaml"}, template_type="applicationCoding")
@@ -71,11 +71,11 @@ class TestRelayDefaultRuntime:
         envs = build_aix_extra_envs({"runtime": "  py  "}, template_type="applicationCoding")
         assert envs["RELAY_DEFAULT_RUNTIME"] == "py"
 
-    def test_personal_coding_does_not_inject_runtime(self):
-        """门控仅 applicationCoding：personalCoding 即使带 runtime 也不写 RELAY_DEFAULT_RUNTIME。"""
+    def test_personal_coding_injects_runtime(self):
+        """门控覆盖两类 coding 模板：personalCoding 带 runtime 同样写 RELAY_DEFAULT_RUNTIME。"""
         envs = build_aix_extra_envs({"runtime": "py"}, template_type="personalCoding")
-        assert "RELAY_DEFAULT_RUNTIME" not in envs
-        assert envs == {"BOT_TYPE": "personal"}
+        assert envs["RELAY_DEFAULT_RUNTIME"] == "py"
+        assert envs["BOT_TYPE"] == "personal"
 
     def test_application_coding_without_runtime(self):
         envs = build_aix_extra_envs({"devflow_workflow": "d.yaml"}, template_type="applicationCoding")

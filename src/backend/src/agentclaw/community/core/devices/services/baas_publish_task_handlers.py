@@ -508,7 +508,7 @@ class BaasRestartPublishPollHandler:
     def _read_codefuse_token(self, *, bot_id: str, bot: Any) -> str | None:
         if not isinstance(bot, dict):
             return None
-        if bot.get("template_type") != "applicationCoding":
+        if bot.get("template_type") not in ("applicationCoding", "personalCoding"):
             return None
         if self._template_service is None:
             return None

@@ -2088,12 +2088,12 @@ class BotService:
                     )
                 logger.info(f"[bot_service.update_bot] Template updated for bot {bot_id}")
 
-                # applicationCoding bot：token 变化时把新 token 下发到运行中容器
-                # 的 codefuse.json（与 save_codefuse_token / apply_device 启动写入、
-                # reconciler 重启写入同路径），使 PUT /api/bots/{bot_id} 改 token 后
-                # 无需前端再单独调 codefuse/auth。仅当本次入参携带 token 字段且与
-                # 旧值解密后不同才触发；异步执行，失败只告警不阻断主流程。
-                if bot.get("template_type") == "applicationCoding" and isinstance(
+                # coding 类 bot（applicationCoding / personalCoding）：token 变化时把新
+                # token 下发到运行中容器的 codefuse.json（与 save_codefuse_token /
+                # apply_device 启动写入、reconciler 重启写入同路径），使 PUT /api/bots/{bot_id}
+                # 改 token 后无需前端再单独调 codefuse/auth。仅当本次入参携带 token 字段且
+                # 与旧值解密后不同才触发；异步执行，失败只告警不阻断主流程。
+                if bot.get("template_type") in ("applicationCoding", "personalCoding") and isinstance(
                     template_config, dict
                 ) and "token" in template_config:
                     self._maybe_refresh_codefuse_token_async(

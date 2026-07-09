@@ -296,9 +296,9 @@ class DeviceService:
             bot_id: Bot ID
             owner_id: Owner ID
             admins: List of admin user IDs
-            codefuse_token: CodeFuse SSO auth_code（base64）。仅 applicationCoding bot
-                由 apply_device 透传非空值；provider 在容器就绪初始化里解码后写
-                codefuse.json。base 默认实现不处理（Noop）。
+            codefuse_token: CodeFuse SSO auth_code（base64）。仅 coding 类 bot
+                （applicationCoding / personalCoding）由 apply_device 透传非空值；provider
+                在容器就绪初始化里解码后写 codefuse.json。base 默认实现不处理（Noop）。
 
         Returns:
             Tuple of (success, message)
@@ -688,14 +688,14 @@ class DeviceService:
             return record
 
         # 5. Start service asynchronously
-        # 仅 applicationCoding bot 透传 CodeFuse token（从 ext 读回密文，启动时解密为明文）。
-        # 解密在异步闭包内：密文损坏/密钥错配时由 start_service 的 except 承接为 FAILED，
-        # 与 token 写入失败同语义（failure-closed），避免同步段抛错导致 binding 已落库但
-        # apply_device 返回 500 的状态机不一致。token 全程 in-memory 不进 device_props；
-        # get_template_config 不解密 → API 返回密文脱敏。
+        # 仅 coding 类 bot（applicationCoding / personalCoding）透传 CodeFuse token（从 ext
+        # 读回密文，启动时解密为明文）。解密在异步闭包内：密文损坏/密钥错配时由 start_service
+        # 的 except 承接为 FAILED，与 token 写入失败同语义（failure-closed），避免同步段抛错
+        # 导致 binding 已落库但 apply_device 返回 500 的状态机不一致。token 全程 in-memory
+        # 不进 device_props；get_template_config 不解密 → API 返回密文脱敏。
         _raw_codefuse_token = (
             (template_config or {}).get("token")
-            if (template_type or "") == "applicationCoding"
+            if (template_type or "") in ("applicationCoding", "personalCoding")
             else None
         )
 

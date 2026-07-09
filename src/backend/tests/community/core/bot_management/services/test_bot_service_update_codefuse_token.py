@@ -197,9 +197,9 @@ class TestUpdateBotCodefuseTokenDispatch:
 
     # ── 条件过滤 ─────────────────────────────────────────────────
 
-    def test_no_dispatch_when_not_application_coding(self, repo, template_svc):
-        repo.get_by_id_and_owner.return_value = _bot_record(template_type="personalCoding")
-        repo.update_by_owner.return_value = _bot_record(template_type="personalCoding")
+    def test_no_dispatch_when_non_coding_template_type(self, repo, template_svc):
+        repo.get_by_id_and_owner.return_value = _bot_record(template_type="sometype")
+        repo.update_by_owner.return_value = _bot_record(template_type="sometype")
         service = _make_bot_service(repository=repo, template_service=template_svc)
 
         with patch(
@@ -216,6 +216,37 @@ class TestUpdateBotCodefuseTokenDispatch:
                     cookie="c",
                 )
                 mock_refresh.assert_not_called()
+
+    def test_dispatches_when_personal_coding(self, repo, template_svc):
+        """personalCoding 同 applicationCoding：token 变化时也异步下发到容器。"""
+        repo.get_by_id_and_owner.return_value = _bot_record(template_type="personalCoding")
+        repo.update_by_owner.return_value = _bot_record(template_type="personalCoding")
+        self._wire_get_template_config(
+            template_svc,
+            old_db_token="enc:v1:OLD_CIPHERTEXT",
+            new_db_token="enc:v1:NEW_CIPHERTEXT",
+        )
+        service = _make_bot_service(repository=repo, template_service=template_svc)
+        new_config = {"token": "new-plaintext-auth-code"}
+
+        with patch(
+            "agentclaw.community.core.bot_management.services.bot_service.threading.Thread",
+            _FakeThread,
+        ):
+            with patch.object(
+                service, "_refresh_codefuse_token_on_device"
+            ) as mock_refresh:
+                service.update_bot(
+                    bot_id="bot-1",
+                    user_id="user1",
+                    template_config=new_config,
+                    cookie="c",
+                )
+                mock_refresh.assert_called_once_with(
+                    bot_id="bot-1",
+                    user_id="user1",
+                    plaintext_token="new-plaintext-auth-code",
+                )
 
     def test_no_dispatch_when_no_template_config(self, repo, template_svc):
         service = _make_bot_service(repository=repo, template_service=template_svc)
