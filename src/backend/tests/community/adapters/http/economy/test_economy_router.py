@@ -22,8 +22,7 @@ from agentclaw.community.adapters.http.economy.schemas import (
     EmergencyRequest,
     GovernanceNotifyResolveRequest,
     OfflineBatchRequest,
-    WhitelistBatchRequest,
-    WhitelistEntry,
+    WhitelistAddRequest,
 )
 
 
@@ -70,23 +69,33 @@ class _ResolveResult:
         self.message = message
 
 
+class _Dictable:
+    """Minimal object with ``to_dict()`` — mirrors GovernanceNotification / WhitelistEntry interface."""
+
+    def __init__(self, data: dict) -> None:
+        self._data = data
+
+    def to_dict(self) -> dict:
+        return dict(self._data)
+
+
 class FakeFeedbackService:
     """In-memory fake of GovernanceFeedbackServiceProtocol."""
 
     def __init__(self) -> None:
-        self.pending: list[dict] = []
-        self.history: list[dict] = []
-        self.notifications: dict[str, dict] = {}
+        self.pending: list[_Dictable] = []
+        self.history: list[_Dictable] = []
+        self.notifications: dict[str, _Dictable] = {}
         self.resolve_result = _ResolveResult()
         self.resolve_calls: list[dict] = []
 
-    def list_pending(self, owner_id: str, *, limit: int, offset: int) -> list[dict]:
+    def list_pending(self, owner_id: str, *, limit: int, offset: int) -> list[_Dictable]:
         return self.pending
 
-    def list_history(self, owner_id: str, *, limit: int, offset: int) -> list[dict]:
+    def list_history(self, owner_id: str, *, limit: int, offset: int) -> list[_Dictable]:
         return self.history
 
-    def get_notification(self, notification_id: str, owner_id: str) -> dict | None:
+    def get_notification(self, notification_id: str, owner_id: str) -> _Dictable | None:
         return self.notifications.get(notification_id)
 
     def resolve(self, **kwargs: Any) -> _ResolveResult:
@@ -95,17 +104,34 @@ class FakeFeedbackService:
 
 
 class FakeWhitelistService:
-    """In-memory fake of GovernanceWhitelistRepository (as used by router)."""
+    """In-memory fake of GovernanceWhitelistServiceProtocol (as used by router)."""
 
     def __init__(self) -> None:
-        self.entries: list[dict] = []
-        self.batch_result = {"inserted": 0, "skipped": 0}
+        self.entries: list[_Dictable] = []
 
-    def batch_add(self, *, entries, created_by, whitelist_type, source) -> dict:
-        self.entries.extend(entries)
-        return {"inserted": len(entries), "skipped": 0}
+    def add(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        created_by: str,
+        whitelist_type: str = "governance",
+        source: str = "manual",
+        reason: str = "",
+        expires_at: Any | None = None,
+    ) -> _Dictable:
+        entry = _Dictable({"bot_id": bot_id, "owner_id": owner_id, "source": source})
+        self.entries.append(entry)
+        return entry
 
-    def list_all(self, *, owner_id, whitelist_type, limit, offset) -> list[dict]:
+    def list_by_owner(
+        self,
+        owner_id: str,
+        *,
+        whitelist_type: str = "governance",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[_Dictable]:
         return self.entries
 
 
@@ -114,7 +140,7 @@ class FakeAdminService:
 
     def __init__(self) -> None:
         self.calls: list[str] = []
-        self.state = {
+        self._state_data = {
             "paused": False,
             "reason": None,
             "operator": None,
@@ -127,32 +153,32 @@ class FakeAdminService:
         self.deliver_calls: list[dict] = []
 
     def is_paused(self) -> bool:
-        return self.state["paused"]
+        return self._state_data["paused"]
 
-    def get_state(self) -> dict:
-        return self.state
+    def get_state(self) -> _Dictable:
+        return _Dictable(self._state_data)
 
     def pause(self, reason: str, operator: str) -> None:
         self.calls.append("pause")
-        self.state["paused"] = True
+        self._state_data["paused"] = True
 
     def resume(self, reason: str, operator: str) -> None:
         self.calls.append("resume")
-        self.state["paused"] = False
+        self._state_data["paused"] = False
 
     def bulk_whitelist(self, bot_ids, reason, operator) -> dict:
         self.calls.append("bulk_whitelist")
         return {"whitelisted": len(bot_ids)}
 
-    def cancel_pending(self, reason, operator) -> dict:
+    def cancel_pending(self, reason, operator) -> _Dictable:
         self.calls.append("cancel_pending")
-        return {"cancelled": 3}
+        return _Dictable({"cancelled": 3})
 
-    def close_all_open(self, reason, operator) -> dict:
+    def close_all_open(self, reason, operator) -> _Dictable:
         self.calls.append("close_all_open")
-        return {"closed": 5}
+        return _Dictable({"closed": 5})
 
-    async def deliver_pending(
+    def deliver_pending(
         self,
         *,
         scan_svc: Any,
@@ -273,7 +299,7 @@ class FakeScanService:
         self.raise_exc = raise_exc
         self.calls: list[dict] = []
 
-    async def process_cron_tick(self, *, dry_run=None):
+    def process_cron_tick(self, *, dry_run=None):
         """Fake of GovernanceBotServiceProtocol.process_cron_tick."""
         self.calls.append({"method": "process_cron_tick", "dry_run": dry_run})
         if self.raise_exc:
@@ -294,7 +320,7 @@ class FakeScanService:
 
 
 class _FakeRow:
-    """A single fake GovernanceNotifyLog row (attribute bag)."""
+    """A single fake GovernanceNotification row (attribute bag)."""
 
     def __init__(self, **kw: Any) -> None:
         self.notification_id = kw.get("notification_id", "n-1")
@@ -356,16 +382,17 @@ class FakeNotifySender:
     def __init__(self, *, markdown_id="md-1", tc_card_id="tc-1") -> None:
         self._markdown_id = markdown_id
         self._tc_card_id = tc_card_id
-        self.markdown_calls: list[dict] = []
-        self.tc_card_calls: list[dict] = []
+        self.send_calls: list[dict] = []
 
-    def send_markdown(self, *, user_id, title, content):
-        self.markdown_calls.append({"user_id": user_id, "title": title})
+    @property
+    def channels(self) -> frozenset[str]:
+        return frozenset({"markdown", "tc_card"})
+
+    def send(self, message, *, channel: str = "markdown") -> str | None:
+        self.send_calls.append({"channel": channel, "message": message})
+        if channel == "tc_card":
+            return self._tc_card_id
         return self._markdown_id
-
-    def send_tc_card(self, **kwargs):
-        self.tc_card_calls.append(kwargs)
-        return self._tc_card_id
 
 
 class FakeNotifyRepo:
@@ -395,14 +422,14 @@ def _gov_config() -> types.SimpleNamespace:
 class TestListNotifications:
     def test_list_pending(self):
         svc = FakeFeedbackService()
-        svc.pending = [{"id": "a"}, {"id": "b"}]
+        svc.pending = [_Dictable({"id": "a"}), _Dictable({"id": "b"})]
         resp = _run(router.list_pending_notifications(ctx=_ctx(), feedback_svc=svc, limit=50, offset=0))
         assert resp.success is True
         assert resp.data == [{"id": "a"}, {"id": "b"}]
 
     def test_list_history(self):
         svc = FakeFeedbackService()
-        svc.history = [{"id": "c"}]
+        svc.history = [_Dictable({"id": "c"})]
         resp = _run(router.list_history_notifications(ctx=_ctx(), feedback_svc=svc, limit=10, offset=0))
         assert resp.success is True
         assert resp.data == [{"id": "c"}]
@@ -411,7 +438,7 @@ class TestListNotifications:
 class TestGetNotificationDetail:
     def test_found(self):
         svc = FakeFeedbackService()
-        svc.notifications["n-9"] = {"id": "n-9", "status": "open"}
+        svc.notifications["n-9"] = _Dictable({"id": "n-9", "status": "open"})
         resp = _run(router.get_notification_detail(notification_id="n-9", ctx=_ctx(), feedback_svc=svc))
         assert resp.success is True
         assert resp.data["id"] == "n-9"
@@ -473,19 +500,19 @@ class TestResolveNotification:
 
 
 class TestWhitelist:
-    def test_batch_whitelist(self):
+    def test_add_whitelist(self):
         svc = FakeWhitelistService()
-        body = WhitelistBatchRequest(
-            entries=[WhitelistEntry(bot_id="b1", owner_id="o1"), WhitelistEntry(bot_id="b2", owner_id="o2")],
-            source="admin",
+        body = WhitelistAddRequest(
+            bot_id="b1", owner_id="o1", source="admin",
         )
-        resp = _run(router.batch_whitelist(body=body, ctx=_ctx(), whitelist_svc=svc))
+        resp = _run(router.add_whitelist(body=body, ctx=_ctx(), whitelist_svc=svc))
         assert resp.success is True
-        assert resp.data["inserted"] == 2
+        assert resp.data["bot_id"] == "b1"
+        assert resp.data["owner_id"] == "o1"
 
     def test_list_whitelist(self):
         svc = FakeWhitelistService()
-        svc.entries = [{"bot_id": "b1"}]
+        svc.entries = [_Dictable({"bot_id": "b1"})]
         resp = _run(router.list_whitelist(ctx=_ctx(), whitelist_svc=svc, limit=100, offset=0))
         assert resp.success is True
         assert resp.data == [{"bot_id": "b1"}]
@@ -613,7 +640,7 @@ class TestEmergencyAction:
 class TestEmergencyState:
     def test_get_state(self):
         admin = FakeAdminService()
-        admin.state["pending_count"] = 7
+        admin._state_data["pending_count"] = 7
         resp = _run(admin_router.get_emergency_state(ctx=_ctx(), admin_svc=admin))
         assert resp.success is True
         assert resp.data["pending_count"] == 7

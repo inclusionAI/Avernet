@@ -37,7 +37,7 @@ governance/
   contracts/                   ORM models + Protocol interfaces
     __init__.py
     models.py                  4 ORM table definitions
-    protocols.py               GovernanceNotifySender Protocol
+    protocols.py               Repository Protocols (NotifySenderPlugin → plugin_api/)
   lifecycle.py                 GovernanceBotLifecycle (cron participant)
   __init__.py
 ```

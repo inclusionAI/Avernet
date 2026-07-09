@@ -127,16 +127,12 @@ class WhitelistEntry(BaseModel):
     expires_at: str | None = None
 
 
-class WhitelistBatchRequest(BaseModel):
-    """Request body for batch whitelist add."""
-    entries: list[WhitelistEntry] = Field(..., min_length=1)
+class WhitelistAddRequest(BaseModel):
+    """Request body for single whitelist add (point-to-point)."""
+    bot_id: str = Field(..., description="Bot ID to whitelist")
+    owner_id: str = Field(..., description="Owner (staff) ID")
+    reason: str = Field("", description="Optional reason for whitelisting")
     source: str = Field("manual", description="manual / owner / admin / system")
-
-
-class WhitelistBatchResponse(BaseModel):
-    """Response for batch whitelist add."""
-    inserted: int = 0
-    skipped: int = 0
 
 
 class WhitelistDeletePair(BaseModel):
@@ -147,11 +143,9 @@ class WhitelistDeletePair(BaseModel):
 
 class WhitelistDeleteRequest(BaseModel):
     """Request body for whitelist deletion."""
-    ids: list[int] | None = Field(None, description="按主键 ID 删除")
-    bot_owner_pairs: list[WhitelistDeletePair] | None = Field(
-        None, description="按 (bot_id, owner_id) 对删除",
+    bot_owner_pairs: list[WhitelistDeletePair] = Field(
+        ..., min_length=1, description="按 (bot_id, owner_id) 对删除",
     )
-    dry_run: bool = Field(True, description="true=只统计不删除")
     reason: str = Field(..., description="操作原因，写入 audit")
 
 

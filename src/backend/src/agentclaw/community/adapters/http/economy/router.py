@@ -5,7 +5,7 @@ Public (7 endpoints — user-facing):
   - /notifications/history    历史反馈记录
   - /notifications/{id}       通知详情
   - /notifications/{id}/resolve  用户反馈
-  - /whitelist/batch          批量加白
+  - /whitelist                添加白名单 (点对点)
   - /whitelist                查询加白列表
   - /card-callback            卡片回调 (iframe fetch POST)
 
@@ -38,13 +38,12 @@ from agentclaw.community.adapters.http.economy.schemas import (
     OfflineBatchRequest,
     OfflineBatchResponse,
     RecordProcessResultItem,
-    WhitelistBatchRequest,
-    WhitelistBatchResponse,
+    WhitelistAddRequest,
 )
 from agentclaw.community.api.governance_service import (
     GovernanceFeedbackServiceProtocol,
     GovernanceRecordProcessProtocol,
-    GovernanceWhitelistProtocol,
+    GovernanceWhitelistServiceProtocol,
 )
 from agentclaw.community.di import Injected
 
@@ -59,7 +58,7 @@ router = APIRouter(prefix="/api/economy/governance", tags=["economy-governance"]
 
 # Lazy imports to avoid circular dependency at module level
 _FeedbackService = GovernanceFeedbackServiceProtocol
-_WhitelistRepo = GovernanceWhitelistProtocol
+_WhitelistService = GovernanceWhitelistServiceProtocol
 _OfflineBatchSvc = GovernanceRecordProcessProtocol
 
 
@@ -72,8 +71,9 @@ async def list_pending_notifications(
 ) -> ApiResponse:
     """List pending (open/muted) notifications for the current user."""
     owner_id = ctx.user_id
-    items = feedback_svc.list_pending(owner_id, limit=limit, offset=offset)
-    return ApiResponse(success=True, data=items)
+    items = await asyncio.to_thread(feedback_svc.list_pending, owner_id, limit=limit, offset=offset)
+    data = [t.to_dict() for t in items]
+    return ApiResponse(success=True, data=data)
 
 
 @router.get("/notifications/history", summary="历史反馈记录")
@@ -85,8 +85,9 @@ async def list_history_notifications(
 ) -> ApiResponse:
     """List closed/expired notifications for the current user."""
     owner_id = ctx.user_id
-    items = feedback_svc.list_history(owner_id, limit=limit, offset=offset)
-    return ApiResponse(success=True, data=items)
+    items = await asyncio.to_thread(feedback_svc.list_history, owner_id, limit=limit, offset=offset)
+    data = [t.to_dict() for t in items]
+    return ApiResponse(success=True, data=data)
 
 
 @router.get("/notifications/{notification_id}", summary="通知详情")
@@ -97,10 +98,10 @@ async def get_notification_detail(
 ) -> ApiResponse:
     """Get a single notification by ID."""
     owner_id = ctx.user_id
-    item = feedback_svc.get_notification(notification_id, owner_id)
+    item = await asyncio.to_thread(feedback_svc.get_notification, notification_id, owner_id)
     if not item:
         raise HTTPException(status_code=404, detail="Notification not found")
-    return ApiResponse(success=True, data=item)
+    return ApiResponse(success=True, data=item.to_dict())
 
 
 @router.post("/notifications/{notification_id}/resolve", summary="用户反馈")
@@ -121,7 +122,8 @@ async def resolve_notification(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid repair_deadline format") from None
 
-    result = feedback_svc.resolve(
+    result = await asyncio.to_thread(
+        feedback_svc.resolve,
         notification_id=notification_id,
         response=body.response,
         user_id=owner_id,
@@ -151,44 +153,43 @@ async def resolve_notification(
     )
 
 
-@router.post("/whitelist/batch", summary="批量加白")
-async def batch_whitelist(
-    body: WhitelistBatchRequest,
+@router.post("/whitelist", summary="添加白名单")
+async def add_whitelist(
+    body: WhitelistAddRequest,
     ctx: RequestContext = Depends(get_request_context),
-    whitelist_svc: _WhitelistRepo = Injected(_WhitelistRepo),
+    whitelist_svc: _WhitelistService = Injected(_WhitelistService),
 ) -> ApiResponse:
-    """Batch-add bots to governance whitelist."""
+    """Add a single bot to governance whitelist (point-to-point)."""
     owner_id = ctx.user_id
-    entries = [e.model_dump() for e in body.entries]
-
-    result = whitelist_svc.batch_add(
-        entries=entries,
+    result = await asyncio.to_thread(
+        whitelist_svc.add,
+        bot_id=body.bot_id,
+        owner_id=body.owner_id,
         created_by=owner_id,
+        reason=body.reason,
         whitelist_type="governance",
         source=body.source,
     )
-    return ApiResponse(
-        success=True,
-        data=WhitelistBatchResponse(**result).model_dump(),
-    )
+    return ApiResponse(success=True, data=result.to_dict())
 
 
 @router.get("/whitelist", summary="查询加白列表")
 async def list_whitelist(
     ctx: RequestContext = Depends(get_request_context),
-    whitelist_svc: _WhitelistRepo = Injected(_WhitelistRepo),
+    whitelist_svc: _WhitelistService = Injected(_WhitelistService),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> ApiResponse:
     """List governance whitelist entries for the current user."""
     owner_id = ctx.user_id
-    items = whitelist_svc.list_all(
+    items = await asyncio.to_thread(
+        whitelist_svc.list_by_owner,
         owner_id=owner_id,
         whitelist_type="governance",
         limit=limit,
         offset=offset,
     )
-    return ApiResponse(success=True, data=items)
+    return ApiResponse(success=True, data=[e.to_dict() for e in items])
 
 
 @router.post("/card-callback", summary="卡片回调 (iframe fetch POST)")
@@ -211,7 +212,8 @@ async def card_callback(
         except ValueError:
             pass
 
-    result = feedback_svc.resolve(
+    result = await asyncio.to_thread(
+        feedback_svc.resolve,
         notification_id=body.notification_id,
         response=body.response,
         user_id="",  # empty → resolve() reads owner_id from notify_log

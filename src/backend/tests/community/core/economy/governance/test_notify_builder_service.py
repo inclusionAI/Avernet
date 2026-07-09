@@ -1,9 +1,13 @@
-"""Tests for notify_builder_service — Markdown/TC-card notification builders.
+"""Tests for notify_builder_service — TC-card notification builders.
 
 The target module is a set of pure render/build functions (no DB). Each test
-constructs explicit inputs and asserts on real rendered output, covering the
-rich-vs-simple template branches, structured-JSON parsing, per-field
+constructs explicit inputs and asserts on real rendered output, covering
+the simplified reason builder, structured-JSON parsing, per-field
 truncation, token formatting, and the base64 deep-link builder.
+
+Legacy verbose templates (render_governance_notify, render_governance_remind,
+_format_action_items, _urgency_from_structured, _resolve_action_link) have
+been removed; their tests are also removed.
 """
 from __future__ import annotations
 
@@ -43,46 +47,6 @@ class TestParseNotificationStructured:
         assert nb._parse_notification_structured(payload) is payload
 
 
-# ── _format_action_items ────────────────────────────────────────
-
-
-class TestFormatActionItems:
-    def test_empty_list_returns_placeholder(self):
-        assert nb._format_action_items([]) == "（暂无具体建议）"
-
-    def test_single_item_basic(self):
-        items = [{"index": 1, "action": "拆分任务", "expected_effect": "省50%"}]
-        out = nb._format_action_items(items)
-        assert out == "1. 拆分任务 ↓ 省50%"
-
-    def test_needs_owner_confirm_marker(self):
-        items = [
-            {
-                "index": 2,
-                "action": "改配置",
-                "expected_effect": "省30%",
-                "needs_owner_confirm": True,
-            }
-        ]
-        out = nb._format_action_items(items)
-        assert out.startswith("2. ⚠️ 改配置")
-        assert "（需确认）" in out
-
-    def test_fallback_id_and_no_effect(self):
-        items = [{"id": "A", "action": "act"}]
-        out = nb._format_action_items(items)
-        assert out == "A. act"
-
-    def test_missing_index_uses_question_mark(self):
-        out = nb._format_action_items([{"action": "x"}])
-        assert out == "?. x"
-
-    def test_multiple_items_joined(self):
-        items = [{"index": 1, "action": "a"}, {"index": 2, "action": "b"}]
-        out = nb._format_action_items(items)
-        assert out == "1. a\n2. b"
-
-
 # ── _format_hit_dimensions ──────────────────────────────────────
 
 
@@ -116,141 +80,6 @@ class TestFormatHitDimensions:
     def test_non_string_non_list_input(self):
         out = nb._format_hit_dimensions(123)
         assert out == "123"
-
-
-# ── _urgency_from_structured ────────────────────────────────────
-
-
-class TestUrgencyFromStructured:
-    def test_uses_optimization_summary(self):
-        assert nb._urgency_from_structured({"optimization_summary": "P0"}) == "P0"
-
-    def test_defaults_to_high(self):
-        assert nb._urgency_from_structured({}) == "HIGH"
-
-
-# ── render_governance_notify ────────────────────────────────────
-
-
-class TestRenderGovernanceNotify:
-    def test_simple_fallback_all_fields(self):
-        out = nb.render_governance_notify(
-            bot_name="MyBot",
-            dt_version="20260629",
-            hit_dimensions="cron_high_freq",
-            governance_max_priority="P1",
-            expected_token_saving=1000,
-            saving_ratio=0.25,
-            task_summary="太贵了",
-        )
-        assert "🔔 Bot 治理通知" in out
-        assert "**Bot 名称**: MyBot" in out
-        assert "1000 tokens (25.0%)" in out
-        assert "太贵了" in out
-
-    def test_simple_fallback_none_fields_use_na(self):
-        out = nb.render_governance_notify(bot_name="", dt_version="20260629")
-        assert "**Bot 名称**: N/A" in out
-        assert "N/A tokens (N/A)" in out
-        assert "**命中维度**: N/A" in out
-
-    def test_rich_template_with_structured(self):
-        structured = json.dumps(
-            {
-                "meta": {
-                    "owner": "alice",
-                    "hit_dimensions": ["low_efficiency"],
-                    "optimization_summary": "CRITICAL",
-                    "daily_tokens": "12万",
-                },
-                "problem_summary": "重复调用",
-                "action_items": [
-                    {"index": 1, "action": "缓存结果", "expected_effect": "省40%"}
-                ],
-                "disclaimer": "仅供参考",
-            }
-        )
-        out = nb.render_governance_notify(
-            bot_name="RichBot",
-            dt_version="20260629",
-            expected_token_saving=500,
-            saving_ratio=0.1,
-            notification_structured=structured,
-        )
-        assert "🏷️ Bot 治理通知 — RichBot" in out
-        assert "**Owner**: alice" in out
-        assert "低效率" in out
-        assert "CRITICAL" in out
-        assert "**日均Token**: 12万" in out
-        assert "500 tokens (10.0%)" in out
-        assert "重复调用" in out
-        assert "1. 缓存结果 ↓ 省40%" in out
-        assert "仅供参考" in out
-
-    def test_rich_template_defaults_when_meta_sparse(self):
-        # meta present but empty-ish → owner N/A, no daily line, defaults
-        structured = json.dumps({"meta": {}})
-        out = nb.render_governance_notify(
-            bot_name="",
-            dt_version="20260629",
-            notification_structured=structured,
-        )
-        assert "**Owner**: N/A" in out
-        assert "**日均Token**" not in out  # no daily_tokens
-        assert "N/A tokens (N/A)" in out
-        assert "以上为基于采样的优化建议" in out
-        # bot_name falls back to N/A
-        assert "— N/A" in out
-
-
-# ── render_governance_remind ────────────────────────────────────
-
-
-class TestRenderGovernanceRemind:
-    def test_simple_remind_no_overdue(self):
-        out = nb.render_governance_remind(
-            bot_name="RemBot",
-            dt_version="20260629",
-            hit_dimensions="high_error",
-            governance_max_priority="P0",
-            days_since_create=3,
-        )
-        assert "⚠️ 治理通知提醒" in out
-        assert "**Bot 名称**: RemBot" in out
-        assert "已发送 3 天" in out
-        # overdue prefix only appears above 5 days
-        assert "已超期" not in out
-
-    def test_simple_remind_overdue_prefix(self):
-        out = nb.render_governance_remind(
-            bot_name="RemBot",
-            dt_version="20260629",
-            days_since_create=9,
-        )
-        assert "⚠️ 此通知已超期 9 天未处理" in out
-
-    def test_rich_remind_with_structured(self):
-        structured = json.dumps(
-            {
-                "meta": {
-                    "owner": "bob",
-                    "hit_dimensions": ["quality_defect"],
-                    "optimization_summary": "P2",
-                }
-            }
-        )
-        out = nb.render_governance_remind(
-            bot_name="RichRem",
-            dt_version="20260629",
-            days_since_create=7,
-            notification_structured=structured,
-        )
-        assert "⚠️ 治理通知提醒 — RichRem" in out
-        assert "**Owner**: bob" in out
-        assert "质量缺陷" in out
-        assert "P2" in out
-        assert "已超期 7 天" in out
-        assert "已发送 7 天" in out
 
 
 # ── _fmt_tokens ─────────────────────────────────────────────────
@@ -643,8 +472,3 @@ class TestBuildTcCardDetailLink:
         assert "2026-06-29" in decoded["data"]["when"]
 
 
-# ── _resolve_action_link ────────────────────────────────────────
-
-
-def test_resolve_action_link_returns_empty():
-    assert nb._resolve_action_link(bot_id="b", notification_id="n") == ""

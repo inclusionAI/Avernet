@@ -14,12 +14,12 @@ All data access delegates to repositories; this service owns orchestration,
 business rules, and ticket lifecycle transitions only.
 
 Repos use self-managed sessions.
-Ticket mutations (refresh, whitelist-close) are performed in a dedicated
-``self._db.orm_session()`` within the service.
+Ticket mutations (refresh, whitelist-close) are performed via Repo
+command methods.
 """
 from __future__ import annotations
 
-import logging
+from agentclaw.community.log import get_logger
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -27,15 +27,20 @@ from typing import TYPE_CHECKING, Any
 
 from injector import inject
 
-from agentclaw.community.core.economy.governance.contracts.enums import AuditAction
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceNotifyLog,
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.domain.enums import (
+    AuditAction,
+    CloseReason,
+    GovernanceStatus,
+    NotifyType,
+)
+from agentclaw.community.core.economy.governance.domain.domain import (
+    FrozenSnapshot,
+    GovernanceNotification,
+    GovernanceTicket,
 )
 from agentclaw.community.core.economy.governance.services.notify_builder_service import (
-    render_governance_notify,
+    build_governance_reason,
 )
-from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
 if TYPE_CHECKING:
@@ -52,7 +57,7 @@ if TYPE_CHECKING:
         GovernanceWhitelistRepository,
     )
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 
 # ── Result types ─────────────────────────────────────────────────────────
@@ -101,14 +106,12 @@ class GovernanceRecordService:
     @inject
     def __init__(
         self,
-        db: DatabasePlugin,
         task_repo: TaskRecordRepository,
         whitelist_repo: GovernanceWhitelistRepository,
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         config: Any,  # EconomyGovernanceConfig
     ) -> None:
-        self._db = db
         self._task_repo = task_repo
         self._whitelist_repo = whitelist_repo
         self._notify_repo = notify_repo
@@ -165,9 +168,8 @@ class GovernanceRecordService:
 
         dt_version = record.get("dt_version", "")
 
-        # Step 2: Whitelist filter (§7.1.4 Step 2) — self-managed session
-        whitelist_set = self._whitelist_repo.get_whitelist_set()
-        is_whitelisted = (bot_id, owner_id) in whitelist_set
+        # Step 2: Whitelist filter (§7.1.4 Step 2) — point query
+        is_whitelisted = self._whitelist_repo.is_whitelisted(bot_id, owner_id)
 
         # Step 3: Find active ticket (self-managed session)
         active_ticket = self._task_repo.find_active_ticket(worker_key)
@@ -203,8 +205,8 @@ class GovernanceRecordService:
         now = datetime.now()
         if (
             latest_closed is not None
-            and latest_closed.get("cooldown_until") is not None
-            and latest_closed.get("cooldown_until") > now
+            and latest_closed.cooldown_until is not None
+            and latest_closed.cooldown_until > now
         ):
             # Cooldown active → skip
             if not dry_run:
@@ -220,8 +222,8 @@ class GovernanceRecordService:
                 worker_key=worker_key,
                 entered_governance_scope=False,
                 action="cooldown_filtered",
-                reason=f"cooldown_until={latest_closed.get('cooldown_until').isoformat()}",
-                ticket_id=latest_closed.get("ticket_id"),
+                reason=f"cooldown_until={latest_closed.cooldown_until.isoformat()}",
+                ticket_id=latest_closed.ticket_id,
             )
 
         # Step 6: Create new ticket + first_send notify (§7.1.4 Step 6)
@@ -338,7 +340,7 @@ class GovernanceRecordService:
     def _handle_whitelist_hit(
         self,
         *,
-        active_ticket: dict | None,
+        active_ticket: GovernanceTicket | None,
         worker_key: str,
         owner_id: str,
         bot_id: str,
@@ -372,26 +374,17 @@ class GovernanceRecordService:
 
         # Whitelist hit + active ticket → close ticket (§7.2.7)
         if not dry_run:
-            # Close ticket via dedicated session
-            with self._db.orm_session() as s:
-                db_ticket = (
-                    s.query(GovernanceTaskRecordDaily)
-                    .filter(
-                        GovernanceTaskRecordDaily.ticket_id == active_ticket.get("ticket_id"),
-                    )
-                    .one_or_none()
-                )
-                if db_ticket is not None:
-                    db_ticket.governance_status = "closed"
-                    db_ticket.close_reason = "whitelist_filtered"
-                    db_ticket.closed_at = now
-                    db_ticket.active_worker = None
-                    db_ticket.last_sync_at = now
+            # Close ticket via Repo command method
+            self._task_repo.close_ticket(
+                active_ticket.ticket_id,
+                close_reason=CloseReason.WHITELIST_FILTERED,
+                closed_at=now,
+            )
 
             # Cancel pending notify (self-managed session)
-            if active_ticket.get("ticket_id"):
+            if active_ticket.ticket_id:
                 self._notify_repo.cancel_pending_by_ticket(
-                    active_ticket.get("ticket_id"),
+                    active_ticket.ticket_id,
                 )
 
             self._audit_repo.add_audit(
@@ -405,7 +398,7 @@ class GovernanceRecordService:
             entered_governance_scope=False,
             action="whitelist_closed",
             reason="whitelist_hit_active_ticket_closed",
-            ticket_id=active_ticket.get("ticket_id"),
+            ticket_id=active_ticket.ticket_id,
         )
 
     # ------------------------------------------------------------------
@@ -415,7 +408,7 @@ class GovernanceRecordService:
     def _handle_active_ticket_refresh(
         self,
         *,
-        ticket: dict,
+        ticket: GovernanceTicket,
         record: dict,
         worker_key: str,
         owner_id: str,
@@ -432,13 +425,13 @@ class GovernanceRecordService:
         refresh to prevent regression.
         """
         now = datetime.now()
-        prev_latest_decision = ticket.get("latest_decision")
+        prev_latest_decision = ticket.current_decision
 
         # Guard: reject stale dt_version (older or equal → skip refresh)
-        existing_dt = ticket.get("dt_version") or ""
+        existing_dt = ticket.dt_version or ""
         if dt_version and existing_dt and dt_version <= existing_dt:
             log.debug(
-                "[record-process] Skip refresh: incoming dt_version=%s "
+                "[RecordProcess] Skip refresh: incoming dt_version=%s "
                 "<= existing dt_version=%s, worker_key=%s",
                 dt_version, existing_dt, worker_key,
             )
@@ -455,7 +448,7 @@ class GovernanceRecordService:
                 entered_governance_scope=True,
                 action="still_actionable",
                 reason="stale_dt_version_skipped",
-                ticket_id=ticket.get("ticket_id"),
+                ticket_id=ticket.ticket_id,
             )
 
         if not dry_run:
@@ -463,72 +456,50 @@ class GovernanceRecordService:
             incoming_decision = record.get("governance_decision", "actionable")
             is_still_actionable = incoming_decision == "actionable"
 
-            with self._db.orm_session() as s:
-                db_ticket = (
-                    s.query(GovernanceTaskRecordDaily)
-                    .filter(
-                        GovernanceTaskRecordDaily.ticket_id == ticket.get("ticket_id"),
-                    )
-                    .one_or_none()
-                )
-                if db_ticket is None:
-                    return RecordProcessResult(
-                        worker_key=worker_key,
-                        action="error",
-                        reason="ticket_disappeared_between_read_and_write",
-                    )
+            # Compute consecutive_normal_days and remind_at
+            if is_still_actionable:
+                consecutive_days = 0
+            else:
+                consecutive_days = (ticket.consecutive_normal_days or 0) + 1
 
-                db_ticket.dt_version = dt_version
-                db_ticket.bot_name = record.get("bot_name", db_ticket.bot_name)
-                db_ticket.hit_dimensions = record.get("hit_dimensions", db_ticket.hit_dimensions)
-                db_ticket.hit_dimensions_count = record.get(
-                    "hit_dimensions_count", db_ticket.hit_dimensions_count,
-                )
-                db_ticket.governance_max_priority = record.get(
-                    "governance_max_priority", db_ticket.governance_max_priority,
-                )
-                db_ticket.expected_token_saving = record.get(
-                    "expected_token_saving", db_ticket.expected_token_saving,
-                )
-                db_ticket.saving_ratio = record.get("saving_ratio", db_ticket.saving_ratio)
-                db_ticket.task_summary = record.get("task_summary", db_ticket.task_summary)
-                db_ticket.notification_structured = record.get(
-                    "notification_structured", db_ticket.notification_structured,
-                )
-                db_ticket.analysis_status = record.get(
-                    "analysis_status", db_ticket.analysis_status,
-                )
-                db_ticket.last_seen_at = now
-                db_ticket.last_sync_at = now
-                db_ticket.last_decision_dt_version = dt_version
+            # Auto-silence resume: if actionable + prev was normal + open + no feedback + no remind
+            should_resume_remind = (
+                is_still_actionable
+                and prev_latest_decision in ("normal", "unknown")
+                and ticket.governance_status == GovernanceStatus.OPEN
+                and ticket.user_feedback is None
+                and ticket.remind_at is None
+            )
+            # refresh_snapshot sentinel: "" = don't touch, datetime = set, None = clear
+            effective_remind_at: datetime | None | object = now if should_resume_remind else ""
 
-                if is_still_actionable:
-                    db_ticket.latest_decision = "actionable"
-                    db_ticket.consecutive_normal_days = 0
-                else:
-                    db_ticket.latest_decision = "normal"
-                    db_ticket.consecutive_normal_days = (
-                        db_ticket.consecutive_normal_days or 0
-                    ) + 1
-
-                # Auto-silence resume (§7.1.4 Step 4 "自动静默恢复"):
-                if (
-                    is_still_actionable
-                    and prev_latest_decision in ("normal", "unknown")
-                    and db_ticket.governance_status == "open"
-                    and db_ticket.response is None
-                    and db_ticket.remind_at is None
-                ):
-                    db_ticket.remind_at = now
-                    # Audit is written after session commits
+            self._task_repo.refresh_snapshot(
+                ticket.ticket_id,
+                dt_version=dt_version,
+                bot_name=record.get("bot_name"),
+                triggered_dimensions=record.get("hit_dimensions"),
+                hit_dimensions_count=record.get("hit_dimensions_count"),
+                severity=record.get("governance_max_priority"),
+                estimated_saving_tokens=record.get("expected_token_saving"),
+                saving_ratio=record.get("saving_ratio"),
+                task_summary=record.get("task_summary"),
+                notification_structured=record.get("notification_structured"),
+                analysis_status=record.get("analysis_status"),
+                current_decision="actionable" if is_still_actionable else "normal",
+                consecutive_normal_days=consecutive_days,
+                last_seen_at=now,
+                last_sync_at=now,
+                last_decision_dt_version=dt_version,
+                remind_at=effective_remind_at,
+            )
 
             # Audit auto-silence resume if applicable
             if (
                 is_still_actionable
                 and prev_latest_decision in ("normal", "unknown")
-                and ticket.get("governance_status") == "open"
-                and ticket.get("response") is None
-                and ticket.get("remind_at") is None
+                and ticket.governance_status == GovernanceStatus.OPEN
+                and ticket.user_feedback is None
+                and ticket.remind_at is None
             ):
                 self._audit_repo.add_audit(
                     run_id, bot_id, owner_id,
@@ -550,7 +521,7 @@ class GovernanceRecordService:
             entered_governance_scope=True,
             action="still_actionable",
             reason="active_ticket_exists_snapshot_refreshed",
-            ticket_id=ticket.get("ticket_id"),
+            ticket_id=ticket.ticket_id,
         )
 
     # ------------------------------------------------------------------
@@ -568,7 +539,7 @@ class GovernanceRecordService:
         run_id: str,
         dry_run: bool,
         notify_source: str,
-        latest_closed: dict | None,
+        latest_closed: GovernanceTicket | None,
     ) -> RecordProcessResult:
         """Create new ticket + first_send notify (§7.1.4 Step 6)."""
         now = datetime.now()
@@ -581,14 +552,14 @@ class GovernanceRecordService:
         reopen_ref_time: datetime | None = None
         if (
             latest_closed is not None
-            and latest_closed.get("close_reason") == "review_rejected"
+            and latest_closed.close_reason == CloseReason.REVIEW_REJECTED
         ):
             use_reopen_template = True
             # Time priority: response_at > reviewed_at > closed_at
             reopen_ref_time = (
-                latest_closed.get("response_at")
-                or latest_closed.get("reviewed_at")
-                or latest_closed.get("closed_at")
+                latest_closed.feedback_at
+                or latest_closed.reviewed_at
+                or latest_closed.closed_at
             )
 
         # Render notification markdown
@@ -622,25 +593,25 @@ class GovernanceRecordService:
             )
 
         # CREATE task_record (self-managed session + flush)
-        ticket_row = GovernanceTaskRecordDaily(
+        self._task_repo.add_ticket(
             ticket_id=ticket_id,
             worker_id=worker_key,
-            active_worker=worker_key,
+            assignee=worker_key,
             bot_id=bot_id,
             owner_id=owner_id_val,
             bot_name=record.get("bot_name"),
             dt_version=dt_version,
-            governance_decision="actionable",  # initial_decision (§5.6)
-            latest_decision="actionable",
-            hit_dimensions=record.get("hit_dimensions"),
+            initial_decision="actionable",  # initial_decision (§5.6)
+            current_decision="actionable",
+            triggered_dimensions=record.get("hit_dimensions"),
             hit_dimensions_count=record.get("hit_dimensions_count"),
-            governance_max_priority=record.get("governance_max_priority"),
-            expected_token_saving=record.get("expected_token_saving"),
+            severity=record.get("governance_max_priority"),
+            estimated_saving_tokens=record.get("expected_token_saving"),
             saving_ratio=record.get("saving_ratio"),
             task_summary=record.get("task_summary"),
             notification_structured=record.get("notification_structured"),
             analysis_status=record.get("analysis_status"),
-            governance_status="open",
+            governance_status=GovernanceStatus.OPEN,
             consecutive_normal_days=0,
             remind_at=None,  # No remind until first_send sent (§7.3.3)
             remind_count=0,
@@ -648,31 +619,29 @@ class GovernanceRecordService:
             last_sync_at=now,
             last_decision_dt_version=dt_version,
         )
-        self._task_repo.add_ticket(ticket_row)
 
         # CREATE notify_log — frozen snapshot at creation time (§5.6)
-        notify_row = GovernanceNotifyLog(
+        notify_row = GovernanceNotification.create(
             notification_id=notification_id,
             ticket_id=ticket_id,
             bot_id=bot_id,
             bot_name=record.get("bot_name"),
             owner_id=owner_id_val,
             worker_id=worker_key,
-            dt_version=dt_version,
-            governance_decision="actionable",  # freeze latest_decision at creation (§5.6)
-            governance_cycle_id=ticket_id,  # NOT NULL — use ticket_id as cycle ID
-            hit_dimensions=record.get("hit_dimensions"),
-            hit_dimensions_count=record.get("hit_dimensions_count"),
-            expected_token_saving=record.get("expected_token_saving"),
-            saving_ratio=record.get("saving_ratio"),
-            notification_md=notification_md,
-            notification_structured=record.get("notification_structured"),
-            governance_max_priority=record.get("governance_max_priority"),
-            notify_status="pending",
-            notify_type="first_send",
+            snapshot=FrozenSnapshot(
+                dt_version=dt_version,
+                decision_at_create="actionable",  # freeze latest_decision (§5.6)
+                triggered_dimensions=record.get("hit_dimensions"),
+                hit_dimensions_count=record.get("hit_dimensions_count"),
+                severity=record.get("governance_max_priority"),
+                estimated_saving_tokens=record.get("expected_token_saving"),
+                saving_ratio=record.get("saving_ratio"),
+                notification_md=notification_md,
+                notification_structured=record.get("notification_structured"),
+            ),
+            notify_type=NotifyType.FIRST_SEND,
             notify_source=notify_source,
-            notify_channel=getattr(self._config, "notify_channel", "markdown"),
-            send_attempt_count=0,
+            channel=getattr(self._config, "notify_channel", "markdown"),
         )
         # env auto-filled by ORM default=get_current_env (not in constructor)
         self._notify_repo.add_notification(notify_row)
@@ -773,8 +742,8 @@ class GovernanceRecordService:
                 f"**数据日期**: {dt_version}\n"
             )
 
-        # Standard first notification template
-        return render_governance_notify(
+        # Standard first notification template — use simplified reason builder
+        return build_governance_reason(
             bot_name=record.get("bot_name", ""),
             dt_version=dt_version,
             hit_dimensions=record.get("hit_dimensions"),
@@ -782,8 +751,6 @@ class GovernanceRecordService:
             expected_token_saving=record.get("expected_token_saving"),
             saving_ratio=record.get("saving_ratio"),
             task_summary=record.get("task_summary"),
-            bot_id=bot_id,
-            notification_id=notification_id,
             notification_structured=record.get("notification_structured"),
         )
 

@@ -13,9 +13,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceNotifyLog,
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    GovernanceNotificationOrm,
+    GovernanceTicketOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
     NotifyLogRepository,
@@ -44,7 +44,7 @@ def _seed_notify_log_for_delete(world) -> None:
     # Also need a task_record row (FK-like logical dependency)
     task_repo = world.get(TaskRecordRepository)
     task_repo.insert_ticket(
-        GovernanceTaskRecordDaily(
+        GovernanceTicketOrm(
             ticket_id=ticket_id,
             worker_id=worker_id,
             active_worker=worker_id,
@@ -62,7 +62,7 @@ def _seed_notify_log_for_delete(world) -> None:
     )
 
     repo.insert_notification(
-        GovernanceNotifyLog(
+        GovernanceNotificationOrm(
             notification_id=notification_id,
             ticket_id=ticket_id,
             bot_id="bot-del",

@@ -31,6 +31,7 @@ class FakeGovernanceConfig:
     auto_silence_close_days: int = 7
     notify_channel: str = "markdown"
     tc_card_id: str = "card_cb190863"
+    tc_card_preview_url: str = "https://teamclaw.alipay.com/preview"
     tc_card_template_id: str = ""
 
 
@@ -63,11 +64,24 @@ class FakeDB:
 class FakeWhitelistSvc:
     """Minimal GovernanceWhitelistRepository stand-in."""
 
-    def get_whitelist_set(self, **kwargs):
-        return set()
+    def is_whitelisted(self, bot_id, owner_id, **kwargs):
+        return False
 
-    def batch_add(self, entries, created_by, **kwargs):
-        return {"inserted": len(entries), "skipped": 0}
+    def add(self, *, bot_id, owner_id, created_by, whitelist_type="governance",
+            source="manual", reason="", expires_at=None):
+        from agentclaw.community.core.economy.governance.domain.domain import WhitelistEntry
+        return WhitelistEntry(
+            bot_id=bot_id, owner_id=owner_id,
+            whitelist_type=whitelist_type, source=source,
+            reason=reason, created_by=created_by, expires_at=expires_at,
+        )
+
+    def remove(self, *, bot_id, owner_id, whitelist_type="governance"):
+        return True
+
+    def list_by_owner(self, owner_id, *, whitelist_type="governance",
+                      limit=100, offset=0):
+        return []
 
     def count_by_type(self, **kwargs):
         return 0
@@ -85,20 +99,29 @@ class FakeWhitelistService:
     def bulk_whitelist(self, bot_ids, reason, operator):
         return {"whitelisted": len(bot_ids), "cancelled": 0}
 
-    def delete_whitelist_entries(self, body, operator):
-        return {
-            "dry_run": body.get("dry_run", True),
-            "would_delete": 0,
-            "deleted": 0,
-            "not_found": [],
-            "affected_owner_bots": [],
-        }
+    def delete_whitelist_entry(self, *, bot_id, owner_id, reason, operator):
+        return {"deleted": True, "bot_id": bot_id, "owner_id": owner_id}
+
+    def add(self, *, bot_id, owner_id, created_by, whitelist_type="governance",
+            source="manual", reason=""):
+        return self._whitelist_svc.add(
+            bot_id=bot_id, owner_id=owner_id, created_by=created_by,
+            whitelist_type=whitelist_type, source=source, reason=reason,
+        )
+
+    def list_by_owner(self, owner_id, *, whitelist_type="governance",
+                      limit=100, offset=0):
+        return self._whitelist_svc.list_by_owner(
+            owner_id, whitelist_type=whitelist_type, limit=limit, offset=offset,
+        )
+
+    def is_whitelisted(self, bot_id, owner_id, *, whitelist_type="governance"):
+        return self._whitelist_svc.is_whitelisted(
+            bot_id, owner_id, whitelist_type=whitelist_type,
+        )
 
     def count_by_type(self, **kwargs):
         return 0
-
-    def batch_add(self, entries, created_by, **kwargs):
-        return {"inserted": len(entries), "skipped": 0}
 
 
 class FakeCache:
@@ -118,22 +141,20 @@ class FakeCache:
 
 
 class FakeNotifySender:
-    """No-op GovernanceNotifySender for testing."""
+    """Fake NotifySenderPlugin for unit testing.
 
-    def send_markdown(self, user_id: str, title: str, content: str) -> str | None:
-        return f"fake-msg-{user_id}"
+    Implements the ``NotifySenderPlugin`` Protocol surface (``send`` + ``channels``).
+    Returns deterministic fake IDs so tests can assert send outcomes.
+    """
 
-    def send_tc_card(
-        self,
-        user_id: str,
-        reason: str,
-        detail_link: str,
-        bot_id: str,
-        card_id: str,
-        notification_data: dict,
-        out_track_id_prefix: str = "dingtalk",
-    ) -> str | None:
-        return f"fake-card-{user_id}"
+    @property
+    def channels(self) -> frozenset[str]:
+        return frozenset({"markdown", "tc_card"})
+
+    def send(self, message: object, *, channel: str = "markdown") -> str | None:
+        if channel == "tc_card":
+            return f"fake-card-{message.recipient}"
+        return f"fake-msg-{message.recipient}"
 
 
 @dataclass
@@ -172,7 +193,7 @@ def engine():
 @pytest.fixture()
 def tables(engine):
     """Create all governance tables, drop after test."""
-    import agentclaw.community.core.economy.governance.contracts.models  # noqa: F401
+    import agentclaw.community.core.economy.governance.repositories.orm  # noqa: F401
     Base.metadata.create_all(engine)
     yield
     Base.metadata.drop_all(engine)

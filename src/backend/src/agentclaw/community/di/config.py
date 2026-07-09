@@ -522,7 +522,7 @@ class EconomyGovernanceConfig:
         auto-degrades to ``"markdown"`` (recorded in audit + notify_log).
 
     dry_run       True (default) → scan runs but does NOT create
-                  GovernanceNotifyLog rows; audit rows are written
+                  GovernanceNotification rows; audit rows are written
                   with dry_run=1. Flip to False to enable real
                   notifications in pre/prod.
     skip_weekends  True (default) → skip DingTalk delivery on Saturday/Sunday.
