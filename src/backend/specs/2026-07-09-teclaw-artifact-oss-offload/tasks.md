@@ -29,28 +29,30 @@
   - [x] `reset_all_mocks` resets `get_object` (return_value `None`, clears side_effect/history).
 - **Depends on:** Task 1
 
-## Task 4: Add offload helpers + constants to the publish repository
+## Task 4: [x] Add offload helpers + constants to the publish repository
 - **Goal:** Introduce the size threshold, marker shape, key builder, and the
   serialize/resolve helpers — without wiring them into read/write paths yet.
 - **Files:** `src/backend/src/agentclaw/community/plugins/bot_publish_repository.py`
 - **Done when:**
-  - [ ] Module constants: `_ARTIFACT_OSS_THRESHOLD_BYTES = 60 * 1024`,
+  - [x] Module constants: `_ARTIFACT_OSS_THRESHOLD_BYTES = 60 * 1024`,
         `_ARTIFACT_KEY = "config_artifact"`, `_ARTIFACT_OSS_MARKER = "config_artifact_oss"`.
-  - [ ] `__init__` accepts injected `oss: ObjectStoragePlugin | None = None`,
+  - [x] `__init__` accepts injected `oss: ObjectStoragePlugin | None = None`,
         stores it, and sets `self._offload_enabled` (True only when `oss` is
         present AND exposes a callable `get_object`); warns once when `oss` is
         present but lacks `get_object`.
-  - [ ] `_artifact_oss_key(env, publish_id)` returns
+  - [x] `_artifact_oss_key(env, publish_id)` returns
         `teclaw/{env}/bot_publish/{publish_id}/config_artifact.json`.
-  - [ ] `_serialize_ext(ext, publish_id, env) -> str | None`: offloads
+  - [x] `_serialize_ext(ext, publish_id, env) -> str | None`: offloads
         `config_artifact` to OSS when `_offload_enabled` and the artifact's UTF-8
         JSON byte length > threshold; replaces it with the self-describing marker;
         raises on `put_object` failure (fail loud); returns `json.dumps(ext)` (or
         `None` when `ext is None`). Inline path unchanged when under threshold /
         offload disabled.
-  - [ ] `_resolve_ext(ext) -> ext`: when the marker is present, `get_object` +
+  - [x] `_resolve_ext(ext) -> ext`: when the marker is present, `get_object` +
         `json.loads` → set `config_artifact`, drop the marker; on fetch failure,
         log an error and return `ext` with the marker intact.
+  - [x] `_to_record(row)` helper re-inlines via `_resolve_ext` (wired into read
+        paths in Task 5).
 - **Depends on:** Task 1
 
 ## Task 5: Wire offload/inload into the repository read & write paths
