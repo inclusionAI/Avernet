@@ -1,6 +1,6 @@
 """Route-B acceptance: bot_chat read-only query lifecycle on live backend.
 
-Starts a real --local backend (in-memory SQLite via local_setup.sh --local),
+Starts a real singlebox backend (in-memory SQLite via local_setup.sh),
 runs the LOCAL-pure flows through httpx, asserts no-data state matches a JSON
 baseline snapshot.
 

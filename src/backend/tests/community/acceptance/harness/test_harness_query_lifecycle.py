@@ -1,6 +1,6 @@
 """Route-B acceptance: harness read-only query lifecycle on live backend.
 
-Starts a real --local backend, runs the 5 read-only flows + asserts no-data
+Starts a real singlebox backend, runs the 5 read-only flows + asserts no-data
 state matches baseline.
 
 harness write paths (POST /diagnose / /generate-patches / /apply / /rollback)

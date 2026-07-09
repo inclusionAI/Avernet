@@ -93,7 +93,7 @@ test -f .env.local || cp .env.example .env.local
 docker compose --env-file .env.local up --build
 ```
 
-Docker 会只读挂载宿主机 `${HOME}/.openclaw` 到容器内，并在没有完整 `OPENCLAW_OPENAI_*` 时尝试复用其中的 `openclaw.json`。这条路径和 `singlebox --local` 的 5bot 行为对齐：完整 `OPENCLAW_OPENAI_*` 优先；否则回退到本机 OpenClaw 模型配置；都没有时继续启动，但 bot 不能真实回复。
+Docker 会只读挂载宿主机 `${HOME}/.openclaw` 到容器内，并在没有完整 `OPENCLAW_OPENAI_*` 时尝试复用其中的 `openclaw.json`。这条路径和本机 `singlebox.sh` 的 5bot 行为对齐：完整 `OPENCLAW_OPENAI_*` 优先；否则回退到本机 OpenClaw 模型配置；都没有时继续启动，但 bot 不能真实回复。
 如果宿主机配置目录不存在，Docker Compose 可能会创建一个空目录；启动仍会继续，但不会复用本机模型配置。
 
 要改成其他宿主机 OpenClaw 配置目录，在 `.env.local` 中设置：

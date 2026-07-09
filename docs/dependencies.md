@@ -7,8 +7,8 @@ quick start. It is written for humans and agents to read before installing
 dependencies or starting services.
 
 Supported platforms: macOS, Debian / Ubuntu, and Fedora. This page covers the
-native `singlebox.sh --local` and `singlebox.sh --standalone` paths. The Docker
-source-build path only needs the optional Docker dependency below; see the
+native `singlebox.sh` isolated local path. The Docker source-build path only
+needs the optional Docker dependency below; see the
 [Docker Guide](docker.md) for the full flow.
 
 Run the safety preflight from the repository root first:
@@ -65,7 +65,7 @@ installation for a one-off command.
 | SQLite development libraries | BCS local storage | `pkg-config --modversion sqlite3` | Usually present on macOS; Linux needs a dev package. |
 | OpenSSL development libraries | Building Rust TLS / native-tls dependencies | `pkg-config --modversion openssl` | Linux needs `libssl-dev` / `openssl-devel`; on macOS, prefer Homebrew `openssl@3`. |
 | Node.js 22+ | Building the BCN plugin and running the frontend | `node --version` | `singlebox.sh` rejects lower major versions. |
-| npm | Installing/building the BCN plugin and installing frontend dependencies | `npm --version` | Both local and standalone paths use npm for plugin and frontend setup. |
+| npm | Installing/building the BCN plugin and installing frontend dependencies | `npm --version` | The native singlebox path uses npm for plugin and frontend setup. |
 | OpenClaw `>= 2026.3.28` | Starting the local 5-bot stack | `openclaw --version` | `install-tools` asks whether to install the requested version when OpenClaw is missing or below the minimum. |
 | `jq` | Generating and reusing 5-bot OpenClaw JSON configuration | `jq --version` | The local 5-bot stack uses it to safely handle model and bot configuration. |
 | `curl` | Health checks and manual downloads | `curl --version` | Used by scripts and manual installation commands. |
@@ -164,10 +164,11 @@ run:
 After the preflight passes, continue with the main flow:
 
 ```bash
-./scripts/singlebox.sh --local
+./scripts/singlebox.sh
 ```
 
-If you want to use the repo-local isolated BCS runtime and OpenClaw root:
+`--standalone` remains accepted as an explicit alias for the same isolated
+singlebox mode:
 
 ```bash
 ./scripts/singlebox.sh --standalone

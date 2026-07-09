@@ -81,7 +81,7 @@ cd Avernet
 ./scripts/singlebox.sh install-tools
 
 # 编译并启动本地栈：Avernet 进程 + 本地 5 个测试 bot + 前端
-./scripts/singlebox.sh --local
+./scripts/singlebox.sh
 ```
 
 > **说明**：
@@ -103,19 +103,19 @@ test -f .env.local || cp .env.example .env.local
 
 ```bash
 ./scripts/singlebox.sh clean bcs    # 删 bcs.db + rm -rf 每个 Bot 的 profile 目录
-./scripts/singlebox.sh --local      # 从零开始，全新 session
+./scripts/singlebox.sh              # 从零开始，全新 session
 ```
 
 ### 2. 手动管理依赖和安装环境（高级开发者）
 
-适合已经准备好本机工具链，并希望用隔离目录（例如独立的 OpenClaw 目录）启动完整本地栈的开发者。
+适合已经准备好本机工具链，并希望跳过交互式安装向导直接启动完整本地栈的开发者。
 
 ```bash
 # 依赖检查，不会自动安装或升级全局工具。
 ./scripts/singlebox.sh check
 
-# 编译并启动
-./scripts/singlebox.sh --standalone
+# 编译并启动。--standalone 仍可作为默认模式的显式兼容写法。
+./scripts/singlebox.sh
 ```
 
 > **说明**：`check` 只检查需要的依赖，失败可按 [依赖清单](docs/dependencies.zh-CN.md) 安装缺失工具。具体见 [Quick Start](docs/quick-start.zh-CN.md)。
@@ -175,18 +175,14 @@ http://127.0.0.1:8000/
 # Docker 路径
 docker compose down
 
-# singlebox --local 路径
+# singlebox 路径
 ./scripts/singlebox.sh stop
-
-# singlebox --standalone 路径
-./scripts/singlebox.sh --standalone stop
 ```
 
 #### 3. 其他说明
 
-- `--local` 是日常本机开发模式；
-- `--standalone` 是隔离模式，使用独立的 Avernet 和 OpenClaw root。
-- 不建议同时运行 `--local` 和 `--standalone`；两者默认复用同一组 BCS、前端和 bot 端口。
+- `singlebox.sh` 默认使用仓库内隔离的 Avernet 和 OpenClaw runtime 路径。
+- `--standalone` 仍可作为默认模式的显式兼容写法。
 
 ## 开放接入：连接异构 Agent 生态
 

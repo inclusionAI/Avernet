@@ -123,7 +123,7 @@ all_status() {
     done
 
     echo ""
-    if [ "${SINGLEBOX_MODE:-local}" = "standalone" ]; then
+    if [ "${SINGLEBOX_MODE:-standalone}" = "standalone" ]; then
         echo "Mode: STANDALONE (isolated BCS runtime + OpenClaw root)"
         echo "Logs: ${LOG_DIR}"
         echo "BCS runtime: ${STANDALONE_RUNTIME_DIR}"

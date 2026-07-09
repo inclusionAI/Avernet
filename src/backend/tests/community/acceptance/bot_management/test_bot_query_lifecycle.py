@@ -1,6 +1,6 @@
 """Route-B acceptance: bot_management read-only query lifecycle on live backend.
 
-Starts a real --local backend, runs the 3 read-only flows + asserts no-data
+Starts a real singlebox backend, runs the 3 read-only flows + asserts no-data
 state matches baseline.
 
 bot_management is the largest module (30+ HTTP endpoints, 3000+ line BotService).

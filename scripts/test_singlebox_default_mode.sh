@@ -24,16 +24,16 @@ test_default_mode_is_standalone() {
   grep -q ".standalone-openclaw" <<<"$output" || fail "default mode should use standalone OpenClaw root"
 }
 
-test_local_mode_remains_explicit_opt_out() {
+test_local_mode_is_rejected() {
   local output
-  output="$(run_singlebox_status --local)"
 
-  if grep -q "STANDALONE MODE ENABLED" <<<"$output"; then
-    fail "--local should opt out of standalone mode"
+  if output="$(run_singlebox_status --local)"; then
+    fail "--local should be rejected"
   fi
+  grep -q -- "--local has been removed" <<<"$output" || fail "--local rejection should explain removal"
 }
 
 test_default_mode_is_standalone
-test_local_mode_remains_explicit_opt_out
+test_local_mode_is_rejected
 
 printf 'PASS: singlebox default mode tests\n'

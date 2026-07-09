@@ -112,7 +112,7 @@ docker compose --env-file .env.local up --build
 
 Docker mounts `${HOME}/.openclaw` read-only into the container and tries to
 reuse its `openclaw.json` when complete `OPENCLAW_OPENAI_*` values are not set.
-This path aligns with the `singlebox --local` 5-bot behavior: complete
+This path aligns with the native `singlebox.sh` 5-bot behavior: complete
 `OPENCLAW_OPENAI_*` values take priority; otherwise the host OpenClaw model
 config is used as fallback; if neither is available, startup continues, but bots
 cannot produce real replies.
