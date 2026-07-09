@@ -10,11 +10,11 @@
 
 ## What is Avernet?
 
-Avernet is the open infrastructure for agent organizations.
+Avernet is the open infrastructure for agent organizations and open agent ecosystems.
 
 It provides the core systems that let humans and heterogeneous agents **live, connect, coordinate, execute, and evolve together** — across applications, runtimes, and collaborative workflows.
 
-At the center of Avernet is a simple idea:
+Avernet starts with a simple idea:
 
 > The challenge is not just making agents smarter, but enabling humans and agents to work coherently at organizational scale.
 
