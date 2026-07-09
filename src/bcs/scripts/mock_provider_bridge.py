@@ -322,7 +322,7 @@ async def drive_turn(
     try:
         async with websockets.connect(
             url, max_size=16 * 1024 * 1024,
-            additional_headers={"Origin": "https://teamclaw.alipay.com"},
+            additional_headers={"Origin": cfg.engine_origin},
         ) as ws:
             # v3 handshake
             connect_id = uuid.uuid4().hex
@@ -434,7 +434,7 @@ async def drive_turn_callback(run_id: str, session_key: str, message: str, cfg: 
     try:
         async with websockets.connect(
             url, max_size=16 * 1024 * 1024,
-            additional_headers={"Origin": "https://teamclaw.alipay.com"},
+            additional_headers={"Origin": cfg.engine_origin},
         ) as ws:
             await ws.send(json.dumps(build_connect_frame(uuid.uuid4().hex)))
             chat_id = uuid.uuid4().hex
@@ -535,7 +535,7 @@ async def drive_request(run_id: str, frame: dict, engine: str, cfg: "BridgeConfi
     try:
         async with websockets.connect(
             url, max_size=16 * 1024 * 1024,
-            additional_headers={"Origin": "https://teamclaw.alipay.com"},
+            additional_headers={"Origin": cfg.engine_origin},
         ) as ws:
             await ws.send(json.dumps(build_connect_frame(uuid.uuid4().hex)))
             await ws.send(json.dumps(frame))
@@ -665,12 +665,14 @@ class BridgeConfig:
         provider_bot_ref: str = "",
         provider_admin_token: str = "",
         permission_mode: str = "",
+        engine_origin: str = "https://teamclaw.localhost",
     ):
         self.engine = engine
         self.engine_host = engine_host
         self.engine_port = engine_port
         self.idle_timeout_s = idle_timeout_s
         self.permission_mode = permission_mode
+        self.engine_origin = engine_origin
         # send response shape:
         #   "sse"          -> 2.0 SSE: respond with text/event-stream, stream frames.
         #   "callback-2.0" -> 2.0 callback streaming: JSON-ack the POST, then
@@ -704,6 +706,7 @@ def main() -> None:
     parser.add_argument("--provider-bot-ref", default="", help="provider_bot_ref for callback auth headers")
     parser.add_argument("--provider-admin-token", default="", help="provider_admin_token (Bearer) for callback auth")
     parser.add_argument("--permission-mode", default="", help="optional engine chat.send permissionMode")
+    parser.add_argument("--engine-origin", default="https://teamclaw.localhost", help="Origin header for engine websocket calls")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
 
@@ -723,6 +726,7 @@ def main() -> None:
         provider_bot_ref=args.provider_bot_ref,
         provider_admin_token=args.provider_admin_token,
         permission_mode=args.permission_mode,
+        engine_origin=args.engine_origin,
     )
     app = web.Application()
     app.router.add_post("/webhook", make_webhook_handler(cfg))

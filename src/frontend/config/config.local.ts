@@ -64,11 +64,11 @@ const hasHttpServer = Object.entries(preset.servers).some(
 
 const frontendPort = process.env.PORT || '8000';
 const frontendUrl = !hasHttpServer
-  ? `https://dev.alipay.com:${frontendPort}`
-  : `http://dev.alipay.net:${frontendPort}`;
+  ? `https://dev.localhost:${frontendPort}`
+  : `http://dev.localhost:${frontendPort}`;
 const hostConfig = !hasHttpServer
-  ? '127.0.0.1 dev.alipay.com'
-  : '127.0.0.1 dev.alipay.net';
+  ? '127.0.0.1 dev.localhost'
+  : '127.0.0.1 dev.localhost';
 const localDevEnv =
   presetName === 'local'
     ? 'LOCAL'
@@ -169,13 +169,13 @@ if (process.env.BCS_PORT || process.env.BCSFUSE_PORT) {
 
 // ==================== 副屏 UMD 组件 CDN 同源代理（dev-only）====================
 // 副屏 UMD 组件由 UmdLoader 在浏览器里 fetch(cdn) 拉取（cdn 是后端下发的绝对地址）。
-// fetch 受 CORS 约束：受限 CDN 只放行白名单内的 origin（如 *.alipay.net），导致
+// fetch 受 CORS 约束：受限 CDN 只放行白名单内的 origin，导致
 // 用 localhost 打开时副屏「组件加载失败」。
 //
 // 解法：dev 下让前端把 fetch 改写成同源路径 /__umd_cdn?target=<绝对CDN地址>，
 // 由 dev server 转发到真实 CDN。浏览器只与 dev server 同源通信（不触发 CORS），
 // dev server 用 Node 拉 CDN 是服务端请求（不受 CORS 白名单限制）。于是无论 CDN
-// 换成哪个域名、前端用 localhost 还是 dev.alipay.net，都能加载——前端域名与 CDN
+// 换成哪个域名、前端用 localhost 还是 dev.localhost，都能加载——前端域名与 CDN
 // 域名彻底解耦。配套改写见 src/components/UmdLoader/loadUmd.ts（同名 UMD_CDN_PROXY
 // define 守卫；生产不注入，直连原始 CDN）。
 //
