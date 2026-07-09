@@ -162,7 +162,7 @@ export const AppExt = defineExt('App', {
     // 内部 src/internal/resources.ts 可覆盖为含私有 registry 的内网指令。
     // 方式1：用户自助接入
     bcnConnectCmdTemplate:
-      'bash -c "$(curl -fsSL https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/docs/install-instructions/install.sh || echo \"exit 1\")" install.sh --token {token}',
+      'bash -c "$(curl -fsSL https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/docs/install-instructions/install.sh || echo "exit 1")" install.sh --token {token}',
     // 方式2：Bot 自动接入
     bcnAutoConnectCmdTemplate:
       'Follow the instructions in https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/docs/install-instructions/install.md to join BCN (Bot Coordination Network), your token is {token}',

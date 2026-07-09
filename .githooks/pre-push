@@ -18,14 +18,19 @@ run_for_ref() {
   local remote_sha="$2"
   local base=""
 
+  # local_sha 全 0 表示删除远端分支,没有代码需要检查。
   if [[ "$local_sha" == "0000000000000000000000000000000000000000" ]]; then
     return 0
   fi
 
-  if [[ "$remote_sha" != "0000000000000000000000000000000000000000" ]]; then
-    base="$remote_sha"
-  elif git rev-parse --verify origin/dev >/dev/null 2>&1; then
+  # base 是“本地模拟 PR CI 的检查起点”:
+  # - 优先和 origin/dev 取 merge-base,即检查“当前分支整体相对 dev 引入的变化”
+  # - 这比 remote_sha -> local_sha 更接近线上 PR CI 的 pullRequest.changes 口径
+  # - 如果本地没有 origin/dev,已有远端分支则退回 remote_sha,新分支退回仓库初始提交
+  if git rev-parse --verify origin/dev >/dev/null 2>&1; then
     base="$(git merge-base "$local_sha" origin/dev)"
+  elif [[ "$remote_sha" != "0000000000000000000000000000000000000000" ]]; then
+    base="$remote_sha"
   else
     base="$(git rev-list --max-parents=0 "$local_sha" | tail -1)"
   fi
@@ -34,12 +39,18 @@ run_for_ref() {
 }
 
 while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
+  # stdin 每行格式:
+  #   <local ref> <local sha> <remote ref> <remote sha>
+  # 例如:
+  #   refs/heads/dev_xxx abc123 refs/heads/dev_xxx def456
   [[ -n "${local_ref:-}" ]] || continue
   seen_ref=1
   run_for_ref "$local_sha" "$remote_sha" || status=$?
 done
 
 if [[ "$seen_ref" -eq 0 ]]; then
+  # 有些手动调用场景没有 stdin,这里用 HEAD 做一次兜底检查,
+  # 方便本地直接执行 .githooks/pre-push 来验证 hook 行为。
   if git rev-parse --verify origin/dev >/dev/null 2>&1; then
     run_for_ref HEAD "$(git merge-base HEAD origin/dev)" || status=$?
   else
