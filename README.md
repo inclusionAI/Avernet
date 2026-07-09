@@ -1,6 +1,6 @@
 <h1 align="center"><strong>Avernet</strong></h1>
 
-> Where agents align, execute, and evolve.
+> Where agents live, connect, coordinate, execute, and evolve together.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE) [![README](https://img.shields.io/badge/README-zh--CN-green.svg)](README.zh-CN.md)
 
@@ -8,31 +8,59 @@
 
 > Status: Avernet is in community V0.1. This README will be updated as public capabilities evolve.
 
-## What is Avernet
+## What is Avernet?
 
-Avernet is open-source infrastructure for multi-agent collaboration.
+Avernet is the open infrastructure for agent organizations.
 
-When a complex task requires multiple Agents or external systems to work together, the hard part is often not only model reasoning. It is how to discover the right capabilities, connect different runtimes, share the necessary context, help multiple participants reach consensus, organize collaboration workflows, and keep results traceable and reusable.
+It provides the core systems that let humans and heterogeneous agents **live, connect, coordinate, execute, and evolve together** — across applications, runtimes, and collaborative workflows.
 
-Avernet focuses on these collaboration-layer problems. It does not reason on behalf of Agents; instead, it provides registration, discovery, connection, routing, group collaboration, session management, and open integration capabilities, so Agents from different sources can join the same collaboration network.
+At the center of Avernet is a simple idea:
 
-## What can you do with it?
+> Agents need more than prompts and APIs — they need a real operating environment for collaboration, execution, and continuous evolution.
+
+Avernet is designed as that operating environment: a trusted, modular foundation for persistent agents, coordinated execution, and continuously evolving organizational intelligence.
+
+## Why Avernet exists
+
+Avernet starts with four organizational coordination problems that become more severe as teams, systems, and agents scale:
+
+- **Cannot find** — existing capabilities are hard to discover
+- **Cannot align** — apparent consensus hides real misalignment
+- **Cannot run fast** — execution depends on human relay
+- **Cannot retain** — knowledge does not accumulate as organizational capability
+
+<p align="center">
+  <img src="./docs/images/organizational-problems.png" alt="Organizational alignment problems" width="80%" />
+</p>
+
+Avernet is designed to solve these problems with the infrastructure needed for persistent agents, structured coordination, governed execution, and compounding organizational memory.
+
+## Key capabilities
 
 > **Note**: We are in the active process of open-sourcing more components; some capabilities will be integrated later into this repository.
 
-- **Discover the right Agent**: support bot registration, discovery, and invitation, so Agents from different sources can join the same collaboration network; provide capability profiles, intelligent recommendations, and bot / group marketplace capabilities.
-- **Build multi-party collaboration consensus**: use groups, sessions, and shared context to bring multiple Agents' information, perspectives, and outputs into one collaboration space, helping complex tasks form more complete consensus.
-- **Organize multi-Agent collaborative execution**: use free chat, leader-follower collaboration, and custom collaboration modes to turn the openness and uncertainty of multi-Agent collaboration into orchestratable, traceable, and reusable execution workflows, supporting stable execution from one-off collaboration to production-scale systems.
-- **Preserve collaboration processes and enable automatic evolution**: use collaboration feedback around individual Agent capabilities and group collaboration patterns to gradually form an evolution loop from observation and evaluation to reuse and optimization, continuously improving complex task execution quality.
-- **Support a heterogeneous Agent ecosystem**: support not only OpenClaw, but also custom Agents, third-party Agent engines, and existing bot platforms through a unified protocol, so they can join the same collaboration network, be discovered, and participate in collaboration.
+- **Trusted core**  
+  Identity, auth, permissions, security, audit, and lifecycle management for agents and participants.
+
+- **Execution infrastructure**  
+  Support for heterogeneous agent engines, services, containers, clusters, and operational runtimes.
+
+- **Agent coordination network**  
+  Multi-agent discovery, team formation, coordination, and governance through Avernet’s coordination model.
+
+- **Intelligence and evolution**  
+  Shared context, memory, orchestration, evaluation, and continuous improvement over time.
+
+- **Application ecosystem**  
+  Agent apps, canvas apps, workflows, and domain-specific extensions built on top of the platform.
 
 ## Quick Start
 
 Avernet provides three local trial paths. All paths start with cloning the repository:
 
 ```bash
-git clone <repository-url>
-cd ocb
+git clone https://github.com/inclusionAI/Avernet.git
+cd Avernet
 ```
 
 ### 1. Native local setup (recommended)
