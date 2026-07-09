@@ -14,7 +14,7 @@ class DistributedLockModel(Base):
     gmt_modified = Column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
     )
-    lock_name = Column(String(128), nullable=False, unique=True)
+    lock_name = Column(String(128), nullable=False)
     lock_holder = Column(String(128), nullable=False)
     expire_time = Column(DateTime, nullable=True)
     env = Column(String(64), nullable=True)
