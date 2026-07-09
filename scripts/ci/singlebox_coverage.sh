@@ -58,15 +58,23 @@ done
 
 run_real_singlebox() {
   mkdir -p "$coverage_root/raw" "$report_dir"
+  local coverage_standalone_root="$coverage_root/standalone-openclaw"
+  local coverage_standalone_runtime="$coverage_root/standalone-runtime"
   echo "singlebox coverage real mode"
   echo "coverage_root: $coverage_root"
+  echo "standalone_openclaw_root: $coverage_standalone_root"
+  echo "standalone_runtime_dir: $coverage_standalone_runtime"
   echo "This mode currently verifies startup only; full coverage combine/reporting will be restored with the real singlebox worktree."
   cleanup_real_singlebox() {
     env OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE=mock \
+      STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
+      STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
       bash "$repo_root/scripts/singlebox.sh" --standalone stop bcs backend baas || true
   }
   trap cleanup_real_singlebox EXIT
   env SINGLEBOX_COVERAGE=1 SINGLEBOX_COVERAGE_DIR="$coverage_root/raw" OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE=mock \
+    STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
+    STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
     bash "$repo_root/scripts/singlebox.sh" --standalone start baas backend bcs
   cleanup_real_singlebox
   trap - EXIT

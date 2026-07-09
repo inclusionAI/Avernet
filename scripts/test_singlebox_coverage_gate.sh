@@ -25,6 +25,14 @@ if [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" != "mock" ]; then
   echo "singlebox coverage should force SINGLEBOX_MODEL_CONFIG_MODE=mock" >&2
   exit 12
 fi
+case "${STANDALONE_OPENCLAW_ROOT:-}" in
+  "${PWD}/scripts/.dependencies/coverage/singlebox/standalone-openclaw") ;;
+  *) echo "singlebox coverage should use an isolated standalone OpenClaw root" >&2; exit 13 ;;
+esac
+case "${STANDALONE_RUNTIME_DIR:-}" in
+  "${PWD}/scripts/.dependencies/coverage/singlebox/standalone-runtime") ;;
+  *) echo "singlebox coverage should use an isolated standalone runtime dir" >&2; exit 14 ;;
+esac
 printf '%s\n' "$*" >> "${SINGLEBOX_STUB_LOG:?}"
 exit 0
 SH
@@ -37,8 +45,10 @@ test_default_mode_runs_real_singlebox() {
   log="${tmp}/singlebox.log"
   make_fake_repo "$tmp"
 
-  SINGLEBOX_STUB_LOG="$log" "${tmp}/scripts/ci/singlebox_coverage.sh" \
-    --coverage-root "${tmp}/coverage" >/dev/null
+  (
+    cd "$tmp"
+    SINGLEBOX_STUB_LOG="$log" "${tmp}/scripts/ci/singlebox_coverage.sh" >/dev/null
+  )
 
   grep -Fx -- "--standalone start baas backend bcs" "$log" >/dev/null || \
     fail "default coverage mode should start the standalone singlebox coverage stack"
