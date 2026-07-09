@@ -85,6 +85,40 @@ def _default_bcn_plugin_path() -> str:
     return os.path.expanduser("~/.openclaw/extensions/openclaw-channel-bcn")
 
 
+def _merge_singlebox_model_config(oc_config: dict) -> None:
+    """Merge the repo-local singlebox model config into an OpenClaw config."""
+    configured = os.environ.get("SINGLEBOX_MODEL_CONFIG_FILE", "").strip()
+    if not configured:
+        return
+
+    config_path = Path(configured)
+    if not config_path.is_file():
+        raise DeviceAllocateError(
+            f"SINGLEBOX_MODEL_CONFIG_FILE does not exist: {config_path}"
+        )
+
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            model_config = json.load(f)
+    except json.JSONDecodeError as exc:
+        raise DeviceAllocateError(
+            f"SINGLEBOX_MODEL_CONFIG_FILE is not valid JSON: {config_path}"
+        ) from exc
+
+    models = model_config.get("models")
+    if models is not None:
+        oc_config["models"] = models
+
+    defaults = model_config.get("agents", {}).get("defaults", {})
+    if isinstance(defaults, dict):
+        target_defaults = oc_config.setdefault("agents", {}).setdefault("defaults", {})
+        for key in ("model", "models", "imageModel"):
+            target_defaults.pop(key, None)
+        for key in ("model", "models", "imageModel"):
+            if key in defaults:
+                target_defaults[key] = defaults[key]
+
+
 @dataclass
 class ProcessEntry:
     """Represents a running adapter (+ optional openclaw/hermes) for one bot.
@@ -221,6 +255,8 @@ class LocalProcessManager:
                 template_path,
             )
             oc_config = {}
+
+        _merge_singlebox_model_config(oc_config)
 
         oc_config.setdefault("gateway", {})["port"] = openclaw_port
         oc_config["gateway"]["mode"] = "local"

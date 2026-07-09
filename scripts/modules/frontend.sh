@@ -225,7 +225,7 @@ frontend_prereqs() {
         prereq_ok "Port ${FRONTEND_PORT} available"
     else
         prereq_warn "Port ${FRONTEND_PORT} is in use"
-        print_port_conflict_guidance "${FRONTEND_PORT}" "${FRONTEND_DIR}" "frontend" "./scripts/singlebox.sh --local stop frontend" "set FRONTEND_PORT=<free-port> in .env.local" false
+        print_port_conflict_guidance "${FRONTEND_PORT}" "${FRONTEND_DIR}" "frontend" "$(singlebox_cmd stop frontend)" "set FRONTEND_PORT=<free-port> in .env.local" false
     fi
 
     if [ "$has_error" = true ]; then

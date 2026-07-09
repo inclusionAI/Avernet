@@ -24,7 +24,7 @@ log_error() {
 }
 
 singlebox_mode_option() {
-    if [ "${SINGLEBOX_MODE:-local}" = "standalone" ] || [ "${STANDALONE_MODE:-false}" = true ]; then
+    if [ "${SINGLEBOX_MODE:-standalone}" = "standalone" ] || [ "${STANDALONE_MODE:-true}" = true ]; then
         echo "--standalone"
     else
         echo "--local"
@@ -1109,7 +1109,7 @@ show_local_mode_info() {
     log_warn "LOCAL MODE ENABLED"
     log_warn "========================================="
     log_warn "Using:"
-    log_warn "  - Services: BCS + 5 local bots + frontend"
+    log_warn "  - Services: BAAS + Backend + BCS + 5 local bots + demo bot + frontend"
     log_warn "  - Auth: BCS local mock identity"
     log_warn "  - BCS: local config (no external MySQL/Redis services)"
     log_warn "  - OpenClaw configs: ${LOCAL_OPENCLAW_DIR}"

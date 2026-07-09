@@ -64,7 +64,8 @@ export function resolveAccount(cfg: any, accountId?: string | null): ResolvedBcs
   const accountOverride = channelCfg.accounts?.[id] ?? {};
 
   const envUrl = getDefaultBcsUrl();
-  const envBotId = process.env.BCS_BOT_ID ?? 'openclaw-bot';
+  const explicitEnvBotId = process.env.BCS_BOT_ID;
+  const envBotId = explicitEnvBotId ?? 'openclaw-bot';
   const envBotName = process.env.BCS_BOT_NAME ?? 'OpenClaw Agent';
   const envSummary = process.env.BCS_BOT_SUMMARY ?? 'AI Agent';
   const envDomains = parseList(process.env.BCS_BOT_DOMAINS);
@@ -73,12 +74,14 @@ export function resolveAccount(cfg: any, accountId?: string | null): ResolvedBcs
 
   const baseCaps = channelCfg.capabilities ?? {};
   const overrideCaps = accountOverride.capabilities ?? {};
+  const connectBotId = accountOverride.botId ?? channelCfg.botId ?? explicitEnvBotId;
 
   return {
     accountId: id,
     enabled: accountOverride.enabled ?? channelCfg.enabled ?? true,
     bcsUrl: (accountOverride.bcsUrl ?? channelCfg.bcsUrl ?? envUrl).trim(),
     botId: accountOverride.botId ?? channelCfg.botId ?? envBotId,
+    ...(connectBotId ? { connectBotId } : {}),
     botName: accountOverride.botName ?? channelCfg.botName ?? envBotName,
     capabilities: {
       summary: overrideCaps.summary ?? baseCaps.summary ?? envSummary,

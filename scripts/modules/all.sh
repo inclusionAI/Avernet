@@ -6,10 +6,12 @@ _ALL_SH_LOADED=1
 # Canonical service orders — single source of truth for the "all" group.
 # toolchain is NOT included here — use `install-tools` command separately.
 #
-# Current open-source default starts BCS, 5 local bots, and the frontend workbench.
-SETUP_ORDER=(bcs_bots frontend)
-START_ORDER=(bcs_bots frontend)
-STOP_ORDER=(frontend bcs_bots)
+# Full singlebox stack: BAAS/backend create the developer runtime, BCS runs
+# collaboration, bots starts the 5 local profiles, demo_bot onboards the
+# backend-created developer bot, then frontend exposes the workbench.
+SETUP_ORDER=(baas backend bcs bots frontend)
+START_ORDER=(baas backend bcs bots demo_bot frontend)
+STOP_ORDER=(frontend demo_bot bots bcs backend baas)
 
 all_setup() {
     for svc in "${SETUP_ORDER[@]}"; do
@@ -121,5 +123,5 @@ all_status() {
 }
 
 all_help() {
-    echo "all - BCS + 5 local bots + frontend stack (current open-source default)"
+    echo "all - BAAS + Backend + BCS + 5 local bots + demo bot + frontend stack"
 }

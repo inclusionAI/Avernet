@@ -268,6 +268,30 @@ config_has_bcs_core_tools() {
     done
 }
 
+config_model_matches_local() {
+    local config_file="$1"
+    local expected_models="${OPENCLAW_MODELS_JSON:-null}"
+    local expected_fields="${OPENCLAW_AGENT_MODEL_FIELDS_JSON:-{}}"
+
+    [ -f "$config_file" ] || return 1
+    jq -e \
+        --argjson expected_models "${expected_models:-null}" \
+        --argjson expected_fields "$expected_fields" \
+        '
+          (.agents.defaults // {}) as $defaults
+          | (
+              if $expected_models == null then
+                (.models? == null)
+              else
+                .models == $expected_models
+              end
+            )
+          and (($defaults.model // null) == ($expected_fields.model // null))
+          and (($defaults.models // null) == ($expected_fields.models // null))
+          and (($defaults.imageModel // null) == ($expected_fields.imageModel // null))
+        ' "$config_file" >/dev/null 2>&1
+}
+
 bot_config_base_matches_local() {
     local bot_id="$1"
     local profile="$2"
@@ -818,11 +842,11 @@ setup_profile_dir() {
 
     local config_file="$profile_dir/openclaw.json"
     if [ "$BCS_BOTS_PRESERVE_FILES" = "1" ] && [ -f "$config_file" ]; then
-        if config_has_bcs_core_tools "$config_file" && bot_config_matches_local "$bot_id" "$profile" "$port" "$profile_source"; then
+        if config_has_bcs_core_tools "$config_file" && bot_config_matches_local "$bot_id" "$profile" "$port" "$profile_source" && config_model_matches_local "$config_file"; then
             info "Preserving existing profile directory: $profile ($bot_id)"
             return 0
         fi
-        info "Refreshing existing profile config with BCS tool allowlist or session bot identity: $profile ($bot_id)"
+        info "Refreshing existing profile config with current BCS/model settings: $profile ($bot_id)"
     fi
 
     # Copy business skills if specified

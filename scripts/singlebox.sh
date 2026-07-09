@@ -4,7 +4,7 @@ set -e
 # ============ singlebox.sh — Local development environment entry point ============
 #
 # Usage:
-#   ./scripts/singlebox.sh                              # Current local default (setup current all group + start current all group)
+#   ./scripts/singlebox.sh                              # Default standalone local stack (setup current all group + start current all group)
 #   ./scripts/singlebox.sh install-tools                # Install/upgrade dev tools (toolchain)
 #   ./scripts/singlebox.sh setup [service|group|all]    # Prepare artifacts/config/links; rebuild stale binaries
 #   ./scripts/singlebox.sh start [service|group|all]    # Start target (default: current all group)
@@ -13,12 +13,12 @@ set -e
 #   ./scripts/singlebox.sh clean [service|group|all]    # Clean local runtime data for target
 #   ./scripts/singlebox.sh status [group|service|all]   # Show status (default: current all group)
 #   ./scripts/singlebox.sh check [service|group|all]    # Check prerequisites (default: current all group)
-#   ./scripts/singlebox.sh --standalone [command]       # Run isolated standalone BCS + OpenClaw stack
+#   ./scripts/singlebox.sh --local [command]            # Opt out of isolated standalone paths
 #
 # Compatibility:
 #
 # Groups:
-#   all             Current open-source default (BCS + 5 bots + Frontend)
+#   all             Full local product stack (BAAS + Backend + BCS + 5 OpenClaw bots + demo bot + Frontend)
 #   bcs_bots        BCS + 5 local OpenClaw bots
 #   bcs_frontend    BCS + Frontend (E2E)
 #
@@ -122,7 +122,7 @@ ENGINE_STATE_FILE="${LOG_DIR}/.engine_type"
 # ============ 运行模式 ============
 LOCAL_MODE=true
 with_bcs_coverage=0
-STANDALONE_MODE=false
+STANDALONE_MODE=true
 
 # Local Mode directories
 LOCAL_BOTS_DIR="${PROJECT_ROOT}/test-bots"
@@ -139,11 +139,16 @@ mkdir -p "${RUNTIME_DATA_DIR}"
 source "${SCRIPT_DIR}/utils.sh"
 apply_cn_mirror_overrides
 source "${SCRIPT_DIR}/toolchain.sh"
+source "${SCRIPT_DIR}/modules/model_config.sh"
 
 # Service modules
+source "${SCRIPT_DIR}/modules/engine.sh"
+source "${SCRIPT_DIR}/modules/baas.sh"
+source "${SCRIPT_DIR}/modules/backend.sh"
 source "${SCRIPT_DIR}/modules/frontend.sh"
 source "${SCRIPT_DIR}/modules/bcs.sh"
 source "${SCRIPT_DIR}/modules/bots.sh"
+source "${SCRIPT_DIR}/modules/demo_bot.sh"
 source "${SCRIPT_DIR}/modules/bcs_bots.sh"
 
 # Group modules (must be after service modules they compose)
@@ -365,18 +370,17 @@ show_help() {
     echo "Local development environment manager."
     echo ""
     echo "Modes:"
-    echo "  --local, -l     Use local BCS + frontend defaults (default)"
-    echo "                  - Services: BCS + 5 local bots + frontend; no backend service in this profile"
-    echo "                  - Auth: BCS local mock identity"
-    echo "                  - BCS: SERVER_ENV=local, no external MySQL/Redis services"
-    echo ""
-    echo "  --standalone, -s Use isolated standalone BCS + OpenClaw paths"
+    echo "  --standalone, -s Use isolated standalone BCS + OpenClaw paths (default)"
     echo "                  - Starts the same BCS 5bot stack + frontend flow"
     echo "                  - Writes BCS runtime under scripts/.dependencies/standalone"
     echo "                  - Writes OpenClaw profiles, workspaces, and plugin link under .standalone-openclaw"
     echo ""
-    echo "  (default)       Same as --local"
+    echo "  --local, -l     Opt out of standalone paths and use local full-stack defaults"
+    echo "                  - Services: BAAS + Backend + BCS + Frontend"
+    echo "                  - Auth: BCS local mock identity"
+    echo "                  - BCS: SERVER_ENV=local, no external MySQL/Redis services"
     echo ""
+    echo "  (default)       Same as --standalone"
     echo ""
     echo "Commands:"
     echo "  install-tools                  Install/upgrade dev tools (node, npm, uv, openclaw, ...)"
@@ -388,11 +392,11 @@ show_help() {
     echo "  status [group|service|all]     Show status (default: current all group)"
     echo "  check [service|group|all]      Check prerequisites (default: current all group)"
     echo ""
-    echo "  (no arguments)                 Current local default: setup current all group + start current all group"
+    echo "  (no arguments)                 Default standalone stack: setup/start BAAS + Backend + BCS + bots + demo bot + Frontend"
     echo ""
     echo "Options:"
-    echo "  --local, -l                   Use local BCS + 5bot + frontend defaults"
     echo "  --standalone, -s              Use isolated standalone BCS + OpenClaw + frontend flow; forwards remaining args"
+    echo "  --local, -l                   Opt out of standalone paths and use local full-stack defaults"
     echo "  --openclaw-version, -ov VERSION Specify openclaw npm version/range (default: ${DEFAULT_OPENCLAW_VERSION})"
     echo "  --bcs-port, -bp PORT          Specify BCS port (default: ${DEFAULT_BCS_PORT})"
     echo "  --frontend-port, -fp PORT     Specify frontend dev server port (default: ${DEFAULT_FRONTEND_PORT})"
@@ -408,7 +412,7 @@ show_help() {
     echo ""
     echo "Services:"
     # 从各模块收集帮助信息
-    for svc in frontend bcs bots; do
+    for svc in baas backend bcs frontend engine bots; do
         if type -t "${svc}_help" &>/dev/null; then
             echo "  $( "${svc}_help" )"
         fi
@@ -423,9 +427,9 @@ show_help() {
     echo ""
     echo "Examples:"
     echo "  $0 install-tools               First time: install dev tools"
-    echo "  $0                             Setup and start current all group (currently BCS + 5bots + frontend)"
-    echo "  $0 setup all                   Setup current all group (currently BCS + 5bots + frontend)"
-    echo "  $0 start all                   Start current all group (currently BCS + 5bots + frontend)"
+    echo "  $0                             Setup and start standalone all group"
+    echo "  $0 setup all                   Setup standalone all group"
+    echo "  $0 start all                   Start standalone all group"
     echo "  $0 restart bcs                 Restart only the BCS server"
     echo "  $0 restart bots                Restart only the 5 local bot gateways"
     echo "  $0 start bots --profile-dir scripts/8bots_micro_merchant_profile"
@@ -433,8 +437,8 @@ show_help() {
     echo "  $0 clean bcs                   Clean only local BCS runtime data"
     echo "  $0 clean bots                  Clean only local bot profiles/workspaces"
     echo "  $0 check                       Check prerequisites"
-    echo "  $0 --standalone check          Check the isolated standalone local stack"
-    echo "  $0 --standalone                Setup and start local stack under .standalone-openclaw"
+    echo "  $0 check                       Check the isolated standalone local stack"
+    echo "  $0 --local start all           Start all group using non-standalone local paths"
     echo "  $0 status                      Show service status"
     echo ""
 }
@@ -533,6 +537,7 @@ setup_all_and_start() {
 
     # 创建必要的目录
     mkdir -p "${DEP_DIR}" "${LOG_DIR}"
+    singlebox_model_config_prepare || return 1
 
     echo ""
     echo "======================================"
@@ -543,14 +548,14 @@ setup_all_and_start() {
     # Setup current all group (via group module)
     log_info "Running setup current all group..."
     if ! all_setup; then
-        log_error "Setup failed. Fix the errors above, then rerun ./scripts/singlebox.sh --local."
+        log_error "Setup failed. Fix the errors above, then rerun ./scripts/singlebox.sh $(singlebox_mode_option)."
         return 1
     fi
 
     # Start current all group (via group module)
     log_info "Running start current all group..."
     if ! all_start; then
-        log_error "Start failed. Fix the errors above, then rerun ./scripts/singlebox.sh --local."
+        log_error "Start failed. Fix the errors above, then rerun ./scripts/singlebox.sh $(singlebox_mode_option)."
         return 1
     fi
 
@@ -572,11 +577,13 @@ main() {
     while [ $# -gt 0 ]; do
         case $1 in
             --dev|-d)
+                STANDALONE_MODE=false
                 LOCAL_MODE=false
                 BCS_SERVER_ENV=dev
                 shift
                 ;;
             --local|-l)
+                STANDALONE_MODE=false
                 LOCAL_MODE=true
                 shift
                 ;;
@@ -693,7 +700,7 @@ main() {
                 LOCAL_MODE=true
                 shift
                 ;;
-            frontend|bcs|bots|bcs_bots|bcs_frontend|all)
+            baas|backend|bcs|frontend|engine|bots|bcs_bots|bcs_frontend|all)
                 # Legacy: service name without command defaults to start
                 services+=("$1")
                 if [ -z "$command" ]; then
@@ -726,6 +733,13 @@ main() {
     if [ "$STANDALONE_MODE" = true ]; then
         mkdir -p "${STANDALONE_RUNTIME_DIR}"
     fi
+    if [ -n "$command" ] && [ "$command" != "install-tools" ]; then
+        if [ "$STANDALONE_MODE" = true ]; then
+            show_standalone_mode_info
+        elif [ "$LOCAL_MODE" = true ]; then
+            show_local_mode_info
+        fi
+    fi
 
     # 处理命令
     # Default to current all group if no services specified
@@ -752,6 +766,12 @@ main() {
     export BCN_PLUGIN_SOURCE="$resolved_bcn_mode"
     export BCN_PLUGIN_VERSION
     export SINGLEBOX_COMMAND="${command:-}"
+
+    case "$command" in
+        setup|start|restart|"")
+            singlebox_model_config_prepare || exit 1
+            ;;
+    esac
 
     case "$command" in
         install-tools)
