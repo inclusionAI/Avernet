@@ -114,6 +114,29 @@ test_service_modules_use_ownership_aware_stop_helpers() {
   [ -z "$offenders" ] || fail "service modules still use unsafe kill helpers: ${offenders}"
 }
 
+test_service_starts_fail_when_ports_remain_occupied() {
+  grep -F 'require_port_available_after_owned_stop 8888 "backend"' "${ROOT}/scripts/modules/backend.sh" >/dev/null || \
+    fail "backend_start should fail if port 8888 remains occupied after owned cleanup"
+  grep -F 'require_port_available_after_owned_stop 8890 "BAAS"' "${ROOT}/scripts/modules/baas.sh" >/dev/null || \
+    fail "baas_start should fail if port 8890 remains occupied after owned cleanup"
+  grep -F 'require_port_available_after_owned_stop 20003 "engine"' "${ROOT}/scripts/modules/engine.sh" >/dev/null || \
+    fail "engine_start should fail if port 20003 remains occupied after owned cleanup"
+}
+
+test_baas_stop_does_not_delegate_to_app_stop() {
+  local stop_body
+  stop_body="$(
+    sed -n '/^baas_stop()/,/^baas_status()/p' "${ROOT}/scripts/modules/baas.sh"
+  )"
+  if grep -F 'app.sh" stop' <<<"$stop_body" >/dev/null; then
+    fail "baas_stop should not call app.sh stop because app.sh has unsafe port kill fallback"
+  fi
+  grep -F 'stop_process_if_owned' <<<"$stop_body" >/dev/null || \
+    fail "baas_stop should stop pidfile process with ownership verification"
+  grep -F 'stop_port_processes_if_owned "$port"' <<<"$stop_body" >/dev/null || \
+    fail "baas_stop should clean the BAAS port with ownership verification"
+}
+
 test_5bot_openclaw_config_is_written_private() {
   grep -F 'umask 077' "${ROOT}/src/bcs/scripts/start_bcs_bots.sh" >/dev/null || \
     fail "5bot openclaw config should be written under umask 077"
@@ -134,6 +157,8 @@ test_all_start_rolls_back_started_services_on_failure
 test_backend_health_failure_stops_backend
 test_backend_wait_fails_when_started_process_exits
 test_service_modules_use_ownership_aware_stop_helpers
+test_service_starts_fail_when_ports_remain_occupied
+test_baas_stop_does_not_delegate_to_app_stop
 test_5bot_openclaw_config_is_written_private
 test_ready_banner_describes_full_stack
 

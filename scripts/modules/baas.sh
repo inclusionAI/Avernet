@@ -43,6 +43,7 @@ baas_start() {
 
     stop_port_processes_if_owned 8890 "${PROJECT_ROOT}" "existing BAAS"
     stop_matching_processes_if_owned "secbaas/main.py" "${PROJECT_ROOT}" "existing BAAS process"
+    require_port_available_after_owned_stop 8890 "BAAS" "stop the service using port 8890" || return 1
 
     log_info "Starting BAAS service (singlebox mode)..."
 
@@ -94,12 +95,25 @@ baas_start() {
 baas_stop() {
     log_info "Stopping BAAS service..."
 
-    cd "${BAAS_APP_DIR}"
+    local pid_file="${BAAS_APP_DIR}/tmp/app.pid"
+    local port_file="${BAAS_APP_DIR}/tmp/app.port"
+    local pid=""
+    local port="8890"
 
-    # Use baas script to stop (includes graceful shutdown + port cleanup internally)
-    if [ -f "${BAAS_APP_DIR}/scripts/app.sh" ]; then
-        "${BAAS_APP_DIR}/scripts/app.sh" stop 2>/dev/null || true
+    if [ -f "$pid_file" ]; then
+        pid="$(cat "$pid_file" 2>/dev/null || true)"
     fi
+    if [ -f "$port_file" ]; then
+        port="$(cat "$port_file" 2>/dev/null || echo "8890")"
+    fi
+
+    if [ -n "$pid" ]; then
+        stop_process_if_owned "$pid" "${PROJECT_ROOT}" "BAAS pidfile process" || true
+    fi
+
+    stop_matching_processes_if_owned "secbaas/main.py" "${PROJECT_ROOT}" "BAAS process" || true
+    stop_port_processes_if_owned "$port" "${PROJECT_ROOT}" "BAAS" || true
+    rm -f "$pid_file" "$port_file"
 
     log_info "BAAS service stopped"
 }

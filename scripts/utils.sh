@@ -258,6 +258,21 @@ stop_port_processes_if_owned() {
     done
 }
 
+require_port_available_after_owned_stop() {
+    local port="$1"
+    local service_name="$2"
+    local override_hint="${3:-choose another port}"
+
+    if ! port_is_listening "$port"; then
+        return 0
+    fi
+
+    log_error "Port ${port} is still in use by a process outside this checkout after stopping owned ${service_name} processes."
+    log_error "Owner: $(port_listener_summary "$port")"
+    log_error "Stop the external process manually or ${override_hint}."
+    return 1
+}
+
 stop_matching_processes_if_owned() {
     local pattern="$1"
     local owner_dir="$2"

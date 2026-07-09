@@ -36,6 +36,7 @@ engine_start() {
 
     stop_port_processes_if_owned 20003 "${PROJECT_ROOT}" "existing engine"
     stop_matching_processes_if_owned "engine.community.api.app" "${PROJECT_ROOT}" "existing engine process"
+    require_port_available_after_owned_stop 20003 "engine" "stop the service using port 20003" || return 1
 
     # Check start script exists
     local run_script="${ENGINE_DIR}/scripts/run.sh"

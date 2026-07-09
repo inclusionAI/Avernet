@@ -29,6 +29,7 @@ backend_start() {
 
     stop_port_processes_if_owned 8888 "${PROJECT_ROOT}" "existing backend"
     stop_matching_processes_if_owned "agentclaw/community/main.py" "${PROJECT_ROOT}" "existing backend process"
+    require_port_available_after_owned_stop 8888 "backend" "set BACKEND_PORT=<free-port> in .env.local" || return 1
 
     log_info "Starting backend service..."
 
