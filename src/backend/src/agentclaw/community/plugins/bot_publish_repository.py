@@ -493,11 +493,12 @@ class BotPublishRepository:
                 },
                 synchronize_session=False,
             )
-            # Upload the offloaded artifact only once we know this write took
-            # (optimistic lock matched). A rejected update (affected == 0) must
-            # NOT touch object storage, or it would clobber the object a still-
-            # valid record points at. Inside the txn so a put failure rolls back.
-            if not (source_status is not None and affected == 0):
+            # Upload the offloaded artifact only when a row actually took this
+            # write (affected > 0): a rejected optimistic-lock update OR a
+            # missing publish_id must not write an artifact object that nothing
+            # references (it could never be reaped — delete needs the row's env).
+            # Inside the txn so a put failure rolls back.
+            if affected > 0:
                 self._upload_pending(pending)
         if source_status is not None and affected == 0:
             return None
@@ -575,7 +576,16 @@ class BotPublishRepository:
                 .delete(synchronize_session=False)
             )
         if affected > 0 and prefix:
-            # Best effort — a failed OSS cleanup must not fail the DB delete.
-            for key in self._oss.list_objects(prefix):
-                self._oss.delete_object(key)
+            # Best effort — cleanup must never fail the DB delete, and must not
+            # assume the object-storage impl implements list_objects: the corp
+            # impl is out-of-tree and may lag the Protocol (same risk the ctor
+            # guards for get_object). Swallow anything the sweep raises.
+            try:
+                for key in self._oss.list_objects(prefix):
+                    self._oss.delete_object(key)
+            except Exception:  # noqa: BLE001 - best-effort artifact cleanup
+                logger.exception(
+                    "[BotPublishRepository] artifact cleanup failed for "
+                    "publish_id=%s prefix=%s", publish_id, prefix,
+                )
         return affected > 0
