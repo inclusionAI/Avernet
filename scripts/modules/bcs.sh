@@ -891,6 +891,16 @@ bcs_ready() {
     wait_for_bcs_health 5
 }
 
+bcs_cargo_not_found_message() {
+    if [ -x "${HOME}/.cargo/bin/cargo" ]; then
+        printf 'cargo exists at %s but is not in PATH (required for building BCS). Run: source "%s"\n' \
+            "${HOME}/.cargo/bin/cargo" \
+            "${HOME}/.cargo/env"
+    else
+        printf "%s\n" "cargo not found (required for building BCS). Install: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+    fi
+}
+
 bcs_prereqs() {
     local has_error=false
 
@@ -903,7 +913,7 @@ bcs_prereqs() {
         if check_rust_installed; then
             prereq_ok "cargo: $(rustc --version 2>&1 | head -1)"
         else
-            prereq_error "cargo not found (required for building BCS). Install: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+            prereq_error "$(bcs_cargo_not_found_message)"
             has_error=true
         fi
 
