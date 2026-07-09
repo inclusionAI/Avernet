@@ -2,7 +2,7 @@
 
 Covers the main orchestration flows: pending send (markdown + tc_card),
 send failure, cancel, reminder creation, schedule_due, emergency brake,
-dry_run, timeout recovery, process_run backward compat, and CronTickSummary.
+dry_run, timeout recovery, and CronTickSummary.
 """
 from __future__ import annotations
 
@@ -13,11 +13,11 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy.orm import sessionmaker
 
-import agentclaw.community.core.economy.governance.contracts.models  # noqa: F401
+import agentclaw.community.core.economy.governance.repositories.orm  # noqa: F401
 from agentclaw.community.core.base import Base
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceNotifyLog,
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    GovernanceNotificationOrm,
+    GovernanceTicketOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.audit_repo import (
     GovernanceAuditRepository,
@@ -52,6 +52,7 @@ class _FakeAdminSvc:
 class _ConfigurableSender:
     """Sender whose tc_card/markdown return values are configurable.
 
+    Implements the ``NotifySenderPlugin`` Protocol surface (``send`` + ``channels``).
     Used for testing delivery failure paths (e.g. markdown send returns None).
     """
 
@@ -59,10 +60,13 @@ class _ConfigurableSender:
         self._tc = tc_card
         self._md = markdown
 
-    def send_tc_card(self, **kwargs):
-        return self._tc
+    @property
+    def channels(self) -> frozenset[str]:
+        return frozenset({"markdown", "tc_card"})
 
-    def send_markdown(self, **kwargs):
+    def send(self, message: object, *, channel: str = "markdown") -> str | None:
+        if channel == "tc_card":
+            return self._tc
         return self._md
 
 
@@ -90,11 +94,11 @@ def _seed_ticket(
     response=None,
     remind_count=0,
 ):
-    """Insert a GovernanceTaskRecordDaily ticket row."""
+    """Insert a GovernanceTicketOrm ticket row."""
     if ticket_id is None:
         ticket_id = uuid.uuid4().hex
     now = datetime.now()
-    row = GovernanceTaskRecordDaily(
+    row = GovernanceTicketOrm(
         ticket_id=ticket_id,
         worker_id=worker_id,
         bot_id=bot_id,
@@ -128,10 +132,10 @@ def _seed_pending_notify(
     bot_id="bot-1",
     owner_id="user-1",
 ):
-    """Insert a pending GovernanceNotifyLog linked to a ticket."""
+    """Insert a pending GovernanceNotificationOrm linked to a ticket."""
     if notification_id is None:
         notification_id = uuid.uuid4().hex
-    row = GovernanceNotifyLog(
+    row = GovernanceNotificationOrm(
         notification_id=notification_id,
         ticket_id=ticket_id,
         worker_id=worker_id,
@@ -168,7 +172,6 @@ def _build_service(engine, *, config=None, admin_svc=None, notify_sender=None):
     if notify_sender is None:
         notify_sender = FakeNotifySender()
     svc = GovernanceBotService(
-        db=db,
         task_repo=task_repo,
         admin_svc=admin_svc,
         notify_repo=notify_repo,
@@ -190,7 +193,7 @@ class TestProcessCronTickSmoke:
         """Cron tick returns a valid CronTickSummary even with no data."""
         svc, db, _sess = _build_service(engine)
 
-        summary = await svc.process_cron_tick()
+        summary = svc.process_cron_tick()
         assert isinstance(summary, CronTickSummary)
         assert summary.run_id != ""
         assert summary.dry_run is False
@@ -200,7 +203,7 @@ class TestProcessCronTickSmoke:
         """No pending data → tick completes gracefully with zero counts."""
         svc, db, _sess = _build_service(engine)
 
-        summary = await svc.process_cron_tick()
+        summary = svc.process_cron_tick()
         assert summary.errors == 0
         assert summary.sent_count == 0
 
@@ -231,12 +234,12 @@ class TestProcessCronTick:
         notif_id = _seed_pending_notify(s, ticket_id=ticket_id, notify_channel="markdown")
         s.close()
 
-        summary = await svc.process_cron_tick()
+        summary = svc.process_cron_tick()
 
         assert isinstance(summary, CronTickSummary)
         assert summary.sent_count >= 1
         with db.orm_session() as s2:
-            row = s2.query(GovernanceNotifyLog).filter_by(notification_id=notif_id).one()
+            row = s2.query(GovernanceNotificationOrm).filter_by(notification_id=notif_id).one()
             assert row.notify_status == "sent"
 
     @pytest.mark.asyncio
@@ -252,11 +255,11 @@ class TestProcessCronTick:
         notif_id = _seed_pending_notify(s, ticket_id=ticket_id, notify_channel="tc_card")
         s.close()
 
-        summary = await svc.process_cron_tick(dry_run=False)
+        summary = svc.process_cron_tick(dry_run=False)
 
         assert summary.sent_count >= 1
         with db.orm_session() as s2:
-            row = s2.query(GovernanceNotifyLog).filter_by(notification_id=notif_id).one()
+            row = s2.query(GovernanceNotificationOrm).filter_by(notification_id=notif_id).one()
             assert row.notify_status == "sent"
 
     @pytest.mark.asyncio
@@ -274,11 +277,11 @@ class TestProcessCronTick:
         )
         s.close()
 
-        summary = await svc.process_cron_tick(dry_run=False)
+        summary = svc.process_cron_tick(dry_run=False)
 
         assert summary.failed_count >= 1
         with db.orm_session() as s2:
-            row = s2.query(GovernanceNotifyLog).filter_by(notification_id=notif_id).one()
+            row = s2.query(GovernanceNotificationOrm).filter_by(notification_id=notif_id).one()
             # First attempt (count < MAX_SEND_ATTEMPTS) → reverts to pending
             assert row.notify_status in ("pending", "failed")
             assert row.last_send_error is not None
@@ -292,11 +295,11 @@ class TestProcessCronTick:
         notif_id = _seed_pending_notify(s, ticket_id=ticket_id, notify_channel="markdown")
         s.close()
 
-        summary = await svc.process_cron_tick()
+        summary = svc.process_cron_tick()
 
         assert summary.cancelled_count >= 1
         with db.orm_session() as s2:
-            row = s2.query(GovernanceNotifyLog).filter_by(notification_id=notif_id).one()
+            row = s2.query(GovernanceNotificationOrm).filter_by(notification_id=notif_id).one()
             assert row.notify_status == "cancelled"
 
     @pytest.mark.asyncio
@@ -308,11 +311,11 @@ class TestProcessCronTick:
         notif_id = _seed_pending_notify(s, ticket_id=ticket_id, notify_channel="markdown")
         s.close()
 
-        summary = await svc.process_cron_tick()
+        summary = svc.process_cron_tick()
 
         assert summary.cancelled_count >= 1
         with db.orm_session() as s2:
-            row = s2.query(GovernanceNotifyLog).filter_by(notification_id=notif_id).one()
+            row = s2.query(GovernanceNotificationOrm).filter_by(notification_id=notif_id).one()
             assert row.notify_status == "cancelled"
 
     @pytest.mark.asyncio
@@ -320,7 +323,7 @@ class TestProcessCronTick:
         """Emergency brake active → tick returns with all counts zero."""
         svc, _, _ = _build_service(engine, admin_svc=_FakeAdminSvc(paused=True))
 
-        summary = await svc.process_cron_tick()
+        summary = svc.process_cron_tick()
 
         assert isinstance(summary, CronTickSummary)
         assert summary.sent_count == 0
@@ -339,13 +342,13 @@ class TestProcessCronTick:
         notif_id = _seed_pending_notify(s, ticket_id=ticket_id, notify_channel="markdown")
         s.close()
 
-        summary = await svc.process_cron_tick(dry_run=True)
+        summary = svc.process_cron_tick(dry_run=True)
 
         assert summary.dry_run is True
         assert summary.sent_count == 0
         assert summary.reminders_created == 0
         with db.orm_session() as s2:
-            row = s2.query(GovernanceNotifyLog).filter_by(notification_id=notif_id).one()
+            row = s2.query(GovernanceNotificationOrm).filter_by(notification_id=notif_id).one()
             assert row.notify_status == "pending"
 
     @pytest.mark.asyncio
@@ -364,12 +367,12 @@ class TestProcessCronTick:
         )
         s.close()
 
-        summary = await svc.process_cron_tick()
+        summary = svc.process_cron_tick()
 
         assert summary.reminders_created >= 1
         with db.orm_session() as s2:
             reminders = (
-                s2.query(GovernanceNotifyLog)
+                s2.query(GovernanceNotificationOrm)
                 .filter_by(ticket_id=ticket_id, notify_type="reminder")
                 .all()
             )
@@ -392,26 +395,12 @@ class TestProcessCronTick:
         )
         s.close()
 
-        summary = await svc.process_cron_tick()
+        summary = svc.process_cron_tick()
 
         assert summary.schedule_due_count >= 1
         with db.orm_session() as s2:
-            ticket = s2.query(GovernanceTaskRecordDaily).filter_by(ticket_id=ticket_id).one()
+            ticket = s2.query(GovernanceTicketOrm).filter_by(ticket_id=ticket_id).one()
             assert ticket.governance_status == "waiting_review"
-
-    @pytest.mark.asyncio
-    async def test_process_run_delegates_to_cron_tick(self, engine):
-        """process_run (backward compat) delegates to process_cron_tick."""
-        svc, db, Sess = _build_service(engine)
-        s = Sess()
-        ticket_id = _seed_ticket(s)
-        _seed_pending_notify(s, ticket_id=ticket_id, notify_channel="markdown")
-        s.close()
-
-        summary = await svc.process_run()
-
-        assert isinstance(summary, CronTickSummary)
-        assert summary.sent_count >= 1
 
     @pytest.mark.asyncio
     async def test_timeout_recovery_reverts_stale_sending(self, engine):
@@ -421,14 +410,14 @@ class TestProcessCronTick:
         ticket_id = _seed_ticket(s)
         notif_id = _seed_pending_notify(s, ticket_id=ticket_id, notify_channel="markdown")
         # Manually mark as 'sending' with old last_send_at
-        notify_row = s.query(GovernanceNotifyLog).filter_by(notification_id=notif_id).one()
+        notify_row = s.query(GovernanceNotificationOrm).filter_by(notification_id=notif_id).one()
         notify_row.notify_status = "sending"
         notify_row.last_send_at = datetime.now() - timedelta(hours=2)
         notify_row.send_attempt_count = 1
         s.commit()
         s.close()
 
-        summary = await svc.process_cron_tick(dry_run=False)
+        summary = svc.process_cron_tick(dry_run=False)
 
         assert summary.timeout_recovered >= 1
 
@@ -443,25 +432,25 @@ class TestProcessCronTick:
             latest_decision="normal",
         )
         # Set consecutive_normal_days to meet threshold
-        ticket = s.query(GovernanceTaskRecordDaily).filter_by(ticket_id=ticket_id).one()
+        ticket = s.query(GovernanceTicketOrm).filter_by(ticket_id=ticket_id).one()
         ticket.consecutive_normal_days = 7
         # Also seed a pending notify — should be cancelled on close
         notif_id = _seed_pending_notify(s, ticket_id=ticket_id)
         s.commit()
         s.close()
 
-        summary = await svc.process_cron_tick(dry_run=False)
+        summary = svc.process_cron_tick(dry_run=False)
 
         assert summary.auto_silence_closed >= 1
         # Verify ticket state
         s2 = Sess()
-        t = s2.query(GovernanceTaskRecordDaily).filter_by(ticket_id=ticket_id).one()
+        t = s2.query(GovernanceTicketOrm).filter_by(ticket_id=ticket_id).one()
         assert t.governance_status == "closed"
         assert t.close_reason == "auto_silenced_normal"
         assert t.active_worker is None
         assert t.remind_at is None
         # Verify pending notify was cancelled
-        n = s2.query(GovernanceNotifyLog).filter_by(notification_id=notif_id).one()
+        n = s2.query(GovernanceNotificationOrm).filter_by(notification_id=notif_id).one()
         assert n.notify_status == "cancelled"
         s2.close()
 
@@ -475,15 +464,15 @@ class TestProcessCronTick:
             s,
             latest_decision="normal",
         )
-        ticket = s.query(GovernanceTaskRecordDaily).filter_by(ticket_id=ticket_id).one()
+        ticket = s.query(GovernanceTicketOrm).filter_by(ticket_id=ticket_id).one()
         ticket.consecutive_normal_days = 6  # Below threshold
         s.commit()
         s.close()
 
-        summary = await svc.process_cron_tick(dry_run=False)
+        summary = svc.process_cron_tick(dry_run=False)
 
         assert summary.auto_silence_closed == 0
         s2 = Sess()
-        t = s2.query(GovernanceTaskRecordDaily).filter_by(ticket_id=ticket_id).one()
+        t = s2.query(GovernanceTicketOrm).filter_by(ticket_id=ticket_id).one()
         assert t.governance_status == "open"
         s2.close()

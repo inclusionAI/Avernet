@@ -7,11 +7,11 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.contracts.models import (
-    BotWhitelist,
-    GovernanceAudit,
-    GovernanceNotifyLog,
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    WhitelistEntryOrm,
+    AuditLogOrm,
+    GovernanceNotificationOrm,
+    GovernanceTicketOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.audit_repo import (
     GovernanceAuditRepository,
@@ -45,7 +45,6 @@ def _build_svc(engine):
     notify_repo = NotifyLogRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
     svc = GovernanceRecordService(
-        db=db,
         task_repo=task_repo,
         whitelist_repo=whitelist_repo,
         notify_repo=notify_repo,
@@ -88,12 +87,12 @@ def _make_ticket(
     latest_decision: str = "actionable",
     close_reason: str | None = None,
     env: str = "dev",
-) -> GovernanceTaskRecordDaily:
+) -> GovernanceTicketOrm:
     """Create a test ticket row."""
     if ticket_id is None:
         ticket_id = uuid.uuid4().hex
     owner_id, bot_id = worker_key.split(":", 1) if ":" in worker_key else ("staff-001", worker_key)
-    row = GovernanceTaskRecordDaily(
+    row = GovernanceTicketOrm(
         ticket_id=ticket_id,
         worker_id=worker_key,
         active_worker=worker_key if governance_status != "closed" else None,
@@ -123,10 +122,10 @@ def engine():
     from sqlalchemy import create_engine
 
     eng = create_engine("sqlite:///:memory:")
-    GovernanceTaskRecordDaily.__table__.create(eng, checkfirst=True)
-    GovernanceNotifyLog.__table__.create(eng, checkfirst=True)
-    GovernanceAudit.__table__.create(eng, checkfirst=True)
-    BotWhitelist.__table__.create(eng, checkfirst=True)
+    GovernanceTicketOrm.__table__.create(eng, checkfirst=True)
+    GovernanceNotificationOrm.__table__.create(eng, checkfirst=True)
+    AuditLogOrm.__table__.create(eng, checkfirst=True)
+    WhitelistEntryOrm.__table__.create(eng, checkfirst=True)
     return eng
 
 
@@ -179,7 +178,7 @@ class TestProcessRecord:
         assert result.ticket_id is not None
 
         with db.orm_session() as s:
-            ticket = s.query(GovernanceTaskRecordDaily).first()
+            ticket = s.query(GovernanceTicketOrm).first()
             assert ticket is not None
             assert ticket.governance_status == "open"
             assert ticket.active_worker == "staff-001:bot-001"
@@ -190,8 +189,8 @@ class TestProcessRecord:
 
         # Add to whitelist — repo uses self-managed session
         whitelist_repo = GovernanceWhitelistRepository(db=db)
-        whitelist_repo.batch_add(
-            entries=[{"bot_id": "bot-001", "owner_id": "staff-001"}],
+        whitelist_repo.add(
+            bot_id="bot-001", owner_id="staff-001",
             created_by="admin",
             whitelist_type="governance",
         )
@@ -243,7 +242,7 @@ class TestProcessRecord:
                 close_reason="user_optimized_approved",
             )
             # Set cooldown_until in the future
-            ticket = s.query(GovernanceTaskRecordDaily).first()
+            ticket = s.query(GovernanceTicketOrm).first()
             ticket.cooldown_until = datetime.now() + timedelta(days=7)
             s.commit()
 
@@ -325,8 +324,8 @@ class TestProcessOfflineBatch:
 
         # Verify the existing ticket was NOT modified
         with db.orm_session() as s:
-            ticket = s.query(GovernanceTaskRecordDaily).filter(
-                GovernanceTaskRecordDaily.ticket_id == "t-silence",
+            ticket = s.query(GovernanceTicketOrm).filter(
+                GovernanceTicketOrm.ticket_id == "t-silence",
             ).first()
             assert ticket is not None
             assert ticket.latest_decision == "actionable"

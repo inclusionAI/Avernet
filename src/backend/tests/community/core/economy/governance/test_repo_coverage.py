@@ -1,12 +1,11 @@
 """Coverage supplement — repo methods not covered by existing tests.
 
 Targets (P2 sorted):
-  - notify_log_repo: find_latest_closed, find_latest, get_by_notification_id,
-    list_remindable, list_expired, list_pending_to_cancel, list_pending_open,
+  - notify_log_repo: get_by_notification_id,
     count_pending, insert_notification, delete_by_notification_ids,
-    count_by_notification_ids (lines 64-111, 179-244, 305-316, 553-611)
+    count_by_notification_ids
   - task_record_repo: count_by_dt_versions, delete_by_dt_versions,
-    delete_by_ids, count_by_ids (lines 306-388)
+    delete_by_ids, count_by_ids
 
 Design: vertical-slice — one test seeds data then exercises multiple repo
 methods in sequence, maximizing ROI per test case.
@@ -21,18 +20,32 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.base import Base
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceNotifyLog,
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    GovernanceNotificationOrm,
+    GovernanceTicketOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
     NotifyLogRepository,
 )
 from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
     TaskRecordRepository,
+    _extract_owner_id,
 )
 
 from .conftest import FakeDB
+
+
+# ── Module-level helpers ────────────────────────────────────────
+
+
+class TestExtractOwnerId:
+    """_extract_owner_id splits '{owner_id}:{bot_id}' on the first colon."""
+
+    def test_splits_owner_and_bot(self):
+        assert _extract_owner_id("user-1:bot-9") == "user-1"
+
+    def test_no_colon_returns_input_unchanged(self):
+        assert _extract_owner_id("noColonHere") == "noColonHere"
 
 
 # ── Shared fixture ────────────────────────────────────────────────
@@ -52,7 +65,7 @@ def engine():
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    import agentclaw.community.core.economy.governance.contracts.models  # noqa: F401
+    import agentclaw.community.core.economy.governance.repositories.orm  # noqa: F401
     Base.metadata.create_all(eng)
     return eng
 
@@ -85,9 +98,9 @@ def _make_notify(
     response: str | None = None,
     ticket_id: str | None = None,
     send_attempt_count: int = 1,
-) -> GovernanceNotifyLog:
-    """Insert a GovernanceNotifyLog row directly via session."""
-    row = GovernanceNotifyLog(
+) -> GovernanceNotificationOrm:
+    """Insert a GovernanceNotificationOrm row directly via session."""
+    row = GovernanceNotificationOrm(
         notification_id=notification_id,
         ticket_id=ticket_id,
         bot_id=bot_id,
@@ -121,50 +134,7 @@ def _make_notify(
 
 
 class TestNotifyLogRepoQueries:
-    """Single vertical-slice: seed data → exercise all uncovered query methods."""
-
-    def test_find_latest_closed_returns_most_recent(self, session, engine):
-        """find_latest_closed: returns the most recent closed row by closed_at."""
-        db = _db_from_engine(engine)
-        repo = NotifyLogRepository(db=db)
-
-        now = datetime.now()
-        _make_notify(session, notification_id="n-old", bot_id="bot-a",
-                     owner_id="user-a", governance_status="closed",
-                     closed_at=now - timedelta(days=2))
-        _make_notify(session, notification_id="n-recent", bot_id="bot-a",
-                     owner_id="user-a", governance_status="closed",
-                     closed_at=now)
-
-        result = repo.find_latest_closed("bot-a", "user-a")
-        assert result is not None
-        assert result["notification_id"] == "n-recent"
-
-    def test_find_latest_closed_returns_none_when_no_match(self, session, engine):
-        """find_latest_closed: no matching rows → None."""
-        db = _db_from_engine(engine)
-        repo = NotifyLogRepository(db=db)
-
-        result = repo.find_latest_closed("bot-x", "user-x")
-        assert result is None
-
-    def test_find_latest_returns_any_status(self, session, engine):
-        """find_latest: returns newest row regardless of status."""
-        db = _db_from_engine(engine)
-        repo = NotifyLogRepository(db=db)
-
-        now = datetime.now()
-        _make_notify(session, notification_id="n-early", bot_id="bot-b",
-                     owner_id="user-b", governance_status="open")
-        # Slightly delay second insert so gmt_create is later
-        _make_notify(session, notification_id="n-later", bot_id="bot-b",
-                     owner_id="user-b", governance_status="closed",
-                     closed_at=now)
-
-        result = repo.find_latest("bot-b", "user-b")
-        assert result is not None
-        # Both rows exist; find_latest returns by gmt_create desc
-        assert result["notification_id"] in ("n-early", "n-later")
+    """Single vertical-slice: seed data → exercise uncovered query methods."""
 
     def test_get_by_notification_id(self, session, engine):
         """get_by_notification_id: fetch by notification_id."""
@@ -176,7 +146,7 @@ class TestNotifyLogRepoQueries:
 
         result = repo.get_by_notification_id("n-fetch-1")
         assert result is not None
-        assert result["bot_id"] == "bot-c"
+        assert result.bot_id == "bot-c"
 
     def test_get_by_notification_id_not_found(self, session, engine):
         """get_by_notification_id: non-existent → None."""
@@ -185,78 +155,6 @@ class TestNotifyLogRepoQueries:
 
         result = repo.get_by_notification_id("n-nonexistent")
         assert result is None
-
-    def test_list_remindable_returns_due(self, session, engine):
-        """list_remindable: open + sent + remind_at <= now → returned."""
-        db = _db_from_engine(engine)
-        repo = NotifyLogRepository(db=db)
-
-        now = datetime.now()
-        _make_notify(session, notification_id="n-remind-1", bot_id="bot-d",
-                     owner_id="user-d", governance_status="open",
-                     notify_status="sent", remind_at=now - timedelta(hours=1))
-        _make_notify(session, notification_id="n-remind-future", bot_id="bot-d2",
-                     owner_id="user-d2", governance_status="open",
-                     notify_status="sent", remind_at=now + timedelta(days=1))
-
-        results = repo.list_remindable(now)
-        ids = {r["notification_id"] for r in results}
-        assert "n-remind-1" in ids
-        assert "n-remind-future" not in ids
-
-    def test_list_expired_returns_past_expire(self, session, engine):
-        """list_expired: open + expire_at <= now + reminded → returned."""
-        db = _db_from_engine(engine)
-        repo = NotifyLogRepository(db=db)
-
-        now = datetime.now()
-        _make_notify(session, notification_id="n-exp-1", bot_id="bot-e",
-                     owner_id="user-e", governance_status="open",
-                     notify_status="sent", expire_at=now - timedelta(hours=1),
-                     remind_count=1)
-        _make_notify(session, notification_id="n-exp-no-remind", bot_id="bot-e2",
-                     owner_id="user-e2", governance_status="open",
-                     notify_status="sent", expire_at=now - timedelta(hours=1),
-                     remind_count=0)
-
-        results = repo.list_expired(now)
-        ids = {r["notification_id"] for r in results}
-        assert "n-exp-1" in ids
-        assert "n-exp-no-remind" not in ids
-
-    def test_list_pending_to_cancel(self, session, engine):
-        """list_pending_to_cancel: closed/expired + pending → returned."""
-        db = _db_from_engine(engine)
-        repo = NotifyLogRepository(db=db)
-
-        _make_notify(session, notification_id="n-pc-1", bot_id="bot-f",
-                     owner_id="user-f", governance_status="closed",
-                     notify_status="pending")
-        _make_notify(session, notification_id="n-pc-open", bot_id="bot-f2",
-                     owner_id="user-f2", governance_status="open",
-                     notify_status="pending")
-
-        results = repo.list_pending_to_cancel()
-        ids = {r["notification_id"] for r in results}
-        assert "n-pc-1" in ids
-        assert "n-pc-open" not in ids
-
-    def test_list_pending_open(self, session, engine):
-        """list_pending_open: open + pending → returned."""
-        db = _db_from_engine(engine)
-        repo = NotifyLogRepository(db=db)
-
-        _make_notify(session, notification_id="n-po-1", bot_id="bot-g",
-                     owner_id="user-g", governance_status="open",
-                     notify_status="pending")
-        _make_notify(session, notification_id="n-po-sent", bot_id="bot-g2",
-                     owner_id="user-g2", governance_status="open",
-                     notify_status="sent")
-
-        results = repo.list_pending_open()
-        ids = {r["notification_id"] for r in results}
-        assert "n-po-1" in ids
-        assert "n-po-sent" not in ids
 
     def test_count_pending(self, session, engine):
         """count_pending: open/muted + no response → count."""
@@ -282,7 +180,7 @@ class TestNotifyLogRepoWriteMethods:
         db = _db_from_engine(engine)
         repo = NotifyLogRepository(db=db)
 
-        row = GovernanceNotifyLog(
+        row = GovernanceNotificationOrm(
             notification_id="n-ins-1",
             bot_id="bot-ins",
             bot_name="TestBot",
@@ -302,7 +200,7 @@ class TestNotifyLogRepoWriteMethods:
 
         # Verify visible via another session
         with db.orm_session() as s:
-            found = s.query(GovernanceNotifyLog).filter_by(
+            found = s.query(GovernanceNotificationOrm).filter_by(
                 notification_id="n-ins-1",
             ).one_or_none()
             assert found is not None
@@ -355,9 +253,9 @@ def _make_task_record(
     governance_status: str = "open",
     env: str = "dev",
 ):
-    """Insert a GovernanceTaskRecordDaily row directly."""
+    """Insert a GovernanceTicketOrm row directly."""
     worker_key = f"{owner_id}:{bot_id}"
-    row = GovernanceTaskRecordDaily(
+    row = GovernanceTicketOrm(
         ticket_id=ticket_id,
         worker_id=worker_key,
         active_worker=worker_key if governance_status != "closed" else None,
@@ -411,7 +309,7 @@ class TestTaskRecordRepoAdminMethods:
 
         # Verify only the correct row was deleted
         with db.orm_session() as s:
-            remaining = s.query(GovernanceTaskRecordDaily).all()
+            remaining = s.query(GovernanceTicketOrm).all()
             assert len(remaining) == 1
             assert remaining[0].dt_version == "20260702"
 
@@ -427,7 +325,7 @@ class TestTaskRecordRepoAdminMethods:
 
         # Get the actual primary key IDs
         with db.orm_session() as s:
-            rows = s.query(GovernanceTaskRecordDaily).all()
+            rows = s.query(GovernanceTicketOrm).all()
             existing_ids = [r.id for r in rows]
 
         deleted, not_found = repo.delete_by_ids(
@@ -445,7 +343,7 @@ class TestTaskRecordRepoAdminMethods:
                           owner_id="user-cnt1")
 
         with db.orm_session() as s:
-            row = s.query(GovernanceTaskRecordDaily).filter_by(
+            row = s.query(GovernanceTicketOrm).filter_by(
                 ticket_id="t-cnt-1",
             ).one()
             real_id = row.id

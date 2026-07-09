@@ -1,14 +1,18 @@
-"""Markdown notification templates for governance notifications.
+"""Markdown notification builders for governance notifications.
 
-Phase 1 supports two interchangeable notification channels:
-  - **Markdown** (sampleMarkdown batchSend): simple notification with deep-link.
-  - **TC Card** (createAndDeliver): card shell with Markdown reason + detailLink
-    deep-link that opens a teamclaw preview iframe.
+The **simplified reason** (``build_governance_reason``) is the single
+source of truth for notification text.  It renders a concise Markdown
+block (bot name + hit dimensions + key metrics + problem summary)
+designed for the DingTalk TC card shell ``DDRichTextView``.
 
-When ``notification_structured`` JSON is available (from ODPS pipeline),
-the rich template is rendered with full detail (owner, department,
-problem summary, action items). Otherwise, a simple fallback template
-is used with the basic fields from task_record_daily.
+Full detail (action items, suggestions, disclaimer) lives in the
+teamclaw preview iframe — the card shell only carries enough to drive
+action, not to reproduce the report.
+
+Legacy verbose templates (``_RICH_NOTIFY_TEMPLATE``,
+``_SIMPLE_NOTIFY_TEMPLATE``, ``render_governance_notify``,
+``render_governance_remind``) have been removed; all callers now
+use ``build_governance_reason``.
 """
 from __future__ import annotations
 
@@ -16,77 +20,6 @@ import base64
 import json
 import urllib.parse
 from typing import Any
-
-
-# ---------------------------------------------------------------------------
-# Rich template (notification_structured available)
-# ---------------------------------------------------------------------------
-
-_RICH_NOTIFY_TEMPLATE = """#### 🏷️ Bot 治理通知 — {bot_name}
-
-**Bot**: {bot_name}　**Owner**: {owner}
-**命中维度**: {hit_dimensions_display}
-**严重级别**: {urgency}
-{daily_tokens_line}
-**预计节省**: {saving_display}
-
----
-
-**📋 问题摘要**
-
-{problem_summary}
-
-**🔧 优化建议**
-
-{action_items_formatted}
-
----
-
-> {disclaimer}
-> 📎 [查看详情 / 反馈]({action_link})"""
-
-_RICH_REMIND_TEMPLATE = """#### ⚠️ 治理通知提醒 — {bot_name}
-
-{overdue_prefix}
-
-**Bot**: {bot_name}　**Owner**: {owner}
-**命中维度**: {hit_dimensions_display}
-**严重级别**: {urgency}
-
-> 此通知已发送 {days_since_create} 天，请尽快处理。
-
-> 📎 [查看详情 / 反馈]({action_link})"""
-
-
-# ---------------------------------------------------------------------------
-# Simple template (fallback, no notification_structured)
-# ---------------------------------------------------------------------------
-
-_SIMPLE_NOTIFY_TEMPLATE = """## 🔔 Bot 治理通知
-
-**Bot 名称**: {bot_name}
-**数据日期**: {dt_version}
-**命中维度**: {hit_dimensions}
-**最高优先级**: {governance_max_priority}
-**预估节省**: {expected_token_saving} tokens ({saving_ratio})
-**摘要**: {task_summary}
-
-> 请在收到通知后 7 天内处理，否则工单将自动过期。
-
-[📌 点击处理]({action_link})"""
-
-_SIMPLE_REMIND_TEMPLATE = """## ⚠️ 治理通知提醒
-
-{overdue_prefix}
-
-**Bot 名称**: {bot_name}
-**数据日期**: {dt_version}
-**命中维度**: {hit_dimensions}
-**最高优先级**: {governance_max_priority}
-
-> 此通知已发送 {days_since_create} 天，请尽快处理。
-
-[📌 点击处理]({action_link})"""
 
 
 # ---------------------------------------------------------------------------
@@ -100,21 +33,6 @@ def _safe_float(val: Any) -> float | None:
         return float(val)
     except (ValueError, TypeError):
         return None
-
-def _resolve_action_link(
-    *,
-    bot_id: str | None = None,
-    notification_id: str | None = None,
-) -> str:
-    """Resolve the deep link for governance notification action.
-
-    Currently returns "" — the frontend routes for direct bot/notify
-    detail pages do not exist yet.  When the routes are added, this
-    function should accept the base URL from config rather than
-    hardcoding it.
-    """
-    return ""
-
 
 def _parse_notification_structured(
     raw: str | None,
@@ -133,30 +51,6 @@ def _parse_notification_structured(
     if not isinstance(data, dict) or "meta" not in data:
         return None
     return data
-
-
-def _format_action_items(action_items: list[dict]) -> str:
-    """Format action_items list into numbered Markdown lines.
-
-    Each item has ``index``, ``action``, ``what_to_change``, ``why``,
-    ``expected_effect``, and optional ``needs_owner_confirm``.
-    """
-    if not action_items:
-        return "（暂无具体建议）"
-    lines: list[str] = []
-    for item in action_items:
-        idx = item.get("index", item.get("id", "?"))
-        action = item.get("action", "")
-        effect = item.get("expected_effect", "")
-        needs_confirm = item.get("needs_owner_confirm", False)
-        marker = "⚠️ " if needs_confirm else ""
-        line = f"{idx}. {marker}{action}"
-        if effect:
-            line += f" ↓ {effect}"
-        if needs_confirm:
-            line += "（需确认）"
-        lines.append(line)
-    return "\n".join(lines)
 
 
 # Dimension key → Chinese display name.
@@ -209,165 +103,6 @@ def _format_hit_dimensions(hit_dimensions: Any) -> str:
     # Translate each key to its Chinese display name
     translated = [_DIMENSION_DISPLAY_NAMES.get(d, d) for d in filtered]
     return " · ".join(translated)
-
-
-def _urgency_from_structured(meta: dict) -> str:
-    """Extract urgency/severity label from notification_structured meta.
-
-    Falls back to ``optimization_summary`` or "HIGH".
-    """
-    # governance_urgency is not in meta but in the parent;
-    # the template caller should pass it if available.
-    return meta.get("optimization_summary", "HIGH")
-
-
-# ---------------------------------------------------------------------------
-# Public render functions
-# ---------------------------------------------------------------------------
-
-
-def render_governance_notify(
-    *,
-    bot_name: str,
-    dt_version: str,
-    hit_dimensions: str | None = None,
-    governance_max_priority: str | None = None,
-    expected_token_saving: int | None = None,
-    saving_ratio: float | None = None,
-    task_summary: str | None = None,
-    bot_id: str | None = None,
-    notification_id: str | None = None,
-    notification_structured: str | None = None,
-) -> str:
-    """Render the primary governance notification Markdown.
-
-    When ``notification_structured`` JSON is present, renders the rich
-    template (owner, department, problem summary, action items).
-    Otherwise, falls back to the simple template with basic fields.
-    """
-    action_link = _resolve_action_link(
-        bot_id=bot_id, notification_id=notification_id,
-    )
-
-    structured = _parse_notification_structured(notification_structured)
-
-    if structured:
-        meta = structured.get("meta", {})
-        owner = meta.get("owner", "N/A")
-        dimensions_display = _format_hit_dimensions(
-            meta.get("hit_dimensions", hit_dimensions),
-        )
-        urgency = _urgency_from_structured(meta)
-
-        daily_tokens_line = ""
-        daily_tokens = meta.get("daily_tokens", "")
-        if daily_tokens:
-            daily_tokens_line = f"**日均Token**: {daily_tokens}"
-
-        saving_str = str(expected_token_saving) if expected_token_saving is not None else "N/A"
-        try:
-            ratio_val = float(saving_ratio) if saving_ratio is not None else None
-            ratio_str = f"{ratio_val:.1%}" if ratio_val is not None else "N/A"
-        except (ValueError, TypeError):
-            ratio_str = str(saving_ratio)
-        saving_display = f"{saving_str} tokens ({ratio_str})"
-
-        problem_summary = structured.get("problem_summary", task_summary or "N/A")
-        action_items_formatted = _format_action_items(
-            structured.get("action_items", []),
-        )
-        disclaimer = structured.get(
-            "disclaimer",
-            "以上为基于采样的优化建议，具体改造请结合业务 SLA 确认。",
-        )
-
-        return _RICH_NOTIFY_TEMPLATE.format(
-            bot_name=bot_name or "N/A",
-            owner=owner,
-            hit_dimensions_display=dimensions_display,
-            urgency=urgency,
-            daily_tokens_line=daily_tokens_line,
-            saving_display=saving_display,
-            problem_summary=problem_summary,
-            action_items_formatted=action_items_formatted,
-            disclaimer=disclaimer,
-            action_link=action_link,
-        )
-
-    # Fallback: simple template
-    saving_str = str(expected_token_saving) if expected_token_saving is not None else "N/A"
-    try:
-        ratio_val = float(saving_ratio) if saving_ratio is not None else None
-        ratio_str = f"{ratio_val:.1%}" if ratio_val is not None else "N/A"
-    except (ValueError, TypeError):
-        ratio_str = str(saving_ratio)
-
-    return _SIMPLE_NOTIFY_TEMPLATE.format(
-        bot_name=bot_name or "N/A",
-        dt_version=dt_version,
-        hit_dimensions=hit_dimensions or "N/A",
-        governance_max_priority=governance_max_priority or "N/A",
-        expected_token_saving=saving_str,
-        saving_ratio=ratio_str,
-        task_summary=task_summary or "N/A",
-        action_link=action_link,
-    )
-
-
-def render_governance_remind(
-    *,
-    bot_name: str,
-    dt_version: str,
-    hit_dimensions: str | None = None,
-    governance_max_priority: str | None = None,
-    remind_count: int = 0,
-    days_since_create: int = 0,
-    bot_id: str | None = None,
-    notification_id: str | None = None,
-    notification_structured: str | None = None,
-) -> str:
-    """Render the reminder Markdown for overdue notifications.
-
-    When ``notification_structured`` is available, uses the rich remind
-    template. Otherwise, falls back to the simple version.
-    """
-    action_link = _resolve_action_link(
-        bot_id=bot_id, notification_id=notification_id,
-    )
-
-    overdue_prefix = ""
-    if days_since_create > 5:
-        overdue_prefix = f"⚠️ 此通知已超期 {days_since_create} 天未处理"
-
-    structured = _parse_notification_structured(notification_structured)
-
-    if structured:
-        meta = structured.get("meta", {})
-        owner = meta.get("owner", "N/A")
-        dimensions_display = _format_hit_dimensions(
-            meta.get("hit_dimensions", hit_dimensions),
-        )
-        urgency = _urgency_from_structured(meta)
-
-        return _RICH_REMIND_TEMPLATE.format(
-            bot_name=bot_name or "N/A",
-            owner=owner,
-            hit_dimensions_display=dimensions_display,
-            urgency=urgency,
-            overdue_prefix=overdue_prefix,
-            days_since_create=days_since_create,
-            action_link=action_link,
-        )
-
-    return _SIMPLE_REMIND_TEMPLATE.format(
-        overdue_prefix=overdue_prefix,
-        bot_name=bot_name or "N/A",
-        dt_version=dt_version,
-        hit_dimensions=hit_dimensions or "N/A",
-        governance_max_priority=governance_max_priority or "N/A",
-        days_since_create=days_since_create,
-        action_link=action_link,
-    )
 
 
 # ---------------------------------------------------------------------------

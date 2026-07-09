@@ -1,12 +1,11 @@
 """Unit tests for governance audit action enums.
 
-Exercises every ``AuditAction`` class constant and the ``LEGACY_ACTION_MAP``
-so all definition lines in ``contracts/enums.py`` are executed and verified.
+Exercises every ``AuditAction`` class constant so all definition lines in
+``domain/enums.py`` are executed and verified.
 """
 from __future__ import annotations
 
-from agentclaw.community.core.economy.governance.contracts.enums import (
-    LEGACY_ACTION_MAP,
+from agentclaw.community.core.economy.governance.domain.enums import (
     AuditAction,
 )
 
@@ -60,37 +59,3 @@ def test_all_action_values_are_unique_strings():
     assert len(values) == 51
     assert all(isinstance(v, str) for v in values)
     assert len(set(values)) == len(values)
-
-
-def test_legacy_action_map_maps_old_to_canonical():
-    assert LEGACY_ACTION_MAP["enqueued"] == AuditAction.NOTIFICATION_CREATED
-    assert LEGACY_ACTION_MAP["first_delivered"] == AuditAction.NOTIFICATION_SENT
-    assert LEGACY_ACTION_MAP["first_delivery_failed"] == AuditAction.NOTIFICATION_SEND_FAILED
-    assert LEGACY_ACTION_MAP["reminded"] == AuditAction.REMIND_SENT
-    assert LEGACY_ACTION_MAP["feedback_optimized"] == AuditAction.USER_OPTIMIZED
-    assert LEGACY_ACTION_MAP["feedback_need_time"] == AuditAction.USER_NEED_TIME
-    assert LEGACY_ACTION_MAP["feedback_dispute"] == AuditAction.USER_DISPUTE
-    assert LEGACY_ACTION_MAP["feedback_whitelist"] == AuditAction.USER_WHITELIST
-    assert LEGACY_ACTION_MAP["auto_resolved"] == AuditAction.SYSTEM_RESOLVED
-    assert LEGACY_ACTION_MAP["expired_unresolved"] == AuditAction.EXPIRED
-    assert LEGACY_ACTION_MAP["data_not_ready"] == AuditAction.SCAN_SKIP_NOT_READY
-    assert LEGACY_ACTION_MAP["whitelist_filtered"] == AuditAction.SCAN_SKIP_WHITELIST
-    assert LEGACY_ACTION_MAP["muted"] == AuditAction.SCAN_SKIP_MUTED
-    assert LEGACY_ACTION_MAP["cooldown_filtered"] == AuditAction.SCAN_SKIP_COOLDOWN
-    assert LEGACY_ACTION_MAP["emergency_cancelled"] == AuditAction.ADMIN_CANCEL_PENDING
-    assert LEGACY_ACTION_MAP["admin_closed_all"] == AuditAction.ADMIN_CLOSE_ALL
-    assert LEGACY_ACTION_MAP["emergency_paused"] == AuditAction.ADMIN_PAUSE
-    assert LEGACY_ACTION_MAP["emergency_resumed"] == AuditAction.ADMIN_RESUME
-    assert LEGACY_ACTION_MAP["emergency_whitelisted"] == AuditAction.ADMIN_WHITELIST
-
-
-def test_legacy_action_map_is_complete_and_typed():
-    assert isinstance(LEGACY_ACTION_MAP, dict)
-    assert len(LEGACY_ACTION_MAP) == 19
-    # Every legacy value maps onto a canonical AuditAction string.
-    canonical = {
-        v
-        for k, v in vars(AuditAction).items()
-        if not k.startswith("_") and isinstance(v, str)
-    }
-    assert set(LEGACY_ACTION_MAP.values()) <= canonical
