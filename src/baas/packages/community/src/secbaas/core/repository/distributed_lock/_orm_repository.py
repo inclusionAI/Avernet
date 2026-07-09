@@ -6,6 +6,8 @@ Corresponds to ZdasDistributedLockRepository (ac_lock_table).
 
 from datetime import datetime
 
+from sqlalchemy import text
+
 from secbaas.core.repository import OrmConnectionMixin, with_orm_session
 from secbaas.logger import get_logger
 
@@ -15,6 +17,39 @@ from ._record import LockRecord
 
 log = get_logger("orm-repository")
 
+# MySQL / OceanBase — INSERT ... ON DUPLICATE KEY UPDATE
+_UPSERT_SQL_MYSQL = text(
+    """
+    INSERT INTO ac_lock_table (gmt_create, gmt_modified, lock_name, lock_holder, expire_time, env)
+    VALUES (NOW(), NOW(), :lock_name, :lock_holder, :expire_time, :env)
+    ON DUPLICATE KEY UPDATE
+      gmt_modified = NOW(),
+      lock_holder  = IF(expire_time IS NULL OR expire_time < NOW(), VALUES(lock_holder), lock_holder),
+      expire_time  = IF(expire_time IS NULL OR expire_time < NOW(), VALUES(expire_time), expire_time)
+    """
+)
+
+# SQLite — INSERT ... ON CONFLICT DO UPDATE
+# datetime('now', 'localtime') to match Python's naive local-time datetimes
+_UPSERT_SQL_SQLITE = text(
+    """
+    INSERT INTO ac_lock_table (gmt_create, gmt_modified, lock_name, lock_holder, expire_time, env)
+    VALUES (datetime('now', 'localtime'), datetime('now', 'localtime'), :lock_name, :lock_holder, :expire_time, :env)
+    ON CONFLICT(lock_name) DO UPDATE SET
+      gmt_modified = datetime('now', 'localtime'),
+      lock_holder  = CASE WHEN expire_time IS NULL OR expire_time < datetime('now', 'localtime')
+                          THEN excluded.lock_holder ELSE lock_holder END,
+      expire_time  = CASE WHEN expire_time IS NULL OR expire_time < datetime('now', 'localtime')
+                          THEN excluded.expire_time ELSE expire_time END
+    """
+)
+
+_UPSERT_RESULT_SQL = text(
+    """
+    SELECT lock_holder, expire_time FROM ac_lock_table WHERE lock_name = :lock_name
+    """
+)
+
 
 class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository):
     """ORM-based distributed lock repository using SQLAlchemy."""
@@ -23,10 +58,25 @@ class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository
         self._database = database
 
     @with_orm_session
-    def get_by_lock_name_for_update(self, lock_name: str) -> LockRecord | None:
-        log.info("get_by_lock_name_for_update: lock_name=%s", lock_name)
-        """Get lock record with FOR UPDATE (MySQL/SQLAlchemy) for distributed locking."""
+    def get_by_lock_name(self, lock_name: str) -> LockRecord | None:
+        """Get lock record (read-only, no FOR UPDATE)."""
+        log.info("get_by_lock_name: lock_name=%s", lock_name)
+        row = (
+            self._session.query(DistributedLockModel)
+            .filter(DistributedLockModel.lock_name == lock_name)
+            .first()
+        )
+        record = row.to_record() if row else None
+        log.info(
+            "[distributed-lock:get_by_lock_name] result: %s",
+            record.id if record else "None",
+        )
+        return record
 
+    @with_orm_session
+    def get_by_lock_name_for_update(self, lock_name: str) -> LockRecord | None:
+        """Get lock record with FOR UPDATE for distributed locking."""
+        log.info("get_by_lock_name_for_update: lock_name=%s", lock_name)
         row = (
             self._session.query(DistributedLockModel)
             .filter(DistributedLockModel.lock_name == lock_name)
@@ -39,6 +89,46 @@ class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository
             record.id if record else "None",
         )
         return record
+
+    @with_orm_session
+    def try_acquire(
+        self,
+        *,
+        lock_name: str,
+        lock_holder: str,
+        expire_time: datetime,
+        env: str | None = None,
+    ) -> bool:
+        """Atomic try-acquire via INSERT ... ON DUPLICATE KEY UPDATE.
+
+        Returns True if the lock was acquired (either new insert or
+        expired-lock takeover), False if the lock is held by someone else.
+        """
+        log.info("try_acquire: lock_name=%s, lock_holder=%s", lock_name, lock_holder)
+        dialect = self._session.bind.dialect.name
+        upsert_sql = _UPSERT_SQL_SQLITE if dialect == "sqlite" else _UPSERT_SQL_MYSQL
+        self._session.execute(
+            upsert_sql,
+            {
+                "lock_name": lock_name,
+                "lock_holder": lock_holder,
+                "expire_time": expire_time,
+                "env": env,
+            },
+        )
+        self._session.flush()
+
+        row = self._session.execute(
+            _UPSERT_RESULT_SQL, {"lock_name": lock_name}
+        ).fetchone()
+
+        acquired = row is not None and row.lock_holder == lock_holder
+        log.info(
+            "[distributed-lock:try_acquire] lock_name=%s, acquired=%s",
+            lock_name,
+            acquired,
+        )
+        return acquired
 
     @with_orm_session
     def insert_lock(

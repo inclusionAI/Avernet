@@ -4,7 +4,8 @@
 实现功能：
 1. 自动续期 - 通过后台线程定期更新过期时间
 2. 可重入锁 - 同一线程/持有者可以多次获取锁，维护重入计数
-3. 基于 MySQL FOR UPDATE 实现分布式锁
+3. 基于 INSERT ... ON DUPLICATE KEY UPDATE 原子操作实现分布式锁
+4. 防死锁 - 通过 expire_time 防止进程宕机导致的死锁
 
 使用示例：
     lock_service = DistributedLockService(repository)
@@ -64,10 +65,6 @@ class DistributedLockService:
     4. 持有者验证：只有锁持有者才能释放锁
     """
 
-    # 类级别的锁上下文缓存，用于跟踪当前线程持有的锁
-    _lock_contexts: dict[str, LockContext] = {}
-    _local_lock: threading.Lock = threading.Lock()
-
     def __init__(
         self,
         repository: DistributedLockRepository,
@@ -84,6 +81,8 @@ class DistributedLockService:
         self._repository = repository
         self._default_expire_seconds = default_expire_seconds
         self._renew_interval_seconds = renew_interval_seconds
+        self._lock_contexts: dict[str, LockContext] = {}
+        self._local_lock = threading.Lock()
 
     def _generate_holder_id(self) -> str:
         """生成唯一的锁持有者标识。
@@ -278,7 +277,8 @@ class DistributedLockService:
     ) -> bool:
         """内部方法：尝试获取锁。
 
-        使用 FOR UPDATE 实现分布式锁。
+        使用 INSERT ... ON DUPLICATE KEY UPDATE 原子操作实现，
+        避免 FOR UPDATE 行锁长时间持有和全表 DELETE。
 
         Args:
             lock_name: 锁名称
@@ -289,70 +289,15 @@ class DistributedLockService:
             是否获取成功
         """
         try:
-            # 1. 先清理过期锁
-            self._repository.delete_expired_locks(datetime.now())
-
-            # 2. 使用 FOR UPDATE 查询锁记录
-            record = self._repository.get_by_lock_name_for_update(lock_name)
+            from secbaas.core.utils.env_utils import get_current_env
 
             expire_time = datetime.now() + timedelta(seconds=expire_seconds)
-
-            if record is None:
-                # 3. 锁记录不存在，尝试插入新记录
-                inserted_id = self._repository.insert_lock(
-                    lock_name=lock_name,
-                    lock_holder=lock_holder,
-                    expire_time=expire_time,
-                )
-                if inserted_id > 0:
-                    logger.info(
-                        f"[_try_acquire_lock_internal] Created new lock '{lock_name}'"
-                    )
-                    return True
-                else:
-                    logger.warning(
-                        f"[_try_acquire_lock_internal] Lock '{lock_name}' already created by another transaction"
-                    )
-                    return False
-            else:
-                # 4. 锁记录存在，检查是否已过期或当前持有者是自己
-                if record.expire_time and record.expire_time < datetime.now():
-                    # 锁已过期，更新持有者
-                    updated = self._repository.update_lock_holder(
-                        lock_name=lock_name,
-                        lock_holder=lock_holder,
-                        expire_time=expire_time,
-                    )
-                    if updated > 0:
-                        logger.info(
-                            f"[_try_acquire_lock_internal] Acquired expired lock '{lock_name}'"
-                        )
-                        return True
-                    return False
-                elif record.lock_holder == lock_holder:
-                    # 已经是持有者，更新过期时间
-                    self._repository.update_expire_time(
-                        lock_name=lock_name,
-                        expire_time=expire_time,
-                    )
-                    logger.info(
-                        f"[_try_acquire_lock_internal] Renewed own lock '{lock_name}'"
-                    )
-                    return True
-                else:
-                    # 锁被其他持有者持有
-                    remaining = (
-                        record.expire_time - datetime.now()
-                        if record.expire_time
-                        else None
-                    )
-                    logger.warning(
-                        f"[_try_acquire_lock_internal] Lock '{lock_name}' held by "
-                        f"'{record.lock_holder}', remaining={remaining}s, "
-                        f"requester='{lock_holder}'"
-                    )
-                    return False
-
+            return self._repository.try_acquire(
+                lock_name=lock_name,
+                lock_holder=lock_holder,
+                expire_time=expire_time,
+                env=get_current_env(),
+            )
         except Exception as e:
             logger.error(
                 f"[_try_acquire_lock_internal] Error acquiring lock '{lock_name}': {e}"
@@ -460,7 +405,7 @@ class DistributedLockService:
                     return True
 
         # 查询数据库
-        record = self._repository.get_by_lock_name_for_update(lock_name)
+        record = self._repository.get_by_lock_name(lock_name)
         if record is None:
             return False
 
@@ -590,7 +535,7 @@ class DistributedLockService:
                 }
 
         # 查询数据库
-        record = self._repository.get_by_lock_name_for_update(lock_name)
+        record = self._repository.get_by_lock_name(lock_name)
         if record is None:
             return None
 

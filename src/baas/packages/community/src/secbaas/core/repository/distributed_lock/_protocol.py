@@ -8,8 +8,23 @@ from ._record import LockRecord
 class DistributedLockRepository(Protocol):
     """Protocol for distributed lock repository."""
 
+    def get_by_lock_name(self, lock_name: str) -> LockRecord | None:
+        """获取锁记录（只读，不加行锁）"""
+        ...
+
     def get_by_lock_name_for_update(self, lock_name: str) -> LockRecord | None:
         """使用 FOR UPDATE 获取锁记录"""
+        ...
+
+    def try_acquire(
+        self,
+        *,
+        lock_name: str,
+        lock_holder: str,
+        expire_time: datetime,
+        env: str | None = None,
+    ) -> bool:
+        """原子尝试获取锁（INSERT ... ON DUPLICATE KEY UPDATE）"""
         ...
 
     def insert_lock(
@@ -46,5 +61,5 @@ class DistributedLockRepository(Protocol):
         ...
 
     def delete_expired_locks(self, current_time: datetime) -> int:
-        """删除已过期的锁记录"""
+        """删除已过期的锁记录（供异步定时清理使用）"""
         ...
