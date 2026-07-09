@@ -180,6 +180,32 @@ class TestGetSkillReadmeEncoding:
         assert result is not None
         assert isinstance(result, str)
 
+    @pytest.mark.asyncio
+    async def test_local_readme_keeps_caller_bolt_when_db_bolt_missing(self, skill_dirs, mock_skill_repo):
+        """DB rows without bolt_id must not erase the route-resolved bot id."""
+        mock_skill_repo.get_by_id.return_value = {
+            "id": "106",
+            "git_path": "local://skills-local/my-skill",
+            "bolt_id": None,
+            "user_id": "owner1",
+        }
+
+        device_fs = AsyncMock()
+        device_fs.read_file = AsyncMock(return_value=b"# Caller Bot")
+        factory = MagicMock(return_value=device_fs)
+
+        svc = _make_service(
+            mock_skill_repo,
+            skill_dirs["repo_dir"],
+            skill_dirs["local_dir"],
+            skill_dirs["active_dir"],
+            device_fs_factory=factory,
+        )
+        result = await svc.get_skill_readme("106", user_id="request-user", bolt_id="route-bot")
+
+        assert result == "# Caller Bot"
+        factory.assert_called_once_with("route-bot", "owner1")
+
 
 class TestPrepareUploadPlanEncoding:
     """_prepare_upload_plan should handle GBK-encoded SKILL.md bytes."""
