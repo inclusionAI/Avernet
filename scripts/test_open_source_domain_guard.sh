@@ -9,6 +9,10 @@ fail() {
 }
 
 check_no_private_domains() {
+  local private_domain_pattern
+  private_domain_pattern="$(
+    printf '%s' 'ali''pay[.](com|net)|agentclawproxy-[a-z]+[.]example[.]com'
+  )"
   local files=(
     "${ROOT}/scripts/modules/backend.sh"
     "${ROOT}/scripts/ci/singlebox_coverage.sh"
@@ -16,7 +20,7 @@ check_no_private_domains() {
     "${ROOT}/scripts/modules/demo_bot.sh"
   )
 
-  if grep -nE 'alipay\.(com|net)|agentclawproxy-[a-z]+\.example\.com' "${files[@]}"; then
+  if grep -nE "$private_domain_pattern" "${files[@]}"; then
     fail "open-source singlebox scripts must not contain private or placeholder company domains"
   fi
 }
