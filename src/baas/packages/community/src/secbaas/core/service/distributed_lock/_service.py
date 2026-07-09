@@ -4,7 +4,7 @@
 实现功能：
 1. 自动续期 - 通过后台线程定期更新过期时间
 2. 可重入锁 - 同一线程/持有者可以多次获取锁，维护重入计数
-3. 基于 INSERT ... ON DUPLICATE KEY UPDATE 原子操作实现分布式锁
+3. 基于唯一索引 + SELECT/INSERT 实现分布式锁
 4. 防死锁 - 通过 expire_time 防止进程宕机导致的死锁
 
 使用示例：
@@ -277,8 +277,12 @@ class DistributedLockService:
     ) -> bool:
         """内部方法：尝试获取锁。
 
-        使用 INSERT ... ON DUPLICATE KEY UPDATE 原子操作实现，
-        避免 FOR UPDATE 行锁长时间持有和全表 DELETE。
+        基于 SELECT + INSERT/DELETE 的简单流程，依赖唯一索引保证并发安全：
+        1. SELECT 查询锁记录
+        2. 记录不存在 → INSERT，成功则加锁，唯一索引冲突则被人抢了
+        3. 记录已过期 → DELETE → INSERT，同上
+        4. 同 holder → UPDATE expire_time 续期
+        5. 他人持有未过期 → 失败
 
         Args:
             lock_name: 锁名称
@@ -289,17 +293,41 @@ class DistributedLockService:
             是否获取成功
         """
         try:
-            from secbaas.core.utils.env_utils import get_current_env
-
             now = datetime.now()
             expire_time = now + timedelta(seconds=expire_seconds)
-            return self._repository.try_acquire(
-                lock_name=lock_name,
-                lock_holder=lock_holder,
-                expire_time=expire_time,
-                env=get_current_env(),
-                current_time=now,
-            )
+
+            record = self._repository.get_by_lock_name(lock_name)
+
+            if record is None:
+                # 锁不存在，尝试插入
+                inserted = self._repository.insert_lock(
+                    lock_name=lock_name,
+                    lock_holder=lock_holder,
+                    expire_time=expire_time,
+                )
+                return inserted > 0
+
+            if record.expire_time and record.expire_time < now:
+                # 锁已过期，删除后重新插入
+                self._repository.delete_lock(lock_name)
+                inserted = self._repository.insert_lock(
+                    lock_name=lock_name,
+                    lock_holder=lock_holder,
+                    expire_time=expire_time,
+                )
+                return inserted > 0
+
+            if record.lock_holder == lock_holder:
+                # 同一持有者，续期
+                self._repository.update_expire_time(
+                    lock_name=lock_name,
+                    expire_time=expire_time,
+                )
+                return True
+
+            # 锁被他人持有且未过期
+            return False
+
         except Exception as e:
             logger.error(
                 f"[_try_acquire_lock_internal] Error acquiring lock '{lock_name}': {e}"

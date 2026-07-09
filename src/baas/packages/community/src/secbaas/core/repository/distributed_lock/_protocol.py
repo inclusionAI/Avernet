@@ -16,21 +16,6 @@ class DistributedLockRepository(Protocol):
         """使用 FOR UPDATE 获取锁记录"""
         ...
 
-    def try_acquire(
-        self,
-        *,
-        lock_name: str,
-        lock_holder: str,
-        expire_time: datetime,
-        env: str | None = None,
-        current_time: datetime | None = None,
-    ) -> bool:
-        """原子尝试获取锁（INSERT ... ON DUPLICATE KEY UPDATE）
-
-        支持三种场景：新建锁、抢占过期锁、同 holder 续期。
-        """
-        ...
-
     def insert_lock(
         self,
         *,
@@ -38,7 +23,7 @@ class DistributedLockRepository(Protocol):
         lock_holder: str,
         expire_time: datetime,
     ) -> int:
-        """插入新的锁记录"""
+        """插入新的锁记录，唯一索引冲突时返回 0"""
         ...
 
     def update_lock_holder(
