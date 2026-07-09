@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BCS Bot Group List Response",
+  "description": "Contract schema for BCS /bots/{uuid}/groups response",
+  "type": "object",
+  "required": ["bot_uuid", "items", "total"],
+  "properties": {
+    "bot_uuid": {"type": "string"},
+    "items": {"type": "array"},
+    "total": {"type": "integer"},
+    "limit": {"type": "integer"},
+    "offset": {"type": "integer"}
+  }
+}

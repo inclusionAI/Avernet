@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "auto_accepted": {
+          "type": "boolean"
+        },
+        "bot_friend_id": {
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "auto_accepted",
+        "bot_friend_id",
+        "message",
+        "success"
+      ],
+      "additionalProperties": false
+    },
+    "error_code": {
+      "type": "integer"
+    },
+    "message": {
+      "type": "string"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "data",
+    "error_code",
+    "message",
+    "success"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,228 @@
+{
+  "raw_user_config": {
+    "admin": {
+      "collaborator_admin": [
+        "100000"
+      ],
+      "device_admin": [
+        "100000"
+      ],
+      "disk_usage_admin": [
+        "100000"
+      ],
+      "harness_admin": [
+        "100000"
+      ],
+      "skill_admin": [
+        "100000"
+      ],
+      "super_admin": [
+        "100000"
+      ]
+    },
+    "aidesktop_root": "~/.aidesktop",
+    "app": {
+      "description": "Custom SOFAPy application",
+      "local_debug": true,
+      "title": "My SOFAPy App",
+      "version": "1.0.0"
+    },
+    "business": {
+      "retry_count": 3,
+      "timeout": 30
+    },
+    "cors": {
+      "allow_origin_regex": [],
+      "allow_origins": [
+        "http://localhost",
+        "http://localhost:3000",
+        "http://localhost:8080",
+        "http://localhost:8888"
+      ]
+    },
+    "daas_device_config": {
+      "adapter_service_port": 20003
+    },
+    "desktop_bot_periodic_scan": {
+      "apply_owner_whitelist": [],
+      "enabled": true,
+      "global_dry_run": false
+    },
+    "device_allocation": {
+      "max_devices_per_entity": 5,
+      "mode": "multi"
+    },
+    "device_provider": "local",
+    "features": {
+      "enable_cache": true,
+      "enable_metrics": false,
+      "max_connections": 100
+    },
+    "git_sync": {
+      "bolt_shared_dir_name": "bolt_shared",
+      "enable_oss_sync": true
+    },
+    "health_check": {
+      "bcs_url": "http://localhost:21000"
+    },
+    "openclaw": {
+      "skills_repo_url": ""
+    },
+    "skill_scan": {
+      "auth_app_key": "agentclaw",
+      "enable_scheduled_scan": false,
+      "max_concurrent_scans": 3,
+      "mist_mode": "dev",
+      "scan_interval_hours": 1,
+      "storage_dir": "./data/skills_scan"
+    },
+    "whitelist": {
+      "operator_names": []
+    },
+    "workspace": {
+      "claude_code_root": "~/.claude_code",
+      "openclaw_root": "~/.openclaw"
+    },
+    "yuque": {
+      "user_api": "http://127.0.0.1:9999/api/v2/user"
+    }
+  },
+  "typed": {
+    "aix": {
+      "preview_url": ""
+    },
+    "baas": {
+      "api_base_url": "http://localhost:8888",
+      "api_base_url_pre": "http://localhost:8888",
+      "default_ttl_minutes": 10080,
+      "desktop_template_uuid": "",
+      "desktop_ttl_minutes": 0,
+      "personal_bot_template_uuid": "",
+      "teclaw_template_uuid": "",
+      "template_uuid": "",
+      "tenant": "default"
+    },
+    "bcn": {
+      "base_url": "",
+      "base_url_pre": "",
+      "provider_admin_token_pre": "",
+      "provider_admin_token_prod": "",
+      "provider_id_pre": "",
+      "provider_id_prod": ""
+    },
+    "bcsfuse": {
+      "base_url": "",
+      "base_url_pre": "",
+      "raw": {}
+    },
+    "bot_chat": {
+      "langfuse_base_url": "",
+      "langfuse_public_key": "",
+      "langfuse_secret_key": ""
+    },
+    "bot_oss": {
+      "bucket_name": "",
+      "endpoint": "",
+      "secret_name": ""
+    },
+    "cors": {
+      "allow_origin_regex": [],
+      "allow_origins": [
+        "http://localhost",
+        "http://localhost:3000",
+        "http://localhost:8080",
+        "http://localhost:8888"
+      ]
+    },
+    "desktop_bot_periodic_scan": {
+      "apply_owner_whitelist": [],
+      "enabled": true,
+      "global_dry_run": false
+    },
+    "device_allocation": {
+      "arca_legacy_tenant": "legacy",
+      "max_devices_per_entity": 5,
+      "mode": "multi"
+    },
+    "device_provider": {
+      "default_provider": "local"
+    },
+    "dormant_config": {
+      "dry_run": true
+    },
+    "dormant_notify": {
+      "action_link_pattern": ""
+    },
+    "ecb": {
+      "base_url": "",
+      "base_url_pre": ""
+    },
+    "kb": {
+      "base_url": "",
+      "function_name": "",
+      "instance_name": "",
+      "interface_name": "",
+      "token": ""
+    },
+    "llm_harness": {
+      "base_url": "",
+      "secret_name": ""
+    },
+    "masa_agent_eval": {
+      "base_url": "http://localhost:8080",
+      "base_url_pre": "http://localhost:8080"
+    },
+    "oss_to_nas": {
+      "nas_root": "./data/nas",
+      "oss_root": "./data/oss"
+    },
+    "secret_names": {
+      "aiworkbench_repo_url": "",
+      "dormant_internal_token": ""
+    },
+    "skill_scan": {
+      "auth_app_key": "agentclaw",
+      "auth_app_secret": "",
+      "auth_endpoint": "",
+      "enable_scheduled_scan": false,
+      "enabled": true,
+      "env": "prod",
+      "git_download_dir": "/home/admin/logs/tmp/sec/code",
+      "max_concurrent_scans": 3,
+      "mist_mode": "dev",
+      "scan_interval_hours": 1,
+      "scan_interval_minutes": 0,
+      "storage_dir": "./data/skills_scan"
+    },
+    "task_queue_worker": {
+      "batch_size": 10,
+      "enabled": false,
+      "lease_seconds": 60,
+      "max_concurrency": 10,
+      "poll_interval_seconds": 2.0,
+      "poll_jitter_seconds": 0.5,
+      "retry_backoff_max_seconds": 60.0,
+      "retry_backoff_min_seconds": 1.0
+    },
+    "whitelist": {
+      "operator_names": []
+    },
+    "workspace": {
+      "claude_code_root": "~/.claude_code",
+      "claude_code_session_root": "/home/admin/.claude",
+      "openclaw_root": "~/.openclaw"
+    },
+    "workspace_hosting": {
+      "access_key": "",
+      "access_secret": "",
+      "aixcore_base_url": "",
+      "aixcore_base_url_pre": "",
+      "base_url": "",
+      "tenant": "default",
+      "timeout": 30
+    },
+    "yuque": {
+      "user_api": "http://127.0.0.1:9999/api/v2/user"
+    }
+  }
+}

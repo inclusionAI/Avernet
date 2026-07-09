@@ -1,0 +1,1 @@
+"""Tests for bot_collaborator module."""

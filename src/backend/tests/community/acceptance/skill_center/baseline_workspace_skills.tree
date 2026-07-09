@@ -1,0 +1,4 @@
+# Baseline: global ~/.openclaw/workspace/skills top-level (after full lifecycle)
+L brainstorming -> skills-repo/infra/common/brainstorming
+F skill_sets.json
+D skills-repo/

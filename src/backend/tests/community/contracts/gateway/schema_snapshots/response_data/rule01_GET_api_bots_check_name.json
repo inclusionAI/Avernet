@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "properties": {
+    "bot_name": {
+      "type": "string"
+    },
+    "exists": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "bot_name",
+    "exists"
+  ],
+  "additionalProperties": false
+}

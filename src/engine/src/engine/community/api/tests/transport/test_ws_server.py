@@ -1,0 +1,1108 @@
+"""Phase C tests — `api/transport/ws_server.py` plugin dispatch.
+
+Covers the engine-agnostic server's handler translation from wire frames
+to plugin calls. The server is exercised directly (not through an HTTP
+test client) — every test builds a `EngineWebSocketServer`, stashes a fake
+active engine on `EngineManager._instance`, and drives one handler at a
+time.
+
+What's NOT covered here:
+  - FastAPI WebSocket connection lifecycle / accept + handshake IO
+    (that's the same wiring for every inbound connection; the handlers are
+    what Phase C actually rewrote).
+  - Intent-eval observer side effects — owned by the chat plugin and
+    covered in `engines/openclaw/tests/test_intent_eval_observer.py`.
+"""
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from engine.community.core.session.models import SessionResetRequest, SessionResetResult
+from engine.community.core.chat.models import ChatAbortRequest, ChatAbortResult
+from engine.community.core.engine.context import AuthContext
+from engine.community.kernel.frames import (
+    ErrorCodes,
+    ErrorShape,
+    EventFrame,
+    RequestFrame,
+    ResponseFrame,
+)
+from engine.community.manager import EngineManager
+from engine.community.api.transport.ws_server import (
+    EngineWebSocketServer,
+    _is_openclaw_session_not_found,
+)
+from engine.community.api.transport.auth_gate import AuthGateResult
+from engine.community.plugin_api.auth_gate.models import VerifyResult
+from engine.community.plugins.auth_gate.noop_impl import NoopAuthGateService
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fixtures
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def fake_engine():
+    """Stand-in Engine with every plugin slot a MagicMock.
+
+    Wired onto EngineManager._instance so `manager.session` /
+    `manager.chat` / `manager.relay` / `on_connection_*` passthroughs
+    resolve to this instance.
+    """
+    engine = MagicMock(name="FakeActiveEngine")
+    engine.session = MagicMock(name="FakeSessionService")
+    engine.chat = MagicMock(name="FakeChatService")
+    engine.relay = MagicMock(name="FakeRelayService")
+    engine.on_connection_open = AsyncMock()
+    engine.on_connection_close = AsyncMock()
+
+    # Build a bare manager and poke the engine in, bypassing registry/init.
+    EngineManager.reset_instance()
+    mgr = EngineManager("fake")
+    mgr._active_engine = engine
+    EngineManager._instance = mgr
+    yield engine
+    EngineManager.reset_instance()
+
+
+@pytest.fixture
+def server() -> EngineWebSocketServer:
+    """Fresh server with one seeded auth entry ("conn-1" → token "tok-a")."""
+    s = EngineWebSocketServer()
+    s._conn_auth["conn-1"] = AuthContext(token="tok-a")
+    return s
+
+
+class FakeAuthGateService:
+    def __init__(self, *, enabled: bool = True, verify_result: VerifyResult | None = None):
+        self.enabled = enabled
+        self.verify_result = verify_result or VerifyResult(allowed=True)
+        self.verify_calls = []
+
+    async def get_switch(self) -> bool:
+        return self.enabled
+
+    async def set_switch(self, enabled: bool) -> None:
+        self.enabled = bool(enabled)
+
+    async def verify(self, token: str, content: str, session_id: str) -> VerifyResult:
+        self.verify_calls.append({
+            "token": token,
+            "content": content,
+            "session_id": session_id,
+        })
+        return self.verify_result
+
+
+@pytest.fixture
+def auth_gate_service() -> FakeAuthGateService:
+    return FakeAuthGateService()
+
+
+def _req(method: str, params: dict, id: str = "r-1") -> RequestFrame:
+    return RequestFrame(id=id, method=method, params=params)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _handle_chat_send
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestHandleChatSend:
+    @pytest.mark.asyncio
+    async def test_rejects_missing_iam_token(self, server, fake_engine, auth_gate_service):
+        websocket = MagicMock()
+        params = {"sessionKey": "agent:main:user:165137", "message": "hello"}
+
+        response = await server._handle_chat_send(
+            websocket, "conn-1", _req("chat.send", params), params,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is False
+        assert response.error.code == "ZERO_CHECK_FAILED"
+        assert "x-iam-token" in response.error.message
+
+    @pytest.mark.asyncio
+    async def test_auth_gate_deny_rejects_chat_send(self, server, fake_engine, auth_gate_service, monkeypatch):
+        websocket = MagicMock()
+        stream = AsyncMock()
+        server._stream_chat_events = stream
+        monkeypatch.setattr(
+            "engine.community.api.transport.ws_server.verify_chat_send",
+            AsyncMock(
+                return_value=AuthGateResult(
+                    allowed=False,
+                    error_message="not allowed",
+                )
+            ),
+        )
+        params = {
+            "sessionKey": "agent:main:user:165137",
+            "message": "hello",
+            "x-iam-token": "iam-token",
+        }
+
+        response = await server._handle_chat_send(
+            websocket, "conn-1", _req("chat.send", params), params,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is False
+        assert response.error.code == "ZERO_CHECK_FAILED"
+        assert response.error.message == "not allowed"
+        stream.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_auth_gate_task_id_passes_to_stream(self, server, fake_engine, auth_gate_service, monkeypatch):
+        websocket = MagicMock()
+        stream = AsyncMock()
+        server._stream_chat_events = stream
+        monkeypatch.setattr(
+            "engine.community.api.transport.ws_server.verify_chat_send",
+            AsyncMock(
+                return_value=AuthGateResult(
+                    allowed=True,
+                    idempotency_key="aps_123",
+                )
+            ),
+        )
+        params = {
+            "sessionKey": "agent:main:user:165137",
+            "message": "hello",
+            "x-iam-token": "iam-token",
+        }
+
+        response = await server._handle_chat_send(
+            websocket, "conn-1", _req("chat.send", params), params,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is True
+        assert params["idempotencyKey"] == "aps_123"
+        stream.assert_called_once()
+        assert stream.call_args.args[-1] == "aps_123"
+
+    @pytest.mark.asyncio
+    async def test_open_api_token_still_calls_auth_gate(self, server, fake_engine, auth_gate_service, monkeypatch):
+        websocket = MagicMock()
+        stream = AsyncMock()
+        auth_gate = AsyncMock(return_value=AuthGateResult(allowed=True, idempotency_key="aps_open"))
+        server._stream_chat_events = stream
+        monkeypatch.setattr("engine.community.api.transport.ws_server.verify_chat_send", auth_gate)
+        params = {
+            "sessionKey": "agent:main:user:165137",
+            "message": "hello",
+            "x-iam-token": "OPEN_API:app:security_app",
+        }
+
+        response = await server._handle_chat_send(
+            websocket, "conn-1", _req("chat.send", params), params,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is True
+        auth_gate.assert_awaited_once_with(
+            auth_gate_service=auth_gate_service,
+            session_key="agent:main:user:165137",
+            message="hello",
+            iam_token="OPEN_API:app:security_app",
+        )
+        assert params["idempotencyKey"] == "aps_open"
+        stream.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_auth_gate_exception_is_fail_open(self, server, fake_engine, auth_gate_service, monkeypatch):
+        """When verify_chat_send raises, chat.send proceeds (fail-open)."""
+        websocket = MagicMock()
+        stream = AsyncMock()
+        server._stream_chat_events = stream
+        monkeypatch.setattr(
+            "engine.community.api.transport.ws_server.verify_chat_send",
+            AsyncMock(side_effect=RuntimeError("network unreachable")),
+        )
+        params = {
+            "sessionKey": "agent:main:user:165137",
+            "message": "hello",
+            "x-iam-token": "iam-token",
+        }
+
+        response = await server._handle_chat_send(
+            websocket, "conn-1", _req("chat.send", params), params,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is True
+        stream.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_chat_send_forwards_attachments_to_stream(self, server, fake_engine, auth_gate_service, monkeypatch):
+        websocket = MagicMock()
+        stream = AsyncMock()
+        server._stream_chat_events = stream
+        auth_gate_service.enabled = False
+        attachments = [
+            {
+                "type": "file",
+                "mimeType": "application/pdf",
+                "fileName": "brief.pdf",
+                "content": "YmFzZTY0",
+            }
+        ]
+        params = {
+            "sessionKey": "agent:main:user:165137",
+            "message": "看看这个文件",
+            "attachments": attachments,
+        }
+
+        response = await server._handle_chat_send(
+            websocket, "conn-1", _req("chat.send", params), params,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is True
+        stream.assert_called_once()
+        assert stream.call_args.kwargs["attachments"] == attachments
+
+    @pytest.mark.asyncio
+    async def test_chat_send_rejects_invalid_attachments(self, server, fake_engine, auth_gate_service, monkeypatch):
+        websocket = MagicMock()
+        stream = AsyncMock()
+        server._stream_chat_events = stream
+        auth_gate_service.enabled = False
+        params = {
+            "sessionKey": "agent:main:user:165137",
+            "message": "hello",
+            "attachments": {"type": "file"},
+        }
+
+        response = await server._handle_chat_send(
+            websocket, "conn-1", _req("chat.send", params), params,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is False
+        assert response.error.code == ErrorCodes.INVALID_REQUEST
+        assert "attachments" in response.error.message
+        stream.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_auth_gate_empty_task_id_uses_uuid_fallback(self, server, fake_engine, auth_gate_service, monkeypatch):
+        websocket = MagicMock()
+        stream = AsyncMock()
+        server._stream_chat_events = stream
+        monkeypatch.setattr(
+            "engine.community.api.transport.ws_server.verify_chat_send",
+            AsyncMock(return_value=AuthGateResult(allowed=True)),
+        )
+        params = {
+            "sessionKey": "agent:main:user:165137",
+            "message": "hello",
+            "x-iam-token": "iam-token",
+        }
+
+        response = await server._handle_chat_send(
+            websocket, "conn-1", _req("chat.send", params), params,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is True
+        assert "idempotencyKey" not in params
+        stream.assert_called_once()
+        assert stream.call_args.args[-1] is None
+
+    @pytest.mark.asyncio
+    async def test_auth_gate_disabled_allows_chat_send_without_token(
+        self, server, fake_engine, auth_gate_service, monkeypatch,
+    ):
+        websocket = MagicMock()
+        stream = AsyncMock()
+        auth_gate = AsyncMock(return_value=AuthGateResult(allowed=False))
+        server._stream_chat_events = stream
+        auth_gate_service.enabled = False
+        monkeypatch.setattr("engine.community.api.transport.ws_server.verify_chat_send", auth_gate)
+        monkeypatch.setattr(
+            "engine.community.api.transport.ws_server.uuid.uuid4",
+            lambda: SimpleNamespace(hex="uuid-fallback"),
+        )
+        params = {"sessionKey": "agent:main:user:165137", "message": "hello"}
+
+        response = await server._handle_chat_send(
+            websocket, "conn-1", _req("chat.send", params), params,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is True
+        assert params["idempotencyKey"] == "uuid-fallback"
+        auth_gate.assert_not_called()
+        stream.assert_called_once()
+        assert stream.call_args.args[-1] == "uuid-fallback"
+
+    @pytest.mark.asyncio
+    async def test_auth_gate_disabled_preserves_client_idempotency_key(
+        self, server, fake_engine, auth_gate_service, monkeypatch,
+    ):
+        websocket = MagicMock()
+        stream = AsyncMock()
+        server._stream_chat_events = stream
+        auth_gate_service.enabled = False
+        params = {
+            "sessionKey": "agent:main:user:165137",
+            "message": "hello",
+            "idempotencyKey": "client-run",
+        }
+
+        response = await server._handle_chat_send(
+            websocket, "conn-1", _req("chat.send", params), params,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is True
+        assert params["idempotencyKey"] == "client-run"
+        stream.assert_called_once()
+        assert stream.call_args.args[-1] == "client-run"
+
+    @pytest.mark.asyncio
+    async def test_community_noop_auth_gate_allows_chat_send_without_token(
+        self, server, fake_engine, monkeypatch,
+    ):
+        websocket = MagicMock()
+        stream = AsyncMock()
+        auth_gate = AsyncMock(return_value=AuthGateResult(allowed=False))
+        server._stream_chat_events = stream
+        monkeypatch.setattr("engine.community.api.transport.ws_server.verify_chat_send", auth_gate)
+        monkeypatch.setattr(
+            "engine.community.api.transport.ws_server.uuid.uuid4",
+            lambda: SimpleNamespace(hex="community-noop-run"),
+        )
+        params = {"sessionKey": "agent:main:user:165137", "message": "hello"}
+
+        response = await server._handle_chat_send(
+            websocket, "conn-1", _req("chat.send", params), params,
+            auth_gate_service=NoopAuthGateService(),
+        )
+
+        assert response.ok is True
+        assert params["idempotencyKey"] == "community-noop-run"
+        auth_gate.assert_not_called()
+        stream.assert_called_once()
+        assert stream.call_args.args[-1] == "community-noop-run"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _handle_chat_abort
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestHandleChatAbort:
+    @pytest.mark.asyncio
+    async def test_rejects_missing_session_key(self, server, fake_engine):
+        response, events = await server._handle_chat_abort(
+            "conn-1", _req("chat.abort", {}), {},
+        )
+        assert response.ok is False
+        assert response.error.code == ErrorCodes.INVALID_REQUEST
+        assert events == []
+        # Plugin never called when inputs are rejected locally.
+        fake_engine.chat.abort.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_successful_abort_returns_runids_and_followup_event(
+        self, server, fake_engine,
+    ):
+        fake_engine.chat.abort = AsyncMock(return_value=ChatAbortResult(
+            ok=True,
+            aborted=True,
+            run_id="r-123",
+            emit_events=[EventFrame(event="chat", payload={"state": "aborted"})],
+        ))
+
+        params = {"sessionKey": "sk-1", "runId": "r-123"}
+        response, events = await server._handle_chat_abort(
+            "conn-1", _req("chat.abort", params), params,
+        )
+
+        assert response.ok is True
+        assert response.payload == {
+            "ok": True, "aborted": True, "runIds": ["r-123"],
+        }
+        assert events == [("chat", {"state": "aborted"})]
+
+        # Plugin received the request and the cached AuthContext for conn-1.
+        call = fake_engine.chat.abort.await_args
+        assert call.args[0] == ChatAbortRequest(session_key="sk-1", run_id="r-123")
+        assert call.kwargs["auth"] == AuthContext(token="tok-a")
+
+    @pytest.mark.asyncio
+    async def test_not_aborted_returns_empty_runids(self, server, fake_engine):
+        fake_engine.chat.abort = AsyncMock(return_value=ChatAbortResult(
+            ok=True, aborted=False, run_id="r-xx", emit_events=[],
+        ))
+
+        params = {"sessionKey": "sk-1"}
+        response, events = await server._handle_chat_abort(
+            "conn-1", _req("chat.abort", params), params,
+        )
+
+        assert response.ok is True
+        assert response.payload["runIds"] == []
+        assert events == []
+
+    @pytest.mark.asyncio
+    async def test_plugin_failure_surfaces_error_shape(self, server, fake_engine):
+        fake_engine.chat.abort = AsyncMock(return_value=ChatAbortResult(
+            ok=False,
+            error=ErrorShape(code="NOT_FOUND", message="no such run"),
+        ))
+
+        params = {"sessionKey": "sk-1"}
+        response, events = await server._handle_chat_abort(
+            "conn-1", _req("chat.abort", params), params,
+        )
+
+        assert response.ok is False
+        assert response.error.code == "NOT_FOUND"
+        assert response.error.message == "no such run"
+        assert events == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _handle_session_reset
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestHandleSessionReset:
+    @pytest.mark.asyncio
+    async def test_rejects_missing_session_key(self, server, fake_engine):
+        response = await server._handle_session_reset(
+            "conn-1", _req("sessions.reset", {}), {},
+        )
+        assert response.ok is False
+        assert response.error.code == ErrorCodes.INVALID_REQUEST
+        fake_engine.session.reset.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_accepts_session_key_or_key(self, server, fake_engine):
+        fake_engine.session.reset = AsyncMock(
+            return_value=SessionResetResult(ok=True, payload={"cleared": 1}),
+        )
+        # Legacy callers send `{"key": ...}`; new ones send `{"sessionKey": ...}`.
+        params = {"key": "sk-1"}
+        response = await server._handle_session_reset(
+            "conn-1", _req("sessions.reset", params), params,
+        )
+        assert response.ok is True
+        assert response.payload == {"cleared": 1}
+
+    @pytest.mark.asyncio
+    async def test_success_relays_payload(self, server, fake_engine):
+        fake_engine.session.reset = AsyncMock(
+            return_value=SessionResetResult(ok=True, payload={"cleared": 42}),
+        )
+        params = {"sessionKey": "sk-1"}
+        response = await server._handle_session_reset(
+            "conn-1", _req("sessions.reset", params), params,
+        )
+        assert response.ok is True
+        assert response.payload == {"cleared": 42}
+
+        # Plugin saw the request with the right key + AuthContext.
+        call = fake_engine.session.reset.await_args
+        assert call.args[0] == SessionResetRequest(session_key="sk-1")
+        assert call.kwargs["auth"] == AuthContext(token="tok-a")
+
+    @pytest.mark.asyncio
+    async def test_failure_maps_to_err_response(self, server, fake_engine):
+        fake_engine.session.reset = AsyncMock(
+            return_value=SessionResetResult(
+                ok=False,
+                error_code="NOT_FOUND",
+                error_message="no such session",
+            ),
+        )
+        params = {"sessionKey": "sk-x"}
+        response = await server._handle_session_reset(
+            "conn-1", _req("sessions.reset", params), params,
+        )
+        assert response.ok is False
+        assert response.error.code == "NOT_FOUND"
+        assert response.error.message == "no such session"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _forward_request (unknown method → relay)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestForwardRequest:
+    @pytest.mark.asyncio
+    async def test_501_when_engine_has_no_relay(self, server, fake_engine):
+        fake_engine.relay = None  # engine opted out of passthrough
+        response, events = await server._forward_request(
+            "conn-1", _req("some.unknown.method", {"x": 1}),
+        )
+        assert response.ok is False
+        assert response.error.code == "METHOD_NOT_SUPPORTED"
+        assert "some.unknown.method" in response.error.message
+        assert events == []
+
+    @pytest.mark.asyncio
+    async def test_relay_response_passed_through(self, server, fake_engine):
+        upstream = ResponseFrame(id="r-1", ok=True, payload={"result": "ok"})
+        fake_engine.relay.forward_request = AsyncMock(return_value=upstream)
+
+        request = _req("sessions.list", {"limit": 10}, id="r-1")
+        response, events = await server._forward_request("conn-1", request)
+
+        # Server passes the ResponseFrame through verbatim.
+        assert response is upstream
+        assert events == []
+        # Request id, method, params, and cached auth all propagate.
+        call = fake_engine.relay.forward_request.await_args
+        assert call.kwargs == {
+            "request_id": "r-1",
+            "method": "sessions.list",
+            "params": {"limit": 10},
+            "auth": AuthContext(token="tok-a"),
+            "timeout": 30.0,
+        }
+
+    @pytest.mark.asyncio
+    async def test_relay_exception_wrapped_as_internal_error(
+        self, server, fake_engine,
+    ):
+        fake_engine.relay.forward_request = AsyncMock(
+            side_effect=RuntimeError("upstream blew up"),
+        )
+        response, events = await server._forward_request(
+            "conn-1", _req("sessions.list", {}),
+        )
+        assert response.ok is False
+        assert response.error.code == "INTERNAL_ERROR"
+        assert "upstream blew up" in response.error.message
+        assert events == []
+
+
+class TestOpenClawChatInjectAutocreate:
+    @staticmethod
+    def _set_openclaw_engine():
+        EngineManager.get_instance()._engine = "openclaw"
+
+    @pytest.mark.asyncio
+    async def test_first_inject_success_does_not_create_session(self, server, fake_engine):
+        self._set_openclaw_engine()
+        first = ResponseFrame.ok_response("r-1", {"injected": True})
+        fake_engine.relay.forward_request = AsyncMock(return_value=first)
+
+        request = _req(
+            "chat.inject",
+            {
+                "sessionKey": "test-openclaw-session-key",
+                "message": "hello",
+            },
+            id="chat-inject-1",
+        )
+        response, events = await server._forward_chat_inject_with_session_autocreate(
+            "conn-1",
+            request,
+        )
+
+        assert response is first
+        assert events == []
+        assert fake_engine.relay.forward_request.await_count == 1
+        call = fake_engine.relay.forward_request.await_args_list[0]
+        assert call.kwargs["method"] == "chat.inject"
+        assert call.kwargs["params"] == request.params
+
+    @pytest.mark.asyncio
+    async def test_session_not_found_creates_exact_key_then_retries(self, server, fake_engine):
+        self._set_openclaw_engine()
+        raw_session_key = "test-openclaw-session-key"
+        not_found = ResponseFrame.err_response(
+            "chat-inject-1",
+            ErrorShape(ErrorCodes.INVALID_REQUEST, "session not found"),
+        )
+        created = ResponseFrame.ok_response("ensure-session-1", {"ok": True})
+        retried = ResponseFrame.ok_response("chat-inject-1", {"injected": True})
+        fake_engine.relay.forward_request = AsyncMock(
+            side_effect=[not_found, created, retried],
+        )
+
+        request = _req(
+            "chat.inject",
+            {
+                "sessionKey": raw_session_key,
+                "message": "hello",
+                "label": "bcs",
+            },
+            id="chat-inject-1",
+        )
+        response, events = await server._forward_chat_inject_with_session_autocreate(
+            "conn-1",
+            request,
+        )
+
+        assert response is retried
+        assert events == []
+        assert fake_engine.relay.forward_request.await_count == 3
+        first, create, retry = fake_engine.relay.forward_request.await_args_list
+        assert first.kwargs["request_id"] == "chat-inject-1"
+        assert first.kwargs["method"] == "chat.inject"
+        assert first.kwargs["params"] == request.params
+        assert create.kwargs["request_id"].startswith("ensure-session-")
+        assert create.kwargs["method"] == "sessions.patch"
+        assert create.kwargs["params"] == {"key": raw_session_key}
+        assert create.kwargs["auth"] == AuthContext(token="tok-a")
+        assert retry.kwargs["request_id"] == "chat-inject-1"
+        assert retry.kwargs["method"] == "chat.inject"
+        assert retry.kwargs["params"] == request.params
+
+    @pytest.mark.asyncio
+    async def test_session_patch_failure_returns_patch_error_without_retry(
+        self, server, fake_engine,
+    ):
+        self._set_openclaw_engine()
+        not_found = ResponseFrame.err_response(
+            "chat-inject-1",
+            ErrorShape(ErrorCodes.INVALID_REQUEST, "session not found"),
+        )
+        patch_failed = ResponseFrame.err_response(
+            "ensure-session-1",
+            ErrorShape("PERMISSION_DENIED", "cannot create"),
+        )
+        fake_engine.relay.forward_request = AsyncMock(
+            side_effect=[not_found, patch_failed],
+        )
+
+        response, events = await server._forward_chat_inject_with_session_autocreate(
+            "conn-1",
+            _req("chat.inject", {"sessionKey": "sk-1", "message": "hi"}, id="chat-inject-1"),
+        )
+
+        assert response is not patch_failed
+        assert response.id == "chat-inject-1"
+        assert response.ok is False
+        assert response.error.code == "PERMISSION_DENIED"
+        assert response.error.message == "cannot create"
+        assert events == []
+        assert fake_engine.relay.forward_request.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_retry_failure_is_returned(self, server, fake_engine):
+        self._set_openclaw_engine()
+        not_found = ResponseFrame.err_response(
+            "chat-inject-1",
+            ErrorShape(ErrorCodes.INVALID_REQUEST, "session not found"),
+        )
+        created = ResponseFrame.ok_response("ensure-session-1", {"ok": True})
+        retry_failed = ResponseFrame.err_response(
+            "chat-inject-1",
+            ErrorShape("INVALID_REQUEST", "bad inject"),
+        )
+        fake_engine.relay.forward_request = AsyncMock(
+            side_effect=[not_found, created, retry_failed],
+        )
+
+        response, events = await server._forward_chat_inject_with_session_autocreate(
+            "conn-1",
+            _req("chat.inject", {"sessionKey": "sk-1", "message": "hi"}, id="chat-inject-1"),
+        )
+
+        assert response is retry_failed
+        assert events == []
+        assert fake_engine.relay.forward_request.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_other_invalid_request_does_not_create_session(self, server, fake_engine):
+        self._set_openclaw_engine()
+        invalid = ResponseFrame.err_response(
+            "chat-inject-1",
+            ErrorShape(ErrorCodes.INVALID_REQUEST, "message required"),
+        )
+        fake_engine.relay.forward_request = AsyncMock(return_value=invalid)
+
+        response, events = await server._forward_chat_inject_with_session_autocreate(
+            "conn-1",
+            _req("chat.inject", {"sessionKey": "sk-1", "message": "hi"}, id="chat-inject-1"),
+        )
+
+        assert response is invalid
+        assert events == []
+        assert fake_engine.relay.forward_request.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_non_openclaw_engine_does_not_create_session(self, server, fake_engine):
+        EngineManager.get_instance()._engine = "aicoding"
+        not_found = ResponseFrame.err_response(
+            "chat-inject-1",
+            ErrorShape(ErrorCodes.INVALID_REQUEST, "session not found"),
+        )
+        fake_engine.relay.forward_request = AsyncMock(return_value=not_found)
+
+        response, events = await server._forward_chat_inject_with_session_autocreate(
+            "conn-1",
+            _req("chat.inject", {"sessionKey": "sk-1", "message": "hi"}, id="chat-inject-1"),
+        )
+
+        assert response is not_found
+        assert events == []
+        assert fake_engine.relay.forward_request.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_session_patch_exception_is_internal_error(self, server, fake_engine):
+        self._set_openclaw_engine()
+        not_found = ResponseFrame.err_response(
+            "chat-inject-1",
+            ErrorShape(ErrorCodes.INVALID_REQUEST, "session not found"),
+        )
+        fake_engine.relay.forward_request = AsyncMock(
+            side_effect=[not_found, RuntimeError("patch exploded")],
+        )
+
+        response, events = await server._forward_chat_inject_with_session_autocreate(
+            "conn-1",
+            _req("chat.inject", {"sessionKey": "sk-1", "message": "hi"}, id="chat-inject-1"),
+        )
+
+        assert response.ok is False
+        assert response.error.code == "INTERNAL_ERROR"
+        assert "patch exploded" in response.error.message
+        assert events == []
+
+
+class TestOpenClawSessionNotFoundPredicate:
+    def test_matches_invalid_request_session_not_found_case_insensitive(self):
+        response = ResponseFrame.err_response(
+            "r-1",
+            ErrorShape(ErrorCodes.INVALID_REQUEST, "Session Not Found"),
+        )
+        assert _is_openclaw_session_not_found(response) is True
+
+    def test_rejects_success_and_other_errors(self):
+        assert _is_openclaw_session_not_found(
+            ResponseFrame.ok_response("r-1", {}),
+        ) is False
+        assert _is_openclaw_session_not_found(
+            ResponseFrame.err_response(
+                "r-1",
+                ErrorShape(ErrorCodes.INVALID_REQUEST, "message required"),
+            ),
+        ) is False
+        assert _is_openclaw_session_not_found(
+            ResponseFrame.err_response(
+                "r-1",
+                ErrorShape("NOT_FOUND", "session not found"),
+            ),
+        ) is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _forward_raw_frame
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestForwardRawFrame:
+    @pytest.mark.asyncio
+    async def test_drops_when_engine_has_no_relay(self, server, fake_engine):
+        fake_engine.relay = None
+        websocket = MagicMock()
+        websocket.send_text = AsyncMock()
+
+        await server._forward_raw_frame(
+            websocket, "conn-1", {"type": "event", "event": "client.ping"},
+        )
+        # No relay → frame silently dropped, no error event emitted.
+        websocket.send_text.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delegates_to_relay_with_auth(self, server, fake_engine):
+        fake_engine.relay.forward_raw_frame = AsyncMock()
+        websocket = MagicMock()
+
+        frame = {"type": "event", "event": "client.hint", "payload": {}}
+        await server._forward_raw_frame(websocket, "conn-1", frame)
+
+        fake_engine.relay.forward_raw_frame.assert_awaited_once_with(
+            frame, auth=AuthContext(token="tok-a"),
+        )
+
+    @pytest.mark.asyncio
+    async def test_relay_failure_sends_error_event(self, server, fake_engine):
+        fake_engine.relay.forward_raw_frame = AsyncMock(
+            side_effect=RuntimeError("gateway down"),
+        )
+        websocket = MagicMock()
+        websocket.send_text = AsyncMock()
+
+        await server._forward_raw_frame(
+            websocket, "conn-1", {"type": "event"},
+        )
+        # An error EventFrame went out.
+        websocket.send_text.assert_awaited_once()
+        sent = websocket.send_text.await_args.args[0]
+        assert "gateway down" in sent
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _auth_for
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAuthFor:
+    def test_known_conn_returns_cached_auth(self, server):
+        assert server._auth_for("conn-1") == AuthContext(token="tok-a")
+
+    def test_unknown_conn_returns_empty_auth(self, server):
+        assert server._auth_for("unknown") == AuthContext()
+
+    def test_none_conn_id_returns_empty_auth(self, server):
+        assert server._auth_for(None) == AuthContext()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dispatch routing (_handle_request)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestDispatch:
+    """_handle_request is the switchboard that picks which handler runs.
+
+    These tests patch individual handlers to verify method → handler routing
+    without exercising the handler logic (covered above).
+    """
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_routes_to_chat_abort_handler(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        expected_response = ResponseFrame.ok_response("r-1", {"accepted": True})
+        server._handle_chat_abort = AsyncMock(
+            return_value=(expected_response, []),
+        )
+
+        req = _req("chat.abort", {"sessionKey": "sk-1"})
+        response, events = await server._handle_request(
+            websocket=MagicMock(), conn_id="conn-1", request=req,
+            auth_gate_service=auth_gate_service,
+        )
+        assert response is expected_response
+        server._handle_chat_abort.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_sessions_reset_routes_to_session_reset_handler(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        expected_response = ResponseFrame.ok_response("r-1", {})
+        server._handle_session_reset = AsyncMock(return_value=expected_response)
+
+        req = _req("sessions.reset", {"sessionKey": "sk-1"})
+        response, events = await server._handle_request(
+            websocket=MagicMock(), conn_id="conn-1", request=req,
+            auth_gate_service=auth_gate_service,
+        )
+        assert response is expected_response
+        assert events == []
+
+    @pytest.mark.asyncio
+    async def test_unknown_method_falls_through_to_forward_request(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        expected_response = ResponseFrame.ok_response("r-1", {})
+        server._forward_request = AsyncMock(
+            return_value=(expected_response, []),
+        )
+
+        # `exec.approval.resolve` used to have a dedicated handler; Phase C
+        # routes it through the relay plugin like any other unknown method.
+        req = _req("exec.approval.resolve", {"sessionKey": "sk", "action": "ok"})
+        response, events = await server._handle_request(
+            websocket=MagicMock(), conn_id="conn-1", request=req,
+            auth_gate_service=auth_gate_service,
+        )
+        assert response is expected_response
+        server._forward_request.assert_awaited_once_with("conn-1", req)
+
+    @pytest.mark.asyncio
+    async def test_handler_exception_wrapped_as_internal_error(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        server._handle_session_reset = AsyncMock(
+            side_effect=RuntimeError("handler boom"),
+        )
+        req = _req("sessions.reset", {"sessionKey": "sk-1"})
+        response, events = await server._handle_request(
+            websocket=MagicMock(), conn_id="conn-1", request=req,
+            auth_gate_service=auth_gate_service,
+        )
+        assert response.ok is False
+        assert response.error.code == "INTERNAL_ERROR"
+        assert "handler boom" in response.error.message
+
+    @pytest.mark.asyncio
+    async def test_chat_inject_filters_params_to_openclaw_schema(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        """openclaw `ChatInjectParamsSchema` 严格 additionalProperties=false，
+        dispatch 层必须把 chat.inject 的 params 裁剪成
+        {sessionKey, message, label?} 子集再透传。
+        """
+        expected_response = ResponseFrame.ok_response("r-1", {})
+        server._forward_request = AsyncMock()
+        server._forward_chat_inject_with_session_autocreate = AsyncMock(
+            return_value=(expected_response, []),
+        )
+
+        req = _req("chat.inject", {
+            "sessionKey": "sk-1",
+            "message": "hello",
+            "label": "user-pin",
+            # 不在 schema 中，必须被过滤
+            "idempotencyKey": "should-be-stripped",
+            "attachments": [{"data": "..."}],
+            "x-iam-token": "should-be-stripped",
+            "randomExtra": 42,
+        })
+        response, events = await server._handle_request(
+            websocket=MagicMock(), conn_id="conn-1", request=req,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response is expected_response
+        server._forward_chat_inject_with_session_autocreate.assert_awaited_once()
+        server._forward_request.assert_not_awaited()
+        forwarded = server._forward_chat_inject_with_session_autocreate.await_args.args[1]
+        assert forwarded.method == "chat.inject"
+        assert forwarded.params == {
+            "sessionKey": "sk-1",
+            "message": "hello",
+            "label": "user-pin",
+        }
+
+
+class _FakeChatServiceWithInject:
+    """Stand-in chat service whose class explicitly declares ``inject``.
+
+    Used by chat.inject dispatch tests — the production helper
+    ``_chat_plugin_supports_inject`` only recognises ``inject`` defined on a
+    class in the MRO (not auto-spawned ``MagicMock`` attributes), so a plain
+    ``MagicMock(name="FakeChatService")`` won't trigger the new branch.
+    """
+
+    def __init__(self, *, return_value=None, exc=None):
+        self._return_value = return_value or {"ok": True, "payload": {}}
+        self._exc = exc
+        self.calls = []
+
+    async def inject(self, *, session_key, message, label=None, auth=None):
+        self.calls.append({
+            "session_key": session_key,
+            "message": message,
+            "label": label,
+            "auth": auth,
+        })
+        if self._exc is not None:
+            raise self._exc
+        return self._return_value
+
+
+class TestChatInjectDispatch:
+    """覆盖 chat.inject 分支调用 ChatService.inject 的成功 / 失败 / 兜底路径."""
+
+    @pytest.mark.asyncio
+    async def test_inject_success_forwards_to_service(self, server, fake_engine, auth_gate_service):
+        fake_chat = _FakeChatServiceWithInject(
+            return_value={"ok": True, "payload": {"injected": True}},
+        )
+        fake_engine.chat = fake_chat
+
+        req = _req("chat.inject", {
+            "sessionKey": "sk-1",
+            "message": "hello",
+            "label": "user-pin",
+            # 多余字段需要被裁剪掉, 不传给 service
+            "idempotencyKey": "stripped",
+        })
+        response, events = await server._handle_request(
+            websocket=MagicMock(), conn_id="conn-1", request=req,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is True
+        assert response.payload == {"injected": True}
+        assert events == []
+        assert len(fake_chat.calls) == 1
+        call = fake_chat.calls[0]
+        assert call["session_key"] == "sk-1"
+        assert call["message"] == "hello"
+        assert call["label"] == "user-pin"
+
+    @pytest.mark.asyncio
+    async def test_inject_missing_session_key_returns_invalid_request(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        fake_engine.chat = _FakeChatServiceWithInject()
+
+        req = _req("chat.inject", {"message": "hello"})
+        response, events = await server._handle_request(
+            websocket=MagicMock(), conn_id="conn-1", request=req,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is False
+        assert response.error is not None
+        # 缺 sessionKey: dispatch 层立即拒绝, service 不应被调到
+        assert fake_engine.chat.calls == []
+
+    @pytest.mark.asyncio
+    async def test_inject_missing_message_returns_invalid_request(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        fake_engine.chat = _FakeChatServiceWithInject()
+
+        req = _req("chat.inject", {"sessionKey": "sk-1"})
+        response, events = await server._handle_request(
+            websocket=MagicMock(), conn_id="conn-1", request=req,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is False
+        assert response.error is not None
+        assert fake_engine.chat.calls == []
+
+    @pytest.mark.asyncio
+    async def test_inject_service_returns_error_dict_surfaces_error_shape(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        fake_engine.chat = _FakeChatServiceWithInject(return_value={
+            "ok": False,
+            "error": {"code": "METHOD_NOT_SUPPORTED", "message": "no handler"},
+        })
+
+        req = _req("chat.inject", {"sessionKey": "sk-1", "message": "hi"})
+        response, events = await server._handle_request(
+            websocket=MagicMock(), conn_id="conn-1", request=req,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is False
+        assert response.error.code == "METHOD_NOT_SUPPORTED"
+        assert "no handler" in response.error.message
+
+    @pytest.mark.asyncio
+    async def test_inject_service_exception_surfaces_internal_error(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        fake_engine.chat = _FakeChatServiceWithInject(exc=RuntimeError("boom"))
+
+        req = _req("chat.inject", {"sessionKey": "sk-1", "message": "hi"})
+        response, events = await server._handle_request(
+            websocket=MagicMock(), conn_id="conn-1", request=req,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is False
+        assert response.error.code == "INTERNAL_ERROR"

@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "bot_name": {
+          "type": "string"
+        },
+        "exists": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "bot_name",
+        "exists"
+      ],
+      "additionalProperties": false
+    },
+    "error_code": {
+      "type": "integer"
+    },
+    "message": {
+      "type": "string"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "data",
+    "error_code",
+    "message",
+    "success"
+  ],
+  "additionalProperties": false
+}

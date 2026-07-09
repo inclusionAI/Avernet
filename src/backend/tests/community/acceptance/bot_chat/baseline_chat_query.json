@@ -1,0 +1,15 @@
+{
+  "detail_missing": {
+    "error_code": 4004,
+    "success": false
+  },
+  "list_no_seed": {
+    "data": {
+      "limit": 20,
+      "page": 1,
+      "sessions": [],
+      "total": 0
+    },
+    "success": true
+  }
+}

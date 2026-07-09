@@ -1,0 +1,76 @@
+{
+  "type": "object",
+  "properties": {
+    "bot_id": {
+      "type": "string"
+    },
+    "bot_name": {
+      "type": "string"
+    },
+    "input": {
+      "type": "string"
+    },
+    "owner_id": {
+      "type": "string"
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "duration_ms": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "null"
+          },
+          "finished_at_ms": {
+            "type": "integer"
+          },
+          "input_tokens": {
+            "type": "integer"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          },
+          "output_tokens": {
+            "type": "integer"
+          },
+          "started_at_ms": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "duration_ms",
+          "error",
+          "finished_at_ms",
+          "input_tokens",
+          "job_id",
+          "output",
+          "output_tokens",
+          "started_at_ms",
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "unread_count": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "bot_id",
+    "bot_name",
+    "input",
+    "owner_id",
+    "runs",
+    "unread_count"
+  ],
+  "additionalProperties": false
+}

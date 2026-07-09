@@ -1,0 +1,23 @@
+{
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "message": {
+      "title": "Message",
+      "type": "string"
+    },
+    "updated_count": {
+      "title": "Updated Count",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "success",
+    "message",
+    "updated_count"
+  ],
+  "title": "SetSkillSetActiveResponse",
+  "type": "object"
+}

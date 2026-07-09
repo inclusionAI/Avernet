@@ -1,0 +1,127 @@
+{
+  "description": "Bot好友关系响应模型",
+  "properties": {
+    "id": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "主键ID",
+      "title": "Id"
+    },
+    "requester_entity_id": {
+      "description": "申请方实体ID",
+      "title": "Requester Entity Id",
+      "type": "string"
+    },
+    "requester_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "申请人姓名",
+      "title": "Requester Name"
+    },
+    "target_entity_id": {
+      "description": "目标方实体ID",
+      "title": "Target Entity Id",
+      "type": "string"
+    },
+    "target_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "目标方姓名",
+      "title": "Target Name"
+    },
+    "target_bot_id": {
+      "description": "目标Bot ID",
+      "title": "Target Bot Id",
+      "type": "string"
+    },
+    "target_owner_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "被申请Bot的拥有者花名",
+      "title": "Target Owner Name"
+    },
+    "status": {
+      "default": "PENDING",
+      "description": "好友关系状态",
+      "title": "Status",
+      "type": "string"
+    },
+    "gmt_create": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "创建时间",
+      "title": "Gmt Create"
+    },
+    "gmt_modified": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "修改时间",
+      "title": "Gmt Modified"
+    },
+    "ext": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "扩展字段",
+      "title": "Ext"
+    }
+  },
+  "required": [
+    "requester_entity_id",
+    "target_entity_id",
+    "target_bot_id"
+  ],
+  "title": "BotFriendResponse",
+  "type": "object"
+}

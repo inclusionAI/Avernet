@@ -1,0 +1,64 @@
+{
+  "description": "专家Bot信息",
+  "properties": {
+    "bot_id": {
+      "title": "Bot Id",
+      "type": "string"
+    },
+    "owner_id": {
+      "title": "Owner Id",
+      "type": "string"
+    },
+    "bot_name": {
+      "title": "Bot Name",
+      "type": "string"
+    },
+    "owner_name": {
+      "title": "Owner Name",
+      "type": "string"
+    },
+    "status": {
+      "title": "Status",
+      "type": "string"
+    },
+    "binding_available": {
+      "default": false,
+      "title": "Binding Available",
+      "type": "boolean"
+    },
+    "binding_id": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Binding Id"
+    },
+    "ext": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ext"
+    }
+  },
+  "required": [
+    "bot_id",
+    "owner_id",
+    "bot_name",
+    "owner_name",
+    "status"
+  ],
+  "title": "ExpertBotInfo",
+  "type": "object"
+}

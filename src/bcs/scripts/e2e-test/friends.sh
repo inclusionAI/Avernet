@@ -7,6 +7,7 @@ E2E_TESTS_FRIENDS=(
     "test_friend_request_accept_protected"
     "test_friend_request_reject_protected"
     "test_list_friends"
+    "test_friend_flow_via_cli"
 )
 
 # ============================================================================
@@ -148,4 +149,56 @@ test_list_friends() {
     api_get "/bots/$BOT_CEO_UUID/friends"
     assert_eq "list friends returns 200" "$HTTP_STATUS" "200"
     assert_contains "CEO's friend list contains 研发" "$RESPONSE" "$BOT_ENG_UUID"
+}
+
+# ============================================================================
+# bcs-cli friend flow: request -> requests -> accept -> list
+# (Covers the 'friend' sub-command family as one end-to-end CLI case.)
+# ============================================================================
+test_friend_flow_via_cli() {
+    info "Friends(CLI): friend request/requests/accept/list"
+    ensure_cli_token CEO || { skip_case "no CEO token"; TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
+    # PM token needed to drive accept (PM is the receiver of CEO's request).
+    local pm_token
+    pm_token="$(get_bot_token PM)"
+    if [[ -z "$pm_token" ]]; then
+        skip_case "no PM token for accept step"; TESTS_TOTAL=$((TESTS_TOTAL+1)); return 77
+    fi
+
+    # 1) CEO requests friendship with PM (idempotent if already friends; standalone
+    #    auto-accepts). 'request' subcommand prints "Friend request sent ...".
+    bcs_cli CEO friend request --bot-uuid "$BOT_PM_UUID" >/dev/null 2>&1 \
+        || warn "friend request returned $BCS_CLI_EXIT (may already exist)"
+
+    # 2) PM lists received requests (covers 'requests'). Output is HUMAN:
+    #    "Friend requests (N):\n  bot_x → bot_y [accepted] (id: <uuid>)"
+    bcs_cli PM friend requests >/dev/null 2>&1 || true
+    if ! _cli_contains "$BCS_CLI_STDOUT" "Friend request"; then
+        fail "friend requests did not return a request list"
+        TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return
+    fi
+    # Extract a request id to drive accept: "(id: <uuid>)".
+    local rid
+    rid="$(printf '%s' "$BCS_CLI_STDOUT" | grep -oE '\(id: [a-f0-9-]+\)' | head -1 | sed 's/(id: //;s/)//')"
+
+    # 3) PM accepts the request (covers 'accept'). Accept is idempotent — accepting
+    #    an already-accepted request still returns "✓ Friend request accepted".
+    if [[ -n "$rid" ]]; then
+        bcs_cli PM friend accept --request-id "$rid" >/dev/null 2>&1 \
+            || warn "friend accept returned $BCS_CLI_EXIT"
+    else
+        warn "no request id parsed from 'friend requests'; accept step skipped"
+    fi
+
+    # 4) CEO lists friends (covers 'list'). Primary assertion: PM is in CEO's
+    #    friend list (standalone auto-accepts, so the friendship exists).
+    bcs_cli CEO friend list >/dev/null 2>&1 || true
+    if _cli_contains "$BCS_CLI_STDOUT" "$BOT_PM_UUID"; then
+        pass "friend flow via CLI ok (request/requests/accept/list)"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "PM not in CEO friend list after CLI friend flow"
+        TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
 }

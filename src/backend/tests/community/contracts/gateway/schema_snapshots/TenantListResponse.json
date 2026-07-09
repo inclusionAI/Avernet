@@ -1,0 +1,139 @@
+{
+  "$defs": {
+    "TenantCategory": {
+      "description": "租户类目",
+      "properties": {
+        "parentCode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parentcode"
+        },
+        "parentType": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parenttype"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "children": {
+          "default": [],
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Children",
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "name"
+      ],
+      "title": "TenantCategory",
+      "type": "object"
+    },
+    "TenantItem": {
+      "description": "租户项",
+      "properties": {
+        "site": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Site"
+        },
+        "archDomainCode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Archdomaincode"
+        },
+        "archDomainName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Archdomainname"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "categories": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TenantCategory"
+          },
+          "title": "Categories",
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "name"
+      ],
+      "title": "TenantItem",
+      "type": "object"
+    }
+  },
+  "description": "租户列表响应",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "data": {
+      "items": {
+        "$ref": "#/$defs/TenantItem"
+      },
+      "title": "Data",
+      "type": "array"
+    }
+  },
+  "required": [
+    "success",
+    "data"
+  ],
+  "title": "TenantListResponse",
+  "type": "object"
+}

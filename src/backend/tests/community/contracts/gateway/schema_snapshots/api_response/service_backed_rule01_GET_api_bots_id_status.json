@@ -1,0 +1,167 @@
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "binding_status": {
+          "type": "string"
+        },
+        "bot_id": {
+          "type": "string"
+        },
+        "bot_status": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "device_provider": {
+          "type": "string"
+        },
+        "error_message": {
+          "type": "null"
+        },
+        "ext": {
+          "type": "object",
+          "properties": {
+            "avatar_url": {
+              "type": "string"
+            },
+            "bot_type": {
+              "type": "string"
+            },
+            "bot_work_dir": {
+              "type": "string"
+            },
+            "can_edit_bot": {
+              "type": "boolean"
+            },
+            "engine_paths": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            },
+            "env": {
+              "type": "string"
+            },
+            "friend_approval": {
+              "type": "string"
+            },
+            "passport": {
+              "type": "object",
+              "properties": {
+                "is_first_bot": {
+                  "type": "boolean"
+                },
+                "status": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "is_first_bot",
+                "status"
+              ],
+              "additionalProperties": false
+            },
+            "permission_owner": {
+              "type": "string"
+            },
+            "public_approval": {
+              "type": "object",
+              "properties": {
+                "applicant": {
+                  "type": "string"
+                },
+                "approval_url": {
+                  "type": "string"
+                },
+                "friend_approval": {
+                  "type": "string"
+                },
+                "permission_owner": {
+                  "type": "string"
+                },
+                "processed_at": {
+                  "type": "string"
+                },
+                "public": {
+                  "type": "string"
+                },
+                "puid": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "applicant",
+                "approval_url",
+                "friend_approval",
+                "permission_owner",
+                "processed_at",
+                "public",
+                "puid",
+                "status"
+              ],
+              "additionalProperties": false
+            },
+            "start_message": {
+              "type": "string"
+            },
+            "start_status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "avatar_url",
+            "bot_type",
+            "bot_work_dir",
+            "can_edit_bot",
+            "engine_paths",
+            "env",
+            "friend_approval",
+            "passport",
+            "permission_owner",
+            "public_approval",
+            "start_message",
+            "start_status"
+          ],
+          "additionalProperties": false
+        },
+        "is_ready": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "binding_status",
+        "bot_id",
+        "bot_status",
+        "device_id",
+        "device_provider",
+        "error_message",
+        "ext",
+        "is_ready"
+      ],
+      "additionalProperties": false
+    },
+    "error_code": {
+      "type": "integer"
+    },
+    "message": {
+      "type": "string"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "data",
+    "error_code",
+    "message",
+    "success"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,11 @@
+# Community profile sample config. Internal endpoints are intentionally blank.
+profile: community
+zero_check:
+  enabled: false
+  url: ""
+skills_repo:
+  meta_url: ""
+langfuse:
+  public_key: ""
+  secret_key: ""
+  host: ""

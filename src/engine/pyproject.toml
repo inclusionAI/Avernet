@@ -1,0 +1,68 @@
+# Standalone manifest for the open-source (community) engine distribution.
+#
+# This pyproject is a TEMPLATE consumed by scripts/build_community_dist.py: the
+# builder stages it (with README.md + uv.lock) to the assembled community dist
+# ROOT, alongside a corp-stripped `src/engine/` tree, so the community build
+# `uv sync`s / builds a wheel STANDALONE — proving the community subtree needs no
+# corp code. Its relative paths (`readme`, `packages`) resolve at the dist root,
+# not here in the monorepo. Corp-only deps (the root's `corp` extra) are absent.
+[project]
+name = "openclawengine-community"
+version = "0.1.14"
+description = "OpenClaw engine adapter — open-source (community) distribution"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "aiofiles>=25.1.0",
+  "aiohttp>=3.9.0",
+  "cryptography>=44.0.0",
+  "fastapi>=0.135.1",
+  "fastapi-injector>=0.7,<1.0",
+  "orjson>=3.11.7",
+  "platformdirs>=4.9.2",
+  "psutil>=7.2.2",
+  "pydantic>=2.12.5",
+  "pydantic-settings>=2.13.1",
+  "python-dotenv>=1.2.2",
+  "python-multipart>=0.0.22",
+  "python-socks>=2.8.1",
+  "pyyaml>=6.0.3",
+  "requests>=2.32.5",
+  "sqlalchemy>=2.0.48",
+  "uvicorn[standard]>=0.41.0",
+  "websockets>=16.0",
+  "httpx>=0.28.1",
+  "croniter>=3.0.0",
+  "injector>=0.21,<1.0",
+]
+
+[project.optional-dependencies]
+langfuse = ["langfuse>=2.0.0"]
+
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[tool.hatch.build.targets.wheel]
+# Resolves at the dist root: the corp-stripped `engine` namespace (community
+# only). corp/ and the corp-only `intent_eval` eval helper are absent from the dist.
+packages = ["src/engine"]
+
+[tool.hatch.build]
+exclude = ["*.log", ".github"]
+
+# Test config for the standalone community dist (this template is staged to the
+# dist ROOT, where `src` resolves). Restores the asyncio settings the monorepo
+# root pyproject carries; without them, unmarked async tests are silently
+# uncollected under pytest-asyncio STRICT mode when the community tree runs
+# outside the monorepo (e.g. the openocb export + scripts/community_selftest.py).
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["src"]
+
+# Specify pypi index
+[[tool.uv.index]]
+default = true
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple"

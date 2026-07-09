@@ -1,0 +1,35 @@
+# Community CI / test overlay (B11) — the overlay DEPLOY_PROFILE=test loads on top
+# of the neutral application.yaml base. Ships WITH community (community/configs), so
+# it must carry NO corp identifiers (no company hostnames, secret-registry keys, or
+# container-template UUIDs — enforced by the shipped-config guard). Values are neutral
+# stand-ins; the test suite mocks the actual endpoints, so only the keys' presence /
+# shape matters, not where they point.
+user_config:
+  # Privileged-user allow-lists (admin scopes) — SYNTHETIC ids, tests only. Real
+  # employee ids never ship in community source; corp overlays carry production
+  # ids. Endpoint tests authorize with "100000" (the doc-example placeholder).
+  admin:
+    super_admin:
+      - "100000"
+    disk_usage_admin:
+      - "100000"
+    harness_admin:
+      - "100000"
+    skill_admin:
+      - "100000"
+    collaborator_admin:
+      - "100000"
+    device_admin:
+      - "100000"
+
+  # Workspace roots read by path_factory (neutral home-relative paths; identical to
+  # what the dev overlay set, so path resolution is unchanged under the test profile).
+  aidesktop_root: "~/.aidesktop"
+  workspace:
+    openclaw_root: "~/.openclaw"
+    claude_code_root: "~/.claude_code"
+
+  # Yuque binding-verify endpoint — neutral stand-in; the suite mocks the HTTP call,
+  # so only the config key's presence matters (the yuque verify endpoint reads it).
+  yuque:
+    user_api: "http://127.0.0.1:9999/api/v2/user"

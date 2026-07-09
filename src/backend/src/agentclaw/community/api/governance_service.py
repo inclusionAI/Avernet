@@ -1,0 +1,224 @@
+"""Service API Protocols for economy/governance endpoints.
+
+These Protocols decouple the HTTP adapter layer from concrete core service
+classes, following the project's adapter→api→core layering rule (Rule 14).
+Routers inject ``Injected(XProtocol)`` instead of importing service classes
+from ``core/`` directly.
+"""
+from __future__ import annotations
+
+from typing import Any, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class GovernanceAdminServiceProtocol(Protocol):
+    """Protocol for governance admin operations (emergency brake + review)."""
+
+    def is_paused(self) -> bool:
+        ...
+
+    def get_state(self) -> dict:
+        ...
+
+    def pause(self, reason: str, operator: str) -> None:
+        ...
+
+    def resume(self, reason: str, operator: str) -> None:
+        ...
+
+    def bulk_whitelist(
+        self,
+        bot_ids: list[str],
+        reason: str,
+        operator: str,
+    ) -> dict:
+        ...
+
+    def cancel_pending(self, reason: str, operator: str) -> dict:
+        ...
+
+    def close_all_open(self, reason: str, operator: str) -> dict:
+        ...
+
+    def pause_ticket(
+        self, ticket_id: str, admin_id: str, reason: str = "",
+    ) -> dict:
+        ...
+
+    def review_ticket(
+        self, ticket_id: str, action: str, admin_id: str, remark: str = "",
+    ) -> dict:
+        ...
+
+    def emergency_close(
+        self, ticket_id: str, admin_id: str, reason: str = "",
+    ) -> dict:
+        ...
+
+    def delete_records(
+        self,
+        body: dict,
+        operator: str,
+    ) -> dict:
+        ...
+
+    def delete_whitelist_entries(
+        self,
+        body: dict,
+        operator: str,
+    ) -> dict:
+        ...
+
+    async def deliver_pending(
+        self,
+        *,
+        scan_svc: Any,
+        override_recipient: str,
+        dry_run: bool,
+        max_send: int,
+        channel: str,
+        skip_scan: bool,
+        scan_dry_run: bool,
+    ) -> dict:
+        ...
+
+
+@runtime_checkable
+class GovernanceWhitelistServiceProtocol(Protocol):
+    """Protocol for governance whitelist batch operations.
+
+    Decouples routers and other services from the concrete
+    ``GovernanceWhitelistService`` — following Rule 14 layering.
+    """
+
+    def bulk_whitelist(
+        self,
+        bot_ids: list[str],
+        reason: str,
+        operator: str,
+    ) -> dict:
+        ...
+
+    def delete_whitelist_entries(
+        self,
+        body: dict,
+        operator: str,
+    ) -> dict:
+        ...
+
+    def count_by_type(self, *, whitelist_type: str = "governance") -> int:
+        ...
+
+    def batch_add(
+        self,
+        entries: list[dict],
+        created_by: str,
+        *,
+        whitelist_type: str = "governance",
+        source: str = "manual",
+    ) -> dict:
+        ...
+
+
+@runtime_checkable
+class GovernanceFeedbackServiceProtocol(Protocol):
+    """Protocol for user-facing governance feedback interactions."""
+
+    def list_pending(
+        self, owner_id: str, *, limit: int, offset: int,
+    ) -> list[dict]:
+        ...
+
+    def list_history(
+        self, owner_id: str, *, limit: int, offset: int,
+    ) -> list[dict]:
+        ...
+
+    def get_notification(
+        self, notification_id: str, owner_id: str,
+    ) -> dict | None:
+        ...
+
+    def resolve(
+        self,
+        notification_id: str,
+        response: str,
+        user_id: str,
+        remark: str | None,
+        source: str,
+        repair_deadline: Any | None = None,
+        feedback_payload: dict | None = None,
+    ) -> Any:
+        ...
+
+
+@runtime_checkable
+class GovernanceBotServiceProtocol(Protocol):
+    """Protocol for governance cron tick orchestrator (§7.3)."""
+
+    async def process_cron_tick(
+        self,
+        *,
+        dry_run: bool | None = None,
+    ) -> Any:
+        ...
+
+    async def process_run(
+        self,
+        *,
+        dry_run: bool | None = None,
+        skip_delivery: bool = False,
+        notify_source: str = "cron",
+    ) -> Any:
+        ...
+
+
+@runtime_checkable
+class GovernanceWhitelistProtocol(Protocol):
+    """Protocol for governance whitelist operations (batch_add + list_all).
+
+    Decouples the public router from the concrete
+    ``GovernanceWhitelistRepository`` in ``core/``, following Rule 14.
+    """
+
+    def batch_add(
+        self,
+        entries: list[dict],
+        created_by: str,
+        *,
+        whitelist_type: str = "governance",
+        source: str = "manual",
+        env: str | None = None,
+    ) -> dict:
+        ...
+
+    def list_all(
+        self,
+        owner_id: str | None = None,
+        *,
+        whitelist_type: str = "governance",
+        limit: int = 100,
+        offset: int = 0,
+        env: str | None = None,
+    ) -> list[dict]:
+        ...
+
+
+@runtime_checkable
+class GovernanceRecordProcessProtocol(Protocol):
+    """Protocol for offline-batch record processing (§7.2).
+
+    ``process_record()`` is an internal implementation detail used by
+    ``process_offline_batch()``; it is not exposed via this Protocol.
+    """
+
+    def process_offline_batch(
+        self,
+        records: list[dict],
+        *,
+        batch_id: str,
+        dt_version: str,
+        total_count: int,
+        dry_run: bool = False,
+    ) -> Any:
+        ...

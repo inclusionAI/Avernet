@@ -1,0 +1,10 @@
+{
+  "list_empty": {
+    "entries_count": 0,
+    "success": true
+  },
+  "running_empty": {
+    "entries_count": 0,
+    "success": true
+  }
+}

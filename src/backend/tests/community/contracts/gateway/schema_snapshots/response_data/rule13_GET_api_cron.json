@@ -1,0 +1,157 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "bot_id": {
+        "type": "string"
+      },
+      "bot_name": {
+        "type": "string"
+      },
+      "created_at_ms": {
+        "type": "integer"
+      },
+      "enabled": {
+        "type": "boolean"
+      },
+      "id": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "notify": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "user_ids": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "user_ids"
+        ],
+        "additionalProperties": false
+      },
+      "owner_id": {
+        "type": "string"
+      },
+      "publish_id": {
+        "type": "integer"
+      },
+      "publish_status": {
+        "type": "string"
+      },
+      "payload": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timeout_secs": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "message",
+          "timeout_secs"
+        ],
+        "additionalProperties": false
+      },
+      "schedule": {
+        "type": "object",
+        "properties": {
+          "expr": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "tz": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expr",
+          "kind",
+          "tz"
+        ],
+        "additionalProperties": false
+      },
+      "runtime_stage": {
+        "type": "string"
+      },
+      "session_target": {
+        "type": "string"
+      },
+      "state": {
+        "type": "object",
+        "properties": {
+          "consecutive_errors": {
+            "type": "integer"
+          },
+          "last_delivered": {
+            "type": "boolean"
+          },
+          "last_delivery_status": {
+            "type": "string"
+          },
+          "last_duration_ms": {
+            "type": "integer"
+          },
+          "last_run_at_ms": {
+            "type": "integer"
+          },
+          "last_run_status": {
+            "type": "string"
+          },
+          "last_status": {
+            "type": "string"
+          },
+          "next_run_at_ms": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "consecutive_errors",
+          "last_delivered",
+          "last_delivery_status",
+          "last_duration_ms",
+          "last_run_at_ms",
+          "last_run_status",
+          "last_status",
+          "next_run_at_ms"
+        ],
+        "additionalProperties": false
+      },
+      "updated_at_ms": {
+        "type": "integer"
+      }
+    },
+    "required": [
+      "bot_id",
+      "bot_name",
+      "created_at_ms",
+      "enabled",
+      "id",
+      "name",
+      "notify",
+      "owner_id",
+      "payload",
+      "runtime_stage",
+      "schedule",
+      "session_target",
+      "state",
+      "updated_at_ms"
+    ],
+    "additionalProperties": false
+  }
+}

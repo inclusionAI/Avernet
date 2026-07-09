@@ -1,0 +1,53 @@
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "activation_failed": {
+          "type": "array"
+        },
+        "failed": {
+          "type": "array"
+        },
+        "success": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "skill_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "skill_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "activation_failed",
+        "failed",
+        "success"
+      ],
+      "additionalProperties": false
+    },
+    "message": {
+      "type": "string"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "data",
+    "message",
+    "success"
+  ],
+  "additionalProperties": false
+}

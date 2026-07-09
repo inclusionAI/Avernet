@@ -1,0 +1,42 @@
+{
+  "properties": {
+    "valid": {
+      "title": "Valid",
+      "type": "boolean"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "requires_api_key": {
+      "default": false,
+      "title": "Requires Api Key",
+      "type": "boolean"
+    },
+    "server_code": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Server Code"
+    }
+  },
+  "required": [
+    "valid"
+  ],
+  "title": "MCPValidationResponse",
+  "type": "object"
+}

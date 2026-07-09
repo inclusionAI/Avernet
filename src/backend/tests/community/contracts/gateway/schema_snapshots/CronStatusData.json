@@ -1,0 +1,29 @@
+{
+  "description": "Cron 服务状态数据",
+  "properties": {
+    "running_count": {
+      "default": 0,
+      "title": "Running Count",
+      "type": "integer"
+    },
+    "total_count": {
+      "default": 0,
+      "title": "Total Count",
+      "type": "integer"
+    },
+    "last_run_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Last Run At"
+    }
+  },
+  "title": "CronStatusData",
+  "type": "object"
+}

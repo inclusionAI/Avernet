@@ -1,0 +1,62 @@
+# Moltis Configuration
+# ====================
+# This file contains all available configuration options.
+# Uncomment and modify settings as needed.
+# Changes require a restart to take effect.
+#
+# Environment variable substitution is supported: ${ENV_VAR}
+# Example: api_key = "${ANTHROPIC_API_KEY}"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SERVER
+# ══════════════════════════════════════════════════════════════════════════════
+
+[server]
+bind = "0.0.0.0"                # Address to bind to ("0.0.0.0" for all interfaces)
+port = 20001                           # Port number (auto-generated for this installation)
+http_request_logs = false              # Enable verbose Axum HTTP request/response logs (debugging)
+ws_request_logs = false                # Enable WebSocket RPC request/response logs (debugging)
+log_time_format = "%Y-%m-%d %H:%M:%S,%3f"
+log_file_path = "/home/admin/logs/moltis/logs.jsonl"
+update_repository_url = "https://github.com/moltis-org/moltis"    # GitHub repo used for update checks (comment out to disable)
+log_buffer_size = 1000
+# LLM API AUDIT LOGGING
+# Records provider API request/response payloads to a separate audit log.
+# This module is best-effort: audit logging may drop records or fail silently,
+# but it must not affect the main chat/agent request path.
+llm_api_audit_enabled = true          # Enable LLM API audit logging
+llm_api_audit_file_path = "/home/admin/logs/moltis/llm_audit.log" # Active log file (daily rotate writes llm_audit.log.YYYY-MM-DD)
+llm_api_audit_format = "text"         # "jsonl" (machine-readable) or "text" (java-like single-line)
+llm_api_audit_rotate = "daily"         # "daily" or "off"
+llm_api_audit_date_suffix = "%Y-%m-%d" # Date suffix pattern for rotated files
+llm_api_audit_max_payload_bytes = 262144 # Truncate large request/response payloads
+llm_api_audit_include_stream_chunks = false # If true, include streaming chunks (can be very large)
+llm_api_audit_redact = true            # Redact sensitive fields (token/api_key/authorization/cookie)
+cors_allow_all = true    # open ws cros
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AUTHENTICATION
+# ══════════════════════════════════════════════════════════════════════════════
+
+[auth]
+disabled = true                  # true = disable auth entirely (DANGEROUS if exposed)
+                                  # When disabled, anyone with network access can use moltis
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TLS / HTTPS
+# ══════════════════════════════════════════════════════════════════════════════
+
+[tls]
+enabled = false                    # Enable HTTPS (recommended)
+auto_generate = true              # Auto-generate local CA and server certificate
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHANNELS
+# ══════════════════════════════════════════════════════════════════════════════
+# External messaging integrations.
+
+[channels]
+
+[channels.telegram]
+# token = "..."
+# allowed_users = []

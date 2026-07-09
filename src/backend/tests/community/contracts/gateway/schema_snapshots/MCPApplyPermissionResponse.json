@@ -1,0 +1,43 @@
+{
+  "description": "MCP 权限申请响应",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "server_code": {
+      "title": "Server Code",
+      "type": "string"
+    },
+    "process_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Process Url"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    }
+  },
+  "required": [
+    "success",
+    "server_code"
+  ],
+  "title": "MCPApplyPermissionResponse",
+  "type": "object"
+}

@@ -1,0 +1,101 @@
+{
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "binding_available": {
+            "type": "boolean"
+          },
+          "binding_id": {
+            "type": "integer"
+          },
+          "bot_id": {
+            "type": "string"
+          },
+          "bot_name": {
+            "type": "string"
+          },
+          "ext": {
+            "type": "object",
+            "properties": {
+              "avatar_url": {
+                "type": "string"
+              },
+              "friend_approval": {
+                "type": "string"
+              },
+              "passport": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              "permission_owner": {
+                "type": "string"
+              },
+              "public_approval": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              },
+              "start_message": {
+                "type": "string"
+              },
+              "start_status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "avatar_url",
+              "friend_approval",
+              "passport",
+              "permission_owner",
+              "public_approval",
+              "start_message",
+              "start_status"
+            ],
+            "additionalProperties": false
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "binding_available",
+          "binding_id",
+          "bot_id",
+          "bot_name",
+          "ext",
+          "owner_id",
+          "owner_name",
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "total": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "items",
+    "total"
+  ],
+  "additionalProperties": false
+}

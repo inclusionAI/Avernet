@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BCS Session List Response",
+  "description": "Contract schema for BCS /groups/{id}/sessions responses",
+  "type": "object",
+  "required": ["group_id", "items", "total"],
+  "properties": {
+    "group_id": {"type": "string"},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "session_id", "status", "participants", "created_at"],
+        "properties": {
+          "id": {"type": "string"},
+          "session_id": {"type": "string"},
+          "session_kind": {"type": "string"},
+          "session_title": {"type": "string"},
+          "status": {"type": "string"},
+          "participants": {"type": "array"},
+          "activation_count": {"type": "integer"},
+          "created_at": {"type": "integer"},
+          "env": {"type": "string"},
+          "group_version": {"type": "integer"}
+        }
+      }
+    },
+    "total": {"type": "integer"},
+    "limit": {"type": "integer"},
+    "offset": {"type": "integer"}
+  }
+}

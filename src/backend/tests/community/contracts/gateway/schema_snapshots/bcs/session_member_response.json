@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BCS Session Member Response",
+  "description": "Contract schema for BCS /sessions/{id}/members/{bot_id} response",
+  "type": "object",
+  "required": ["session_id", "group_id", "participants", "status"],
+  "properties": {
+    "session_id": {"type": "string"},
+    "group_id": {"type": "string"},
+    "participants": {"type": "array"},
+    "status": {"type": "string"}
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "check_permission_no_bot": {
+    "data_is_none": true,
+    "error_code": 404,
+    "success": false
+  },
+  "list_no_bot": {
+    "data_is_none": true,
+    "error_code": 404,
+    "success": false
+  },
+  "lock_info_not_held": {
+    "locked": false,
+    "success": true
+  }
+}

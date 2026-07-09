@@ -1,0 +1,115 @@
+{
+  "additionalProperties": true,
+  "description": "Device properties - compatible with daas and arca device types.\n\nCommon fields:\n    client_id: Client ID\n    nas_mappings: NAS mount mappings\n    callback_token: Callback token\n    bolt_id: Bolt ID\n\nDaas-specific fields:\n    exe_unit_uuid, daas_session_id, protocol, version, etc.\n\nArca-specific fields:\n    sandbox_id, template_id, device_from, symbol",
+  "properties": {
+    "client_id": {
+      "default": "",
+      "description": "Client ID",
+      "title": "Client Id",
+      "type": "string"
+    },
+    "nas_mappings": {
+      "default": "",
+      "description": "NAS mappings (JSON string)",
+      "title": "Nas Mappings",
+      "type": "string"
+    },
+    "callback_token": {
+      "default": "",
+      "description": "Callback token",
+      "title": "Callback Token",
+      "type": "string"
+    },
+    "bolt_id": {
+      "default": "",
+      "description": "Bolt ID",
+      "title": "Bolt Id",
+      "type": "string"
+    },
+    "exe_unit_uuid": {
+      "default": "",
+      "description": "Execution unit UUID",
+      "title": "Exe Unit Uuid",
+      "type": "string"
+    },
+    "daas_session_id": {
+      "default": "",
+      "description": "DaaS session ID",
+      "title": "Daas Session Id",
+      "type": "string"
+    },
+    "protocol": {
+      "default": "",
+      "description": "Protocol type",
+      "title": "Protocol",
+      "type": "string"
+    },
+    "version": {
+      "default": "",
+      "description": "Version",
+      "title": "Version",
+      "type": "string"
+    },
+    "device_region": {
+      "default": "",
+      "description": "Device region",
+      "title": "Device Region",
+      "type": "string"
+    },
+    "device_locator": {
+      "default": "",
+      "description": "Device locator",
+      "title": "Device Locator",
+      "type": "string"
+    },
+    "device_locator_str": {
+      "default": "",
+      "description": "Device locator (Base64)",
+      "title": "Device Locator Str",
+      "type": "string"
+    },
+    "device_number": {
+      "default": "",
+      "description": "Device number",
+      "title": "Device Number",
+      "type": "string"
+    },
+    "sandbox_id": {
+      "default": "",
+      "description": "Arca sandbox ID",
+      "title": "Sandbox Id",
+      "type": "string"
+    },
+    "template_id": {
+      "default": "",
+      "description": "Arca template ID",
+      "title": "Template Id",
+      "type": "string"
+    },
+    "device_from": {
+      "default": "",
+      "description": "Device source",
+      "title": "Device From",
+      "type": "string"
+    },
+    "symbol": {
+      "anyOf": [
+        {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "default": "",
+      "description": "Symlink mappings",
+      "title": "Symbol"
+    }
+  },
+  "title": "DeviceProps",
+  "type": "object"
+}

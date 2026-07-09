@@ -1,0 +1,83 @@
+# openocb — the community (open-source) distribution manifest for agentclaw.community.
+#
+# Standalone community backend: pyproject + uv.lock at the backend project root
+# (src/backend/), source under src/agentclaw/community/ — a PEP 420 `agentclaw`
+# namespace child (no agentclaw/__init__.py). openocb builds and tests from here
+# directly; `packages` below packages the namespace with just the community child.
+#
+# History: this subtree was extracted from the ocb monorepo, where the base
+# [project.dependencies] mirrored the corp manifest and a now-removed architecture
+# test guarded the two against drift. The repos now evolve independently and that
+# guard does not exist here — keep shared runtime deps in sync by hand when a
+# change spans both corp (ocb) and community (openocb).
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[tool.hatch.build.targets.wheel]
+# In the assembled community repo, src/agentclaw/ contains only community/, so
+# this packages the agentclaw namespace with just the community child.
+packages = ["src/agentclaw"]
+
+[project]
+name = "agentclaw-community"
+version = "0.1.0"
+description = "agentclaw — community (open-source) distribution."
+readme = "README.md"
+# Pinned to match corp (the deployed interpreter). The community build MAY widen
+# this later, but it stays aligned with what the suite is tested against for now.
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  # ── Shared base — MIRRORS corp src/backend/pyproject.toml [project.dependencies].
+  #    Keep in lockstep; the drift guard enforces it. ──
+  "aiofiles>=25.1.0",
+  "fastapi>=0.115.0",
+  "pycryptodome>=3.23.0",
+  "redis==7.4.0",
+  "sqlalchemy>=2.0.48",
+  "tomlkit>=0.14.0",
+  "uvicorn[standard]>=0.32.0",
+  "cryptography>=37.0.4",
+  "injector>=0.21,<1.0",
+  "fastapi-injector>=0.7,<1.0",
+  "httpx>=0.27.0",
+  "pyyaml>=6.0",
+  "requests>=2.31",
+  "aiohttp>=3.9",
+  "websockets>=13.0.0",
+  # python-multipart: the community app mounts multipart/file-upload routers
+  # (resources file upload, skill-center, aicoding workitem upload) that FastAPI
+  # requires this for. In the monorepo it resolved transitively (mcp /
+  # fastapi[standard]); the community manifest declares plain fastapi, so a
+  # standalone community install must name it directly or the app fails to import.
+  "python-multipart>=0.0.18",
+  # ── Community-only public dep: boto3 backs CommunityS3ObjectStorage, the
+  #    community S3-compatible object-storage impl (MinIO / AWS S3 / R2 / the
+  #    Aliyun-OSS S3 endpoint). Corp runtime never uses it; the corp manifest
+  #    declares no community deps (its test venv gets boto3 via moto[s3]). ──
+  "boto3>=1.34",
+]
+
+# Community test tooling — so the extracted community repo can run its own CI.
+[dependency-groups]
+dev = [
+  "ruff>=0.14.13",
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.0",
+  "fakeredis>=2.20",
+  "moto[s3]>=5.0",
+  "socksio>=1.0.0",
+  "responses>=0.26.1",
+  "respx>=0.23.1",
+  "pytest-cov>=7.1.0",
+  # jsonschema: community contract tests validate BotConfigArtifact / gateway
+  # payloads against JSON Schemas. Test-only (no runtime src import); transitive
+  # in the monorepo, must be named for the standalone community suite.
+  "jsonschema>=4.20",
+]
+
+# Specify pypi index
+[[tool.uv.index]]
+default = true
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple"

@@ -1,0 +1,6 @@
+# 默认非py文件不会被打包
+# 包含静态资源
+recursive-include src/openclawserver/frontend *
+
+# 排除不需要的文件
+global-exclude *.pyc
