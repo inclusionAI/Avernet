@@ -3,7 +3,12 @@
 from dependency_injector.wiring import Provide, inject
 from fastapi import Depends, Header, HTTPException, Request, status
 
-from secbaas.api.api_gateway import APIKeyRecord, APIKeyValidator, parse_policy
+from secbaas.api.api_gateway import (
+    APIKeyPolicy,
+    APIKeyRecord,
+    APIKeyValidator,
+    parse_policy,
+)
 from secbaas.api.bot_runtime import BotChatContext
 from secbaas.api.open_api import OpenAPICode
 from secbaas.bootstrap import ApplicationContainer
@@ -179,25 +184,32 @@ def validate_policy(
 ) -> str:
     """根据 API Key 的 policy 校验对目标 bot 的访问权限
 
+    policy 语义（parse_policy 归一化后）：
+    - allowed_bots 含 "*"：允许访问所有 bot（含历史未配置的存量 key）。
+    - allowed_bots 为空（含历史 ["NONE"] 哨兵）：拒绝所有 bot（fail-closed）。
+    - 否则：白名单匹配，仅命中的 bot 放行。
+
     Args:
         api_key_record: API Key 记录
         target_bot_id: 目标 bot ID，格式为 <real_bot_id>:<entity_id>
 
     Returns:
         str: 校验通过后应使用的 bot_id。
-             当 allowed_bots 非空时返回匹配到的 allowed_bots 中的权威格式；
-             当 allowed_bots 为空（允许所有 bot）时返回原始 target_bot_id。
+             当为显式 allow-all 时返回原始 target_bot_id；
+             当为白名单匹配时返回匹配到的 allowed_bots 中的权威格式。
 
     Raises:
         HTTPException: 403 如果无权限
     """
     policy = parse_policy(api_key_record.policy)
-    if not policy.allowed_bots:
-        # allowed_bots 为空时表示允许访问所有 bot（向前兼容）
+
+    if APIKeyPolicy.ALL in policy.allowed_bots:
+        # 显式 allow-all（含历史未配置存量 key 的归一结果）
         return target_bot_id
 
     matched = match_allowed_bots(target_bot_id, policy.allowed_bots)
     if matched is None:
+        # 白名单未命中 / 空（含 NONE）即拒绝所有 bot（fail-closed）
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
