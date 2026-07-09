@@ -75,6 +75,18 @@ class CommunityFsObjectStorage(ObjectStoragePlugin):
             logger.error("ObjectStorage put_file failed: key=%s, error=%s", key, e)
             return False
 
+    def get_object(self, key: str) -> bytes | None:
+        path = self._safe_path(key)
+        if path is None:
+            return None
+        try:
+            if not path.is_file():
+                return None
+            return path.read_bytes()
+        except OSError as e:
+            logger.error("ObjectStorage get_object failed: key=%s, error=%s", key, e)
+            return None
+
     def delete_object(self, key: str) -> bool:
         path = self._safe_path(key)
         if path is None:
@@ -199,6 +211,15 @@ class CommunityS3ObjectStorage(ObjectStoragePlugin):
         except self._errors as e:
             logger.error("S3 put_file failed: key=%s, error=%s", key, e)
             return False
+
+    def get_object(self, key: str) -> bytes | None:
+        try:
+            resp = self._s3.get_object(Bucket=self._bucket, Key=key)
+            return resp["Body"].read()
+        except self._errors as e:
+            # Includes a missing key (ClientError NoSuchKey) — swallowed to None.
+            logger.error("S3 get_object failed: key=%s, error=%s", key, e)
+            return None
 
     def delete_object(self, key: str) -> bool:
         try:

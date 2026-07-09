@@ -11,13 +11,13 @@
         docstring matching the "swallow transport errors, return None" convention.
 - **Depends on:** —
 
-## Task 2: Implement `get_object` in the real object-storage backends
+## Task 2: [x] Implement `get_object` in the real object-storage backends
 - **Goal:** Both deployable impls can read an object's bytes.
 - **Files:** `src/backend/src/agentclaw/community/plugins/community/object_storage.py`
 - **Done when:**
-  - [ ] `CommunityFsObjectStorage.get_object` returns bytes via `_safe_path` +
+  - [x] `CommunityFsObjectStorage.get_object` returns bytes via `_safe_path` +
         `read_bytes()`, and `None` for a missing key / escaping key / `OSError`.
-  - [ ] `CommunityS3ObjectStorage.get_object` returns the body bytes, and `None`
+  - [x] `CommunityS3ObjectStorage.get_object` returns the body bytes, and `None`
         on `self._errors` (incl. missing-key `ClientError`).
 - **Depends on:** Task 1
 
