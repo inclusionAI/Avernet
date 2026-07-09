@@ -22,6 +22,7 @@ DB-First 流程：
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -182,8 +183,8 @@ class BotRunner:
         )
 
         chat_metadata = build_chat_metadata(metadata, run_id=message_id)
-        # 5. 上报日志关联
-        await self._report_log_relation(
+        # 5. 上报日志关联(后台执行,不阻塞主链路)
+        self._fire_and_forget_report(
             run_id=message_id,
             session_id=actual_session_id,
             binding_info=route.binding_info,
@@ -280,8 +281,8 @@ class BotRunner:
             chat_metadata=chat_metadata,
         )
 
-        # 5. 上报日志关联
-        await self._report_log_relation(
+        # 5. 上报日志关联(后台执行,不阻塞主链路)
+        self._fire_and_forget_report(
             run_id=message_id,
             session_id=actual_session_id,
             binding_info=route.binding_info,
@@ -486,6 +487,58 @@ class BotRunner:
                 run_id,
                 biz_task_id,
                 exc_info=True,
+            )
+
+    def _fire_and_forget_report(
+        self,
+        *,
+        run_id: str,
+        session_id: str,
+        binding_info: BotBindingInfo,
+        chat_metadata: dict[str, str] | None,
+    ) -> None:
+        """Fire the log-relation report in the background without blocking the main path.
+
+        log-relation is fire-and-forget side logic: its success/speed has no
+        impact on the business flow (the return value is unused, failure only
+        logs a WARNING). Running it via create_task keeps a worst-case ~10s HTTP
+        request off the response path.
+
+        Normalize session_id: the openclaw engine requires the session_key to be
+        prefixed with ``agent:main:`` (mirroring the normalization done when
+        ``_claw_service`` creates a session). The prefix is added before
+        reporting so downstream log-relation lookups can resolve the session.
+        """
+        if (
+            binding_info.engine_type == "openclaw"
+            and session_id
+            and not session_id.startswith("agent:main:")
+        ):
+            session_id = f"agent:main:{session_id}"
+
+        task = asyncio.create_task(
+            self._report_log_relation(
+                run_id=run_id,
+                session_id=session_id,
+                binding_info=binding_info,
+                chat_metadata=chat_metadata,
+            )
+        )
+        task.add_done_callback(self._on_report_done)
+
+    @staticmethod
+    def _on_report_done(task: asyncio.Task[None]) -> None:
+        """后台上报任务收尾:吞掉异常,避免 "Task exception was never retrieved"。
+
+        _report_log_relation 内部已捕获并记 WARNING,这里仅作兜底防御。
+        """
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.warning(
+                "[runner.report] background report task error",
+                exc_info=exc,
             )
 
     def _select_dispatcher(self, bot_id: str) -> MessageDispatcher:
