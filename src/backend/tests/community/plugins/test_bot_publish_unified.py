@@ -18,6 +18,9 @@ from agentclaw.community.core.service_bot.repository.models import (
 )
 from agentclaw.community.plugins.bot_publish_repository import (
     BotPublishRepository,
+    _ARTIFACT_KEY,
+    _ARTIFACT_OSS_MARKER,
+    _ARTIFACT_OSS_THRESHOLD_BYTES,
 )
 
 pytestmark = pytest.mark.integration
@@ -264,3 +267,241 @@ def test_get_latest_success_by_source_bot_id_returns_none_when_no_success(repo):
 
     assert repo.get_latest_success_by_source_bot_id("src-1", "dev") is None
     assert repo.get_latest_success_by_source_bot_id("src-missing", "dev") is None
+
+
+# ── config_artifact OSS offload ─────────────────────────────────────
+#
+# When ``ext['config_artifact']`` serializes past the inline TEXT-column
+# threshold, the repository stashes its JSON in object storage and stores a
+# self-describing marker instead, transparently re-inlining on read. The fake
+# below is a minimal in-memory ObjectStoragePlugin covering the slice the repo
+# uses (put/get/delete/list).
+
+
+class _FakeOSS:
+    """In-memory object store; records put_object calls for assertions."""
+
+    def __init__(self):
+        self.store: dict[str, bytes] = {}
+        self.put_calls = 0
+
+    def put_object(self, key: str, content) -> bool:
+        self.put_calls += 1
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        self.store[key] = content
+        return True
+
+    def get_object(self, key: str):
+        return self.store.get(key)
+
+    def delete_object(self, key: str) -> bool:
+        self.store.pop(key, None)
+        return True
+
+    def list_objects(self, prefix: str, max_keys: int = 1000):
+        return [k for k in self.store if k.startswith(prefix)][:max_keys]
+
+
+class _FakeOSSPutFails(_FakeOSS):
+    def put_object(self, key: str, content) -> bool:
+        self.put_calls += 1
+        return False
+
+
+class _FakeOSSNoGet:
+    """Object store WITHOUT get_object — offload must stay disabled."""
+
+    def __init__(self):
+        self.store: dict[str, bytes] = {}
+        self.put_calls = 0
+
+    def put_object(self, key: str, content) -> bool:  # pragma: no cover - guard
+        self.put_calls += 1
+        self.store[key] = content
+        return True
+
+    def delete_object(self, key: str) -> bool:
+        self.store.pop(key, None)
+        return True
+
+    def list_objects(self, prefix: str, max_keys: int = 1000):
+        return [k for k in self.store if k.startswith(prefix)][:max_keys]
+
+
+def _repo_with(engine_tmp, oss):
+    engine = create_engine(
+        f"sqlite:///{engine_tmp / 'bp.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    BotPublishModel.__table__.create(engine)
+    return BotPublishRepository(_FileSqliteDB(engine), oss=oss)
+
+
+@pytest.fixture
+def oss():
+    return _FakeOSS()
+
+
+@pytest.fixture
+def repo_oss(tmp_path, oss):
+    return _repo_with(tmp_path, oss)
+
+
+def _big_artifact():
+    """A serialized artifact comfortably over the inline threshold."""
+    return {
+        "schema_version": 4,
+        "engine_type": "openclaw",
+        "blob": "x" * (_ARTIFACT_OSS_THRESHOLD_BYTES + 2048),
+    }
+
+
+def _small_artifact():
+    return {"schema_version": 4, "engine_type": "openclaw", "blob": "tiny"}
+
+
+def _raw_ext(repo, publish_id):
+    """The ext JSON actually persisted in the column (unresolved), as a dict."""
+    import json
+
+    with repo._db.orm_session() as db:
+        row = (
+            db.query(BotPublishModel.ext)
+            .filter(BotPublishModel.id == publish_id)
+            .first()
+        )
+    return json.loads(row[0]) if row and row[0] else None
+
+
+def test_small_artifact_stays_inline(repo_oss, oss):
+    art = _small_artifact()
+    rec = repo_oss.insert(_data(ext={"config_artifact": art}))
+    # No offload: nothing written to object storage, no marker in the column.
+    assert oss.put_calls == 0
+    assert oss.store == {}
+    raw = _raw_ext(repo_oss, rec.id)
+    assert _ARTIFACT_KEY in raw and _ARTIFACT_OSS_MARKER not in raw
+    # Read path returns the artifact unchanged.
+    assert repo_oss.get_by_id(rec.id).ext["config_artifact"] == art
+
+
+def test_large_artifact_offloaded_and_reinlined(repo_oss, oss):
+    art = _big_artifact()
+    rec = repo_oss.insert(_data(ext={"config_artifact": art, "keep": "me"}))
+    # Offloaded exactly once, under this record's prefix.
+    assert oss.put_calls == 1
+    keys = list(oss.store)
+    assert len(keys) == 1
+    assert keys[0].startswith(f"teclaw/dev/bot_publish/{rec.id}/")
+    # Column holds the marker (self-describing), NOT the inline artifact.
+    raw = _raw_ext(repo_oss, rec.id)
+    assert _ARTIFACT_KEY not in raw
+    marker = raw[_ARTIFACT_OSS_MARKER]
+    assert marker["offloaded"] is True
+    assert marker["oss_key"] == keys[0]
+    assert marker["size_bytes"] > _ARTIFACT_OSS_THRESHOLD_BYTES
+    assert "note" in marker
+    assert raw["keep"] == "me"  # sibling ext fields untouched
+    # Every read path re-inlines the full artifact and hides the marker.
+    for got in (
+        repo_oss.get_by_id(rec.id),
+        repo_oss.get_by_publish_bot_id("src-bot.pub.1", "emp001", "dev"),
+        repo_oss.list_by_owner("emp001", "dev")[0],
+    ):
+        assert got.ext["config_artifact"] == art
+        assert got.ext["keep"] == "me"
+        assert _ARTIFACT_OSS_MARKER not in got.ext
+
+
+def test_offload_via_update_status_with_ext(repo_oss, oss):
+    rec = repo_oss.insert(_data(status="DRAFT", ext={"k": "v"}))
+    assert oss.put_calls == 0
+    out = repo_oss.update_status_with_ext(
+        rec.id, "BUILT", {"config_artifact": _big_artifact()},
+        source_status="DRAFT",
+    )
+    assert out.status == "BUILT"
+    assert out.ext["config_artifact"] == _big_artifact()
+    assert oss.put_calls == 1
+
+
+def test_rejected_update_does_not_upload(repo_oss, oss):
+    rec = repo_oss.insert(_data(status="DRAFT"))
+    # source_status mismatch → 0 rows updated → artifact must NOT be uploaded.
+    out = repo_oss.update_status_with_ext(
+        rec.id, "BUILT", {"config_artifact": _big_artifact()},
+        source_status="BUILT",
+    )
+    assert out is None
+    assert oss.put_calls == 0
+    assert oss.store == {}
+
+
+def test_rewrite_new_content_and_delete_sweeps_all(repo_oss, oss):
+    rec = repo_oss.insert(_data(status="DRAFT", ext={"config_artifact": _big_artifact()}))
+    v2 = {**_big_artifact(), "blob": "y" * (_ARTIFACT_OSS_THRESHOLD_BYTES + 4096)}
+    repo_oss.update_status_with_ext(
+        rec.id, "DRAFT", {"config_artifact": v2}, source_status="DRAFT",
+    )
+    # Content-addressed: two distinct versions coexist under the prefix.
+    assert len(oss.store) == 2
+    # Latest read returns the newest content.
+    assert repo_oss.get_by_id(rec.id).ext["config_artifact"] == v2
+    # Delete sweeps every version under the record's prefix.
+    assert repo_oss.delete(rec.id) is True
+    assert oss.store == {}
+
+
+def test_delete_without_offload_leaves_store_untouched(repo_oss, oss):
+    rec = repo_oss.insert(_data(ext={"config_artifact": _small_artifact()}))
+    assert oss.store == {}
+    assert repo_oss.delete(rec.id) is True
+    assert oss.store == {}
+
+
+def test_offload_disabled_when_no_oss(repo):
+    # The default repo fixture has no OSS → inline even when large (SQLite TEXT
+    # has no 64KB cap, so this just verifies no crash and no marker).
+    rec = repo.insert(_data(ext={"config_artifact": _big_artifact()}))
+    got = repo.get_by_id(rec.id)
+    assert got.ext["config_artifact"] == _big_artifact()
+    assert _ARTIFACT_OSS_MARKER not in got.ext
+
+
+def test_offload_disabled_when_oss_lacks_get_object(tmp_path):
+    fake = _FakeOSSNoGet()
+    repo = _repo_with(tmp_path, fake)
+    rec = repo.insert(_data(ext={"config_artifact": _big_artifact()}))
+    # Capability gate: no get_object → offload off → nothing uploaded, inline.
+    assert fake.put_calls == 0
+    assert fake.store == {}
+    got = repo.get_by_id(rec.id)
+    assert got.ext["config_artifact"] == _big_artifact()
+    assert _ARTIFACT_OSS_MARKER not in got.ext
+
+
+def test_offload_put_failure_raises_and_rolls_back(tmp_path):
+    fake = _FakeOSSPutFails()
+    repo = _repo_with(tmp_path, fake)
+    with pytest.raises(RuntimeError):
+        repo.insert(_data(ext={"config_artifact": _big_artifact()}))
+    # The insert transaction rolled back — no half-written row persisted.
+    assert repo.list_by_owner("emp001", "dev") == []
+
+
+def test_strip_stale_marker_write_side(repo_oss):
+    # A fresh inline artifact wins over a leftover marker (never persist both).
+    out = repo_oss._strip_stale_marker(
+        {"config_artifact": {"a": 1}, "config_artifact_oss": {"oss_key": "old"}}
+    )
+    assert out == {"config_artifact": {"a": 1}}
+
+
+def test_resolve_ext_inline_wins_over_marker(repo_oss, oss):
+    # If both are somehow present on read, inline wins and no fetch happens.
+    resolved = repo_oss._resolve_ext(
+        {"config_artifact": {"a": 1}, "config_artifact_oss": {"oss_key": "gone"}}
+    )
+    assert resolved == {"config_artifact": {"a": 1}}
+    assert oss.store == {}  # no get/put occurred

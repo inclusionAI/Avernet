@@ -35,6 +35,15 @@ def test_fs_put_object_accepts_bytes(tmp_path):
     assert store.get_etag("b.bin") is not None
 
 
+def test_fs_get_object_roundtrip_and_missing(tmp_path):
+    store = _fs(tmp_path)
+    store.put_object("g.txt", "payload")
+    assert store.get_object("g.txt") == b"payload"
+    # Absent key and a path-traversal key both return None, never raise.
+    assert store.get_object("nope.txt") is None
+    assert store.get_object("../escape.txt") is None
+
+
 def test_fs_nested_key_creates_dirs(tmp_path):
     store = _fs(tmp_path)
     assert store.put_object("a/b/c.txt", "deep") is True
@@ -177,6 +186,13 @@ def test_s3_put_list_delete(s3_store):
 
 def test_s3_delete_absent_is_success(s3_store):
     assert s3_store.delete_object("never-existed") is True
+
+
+def test_s3_get_object_roundtrip_and_missing(s3_store):
+    s3_store.put_object("g", "payload")
+    assert s3_store.get_object("g") == b"payload"
+    # Missing key is a swallowed NoSuchKey ClientError → None, not a raise.
+    assert s3_store.get_object("missing") is None
 
 
 def test_s3_list_prefix_and_max_keys(s3_store):

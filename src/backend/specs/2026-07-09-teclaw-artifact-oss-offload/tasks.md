@@ -76,25 +76,29 @@
   - [x] Existing `test_bot_publish_unified.py` still green (18 passed).
 - **Depends on:** Task 4
 
-## Task 6: Tests & Verification
+## Task 6: [x] Tests & Verification
 - **Goal:** Prove the spec's acceptance criteria with an in-memory fake OSS.
-- **Files:** `src/backend/tests/community/plugins/test_bot_publish_unified.py`
-  (and a small `get_object` check for the fs backend, colocated or in the
-  existing object-storage test module if one exists)
+- **Files:** `src/backend/tests/community/plugins/test_bot_publish_unified.py`,
+  `src/backend/tests/community/plugins/community/test_object_storage.py`
 - **Done when:**
-  - [ ] Small artifact → inline, no `put_object`, no marker, round-trips unchanged.
-  - [ ] Large artifact → `put_object` called, `ext` holds only the marker, OSS
+  - [x] Small artifact → inline, no `put_object`, no marker, round-trips unchanged.
+  - [x] Large artifact → `put_object` called, `ext` holds only the marker, OSS
         holds the JSON; reads (`get_by_id` + a query + a `list_*`) re-inline the
         full artifact and the marker key is absent from the returned record.
-  - [ ] `insert` with an over-threshold `prior_artifact` offloads under a key
-        containing the post-flush `publish_id`.
-  - [ ] Two writes of the same record reuse/overwrite one OSS key.
-  - [ ] `delete` removes the OSS object.
-  - [ ] Capability gate: `oss=None` and an `oss` lacking `get_object` both store
+  - [x] `insert` with an over-threshold artifact offloads under a key containing
+        the post-flush `publish_id`; `update_status_with_ext` offloads too.
+  - [x] Rejected optimistic-lock update does NOT upload (round-2 fix regression).
+  - [x] Two distinct writes of the same record → two content-addressed objects;
+        `delete` sweeps the whole prefix.
+  - [x] `delete` removes the OSS object(s); no-offload delete leaves store empty.
+  - [x] Capability gate: `oss=None` and an `oss` lacking `get_object` both store
         inline (no offload, no crash).
-  - [ ] Over-threshold artifact with `put_object` → `False` raises (fail loud).
-  - [ ] `CommunityFsObjectStorage.get_object` write→read→missing-key(None) passes.
-  - [ ] Existing `test_bot_publish_unified.py` suite still green.
+  - [x] Over-threshold artifact with `put_object` → `False` raises + rolls back.
+  - [x] Marker/inline mutual exclusion: `_strip_stale_marker` (write) and
+        `_resolve_ext` inline-wins (read) covered.
+  - [x] `CommunityFsObjectStorage`/`CommunityS3ObjectStorage` `get_object`
+        write→read→missing-key(None) passes.
+  - [x] Full suite green (55 passed: repo + object-storage).
 - **Depends on:** Task 5
 
 ---
