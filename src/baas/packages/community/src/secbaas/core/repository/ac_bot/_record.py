@@ -37,4 +37,5 @@ class AcBotRecord:
     owner_name: str | None
     public: str
     ext: dict[str, Any] | None
+    template_type: str | None = None
     bot_type: str = "personal"

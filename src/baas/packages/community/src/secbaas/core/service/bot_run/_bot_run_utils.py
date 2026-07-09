@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, Any
 from secbaas.api.bot_runtime import BotBindingInfo
 from secbaas.spi.bot_service import BotBindingData
 
+from ._bot_binding_resolver import _normalize_engine_type
+
 if TYPE_CHECKING:
     from secbaas.api.bot_runtime import BotChatContext
     from secbaas.core.repository.bot_run import BotRunRecord
@@ -132,7 +134,9 @@ def binding_data_to_info(data: BotBindingData) -> BotBindingInfo:
     - owner_id → entity_id
     - sandbox_id: device_id when device_provider == "arca", else None
     - device_props: always {} (BotBindingData has no device_props)
-    - engine_type: empty string → "openclaw"
+    - engine_type: normalized via _normalize_engine_type(active_engine, template_type);
+      empty active_engine → "openclaw"; claude_code + {personalCoding,applicationCoding}
+      template → "aicoding"; unknown → "openclaw" (with WARN)
     - baas_session_id: always None (set at runtime by BaasBotService)
     - publish_id / publish_status: dropped (no counterpart in BotBindingInfo)
     """
@@ -145,7 +149,7 @@ def binding_data_to_info(data: BotBindingData) -> BotBindingInfo:
         binding_id=data.binding_id,
         device_props={},
         bot_type=data.bot_type,
-        engine_type=data.engine_type or "openclaw",
+        engine_type=_normalize_engine_type(data.engine_type, data.template_type),
         baas_session_id=None,
     )
 

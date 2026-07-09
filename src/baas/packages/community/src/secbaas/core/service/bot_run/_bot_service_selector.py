@@ -7,6 +7,8 @@ from secbaas.api.bot_runtime import BotBindingInfo
 from ._internal_protocols import BotService
 
 # 使用 BaasBotService 的 device_provider 集合
+# 注：引擎差异（aicoding/hermes/claude_code）已下沉到 BotEngineAdapter SPI，
+# 在 BaasBotService 内按 registry.has(engine_type) 分流；新增引擎不扩展本集合。
 _BAAS_PROVIDERS = frozenset({"baas", "teclaw"})
 
 

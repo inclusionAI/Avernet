@@ -57,6 +57,7 @@ class OrmAcBotRepository(OrmConnectionMixin, AcBotRepository):
             owner_name=row.owner_name,
             public=row.public or "",
             ext=_json_load(row.ext),
+            template_type=row.template_type,
             bot_type=row.bot_type,
         )
 

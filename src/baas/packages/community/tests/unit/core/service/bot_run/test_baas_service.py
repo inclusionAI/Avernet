@@ -1192,6 +1192,34 @@ class TestCreateSessionAdapterErrors:
                 )
 
     @pytest.mark.asyncio
+    async def test_adapter_session_client_error_does_not_leak_url(
+        self, service, wss_resolver
+    ):
+        # [单测用例]测试场景：ClientResponseError 含内部代理 url,外抛消息不得包含 url
+        """_safe_client_msg strips aiohttp request url from ClientResponseError."""
+        import aiohttp
+
+        from secbaas.core.service.bot_run._baas_service import _safe_client_msg
+
+        cre = aiohttp.ClientResponseError(
+            request_info=None,
+            history=(),
+            status=500,
+            message="Unsupported engine type: claude_code. Only 'aicoding' is supported.",
+        )
+        # aiohttp 把请求 url 拼进 str(cre);模拟该行为
+        cre.__dict__["_url"] = (
+            "https://agentclawproxy-pre.alipay.com/proxypass/ARCA_sb/api/sessions"  # type: ignore[attr-defined]
+        )
+
+        safe = _safe_client_msg(cre)
+        assert "agentclawproxy" not in safe
+        assert "/api/sessions" not in safe
+        assert "Unsupported engine type" in safe  # 业务错误保留
+        # 普通异常照常 str()
+        assert _safe_client_msg(RuntimeError("boom")) == "boom"
+
+    @pytest.mark.asyncio
     async def test_existing_session_id_exception_reraises(self, service, wss_resolver):
         # [单测用例]测试场景：session_id 已存在但 async with 出异常时 re-raise
         """When session_id is provided but async context fails, exception is reraised."""

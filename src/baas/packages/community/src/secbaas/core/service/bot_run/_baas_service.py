@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 from pydantic import BaseModel, Field
@@ -51,12 +51,28 @@ from ._async_session_client import SessionInfo as AdapterSessionInfo
 from ._bot_run_utils import resolve_user_id
 from ._internal_protocols import BotService
 
+if TYPE_CHECKING:
+    from secbaas.spi.bot.engine_adapter import BotEngineAdapter
+
+    from ._engine_adapter_registry import BotEngineAdapterRegistry
+
 logger = get_logger("core-bot-run")
 
 DEFAULT_WS_PATH = "/api/openclaw/ws"
 DEFAULT_ADAPTER_PORT = 20003
 DEFAULT_REQUEST_TIMEOUT = 30
 DEFAULT_CONNECT_TIMEOUT = 10
+
+
+def _safe_client_msg(exc: Exception) -> str:
+    """返回可安全外抛给客户端的异常消息(剥离 aiohttp 请求 url 等内部信息)。
+
+    aiohttp.ClientResponseError 的 str() 形如 ``"500, message='...', url='https://agentclawproxy-.../api/sessions'"``,
+    其中 url 是内部代理地址,不应外泄。这里只取业务 message。
+    """
+    if isinstance(exc, aiohttp.ClientResponseError):
+        return exc.message or f"HTTP {exc.status}"
+    return str(exc)
 
 
 class BaasBotServiceConfig(BaseModel):
@@ -96,11 +112,15 @@ class BaasBotService(BotService):
         client_pool: AsyncChatClientPool,
         wss_resolver: DefaultBotWssDispatcher,
         session_service: DefaultSessionService,
+        engine_adapter_registry: BotEngineAdapterRegistry | None = None,
     ) -> None:
         self._config = config
         self._client_pool = client_pool
         self._wss_resolver = wss_resolver
         self._session_service = session_service
+        # Registry 只服务 aicoding / hermes / claude_code；openclaw / teclaw 不注册。
+        # 引擎差异由 registry 分流:命中 adapter 走 adapter,否则走原始分支。
+        self._engine_adapter_registry = engine_adapter_registry
 
     # ── 公开方法 (BotService Protocol) ───────────────────────────────────────
 
@@ -208,13 +228,23 @@ class BaasBotService(BotService):
         )
         try:
             engine_type = binding_info.engine_type if binding_info else None
-            session_consistency_key = self._create_session_consistency_key(
-                engine_type=engine_type,
-                tc_bot_id=binding_info.bot_id,
-                user_id=user_id,
-                run_id=run_id,
-                session_id=session_id,
-            )
+            # consistency key:命中 adapter 走 adapter,否则走原始分支。
+            _adapter = self._adapter_for(engine_type)
+            if _adapter is not None:
+                session_consistency_key = _adapter.session_consistency_key(
+                    tc_bot_id=binding_info.bot_id,
+                    user_id=user_id,
+                    run_id=run_id,
+                    session_id=session_id,
+                )
+            else:
+                session_consistency_key = self._create_session_consistency_key(
+                    engine_type=engine_type,
+                    tc_bot_id=binding_info.bot_id,
+                    user_id=user_id,
+                    run_id=run_id,
+                    session_id=session_id,
+                )
             conn_info = await self._resolve_ws_connection(
                 bot_id, tenant, engine_type, session_consistency_key
             )
@@ -241,7 +271,7 @@ class BaasBotService(BotService):
                 e,
             )
             raise BotServiceError(
-                f"Failed to resolve WS connection for bot {bot_id}: {e}"
+                f"Failed to resolve WS connection for bot {bot_id}: {_safe_client_msg(e)}"
             ) from e
 
         # Step 2: Get or create adapter session
@@ -249,21 +279,37 @@ class BaasBotService(BotService):
 
         try:
             async with session_client:
-                adapter_session_id, reused = await self._get_or_create_adapter_session(
-                    session_client=session_client,
-                    session_id=session_id,
-                    user_id=user_id,
-                    metadata=metadata,
-                    engine_type=engine_type or "openclaw",
-                    bot_id=binding_info.bot_id,
-                    run_id=run_id,
-                )
+                # adapter session 创建:命中 adapter 走 adapter,否则走原始分支
+                # (含 teclaw 语义 + openclaw agent:main: 前缀)。
+                _adapter = self._adapter_for(engine_type)
+                if _adapter is not None:
+                    adapter_session_id, reused = await _adapter.create_adapter_session(
+                        session_client=session_client,
+                        session_id=session_id,
+                        user_id=user_id,
+                        metadata=metadata,
+                        bot_id=binding_info.bot_id,
+                        run_id=run_id,
+                    )
+                else:
+                    (
+                        adapter_session_id,
+                        reused,
+                    ) = await self._get_or_create_adapter_session(
+                        session_client=session_client,
+                        session_id=session_id,
+                        user_id=user_id,
+                        metadata=metadata,
+                        engine_type=engine_type or "openclaw",
+                        bot_id=binding_info.bot_id,
+                        run_id=run_id,
+                    )
         except BotServiceError:
             raise
         except Exception as e:
             logger.warning("Failed to get or create adapter session: %s", e)
             raise BotServiceError(
-                f"Failed to get or create adapter session for bot {bot_id}: {e}"
+                f"Failed to get or create adapter session for bot {bot_id}: {_safe_client_msg(e)}"
             ) from e
 
         action = "reused" if reused else "created"
@@ -333,7 +379,9 @@ class BaasBotService(BotService):
             )
         except Exception as e:
             self._mark_session_failed(baas_session_id, err_msg=str(e))
-            raise BotServiceError(f"Failed to resolve WS connection: {e}") from e
+            raise BotServiceError(
+                f"Failed to resolve WS connection: {_safe_client_msg(e)}"
+            ) from e
 
         pool_key = conn_info.target
         headers = {"x-proxypass-token": conn_info.token}
@@ -372,7 +420,9 @@ class BaasBotService(BotService):
             ) from e
         except Exception as e:
             self._mark_session_failed(baas_session_id, err_msg=str(e))
-            raise BotServiceError(f"Failed to send message: {e}") from e
+            raise BotServiceError(
+                f"Failed to send message: {_safe_client_msg(e)}"
+            ) from e
 
     async def send_message_stream(
         self,
@@ -399,7 +449,9 @@ class BaasBotService(BotService):
             )
         except Exception as e:
             self._mark_session_failed(baas_session_id, err_msg=str(e))
-            raise BotServiceError(f"Failed to resolve WS connection: {e}") from e
+            raise BotServiceError(
+                f"Failed to resolve WS connection: {_safe_client_msg(e)}"
+            ) from e
 
         pool_key = conn_info.target
         headers = {"x-proxypass-token": conn_info.token}
@@ -431,7 +483,9 @@ class BaasBotService(BotService):
             raise
         except Exception as e:
             self._mark_session_failed(baas_session_id, err_msg=str(e))
-            raise BotServiceError(f"Failed to send message stream: {e}") from e
+            raise BotServiceError(
+                f"Failed to send message stream: {_safe_client_msg(e)}"
+            ) from e
 
     async def inject_message(
         self,
@@ -460,7 +514,9 @@ class BaasBotService(BotService):
             )
         except Exception as e:
             self._mark_session_failed(baas_session_id, err_msg=str(e))
-            raise BotServiceError(f"Failed to resolve WS connection: {e}") from e
+            raise BotServiceError(
+                f"Failed to resolve WS connection: {_safe_client_msg(e)}"
+            ) from e
 
         pool_key = conn_info.target
         headers = {"x-proxypass-token": conn_info.token}
@@ -480,7 +536,9 @@ class BaasBotService(BotService):
             raise
         except Exception as e:
             self._mark_session_failed(baas_session_id, err_msg=str(e))
-            raise BotServiceError(f"Failed to inject message: {e}") from e
+            raise BotServiceError(
+                f"Failed to inject message: {_safe_client_msg(e)}"
+            ) from e
 
     async def get_messages(
         self,
@@ -509,7 +567,9 @@ class BaasBotService(BotService):
                 binding_info, session_id, context
             )
         except Exception as e:
-            raise BotServiceError(f"Failed to resolve WS connection: {e}") from e
+            raise BotServiceError(
+                f"Failed to resolve WS connection: {_safe_client_msg(e)}"
+            ) from e
 
         session_client = self._create_session_client(
             conn_info, binding_info.engine_type
@@ -532,7 +592,9 @@ class BaasBotService(BotService):
         except BotServiceError:
             raise
         except Exception as e:
-            raise BotServiceError(f"Failed to get messages: {e}") from e
+            raise BotServiceError(
+                f"Failed to get messages: {_safe_client_msg(e)}"
+            ) from e
 
     async def get_session(
         self,
@@ -562,7 +624,9 @@ class BaasBotService(BotService):
                 binding_info, context
             )
         except Exception as e:
-            raise BotServiceError(f"Failed to resolve WS connection: {e}") from e
+            raise BotServiceError(
+                f"Failed to resolve WS connection: {_safe_client_msg(e)}"
+            ) from e
 
         session_client = self._create_session_client(
             conn_info, binding_info.engine_type
@@ -576,15 +640,30 @@ class BaasBotService(BotService):
         except aiohttp.ClientResponseError as e:
             if e.status == 404:
                 raise SessionNotFoundError(session_id) from e
-            raise BotServiceError(f"Failed to get session: {e}") from e
+            raise BotServiceError(
+                f"Failed to get session: {_safe_client_msg(e)}"
+            ) from e
         except SessionNotFoundError:
             raise
         except BotServiceError:
             raise
         except Exception as e:
-            raise BotServiceError(f"Failed to get session: {e}") from e
+            raise BotServiceError(
+                f"Failed to get session: {_safe_client_msg(e)}"
+            ) from e
 
     # ── 私有方法 ─────────────────────────────────────────────────────────────
+
+    def _adapter_for(self, engine_type: str | None) -> BotEngineAdapter | None:
+        """返回 engine_type 对应的已注册 adapter，未注册返回 None。
+
+        只有 aicoding / hermes / claude_code 会命中；openclaw / teclaw 恒返回 None
+        → 三处接缝走 else 原始分支（字节级不变）。
+        """
+        reg = self._engine_adapter_registry
+        if reg is not None and engine_type and reg.has(engine_type):
+            return reg.get(engine_type)
+        return None
 
     async def _resolve_ws_connection(
         self,
@@ -613,8 +692,12 @@ class BaasBotService(BotService):
             NoDevicesFoundError: If bot has no associated devices.
             NoActiveDevicesError: If bot has no ACTIVE devices.
         """
+        # WS path:命中 adapter 用 adapter.ws_path(),否则用 f"/api/{engine}/ws"。
         path = self._config.ws_path
-        if engine_type:
+        _adapter = self._adapter_for(engine_type)
+        if _adapter is not None:
+            path = _adapter.ws_path()
+        elif engine_type:
             path = f"/api/{engine_type}/ws"
 
         return await self._wss_resolver.dispatch_bot_ws_conn_info(
@@ -678,16 +761,22 @@ class BaasBotService(BotService):
         Returns:
             HTTP base URL for AsyncSessionClient.
         """
-        ws_url = conn_info.ws_url
+        # 保留原静态语义（openclaw/teclaw 及既有测试）：后缀 = f"/api/{engine}/ws"。
+        # 新引擎的 adapter.ws_path() 后缀由 _create_session_client 走 _strip_ws_url_to_base。
+        return BaasBotService._strip_ws_url_to_base(
+            conn_info.ws_url, f"/api/{engine_type}/ws"
+        )
+
+    @staticmethod
+    def _strip_ws_url_to_base(ws_url: str, ws_path_suffix: str) -> str:
+        """wss:// → https:// 并 strip 指定 WS path 后缀。"""
         if ws_url.startswith("wss://"):
             base = ws_url[6:]
         elif ws_url.startswith("ws://"):
             base = ws_url[5:]
         else:
             base = ws_url
-        # Strip the WS path suffix (e.g., /api/openclaw/ws)
         # The target is embedded in the path: /proxypass/{target}/api/openclaw/ws
-        ws_path_suffix = f"/api/{engine_type}/ws"
         if base.endswith(ws_path_suffix):
             base = base[: -len(ws_path_suffix)]
         return f"https://{base}"
@@ -700,10 +789,14 @@ class BaasBotService(BotService):
         Args:
             conn_info: WsConnectionInfo with ws_url, token, target.
 
-        Returns:
-            Configured AsyncSessionClient instance.
+        base_url 计算：新引擎（aicoding 等）用 adapter.ws_path() 作 strip 后缀，
+        openclaw/teclaw 走原 _build_base_url。
         """
-        base_url = self._build_base_url(conn_info, engine_type)
+        _adapter = self._adapter_for(engine_type)
+        if _adapter is not None:
+            base_url = self._strip_ws_url_to_base(conn_info.ws_url, _adapter.ws_path())
+        else:
+            base_url = self._build_base_url(conn_info, engine_type)
         headers = {"x-proxypass-token": conn_info.token}
         return AsyncSessionClient(
             base_url=base_url,
