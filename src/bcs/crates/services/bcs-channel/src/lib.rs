@@ -51,6 +51,7 @@ pub struct BcsChannelService {
     groups: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     providers: Arc<ChannelProviderRegistry>,
+    env: String,
     now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
     new_id: Arc<dyn Fn() -> String + Send + Sync>,
     inbound_dedup: InboundDedupGuard,
@@ -79,6 +80,7 @@ impl BcsChannelService {
         groups: Arc<dyn GroupCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
         providers: Arc<ChannelProviderRegistry>,
+        env: impl Into<String>,
         now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
         new_id: Arc<dyn Fn() -> String + Send + Sync>,
     ) -> Self {
@@ -92,6 +94,7 @@ impl BcsChannelService {
             groups,
             registry,
             providers,
+            env: env.into(),
             now_ms,
             new_id,
             inbound_dedup: InboundDedupGuard::new(DEFAULT_INBOUND_DEDUP_LIMIT),
@@ -597,7 +600,13 @@ impl ChannelService for BcsChannelService {
     ) -> Result<ChannelBinding, ChannelUseCaseError> {
         let _guard = self.binding_admin_lock.lock().await;
         let account_ref = normalize_required(&cmd.account_ref, "account_ref")?.to_string();
-        let env = normalize_required(&cmd.env, "env")?.to_string();
+        let env = self.env.trim();
+        if env.is_empty() {
+            return Err(ChannelUseCaseError::Internal(ServiceError::InternalError(
+                "server environment configuration 'env' is empty".to_string(),
+            )));
+        }
+        let env = env.to_string();
         let target = validate_target(&*self.groups, &*self.registry, &cmd).await?;
         let provider = self.provider_for(&cmd.channel_type)?;
         provider.validate_config(&cmd.config).map_err(provider_error)?;
@@ -890,7 +899,8 @@ mod tests {
     };
     use bcs_service_api::lifecycle::ServiceLifecycle;
     use bcs_service_api::application::channel::{
-        ChannelService, CreateBindingCommand, InboundMessage, OutboundMessage,
+        ChannelService, ChannelUseCaseError, CreateBindingCommand, InboundMessage,
+        OutboundMessage,
     };
     use bcs_service_api::application::collaboration_runtime::{
         CancelStateMachineRunCommand, CollaborationRuntimeError, ConfigureGroupRuntimeCommand,
@@ -1032,6 +1042,10 @@ mod tests {
 
     impl TestHarness {
         async fn new(group: Group) -> ServiceResult<Self> {
+            Self::new_with_env(group, "pre").await
+        }
+
+        async fn new_with_env(group: Group, env: &str) -> ServiceResult<Self> {
             let binding_repo = Arc::new(MemoryChannelBindingRepo::new());
             let conversation_repo = Arc::new(MemoryConversationSessionRepo::new());
             let participant_repo = Arc::new(MemoryImParticipantRepo::new());
@@ -1057,6 +1071,7 @@ mod tests {
                 groups,
                 registry.clone(),
                 providers,
+                env,
                 Arc::new(|| 42),
                 Arc::new(|| "generated_id".to_string()),
             );
@@ -1101,6 +1116,7 @@ mod tests {
                 groups,
                 registry.clone(),
                 providers,
+                "pre",
                 Arc::new(|| 42),
                 Arc::new(|| "generated_id".to_string()),
             );
@@ -1121,7 +1137,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_binding_rejects_empty_account_env_and_target_refs() -> TestResult {
+    async fn create_binding_rejects_empty_account_and_target_refs() -> TestResult {
         let harness = TestHarness::new(manager_group("group_1")).await?;
 
         let empty_account = harness
@@ -1141,7 +1157,7 @@ mod tests {
             .await;
         assert!(empty_account.is_err());
 
-        let empty_env = harness
+        let ignored_client_env = harness
             .service
             .create_binding(CreateBindingCommand {
                 channel_type: channel_type(),
@@ -1156,7 +1172,7 @@ mod tests {
                 config: dingtalk_config("robot_1"),
             })
             .await;
-        assert!(empty_env.is_err());
+        assert!(ignored_client_env.is_ok());
 
         let empty_group = harness
             .service
@@ -1174,6 +1190,66 @@ mod tests {
             })
             .await;
         assert!(empty_group.is_err());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_binding_uses_service_runtime_env() -> TestResult {
+        let harness = TestHarness::new_with_env(manager_group("group_1"), "pre").await?;
+
+        let binding = harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "local".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+
+        assert_eq!(binding.env, "pre");
+        assert_eq!(
+            harness.binding_repo.get("generated_id").await?.unwrap().env,
+            "pre"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_binding_reports_empty_service_env_as_internal_error() -> TestResult {
+        let harness = TestHarness::new_with_env(manager_group("group_1"), " ").await?;
+
+        let error = harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "local".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await
+            .expect_err("empty service env should fail");
+
+        match error {
+            ChannelUseCaseError::Internal(ServiceError::InternalError(message)) => {
+                assert!(message.contains("server environment"));
+            }
+            other => panic!("expected internal service env error, got {other:?}"),
+        }
 
         Ok(())
     }

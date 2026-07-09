@@ -323,6 +323,7 @@ fn build_channel_runtime(
         group,
         registry,
         provider_registry,
+        bcs_config::resolve_env_str(),
         Arc::new(now_ms),
         Arc::new(|| uuid::Uuid::new_v4().to_string()),
     ));
