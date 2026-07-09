@@ -1,0 +1,18 @@
+user_config:
+  plugins:
+    auth: stub
+    crypto: stub
+    secret: stub
+    scheduler: stub
+    cache: stub
+    bot_service: stub
+    sandbox:
+      arca: stub
+      desktop: stub
+      teclaw: stub
+      k8s: stub
+      docker: stub
+      poolab: stub
+    database:
+      plugin_database: "SQLITE_ORM"
+      database_url: "sqlite:////tmp/secbaas_e2e.db"

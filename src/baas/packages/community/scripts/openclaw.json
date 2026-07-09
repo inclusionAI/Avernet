@@ -1,0 +1,122 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.5.12",
+    "lastTouchedAt": "2026-05-17T00:00:00.000Z"
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "antchat": {
+        "baseUrl": "${OPEN_CLAW_BASE_URL}",
+        "apiKey": "${OPEN_CLAW_API_KEY}",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "Kimi-K2.5",
+            "name": "Kimi-K2.5",
+            "reasoning": false,
+            "input": ["text", "image"],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "GLM-5",
+            "name": "GLM-5",
+            "reasoning": false,
+            "input": ["text"],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "Qwen3.5-397B-A17B",
+            "name": "Qwen3.5-397B-A17B",
+            "reasoning": false,
+            "input": ["text"],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "lemon_1",
+            "name": "Lemon-1",
+            "reasoning": false,
+            "input": ["text"],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "antchat/Kimi-K2.5"
+      },
+      "models": {
+        "antchat/Kimi-K2.5": {},
+        "antchat/GLM-5": {},
+        "antchat/Qwen3.5-397B-A17B": {},
+        "antchat/lemon_1": {}
+      },
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      },
+      "imageModel": {
+        "primary": "antchat/Kimi-K2.5"
+      }
+    }
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "gateway": {
+    "mode": "local",
+    "port": 18789,
+    "auth": {
+      "mode": "none",
+      "token": "a9005737f2144de8917abfacb85b165b"
+    }
+  },
+  "logging": {
+    "level": "info",
+    "maxFileBytes": 10485760
+  },
+  "skills": {
+    "entries": {
+      "acp-router": {
+        "enabled": false
+      }
+    }
+  }
+}

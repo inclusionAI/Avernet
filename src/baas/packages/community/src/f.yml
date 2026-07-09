@@ -1,0 +1,17 @@
+# f.yml - 用于配置需要订阅（调用）的外部 TR 服务
+# 执行 oneapi-codegen layotto --target oneapi 生成客户端代码
+# 生成的代码位于 ./oneapi/ 目录
+#
+# 配置示例和说明:
+#oneapi:
+#  - appname: basementurl  # 必填，目标服务所在的 OneAPI 应用名
+#    source: ZAPPINFO	# 可选，应用数据来源，默认为主站，仅在非主站环境需指定
+#    tag: master         # 可选，指定服务的迭代版本，默认为 master
+#    lang: python		# 必填，指定生成客户端的目标语言
+#    api:
+#      # 依赖的上游服务名，对应 OneAPI 平台的 TR 接口
+#      URLFacadeV2:
+#        enable: true                     # 必填，设为 true 以生成此接口的客户端
+#        responseTimeout: 5000 			# 可选，覆盖 TR 请求超时时间，默认 5000 ms
+
+oneapi: []

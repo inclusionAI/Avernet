@@ -269,3 +269,71 @@ jobs:
           name: engine-testresult
           path: src/engine/pytest_report/
           if-no-files-found: ignore
+
+  baas:
+    name: BaaS unit tests
+    runs-on: ubuntu-latest
+    env:
+      # PR: compare against the PR's base branch. push/dispatch: compare against dev
+      # (the repo default branch) so coverage-gated diff detection still has a base.
+      BAAS_BASE_REF: origin/${{ github.base_ref || 'dev' }}
+    defaults:
+      run:
+        working-directory: src/baas/packages/community
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect baas changes vs base
+        id: changes
+        # Run from the repo root so the "-- src/baas/packages/community" pathspec resolves; the job
+        # default working-directory is src/baas/packages/community, so override to the workspace root.
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          # Make sure the base ref is present locally (shallow clones may not have it).
+          git fetch --no-tags --depth=1 origin "${BAAS_BASE_REF#origin/}" 2>/dev/null || true
+          # Diff the base ref against the working tree. PR runs check out a merge commit,
+          # for which "<base>...HEAD" collapses to nothing; diffing base against the tree
+          # sees all PR-introduced changes regardless of the merge-commit checkout.
+          mapfile -t files < <(git diff --name-only "${BAAS_BASE_REF}" -- src/baas/packages/community || true)
+          n=${#files[@]}
+          if [ "$n" -eq 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No changes under src/baas/packages/community vs ${BAAS_BASE_REF}; skipping baas tests."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Detected ${n} changed file(s) under src/baas/packages/community vs ${BAAS_BASE_REF}."
+            printf '%s\n' "${files[@]}" | sed 's/^/  - /'
+          fi
+
+      - name: Set up Python
+        if: steps.changes.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          # Baas targets Python >=3.12,<3.13 (see src/baas/packages/community/pyproject.toml).
+          python-version: '3.12'
+
+      - name: Install uv
+        if: steps.changes.outputs.skip != 'true'
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: src/baas/packages/community/uv.lock
+
+      - name: Run unit tests with coverage
+        if: steps.changes.outputs.skip != 'true'
+        # ci_test.sh runs pytest with coverage and enforces the case-pass-rate /
+        # line-coverage / changed-line-coverage gates via scripts/ci/report_check.py.
+        run: DEPLOY_ENV=dev bash scripts/ci_test.sh --group ci
+
+      - name: Upload baas test results
+        if: always() && steps.changes.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: baas-testresult
+          path: src/baas/packages/community/pytest_report/
+          if-no-files-found: ignore
+

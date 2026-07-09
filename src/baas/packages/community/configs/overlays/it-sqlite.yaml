@@ -1,0 +1,22 @@
+# Integration test overlay — all plugins in stub mode, SQLite backend.
+# This overlay ensures the DI container can resolve ALL providers
+# (plugins, repositories, services) without external dependencies.
+# Uses :memory: SQLite — no filesystem or network needed.
+user_config:
+  plugins:
+    auth: stub
+    crypto: stub
+    secret: stub
+    scheduler: stub
+    cache: stub
+    bot_service: stub
+    sandbox:
+      arca: stub
+      desktop: stub
+      teclaw: stub
+      k8s: stub
+      docker: stub
+      poolab: stub
+    database:
+      plugin_database: "SQLITE_ORM"
+      database_url: "sqlite:///:memory:"
