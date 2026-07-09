@@ -1583,7 +1583,10 @@ mod tests {
 
         let summary = check_sqlite_migration_state(&sqlite_path).await?;
 
-        assert!(summary.contains("pending_versions=1"));
+        assert!(summary.contains(&format!(
+            "pending_versions={}",
+            bcs::migrations::sqlite_migration_count()
+        )));
         assert!(!sqlite_path.exists());
         Ok(())
     }
@@ -1593,11 +1596,14 @@ mod tests {
         let summary = check_sqlite_migration_definitions();
 
         assert!(summary.contains("SQLite migration definitions check ok"));
-        assert!(summary.contains("target_version=1"));
+        assert!(summary.contains(&format!(
+            "target_version={}",
+            bcs::migrations::sqlite_target_version()
+        )));
     }
 
     #[tokio::test]
-    async fn sqlite_apply_creates_baseline_record() -> Result<(), Box<dyn std::error::Error>> {
+    async fn sqlite_apply_records_code_defined_migrations() -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = tempfile::tempdir()?;
         let sqlite_path = temp_dir.path().join("bcs.db");
         let mut args = migrate_args(Path::new("."));
@@ -1615,13 +1621,19 @@ mod tests {
         let db = LocalSqliteDbPlugin::new_file(&sqlite_path)?;
         let rows = db
             .query(DbStatement::new(
-                "SELECT version, name, dialect FROM bcs_schema_migrations",
+                "SELECT version, name, dialect FROM bcs_schema_migrations ORDER BY version",
             ))
             .await?;
-        assert_eq!(rows.len(), 1);
+        assert_eq!(rows.len(), bcs::migrations::sqlite_migration_count());
         assert_eq!(db_get_column::<i64>(&rows[0], "version")?, 1);
         assert_eq!(db_get_column::<String>(&rows[0], "name")?, "init_schema");
         assert_eq!(db_get_column::<String>(&rows[0], "dialect")?, "sqlite");
+        assert_eq!(db_get_column::<i64>(&rows[1], "version")?, 2);
+        assert_eq!(
+            db_get_column::<String>(&rows[1], "name")?,
+            "channel_binding_audit_timestamps"
+        );
+        assert_eq!(db_get_column::<String>(&rows[1], "dialect")?, "sqlite");
         Ok(())
     }
 }

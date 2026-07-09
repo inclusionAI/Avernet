@@ -5,6 +5,8 @@
 //! ```sql
 //! CREATE TABLE bcs_channel_bindings (
 //!   id               VARCHAR(64) PRIMARY KEY,
+//!   gmt_create       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+//!   gmt_modified     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 //!   channel_type     VARCHAR(32) NOT NULL,
 //!   account_ref      VARCHAR(128) NOT NULL,
 //!   target_json      TEXT NOT NULL,
@@ -13,13 +15,14 @@
 //!   env              VARCHAR(32) NOT NULL,
 //!   status           VARCHAR(16) NOT NULL,
 //!   created_by       VARCHAR(256) DEFAULT NULL,
-//!   created_at       BIGINT NOT NULL,
 //!   config_json      TEXT NOT NULL,
 //!   INDEX idx_channel_bindings_account (channel_type, account_ref, status)
 //! );
 //!
 //! CREATE TABLE bcs_channel_conversations (
 //!   binding_id           VARCHAR(64) NOT NULL,
+//!   gmt_create           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+//!   gmt_modified         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 //!   im_conversation_id   VARCHAR(256) NOT NULL,
 //!   im_conversation_type VARCHAR(16) NOT NULL,
 //!   session_scope        VARCHAR(32) NOT NULL,
@@ -33,6 +36,8 @@
 //!
 //! CREATE TABLE bcs_channel_im_participants (
 //!   channel_type VARCHAR(32) NOT NULL,
+//!   gmt_create   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+//!   gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 //!   account_ref  VARCHAR(128) NOT NULL,
 //!   im_user_id   VARCHAR(128) NOT NULL,
 //!   actor_id     VARCHAR(256) NOT NULL,
@@ -114,8 +119,8 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
             DbStatement::with_params(
                 "INSERT INTO bcs_channel_bindings \
                  (id, channel_type, account_ref, target_json, group_chat_scope, \
-                  visibility, env, status, created_by, created_at, config_json) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                  visibility, env, status, created_by, config_json) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 vec![
                     DbValue::from(binding.id.as_str()),
                     DbValue::from(binding.channel_type.as_str()),
@@ -126,7 +131,6 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
                     DbValue::from(binding.env.as_str()),
                     DbValue::from(binding_status_to_str(binding.status)),
                     DbValue::from(binding.created_by.as_deref()),
-                    DbValue::from(binding.created_at),
                     DbValue::from(config_json),
                 ],
             ),
@@ -141,7 +145,7 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
                 "get_binding",
                 DbStatement::with_params(
                     "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
-                     visibility, env, status, created_by, created_at, config_json \
+                     visibility, env, status, created_by, config_json \
                      FROM bcs_channel_bindings WHERE id = ? LIMIT 1",
                     vec![DbValue::from(id)],
                 ),
@@ -164,7 +168,7 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
                 "find_active_binding_by_account",
                 DbStatement::with_params(
                     "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
-                     visibility, env, status, created_by, created_at, config_json \
+                     visibility, env, status, created_by, config_json \
                      FROM bcs_channel_bindings \
                      WHERE channel_type = ? AND account_ref = ? AND status = 'active' \
                      LIMIT 1",
@@ -188,7 +192,7 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
                 "list_bindings",
                 DbStatement::new(
                     "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
-                     visibility, env, status, created_by, created_at, config_json \
+                     visibility, env, status, created_by, config_json \
                      FROM bcs_channel_bindings ORDER BY id",
                 ),
             )
@@ -205,7 +209,10 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
         self.execute(
             "set_binding_status",
             DbStatement::with_params(
-                "UPDATE bcs_channel_bindings SET status = ? WHERE id = ?",
+                format!(
+                    "UPDATE bcs_channel_bindings SET status = ?, {} WHERE id = ?",
+                    self.flavor.set_modified_now()
+                ),
                 vec![DbValue::from(binding_status_to_str(status)), DbValue::from(id)],
             ),
         )
@@ -218,7 +225,10 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
         self.execute(
             "set_binding_config",
             DbStatement::with_params(
-                "UPDATE bcs_channel_bindings SET config_json = ? WHERE id = ?",
+                format!(
+                    "UPDATE bcs_channel_bindings SET config_json = ?, {} WHERE id = ?",
+                    self.flavor.set_modified_now()
+                ),
                 vec![DbValue::from(config_json), DbValue::from(id)],
             ),
         )
@@ -294,7 +304,7 @@ impl DbConversationSessionStore {
                     "im_user_id",
                 ],
                 &["im_conversation_type", "bcs_session_id", "last_active_at"],
-                &[],
+                &[("gmt_modified", self.flavor.now())],
             )
         )
     }
@@ -451,7 +461,7 @@ impl DbImParticipantStore {
             self.flavor.on_conflict_update(
                 &["channel_type", "account_ref", "im_user_id"],
                 &["actor_id", "display_name"],
-                &[],
+                &[("gmt_modified", self.flavor.now())],
             )
         )
     }
@@ -521,7 +531,6 @@ fn row_to_binding(row: &DbRow) -> ServiceResult<ChannelBinding> {
         env: required_string(row, "env")?,
         status: parse_binding_status(&required_string(row, "status")?)?,
         created_by: optional_string(row, "created_by"),
-        created_at: row_u64(row, "created_at")?,
         config: serde_json::from_str::<serde_json::Value>(&config_json)?,
     })
 }
@@ -687,6 +696,8 @@ mod tests {
             &db,
             "CREATE TABLE bcs_channel_bindings (
                 id TEXT PRIMARY KEY,
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 channel_type TEXT NOT NULL,
                 account_ref TEXT NOT NULL,
                 target_json TEXT NOT NULL,
@@ -695,7 +706,6 @@ mod tests {
                 env TEXT NOT NULL,
                 status TEXT NOT NULL,
                 created_by TEXT,
-                created_at INTEGER NOT NULL,
                 config_json TEXT NOT NULL
             )",
         )
@@ -704,6 +714,8 @@ mod tests {
             &db,
             "CREATE TABLE bcs_channel_conversations (
                 binding_id TEXT NOT NULL,
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 im_conversation_id TEXT NOT NULL,
                 im_conversation_type TEXT NOT NULL,
                 session_scope TEXT NOT NULL,
@@ -723,6 +735,8 @@ mod tests {
             &db,
             "CREATE TABLE bcs_channel_im_participants (
                 channel_type TEXT NOT NULL,
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 account_ref TEXT NOT NULL,
                 im_user_id TEXT NOT NULL,
                 actor_id TEXT NOT NULL,
@@ -763,7 +777,6 @@ mod tests {
             env: "dev".to_string(),
             status: BindingStatus::Active,
             created_by: Some("creator".to_string()),
-            created_at: 100,
             config: serde_json::json!({
                 "robot_code": "robot_1",
                 "client_id": "client_1",
@@ -843,48 +856,136 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sqlite_binding_rejects_invalid_created_at() -> ServiceResult<()> {
+    async fn sqlite_channel_tables_populate_audit_timestamps() -> ServiceResult<()> {
         let db = sqlite_db().await?;
-        db.execute(DbStatement::with_params(
-            "INSERT INTO bcs_channel_bindings \
-             (id, channel_type, account_ref, target_json, group_chat_scope, \
-              visibility, env, status, created_by, created_at, config_json) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            vec![
-                DbValue::from("bad_binding"),
-                DbValue::from("ding_talk"),
-                DbValue::from("robot_1"),
-                DbValue::from(serde_json::to_string(&BindingTarget::Group {
-                    group_id: "group_1".to_string(),
-                })?),
-                DbValue::from(Some("per_sender")),
-                DbValue::from("full_transcript"),
-                DbValue::from("dev"),
-                DbValue::from("active"),
-                DbValue::Null,
-                DbValue::from("bad_timestamp"),
-                DbValue::from(serde_json::to_string(&serde_json::json!({
-                    "robot_code": "robot_1",
-                    "client_id": "client_1",
-                    "client_secret": "secret_1",
-                    "send_mode": {
-                        "mode": "normal",
-                        "message_type": "markdown"
-                    }
-                }))?),
-            ],
-        ))
+        let db_plugin: Arc<dyn DbPlugin> = db;
+        let binding_repo = DbChannelBindingStore::sqlite(db_plugin.clone());
+        let conversation_repo = DbConversationSessionStore::sqlite(db_plugin.clone());
+        let participant_repo = DbImParticipantStore::sqlite(db_plugin.clone());
+
+        binding_repo.create(binding()).await?;
+        conversation_repo
+            .upsert(conversation(SessionScope::Conversation, None, "session_1", 100))
+            .await?;
+        participant_repo.upsert(participant("actor_1", "Alice")).await?;
+
+        for table in [
+            "bcs_channel_bindings",
+            "bcs_channel_conversations",
+            "bcs_channel_im_participants",
+        ] {
+            let rows = db_plugin
+                .query(DbStatement::new(format!(
+                    "SELECT gmt_create, gmt_modified FROM {table} LIMIT 1"
+                )))
+                .await
+                .map_err(|err| test_db_error("query audit timestamps", err))?;
+            let row = rows.first().expect("expected audit timestamp row");
+            assert!(
+                row.get_string("gmt_create")
+                    .map_err(|err| test_db_error("read gmt_create", err))?
+                    .is_some()
+            );
+            assert!(
+                row.get_string("gmt_modified")
+                    .map_err(|err| test_db_error("read gmt_modified", err))?
+                    .is_some()
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn query_string(
+        db: &dyn DbPlugin,
+        sql: impl Into<String>,
+        column: &'static str,
+    ) -> ServiceResult<String> {
+        let rows = db
+            .query(DbStatement::new(sql.into()))
+            .await
+            .map_err(|err| test_db_error("query string", err))?;
+        rows.first()
+            .expect("expected row")
+            .get_string(column)
+            .map_err(|err| test_db_error("read string", err))?
+            .ok_or_else(|| ServiceError::InternalError(format!("missing {}", column)))
+    }
+
+    async fn force_old_modified(db: &dyn DbPlugin, table: &str) -> ServiceResult<()> {
+        db.execute(DbStatement::new(format!(
+            "UPDATE {table} SET gmt_modified = '2000-01-01 00:00:00'"
+        )))
         .await
         .map(|_| ())
-        .map_err(|err| test_db_error("insert bad timestamp", err))?;
+        .map_err(|err| test_db_error("force old modified", err))
+    }
 
+    #[tokio::test]
+    async fn sqlite_write_paths_refresh_gmt_modified() -> ServiceResult<()> {
+        let db = sqlite_db().await?;
         let db_plugin: Arc<dyn DbPlugin> = db;
-        let binding_repo = DbChannelBindingStore::sqlite(db_plugin);
-        let result = binding_repo.get("bad_binding").await;
+        let binding_repo = DbChannelBindingStore::sqlite(db_plugin.clone());
+        let conversation_repo = DbConversationSessionStore::sqlite(db_plugin.clone());
+        let participant_repo = DbImParticipantStore::sqlite(db_plugin.clone());
 
-        assert!(
-            matches!(result, Err(ServiceError::InternalError(_))),
-            "invalid created_at must be surfaced as a row mapping error"
+        binding_repo.create(binding()).await?;
+        force_old_modified(db_plugin.as_ref(), "bcs_channel_bindings").await?;
+        binding_repo.set_status("binding_1", false).await?;
+        assert_ne!(
+            query_string(
+                db_plugin.as_ref(),
+                "SELECT gmt_modified FROM bcs_channel_bindings WHERE id = 'binding_1'",
+                "gmt_modified",
+            )
+            .await?,
+            "2000-01-01 00:00:00"
+        );
+
+        force_old_modified(db_plugin.as_ref(), "bcs_channel_bindings").await?;
+        binding_repo
+            .set_config("binding_1", serde_json::json!({"send_mode": {"mode": "normal"}}))
+            .await?;
+        assert_ne!(
+            query_string(
+                db_plugin.as_ref(),
+                "SELECT gmt_modified FROM bcs_channel_bindings WHERE id = 'binding_1'",
+                "gmt_modified",
+            )
+            .await?,
+            "2000-01-01 00:00:00"
+        );
+
+        conversation_repo
+            .upsert(conversation(SessionScope::Conversation, None, "session_old", 100))
+            .await?;
+        force_old_modified(db_plugin.as_ref(), "bcs_channel_conversations").await?;
+        conversation_repo
+            .upsert(conversation(SessionScope::Conversation, None, "session_new", 200))
+            .await?;
+        assert_ne!(
+            query_string(
+                db_plugin.as_ref(),
+                "SELECT gmt_modified FROM bcs_channel_conversations \
+                 WHERE binding_id = 'binding_1' AND im_conversation_id = 'conversation_1'",
+                "gmt_modified",
+            )
+            .await?,
+            "2000-01-01 00:00:00"
+        );
+
+        participant_repo.upsert(participant("actor_1", "Alice")).await?;
+        force_old_modified(db_plugin.as_ref(), "bcs_channel_im_participants").await?;
+        participant_repo.upsert(participant("actor_2", "Alice New")).await?;
+        assert_ne!(
+            query_string(
+                db_plugin.as_ref(),
+                "SELECT gmt_modified FROM bcs_channel_im_participants \
+                 WHERE channel_type = 'dingtalk' AND account_ref = 'robot_1' AND im_user_id = 'staff_1'",
+                "gmt_modified",
+            )
+            .await?,
+            "2000-01-01 00:00:00"
         );
 
         Ok(())

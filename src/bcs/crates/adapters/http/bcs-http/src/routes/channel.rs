@@ -39,7 +39,6 @@ pub struct BindingResponse {
     pub env: String,
     pub status: bcs_domain::BindingStatus,
     pub created_by: Option<String>,
-    pub created_at: u64,
     pub config: ChannelConfig,
 }
 
@@ -55,7 +54,6 @@ impl From<ChannelBinding> for BindingResponse {
             env: binding.env,
             status: binding.status,
             created_by: binding.created_by,
-            created_at: binding.created_at,
             config: binding.config,
         }
     }
@@ -278,7 +276,6 @@ mod tests {
             env: "prod".to_string(),
             status: BindingStatus::Active,
             created_by: Some("creator".to_string()),
-            created_at: 1,
             config: serde_json::json!({
                 "robot_code": "robot_1",
                 "client_id": "robot_1",
@@ -293,6 +290,7 @@ mod tests {
         let json = serde_json::to_value(response).expect("serialize response");
 
         assert_eq!(json["channel_type"], "dingtalk");
+        assert!(json.get("created_at").is_none());
         assert_eq!(json["config"]["send_mode"]["mode"], "streaming_card");
         assert_eq!(
             json["config"]["send_mode"]["card_template_id"],

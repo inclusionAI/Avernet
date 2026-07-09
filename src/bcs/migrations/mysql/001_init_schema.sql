@@ -391,6 +391,52 @@ CREATE TABLE IF NOT EXISTS `bcs_provider_bot_bindings` (
   UNIQUE KEY `uk_bot_uuid_env` (`env`, `bot_uuid`)
 ) DEFAULT CHARSET = utf8mb4;
 
+-- Table: bcs_channel_bindings
+CREATE TABLE IF NOT EXISTS `bcs_channel_bindings` (
+  `id` varchar(64) NOT NULL,
+  `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `gmt_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `channel_type` varchar(32) NOT NULL,
+  `account_ref` varchar(128) NOT NULL,
+  `target_json` text NOT NULL,
+  `group_chat_scope` varchar(32) DEFAULT NULL,
+  `visibility` varchar(32) NOT NULL,
+  `env` varchar(32) NOT NULL,
+  `status` varchar(16) NOT NULL,
+  `created_by` varchar(256) DEFAULT NULL,
+  `config_json` text NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_channel_bindings_account` (`channel_type`, `account_ref`, `status`)
+) DEFAULT CHARSET = utf8mb4;
+
+-- Table: bcs_channel_conversations
+CREATE TABLE IF NOT EXISTS `bcs_channel_conversations` (
+  `binding_id` varchar(64) NOT NULL,
+  `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `gmt_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `im_conversation_id` varchar(256) NOT NULL,
+  `im_conversation_type` varchar(16) NOT NULL,
+  `session_scope` varchar(32) NOT NULL,
+  `im_user_id` varchar(128) NOT NULL DEFAULT '',
+  `bcs_session_id` varchar(128) NOT NULL,
+  `last_active_at` bigint(20) unsigned NOT NULL,
+  PRIMARY KEY (`binding_id`, `im_conversation_id`, `session_scope`, `im_user_id`),
+  KEY `idx_channel_conversations_session` (`binding_id`, `bcs_session_id`),
+  KEY `idx_channel_conversations_bcs_session` (`bcs_session_id`, `binding_id`)
+) DEFAULT CHARSET = utf8mb4;
+
+-- Table: bcs_channel_im_participants
+CREATE TABLE IF NOT EXISTS `bcs_channel_im_participants` (
+  `channel_type` varchar(32) NOT NULL,
+  `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `gmt_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `account_ref` varchar(128) NOT NULL,
+  `im_user_id` varchar(128) NOT NULL,
+  `actor_id` varchar(256) NOT NULL,
+  `display_name` varchar(256) DEFAULT NULL,
+  PRIMARY KEY (`channel_type`, `account_ref`, `im_user_id`)
+) DEFAULT CHARSET = utf8mb4;
+
 -- Table: bcs_provider_credentials
 CREATE TABLE IF NOT EXISTS `bcs_provider_credentials` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,

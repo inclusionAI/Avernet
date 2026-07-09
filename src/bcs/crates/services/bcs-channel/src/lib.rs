@@ -622,7 +622,6 @@ impl ChannelService for BcsChannelService {
             env,
             status: BindingStatus::Active,
             created_by: cmd.created_by,
-            created_at: (self.now_ms)(),
             config: cmd.config,
         };
         self.bindings.create(binding.clone()).await?;
@@ -2130,7 +2129,6 @@ mod tests {
             env: "dev".to_string(),
             status: BindingStatus::Active,
             created_by: Some("creator".to_string()),
-            created_at: 1,
             config: dingtalk_config(account_ref),
         }
     }
