@@ -17,6 +17,7 @@ never opens ORM sessions or queries models directly.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -33,6 +34,7 @@ from agentclaw.community.adapters.http.economy.schemas import (
     RecordsDeleteRequest,
     WhitelistDeleteRequest,
 )
+from agentclaw.community.core.economy.governance.domain.enums import GovernanceStatus
 from agentclaw.community.api.governance_service import (
     GovernanceAdminServiceProtocol,
     GovernanceBotServiceProtocol,
@@ -76,12 +78,23 @@ def _cron_tick_to_dict(summary: object) -> dict:
     }
 
 
-def _raise_on_admin_error(result: dict) -> None:
-    """Raise HTTPException if the admin-service result contains an error."""
-    if "error" in result:
-        error_code = result.get("error_code", "")
-        status_code = 404 if error_code == "NOT_FOUND" else 400
-        raise HTTPException(status_code=status_code, detail=result["error"])
+def _raise_on_admin_error(result: dict | object) -> None:
+    """Raise HTTPException if the admin-service result contains an error.
+
+    Accepts both ``dict`` (legacy) and ``TicketActionOutcome`` dataclass.
+    """
+    if isinstance(result, dict):
+        if "error" in result:
+            error_code = result.get("error_code", "")
+            status_code = 404 if error_code == "NOT_FOUND" else 400
+            raise HTTPException(status_code=status_code, detail=result["error"])
+    else:
+        # TicketActionOutcome / EmergencyState / BulkOperationResult
+        error = getattr(result, "error", None)
+        if error:
+            error_code = getattr(result, "error_code", "")
+            status_code = 404 if error_code == "NOT_FOUND" else 400
+            raise HTTPException(status_code=status_code, detail=error)
 
 
 # ── Records delete (emergency) ────────────────────────────────────────────
@@ -113,7 +126,7 @@ async def delete_records(
             detail=f"Unknown table: {body.table!r}. Use 'record_daily' or 'notify_log'",
         )
 
-    data = admin_svc.delete_records(body.model_dump(), operator=ctx.user_id)
+    data = await asyncio.to_thread(admin_svc.delete_records, body.model_dump(), operator=ctx.user_id)
     return ApiResponse(success=True, data=data)
 
 
@@ -129,22 +142,27 @@ async def delete_whitelist(
     ctx: RequestContext = Depends(get_request_context),
     admin_svc: _AdminSvc = Injected(_AdminSvc),
 ) -> ApiResponse:
-    """Delete governance whitelist entries by ID or (bot_id, owner_id) pair."""
-    has_ids = body.ids and len(body.ids) > 0
-    has_pairs = body.bot_owner_pairs and len(body.bot_owner_pairs) > 0
-    if not has_ids and not has_pairs:
+    """Delete governance whitelist entries by (bot_id, owner_id) pairs."""
+    if not body.bot_owner_pairs or len(body.bot_owner_pairs) == 0:
         raise HTTPException(
             status_code=400,
-            detail="At least one of ids / bot_owner_pairs is required",
+            detail="bot_owner_pairs is required",
         )
 
-    body_dump = body.model_dump()
-    # Convert Pydantic models in bot_owner_pairs to plain dicts
-    if has_pairs and body.bot_owner_pairs:
-        body_dump["bot_owner_pairs"] = [p.model_dump() for p in body.bot_owner_pairs]
+    def _delete_all():
+        results = []
+        for pair in body.bot_owner_pairs:
+            result = admin_svc.delete_whitelist_entry(
+                bot_id=pair.bot_id,
+                owner_id=pair.owner_id,
+                reason=body.reason,
+                operator=ctx.user_id,
+            )
+            results.append(result)
+        return results
 
-    data = admin_svc.delete_whitelist_entries(body_dump, operator=ctx.user_id)
-    return ApiResponse(success=True, data=data)
+    results = await asyncio.to_thread(_delete_all)
+    return ApiResponse(success=True, data=results)
 
 
 # ── Admin: review / pause / emergency-close ───────────────────────────────
@@ -160,7 +178,8 @@ async def admin_review(
     admin_svc: _AdminSvc = Injected(_AdminSvc),
 ) -> ApiResponse:
     """Admin review: waiting_review → closed (§7.5.2)."""
-    result = admin_svc.review_ticket(
+    result = await asyncio.to_thread(
+        admin_svc.review_ticket,
         ticket_id=body.ticket_id,
         action=body.action,
         admin_id=body.admin_id or ctx.user_id,
@@ -170,9 +189,9 @@ async def admin_review(
     return ApiResponse(
         success=True,
         data=AdminReviewResponse(
-            ticket_id=result.get("ticket_id", ""),
-            governance_status=result.get("governance_status", ""),
-            close_reason=result.get("close_reason"),
+            ticket_id=result.ticket_id,
+            governance_status=result.status.value if isinstance(result.status, GovernanceStatus) else str(result.status or ""),
+            close_reason=result.close_reason,
         ).model_dump(),
     )
 
@@ -187,13 +206,14 @@ async def admin_pause(
     admin_svc: _AdminSvc = Injected(_AdminSvc),
 ) -> ApiResponse:
     """Admin pause: open/scheduled → waiting_review (§7.5.1)."""
-    result = admin_svc.pause_ticket(
+    result = await asyncio.to_thread(
+        admin_svc.pause_ticket,
         ticket_id=body.ticket_id,
         admin_id=body.admin_id or ctx.user_id,
         reason=body.reason,
     )
     _raise_on_admin_error(result)
-    return ApiResponse(success=True, data=result)
+    return ApiResponse(success=True, data=result.to_dict())
 
 
 @admin_router.post(
@@ -206,13 +226,14 @@ async def admin_emergency_close(
     admin_svc: _AdminSvc = Injected(_AdminSvc),
 ) -> ApiResponse:
     """Emergency close: any non-closed ticket → closed, no cooldown."""
-    result = admin_svc.emergency_close(
+    result = await asyncio.to_thread(
+        admin_svc.emergency_close,
         ticket_id=body.ticket_id,
         admin_id=body.admin_id or ctx.user_id,
         reason=body.reason,
     )
     _raise_on_admin_error(result)
-    return ApiResponse(success=True, data=result)
+    return ApiResponse(success=True, data=result.to_dict())
 
 
 # ── Trigger scan / cron tick ──────────────────────────────────────────────
@@ -229,7 +250,7 @@ async def trigger_scan(
 ) -> ApiResponse:
     """Manually trigger a governance cron tick (§7.3)."""
     try:
-        summary = await scan_svc.process_cron_tick(dry_run=dry_run)
+        summary = await asyncio.to_thread(scan_svc.process_cron_tick, dry_run=dry_run)
         return ApiResponse(success=True, data=_cron_tick_to_dict(summary))
     except Exception:
         log.exception("[EconomyGovernance] trigger-scan failed")
@@ -250,17 +271,18 @@ async def emergency_action(
 ) -> ApiResponse:
     """Emergency brake / admin actions: pause / resume / bulk-whitelist / cancel-pending / close-all-open."""
     if body.action == "pause":
-        admin_svc.pause(reason=body.reason, operator=body.operator)
+        await asyncio.to_thread(admin_svc.pause, reason=body.reason, operator=body.operator)
         return ApiResponse(success=True, message="Paused")
 
     if body.action == "resume":
-        admin_svc.resume(reason=body.reason, operator=body.operator)
+        await asyncio.to_thread(admin_svc.resume, reason=body.reason, operator=body.operator)
         return ApiResponse(success=True, message="Resumed")
 
     if body.action == "bulk-whitelist":
         if not body.bot_ids:
             raise HTTPException(status_code=400, detail="bot_ids required for bulk-whitelist")
-        result = admin_svc.bulk_whitelist(
+        result = await asyncio.to_thread(
+            admin_svc.bulk_whitelist,
             bot_ids=body.bot_ids,
             reason=body.reason,
             operator=body.operator,
@@ -268,18 +290,20 @@ async def emergency_action(
         return ApiResponse(success=True, data=result)
 
     if body.action == "cancel-pending":
-        result = admin_svc.cancel_pending(
+        result = await asyncio.to_thread(
+            admin_svc.cancel_pending,
             reason=body.reason,
             operator=body.operator,
         )
-        return ApiResponse(success=True, data=result)
+        return ApiResponse(success=True, data=result.to_dict())
 
     if body.action == "close-all-open":
-        result = admin_svc.close_all_open(
+        result = await asyncio.to_thread(
+            admin_svc.close_all_open,
             reason=body.reason,
             operator=body.operator,
         )
-        return ApiResponse(success=True, data=result)
+        return ApiResponse(success=True, data=result.to_dict())
 
     raise HTTPException(status_code=400, detail=f"Unknown action: {body.action}")
 
@@ -293,10 +317,10 @@ async def get_emergency_state(
     admin_svc: _AdminSvc = Injected(_AdminSvc),
 ) -> ApiResponse:
     """Query current emergency state."""
-    state = admin_svc.get_state()
+    state = await asyncio.to_thread(admin_svc.get_state)
     return ApiResponse(
         success=True,
-        data=EmergencyStateResponse(**state).model_dump(),
+        data=EmergencyStateResponse(**state.to_dict()).model_dump(),
     )
 
 
@@ -348,14 +372,15 @@ async def scan_and_deliver(
     scan_summary: dict = {}
     if not skip_scan:
         try:
-            result = await scan_svc.process_cron_tick(dry_run=scan_dry_run)
+            result = await asyncio.to_thread(scan_svc.process_cron_tick, dry_run=scan_dry_run)
             scan_summary = _cron_tick_to_dict(result)
         except Exception:
             log.exception("[scan-and-deliver] Cron tick phase failed")
             scan_summary = {"error": "Cron tick failed — see backend logs"}
 
     # ---- Phase 2-5: delegate to service ----
-    data = await admin_svc.deliver_pending(
+    data = await asyncio.to_thread(
+        admin_svc.deliver_pending,
         scan_svc=scan_svc,
         override_recipient=override_recipient,
         dry_run=dry_run,

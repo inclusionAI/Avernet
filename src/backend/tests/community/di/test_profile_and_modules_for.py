@@ -70,7 +70,7 @@ def test_modules_for_community_is_isolated():
         "CommunityAppServicesModule",
         "CommunityApprovalWorkflowModule",
         "CommunityBotPublishApprovalModule",
-        "CommunityGovernanceModule",
+        "CommunityNotifyModule",
     }
 
 
@@ -100,7 +100,7 @@ def test_modules_for_test_and_singlebox_match():
         "TestDevicesModule",          # corp-free local device doubles
         "TestTokenVaultModule",       # empty-key vault
         "CommunityAICodingModule",    # empty workflow catalog
-        "CommunityGovernanceModule",  # no-op notify sender
+        "CommunityNotifyModule",  # no-op notify sender
         "CommunityOutboundRulesModule",
         "CommunityDeviceSyncModule",
         # Corp-free test app-services (real BotChatService, local_sql router,

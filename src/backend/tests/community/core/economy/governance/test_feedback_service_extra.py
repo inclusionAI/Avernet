@@ -12,9 +12,9 @@ from datetime import datetime
 
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceNotifyLog,
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    GovernanceNotificationOrm,
+    GovernanceTicketOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.audit_repo import (
     GovernanceAuditRepository,
@@ -33,18 +33,18 @@ from .conftest import FakeDB, FakeGovernanceConfig, FakeWhitelistService
 
 
 class _RaisingWhitelistService:
-    """Whitelist service whose batch_add always raises — exercises except path."""
+    """Whitelist service whose add always raises — exercises except path."""
 
     def bulk_whitelist(self, bot_ids, reason, operator):
         raise RuntimeError("boom")
 
-    def delete_whitelist_entries(self, body, operator):
+    def delete_whitelist_entry(self, *, bot_id, owner_id, reason, operator):
         raise RuntimeError("boom")
 
     def count_by_type(self, **kwargs):
         return 0
 
-    def batch_add(self, entries, created_by, **kwargs):
+    def add(self, *, bot_id, owner_id, created_by, **kwargs):
         raise RuntimeError("boom")
 
 
@@ -64,7 +64,7 @@ def _make_notification(session, **overrides):
     worker_id = overrides.pop("worker_id", f"{owner_id}:{bot_id}:{nid}")
 
     # Create task_record (lifecycle entity)
-    task_rec = GovernanceTaskRecordDaily(
+    task_rec = GovernanceTicketOrm(
         ticket_id=ticket_id,
         worker_id=f"{owner_id}:{bot_id}",
         active_worker=f"{owner_id}:{bot_id}"
@@ -83,7 +83,7 @@ def _make_notification(session, **overrides):
     session.add(task_rec)
 
     # Create notify_log (event log) linked by ticket_id
-    row = GovernanceNotifyLog(
+    row = GovernanceNotificationOrm(
         notification_id=nid,
         ticket_id=ticket_id,
         bot_id=bot_id,
@@ -110,7 +110,6 @@ def _make_svc(engine, whitelist_service=None):
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     db = FakeDB(lambda: Session(bind=engine))
     return GovernanceFeedbackService(
-        db=db,
         whitelist_service=whitelist_service or FakeWhitelistService(),
         notify_repo=NotifyLogRepository(db=db),
         task_repo=TaskRecordRepository(db=db),
@@ -156,7 +155,7 @@ class TestResolveEdgeBranches:
         assert result.error_code == "INVALID_FEEDBACK_PAYLOAD"
 
     def test_whitelist_add_failure_is_swallowed(self, session, engine):
-        """batch_add raising must not fail the resolve (lines 200-201)."""
+        """add raising must not fail the resolve (lines 200-201)."""
         svc = _make_svc(engine, whitelist_service=_RaisingWhitelistService())
         _make_notification(session)
 
@@ -182,12 +181,12 @@ class TestListAndGetHelpers:
         _make_notification(session, notification_id="p-closed", bot_id="bot-closed", governance_status="closed")
 
         rows = svc.list_pending("user-1")
-        ticket_ids = {r["ticket_id"] for r in rows}
+        ticket_ids = {r.ticket_id for r in rows}
         assert "t-p-open" in ticket_ids
         assert "t-p-scheduled" in ticket_ids
         assert "t-p-closed" not in ticket_ids
         # _row_to_dict shape sanity
-        assert rows[0]["owner_id"] == "user-1"
+        assert rows[0].owner_id == "user-1"
 
     def test_list_pending_empty(self, session, engine):
         svc = _make_svc(engine)
@@ -209,7 +208,7 @@ class TestListAndGetHelpers:
         _make_notification(session, notification_id="h-open", bot_id="bot-h-open", governance_status="open")
 
         rows = svc.list_history("user-1")
-        ticket_ids = {r["ticket_id"] for r in rows}
+        ticket_ids = {r.ticket_id for r in rows}
         assert "t-h-closed" in ticket_ids
         assert "t-h-open" not in ticket_ids
 
@@ -223,7 +222,7 @@ class TestListAndGetHelpers:
 
         got = svc.get_notification("g-1", "user-1")
         assert got is not None
-        assert got["ticket_id"] == "t-g-1"
+        assert got.ticket_id == "t-g-1"
 
     def test_get_notification_wrong_owner_returns_none(self, session, engine):
         svc = _make_svc(engine)

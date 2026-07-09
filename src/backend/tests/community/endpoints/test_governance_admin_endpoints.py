@@ -12,9 +12,9 @@ from datetime import datetime
 from agentclaw.community.api.governance_service import (
     GovernanceAdminServiceProtocol,
 )
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceNotifyLog,
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    GovernanceNotificationOrm,
+    GovernanceTicketOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
     NotifyLogRepository,
@@ -45,7 +45,7 @@ def _insert_ticket(
     owner_id: str = "owner-1",
     dt_version: str = "20260705",
 ) -> None:
-    """Insert a real GovernanceTaskRecordDaily row via repo.
+    """Insert a real GovernanceTicketOrm row via repo.
 
     The admin service methods (pause_ticket, review_ticket, emergency_close)
     read from this table through TaskRecordRepository.find_by_ticket_id.
@@ -54,7 +54,7 @@ def _insert_ticket(
     worker_id = f"{owner_id}:{bot_id}"
     active_worker = worker_id if governance_status != "closed" else None
     repo.insert_ticket(
-        GovernanceTaskRecordDaily(
+        GovernanceTicketOrm(
             worker_id=worker_id,
             bot_id=bot_id,
             owner_id=owner_id,
@@ -75,11 +75,11 @@ def _insert_whitelist_entry(
     owner_id: str,
     reason: str = "test",
 ) -> None:
-    """Insert a real BotWhitelist row via GovernanceWhitelistRepository."""
+    """Insert a real WhitelistEntryOrm row via GovernanceWhitelistRepository."""
     wl_repo = world.get(GovernanceWhitelistRepository)
-    wl_repo.batch_add(
-        entries=[{"bot_id": bot_id, "owner_id": owner_id, "reason": reason}],
-        created_by="88888",
+    wl_repo.add(
+        bot_id=bot_id, owner_id=owner_id,
+        reason=reason, created_by="88888",
         whitelist_type="governance",
         source="manual",
     )
@@ -94,7 +94,7 @@ def _insert_notify_log(
     notify_status: str = "pending",
     governance_status: str = "open",
 ) -> None:
-    """Insert a real GovernanceNotifyLog row via repo.
+    """Insert a real GovernanceNotificationOrm row via repo.
 
     Needed for scan-and-deliver which queries notify_log rows.
     """
@@ -102,7 +102,7 @@ def _insert_notify_log(
     worker_id = f"{owner_id}:{bot_id}"
     notification_id = f"n-{uuid.uuid4().hex[:12]}"
     repo.insert_notification(
-        GovernanceNotifyLog(
+        GovernanceNotificationOrm(
             notification_id=notification_id,
             ticket_id=ticket_id,
             bot_id=bot_id,
@@ -185,8 +185,8 @@ def _assert_review_closed_ticket(response, world) -> None:
     repo = world.get(TaskRecordRepository)
     ticket = repo.find_by_ticket_id("tkt-review-test")
     assert ticket is not None, "Seeded ticket should exist"
-    assert ticket["governance_status"] == "closed", (
-        f"Expected closed, got {ticket['governance_status']}"
+    assert ticket.governance_status == "closed", (
+        f"Expected closed, got {ticket.governance_status}"
     )
 
 
@@ -195,8 +195,8 @@ def _assert_pause_to_waiting_review(response, world) -> None:
     repo = world.get(TaskRecordRepository)
     ticket = repo.find_by_ticket_id("tkt-pause-test")
     assert ticket is not None, "Seeded ticket should exist"
-    assert ticket["governance_status"] == "waiting_review", (
-        f"Expected waiting_review, got {ticket['governance_status']}"
+    assert ticket.governance_status == "waiting_review", (
+        f"Expected waiting_review, got {ticket.governance_status}"
     )
 
 
@@ -205,21 +205,19 @@ def _assert_emergency_close_closed(response, world) -> None:
     repo = world.get(TaskRecordRepository)
     ticket = repo.find_by_ticket_id("tkt-eclose-test")
     assert ticket is not None, "Seeded ticket should exist"
-    assert ticket["governance_status"] == "closed", (
-        f"Expected closed, got {ticket['governance_status']}"
+    assert ticket.governance_status == "closed", (
+        f"Expected closed, got {ticket.governance_status}"
     )
-    assert ticket["close_reason"] == "emergency_closed"
+    assert ticket.close_reason == "emergency_closed"
 
 
 def _assert_whitelist_deleted(response, world) -> None:
-    """Verify whitelist entries were actually counted for dry-run delete."""
+    """Verify whitelist entries were actually deleted."""
     body = response.json()
     assert body["success"] is True
-    # dry_run=True: would_delete should be > 0 since we seeded 2 entries
-    data = body.get("data", {})
-    assert data.get("would_delete", 0) >= 1, (
-        f"Expected would_delete >= 1 for dry-run, got {data}"
-    )
+    # Response is a list of {deleted, bot_id, owner_id} dicts
+    data = body.get("data", [])
+    assert len(data) >= 1, f"Expected at least 1 deletion result, got {data}"
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +236,6 @@ def _assert_whitelist_deleted(response, world) -> None:
                 {"bot_id": "wl-bot-1", "owner_id": "wl-owner-1"},
                 {"bot_id": "wl-bot-2", "owner_id": "wl-owner-2"},
             ],
-            "dry_run": True,
             "reason": "test",
         },
     ),
@@ -247,7 +244,7 @@ def _assert_whitelist_deleted(response, world) -> None:
     extra_assertions=(_assert_whitelist_deleted,),
 )
 def whitelist_delete_ok():
-    """Happy path: whitelist delete dry-run counts matching entries."""
+    """Happy path: whitelist delete removes matching entries."""
 
 
 @endpoint_test(
@@ -256,10 +253,10 @@ def whitelist_delete_ok():
     scenario="error",
     input=CaseInput(
         headers=_USER_HEADER,
-        # Empty ids + no bot_owner_pairs -> handler raises HTTPException(400)
-        json_body={"ids": [], "reason": "test"},
+        # No bot_owner_pairs -> Pydantic min_length=1 validates with 422
+        json_body={"bot_owner_pairs": [], "reason": "test"},
     ),
-    expect=ExpectError(status=400),
+    expect=ExpectError(status=422),
 )
 def whitelist_delete_error():
     """Error path: whitelist delete with no ids/pairs -> 400."""

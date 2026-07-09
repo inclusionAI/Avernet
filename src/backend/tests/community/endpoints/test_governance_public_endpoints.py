@@ -7,7 +7,7 @@ Covers the 8 endpoints from coverage_baseline.txt §"economy/governance — Phas
   - GET  /notifications/{notification_id}           (single detail)
   - GET  /whitelist                                 (list whitelist)
   - POST /notifications/{notification_id}/resolve   (user feedback)
-  - POST /whitelist/batch                           (batch add whitelist)
+  - POST /whitelist                                (add whitelist, point-to-point)
   - POST /card-callback                             (DingTalk card iframe)
   - POST /records/offline-batch                     (ODPS batch ingestion)
 
@@ -21,12 +21,14 @@ from datetime import datetime
 
 from agentclaw.community.api.governance_service import (
     GovernanceFeedbackServiceProtocol,
-    GovernanceWhitelistProtocol,
     GovernanceRecordProcessProtocol,
 )
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceNotifyLog,
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.domain.protocols import (
+    WhitelistRepositoryProtocol,
+)
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    GovernanceNotificationOrm,
+    GovernanceTicketOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
     NotifyLogRepository,
@@ -70,7 +72,7 @@ def _seed_open_ticket_for_user(
 
     task_repo = world.get(TaskRecordRepository)
     task_repo.insert_ticket(
-        GovernanceTaskRecordDaily(
+        GovernanceTicketOrm(
             ticket_id=ticket_id,
             worker_id=worker_id,
             active_worker=worker_id,
@@ -89,7 +91,7 @@ def _seed_open_ticket_for_user(
 
     notify_repo = world.get(NotifyLogRepository)
     notify_repo.insert_notification(
-        GovernanceNotifyLog(
+        GovernanceNotificationOrm(
             notification_id=notification_id,
             ticket_id=ticket_id,
             bot_id=bot_id,
@@ -123,7 +125,7 @@ def _seed_closed_ticket_for_user(
 
     task_repo = world.get(TaskRecordRepository)
     task_repo.insert_ticket(
-        GovernanceTaskRecordDaily(
+        GovernanceTicketOrm(
             ticket_id=ticket_id,
             worker_id=worker_id,
             active_worker=None,
@@ -144,7 +146,7 @@ def _seed_closed_ticket_for_user(
 
     notify_repo = world.get(NotifyLogRepository)
     notify_repo.insert_notification(
-        GovernanceNotifyLog(
+        GovernanceNotificationOrm(
             notification_id=notification_id,
             ticket_id=ticket_id,
             bot_id=bot_id,
@@ -174,9 +176,9 @@ def _seed_whitelist_entry(
 ) -> None:
     """Insert a whitelist entry via the real repository."""
     whitelist_repo = world.get(GovernanceWhitelistRepository)
-    whitelist_repo.batch_add(
-        entries=[{"bot_id": bot_id, "owner_id": owner_id, "reason": reason}],
-        created_by=owner_id,
+    whitelist_repo.add(
+        bot_id=bot_id, owner_id=owner_id,
+        reason=reason, created_by=owner_id,
         whitelist_type="governance",
         source="http_api",
     )
@@ -240,9 +242,9 @@ def _assert_resolve_succeeded(response, world) -> None:
 
 
 def _assert_whitelist_inserted(response, world) -> None:
-    """Verify the whitelist entry exists in DB after batch add."""
-    whitelist_svc = world.get(GovernanceWhitelistProtocol)
-    items = whitelist_svc.list_all(
+    """Verify the whitelist entry exists in DB after add."""
+    whitelist_svc = world.get(WhitelistRepositoryProtocol)
+    items = whitelist_svc.list_by_owner(
         owner_id=_USER_ID,
         whitelist_type="governance",
     )
@@ -450,6 +452,45 @@ def list_whitelist_bad_limit():
 
 
 # ===========================================================================
+# 4b. POST /whitelist — add whitelist (point-to-point)
+# ===========================================================================
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/whitelist",
+    scenario="ok",
+    input=CaseInput(
+        headers=_USER_HEADERS,
+        json_body={
+            "bot_id": "bot-wl-add",
+            "owner_id": _USER_ID,
+            "reason": "endpoint test",
+            "source": "manual",
+        },
+    ),
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(_assert_whitelist_inserted,),
+)
+def add_whitelist_ok():
+    """Happy path: add a single whitelist entry."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/whitelist",
+    scenario="missing_fields",
+    input=CaseInput(
+        headers=_USER_HEADERS,
+        json_body={"source": "manual"},
+    ),
+    expect=ExpectError(status=422),
+)
+def add_whitelist_missing_fields():
+    """Error path: missing required bot_id/owner_id → 422."""
+
+
+# ===========================================================================
 # 5. POST /notifications/{notification_id}/resolve — user feedback
 # ===========================================================================
 
@@ -496,58 +537,7 @@ def resolve_not_found():
 
 
 # ===========================================================================
-# 6. POST /whitelist/batch — batch add whitelist
-# ===========================================================================
-
-
-@endpoint_test(
-    method="POST",
-    path="/api/economy/governance/whitelist/batch",
-    scenario="ok",
-    input=CaseInput(
-        headers=_USER_HEADERS,
-        json_body={
-            "entries": [
-                {"bot_id": "bot-batch-new", "owner_id": _USER_ID, "reason": "test"},
-            ],
-            "source": "http_api",
-        },
-    ),
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={"success": True, "data": {"inserted": 1}},
-    ),
-    extra_assertions=(_assert_whitelist_inserted,),
-)
-def whitelist_batch_ok():
-    """Happy path: batch add whitelist entries."""
-
-
-@endpoint_test(
-    method="POST",
-    path="/api/economy/governance/whitelist/batch",
-    scenario="all_skipped",
-    input=CaseInput(
-        headers=_USER_HEADERS,
-        json_body={
-            "entries": [
-                {"bot_id": "bot-wl-dup", "owner_id": _USER_ID, "reason": "duplicate"},
-            ],
-            "source": "http_api",
-        },
-    ),
-    seed=lambda w: _seed_whitelist_entry(w, bot_id="bot-wl-dup", owner_id=_USER_ID),
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={"success": True, "data": {"inserted": 0, "skipped": 1}},
-    ),
-)
-def whitelist_batch_all_skipped():
-    """Error path: duplicate entries all skipped."""
-
-
-# ===========================================================================
-# 7. POST /card-callback — DingTalk card iframe callback (no auth)
+# 6. POST /card-callback — DingTalk card iframe callback (no auth)
 # ===========================================================================
 
 
@@ -692,21 +682,5 @@ def list_whitelist_no_auth():
 
 
 # ===========================================================================
-# 12. POST /whitelist/batch — no auth
+# 10. POST /whitelist/batch — no auth  (REMOVED: whitelist is point-to-point, no batch endpoint)
 # ===========================================================================
-
-
-@endpoint_test(
-    method="POST",
-    path="/api/economy/governance/whitelist/batch",
-    scenario="no_auth",
-    input=CaseInput(
-        json_body={
-            "entries": [{"bot_id": "bot-noauth", "owner_id": "user-noauth"}],
-            "source": "manual",
-        },
-    ),
-    expect=ExpectError(status=401),
-)
-def whitelist_batch_no_auth():
-    """Error path: batch whitelist add without auth → 401."""

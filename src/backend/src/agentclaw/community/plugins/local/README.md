@@ -19,6 +19,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_chat
   - agentclaw.community.core.bot_dormant   # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.economy.governance.contracts.models  # SQLite ORM side-effect import for local table creation
+  - agentclaw.community.core.economy.governance.repositories.orm  # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.bot_public
   - agentclaw.community.core.bot_chat
@@ -54,6 +55,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.impl_registry
   - agentclaw.community.plugin_api.mcp_auth
   - agentclaw.community.plugin_api.mcp_center
+  - agentclaw.community.plugin_api.notify_sender
   - agentclaw.community.plugin_api.model_api
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.object_storage

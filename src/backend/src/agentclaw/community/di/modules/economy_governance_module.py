@@ -5,10 +5,10 @@ Bindings registered here:
   - GovernanceFeedbackService      — user feedback on governance notifications
   - GovernanceAdminService         — backend admin (pause/resume/bulk-whitelist)
   - GovernanceWhitelistService     — whitelist batch add + delete
-  - TaskRecordRepository           — task_record_daily read + offline batch upsert
+  - TaskRecordRepository           — task_record_daily ticket lifecycle
   - GovernanceBotService           — scan-and-decision orchestrator
   - GovernanceBotLifecycle         — single-cron lifecycle participant
-  - GovernanceNotifySender         — notification dispatcher (Markdown / TC card)
+  - NotifySenderPlugin             — notification dispatcher (Markdown / TC card)
   - GovernanceDingTalkConfig       — DingTalk credentials + TC card template
 """
 from __future__ import annotations
@@ -35,15 +35,18 @@ from agentclaw.community.core.economy.governance.repositories.audit_repo import 
 from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
     TaskRecordRepository,
 )
-from agentclaw.community.core.economy.governance.contracts.protocols import (
-    GovernanceNotifySender,
+from agentclaw.community.core.economy.governance.domain.protocols import (
+    AuditRepositoryProtocol,
+    NotifyLogRepositoryProtocol,
+    TaskRecordRepositoryProtocol,
+    WhitelistRepositoryProtocol,
 )
+from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
 from agentclaw.community.api.governance_service import (
     GovernanceAdminServiceProtocol,
     GovernanceBotServiceProtocol,
     GovernanceFeedbackServiceProtocol,
     GovernanceRecordProcessProtocol,
-    GovernanceWhitelistProtocol,
     GovernanceWhitelistServiceProtocol,
 )
 from agentclaw.community.core.economy.governance.services.scan_service import GovernanceBotService
@@ -95,7 +98,7 @@ class EconomyGovernanceModule(Module):
         # All services are now provided via @provider methods below.
         # binder.bind() was removed because auto-construction fails when
         # the service's __init__ references types imported only under
-        # TYPE_CHECKING (e.g. DatabasePlugin) — the injector resolves
+        # TYPE_CHECKING (e.g. CachePlugin) — the injector resolves
         # string annotations against the service module's globals, where
         # those names don't exist at runtime.
         # @provider methods live in *this* module, which imports all
@@ -131,7 +134,6 @@ class EconomyGovernanceModule(Module):
     @inject
     def _feedback_service(
         self,
-        db: DatabasePlugin,
         whitelist_service: GovernanceWhitelistService,
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
@@ -139,7 +141,7 @@ class EconomyGovernanceModule(Module):
         config: EconomyGovernanceConfig,
     ) -> GovernanceFeedbackService:
         return GovernanceFeedbackService(
-            db=db, whitelist_service=whitelist_service, notify_repo=notify_repo,
+            whitelist_service=whitelist_service, notify_repo=notify_repo,
             audit_repo=audit_repo, task_repo=task_repo, config=config,
         )
 
@@ -148,14 +150,13 @@ class EconomyGovernanceModule(Module):
     @inject
     def _whitelist_service(
         self,
-        db: DatabasePlugin,
         whitelist_repo: GovernanceWhitelistRepository,
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         config: EconomyGovernanceConfig,
     ) -> GovernanceWhitelistService:
         return GovernanceWhitelistService(
-            db=db, whitelist_repo=whitelist_repo, notify_repo=notify_repo,
+            whitelist_repo=whitelist_repo, notify_repo=notify_repo,
             audit_repo=audit_repo, config=config,
         )
 
@@ -164,21 +165,21 @@ class EconomyGovernanceModule(Module):
     @inject
     def _admin_service(
         self,
-        db: DatabasePlugin,
         cache: CachePlugin,
         whitelist_service: GovernanceWhitelistService,
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         task_repo: TaskRecordRepository,
         config: EconomyGovernanceConfig,
-        notify_sender: GovernanceNotifySender,
+        notify_sender: NotifySenderPlugin,
         dingtalk_config: GovernanceDingTalkConfig,
     ) -> GovernanceAdminService:
         return GovernanceAdminService(
-            db=db, cache=cache,
+            cache=cache,
             whitelist_service=whitelist_service,
             notify_repo=notify_repo, audit_repo=audit_repo,
-            task_repo=task_repo, config=config,
+            task_repo=task_repo,
+            config=config,
             notify_sender=notify_sender, dingtalk_config=dingtalk_config,
         )
 
@@ -195,18 +196,16 @@ class EconomyGovernanceModule(Module):
     @inject
     def _governance_bot_service(
         self,
-        db: DatabasePlugin,
         task_repo: TaskRecordRepository,
         admin_svc: GovernanceAdminService,
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         config: EconomyGovernanceConfig,
-        notify_sender: GovernanceNotifySender,
+        notify_sender: NotifySenderPlugin,
         dingtalk_config: GovernanceDingTalkConfig,
     ) -> GovernanceBotService:
         """Construct GovernanceBotService."""
         return GovernanceBotService(
-            db=db,
             task_repo=task_repo,
             admin_svc=admin_svc,
             notify_repo=notify_repo,
@@ -221,7 +220,6 @@ class EconomyGovernanceModule(Module):
     @inject
     def _record_process_service(
         self,
-        db: DatabasePlugin,
         task_repo: TaskRecordRepository,
         whitelist_repo: GovernanceWhitelistRepository,
         notify_repo: NotifyLogRepository,
@@ -230,7 +228,6 @@ class EconomyGovernanceModule(Module):
     ) -> GovernanceRecordService:
         """Construct GovernanceRecordService."""
         return GovernanceRecordService(
-            db=db,
             task_repo=task_repo,
             whitelist_repo=whitelist_repo,
             notify_repo=notify_repo,
@@ -287,8 +284,8 @@ class EconomyGovernanceModule(Module):
     @inject
     def _whitelist_protocol(
         self, repo: GovernanceWhitelistRepository,
-    ) -> GovernanceWhitelistProtocol:
-        return repo  # type: ignore[return-value]
+    ) -> WhitelistRepositoryProtocol:
+        return repo
 
     @singleton
     @provider
@@ -297,6 +294,46 @@ class EconomyGovernanceModule(Module):
         self, svc: GovernanceWhitelistService,
     ) -> GovernanceWhitelistServiceProtocol:
         return svc
+
+    # -----------------------------------------------------------------
+    # Repository Protocol → concrete bindings (Rule 14).
+    #
+    # Concrete repos structurally satisfy the Protocols — no adapter
+    # or # type: ignore needed.  As P4 adds command methods to the
+    # concrete repos, the Protocols will be expanded to include them.
+    # -----------------------------------------------------------------
+
+    @singleton
+    @provider
+    @inject
+    def _task_record_repo_protocol(
+        self, repo: TaskRecordRepository,
+    ) -> TaskRecordRepositoryProtocol:
+        return repo
+
+    @singleton
+    @provider
+    @inject
+    def _notify_log_repo_protocol(
+        self, repo: NotifyLogRepository,
+    ) -> NotifyLogRepositoryProtocol:
+        return repo
+
+    @singleton
+    @provider
+    @inject
+    def _audit_repo_protocol(
+        self, repo: GovernanceAuditRepository,
+    ) -> AuditRepositoryProtocol:
+        return repo
+
+    @singleton
+    @provider
+    @inject
+    def _whitelist_repo_protocol(
+        self, repo: GovernanceWhitelistRepository,
+    ) -> WhitelistRepositoryProtocol:
+        return repo
 
     @singleton
     @provider
@@ -476,9 +513,9 @@ class EconomyGovernanceModule(Module):
             iframe_callback_url=iframe_callback_url,
         )
 
-    # NOTE: the ``GovernanceNotifySender`` binding is profile-specific (corp =
+    # NOTE: the ``NotifySenderPlugin`` binding is profile-specific (corp =
     # DingTalk, community = no-op), so it is bound by a per-concern column module
-    # (``infrastructure/{corp,community}/governance.py``), NOT here — this
+    # (``infrastructure/{corp,community}/notify.py``), NOT here — this
     # base-list module must name no ``plugins.prod`` import so selecting the
     # community profile never drags the DingTalk import tree in (B11 Phase A).
     # The neutral ``GovernanceDingTalkConfig`` it needs is still provided above.

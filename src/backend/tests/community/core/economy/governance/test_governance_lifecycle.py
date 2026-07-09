@@ -57,7 +57,7 @@ class _FakeService:
         self._raises = raises
         self.process_cron_tick_calls: list[None] = []
 
-    async def process_cron_tick(self, dry_run: bool | None = None, run_id: str | None = None):
+    def process_cron_tick(self, dry_run: bool | None = None, run_id: str | None = None):
         self.process_cron_tick_calls.append(None)
         if self._raises is not None:
             raise self._raises

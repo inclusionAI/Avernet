@@ -18,8 +18,7 @@ This combines two guarantees:
 """
 from __future__ import annotations
 
-import asyncio
-import logging
+from agentclaw.community.log import get_logger
 import threading
 import time
 from datetime import datetime
@@ -33,7 +32,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.services.scan_service import GovernanceBotService
     from agentclaw.community.plugin_api.cache import CachePlugin
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # TTL for the once-lock: 2 days — generous buffer over single-day scope.
 _ONCE_LOCK_TTL_SECONDS = 2 * 86400
@@ -149,7 +148,7 @@ class GovernanceBotLifecycle(LifecycleBase):
 
         started = datetime.now()
         try:
-            summary = asyncio.run(self._service.process_cron_tick())
+            summary = self._service.process_cron_tick()
             duration = (datetime.now() - started).total_seconds()
             log.info(
                 "[GovernanceLifecycle] Scan completed: run_id=%s, "

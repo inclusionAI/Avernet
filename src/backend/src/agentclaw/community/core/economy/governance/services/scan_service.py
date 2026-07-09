@@ -14,7 +14,7 @@ No offline data judgment — that responsibility belongs to
 """
 from __future__ import annotations
 
-import logging
+from agentclaw.community.log import get_logger
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -22,16 +22,20 @@ from typing import TYPE_CHECKING, Any
 
 from injector import inject
 
-from agentclaw.community.core.economy.governance.contracts.enums import AuditAction
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceNotifyLog,
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.domain.enums import (
+    AuditAction,
+    GovernanceStatus,
+    NotifyType,
+)
+from agentclaw.community.core.economy.governance.domain.domain import (
+    FrozenSnapshot,
+    GovernanceNotification,
+    GovernanceTicket,
 )
 from agentclaw.community.core.economy.governance.services.notify_builder_service import (
     build_card_notification_data,
     build_governance_reason,
     build_tc_card_detail_link,
-    render_governance_remind,
 )
 
 
@@ -59,9 +63,7 @@ when False, no further reminders are scheduled after the rhythm is exhausted."""
 
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.economy.governance.contracts.protocols import (
-        GovernanceNotifySender,
-    )
+    from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
     from agentclaw.community.core.economy.governance.repositories.audit_repo import (
         GovernanceAuditRepository,
     )
@@ -74,9 +76,18 @@ if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.services.admin_service import (
         GovernanceAdminService,
     )
-    from agentclaw.community.plugin_api.database_protocol import DatabasePlugin
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class SendResult:
+    """Result of a single notification send attempt."""
+
+    notification_id: str
+    success: bool
+    external_message_id: str | None = None
+    actual_channel: str | None = None
 
 
 @dataclass
@@ -106,16 +117,14 @@ class GovernanceBotService:
     @inject
     def __init__(
         self,
-        db: DatabasePlugin,
         task_repo: TaskRecordRepository,
         admin_svc: GovernanceAdminService,
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         config: Any,  # EconomyGovernanceConfig
-        notify_sender: GovernanceNotifySender,
-        dingtalk_config: Any = None,  # GovernanceDingTalkConfig
+        notify_sender: NotifySenderPlugin,
+        dingtalk_config: Any = None,  # GovernanceDingTalkConfig (retained for tc_card detail_link)
     ) -> None:
-        self._db = db
         self._task_repo = task_repo
         self._admin_svc = admin_svc
         self._notify_repo = notify_repo
@@ -137,7 +146,7 @@ class GovernanceBotService:
     # Public API
     # ------------------------------------------------------------------
 
-    async def process_cron_tick(
+    def process_cron_tick(
         self,
         dry_run: bool | None = None,
         run_id: str | None = None,
@@ -242,21 +251,6 @@ class GovernanceBotService:
         return summary
 
     # ------------------------------------------------------------------
-    # Backward compat: process_run delegates to process_cron_tick
-    # ------------------------------------------------------------------
-
-    async def process_run(
-        self,
-        scan_date: object = None,
-        dry_run: bool | None = None,
-        run_id: str | None = None,
-        skip_delivery: bool = False,
-        notify_source: str = "cron",
-    ) -> CronTickSummary:
-        """Backward-compat entry point — delegates to process_cron_tick."""
-        return await self.process_cron_tick(dry_run=dry_run, run_id=run_id)
-
-    # ------------------------------------------------------------------
     # Step 2: Send pending notifies (§7.3.1)
     # ------------------------------------------------------------------
 
@@ -300,43 +294,43 @@ class GovernanceBotService:
                 if ticket is None:
                     # No ticket found — cancel via self-managed session
                     self._notify_repo.cancel_pending_by_ticket(
-                        notify_row.get("notification_id"),
+                        notify_row.notification_id,
                     )
                     summary.cancelled_count += 1
                     continue
 
-                if ticket.get("governance_status") != "open":
+                if ticket.governance_status != GovernanceStatus.OPEN:
                     self._audit_repo.add_audit(
                         run_id,
-                        bot_id=notify_row.get("bot_id"),
-                        owner_id=notify_row.get("owner_id"),
-                        notification_id=notify_row.get("notification_id"),
-                        check_result=notify_row.get("governance_decision"),
-                        governance_decision=notify_row.get("governance_decision"),
+                        bot_id=notify_row.bot_id,
+                        owner_id=notify_row.owner_id,
+                        notification_id=notify_row.notification_id,
+                        check_result=notify_row.decision_at_create,
+                        governance_decision=notify_row.decision_at_create,
                         action_taken=AuditAction.NOTIFY_CANCELLED_NON_OPEN,
                         source="online_cron",
                         dry_run=0,
                     )
                     self._notify_repo.cancel_pending_by_ticket(
-                        notify_row.get("ticket_id"),
+                        notify_row.ticket_id,
                     )
                     summary.cancelled_count += 1
                     continue
 
-                if ticket.get("latest_decision") != "actionable":
+                if ticket.current_decision != "actionable":
                     self._audit_repo.add_audit(
                         run_id,
-                        bot_id=notify_row.get("bot_id"),
-                        owner_id=notify_row.get("owner_id"),
-                        notification_id=notify_row.get("notification_id"),
-                        check_result=notify_row.get("governance_decision"),
-                        governance_decision=notify_row.get("governance_decision"),
+                        bot_id=notify_row.bot_id,
+                        owner_id=notify_row.owner_id,
+                        notification_id=notify_row.notification_id,
+                        check_result=notify_row.decision_at_create,
+                        governance_decision=notify_row.decision_at_create,
                         action_taken=AuditAction.NOTIFY_CANCELLED_NOT_ACTIONABLE,
                         source="online_cron",
                         dry_run=0,
                     )
                     self._notify_repo.cancel_pending_by_ticket(
-                        notify_row.get("ticket_id"),
+                        notify_row.ticket_id,
                     )
                     summary.cancelled_count += 1
                     continue
@@ -353,19 +347,19 @@ class GovernanceBotService:
 
                 # Atomic claim (§7.3.1 Step 4)
                 claimed = self._notify_repo.claim_pending(
-                    notify_row.get("notification_id"), now,
+                    notify_row.notification_id, now,
                 )
                 if not claimed:
                     continue  # Another consumer already claimed
 
                 # Send (§7.3.1 Step 5)
-                success = self._send_notification(notify_row)
+                result = self._send_notification(notify_row)
 
-                if success:
+                if result.success:
                     # Mark sent (§7.3.1 Step 5)
                     self._notify_repo.mark_sent(
-                        notify_row.get("notification_id"),
-                        external_message_id=notify_row.get("external_message_id"),
+                        notify_row.notification_id,
+                        external_message_id=result.external_message_id,
                         sent_at=now,
                     )
                     summary.sent_count += 1
@@ -373,20 +367,20 @@ class GovernanceBotService:
                     # Audit: notification_sent (first_send or reminder)
                     audit_action = (
                         AuditAction.NOTIFICATION_SENT
-                        if notify_row.get("notify_type") == "first_send"
+                        if notify_row.notify_type == NotifyType.FIRST_SEND
                         else AuditAction.REMIND_SENT
                     )
                     self._audit_repo.add_audit(
                         run_id,
-                        bot_id=notify_row.get("bot_id"),
-                        owner_id=notify_row.get("owner_id"),
-                        notification_id=notify_row.get("notification_id"),
-                        check_result=notify_row.get("governance_decision"),
-                        governance_decision=notify_row.get("governance_decision"),
-                        hit_dimensions=notify_row.get("hit_dimensions"),
-                        expected_token_saving=notify_row.get("expected_token_saving"),
-                        saving_ratio=float(notify_row.get("saving_ratio"))
-                        if notify_row.get("saving_ratio") else None,
+                        bot_id=notify_row.bot_id,
+                        owner_id=notify_row.owner_id,
+                        notification_id=notify_row.notification_id,
+                        check_result=notify_row.decision_at_create,
+                        governance_decision=notify_row.decision_at_create,
+                        hit_dimensions=notify_row.triggered_dimensions,
+                        expected_token_saving=notify_row.estimated_saving_tokens,
+                        saving_ratio=float(notify_row.saving_ratio)
+                        if notify_row.saving_ratio else None,
                         action_taken=audit_action,
                         source="online_cron",
                         dry_run=0,
@@ -403,10 +397,10 @@ class GovernanceBotService:
                     # Failed → revert or terminal failure
                     max_attempts = _MAX_SEND_ATTEMPTS
                     # Read actual attempt count from the row after claim
-                    attempt_count = notify_row.get("send_attempt_count") or 1
+                    attempt_count = notify_row.send_attempt_count or 1
                     is_terminal = attempt_count >= max_attempts
                     self._notify_repo.mark_send_failed(
-                        notify_row.get("notification_id"),
+                        notify_row.notification_id,
                         error_msg="Send failed",
                         is_terminal=is_terminal,
                     )
@@ -420,15 +414,15 @@ class GovernanceBotService:
                     )
                     self._audit_repo.add_audit(
                         run_id,
-                        bot_id=notify_row.get("bot_id"),
-                        owner_id=notify_row.get("owner_id"),
-                        notification_id=notify_row.get("notification_id"),
-                        check_result=notify_row.get("governance_decision"),
-                        governance_decision=notify_row.get("governance_decision"),
-                        hit_dimensions=notify_row.get("hit_dimensions"),
-                        expected_token_saving=notify_row.get("expected_token_saving"),
-                        saving_ratio=float(notify_row.get("saving_ratio"))
-                        if notify_row.get("saving_ratio") else None,
+                        bot_id=notify_row.bot_id,
+                        owner_id=notify_row.owner_id,
+                        notification_id=notify_row.notification_id,
+                        check_result=notify_row.decision_at_create,
+                        governance_decision=notify_row.decision_at_create,
+                        hit_dimensions=notify_row.triggered_dimensions,
+                        expected_token_saving=notify_row.estimated_saving_tokens,
+                        saving_ratio=float(notify_row.saving_ratio)
+                        if notify_row.saving_ratio else None,
                         action_taken=audit_action,
                         source="online_cron",
                         error_msg="Send failed" if not is_terminal
@@ -439,7 +433,7 @@ class GovernanceBotService:
             except Exception:
                 log.exception(
                     "[GovernanceCron] Error processing notify_id=%s",
-                    notify_row.get("notification_id"),
+                    notify_row.notification_id,
                 )
                 summary.errors += 1
 
@@ -483,8 +477,8 @@ class GovernanceBotService:
                     break
 
                 # Dedup check (§7.3.2)
-                if ticket.get("ticket_id") and self._notify_repo.has_pending_or_sending_reminder(
-                    ticket.get("ticket_id"),
+                if ticket.ticket_id and self._notify_repo.has_pending_or_sending_reminder(
+                    ticket.ticket_id,
                 ):
                     continue
 
@@ -492,29 +486,27 @@ class GovernanceBotService:
                 notification_id = uuid.uuid4().hex
                 notification_md = self._render_reminder_md(ticket, now)
 
-                notify_row = GovernanceNotifyLog(
+                notify_row = GovernanceNotification.create(
                     notification_id=notification_id,
-                    ticket_id=ticket.get("ticket_id"),
-                    bot_id=ticket.get("bot_id"),
-                    bot_name=ticket.get("bot_name"),
-                    owner_id=ticket.get("owner_id"),
-                    worker_id=ticket.get("worker_id"),
-                    dt_version=ticket.get("dt_version"),
-                    governance_decision=ticket.get("latest_decision") or "actionable",
-                    hit_dimensions=ticket.get("hit_dimensions"),
-                    hit_dimensions_count=ticket.get("hit_dimensions_count"),
-                    expected_token_saving=ticket.get("expected_token_saving"),
-                    saving_ratio=ticket.get("saving_ratio"),
-                    notification_md=notification_md,
-                    notification_structured=ticket.get("notification_structured"),
-                    governance_max_priority=ticket.get("governance_max_priority"),
-                    notify_status="pending",
-                    notify_type="reminder",
+                    ticket_id=ticket.ticket_id,
+                    bot_id=ticket.bot_id,
+                    bot_name=ticket.bot_name,
+                    owner_id=ticket.owner_id,
+                    worker_id=ticket.worker_id,
+                    snapshot=FrozenSnapshot(
+                        dt_version=ticket.dt_version,
+                        decision_at_create=ticket.current_decision or "actionable",
+                        triggered_dimensions=ticket.triggered_dimensions,
+                        hit_dimensions_count=ticket.hit_dimensions_count,
+                        severity=ticket.severity,
+                        estimated_saving_tokens=ticket.estimated_saving_tokens,
+                        saving_ratio=float(ticket.saving_ratio) if ticket.saving_ratio else None,
+                        notification_md=notification_md,
+                        notification_structured=ticket.notification_structured,
+                    ),
+                    notify_type=NotifyType.REMINDER,
                     notify_source="online_cron",
-                    notify_channel=self._config.notify_channel,
-                    send_attempt_count=0,
-                    # Sealed column — required by NOT NULL constraint
-                    governance_cycle_id=ticket.get("ticket_id") or uuid.uuid4().hex,
+                    channel=self._config.notify_channel,
                 )
                 self._notify_repo.add_notification(notify_row)
 
@@ -526,15 +518,15 @@ class GovernanceBotService:
                 # Audit reminder scheduled
                 self._audit_repo.add_audit(
                     run_id,
-                    bot_id=ticket.get("bot_id"),
-                    owner_id=ticket.get("owner_id"),
+                    bot_id=ticket.bot_id,
+                    owner_id=ticket.owner_id,
                     notification_id=notification_id,
-                    check_result=ticket.get("latest_decision"),
-                    governance_decision=ticket.get("latest_decision"),
-                    hit_dimensions=ticket.get("hit_dimensions"),
-                    expected_token_saving=ticket.get("expected_token_saving"),
-                    saving_ratio=float(ticket.get("saving_ratio"))
-                    if ticket.get("saving_ratio") else None,
+                    check_result=ticket.current_decision,
+                    governance_decision=ticket.current_decision,
+                    hit_dimensions=ticket.triggered_dimensions,
+                    expected_token_saving=ticket.estimated_saving_tokens,
+                    saving_ratio=float(ticket.saving_ratio)
+                    if ticket.saving_ratio else None,
                     action_taken=AuditAction.REMIND_SCHEDULED,
                     source="online_cron",
                     dry_run=0,
@@ -545,7 +537,7 @@ class GovernanceBotService:
             except Exception:
                 log.exception(
                     "[GovernanceCron] Error creating reminder for ticket_id=%s",
-                    ticket.get("ticket_id"),
+                    ticket.ticket_id,
                 )
                 summary.errors += 1
 
@@ -564,37 +556,28 @@ class GovernanceBotService:
 
         for ticket in due_tickets:
             try:
-                # Update ticket via self-managed session
-                with self._db.orm_session() as s:
-                    db_ticket = (
-                        s.query(GovernanceTaskRecordDaily)
-                        .filter(
-                            GovernanceTaskRecordDaily.ticket_id == ticket.get("ticket_id"),
-                        )
-                        .one_or_none()
-                    )
-                    if db_ticket is None:
-                        continue
-                    db_ticket.governance_status = "waiting_review"
-                    db_ticket.review_reason = "schedule_due"
-                    db_ticket.remind_at = None
+                # Transition via Repo command method
+                self._task_repo.transition_schedule_due(
+                    ticket.ticket_id,
+                    review_reason="schedule_due",
+                )
 
                 # Cancel pending notify (waiting_review = no sends)
-                if ticket.get("ticket_id"):
+                if ticket.ticket_id:
                     self._notify_repo.cancel_pending_by_ticket(
-                        ticket.get("ticket_id"),
+                        ticket.ticket_id,
                     )
 
                 self._audit_repo.add_audit(
                     run_id,
-                    bot_id=ticket.get("bot_id"),
-                    owner_id=ticket.get("owner_id"),
-                    check_result=ticket.get("latest_decision"),
-                    governance_decision=ticket.get("governance_decision"),
-                    hit_dimensions=ticket.get("hit_dimensions"),
-                    expected_token_saving=ticket.get("expected_token_saving"),
-                    saving_ratio=float(ticket.get("saving_ratio"))
-                    if ticket.get("saving_ratio") else None,
+                    bot_id=ticket.bot_id,
+                    owner_id=ticket.owner_id,
+                    check_result=ticket.current_decision,
+                    governance_decision=ticket.initial_decision,
+                    hit_dimensions=ticket.triggered_dimensions,
+                    expected_token_saving=ticket.estimated_saving_tokens,
+                    saving_ratio=float(ticket.saving_ratio)
+                    if ticket.saving_ratio else None,
                     action_taken=AuditAction.SCHEDULE_DUE,
                     source="online_cron",
                     dry_run=0,
@@ -605,7 +588,7 @@ class GovernanceBotService:
             except Exception:
                 log.exception(
                     "[GovernanceCron] Error processing schedule_due for ticket_id=%s",
-                    ticket.get("ticket_id"),
+                    ticket.ticket_id,
                 )
                 summary.errors += 1
 
@@ -636,39 +619,28 @@ class GovernanceBotService:
         now = datetime.now()
         for ticket in eligible:
             try:
-                # Update ticket via self-managed session
-                with self._db.orm_session() as s:
-                    db_ticket = (
-                        s.query(GovernanceTaskRecordDaily)
-                        .filter(
-                            GovernanceTaskRecordDaily.ticket_id == ticket.get("ticket_id"),
-                        )
-                        .one_or_none()
-                    )
-                    if db_ticket is None:
-                        continue
-                    db_ticket.governance_status = "closed"
-                    db_ticket.close_reason = "auto_silenced_normal"
-                    db_ticket.closed_at = now
-                    db_ticket.active_worker = None
-                    db_ticket.remind_at = None
+                # Auto-silence close via Repo command method
+                self._task_repo.auto_silence_close(
+                    ticket.ticket_id,
+                    closed_at=now,
+                )
 
                 # Cancel any pending notify for this ticket
-                if ticket.get("ticket_id"):
+                if ticket.ticket_id:
                     self._notify_repo.cancel_pending_by_ticket(
-                        ticket.get("ticket_id"),
+                        ticket.ticket_id,
                     )
 
                 self._audit_repo.add_audit(
                     run_id,
-                    bot_id=ticket.get("bot_id"),
-                    owner_id=ticket.get("owner_id"),
-                    check_result=ticket.get("latest_decision"),
-                    governance_decision=ticket.get("governance_decision"),
-                    hit_dimensions=ticket.get("hit_dimensions"),
-                    expected_token_saving=ticket.get("expected_token_saving"),
-                    saving_ratio=float(ticket.get("saving_ratio"))
-                    if ticket.get("saving_ratio") else None,
+                    bot_id=ticket.bot_id,
+                    owner_id=ticket.owner_id,
+                    check_result=ticket.current_decision,
+                    governance_decision=ticket.initial_decision,
+                    hit_dimensions=ticket.triggered_dimensions,
+                    expected_token_saving=ticket.estimated_saving_tokens,
+                    saving_ratio=float(ticket.saving_ratio)
+                    if ticket.saving_ratio else None,
                     action_taken=AuditAction.AUTO_SILENCE_CONVERGED,
                     source="online_cron",
                     dry_run=0,
@@ -680,7 +652,7 @@ class GovernanceBotService:
                 log.exception(
                     "[GovernanceCron] Error in auto_silence_converge "
                     "for ticket_id=%s",
-                    ticket.get("ticket_id"),
+                    ticket.ticket_id,
                 )
                 summary.errors += 1
 
@@ -698,8 +670,8 @@ class GovernanceBotService:
     def _advance_reminder_chain(
         self,
         *,
-        ticket: dict,
-        notify_row: dict,
+        ticket: GovernanceTicket,
+        notify_row: GovernanceNotification,
         now: datetime,
         run_id: str,
     ) -> None:
@@ -717,15 +689,15 @@ class GovernanceBotService:
 
         new_remind_at: datetime | None = None
 
-        if notify_row.get("notify_type") == "first_send":
+        if notify_row.notify_type == NotifyType.FIRST_SEND:
             # First send → schedule first reminder
             if remind_delays:
                 new_remind_at = now + timedelta(days=remind_delays[0])
             # remind_count stays 0 until reminder actually sent
 
-        elif notify_row.get("notify_type") == "reminder":
+        elif notify_row.notify_type == NotifyType.REMINDER:
             # Reminder sent → increment remind_count and schedule next
-            count = (ticket.get("remind_count") or 0) + 1
+            count = (ticket.remind_count or 0) + 1
 
             if count < len(remind_delays):
                 # Use the next delay in the rhythm
@@ -737,85 +709,111 @@ class GovernanceBotService:
                 # No more reminders
                 new_remind_at = None
 
-        # Persist remind_at change
-        with self._db.orm_session() as s:
-            db_ticket = (
-                s.query(GovernanceTaskRecordDaily)
-                .filter(
-                    GovernanceTaskRecordDaily.ticket_id == ticket.get("ticket_id"),
-                )
-                .one_or_none()
+        # Persist remind_at change via Repo command method
+        if notify_row.notify_type == NotifyType.REMINDER:
+            self._task_repo.advance_reminder(
+                ticket.ticket_id,
+                remind_at=new_remind_at,
+                is_reminder=True,
+                remind_count_delta=1,
             )
-            if db_ticket is not None:
-                if notify_row.get("notify_type") == "reminder":
-                    db_ticket.remind_count = (db_ticket.remind_count or 0) + 1
-                db_ticket.remind_at = new_remind_at
+        else:
+            self._task_repo.advance_reminder(
+                ticket.ticket_id,
+                remind_at=new_remind_at,
+            )
 
     # ------------------------------------------------------------------
     # Send dispatch
     # ------------------------------------------------------------------
 
-    def _send_notification(self, notify_row: dict) -> bool:
+    def _send_notification(self, notify: GovernanceNotification) -> SendResult:
         """Send a notification via configured channel.
 
-        Returns True on success, False on failure.
+        Returns SendResult indicating success/failure and metadata.
         """
-        user_id = notify_row.get("owner_id")
-        notify_channel = notify_row.get("notify_channel", "markdown") or "markdown"
+        from agentclaw.community.plugin_api.notify_sender import NotifyMessage
 
-        if notify_channel == "tc_card":
-            external_id = self._try_send_tc_card(notify_row, user_id)
-            if external_id is not None:
-                notify_row["external_message_id"] = external_id
-                return True
-            # Degrade to Markdown
-            notify_row["notify_channel"] = "markdown"
-
-        # Markdown channel
-        content = notify_row.get("notification_md") or ""
-        external_id = self._notify_sender.send_markdown(
-            user_id=user_id,
-            title="🔔 Bot 治理通知" if notify_row.get("notify_type") == "first_send" else "⚠️ 治理通知提醒",
-            content=content,
+        user_id = notify.owner_id
+        notify_channel = notify.channel or "markdown"
+        title = (
+            "🔔 Bot 治理通知"
+            if notify.notify_type == NotifyType.FIRST_SEND
+            else "⚠️ 治理通知提醒"
         )
-        if external_id:
-            notify_row["external_message_id"] = external_id
-            return True
-        return False
 
-    def _try_send_tc_card(
-        self, notify_row: dict, user_id: str,
-    ) -> str | None:
-        """Attempt TC card send, returns external_message_id or None."""
+        # Build channel-agnostic message; tc_card extras populated only when needed.
+        deep_link = ""
+        extra: dict[str, Any] = {}
+        reason = ""  # Simplified reason from build_governance_reason (tc_card only)
+        if notify_channel == "tc_card":
+            tc_payload = self._build_tc_card_payload(notify, user_id)
+            if tc_payload is not None:
+                reason, deep_link, extra = tc_payload
+            else:
+                # TC card build failed → degrade to markdown
+                notify_channel = "markdown"
+
+        # For tc_card channel, use simplified reason; for markdown, use
+        # notification_md (full Markdown with action items & suggestions).
+        msg_body = reason if (notify_channel == "tc_card" and reason) else (notify.notification_md or "")
+        msg = NotifyMessage(
+            title=title,
+            body=msg_body,
+            recipient=user_id,
+            deep_link=deep_link,
+            extra=extra,
+        )
+        external_id = self._notify_sender.send(msg, channel=notify_channel)
+        if external_id:
+            return SendResult(
+                notification_id=notify.notification_id,
+                success=True,
+                external_message_id=external_id,
+                actual_channel=notify_channel,
+            )
+        return SendResult(
+            notification_id=notify.notification_id,
+            success=False,
+        )
+
+    def _build_tc_card_payload(
+        self, notify: GovernanceNotification, user_id: str,
+    ) -> tuple[str, str, dict[str, Any]] | None:
+        """Build TC card reason, deep_link + extra dict for NotifyMessage.
+
+        Returns (reason, deep_link, extra) on success, None on build failure
+        (caller should degrade to markdown).
+        """
         try:
             reason = build_governance_reason(
-                notification_structured=notify_row.get("notification_structured"),
-                bot_name=notify_row.get("bot_name"),
-                dt_version=notify_row.get("dt_version"),
-                hit_dimensions=notify_row.get("hit_dimensions"),
-                governance_max_priority=notify_row.get("governance_max_priority"),
-                expected_token_saving=notify_row.get("expected_token_saving"),
-                saving_ratio=notify_row.get("saving_ratio"),
+                notification_structured=notify.notification_structured,
+                bot_name=notify.bot_name,
+                dt_version=notify.dt_version,
+                hit_dimensions=notify.triggered_dimensions,
+                governance_max_priority=notify.severity,
+                expected_token_saving=notify.estimated_saving_tokens,
+                saving_ratio=notify.saving_ratio,
                 task_summary=None,
             )
 
             notification_data = build_card_notification_data(
-                notification_structured=notify_row.get("notification_structured"),
-                notification_id=notify_row.get("notification_id"),
-                bot_id=notify_row.get("bot_id"),
-                bot_name=notify_row.get("bot_name"),
-                owner_id=notify_row.get("owner_id"),
-                dt_version=notify_row.get("dt_version"),
-                expected_token_saving=notify_row.get("expected_token_saving"),
-                saving_ratio=notify_row.get("saving_ratio"),
-                governance_max_priority=notify_row.get("governance_max_priority"),
+                notification_structured=notify.notification_structured,
+                notification_id=notify.notification_id,
+                bot_id=notify.bot_id,
+                bot_name=notify.bot_name,
+                owner_id=notify.owner_id,
+                dt_version=notify.dt_version,
+                expected_token_saving=notify.estimated_saving_tokens,
+                saving_ratio=notify.saving_ratio,
+                governance_max_priority=notify.severity,
             )
             iframe_callback_url = (
                 self._dingtalk_config.iframe_callback_url
                 if self._dingtalk_config else ""
             )
             detail_link = build_tc_card_detail_link(
-                bot_id=notify_row.get("bot_id"),
+                bot_id=notify.bot_id,
                 card_id=self._config.tc_card_id,
                 notification_data=notification_data,
                 base_url=self._config.tc_card_preview_url,
@@ -823,19 +821,18 @@ class GovernanceBotService:
                 staff_id=user_id,
             )
 
-            return self._notify_sender.send_tc_card(
-                user_id=user_id,
-                reason=reason,
-                detail_link=detail_link,
-                bot_id=notify_row.get("bot_id"),
-                card_id=self._config.tc_card_id,
-                notification_data=notification_data,
-                out_track_id_prefix="gov-notify",
-            )
+            extra = {
+                "bot_id": notify.bot_id,
+                "card_id": self._config.tc_card_id,
+                "notification_data": notification_data,
+                "out_track_id_prefix": "gov-notify",
+            }
+            # Override body with reason for TC card rendering
+            return reason, detail_link, extra
         except Exception:
             log.exception(
-                "[GovernanceCron] TC card send failed for notification_id=%s",
-                notify_row.get("notification_id"),
+                "[GovernanceCron] TC card build failed for notification_id=%s",
+                notify.notification_id,
             )
             return None
 
@@ -844,28 +841,25 @@ class GovernanceBotService:
     # ------------------------------------------------------------------
 
     def _find_ticket_for_notify(
-        self, notify_row: dict,
-    ) -> dict | None:
+        self, notify: GovernanceNotification,
+    ) -> GovernanceTicket | None:
         """Find the ticket for a notify_log row via ticket_id."""
-        if not notify_row.get("ticket_id"):
+        if not notify.ticket_id:
             return None
-        return self._task_repo.find_by_ticket_id(notify_row.get("ticket_id"))
+        return self._task_repo.find_by_ticket_id(notify.ticket_id)
 
     @staticmethod
     def _render_reminder_md(
-        ticket: dict, now: datetime,
+        ticket: GovernanceTicket, now: datetime,
     ) -> str:
         """Render reminder markdown from ticket fields."""
-        days_since = (now - ticket.get("gmt_create")).days if ticket.get("gmt_create") else 0
-        return render_governance_remind(
-            bot_name=ticket.get("bot_name"),
-            dt_version=ticket.get("dt_version"),
-            hit_dimensions=ticket.get("hit_dimensions"),
-            governance_max_priority=ticket.get("governance_max_priority"),
-            remind_count=ticket.get("remind_count") or 0,
-            days_since_create=days_since,
-            bot_id=ticket.get("bot_id"),
-            notification_id="",  # Will be filled when notify is created
+        days_since = (now - ticket.last_sync_at).days if ticket.last_sync_at else 0
+        return build_governance_reason(
+            bot_name=ticket.bot_name,
+            dt_version=ticket.dt_version,
+            hit_dimensions=ticket.triggered_dimensions,
+            governance_max_priority=ticket.severity,
+            overdue_days=days_since,
         )
 
     def _should_skip_delivery(self) -> bool:
@@ -874,15 +868,3 @@ class GovernanceBotService:
             return False
         weekday = datetime.now().weekday()
         return weekday >= 5
-
-    # ------------------------------------------------------------------
-    # Legacy data-readiness method (kept for backward compat)
-    # ------------------------------------------------------------------
-
-    def is_data_ready(self, scan_date: object) -> bool:
-        """Legacy method — always returns True for cron mode."""
-        return True
-
-    def write_data_not_ready_audit_once(self, scan_date: object, *, reason: str) -> None:
-        """Legacy method — no-op in cron mode."""
-        pass
