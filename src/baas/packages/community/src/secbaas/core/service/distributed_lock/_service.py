@@ -42,6 +42,19 @@ from secbaas.logger import get_logger
 logger = get_logger("core-service")
 
 
+def _is_unique_constraint_violation(exc: Exception) -> bool:
+    """判断异常是否为唯一索引冲突（并发加锁时的正常竞争，非系统错误）。"""
+    from sqlalchemy.exc import IntegrityError
+
+    if isinstance(exc, IntegrityError):
+        msg = str(exc.orig).lower() if exc.orig else str(exc).lower()
+        return any(
+            kw in msg
+            for kw in ("duplicate", "unique", "constraint")
+        )
+    return False
+
+
 @dataclass
 class LockContext:
     """锁上下文，用于跟踪锁状态"""
@@ -329,9 +342,15 @@ class DistributedLockService:
             return False
 
         except Exception as e:
-            logger.error(
-                f"[_try_acquire_lock_internal] Error acquiring lock '{lock_name}': {e}"
-            )
+            if _is_unique_constraint_violation(e):
+                logger.info(
+                    "[_try_acquire_lock_internal] Lock '%s' concurrently acquired by another holder",
+                    lock_name,
+                )
+            else:
+                logger.error(
+                    f"[_try_acquire_lock_internal] Error acquiring lock '{lock_name}': {e}"
+                )
             return False
 
     def release_lock(self, lock_name: str, lock_holder: str | None = None) -> bool:
