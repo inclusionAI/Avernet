@@ -30,6 +30,7 @@ user_config:
     secret: "stub"          # stub | real
     scheduler: "stub"       # stub | real
     cache: "stub"           # stub | real
+    engine_adapter: "stub"  # stub | real (aicoding/hermes/claude_code engine adapter)
     database:
       plugin_database: "SQLITE_ORM"    # ZDAS_ORM (production ORM) | SQLITE_ORM (test only)
     sandbox:
