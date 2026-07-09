@@ -14,7 +14,7 @@ Avernet is the open infrastructure for agent organizations and open agent ecosys
 
 It provides the core systems that let humans and heterogeneous agents **live, connect, coordinate, execute, and evolve together** — across applications, runtimes, and collaborative workflows.
 
-Avernet starts from a simple idea:
+Avernet starts with a simple idea:
 
 > The challenge is not just making agents smarter, but enabling humans and agents to work coherently at organizational scale.
 
