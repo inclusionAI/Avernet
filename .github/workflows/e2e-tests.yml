@@ -187,4 +187,6 @@ jobs:
             src/bcs/target/cov-e2e/cobertura.xml
             src/bcs/target/cov-e2e/coverage.txt
             src/bcs/target/cov-e2e/summary.json
+            src/bcs/target/cov-e2e/endpoint_coverage.txt
+            src/bcs/target/cov-e2e/endpoint_coverage.xml
           if-no-files-found: ignore
