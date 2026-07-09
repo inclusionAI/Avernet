@@ -2,12 +2,12 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 
-## Task 1: Add `get_object` to the object-storage abstraction
+## Task 1: [x] Add `get_object` to the object-storage abstraction
 - **Goal:** Give `ObjectStoragePlugin` a read method so offloaded artifacts can be
   fetched back.
 - **Files:** `src/backend/src/agentclaw/community/plugin_api/object_storage.py`
 - **Done when:**
-  - [ ] Protocol declares `get_object(self, key: str) -> bytes | None` with a
+  - [x] Protocol declares `get_object(self, key: str) -> bytes | None` with a
         docstring matching the "swallow transport errors, return None" convention.
 - **Depends on:** —
 
