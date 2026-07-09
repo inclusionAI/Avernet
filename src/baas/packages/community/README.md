@@ -85,7 +85,7 @@ Key configuration sections:
 |---|---|
 | `module_config.web` | HTTP server settings (port, workers) |
 | `user_config.plugins` | Plugin backend selection (stub/real) |
-| `user_config.sandbox` | Sandbox provider configs (Arca, K8s, Docker, etc.) |
+| `user_config.plugins.sandbox` | Sandbox provider configs (Arca, K8s, Docker, etc.) |
 | `user_config.bot_service` | Bot runtime proxy settings |
 | `user_config.bot_run_queue` | Task queue worker config |
 | `user_config.device_ttl_timer` | Device TTL renewal schedule |
