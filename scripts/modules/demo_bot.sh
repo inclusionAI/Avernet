@@ -74,7 +74,7 @@ demo_bot_find_existing() {
             | if type == "array" then . else [] end
             | map(select((.bot_name == $name) and (.entity_id == $entity_id) and ((.is_delete // 0) == 0)))
             | .[0].bot_id // empty
-        '
+        ' 2>/dev/null || true
 }
 
 demo_bot_create() {
@@ -91,7 +91,7 @@ demo_bot_create() {
             2>>"${DEMO_BOT_LOG}" || true
     )"
     printf '%s\n' "$response" >> "${DEMO_BOT_LOG}"
-    printf '%s\n' "$response" | jq -r '.data.bot_id // .data.bot.bot_id // .bot_id // empty'
+    printf '%s\n' "$response" | jq -r '.data.bot_id // .data.bot.bot_id // .bot_id // empty' 2>/dev/null || true
 }
 
 demo_bot_wait_ready() {

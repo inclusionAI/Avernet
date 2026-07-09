@@ -317,6 +317,7 @@ class LocalProcessManager:
 
         with open(config_file, "w") as f:
             json.dump(oc_config, f, indent=2, ensure_ascii=False)
+        config_file.chmod(0o600)
 
         logger.info(
             "Created openclaw config: %s, port=%s, workspace=%s",

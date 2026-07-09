@@ -41,13 +41,8 @@ baas_setup() {
 baas_start() {
     mkdir -p "${LOG_DIR}"
 
-    # Kill processes on port
-    kill_port_process 8890
-
-    # Kill old baas processes
-    kill_process_by_path "secbaas/main.py"
-
-    kill_port_process 8890
+    stop_port_processes_if_owned 8890 "${PROJECT_ROOT}" "existing BAAS"
+    stop_matching_processes_if_owned "secbaas/main.py" "${PROJECT_ROOT}" "existing BAAS process"
 
     log_info "Starting BAAS service (singlebox mode)..."
 

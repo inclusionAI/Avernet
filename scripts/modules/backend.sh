@@ -27,13 +27,8 @@ backend_setup() {
 backend_start() {
     mkdir -p "${LOG_DIR}"
 
-    # 杀掉占用端口的进程
-    kill_port_process 8888
-
-    # 杀掉旧的后端进程
-    kill_process_by_path "agentclaw/community/main.py"
-
-    kill_port_process 8888
+    stop_port_processes_if_owned 8888 "${PROJECT_ROOT}" "existing backend"
+    stop_matching_processes_if_owned "agentclaw/community/main.py" "${PROJECT_ROOT}" "existing backend process"
 
     log_info "Starting backend service..."
 
@@ -85,6 +80,7 @@ backend_start() {
     fi
 
     log_info "Engine type: ${CHAT_ENGINE}"
+    local backend_pid
     if [ "$LOCAL_MODE" = true ]; then
         # Remove existing SQLite database to start fresh
         if [ -f "${RUNTIME_DATA_DIR}/backend.db" ]; then
@@ -100,26 +96,20 @@ backend_start() {
             LOCAL_AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
             PYTHONPATH="${community_src}:${BACKEND_DIR}:${PYTHONPATH:-}" \
             nohup "${backend_cmd[@]}" < /dev/null >> "${BACKEND_LOG}" 2>&1 &
+        backend_pid=$!
     else
         SERVER_ENV=singlebox DEPLOY_PROFILE=corp CHAT_ENGINE="${CHAT_ENGINE}" \
             AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
             LOCAL_AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
             PYTHONPATH="${community_src}:${BACKEND_DIR}:${PYTHONPATH:-}" \
             nohup "${backend_cmd[@]}" < /dev/null >> "${BACKEND_LOG}" 2>&1 &
+        backend_pid=$!
     fi
 
-    local attempt=0
-    while [ "$attempt" -lt 20 ]; do
-        if backend_ready; then
-            break
-        fi
-        sleep 0.5
-        attempt=$((attempt + 1))
-    done
+    backend_wait_until_ready "$backend_pid" || return 1
 
     # 验证进程是否启动成功
-    local backend_pid=$(ps aux | grep -v grep | grep "agentclaw/community/main.py" | awk '{print $2}' | head -1)
-    if [ -n "$backend_pid" ]; then
+    if kill -0 "$backend_pid" 2>/dev/null; then
         log_info "Backend started successfully (PID: $backend_pid)"
     else
         log_error "Failed to start backend. Check logs at ${BACKEND_LOG}"
@@ -127,23 +117,38 @@ backend_start() {
     fi
 }
 
+backend_wait_until_ready() {
+    local pid="${1:-}"
+    local attempt=0
+    local max_attempts="${BACKEND_READY_ATTEMPTS:-20}"
+    while [ "$attempt" -lt "$max_attempts" ]; do
+        if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+            log_error "Backend process exited before becoming ready. Last backend log lines:"
+            tail -n 40 "${BACKEND_LOG}" 2>/dev/null | while IFS= read -r line; do
+                log_error "  ${line}"
+            done
+            backend_stop
+            return 1
+        fi
+        if backend_ready; then
+            return 0
+        fi
+        sleep 0.5
+        attempt=$((attempt + 1))
+    done
+
+    log_error "Backend did not become ready. Last backend log lines:"
+    tail -n 40 "${BACKEND_LOG}" 2>/dev/null | while IFS= read -r line; do
+        log_error "  ${line}"
+    done
+    backend_stop
+    return 1
+}
+
 backend_stop() {
     log_info "Stopping backend..."
-    local backend_pids=$(ps aux | grep "agentclaw/community/main.py" | grep -v grep | awk '{print $2}')
-    if [ -n "$backend_pids" ]; then
-        log_info "Sending TERM to backend process(es): ${backend_pids}"
-        echo "$backend_pids" | xargs kill 2>/dev/null || true
-        for _ in 1 2 3 4 5 6 7 8 9 10; do
-            if ! ps aux | grep "agentclaw/community/main.py" | grep -v grep >/dev/null; then
-                break
-            fi
-            sleep 1
-        done
-    fi
-    # 再清理端口进程兜底
-    kill_port_process 8888
-    # 最后再检查一次端口
-    kill_port_process 8888
+    stop_matching_processes_if_owned "agentclaw/community/main.py" "${PROJECT_ROOT}" "backend process" || true
+    stop_port_processes_if_owned 8888 "${PROJECT_ROOT}" "backend" || true
     log_info "Backend stopped"
 }
 

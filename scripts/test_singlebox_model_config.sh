@@ -16,6 +16,10 @@ assert_eq() {
   [ "$expected" = "$actual" ] || fail "${label}: expected '${expected}', got '${actual}'"
 }
 
+file_mode() {
+  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"
+}
+
 setup_env() {
   unset SINGLEBOX_MODEL_CONFIG_MODE
   unset OPENCLAW_OPENAI_PROVIDER_ID
@@ -55,6 +59,7 @@ test_manual_generates_runtime_config_from_env() {
   singlebox_model_config_prepare
 
   [ -f "$SINGLEBOX_MODEL_CONFIG_FILE" ] || fail "runtime model config missing"
+  assert_eq "600" "$(file_mode "$SINGLEBOX_MODEL_CONFIG_FILE")" "manual config file mode"
   jq -e '
     .models.providers["test-provider"].baseUrl == "https://model.example.test/v1"
     and .models.providers["test-provider"].apiKey == "sk-test"
@@ -110,6 +115,7 @@ JSON
   source "$MODULE"
   singlebox_model_config_prepare
 
+  assert_eq "600" "$(file_mode "$SINGLEBOX_MODEL_CONFIG_FILE")" "home config file mode"
   jq -e '
     .models.providers["home-provider"].apiKey == "home-key"
     and .agents.defaults.model.primary == "home-provider/home-model"

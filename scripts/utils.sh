@@ -117,15 +117,17 @@ print_local_stack_runtime_paths() {
 
 print_local_stack_ready_banner() {
     local title="LOCAL STACK READY"
-    local stack_label="BCS + 5 BOTS + FRONTEND"
-    local status="[BCS OK] [5BOTS OK] [FRONTEND OK]"
+    local stack_label="FULL SINGLEBOX STACK"
+    local status_line_one="BAAS BACKEND BCS"
+    local status_line_two="5BOTS DEMO FRONTEND"
 
     if [ "${STANDALONE_MODE:-false}" = true ]; then
         title="STANDALONE STACK READY"
     fi
     if [ "${LOCAL_MODE:-true}" != true ]; then
         stack_label="BCS + FRONTEND"
-        status="[BCS OK] [FRONTEND OK]"
+        status_line_one="BCS FRONTEND"
+        status_line_two=""
     fi
 
     echo ""
@@ -133,8 +135,8 @@ print_local_stack_ready_banner() {
     print_banner_line "$GREEN" ""
     print_banner_line "$GREEN" "  ____   ____  ____     ${title}"
     print_banner_line "$GREEN" " / __ \\ / ___|| __ )    ${stack_label}"
-    print_banner_line "$GREEN" "| |  | | |    |  _ \\"
-    print_banner_line "$GREEN" "| |__| | |___ | |_) |   ${status}"
+    print_banner_line "$GREEN" "| |  | | |    |  _ \\    ${status_line_one}"
+    print_banner_line "$GREEN" "| |__| | |___ | |_) |   ${status_line_two}"
     print_banner_line "$GREEN" " \\____/ \\____||____/"
     print_banner_line "$GREEN" ""
     echo -e "${GREEN}+------------------------------------------------------------+${NC}"

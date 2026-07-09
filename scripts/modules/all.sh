@@ -30,6 +30,8 @@ all_setup() {
 all_start() {
     SINGLEBOX_COMMAND=start check_prereqs_for_services ${START_ORDER[*]} || return 1
     mkdir -p "${LOG_DIR}"
+    local started_services=()
+    local svc
 
     for svc in "${START_ORDER[@]}"; do
         if type -t "${svc}_start" &>/dev/null; then
@@ -44,8 +46,10 @@ all_start() {
             fi
             if [ "$start_rc" -ne 0 ]; then
                 log_error "${svc} start failed"
+                all_rollback_started_services "${started_services[@]}"
                 return "$start_rc"
             fi
+            started_services+=("$svc")
         else
             log_warn "No start function for ${svc} — skipping"
         fi
@@ -55,12 +59,29 @@ all_start() {
         if type -t "${svc}_ready" &>/dev/null; then
             "${svc}_ready" || {
                 log_error "${svc} is not ready after startup"
+                all_rollback_started_services "${started_services[@]}"
                 return 1
             }
         fi
     done
 
     print_local_stack_ready_banner
+}
+
+all_rollback_started_services() {
+    local started=("$@")
+    local idx svc
+    if [ "${#started[@]}" -eq 0 ]; then
+        return 0
+    fi
+
+    log_warn "Rolling back started services after startup failure..."
+    for ((idx=${#started[@]}-1; idx>=0; idx--)); do
+        svc="${started[$idx]}"
+        if type -t "${svc}_stop" &>/dev/null; then
+            "${svc}_stop" || log_warn "${svc} rollback stop failed, continuing..."
+        fi
+    done
 }
 
 all_stop() {

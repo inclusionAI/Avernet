@@ -34,9 +34,8 @@ engine_setup() {
 engine_start() {
     mkdir -p "${LOG_DIR}"
 
-    # Kill old processes on port
-    kill_port_process 20003
-    kill_process_by_path "engine.community.api.app"
+    stop_port_processes_if_owned 20003 "${PROJECT_ROOT}" "existing engine"
+    stop_matching_processes_if_owned "engine.community.api.app" "${PROJECT_ROOT}" "existing engine process"
 
     # Check start script exists
     local run_script="${ENGINE_DIR}/scripts/run.sh"
@@ -60,12 +59,13 @@ engine_start() {
     # Export engine type and start
     export CHAT_ENGINE
     nohup "${run_script}" --port 20003 -l -e "${CHAT_ENGINE}" >> "${LOG_DIR}/engine.log" 2>&1 &
+    local engine_pid=$!
 
     sleep 2
 
     # Verify process started successfully
-    if ps aux | grep -v grep | grep -q "engine.community.api.app"; then
-        log_info "Adapter started successfully (PID: $(pgrep -f "engine.community.api.app"))"
+    if kill -0 "$engine_pid" 2>/dev/null; then
+        log_info "Adapter started successfully (PID: ${engine_pid})"
         log_info "Adapter is running on port 20003 with engine: ${CHAT_ENGINE}"
     else
         log_error "Failed to start engine. Check logs at ${LOG_DIR}/engine.log"
@@ -75,8 +75,8 @@ engine_start() {
 
 engine_stop() {
     log_info "Stopping engine..."
-    kill_port_process 20003
-    kill_process_by_path "engine.community.api.app"
+    stop_port_processes_if_owned 20003 "${PROJECT_ROOT}" "engine" || true
+    stop_matching_processes_if_owned "engine.community.api.app" "${PROJECT_ROOT}" "engine process" || true
     log_info "Adapter stopped"
 }
 

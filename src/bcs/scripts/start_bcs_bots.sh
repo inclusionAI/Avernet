@@ -873,8 +873,11 @@ setup_profile_dir() {
         bot_id_config_line="      \"botId\": $(jq -cn --arg bot_id "$session_bot_uuid" '$bot_id'),"
     fi
 
-    # Create openclaw.json config
-    cat > "$profile_dir/openclaw.json" << EOF
+    # Create openclaw.json config. It may contain model API keys, so keep it
+    # readable only by the current user.
+    (
+        umask 077
+        cat > "$config_file" << EOF
 {
   "meta": {
     "lastTouchedVersion": "2026.3.12"
@@ -982,6 +985,8 @@ ${bot_id_config_line}
   }
 }
 EOF
+    ) || return 1
+    chmod 600 "$config_file" || return 1
 
     # Copy provider keys if exists
     if [ -f "$HOME/.config/moltis/provider_keys.json" ]; then

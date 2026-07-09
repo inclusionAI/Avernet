@@ -94,6 +94,24 @@ SH
   assert_eq "default" "$(demo_bot_find_existing)" "existing bot id"
 }
 
+test_find_existing_ignores_malformed_response() {
+  setup_env
+  tmpbin="$(mktemp -d)"
+  cat > "${tmpbin}/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' '<html>bad gateway</html>'
+SH
+  chmod +x "${tmpbin}/curl"
+  PATH="${tmpbin}:$PATH"
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  demo_bot_defaults
+  err_file="$(mktemp)"
+  assert_eq "" "$(demo_bot_find_existing 2>"$err_file")" "malformed list response should return empty"
+  [ ! -s "$err_file" ] || fail "malformed list response should not print jq errors"
+}
+
 test_create_posts_to_local_backend() {
   setup_env
   tmpbin="$(mktemp -d)"
@@ -112,6 +130,24 @@ SH
   assert_eq "default" "$(demo_bot_create)" "created bot id"
   grep -F 'http://127.0.0.1:8888/api/bots?user_id=mock-user' "$CURL_ARGS_FILE" >/dev/null || fail "backend create URL missing"
   grep -F 'x-user-id: mock-user' "$CURL_ARGS_FILE" >/dev/null || fail "x-user-id header missing"
+}
+
+test_create_ignores_malformed_response() {
+  setup_env
+  tmpbin="$(mktemp -d)"
+  cat > "${tmpbin}/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' '<html>bad gateway</html>'
+SH
+  chmod +x "${tmpbin}/curl"
+  PATH="${tmpbin}:$PATH"
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  demo_bot_defaults
+  err_file="$(mktemp)"
+  assert_eq "" "$(demo_bot_create 2>"$err_file")" "malformed create response should return empty"
+  [ ! -s "$err_file" ] || fail "malformed create response should not print jq errors"
 }
 
 test_create_handles_curl_failure_without_exiting() {
@@ -375,7 +411,9 @@ test_defaults_are_community_safe
 test_env_overrides_are_used
 test_bcs_bot_id_uses_backend_bot_and_entity_id
 test_find_existing_parses_backend_list
+test_find_existing_ignores_malformed_response
 test_create_posts_to_local_backend
+test_create_ignores_malformed_response
 test_create_handles_curl_failure_without_exiting
 test_wait_ready_polls_backend_status_success
 test_wait_ready_fails_on_backend_failed_status

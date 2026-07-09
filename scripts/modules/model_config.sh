@@ -88,14 +88,16 @@ singlebox_model_config_write_manual() {
     local model_name="${OPENCLAW_OPENAI_MODEL_NAME:-$model_id}"
     local model_api="${OPENCLAW_OPENAI_MODEL_API:-openai-completions}"
 
-    jq -n \
-        --arg provider_id "$provider_id" \
-        --arg base_url "$OPENCLAW_OPENAI_BASE_URL" \
-        --arg api_key "$OPENCLAW_OPENAI_API_KEY" \
-        --arg model_id "$model_id" \
-        --arg model_name "$model_name" \
-        --arg model_api "$model_api" \
-        '{
+    (
+        umask 077
+        jq -n \
+            --arg provider_id "$provider_id" \
+            --arg base_url "$OPENCLAW_OPENAI_BASE_URL" \
+            --arg api_key "$OPENCLAW_OPENAI_API_KEY" \
+            --arg model_id "$model_id" \
+            --arg model_name "$model_name" \
+            --arg model_api "$model_api" \
+            '{
           models: {
             mode: "merge",
             providers: {
@@ -134,7 +136,9 @@ singlebox_model_config_write_manual() {
               }
             }
           }
-        }' > "$output_file"
+            }' > "$output_file"
+    ) || return 1
+    chmod 600 "$output_file"
 }
 
 singlebox_model_config_home_source() {
@@ -161,7 +165,7 @@ singlebox_model_config_confirm_home_import() {
             echo "Home mode will read model fields from:"
             echo "  ${source}"
             echo "This may include local model base URLs and API keys."
-            printf "Continue? [Y/n]: "
+            printf "Continue? [y/N]: "
         } >&2
         read -r answer </dev/tty || return 1
         case "$answer" in
@@ -210,38 +214,46 @@ singlebox_model_config_write_home() {
         return 1
     fi
 
-    jq '
-    def agent_defaults:
-      if (.agents? | type) == "object" and (.agents.defaults? | type) == "object"
-      then .agents.defaults
-      else {}
-      end;
-    {
-      models: (.models // {mode: "merge", providers: {}}),
-      agents: {
-        defaults: (
-          {}
-          + (if agent_defaults.model? != null then {model: agent_defaults.model} else {} end)
-          + (if agent_defaults.models? != null then {models: agent_defaults.models} else {} end)
-          + (if agent_defaults.imageModel? != null then {imageModel: agent_defaults.imageModel} else {} end)
-        )
-      }
-    }' "$source" > "$output_file"
+    (
+        umask 077
+        jq '
+        def agent_defaults:
+          if (.agents? | type) == "object" and (.agents.defaults? | type) == "object"
+          then .agents.defaults
+          else {}
+          end;
+        {
+          models: (.models // {mode: "merge", providers: {}}),
+          agents: {
+            defaults: (
+              {}
+              + (if agent_defaults.model? != null then {model: agent_defaults.model} else {} end)
+              + (if agent_defaults.models? != null then {models: agent_defaults.models} else {} end)
+              + (if agent_defaults.imageModel? != null then {imageModel: agent_defaults.imageModel} else {} end)
+            )
+          }
+        }' "$source" > "$output_file"
+    ) || return 1
+    chmod 600 "$output_file"
 }
 
 singlebox_model_config_write_mock() {
     local output_file="$1"
-    jq -n '{
-      models: {
-        mode: "merge",
-        providers: {}
-      },
-      agents: {
-        defaults: {
-          models: {}
-        }
-      }
-    }' > "$output_file"
+    (
+        umask 077
+        jq -n '{
+          models: {
+            mode: "merge",
+            providers: {}
+          },
+          agents: {
+            defaults: {
+              models: {}
+            }
+          }
+        }' > "$output_file"
+    ) || return 1
+    chmod 600 "$output_file"
 }
 
 singlebox_model_config_prepare() {

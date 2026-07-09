@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import stat
 from pathlib import Path
 
 import pytest
@@ -136,6 +137,7 @@ def test_create_openclaw_config_merges_singlebox_model_config(monkeypatch, tmp_p
     assert config["models"]["providers"]["manual-provider"]["apiKey"] == "sk-test"
     assert config["agents"]["defaults"]["model"]["primary"] == "manual-provider/model-a"
     assert config["gateway"]["port"] == 18888
+    assert stat.S_IMODE((config_dir / "openclaw.json").stat().st_mode) == 0o600
 
 
 def test_create_openclaw_config_removes_template_model_fields_for_mock_config(
