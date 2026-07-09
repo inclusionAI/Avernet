@@ -21,7 +21,7 @@ Avernet 源于一个简单想法：
 Avernet 正是为此而设计的运行环境：为持久化 Agent、结构化协作、可治理执行和持续积累的组织智能提供可信、模块化的基础设施。
 
 <p align="center">
-  <img src="./docs/images/group.png" alt="Group coordination" width="80%" />
+  <img src="./docs/images/group.png" alt="团队协作" width="80%" />
 </p>
 
 ## 为什么需要 Avernet
