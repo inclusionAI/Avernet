@@ -8,10 +8,12 @@
 
 # Module-specific owners. Later matching rules override the repository-wide
 # fallback above.
-# /.github/ @carolynli @xianmuyq
-/docs/arch/ @carolynli @xianmuyq
+/.github/ @carolynli @xianmuyq @dxwinux @archer910517-ctrl @yuyiming
+/docs/arch/ @carolynli @xianmuyq @dxwinux @archer910517-ctrl @yuyiming
 /src/bcs/ @carolynli @vzvince @questchaos @RaymondHX
-/src/plugin/ @RaymondHX @vzvince @carolynli @questchaos
+/src/plugin/ @RaymondHX @vzvince @carolynli @questchaos @zoii
+/src/frontend/ @zoii @ClaaaaaaaaaireR @greenishzyy
+/src/bcsfuse/ @archer910517-ctrl @wienyang
 /src/backend/ @totalfrank @xianmuyq
 /src/engine/ @totalfrank @xianmuyq
 /src/baas/ @cassiuscai @pfmiles @phoenixliu @xxxxpenny @EVASHINJI
