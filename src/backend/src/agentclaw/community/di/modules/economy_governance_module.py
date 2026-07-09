@@ -89,6 +89,13 @@ def _block(name: str) -> dict[str, object]:
 # Env var overrides for governance config knobs.
 _ENV_NOTIFY_CHANNEL = "ECONOMY_GOVERNANCE_NOTIFY_CHANNEL"
 _ENV_IFRAME_CALLBACK_URL = "GOVERNANCE_IFRAME_CALLBACK_URL"
+# DingTalk credentials env overrides — take precedence over the YAML ``dingtalk``
+# block so real creds need never be committed (singlebox/local dev injects real
+# creds via env; the shipped YAML keeps dummy values). Mirrors the
+# ``ECONOMY_GOVERNANCE_*`` / ``GOVERNANCE_IFRAME_CALLBACK_URL`` override pattern.
+_ENV_DINGTALK_APP_KEY = "DINGTALK_APP_KEY"
+_ENV_DINGTALK_APP_SECRET = "DINGTALK_APP_SECRET"
+_ENV_DINGTALK_ROBOT_CODE = "DINGTALK_ROBOT_CODE"
 
 
 class EconomyGovernanceModule(Module):
@@ -459,6 +466,13 @@ class EconomyGovernanceModule(Module):
           2. YAML ``economy_governance.iframe_callback_url``
              (prepub 环境读 ``iframe_callback_url_pre``，同 bcsfuse/secbaas _pre 后缀)
 
+        Resolution order for DingTalk credentials (``app_key`` / ``app_secret`` /
+        ``robot_code``):
+          1. Env var (``DINGTALK_APP_KEY`` / ``DINGTALK_APP_SECRET`` /
+             ``DINGTALK_ROBOT_CODE``) — lets singlebox/local dev inject real creds
+             without committing them; the shipped YAML carries dummy values.
+          2. YAML ``dingtalk`` block (``app_key_pre`` etc. for prepub env).
+
         All DingTalk creds empty → DingTalkMarkdownSender with empty config (send returns None).
         """
         from agentclaw.community.utils.env_utils import get_current_env
@@ -467,13 +481,14 @@ class EconomyGovernanceModule(Module):
         env = get_current_env()
         is_pre = env in ("pre", "prepub")
 
-        app_key = str(yaml_block.get(
+        # Env override takes precedence over YAML so real creds never ship in YAML.
+        app_key = os.environ.get(_ENV_DINGTALK_APP_KEY) or str(yaml_block.get(
             "app_key_pre" if is_pre else "app_key", "",
         ))
-        app_secret = str(yaml_block.get(
+        app_secret = os.environ.get(_ENV_DINGTALK_APP_SECRET) or str(yaml_block.get(
             "app_secret_pre" if is_pre else "app_secret", "",
         ))
-        robot_code = str(yaml_block.get(
+        robot_code = os.environ.get(_ENV_DINGTALK_ROBOT_CODE) or str(yaml_block.get(
             "robot_code_pre" if is_pre else "robot_code", "",
         ))
         # iframe_callback_url: governance business config, read from
@@ -488,15 +503,23 @@ class EconomyGovernanceModule(Module):
         )
 
         if app_key:
+            from_env = any(
+                os.environ.get(v) for v in (
+                    _ENV_DINGTALK_APP_KEY,
+                    _ENV_DINGTALK_APP_SECRET,
+                    _ENV_DINGTALK_ROBOT_CODE,
+                )
+            )
             logger.info(
-                "[economy_governance_module] DingTalk credentials loaded from "
-                "YAML dingtalk block (app_key=%s***, robot_code=%s)",
+                "[economy_governance_module] DingTalk credentials loaded "
+                "(source=%s, app_key=%s***, robot_code=%s)",
+                "env" if from_env else "yaml",
                 app_key[:6] if len(app_key) >= 6 else app_key,
                 robot_code,
             )
         else:
             logger.info(
-                "[economy_governance_module] No DingTalk credentials in YAML "
+                "[economy_governance_module] No DingTalk credentials "
                 "— DingTalkMarkdownSender with empty config will be used",
             )
 
