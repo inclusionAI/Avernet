@@ -40,10 +40,10 @@ test_default_mode_runs_real_singlebox() {
   SINGLEBOX_STUB_LOG="$log" "${tmp}/scripts/ci/singlebox_coverage.sh" \
     --coverage-root "${tmp}/coverage" >/dev/null
 
-  grep -Fx -- "--local start baas backend bcs" "$log" >/dev/null || \
-    fail "default coverage mode should start the real singlebox coverage stack"
-  grep -Fx -- "--local stop bcs backend baas" "$log" >/dev/null || \
-    fail "default coverage mode should stop the real singlebox coverage stack"
+  grep -Fx -- "--standalone start baas backend bcs" "$log" >/dev/null || \
+    fail "default coverage mode should start the standalone singlebox coverage stack"
+  grep -Fx -- "--standalone stop bcs backend baas" "$log" >/dev/null || \
+    fail "default coverage mode should stop the standalone singlebox coverage stack"
 }
 
 test_mock_mode_is_not_supported() {
