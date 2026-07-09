@@ -14,14 +14,21 @@ module_config:
 user_config:
   # 插件配置
   plugins:
+    auth: "stub"
     sandbox:
       # local proc
       arca: local_proc
+      desktop: stub
+      teclaw: stub
+      k8s: stub
+      docker: stub
+      poolab: stub
     database:
       plugin_database: "SQLITE_ORM"    # ZDAS_SQL (Production RAW SQL, migrating to orm) | ZDAS_ORM (production ORM) | SQLITE_ORM (test only)
       database_url: "sqlite:////tmp/secbaas_singlebox.db"
     secret: "stub"
     cache: "stub"
+    engine_adapter: "stub"
     bot_service: "local"
 
   bot_service:
