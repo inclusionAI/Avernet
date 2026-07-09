@@ -24,6 +24,9 @@ from agentclaw.community.core.devices.services.device_service import (
     BAAS_DEVICE_PROVIDER,
     DeviceService,
 )
+from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
+    TECLAW_DEVICE_PROVIDER,
+)
 from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
     BotPublishRepositoryProtocol,
 )
@@ -34,6 +37,7 @@ from agentclaw.community.utils import env_utils
 logger = get_logger()
 
 _DEFAULT_ENGINE_TYPE = "openclaw"
+_INSTANCE_QUERY_DEVICE_PROVIDERS = {BAAS_DEVICE_PROVIDER, TECLAW_DEVICE_PROVIDER}
 
 
 class BotPublishNotFoundError(RuntimeError):
@@ -141,7 +145,7 @@ class DeviceInstanceService:
     ) -> tuple[DeviceBindingRecord, str]:
         """校验 binding 有效性并返回 ``(record, bot_uuid)``。
 
-        校验：存在 / device_provider=baas / status=ACTIVE / 同环境。
+        校验：存在 / device_provider in {baas, teclaw} / status=ACTIVE / 同环境。
 
         Raises:
             BindingNotFoundError: 校验不通过
@@ -150,9 +154,9 @@ class DeviceInstanceService:
         if record is None:
             raise BindingNotFoundError(f"Binding not found: binding_id={binding_id}")
 
-        if record.device_provider != BAAS_DEVICE_PROVIDER:
+        if record.device_provider not in _INSTANCE_QUERY_DEVICE_PROVIDERS:
             raise BindingNotFoundError(
-                f"Binding {binding_id} is not baas provider: "
+                f"Binding {binding_id} does not support instances query: "
                 f"provider={record.device_provider}"
             )
 
