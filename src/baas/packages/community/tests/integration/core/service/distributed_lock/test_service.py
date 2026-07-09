@@ -59,7 +59,7 @@ class TestDistributedLockServiceIntegration:
             assert lock.reentrant_count == 1
 
             # Verify lock exists in database
-            record = lock_repository.get_by_lock_name_for_update(lock_name)
+            record = lock_repository.get_by_lock_name(lock_name)
             assert record is not None
             assert record.lock_holder == lock.lock_holder
         finally:
@@ -103,7 +103,7 @@ class TestDistributedLockServiceIntegration:
         assert released is True
 
         # Verify lock is removed from database
-        record = lock_repository.get_by_lock_name_for_update(lock_name)
+        record = lock_repository.get_by_lock_name(lock_name)
         assert record is None
 
     def test_release_lock_wrong_holder(
@@ -124,7 +124,7 @@ class TestDistributedLockServiceIntegration:
             assert released is False
 
             # Verify lock still exists
-            record = lock_repository.get_by_lock_name_for_update(lock_name)
+            record = lock_repository.get_by_lock_name(lock_name)
             assert record is not None
         finally:
             lock_service.force_unlock(lock_name)
@@ -163,7 +163,7 @@ class TestDistributedLockServiceIntegration:
             assert released is True
 
             # Lock still exists
-            record = lock_repository.get_by_lock_name_for_update(lock_name)
+            record = lock_repository.get_by_lock_name(lock_name)
             assert record is not None
 
             # Second release
@@ -171,7 +171,7 @@ class TestDistributedLockServiceIntegration:
             assert released is True
 
             # Lock still exists
-            record = lock_repository.get_by_lock_name_for_update(lock_name)
+            record = lock_repository.get_by_lock_name(lock_name)
             assert record is not None
 
             # Third release (actually releases)
@@ -179,7 +179,7 @@ class TestDistributedLockServiceIntegration:
             assert released is True
 
             # Lock is now removed
-            record = lock_repository.get_by_lock_name_for_update(lock_name)
+            record = lock_repository.get_by_lock_name(lock_name)
             assert record is None
         finally:
             lock_service.force_unlock(lock_name)
@@ -195,11 +195,11 @@ class TestDistributedLockServiceIntegration:
             assert lock.acquired is True
 
             # Verify lock exists in database
-            record = lock_repository.get_by_lock_name_for_update(lock_name)
+            record = lock_repository.get_by_lock_name(lock_name)
             assert record is not None
 
         # After context, lock should be released
-        record = lock_repository.get_by_lock_name_for_update(lock_name)
+        record = lock_repository.get_by_lock_name(lock_name)
         assert record is None
 
     def test_try_lock_failure_context_manager(
@@ -293,7 +293,7 @@ class TestDistributedLockServiceIntegration:
         assert unlocked is True
 
         # Verify lock is removed
-        record = lock_repository.get_by_lock_name_for_update(lock_name)
+        record = lock_repository.get_by_lock_name(lock_name)
         assert record is None
 
     def test_expired_lock_can_be_acquired(
@@ -318,7 +318,7 @@ class TestDistributedLockServiceIntegration:
             assert lock.acquired is True
 
             # Verify holder is updated
-            record = lock_repository.get_by_lock_name_for_update(lock_name)
+            record = lock_repository.get_by_lock_name(lock_name)
             assert record is not None
             assert record.lock_holder == "new_holder"
         finally:
