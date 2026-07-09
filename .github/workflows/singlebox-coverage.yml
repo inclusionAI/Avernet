@@ -122,6 +122,11 @@ jobs:
           echo "SINGLEBOX_COVERAGE_MODE=${SINGLEBOX_COVERAGE_MODE}"
           bash scripts/ci/singlebox_coverage.sh
 
+      - name: Verify singlebox coverage artifacts
+        run: |
+          python3 scripts/ci/verify_singlebox_coverage_artifacts.py \
+            --reports-dir scripts/.dependencies/coverage/singlebox/reports
+
       - name: Show singlebox diagnostics on failure
         if: failure()
         run: |
