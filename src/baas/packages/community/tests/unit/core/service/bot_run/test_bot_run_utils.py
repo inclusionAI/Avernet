@@ -535,3 +535,54 @@ class TestBindingDataToInfo:
 
         assert info.sandbox_id is None
         assert info.device_id == "local-device"
+
+
+# ============ Tests: binding_data_to_info engine_type 归一化 ============
+
+
+class TestBindingDataToInfoEngineNormalization:
+    """active_engine + template_type 共同决定 engine_type(见 _normalize_engine_type)。
+
+    aicoding 家族沙箱(personalCoding/applicationCoding)即使 active_engine 被写成
+    claude_code,也必须归一化为 aicoding,否则 create adapter session 会命中 aicoding
+    沙箱却传 engine=claude_code 报 500。
+    """
+
+    def _data(self, engine_type: str, template_type: str | None) -> BotBindingData:
+        return BotBindingData(
+            bot_id="bot-001",
+            owner_id="entity-001",
+            bot_type="personal",
+            engine_type=engine_type,
+            binding_id=1,
+            device_provider="arca",
+            device_id="ARCA-SANDBOX-abc@0",
+            template_type=template_type,
+        )
+
+    @pytest.mark.parametrize(
+        ("engine_type", "template_type", "expected"),
+        [
+            # claude_code + coding 家族模板 → 归一化为 aicoding(核心修复)
+            ("claude_code", "applicationCoding", "aicoding"),
+            ("claude_code", "personalCoding", "aicoding"),
+            # claude_code + 空/普通模板 → 保持 claude_code
+            ("claude_code", None, "claude_code"),
+            ("claude_code", "", "claude_code"),
+            ("claude_code", "normalCC", "claude_code"),
+            # aicoding + 任意模板 → aicoding
+            ("aicoding", "applicationCoding", "aicoding"),
+            ("aicoding", None, "aicoding"),
+            # 其他已知引擎以 active_engine 为准,不受 template_type 影响
+            ("hermes", "applicationCoding", "hermes"),
+            ("openclaw", None, "openclaw"),
+            # 空 / 未知 active_engine 兜底 openclaw(与旧行为等价)
+            ("", None, "openclaw"),
+            ("unknown_engine", None, "openclaw"),
+        ],
+    )
+    def test_engine_type_normalization_matrix(
+        self, engine_type, template_type, expected
+    ):
+        info = binding_data_to_info(self._data(engine_type, template_type))
+        assert info.engine_type == expected

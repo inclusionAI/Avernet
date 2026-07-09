@@ -26,6 +26,7 @@ class AcBotModel(Base):
     owner_name = Column(String(128), nullable=True)
     public = Column(String(16), nullable=True)
     ext = Column(Text, nullable=True)
+    template_type = Column(String(64), nullable=True)
     is_delete = Column(Integer, nullable=False, default=0)
     gmt_create = Column(DateTime, nullable=False, server_default=func.now())
     gmt_modified = Column(
