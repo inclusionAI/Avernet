@@ -569,7 +569,7 @@ main() {
         case $1 in
             --local|-l)
                 log_error "--local has been removed. singlebox.sh now always uses isolated standalone paths."
-                log_error "Run ./scripts/singlebox.sh ${*:2} without --local."
+                log_error "Run ./scripts/singlebox.sh without --local."
                 exit 1
                 ;;
             --dev|-d)
