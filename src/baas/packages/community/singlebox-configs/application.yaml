@@ -30,8 +30,11 @@ user_config:
     secret: "stub"          # stub | real
     scheduler: "stub"       # stub | real
     cache: "stub"           # stub | real
+    bot_service: "stub"     # real | local | stub
+    engine_adapter: "stub"  # stub | real (aicoding/hermes/claude_code engine adapter)
     database:
       plugin_database: "SQLITE_ORM"    # ZDAS_ORM (production ORM) | SQLITE_ORM (test only)
+      database_url: "sqlite:////tmp/secbaas.db"
     sandbox:
       arca: stub #  arca_sdk or stub
       desktop: stub # real or stub
@@ -60,6 +63,14 @@ user_config:
     #     # headers:               # v2 预留（PRX-06）
     #     #   X-Custom: "value"
 
+  # Arca 沙箱配置（用于定时任务续期）
+  arca:
+    enabled: true  # 设置为 true 启用沙箱续期定时任务
+    base_url: "http://arca.example.com:8080"
+    template_id: "ARCA-TEMPLATE-000000"
+    oss_mount_id: "dummy_mount_id"
+    api_key: "@dummy_api_key"
+    default_ttl_minutes: 1440 # 分钟 => 1 天
 
   bot_service:
     proxy_base_url: "https://proxy.example.com"
@@ -90,6 +101,10 @@ user_config:
     base_url: "https://teamclaw.example.com"
     timeout: 30
 
+  # OAuth 客户端配置（单机模式）
+  oauth:
+    base_url: "https://oauth.example.com"
+
   # 设备 TTL 定时器配置（每 5 分钟扫描 TTL 最小的设备并续期+探活）
   device_ttl_timer:
     enabled: true  # 是否启用定时任务
@@ -106,6 +121,7 @@ user_config:
     cron_interval_seconds: 60  # 执行间隔（秒），默认: 60
     lock_name: "bot_run_recovery_lock"  # 分布式锁名称
     lock_expire_seconds: 120  # 分布式锁过期时间（秒），默认: 120
+    lock_renew_interval_seconds: 30  # 分布式锁自动续期间隔（秒），默认: 30（0 表示禁用续期）
     stale_seconds: 120  # RUNNING 超过此时长无心跳视为悬挂（秒），默认: 120
     dry_run: false  # 测试模式：只打印日志
 
@@ -141,6 +157,12 @@ user_config:
       extend_when_remaining_hours: 16  # 剩余时间 ≤ 16 小时才续期
       target_ttl_hours: 24             # 续期目标 TTL（小时）
 
+  # 聊天日志关联后端配置
+  bot_chat_log_relation:
+    base_url: "https://backend.example.com"
+    timeout: 10
+    max_retries: 0
+
   # agentclawproxy 代理服务主机名（按环境）
   # 用于 proxypass URL 和 WS relay 构造。
   agentclawproxy:
@@ -168,3 +190,15 @@ user_config:
         dev: "https://secbaas-dev.secbaas.ai"
         pre: "https://secbaas-pre.secbaas.ai"
         prod: "https://secbaas-prod.secbaas.ai"
+
+  # Poolab API 端点（按环境，单机模式）
+  poolab:
+    endpoint:
+      dev: "https://poolab-dev.example.com"
+      pre: "https://poolab-pre.example.com"
+      prod: "https://poolab-prod.example.com"
+
+  # 应用级动态调试/展示标记
+  app:
+    local_debug: false
+    show_error_details: false
