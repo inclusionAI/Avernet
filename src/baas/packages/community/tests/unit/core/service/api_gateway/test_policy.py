@@ -1,9 +1,10 @@
 """Unit tests for policy parsing module.
 
 Covers:
-- parse_policy: valid JSON, None input, empty string, invalid JSON, non-dict JSON
-- APIKeyPolicy: to_json round-trip, NONE sentinel
-- parse_policy: NONE sentinel policy
+- parse_policy normalization: legacy allow-all (None/empty/missing key),
+  explicit allow-all ("*"), deny-all (empty / NONE sentinel / mixed),
+  whitelist parsing, fail-closed on bad input.
+- APIKeyPolicy: to_json round-trip, NONE/ALL sentinel constants
 """
 
 from secbaas.api.api_gateway import APIKeyPolicy, parse_policy
@@ -38,15 +39,10 @@ class TestAPIKeyPolicy:
         parsed = json.loads(result)
         assert "allowed_bots" in parsed
 
-    def test_none_sentinel_constant(self):
-        """NONE sentinel constant should be 'NONE'."""
+    def test_sentinel_constants(self):
+        """NONE / ALL sentinel constants."""
         assert APIKeyPolicy.NONE == "NONE"
-
-    def test_to_json_with_none_sentinel(self):
-        """Policy with NONE sentinel serializes correctly."""
-        policy = APIKeyPolicy(allowed_bots=["NONE"])
-        result = policy.to_json()
-        assert result == '{"allowed_bots":["NONE"]}'
+        assert APIKeyPolicy.ALL == "*"
 
 
 class TestParsePolicy:
@@ -55,42 +51,57 @@ class TestParsePolicy:
         assert isinstance(result, APIKeyPolicy)
         assert result.allowed_bots == ["bot1:e1", "bot2:e2"]
 
-    def test_valid_json_without_allowed_bots(self):
-        result = parse_policy('{"other_key": "value"}')
-        assert isinstance(result, APIKeyPolicy)
-        assert result.allowed_bots == []
-
-    def test_none_input(self):
+    # --- legacy allow-all compatibility (NULL / empty / missing key) ---
+    def test_none_input_legacy_allow_all(self):
         result = parse_policy(None)
-        assert isinstance(result, APIKeyPolicy)
-        assert result.allowed_bots == []
+        assert result.allowed_bots == ["*"]
 
-    def test_empty_string(self):
+    def test_empty_string_legacy_allow_all(self):
         result = parse_policy("")
-        assert isinstance(result, APIKeyPolicy)
-        assert result.allowed_bots == []
+        assert result.allowed_bots == ["*"]
 
-    def test_whitespace_string(self):
+    def test_whitespace_string_legacy_allow_all(self):
         result = parse_policy("   ")
-        assert isinstance(result, APIKeyPolicy)
+        assert result.allowed_bots == ["*"]
+
+    def test_missing_allowed_bots_key_legacy_allow_all(self):
+        """dict without allowed_bots key → legacy allow-all."""
+        result = parse_policy('{"other_key": "value"}')
+        assert result.allowed_bots == ["*"]
+
+    # --- explicit allow-all ---
+    def test_explicit_allow_all(self):
+        result = parse_policy('{"allowed_bots": ["*"]}')
+        assert result.allowed_bots == ["*"]
+
+    # --- deny-all: empty / NONE sentinel / fail-closed ---
+    def test_empty_allowed_bots_denies_all(self):
+        result = parse_policy('{"allowed_bots": []}')
         assert result.allowed_bots == []
 
-    def test_invalid_json(self):
-        result = parse_policy("not-json")
-        assert isinstance(result, APIKeyPolicy)
-        assert result.allowed_bots == []
-
-    def test_non_dict_json(self):
-        result = parse_policy('["list", "not", "dict"]')
-        assert isinstance(result, APIKeyPolicy)
-        assert result.allowed_bots == []
-
-    def test_allowed_bots_null(self):
+    def test_allowed_bots_null_denies_all(self):
         result = parse_policy('{"allowed_bots": null}')
-        assert isinstance(result, APIKeyPolicy)
         assert result.allowed_bots == []
 
-    def test_parse_none_sentinel_policy(self):
-        """Parse a policy that contains the NONE sentinel."""
+    def test_none_sentinel_denies_all(self):
+        """Lone ['NONE'] sentinel → normalized to empty = deny all."""
         result = parse_policy('{"allowed_bots": ["NONE"]}')
-        assert result.allowed_bots == ["NONE"]
+        assert result.allowed_bots == []
+
+    def test_none_sentinel_filtered_from_mixed(self):
+        """['NONE', 'bot-1'] keeps ['bot-1'] (NONE filtered, not a full deny)."""
+        result = parse_policy('{"allowed_bots": ["NONE", "bot-1:e1"]}')
+        assert result.allowed_bots == ["bot-1:e1"]
+
+    # --- fail-closed: bad input denies all ---
+    def test_invalid_json_denies_all(self):
+        result = parse_policy("not-json")
+        assert result.allowed_bots == []
+
+    def test_non_dict_json_denies_all(self):
+        result = parse_policy('["list", "not", "dict"]')
+        assert result.allowed_bots == []
+
+    def test_non_list_allowed_bots_denies_all(self):
+        result = parse_policy('{"allowed_bots": "bot-1"}')
+        assert result.allowed_bots == []

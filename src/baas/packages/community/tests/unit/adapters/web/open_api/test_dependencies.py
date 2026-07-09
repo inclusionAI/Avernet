@@ -383,14 +383,28 @@ class TestValidatePolicy:
         result = validate_policy(record, "bot-1:entity-1")
         assert result == "bot-1:entity-1"
 
-    def test_empty_allowed_bots_list_allows_all(self):
-        """Empty allowed_bots → all bots allowed (forward compat)，返回原始 target_bot_id。"""
+    def test_empty_allowed_bots_list_denies_all(self):
+        """Empty allowed_bots → deny all (fail-closed)，返回 403。"""
         record = _make_api_key_record(policy='{"allowed_bots": []}')
+        with pytest.raises(HTTPException) as exc:
+            validate_policy(record, "any-bot")
+        assert exc.value.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_none_sentinel_denies_all(self):
+        """Lone ['NONE'] sentinel → deny all (normalized to empty)。返回 403。"""
+        record = _make_api_key_record(policy='{"allowed_bots": ["NONE"]}')
+        with pytest.raises(HTTPException) as exc:
+            validate_policy(record, "any-bot")
+        assert exc.value.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_explicit_allow_all(self):
+        """allowed_bots 含 '*' → 允许所有 bot，返回原始 target_bot_id。"""
+        record = _make_api_key_record(policy='{"allowed_bots": ["*"]}')
         result = validate_policy(record, "any-bot")
         assert result == "any-bot"
 
     def test_no_allowed_bots_key_allows_all(self):
-        """Policy without allowed_bots key → allows all，返回原始 target_bot_id。"""
+        """Policy without allowed_bots key → legacy allow-all，返回原始 target_bot_id。"""
         record = _make_api_key_record(policy='{"other_key": "value"}')
         result = validate_policy(record, "any-bot")
         assert result == "any-bot"
@@ -425,21 +439,23 @@ class TestValidatePolicy:
             validate_policy(record, "default:entity-2")
         assert exc.value.status_code == status.HTTP_403_FORBIDDEN
 
-    def test_invalid_json_policy_returns_early(self):
-        """Invalid JSON is treated as empty dict → no restriction，返回原始 target_bot_id。"""
+    def test_invalid_json_policy_denies_all(self):
+        """Invalid JSON → fail-closed deny all，返回 403。"""
         record = _make_api_key_record(policy="{invalid json}")
-        result = validate_policy(record, "any-bot")
-        assert result == "any-bot"
+        with pytest.raises(HTTPException) as exc:
+            validate_policy(record, "any-bot")
+        assert exc.value.status_code == status.HTTP_403_FORBIDDEN
 
-    def test_policy_with_non_dict_parsed_value(self):
-        """parse_policy returns non-dict → returns early，返回原始 target_bot_id。"""
+    def test_policy_with_non_dict_parsed_value_denies_all(self):
+        """parse_policy returns empty (non-dict) → fail-closed deny all，返回 403。"""
         with patch(
             "secbaas.adapters.web.routers.open_api.dependencies.parse_policy",
             return_value=MagicMock(allowed_bots=[]),
         ):
             record = _make_api_key_record(policy='["list"]')
-            result = validate_policy(record, "any-bot")
-            assert result == "any-bot"
+            with pytest.raises(HTTPException) as exc:
+                validate_policy(record, "any-bot")
+            assert exc.value.status_code == status.HTTP_403_FORBIDDEN
 
     def test_multiple_bots_in_policy(self):
         """Ensure any matching bot_id passes and returns the matched entry."""
