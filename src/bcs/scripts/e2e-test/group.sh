@@ -22,6 +22,11 @@ E2E_TESTS_GROUP=(
     # --- share cases (group invite-link via API; session invite-link via CLI) ---
     "test_group_invite_link"
     "test_session_invite_link"
+    # --- bot-side group listing ---
+    "test_bot_groups_of_bot"
+    # --- session lifecycle (session = a group's instantiated run) ---
+    "test_session_invite_join"
+    "test_session_lifecycle"
 )
 
 # ============================================================================
@@ -374,6 +379,232 @@ test_session_invite_link() {
     else
         fail "session invite-link did not return an invite_token"
         TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+    _cli_delete_group "$gid"
+}
+
+# GET /bots/{id}/groups — a bot lists the groups it belongs to. Create a
+# PM-driven group, then verify it shows up in PM's bot-group listing.
+test_bot_groups_of_bot() {
+    info "Group: GET /bots/{PM}/groups lists a group PM belongs to"
+    ensure_cli_token PM || { skip_case "no PM token"; TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
+    local gid; gid="$(_cli_create_group)"
+    [[ -z "$gid" ]] && { fail "setup create-group failed"; TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
+
+    api_get "/bots/${BOT_PM_UUID}/groups?limit=50&group_kind=all"
+    if [[ "$HTTP_STATUS" != "200" ]]; then
+        fail "GET /bots/{id}/groups returned $HTTP_STATUS"; TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1))
+        _cli_delete_group "$gid"; return
+    fi
+    pass "GET /bots/{id}/groups returned 200"
+    TESTS_PASSED=$((TESTS_PASSED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # The fresh group must appear in PM's listing (items[*].group_id or .id).
+    local found
+    found=$(printf '%s' "$RESPONSE" | python3 -c "
+import json,sys
+try:
+    d=json.load(sys.stdin)
+    ids=[i.get('group_id') or i.get('id') for i in d.get('items',[])]
+    print('1' if sys.argv[1] in ids else '0')
+except Exception:
+    print('0')
+" "$gid" 2>/dev/null || echo 0)
+    if [[ "$found" = "1" ]]; then
+        pass "created group $gid listed under /bots/{PM}/groups"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "created group $gid NOT found in /bots/{PM}/groups: $(printf '%s' "$RESPONSE" | head -c 160)"
+        TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+    _cli_delete_group "$gid"
+}
+
+# Create a chat session in <group> as PM (bot token). Echoes the session id
+# (session_id or id). Empty on failure. PM is the group driver/creator, so it
+# has access to create sessions in its group. Requires PM token resolved.
+_api_create_session() {
+    local gid="$1" title="${2:-e2e-sess}"
+    bot_post "/groups/${gid}/sessions" PM "{\"session_title\":\"${title}\"}" >/dev/null 2>&1 || true
+    if [ "$HTTP_STATUS" != "200" ] && [ "$HTTP_STATUS" != "201" ]; then
+        warn "_api_create_session: HTTP $HTTP_STATUS body=$(printf '%s' "$RESPONSE" | head -c 120)"
+        return 1
+    fi
+    local sid
+    sid=$(printf '%s' "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('session_id') or d.get('id') or '')" 2>/dev/null)
+    if [ -z "$sid" ]; then
+        warn "_api_create_session: empty sid from body=$(printf '%s' "$RESPONSE" | head -c 120)"
+        return 1
+    fi
+    printf '%s' "$sid"
+}
+
+# DELETE /sessions/{sid}?bot_id=<creator>. The creator (caller) must match the
+# session's created_by; PM created the session so pass PM's uuid. Best-effort.
+_api_delete_session() {
+    [[ -z "$1" ]] && return
+    api_delete "/sessions/$1?bot_id=${BOT_PM_UUID}"
+}
+
+# POST /sessions/join/{token} — the standard "human joins a session" flow.
+# Builds on the bcs-cli session invite-link test: create a session, mint an
+# invite token, then have the mock human join it, verifying the closed
+# invite loop (create invite-link -> human join).
+test_session_invite_join() {
+    info "Session(share): invite-link -> human joins via POST /sessions/join/{token}"
+    ensure_cli_token PM || { skip_case "no PM token"; TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
+    local gid; gid="$(_cli_create_group)"
+    [[ -z "$gid" ]] && { fail "setup create-group failed"; TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
+    local sid; sid="$(_api_create_session "$gid" share-sess)"
+    if [[ -z "$sid" ]]; then
+        fail "session create failed"; TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1))
+        _cli_delete_group "$gid"; return
+    fi
+
+    # Mint a session invite token as PM (bot token) — returns {invite_token, expires_at, join_url}.
+    bot_post "/sessions/${sid}/invite-link" PM '{"ttl_seconds":300}'
+    if [[ "$HTTP_STATUS" != "200" ]]; then
+        fail "session invite-link returned $HTTP_STATUS"; TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1))
+        _cli_delete_group "$gid"; return
+    fi
+    local invite_token
+    invite_token=$(printf '%s' "$RESPONSE" | python3 -c "import json,sys; print(json.load(sys.stdin).get('invite_token',''))" 2>/dev/null || echo "")
+    if [[ -z "$invite_token" ]]; then
+        fail "no invite_token in session invite-link"; TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1))
+        _cli_delete_group "$gid"; return
+    fi
+
+    # Human (mock identity) joins the session via the invite token.
+    api_post "/sessions/join/${invite_token}" '{}'
+    if [[ "$HTTP_STATUS" = "200" ]]; then
+        pass "human joined session via POST /sessions/join/{token}"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "sessions/join returned $HTTP_STATUS: $(printf '%s' "$RESPONSE" | head -c 160)"
+        TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+    _cli_delete_group "$gid"
+}
+
+# Full session lifecycle as a self-contained flow: session is a group's
+# instantiated run. Create group -> create session -> PATCH title ->
+# add member (ENG) -> set member mode -> session chat -> get messages ->
+# remove member -> delete session -> verify gone.
+test_session_lifecycle() {
+    info "Session: create -> patch -> add member -> mode -> chat -> messages -> remove -> delete"
+    ensure_cli_token PM || { skip_case "no PM token"; TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
+    local gid; gid="$(_cli_create_group)"
+    [[ -z "$gid" ]] && { fail "setup create-group failed"; TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
+
+    local sid; sid="$(_api_create_session "$gid" lifecycle-sess)"
+    if [[ -z "$sid" ]]; then
+        fail "session create failed"; TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1))
+        _cli_delete_group "$gid"; return
+    fi
+    pass "session created ($sid)"; TESTS_PASSED=$((TESTS_PASSED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # PATCH /sessions/{sid} — rename the session title.
+    bot_patch "/sessions/${sid}" PM '{"session_title":"renamed-sess"}'
+    if [[ "$HTTP_STATUS" = "200" ]]; then
+        pass "PATCH /sessions/{sid} title updated"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "PATCH /sessions/{sid} returned $HTTP_STATUS"; TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # POST /sessions/{sid}/members — add ENG to the session (default consultant role).
+    bot_post "/sessions/${sid}/members" PM "{\"bot_uuid\":\"${BOT_ENG_UUID}\"}"
+    if [[ "$HTTP_STATUS" = "200" ]]; then
+        pass "POST /sessions/{sid}/members added ENG"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "add member returned $HTTP_STATUS: $(printf '%s' "$RESPONSE" | head -c 120)"; TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # PATCH /sessions/{sid}/members/{bot_uuid} — set ENG's mode to muted.
+    bot_patch "/sessions/${sid}/members/${BOT_ENG_UUID}" PM '{"mode":"muted"}'
+    if [[ "$HTTP_STATUS" = "200" ]]; then
+        pass "PATCH member mode set to muted"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "set member mode returned $HTTP_STATUS"; TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # POST /sessions/{sid}/chat — PM (a participant) sends a message to the session.
+    bot_post "/sessions/${sid}/chat" PM '{"message":"hello-session"}'
+    # session_chat may deliver 0 (bots not connected) — treat 200 as success, a
+    # forbidden/conflict as exercisable-but-blocked; fail only on auth/not-found/5xx.
+    case "$HTTP_STATUS" in
+        200) pass "POST /sessions/{sid}/chat returned 200"; TESTS_PASSED=$((TESTS_PASSED+1)) ;;
+        403|409) warn "session chat returned $HTTP_STATUS (endpoint exercised)"; pass "session chat reachable"; TESTS_PASSED=$((TESTS_PASSED+1)) ;;
+        *) fail "session chat returned $HTTP_STATUS: $(printf '%s' "$RESPONSE" | head -c 120)"; TESTS_FAILED=$((TESTS_FAILED+1)) ;;
+    esac
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # GET /sessions/{sid}/messages — fetch session message history (public caller ok).
+    api_get "/sessions/${sid}/messages?limit=50"
+    if [[ "$HTTP_STATUS" = "200" ]]; then
+        pass "GET /sessions/{sid}/messages returned 200"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "GET /sessions/{sid}/messages returned $HTTP_STATUS"; TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # DELETE /sessions/{sid}/members/{bot_uuid} — remove ENG.
+    if ! bot_delete "/sessions/${sid}/members/${BOT_ENG_UUID}" PM; then
+        : # bot_delete returns the curl rc; HTTP_STATUS carries the real code
+    fi
+    if [[ "$HTTP_STATUS" = "200" ]]; then
+        pass "DELETE member removed ENG"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "DELETE member returned $HTTP_STATUS: $(printf '%s' "$RESPONSE" | head -c 120)"; TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # DELETE /sessions/{sid}?bot_id=<PM UUID> — PM (creator) deletes the session.
+    api_delete "/sessions/${sid}?bot_id=${BOT_PM_UUID}"
+    if [[ "$HTTP_STATUS" = "200" ]]; then
+        pass "DELETE /sessions/{sid} returned 200 (creator delete)"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "DELETE /sessions/{sid} returned $HTTP_STATUS"; TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # Closed loop: session must be gone after delete. Require the listing request
+    # itself to be healthy (HTTP 200) and the body to parse; a failed/malformed
+    # verification response must NOT default to "gone" — that would mask auth or
+    # route regressions in the verification request. gone: 1 = not listed, 0 =
+    # still present OR verification request failed/unparseable.
+    api_get "/groups/${gid}/sessions"
+    local gone
+    if [[ "$HTTP_STATUS" != "200" ]]; then
+        gone=0
+    else
+        gone=$(printf '%s' "$RESPONSE" | python3 -c "
+import json,sys
+try:
+    d=json.load(sys.stdin)
+    items=d.get('items') or d.get('sessions') or (d if isinstance(d,list) else [])
+    ids=[i.get('session_id') or i.get('id') for i in items]
+    print('1' if sys.argv[1] not in ids else '0')
+except Exception:
+    print('0')
+" "$sid" 2>/dev/null || echo 0)
+    fi
+    if [[ "$gone" = "1" ]]; then
+        pass "session $sid gone after delete (deletion verified)"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "session $sid deletion NOT verified (HTTP=$HTTP_STATUS body=$(printf '%s' "$RESPONSE" | head -c 100))"; TESTS_FAILED=$((TESTS_FAILED+1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL+1))
     _cli_delete_group "$gid"

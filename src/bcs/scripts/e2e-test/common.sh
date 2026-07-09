@@ -207,6 +207,29 @@ api_patch() {
     _api_request PATCH "$1" "${2:-}"
 }
 
+# Bot-token-authenticated request. Some endpoints (actor self-status PUT, sync
+# bot chat, session create/member/chat) resolve the caller from its bot session
+# token (X-BCS-Bot-Token / Bearer) rather than the mock-human headers _api_request
+# sends. Sets HTTP_STATUS / RESPONSE like _api_request.
+# Usage: bot_request <METHOD> <PATH> <BOT_NAME> [BODY]
+bot_request() {
+    local method="$1" path="$2" bot="$3" body="${4:-}"
+    ensure_cli_token "$bot" >/dev/null || { HTTP_STATUS="000"; RESPONSE=""; return 1; }
+    local url="${BCS_API_BASE_URL}${path}"
+    local curl_args=(-s -o "$_RESPONSE_FILE" -w '%{http_code}' -X "$method"
+        -H "X-BCS-Bot-Token: $BCS_CLI_TOKEN"
+        -H "Content-Type: application/json")
+    [ -n "$body" ] && curl_args+=(-d "$body")
+    HTTP_STATUS=$(curl "${curl_args[@]}" "$url" 2>/dev/null) || HTTP_STATUS="000"
+    RESPONSE=$(cat "$_RESPONSE_FILE")
+}
+
+bot_get()    { bot_request GET    "$1" "$2"; }
+bot_post()   { bot_request POST   "$1" "$2" "${3:-}"; }
+bot_put()    { bot_request PUT    "$1" "$2" "${3:-}"; }
+bot_patch()  { bot_request PATCH  "$1" "$2" "${3:-}"; }
+bot_delete() { bot_request DELETE "$1" "$2"; }
+
 # ============================================================================
 # Bot UUID Resolution
 # ============================================================================
