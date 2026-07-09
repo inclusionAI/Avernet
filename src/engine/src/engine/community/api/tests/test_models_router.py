@@ -117,11 +117,12 @@ def _sample_models() -> list[Model]:
         ),
         Model(
             id="glink/claude-opus-4-6",
-            provider="codefuse-antcc",
+            provider="glink",
             provider_id="glink/claude-opus-4-6",
             name="Claude Opus 4.6",
             display_name="Claude Opus 4.6",
             provider_category="glink_account_hosting",
+            extra={"runtime": "claude-code"},
         ),
     ]
 
@@ -152,8 +153,11 @@ class TestListModels:
         assert first["pricing"]["input_price"] == 0.005
         # provider_category only emitted when set (None → key absent)
         assert "provider_category" not in first
+        # extra fields merged into response (None extra → no extra keys)
+        assert "runtime" not in first
         glink = body["data"]["models"][2]
         assert glink["provider_category"] == "glink_account_hosting"
+        assert glink["runtime"] == "claude-code"
 
         plugin.list_models.assert_awaited_once()
 
