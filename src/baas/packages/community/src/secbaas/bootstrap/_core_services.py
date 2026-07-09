@@ -110,6 +110,45 @@ def _create_system_default_paas_service(factory: PaasServiceFactory):
     return factory.create_local_paas_service(user_id="system", machine_id="default")
 
 
+def _real_engine_adapter_registry():
+    """装配 3 个 real adapter(连真实 engine/proxy 通道)。
+
+    延迟 import:core 层不得 module-level import plugins,故装配在 bootstrap 完成。
+    """
+    from secbaas.core.service.bot_run import BotEngineAdapterRegistry
+    from secbaas.plugins.bot.engine_adapter.aicoding.real import AICodingAdapter
+    from secbaas.plugins.bot.engine_adapter.claude_code.real import (
+        ClaudeCodeAdapter,
+    )
+    from secbaas.plugins.bot.engine_adapter.hermes.real import HermesAdapter
+
+    return BotEngineAdapterRegistry(
+        {
+            "aicoding": AICodingAdapter(),
+            "hermes": HermesAdapter(),
+            "claude_code": ClaudeCodeAdapter(),
+        }
+    )
+
+
+def _stub_engine_adapter_registry():
+    """装配 3 个 Noop adapter(安全零值,不连真实 engine;用于测试/本地)。"""
+    from secbaas.core.service.bot_run import BotEngineAdapterRegistry
+    from secbaas.plugins.bot.engine_adapter.aicoding.stub import NoopAICodingAdapter
+    from secbaas.plugins.bot.engine_adapter.claude_code.stub import (
+        NoopClaudeCodeAdapter,
+    )
+    from secbaas.plugins.bot.engine_adapter.hermes.stub import NoopHermesAdapter
+
+    return BotEngineAdapterRegistry(
+        {
+            "aicoding": NoopAICodingAdapter(),
+            "hermes": NoopHermesAdapter(),
+            "claude_code": NoopClaudeCodeAdapter(),
+        }
+    )
+
+
 class CoreServiceContainer(containers.DeclarativeContainer):
     config = providers.Configuration()
 
@@ -378,12 +417,21 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         repository=bot_session_repo,
     )
 
+    # Engine adapter registry — 按 config.plugins.engine_adapter 切 stub/real,
+    # 仅注入 BaasBotService。stub=Noop(测试/本地),real=连真实 engine 通道。
+    engine_adapter_registry = providers.Selector(
+        config.plugins.engine_adapter,
+        real=providers.Singleton(_real_engine_adapter_registry),
+        stub=providers.Singleton(_stub_engine_adapter_registry),
+    )
+
     baas_bot_service = providers.Singleton(
         BaasBotService,
         client_pool=chat_client_pool,
         config=baas_bot_service_config,
         wss_resolver=bot_wss_dispatcher,
         session_service=session_service,
+        engine_adapter_registry=engine_adapter_registry,
     )
 
     system_config_service = providers.Singleton(

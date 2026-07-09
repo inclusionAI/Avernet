@@ -285,6 +285,14 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                 _stage_ms,
                 (time.monotonic() - _binding_t0) * 1000,
             )
+            logger.info(
+                "[bot-service] get_binding raw: bot_id=%s engine_type=%r "
+                "template_type=%r device_provider=%r",
+                inner.get("bot_id", bot_id),
+                inner.get("engine_type"),
+                inner.get("template_type"),
+                inner.get("device_provider"),
+            )
             return BotBindingData(
                 bot_id=inner.get("bot_id", bot_id),
                 owner_id=inner.get("owner_id", owner_id),
@@ -295,6 +303,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                 binding_id=inner.get("binding_id", 0),
                 device_provider=inner.get("device_provider", ""),
                 device_id=inner.get("device_id", ""),
+                template_type=inner.get("template_type"),
             )
 
         if last_error is not None and last_error.code != ErrorCode.PLATFORM_UNAVAILABLE:

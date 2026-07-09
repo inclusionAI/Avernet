@@ -36,6 +36,8 @@ def _make_bot_record(
     device_id=DEVICE_ID_ARCA,
     bot_id=BOT_ID,
     entity_id=ENTITY_ID,
+    active_engine="openclaw",
+    template_type=None,
 ):
     now = datetime.now()
     return AcBotRecord(
@@ -55,12 +57,13 @@ def _make_bot_record(
         modifier_id=None,
         share_policy=None,
         is_delete=0,
-        active_engine="openclaw",
+        active_engine=active_engine,
         device_id=device_id,
         env=ENV,
         owner_name="test",
         public="0",
         ext=None,
+        template_type=template_type,
         bot_type=bot_type,
     )
 
@@ -606,3 +609,133 @@ class TestBotBindingInfoEdgeCases:
         assert result is not None
         assert result.device_props == {}
         assert result.sandbox_id is None
+
+
+class TestEngineTypeWhitelist:
+    """§7 — active_engine 白名单校验（unknown → openclaw + warn）。"""
+
+    def _setup(self, mock_ac_bot_repo, mock_binding_repo, active_engine):
+        mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
+            _make_bot_record(
+                bot_type="personal",
+                binding_id=BINDING_ID_DRAFT,
+                active_engine=active_engine,
+            )
+        )
+        mock_binding_repo.get_by_id.return_value = _make_binding_record(
+            device_provider="baas",
+            device_id=DEVICE_ID_BAAS,
+            binding_id=BINDING_ID_DRAFT,
+        )
+
+    @pytest.mark.parametrize(
+        "engine", ["openclaw", "teclaw", "aicoding", "hermes", "claude_code"]
+    )
+    def test_whitelisted_engine_preserved(
+        self, resolver, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo, engine
+    ):
+        self._setup(mock_ac_bot_repo, mock_binding_repo, engine)
+        result = resolver.resolve(bot_id=BOT_ID, entity_id=ENTITY_ID, env=ENV)
+        assert result is not None
+        assert result.engine_type == engine
+
+    def test_unknown_engine_falls_back_to_openclaw(
+        self, resolver, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        self._setup(mock_ac_bot_repo, mock_binding_repo, "moltis")
+        result = resolver.resolve(bot_id=BOT_ID, entity_id=ENTITY_ID, env=ENV)
+        assert result is not None
+        assert result.engine_type == "openclaw"
+
+    def test_empty_engine_defaults_to_openclaw(
+        self, resolver, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        self._setup(mock_ac_bot_repo, mock_binding_repo, None)
+        result = resolver.resolve(bot_id=BOT_ID, entity_id=ENTITY_ID, env=ENV)
+        assert result is not None
+        assert result.engine_type == "openclaw"
+
+
+class TestTemplateTypeNormalization:
+    """template_type 归一化:aicoding 家族(空/personalCoding/applicationCoding)→ aicoding。
+
+    兼容生产数据中 active_engine 与沙箱实际引擎不一致的历史 bot。
+    """
+
+    def _setup(self, mock_ac_bot_repo, mock_binding_repo, active_engine, template_type):
+        mock_ac_bot_repo.get_by_bot_id_env_exclude_default.return_value = (
+            _make_bot_record(
+                bot_type="personal",
+                binding_id=BINDING_ID_DRAFT,
+                active_engine=active_engine,
+                template_type=template_type,
+            )
+        )
+        mock_binding_repo.get_by_id.return_value = _make_binding_record(
+            device_provider="baas",
+            device_id=DEVICE_ID_BAAS,
+            binding_id=BINDING_ID_DRAFT,
+        )
+
+    @pytest.mark.parametrize("template_type", ["personalCoding", "applicationCoding"])
+    def test_aicoding_template_overrides_active_engine(
+        self,
+        resolver,
+        mock_ac_bot_repo,
+        mock_publish_repo,
+        mock_binding_repo,
+        template_type,
+    ):
+        # personalCoding/applicationCoding + active_engine=claude_code(历史脏数据)→ aicoding
+        self._setup(mock_ac_bot_repo, mock_binding_repo, "claude_code", template_type)
+        result = resolver.resolve(bot_id=BOT_ID, entity_id=ENTITY_ID, env=ENV)
+        assert result is not None
+        assert result.engine_type == "aicoding"
+
+    @pytest.mark.parametrize("template_type", [None, ""])
+    def test_empty_template_respects_active_engine(
+        self,
+        resolver,
+        mock_ac_bot_repo,
+        mock_publish_repo,
+        mock_binding_repo,
+        template_type,
+    ):
+        # template_type 为空(None 或 "")→ 以 active_engine 为准,不归一化
+        self._setup(mock_ac_bot_repo, mock_binding_repo, "claude_code", template_type)
+        result = resolver.resolve(bot_id=BOT_ID, entity_id=ENTITY_ID, env=ENV)
+        assert result is not None
+        assert result.engine_type == "claude_code"
+
+    @pytest.mark.parametrize("template_type", ["personalCoding", "applicationCoding"])
+    def test_aicoding_template_only_when_active_is_claude_code(
+        self,
+        resolver,
+        mock_ac_bot_repo,
+        mock_publish_repo,
+        mock_binding_repo,
+        template_type,
+    ):
+        # template_type 属 aicoding 家族,但 active_engine 不是 claude_code → 不归一化,走 active_engine
+        self._setup(mock_ac_bot_repo, mock_binding_repo, "hermes", template_type)
+        result = resolver.resolve(bot_id=BOT_ID, entity_id=ENTITY_ID, env=ENV)
+        assert result is not None
+        assert result.engine_type == "hermes"
+
+    def test_non_aicoding_template_respects_active_engine(
+        self, resolver, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        # template_type 不在 aicoding 家族(如 normalCC)→ 走 active_engine
+        self._setup(mock_ac_bot_repo, mock_binding_repo, "hermes", "normalCC")
+        result = resolver.resolve(bot_id=BOT_ID, entity_id=ENTITY_ID, env=ENV)
+        assert result is not None
+        assert result.engine_type == "hermes"
+
+    def test_none_template_respects_active_engine(
+        self, resolver, mock_ac_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        # template_type=None(老 bot 没这字段)→ 走 active_engine,不误归一化
+        self._setup(mock_ac_bot_repo, mock_binding_repo, "hermes", None)
+        result = resolver.resolve(bot_id=BOT_ID, entity_id=ENTITY_ID, env=ENV)
+        assert result is not None
+        assert result.engine_type == "hermes"

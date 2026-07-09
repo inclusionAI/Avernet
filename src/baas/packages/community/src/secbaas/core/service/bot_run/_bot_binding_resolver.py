@@ -21,6 +21,40 @@ if TYPE_CHECKING:
 
 logger = get_logger("core-bot-run")
 
+# 支持的 engine_type 白名单：openclaw/teclaw（老引擎）+ 3 个新引擎。
+_SUPPORTED_ENGINES = frozenset(
+    {"openclaw", "teclaw", "aicoding", "hermes", "claude_code"}
+)
+
+# 这两种 template_type 的沙箱实为 aicoding 引擎进程;当 active_engine 被错写成
+# claude_code 时,强制按 aicoding 处理(兼容生产脏数据)。
+_AICODING_FAMILY_TEMPLATES = frozenset({"personalCoding", "applicationCoding"})
+
+
+def _normalize_engine_type(
+    active_engine: str | None, template_type: str | None = None
+) -> str:
+    """解析 engine_type,先按 template_type+active_engine 的特定组合归一化,再校验白名单。
+
+    生产数据中存在 active_engine 与沙箱实际引擎不一致的脏数据:personalCoding/
+    applicationCoding 模板的沙箱实为 aicoding,但 active_engine 被写成 claude_code。
+    为兼容这类历史数据,仅当 ``template_type ∈ {personalCoding, applicationCoding}``
+    且 ``active_engine == "claude_code"`` 时,强制按 aicoding 处理。其余情况(含
+    template_type 为空)一律以 active_engine 为准,走白名单校验,空/未知回落 openclaw。
+    """
+    if template_type in _AICODING_FAMILY_TEMPLATES and active_engine == "claude_code":
+        return "aicoding"
+    if not active_engine:
+        return "openclaw"
+    if active_engine in _SUPPORTED_ENGINES:
+        return active_engine
+    logger.warning(
+        "engine_type.unknown: active_engine=%r not in whitelist %s, fallback to openclaw",
+        active_engine,
+        sorted(_SUPPORTED_ENGINES),
+    )
+    return "openclaw"
+
 
 class BotBindingResolver:
     """Binding 解析器 — 单次查询完整链路。
@@ -78,7 +112,7 @@ class BotBindingResolver:
             return None
 
         binding_id = ac_bot.binding_id
-        engine_type = ac_bot.active_engine
+        engine_type = _normalize_engine_type(ac_bot.active_engine, ac_bot.template_type)
 
         # Step 2: For service bots, resolve binding based on lifecycle_stage
         if ac_bot.bot_type == "service":
@@ -125,7 +159,7 @@ class BotBindingResolver:
             binding_id=binding.id,
             device_props=binding.device_props or {},
             bot_type=ac_bot.bot_type,
-            engine_type=engine_type if engine_type else "openclaw",
+            engine_type=engine_type,
         )
 
         logger.info(
