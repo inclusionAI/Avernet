@@ -23,6 +23,7 @@ user_config:
     secret: "stub"
     cache: "stub"
     bot_service: "local"
+    engine_adapter: "stub"  # stub | real (singlebox 默认不连真实 engine)
 
   bot_service:
     adapter_port: 20003

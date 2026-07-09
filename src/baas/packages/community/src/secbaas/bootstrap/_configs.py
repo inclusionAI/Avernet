@@ -185,6 +185,8 @@ class PluginConfig(ConfigSchema):
     scheduler: str = Field(default="stub", pattern=r"^(real|stub)$")
     cache: str = Field(default="stub", pattern=r"^(real|stub)$")
     bot_service: str = Field(default="stub", pattern=r"^(real|local|stub)$")
+
+    engine_adapter: str = Field(default="stub", pattern=r"^(real|stub)$")
     sandbox: SandboxPluginConfig = Field(default_factory=SandboxPluginConfig)
 
 

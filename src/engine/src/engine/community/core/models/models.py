@@ -21,6 +21,8 @@ slim engines (aicoding) can leave them ``None`` while richer engines
 """
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -60,6 +62,12 @@ class Model(BaseModel):
 
     ``provider_id`` carries the upstream-native id (pre-normalisation),
     needed when relays expect the original form on chat.send.
+
+    ``extra`` carries relay-specific fields not modeled above (e.g.
+    ``runtime``, ``provider_category`` when the engine does not promote
+    it to the top-level field, etc.). The API layer merges ``extra``
+    into the response dict so the frontend receives them without
+    the DTO needing a field for every key the relay might add.
     """
 
     id: str
@@ -77,6 +85,7 @@ class Model(BaseModel):
     enterprise_default: bool = False
     release_date: str | None = None
     deprecated: bool = False
+    extra: dict[str, Any] = Field(default_factory=dict)
 
 
 class Provider(BaseModel):
