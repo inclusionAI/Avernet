@@ -31,22 +31,35 @@ size, without a risky schema migration of the existing field.
   understand and trace the data without guessing.
 
 ## Acceptance Criteria
-- [ ] A bot whose serialized artifact exceeds the configured size threshold can
+- [x] A bot whose serialized artifact exceeds the configured size threshold can
       be built, published, upgraded, and booted with no size-related failure.
-- [ ] Small artifacts (under the threshold) are stored exactly as they are today
-      — no object-storage round trip, no behavior change.
-- [ ] Callers that read the publish record always receive the full artifact,
+      *(Offload keeps the column small; verified at the repository boundary — the
+      single locus every read/write flows through — with SQLite + a fake OSS.)*
+- [x] Small artifacts (under the threshold) are stored exactly as they are today
+      — no object-storage round trip, no behavior change. *(18 pre-existing
+      parity tests unchanged; `test_small_artifact_stays_inline`.)*
+- [x] Callers that read the publish record always receive the full artifact,
       whether it was stored inline or offloaded — the offload is invisible to
-      them.
-- [ ] When an artifact is offloaded, the stored record carries a clearly-named
+      them. *(`test_large_artifact_offloaded_and_reinlined` across get_by_id, a
+      query, and a list.)*
+- [x] When an artifact is offloaded, the stored record carries a clearly-named
       marker indicating (a) that offloading happened, (b) where the content is,
       and (c) the original size and threshold, plus a short human-readable note.
-- [ ] Deleting a publish record also removes its offloaded artifact content, so
-      object storage does not accumulate orphans.
-- [ ] Repeated writes of the same record (e.g. re-stamping during the publish
-      flow) do not accumulate stale offloaded copies.
-- [ ] The threshold is a single, documented value with headroom below the field
-      cap so other data in the same field still fits.
+- [x] Deleting a publish record also removes its offloaded artifact content, so
+      object storage does not accumulate orphans. *(delete() sweeps the whole
+      per-record prefix.)*
+- [~] Repeated writes of the same record (e.g. re-stamping during the publish
+      flow) do not accumulate stale offloaded copies. *(DEVIATION: keys are now
+      content-addressed for correctness — an immutable object per distinct
+      artifact version, so a rejected/concurrent write can never clobber a live
+      record's bytes. Superseded versions therefore persist for the record's
+      lifetime and are reaped together by delete()'s prefix sweep, rather than
+      being overwritten in place. No unbounded orphans; storage cost only. See
+      plan.md "Risks" and the review trail. Write-time GC was rejected — it
+      reintroduces a delete-vs-read race.)*
+- [x] The threshold is a single, documented value with headroom below the field
+      cap so other data in the same field still fits. *(`_ARTIFACT_OSS_THRESHOLD_BYTES
+      = 60 * 1024`; `test_threshold_boundary`.)*
 
 ## In Scope
 - Size-based decision to store the artifact inline vs. in object storage.
