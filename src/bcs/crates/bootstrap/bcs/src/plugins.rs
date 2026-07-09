@@ -8,6 +8,7 @@ use std::sync::Arc;
 use bcs_cache_api::CachePlugin;
 use bcs_cache_local::InMemoryCachePlugin;
 use bcs_cache_redis::RedisCachePlugin;
+use bcs_channel_api::ChannelProvider;
 use bcs_config_api::{LeaderElectionProviderConfig, RedisCacheConfig};
 use bcs_db_api::DbPlugin;
 use bcs_db_local::LocalSqliteDbPlugin;
@@ -16,6 +17,7 @@ use bcs_llm_api::LlmChatCompletionPort;
 use bcs_security_gateway_api::SecurityGatewayPort;
 use bcs_service_api::LeaderElectionPort;
 use bcs_service_api::lifecycle::ServiceLifecycle;
+use bcs_service_api::port::repo::ChannelBindingRepoPort;
 use bcs_user_directory_api::UserDirectoryPlugin;
 use futures::future::BoxFuture;
 
@@ -120,10 +122,8 @@ pub struct SecurityGatewayRegistration {
     pub gateway: Arc<dyn SecurityGatewayPort>,
 }
 
-pub type SecurityGatewayBuild = fn(
-    BcsConfig,
-    SecurityGatewayProviderConfig,
-) -> crate::Result<SecurityGatewayRegistration>;
+pub type SecurityGatewayBuild =
+    fn(BcsConfig, SecurityGatewayProviderConfig) -> crate::Result<SecurityGatewayRegistration>;
 
 pub struct SecurityGatewayFactory {
     pub name: &'static str,
@@ -146,6 +146,25 @@ pub struct UserDirectoryFactory {
 }
 
 inventory::collect!(UserDirectoryFactory);
+
+#[derive(Clone)]
+pub struct ChannelProviderBuildContext {
+    pub config: BcsConfig,
+    pub provider_name: String,
+    pub provider_config: bcs_config_api::ChannelProviderConfig,
+    pub channel_bindings: Arc<dyn ChannelBindingRepoPort>,
+    pub now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
+}
+
+pub type ChannelProviderBuild =
+    fn(ChannelProviderBuildContext) -> crate::Result<Arc<dyn ChannelProvider>>;
+
+pub struct ChannelProviderFactory {
+    pub name: &'static str,
+    pub build: ChannelProviderBuild,
+}
+
+inventory::collect!(ChannelProviderFactory);
 
 async fn build_registered_cache_plugin(
     config: &BcsConfig,
@@ -217,6 +236,27 @@ pub fn build_registered_user_directory(
     for factory in inventory::iter::<UserDirectoryFactory> {
         if factory.name == provider {
             return Ok(Some((factory.build)(config.clone(), provider_config)?));
+        }
+    }
+    Ok(None)
+}
+
+pub fn build_registered_channel_provider(
+    config: &BcsConfig,
+    provider: &str,
+    provider_config: bcs_config_api::ChannelProviderConfig,
+    channel_bindings: Arc<dyn ChannelBindingRepoPort>,
+    now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
+) -> crate::Result<Option<Arc<dyn ChannelProvider>>> {
+    for factory in inventory::iter::<ChannelProviderFactory> {
+        if factory.name == provider {
+            return Ok(Some((factory.build)(ChannelProviderBuildContext {
+                config: config.clone(),
+                provider_name: provider.to_string(),
+                provider_config,
+                channel_bindings,
+                now_ms,
+            })?));
         }
     }
     Ok(None)
@@ -456,6 +496,17 @@ pub fn select_db_plugin_kind(config: &BcsConfig) -> DbPluginKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use bcs_channel_api::{
+        ChannelHttpIngressPort, ChannelInboundSink, ChannelProvider, ChannelProviderResult,
+    };
+    use bcs_channel_store::MemoryChannelBindingRepo;
+    use bcs_service_api::ServiceResult;
+    use bcs_service_api::lifecycle::ServiceLifecycle;
+    use bcs_service_api::port::channel_delivery::{
+        ChannelBindingRef, ChannelDeliveryPort, ChannelDeliveryResult, ChannelOutboundEvent,
+    };
+    use bcs_service_api::port::repo::ChannelBindingRepoPort;
 
     fn test_cache_factory(
         _config: BcsConfig,
@@ -559,6 +610,86 @@ mod tests {
         UserDirectoryFactory {
             name: "test-user-directory-options",
             build: test_user_directory_factory,
+        }
+    }
+
+    fn test_channel_provider_factory(
+        ctx: ChannelProviderBuildContext,
+    ) -> crate::Result<Arc<dyn ChannelProvider>> {
+        if ctx.provider_name != "test-channel-provider" {
+            return Err(crate::BcsError::InvalidConfig(
+                "unexpected channel provider name".to_string(),
+            ));
+        }
+        if ctx
+            .provider_config
+            .options
+            .get("mode")
+            .and_then(|value| value.as_str())
+            != Some("lab")
+        {
+            return Err(crate::BcsError::InvalidConfig(
+                "expected provider option mode = lab".to_string(),
+            ));
+        }
+        Ok(Arc::new(TestChannelProvider))
+    }
+
+    inventory::submit! {
+        ChannelProviderFactory {
+            name: "test-channel-provider",
+            build: test_channel_provider_factory,
+        }
+    }
+
+    struct TestChannelProvider;
+
+    #[async_trait]
+    impl ChannelProvider for TestChannelProvider {
+        fn channel_type(&self) -> &'static str {
+            "test-channel"
+        }
+
+        fn validate_config(&self, _config: &serde_json::Value) -> ChannelProviderResult<()> {
+            Ok(())
+        }
+
+        fn redact_config(&self, config: &serde_json::Value) -> serde_json::Value {
+            config.clone()
+        }
+
+        fn delivery(&self) -> Arc<dyn ChannelDeliveryPort> {
+            Arc::new(TestChannelDelivery)
+        }
+
+        fn http_ingress(&self) -> Option<Arc<dyn ChannelHttpIngressPort>> {
+            None
+        }
+
+        fn stream_lifecycle(
+            &self,
+            _sink: Arc<dyn ChannelInboundSink>,
+        ) -> Option<Arc<dyn ServiceLifecycle>> {
+            None
+        }
+    }
+
+    struct TestChannelDelivery;
+
+    #[async_trait]
+    impl ChannelDeliveryPort for TestChannelDelivery {
+        async fn is_available(&self, _binding: &ChannelBindingRef) -> bool {
+            true
+        }
+
+        async fn deliver_event(
+            &self,
+            _event: ChannelOutboundEvent,
+        ) -> ServiceResult<ChannelDeliveryResult> {
+            Ok(ChannelDeliveryResult {
+                delivered: true,
+                error: None,
+            })
         }
     }
 
@@ -693,6 +824,32 @@ mod tests {
             .expect("profile should be found");
         assert_eq!(profile.staff_no, "197262");
         assert_eq!(profile.nick_name.as_deref(), Some("test-user"));
+    }
+
+    #[test]
+    fn registered_channel_provider_factory_receives_provider_context() {
+        let channel_bindings: Arc<dyn ChannelBindingRepoPort> =
+            Arc::new(MemoryChannelBindingRepo::new());
+        let mut provider_config = bcs_config_api::ChannelProviderConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        provider_config.options.insert(
+            "mode".to_string(),
+            serde_json::Value::String("lab".to_string()),
+        );
+
+        let provider = build_registered_channel_provider(
+            &BcsConfig::default(),
+            "test-channel-provider",
+            provider_config,
+            channel_bindings,
+            Arc::new(|| 42),
+        )
+        .expect("channel provider factory should build")
+        .expect("channel provider factory should be registered");
+
+        assert_eq!(provider.channel_type(), "test-channel");
     }
 
     #[test]

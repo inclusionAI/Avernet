@@ -1,4 +1,5 @@
 use bcs_domain::BotCapabilities;
+use bcs_channel_api::ChannelHttpIngressRegistry;
 use bcs_config_api::ManifestConfig;
 use crate::service_key::ApiKeyRegistry;
 use bcs_auth_api::{AuthError, UserIdentityInfo};
@@ -321,6 +322,7 @@ pub struct HttpAppState {
     pub allowed_switch_provider_ids: Arc<Vec<String>>,
     pub provider_stream_gray_list: Arc<ProviderStreamGrayList>,
     pub judge_enabled: bool,
+    pub channel_http_ingress: Option<Arc<ChannelHttpIngressRegistry>>,
     pub auth_chain: Option<Arc<bcs_auth_api::AuthPluginChain>>,
     pub auth_config: bcs_auth_api::AuthConfig,
     pub outbound_url_guard: OutboundUrlGuard,
@@ -367,6 +369,7 @@ impl HttpAppState {
             allowed_switch_provider_ids: Arc::new(Vec::new()),
             provider_stream_gray_list: Arc::new(ProviderStreamGrayList::default()),
             judge_enabled: false,
+            channel_http_ingress: None,
             auth_chain: None,
             auth_config: bcs_auth_api::AuthConfig::default(),
             outbound_url_guard: OutboundUrlGuard::strict(),
@@ -524,6 +527,14 @@ impl HttpAppState {
         gray_list: Arc<ProviderStreamGrayList>,
     ) -> Self {
         self.provider_stream_gray_list = gray_list;
+        self
+    }
+
+    pub fn with_channel_http_ingress(
+        mut self,
+        ingress: Option<Arc<ChannelHttpIngressRegistry>>,
+    ) -> Self {
+        self.channel_http_ingress = ingress;
         self
     }
 

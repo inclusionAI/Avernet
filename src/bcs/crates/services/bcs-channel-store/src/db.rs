@@ -1,0 +1,982 @@
+//! DB-backed channel repository implementations.
+//!
+//! Required tables (DDL is executed by deployment/migration tooling):
+//!
+//! ```sql
+//! CREATE TABLE bcs_channel_bindings (
+//!   id               VARCHAR(64) PRIMARY KEY,
+//!   channel_type     VARCHAR(32) NOT NULL,
+//!   account_ref      VARCHAR(128) NOT NULL,
+//!   target_json      TEXT NOT NULL,
+//!   group_chat_scope VARCHAR(32) DEFAULT NULL,
+//!   visibility       VARCHAR(32) NOT NULL,
+//!   env              VARCHAR(32) NOT NULL,
+//!   status           VARCHAR(16) NOT NULL,
+//!   created_by       VARCHAR(256) DEFAULT NULL,
+//!   created_at       BIGINT NOT NULL,
+//!   config_json      TEXT NOT NULL,
+//!   INDEX idx_channel_bindings_account (channel_type, account_ref, status)
+//! );
+//!
+//! CREATE TABLE bcs_channel_conversations (
+//!   binding_id           VARCHAR(64) NOT NULL,
+//!   im_conversation_id   VARCHAR(256) NOT NULL,
+//!   im_conversation_type VARCHAR(16) NOT NULL,
+//!   session_scope        VARCHAR(32) NOT NULL,
+//!   im_user_id           VARCHAR(128) NOT NULL DEFAULT '',
+//!   bcs_session_id       VARCHAR(128) NOT NULL,
+//!   last_active_at       BIGINT NOT NULL,
+//!   PRIMARY KEY (binding_id, im_conversation_id, session_scope, im_user_id),
+//!   INDEX idx_channel_conversations_session (binding_id, bcs_session_id),
+//!   INDEX idx_channel_conversations_bcs_session (bcs_session_id, binding_id)
+//! );
+//!
+//! CREATE TABLE bcs_channel_im_participants (
+//!   channel_type VARCHAR(32) NOT NULL,
+//!   account_ref  VARCHAR(128) NOT NULL,
+//!   im_user_id   VARCHAR(128) NOT NULL,
+//!   actor_id     VARCHAR(256) NOT NULL,
+//!   display_name VARCHAR(256) DEFAULT NULL,
+//!   PRIMARY KEY (channel_type, account_ref, im_user_id)
+//! );
+//! ```
+//!
+//! The deployment side executes DDL; this module owns only SQL DML and
+//! row-to-domain mapping for the channel repository ports.
+
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use tracing::warn;
+
+use bcs_db_api::{DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
+use bcs_domain::{
+    BindingStatus, BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap,
+    GroupChatScope, ImParticipantMap, SessionScope, Visibility,
+};
+use bcs_service_api::port::repo::{
+    ChannelBindingRepoPort, ConversationSessionRepoPort, ImParticipantRepoPort,
+};
+use bcs_service_api::{ServiceError, ServiceResult};
+
+pub type ChannelSqlFlavor = DbSqlFlavor;
+
+pub struct DbChannelBindingStore {
+    db: Arc<dyn DbPlugin>,
+    flavor: ChannelSqlFlavor,
+}
+
+impl DbChannelBindingStore {
+    pub fn new(db: Arc<dyn DbPlugin>, flavor: ChannelSqlFlavor) -> Self {
+        Self { db, flavor }
+    }
+
+    pub fn mysql(db: Arc<dyn DbPlugin>) -> Self {
+        Self::new(db, ChannelSqlFlavor::Mysql)
+    }
+
+    pub fn sqlite(db: Arc<dyn DbPlugin>) -> Self {
+        Self::new(db, ChannelSqlFlavor::Sqlite)
+    }
+
+    pub fn flavor(&self) -> ChannelSqlFlavor {
+        self.flavor
+    }
+
+    async fn execute(&self, operation: &'static str, statement: DbStatement) -> ServiceResult<u64> {
+        self.db
+            .execute(statement)
+            .await
+            .map(|result| result.affected_rows)
+            .map_err(|err| service_db_error(operation, err))
+    }
+
+    async fn query(
+        &self,
+        operation: &'static str,
+        statement: DbStatement,
+    ) -> ServiceResult<Vec<DbRow>> {
+        self.db
+            .query(statement)
+            .await
+            .map_err(|err| service_db_error(operation, err))
+    }
+}
+
+#[async_trait]
+impl ChannelBindingRepoPort for DbChannelBindingStore {
+    async fn create(&self, binding: ChannelBinding) -> ServiceResult<()> {
+        let target_json = serde_json::to_string(&binding.target)?;
+        let config_json = serde_json::to_string(&binding.config)?;
+
+        self.execute(
+            "create_binding",
+            DbStatement::with_params(
+                "INSERT INTO bcs_channel_bindings \
+                 (id, channel_type, account_ref, target_json, group_chat_scope, \
+                  visibility, env, status, created_by, created_at, config_json) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                vec![
+                    DbValue::from(binding.id.as_str()),
+                    DbValue::from(binding.channel_type.as_str()),
+                    DbValue::from(binding.account_ref.as_str()),
+                    DbValue::from(target_json),
+                    DbValue::from(binding.group_chat_scope.map(group_chat_scope_to_str)),
+                    DbValue::from(visibility_to_str(binding.outbound_visibility)),
+                    DbValue::from(binding.env.as_str()),
+                    DbValue::from(binding_status_to_str(binding.status)),
+                    DbValue::from(binding.created_by.as_deref()),
+                    DbValue::from(binding.created_at),
+                    DbValue::from(config_json),
+                ],
+            ),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn get(&self, id: &str) -> ServiceResult<Option<ChannelBinding>> {
+        let rows = self
+            .query(
+                "get_binding",
+                DbStatement::with_params(
+                    "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
+                     visibility, env, status, created_by, created_at, config_json \
+                     FROM bcs_channel_bindings WHERE id = ? LIMIT 1",
+                    vec![DbValue::from(id)],
+                ),
+            )
+            .await?;
+
+        match rows.first() {
+            Some(row) => row_to_binding(row).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    async fn find_active_by_account(
+        &self,
+        channel_type: ChannelType,
+        account_ref: &str,
+    ) -> ServiceResult<Option<ChannelBinding>> {
+        let rows = self
+            .query(
+                "find_active_binding_by_account",
+                DbStatement::with_params(
+                    "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
+                     visibility, env, status, created_by, created_at, config_json \
+                     FROM bcs_channel_bindings \
+                     WHERE channel_type = ? AND account_ref = ? AND status = 'active' \
+                     LIMIT 1",
+                    vec![
+                        DbValue::from(channel_type.as_str()),
+                        DbValue::from(account_ref),
+                    ],
+                ),
+            )
+            .await?;
+
+        match rows.first() {
+            Some(row) => row_to_binding(row).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    async fn list(&self) -> ServiceResult<Vec<ChannelBinding>> {
+        let rows = self
+            .query(
+                "list_bindings",
+                DbStatement::new(
+                    "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
+                     visibility, env, status, created_by, created_at, config_json \
+                     FROM bcs_channel_bindings ORDER BY id",
+                ),
+            )
+            .await?;
+        rows.iter().map(row_to_binding).collect()
+    }
+
+    async fn set_status(&self, id: &str, active: bool) -> ServiceResult<()> {
+        let status = if active {
+            BindingStatus::Active
+        } else {
+            BindingStatus::Disabled
+        };
+        self.execute(
+            "set_binding_status",
+            DbStatement::with_params(
+                "UPDATE bcs_channel_bindings SET status = ? WHERE id = ?",
+                vec![DbValue::from(binding_status_to_str(status)), DbValue::from(id)],
+            ),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn set_config(&self, id: &str, config: serde_json::Value) -> ServiceResult<()> {
+        let config_json = serde_json::to_string(&config)?;
+        self.execute(
+            "set_binding_config",
+            DbStatement::with_params(
+                "UPDATE bcs_channel_bindings SET config_json = ? WHERE id = ?",
+                vec![DbValue::from(config_json), DbValue::from(id)],
+            ),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn delete(&self, id: &str) -> ServiceResult<()> {
+        self.execute(
+            "delete_binding",
+            DbStatement::with_params(
+                "DELETE FROM bcs_channel_bindings WHERE id = ?",
+                vec![DbValue::from(id)],
+            ),
+        )
+        .await?;
+        Ok(())
+    }
+}
+
+pub struct DbConversationSessionStore {
+    db: Arc<dyn DbPlugin>,
+    flavor: ChannelSqlFlavor,
+}
+
+impl DbConversationSessionStore {
+    pub fn new(db: Arc<dyn DbPlugin>, flavor: ChannelSqlFlavor) -> Self {
+        Self { db, flavor }
+    }
+
+    pub fn mysql(db: Arc<dyn DbPlugin>) -> Self {
+        Self::new(db, ChannelSqlFlavor::Mysql)
+    }
+
+    pub fn sqlite(db: Arc<dyn DbPlugin>) -> Self {
+        Self::new(db, ChannelSqlFlavor::Sqlite)
+    }
+
+    pub fn flavor(&self) -> ChannelSqlFlavor {
+        self.flavor
+    }
+
+    async fn execute(&self, operation: &'static str, statement: DbStatement) -> ServiceResult<u64> {
+        self.db
+            .execute(statement)
+            .await
+            .map(|result| result.affected_rows)
+            .map_err(|err| service_db_error(operation, err))
+    }
+
+    async fn query(
+        &self,
+        operation: &'static str,
+        statement: DbStatement,
+    ) -> ServiceResult<Vec<DbRow>> {
+        self.db
+            .query(statement)
+            .await
+            .map_err(|err| service_db_error(operation, err))
+    }
+
+    fn upsert_sql(&self) -> String {
+        format!(
+            "INSERT INTO bcs_channel_conversations \
+             (binding_id, im_conversation_id, im_conversation_type, session_scope, \
+              im_user_id, bcs_session_id, last_active_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?) {}",
+            self.flavor.on_conflict_update(
+                &[
+                    "binding_id",
+                    "im_conversation_id",
+                    "session_scope",
+                    "im_user_id",
+                ],
+                &["im_conversation_type", "bcs_session_id", "last_active_at"],
+                &[],
+            )
+        )
+    }
+}
+
+#[async_trait]
+impl ConversationSessionRepoPort for DbConversationSessionStore {
+    async fn get(
+        &self,
+        binding_id: &str,
+        im_conversation_id: &str,
+        session_scope: SessionScope,
+        im_user_id: Option<&str>,
+    ) -> ServiceResult<Option<ConversationSessionMap>> {
+        let rows = self
+            .query(
+                "get_conversation",
+                DbStatement::with_params(
+                    "SELECT binding_id, im_conversation_id, im_conversation_type, \
+                     session_scope, im_user_id, bcs_session_id, last_active_at \
+                     FROM bcs_channel_conversations \
+                     WHERE binding_id = ? AND im_conversation_id = ? \
+                       AND session_scope = ? AND im_user_id = ? \
+                     LIMIT 1",
+                    vec![
+                        DbValue::from(binding_id),
+                        DbValue::from(im_conversation_id),
+                        DbValue::from(session_scope_to_str(session_scope)),
+                        DbValue::from(im_user_id_value(im_user_id)),
+                    ],
+                ),
+            )
+            .await?;
+
+        match rows.first() {
+            Some(row) => row_to_conversation(row).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    async fn find_by_session(
+        &self,
+        binding_id: &str,
+        bcs_session_id: &str,
+    ) -> ServiceResult<Option<ConversationSessionMap>> {
+        let rows = self
+            .query(
+                "find_conversation_by_session",
+                DbStatement::with_params(
+                    "SELECT binding_id, im_conversation_id, im_conversation_type, \
+                     session_scope, im_user_id, bcs_session_id, last_active_at \
+                     FROM bcs_channel_conversations \
+                     WHERE binding_id = ? AND bcs_session_id = ? \
+                     LIMIT 1",
+                    vec![DbValue::from(binding_id), DbValue::from(bcs_session_id)],
+                ),
+            )
+            .await?;
+
+        match rows.first() {
+            Some(row) => row_to_conversation(row).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    async fn list_by_bcs_session(
+        &self,
+        bcs_session_id: &str,
+    ) -> ServiceResult<Vec<ConversationSessionMap>> {
+        let rows = self
+            .query(
+                "list_conversations_by_bcs_session",
+                DbStatement::with_params(
+                    "SELECT binding_id, im_conversation_id, im_conversation_type, \
+                     session_scope, im_user_id, bcs_session_id, last_active_at \
+                     FROM bcs_channel_conversations \
+                     WHERE bcs_session_id = ? \
+                     ORDER BY binding_id",
+                    vec![DbValue::from(bcs_session_id)],
+                ),
+            )
+            .await?;
+
+        rows.iter().map(row_to_conversation).collect()
+    }
+
+    async fn upsert(&self, map: ConversationSessionMap) -> ServiceResult<()> {
+        self.execute(
+            "upsert_conversation",
+            DbStatement::with_params(
+                self.upsert_sql(),
+                vec![
+                    DbValue::from(map.binding_id.as_str()),
+                    DbValue::from(map.im_conversation_id.as_str()),
+                    DbValue::from(map.im_conversation_type.as_str()),
+                    DbValue::from(session_scope_to_str(map.session_scope)),
+                    DbValue::from(im_user_id_value(map.im_user_id.as_deref())),
+                    DbValue::from(map.bcs_session_id.as_str()),
+                    DbValue::from(map.last_active_at),
+                ],
+            ),
+        )
+        .await?;
+        Ok(())
+    }
+}
+
+pub struct DbImParticipantStore {
+    db: Arc<dyn DbPlugin>,
+    flavor: ChannelSqlFlavor,
+}
+
+impl DbImParticipantStore {
+    pub fn new(db: Arc<dyn DbPlugin>, flavor: ChannelSqlFlavor) -> Self {
+        Self { db, flavor }
+    }
+
+    pub fn mysql(db: Arc<dyn DbPlugin>) -> Self {
+        Self::new(db, ChannelSqlFlavor::Mysql)
+    }
+
+    pub fn sqlite(db: Arc<dyn DbPlugin>) -> Self {
+        Self::new(db, ChannelSqlFlavor::Sqlite)
+    }
+
+    pub fn flavor(&self) -> ChannelSqlFlavor {
+        self.flavor
+    }
+
+    async fn execute(&self, operation: &'static str, statement: DbStatement) -> ServiceResult<u64> {
+        self.db
+            .execute(statement)
+            .await
+            .map(|result| result.affected_rows)
+            .map_err(|err| service_db_error(operation, err))
+    }
+
+    async fn query(
+        &self,
+        operation: &'static str,
+        statement: DbStatement,
+    ) -> ServiceResult<Vec<DbRow>> {
+        self.db
+            .query(statement)
+            .await
+            .map_err(|err| service_db_error(operation, err))
+    }
+
+    fn upsert_sql(&self) -> String {
+        format!(
+            "INSERT INTO bcs_channel_im_participants \
+             (channel_type, account_ref, im_user_id, actor_id, display_name) \
+             VALUES (?, ?, ?, ?, ?) {}",
+            self.flavor.on_conflict_update(
+                &["channel_type", "account_ref", "im_user_id"],
+                &["actor_id", "display_name"],
+                &[],
+            )
+        )
+    }
+}
+
+#[async_trait]
+impl ImParticipantRepoPort for DbImParticipantStore {
+    async fn get(
+        &self,
+        channel_type: ChannelType,
+        account_ref: &str,
+        im_user_id: &str,
+    ) -> ServiceResult<Option<ImParticipantMap>> {
+        let rows = self
+            .query(
+                "get_participant",
+                DbStatement::with_params(
+                    "SELECT channel_type, account_ref, im_user_id, actor_id, display_name \
+                     FROM bcs_channel_im_participants \
+                     WHERE channel_type = ? AND account_ref = ? AND im_user_id = ? \
+                     LIMIT 1",
+                    vec![
+                        DbValue::from(channel_type.as_str()),
+                        DbValue::from(account_ref),
+                        DbValue::from(im_user_id),
+                    ],
+                ),
+            )
+            .await?;
+
+        match rows.first() {
+            Some(row) => row_to_participant(row).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    async fn upsert(&self, map: ImParticipantMap) -> ServiceResult<()> {
+        self.execute(
+            "upsert_participant",
+            DbStatement::with_params(
+                self.upsert_sql(),
+                vec![
+                    DbValue::from(map.channel_type.as_str()),
+                    DbValue::from(map.account_ref.as_str()),
+                    DbValue::from(map.im_user_id.as_str()),
+                    DbValue::from(map.actor_id.as_str()),
+                    DbValue::from(map.display_name.as_deref()),
+                ],
+            ),
+        )
+        .await?;
+        Ok(())
+    }
+}
+
+fn row_to_binding(row: &DbRow) -> ServiceResult<ChannelBinding> {
+    let target_json = required_string(row, "target_json")?;
+    let config_json = required_string(row, "config_json")?;
+
+    Ok(ChannelBinding {
+        id: required_string(row, "id")?,
+        channel_type: required_string(row, "channel_type")?,
+        account_ref: required_string(row, "account_ref")?,
+        target: serde_json::from_str::<BindingTarget>(&target_json)?,
+        group_chat_scope: parse_group_chat_scope(optional_string(row, "group_chat_scope").as_deref())?,
+        outbound_visibility: parse_visibility(&required_string(row, "visibility")?)?,
+        env: required_string(row, "env")?,
+        status: parse_binding_status(&required_string(row, "status")?)?,
+        created_by: optional_string(row, "created_by"),
+        created_at: row_u64(row, "created_at")?,
+        config: serde_json::from_str::<serde_json::Value>(&config_json)?,
+    })
+}
+
+fn row_to_conversation(row: &DbRow) -> ServiceResult<ConversationSessionMap> {
+    let im_user_id = optional_string(row, "im_user_id");
+    Ok(ConversationSessionMap {
+        binding_id: required_string(row, "binding_id")?,
+        im_conversation_id: required_string(row, "im_conversation_id")?,
+        im_conversation_type: required_string(row, "im_conversation_type")?,
+        session_scope: parse_session_scope(&required_string(row, "session_scope")?)?,
+        im_user_id: match im_user_id.as_deref() {
+            Some("") | None => None,
+            Some(value) => Some(value.to_string()),
+        },
+        bcs_session_id: required_string(row, "bcs_session_id")?,
+        last_active_at: row_u64(row, "last_active_at")?,
+    })
+}
+
+fn row_to_participant(row: &DbRow) -> ServiceResult<ImParticipantMap> {
+    Ok(ImParticipantMap {
+        channel_type: required_string(row, "channel_type")?,
+        account_ref: required_string(row, "account_ref")?,
+        im_user_id: required_string(row, "im_user_id")?,
+        actor_id: required_string(row, "actor_id")?,
+        display_name: optional_string(row, "display_name"),
+    })
+}
+
+fn required_string(row: &DbRow, column: &'static str) -> ServiceResult<String> {
+    row.get_string(column)
+        .map_err(|err| service_db_error(column, err))?
+        .ok_or_else(|| ServiceError::InternalError(format!("missing channel column {}", column)))
+}
+
+fn optional_string(row: &DbRow, column: &'static str) -> Option<String> {
+    row.get_string(column).ok().flatten()
+}
+
+fn row_u64(row: &DbRow, column: &'static str) -> ServiceResult<u64> {
+    let value = row
+        .get_i64(column)
+        .map_err(|err| service_db_error(column, err))?
+        .ok_or_else(|| ServiceError::InternalError(format!("missing channel column {}", column)))?;
+    u64::try_from(value).map_err(|_| {
+        ServiceError::InternalError(format!(
+            "channel column {} must be non-negative, got {}",
+            column, value
+        ))
+    })
+}
+
+fn im_user_id_value(im_user_id: Option<&str>) -> &str {
+    match im_user_id {
+        Some(value) => value,
+        None => "",
+    }
+}
+
+fn group_chat_scope_to_str(scope: GroupChatScope) -> &'static str {
+    match scope {
+        GroupChatScope::ConversationShared => "conversation_shared",
+        GroupChatScope::PerSender => "per_sender",
+    }
+}
+
+fn parse_group_chat_scope(value: Option<&str>) -> ServiceResult<Option<GroupChatScope>> {
+    match value {
+        Some("conversation_shared") => Ok(Some(GroupChatScope::ConversationShared)),
+        Some("per_sender") => Ok(Some(GroupChatScope::PerSender)),
+        Some(other) => Err(ServiceError::InternalError(format!(
+            "unknown group_chat_scope {}",
+            other
+        ))),
+        None => Ok(None),
+    }
+}
+
+fn session_scope_to_str(scope: SessionScope) -> &'static str {
+    match scope {
+        SessionScope::Conversation => "conversation",
+        SessionScope::PerSender => "per_sender",
+    }
+}
+
+fn parse_session_scope(value: &str) -> ServiceResult<SessionScope> {
+    match value {
+        "conversation" => Ok(SessionScope::Conversation),
+        "per_sender" => Ok(SessionScope::PerSender),
+        _ => Err(ServiceError::InternalError(format!(
+            "unknown session_scope {}",
+            value
+        ))),
+    }
+}
+
+fn visibility_to_str(visibility: Visibility) -> &'static str {
+    match visibility {
+        Visibility::FullTranscript => "full_transcript",
+        Visibility::LeadOnly => "lead_only",
+    }
+}
+
+fn parse_visibility(value: &str) -> ServiceResult<Visibility> {
+    match value {
+        "full_transcript" => Ok(Visibility::FullTranscript),
+        "lead_only" => Ok(Visibility::LeadOnly),
+        _ => Err(ServiceError::InternalError(format!(
+            "unknown visibility {}",
+            value
+        ))),
+    }
+}
+
+fn binding_status_to_str(status: BindingStatus) -> &'static str {
+    match status {
+        BindingStatus::Active => "active",
+        BindingStatus::Disabled => "disabled",
+    }
+}
+
+fn parse_binding_status(value: &str) -> ServiceResult<BindingStatus> {
+    match value {
+        "active" => Ok(BindingStatus::Active),
+        "disabled" => Ok(BindingStatus::Disabled),
+        _ => Err(ServiceError::InternalError(format!(
+            "unknown binding status {}",
+            value
+        ))),
+    }
+}
+
+fn service_db_error(operation: &'static str, err: DbError) -> ServiceError {
+    warn!(operation, error = %err, "channel db operation failed");
+    ServiceError::InternalError(format!("channel db {}: {}", operation, err))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use bcs_db_api::{DbError, DbStatement};
+    use bcs_db_local::LocalSqliteDbPlugin;
+    use bcs_domain::{BindingStatus, BindingTarget, GroupChatScope, Visibility};
+
+    fn test_db_error(operation: &'static str, err: DbError) -> ServiceError {
+        ServiceError::InternalError(format!("test db {}: {}", operation, err))
+    }
+
+    async fn execute_schema(db: &LocalSqliteDbPlugin, sql: &'static str) -> ServiceResult<()> {
+        db.execute(DbStatement::new(sql))
+            .await
+            .map(|_| ())
+            .map_err(|err| test_db_error("schema", err))
+    }
+
+    async fn sqlite_db() -> ServiceResult<Arc<LocalSqliteDbPlugin>> {
+        let db = LocalSqliteDbPlugin::new()
+            .map_err(|err| test_db_error("open sqlite", err))?;
+
+        execute_schema(
+            &db,
+            "CREATE TABLE bcs_channel_bindings (
+                id TEXT PRIMARY KEY,
+                channel_type TEXT NOT NULL,
+                account_ref TEXT NOT NULL,
+                target_json TEXT NOT NULL,
+                group_chat_scope TEXT,
+                visibility TEXT NOT NULL,
+                env TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_by TEXT,
+                created_at INTEGER NOT NULL,
+                config_json TEXT NOT NULL
+            )",
+        )
+        .await?;
+        execute_schema(
+            &db,
+            "CREATE TABLE bcs_channel_conversations (
+                binding_id TEXT NOT NULL,
+                im_conversation_id TEXT NOT NULL,
+                im_conversation_type TEXT NOT NULL,
+                session_scope TEXT NOT NULL,
+                im_user_id TEXT NOT NULL,
+                bcs_session_id TEXT NOT NULL,
+                last_active_at INTEGER NOT NULL,
+                PRIMARY KEY (
+                    binding_id,
+                    im_conversation_id,
+                    session_scope,
+                    im_user_id
+                )
+            )",
+        )
+        .await?;
+        execute_schema(
+            &db,
+            "CREATE TABLE bcs_channel_im_participants (
+                channel_type TEXT NOT NULL,
+                account_ref TEXT NOT NULL,
+                im_user_id TEXT NOT NULL,
+                actor_id TEXT NOT NULL,
+                display_name TEXT,
+                PRIMARY KEY (channel_type, account_ref, im_user_id)
+            )",
+        )
+        .await?;
+
+        Ok(Arc::new(db))
+    }
+
+    async fn sqlite_stores() -> ServiceResult<(
+        Arc<dyn ChannelBindingRepoPort>,
+        Arc<dyn ConversationSessionRepoPort>,
+        Arc<dyn ImParticipantRepoPort>,
+    )> {
+        let db = sqlite_db().await?;
+        let db_plugin: Arc<dyn DbPlugin> = db;
+
+        Ok((
+            Arc::new(DbChannelBindingStore::sqlite(db_plugin.clone())),
+            Arc::new(DbConversationSessionStore::sqlite(db_plugin.clone())),
+            Arc::new(DbImParticipantStore::sqlite(db_plugin)),
+        ))
+    }
+
+    fn binding() -> ChannelBinding {
+        ChannelBinding {
+            id: "binding_1".to_string(),
+            channel_type: "dingtalk".to_string(),
+            account_ref: "robot_1".to_string(),
+            target: BindingTarget::Group {
+                group_id: "group_1".to_string(),
+            },
+            group_chat_scope: Some(GroupChatScope::PerSender),
+            outbound_visibility: Visibility::FullTranscript,
+            env: "dev".to_string(),
+            status: BindingStatus::Active,
+            created_by: Some("creator".to_string()),
+            created_at: 100,
+            config: serde_json::json!({
+                "robot_code": "robot_1",
+                "client_id": "client_1",
+                "client_secret": "secret_1",
+                "send_mode": {
+                    "mode": "normal",
+                    "message_type": "markdown"
+                }
+            }),
+        }
+    }
+
+    fn conversation(
+        session_scope: SessionScope,
+        im_user_id: Option<&str>,
+        bcs_session_id: &str,
+        last_active_at: u64,
+    ) -> ConversationSessionMap {
+        ConversationSessionMap {
+            binding_id: "binding_1".to_string(),
+            im_conversation_id: "conversation_1".to_string(),
+            im_conversation_type: "group".to_string(),
+            session_scope,
+            im_user_id: im_user_id.map(str::to_string),
+            bcs_session_id: bcs_session_id.to_string(),
+            last_active_at,
+        }
+    }
+
+    fn participant(actor_id: &str, display_name: &str) -> ImParticipantMap {
+        ImParticipantMap {
+            channel_type: "dingtalk".to_string(),
+            account_ref: "robot_1".to_string(),
+            im_user_id: "staff_1".to_string(),
+            actor_id: actor_id.to_string(),
+            display_name: Some(display_name.to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn sqlite_binding_crud_round_trip() -> ServiceResult<()> {
+        let (binding_repo, _, _) = sqlite_stores().await?;
+        let binding = binding();
+
+        binding_repo.create(binding.clone()).await?;
+
+        let got = binding_repo.get("binding_1").await?;
+        match got {
+            Some(got) => {
+                assert_eq!(got, binding);
+                assert_eq!(got.group_chat_scope, Some(GroupChatScope::PerSender));
+            }
+            None => panic!("expected binding_1 after create"),
+        }
+
+        let active = binding_repo
+            .find_active_by_account("dingtalk".to_string(), "robot_1")
+            .await?;
+        assert_eq!(active.as_ref().map(|binding| binding.id.as_str()), Some("binding_1"));
+
+        binding_repo.set_status("binding_1", false).await?;
+
+        let disabled_active = binding_repo
+            .find_active_by_account("dingtalk".to_string(), "robot_1")
+            .await?;
+        assert_eq!(disabled_active, None);
+
+        let listed = binding_repo.list().await?;
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id.as_str(), "binding_1");
+        assert_eq!(listed[0].status, BindingStatus::Disabled);
+
+        binding_repo.delete("binding_1").await?;
+        assert_eq!(binding_repo.get("binding_1").await?, None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_binding_rejects_invalid_created_at() -> ServiceResult<()> {
+        let db = sqlite_db().await?;
+        db.execute(DbStatement::with_params(
+            "INSERT INTO bcs_channel_bindings \
+             (id, channel_type, account_ref, target_json, group_chat_scope, \
+              visibility, env, status, created_by, created_at, config_json) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            vec![
+                DbValue::from("bad_binding"),
+                DbValue::from("ding_talk"),
+                DbValue::from("robot_1"),
+                DbValue::from(serde_json::to_string(&BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                })?),
+                DbValue::from(Some("per_sender")),
+                DbValue::from("full_transcript"),
+                DbValue::from("dev"),
+                DbValue::from("active"),
+                DbValue::Null,
+                DbValue::from("bad_timestamp"),
+                DbValue::from(serde_json::to_string(&serde_json::json!({
+                    "robot_code": "robot_1",
+                    "client_id": "client_1",
+                    "client_secret": "secret_1",
+                    "send_mode": {
+                        "mode": "normal",
+                        "message_type": "markdown"
+                    }
+                }))?),
+            ],
+        ))
+        .await
+        .map(|_| ())
+        .map_err(|err| test_db_error("insert bad timestamp", err))?;
+
+        let db_plugin: Arc<dyn DbPlugin> = db;
+        let binding_repo = DbChannelBindingStore::sqlite(db_plugin);
+        let result = binding_repo.get("bad_binding").await;
+
+        assert!(
+            matches!(result, Err(ServiceError::InternalError(_))),
+            "invalid created_at must be surfaced as a row mapping error"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_conversation_upsert_and_find_by_session() -> ServiceResult<()> {
+        let (_, conversation_repo, _) = sqlite_stores().await?;
+
+        conversation_repo
+            .upsert(conversation(SessionScope::Conversation, None, "session_old", 100))
+            .await?;
+        conversation_repo
+            .upsert(conversation(SessionScope::Conversation, None, "session_new", 200))
+            .await?;
+
+        let shared = conversation_repo
+            .get("binding_1", "conversation_1", SessionScope::Conversation, None)
+            .await?;
+        match shared {
+            Some(shared) => {
+                assert_eq!(shared.bcs_session_id, "session_new");
+                assert_eq!(shared.im_user_id, None);
+                assert_eq!(shared.last_active_at, 200);
+            }
+            None => panic!("expected shared conversation mapping"),
+        }
+
+        conversation_repo
+            .upsert(conversation(
+                SessionScope::PerSender,
+                Some("staff_1"),
+                "session_sender",
+                300,
+            ))
+            .await?;
+
+        let per_sender = conversation_repo
+            .get(
+                "binding_1",
+                "conversation_1",
+                SessionScope::PerSender,
+                Some("staff_1"),
+            )
+            .await?;
+        match per_sender {
+            Some(per_sender) => assert_eq!(per_sender.bcs_session_id, "session_sender"),
+            None => panic!("expected per-sender conversation mapping"),
+        }
+
+        let by_session = conversation_repo
+            .find_by_session("binding_1", "session_sender")
+            .await?;
+        match by_session {
+            Some(by_session) => {
+                assert_eq!(by_session.session_scope, SessionScope::PerSender);
+                assert_eq!(by_session.im_user_id.as_deref(), Some("staff_1"));
+            }
+            None => panic!("expected find_by_session result"),
+        }
+        let by_bcs_session = conversation_repo
+            .list_by_bcs_session("session_sender")
+            .await?;
+        assert_eq!(by_bcs_session.len(), 1);
+        assert_eq!(by_bcs_session[0].binding_id, "binding_1");
+        assert_eq!(by_bcs_session[0].session_scope, SessionScope::PerSender);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_participant_upsert_round_trip() -> ServiceResult<()> {
+        let (_, _, participant_repo) = sqlite_stores().await?;
+
+        participant_repo
+            .upsert(participant("actor_old", "Old Name"))
+            .await?;
+        participant_repo
+            .upsert(participant("actor_new", "New Name"))
+            .await?;
+
+        let got = participant_repo
+            .get("dingtalk".to_string(), "robot_1", "staff_1")
+            .await?;
+        match got {
+            Some(got) => {
+                assert_eq!(got.actor_id, "actor_new");
+                assert_eq!(got.display_name.as_deref(), Some("New Name"));
+            }
+            None => panic!("expected participant mapping"),
+        }
+
+        Ok(())
+    }
+}

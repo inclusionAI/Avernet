@@ -15,7 +15,9 @@ pub use protocol::{
     ProtocolDeprecation, RequestFrame, RequestSource, ResponseDirective, ResponseFrame,
     ResponseMode, RouteSelectorWire, ToolEventData, ToolPhase, ToolResult,
     ToolResultContent, UsageInfo, WsBotCapabilities, GROUP_ID_PREFIX, build_session_key,
-    apply_sender_display_name, build_chat_inject_frame, build_chat_send_frame, build_recipient_group_context,
+    apply_sender_display_name, build_chat_inject_frame, build_chat_send_frame,
+    build_direct_chat_inject_frame, build_direct_chat_send_frame,
+    build_recipient_group_context,
     now_ms, response_directive_for_delivery,
     error_codes,
 };

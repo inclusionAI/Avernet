@@ -1038,6 +1038,191 @@ pub fn build_chat_send_frame(
     ))
 }
 
+/// Build a direct bot `chat.send` frame without BCS group-context header.
+///
+/// This is used when the BCS group is only a technical container and the bot
+/// should perceive the exchange as a direct human ↔ bot chat.
+#[allow(clippy::too_many_arguments)]
+pub fn build_direct_chat_send_frame(
+    run_id: &str,
+    session_id: &str,
+    content: &str,
+    from_actor_id: &str,
+    from_actor_name: &str,
+    target_bot: &str,
+    attachments: &Option<Vec<Value>>,
+    thinking: &Option<String>,
+    protocol_version: u32,
+    bcs_session_id: Option<&str>,
+) -> BcsFrame {
+    let group_context = build_direct_bot_context(
+        session_id,
+        bcs_session_id,
+        content,
+        from_actor_id,
+        from_actor_name,
+        target_bot,
+        GroupContextDeliveryType::Send,
+    );
+    let supports_session_field = protocol_version >= 3;
+    let wire_id = legacy_aware_wire_group_id(session_id, bcs_session_id, supports_session_field);
+    let session_key = build_session_key(wire_id);
+    let send = ChatSendParams {
+        session_key,
+        bcs_group_id: wire_id.to_string(),
+        message: MessageContent {
+            role: "user".to_string(),
+            content: vec![ContentBlock::text(content.to_string())],
+            timestamp: now_ms(),
+        },
+        channel: ChannelInfo {
+            source: ChannelSource::Api,
+            user_id: Some(from_actor_name.to_string()),
+            actor_id: Some(from_actor_id.to_string()),
+            actor_name: Some(from_actor_name.to_string()),
+            thread_id: Some(session_id.to_string()),
+        },
+        session_context: group_context,
+        timeout_ms: None,
+        idempotency_key: Some(run_id.to_string()),
+        bcs_session_id: if supports_session_field {
+            bcs_session_id.map(str::to_string)
+        } else {
+            None
+        },
+        tags: Vec::new(),
+    };
+    let mut params = serde_json::to_value(send).unwrap_or_else(|error| {
+        tracing::warn!(%error, "failed to serialize direct chat.send params");
+        Value::Null
+    });
+    if let Some(obj) = params.as_object_mut() {
+        obj.insert("deliver".to_string(), Value::Bool(true));
+        if let Some(attachments) = attachments {
+            obj.insert(
+                "attachments".to_string(),
+                Value::Array(attachments.clone()),
+            );
+        }
+        if let Some(thinking) = thinking {
+            obj.insert("thinking".to_string(), Value::String(thinking.clone()));
+        }
+    }
+    BcsFrame::Request(RequestFrame::new(
+        run_id.to_string(),
+        "chat.send",
+        Some(params),
+    ))
+}
+
+/// Build a direct bot `chat.inject` frame without BCS group-context header.
+#[allow(clippy::too_many_arguments)]
+pub fn build_direct_chat_inject_frame(
+    run_id: &str,
+    session_id: &str,
+    content: &str,
+    from_actor_id: &str,
+    from_actor_name: &str,
+    target_bot: &str,
+    protocol_version: u32,
+    bcs_session_id: Option<&str>,
+) -> BcsFrame {
+    let group_context = build_direct_bot_context(
+        session_id,
+        bcs_session_id,
+        content,
+        from_actor_id,
+        from_actor_name,
+        target_bot,
+        GroupContextDeliveryType::Inject,
+    );
+    let supports_session_field = protocol_version >= 3;
+    let wire_id = legacy_aware_wire_group_id(session_id, bcs_session_id, supports_session_field);
+    let session_key = build_session_key(wire_id);
+    let inject = ChatInjectParams {
+        session_key,
+        bcs_group_id: wire_id.to_string(),
+        message: MessageContent {
+            role: "user".to_string(),
+            content: vec![ContentBlock::text(content.to_string())],
+            timestamp: now_ms(),
+        },
+        channel: ChannelInfo {
+            source: ChannelSource::Api,
+            user_id: Some(from_actor_name.to_string()),
+            actor_id: Some(from_actor_id.to_string()),
+            actor_name: Some(from_actor_name.to_string()),
+            thread_id: Some(session_id.to_string()),
+        },
+        session_context: group_context,
+        bcs_session_id: if supports_session_field {
+            bcs_session_id.map(str::to_string)
+        } else {
+            None
+        },
+    };
+    let mut payload = serde_json::to_value(inject).unwrap_or_else(|error| {
+        tracing::warn!(%error, "failed to serialize direct chat.inject params");
+        Value::Null
+    });
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("from".to_string(), Value::String(from_actor_id.to_string()));
+        obj.insert("deliver".to_string(), Value::Bool(false));
+    }
+    BcsFrame::Request(RequestFrame::new(
+        run_id.to_string(),
+        "chat.inject",
+        Some(payload),
+    ))
+}
+
+fn build_direct_bot_context(
+    session_id: &str,
+    bcs_session_id: Option<&str>,
+    content: &str,
+    from_actor_id: &str,
+    from_actor_name: &str,
+    target_bot: &str,
+    delivery_type: GroupContextDeliveryType,
+) -> GroupContext {
+    let should_respond = delivery_type == GroupContextDeliveryType::Send;
+    let originator = if from_actor_name.trim().is_empty() {
+        from_actor_id.to_string()
+    } else {
+        from_actor_name.to_string()
+    };
+    GroupContext {
+        session_id: bcs_session_id.unwrap_or(session_id).to_string(),
+        participants: Vec::new(),
+        recipient: Some(target_bot.to_string()),
+        recipient_name: None,
+        recipient_role: None,
+        delivery_type: Some(delivery_slug(delivery_type).to_string()),
+        originator,
+        from: if from_actor_name.trim().is_empty() {
+            from_actor_id.to_string()
+        } else {
+            format!("{from_actor_name}({from_actor_id})")
+        },
+        from_bot_id: (!from_actor_id.starts_with("human_")).then(|| from_actor_id.to_string()),
+        from_bot_owner: None,
+        you_are_mentioned: should_respond,
+        is_sender: from_actor_id == target_bot,
+        mentions: if should_respond {
+            vec![target_bot.to_string()]
+        } else {
+            Vec::new()
+        },
+        response_directive: Some(response_directive_for_delivery(
+            delivery_type,
+            RequestSource::LegacyMention,
+        )),
+        message: content.to_string(),
+        routing_mode: None,
+        group_type: None,
+    }
+}
+
 fn legacy_aware_wire_group_id<'a>(
     group_id: &'a str,
     bcs_session_id: Option<&'a str>,

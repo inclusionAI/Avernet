@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 bcs-domain      = { workspace = true }
 bcs-group       = { workspace = true }
+bcs-channel-api = { workspace = true }
 bcs-callback    = { workspace = true }
 bcs-config-api  = { workspace = true }
 bcs-route-security = { workspace = true }

@@ -31,6 +31,9 @@ pub use actors::{
     WorkerRecommendCommand, WorkerRecommendResult, WorkerRecommendation,
 };
 pub use application::SystemMessageService;
+pub use application::channel::{
+    ChannelService, ChannelUseCaseError, CreateBindingCommand, InboundMessage, OutboundMessage,
+};
 pub use application::message_log::{
     MessageLogContent, MessageLogEventType, MessageLogMode, MessageLogStatus,
     MessageLogTargetSummary, MESSAGE_LOG_CONTENT_MAX_BYTES, MESSAGE_LOG_SCHEMA_VERSION,
@@ -137,12 +140,16 @@ pub use port::{
     DeliveryBlockReason, DeliveryBlockSurface, DeliveryMetricKind, DeliveryMetricTarget,
     DeliveryPolicyBlockInstrumentationHook, DirectChatClientKind, DirectChatRunEvent,
     DirectChatRunLifecycleHook, DirectChatRunReason, DirectChatRunSnapshotPort, DirectChatRunState,
+    ChannelBindingRef, ChannelDeliveryPort, ChannelDeliveryResult, ChannelOutboundEvent,
+    ChannelOutboundEventKind, ChannelRenderHint,
+    ChannelBindingRepoPort, ConversationSessionRepoPort,
     FriendRepoPort, FriendRequestRepoPort, FrontendDeliveryCommand, FrontendDeliveryKind,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget,
     GroupHistoryBotRequestPort, GroupDispatchContextPort, GroupMetricCount, GroupMetricsSnapshotPort,
     GroupRepoPort, GroupRuntimeBindingRepoPort, GroupSessionMetricCount,
     GroupSessionMetricsSnapshotPort, JudgeArtifact,
     JudgeCheckedCriterion, JudgeDecision, JudgeEvaluatorPort, JudgeRequest, KickReason,
+    ImParticipantRepoPort,
     LeaderElectionPort, LeaderInfo, LeaderStatus, MetricsResult, NewSessionParams,
     ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector,
     ProviderCredentialRepoPort, ProviderRepoPort, ProviderStreamGrayList,

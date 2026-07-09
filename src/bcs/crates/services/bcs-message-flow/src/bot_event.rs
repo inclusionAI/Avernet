@@ -5,9 +5,11 @@ use bcs_protocol::{
     TOOL_SEND_TASK_MESSAGE, TOOL_TASK_COMPLETE,
     build_recipient_group_context, build_session_key,
 };
+use bcs_service_api::application::channel::OutboundMessage;
 use bcs_service_api::{
     ActorStatus, BotDeliveryCommand, BotDeliveryKind, BotDeliveryResult, BotDeliveryTarget,
-    BotEventCommand, BotEventOutcome, ChatEventRouting, ChatEventState, ChatResponseMode,
+    BotEventCommand, BotEventOutcome, ChannelOutboundEventKind, ChannelRenderHint,
+    ChatEventRouting, ChatEventState, ChatResponseMode,
     DefaultDelivery, DeliveryType, FrontendDeliveryCommand, FrontendDeliveryKind,
     FrontendDeliveryResult, FrontendDeliveryTarget, Group, GroupKind, GroupStatus, GroupStrategy, MessageDeliveryResult,
     MessageLogContent, MessageLogEventType, MessageLogMode, MessageLogStatus,
@@ -78,6 +80,7 @@ pub async fn handle_bot_event(
     }
 
     let mut frontend_deliveries = publish_incoming_event(flow, &cmd).await?;
+    try_channel_outbound(flow, &cmd).await;
     let mut bot_deliveries = Vec::new();
 
     // Persist tool call events (identified by payload.stream == "tool", distinguished by payload.data.phase)
@@ -164,6 +167,83 @@ pub async fn handle_bot_event(
         failed_count: 0,
         delivery_results: Vec::new(),
     })
+}
+
+async fn try_channel_outbound(flow: &BcsMessageFlow, cmd: &BotEventCommand) {
+    let Some(channel) = flow.channel.get().cloned() else {
+        return;
+    };
+    let Some(kind) = channel_event_kind(cmd) else {
+        return;
+    };
+
+    let (sender_role, sender_label) = match flow.group.get(&cmd.group_id).await {
+        Some(group) => group
+            .participants
+            .into_iter()
+            .find(|participant| participant.bot_uuid == cmd.bot_id)
+            .map(|participant| {
+                (
+                    participant.role,
+                    participant
+                        .bot_name
+                        .filter(|name| !name.trim().is_empty())
+                        .unwrap_or_else(|| cmd.bot_id.clone()),
+                )
+            })
+            .unwrap_or((bcs_domain::ParticipantRole::Observer, cmd.bot_id.clone())),
+        None => (bcs_domain::ParticipantRole::Observer, cmd.bot_id.clone()),
+    };
+    let text = channel_outbound_text(kind, &cmd.event_payload);
+    let render_hint = match kind {
+        ChannelOutboundEventKind::Agent => ChannelRenderHint::IgnoreByDefault,
+        ChannelOutboundEventKind::ChatDelta
+        | ChannelOutboundEventKind::ChatFinal
+        | ChannelOutboundEventKind::System => ChannelRenderHint::Render,
+    };
+
+    if let Err(error) = channel
+        .try_outbound(OutboundMessage {
+            group_id: cmd.group_id.clone(),
+            bcs_session_id: cmd
+                .bcs_session_id
+                .clone()
+                .unwrap_or_else(|| cmd.group_id.clone()),
+            run_id: cmd.run_id.clone(),
+            sender_actor_id: cmd.bot_id.clone(),
+            sender_role,
+            sender_label,
+            kind,
+            text: (!text.is_empty()).then_some(text),
+            raw_payload: cmd.event_payload.clone(),
+            render_hint,
+            source_is_channel: false,
+        })
+        .await
+    {
+        warn!(run_id = %cmd.run_id, error = %error, "channel outbound hook failed");
+    }
+}
+
+fn channel_event_kind(cmd: &BotEventCommand) -> Option<ChannelOutboundEventKind> {
+    match (cmd.event_type.as_str(), &cmd.state) {
+        ("agent", _) => Some(ChannelOutboundEventKind::Agent),
+        ("chat" | "chat.event", ChatEventState::Delta) => Some(ChannelOutboundEventKind::ChatDelta),
+        ("chat" | "chat.event", ChatEventState::Final) => Some(ChannelOutboundEventKind::ChatFinal),
+        ("chat" | "chat.event", ChatEventState::ToolCallStart | ChatEventState::ToolCallEnd) => {
+            Some(ChannelOutboundEventKind::Agent)
+        }
+        _ => None,
+    }
+}
+
+fn channel_outbound_text(kind: ChannelOutboundEventKind, event: &Value) -> String {
+    if kind == ChannelOutboundEventKind::ChatDelta {
+        if let Some(delta) = extract_delta_text(event) {
+            return delta.to_string();
+        }
+    }
+    extract_message_text(event)
 }
 
 struct RelayOutcome {

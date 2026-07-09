@@ -270,6 +270,90 @@ impl Default for DatabaseConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Channel(IM bridge)
+// ---------------------------------------------------------------------------
+
+/// Channel(IM bridge) configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ChannelConfigSection {
+    /// Enable channel bridge wiring.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Provider-specific channel configuration keyed by provider name.
+    #[serde(default)]
+    pub providers: BTreeMap<String, ChannelProviderConfig>,
+
+    /// Backward-compatible flat switch for DingTalk.
+    #[serde(default)]
+    pub dingtalk_enabled: bool,
+
+    /// Nested DingTalk switch matching `[channels.dingtalk]`.
+    #[serde(default)]
+    pub dingtalk: ChannelDingTalkConfig,
+}
+
+impl ChannelConfigSection {
+    pub fn dingtalk_enabled(&self) -> bool {
+        self.enabled
+            && (self.dingtalk_enabled
+                || self.dingtalk.enabled
+                || self.provider_enabled("dingtalk"))
+    }
+
+    pub fn provider_enabled(&self, name: &str) -> bool {
+        self.enabled
+            && self
+                .providers
+                .get(name)
+                .is_some_and(|provider| provider.enabled)
+    }
+
+    pub fn enabled_provider_configs(&self) -> BTreeMap<String, ChannelProviderConfig> {
+        if !self.enabled {
+            return BTreeMap::new();
+        }
+        let mut providers = self
+            .providers
+            .iter()
+            .filter(|(_, provider)| provider.enabled)
+            .map(|(name, provider)| (name.clone(), provider.clone()))
+            .collect::<BTreeMap<_, _>>();
+        if (self.dingtalk_enabled || self.dingtalk.enabled)
+            && !providers.contains_key("dingtalk")
+        {
+            providers.insert(
+                "dingtalk".to_string(),
+                ChannelProviderConfig {
+                    enabled: true,
+                    options: BTreeMap::new(),
+                },
+            );
+        }
+        providers
+    }
+}
+
+/// Generic channel provider configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ChannelProviderConfig {
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Provider-owned options. The public host only carries these through to
+    /// the provider factory.
+    #[serde(default, flatten)]
+    pub options: BTreeMap<String, serde_json::Value>,
+}
+
+/// DingTalk channel configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ChannelDingTalkConfig {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+// ---------------------------------------------------------------------------
 // Auth SDK
 // ---------------------------------------------------------------------------
 
@@ -915,6 +999,84 @@ impl Default for SqliteConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channel_config_accepts_nested_dingtalk_switch() {
+        let cfg: ChannelConfigSection = toml::from_str(
+            r#"
+            enabled = true
+
+            [dingtalk]
+            enabled = true
+        "#,
+        )
+        .expect("parse channel config");
+
+        assert!(cfg.enabled);
+        assert!(cfg.dingtalk.enabled);
+        assert!(cfg.dingtalk_enabled());
+    }
+
+    #[test]
+    fn channel_config_accepts_flat_dingtalk_switch() {
+        let cfg: ChannelConfigSection = toml::from_str(
+            r#"
+            enabled = true
+            dingtalk_enabled = true
+        "#,
+        )
+        .expect("parse channel config");
+
+        assert!(cfg.enabled);
+        assert!(cfg.dingtalk_enabled);
+        assert!(cfg.dingtalk_enabled());
+    }
+
+    #[test]
+    fn channel_config_accepts_provider_map() {
+        let cfg: ChannelConfigSection = toml::from_str(
+            r#"
+            enabled = true
+
+            [providers.test_im]
+            enabled = true
+            callback_path = "/channels/test/callback"
+
+            [providers.disabled_im]
+            enabled = false
+        "#,
+        )
+        .expect("parse channel provider config");
+
+        assert!(cfg.provider_enabled("test_im"));
+        assert!(!cfg.provider_enabled("disabled_im"));
+        assert_eq!(
+            cfg.providers["test_im"].options["callback_path"],
+            "/channels/test/callback"
+        );
+        assert_eq!(
+            cfg.enabled_provider_configs()
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec!["test_im".to_string()]
+        );
+    }
+
+    #[test]
+    fn channel_config_maps_legacy_dingtalk_switch_to_provider() {
+        let cfg: ChannelConfigSection = toml::from_str(
+            r#"
+            enabled = true
+            dingtalk_enabled = true
+        "#,
+        )
+        .expect("parse channel config");
+
+        let providers = cfg.enabled_provider_configs();
+        assert!(providers.contains_key("dingtalk"));
+        assert!(providers["dingtalk"].enabled);
+    }
 
     #[test]
     fn default_logging_outputs_include_chat_digest_file() {

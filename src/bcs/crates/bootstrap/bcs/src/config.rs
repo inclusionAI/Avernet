@@ -16,9 +16,9 @@ pub use bcs_config_api::{
 // data-contract crate so downstream modules can depend on them without
 // pulling in the rest of the `bcs` binary.
 pub use bcs_config_api::{
-    AuthChainConfig, AuthSdkConfig, DingTalkAccountConfig, FusionProviderConfig, LlmConfig,
-    LlmProviderType, LogOutputConfig, LogOutputFormat, LoggingConfig, ManifestConfig,
-    LeaderElectionConfig, StructuredOutputMode, SecurityConfig,
+    AuthChainConfig, AuthSdkConfig, ChannelConfigSection, DingTalkAccountConfig,
+    FusionProviderConfig, LlmConfig, LlmProviderType, LogOutputConfig, LogOutputFormat,
+    LoggingConfig, ManifestConfig, LeaderElectionConfig, StructuredOutputMode, SecurityConfig,
     UserDirectoryConfig, UserDirectoryProviderConfig,
     deserialize_optional_secret, serialize_optional_secret,
 };
@@ -181,6 +181,10 @@ pub struct BcsConfig {
     /// machines.
     #[serde(default)]
     pub mist: MistConfig,
+
+    /// Channel(IM bridge) configuration.
+    #[serde(default)]
+    pub channels: ChannelConfigSection,
 
     /// Structured collaboration authoring-template configuration.
     #[serde(default)]
@@ -590,6 +594,7 @@ impl Default for BcsConfig {
             cache: CacheConfig::default(),
             database: DatabaseConfig::default(),
             mist: MistConfig::default(),
+            channels: ChannelConfigSection::default(),
             collaboration: CollaborationConfig::default(),
             max_groups_as_driver: default_max_groups_as_driver(),
             max_group_members: default_max_group_members(),

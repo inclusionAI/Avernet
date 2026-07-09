@@ -98,6 +98,7 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
         .with_allowed_switch_provider_ids(config.allowed_switch_provider_ids.clone())
         .with_provider_stream_gray_list(state.provider_stream_gray_list.clone())
         .with_judge_enabled(config.llm.is_enabled())
+        .with_channel_http_ingress(state.channel_http_ingress.clone())
         .with_auth_chain(state.auth_chain.clone(), state.auth_config.clone())
         .with_outbound_url_guard(state.outbound_url_guard.clone())
         .with_user_identity(Arc::new(

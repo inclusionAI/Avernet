@@ -1089,6 +1089,16 @@ enum Commands {
         command: FriendCommands,
     },
 
+    /// Manage channel (IM bridge) bindings
+    Channel {
+        /// Authentication token (auto-discovered if not provided)
+        #[arg(short, long)]
+        token: Option<String>,
+
+        #[command(subcommand)]
+        command: ChannelCommands,
+    },
+
     /// Get or set bot visibility (auto-resolves bot UUID from token)
     Visibility {
         /// Authentication token (auto-discovered if not provided)
@@ -1120,6 +1130,159 @@ enum Commands {
         #[command(subcommand)]
         command: ServiceCommands,
     },
+}
+
+#[derive(Subcommand)]
+enum ChannelCommands {
+    /// Bind a DingTalk robot to a group or bot target
+    Bind {
+        /// DingTalk robot account_ref
+        #[arg(long)]
+        account: String,
+
+        /// Target kind: group or bot
+        #[arg(long, default_value = "group")]
+        target_kind: String,
+
+        /// Target group_id or bot_id
+        #[arg(long)]
+        target_id: String,
+
+        /// DingTalk group scope: conversation_shared or per_sender
+        #[arg(long)]
+        group_chat_scope: Option<String>,
+
+        /// Outbound visibility: full_transcript or lead_only
+        #[arg(long, default_value = "lead_only")]
+        visibility: String,
+
+        /// Runtime environment label
+        #[arg(long, default_value = "dev")]
+        env: String,
+
+        /// DingTalk robotCode
+        #[arg(long)]
+        robot_code: String,
+
+        /// DingTalk client id
+        #[arg(long)]
+        client_id: String,
+
+        /// DingTalk client secret
+        #[arg(long)]
+        client_secret: String,
+
+        /// DingTalk send mode: normal or streaming_card
+        #[arg(long, default_value = "normal")]
+        send_mode: String,
+
+        /// Required when --send-mode=streaming_card
+        #[arg(long)]
+        card_template_id: Option<String>,
+
+        /// Message type: markdown or text
+        #[arg(long, default_value = "markdown")]
+        message_type: String,
+    },
+
+    /// List channel bindings
+    List,
+
+    /// Delete a channel binding
+    Unbind {
+        /// Binding id
+        #[arg(long)]
+        id: String,
+    },
+}
+
+fn build_channel_bind_payload(command: &ChannelCommands) -> Result<serde_json::Value> {
+    let ChannelCommands::Bind {
+        account,
+        target_kind,
+        target_id,
+        group_chat_scope,
+        visibility,
+        env,
+        robot_code,
+        client_id,
+        client_secret,
+        send_mode,
+        card_template_id,
+        message_type,
+    } = command else {
+        return Err(anyhow!("channel bind payload requires bind command"));
+    };
+
+    let target = match target_kind.as_str() {
+        "group" => json!({ "group": { "group_id": target_id } }),
+        "bot" => json!({ "bot": { "bot_id": target_id } }),
+        other => {
+            return Err(anyhow!(
+                "unsupported target-kind {}; expected group or bot",
+                other
+            ));
+        }
+    };
+
+    let send_mode = match send_mode.as_str() {
+        "normal" => json!({
+            "mode": "normal",
+            "message_type": message_type,
+        }),
+        "streaming_card" => {
+            let Some(card_template_id) = card_template_id.as_deref() else {
+                return Err(anyhow!(
+                    "--card-template-id is required when --send-mode=streaming_card"
+                ));
+            };
+            json!({
+                "mode": "streaming_card",
+                "card_template_id": card_template_id,
+                "fallback_message_type": message_type,
+            })
+        }
+        other => {
+            return Err(anyhow!(
+                "unsupported send-mode {}; expected normal or streaming_card",
+                other
+            ));
+        }
+    };
+
+    let mut payload = json!({
+        "channel_type": "ding_talk",
+        "account_ref": account,
+        "target": target,
+        "outbound_visibility": visibility,
+        "env": env,
+        "config": {
+            "channel_type": "ding_talk",
+            "robot_code": robot_code,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "send_mode": send_mode,
+        }
+    });
+
+    if let Some(group_chat_scope) = group_chat_scope {
+        payload["group_chat_scope"] = json!(group_chat_scope);
+    }
+
+    Ok(payload)
+}
+
+fn redact_channel_bind_debug_payload(payload: &serde_json::Value) -> serde_json::Value {
+    let mut redacted = payload.clone();
+    if let Some(config) = redacted
+        .get_mut("config")
+        .and_then(|value| value.as_object_mut())
+    {
+        if config.contains_key("client_secret") {
+            config.insert("client_secret".to_string(), json!("<redacted>"));
+        }
+    }
+    redacted
 }
 
 #[derive(Subcommand)]
@@ -2873,6 +3036,98 @@ async fn main() -> Result<()> {
             }
         }
 
+        Commands::Channel { token, command } => {
+            let token = get_token(token.as_deref())?;
+            let client = create_client(
+                &bcs_url,
+                &token,
+                bcs_cookie.as_deref(),
+                oauth_headers.as_ref(),
+            );
+
+            match &command {
+                ChannelCommands::Bind { .. } => {
+                    let payload = build_channel_bind_payload(&command)?;
+                    debug_request!(
+                        debug,
+                        "POST",
+                        "/channels/bindings",
+                        redact_channel_bind_debug_payload(&payload)
+                    );
+
+                    let result = client.create_channel_binding(&payload).await?;
+
+                    debug_response!(debug, "200", &result);
+
+                    if cli.json {
+                        println!("{}", serde_json::to_string(&result)?);
+                    } else {
+                        println!("✓ Channel binding created");
+                        if let Some(id) = result.get("id").and_then(|value| value.as_str()) {
+                            println!("  ID: {}", id);
+                        }
+                        if let Some(account) =
+                            result.get("account_ref").and_then(|value| value.as_str())
+                        {
+                            println!("  Account: {}", account);
+                        }
+                    }
+                }
+
+                ChannelCommands::List => {
+                    debug_request!(debug, "GET", "/channels/bindings", json!({}));
+
+                    let result = client.list_channel_bindings().await?;
+
+                    debug_response!(debug, "200", &result);
+
+                    if cli.json {
+                        println!("{}", serde_json::to_string(&result)?);
+                    } else if let Some(items) =
+                        result.get("items").and_then(|value| value.as_array())
+                    {
+                        println!("Channel bindings ({}):", items.len());
+                        for item in items {
+                            let id = item
+                                .get("id")
+                                .and_then(|value| value.as_str())
+                                .unwrap_or("?");
+                            let account = item
+                                .get("account_ref")
+                                .and_then(|value| value.as_str())
+                                .unwrap_or("?");
+                            let status = item
+                                .get("status")
+                                .and_then(|value| value.as_str())
+                                .unwrap_or("?");
+                            println!("  {} {} [{}]", id, account, status);
+                        }
+                    } else {
+                        println!("{}", serde_json::to_string_pretty(&result)?);
+                    }
+                }
+
+                ChannelCommands::Unbind { id } => {
+                    debug_request!(
+                        debug,
+                        "DELETE",
+                        &format!("/channels/bindings/{}", id),
+                        json!({})
+                    );
+
+                    let result = client.delete_channel_binding(id).await?;
+
+                    debug_response!(debug, "200", &result);
+
+                    if cli.json {
+                        println!("{}", serde_json::to_string(&result)?);
+                    } else {
+                        println!("✓ Channel binding deleted: {}", id);
+                    }
+                }
+            }
+        }
+
         Commands::Visibility { token, command } => {
             let token = get_token(token.as_deref())?;
             let client = create_client(
@@ -4050,6 +4305,207 @@ mod tests {
         };
 
         assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
+    }
+
+    #[test]
+    fn test_channel_bind_command_parses_defaults() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "channel",
+            "bind",
+            "--account",
+            "robot_1",
+            "--target-id",
+            "group_1",
+            "--robot-code",
+            "robot_1",
+            "--client-id",
+            "client_id",
+            "--client-secret",
+            "secret",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Channel {
+                command:
+                    ChannelCommands::Bind {
+                        account,
+                        target_kind,
+                        target_id,
+                        group_chat_scope,
+                        visibility,
+                        env,
+                        send_mode,
+                        message_type,
+                        ..
+                    },
+                ..
+            } => {
+                assert_eq!(account, "robot_1");
+                assert_eq!(target_kind, "group");
+                assert_eq!(target_id, "group_1");
+                assert_eq!(group_chat_scope, None);
+                assert_eq!(visibility, "lead_only");
+                assert_eq!(env, "dev");
+                assert_eq!(send_mode, "normal");
+                assert_eq!(message_type, "markdown");
+            }
+            _ => panic!("expected channel bind command"),
+        }
+    }
+
+    #[test]
+    fn test_channel_bind_payload_builds_group_dingtalk_normal() {
+        let command = ChannelCommands::Bind {
+            account: "robot_1".to_string(),
+            target_kind: "group".to_string(),
+            target_id: "group_1".to_string(),
+            group_chat_scope: Some("conversation_shared".to_string()),
+            visibility: "full_transcript".to_string(),
+            env: "pre".to_string(),
+            robot_code: "robot_1".to_string(),
+            client_id: "client_id".to_string(),
+            client_secret: "secret".to_string(),
+            send_mode: "normal".to_string(),
+            card_template_id: None,
+            message_type: "text".to_string(),
+        };
+
+        let payload = build_channel_bind_payload(&command).unwrap();
+
+        assert_eq!(
+            payload,
+            json!({
+                "channel_type": "ding_talk",
+                "account_ref": "robot_1",
+                "target": { "group": { "group_id": "group_1" } },
+                "group_chat_scope": "conversation_shared",
+                "outbound_visibility": "full_transcript",
+                "env": "pre",
+                "config": {
+                    "channel_type": "ding_talk",
+                    "robot_code": "robot_1",
+                    "client_id": "client_id",
+                    "client_secret": "secret",
+                    "send_mode": {
+                        "mode": "normal",
+                        "message_type": "text"
+                    }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn test_channel_bind_payload_builds_bot_streaming_card() {
+        let command = ChannelCommands::Bind {
+            account: "robot_1".to_string(),
+            target_kind: "bot".to_string(),
+            target_id: "bot_1".to_string(),
+            group_chat_scope: Some("per_sender".to_string()),
+            visibility: "lead_only".to_string(),
+            env: "dev".to_string(),
+            robot_code: "robot_1".to_string(),
+            client_id: "client_id".to_string(),
+            client_secret: "secret".to_string(),
+            send_mode: "streaming_card".to_string(),
+            card_template_id: Some("card_tpl".to_string()),
+            message_type: "markdown".to_string(),
+        };
+
+        let payload = build_channel_bind_payload(&command).unwrap();
+
+        assert_eq!(payload["target"], json!({ "bot": { "bot_id": "bot_1" } }));
+        assert_eq!(payload["group_chat_scope"], "per_sender");
+        assert_eq!(
+            payload["config"]["send_mode"],
+            json!({
+                "mode": "streaming_card",
+                "card_template_id": "card_tpl",
+                "fallback_message_type": "markdown"
+            })
+        );
+    }
+
+    #[test]
+    fn test_channel_bind_payload_requires_card_template_for_streaming_card() {
+        let command = ChannelCommands::Bind {
+            account: "robot_1".to_string(),
+            target_kind: "group".to_string(),
+            target_id: "group_1".to_string(),
+            group_chat_scope: None,
+            visibility: "lead_only".to_string(),
+            env: "dev".to_string(),
+            robot_code: "robot_1".to_string(),
+            client_id: "client_id".to_string(),
+            client_secret: "secret".to_string(),
+            send_mode: "streaming_card".to_string(),
+            card_template_id: None,
+            message_type: "markdown".to_string(),
+        };
+
+        let err = build_channel_bind_payload(&command).unwrap_err();
+        assert!(err.to_string().contains("card-template-id"));
+    }
+
+    #[test]
+    fn test_channel_bind_debug_payload_redacts_client_secret() {
+        let command = ChannelCommands::Bind {
+            account: "robot_1".to_string(),
+            target_kind: "group".to_string(),
+            target_id: "group_1".to_string(),
+            group_chat_scope: None,
+            visibility: "lead_only".to_string(),
+            env: "dev".to_string(),
+            robot_code: "robot_1".to_string(),
+            client_id: "client_id".to_string(),
+            client_secret: "secret".to_string(),
+            send_mode: "normal".to_string(),
+            card_template_id: None,
+            message_type: "markdown".to_string(),
+        };
+        let payload = build_channel_bind_payload(&command).unwrap();
+
+        let redacted = redact_channel_bind_debug_payload(&payload);
+
+        assert_eq!(payload["config"]["client_secret"], "secret");
+        assert_eq!(redacted["config"]["client_secret"], "<redacted>");
+    }
+
+    #[test]
+    fn test_channel_list_command_parses() {
+        let cli = Cli::try_parse_from(["bcs-cli", "channel", "list"]).unwrap();
+
+        match cli.command {
+            Commands::Channel {
+                command: ChannelCommands::List,
+                ..
+            } => {}
+            _ => panic!("expected channel list command"),
+        }
+    }
+
+    #[test]
+    fn test_channel_unbind_command_parses_id() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "channel",
+            "unbind",
+            "--id",
+            "binding_1",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Channel {
+                command: ChannelCommands::Unbind { id },
+                ..
+            } => {
+                assert_eq!(id, "binding_1");
+            }
+            _ => panic!("expected channel unbind command"),
+        }
     }
 
     #[test]

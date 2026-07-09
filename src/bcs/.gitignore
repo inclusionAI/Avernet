@@ -31,6 +31,7 @@ bcs.db-wal
 .bcs-env
 .backup*
 config/bcs-config.json
+.dingtalk-local-lab/
 
 CLAUDE.local.md
 .superpowers/

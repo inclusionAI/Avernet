@@ -270,6 +270,9 @@ dependencies = [
  "bcs-cache-local",
  "bcs-cache-redis",
  "bcs-callback",
+ "bcs-channel",
+ "bcs-channel-api",
+ "bcs-channel-store",
  "bcs-cli",
  "bcs-collaboration-runtime",
  "bcs-collaboration-store",
@@ -585,6 +588,51 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-channel"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-channel-api",
+ "bcs-channel-store",
+ "bcs-domain",
+ "bcs-group",
+ "bcs-service-api",
+ "bcs-test-support",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "bcs-channel-api"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-service-api",
+ "bytes",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "bcs-channel-store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-db-api",
+ "bcs-db-local",
+ "bcs-domain",
+ "bcs-service-api",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-test",
+ "tracing",
+]
+
+[[package]]
 name = "bcs-cli"
 version = "0.1.0"
 dependencies = [
@@ -849,6 +897,7 @@ dependencies = [
  "bcs-bot",
  "bcs-bot-store",
  "bcs-callback",
+ "bcs-channel-api",
  "bcs-cli",
  "bcs-config-api",
  "bcs-domain",

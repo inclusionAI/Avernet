@@ -652,4 +652,76 @@ mod tests {
         assert_eq!(digest.file, "bcs-chat-digest.log");
         assert_eq!(digest.targets, vec!["bcs_chat_digest"]);
     }
+
+    #[test]
+    fn test_real_base_config_accepts_dingtalk_lab_json_override() {
+        let source_config_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../configs");
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::copy(
+            source_config_dir.join("bcs-config-local.toml"),
+            dir.path().join("bcs-config.toml"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("bcs-config-local.json"),
+            r#"{
+              "bind": "127.0.0.1",
+              "port": 21992,
+              "bots_base_dir": "/tmp/dingtalk-lab/data/bots",
+              "strict_container_validation": false,
+              "bcs_endpoint": "http://127.0.0.1:21992",
+              "botchat_url": "http://127.0.0.1:21992",
+              "provider_stream_gray_enabled": true,
+              "provider_stream_gray_created_by": ["197262", "999001"],
+              "leader_election": {"enabled": false},
+              "cache": {"type": "memory"},
+              "database": {
+                "type": "sqlite",
+                "sqlite": {"path": "/tmp/dingtalk-lab/bcs.db"}
+              },
+              "collaboration": {
+                "templates": {
+                  "storage_type": "file",
+                  "base_dir": "seeds/collaboration-templates",
+                  "default_language": "zh-CN"
+                }
+              },
+              "auth_sdk": {
+                "client_id": null,
+                "secret_key": null,
+                "app_key": null,
+                "app_name": null,
+                "remote_server_domain": null,
+                "use_remote_login_check": false
+              },
+              "auth": {"chain": ["local"], "require_authentication": false},
+              "bcsfuse": {"enabled": false},
+              "security_gateway": {"provider": "noop"},
+              "channels": {"enabled": true, "providers": {"dingtalk": {"enabled": true}}},
+              "dingtalk_accounts": [
+                {
+                  "account_id": "dummy_robot_code",
+                  "client_id": "dummy_app_key",
+                  "client_secret": "dummy_app_secret",
+                  "robot_code": "dummy_robot_code",
+                  "card_template_id": "dummy_template_id",
+                  "card_template_key": "content",
+                  "enable_streaming_cards": true,
+                  "enable_scene_group": true,
+                  "dm_policy": "open",
+                  "allowlist": ["*"]
+                }
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        let loader = ConfigLoader::new(dir.path().to_path_buf()).with_environment(Environment::Local);
+        let config: crate::config::BcsConfig = loader.load().unwrap();
+
+        assert_eq!(config.port, 21992);
+        assert!(config.channels.dingtalk_enabled());
+        assert!(config.channels.enabled_provider_configs().contains_key("dingtalk"));
+        assert_eq!(config.dingtalk_accounts.len(), 1);
+    }
 }

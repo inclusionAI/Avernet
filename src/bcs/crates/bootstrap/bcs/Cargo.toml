@@ -86,6 +86,7 @@ bcs-protocol    = { workspace = true }
 bcs-config      = { workspace = true }
 bcs-config-api  = { workspace = true }
 bcs-route-security = { workspace = true }
+bcs-channel-api = { workspace = true }
 bcs-cache-api   = { workspace = true }
 bcs-db-api      = { workspace = true }
 bcs-llm-api     = { workspace = true }
@@ -105,6 +106,8 @@ bcs-db-local    = { workspace = true }
 bcs-db-mysql    = { workspace = true }
 bcs-ws          = { workspace = true }
 bcs-bot = { workspace = true }
+bcs-channel = { workspace = true }
+bcs-channel-store = { workspace = true }
 bcs-group    = { workspace = true }
 bcs-message-flow = { workspace = true }
 bcs-routing  = { workspace = true }

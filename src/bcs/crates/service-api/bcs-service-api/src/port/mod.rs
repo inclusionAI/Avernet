@@ -1,5 +1,6 @@
 pub mod bot_connection;
 pub mod chat_run;
+pub mod channel_delivery;
 pub mod delivery;
 pub mod group_context;
 pub mod judge;
@@ -12,6 +13,10 @@ pub mod session_callback;
 
 pub use bot_connection::{BotConnectionControlPort, KickReason};
 pub use chat_run::{BotRunContext, BotRunContextPort, ChatRunCleanupPort, ChatRunEventPort};
+pub use channel_delivery::{
+    ChannelBindingRef, ChannelDeliveryPort, ChannelDeliveryResult, ChannelOutboundEvent,
+    ChannelOutboundEventKind, ChannelRenderHint,
+};
 pub use delivery::{
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult,
     FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort, FrontendDeliveryResult,
@@ -35,8 +40,10 @@ pub use provider_stream_gray::ProviderStreamGrayList;
 pub use repo::{
     BotRepoPort, CollaborationDefinitionRecord, CollaborationEventRecord,
     CollaborationEventRepoPort, CollaborationTemplateEntry, CollaborationTemplateRepoPort,
+    ChannelBindingRepoPort, ConversationSessionRepoPort,
     FriendRepoPort, FriendRequestRepoPort,
     GroupRepoPort, GroupRuntimeBindingRepoPort, NewSessionParams, ProviderBotBindingRepoPort,
+    ImParticipantRepoPort,
     ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector, ProviderCredentialRepoPort,
     ProviderRepoPort, RelationRepoPort, SessionRepoPort, StateMachineDefinitionRepoPort,
     StateMachineRunRepoPort,

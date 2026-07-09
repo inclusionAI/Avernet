@@ -52,6 +52,7 @@ fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
         cache: Default::default(),
         database: Default::default(),
         mist: bcs::MistConfig::default(),
+        channels: Default::default(),
         collaboration: Default::default(),
         store_messages: true,
         max_groups_as_driver: 3,

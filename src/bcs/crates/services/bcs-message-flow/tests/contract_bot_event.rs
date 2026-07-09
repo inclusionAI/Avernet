@@ -9,7 +9,7 @@ use bcs_service_api::{
     ParticipantRole, RoutingMode, RoutingPolicy, ServiceError, GroupStrategy, ServiceSpec,
     Session, SessionKind, SessionManagementService, SessionStatus, SessionUseCaseError,
     SystemMessageEvent, SystemMessageService, TaskCompleteCommand, TaskDispatchCommand,
-    TaskMessageCommand, TaskRunAliasRegistration,
+    TaskMessageCommand, TaskRunAliasRegistration, ChannelService, ChannelUseCaseError,
     interceptor::{BlockReason, InterceptorDecision, MessageInterceptor, OutboundMessage},
 };
 use serde_json::{Value, json};
@@ -29,6 +29,68 @@ struct RecordingSystemNotification {
     event: SystemMessageEvent,
     session_id: String,
     participants: Vec<Participant>,
+}
+
+#[derive(Default)]
+struct RecordingChannelService {
+    outbound: Mutex<Vec<bcs_service_api::application::channel::OutboundMessage>>,
+}
+
+impl RecordingChannelService {
+    async fn outbound(&self) -> Vec<bcs_service_api::application::channel::OutboundMessage> {
+        self.outbound.lock().await.clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl ChannelService for RecordingChannelService {
+    async fn handle_inbound(
+        &self,
+        _msg: bcs_service_api::application::channel::InboundMessage,
+    ) -> Result<(), ChannelUseCaseError> {
+        Ok(())
+    }
+
+    async fn try_outbound(
+        &self,
+        msg: bcs_service_api::application::channel::OutboundMessage,
+    ) -> Result<(), ChannelUseCaseError> {
+        self.outbound.lock().await.push(msg);
+        Ok(())
+    }
+
+    async fn create_binding(
+        &self,
+        _cmd: bcs_service_api::application::channel::CreateBindingCommand,
+    ) -> Result<bcs_domain::ChannelBinding, ChannelUseCaseError> {
+        Err(ChannelUseCaseError::InvalidParams(
+            "not implemented in message-flow test channel".to_string(),
+        ))
+    }
+
+    async fn list_bindings(&self) -> Result<Vec<bcs_domain::ChannelBinding>, ChannelUseCaseError> {
+        Ok(Vec::new())
+    }
+
+    async fn set_binding_status(
+        &self,
+        _id: &str,
+        _active: bool,
+    ) -> Result<(), ChannelUseCaseError> {
+        Ok(())
+    }
+
+    async fn update_binding_config(
+        &self,
+        _id: &str,
+        _config: Value,
+    ) -> Result<(), ChannelUseCaseError> {
+        Ok(())
+    }
+
+    async fn delete_binding(&self, _id: &str) -> Result<(), ChannelUseCaseError> {
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -195,6 +257,49 @@ async fn bot_event_with_bcs_session_id_publishes_to_session_target() {
         .as_ref()
         .expect("bot event should carry run fallback");
     assert_eq!(fallback.session_id, "group-1:abcdef12");
+}
+
+#[tokio::test]
+async fn bot_delta_channel_outbound_uses_delta_text_not_synthesized_snapshot() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+    let recording_channel = Arc::new(RecordingChannelService::default());
+    let channel: Arc<dyn ChannelService> = recording_channel.clone();
+    assert!(flow.channel_slot().set(channel).is_ok());
+
+    for delta in ["你", "好"] {
+        flow.handle_bot_event(BotEventCommand {
+            bot_id: "bot-observer".to_string(),
+            run_id: "run-channel-delta".to_string(),
+            group_id: "group-1".to_string(),
+            event_type: "chat.event".to_string(),
+            event_payload: json!({
+                "state": "delta",
+                "delta_text": delta,
+            }),
+            state: ChatEventState::Delta,
+            bcs_session_id: Some("group-1:abcdef12".to_string()),
+        })
+        .await
+        .unwrap();
+    }
+
+    let outbound = recording_channel.outbound().await;
+    assert_eq!(outbound.len(), 2);
+    assert_eq!(outbound[0].text.as_deref(), Some("你"));
+    assert_eq!(outbound[0].raw_payload["message"]["content"][0]["text"], "你");
+    assert_eq!(
+        outbound[1].text.as_deref(),
+        Some("好"),
+        "ChatDelta sent to channel adapters must stay incremental even when BCS synthesizes cumulative message.content for frontend rendering"
+    );
+    assert_eq!(outbound[1].raw_payload["message"]["content"][0]["text"], "你好");
 }
 
 #[tokio::test]

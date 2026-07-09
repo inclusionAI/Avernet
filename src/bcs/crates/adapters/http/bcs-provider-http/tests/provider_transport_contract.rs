@@ -1,22 +1,30 @@
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex as StdMutex, OnceLock},
+    time::Duration,
 };
 
 use axum::{
+    body::Body,
     Json, Router,
     extract::State,
     http::HeaderMap,
+    response::Response,
     routing::post,
 };
 use bcs_domain::{BotDeliveryTarget, RedactedToken};
 use bcs_provider_http::HttpProviderTransport;
 use bcs_protocol::{BCN_TRANSPORT_HEADER, BcsFrame, BotDeliveryKind, RequestFrame};
 use bcs_service_api::{
-    BotDeliveryCommand, BotDeliveryPort, GroupHistoryBotRequestPort, ProviderTransportPreference,
+    BotDeliveryCommand, BotDeliveryPort, BotEventCommand, BotEventOutcome, BotRunContext,
+    BotRunContextPort, ChatAbortCommand, ChatAbortOutcome, ChatEventState, GroupCallbackCommand,
+    GroupCallbackOutcome, GroupHistoryBotRequestPort, MessageFlowService, ServiceResult,
+    ProviderTransportPreference,
+    TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
+    TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
 };
 use serde_json::{Value, json};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tracing::field::{Field, Visit};
 use tracing_subscriber::{Layer, layer::Context, prelude::*};
 
@@ -256,6 +264,73 @@ async fn provider_delivery_rejects_private_webhook_url_before_request() {
         .expect_err("private webhook URL should be rejected before request");
 
     assert!(err.to_string().contains("provider webhook_url is not allowed"));
+}
+
+#[tokio::test]
+async fn provider_delivery_protocol2_sse_ingests_events() {
+    let app = Router::new().route("/webhook", post(capture_sse));
+    let (webhook_url, server) = spawn_server(app).await;
+
+    let message_flow = Arc::new(RecordingMessageFlow::default());
+    let run_context = Arc::new(RecordingRunContext::default());
+    run_context
+        .put_context(BotRunContext {
+            run_id: "run-sse".to_string(),
+            bot_id: "bot-provider".to_string(),
+            group_id: "group-sse".to_string(),
+            bcs_session_id: Some("group-sse:abc12345".to_string()),
+            deadline_ms: bcs_protocol::now_ms() + 60_000,
+            terminal: false,
+        })
+        .await;
+
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    transport.set_ingest(message_flow.clone(), run_context.clone());
+    let result = transport
+        .deliver(BotDeliveryCommand {
+            target: provider_target_with_protocol(webhook_url, "2.0"),
+            run_id: "run-sse".to_string(),
+            frame: BcsFrame::Request(RequestFrame::new(
+                "run-sse",
+                "chat.send",
+                Some(json!({
+                    "session_key": "group:sse",
+                    "bcs_session_id": "group-sse:abc12345",
+                    "bcs_group_id": "group-sse",
+                    "message": {
+                        "text": "hello"
+                    }
+                })),
+            )),
+            delivery_kind: BotDeliveryKind::Send,
+            provider_transport: ProviderTransportPreference::CallbackSse,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.delivered);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if message_flow.events.lock().await.len() >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("SSE reader should ingest stream events");
+    let events = message_flow.events.lock().await;
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].run_id, "run-sse");
+    assert_eq!(events[0].event_type, "agent");
+    assert_eq!(events[0].event_payload["stream"], "tool");
+    assert_eq!(events[1].event_type, "chat.event");
+    assert_eq!(events[1].state, ChatEventState::Final);
+    assert_eq!(events[1].event_payload["state"], "final");
+    drop(events);
+    assert!(run_context.get_context("run-sse").await.unwrap().terminal);
+
+    server.abort();
 }
 
 #[tokio::test]
@@ -530,6 +605,21 @@ async fn capture_history(
     }))
 }
 
+async fn capture_sse() -> Response {
+    let body = concat!(
+        "event: agent\n",
+        "data: {\"runId\":\"engine-run-sse\",\"seq\":1,\"stream\":\"tool\",\"phase\":\"result\",\"toolCallId\":\"tc-1\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+        "\n",
+        "event: chat\n",
+        "data: {\"runId\":\"engine-run-sse\",\"seq\":2,\"state\":\"final\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"done\"}]}}\n",
+        "\n",
+    );
+    Response::builder()
+        .header("content-type", "text/event-stream; charset=utf-8")
+        .body(Body::from(body))
+        .unwrap()
+}
+
 async fn capture(captured: CapturedState, headers: HeaderMap, body: Value) {
     let authorization = headers
         .get(axum::http::header::AUTHORIZATION)
@@ -583,13 +673,118 @@ async fn spawn_server(app: Router) -> (String, tokio::task::JoinHandle<()>) {
 }
 
 fn provider_target(webhook_url: String) -> BotDeliveryTarget {
+    provider_target_with_protocol(webhook_url, "1.0")
+}
+
+fn provider_target_with_protocol(webhook_url: String, protocol_version: &str) -> BotDeliveryTarget {
     BotDeliveryTarget::HttpProvider {
         bot_id: "bot-provider".to_string(),
         provider_id: "provider-1".to_string(),
         provider_bot_ref: "reviewer-v2".to_string(),
         webhook_url,
         bcs_to_provider_token: RedactedToken::new("secret-b2p"),
-        protocol_version: "1.0".to_string(),
+        protocol_version: protocol_version.to_string(),
+    }
+}
+
+#[derive(Default)]
+struct RecordingRunContext {
+    contexts: RwLock<std::collections::HashMap<String, BotRunContext>>,
+}
+
+#[async_trait::async_trait]
+impl BotRunContextPort for RecordingRunContext {
+    async fn put_context(&self, context: BotRunContext) {
+        self.contexts
+            .write()
+            .await
+            .insert(context.run_id.clone(), context);
+    }
+
+    async fn get_context(&self, run_id: &str) -> Option<BotRunContext> {
+        self.contexts.read().await.get(run_id).cloned()
+    }
+
+    async fn try_begin_terminal(&self, run_id: &str) -> bool {
+        self.contexts
+            .read()
+            .await
+            .get(run_id)
+            .is_some_and(|context| !context.terminal)
+    }
+
+    async fn mark_terminal(&self, run_id: &str) -> bool {
+        let mut contexts = self.contexts.write().await;
+        let Some(context) = contexts.get_mut(run_id) else {
+            return false;
+        };
+        if context.terminal {
+            return false;
+        }
+        context.terminal = true;
+        true
+    }
+
+    async fn release_terminal(&self, _run_id: &str) {}
+}
+
+#[derive(Default)]
+struct RecordingMessageFlow {
+    events: Mutex<Vec<BotEventCommand>>,
+}
+
+#[async_trait::async_trait]
+impl MessageFlowService for RecordingMessageFlow {
+    async fn handle_web_send(&self, _cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
+        unreachable!("not used by this contract")
+    }
+
+    async fn handle_bot_event(&self, cmd: BotEventCommand) -> ServiceResult<BotEventOutcome> {
+        let run_id = cmd.run_id.clone();
+        self.events.lock().await.push(cmd);
+        Ok(BotEventOutcome {
+            bot_deliveries: Vec::new(),
+            frontend_deliveries: Vec::new(),
+            unregistered_run_ids: vec![run_id],
+            mentions: Vec::new(),
+            delivered_count: 1,
+            failed_count: 0,
+            delivery_results: Vec::new(),
+        })
+    }
+
+    async fn handle_group_callback(
+        &self,
+        _cmd: GroupCallbackCommand,
+    ) -> ServiceResult<GroupCallbackOutcome> {
+        unreachable!("not used by this contract")
+    }
+
+    async fn handle_chat_abort(&self, _cmd: ChatAbortCommand) -> ServiceResult<ChatAbortOutcome> {
+        unreachable!("not used by this contract")
+    }
+
+    async fn register_task_run_alias(
+        &self,
+        _task_id: &str,
+        _run_id: &str,
+        _bot_id: &str,
+    ) -> ServiceResult<TaskRunAliasRegistration> {
+        unreachable!("not used by this contract")
+    }
+
+    async fn handle_task_dispatch(
+        &self,
+        _cmd: TaskDispatchCommand,
+    ) -> ServiceResult<TaskDispatchOutcome> {
+        unreachable!("not used by this contract")
+    }
+
+    async fn handle_task_complete(
+        &self,
+        _cmd: TaskCompleteCommand,
+    ) -> ServiceResult<TaskCompleteOutcome> {
+        unreachable!("not used by this contract")
     }
 }
 
