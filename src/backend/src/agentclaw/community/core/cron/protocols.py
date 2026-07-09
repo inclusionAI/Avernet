@@ -96,6 +96,23 @@ class DeviceConnectionProvider(Protocol):
         """
         ...
 
+    def get_instances(
+        self,
+        *,
+        binding_id: int,
+        health_check: bool = False,
+    ) -> Dict[str, Any]:
+        """获取多实例设备列表。
+
+        Args:
+            binding_id: 设备绑定ID
+            health_check: 是否触发实时健康检查
+
+        Returns:
+            {"bot_uuid": "...", "devices": [...]}
+        """
+        ...
+
 
 class DeviceBindingStatus:
     """设备绑定状态枚举"""
