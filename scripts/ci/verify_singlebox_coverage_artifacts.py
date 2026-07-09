@@ -44,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backend-min", type=float, default=38.0)
     parser.add_argument("--baas-min", type=float, default=45.0)
     parser.add_argument("--backend-router-min", type=int, default=10)
-    parser.add_argument("--backend-plugin-min", type=int, default=300)
+    parser.add_argument("--backend-plugin-min", type=int, default=30)
     parser.add_argument("--baas-router-min", type=int, default=10)
     return parser.parse_args()
 
