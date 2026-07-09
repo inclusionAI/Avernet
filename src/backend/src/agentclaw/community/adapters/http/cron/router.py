@@ -161,12 +161,10 @@ async def get_cron_status(
         effective_user_id, effective_nick_name = _resolve_user_identity(
             owner_id, bot_id, user, bot_service
         )
-        result = await service.forward_request(
+        result = await service.get_cron_status(
             bot_id=bot_id,
             user_id=effective_user_id,
             nick_name=effective_nick_name,
-            method="GET",
-            path="/api/cron/status"
         )
         return ApiResponse(
             success=result.get("success", True),
@@ -188,6 +186,8 @@ async def get_cron_status(
 async def get_running_crons(
     bot_id: str | None = Query("all", description="Bot ID，'all' 表示所有 Bots"),
     owner_id: str | None = Query(None, description="Bot 拥有者工号"),
+    runtime_stage: str | None = Query(None, description="运行态：draft/verify/online"),
+    device_uuid: str | None = Query(None, description="运行实例 device_uuid"),
     user: AuthenticatedUser = Depends(get_current_user),
     service: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
@@ -200,12 +200,23 @@ async def get_running_crons(
         result = await service.list_running_crons(
             user_id=effective_user_id,
             nick_name=effective_nick_name,
-            bot_id=bot_id
+            bot_id=bot_id,
+            runtime_stage=runtime_stage,
+            device_uuid=device_uuid,
         )
         return CronListApiResponse(
             success=True,
             data=result.get("data", []),
             failed_targets=result.get("failed_targets", []),
+        )
+    except CronRelayError as e:
+        logger.warning(f"[get_running_crons] Business error: {e}")
+        return CronListApiResponse(
+            success=False,
+            data=[],
+            message=str(e),
+            error_code=e.error_code,
+            failed_targets=[],
         )
     except Exception as e:
         logger.error(f"[get_running_crons] Error: {e}")
@@ -238,12 +249,11 @@ async def get_cron(
         effective_user_id, effective_nick_name = _resolve_user_identity(
             owner_id, bot_id, user, bot_service
         )
-        result = await service.forward_request(
+        result = await service.get_cron_detail(
             bot_id=bot_id,
             user_id=effective_user_id,
             nick_name=effective_nick_name,
-            method="GET",
-            path=f"/api/cron/{task_id}",
+            task_id=task_id,
             runtime_stage=runtime_stage,
         )
         return ApiResponse(
@@ -304,13 +314,11 @@ async def create_cron(
         if data.get("notify"):
             adapter_body["notify"] = data.get("notify")
 
-        result = await service.forward_request(
+        result = await service.create_cron(
             bot_id=bot_id,
             user_id=effective_user_id,
             nick_name=effective_nick_name,
-            method="POST",
-            path="/api/cron",
-            body=adapter_body
+            body=adapter_body,
         )
 
         return ApiResponse(
@@ -347,12 +355,11 @@ async def update_cron(
             owner_id, bot_id, user, bot_service
         )
 
-        result = await service.forward_request(
+        result = await service.update_cron(
             bot_id=bot_id,
             user_id=effective_user_id,
             nick_name=effective_nick_name,
-            method="PUT",
-            path=f"/api/cron/{task_id}",
+            task_id=task_id,
             body=data,
             runtime_stage=runtime_stage,
         )
@@ -392,12 +399,11 @@ async def delete_cron(
             owner_id, bot_id, user, bot_service
         )
 
-        result = await service.forward_request(
+        result = await service.delete_cron(
             bot_id=bot_id,
             user_id=effective_user_id,
             nick_name=effective_nick_name,
-            method="DELETE",
-            path=f"/api/cron/{task_id}",
+            task_id=task_id,
             runtime_stage=runtime_stage,
         )
 
@@ -436,13 +442,12 @@ async def run_cron(
             owner_id, bot_id, user, bot_service
         )
 
-        result = await service.forward_request(
+        result = await service.run_cron(
             bot_id=bot_id,
             user_id=effective_user_id,
             nick_name=effective_nick_name,
-            method="POST",
-            path=f"/api/cron/{task_id}/run",
-            params={"force": force},
+            task_id=task_id,
+            force=force,
             runtime_stage=runtime_stage,
         )
 
@@ -471,25 +476,29 @@ async def get_cron_runs(
     bot_id: str = Query(..., description="所属 Bot ID"),
     limit: int = Query(20, description="返回记录数量上限"),
     owner_id: str | None = Query(None, description="Bot 拥有者工号"),
-    runtime_stage: str = Query("draft", description="运行态：draft/verify/online"),
+    runtime_stage: str | None = Query(None, description="运行态：draft/verify/online"),
+    device_uuid: str | None = Query(None, description="运行实例 device_uuid"),
     user: AuthenticatedUser = Depends(get_current_user),
     service: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> ApiResponse:
     """获取任务执行历史"""
     try:
+        if device_uuid and not runtime_stage:
+            raise CronRelayError("device_uuid requires runtime_stage", error_code=400)
+
         effective_user_id, effective_nick_name = _resolve_user_identity(
             owner_id, bot_id, user, bot_service
         )
 
-        result = await service.forward_request(
+        result = await service.get_cron_runs(
             bot_id=bot_id,
             user_id=effective_user_id,
             nick_name=effective_nick_name,
-            method="GET",
-            path=f"/api/cron/{task_id}/runs",
-            params={"limit": limit},
-            runtime_stage=runtime_stage,
+            task_id=task_id,
+            limit=limit,
+            runtime_stage=runtime_stage or "draft",
+            device_uuid=device_uuid,
         )
 
         return ApiResponse(
