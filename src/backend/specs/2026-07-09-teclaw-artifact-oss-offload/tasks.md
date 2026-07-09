@@ -21,12 +21,12 @@
         on `self._errors` (incl. missing-key `ClientError`).
 - **Depends on:** Task 1
 
-## Task 3: Add `get_object` to the mock object-storage double
+## Task 3: [x] Add `get_object` to the mock object-storage double
 - **Goal:** Tests and the local runtime satisfy the extended Protocol.
 - **Files:** `src/backend/src/agentclaw/community/plugins/local/oss_storage.py`
 - **Done when:**
-  - [ ] `MockObjectStoragePlugin.__init__` adds `self.get_object = MagicMock(return_value=None)`.
-  - [ ] `reset_all_mocks` resets `get_object` (return_value `None`, clears side_effect/history).
+  - [x] `MockObjectStoragePlugin.__init__` adds `self.get_object = MagicMock(return_value=None)`.
+  - [x] `reset_all_mocks` resets `get_object` (return_value `None`, clears side_effect/history).
 - **Depends on:** Task 1
 
 ## Task 4: Add offload helpers + constants to the publish repository
