@@ -15,10 +15,18 @@ skip_singlebox_coverage="${OCB_PRE_PUSH_SKIP_SINGLEBOX_COVERAGE:-0}"
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --base)
+      if [[ "$#" -lt 2 ]]; then
+        echo "error: --base requires an argument" >&2
+        exit 2
+      fi
       base="$2"
       shift 2
       ;;
     --head)
+      if [[ "$#" -lt 2 ]]; then
+        echo "error: --head requires an argument" >&2
+        exit 2
+      fi
       head="$2"
       shift 2
       ;;
