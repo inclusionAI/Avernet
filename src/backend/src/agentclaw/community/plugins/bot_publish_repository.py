@@ -34,6 +34,7 @@ reference):
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any, Dict, List, Optional
 
@@ -93,68 +94,109 @@ class BotPublishRepository:
 
     # ── config_artifact offload/inload helpers ──────────────────
 
-    def _artifact_oss_key(self, env: str, publish_id: int) -> str:
-        """Deterministic per-record key. Overwritten on each write (a publish's
-        re-stamps reuse the same object), so no orphan copies accumulate."""
-        return f"teclaw/{env}/bot_publish/{publish_id}/config_artifact.json"
+    def _artifact_prefix(self, env: str, publish_id: int) -> str:
+        """Per-record object-storage prefix. Every offloaded version of one
+        publish record lives under here; :meth:`delete` sweeps the whole subtree
+        so superseded versions never accumulate."""
+        return f"teclaw/{env}/bot_publish/{publish_id}/"
 
-    def _serialize_ext(
+    def _artifact_oss_key(self, env: str, publish_id: int, digest: str) -> str:
+        """Content-addressed key for one artifact version.
+
+        The content digest makes each write a NEW immutable object instead of an
+        in-place overwrite. That is what stops a rejected optimistic-lock write
+        (or a concurrent writer) from clobbering the object a still-valid record
+        points at — a marker always names exactly the bytes written with it.
+        Superseded versions are reaped by :meth:`delete`'s prefix sweep.
+        """
+        return (
+            f"{self._artifact_prefix(env, publish_id)}"
+            f"config_artifact-{digest}.json"
+        )
+
+    @staticmethod
+    def _strip_stale_marker(ext: Dict[str, Any]) -> Dict[str, Any]:
+        """Enforce marker/inline mutual exclusion on write.
+
+        A fresh inline ``config_artifact`` wins over a leftover marker: if both
+        are present (e.g. a caller merged a new artifact onto an ext whose marker
+        had failed to resolve), drop the marker so we never persist both — which
+        would otherwise make the next read fetch stale OSS content over the fresh
+        inline artifact.
+        """
+        if _ARTIFACT_KEY in ext and _ARTIFACT_OSS_MARKER in ext:
+            return {k: v for k, v in ext.items() if k != _ARTIFACT_OSS_MARKER}
+        return ext
+
+    def _prepare_ext(
         self, ext: Optional[Dict[str, Any]], publish_id: int, env: str
-    ) -> Optional[str]:
-        """Serialize ``ext`` to the JSON string stored in the ext column.
+    ) -> tuple[Optional[str], Optional[tuple[str, str]]]:
+        """Build the ext JSON to store, plus a pending object-storage upload.
 
-        When offloading is enabled and ``ext['config_artifact']`` serializes to
-        more than :data:`_ARTIFACT_OSS_THRESHOLD_BYTES`, its JSON is written to
-        object storage and replaced with a self-describing marker so the column
-        stays small. Raises on an object-storage write failure — a loud failure
-        beats silently truncating the ext column.
-
-        Invariant: callers pass a *resolved* ext (a full inline ``config_artifact``
-        or none; never a lingering marker), because every read path resolves the
-        marker back before handing the record out.
+        Returns ``(ext_json, pending)`` where ``pending`` is ``(oss_key,
+        artifact_json)`` to write, or ``None``. Performs NO I/O: the caller
+        uploads ``pending`` only AFTER confirming the DB write will persist, so a
+        rejected optimistic-lock update never writes an orphan or clobbers a live
+        object. When ``pending`` is set, ``ext_json`` already carries the marker
+        instead of the inline artifact.
         """
         if ext is None:
-            return None
+            return None, None
+        ext = self._strip_stale_marker(ext)
         artifact = ext.get(_ARTIFACT_KEY)
-        if self._offload_enabled and artifact is not None:
-            artifact_json = json.dumps(artifact, ensure_ascii=False)
-            size = len(artifact_json.encode("utf-8"))
-            if size > _ARTIFACT_OSS_THRESHOLD_BYTES:
-                key = self._artifact_oss_key(env, publish_id)
-                if not self._oss.put_object(key, artifact_json):
-                    raise RuntimeError(
-                        "config_artifact offload failed: "
-                        f"put_object({key!r}) returned False (size={size} bytes)"
-                    )
-                ext = {k: v for k, v in ext.items() if k != _ARTIFACT_KEY}
-                ext[_ARTIFACT_OSS_MARKER] = {
-                    "offloaded": True,
-                    "oss_key": key,
-                    "size_bytes": size,
-                    "threshold_bytes": _ARTIFACT_OSS_THRESHOLD_BYTES,
-                    "note": (
-                        f"config_artifact ({size} bytes) exceeded the "
-                        f"{_ARTIFACT_OSS_THRESHOLD_BYTES}-byte inline limit for "
-                        "the ac_bot_publish.ext TEXT column and was stored in "
-                        "object storage at oss_key; the repository re-inlines it "
-                        f"as ext['{_ARTIFACT_KEY}'] on read."
-                    ),
-                }
-        return json.dumps(ext, ensure_ascii=False)
+        if not (self._offload_enabled and artifact is not None):
+            return json.dumps(ext, ensure_ascii=False), None
+        artifact_json = json.dumps(artifact, ensure_ascii=False)
+        size = len(artifact_json.encode("utf-8"))
+        if size <= _ARTIFACT_OSS_THRESHOLD_BYTES:
+            return json.dumps(ext, ensure_ascii=False), None
+        digest = hashlib.sha1(artifact_json.encode("utf-8")).hexdigest()[:12]
+        key = self._artifact_oss_key(env, publish_id, digest)
+        ext = {k: v for k, v in ext.items() if k != _ARTIFACT_KEY}
+        ext[_ARTIFACT_OSS_MARKER] = {
+            "offloaded": True,
+            "oss_key": key,
+            "size_bytes": size,
+            "threshold_bytes": _ARTIFACT_OSS_THRESHOLD_BYTES,
+            "note": (
+                f"config_artifact ({size} bytes) exceeded the "
+                f"{_ARTIFACT_OSS_THRESHOLD_BYTES}-byte inline limit for the "
+                "ac_bot_publish.ext TEXT column and was stored in object storage "
+                f"at oss_key; the repository re-inlines it as ext['{_ARTIFACT_KEY}'] "
+                "on read."
+            ),
+        }
+        return json.dumps(ext, ensure_ascii=False), (key, artifact_json)
+
+    def _upload_pending(self, pending: Optional[tuple[str, str]]) -> None:
+        """Write a prepared artifact object. Fail loud on error — better than
+        silently truncating the ext column or shipping a dangling marker."""
+        if pending is None:
+            return
+        key, body = pending
+        if not self._oss.put_object(key, body):
+            raise RuntimeError(
+                f"config_artifact offload failed: put_object({key!r}) "
+                "returned False"
+            )
 
     def _resolve_ext(
         self, ext: Optional[Dict[str, Any]]
     ) -> Optional[Dict[str, Any]]:
-        """Inverse of the offload in :meth:`_serialize_ext`.
+        """Inverse of the offload in :meth:`_prepare_ext`.
 
         If ``ext`` carries the offload marker, fetch the artifact JSON back from
         object storage and re-inline it as ``ext['config_artifact']``, dropping
-        the marker so callers see the same shape as an inline artifact. On a
-        fetch failure, log and leave the marker in place (readers already guard
-        on a missing config_artifact) rather than raising inside a read path.
+        the marker so callers see the same shape as an inline artifact. If an
+        inline artifact is somehow also present it wins (the marker is dropped
+        without a fetch). On a fetch failure, log and leave the marker in place
+        (readers already guard on a missing config_artifact) rather than raising
+        inside a read path.
         """
         if not ext or _ARTIFACT_OSS_MARKER not in ext:
             return ext
+        if _ARTIFACT_KEY in ext:
+            return {k: v for k, v in ext.items() if k != _ARTIFACT_OSS_MARKER}
         marker = ext[_ARTIFACT_OSS_MARKER]
         key = marker.get("oss_key") if isinstance(marker, dict) else None
         raw = self._oss.get_object(key) if (self._oss and key) else None
@@ -170,10 +212,16 @@ class BotPublishRepository:
         )
         return resolved
 
-    def _to_record(self, row: "BotPublishModel") -> BotPublishRecord:
-        """Row → record with any offloaded config_artifact re-inlined."""
-        record = row.to_record()
-        record.ext = self._resolve_ext(record.ext)
+    def _resolve_record(
+        self, record: Optional[BotPublishRecord]
+    ) -> Optional[BotPublishRecord]:
+        """Re-inline an offloaded artifact on a detached record.
+
+        Called AFTER the DB session closes, so the object-storage network fetch
+        never holds a database connection open.
+        """
+        if record is not None:
+            record.ext = self._resolve_ext(record.ext)
         return record
 
     # ── insert (plain INSERT — never an upsert) ─────────────────
@@ -204,7 +252,12 @@ class BotPublishRepository:
             db.add(row)
             db.flush()
             new_id = row.id
-            row.ext = self._serialize_ext(ext, new_id, env)
+            # ext + upload only after flush: the OSS key is content-addressed
+            # under the DB-assigned publish_id. The upload runs inside the txn so
+            # a put failure rolls the whole INSERT back (no dangling marker row).
+            ext_json, pending = self._prepare_ext(ext, new_id, env)
+            row.ext = ext_json
+            self._upload_pending(pending)
             db.flush()
             logger.info("[insert] inserted bot publish id=%s", new_id)
         # Re-read after commit — prod returns get_by_id(inserted_id),
@@ -221,7 +274,8 @@ class BotPublishRepository:
                 .filter(self.Model.id == publish_id)
                 .first()
             )
-            return self._to_record(row) if row else None
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
 
     def get_by_publish_bot_id(
         self,
@@ -239,7 +293,8 @@ class BotPublishRepository:
             if publish_status:
                 query = query.filter(self.Model.status == publish_status)
             row = query.order_by(self.Model.version.desc()).first()
-            return self._to_record(row) if row else None
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
 
     def get_draft_by_publish_bot_id(
         self,
@@ -257,7 +312,8 @@ class BotPublishRepository:
                 .order_by(self.Model.version.desc())
                 .first()
             )
-            return self._to_record(row) if row else None
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
 
     def get_by_publish_bot_id_and_version(
         self,
@@ -277,7 +333,8 @@ class BotPublishRepository:
                 )
                 .first()
             )
-            return self._to_record(row) if row else None
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
 
     def list_by_owner(
         self,
@@ -293,7 +350,8 @@ class BotPublishRepository:
             if status:
                 query = query.filter(self.Model.status == status)
             rows = query.order_by(self.Model.gmt_create.desc()).all()
-            return [self._to_record(r) for r in rows]
+            records = [r.to_record() for r in rows]
+        return [self._resolve_record(r) for r in records]
 
     def list_by_source_bot(
         self,
@@ -310,7 +368,8 @@ class BotPublishRepository:
                 .order_by(self.Model.gmt_create.desc())
                 .all()
             )
-            return [self._to_record(r) for r in rows]
+            records = [r.to_record() for r in rows]
+        return [self._resolve_record(r) for r in records]
 
     def list_by_status(
         self,
@@ -327,7 +386,8 @@ class BotPublishRepository:
                 .order_by(self.Model.gmt_create.desc())
                 .all()
             )
-            return [self._to_record(r) for r in rows]
+            records = [r.to_record() for r in rows]
+        return [self._resolve_record(r) for r in records]
 
     def get_latest_by_source_bot_id_and_owner_and_status(
         self,
@@ -348,7 +408,8 @@ class BotPublishRepository:
                 .order_by(self.Model.id.desc())
                 .first()
             )
-            return self._to_record(row) if row else None
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
 
     def get_latest_success_by_source_bot_id(
         self,
@@ -366,7 +427,8 @@ class BotPublishRepository:
                 .order_by(self.Model.id.desc())
                 .first()
             )
-            return self._to_record(row) if row else None
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
 
     def get_by_last_pub_id(
         self,
@@ -379,7 +441,8 @@ class BotPublishRepository:
                 .order_by(self.Model.id.desc())
                 .first()
             )
-            return self._to_record(row) if row else None
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
 
     # ── updates (single optimistic-lock statements) ─────────────
 
@@ -413,7 +476,9 @@ class BotPublishRepository:
         ext: Dict[str, Any],
         source_status: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
-        ext_json = self._serialize_ext(ext, publish_id, get_current_env())
+        ext_json, pending = self._prepare_ext(
+            ext, publish_id, get_current_env()
+        )
         with self._db.orm_session() as db:
             query = db.query(self.Model).filter(
                 self.Model.id == publish_id
@@ -428,6 +493,12 @@ class BotPublishRepository:
                 },
                 synchronize_session=False,
             )
+            # Upload the offloaded artifact only once we know this write took
+            # (optimistic lock matched). A rejected update (affected == 0) must
+            # NOT touch object storage, or it would clobber the object a still-
+            # valid record points at. Inside the txn so a put failure rolls back.
+            if not (source_status is not None and affected == 0):
+                self._upload_pending(pending)
         if source_status is not None and affected == 0:
             return None
         return self.get_by_id(publish_id)
@@ -469,40 +540,42 @@ class BotPublishRepository:
 
     # ── delete (single hard DELETE — prod parity) ───────────────
 
-    def _offloaded_key(self, publish_id: int) -> Optional[str]:
-        """Return the OSS key of this record's offloaded artifact, if any.
+    def _artifact_prefix_of(self, publish_id: int) -> Optional[str]:
+        """The object-storage prefix for this record's artifacts, from its
+        ``env`` column, or ``None`` if the row is gone.
 
-        Reads only the raw ``ext`` column (no resolution) and returns the
-        marker's ``oss_key`` when the artifact was offloaded, else ``None``.
+        Uses the deterministic prefix (not a stored marker), so it reaps EVERY
+        offloaded version under the record — the current one plus any superseded
+        (content-addressed) or shrunk-back-to-inline leftovers.
         """
         with self._db.orm_session() as db:
             row = (
-                db.query(self.Model.ext)
+                db.query(self.Model.env)
                 .filter(self.Model.id == publish_id)
                 .first()
             )
         if not row or not row[0]:
             return None
-        try:
-            ext = json.loads(row[0])
-        except (ValueError, TypeError):
-            return None
-        marker = ext.get(_ARTIFACT_OSS_MARKER) if isinstance(ext, dict) else None
-        return marker.get("oss_key") if isinstance(marker, dict) else None
+        return self._artifact_prefix(row[0], publish_id)
 
     def delete(self, publish_id: int) -> bool:
-        # Capture an offloaded artifact's OSS key (if any) before the row is
-        # gone, so object storage can be cleaned up after a successful delete.
-        # The hard DELETE below stays a single statement (prod parity); the
-        # lookup only runs when offload storage is configured.
-        oss_key = self._offloaded_key(publish_id) if self._oss is not None else None
+        # Resolve the record's artifact prefix (if any) before the row is gone,
+        # so object storage can be swept after a successful delete. The hard
+        # DELETE below stays a single statement (prod parity); the lookup only
+        # runs when offload storage is configured.
+        prefix = (
+            self._artifact_prefix_of(publish_id)
+            if self._oss is not None
+            else None
+        )
         with self._db.orm_session() as db:
             affected = (
                 db.query(self.Model)
                 .filter(self.Model.id == publish_id)
                 .delete(synchronize_session=False)
             )
-        if affected > 0 and oss_key:
-            # Best effort — a failed OSS delete must not fail the DB delete.
-            self._oss.delete_object(oss_key)
+        if affected > 0 and prefix:
+            # Best effort — a failed OSS cleanup must not fail the DB delete.
+            for key in self._oss.list_objects(prefix):
+                self._oss.delete_object(key)
         return affected > 0
