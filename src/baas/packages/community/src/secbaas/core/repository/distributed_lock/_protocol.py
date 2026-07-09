@@ -23,8 +23,12 @@ class DistributedLockRepository(Protocol):
         lock_holder: str,
         expire_time: datetime,
         env: str | None = None,
+        current_time: datetime | None = None,
     ) -> bool:
-        """原子尝试获取锁（INSERT ... ON DUPLICATE KEY UPDATE）"""
+        """原子尝试获取锁（INSERT ... ON DUPLICATE KEY UPDATE）
+
+        支持三种场景：新建锁、抢占过期锁、同 holder 续期。
+        """
         ...
 
     def insert_lock(

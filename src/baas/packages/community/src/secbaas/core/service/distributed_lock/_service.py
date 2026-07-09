@@ -291,12 +291,14 @@ class DistributedLockService:
         try:
             from secbaas.core.utils.env_utils import get_current_env
 
-            expire_time = datetime.now() + timedelta(seconds=expire_seconds)
+            now = datetime.now()
+            expire_time = now + timedelta(seconds=expire_seconds)
             return self._repository.try_acquire(
                 lock_name=lock_name,
                 lock_holder=lock_holder,
                 expire_time=expire_time,
                 env=get_current_env(),
+                current_time=now,
             )
         except Exception as e:
             logger.error(
