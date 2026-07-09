@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_fuse_client::FuseClient;
+pub use bcs_http::state::BotRuntimeTokenResolverPort;
 use bcs_http::state::{
     BcsHttpAuthBotRuntimeTokenResolver, BotRequestPort, ChainUserIdentityPort, HealthPort,
     HttpAppState, VisibilitySyncPort, VisibilitySyncRequest,
@@ -17,6 +18,41 @@ use tokio::sync::mpsc;
 
 use crate::server::BcsServerState;
 
+pub struct BotRuntimeTokenResolverBuildContext {
+    pub base: Arc<dyn BotRuntimeTokenResolverPort>,
+    pub state: Arc<BcsServerState>,
+}
+
+pub type RegisteredBotRuntimeTokenResolverBuild =
+    fn(BotRuntimeTokenResolverBuildContext) -> Option<Arc<dyn BotRuntimeTokenResolverPort>>;
+
+pub struct BotRuntimeTokenResolverFactoryRegistration {
+    pub name: &'static str,
+    pub build: RegisteredBotRuntimeTokenResolverBuild,
+}
+
+inventory::collect!(BotRuntimeTokenResolverFactoryRegistration);
+
+pub fn build_bot_runtime_token_resolver(
+    state: Arc<BcsServerState>,
+    base: Arc<dyn BotRuntimeTokenResolverPort>,
+) -> Arc<dyn BotRuntimeTokenResolverPort> {
+    let mut resolver = base;
+    for registration in inventory::iter::<BotRuntimeTokenResolverFactoryRegistration> {
+        if let Some(next) = (registration.build)(BotRuntimeTokenResolverBuildContext {
+            base: Arc::clone(&resolver),
+            state: Arc::clone(&state),
+        }) {
+            tracing::info!(
+                resolver = registration.name,
+                "registered bot runtime token resolver"
+            );
+            resolver = next;
+        }
+    }
+    resolver
+}
+
 pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppState {
     let config = state.config.clone();
     let max_group_messages = if config.max_group_messages > 0 {
@@ -30,11 +66,16 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
         ..state.services.clone()
     };
 
-    HttpAppState::new(services_with_secret)
-        .with_bot_runtime_token_resolver(Arc::new(
+    let runtime_token_resolver = build_bot_runtime_token_resolver(
+        Arc::clone(&state),
+        Arc::new(
             BcsHttpAuthBotRuntimeTokenResolver::default()
                 .with_credentials(state.provider_credentials.clone()),
-        ))
+        ),
+    );
+
+    HttpAppState::new(services_with_secret)
+        .with_bot_runtime_token_resolver(runtime_token_resolver)
         .with_health(Arc::new(BootstrapHealthPort {
             state: Arc::clone(&state),
         }))
@@ -255,5 +296,157 @@ impl VisibilitySyncPort for BootstrapVisibilitySyncPort {
         );
 
         bcs_fusion::sync_worker_with_retry(&fuse_client, &request.bot_uuid, &sync_req).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bcs_bot_store::MemoryProviderStore;
+    use bcs_leader_election::StandaloneLeaderElection;
+    use bcs_route_security::OutboundUrlGuard;
+    use bcs_service_api::ProviderStreamGrayList;
+    use bcs_service_api::{
+        BotMetricCount, BotMetricsSnapshotPort, ChatRunMetricCount,
+        DirectChatRunSnapshotPort, GroupMetricCount, GroupMetricsSnapshotPort,
+        GroupSessionMetricCount, GroupSessionMetricsSnapshotPort, ProviderCredential,
+        ProviderCredentialRepoPort, ServiceResult,
+    };
+    use bcs_services_container::Services;
+    use bcs_ws::web::WorkbenchConnectionRegistry;
+    use std::collections::HashMap;
+    use tokio::sync::Mutex;
+
+    struct NoopGroupMetricsSnapshotPort;
+
+    #[async_trait]
+    impl GroupMetricsSnapshotPort for NoopGroupMetricsSnapshotPort {
+        async fn group_counts(&self) -> ServiceResult<Vec<GroupMetricCount>> {
+            Ok(Vec::new())
+        }
+    }
+
+    struct NoopGroupSessionMetricsSnapshotPort;
+
+    #[async_trait]
+    impl GroupSessionMetricsSnapshotPort for NoopGroupSessionMetricsSnapshotPort {
+        async fn group_session_counts(&self) -> ServiceResult<Vec<GroupSessionMetricCount>> {
+            Ok(Vec::new())
+        }
+    }
+
+    struct NoopBotMetricsSnapshotPort;
+
+    #[async_trait]
+    impl BotMetricsSnapshotPort for NoopBotMetricsSnapshotPort {
+        async fn bot_counts(&self) -> ServiceResult<Vec<BotMetricCount>> {
+            Ok(Vec::new())
+        }
+    }
+
+    struct NoopDirectChatRunSnapshotPort;
+
+    #[async_trait]
+    impl DirectChatRunSnapshotPort for NoopDirectChatRunSnapshotPort {
+        async fn direct_chat_run_counts(&self) -> ServiceResult<Vec<ChatRunMetricCount>> {
+            Ok(Vec::new())
+        }
+    }
+
+    struct RegisteredAgentpassResolver {
+        fallback: Arc<dyn BotRuntimeTokenResolverPort>,
+        observed_port: u16,
+    }
+
+    #[async_trait]
+    impl BotRuntimeTokenResolverPort for RegisteredAgentpassResolver {
+        async fn resolve_agentpass_agent_code(&self, _token: &str) -> Option<String> {
+            Some(format!("registered-agent-code:{}", self.observed_port))
+        }
+
+        async fn try_provider_admin(&self, token: &str) -> Option<String> {
+            self.fallback.try_provider_admin(token).await
+        }
+    }
+
+    fn build_registered_agentpass_resolver(
+        ctx: BotRuntimeTokenResolverBuildContext,
+    ) -> Option<Arc<dyn BotRuntimeTokenResolverPort>> {
+        Some(Arc::new(RegisteredAgentpassResolver {
+            fallback: ctx.base,
+            observed_port: ctx.state.config.port,
+        }))
+    }
+
+    inventory::submit! {
+        BotRuntimeTokenResolverFactoryRegistration {
+            name: "test-agentpass",
+            build: build_registered_agentpass_resolver,
+        }
+    }
+
+    fn test_server_state(port: u16) -> Arc<BcsServerState> {
+        let mut config = crate::BcsConfig::default();
+        config.port = port;
+        let credentials: Arc<dyn ProviderCredentialRepoPort> =
+            Arc::new(MemoryProviderStore::new());
+        Arc::new(BcsServerState {
+            config,
+            services: Services::noop(),
+            run_channels: Arc::new(RunChannelManager::new()),
+            bot_connections: Arc::new(BotConnectionRegistry::new()),
+            frontend_connections: Arc::new(WorkbenchConnectionRegistry::new()),
+            frontend_run_channels: Arc::new(RunChannelManager::new()),
+            coordination_processed: Arc::new(Mutex::new(HashMap::new())),
+            leader_election: Arc::new(StandaloneLeaderElection::local()),
+            lifecycle: Arc::new(Mutex::new(crate::lifecycle::LifecycleOrchestrator::new())),
+            fuse_client: None,
+            provider_credentials: credentials,
+            provider_stream_gray_list: Arc::new(ProviderStreamGrayList::new(Vec::new())),
+            channel_http_ingress: None,
+            group_metrics_snapshot: Arc::new(NoopGroupMetricsSnapshotPort),
+            group_session_metrics_snapshot: Arc::new(NoopGroupSessionMetricsSnapshotPort),
+            bot_metrics_snapshot: Arc::new(NoopBotMetricsSnapshotPort),
+            direct_chat_run_snapshot: Arc::new(NoopDirectChatRunSnapshotPort),
+            metrics: None,
+            auth_chain: Arc::new(bcs_auth_api::AuthPluginChain::new(Vec::new())),
+            auth_config: bcs_auth_api::AuthConfig::default(),
+            user_identity_port: None,
+            outbound_url_guard: OutboundUrlGuard::allowing_private_networks_for_tests(),
+        })
+    }
+
+    #[tokio::test]
+    async fn registered_runtime_token_resolver_extends_default_resolver() {
+        let credentials = Arc::new(MemoryProviderStore::new());
+        credentials
+            .insert_credential(ProviderCredential {
+                provider_id: "provider-1".to_string(),
+                credential_kind: "provider_admin".to_string(),
+                secret_value: "provider-admin-token".to_string(),
+                disabled: false,
+                created_at: 0,
+                updated_at: 0,
+            })
+            .await
+            .expect("insert provider admin credential");
+        let credentials: Arc<dyn ProviderCredentialRepoPort> = credentials;
+        let resolver = build_bot_runtime_token_resolver(test_server_state(21999), Arc::new(
+            BcsHttpAuthBotRuntimeTokenResolver::default()
+                .with_credentials(credentials),
+        ));
+
+        let agent_code = resolver
+            .resolve_agentpass_agent_code("agentpass.header.sig")
+            .await;
+
+        assert_eq!(agent_code.as_deref(), Some("registered-agent-code:21999"));
+        assert_eq!(
+            resolver
+                .try_provider_admin("provider-admin-token")
+                .await
+                .as_deref(),
+            Some("provider-1")
+        );
     }
 }
