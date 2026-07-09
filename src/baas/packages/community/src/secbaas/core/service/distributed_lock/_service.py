@@ -48,10 +48,7 @@ def _is_unique_constraint_violation(exc: Exception) -> bool:
 
     if isinstance(exc, IntegrityError):
         msg = str(exc.orig).lower() if exc.orig else str(exc).lower()
-        return any(
-            kw in msg
-            for kw in ("duplicate", "unique", "constraint")
-        )
+        return any(kw in msg for kw in ("duplicate", "unique", "constraint"))
     return False
 
 
