@@ -1220,6 +1220,27 @@ class TestCreateSessionAdapterErrors:
         assert _safe_client_msg(RuntimeError("boom")) == "boom"
 
     @pytest.mark.asyncio
+    async def test_safe_client_msg_generic_client_error_does_not_leak_url(self, service):
+        # [单测用例]测试场景：ClientConnectorError 等 ClientError 子类 str() 含内部
+        # hostname/URL，外抛消息须统一为通用消息，不得泄露内部地址
+        """_safe_client_msg returns generic message for other aiohttp.ClientError."""
+        import aiohttp
+
+        from secbaas.core.service.bot_run._baas_service import _safe_client_msg
+
+        # ClientConnectorError 的 str() 形如
+        # "Cannot connect to host agentclawproxy-pre.alipay.com:443 ..."
+        cce = aiohttp.ClientConnectorError(
+            connection_key=MagicMock(),
+            os_error=OSError("Cannot connect to host agentclawproxy-pre.alipay.com:443"),
+        )
+
+        safe = _safe_client_msg(cce)
+        assert safe == "Connection failed"
+        assert "agentclawproxy" not in safe
+        assert "alipay.com" not in safe
+
+    @pytest.mark.asyncio
     async def test_existing_session_id_exception_reraises(self, service, wss_resolver):
         # [单测用例]测试场景：session_id 已存在但 async with 出异常时 re-raise
         """When session_id is provided but async context fails, exception is reraised."""

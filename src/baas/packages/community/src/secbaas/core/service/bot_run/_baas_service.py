@@ -69,9 +69,13 @@ def _safe_client_msg(exc: Exception) -> str:
 
     aiohttp.ClientResponseError 的 str() 形如 ``"500, message='...', url='https://agentclawproxy-.../api/sessions'"``,
     其中 url 是内部代理地址,不应外泄。这里只取业务 message。
+    其他 aiohttp.ClientError 子类(如 ClientConnectorError / InvalidURL)的 str()
+    同样可能包含内部 hostname/URL,统一返回通用消息;完整异常由调用方记入日志。
     """
     if isinstance(exc, aiohttp.ClientResponseError):
         return exc.message or f"HTTP {exc.status}"
+    if isinstance(exc, aiohttp.ClientError):
+        return "Connection failed"
     return str(exc)
 
 
@@ -378,7 +382,8 @@ class BaasBotService(BotService):
                 binding_info, session_id, context
             )
         except Exception as e:
-            self._mark_session_failed(baas_session_id, err_msg=str(e))
+            logger.warning("Failed to resolve WS connection: %s", e)
+            self._mark_session_failed(baas_session_id, err_msg=_safe_client_msg(e))
             raise BotServiceError(
                 f"Failed to resolve WS connection: {_safe_client_msg(e)}"
             ) from e
@@ -419,7 +424,8 @@ class BaasBotService(BotService):
                 f"Concurrent request on session {session_id}: {e}"
             ) from e
         except Exception as e:
-            self._mark_session_failed(baas_session_id, err_msg=str(e))
+            logger.warning("Failed to send message: %s", e)
+            self._mark_session_failed(baas_session_id, err_msg=_safe_client_msg(e))
             raise BotServiceError(
                 f"Failed to send message: {_safe_client_msg(e)}"
             ) from e
@@ -448,7 +454,8 @@ class BaasBotService(BotService):
                 binding_info, session_id, context
             )
         except Exception as e:
-            self._mark_session_failed(baas_session_id, err_msg=str(e))
+            logger.warning("Failed to resolve WS connection: %s", e)
+            self._mark_session_failed(baas_session_id, err_msg=_safe_client_msg(e))
             raise BotServiceError(
                 f"Failed to resolve WS connection: {_safe_client_msg(e)}"
             ) from e
@@ -482,7 +489,8 @@ class BaasBotService(BotService):
         except BotServiceError:
             raise
         except Exception as e:
-            self._mark_session_failed(baas_session_id, err_msg=str(e))
+            logger.warning("Failed to send message stream: %s", e)
+            self._mark_session_failed(baas_session_id, err_msg=_safe_client_msg(e))
             raise BotServiceError(
                 f"Failed to send message stream: {_safe_client_msg(e)}"
             ) from e
@@ -513,7 +521,8 @@ class BaasBotService(BotService):
                 binding_info, session_id, context
             )
         except Exception as e:
-            self._mark_session_failed(baas_session_id, err_msg=str(e))
+            logger.warning("Failed to resolve WS connection: %s", e)
+            self._mark_session_failed(baas_session_id, err_msg=_safe_client_msg(e))
             raise BotServiceError(
                 f"Failed to resolve WS connection: {_safe_client_msg(e)}"
             ) from e
@@ -535,7 +544,8 @@ class BaasBotService(BotService):
         except BotServiceError:
             raise
         except Exception as e:
-            self._mark_session_failed(baas_session_id, err_msg=str(e))
+            logger.warning("Failed to inject message: %s", e)
+            self._mark_session_failed(baas_session_id, err_msg=_safe_client_msg(e))
             raise BotServiceError(
                 f"Failed to inject message: {_safe_client_msg(e)}"
             ) from e
@@ -567,6 +577,7 @@ class BaasBotService(BotService):
                 binding_info, session_id, context
             )
         except Exception as e:
+            logger.warning("Failed to resolve WS connection: %s", e)
             raise BotServiceError(
                 f"Failed to resolve WS connection: {_safe_client_msg(e)}"
             ) from e
@@ -592,6 +603,7 @@ class BaasBotService(BotService):
         except BotServiceError:
             raise
         except Exception as e:
+            logger.warning("Failed to get messages: %s", e)
             raise BotServiceError(
                 f"Failed to get messages: {_safe_client_msg(e)}"
             ) from e
@@ -624,6 +636,7 @@ class BaasBotService(BotService):
                 binding_info, context
             )
         except Exception as e:
+            logger.warning("Failed to resolve WS connection: %s", e)
             raise BotServiceError(
                 f"Failed to resolve WS connection: {_safe_client_msg(e)}"
             ) from e
@@ -640,6 +653,7 @@ class BaasBotService(BotService):
         except aiohttp.ClientResponseError as e:
             if e.status == 404:
                 raise SessionNotFoundError(session_id) from e
+            logger.warning("Failed to get session: %s", e)
             raise BotServiceError(
                 f"Failed to get session: {_safe_client_msg(e)}"
             ) from e
@@ -648,6 +662,7 @@ class BaasBotService(BotService):
         except BotServiceError:
             raise
         except Exception as e:
+            logger.warning("Failed to get session: %s", e)
             raise BotServiceError(
                 f"Failed to get session: {_safe_client_msg(e)}"
             ) from e
