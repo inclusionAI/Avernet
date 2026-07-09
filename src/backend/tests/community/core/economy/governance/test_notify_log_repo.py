@@ -5,7 +5,6 @@ Targets the previously-uncovered methods:
   - get_by_notification_id_and_owner  (owner-scoped single lookup)
   - list_by_owner_and_statuses        (paged multi-status list)
   - list_distinct_bot_owner           (distinct (bot_id, owner_id) pairs)
-  - list_pending_by_bot_ids           (un-responded open/muted by bot_ids)
 
 Note: ``add_audit`` has been moved to ``GovernanceAuditRepository``
 (see ``test_audit_repo.py``).
@@ -21,8 +20,8 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceNotifyLog,
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    GovernanceNotificationOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
     NotifyLogRepository,
@@ -43,7 +42,7 @@ def _make_notification(
     **overrides,
 ):
     """Create and persist a minimal notify_log row (mirrors service-test factory)."""
-    row = GovernanceNotifyLog(
+    row = GovernanceNotificationOrm(
         notification_id=notification_id,
         bot_id=overrides.pop("bot_id", f"bot-{notification_id}"),
         bot_name=overrides.pop("bot_name", "TestBot"),
@@ -94,8 +93,8 @@ class TestGetByNotificationIdAndOwner:
         with patch(_ENV_PATCH, return_value="dev"):
             row = repo.get_by_notification_id_and_owner("n-1", "user-1")
         assert row is not None
-        assert row["notification_id"] == "n-1"
-        assert row["owner_id"] == "user-1"
+        assert row.notification_id == "n-1"
+        assert row.owner_id == "user-1"
 
     def test_returns_none_when_owner_mismatch(self, session, engine, repo):
         _make_notification(
@@ -113,7 +112,8 @@ class TestGetByNotificationIdAndOwner:
         with patch(_ENV_PATCH, return_value="pre"):
             row = repo.get_by_notification_id_and_owner("n-pre", "user-1")
         assert row is not None
-        assert row["env"] == "pre"
+        # domain model 不暴露 env (sealed), 通过 notification_id 匹配确认找到正确行
+        assert row.notification_id == "n-pre"
 
 
 # ----------------------------------------------------------------------
@@ -143,7 +143,7 @@ class TestListByOwnerAndStatuses:
             rows = repo.list_by_owner_and_statuses(
                 "user-1", ["open", "muted"],
             )
-        ids = {r["notification_id"] for r in rows}
+        ids = {r.notification_id for r in rows}
         assert ids == {"n-open", "n-muted"}
 
     def test_pagination_offset_and_limit(self, session, engine, repo):
@@ -206,50 +206,6 @@ class TestListDistinctBotOwner:
         with patch(_ENV_PATCH, return_value="dev"):
             pairs = repo.list_distinct_bot_owner([])
         assert pairs == []
-
-
-# ----------------------------------------------------------------------
-# list_pending_by_bot_ids
-# ----------------------------------------------------------------------
-
-class TestListPendingByBotIds:
-    def test_only_unresponded_open_or_muted(self, session, engine, repo):
-        _make_notification(
-            session, notification_id="n-open", bot_id="bot-a",
-            governance_status="open", response=None, env="dev",
-        )
-        _make_notification(
-            session, notification_id="n-muted", bot_id="bot-a",
-            governance_status="muted", response=None, env="dev",
-        )
-        # responded -> excluded
-        _make_notification(
-            session, notification_id="n-responded", bot_id="bot-a",
-            governance_status="open", response="need_time", env="dev",
-        )
-        # closed status -> excluded
-        _make_notification(
-            session, notification_id="n-closed", bot_id="bot-a",
-            governance_status="closed", response=None, env="dev",
-        )
-        # bot not requested -> excluded
-        _make_notification(
-            session, notification_id="n-otherbot", bot_id="bot-z",
-            governance_status="open", response=None, env="dev",
-        )
-        with patch(_ENV_PATCH, return_value="dev"):
-            rows = repo.list_pending_by_bot_ids(["bot-a"])
-        ids = {r["notification_id"] for r in rows}
-        assert ids == {"n-open", "n-muted"}
-
-    def test_empty_when_no_bot_match(self, session, engine, repo):
-        _make_notification(
-            session, notification_id="n-open", bot_id="bot-a",
-            governance_status="open", response=None, env="dev",
-        )
-        with patch(_ENV_PATCH, return_value="dev"):
-            rows = repo.list_pending_by_bot_ids(["bot-nope"])
-        assert rows == []
 
 
 # ----------------------------------------------------------------------

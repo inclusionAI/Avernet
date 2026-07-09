@@ -1,6 +1,6 @@
 """End-to-end tests for GovernanceWhitelistService — SQLite-backed.
 
-Exercises ``bulk_whitelist`` and ``delete_whitelist_entries`` through the
+Exercises ``bulk_whitelist`` and ``delete_whitelist_entry`` through the
 real service + real repos backed by in-memory SQLite.  No MagicMock —
 all DB operations hit the real ORM layer.
 """
@@ -10,11 +10,11 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.contracts.enums import AuditAction
-from agentclaw.community.core.economy.governance.contracts.models import (
-    BotWhitelist,
-    GovernanceAudit,
-    GovernanceNotifyLog,
+from agentclaw.community.core.economy.governance.domain.enums import AuditAction
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    WhitelistEntryOrm,
+    AuditLogOrm,
+    GovernanceNotificationOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.audit_repo import (
     GovernanceAuditRepository,
@@ -49,7 +49,6 @@ def _build_svc(engine):
     audit_repo = GovernanceAuditRepository(db=db)
     config = FakeGovernanceConfig()
     return GovernanceWhitelistService(
-        db=db,
         whitelist_repo=whitelist_repo,
         notify_repo=notify_repo,
         audit_repo=audit_repo,
@@ -59,8 +58,8 @@ def _build_svc(engine):
 
 def _make_notification(session, *, notification_id, bot_id, owner_id,
                        governance_status="open", response=None, **overrides):
-    """Insert a GovernanceNotifyLog row for testing."""
-    row = GovernanceNotifyLog(
+    """Insert a GovernanceNotificationOrm row for testing."""
+    row = GovernanceNotificationOrm(
         notification_id=notification_id,
         bot_id=bot_id,
         bot_name=overrides.pop("bot_name", "TestBot"),
@@ -85,8 +84,8 @@ def _make_notification(session, *, notification_id, bot_id, owner_id,
 
 def _make_whitelist(session, *, bot_id, owner_id, whitelist_type="governance",
                     source="manual", **overrides):
-    """Insert a BotWhitelist row directly."""
-    row = BotWhitelist(
+    """Insert a WhitelistEntryOrm row directly."""
+    row = WhitelistEntryOrm(
         bot_id=bot_id,
         owner_id=owner_id,
         whitelist_type=whitelist_type,
@@ -127,7 +126,7 @@ class TestBulkWhitelist:
 
         # Verify notifications are closed
         with db.orm_session() as s:
-            notif_rows = s.query(GovernanceNotifyLog).all()
+            notif_rows = s.query(GovernanceNotificationOrm).all()
             for n in notif_rows:
                 assert n.notify_status == "cancelled"
                 assert n.governance_status == "closed"
@@ -136,7 +135,7 @@ class TestBulkWhitelist:
 
         # Verify whitelist entries exist
         with db.orm_session() as s:
-            wl = s.query(BotWhitelist).all()
+            wl = s.query(WhitelistEntryOrm).all()
             assert len(wl) == 2
             bot_ids = {r.bot_id for r in wl}
             assert bot_ids == {"bot-a", "bot-b"}
@@ -154,7 +153,7 @@ class TestBulkWhitelist:
         )
 
         with db.orm_session() as s:
-            audits = s.query(GovernanceAudit).all()
+            audits = s.query(AuditLogOrm).all()
             wl_audits = [a for a in audits if a.action_taken == AuditAction.ADMIN_WHITELIST]
             assert len(wl_audits) >= 1
             assert wl_audits[0].actor_id == "admin-1"
@@ -195,7 +194,7 @@ class TestBulkWhitelist:
         assert result["cancelled"] == 1
 
         with db.orm_session() as s:
-            rows = {r.notification_id: r for r in s.query(GovernanceNotifyLog).all()}
+            rows = {r.notification_id: r for r in s.query(GovernanceNotificationOrm).all()}
             assert rows["n-open"].governance_status == "closed"
             assert rows["n-closed"].governance_status == "closed"  # was already closed
 
@@ -215,7 +214,7 @@ class TestBulkWhitelist:
 
         assert result["cancelled"] == 1
         with db.orm_session() as s:
-            row = s.query(GovernanceNotifyLog).one()
+            row = s.query(GovernanceNotificationOrm).one()
             expected_min = before + timedelta(days=14)
             expected_max = after + timedelta(days=14)
             assert expected_min <= row.cooldown_until <= expected_max
@@ -236,7 +235,7 @@ class TestBulkWhitelist:
 
         # Re-open notification (simulating a new cycle)
         with db.orm_session() as s:
-            row = s.query(GovernanceNotifyLog).one()
+            row = s.query(GovernanceNotificationOrm).one()
             row.governance_status = "open"
             row.notify_status = "pending"
             row.close_reason = None
@@ -249,117 +248,55 @@ class TestBulkWhitelist:
         assert result2["cancelled"] == 1     # still cancels the open notification
 
 
-# ── delete_whitelist_entries ──────────────────────────────────────
+# ── delete_whitelist_entry ──────────────────────────────────────
 
 
-class TestDeleteWhitelistEntries:
-    """delete_whitelist_entries: batch remove by IDs or bot_owner_pairs."""
+class TestDeleteWhitelistEntry:
+    """delete_whitelist_entry: single remove by (bot_id, owner_id)."""
 
-    def test_dry_run_returns_count_only(self, session, engine):
-        """dry_run=true → returns count, doesn't delete."""
+    def test_delete_existing(self, session, engine):
+        """Delete an existing whitelist entry."""
         svc, db = _build_svc(engine)
         _make_whitelist(session, bot_id="bot-a", owner_id="user-1")
         _make_whitelist(session, bot_id="bot-b", owner_id="user-1")
 
-        body = {
-            "bot_owner_pairs": [{"bot_id": "bot-a", "owner_id": "user-1"}],
-            "dry_run": True,
-            "reason": "test",
-        }
-        result = svc.delete_whitelist_entries(body, operator="admin")
+        result = svc.delete_whitelist_entry(
+            bot_id="bot-a", owner_id="user-1",
+            reason="cleanup", operator="admin-1",
+        )
 
-        assert result["dry_run"] is True
-        assert result["would_delete"] == 1
-        assert result["deleted"] == 0
-
-        # Verify rows still exist
-        with db.orm_session() as s:
-            assert s.query(BotWhitelist).count() == 2
-
-    def test_real_delete_by_bot_owner_pairs(self, session, engine):
-        """Real delete by (bot_id, owner_id) pairs."""
-        svc, db = _build_svc(engine)
-        row_a = _make_whitelist(session, bot_id="bot-a", owner_id="user-1")
-        _make_whitelist(session, bot_id="bot-b", owner_id="user-1")
-
-        body = {
-            "bot_owner_pairs": [{"bot_id": "bot-a", "owner_id": "user-1"}],
-            "dry_run": False,
-            "reason": "cleanup",
-        }
-        result = svc.delete_whitelist_entries(body, operator="admin-1")
-
-        assert result["deleted"] == 1
-        assert result["dry_run"] is False
+        assert result["deleted"] is True
+        assert result["bot_id"] == "bot-a"
+        assert result["owner_id"] == "user-1"
 
         with db.orm_session() as s:
-            remaining = s.query(BotWhitelist).all()
+            remaining = s.query(WhitelistEntryOrm).all()
             assert len(remaining) == 1
             assert remaining[0].bot_id == "bot-b"
 
-    def test_real_delete_by_ids(self, session, engine):
-        """Real delete by whitelist entry IDs."""
+    def test_delete_nonexistent(self, session, engine):
+        """Deleting a non-existent entry → deleted=False."""
+        svc, db = _build_svc(engine)
+
+        result = svc.delete_whitelist_entry(
+            bot_id="bot-x", owner_id="user-x",
+            reason="test", operator="admin",
+        )
+
+        assert result["deleted"] is False
+
+    def test_audit_written_on_delete(self, session, engine):
+        """Real delete writes WHITELIST_REMOVED audit."""
         svc, db = _build_svc(engine)
         _make_whitelist(session, bot_id="bot-a", owner_id="user-1")
-        _make_whitelist(session, bot_id="bot-b", owner_id="user-1")
+
+        svc.delete_whitelist_entry(
+            bot_id="bot-a", owner_id="user-1",
+            reason="cleanup", operator="admin-1",
+        )
 
         with db.orm_session() as s:
-            row = next(r for r in s.query(BotWhitelist).all() if r.bot_id == "bot-a")
-            target_id = row.id
-
-        body = {
-            "ids": [target_id],
-            "dry_run": False,
-            "reason": "cleanup",
-        }
-        result = svc.delete_whitelist_entries(body, operator="admin")
-
-        assert result["deleted"] == 1
-        with db.orm_session() as s:
-            assert s.query(BotWhitelist).count() == 1
-
-    def test_not_found_reported(self, session, engine):
-        """Non-existent IDs/pairs → not_found list."""
-        svc, db = _build_svc(engine)
-
-        body = {
-            "ids": [99999],
-            "dry_run": True,
-            "reason": "test",
-        }
-        result = svc.delete_whitelist_entries(body, operator="admin")
-
-        assert result["would_delete"] == 0
-        assert len(result["not_found"]) == 1
-
-    def test_audit_written_on_real_delete(self, session, engine):
-        """Real delete writes WHITELIST_REMOVED audit per affected pair."""
-        svc, db = _build_svc(engine)
-        _make_whitelist(session, bot_id="bot-a", owner_id="user-1")
-        _make_whitelist(session, bot_id="bot-b", owner_id="user-1")
-
-        body = {
-            "bot_owner_pairs": [
-                {"bot_id": "bot-a", "owner_id": "user-1"},
-                {"bot_id": "bot-b", "owner_id": "user-1"},
-            ],
-            "dry_run": False,
-            "reason": "cleanup",
-        }
-        svc.delete_whitelist_entries(body, operator="admin-1")
-
-        with db.orm_session() as s:
-            audits = s.query(GovernanceAudit).all()
+            audits = s.query(AuditLogOrm).all()
             wl_audits = [a for a in audits if a.action_taken == AuditAction.WHITELIST_REMOVED]
-            assert len(wl_audits) == 2
-            assert all(a.actor_id == "admin-1" for a in wl_audits)
-
-    def test_empty_request_returns_zero(self, session, engine):
-        """No ids/pairs → would_delete=0."""
-        svc, db = _build_svc(engine)
-        _make_whitelist(session, bot_id="bot-a", owner_id="user-1")
-
-        body = {"ids": [], "bot_owner_pairs": [], "dry_run": True, "reason": "test"}
-        result = svc.delete_whitelist_entries(body, operator="admin")
-
-        assert result["would_delete"] == 0
+            assert len(wl_audits) >= 1
+            assert wl_audits[0].actor_id == "admin-1"

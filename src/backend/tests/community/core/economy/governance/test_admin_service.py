@@ -6,11 +6,11 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.contracts.enums import AuditAction
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceAudit,
-    GovernanceNotifyLog,
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.domain.enums import AuditAction
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    AuditLogOrm,
+    GovernanceNotificationOrm,
+    GovernanceTicketOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.audit_repo import (
     GovernanceAuditRepository,
@@ -41,7 +41,7 @@ from .conftest import (
 
 
 def _make_task_record(session, *, ticket_id, governance_status="open", response=None, **overrides):
-    """Create a test GovernanceTaskRecordDaily row.
+    """Create a test GovernanceTicketOrm row.
 
     When *governance_status* is ``closed``, *active_worker* defaults to
     ``None``; otherwise it defaults to ``worker_id`` (so the UK on
@@ -52,7 +52,7 @@ def _make_task_record(session, *, ticket_id, governance_status="open", response=
     if active_worker is None:
         active_worker = worker_id if governance_status != "closed" else None
 
-    row = GovernanceTaskRecordDaily(
+    row = GovernanceTicketOrm(
         ticket_id=ticket_id,
         worker_id=worker_id,
         bot_id=overrides.pop("bot_id", f"bot-{ticket_id}"),
@@ -74,7 +74,7 @@ def _make_task_record(session, *, ticket_id, governance_status="open", response=
 
 def _make_notification(session, *, notification_id, notify_status="pending", ticket_id=None, **overrides):
     """Create a test notification row (for cancel_pending_by_ticket tests)."""
-    row = GovernanceNotifyLog(
+    row = GovernanceNotificationOrm(
         notification_id=notification_id,
         bot_id=overrides.pop("bot_id", f"bot-{notification_id}"),
         bot_name=overrides.pop("bot_name", "TestBot"),
@@ -108,14 +108,12 @@ def _build_svc(engine):
     audit_repo = GovernanceAuditRepository(db=db)
     whitelist_repo = GovernanceWhitelistRepository(db=db)
     whitelist_service = GovernanceWhitelistService(
-        db=db,
         whitelist_repo=whitelist_repo,
         notify_repo=notify_repo,
         audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
     )
     svc = GovernanceAdminService(
-        db=db,
         cache=cache,
         whitelist_service=whitelist_service,
         notify_repo=notify_repo,
@@ -141,10 +139,10 @@ class TestCloseAllOpen:
         _make_notification(session, notification_id="n-open-2", governance_status="open")
 
         result = svc.close_all_open(reason="test", operator="admin")
-        assert result["closed"] == 2
+        assert result.affected == 2
 
         with db.orm_session() as s:
-            rows = s.query(GovernanceNotifyLog).all()
+            rows = s.query(GovernanceNotificationOrm).all()
             for row in rows:
                 assert row.governance_status == "closed"
                 assert row.close_reason == "admin_closed"
@@ -160,10 +158,10 @@ class TestCloseAllOpen:
         )
 
         result = svc.close_all_open(reason="test", operator="admin")
-        assert result["closed"] == 1
+        assert result.affected == 1
 
         with db.orm_session() as s:
-            row = s.query(GovernanceNotifyLog).one()
+            row = s.query(GovernanceNotificationOrm).one()
             assert row.governance_status == "closed"
             assert row.close_reason == "admin_closed"
             assert row.response == "need_time"
@@ -179,7 +177,7 @@ class TestCloseAllOpen:
         svc.close_all_open(reason="emergency", operator="admin")
 
         with db.orm_session() as s:
-            row = s.query(GovernanceNotifyLog).one()
+            row = s.query(GovernanceNotificationOrm).one()
             assert row.response == "need_time"
             assert row.response_source == "card_callback"
             assert row.governance_status == "closed"
@@ -200,7 +198,7 @@ class TestCloseAllOpen:
         svc.close_all_open(reason="test", operator="admin")
 
         with db.orm_session() as s:
-            rows = {r.notification_id: r for r in s.query(GovernanceNotifyLog).all()}
+            rows = {r.notification_id: r for r in s.query(GovernanceNotificationOrm).all()}
             assert rows["n-pending"].notify_status == "cancelled"
             assert rows["n-sent"].notify_status == "sent"
 
@@ -216,22 +214,22 @@ class TestCloseAllOpen:
         )
 
         result = svc.close_all_open(reason="test", operator="admin")
-        assert result["closed"] == 1
+        assert result.affected == 1
 
         with db.orm_session() as s:
-            rows = {r.notification_id: r for r in s.query(GovernanceNotifyLog).all()}
+            rows = {r.notification_id: r for r in s.query(GovernanceNotificationOrm).all()}
             assert rows["n-closed"].close_reason == "user_optimized"
             assert rows["n-open"].close_reason == "admin_closed"
 
     def test_writes_audit(self, session, engine):
-        """close_all_open writes GovernanceAudit."""
+        """close_all_open writes AuditLogOrm."""
         svc, db, _ = _build_svc(engine)
         _make_notification(session, notification_id="n-1", governance_status="open")
 
         svc.close_all_open(reason="emergency test", operator="admin-123")
 
         with db.orm_session() as s:
-            audits = s.query(GovernanceAudit).all()
+            audits = s.query(AuditLogOrm).all()
             admin_audits = [a for a in audits if a.action_taken == AuditAction.ADMIN_CLOSE_ALL]
             assert len(admin_audits) >= 1
 
@@ -240,7 +238,7 @@ class TestCloseAllOpen:
         svc, db, _ = _build_svc(engine)
 
         result = svc.close_all_open(reason="test", operator="admin")
-        assert result["closed"] == 0
+        assert result.affected == 0
 
     def test_cooldown_applied(self, session, engine):
         """Each closed ticket gets cooldown_until = now + cooldown_days."""
@@ -252,7 +250,7 @@ class TestCloseAllOpen:
         after = datetime.now()
 
         with db.orm_session() as s:
-            row = s.query(GovernanceNotifyLog).one()
+            row = s.query(GovernanceNotificationOrm).one()
             expected_min = before + timedelta(days=14)
             expected_max = after + timedelta(days=14)
             assert expected_min <= row.cooldown_until <= expected_max
@@ -274,10 +272,10 @@ class TestCancelPendingVsCloseAllOpen:
         )
 
         result = svc.cancel_pending(reason="test", operator="admin")
-        assert result["cancelled"] == 2  # Both closed
+        assert result.affected == 2  # Both closed
 
         with db.orm_session() as s:
-            rows = s.query(GovernanceNotifyLog).all()
+            rows = s.query(GovernanceNotificationOrm).all()
             for row in rows:
                 assert row.governance_status == "closed"
                 assert row.close_reason == "emergency_closed"
@@ -292,10 +290,10 @@ class TestCancelPendingVsCloseAllOpen:
         )
 
         result = svc.close_all_open(reason="test", operator="admin")
-        assert result["closed"] == 2  # Both closed
+        assert result.affected == 2  # Both closed
 
         with db.orm_session() as s:
-            rows = s.query(GovernanceNotifyLog).all()
+            rows = s.query(GovernanceNotificationOrm).all()
             for row in rows:
                 assert row.governance_status == "closed"
                 assert row.close_reason == "admin_closed"
@@ -318,7 +316,7 @@ class TestGetState:
         )
 
         state = svc.get_state()
-        assert state["open_count"] == 2  # Both open + muted
+        assert state.open_count == 2  # Both open + muted
 
 
 # ── pause_ticket (§7.5.1) ──────────────────────────────────────
@@ -332,9 +330,9 @@ class TestPauseTicket:
         _make_task_record(session, ticket_id="t-pause-1", governance_status="open")
 
         result = svc.pause_ticket("t-pause-1", admin_id="admin-1", reason="testing")
-        assert result.get("ticket_id") == "t-pause-1"
-        assert result.get("governance_status") == "waiting_review"
-        assert result.get("review_reason") == "admin_paused"
+        assert result.ticket_id == "t-pause-1"
+        assert result.status.value == "waiting_review"
+        assert result.review_reason == "admin_paused"
 
     def test_scheduled_to_waiting_review(self, session, engine):
         svc, db, _ = _build_svc(engine)
@@ -344,19 +342,19 @@ class TestPauseTicket:
         )
 
         result = svc.pause_ticket("t-pause-2", admin_id="admin-1")
-        assert result.get("governance_status") == "waiting_review"
+        assert result.status.value == "waiting_review"
 
     def test_invalid_status_rejected(self, session, engine):
         svc, db, _ = _build_svc(engine)
         _make_task_record(session, ticket_id="t-pause-3", governance_status="waiting_review")
 
         result = svc.pause_ticket("t-pause-3", admin_id="admin-1")
-        assert "error" in result
+        assert result.error is not None
 
     def test_not_found(self, session, engine):
         svc, db, _ = _build_svc(engine)
         result = svc.pause_ticket("nonexistent", admin_id="admin-1")
-        assert result.get("error_code") == "NOT_FOUND"
+        assert result.error_code == "NOT_FOUND"
 
 
 # ── review_ticket (§7.5.2) ─────────────────────────────────────
@@ -381,11 +379,11 @@ class TestReviewTicket:
         result = svc.review_ticket(
             "t-review", action="approve_close", admin_id="admin-1",
         )
-        assert result.get("governance_status") == "closed"
-        assert result.get("close_reason") == "user_optimized_approved"
+        assert result.status.value == "closed"
+        assert result.close_reason == "user_optimized_approved"
 
         with db.orm_session() as s:
-            ticket = s.query(GovernanceTaskRecordDaily).first()
+            ticket = s.query(GovernanceTicketOrm).first()
             assert ticket.cooldown_until is not None
 
     def test_approve_whitelist(self, session, engine):
@@ -393,10 +391,10 @@ class TestReviewTicket:
         result = svc.review_ticket(
             "t-review", action="approve_whitelist", admin_id="admin-1",
         )
-        assert result.get("close_reason") == "whitelist_approved"
+        assert result.close_reason == "whitelist_approved"
 
         with db.orm_session() as s:
-            ticket = s.query(GovernanceTaskRecordDaily).first()
+            ticket = s.query(GovernanceTicketOrm).first()
             assert ticket.cooldown_until is None
 
     def test_reject_for_reopen(self, session, engine):
@@ -404,10 +402,10 @@ class TestReviewTicket:
         result = svc.review_ticket(
             "t-review", action="reject_for_reopen", admin_id="admin-1",
         )
-        assert result.get("close_reason") == "review_rejected"
+        assert result.close_reason == "review_rejected"
 
         with db.orm_session() as s:
-            ticket = s.query(GovernanceTaskRecordDaily).first()
+            ticket = s.query(GovernanceTicketOrm).first()
             assert ticket.cooldown_until is None
 
     def test_invalid_action(self, session, engine):
@@ -415,7 +413,7 @@ class TestReviewTicket:
         result = svc.review_ticket(
             "t-review", action="bad_action", admin_id="admin-1",
         )
-        assert "error" in result
+        assert result.error is not None
 
     def test_not_waiting_review_rejected(self, session, engine):
         svc, db, _ = _build_svc(engine)
@@ -424,12 +422,12 @@ class TestReviewTicket:
         result = svc.review_ticket(
             "t-review-open", action="approve_close", admin_id="admin-1",
         )
-        assert "error" in result
+        assert result.error is not None
 
     def test_not_found(self, session, engine):
         svc, db, _ = _build_svc(engine)
         result = svc.review_ticket("nonexistent", action="approve_close", admin_id="admin-1")
-        assert result.get("error_code") == "NOT_FOUND"
+        assert result.error_code == "NOT_FOUND"
 
 
 # ── emergency_close ─────────────────────────────────────────────
@@ -443,11 +441,11 @@ class TestEmergencyClose:
         _make_task_record(session, ticket_id="t-em-1", governance_status="open")
 
         result = svc.emergency_close("t-em-1", admin_id="admin-1", reason="urgent")
-        assert result.get("governance_status") == "closed"
-        assert result.get("close_reason") == "emergency_closed"
+        assert result.status.value == "closed"
+        assert result.close_reason == "emergency_closed"
 
         with db.orm_session() as s:
-            ticket = s.query(GovernanceTaskRecordDaily).first()
+            ticket = s.query(GovernanceTicketOrm).first()
             assert ticket.cooldown_until is None
             assert ticket.active_worker is None
 
@@ -458,9 +456,9 @@ class TestEmergencyClose:
         )
 
         result = svc.emergency_close("t-em-2", admin_id="admin-1")
-        assert result.get("governance_status") == "closed"
+        assert result.status.value == "closed"
 
     def test_not_found(self, session, engine):
         svc, db, _ = _build_svc(engine)
         result = svc.emergency_close("nonexistent", admin_id="admin-1")
-        assert result.get("error_code") == "NOT_FOUND"
+        assert result.error_code == "NOT_FOUND"

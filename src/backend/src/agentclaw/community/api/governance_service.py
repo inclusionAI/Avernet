@@ -62,14 +62,17 @@ class GovernanceAdminServiceProtocol(Protocol):
     ) -> dict:
         ...
 
-    def delete_whitelist_entries(
+    def delete_whitelist_entry(
         self,
-        body: dict,
+        *,
+        bot_id: str,
+        owner_id: str,
+        reason: str,
         operator: str,
     ) -> dict:
         ...
 
-    async def deliver_pending(
+    def deliver_pending(
         self,
         *,
         scan_svc: Any,
@@ -85,7 +88,7 @@ class GovernanceAdminServiceProtocol(Protocol):
 
 @runtime_checkable
 class GovernanceWhitelistServiceProtocol(Protocol):
-    """Protocol for governance whitelist batch operations.
+    """Protocol for governance whitelist operations — single-point add/delete.
 
     Decouples routers and other services from the concrete
     ``GovernanceWhitelistService`` — following Rule 14 layering.
@@ -99,24 +102,48 @@ class GovernanceWhitelistServiceProtocol(Protocol):
     ) -> dict:
         ...
 
-    def delete_whitelist_entries(
+    def delete_whitelist_entry(
         self,
-        body: dict,
+        *,
+        bot_id: str,
+        owner_id: str,
+        reason: str,
         operator: str,
     ) -> dict:
         ...
 
-    def count_by_type(self, *, whitelist_type: str = "governance") -> int:
-        ...
-
-    def batch_add(
+    def add(
         self,
-        entries: list[dict],
-        created_by: str,
         *,
+        bot_id: str,
+        owner_id: str,
+        created_by: str,
         whitelist_type: str = "governance",
         source: str = "manual",
-    ) -> dict:
+        reason: str = "",
+    ) -> Any:
+        ...
+
+    def list_by_owner(
+        self,
+        owner_id: str,
+        *,
+        whitelist_type: str = "governance",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Any]:
+        ...
+
+    def is_whitelisted(
+        self,
+        bot_id: str,
+        owner_id: str,
+        *,
+        whitelist_type: str = "governance",
+    ) -> bool:
+        ...
+
+    def count_by_type(self, *, whitelist_type: str = "governance") -> int:
         ...
 
 
@@ -156,51 +183,59 @@ class GovernanceFeedbackServiceProtocol(Protocol):
 class GovernanceBotServiceProtocol(Protocol):
     """Protocol for governance cron tick orchestrator (§7.3)."""
 
-    async def process_cron_tick(
+    def process_cron_tick(
         self,
         *,
         dry_run: bool | None = None,
-    ) -> Any:
-        ...
-
-    async def process_run(
-        self,
-        *,
-        dry_run: bool | None = None,
-        skip_delivery: bool = False,
-        notify_source: str = "cron",
     ) -> Any:
         ...
 
 
 @runtime_checkable
 class GovernanceWhitelistProtocol(Protocol):
-    """Protocol for governance whitelist operations (batch_add + list_all).
+    """Protocol for governance whitelist operations (single-point add + list_by_owner).
 
     Decouples the public router from the concrete
     ``GovernanceWhitelistRepository`` in ``core/``, following Rule 14.
     """
 
-    def batch_add(
+    def add(
         self,
-        entries: list[dict],
-        created_by: str,
         *,
+        bot_id: str,
+        owner_id: str,
+        created_by: str,
         whitelist_type: str = "governance",
         source: str = "manual",
-        env: str | None = None,
-    ) -> dict:
+        reason: str = "",
+        expires_at: Any | None = None,
+    ) -> Any:
         ...
 
-    def list_all(
+    def list_by_owner(
         self,
-        owner_id: str | None = None,
+        owner_id: str,
         *,
         whitelist_type: str = "governance",
         limit: int = 100,
         offset: int = 0,
-        env: str | None = None,
-    ) -> list[dict]:
+    ) -> list[Any]:
+        ...
+
+    def is_whitelisted(
+        self,
+        bot_id: str,
+        owner_id: str,
+        *,
+        whitelist_type: str = "governance",
+    ) -> bool:
+        ...
+
+    def count_by_type(
+        self,
+        *,
+        whitelist_type: str = "governance",
+    ) -> int:
         ...
 
 

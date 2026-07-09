@@ -9,11 +9,11 @@ from datetime import datetime
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from agentclaw.community.core.economy.governance.contracts.models import (
-    BotWhitelist,
-    GovernanceAudit,
-    GovernanceNotifyLog,
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    WhitelistEntryOrm,
+    AuditLogOrm,
+    GovernanceNotificationOrm,
+    GovernanceTicketOrm,
 )
 
 
@@ -31,15 +31,15 @@ def _column_type_length(table, col_name: str) -> int | None:
     return col.type.length
 
 
-# ── GovernanceNotifyLog ──────────────────────────────────────────────────
+# ── GovernanceNotificationOrm ──────────────────────────────────────────────────
 
 
-class TestGovernanceNotifyLog:
+class TestGovernanceNotification:
     """Tests for ac_governance_notify_log."""
 
     def test_create_table_and_insert(self, session):
         """Basic insert and read-back."""
-        row = GovernanceNotifyLog(
+        row = GovernanceNotificationOrm(
             notification_id="n-001",
             bot_id="bot-1",
             bot_name="TestBot",
@@ -58,7 +58,7 @@ class TestGovernanceNotifyLog:
         session.add(row)
         session.commit()
 
-        fetched = session.query(GovernanceNotifyLog).first()
+        fetched = session.query(GovernanceNotificationOrm).first()
         assert fetched.notification_id == "n-001"
         assert fetched.governance_status == "open"
         assert fetched.notify_status == "pending"
@@ -69,7 +69,7 @@ class TestGovernanceNotifyLog:
 
     def test_uk_worker_dt_version(self, session):
         """UK (worker_id, dt_version) violation on duplicate."""
-        row1 = GovernanceNotifyLog(
+        row1 = GovernanceNotificationOrm(
             notification_id="n-001",
             bot_id="bot-1",
             owner_id="user-1",
@@ -78,7 +78,7 @@ class TestGovernanceNotifyLog:
             governance_decision="actionable",
             governance_cycle_id="cycle-1",
         )
-        row2 = GovernanceNotifyLog(
+        row2 = GovernanceNotificationOrm(
             notification_id="n-002",
             bot_id="bot-1",
             owner_id="user-1",
@@ -96,7 +96,7 @@ class TestGovernanceNotifyLog:
 
     def test_governance_status_default(self, session):
         """Default governance_status = 'open'."""
-        row = GovernanceNotifyLog(
+        row = GovernanceNotificationOrm(
             notification_id="n-003",
             bot_id="bot-2",
             owner_id="user-2",
@@ -111,7 +111,7 @@ class TestGovernanceNotifyLog:
 
     def test_close_reason_and_cooldown(self, session):
         """Verify close_reason + cooldown_until fields for closed state."""
-        row = GovernanceNotifyLog(
+        row = GovernanceNotificationOrm(
             notification_id="n-004",
             bot_id="bot-3",
             owner_id="user-3",
@@ -126,13 +126,13 @@ class TestGovernanceNotifyLog:
         )
         session.add(row)
         session.commit()
-        fetched = session.query(GovernanceNotifyLog).first()
+        fetched = session.query(GovernanceNotificationOrm).first()
         assert fetched.close_reason == "user_optimized"
         assert fetched.cooldown_until is not None
 
     def test_expired_no_cooldown(self, session):
         """Expired records have NULL cooldown_until (spec requirement)."""
-        row = GovernanceNotifyLog(
+        row = GovernanceNotificationOrm(
             notification_id="n-005",
             bot_id="bot-4",
             owner_id="user-4",
@@ -147,15 +147,15 @@ class TestGovernanceNotifyLog:
         )
         session.add(row)
         session.commit()
-        fetched = session.query(GovernanceNotifyLog).first()
+        fetched = session.query(GovernanceNotificationOrm).first()
         assert fetched.governance_status == "expired"
         assert fetched.cooldown_until is None
 
     # --- F1: Index assertions (09-schema-field-review.md) ---
 
     def test_indexes_exist(self, engine, tables):
-        """GovernanceNotifyLog has the required hot-path indexes."""
-        idx_names = _index_names(GovernanceNotifyLog)
+        """GovernanceNotificationOrm has the required hot-path indexes."""
+        idx_names = _index_names(GovernanceNotificationOrm)
         expected = {
             "idx_econ_gov_notify_status",
             "idx_econ_gov_notify_owner_status",
@@ -172,53 +172,53 @@ class TestGovernanceNotifyLog:
 
     def test_worker_id_length(self):
         """worker_id is String(160) — fits '{owner_id(64)}:{bot_id(64)}'."""
-        assert _column_type_length(GovernanceNotifyLog, "worker_id") == 160
+        assert _column_type_length(GovernanceNotificationOrm, "worker_id") == 160
 
     # --- F3: Dead columns must not exist ---
 
     def test_no_analysis_ref_column(self):
         """analysis_ref was removed (dead column, never written)."""
-        col_names = {c.name for c in GovernanceNotifyLog.__table__.columns}
+        col_names = {c.name for c in GovernanceNotificationOrm.__table__.columns}
         assert "analysis_ref" not in col_names
 
     def test_no_governance_max_dimension_column(self):
         """governance_max_dimension was removed (dead column, never written)."""
-        col_names = {c.name for c in GovernanceNotifyLog.__table__.columns}
+        col_names = {c.name for c in GovernanceNotificationOrm.__table__.columns}
         assert "governance_max_dimension" not in col_names
 
     # --- F4: expected_token_saving type ---
 
     def test_expected_token_saving_type(self):
         """expected_token_saving uses BigInteger, not AutoIncrementBigInteger."""
-        col = GovernanceNotifyLog.__table__.columns["expected_token_saving"]
+        col = GovernanceNotificationOrm.__table__.columns["expected_token_saving"]
         assert col.type.__class__.__name__ == "BigInteger"
 
 
-# ── GovernanceAudit ────────────────────────────────────────────────
+# ── AuditLogOrm ────────────────────────────────────────────────
 
 
-class TestGovernanceAudit:
+class TestAuditLog:
     """Tests for ac_governance_audit."""
 
     def test_append_only(self, session):
         """Audit rows are append-only — no UK constraint."""
-        session.add(GovernanceAudit(
+        session.add(AuditLogOrm(
             run_id="r-001", bot_id="bot-1", owner_id="user-1",
             action_taken="enqueued",
         ))
-        session.add(GovernanceAudit(
+        session.add(AuditLogOrm(
             run_id="r-001", bot_id="bot-1", owner_id="user-1",
             action_taken="enqueued",
         ))
         session.commit()
-        count = session.query(GovernanceAudit).count()
+        count = session.query(AuditLogOrm).count()
         assert count == 2
 
     # --- F1: Index assertions ---
 
     def test_indexes_exist(self, engine, tables):
-        """GovernanceAudit has data-readiness + run_id indexes."""
-        idx_names = _index_names(GovernanceAudit)
+        """AuditLogOrm has data-readiness + run_id indexes."""
+        idx_names = _index_names(AuditLogOrm)
         expected = {
             "idx_econ_gov_audit_action_time",
             "idx_econ_gov_audit_run",
@@ -231,19 +231,19 @@ class TestGovernanceAudit:
 
     def test_expected_token_saving_type(self):
         """expected_token_saving uses BigInteger, not AutoIncrementBigInteger."""
-        col = GovernanceAudit.__table__.columns["expected_token_saving"]
+        col = AuditLogOrm.__table__.columns["expected_token_saving"]
         assert col.type.__class__.__name__ == "BigInteger"
 
 
-# ── BotWhitelist ────────────────────────────────────────────────────────
+# ── WhitelistEntryOrm ────────────────────────────────────────────────────────
 
 
-class TestBotWhitelist:
+class TestWhitelistEntry:
     """Tests for ac_bot_whitelist."""
 
     def test_insert_and_query(self, session):
         """Basic insert and read-back."""
-        row = BotWhitelist(
+        row = WhitelistEntryOrm(
             bot_id="bot-1",
             owner_id="user-1",
             whitelist_type="governance",
@@ -253,16 +253,16 @@ class TestBotWhitelist:
         )
         session.add(row)
         session.commit()
-        fetched = session.query(BotWhitelist).first()
+        fetched = session.query(WhitelistEntryOrm).first()
         assert fetched.whitelist_type == "governance"
 
     def test_uk_dedup(self, session):
         """UK (bot_id, owner_id, whitelist_type) — duplicate raises."""
-        row1 = BotWhitelist(
+        row1 = WhitelistEntryOrm(
             bot_id="bot-1", owner_id="user-1",
             whitelist_type="governance", created_by="admin",
         )
-        row2 = BotWhitelist(
+        row2 = WhitelistEntryOrm(
             bot_id="bot-1", owner_id="user-1",
             whitelist_type="governance", created_by="admin",
         )
@@ -274,36 +274,36 @@ class TestBotWhitelist:
 
     def test_same_bot_different_type(self, session):
         """Same bot can have governance + dormant whitelist."""
-        row1 = BotWhitelist(
+        row1 = WhitelistEntryOrm(
             bot_id="bot-1", owner_id="user-1",
             whitelist_type="governance", created_by="admin",
         )
-        row2 = BotWhitelist(
+        row2 = WhitelistEntryOrm(
             bot_id="bot-1", owner_id="user-1",
             whitelist_type="dormant", created_by="admin",
         )
         session.add_all([row1, row2])
         session.commit()
-        count = session.query(BotWhitelist).count()
+        count = session.query(WhitelistEntryOrm).count()
         assert count == 2
 
     # --- F1: Optional whitelist_type index ---
 
     def test_whitelist_type_index(self, engine, tables):
-        """BotWhitelist has whitelist_type index for type-based lookups."""
-        idx_names = _index_names(BotWhitelist)
+        """WhitelistEntryOrm has whitelist_type index for type-based lookups."""
+        idx_names = _index_names(WhitelistEntryOrm)
         assert "idx_econ_gov_wl_type" in idx_names
 
 
-# ── GovernanceTaskRecordDaily ───────────────────────────────────────────
+# ── GovernanceTicketOrm ───────────────────────────────────────────
 
 
-class TestGovernanceTaskRecordDaily:
+class TestGovernanceTicket:
     """Tests for ac_governance_task_record_daily."""
 
     def test_insert_and_query(self, session):
         """Basic insert and read-back."""
-        row = GovernanceTaskRecordDaily(
+        row = GovernanceTicketOrm(
             worker_id="user-1:bot-1",
             bot_id="bot-1",
             dt_version="20260629",
@@ -314,7 +314,7 @@ class TestGovernanceTaskRecordDaily:
         )
         session.add(row)
         session.commit()
-        fetched = session.query(GovernanceTaskRecordDaily).first()
+        fetched = session.query(GovernanceTicketOrm).first()
         assert fetched.governance_decision == "actionable"
         assert fetched.last_sync_at is not None
 
@@ -325,13 +325,13 @@ class TestGovernanceTaskRecordDaily:
         so (worker_id, dt_version) is no longer unique. Verify that
         duplicate rows are accepted.
         """
-        row1 = GovernanceTaskRecordDaily(
+        row1 = GovernanceTicketOrm(
             worker_id="user-1:bot-1",
             dt_version="20260629",
             governance_decision="actionable",
             last_sync_at=datetime(2026, 6, 29),
         )
-        row2 = GovernanceTaskRecordDaily(
+        row2 = GovernanceTicketOrm(
             worker_id="user-1:bot-1",
             dt_version="20260629",
             governance_decision="observe",
@@ -345,7 +345,7 @@ class TestGovernanceTaskRecordDaily:
 
     def test_uk_active_worker(self, session):
         """UNIQUE(env, active_worker) — duplicate active_worker raises."""
-        row1 = GovernanceTaskRecordDaily(
+        row1 = GovernanceTicketOrm(
             worker_id="user-1:bot-1",
             dt_version="20260629",
             governance_decision="actionable",
@@ -354,7 +354,7 @@ class TestGovernanceTaskRecordDaily:
             active_worker="user-1:bot-1",
             governance_status="open",
         )
-        row2 = GovernanceTaskRecordDaily(
+        row2 = GovernanceTicketOrm(
             worker_id="user-1:bot-1",
             dt_version="20260630",
             governance_decision="actionable",
@@ -371,7 +371,7 @@ class TestGovernanceTaskRecordDaily:
 
     def test_uk_ticket_id(self, session):
         """UNIQUE(env, ticket_id) — duplicate ticket_id raises."""
-        row1 = GovernanceTaskRecordDaily(
+        row1 = GovernanceTicketOrm(
             worker_id="user-1:bot-1",
             dt_version="20260629",
             governance_decision="actionable",
@@ -380,7 +380,7 @@ class TestGovernanceTaskRecordDaily:
             active_worker="user-1:bot-1",
             governance_status="open",
         )
-        row2 = GovernanceTaskRecordDaily(
+        row2 = GovernanceTicketOrm(
             worker_id="user-2:bot-2",
             dt_version="20260629",
             governance_decision="actionable",
@@ -404,18 +404,18 @@ class TestGovernanceTaskRecordDaily:
         serve dt_version-only filters. This composite index covers the
         hot read path in oceanbase_reader.get_actionable_bots.
         """
-        idx_names = _index_names(GovernanceTaskRecordDaily)
+        idx_names = _index_names(GovernanceTicketOrm)
         assert "idx_econ_gov_taskrec_dt_decision" in idx_names
 
     # --- F2: worker_id length ---
 
     def test_worker_id_length(self):
         """worker_id is String(160) — matches notify_log, fits max concatenation."""
-        assert _column_type_length(GovernanceTaskRecordDaily, "worker_id") == 160
+        assert _column_type_length(GovernanceTicketOrm, "worker_id") == 160
 
     # --- F4: expected_token_saving type ---
 
     def test_expected_token_saving_type(self):
         """expected_token_saving uses BigInteger, not AutoIncrementBigInteger."""
-        col = GovernanceTaskRecordDaily.__table__.columns["expected_token_saving"]
+        col = GovernanceTicketOrm.__table__.columns["expected_token_saving"]
         assert col.type.__class__.__name__ == "BigInteger"

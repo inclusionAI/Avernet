@@ -8,10 +8,10 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceAudit,
-    GovernanceNotifyLog,
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    AuditLogOrm,
+    GovernanceNotificationOrm,
+    GovernanceTicketOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.audit_repo import (
     GovernanceAuditRepository,
@@ -36,7 +36,6 @@ def _build_svc(engine):
     task_repo = TaskRecordRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
     svc = GovernanceFeedbackService(
-        db=db,
         whitelist_service=FakeWhitelistService(),
         notify_repo=notify_repo,
         task_repo=task_repo,
@@ -58,7 +57,7 @@ def _make_notification(session, **overrides):
     governance_status = overrides.pop("governance_status", "open")
 
     # --- notify_log row ---
-    notify_row = GovernanceNotifyLog(
+    notify_row = GovernanceNotificationOrm(
         notification_id=overrides.pop("notification_id", "n-001"),
         ticket_id=ticket_id,
         bot_id=overrides.pop("bot_id", "bot-1"),
@@ -79,7 +78,7 @@ def _make_notification(session, **overrides):
     session.add(notify_row)
 
     # --- task_record row (the actual ticket) ---
-    task_row = GovernanceTaskRecordDaily(
+    task_row = GovernanceTicketOrm(
         ticket_id=ticket_id,
         worker_id="user-1:bot-1",
         bot_id=notify_row.bot_id,
@@ -106,7 +105,7 @@ def _make_linked_rows(
     response: str | None = None,
     latest_decision: str = "actionable",
     env: str = "dev",
-) -> tuple[GovernanceTaskRecordDaily, GovernanceNotifyLog]:
+) -> tuple[GovernanceTicketOrm, GovernanceNotificationOrm]:
     """Create a linked ticket + notify_log pair (for §7.4.1 tests)."""
     if notification_id is None:
         notification_id = uuid.uuid4().hex
@@ -114,7 +113,7 @@ def _make_linked_rows(
         ticket_id = uuid.uuid4().hex
     worker_key = f"{owner_id}:{bot_id}"
 
-    ticket = GovernanceTaskRecordDaily(
+    ticket = GovernanceTicketOrm(
         ticket_id=ticket_id,
         worker_id=worker_key,
         active_worker=worker_key if governance_status != "closed" else None,
@@ -133,7 +132,7 @@ def _make_linked_rows(
     )
     session.add(ticket)
 
-    notify = GovernanceNotifyLog(
+    notify = GovernanceNotificationOrm(
         notification_id=notification_id,
         ticket_id=ticket_id,
         bot_id=bot_id,
@@ -165,9 +164,9 @@ def engine():
     from sqlalchemy import create_engine
 
     eng = create_engine("sqlite:///:memory:")
-    GovernanceTaskRecordDaily.__table__.create(eng, checkfirst=True)
-    GovernanceNotifyLog.__table__.create(eng, checkfirst=True)
-    GovernanceAudit.__table__.create(eng, checkfirst=True)
+    GovernanceTicketOrm.__table__.create(eng, checkfirst=True)
+    GovernanceNotificationOrm.__table__.create(eng, checkfirst=True)
+    AuditLogOrm.__table__.create(eng, checkfirst=True)
     return eng
 
 
