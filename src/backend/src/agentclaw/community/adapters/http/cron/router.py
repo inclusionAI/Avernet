@@ -168,7 +168,12 @@ async def get_cron_status(
             method="GET",
             path="/api/cron/status"
         )
-        return ApiResponse(success=True, data=result.get("data"))
+        return ApiResponse(
+            success=result.get("success", True),
+            data=result.get("data"),
+            message=result.get("message", "OK"),
+            failed_targets=result.get("failed_targets", []),
+        )
     except Exception as e:
         logger.error(f"[get_cron_status] Error: {e}")
         return ApiResponse(success=False, message=str(e), error_code=500)
@@ -241,7 +246,12 @@ async def get_cron(
             path=f"/api/cron/{task_id}",
             runtime_stage=runtime_stage,
         )
-        return ApiResponse(success=True, data=result.get("data"))
+        return ApiResponse(
+            success=result.get("success", True),
+            data=result.get("data"),
+            message=result.get("message", "OK"),
+            failed_targets=result.get("failed_targets", []),
+        )
     except CronRelayError as e:
         logger.warning(f"[get_cron] Business error: {e}")
         return ApiResponse(success=False, message=str(e), error_code=e.error_code)
@@ -306,7 +316,8 @@ async def create_cron(
         return ApiResponse(
             success=result.get("success", True),
             data=result.get("data"),
-            message=result.get("message", "OK")
+            message=result.get("message", "OK"),
+            failed_targets=result.get("failed_targets", []),
         )
     except Exception as e:
         logger.error(f"[create_cron] Error: {e}")
@@ -349,7 +360,8 @@ async def update_cron(
         return ApiResponse(
             success=result.get("success", True),
             data=result.get("data"),
-            message=result.get("message", "OK")
+            message=result.get("message", "OK"),
+            failed_targets=result.get("failed_targets", []),
         )
     except CronRelayError as e:
         logger.warning(f"[update_cron] Business error: {e}")
@@ -391,7 +403,8 @@ async def delete_cron(
 
         return ApiResponse(
             success=result.get("success", True),
-            message=result.get("message", "Task deleted")
+            message=result.get("message", "Task deleted"),
+            failed_targets=result.get("failed_targets", []),
         )
     except CronRelayError as e:
         logger.warning(f"[delete_cron] Business error: {e}")
@@ -435,7 +448,9 @@ async def run_cron(
 
         return ApiResponse(
             success=result.get("success", True),
-            data=result.get("data")
+            data=result.get("data"),
+            message=result.get("message", "OK"),
+            failed_targets=result.get("failed_targets", []),
         )
     except CronRelayError as e:
         logger.warning(f"[run_cron] Business error: {e}")
@@ -479,7 +494,9 @@ async def get_cron_runs(
 
         return ApiResponse(
             success=result.get("success", True),
-            data=result.get("data")
+            data=result.get("data"),
+            message=result.get("message", "OK"),
+            failed_targets=result.get("failed_targets", []),
         )
     except CronRelayError as e:
         logger.warning(f"[get_cron_runs] Business error: {e}")
