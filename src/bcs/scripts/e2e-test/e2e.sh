@@ -82,12 +82,14 @@ done
 source "$SCRIPT_DIR/group.sh"
 source "$SCRIPT_DIR/friends.sh"
 source "$SCRIPT_DIR/cli.sh"
+source "$SCRIPT_DIR/actor.sh"
+source "$SCRIPT_DIR/register.sh"
 
 # ============================================================================
 # Collect All Tests (Bash 3.2 compatible — no associative arrays)
 # ============================================================================
 
-ALL_SUITES=(group friends cli)
+ALL_SUITES=(group friends cli actor register)
 ALL_TESTS=()
 
 for test_name in "${E2E_TESTS_GROUP[@]}"; do
@@ -98,6 +100,12 @@ for test_name in "${E2E_TESTS_FRIENDS[@]}"; do
 done
 for test_name in "${E2E_TESTS_CLI[@]}"; do
     ALL_TESTS+=("cli:$test_name")
+done
+for test_name in "${E2E_TESTS_ACTOR[@]}"; do
+    ALL_TESTS+=("actor:$test_name")
+done
+for test_name in "${E2E_TESTS_REGISTER[@]}"; do
+    ALL_TESTS+=("register:$test_name")
 done
 
 # ============================================================================
@@ -116,6 +124,14 @@ if [ "$LIST_ONLY" = true ]; then
     done
     echo "  cli:"
     for test_name in "${E2E_TESTS_CLI[@]}"; do
+        echo "    - $test_name"
+    done
+    echo "  actor:"
+    for test_name in "${E2E_TESTS_ACTOR[@]}"; do
+        echo "    - $test_name"
+    done
+    echo "  register:"
+    for test_name in "${E2E_TESTS_REGISTER[@]}"; do
         echo "    - $test_name"
     done
     exit 0
