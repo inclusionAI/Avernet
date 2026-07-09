@@ -85,6 +85,45 @@ def _default_bcn_plugin_path() -> str:
     return os.path.expanduser("~/.openclaw/extensions/openclaw-channel-bcn")
 
 
+def _merge_singlebox_model_config(oc_config: dict) -> None:
+    """Merge the repo-local singlebox model config into an OpenClaw config."""
+    configured = os.environ.get("SINGLEBOX_MODEL_CONFIG_FILE", "").strip()
+    if not configured:
+        return
+
+    config_path = Path(configured)
+    if not config_path.is_file():
+        raise DeviceAllocateError(
+            f"SINGLEBOX_MODEL_CONFIG_FILE does not exist: {config_path}"
+        )
+
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            model_config = json.load(f)
+    except json.JSONDecodeError as exc:
+        raise DeviceAllocateError(
+            f"SINGLEBOX_MODEL_CONFIG_FILE is not valid JSON: {config_path}"
+        ) from exc
+
+    if not isinstance(model_config, dict):
+        raise DeviceAllocateError(
+            f"SINGLEBOX_MODEL_CONFIG_FILE must be a JSON object: {config_path}"
+        )
+
+    models = model_config.get("models")
+    if models is not None:
+        oc_config["models"] = models
+
+    defaults = model_config.get("agents", {}).get("defaults", {})
+    if isinstance(defaults, dict):
+        target_defaults = oc_config.setdefault("agents", {}).setdefault("defaults", {})
+        for key in ("model", "models", "imageModel"):
+            target_defaults.pop(key, None)
+        for key in ("model", "models", "imageModel"):
+            if key in defaults:
+                target_defaults[key] = defaults[key]
+
+
 @dataclass
 class ProcessEntry:
     """Represents a running adapter (+ optional openclaw/hermes) for one bot.
@@ -222,6 +261,8 @@ class LocalProcessManager:
             )
             oc_config = {}
 
+        _merge_singlebox_model_config(oc_config)
+
         oc_config.setdefault("gateway", {})["port"] = openclaw_port
         oc_config["gateway"]["mode"] = "local"
         oc_config["gateway"].setdefault("auth", {})["mode"] = "none"
@@ -276,6 +317,7 @@ class LocalProcessManager:
 
         with open(config_file, "w") as f:
             json.dump(oc_config, f, indent=2, ensure_ascii=False)
+        config_file.chmod(0o600)
 
         logger.info(
             "Created openclaw config: %s, port=%s, workspace=%s",

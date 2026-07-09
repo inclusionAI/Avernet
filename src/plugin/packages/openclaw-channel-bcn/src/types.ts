@@ -328,6 +328,7 @@ export interface ResolvedBcsAccount {
   enabled: boolean;
   bcsUrl: string;
   botId: string;
+  connectBotId?: string;
   botName: string;
   capabilities: BotCapabilities;
   heartbeatIntervalMs: number;

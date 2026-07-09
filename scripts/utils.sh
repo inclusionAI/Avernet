@@ -24,7 +24,7 @@ log_error() {
 }
 
 singlebox_mode_option() {
-    if [ "${SINGLEBOX_MODE:-local}" = "standalone" ] || [ "${STANDALONE_MODE:-false}" = true ]; then
+    if [ "${SINGLEBOX_MODE:-standalone}" = "standalone" ] || [ "${STANDALONE_MODE:-true}" = true ]; then
         echo "--standalone"
     else
         echo "--local"
@@ -117,15 +117,17 @@ print_local_stack_runtime_paths() {
 
 print_local_stack_ready_banner() {
     local title="LOCAL STACK READY"
-    local stack_label="BCS + 5 BOTS + FRONTEND"
-    local status="[BCS OK] [5BOTS OK] [FRONTEND OK]"
+    local stack_label="FULL SINGLEBOX STACK"
+    local status_line_one="BAAS BACKEND BCS"
+    local status_line_two="5BOTS DEMO FRONTEND"
 
     if [ "${STANDALONE_MODE:-false}" = true ]; then
         title="STANDALONE STACK READY"
     fi
     if [ "${LOCAL_MODE:-true}" != true ]; then
         stack_label="BCS + FRONTEND"
-        status="[BCS OK] [FRONTEND OK]"
+        status_line_one="BCS FRONTEND"
+        status_line_two=""
     fi
 
     echo ""
@@ -133,8 +135,8 @@ print_local_stack_ready_banner() {
     print_banner_line "$GREEN" ""
     print_banner_line "$GREEN" "  ____   ____  ____     ${title}"
     print_banner_line "$GREEN" " / __ \\ / ___|| __ )    ${stack_label}"
-    print_banner_line "$GREEN" "| |  | | |    |  _ \\"
-    print_banner_line "$GREEN" "| |__| | |___ | |_) |   ${status}"
+    print_banner_line "$GREEN" "| |  | | |    |  _ \\    ${status_line_one}"
+    print_banner_line "$GREEN" "| |__| | |___ | |_) |   ${status_line_two}"
     print_banner_line "$GREEN" " \\____/ \\____||____/"
     print_banner_line "$GREEN" ""
     echo -e "${GREEN}+------------------------------------------------------------+${NC}"
@@ -254,6 +256,21 @@ stop_port_processes_if_owned() {
     for pid in $pids; do
         stop_process_if_owned "$pid" "$owner_dir" "${label} on port ${port}" || true
     done
+}
+
+require_port_available_after_owned_stop() {
+    local port="$1"
+    local service_name="$2"
+    local override_hint="${3:-choose another port}"
+
+    if ! port_is_listening "$port"; then
+        return 0
+    fi
+
+    log_error "Port ${port} is still in use by a process outside this checkout after stopping owned ${service_name} processes."
+    log_error "Owner: $(port_listener_summary "$port")"
+    log_error "Stop the external process manually or ${override_hint}."
+    return 1
 }
 
 stop_matching_processes_if_owned() {
@@ -1109,7 +1126,7 @@ show_local_mode_info() {
     log_warn "LOCAL MODE ENABLED"
     log_warn "========================================="
     log_warn "Using:"
-    log_warn "  - Services: BCS + 5 local bots + frontend"
+    log_warn "  - Services: BAAS + Backend + BCS + 5 local bots + demo bot + frontend"
     log_warn "  - Auth: BCS local mock identity"
     log_warn "  - BCS: local config (no external MySQL/Redis services)"
     log_warn "  - OpenClaw configs: ${LOCAL_OPENCLAW_DIR}"

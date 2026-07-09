@@ -118,7 +118,8 @@ export class BcsWsClient {
 
     // Prefer explicitly provided session (e.g. from waitForSession in non-prod),
     // otherwise fall back to loading from file (with URL mismatch check).
-    const savedSession = session ?? this._loadSession();
+    const connectBotId = this._resolveExplicitConnectBotId();
+    const savedSession = this._selectSessionForConnect(session ?? this._loadSession(), connectBotId);
     const token = savedSession?.token;
 
     const connectUrl = this._account.bcsUrl;
@@ -139,8 +140,13 @@ export class BcsWsClient {
     // Set up message handling
     ws.on('message', data => this._handleMessage(data));
 
-    // Connect bot — pass the session so _connect can use bot_uuid and token
-    await this._connect(savedSession);
+    try {
+      // Connect bot — pass the session so _connect can use bot_uuid and token
+      await this._connect(savedSession, connectBotId);
+    } catch (err) {
+      await this.disconnect();
+      throw err;
+    }
 
     // Start heartbeat
     this._startHeartbeat();
@@ -282,15 +288,18 @@ export class BcsWsClient {
     });
   }
 
-  private async _connect(preferredSession?: SessionInfo | null): Promise<void> {
+  private async _connect(preferredSession?: SessionInfo | null, explicitConnectBotId?: string): Promise<void> {
     const requestId = this._nextRequestId();
 
-    // Determine bot_id: explicit resolver > preferred session (from waitForSession/connect) > file session > none
-    const savedSession = preferredSession ?? this._loadSession();
-    const botId = this._resolveConnectBotId?.() ?? savedSession?.bot_uuid ?? undefined;
+    // Determine bot_id: explicit config/resolver > preferred session (from waitForSession/connect) > file session > none
+    const savedSession = this._selectSessionForConnect(
+      preferredSession ?? this._loadSession(),
+      explicitConnectBotId,
+    );
+    const botId = explicitConnectBotId ?? savedSession?.bot_uuid ?? undefined;
 
     if (botId) {
-      this._log?.info?.(`Using bot_id: ${botId} (source: ${this._resolveConnectBotId ? 'resolver' : 'session'})`);
+      this._log?.info?.(`Using bot_id: ${botId} (source: ${explicitConnectBotId ? 'config' : 'session'})`);
     }
 
     // bot.connect with optional bot_id and token
@@ -331,6 +340,12 @@ export class BcsWsClient {
     this._sessionToken = payload?.token ?? null;
     const isNew = payload?.is_new ?? true;
     const protocolVersion = payload?.protocol_version ?? 1;
+
+    if (explicitConnectBotId && this._botUuid && this._botUuid !== explicitConnectBotId) {
+      throw new Error(
+        `BCS connected bot_uuid ${this._botUuid} does not match configured bot_id ${explicitConnectBotId}`,
+      );
+    }
 
     // Warn if BCS signals protocol deprecation
     const deprecation = payload?.deprecation;
@@ -402,6 +417,28 @@ export class BcsWsClient {
     const dataDir = this._dataDir || process.env.OPENCLAW_DATA_DIR || path.join(os.homedir(), '.openclaw');
     const bcsDir = path.join(dataDir, '.bcs');
     return path.join(bcsDir, 'session.json');
+  }
+
+  private _resolveExplicitConnectBotId(): string | undefined {
+    const resolved = this._resolveConnectBotId?.()?.trim();
+    if (resolved) return resolved;
+    return this._account.connectBotId?.trim() || undefined;
+  }
+
+  private _selectSessionForConnect(
+    session: SessionInfo | null,
+    explicitConnectBotId?: string,
+  ): SessionInfo | null {
+    if (!session || !explicitConnectBotId) {
+      return session;
+    }
+    if (session.bot_uuid === explicitConnectBotId) {
+      return session;
+    }
+    this._log?.warn?.(
+      `Ignoring saved BCS session for bot_uuid=${session.bot_uuid ?? 'none'} because configured bot_id=${explicitConnectBotId}`,
+    );
+    return null;
   }
 
   private _loadSession(): SessionInfo | null {

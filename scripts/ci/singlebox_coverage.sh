@@ -4,9 +4,12 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"
 
+export PATH="${HOME}/.cargo/bin:${PATH}"
+
 coverage_root="${SINGLEBOX_COVERAGE_ROOT:-$repo_root/scripts/.dependencies/coverage/singlebox}"
 report_dir="$coverage_root/reports"
-mode="${SINGLEBOX_COVERAGE_MODE:-mock}"
+mode="${SINGLEBOX_COVERAGE_MODE:-real}"
+acceptance_target="${SINGLEBOX_COVERAGE_ACCEPTANCE_TARGET:-tests/community/acceptance/cron/test_cron_query_lifecycle.py}"
 
 usage() {
   cat <<USAGE
@@ -14,14 +17,11 @@ Usage: scripts/ci/singlebox_coverage.sh [OPTIONS]
 
 Singlebox coverage gate entrypoint used by pre-push and PR CI.
 
-Current GitHub bootstrap behavior:
-  - default mode is mock, so pre-push can enforce the architecture before the
-    real open-source singlebox startup path is fully stable;
-  - set SINGLEBOX_COVERAGE_MODE=real to attempt the live singlebox path.
+The default mode is real: pre-push starts the local singlebox coverage stack.
 
 Options:
   --coverage-root DIR     Coverage output root, default: $coverage_root
-  --mode mock|real        Override SINGLEBOX_COVERAGE_MODE
+  --mode real             Override SINGLEBOX_COVERAGE_MODE
   -h, --help              Show this help
 USAGE
 }
@@ -57,64 +57,207 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-write_mock_reports() {
-  mkdir -p "$report_dir"
-  cat > "$report_dir/summary.json" <<JSON
-{
-  "mode": "mock",
-  "status": "passed",
-  "systems": {
-    "backend": {"core": null, "router_api": null, "plugin_api": null},
-    "baas": {"core": null, "router_api": null, "plugin_api": null},
-    "bcs": {"core": null, "router_api": null, "plugin_api": null},
-    "engine": {"core": null, "router_api": null, "plugin_api": null}
-  },
-  "note": "Mock singlebox coverage gate. The pre-push architecture is active; real coverage is enabled by SINGLEBOX_COVERAGE_MODE=real after open-source singlebox startup is stabilized."
-}
-JSON
-  cat > "$report_dir/summary.md" <<MD
-# Singlebox Coverage Gate
-
-- mode: mock
-- status: passed
-- note: pre-push invoked the singlebox coverage gate; real startup is deferred to SINGLEBOX_COVERAGE_MODE=real.
-MD
-  cat > "$report_dir/dashboard.html" <<HTML
-<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<title>Singlebox Coverage Gate</title>
-<body>
-  <h1>Singlebox Coverage Gate</h1>
-  <p>Mode: mock</p>
-  <p>Status: passed</p>
-  <p>The pre-push architecture invoked this gate. Switch to <code>SINGLEBOX_COVERAGE_MODE=real</code> when open-source singlebox startup is stable.</p>
-</body>
-</html>
-HTML
-}
-
 run_real_singlebox() {
+  rm -rf "$coverage_root/raw" "$report_dir"
   mkdir -p "$coverage_root/raw" "$report_dir"
+  local coverage_standalone_root="$coverage_root/standalone-openclaw"
+  local coverage_standalone_runtime="$coverage_root/standalone-runtime"
   echo "singlebox coverage real mode"
   echo "coverage_root: $coverage_root"
-  echo "This mode currently verifies startup only; full coverage combine/reporting will be restored with the real singlebox worktree."
+  echo "standalone_openclaw_root: $coverage_standalone_root"
+  echo "standalone_runtime_dir: $coverage_standalone_runtime"
+  echo "acceptance_target: $acceptance_target"
   cleanup_real_singlebox() {
-    env OCB_SKIP_GIT_HOOKS=1 bash "$repo_root/scripts/singlebox.sh" --local stop bcs backend baas || true
+    flush_coverage_processes || true
+    env OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE=mock \
+      STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
+      STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
+      bash "$repo_root/scripts/singlebox.sh" --standalone stop all || true
   }
   trap cleanup_real_singlebox EXIT
-  env SINGLEBOX_COVERAGE=1 SINGLEBOX_COVERAGE_DIR="$coverage_root/raw" OCB_SKIP_GIT_HOOKS=1 \
-    bash "$repo_root/scripts/singlebox.sh" --local start baas backend bcs
+  env SINGLEBOX_COVERAGE=1 SINGLEBOX_COVERAGE_DIR="$coverage_root/raw" OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE=mock \
+    STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
+    STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
+    bash "$repo_root/scripts/singlebox.sh" --standalone start all
+  run_acceptance_smoke
+  flush_coverage_processes
   cleanup_real_singlebox
   trap - EXIT
+  combine_python_coverage "backend" "$repo_root/src/backend" "$coverage_root/raw/backend"
+  combine_python_coverage "baas" "$repo_root/src/baas/packages/community" "$coverage_root/raw/baas"
+  write_summary_artifacts
+  verify_required_artifacts
+}
+
+flush_coverage_processes() {
+  local pids pid
+  pids="$(
+    ps ax -o pid= -o command= 2>/dev/null | \
+      awk -v root="$repo_root" 'index($0, root) && index($0, "coverage run") {print $1}'
+  )"
+  [ -n "$pids" ] || return 0
+  for pid in $pids; do
+    kill -USR1 "$pid" 2>/dev/null || true
+  done
+  sleep 2
+}
+
+run_acceptance_smoke() {
+  local acceptance_log="$report_dir/acceptance.log"
+  local junit_report="$report_dir/acceptance-junit.xml"
+  local rc=0
+  (
+    cd "$repo_root/src/backend"
+    RUN_ACCEPTANCE=1 \
+      SINGLEBOX_ACCEPTANCE_REUSE_LIVE=1 \
+      SINGLEBOX_ACCEPTANCE_KEEP_ARTIFACTS=1 \
+      uv run pytest "$acceptance_target" -q --junitxml "$junit_report"
+  ) > "$acceptance_log" 2>&1 || rc=$?
+  cat "$acceptance_log"
+  [ "$rc" -eq 0 ] || return "$rc"
+  [ -s "$junit_report" ] || {
+    echo "missing acceptance junit artifact: $junit_report" >&2
+    return 1
+  }
+}
+
+combine_python_coverage() {
+  local component="$1"
+  local component_dir="$2"
+  local raw_dir="$3"
+  local combined_file="$report_dir/${component}.coverage"
+  local json_report="$report_dir/${component}-coverage.json"
+  local text_report="$report_dir/${component}-coverage.txt"
+  local html_dir="$report_dir/html/${component}"
+  local coverage_files=()
+  local coverage_file
+
+  while IFS= read -r coverage_file; do
+    coverage_files+=("$coverage_file")
+  done < <(find "$raw_dir" -type f -name '.coverage*' 2>/dev/null | sort)
+
+  if [ "${#coverage_files[@]}" -eq 0 ]; then
+    echo "missing ${component} coverage data under ${raw_dir}" >&2
+    return 1
+  fi
+
+  (
+    cd "$component_dir"
+    COVERAGE_FILE="$combined_file" uv run coverage combine "${coverage_files[@]}"
+    COVERAGE_FILE="$combined_file" uv run coverage json -i -o "$json_report"
+    COVERAGE_FILE="$combined_file" uv run coverage html -i -d "$html_dir"
+    COVERAGE_FILE="$combined_file" uv run coverage report -i > "$text_report"
+  )
+}
+
+jsonl_count() {
+  local file="$1"
+  if [ -f "$file" ]; then
+    wc -l < "$file" | tr -d ' '
+  else
+    printf '0'
+  fi
+}
+
+write_summary_artifacts() {
+  local backend_router_hits backend_plugin_hits baas_router_hits
+  backend_router_hits="$(jsonl_count "$coverage_root/raw/backend/router_hits.jsonl")"
+  backend_plugin_hits="$(jsonl_count "$coverage_root/raw/backend/plugin_hits.jsonl")"
+  baas_router_hits="$(jsonl_count "$coverage_root/raw/baas/router_hits.jsonl")"
+
+  "${PYTHON:-python3}" - "$report_dir" "$acceptance_target" "$backend_router_hits" "$backend_plugin_hits" "$baas_router_hits" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+report_dir = Path(sys.argv[1])
+acceptance_target = sys.argv[2]
+backend_router_hits = int(sys.argv[3])
+backend_plugin_hits = int(sys.argv[4])
+baas_router_hits = int(sys.argv[5])
+
+summary = {
+    "mode": "real",
+    "status": "passed",
+    "stack": "standalone start all",
+    "model_config_mode": "mock",
+    "acceptance": {
+        "target": acceptance_target,
+        "junit": "acceptance-junit.xml",
+    },
+    "coverage": {
+        "backend": {
+            "router_hits": backend_router_hits,
+            "plugin_hits": backend_plugin_hits,
+            "json": "backend-coverage.json",
+            "html": "html/backend/index.html",
+        },
+        "baas": {
+            "router_hits": baas_router_hits,
+            "json": "baas-coverage.json",
+            "html": "html/baas/index.html",
+        },
+    },
+}
+
+report_dir.mkdir(parents=True, exist_ok=True)
+(report_dir / "summary.json").write_text(
+    json.dumps(summary, indent=2, sort_keys=True) + "\n",
+    encoding="utf-8",
+)
+(report_dir / "summary.md").write_text(
+    "\n".join(
+        [
+            "# Singlebox Coverage Summary",
+            "",
+            "- mode: real",
+            "- stack: standalone start all",
+            "- model config: mock",
+            f"- acceptance: {acceptance_target}",
+            f"- backend router hits: {backend_router_hits}",
+            f"- backend plugin hits: {backend_plugin_hits}",
+            f"- baas router hits: {baas_router_hits}",
+            "",
+        ]
+    ),
+    encoding="utf-8",
+)
+(report_dir / "dashboard.html").write_text(
+    "<!doctype html><meta charset='utf-8'><title>Singlebox Coverage</title>"
+    "<h1>Singlebox Coverage</h1>"
+    f"<p>Acceptance: {acceptance_target}</p>"
+    f"<p>Backend router hits: {backend_router_hits}</p>"
+    f"<p>Backend plugin hits: {backend_plugin_hits}</p>"
+    f"<p>BaaS router hits: {baas_router_hits}</p>",
+    encoding="utf-8",
+)
+PY
+}
+
+verify_required_artifacts() {
+  local required=(
+    "$report_dir/acceptance-junit.xml"
+    "$report_dir/acceptance.log"
+    "$report_dir/backend-coverage.json"
+    "$report_dir/backend-coverage.txt"
+    "$report_dir/html/backend/index.html"
+    "$report_dir/baas-coverage.json"
+    "$report_dir/baas-coverage.txt"
+    "$report_dir/html/baas/index.html"
+    "$report_dir/summary.json"
+    "$report_dir/summary.md"
+    "$report_dir/dashboard.html"
+  )
+  local file
+  for file in "${required[@]}"; do
+    if [ ! -s "$file" ]; then
+      echo "missing required singlebox coverage artifact: $file" >&2
+      return 1
+    fi
+  done
 }
 
 case "$mode" in
-  mock)
-    echo "singlebox coverage gate: mock mode"
-    echo "coverage reports: $report_dir"
-    write_mock_reports
-    ;;
   real)
     run_real_singlebox
     ;;

@@ -6,6 +6,8 @@ Spec: docs/superpowers/specs/2026-06-10-engine-per-bot-workspace-design.md §4.3
 from __future__ import annotations
 
 import inspect
+import json
+import stat
 from pathlib import Path
 
 import pytest
@@ -58,9 +60,6 @@ def test_resolve_engine_src_dir_rejects_missing_configured_path(monkeypatch, tmp
     assert str(missing_engine_src_dir) in str(exc_info.value)
 
 
-@pytest.mark.skip(
-    reason="depends on engine repo checkout (src/engine/src/ not available in this partial checkout)"
-)
 def test_resolve_engine_src_dir_falls_back_to_repo_layout(monkeypatch):
     monkeypatch.delenv("LOCAL_ENGINE_SRC_DIR", raising=False)
 
@@ -69,3 +68,191 @@ def test_resolve_engine_src_dir_falls_back_to_repo_layout(monkeypatch):
     assert engine_src_dir.name == "src"
     assert engine_src_dir.parent.name == "engine"
     assert (engine_src_dir / "engine" / "community" / "api" / "app.py").is_file()
+
+
+def test_create_openclaw_config_merges_singlebox_model_config(monkeypatch, tmp_path):
+    manager = pm.LocalProcessManager()
+
+    template_path = tmp_path / "template-openclaw.json"
+    template_path.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "mode": "merge",
+                    "providers": {
+                        "antchat": {
+                            "baseUrl": "${OPEN_CLAW_BASE_URL}",
+                            "apiKey": "${OPEN_CLAW_API_KEY}",
+                        }
+                    },
+                },
+                "agents": {"defaults": {"model": {"primary": "antchat/Kimi-K2.5"}}},
+                "gateway": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    runtime_model_config = tmp_path / "singlebox-model-config.json"
+    runtime_model_config.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "mode": "merge",
+                    "providers": {
+                        "manual-provider": {
+                            "baseUrl": "https://model.example.test/v1",
+                            "apiKey": "sk-test",
+                            "api": "openai-completions",
+                            "models": [{"id": "model-a", "name": "Model A"}],
+                        }
+                    },
+                },
+                "agents": {
+                    "defaults": {
+                        "model": {"primary": "manual-provider/model-a"},
+                        "models": {"manual-provider/model-a": {"alias": "Model A"}},
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(manager, "_resolve_config_template_path", lambda: template_path)
+    monkeypatch.setenv("SINGLEBOX_MODEL_CONFIG_FILE", str(runtime_model_config))
+    monkeypatch.setenv("BCN_PLUGIN_PATH", str(tmp_path / "missing-plugin"))
+
+    workspace_dir = tmp_path / "bot" / "openclaw" / "workspace"
+    workspace_dir.mkdir(parents=True)
+
+    config_dir = manager.create_openclaw_config(
+        bolt_id="default",
+        openclaw_port=18888,
+        workspace_dir=workspace_dir,
+        entity_id="mock-user",
+    )
+
+    config = json.loads((config_dir / "openclaw.json").read_text(encoding="utf-8"))
+    assert "antchat" not in config["models"]["providers"]
+    assert config["models"]["providers"]["manual-provider"]["apiKey"] == "sk-test"
+    assert config["agents"]["defaults"]["model"]["primary"] == "manual-provider/model-a"
+    assert config["gateway"]["port"] == 18888
+    assert stat.S_IMODE((config_dir / "openclaw.json").stat().st_mode) == 0o600
+
+
+def test_create_openclaw_config_removes_template_model_fields_for_mock_config(
+    monkeypatch, tmp_path
+):
+    manager = pm.LocalProcessManager()
+
+    template_path = tmp_path / "template-openclaw.json"
+    template_path.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "mode": "merge",
+                    "providers": {
+                        "antchat": {
+                            "baseUrl": "${OPEN_CLAW_BASE_URL}",
+                            "apiKey": "${OPEN_CLAW_API_KEY}",
+                        }
+                    },
+                },
+                "agents": {
+                    "defaults": {
+                        "model": {"primary": "antchat/Kimi-K2.5"},
+                        "models": {"antchat/Kimi-K2.5": {}},
+                        "imageModel": {"primary": "antchat/Kimi-K2.5"},
+                    }
+                },
+                "gateway": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    runtime_model_config = tmp_path / "mock-model-config.json"
+    runtime_model_config.write_text(
+        json.dumps(
+            {
+                "models": {"mode": "merge", "providers": {}},
+                "agents": {"defaults": {"models": {}}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(manager, "_resolve_config_template_path", lambda: template_path)
+    monkeypatch.setenv("SINGLEBOX_MODEL_CONFIG_FILE", str(runtime_model_config))
+    monkeypatch.setenv("BCN_PLUGIN_PATH", str(tmp_path / "missing-plugin"))
+
+    workspace_dir = tmp_path / "bot" / "openclaw" / "workspace"
+    workspace_dir.mkdir(parents=True)
+
+    config_dir = manager.create_openclaw_config(
+        bolt_id="default",
+        openclaw_port=18888,
+        workspace_dir=workspace_dir,
+        entity_id="mock-user",
+    )
+
+    defaults = json.loads((config_dir / "openclaw.json").read_text(encoding="utf-8"))[
+        "agents"
+    ]["defaults"]
+    assert "model" not in defaults
+    assert defaults["models"] == {}
+    assert "imageModel" not in defaults
+
+
+def test_create_openclaw_config_rejects_non_object_singlebox_model_config(
+    monkeypatch, tmp_path
+):
+    manager = pm.LocalProcessManager()
+
+    template_path = tmp_path / "template-openclaw.json"
+    template_path.write_text(
+        json.dumps({"models": {"mode": "merge", "providers": {}}, "gateway": {}}),
+        encoding="utf-8",
+    )
+    runtime_model_config = tmp_path / "list-model-config.json"
+    runtime_model_config.write_text("[]", encoding="utf-8")
+
+    monkeypatch.setattr(manager, "_resolve_config_template_path", lambda: template_path)
+    monkeypatch.setenv("SINGLEBOX_MODEL_CONFIG_FILE", str(runtime_model_config))
+    monkeypatch.setenv("BCN_PLUGIN_PATH", str(tmp_path / "missing-plugin"))
+
+    workspace_dir = tmp_path / "bot" / "openclaw" / "workspace"
+    workspace_dir.mkdir(parents=True)
+
+    with pytest.raises(pm.DeviceAllocateError, match="must be a JSON object"):
+        manager.create_openclaw_config(
+            bolt_id="default",
+            openclaw_port=18888,
+            workspace_dir=workspace_dir,
+            entity_id="mock-user",
+        )
+
+
+def test_merge_singlebox_model_config_noops_without_configured_file(monkeypatch):
+    config = {"models": {"mode": "merge", "providers": {"existing": {}}}}
+    monkeypatch.delenv("SINGLEBOX_MODEL_CONFIG_FILE", raising=False)
+
+    pm._merge_singlebox_model_config(config)
+
+    assert config["models"]["providers"] == {"existing": {}}
+
+
+def test_merge_singlebox_model_config_rejects_missing_file(monkeypatch, tmp_path):
+    missing_config = tmp_path / "missing-openclaw.json"
+    monkeypatch.setenv("SINGLEBOX_MODEL_CONFIG_FILE", str(missing_config))
+
+    with pytest.raises(pm.DeviceAllocateError, match="does not exist"):
+        pm._merge_singlebox_model_config({})
+
+
+def test_merge_singlebox_model_config_rejects_invalid_json(monkeypatch, tmp_path):
+    invalid_config = tmp_path / "invalid-openclaw.json"
+    invalid_config.write_text("{", encoding="utf-8")
+    monkeypatch.setenv("SINGLEBOX_MODEL_CONFIG_FILE", str(invalid_config))
+
+    with pytest.raises(pm.DeviceAllocateError, match="is not valid JSON"):
+        pm._merge_singlebox_model_config({})
