@@ -197,13 +197,13 @@ run_e2e_tests() {
     mkdir -p "$REPORT_DIR"
     local ec=0
 
-    run_e2e_crud "$@";
-    run_e2e_sync "$@";
-    run_e2e_async "$@";
-    run_e2e_mock_failure_hook "$@";
-    run_e2e_mock_failure_create "$@";
-    run_e2e_mock_failure_destroy "$@";
-    run_e2e_mock_failure_device_not_found "$@";
+    run_e2e_crud "$@" || ec=$((ec + $?))
+    run_e2e_sync "$@" || ec=$((ec + $?))
+    run_e2e_async "$@" || ec=$((ec + $?))
+    run_e2e_mock_failure_hook "$@" || ec=$((ec + $?))
+    run_e2e_mock_failure_create "$@" || ec=$((ec + $?))
+    run_e2e_mock_failure_destroy "$@" || ec=$((ec + $?))
+    run_e2e_mock_failure_device_not_found "$@" || ec=$((ec + $?))
 
     if [[ $ec -ne 0 ]]; then log_error "test-e2e: some sub-runs failed"; fi
     return $ec
