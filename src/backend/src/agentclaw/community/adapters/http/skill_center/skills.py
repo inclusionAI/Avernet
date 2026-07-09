@@ -1139,6 +1139,8 @@ async def get_skill_readme(
         raise HTTPException(status_code=404, detail="Skill or README not found")
 
     # The DB row is the source of truth for the bot/owner that owns local files.
+    # Keep this explicit so README reads do not regress to request-context-only
+    # resolution after REL20260710 rebases.
     # This is especially important for TEClaw requests whose HTTP context can be
     # default/openclaw even though the local skill belongs to a TEClaw bot.
     read_bot_id = (skill or {}).get("bolt_id") or effective_bot_id
