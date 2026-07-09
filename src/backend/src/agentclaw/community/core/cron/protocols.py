@@ -113,6 +113,23 @@ class DeviceConnectionProvider(Protocol):
         """
         ...
 
+    def list_devices_by_runtime_binding(
+        self,
+        *,
+        binding_id: int,
+    ) -> list[str]:
+        """按运行态 binding 获取设备列表。
+
+        返回用于运行态路由的 device_uuid 列表。
+
+        Args:
+            binding_id: 设备绑定ID
+
+        Returns:
+            ["device_uuid"]
+        """
+        ...
+
 
 class DeviceBindingStatus:
     """设备绑定状态枚举"""

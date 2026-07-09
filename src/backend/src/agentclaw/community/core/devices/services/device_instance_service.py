@@ -4,7 +4,7 @@
 解析到同一 ``bot_uuid``，调 BaaS 查设备列表，逐条合成健康四态。
 
 - 健康四态由 BaaS ``status`` + ``health`` 合成（§0.5），不落 BaaS 侧。
-- bot_id 入口经 ``ext.binding.online`` 解析运行态 binding_id（不用草稿 binding）。
+- bot_id 入口经 ``ext.binding.online`` 解析运行态 binding_id。
 - engine_type 走运行态 binding 的 ``device_props.bolt_id`` → ``active_engine``。
 """
 from __future__ import annotations
@@ -45,7 +45,7 @@ class BotPublishNotFoundError(RuntimeError):
 
 
 class BindingNotFoundError(RuntimeError):
-    """binding_id 查不到 / 非 baas / 跨环境 / 已释放。"""
+    """binding_id 无效或不支持实例查询。"""
 
 
 class InstanceHealthStatus:
@@ -101,7 +101,6 @@ class DeviceInstanceService:
 
         查该 bot 最新一条 status=success 的发布单，取
         ``json.loads(ext)["binding"]["online"]``（int）= 运行态 binding_id。
-        **不用** ``get_active_by_bot_and_owner`` —— 那会命中草稿 binding。
 
         Raises:
             BotPublishNotFoundError: 无 success 发布单 / ext 缺失 / binding.online 缺失
@@ -265,6 +264,31 @@ class DeviceInstanceService:
             )
 
         return {"bot_uuid": bot_uuid, "devices": devices}
+
+    def list_devices_by_runtime_binding(
+        self,
+        *,
+        binding_id: int,
+    ) -> list[str]:
+        """运行态设备列表（binding_id 入口）。
+
+        返回运行态路由所需的 device_uuid 列表。
+        """
+        _, bot_uuid = self._validate_binding_for_instances(binding_id)
+
+        baas_service = self._get_baas_service()
+        if baas_service is None:
+            raise DeviceServiceError(
+                "BaasService not available for runtime device query"
+            )
+
+        devices: list[str] = []
+        for d in baas_service.list_devices_by_bot_uuid(bot_uuid) or []:
+            device_uuid = d.get("device_uuid")
+            if device_uuid:
+                devices.append(str(device_uuid))
+
+        return devices
 
     def get_instances_by_bot(
         self,

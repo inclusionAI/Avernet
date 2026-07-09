@@ -96,27 +96,6 @@ def _make_device(
     return SimpleNamespace(status=status, device_provider=device_provider)
 
 
-def _make_instance(
-    device_uuid: str,
-    *,
-    provider_device_id: str | None = None,
-    bot_uuid: str | None = None,
-    status: str = "ACTIVE",
-    health: str = "true",
-    health_status: str = "ACTIVE",
-):
-    instance = {
-        "device_uuid": device_uuid,
-        "status": status,
-        "health": health,
-        "provider_device_id": provider_device_id or f"provider-{device_uuid}",
-        "health_status": health_status,
-    }
-    if bot_uuid:
-        instance["bot_uuid"] = bot_uuid
-    return instance
-
-
 class TestFetchBotCronsUsesResolver:
     @pytest.mark.asyncio
     async def test_fetch_bot_crons_calls_resolver_not_v2(self):
@@ -205,6 +184,53 @@ class TestListAllCronsOwnerId:
 
         assert result["data"][0]["bot_id"] == "default"
         assert result["data"][0]["owner_id"] == "owner-1"
+
+    @pytest.mark.asyncio
+    async def test_list_all_crons_does_not_expose_runtime_stage_for_personal_bot(self):
+        """Personal bots do not have draft/verify/online runtime stages."""
+        bot_provider = MagicMock()
+        bot_provider.get_bot.return_value = {
+            "bot_id": "personal-bot",
+            "owner_id": "owner-1",
+            "binding_id": 42,
+            "bot_name": "Personal Bot",
+            "bot_type": "personal",
+        }
+
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = MagicMock(
+            status=DeviceBindingStatus.ACTIVE
+        )
+
+        resolver = MagicMock()
+        resolver.resolve_for_bot.return_value = _make_ctx(
+            binding_id=42,
+            bot_id="personal-bot",
+            user_id="owner-1",
+        )
+
+        transport = MagicMock()
+        transport.invoke = AsyncMock(return_value={
+            "success": True,
+            "data": [{"id": "task-1", "name": "daily"}],
+        })
+
+        svc = _make_service(
+            bot_provider=bot_provider,
+            device_provider=device_provider,
+            resolver=resolver,
+            transport=transport,
+        )
+
+        result = await svc.list_all_crons(
+            user_id="owner-1",
+            nick_name="Owner",
+            bot_id="personal-bot",
+        )
+
+        assert result["success"] is True
+        assert result["data"][0]["bot_id"] == "personal-bot"
+        assert "runtime_stage" not in result["data"][0]
 
     @pytest.mark.asyncio
     async def test_list_all_crons_all_scope_includes_collaborator_bots(self):
@@ -321,7 +347,7 @@ class TestListServiceBotRuntimeStages:
         )
 
         device_provider = MagicMock()
-        device_provider.get_device.return_value = MagicMock(status=DeviceBindingStatus.ACTIVE)
+        device_provider.get_device.return_value = _make_device(device_provider="arca")
 
         resolver = MagicMock()
         resolver.resolve_for_bot.return_value = _make_ctx(
@@ -402,13 +428,10 @@ class TestListServiceBotRuntimeStages:
                 30: _make_device(device_provider="baas"),
             }[binding_id]
         )
-        device_provider.get_instances.return_value = {
-            "bot_uuid": "bot-uuid-online",
-            "devices": [
-                _make_instance("DEVICE-001", provider_device_id="PDS-001"),
-                _make_instance("DEVICE-002", provider_device_id="PDS-002"),
-            ],
-        }
+        device_provider.list_devices_by_runtime_binding.return_value = [
+            "DEVICE-001",
+            "DEVICE-002",
+        ]
 
         resolver = MagicMock()
         resolver.resolve_for_bot.return_value = _make_ctx(
@@ -461,6 +484,7 @@ class TestListServiceBotRuntimeStages:
         assert {item["id"] for item in online_rows} == {"shared-task"}
         assert result["failed_targets"] == []
         device_provider.get_instances.assert_not_called()
+        device_provider.list_devices_by_runtime_binding.assert_not_called()
         resolver.resolve_for_binding.assert_called_once_with(
             30, "owner-1", bot_id="service-bot"
         )
@@ -495,7 +519,7 @@ class TestListServiceBotRuntimeStages:
                 30: _make_device(device_provider="baas"),
             }[binding_id]
         )
-        device_provider.get_instances.side_effect = RuntimeError("baas timeout")
+        device_provider.list_devices_by_runtime_binding.side_effect = RuntimeError("baas timeout")
 
         resolver = MagicMock()
         resolver.resolve_for_bot.return_value = _make_ctx(
@@ -542,6 +566,7 @@ class TestListServiceBotRuntimeStages:
         ]
         assert result["failed_targets"] == []
         device_provider.get_instances.assert_not_called()
+        device_provider.list_devices_by_runtime_binding.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_service_bot_list_records_failed_runtime_without_failing_result(self):
@@ -579,7 +604,7 @@ class TestListServiceBotRuntimeStages:
         )
 
         device_provider = MagicMock()
-        device_provider.get_device.return_value = MagicMock(status=DeviceBindingStatus.ACTIVE)
+        device_provider.get_device.return_value = _make_device(device_provider="arca")
 
         resolver = MagicMock()
         resolver.resolve_for_bot.return_value = _make_ctx(
@@ -926,13 +951,10 @@ class TestListRunningCronsOwnerId:
                 30: _make_device(device_provider="baas"),
             }[binding_id]
         )
-        device_provider.get_instances.return_value = {
-            "bot_uuid": "bot-uuid-online",
-            "devices": [
-                _make_instance("DEVICE-001", provider_device_id="PDS-001"),
-                _make_instance("DEVICE-002", provider_device_id="PDS-002"),
-            ],
-        }
+        device_provider.list_devices_by_runtime_binding.return_value = [
+            "DEVICE-001",
+            "DEVICE-002",
+        ]
 
         resolver = MagicMock()
         resolver.resolve_for_bot.return_value = _make_ctx(
@@ -975,14 +997,12 @@ class TestListRunningCronsOwnerId:
             "DEVICE-001",
             "DEVICE-002",
         }
-        assert {item["provider_device_id"] for item in result["data"]} == {
-            "PDS-001",
-            "PDS-002",
-        }
-        assert {item["bot_uuid"] for item in result["data"]} == {"bot-uuid-online"}
-        assert {item["instance_health_status"] for item in result["data"]} == {
-            "ACTIVE"
-        }
+        for item in result["data"]:
+            assert "provider_device_id" not in item
+            assert "bot_uuid" not in item
+            assert "instance_status" not in item
+            assert "instance_health" not in item
+            assert "instance_health_status" not in item
         assert result["failed_targets"] == []
 
     @pytest.mark.asyncio
@@ -1020,13 +1040,10 @@ class TestListRunningCronsOwnerId:
                 30: _make_device(device_provider="baas"),
             }[binding_id]
         )
-        device_provider.get_instances.return_value = {
-            "bot_uuid": "bot-uuid-online",
-            "devices": [
-                _make_instance("DEVICE-001", provider_device_id="PDS-001"),
-                _make_instance("DEVICE-002", provider_device_id="PDS-002"),
-            ],
-        }
+        device_provider.list_devices_by_runtime_binding.return_value = [
+            "DEVICE-001",
+            "DEVICE-002",
+        ]
 
         resolver = MagicMock()
         resolver.resolve_for_binding.side_effect = (
@@ -1109,13 +1126,10 @@ class TestListRunningCronsOwnerId:
 
         device_provider = MagicMock()
         device_provider.get_device.return_value = _make_device(device_provider="baas")
-        device_provider.get_instances.return_value = {
-            "bot_uuid": "bot-uuid-online",
-            "devices": [
-                _make_instance("DEVICE-001", provider_device_id="PDS-001"),
-                _make_instance("DEVICE-002", provider_device_id="PDS-002"),
-            ],
-        }
+        device_provider.list_devices_by_runtime_binding.return_value = [
+            "DEVICE-001",
+            "DEVICE-002",
+        ]
 
         resolver = MagicMock()
         resolver.resolve_for_binding.side_effect = (
@@ -1170,14 +1184,67 @@ class TestListRunningCronsOwnerId:
 
         assert exc_info.value.error_code == 400
 
+    @pytest.mark.asyncio
+    async def test_list_running_crons_records_adapter_failure_with_dict_data(self):
+        bot_provider = MagicMock()
+        bot_provider.get_bot.return_value = {
+            "bot_id": "service-bot",
+            "owner_id": "owner-1",
+            "binding_id": 10,
+            "bot_name": "Service Bot",
+            "bot_type": "service",
+        }
+
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device(device_provider="arca")
+
+        resolver = MagicMock()
+        resolver.resolve_for_bot.return_value = _make_ctx(
+            binding_id=10,
+            bot_id="service-bot",
+            user_id="owner-1",
+        )
+
+        transport = MagicMock()
+        transport.invoke = AsyncMock(return_value={
+            "success": False,
+            "message": "adapter rejected",
+            "data": {},
+        })
+        publish_repo = MagicMock()
+        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = None
+
+        svc = _make_service(
+            bot_provider=bot_provider,
+            device_provider=device_provider,
+            resolver=resolver,
+            transport=transport,
+            publish_repo=publish_repo,
+        )
+
+        result = await svc.list_running_crons(
+            user_id="owner-1",
+            nick_name="Owner",
+            bot_id="service-bot",
+        )
+
+        assert result["data"] == []
+        assert result["failed_targets"] == [
+            {
+                "bot_id": "service-bot",
+                "bot_name": "Service Bot",
+                "owner_id": "owner-1",
+                "runtime_stage": "draft",
+                "reason": "cron_api_failed",
+                "message": "adapter rejected",
+            }
+        ]
+
 
 class TestForwardRequestUsesResolver:
     @pytest.mark.asyncio
     async def test_forward_request_calls_resolver_not_v2(self):
-        """forward_request(create/update/delete cron)走 resolver,不再调 v2 —
-        否则 baas service bot 落 v2 direct 分支丢 binding_id → fallback 裸 httpx 直发
-        ARCA-SANDBOX 内网 target → 500。走 resolver 才永填 binding_id → proxypass。
-        """
+        """forward_request uses the resolver-built adapter connection context."""
         bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
             "bot_id": "bot-1", "owner_id": "user-1", "binding_id": 42,
@@ -1280,7 +1347,7 @@ class TestForwardRequestUsesResolver:
         )
 
         device_provider = MagicMock()
-        device_provider.get_device.return_value = MagicMock(status=DeviceBindingStatus.ACTIVE)
+        device_provider.get_device.return_value = _make_device(device_provider="arca")
 
         resolver = MagicMock()
         resolver.resolve_for_binding.return_value = _make_ctx(
@@ -1336,7 +1403,7 @@ class TestForwardRequestUsesResolver:
         )
 
         device_provider = MagicMock()
-        device_provider.get_device.return_value = MagicMock(status=DeviceBindingStatus.ACTIVE)
+        device_provider.get_device.return_value = _make_device(device_provider="arca")
 
         resolver = MagicMock()
         resolver.resolve_for_binding.return_value = _make_ctx(
@@ -1398,13 +1465,10 @@ class TestForwardRequestUsesResolver:
 
         device_provider = MagicMock()
         device_provider.get_device.return_value = _make_device(device_provider="baas")
-        device_provider.get_instances.return_value = {
-            "bot_uuid": "bot-uuid-online",
-            "devices": [
-                _make_instance("DEVICE-001", provider_device_id="PDS-001"),
-                _make_instance("DEVICE-002", provider_device_id="PDS-002"),
-            ],
-        }
+        device_provider.list_devices_by_runtime_binding.return_value = [
+            "DEVICE-001",
+            "DEVICE-002",
+        ]
 
         resolver = MagicMock()
         resolver.resolve_for_binding.side_effect = (
@@ -1441,10 +1505,24 @@ class TestForwardRequestUsesResolver:
             runtime_stage="online",
         )
 
-        assert result["success"] is True
+        assert result["success"] is False
+        assert result["message"] == "partial runtime instances failed"
+        assert "target" not in result["data"]
         assert result["data"]["succeeded"] == 1
         assert result["data"]["failed"] == 1
-        assert result["data"]["results"][0]["device_uuid"] == "DEVICE-001"
+        success_item = result["data"]["results"][0]
+        assert success_item["bot_id"] == "service-bot"
+        assert success_item["bot_name"] == "Service Bot"
+        assert success_item["owner_id"] == "owner-1"
+        assert success_item["runtime_stage"] == "online"
+        assert success_item["publish_id"] == 202
+        assert success_item["publish_status"] == PublishStatus.SUCCESS.value
+        assert success_item["device_uuid"] == "DEVICE-001"
+        assert "provider_device_id" not in success_item
+        assert "bot_uuid" not in success_item
+        assert "instance_status" not in success_item
+        assert "instance_health" not in success_item
+        assert "instance_health_status" not in success_item
         assert result["failed_targets"] == [
             {
                 "bot_id": "service-bot",
@@ -1455,11 +1533,6 @@ class TestForwardRequestUsesResolver:
                 "reason": "cron_api_failed",
                 "message": "DEVICE-002 timeout",
                 "device_uuid": "DEVICE-002",
-                "provider_device_id": "PDS-002",
-                "bot_uuid": "bot-uuid-online",
-                "instance_status": "ACTIVE",
-                "instance_health": "true",
-                "instance_health_status": "ACTIVE",
             }
         ]
         resolver.resolve_for_binding.assert_any_call(
@@ -1493,13 +1566,10 @@ class TestForwardRequestUsesResolver:
 
         device_provider = MagicMock()
         device_provider.get_device.return_value = _make_device(device_provider="baas")
-        device_provider.get_instances.return_value = {
-            "bot_uuid": "bot-uuid-online",
-            "devices": [
-                _make_instance("DEVICE-001", provider_device_id="PDS-001"),
-                _make_instance("DEVICE-002", provider_device_id="PDS-002"),
-            ],
-        }
+        device_provider.list_devices_by_runtime_binding.return_value = [
+            "DEVICE-001",
+            "DEVICE-002",
+        ]
 
         resolver = MagicMock()
         resolver.resolve_for_binding.side_effect = (
@@ -1535,13 +1605,69 @@ class TestForwardRequestUsesResolver:
         )
 
         assert result["success"] is False
+        assert "target" not in result["data"]
         assert result["data"]["succeeded"] == 0
         assert result["data"]["failed"] == 2
+        assert {item["bot_id"] for item in result["data"]["results"]} == {
+            "service-bot",
+        }
+        assert {item["runtime_stage"] for item in result["data"]["results"]} == {
+            "online",
+        }
         assert [item["reason"] for item in result["failed_targets"]] == [
             "cron_api_failed",
             "cron_api_failed",
         ]
         assert transport.invoke.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_run_cron_rejects_service_runtime_without_device_provider(self):
+        bot_provider = MagicMock()
+        bot_provider.get_bot.return_value = {
+            "bot_id": "service-bot",
+            "owner_id": "owner-1",
+            "binding_id": 10,
+            "bot_name": "Service Bot",
+            "bot_type": "service",
+        }
+
+        publish_repo = MagicMock()
+        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = (
+            _make_publish_record(
+                publish_id=202,
+                status=PublishStatus.SUCCESS.value,
+                binding_key="online",
+                binding_id=30,
+            )
+        )
+
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = MagicMock(
+            status=DeviceBindingStatus.ACTIVE
+        )
+
+        transport = MagicMock()
+        transport.invoke = AsyncMock(return_value={"success": True, "data": {}})
+
+        svc = _make_service(
+            bot_provider=bot_provider,
+            device_provider=device_provider,
+            transport=transport,
+            publish_repo=publish_repo,
+        )
+
+        result = await svc.run_cron(
+            bot_id="service-bot",
+            user_id="owner-1",
+            nick_name="Owner",
+            task_id="task-o",
+            force=True,
+            runtime_stage="online",
+        )
+
+        assert result["success"] is False
+        assert result["failed_targets"][0]["reason"] == "unsupported_device_provider"
+        transport.invoke.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_cron_runs_fans_out_to_runtime_instances(self):
@@ -1566,13 +1692,10 @@ class TestForwardRequestUsesResolver:
 
         device_provider = MagicMock()
         device_provider.get_device.return_value = _make_device(device_provider="baas")
-        device_provider.get_instances.return_value = {
-            "bot_uuid": "bot-uuid-online",
-            "devices": [
-                _make_instance("DEVICE-001", provider_device_id="PDS-001"),
-                _make_instance("DEVICE-002", provider_device_id="PDS-002"),
-            ],
-        }
+        device_provider.list_devices_by_runtime_binding.return_value = [
+            "DEVICE-001",
+            "DEVICE-002",
+        ]
 
         resolver = MagicMock()
         resolver.resolve_for_binding.side_effect = (
@@ -1588,7 +1711,10 @@ class TestForwardRequestUsesResolver:
             device_uuid = conn_info["device_uuid"]
             return {
                 "success": True,
-                "data": {"runs": [{"run_id": f"run-{device_uuid}"}]},
+                "data": {
+                    "input": "hello",
+                    "runs": [{"run_id": f"run-{device_uuid}"}],
+                },
             }
 
         transport = MagicMock()
@@ -1612,6 +1738,7 @@ class TestForwardRequestUsesResolver:
         )
 
         assert result["success"] is True
+        assert "target" not in result["data"]
         assert result["data"]["succeeded"] == 2
         assert {item["device_uuid"] for item in result["data"]["results"]} == {
             "DEVICE-001",
@@ -1621,6 +1748,20 @@ class TestForwardRequestUsesResolver:
             item["data"]["runs"][0]["run_id"]
             for item in result["data"]["results"]
         } == {"run-DEVICE-001", "run-DEVICE-002"}
+        for item in result["data"]["results"]:
+            assert item["bot_id"] == "service-bot"
+            assert item["bot_name"] == "Service Bot"
+            assert item["owner_id"] == "owner-1"
+            assert item["runtime_stage"] == "online"
+            assert item["publish_id"] == 202
+            assert item["publish_status"] == PublishStatus.SUCCESS.value
+            assert "provider_device_id" not in item
+            assert "bot_uuid" not in item
+            assert "instance_status" not in item
+            assert "instance_health" not in item
+            assert "instance_health_status" not in item
+            assert "bot_id" not in item["data"]
+            assert "runtime_stage" not in item["data"]
         resolver.resolve_for_binding.assert_any_call(
             30, "owner-1", bot_id="service-bot", device_uuid="DEVICE-001"
         )
@@ -1628,6 +1769,90 @@ class TestForwardRequestUsesResolver:
             30, "owner-1", bot_id="service-bot", device_uuid="DEVICE-002"
         )
         assert transport.invoke.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_get_cron_runs_uses_runtime_device_list_not_get_instances(self):
+        bot_provider = MagicMock()
+        bot_provider.get_bot.return_value = {
+            "bot_id": "service-bot",
+            "owner_id": "owner-1",
+            "binding_id": 10,
+            "bot_name": "Service Bot",
+            "bot_type": "service",
+        }
+
+        publish_repo = MagicMock()
+        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = (
+            _make_publish_record(
+                publish_id=202,
+                status=PublishStatus.SUCCESS.value,
+                binding_key="online",
+                binding_id=30,
+            )
+        )
+
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device(device_provider="teclaw")
+        device_provider.get_instances.side_effect = AssertionError(
+            "cron runtime expansion must not use get_instances"
+        )
+        device_provider.list_devices_by_runtime_binding.return_value = ["DEVICE-001"]
+
+        resolver = MagicMock()
+        resolver.resolve_for_binding.side_effect = (
+            lambda binding_id, operator_id, *, bot_id, device_uuid=None: _make_ctx(
+                binding_id=binding_id,
+                bot_id=bot_id,
+                user_id=operator_id,
+                device_uuid=device_uuid,
+            )
+        )
+
+        transport = MagicMock()
+        transport.invoke = AsyncMock(return_value={
+            "success": True,
+            "data": {"runs": [{"run_id": "run-DEVICE-001"}]},
+        })
+
+        svc = _make_service(
+            bot_provider=bot_provider,
+            device_provider=device_provider,
+            resolver=resolver,
+            transport=transport,
+            publish_repo=publish_repo,
+        )
+
+        result = await svc.get_cron_runs(
+            bot_id="service-bot",
+            user_id="owner-1",
+            nick_name="Owner",
+            task_id="task-o",
+            limit=20,
+            runtime_stage="online",
+        )
+
+        assert result["success"] is True
+        assert "target" not in result["data"]
+        assert result["data"]["succeeded"] == 1
+        result_item = result["data"]["results"][0]
+        assert result_item["bot_id"] == "service-bot"
+        assert result_item["bot_name"] == "Service Bot"
+        assert result_item["owner_id"] == "owner-1"
+        assert result_item["runtime_stage"] == "online"
+        assert result_item["publish_id"] == 202
+        assert result_item["publish_status"] == PublishStatus.SUCCESS.value
+        assert result_item["device_uuid"] == "DEVICE-001"
+        assert result["failed_targets"] == []
+        device_provider.get_instances.assert_not_called()
+        device_provider.list_devices_by_runtime_binding.assert_called_once_with(
+            binding_id=30,
+        )
+        resolver.resolve_for_binding.assert_called_once_with(
+            30,
+            "owner-1",
+            bot_id="service-bot",
+            device_uuid="DEVICE-001",
+        )
 
     @pytest.mark.asyncio
     async def test_get_cron_runs_routes_specific_device_uuid(self):
@@ -1652,13 +1877,10 @@ class TestForwardRequestUsesResolver:
 
         device_provider = MagicMock()
         device_provider.get_device.return_value = _make_device(device_provider="baas")
-        device_provider.get_instances.return_value = {
-            "bot_uuid": "bot-uuid-online",
-            "devices": [
-                _make_instance("DEVICE-001", provider_device_id="PDS-001"),
-                _make_instance("DEVICE-002", provider_device_id="PDS-002"),
-            ],
-        }
+        device_provider.list_devices_by_runtime_binding.return_value = [
+            "DEVICE-001",
+            "DEVICE-002",
+        ]
 
         resolver = MagicMock()
         resolver.resolve_for_binding.side_effect = (
@@ -1755,7 +1977,8 @@ class TestForwardRequestUsesResolver:
         )
 
         device_provider = MagicMock()
-        device_provider.get_device.return_value = MagicMock(status=DeviceBindingStatus.ACTIVE)
+        device_provider.get_device.return_value = _make_device(device_provider="teclaw")
+        device_provider.list_devices_by_runtime_binding.return_value = ["DEVICE-T1"]
 
         binding_repo = MagicMock()
         binding_repo.get_by_id.return_value = _make_binding(
@@ -1800,6 +2023,7 @@ class TestForwardRequestUsesResolver:
 
         binding_repo.get_by_id.assert_called_once_with(30)
         teclaw_builder.build.assert_called_once()
+        assert teclaw_builder.build.call_args.kwargs["device_uuid"] == "DEVICE-T1"
         sent_conn_info = transport.invoke.await_args.args[0]
         assert sent_conn_info["engine_type"] == "teclaw"
         assert sent_conn_info["bind_id"] == 30
