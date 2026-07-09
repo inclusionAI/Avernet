@@ -54,7 +54,6 @@ pub struct ChannelBinding {
     pub env: String,
     pub status: BindingStatus,
     pub created_by: Option<String>,
-    pub created_at: u64,
     pub config: ChannelConfig,
 }
 

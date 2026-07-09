@@ -126,6 +126,8 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     // ── channel bindings ─────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_channel_bindings (
         id TEXT PRIMARY KEY,
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         channel_type TEXT NOT NULL,
         account_ref TEXT NOT NULL,
         target_json TEXT NOT NULL,
@@ -134,7 +136,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         env TEXT NOT NULL,
         status TEXT NOT NULL,
         created_by TEXT DEFAULT NULL,
-        created_at INTEGER NOT NULL,
         config_json TEXT NOT NULL
     )",
     "CREATE INDEX IF NOT EXISTS idx_channel_bindings_account ON bcs_channel_bindings(channel_type, account_ref, status)",
@@ -142,6 +143,8 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     // ── channel conversations ─────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_channel_conversations (
         binding_id TEXT NOT NULL,
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         im_conversation_id TEXT NOT NULL,
         im_conversation_type TEXT NOT NULL,
         session_scope TEXT NOT NULL,
@@ -156,6 +159,8 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     // ── channel IM participants ───────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_channel_im_participants (
         channel_type TEXT NOT NULL,
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         account_ref TEXT NOT NULL,
         im_user_id TEXT NOT NULL,
         actor_id TEXT NOT NULL,

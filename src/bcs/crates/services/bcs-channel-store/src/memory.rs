@@ -390,7 +390,6 @@ mod tests {
             env: "dev".to_string(),
             status,
             created_by: Some("creator".to_string()),
-            created_at: 1,
             config: serde_json::json!({
                 "robot_code": account_ref,
                 "client_id": "client_id",
