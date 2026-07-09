@@ -106,7 +106,14 @@ backend_start() {
             nohup "${backend_cmd[@]}" < /dev/null >> "${BACKEND_LOG}" 2>&1 &
     fi
 
-    sleep 10
+    local attempt=0
+    while [ "$attempt" -lt 20 ]; do
+        if backend_ready; then
+            break
+        fi
+        sleep 0.5
+        attempt=$((attempt + 1))
+    done
 
     # 验证进程是否启动成功
     local backend_pid=$(ps aux | grep -v grep | grep "agentclaw/community/main.py" | awk '{print $2}' | head -1)

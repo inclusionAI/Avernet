@@ -105,6 +105,11 @@ def _merge_singlebox_model_config(oc_config: dict) -> None:
             f"SINGLEBOX_MODEL_CONFIG_FILE is not valid JSON: {config_path}"
         ) from exc
 
+    if not isinstance(model_config, dict):
+        raise DeviceAllocateError(
+            f"SINGLEBOX_MODEL_CONFIG_FILE must be a JSON object: {config_path}"
+        )
+
     models = model_config.get("models")
     if models is not None:
         oc_config["models"] = models

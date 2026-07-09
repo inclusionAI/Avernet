@@ -199,3 +199,32 @@ def test_create_openclaw_config_removes_template_model_fields_for_mock_config(
     assert "model" not in defaults
     assert defaults["models"] == {}
     assert "imageModel" not in defaults
+
+
+def test_create_openclaw_config_rejects_non_object_singlebox_model_config(
+    monkeypatch, tmp_path
+):
+    manager = pm.LocalProcessManager()
+
+    template_path = tmp_path / "template-openclaw.json"
+    template_path.write_text(
+        json.dumps({"models": {"mode": "merge", "providers": {}}, "gateway": {}}),
+        encoding="utf-8",
+    )
+    runtime_model_config = tmp_path / "list-model-config.json"
+    runtime_model_config.write_text("[]", encoding="utf-8")
+
+    monkeypatch.setattr(manager, "_resolve_config_template_path", lambda: template_path)
+    monkeypatch.setenv("SINGLEBOX_MODEL_CONFIG_FILE", str(runtime_model_config))
+    monkeypatch.setenv("BCN_PLUGIN_PATH", str(tmp_path / "missing-plugin"))
+
+    workspace_dir = tmp_path / "bot" / "openclaw" / "workspace"
+    workspace_dir.mkdir(parents=True)
+
+    with pytest.raises(pm.DeviceAllocateError, match="must be a JSON object"):
+        manager.create_openclaw_config(
+            bolt_id="default",
+            openclaw_port=18888,
+            workspace_dir=workspace_dir,
+            entity_id="mock-user",
+        )

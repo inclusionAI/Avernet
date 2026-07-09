@@ -88,7 +88,7 @@ demo_bot_create() {
             -H "Content-Type: application/json" \
             -H "x-user-id: ${DEMO_ENTITY_ID}" \
             -d "$payload" \
-            2>>"${DEMO_BOT_LOG}"
+            2>>"${DEMO_BOT_LOG}" || true
     )"
     printf '%s\n' "$response" >> "${DEMO_BOT_LOG}"
     printf '%s\n' "$response" | jq -r '.data.bot_id // .data.bot.bot_id // .bot_id // empty'

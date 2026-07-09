@@ -154,19 +154,35 @@ singlebox_model_config_write_home() {
         log_error "Home model config is not valid JSON: ${source}"
         return 1
     fi
-    if ! jq -e '(.models? != null) or (.agents.defaults.model? != null) or (.agents.defaults.models? != null) or (.agents.defaults.imageModel? != null)' "$source" >/dev/null; then
+    if ! jq -e '
+      def agent_defaults:
+        if (.agents? | type) == "object" and (.agents.defaults? | type) == "object"
+        then .agents.defaults
+        else {}
+        end;
+      (.models? != null)
+      or (agent_defaults.model? != null)
+      or (agent_defaults.models? != null)
+      or (agent_defaults.imageModel? != null)
+    ' "$source" >/dev/null; then
         log_error "Home model config has no model fields: ${source}"
         return 1
     fi
 
-    jq '{
+    jq '
+    def agent_defaults:
+      if (.agents? | type) == "object" and (.agents.defaults? | type) == "object"
+      then .agents.defaults
+      else {}
+      end;
+    {
       models: (.models // {mode: "merge", providers: {}}),
       agents: {
         defaults: (
           {}
-          + (if .agents.defaults.model? != null then {model: .agents.defaults.model} else {} end)
-          + (if .agents.defaults.models? != null then {models: .agents.defaults.models} else {} end)
-          + (if .agents.defaults.imageModel? != null then {imageModel: .agents.defaults.imageModel} else {} end)
+          + (if agent_defaults.model? != null then {model: agent_defaults.model} else {} end)
+          + (if agent_defaults.models? != null then {models: agent_defaults.models} else {} end)
+          + (if agent_defaults.imageModel? != null then {imageModel: agent_defaults.imageModel} else {} end)
         )
       }
     }' "$source" > "$output_file"

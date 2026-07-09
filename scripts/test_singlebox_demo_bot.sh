@@ -114,6 +114,24 @@ SH
   grep -F 'x-user-id: mock-user' "$CURL_ARGS_FILE" >/dev/null || fail "x-user-id header missing"
 }
 
+test_create_handles_curl_failure_without_exiting() {
+  setup_env
+  tmpbin="$(mktemp -d)"
+  cat > "${tmpbin}/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "curl failed" >&2
+exit 7
+SH
+  chmod +x "${tmpbin}/curl"
+  PATH="${tmpbin}:$PATH"
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  demo_bot_defaults
+  assert_eq "" "$(demo_bot_create)" "failed create should return empty bot id"
+  grep -F 'curl failed' "${DEMO_BOT_LOG}" >/dev/null || fail "curl error should be logged"
+}
+
 test_wait_ready_polls_backend_status_success() {
   setup_env
   tmpbin="$(mktemp -d)"
@@ -358,6 +376,7 @@ test_env_overrides_are_used
 test_bcs_bot_id_uses_backend_bot_and_entity_id
 test_find_existing_parses_backend_list
 test_create_posts_to_local_backend
+test_create_handles_curl_failure_without_exiting
 test_wait_ready_polls_backend_status_success
 test_wait_ready_fails_on_backend_failed_status
 test_verify_uses_bcs_cli_get

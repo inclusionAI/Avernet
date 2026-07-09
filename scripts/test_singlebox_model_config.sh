@@ -116,6 +116,36 @@ JSON
   ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null || fail "home runtime config mismatch"
 }
 
+test_home_ignores_non_object_agents_when_models_exist() {
+  setup_env
+  export SINGLEBOX_MODEL_CONFIG_MODE="home"
+  mkdir -p "$(dirname "$OPENCLAW_CONFIG_FILE")"
+  cat > "$OPENCLAW_CONFIG_FILE" <<'JSON'
+{
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "home-provider": {
+        "baseUrl": "https://home.example.test/v1",
+        "apiKey": "home-key",
+        "models": [{"id": "home-model", "name": "Home Model"}]
+      }
+    }
+  },
+  "agents": []
+}
+JSON
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  singlebox_model_config_prepare
+
+  jq -e '
+    .models.providers["home-provider"].apiKey == "home-key"
+    and .agents.defaults == {}
+  ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null || fail "home mode should ignore non-object agents"
+}
+
 test_mock_generates_no_real_provider() {
   setup_env
   export SINGLEBOX_MODEL_CONFIG_MODE="mock"
@@ -152,6 +182,7 @@ test_noninteractive_defaults_to_mock_without_stdout_noise() {
 test_manual_generates_runtime_config_from_env
 test_manual_requires_complete_env
 test_home_copies_only_model_fields
+test_home_ignores_non_object_agents_when_models_exist
 test_mock_generates_no_real_provider
 test_prompt_maps_selection_to_mode
 test_noninteractive_defaults_to_mock_without_stdout_noise

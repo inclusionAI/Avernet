@@ -140,8 +140,13 @@ export class BcsWsClient {
     // Set up message handling
     ws.on('message', data => this._handleMessage(data));
 
-    // Connect bot — pass the session so _connect can use bot_uuid and token
-    await this._connect(savedSession, connectBotId);
+    try {
+      // Connect bot — pass the session so _connect can use bot_uuid and token
+      await this._connect(savedSession, connectBotId);
+    } catch (err) {
+      await this.disconnect();
+      throw err;
+    }
 
     // Start heartbeat
     this._startHeartbeat();

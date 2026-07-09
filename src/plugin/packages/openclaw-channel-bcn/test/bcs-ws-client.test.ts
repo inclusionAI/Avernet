@@ -8,7 +8,7 @@ import { WebSocketServer } from 'ws';
 import { BcsWsClient } from '../src/bcs-ws-client.js';
 import type { ResolvedBcsAccount, SessionInfo } from '../src/types.js';
 
-async function startBcsStub() {
+async function startBcsStub(responseBotUuid?: string) {
   let cookieHeader: string | undefined;
   let requestUrl: string | undefined;
   let connectParams: Record<string, unknown> | undefined;
@@ -29,7 +29,7 @@ async function startBcsStub() {
           ok: true,
           payload: {
             is_new: false,
-            bot_uuid: frame.params?.bot_id ?? 'bot-1',
+            bot_uuid: responseBotUuid ?? frame.params?.bot_id ?? 'bot-1',
             token: 'next-token',
             protocol_version: 2,
           },
@@ -238,6 +238,49 @@ describe('BcsWsClient security behavior', () => {
       await client.connect(staleSession);
       assert.equal(bcs.connectParams?.bot_id, 'default:mock-user');
       assert.equal(bcs.connectParams?.token, undefined);
+    } finally {
+      await client.disconnect();
+      await bcs.close();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('disconnects when configured connect bot id is rejected by BCS response', async () => {
+    const bcs = await startBcsStub('different-bot');
+    const dataDir = await mkdtemp(join(tmpdir(), 'bcn-bot-id-mismatch-'));
+    const account: ResolvedBcsAccount = {
+      accountId: 'default',
+      enabled: true,
+      bcsUrl: `ws://127.0.0.1:${bcs.port}/ws/bot`,
+      botId: 'default:mock-user',
+      connectBotId: 'default:mock-user',
+      botName: 'Developer',
+      capabilities: {
+        summary: 'test bot',
+        domains: [],
+        skills: [],
+        scopes: [],
+      },
+      heartbeatIntervalMs: 60_000,
+      reconnectIntervalMs: 5_000,
+      connectionTimeoutMs: 10_000,
+    };
+    const client = new BcsWsClient({
+      account,
+      dataDir,
+      log: {
+        info: () => undefined,
+        warn: () => undefined,
+        error: () => undefined,
+      },
+    });
+
+    try {
+      await assert.rejects(
+        () => client.connect(null),
+        /does not match configured bot_id/,
+      );
+      assert.equal(client.connected, false);
     } finally {
       await client.disconnect();
       await bcs.close();
