@@ -7,9 +7,7 @@ from ._record import LockRecord
 
 class DistributedLockModel(Base):
     __tablename__ = "ac_lock_table"
-    __table_args__ = (
-        UniqueConstraint("lock_name", name="uk_lock_name"),
-    )
+    __table_args__ = (UniqueConstraint("lock_name", name="uk_lock_name"),)
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     gmt_create = Column(DateTime, nullable=False, server_default=func.now())
