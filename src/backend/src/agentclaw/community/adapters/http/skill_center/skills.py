@@ -274,6 +274,29 @@ def _resolve_teclaw_local_skill(resolver, bot_id: str, owner_id: str):
     return False, None
 
 
+def _get_skill_by_id_or_link_name(service, skill_id: str, *bolt_ids: str | None):
+    """Look up a skill by numeric ID or link_name across likely bot scopes.
+
+    README requests may arrive without the real bot id in the request context.
+    Numeric IDs are globally unique, while link_name lookup is bot-scoped; try
+    the effective/request bot candidates first and then a global lookup.
+    """
+    if skill_id.isdigit():
+        skill = service.get_skill(skill_id)
+        if skill:
+            return skill
+
+    seen: set[str | None] = set()
+    for bolt_id in (*bolt_ids, None):
+        if bolt_id in seen:
+            continue
+        seen.add(bolt_id)
+        skill = service.get_skill_by_link_name(skill_id, bolt_id=bolt_id)
+        if skill:
+            return skill
+    return None
+
+
 # ==================== Core CRUD APIs ====================
 
 @router.post("/upload", response_model=UploadSkillResponse)
@@ -1060,39 +1083,43 @@ async def get_skill_readme(
     fetch from SkillCenter file-content API; otherwise delegate to
     SkillService.get_skill_readme (handles local://, git://, etc.).
     """
-    logger.info(f"[skills.get_skill_readme] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, skill_id={skill_id}, entity_id={entity_id}")
-
-    # Get effective path parameters
-    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
-
-    # teclaw reads the readme from the (draft) container; resolve provider so the
-    # device-fs path is the workspace-namespace form.
-    is_teclaw, local_skill_adapter = _resolve_teclaw_local_skill(resolver, effective_bot_id, effective_entity_id)
-
-    # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop, is_teclaw=is_teclaw)
-    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
-    repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
-
-    logger.info(f"[skills.get_skill_readme] Creating service: skills_dir={skills_dir}, repo_dir={repo_dir}, is_teclaw={is_teclaw}")
-
-    # Create per-request service instance with user-specific paths
-    service = skill_service_factory.create(
-        active_dir=skills_dir,
-        repo_dir=repo_dir,
-        local_dir=local_dir,
-        local_skill_path_adapter=local_skill_adapter,
+    logger.info(
+        "[skills.get_skill_readme] Request: user_id=%s, ctx_bot_id=%s, "
+        "skill_id=%s, entity_id=%s, bot_id=%s",
+        ctx.user_id, ctx.bot_id, skill_id, entity_id, bot_id,
     )
 
-    # DB lookup: by ID first (numeric), then by link_name
-    skill = None
-    if skill_id.isdigit():
-        skill = service.get_skill(skill_id)
-    if not skill:
-        skill = service.get_skill_by_link_name(skill_id, bolt_id=ctx.bot_id)
+    # Start with the caller/request context only to locate the DB record.
+    effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(
+        ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo
+    )
 
-    # SkillCenter branch: route center:// skills to file-content API
+    initial_skills_dir = path_factory.get_bot_skills_dir(
+        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type
+    )
+    initial_local_dir = path_factory.get_bot_skills_local_dir(
+        effective_entity_id,
+        effective_bot_id,
+        effective_engine,
+        effective_entity_type,
+        is_desktop=is_desktop,
+        is_teclaw=False,
+    )
+    path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
+    initial_repo_dir = path_factory.get_bot_skills_repo_dir(
+        effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop
+    )
+
+    service = skill_service_factory.create(
+        active_dir=initial_skills_dir,
+        repo_dir=initial_repo_dir,
+        local_dir=initial_local_dir,
+        local_skill_path_adapter=None,
+    )
+
+    skill = _get_skill_by_id_or_link_name(service, skill_id, effective_bot_id, ctx.bot_id)
+
+    # SkillCenter branch: route center:// skills to file-content API.
     if skill and (skill.get('git_path') or '').startswith('center://'):
         try:
             result = skill_center_client.get_file_content(skill.get('name'), "SKILL.md")
@@ -1111,9 +1138,70 @@ async def get_skill_readme(
             logger.warning(f"[skills.get_skill_readme] SkillCenter file-content failed: {e}")
         raise HTTPException(status_code=404, detail="Skill or README not found")
 
-    # Default: local://, git://, or repo lookup via service
-    logger.info(f"[skills.get_skill_readme] Calling service.get_skill_readme: skill_id={skill_id}, user_id={ctx.user_id}")
-    readme = await service.get_skill_readme(skill_id, ctx.user_id)
+    # The DB row is the source of truth for the bot/owner that owns local files.
+    # This is especially important for TEClaw requests whose HTTP context can be
+    # default/openclaw even though the local skill belongs to a TEClaw bot.
+    read_bot_id = (skill or {}).get("bolt_id") or effective_bot_id
+    read_owner_id = (skill or {}).get("user_id") or effective_entity_id
+    read_entity_type = effective_entity_type
+    read_engine = resolve_engine_for_bot(
+        bot_id=read_bot_id,
+        owner_id=read_owner_id,
+        override=engine_type,
+        bot_repo=bot_repo,
+    )
+    read_is_desktop = False
+    try:
+        bot = bot_repo.get_by_id_and_owner(read_bot_id, read_owner_id)
+        if bot and bot.get("bot_type") == "desktop":
+            read_is_desktop = True
+    except Exception as e:
+        logger.warning(
+            "[skills.get_skill_readme] bot_type lookup failed for bot_id=%s "
+            "owner=%s: %s — defaulting is_desktop=False",
+            read_bot_id, read_owner_id, e,
+        )
+
+    read_is_teclaw, read_local_skill_adapter = _resolve_teclaw_local_skill(
+        resolver, read_bot_id, read_owner_id
+    )
+
+    read_skills_dir = path_factory.get_bot_skills_dir(
+        read_owner_id, read_bot_id, read_engine, read_entity_type
+    )
+    read_local_dir = path_factory.get_bot_skills_local_dir(
+        read_owner_id,
+        read_bot_id,
+        read_engine,
+        read_entity_type,
+        is_desktop=read_is_desktop,
+        is_teclaw=read_is_teclaw,
+    )
+    path_factory.get_bot_engine_dir(read_owner_id, read_bot_id, read_engine, read_entity_type)
+    read_repo_dir = path_factory.get_bot_skills_repo_dir(
+        read_owner_id, read_bot_id, read_engine, read_entity_type, is_desktop=read_is_desktop
+    )
+
+    logger.info(
+        "[skills.get_skill_readme] Creating read service: skills_dir=%s, "
+        "repo_dir=%s, read_bot_id=%s, read_owner_id=%s, is_teclaw=%s",
+        read_skills_dir, read_repo_dir, read_bot_id, read_owner_id, read_is_teclaw,
+    )
+
+    read_service = skill_service_factory.create(
+        active_dir=read_skills_dir,
+        repo_dir=read_repo_dir,
+        local_dir=read_local_dir,
+        local_skill_path_adapter=read_local_skill_adapter,
+    )
+
+    # Default: local://, git://, or repo lookup via service.
+    logger.info(
+        "[skills.get_skill_readme] Calling service.get_skill_readme: "
+        "skill_id=%s, user_id=%s, bot_id=%s",
+        skill_id, read_owner_id, read_bot_id,
+    )
+    readme = await read_service.get_skill_readme(skill_id, read_owner_id, read_bot_id)
     if readme is None:
         raise HTTPException(status_code=404, detail="Skill or README not found")
     logger.info(f"[skills.get_skill_readme] Success: skill_id={skill_id}")
