@@ -122,7 +122,14 @@ def _sample_models() -> list[Model]:
             name="Claude Opus 4.6",
             display_name="Claude Opus 4.6",
             provider_category="glink_account_hosting",
-            extra={"runtime": "claude-code"},
+            extra={
+                "runtime": "claude-code",
+                # These keys collide with validated fields; the router
+                # must protect them from being overwritten.
+                "enterprise_enabled": False,
+                "provider": "evil-provider",
+                "id": "hijacked",
+            },
         ),
     ]
 
@@ -157,7 +164,12 @@ class TestListModels:
         assert "runtime" not in first
         glink = body["data"]["models"][2]
         assert glink["provider_category"] == "glink_account_hosting"
+        # extra fields merged into response (None extra → no extra keys)
         assert glink["runtime"] == "claude-code"
+        # collision protection — validated fields survive relay keys with the same name
+        assert glink["provider"] == "glink"               # not "evil-provider"
+        assert glink["id"] == "glink/claude-opus-4-6"      # not "hijacked"
+        assert glink["enterprise_enabled"] is True          # not False
 
         plugin.list_models.assert_awaited_once()
 
