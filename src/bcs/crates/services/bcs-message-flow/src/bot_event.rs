@@ -52,6 +52,10 @@ pub async fn handle_bot_event(
     // We accumulate BEFORE publishing to the frontend so we can synthesize the
     // segment-cumulative `message.content` the frontend SDK renders from — the
     // raw SSE delta frame only carries `delta_text` and no `message`.
+    if cmd.state == ChatEventState::Delta && cmd.event_type == "agent" {
+        normalize_thinking_delta(flow, &mut cmd).await;
+    }
+
     if cmd.state == ChatEventState::Delta
         && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
     {
@@ -105,6 +109,12 @@ pub async fn handle_bot_event(
     // thinking frames are cheap no-ops once the buffer is drained.
     if is_chat_segment_boundary_stream(&cmd.event_payload) {
         flush_chat_segment(flow, &cmd, None).await;
+    }
+    if cmd.state == ChatEventState::Delta
+        && cmd.event_type == "agent"
+        && is_thinking_segment_boundary_stream(&cmd.event_payload)
+    {
+        flow.message_tracker.clear_thinking_buf(&cmd.run_id).await;
     }
 
     if is_terminal_state(&cmd.state) {
@@ -1016,6 +1026,33 @@ fn extract_delta_text(event: &Value) -> Option<&str> {
     event.get("delta_text").and_then(|value| value.as_str())
 }
 
+async fn normalize_thinking_delta(flow: &BcsMessageFlow, cmd: &mut BotEventCommand) {
+    if cmd.event_payload.get("stream").and_then(|value| value.as_str()) != Some("thinking") {
+        return;
+    }
+    let Some(delta) = extract_thinking_delta(&cmd.event_payload) else {
+        return;
+    };
+    let accumulated = flow
+        .message_tracker
+        .append_thinking_delta(&cmd.run_id, delta)
+        .await;
+    inject_thinking_text(&mut cmd.event_payload, &accumulated);
+}
+
+fn extract_thinking_delta(event: &Value) -> Option<&str> {
+    event
+        .get("data")
+        .and_then(|data| data.get("delta"))
+        .and_then(|value| value.as_str())
+}
+
+fn inject_thinking_text(event: &mut Value, accumulated_text: &str) {
+    if let Some(data) = event.get_mut("data").and_then(|value| value.as_object_mut()) {
+        data.insert("text".to_string(), Value::String(accumulated_text.to_string()));
+    }
+}
+
 /// Overwrite the frame's `message` with a synthesized assistant message whose
 /// `content` is the segment-accumulated text. The SSE (raw engine) delta frame
 /// carries only `delta_text`; the frontend SDK renders `message.content[].text`
@@ -1055,6 +1092,13 @@ fn is_chat_segment_boundary_stream(payload: &Value) -> bool {
     )
 }
 
+fn is_thinking_segment_boundary_stream(payload: &Value) -> bool {
+    payload
+        .get("stream")
+        .and_then(|value| value.as_str())
+        .map(|stream| stream != "thinking")
+        .unwrap_or(false)
+}
 
 async fn cache_tool_start(flow: &BcsMessageFlow, cmd: &BotEventCommand, data: &Value) {
     if cmd.group_id.is_empty() {
