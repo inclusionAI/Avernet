@@ -180,9 +180,7 @@ class BotPublishRepository:
 
     def insert(self, data: Dict[str, Any]) -> BotPublishRecord:
         ext = data.get("ext")
-        ext_json = (
-            json.dumps(ext, ensure_ascii=False) if ext is not None else None
-        )
+        env = data.get("env", get_current_env())
         with self._db.orm_session() as db:
             row = self.Model(
                 source_bot_pk=data["source_bot_pk"],
@@ -195,13 +193,19 @@ class BotPublishRepository:
                 status=data.get("status", PublishStatus.DRAFT),
                 version=data.get("version"),
                 last_pub_id=data.get("last_pub_id", 0),
-                env=data.get("env", get_current_env()),
-                ext=ext_json,
+                env=env,
+                # ext set after flush: offloading keys the OSS object by the
+                # DB-assigned publish_id, which only exists post-flush. Still a
+                # single INSERT in one transaction (a second flush updates ext
+                # before commit).
+                ext=None,
                 permission_owner=data["permission_owner"],
             )
             db.add(row)
             db.flush()
             new_id = row.id
+            row.ext = self._serialize_ext(ext, new_id, env)
+            db.flush()
             logger.info("[insert] inserted bot publish id=%s", new_id)
         # Re-read after commit — prod returns get_by_id(inserted_id),
         # so the returned record carries DB-populated gmt_create /
@@ -217,7 +221,7 @@ class BotPublishRepository:
                 .filter(self.Model.id == publish_id)
                 .first()
             )
-            return row.to_record() if row else None
+            return self._to_record(row) if row else None
 
     def get_by_publish_bot_id(
         self,
@@ -235,7 +239,7 @@ class BotPublishRepository:
             if publish_status:
                 query = query.filter(self.Model.status == publish_status)
             row = query.order_by(self.Model.version.desc()).first()
-            return row.to_record() if row else None
+            return self._to_record(row) if row else None
 
     def get_draft_by_publish_bot_id(
         self,
@@ -253,7 +257,7 @@ class BotPublishRepository:
                 .order_by(self.Model.version.desc())
                 .first()
             )
-            return row.to_record() if row else None
+            return self._to_record(row) if row else None
 
     def get_by_publish_bot_id_and_version(
         self,
@@ -273,7 +277,7 @@ class BotPublishRepository:
                 )
                 .first()
             )
-            return row.to_record() if row else None
+            return self._to_record(row) if row else None
 
     def list_by_owner(
         self,
@@ -289,7 +293,7 @@ class BotPublishRepository:
             if status:
                 query = query.filter(self.Model.status == status)
             rows = query.order_by(self.Model.gmt_create.desc()).all()
-            return [r.to_record() for r in rows]
+            return [self._to_record(r) for r in rows]
 
     def list_by_source_bot(
         self,
@@ -306,7 +310,7 @@ class BotPublishRepository:
                 .order_by(self.Model.gmt_create.desc())
                 .all()
             )
-            return [r.to_record() for r in rows]
+            return [self._to_record(r) for r in rows]
 
     def list_by_status(
         self,
@@ -323,7 +327,7 @@ class BotPublishRepository:
                 .order_by(self.Model.gmt_create.desc())
                 .all()
             )
-            return [r.to_record() for r in rows]
+            return [self._to_record(r) for r in rows]
 
     def get_latest_by_source_bot_id_and_owner_and_status(
         self,
@@ -344,7 +348,7 @@ class BotPublishRepository:
                 .order_by(self.Model.id.desc())
                 .first()
             )
-            return row.to_record() if row else None
+            return self._to_record(row) if row else None
 
     def get_latest_success_by_source_bot_id(
         self,
@@ -362,7 +366,7 @@ class BotPublishRepository:
                 .order_by(self.Model.id.desc())
                 .first()
             )
-            return row.to_record() if row else None
+            return self._to_record(row) if row else None
 
     def get_by_last_pub_id(
         self,
@@ -375,7 +379,7 @@ class BotPublishRepository:
                 .order_by(self.Model.id.desc())
                 .first()
             )
-            return row.to_record() if row else None
+            return self._to_record(row) if row else None
 
     # ── updates (single optimistic-lock statements) ─────────────
 
@@ -409,7 +413,7 @@ class BotPublishRepository:
         ext: Dict[str, Any],
         source_status: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
-        ext_json = json.dumps(ext, ensure_ascii=False)
+        ext_json = self._serialize_ext(ext, publish_id, get_current_env())
         with self._db.orm_session() as db:
             query = db.query(self.Model).filter(
                 self.Model.id == publish_id
@@ -465,11 +469,40 @@ class BotPublishRepository:
 
     # ── delete (single hard DELETE — prod parity) ───────────────
 
+    def _offloaded_key(self, publish_id: int) -> Optional[str]:
+        """Return the OSS key of this record's offloaded artifact, if any.
+
+        Reads only the raw ``ext`` column (no resolution) and returns the
+        marker's ``oss_key`` when the artifact was offloaded, else ``None``.
+        """
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self.Model.ext)
+                .filter(self.Model.id == publish_id)
+                .first()
+            )
+        if not row or not row[0]:
+            return None
+        try:
+            ext = json.loads(row[0])
+        except (ValueError, TypeError):
+            return None
+        marker = ext.get(_ARTIFACT_OSS_MARKER) if isinstance(ext, dict) else None
+        return marker.get("oss_key") if isinstance(marker, dict) else None
+
     def delete(self, publish_id: int) -> bool:
+        # Capture an offloaded artifact's OSS key (if any) before the row is
+        # gone, so object storage can be cleaned up after a successful delete.
+        # The hard DELETE below stays a single statement (prod parity); the
+        # lookup only runs when offload storage is configured.
+        oss_key = self._offloaded_key(publish_id) if self._oss is not None else None
         with self._db.orm_session() as db:
             affected = (
                 db.query(self.Model)
                 .filter(self.Model.id == publish_id)
                 .delete(synchronize_session=False)
             )
-            return affected > 0
+        if affected > 0 and oss_key:
+            # Best effort — a failed OSS delete must not fail the DB delete.
+            self._oss.delete_object(oss_key)
+        return affected > 0

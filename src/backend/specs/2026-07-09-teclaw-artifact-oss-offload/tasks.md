@@ -55,23 +55,25 @@
         paths in Task 5).
 - **Depends on:** Task 1
 
-## Task 5: Wire offload/inload into the repository read & write paths
+## Task 5: [x] Wire offload/inload into the repository read & write paths
 - **Goal:** Make persistence transparently offload large artifacts and re-inline
   them on read; clean up on delete.
 - **Files:** `src/backend/src/agentclaw/community/plugins/bot_publish_repository.py`
 - **Done when:**
-  - [ ] `_to_record(row)` helper applies `_resolve_ext` to `row.to_record().ext`;
+  - [x] `_to_record(row)` helper applies `_resolve_ext` to `row.to_record().ext`;
         every read method returns records through it (get_by_id, the `get_*`
         queries, and the `list_*` comprehensions).
-  - [ ] `insert` sets `ext` after `db.flush()` (so the key uses the new
+  - [x] `insert` sets `ext` after `db.flush()` (so the key uses the new
         `publish_id`): build row with `ext=None`, flush, `row.ext =
         _serialize_ext(ext, new_id, env)`, flush again — still one INSERT / one
         transaction.
-  - [ ] `update_status_with_ext` builds `ext_json` via
+  - [x] `update_status_with_ext` builds `ext_json` via
         `_serialize_ext(ext, publish_id, get_current_env())`.
-  - [ ] `delete` reads the raw row `ext` first; if it holds the marker, captures
-        `oss_key`, deletes the row, then best-effort `delete_object(oss_key)`.
-  - [ ] `update_status` (no ext) and other non-ext updates are unchanged.
+  - [x] `delete` looks up the raw marker `oss_key` first (only when OSS is
+        configured), keeps the single hard DELETE, then best-effort
+        `delete_object(oss_key)` on success.
+  - [x] `update_status` (no ext) and other non-ext updates are unchanged.
+  - [x] Existing `test_bot_publish_unified.py` still green (18 passed).
 - **Depends on:** Task 4
 
 ## Task 6: Tests & Verification
