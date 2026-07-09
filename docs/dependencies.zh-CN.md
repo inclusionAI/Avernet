@@ -22,6 +22,8 @@
 
 `install-tools` 可能安装 Node.js、uv、OpenClaw、Rust/Cargo、protobuf/protoc，并写入用户目录或调用本机包管理器。当前脚本会在安装 OpenClaw、Rust/Cargo、protobuf/protoc 前询问确认；Node.js 缺失或版本过低时会通过 nvm 安装 Node.js 22，uv 缺失时会尝试通过 `pip` 或官方安装脚本安装。执行前请确认这些本机写入可以接受。
 
+运行 `singlebox.sh` 时也会安装仓库级 pre-push hook，即设置 `core.hooksPath=.githooks`。如果某次命令需要跳过 hook 安装，可以设置 `OCB_SKIP_GIT_HOOKS=1`。
+
 ## 安全规则
 
 - 执行 `sudo`、全局安装、`brew link --force`、`curl | sh` 或等价的系统级写入前，必须停下确认。

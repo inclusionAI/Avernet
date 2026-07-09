@@ -42,7 +42,8 @@ Use this path if you want the fastest native local development stack and accept 
 #### Start
 
 ```bash
-# Check and install or upgrade the toolchain. This may change your host environment.
+# Check and install or upgrade the toolchain, and install the pre-push hook.
+# This may change your host environment.
 ./scripts/singlebox.sh install-tools
 
 # Build and start the local stack: Avernet process + 5 local test bots + frontend
@@ -51,7 +52,8 @@ Use this path if you want the fastest native local development stack and accept 
 
 > **Note**:
 > 1. `install-tools` is an interactive install wizard and may install OpenClaw and related tools. If you only want to preflight dependencies, run `./scripts/singlebox.sh check`.
-> 2. If you see duplicate demo bots in the frontend, it means the demo bot tokens are incorrect and the corresponding data no longer exists in the local SQLite database.
+> 2. Running `singlebox.sh` also installs the repo-local pre-push hook by setting `core.hooksPath=.githooks`. To skip this, set `OCB_SKIP_GIT_HOOKS=1`.
+> 3. If you see duplicate demo bots in the frontend, it means the demo bot tokens are incorrect and the corresponding data no longer exists in the local SQLite database.
 
 ##### Optional: edit local configuration
 
