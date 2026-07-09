@@ -40,6 +40,10 @@ Rust/Cargo, and protobuf/protoc. When Node.js 22+ is missing or too old, it
 installs Node.js through nvm; when uv is missing, it tries `pip` or the official
 installer. Run it only after confirming those local writes are acceptable.
 
+Running `singlebox.sh` also installs the repo-local pre-push hook by setting
+`core.hooksPath=.githooks`. Set `OCB_SKIP_GIT_HOOKS=1` if you need to skip hook
+installation for a one-off command.
+
 ## Safety rules
 
 - Stop for confirmation before running `sudo`, global installs,

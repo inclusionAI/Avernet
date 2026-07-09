@@ -33,8 +33,13 @@ hooks_before="$(git config --worktree --get core.hooksPath 2>/dev/null || git co
 chmod +x .githooks/pre-push
 chmod +x scripts/ci/pre_push.sh
 chmod +x scripts/ci/python_sast_local.sh
+chmod +x scripts/ci/singlebox_coverage.sh
 chmod +x scripts/ci/report_check.py
+chmod +x src/backend/scripts/ci_test.sh
+chmod +x src/baas/scripts/ci_test.sh
 chmod +x src/bcs/scripts/ci_test.sh
+chmod +x src/engine/scripts/ci_test.sh
+chmod +x src/frontend/scripts/ci_test.sh
 
 config_scope="this worktree"
 if ! git config --worktree core.hooksPath .githooks 2>/dev/null; then

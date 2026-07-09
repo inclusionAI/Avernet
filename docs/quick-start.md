@@ -110,6 +110,10 @@ installing OpenClaw, Rust/Cargo, and protobuf/protoc.
 ./scripts/singlebox.sh install-tools
 ```
 
+Running `singlebox.sh` also installs the repo-local pre-push hook by setting
+`core.hooksPath=.githooks`. Set `OCB_SKIP_GIT_HOOKS=1` if you need to skip hook
+installation for a one-off command.
+
 `check` is the preflight command. It only checks dependencies, directories, and
 ports; except for initializing a few local runtime directories, it does not
 install, build, start, or stop processes:
