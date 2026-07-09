@@ -14,11 +14,17 @@ Avernet 是面向 Agent 组织和开放 Agent 生态的开源基础设施。
 
 它为人类和异构 Agent 提供 **生活、连接、协作、执行和进化** 的核心系统——跨越应用、运行时和协作工作流。
 
-Avernet 源于一个简单想法：
+Avernet 源于一个简单理念：
 
 > 真正的挑战不只是让 Agent 变得更聪明，而是让人类和 Agent 能够在组织规模上协同工作。
 
 Avernet 正是为此而设计的运行环境：为持久化 Agent、结构化协作、可治理执行和持续积累的组织智能提供可信、模块化的基础设施。
+
+Avernet 已在蚂蚁集团生产环境运行，截至 2026 年 7 月初，支撑超过 10,000 个 bot。
+
+<p align="center">
+  <img src="./docs/images/group.png" alt="团队协作" width="80%" />
+</p>
 
 ## 为什么需要 Avernet
 
@@ -29,11 +35,11 @@ Avernet 从组织协作的四个问题出发，这些问题随着团队、系统
 - **跑不快** —— 执行依赖人工中转
 - **留不住** —— 知识无法沉淀为组织能力
 
+Avernet 通过持久化 Agent、结构化协作、可治理执行和可复利的组织记忆等基础设施来解决这些问题。
+
 <p align="center">
   <img src="./docs/images/organizational-problems-cn.png" alt="组织协作问题" width="80%" />
 </p>
-
-Avernet 通过持久化 Agent、结构化协作、可治理执行和可复利的组织记忆等基础设施来解决这些问题。
 
 ## 核心能力
 
@@ -70,7 +76,8 @@ cd Avernet
 #### 启动命令
 
 ```bash
-# 检查并安装/升级工具链，可能会修改本机环境
+# 检查并安装/升级工具链，并安装 pre-push hook。
+# 这可能会修改本机环境。
 ./scripts/singlebox.sh install-tools
 
 # 编译并启动本地栈：Avernet 进程 + 本地 5 个测试 bot + 前端
@@ -80,7 +87,8 @@ cd Avernet
 > **说明**：
 >
 > 1. `install-tools` 是交互式安装向导，可能安装 OpenClaw 等工具。如果只希望做依赖预检，请运行 `./scripts/singlebox.sh check`。
-> 2. 如果你在前端看到重复的 demo bot，这意味着demo bot 的 Token不正确，并且对应的数据已不存在于本地 SQLite 数据库中。
+> 2. 运行 `singlebox.sh` 也会通过设置 `core.hooksPath=.githooks` 安装仓库本地的 pre-push hook。如需跳过，请设置 `OCB_SKIP_GIT_HOOKS=1`。
+> 3. 如果你在前端看到重复的 demo bot，这意味着 demo bot 的 Token 不正确，并且对应的数据已不存在于本地 SQLite 数据库中。
 
 ##### 可选：修改本机配置
 
