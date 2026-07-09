@@ -24,7 +24,8 @@ pub struct CreateBindingRequest {
     #[serde(default)]
     pub group_chat_scope: Option<GroupChatScope>,
     pub outbound_visibility: Visibility,
-    pub env: String,
+    #[serde(default)]
+    pub env: Option<String>,
     pub config: ChannelConfig,
 }
 
@@ -120,7 +121,7 @@ pub async fn create_binding(
             target: req.target,
             group_chat_scope: req.group_chat_scope,
             outbound_visibility: req.outbound_visibility,
-            env: req.env,
+            env: req.env.unwrap_or_default(),
             created_by: Some(created_by),
             config: req.config,
         })
@@ -297,5 +298,19 @@ mod tests {
             "card_tpl_123"
         );
         assert_eq!(json["config"]["client_secret"], "<redacted>");
+    }
+
+    #[test]
+    fn create_binding_request_accepts_missing_env() {
+        let request: CreateBindingRequest = serde_json::from_value(serde_json::json!({
+            "channel_type": "dingtalk",
+            "account_ref": "robot_1",
+            "target": { "bot": { "bot_id": "bot_1" } },
+            "outbound_visibility": "full_transcript",
+            "config": {}
+        }))
+        .expect("create binding request should not require client env");
+
+        assert!(request.env.is_none());
     }
 }
