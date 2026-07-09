@@ -7,7 +7,6 @@ import yaml
 
 from secbaas.bootstrap.plugins import PluginContainer
 
-
 COMMUNITY_DIR = Path(__file__).resolve().parents[3]
 SINGLEBOX_DEV_CONFIG = COMMUNITY_DIR / "singlebox-configs" / "application-dev.yaml"
 

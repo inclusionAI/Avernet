@@ -27,6 +27,7 @@ setup_env() {
   unset OPENCLAW_MODEL_CONFIG_SOURCE
   unset SINGLEBOX_MODEL_CONFIG_FILE
   unset SINGLEBOX_MODEL_CONFIG_PREPARED
+  unset SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED
 
   export PROJECT_ROOT="$ROOT"
   export SCRIPT_DIR="${ROOT}/scripts"
@@ -79,6 +80,7 @@ test_manual_requires_complete_env() {
 test_home_copies_only_model_fields() {
   setup_env
   export SINGLEBOX_MODEL_CONFIG_MODE="home"
+  export SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1
   mkdir -p "$(dirname "$OPENCLAW_CONFIG_FILE")"
   cat > "$OPENCLAW_CONFIG_FILE" <<'JSON'
 {
@@ -119,6 +121,7 @@ JSON
 test_home_ignores_non_object_agents_when_models_exist() {
   setup_env
   export SINGLEBOX_MODEL_CONFIG_MODE="home"
+  export SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1
   mkdir -p "$(dirname "$OPENCLAW_CONFIG_FILE")"
   cat > "$OPENCLAW_CONFIG_FILE" <<'JSON'
 {
@@ -144,6 +147,26 @@ JSON
     .models.providers["home-provider"].apiKey == "home-key"
     and .agents.defaults == {}
   ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null || fail "home mode should ignore non-object agents"
+}
+
+test_home_requires_confirmation() {
+  setup_env
+  export SINGLEBOX_MODEL_CONFIG_MODE="home"
+  mkdir -p "$(dirname "$OPENCLAW_CONFIG_FILE")"
+  cat > "$OPENCLAW_CONFIG_FILE" <<'JSON'
+{
+  "models": {
+    "mode": "merge",
+    "providers": {}
+  }
+}
+JSON
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  if singlebox_model_config_prepare; then
+    fail "home mode should require explicit confirmation"
+  fi
 }
 
 test_mock_generates_no_real_provider() {
@@ -183,6 +206,7 @@ test_manual_generates_runtime_config_from_env
 test_manual_requires_complete_env
 test_home_copies_only_model_fields
 test_home_ignores_non_object_agents_when_models_exist
+test_home_requires_confirmation
 test_mock_generates_no_real_provider
 test_prompt_maps_selection_to_mode
 test_noninteractive_defaults_to_mock_without_stdout_noise

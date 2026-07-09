@@ -55,7 +55,7 @@ singlebox_model_config_select_mode() {
         esac
     fi
 
-    if [ -t 0 ] && [ -t 1 ]; then
+    if [ -t 0 ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
         singlebox_model_config_prompt </dev/tty
         return
     fi
@@ -141,10 +141,51 @@ singlebox_model_config_home_source() {
     printf '%s\n' "${OPENCLAW_MODEL_CONFIG_SOURCE:-${OPENCLAW_CONFIG_FILE:-$HOME/.openclaw/openclaw.json}}"
 }
 
+singlebox_model_config_confirm_home_import() {
+    local source="$1"
+    local confirmed="${SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED:-}"
+    local answer=""
+
+    case "$confirmed" in
+        1|true|TRUE|yes|YES|y|Y)
+            return 0
+            ;;
+        0|false|FALSE|no|NO|n|N)
+            log_error "Home model config import was not confirmed."
+            return 1
+            ;;
+    esac
+
+    if [ -t 0 ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        {
+            echo "Home mode will read model fields from:"
+            echo "  ${source}"
+            echo "This may include local model base URLs and API keys."
+            printf "Continue? [Y/n]: "
+        } >&2
+        read -r answer </dev/tty || return 1
+        case "$answer" in
+            Y|y)
+                return 0
+                ;;
+            *)
+                log_error "Home model config import cancelled."
+                return 1
+                ;;
+        esac
+    fi
+
+    log_error "Home mode requires confirmation before reading ${source}."
+    log_error "Run interactively and enter Y, or set SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1."
+    return 1
+}
+
 singlebox_model_config_write_home() {
     local output_file="$1"
     local source
     source="$(singlebox_model_config_home_source)"
+
+    singlebox_model_config_confirm_home_import "$source" || return 1
 
     if [ ! -f "$source" ]; then
         log_error "Home model config not found: ${source}"
