@@ -11,12 +11,19 @@
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.15.3",
     "@eggjs/tsconfig": "^1.3.3",
+    "@typescript-eslint/eslint-plugin": "^7.14.1",
+    "@typescript-eslint/parser": "^7.14.1",
     "@types/mocha": "^10.0.1",
     "@types/node": "^20.6.3",
     "@types/ws": "^8.5.0",
     "egg-bin": "^6.5.2",
     "eslint": "^8.49.0",
     "eslint-config-egg": "^14.0.0",
+    "eslint-plugin-eggache": "^2.0.0",
+    "eslint-plugin-import": "^2.29.1",
+    "eslint-plugin-jsdoc": "^46.9.1",
+    "eslint-plugin-node": "^11.1.0",
+    "openclaw": "file:test/fixtures/openclaw-stub",
     "tshy": "^1.1.1",
     "tshy-after": "^1.0.0",
     "typescript": "^5.2.2"
@@ -48,7 +55,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/inclusionAI/Avernet.git",
-    "directory": "src/plugin/packages/openclaw-channel-bcn"
+    "directory": "src/bcs/crates/plugins/openclaw-channel-bcn"
   },
   "license": "MIT",
   "publishConfig": {

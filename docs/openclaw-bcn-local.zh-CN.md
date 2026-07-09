@@ -74,7 +74,7 @@ openclaw --version
 
 这是推荐路径。`singlebox.sh` 会自动完成以下动作：
 
-1. 构建 `src/plugin/packages/openclaw-channel-bcn`。
+1. 构建 `src/bcs/crates/plugins/openclaw-channel-bcn`。
 2. 将插件软链到 OpenClaw extension 目录。
 3. 为每个 demo bot 生成 OpenClaw profile。
 4. 在 profile 中写入 `channels.bcs.bcsUrl`、bot 信息和插件加载路径。
@@ -96,7 +96,7 @@ openclaw --version
 
 `scripts/singlebox.sh` 加载 `openclaw-channel-bcn` 插件有两种方式：
 
-- **source**（默认）：从仓库内构建 `src/plugin/packages/openclaw-channel-bcn`。
+- **source**（默认）：从仓库内构建 `src/bcs/crates/plugins/openclaw-channel-bcn`。
 - **npm**：通过 `openclaw plugins install` 安装 `@avernet-plugin/openclaw-channel-bcn`。
 
 通过 flag 或环境变量选择（flag 优先级更高）：
@@ -117,17 +117,17 @@ BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.15 ./scripts/singlebox.sh
 ### 1. 构建 BCN 插件
 
 ```bash
-cd src/plugin
-corepack enable
-pnpm install --filter @avernet-plugin/openclaw-channel-bcn...
-pnpm --filter @avernet-plugin/openclaw-channel-bcn build
-cd ../..
+(
+  cd src/bcs/crates/plugins/openclaw-channel-bcn
+  npm install
+  npm run build
+)
 ```
 
 确认插件产物存在：
 
 ```bash
-test -f src/plugin/packages/openclaw-channel-bcn/dist/esm/index.js
+test -f src/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
 ```
 
 Dockerfile 里的做法与此等价：在镜像构建阶段执行 `npm install`、`npm run build`，然后把插件目录软链到 OpenClaw extensions。
@@ -138,7 +138,7 @@ Dockerfile 里的做法与此等价：在镜像构建阶段执行 `npm install`�
 
 ```bash
 mkdir -p ~/.openclaw/extensions
-ln -sfn "$(pwd)/src/plugin/packages/openclaw-channel-bcn" \
+ln -sfn "$(pwd)/src/bcs/crates/plugins/openclaw-channel-bcn" \
   ~/.openclaw/extensions/openclaw-channel-bcn
 ```
 
@@ -161,7 +161,7 @@ BCS_PORT="${BCS_PORT:-21000}"
 OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
 HOST_BOT_DIR="$(pwd)/.openclaw-host-bcn"
 HOST_BOT_WORKSPACE="${HOST_BOT_DIR}/workspace"
-PLUGIN_PATH="$(pwd)/src/plugin/packages/openclaw-channel-bcn"
+PLUGIN_PATH="$(pwd)/src/bcs/crates/plugins/openclaw-channel-bcn"
 
 mkdir -p "${HOST_BOT_WORKSPACE}"
 
@@ -345,7 +345,7 @@ fi
 
 BCS_PORT="${BCS_PORT:-21000}"
 
-test -f src/plugin/packages/openclaw-channel-bcn/dist/esm/index.js
+test -f src/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
 test -L ~/.openclaw/extensions/openclaw-channel-bcn
 curl --noproxy '*' -fsS "http://127.0.0.1:${BCS_PORT}/health"
 ```

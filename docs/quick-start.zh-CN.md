@@ -223,7 +223,13 @@ tail -n 100 .standalone-openclaw/logs/bcs.log
 确认插件构建产物和 symlink：
 
 ```bash
-test -f src/plugin/packages/openclaw-channel-bcn/dist/esm/index.js
+test -f src/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
+test -L "$HOME/.openclaw/extensions/openclaw-channel-bcn"
+```
+
+standalone 模式确认：
+
+```bash
 test -L .standalone-openclaw/extensions/openclaw-channel-bcn
 ```
 

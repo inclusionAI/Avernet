@@ -249,7 +249,13 @@ Common causes:
 Check the plugin build output and symlink:
 
 ```bash
-test -f src/plugin/packages/openclaw-channel-bcn/dist/esm/index.js
+test -f src/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
+test -L "$HOME/.openclaw/extensions/openclaw-channel-bcn"
+```
+
+For standalone mode, check:
+
+```bash
 test -L .standalone-openclaw/extensions/openclaw-channel-bcn
 ```
 

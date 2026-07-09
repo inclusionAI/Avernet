@@ -37,7 +37,7 @@ ln -sfn "$(pwd)" ~/.openclaw/extensions/openclaw-channel-bcn
 
 `scripts/singlebox.sh` can load this plugin two ways:
 
-- **source** (default): builds `src/plugin/packages/openclaw-channel-bcn` from the repo.
+- **source** (default): builds `src/bcs/crates/plugins/openclaw-channel-bcn` from the repo.
 - **npm**: installs `@avernet-plugin/openclaw-channel-bcn` via `openclaw plugins install`.
 
 Select with the flag or env var (flag wins):

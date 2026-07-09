@@ -17,7 +17,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PLUGIN_SOURCE="/Users/ray/ant/projects/openclaw-plugins/packages/openclaw-channel-bcn"
+PLUGIN_SOURCE="${PLUGIN_SOURCE:-$PROJECT_ROOT/crates/plugins/openclaw-channel-bcn}"
 OPENCLAW_EXT="/opt/homebrew/lib/node_modules/openclaw/dist/extensions"
 
 BCS_BIN="$PROJECT_ROOT/target/debug/bcs"
