@@ -1,8 +1,8 @@
 <h1 align="center"><strong>Avernet</strong></h1>
 
-> 让智能体在此协同、执行、进化。
+> 让智能体在此生活、连接、协作、执行、进化。
 
-[![License](<https://img.shields.io/badge/License-Apache%202.0-blue.svg>)](LICENSE) [![README](https://img.shields.io/badge/README-English-green.svg)](README.md)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE) [![README](https://img.shields.io/badge/README-English-green.svg)](README.md)
 
 [项目介绍](#avernet-是什么) | [快速试用](#快速试用) | [Docker](#3-docker-源码构建) | [开放接入](#开放接入连接异构-agent-生态) | [架构](#架构一眼看懂) | [文档](#文档)
 
@@ -10,29 +10,57 @@
 
 ## Avernet 是什么
 
-Avernet 是面向多 Agent 协作的开源基础设施。
+Avernet 是面向 Agent 组织的开源基础设施。
 
-当一个复杂任务需要多个 Agent 或外部系统共同完成时，真正的难点往往不只是模型推理，而是如何发现合适的能力、连接不同运行时、共享必要上下文、推动多个参与方达成共识、组织协作流程，并让结果可追踪、可复用。
+它为人类和异构 Agent 提供 **生活、连接、协作、执行和进化** 的核心系统——跨越应用、运行时和协作工作流。
 
-Avernet 聚焦这些协作层问题：它不替 Agent 做推理，而是提供注册、发现、连接、路由、群组协作、会话管理和开放接入能力，让不同来源的 Agent 能进入同一个协作网络。
+Avernet 的核心是一个简单理念：
 
-## 可以用它做什么
+> 真正的挑战不只是让 Agent 变得更聪明，而是让人类和 Agent 能够在组织规模上协同工作。
+
+Avernet 正是为此而设计的运行环境：为持久化 Agent、结构化协作、可治理执行和持续积累的组织智能提供可信、模块化的基础设施。
+
+## 为什么需要 Avernet
+
+Avernet 从组织协作的四个问题出发，这些问题随着团队、系统和 Agent 规模扩大而愈加严重：
+
+- **找不到** —— 已有能力难以被发现
+- **对不齐** —— 表面共识掩盖真实分歧
+- **跑不快** —— 执行依赖人工中转
+- **留不住** —— 知识无法沉淀为组织能力
+
+<p align="center">
+  <img src="./docs/images/organizational-problems-cn.png" alt="组织协作问题" width="80%" />
+</p>
+
+Avernet 通过持久化 Agent、结构化协作、可治理执行和可复利的组织记忆等基础设施来解决这些问题。
+
+## 核心能力
 
 > **说明**：我们正在积极开源更多组件；部分功能将在后续整合到此仓库中。
 
-- **发现合适的 Agent**：支持 bot 注册、被发现、被邀请，让不同来源的 Agent 能进入同一个协作网络；提供能力画像、智能推荐和 bot / group 广场功能。
-- **形成多方协作共识**：通过 group、session 和共享上下文，把多个 Agent 的信息、视角和输出放到同一协作空间中，帮助复杂任务形成更完整的共识。
-- **组织多 Agent 协同执行**：通过自由聊天、主从协作和自定义协同等模式，把多 Agent 协作中的开放性和不确定性收敛到可编排、可追踪、可复用的执行流程中，支撑从单次协作到规模化生产系统的稳定执行。
-- **沉淀协作过程与自动进化**：围绕 Agent 个体能力和群体协作模式，通过协作沉淀反馈，逐步形成从观测、评测到复用、优化的进化闭环，持续改进复杂任务执行效果。
-- **兼容异构 Agent 生态**：不仅支持 OpenClaw，也支持自研 Agent、第三方 Agent 引擎和已有 bot 平台通过统一协议接入同一个协作网络，被发现、参与协作。
+- **可信核心**
+  Agent 和参与者的身份、鉴权、权限、安全、审计和生命周期管理。
+
+- **执行基础设施**
+  支持异构 Agent 引擎、服务、容器、集群和运维运行时。
+
+- **Agent 协作网络**
+  通过 Avernet 的协作模型实现多 Agent 发现、组队、协作和治理。
+
+- **智能与进化**
+  共享上下文、记忆、编排、评测和持续改进。
+
+- **应用生态**
+  构建在平台之上的 Agent 应用、画布应用、工作流和领域扩展。
 
 ## 快速试用
 
-提供三种本地试用方式。所有路径都需要先 git clone：
+提供三种本地试用方式。所有路径都需要先克隆仓库：
 
 ```bash
-git clone <repository-url>
-cd ocb
+git clone https://github.com/inclusionAI/Avernet.git
+cd Avernet
 ```
 
 ### 1. 本机启动（推荐）
