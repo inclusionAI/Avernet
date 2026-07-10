@@ -5,7 +5,7 @@ Covers the critical path:
     collect_bot_active_mcps(engine_type='aicoding')
         -> get_set_mcp_servers(engine_type='aicoding')
         -> get_default_mcp_server_codes('aicoding')
-        -> returns aicoding list (9 servers)
+        -> returns aicoding list (10 servers)
 
     collect_bot_active_mcps(engine_type='openclaw')
         -> get_set_mcp_server_codes('openclaw')
@@ -70,7 +70,7 @@ class TestMcpDefaultsPerEngineEndToEnd:
     def test_collect_bot_active_mcps_aicoding_returns_aicoding_defaults(
         self, mock_skill_set_repo, mock_skill_repo, tmp_path
     ):
-        """aicoding engine must load its own 9-server default list."""
+        """aicoding engine must load its own 10-server default list."""
         service = self._make_service(
             "aicoding", mock_skill_set_repo, mock_skill_repo, tmp_path
         )
@@ -91,7 +91,7 @@ class TestMcpDefaultsPerEngineEndToEnd:
         assert "mcp.ant.homistudio.meetmcp" not in codes
         assert "hitl" in codes
         # Count: 7 aicoding servers incl. AixCodingMemoryMCP + BCS MCP + hitl
-        assert len(codes) == 9
+        assert len(codes) == 10
 
     def test_collect_bot_active_mcps_openclaw_returns_openclaw_defaults(
         self, mock_skill_set_repo, mock_skill_repo, tmp_path
@@ -172,7 +172,7 @@ class TestMcpDefaultsPerEngineEndToEnd:
         assert "mcp.ant.antprocessai.anttaskmcp" not in codes
         assert "hitl" in codes
         assert "mcp.ant.faas.aixjiter.AixCodingMemoryMCP" in codes
-        assert len(codes) == 9
+        assert len(codes) == 10
 
     def test_collect_bot_mcps_openclaw_returns_openclaw_defaults(
         self, mock_skill_set_repo, mock_skill_repo, tmp_path
@@ -218,7 +218,7 @@ class TestMcpDefaultsPerEngineEndToEnd:
         assert BCS_MCP_SERVER_CODE in codes
         assert "hitl" in codes
         assert "mcp.ant.faas.aixjiter.AixCodingMemoryMCP" in codes
-        assert len(codes) == 9
+        assert len(codes) == 10
 
     def test_get_set_mcp_servers_openclaw_with_default_skill_set(
         self, mock_skill_set_repo, mock_skill_repo, tmp_path
