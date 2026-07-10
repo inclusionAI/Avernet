@@ -2438,3 +2438,43 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         await self._process_publish_callback_for_device(
             device, source="container_ready"
         )
+
+    async def pull_file_from_url(
+        self,
+        paas_device_id: str,
+        source_url: str,
+        device_path: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Not supported: Local platform does not support file transfer.
+
+        Args:
+            paas_device_id: Local device ID (container_id--machine_id--user_id).
+            source_url: URL to download from.
+            device_path: Destination path on device.
+            timeout_seconds: Maximum download time (unused).
+
+        Raises:
+            NotImplementedError: Always — file transfer not supported on Local.
+        """
+        raise NotImplementedError("File transfer not supported on Local platform")
+
+    async def push_file_to_url(
+        self,
+        paas_device_id: str,
+        device_path: str,
+        target_url: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Not supported: Local platform does not support file transfer.
+
+        Args:
+            paas_device_id: Local device ID (container_id--machine_id--user_id).
+            device_path: Source path on device.
+            target_url: URL to upload to.
+            timeout_seconds: Maximum upload time (unused).
+
+        Raises:
+            NotImplementedError: Always — file transfer not supported on Local.
+        """
+        raise NotImplementedError("File transfer not supported on Local platform")

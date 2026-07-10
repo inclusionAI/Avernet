@@ -277,3 +277,43 @@ class TeClawPaasService(PaasService):
 
     async def list_instances(self, params: dict[str, Any]) -> list[Any]:
         raise NotImplementedError("TeClaw does not support instance listing")
+
+    async def pull_file_from_url(
+        self,
+        paas_device_id: str,
+        source_url: str,
+        device_path: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Not supported: TeClaw platform does not support file transfer.
+
+        Args:
+            paas_device_id: TeClaw device ID.
+            source_url: URL to download from.
+            device_path: Destination path on device.
+            timeout_seconds: Maximum download time (unused).
+
+        Raises:
+            NotImplementedError: Always — file transfer not supported on TeClaw.
+        """
+        raise NotImplementedError("File transfer not supported on TeClaw platform")
+
+    async def push_file_to_url(
+        self,
+        paas_device_id: str,
+        device_path: str,
+        target_url: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Not supported: TeClaw platform does not support file transfer.
+
+        Args:
+            paas_device_id: TeClaw device ID.
+            device_path: Source path on device.
+            target_url: URL to upload to.
+            timeout_seconds: Maximum upload time (unused).
+
+        Raises:
+            NotImplementedError: Always — file transfer not supported on TeClaw.
+        """
+        raise NotImplementedError("File transfer not supported on TeClaw platform")
