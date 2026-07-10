@@ -7,7 +7,12 @@ from ``core/`` directly.
 """
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.economy.governance.domain.ticket import (
+        GovernanceTicket,
+    )
 
 
 @runtime_checkable
@@ -43,6 +48,22 @@ class GovernanceAdminServiceProtocol(Protocol):
     def pause_ticket(
         self, ticket_id: str, admin_id: str, reason: str = "",
     ) -> dict:
+        ...
+
+    def list_review_tickets(
+        self,
+        statuses: list[str] | None,
+        *,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> tuple[list[GovernanceTicket], int]:
+        """评审工单列表(跨 owner, 按治理状态过滤, 分页)。返回领域模型 + 总数。"""
+        ...
+
+    def get_review_ticket_detail(
+        self, ticket_id: str,
+    ) -> GovernanceTicket | None:
+        """评审工单详情(单工单领域模型)。"""
         ...
 
     def review_ticket(
