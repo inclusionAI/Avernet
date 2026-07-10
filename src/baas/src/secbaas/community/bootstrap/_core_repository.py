@@ -32,6 +32,7 @@ from secbaas.community.core.repository.tenant import OrmTenantRepository
 from secbaas.community.core.repository.ws_relay_session import (
     OrmWsRelaySessionRepository,
 )
+from secbaas.community.core.repository.file_transfer_ticket import OrmTicketRepository
 from secbaas.community.logger import get_logger
 
 logger = get_logger("bootstrap")
@@ -153,4 +154,9 @@ class CoreRepositoryContainer(containers.DeclarativeContainer):
         config.plugins.database.plugin_database,
         ZDAS_ORM=_orm_repo(OrmWsRelaySessionRepository),
         SQLITE_ORM=_orm_repo(OrmWsRelaySessionRepository),
+    )
+    ticket_repository = providers.Selector(
+        config.plugins.database.plugin_database,
+        ZDAS_ORM=_orm_repo(OrmTicketRepository),
+        SQLITE_ORM=_orm_repo(OrmTicketRepository),
     )
