@@ -2,7 +2,7 @@
 
 use crate::common::{assert_output_contains, assert_success, TestContext};
 use wiremock::{
-    matchers::{method, path},
+    matchers::{bearer_token, method, path},
     Mock, ResponseTemplate,
 };
 
@@ -13,6 +13,7 @@ async fn list_groups_mine_uses_current_bot_from_session() {
 
     Mock::given(method("GET"))
         .and(path(bot_groups_path))
+        .and(bearer_token(&ctx.session.token))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "bot_uuid": ctx.session.bot_uuid,
             "items": [{

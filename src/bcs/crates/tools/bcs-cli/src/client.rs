@@ -1606,8 +1606,7 @@ impl BcsClient {
         );
 
         let response = self
-            .http_client
-            .get(&url)
+            .add_auth(self.http_client.get(&url))
             .send()
             .await
             .context("Failed to list bot groups")?;
