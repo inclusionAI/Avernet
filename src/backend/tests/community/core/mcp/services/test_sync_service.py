@@ -40,6 +40,10 @@ def _make_plugin(**overrides):
     plugin.sync_single_mcp = MagicMock(return_value=True)
     plugin.sync_remove_mcp = MagicMock(return_value=True)
     plugin.has_mcp = MagicMock(return_value=True)
+    # Default to the incremental (arca/baas) capability; whole-artifact tests
+    # override this to True. Explicit so getattr() doesn't see an auto-created
+    # truthy MagicMock.
+    plugin.delivers_whole_artifact = MagicMock(return_value=False)
     for k, v in overrides.items():
         setattr(plugin, k, v)
     return plugin
@@ -611,3 +615,153 @@ class TestSyncMcpDetailToAllBots:
 
         assert result["success"] is True
         assert result["sync_results"][0]["reason"] == "缺少设备连接信息"
+
+
+class TestRefreshMcpScopeWholeArtifactDedup:
+    """refresh_mcp_scope(skip_device_declare_when_whole_artifact=True) collapses
+    the redundant whitelist redeliver for whole-artifact providers (teclaw).
+
+    Context: add_mcp_to_skill_set first pushes the MCP config
+    (``sync_mcp_detail``); for a whole-artifact provider that push already
+    delivered the complete artifact reflecting the new allow-list. The
+    subsequent scope refresh's device declare (``sync_all_mcp_servers``) would
+    recompose and re-POST the *same* artifact — duplicate device work. The skip
+    flag drops that second delivery for whole-artifact providers only, while
+    keeping the (still required) passport update. Incremental providers
+    (arca/baas) are unaffected: their filter-servers declaration is genuinely
+    separate work and must still run.
+    """
+
+    @pytest.mark.asyncio
+    async def test_skip_flag_skips_declare_for_whole_artifact_provider(self):
+        """Whole-artifact provider + skip flag → no second device delivery,
+        passport still updated."""
+        passport_update = MagicMock()
+        passport_update.query_passport_clis.return_value = []
+        plugin = _make_plugin(
+            delivers_whole_artifact=MagicMock(return_value=True),
+        )
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        service = _make_sync_service(
+            mcp_provider=_make_mcp_provider(mcps=[{"server_code": "mcp.test.1"}]),
+            passport_update=passport_update,
+            resolver=resolver,
+            dispatcher=dispatcher,
+        )
+
+        result = await service.refresh_mcp_scope(
+            user_id="user1", entity_id="100", bot_id="bot1",
+            entity_type="staff", engine_type="openclaw",
+            skip_device_declare_when_whole_artifact=True,
+        )
+
+        assert result["success"] is True
+        plugin.sync_all_mcp_servers.assert_not_called()
+        passport_update.update_passport.assert_called_once()
+        resource_scope = passport_update.update_passport.call_args.kwargs["resource_scope"]
+        assert resource_scope["mcp_codes"] == ["mcp.test.1"]
+
+    @pytest.mark.asyncio
+    async def test_skip_flag_still_declares_for_incremental_provider(self):
+        """Incremental provider (delivers_whole_artifact=False) ignores the skip
+        flag: the filter-servers declaration still runs."""
+        passport_update = MagicMock()
+        passport_update.query_passport_clis.return_value = []
+        plugin = _make_plugin(
+            delivers_whole_artifact=MagicMock(return_value=False),
+        )
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        service = _make_sync_service(
+            mcp_provider=_make_mcp_provider(mcps=[{"server_code": "mcp.test.1"}]),
+            passport_update=passport_update,
+            resolver=resolver,
+            dispatcher=dispatcher,
+        )
+
+        result = await service.refresh_mcp_scope(
+            user_id="user1", entity_id="100", bot_id="bot1",
+            entity_type="staff", engine_type="openclaw",
+            skip_device_declare_when_whole_artifact=True,
+        )
+
+        assert result["success"] is True
+        plugin.sync_all_mcp_servers.assert_called_once_with([{"server_code": "mcp.test.1"}])
+        passport_update.update_passport.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_default_still_declares_for_whole_artifact_provider(self):
+        """Without the skip flag (default), a whole-artifact provider still gets
+        the device declare — scope-only flows (activate/switch) rely on it as
+        their sole delivery."""
+        passport_update = MagicMock()
+        passport_update.query_passport_clis.return_value = []
+        plugin = _make_plugin(
+            delivers_whole_artifact=MagicMock(return_value=True),
+        )
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        service = _make_sync_service(
+            mcp_provider=_make_mcp_provider(mcps=[{"server_code": "mcp.test.1"}]),
+            passport_update=passport_update,
+            resolver=resolver,
+            dispatcher=dispatcher,
+        )
+
+        result = await service.refresh_mcp_scope(
+            user_id="user1", entity_id="100", bot_id="bot1",
+            entity_type="staff", engine_type="openclaw",
+        )
+
+        assert result["success"] is True
+        plugin.sync_all_mcp_servers.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_skip_reports_passport_failure_without_second_delivery(self):
+        """Partial failure: skip declare, then passport update fails → surfaces
+        the passport error and never performs a second artifact delivery."""
+        passport_update = MagicMock()
+        passport_update.query_passport_clis.side_effect = RuntimeError("tcauth down")
+        plugin = _make_plugin(
+            delivers_whole_artifact=MagicMock(return_value=True),
+        )
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        service = _make_sync_service(
+            mcp_provider=_make_mcp_provider(mcps=[{"server_code": "mcp.test.1"}]),
+            passport_update=passport_update,
+            resolver=resolver,
+            dispatcher=dispatcher,
+        )
+
+        result = await service.refresh_mcp_scope(
+            user_id="user1", entity_id="100", bot_id="bot1",
+            entity_type="staff", engine_type="openclaw",
+            skip_device_declare_when_whole_artifact=True,
+        )
+
+        assert result["success"] is False
+        assert "查询 CLI 范围失败" in result["error"]
+        plugin.sync_all_mcp_servers.assert_not_called()
+        passport_update.update_passport.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skip_falls_back_to_declare_when_device_unavailable(self):
+        """Skip flag set but no syncable device: capability probe returns False,
+        so the declare path runs and surfaces the missing-device error (no
+        behavior change vs. today)."""
+        passport_update = MagicMock()
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(unavailable=True)
+        service = _make_sync_service(
+            mcp_provider=_make_mcp_provider(mcps=[{"server_code": "mcp.test.1"}]),
+            passport_update=passport_update,
+            resolver=resolver,
+            dispatcher=dispatcher,
+        )
+
+        result = await service.refresh_mcp_scope(
+            user_id="user1", entity_id="100", bot_id="bot1",
+            entity_type="staff", engine_type="openclaw",
+            skip_device_declare_when_whole_artifact=True,
+        )
+
+        assert result["success"] is False
+        assert "缺少设备连接信息" in result["error"]
+        passport_update.update_passport.assert_not_called()

@@ -301,12 +301,25 @@ async def list_skill_set_resources(
     entity_type: Optional[str] = Query(None, description="Entity type (staff/proj/team, default: staff)"),
     bot_id: Optional[str] = Query(None, description="Bot ID (default: default)"),
     engine_type: Optional[str] = Query(None, description="Engine type (default: moltis)"),
+    include_clis: bool = Query(
+        True,
+        description=(
+            "是否聚合默认能力集的 CLI 许可证范围。默认 True 保持兼容；"
+            "MCP-only 屏幕（MCP 市场/新增弹窗）传 False 可跳过同步的 AgentPass "
+            "查询，避免为不消费的 CLI 数据付延迟。"
+        ),
+    ),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
     skill_set_service_factory: SkillSetServiceFactoryProtocol = Injected(SkillSetServiceFactoryProtocol),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
 ) -> SkillSetResourcesResponse:
-    """获取能力集资源聚合视图（MCP + 默认能力集 CLI）。"""
+    """获取能力集资源聚合视图（MCP + 默认能力集 CLI）。
+
+    ``include_clis=False`` 时跳过 AgentPass CLI 查询，仅返回 MCP/Skill 能力集，
+    供只关心 MCP 的屏幕（MCP 市场/新增弹窗）使用，避免同步查询 CLI 的延迟。
+    默认 ``True`` 与旧行为一致。
+    """
     effective_entity_id_param = user_id or entity_id
     effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop = _get_path_params(ctx, effective_entity_id_param, entity_type, bot_id, engine_type, bot_repo=bot_repo)
 
@@ -321,15 +334,19 @@ async def list_skill_set_resources(
     skill_sets = sorted(skill_sets, key=lambda s: (not s.get('is_default'), s.get('gmt_created')))
 
     # CLI 展示依赖 AgentPass 查询，失败时只降级隐藏 CLI，不影响 MCP/Skill 能力集返回。
-    try:
-        default_clis = passport_plugin.query_passport_clis(effective_bot_id, effective_entity_id)
-    except Exception as e:
-        logger.warning(
-            "[list_skill_set_resources] query CLI resources failed: bot_id=%s, owner=%s, error=%s",
-            effective_bot_id,
-            effective_entity_id,
-            e,
-        )
+    # include_clis=False 的 MCP-only 调用方不消费 CLI，直接跳过同步查询省去这段延迟。
+    if include_clis:
+        try:
+            default_clis = passport_plugin.query_passport_clis(effective_bot_id, effective_entity_id)
+        except Exception as e:
+            logger.warning(
+                "[list_skill_set_resources] query CLI resources failed: bot_id=%s, owner=%s, error=%s",
+                effective_bot_id,
+                effective_entity_id,
+                e,
+            )
+            default_clis = []
+    else:
         default_clis = []
 
     data = []

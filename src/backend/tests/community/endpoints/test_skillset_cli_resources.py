@@ -154,6 +154,67 @@ def list_skillset_resources_degrades_when_cli_query_fails():
     """CLI query failures should not block Skill/MCP resource listing."""
 
 
+def _assert_cli_query_skipped(response, world) -> None:
+    """MCP-only reads must not pay for the synchronous AgentPass CLI lookup."""
+    passport = world.get(PassportPlugin)
+    passport.query_passport_clis.assert_not_called()
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/skillsets/resources",
+    scenario="include_clis_false_skips_cli_query",
+    input=CaseInput(
+        query_params={**_QUERY, "include_clis": "false"},
+        headers=_HEADERS,
+    ),
+    seed=_seed_resources_happy,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "data": [
+                {
+                    "id": _SKILL_SET_ID,
+                    "mcps": [{"server_code": "web-search"}],
+                    "clis": [],
+                }
+            ],
+        },
+    ),
+    extra_assertions=(_assert_cli_query_skipped,),
+)
+def list_skillset_resources_include_clis_false_skips_agentpass():
+    """include_clis=false omits CLI aggregation and never calls AgentPass."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/skillsets/resources",
+    scenario="include_clis_true_default_returns_cli",
+    input=CaseInput(
+        query_params={**_QUERY, "include_clis": "true"},
+        headers=_HEADERS,
+    ),
+    seed=_seed_resources_happy,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "data": [
+                {
+                    "id": _SKILL_SET_ID,
+                    "mcps": [{"server_code": "web-search"}],
+                    "clis": [{"cli_code": "cli.keep"}],
+                }
+            ],
+        },
+    ),
+)
+def list_skillset_resources_include_clis_true_returns_cli():
+    """include_clis=true (the default) keeps full CLI aggregation for capability views."""
+
+
 @endpoint_test(
     method="GET",
     path="/api/skillsets/resources",

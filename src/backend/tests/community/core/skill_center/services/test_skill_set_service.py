@@ -818,11 +818,15 @@ class TestAddMcpToSkillSetTeclawEndToEnd:
         from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
 
         # Per-bot DeviceSyncPlugin double: MCP methods are SYNC (run via to_thread).
-        # For a teclaw bot the real plugin delivers the whole artifact; here we assert
-        # the service routes the add + scope legs through it (provider-blind).
+        # A teclaw plugin delivers the whole artifact on every MCP method, so it
+        # declares delivers_whole_artifact() == True. The add leg's sync_single_mcp
+        # already ships the complete artifact (with the new MCP in the allow-list,
+        # since the DB relation is persisted first); the scope leg must therefore
+        # NOT re-deliver — exactly one device delivery per add (acceptance #1).
         plugin = MagicMock()
         plugin.sync_single_mcp = MagicMock(return_value=True)
         plugin.sync_all_mcp_servers = MagicMock(return_value=True)
+        plugin.delivers_whole_artifact = MagicMock(return_value=True)
         ctx = DeviceContext(
             provider="teclaw",
             conn_info={"engine_type": "teclaw"},
@@ -866,15 +870,16 @@ class TestAddMcpToSkillSetTeclawEndToEnd:
 
         # The reported bug: this used to be False with "缺少设备连接信息".
         assert result["success"] is True, result
-        # Delivered via the per-bot plugin (resolved through resolver+dispatcher): the
-        # add leg pushes the MCP and the scope leg declares the allow-list.
+        # Delivered via the per-bot plugin (resolved through resolver+dispatcher).
         resolver.resolve_for_bot.assert_called()
         dispatcher.dispatch.assert_called()
+        # Exactly ONE whole-artifact delivery: the add leg ships it; the scope leg's
+        # redundant re-delivery is deduped for whole-artifact providers (Finding 1).
         plugin.sync_single_mcp.assert_called_once()
-        plugin.sync_all_mcp_servers.assert_called_once()
+        plugin.sync_all_mcp_servers.assert_not_called()
         # DB association persisted — no rollback.
         skill_set_repo.remove_mcp_from_set.assert_not_called()
-        # Scope refresh still updates the passport for teclaw.
+        # Scope refresh still updates the passport for teclaw (auth layer preserved).
         passport_update.update_passport.assert_called_once()
 
 

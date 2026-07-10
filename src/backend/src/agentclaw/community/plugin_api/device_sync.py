@@ -117,3 +117,26 @@ class DeviceSyncPlugin(Plugin, Protocol):
         ``True`` (always deliver + count in the batch — Option B).
         """
         ...
+
+    def delivers_whole_artifact(self) -> bool:
+        """Whether one MCP delivery pushes the **entire** composed device
+        artifact rather than an incremental delta.
+
+        Whole-artifact providers (teclaw) recompose and re-POST the complete
+        ``BotConfigArtifact`` on *every* MCP method — ``sync_single_mcp``,
+        ``sync_all_mcp_servers`` and ``sync_remove_mcp`` all delegate to the
+        same compose-and-deliver path. So once the DB relation is persisted, a
+        single detail push already reflects the full allow-list, and a
+        subsequent ``sync_all_mcp_servers`` (filter-servers) delivery is
+        duplicate device work. Callers use this to collapse the config push and
+        the allow-list declaration into one delivery for such providers.
+
+        Incremental providers (arca/baas) push a per-MCP ``/api/mcp`` delta and
+        a separate filter-servers update, so they return ``False`` — the two
+        deliveries are genuinely different work and must both run.
+
+        The default is ``False`` (incremental / safe): a plugin that does not
+        implement this method is treated as incremental, so no delivery is
+        skipped. Whole-artifact impls override it to return ``True``.
+        """
+        return False

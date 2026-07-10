@@ -297,6 +297,7 @@ class MCPSyncService:
         bot_id: str,
         entity_type: str = "staff",
         engine_type: Optional[str] = None,
+        skip_device_declare_when_whole_artifact: bool = False,
     ) -> dict[str, Any]:
         """刷新 bot 的 MCP 授权范围。
 
@@ -309,6 +310,13 @@ class MCPSyncService:
             bot_id: 目标 bot ID。
             entity_type: 实体类型，默认 ``staff``。
             engine_type: 引擎类型，默认 ``openclaw``。
+            skip_device_declare_when_whole_artifact: 调用方**已经**通过前置的
+                详情投递（``sync_mcp_detail``）向设备下发了一次完整配置时置 True。
+                对整产物 provider（teclaw）而言，那次投递已含最新白名单，本方法
+                的 ``_declare_mcp_scope`` 会重组并再投递同一份 artifact——纯属重复
+                设备工作。置 True 时对整产物 provider 跳过该重复投递，仅保留必需
+                的 passport 更新；增量 provider（arca/baas）不受影响，filter-servers
+                声明照常执行。默认 False 保持既有行为。
 
         Returns:
             ``{"success": bool, "error": str|None}`` 格式的结果字典。
@@ -345,15 +353,28 @@ class MCPSyncService:
             )
 
         # 先向设备声明白名单：即使 active_mcps 为空也会调用，防止设备残留旧白名单。
-        scope_result = await self._declare_mcp_scope(
-            bot_id=bot_id,
-            user_id=user_id,
-            entity_id=entity_id,
-            entity_type=entity_type,
-            engine_type=effective_engine,
+        # 整产物 provider（teclaw）+ 调用方已前置投递整产物时，跳过这次重复投递
+        # （见 skip_device_declare_when_whole_artifact 说明），只保留下方 passport 更新。
+        skip_declare = (
+            skip_device_declare_when_whole_artifact
+            and self._provider_delivers_whole_artifact(bot_id=bot_id, entity_id=entity_id)
         )
-        if not scope_result.get("success"):
-            return scope_result
+        if skip_declare:
+            logger.info(
+                "[MCPSyncService] 整产物 provider 的白名单已由前置整产物投递覆盖，"
+                "跳过重复的设备白名单声明，仅更新 passport: bot_id=%s",
+                bot_id,
+            )
+        else:
+            scope_result = await self._declare_mcp_scope(
+                bot_id=bot_id,
+                user_id=user_id,
+                entity_id=entity_id,
+                entity_type=entity_type,
+                engine_type=effective_engine,
+            )
+            if not scope_result.get("success"):
+                return scope_result
 
         # 白名单声明成功后，再更新 passport 供前端权限校验使用。
         passport_result = await self._update_passport(
@@ -487,6 +508,32 @@ class MCPSyncService:
             }
 
         return {"success": True, "sync_results": sync_results, "error": None}
+
+    def _provider_delivers_whole_artifact(self, *, bot_id: str, entity_id: str) -> bool:
+        """探测 bot 的 per-bot 投递插件是否为整产物投递（teclaw）。
+
+        用 ``entity_id`` 解析（与 ``_declare_mcp_scope`` / ``collect_bot_active_mcps``
+        的 entity 口径一致）。设备未绑定/未知 provider 时返回 False——让上层照常走
+        ``_declare_mcp_scope``，由其统一上报"缺少设备连接信息"，不改变既有行为。
+        用 ``getattr`` 读取 capability：未实现该方法的插件按增量语义（False）处理，
+        保证仅在插件显式声明整产物时才跳过重复投递。
+        """
+        try:
+            ctx = self._resolver_provider().resolve_for_bot(bot_id, entity_id)
+        except (DeviceNotBoundError, UnknownProviderError):
+            return False
+        plugin = self._device_sync_dispatcher_provider().dispatch(ctx)
+        check = getattr(plugin, "delivers_whole_artifact", None)
+        if not callable(check):
+            return False
+        try:
+            return bool(check())
+        except Exception as e:  # 探测失败不阻断主流程，退化为增量语义。
+            logger.warning(
+                "[MCPSyncService] 探测整产物 capability 失败，按增量处理: bot_id=%s, error=%s",
+                bot_id, e,
+            )
+            return False
 
     async def _declare_mcp_scope(
         self,

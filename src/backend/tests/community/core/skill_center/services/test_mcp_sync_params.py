@@ -45,4 +45,5 @@ class TestRefreshMcpScope:
             bot_id="test-bot",
             entity_type="staff",
             engine_type="openclaw",
+            skip_device_declare_when_whole_artifact=False,
         )

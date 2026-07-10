@@ -1312,8 +1312,15 @@ class SkillSetService:
                 "sync_error": error,
             }
 
-        # 触发 scope 同步（更新 allowServers 列表 + passport）
-        scope_result = await self.refresh_mcp_scope(user_id=user_id)
+        # 触发 scope 同步（更新 allowServers 列表 + passport）。
+        # 上面的 sync_mcp_detail 已把 MCP 配置投递到设备：对整产物 provider（teclaw）
+        # 那次投递已是含最新白名单的整份 artifact（关联已先落库），此处的白名单声明
+        # 会重组并再投递同一份 artifact——重复设备工作。传 skip 标志让整产物 provider
+        # 跳过该重复投递，仅保留必需的 passport 更新；增量 provider（arca/baas）照旧。
+        scope_result = await self.refresh_mcp_scope(
+            user_id=user_id,
+            skip_device_declare_when_whole_artifact=True,
+        )
         if not scope_result.get("success"):
             error = scope_result.get("error", "Unknown error")
             logger.error("[add_mcp_to_skill_set] 刷新 MCP 授权范围失败: %s", error)
@@ -1731,6 +1738,7 @@ class SkillSetService:
         self,
         user_id: str,
         engine_type: Optional[str] = None,
+        skip_device_declare_when_whole_artifact: bool = False,
     ) -> dict[str, Any]:
         """刷新MCP授权范围（异步方法）。
 
@@ -1740,6 +1748,10 @@ class SkillSetService:
         Args:
             user_id: User ID for database queries (required, cannot be empty)
             engine_type: Engine type for scoping. If None, falls back to Bot.active_engine.
+            skip_device_declare_when_whole_artifact: 调用方已通过前置详情投递向设备
+                下发过一次完整配置时置 True，对整产物 provider（teclaw）跳过重复的
+                白名单设备投递，仅保留 passport 更新。默认 False。详见
+                ``MCPSyncService.refresh_mcp_scope``。
 
         Returns:
             ``{"success": bool, "error": str|None}`` 格式的结果字典。
@@ -1764,6 +1776,7 @@ class SkillSetService:
             bot_id=self.bot_id,
             entity_type=self.entity_type,
             engine_type=effective_engine,
+            skip_device_declare_when_whole_artifact=skip_device_declare_when_whole_artifact,
         )
 
 
