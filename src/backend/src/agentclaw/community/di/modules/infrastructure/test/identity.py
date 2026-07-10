@@ -8,6 +8,9 @@ from agentclaw.community.plugin_api.auth import AuthPlugin
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.token_exchange import TokenExchangePlugin
+from agentclaw.community.utils.singlebox_coverage_proxy import (
+    wrap_for_singlebox_coverage,
+)
 
 
 logger = get_logger()
@@ -22,7 +25,14 @@ class TestIdentityModule(Module):
         from agentclaw.community.plugins.local.auth import LocalAuth
 
         logger.info("AuthPlugin: LocalAuth (test)")
-        return LocalAuth()
+        return wrap_for_singlebox_coverage(
+            LocalAuth(),
+            {
+                "resolve_user_from_request": "AuthPlugin.resolve_user_from_request",
+                "is_operator_allowed": "AuthPlugin.is_operator_allowed",
+                "authorize_entity_access": "AuthPlugin.authorize_entity_access",
+            },
+        )
 
     @singleton
     @provider

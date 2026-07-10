@@ -30,6 +30,27 @@ modules:
       core_min_percent: 54.13
       router_min_percent: 100.0
       plugin_min_percent: 100.0
+
+  auth:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/auth
+    core_paths:
+      - src/agentclaw/community/core/auth/
+    router_api:
+      status: not_applicable
+      reason: Auth is a cross-cutting identity capability and owns no HTTP routes.
+      items: []
+    plugin_api:
+      status: applicable
+      reason: get_login_user is a legacy method with no production HTTP caller and is outside the runtime-reachable denominator.
+      items:
+        - AuthPlugin.resolve_user_from_request
+        - AuthPlugin.is_operator_allowed
+        - AuthPlugin.authorize_entity_access
+    thresholds:
+      core_min_percent: 100.0
+      plugin_min_percent: 100.0
   devices:
     system: backend
     acceptance_targets:
