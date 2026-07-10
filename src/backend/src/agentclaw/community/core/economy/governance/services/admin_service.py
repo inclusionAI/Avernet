@@ -43,6 +43,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.domain.domain import (
         GovernanceNotification,
     )
+    from agentclaw.community.core.economy.governance.domain.ticket import (
+        GovernanceTicket,
+    )
     from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
     from agentclaw.community.core.economy.governance.repositories.audit_repo import (
         GovernanceAuditRepository,
@@ -289,6 +292,49 @@ class GovernanceAdminService:
         return BulkOperationResult(affected=closed, label="closed")
 
     # -- Ticket-level admin operations (§7.5) ----------------------------------
+
+    def list_review_tickets(
+        self,
+        statuses: list[str] | None,
+        *,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> tuple[list[GovernanceTicket], int]:
+        """评审工单列表:按治理状态过滤(跨 owner)、分页,返回领域模型 + 总数。
+
+        Args:
+            statuses: 治理状态白名单(open/scheduled/waiting_review/closed);
+                None 时默认全部活跃态(open/scheduled/waiting_review)。
+            offset: 分页偏移。
+            limit: 分页上限。
+
+        Returns:
+            (工单领域模型列表, 满足条件的总数)。领域模型经 from_orm 灌入
+            gmt_create/gmt_create,评审列表直接用,router 层负责序列化。
+        """
+        effective = statuses if statuses else [
+            GovernanceStatus.OPEN.value,
+            GovernanceStatus.SCHEDULED.value,
+            GovernanceStatus.WAITING_REVIEW.value,
+        ]
+        tickets = self._task_repo.list_tickets_by_statuses(
+            effective, offset=offset, limit=limit,
+        )
+        total = self._task_repo.count_tickets_by_statuses(effective)
+        return tickets, total
+
+    def get_review_ticket_detail(
+        self, ticket_id: str,
+    ) -> GovernanceTicket | None:
+        """评审工单详情:取单个工单领域模型,供详情面板展示。
+
+        Args:
+            ticket_id: 工单稳定 UUID。
+
+        Returns:
+            :class:`GovernanceTicket` 或 None(不存在)。
+        """
+        return self._task_repo.find_by_ticket_id(ticket_id)
 
     def pause_ticket(
         self, ticket_id: str, admin_id: str, reason: str = "",
@@ -706,7 +752,7 @@ class GovernanceAdminService:
                         card_id=self._config.tc_card_id,
                         notification_data=notification_data,
                         base_url=self._config.tc_card_preview_url,
-                        iframe_callback_url="",
+                        iframe_callback_url=self._config.iframe_callback_url,
                         staff_id=override_recipient,
                     )
                     tc_card_extra = {

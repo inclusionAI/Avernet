@@ -460,3 +460,85 @@ class TestEmergencyClose:
         svc, db, _ = _build_svc(engine)
         result = svc.emergency_close("nonexistent", admin_id="admin-1")
         assert result.error_code == "NOT_FOUND"
+
+
+# ── list_review_tickets / get_review_ticket_detail (评审只读查询) ────
+
+
+class TestListReviewTickets:
+    """list_review_tickets: 按治理状态跨 owner 过滤 + 分页,返回领域模型 + total。"""
+
+    def test_default_statuses_is_all_active(self, session, engine):
+        svc, _, _ = _build_svc(engine)
+        _make_task_record(session, ticket_id="t-1", governance_status="open")
+        _make_task_record(session, ticket_id="t-2", governance_status="scheduled")
+        _make_task_record(session, ticket_id="t-3", governance_status="waiting_review")
+        _make_task_record(session, ticket_id="t-4", governance_status="closed")
+
+        tickets, total = svc.list_review_tickets(None, limit=50)
+        # 默认 = open+scheduled+waiting_review,closed 排除
+        assert total == 3
+        assert {t.ticket_id for t in tickets} == {"t-1", "t-2", "t-3"}
+
+    def test_explicit_status_filter(self, session, engine):
+        svc, _, _ = _build_svc(engine)
+        _make_task_record(
+            session, ticket_id="t-1", owner_id="o-A", governance_status="open",
+        )
+        _make_task_record(
+            session, ticket_id="t-2", owner_id="o-B", governance_status="open",
+        )
+        _make_task_record(
+            session, ticket_id="t-3", owner_id="o-C", governance_status="closed",
+        )
+
+        tickets, total = svc.list_review_tickets(["closed"], limit=50)
+        assert total == 1
+        assert tickets[0].ticket_id == "t-3"
+        # 跨 owner:命中不同 owner_id
+        assert {t.owner_id for t in tickets} == {"o-C"}
+
+    def test_returns_domain_model_not_dict(self, session, engine):
+        svc, _, _ = _build_svc(engine)
+        _make_task_record(session, ticket_id="t-1", governance_status="open")
+
+        tickets, _ = svc.list_review_tickets(["open"], limit=50)
+        assert len(tickets) == 1
+        # 领域模型流转约束:返回 GovernanceTicket,非 dict/ORM
+        assert type(tickets[0]).__name__ == "GovernanceTicket"
+        # Task 1 链路:gmt_create 经 from_orm 灌入
+        assert tickets[0].gmt_create is not None
+
+    def test_paging_offset_limit(self, session, engine):
+        svc, _, _ = _build_svc(engine)
+        for i in range(5):
+            _make_task_record(
+                session, ticket_id=f"t-{i}", governance_status="open",
+            )
+        page1, total = svc.list_review_tickets(["open"], offset=0, limit=2)
+        page2, _ = svc.list_review_tickets(["open"], offset=2, limit=2)
+        assert total == 5
+        assert len(page1) == 2
+        assert len(page2) == 2
+        # 两页不重叠
+        assert {t.ticket_id for t in page1}.isdisjoint(
+            {t.ticket_id for t in page2}
+        )
+
+
+class TestGetReviewTicketDetail:
+    """get_review_ticket_detail: 单工单领域模型, 不存在返回 None。"""
+
+    def test_found(self, session, engine):
+        svc, _, _ = _build_svc(engine)
+        _make_task_record(
+            session, ticket_id="t-detail", governance_status="waiting_review",
+        )
+        t = svc.get_review_ticket_detail("t-detail")
+        assert t is not None
+        assert type(t).__name__ == "GovernanceTicket"
+        assert t.governance_status.value == "waiting_review"
+
+    def test_not_found_returns_none(self, session, engine):
+        svc, _, _ = _build_svc(engine)
+        assert svc.get_review_ticket_detail("nonexistent") is None
