@@ -128,7 +128,7 @@ modules:
       reason: Device lifecycle has no honestly attributable runtime Plugin API denominator yet.
       items: []
     thresholds:
-      core_min_percent: 20.0
+      core_min_percent: 43.36
       router_min_percent: 44.44
 ```
 
@@ -246,10 +246,9 @@ bash scripts/ci/singlebox_coverage.sh \
   --coverage-root /tmp/avernet-device-coverage-final
 ```
 
-Expected: acceptance JUnit has no failures or skips; Core and Router thresholds pass; Plugin API is `not_applicable` with the manifest reason.
-The final Core percentage must also be at least five percentage points above
-the exact Task 1 baseline; this improvement check compares the two generated
-artifacts and does not alter the stable 20% floor in the manifest.
+Expected: acceptance JUnit has no failures or skips; Core is at least 43.36%,
+Router is at least 44.44%, and Plugin API is `not_applicable` with the manifest
+reason.
 
 - [ ] **Step 2: Cross-check report consistency**
 

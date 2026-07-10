@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="${ROOT}/scripts/ci/singlebox_coverage.sh"
+REPORTER="${ROOT}/scripts/ci/singlebox_coverage_report.py"
+MANIFEST="${ROOT}/scripts/ci/singlebox_coverage_modules.yaml"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -14,6 +16,8 @@ make_fake_repo() {
   mkdir -p "${tmp}/scripts/ci"
   mkdir -p "${tmp}/src/backend" "${tmp}/src/baas/packages/community"
   cp "$SCRIPT" "${tmp}/scripts/ci/singlebox_coverage.sh"
+  cp "$REPORTER" "${tmp}/scripts/ci/singlebox_coverage_report.py"
+  cp "$MANIFEST" "${tmp}/scripts/ci/singlebox_coverage_modules.yaml"
   chmod +x "${tmp}/scripts/ci/singlebox_coverage.sh"
   cat > "${tmp}/scripts/singlebox.sh" <<'SH'
 #!/usr/bin/env bash
@@ -39,7 +43,20 @@ if [ "$*" = "--standalone start all" ]; then
   mkdir -p "${SINGLEBOX_COVERAGE_DIR:?}/backend" "${SINGLEBOX_COVERAGE_DIR:?}/baas"
   printf '%s\n' '{}' > "${SINGLEBOX_COVERAGE_DIR}/backend/.coverage.fake"
   printf '%s\n' '{}' > "${SINGLEBOX_COVERAGE_DIR}/baas/.coverage.fake"
-  printf '%s\n' '{"key":"GET /api/health"}' > "${SINGLEBOX_COVERAGE_DIR}/backend/router_hits.jsonl"
+  if [ "${SINGLEBOX_STUB_DEVICE_HITS:-}" = "1" ]; then
+    cat > "${SINGLEBOX_COVERAGE_DIR}/backend/router_hits.jsonl" <<'JSONL'
+{"key":"GET /api/v1/devices"}
+{"key":"GET /api/v1/devices/{binding_id:int}"}
+{"key":"GET /api/v1/devices/by-id/{device_id}"}
+{"key":"GET /api/v1/devices/{binding_id:int}/connection"}
+{"key":"GET /api/v1/devices/connectable"}
+{"key":"GET /api/v1/devices/{binding_id:int}/instances"}
+{"key":"POST /api/v1/devices/{binding_id:int}/restart"}
+{"key":"POST /api/v1/devices/{binding_id:int}/release"}
+JSONL
+  else
+    printf '%s\n' '{"key":"GET /api/health"}' > "${SINGLEBOX_COVERAGE_DIR}/backend/router_hits.jsonl"
+  fi
   printf '%s\n' '{"key":"BotService.create_bot"}' > "${SINGLEBOX_COVERAGE_DIR}/backend/plugin_hits.jsonl"
   printf '%s\n' '{"key":"GET /health"}' > "${SINGLEBOX_COVERAGE_DIR}/baas/router_hits.jsonl"
 fi
@@ -87,7 +104,7 @@ if [ "${1:-}" = "run" ] && [ "${2:-}" = "coverage" ]; then
       done
       [ -n "$output" ] || exit 23
       mkdir -p "$(dirname "$output")"
-      printf '%s\n' '{"totals":{"percent_covered":100}}' > "$output"
+      printf '%s\n' '{"totals":{"percent_covered":100},"files":{"src/agentclaw/community/core/devices/services/device_service.py":{"summary":{"covered_lines":50,"num_statements":100}}}}' > "$output"
       ;;
     html)
       output_dir=""
@@ -160,7 +177,43 @@ test_mock_mode_is_not_supported() {
     fail "mock mode rejection message mismatch"
 }
 
+test_module_mode_reports_device_metrics() {
+  local tmp log uv_log summary
+  tmp="$(mktemp -d)"
+  log="${tmp}/singlebox.log"
+  uv_log="${tmp}/uv.log"
+  make_fake_repo "$tmp"
+
+  (
+    cd "$tmp"
+    PATH="${tmp}/fake-bin:$PATH" \
+      PYTHON="${ROOT}/src/backend/.venv/bin/python" \
+      SINGLEBOX_STUB_LOG="$log" \
+      SINGLEBOX_STUB_DEVICE_HITS=1 \
+      UV_STUB_LOG="$uv_log" \
+      "${tmp}/scripts/ci/singlebox_coverage.sh" \
+        --module devices \
+        --acceptance-target tests/community/acceptance/devices >/dev/null
+  )
+
+  grep -F "run pytest tests/community/acceptance/devices" "$uv_log" >/dev/null || \
+    fail "selected devices acceptance target was not executed"
+  summary="${tmp}/scripts/.dependencies/coverage/singlebox/reports/summary.json"
+  "${ROOT}/src/backend/.venv/bin/python" - "$summary" <<'PY'
+import json
+import sys
+
+summary = json.load(open(sys.argv[1], encoding="utf-8"))
+devices = summary["modules"]["devices"]
+assert devices["core"]["percent"] == 50.0
+assert devices["router_api"]["covered"] == 8
+assert devices["router_api"]["total"] == 18
+assert devices["plugin_api"]["status"] == "not_applicable"
+PY
+}
+
 test_default_mode_runs_real_singlebox
 test_mock_mode_is_not_supported
+test_module_mode_reports_device_metrics
 
 printf 'PASS: singlebox coverage gate tests\n'

@@ -1,0 +1,32 @@
+modules:
+  devices:
+    system: backend
+    core_paths:
+      - src/agentclaw/community/core/devices/
+    router_api:
+      items:
+        - POST /api/v1/devices
+        - POST /api/v1/devices/{binding_id:int}/release
+        - GET /api/v1/devices
+        - GET /api/v1/devices/provider-inventory
+        - GET /api/v1/devices/{binding_id:int}
+        - GET /api/v1/devices/by-id/{device_id}
+        - GET /api/v1/devices/{binding_id:int}/connection
+        - GET /api/v1/devices/bots/{bot_id}/connection
+        - GET /api/v1/devices/connectable
+        - GET /api/v1/devices/connectable_admin
+        - POST /api/v1/devices/callback/alive
+        - POST /api/v1/devices/callback/status
+        - POST /api/v1/devices/callback/bootstrap-auth
+        - POST /api/v1/devices/exec_shell
+        - POST /api/v1/devices/batch/env
+        - GET /api/v1/devices/bots/{bot_id}/instances
+        - GET /api/v1/devices/{binding_id:int}/instances
+        - POST /api/v1/devices/{binding_id:int}/restart
+    plugin_api:
+      status: not_applicable
+      reason: Device lifecycle has no honestly attributable runtime Plugin API denominator yet.
+      items: []
+    thresholds:
+      core_min_percent: 43.36
+      router_min_percent: 44.44
