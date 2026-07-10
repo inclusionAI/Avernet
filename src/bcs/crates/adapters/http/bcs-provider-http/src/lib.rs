@@ -114,7 +114,13 @@ impl BotDeliveryPort for HttpProviderTransport {
 
     async fn deliver(&self, cmd: BotDeliveryCommand) -> ServiceResult<BotDeliveryResult> {
         let target_bot_id = cmd.target_bot_id().to_string();
-        if matches!(cmd.delivery_kind, BotDeliveryKind::Send) {
+        if matches!(
+            cmd.delivery_kind,
+            BotDeliveryKind::Send
+                | BotDeliveryKind::TaskDispatch
+                | BotDeliveryKind::TaskMessage
+                | BotDeliveryKind::TaskResult
+        ) {
             let BcsFrame::Request(request) = &cmd.frame else {
                 return Err(ServiceError::InvalidOperation {
                     message: "chat.send provider delivery requires request frame".to_string(),
@@ -158,7 +164,7 @@ impl BotDeliveryPort for HttpProviderTransport {
             let wants_sse = matches!(
                 cmd.provider_transport,
                 ProviderTransportPreference::CallbackSse
-            ) && matches!(cmd.delivery_kind, BotDeliveryKind::Send);
+            ) && method == "chat.send";
             let client = if wants_sse { &self.sse_client } else { &self.client };
             let resp =
                 send_provider_request(client, &self.url_guard, &cmd.target, &body, wants_sse)

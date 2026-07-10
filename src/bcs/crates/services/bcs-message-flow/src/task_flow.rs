@@ -196,14 +196,18 @@ pub async fn handle_task_dispatch(
             return Err(error);
         }
     };
+    let delivery_kind = BotDeliveryKind::TaskDispatch;
+    let provider_transport = flow
+        .provider_transport_preference(&target_bot_id, &delivery_kind, &delivery_target)
+        .await;
     let result = match flow
         .bot_delivery
         .deliver(BotDeliveryCommand {
             target: delivery_target,
             run_id: effective_task_id.clone(),
             frame,
-            delivery_kind: BotDeliveryKind::TaskDispatch,
-            provider_transport: Default::default(),
+            delivery_kind,
+            provider_transport,
         })
         .await
     {
@@ -539,14 +543,18 @@ pub async fn handle_task_message(
             return Err(error);
         }
     };
+    let delivery_kind = BotDeliveryKind::TaskMessage;
+    let provider_transport = flow
+        .provider_transport_preference(&manager.bot_uuid, &delivery_kind, &delivery_target)
+        .await;
     let result = flow
         .bot_delivery
         .deliver(BotDeliveryCommand {
             target: delivery_target,
             run_id: run_id.clone(),
             frame,
-            delivery_kind: BotDeliveryKind::TaskMessage,
-            provider_transport: Default::default(),
+            delivery_kind,
+            provider_transport,
         })
         .await?;
 

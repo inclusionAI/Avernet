@@ -311,7 +311,7 @@ async fn provider_delivery_protocol2_sse_ingests_events() {
     assert!(result.delivered);
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            if message_flow.events.lock().await.len() >= 2 {
+            if message_flow.events.lock().await.len() >= 3 {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -320,15 +320,95 @@ async fn provider_delivery_protocol2_sse_ingests_events() {
     .await
     .expect("SSE reader should ingest stream events");
     let events = message_flow.events.lock().await;
-    assert_eq!(events.len(), 2);
+    assert_eq!(events.len(), 3);
     assert_eq!(events[0].run_id, "run-sse");
     assert_eq!(events[0].event_type, "agent");
     assert_eq!(events[0].event_payload["stream"], "tool");
     assert_eq!(events[1].event_type, "chat.event");
-    assert_eq!(events[1].state, ChatEventState::Final);
-    assert_eq!(events[1].event_payload["state"], "final");
+    assert_eq!(events[1].state, ChatEventState::Delta);
+    assert_eq!(events[1].event_payload["delta_text"], "streaming ");
+    assert_eq!(events[2].event_type, "chat.event");
+    assert_eq!(events[2].state, ChatEventState::Final);
+    assert_eq!(events[2].event_payload["state"], "final");
     drop(events);
     assert!(run_context.get_context("run-sse").await.unwrap().terminal);
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn provider_delivery_protocol2_task_kinds_sse_ingest_events() {
+    let app = Router::new().route("/webhook", post(capture_sse));
+    let (webhook_url, server) = spawn_server(app).await;
+
+    let message_flow = Arc::new(RecordingMessageFlow::default());
+    let run_context = Arc::new(RecordingRunContext::default());
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    transport.set_ingest(message_flow.clone(), run_context.clone());
+
+    for (suffix, delivery_kind) in [
+        ("dispatch", BotDeliveryKind::TaskDispatch),
+        ("message", BotDeliveryKind::TaskMessage),
+        ("result", BotDeliveryKind::TaskResult),
+    ] {
+        let run_id = format!("task-{suffix}-sse");
+        run_context
+            .put_context(BotRunContext {
+                run_id: run_id.clone(),
+                bot_id: "bot-provider".to_string(),
+                group_id: "group-sse".to_string(),
+                bcs_session_id: Some("group-sse:abc12345".to_string()),
+                deadline_ms: bcs_protocol::now_ms() + 60_000,
+                terminal: false,
+            })
+            .await;
+        let event_offset = message_flow.events.lock().await.len();
+
+        let result = transport
+            .deliver(BotDeliveryCommand {
+                target: provider_target_with_protocol(webhook_url.clone(), "2.0"),
+                run_id: run_id.clone(),
+                frame: BcsFrame::Request(RequestFrame::new(
+                    run_id.clone(),
+                    "chat.send",
+                    Some(json!({
+                        "session_key": "group:sse",
+                        "bcs_session_id": "group-sse:abc12345",
+                        "bcs_group_id": "group-sse",
+                        "message": {
+                            "text": "hello"
+                        }
+                    })),
+                )),
+                delivery_kind,
+                provider_transport: ProviderTransportPreference::CallbackSse,
+            })
+            .await
+            .unwrap();
+
+        assert!(result.delivered);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if message_flow.events.lock().await.len() >= event_offset + 3 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("SSE reader should ingest task events");
+        let events = message_flow.events.lock().await;
+        let task_events = &events[event_offset..event_offset + 3];
+        assert_eq!(task_events[0].run_id, run_id);
+        assert_eq!(task_events[0].event_type, "agent");
+        assert_eq!(task_events[1].event_type, "chat.event");
+        assert_eq!(task_events[1].state, ChatEventState::Delta);
+        assert_eq!(task_events[1].event_payload["delta_text"], "streaming ");
+        assert_eq!(task_events[2].event_type, "chat.event");
+        assert_eq!(task_events[2].state, ChatEventState::Final);
+        drop(events);
+        assert!(run_context.get_context(&run_id).await.unwrap().terminal);
+    }
 
     server.abort();
 }
@@ -611,7 +691,10 @@ async fn capture_sse() -> Response {
         "data: {\"runId\":\"engine-run-sse\",\"seq\":1,\"stream\":\"tool\",\"phase\":\"result\",\"toolCallId\":\"tc-1\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
         "\n",
         "event: chat\n",
-        "data: {\"runId\":\"engine-run-sse\",\"seq\":2,\"state\":\"final\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"done\"}]}}\n",
+        "data: {\"runId\":\"engine-run-sse\",\"seq\":2,\"state\":\"delta\",\"deltaText\":\"streaming \"}\n",
+        "\n",
+        "event: chat\n",
+        "data: {\"runId\":\"engine-run-sse\",\"seq\":3,\"state\":\"final\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"streaming done\"}]}}\n",
         "\n",
     );
     Response::builder()
@@ -880,6 +963,53 @@ async fn provider_delivery_2_0_chat_send_with_sse_preference_advertises_sse() {
     );
     assert_eq!(request.transport.as_deref(), Some("sse"));
     assert_eq!(request.body["method"], "chat.send");
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn provider_delivery_2_0_task_kinds_accept_json_callback_fallback() {
+    let captured: CapturedState = Arc::new(Mutex::new(None));
+    let app = Router::new()
+        .route("/webhook", post(capture_ack))
+        .with_state(captured.clone());
+    let (webhook_url, server) = spawn_server(app).await;
+
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    for (suffix, delivery_kind) in [
+        ("dispatch", BotDeliveryKind::TaskDispatch),
+        ("message", BotDeliveryKind::TaskMessage),
+        ("result", BotDeliveryKind::TaskResult),
+    ] {
+        let run_id = format!("task-{suffix}-json-fallback");
+        let result = transport
+            .deliver(BotDeliveryCommand {
+                target: provider_target_v2(webhook_url.clone()),
+                run_id: run_id.clone(),
+                frame: BcsFrame::Request(RequestFrame::new(
+                    run_id,
+                    "chat.send",
+                    Some(json!({
+                        "bcs_session_id": "group-1:feedbeef",
+                        "bcs_group_id": "group-1",
+                        "message": { "text": "hello" }
+                    })),
+                )),
+                delivery_kind,
+                provider_transport: ProviderTransportPreference::CallbackSse,
+            })
+            .await
+            .expect("2.0 task JSON ack should fall back to callbacks");
+
+        assert!(result.delivered);
+        let request = captured.lock().await.clone().unwrap();
+        assert_eq!(
+            request.accept.as_deref(),
+            Some("text/event-stream, application/json")
+        );
+        assert_eq!(request.transport.as_deref(), Some("sse"));
+        assert_eq!(request.body["method"], "chat.send");
+    }
 
     server.abort();
 }

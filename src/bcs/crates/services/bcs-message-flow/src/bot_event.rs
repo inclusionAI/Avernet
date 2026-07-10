@@ -731,14 +731,22 @@ async fn handle_task_bot_event(
         &entry.task_id,
         &manager_result_run_id,
     );
+    let delivery_target = flow
+        .registry
+        .resolve_delivery_target(&entry.driver_bot)
+        .await?;
+    let delivery_kind = BotDeliveryKind::TaskResult;
+    let provider_transport = flow
+        .provider_transport_preference(&entry.driver_bot, &delivery_kind, &delivery_target)
+        .await;
     let result = flow
         .bot_delivery
         .deliver(BotDeliveryCommand {
-            target: flow.registry.resolve_delivery_target(&entry.driver_bot).await?,
+            target: delivery_target,
             run_id: manager_result_run_id.clone(),
             frame,
-            delivery_kind: BotDeliveryKind::TaskResult,
-            provider_transport: Default::default(),
+            delivery_kind,
+            provider_transport,
         })
         .await?;
     if !result.delivered {
