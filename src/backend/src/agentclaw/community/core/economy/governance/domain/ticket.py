@@ -33,7 +33,8 @@ class GovernanceTicket:
       - 快照 只能通过 refresh_snapshot 方法替换(离线批处理驱动)
       - 生命周期 只能通过状态机方法变更(transition_to / accept_feedback
         / close / pause / resume)
-      - sealed 列(env, gmt_create, gmt_modified)不在本模型上
+      - sealed 列(id/env)不在本模型上;gmt_create/gmt_modified 作为只读
+        基础元信息保留(由 from_orm 灌入,展示/排序用)
     """
 
     # ── 身份(创建时写入,逻辑不可变) ──────────────
@@ -65,6 +66,9 @@ class GovernanceTicket:
     remind_count: int
     feedback_payload: str | None
     actor_id: str | None
+    # ── 基础元信息(只读,由 from_orm 从 sealed 列灌入) ───
+    gmt_create: datetime | None = None
+    gmt_modified: datetime | None = None
 
     # ── 快照访问(只读) ──────────────────────────────
 
@@ -335,6 +339,8 @@ class GovernanceTicket:
             remind_count=0,
             feedback_payload=None,
             actor_id=None,
+            gmt_create=None,
+            gmt_modified=None,
         )
 
     # ── 翻译边界 ─────────────────────────────────────────
@@ -347,7 +353,8 @@ class GovernanceTicket:
             obj: orm.GovernanceTicketOrm 实例(ORM 对象)。
 
         Returns:
-            领域模型实例。sealed 列不会被映射 — 物理不泄漏。
+            领域模型实例。sealed 列(id/env)不会被映射；gmt_create/gmt_modified 作为
+            基础只读元信息灌入(评审/展示场景需读取创建时间)。
         """
         _saving_ratio = obj.saving_ratio
         if _saving_ratio is not None:
@@ -398,13 +405,16 @@ class GovernanceTicket:
             remind_count=obj.remind_count or 0,
             feedback_payload=obj.feedback_payload,
             actor_id=obj.actor_id,
+            gmt_create=getattr(obj, "gmt_create", None),
+            gmt_modified=getattr(obj, "gmt_modified", None),
         )
 
     def to_orm(self, row: object | None = None) -> object:
         """写翻译:领域模型 → ORM。
 
         新建时传 row=None 会创建 ORM 对象;更新已有行传 row。
-        sealed 列(env, gmt_create, gmt_modified)不在领域模型上。
+        sealed 列(id/env)不在领域模型上;gmt_create/gmt_modified 不写回
+        (由数据库 default/onupdate 维护,领域模型仅读不写)。
 
         Args:
             row: 可选已有 ORM 行;None 时新建。
@@ -495,7 +505,7 @@ class GovernanceTicket:
         """API 序列化 — router 直接 ``data=[t.to_dict() for t in items]``。
 
         字段名对齐 ORM 列名(API 契约,前端依赖);sealed 列
-        (id/env/gmt_create/gmt_modified)不在领域模型上,不暴露。
+        (id/env)不在领域模型上,不暴露。gmt_create/gmt_modified 暴露(只读元信息)。
         时间字段转 ISO 字符串以便 JSON 序列化。
         """
         s = self._snapshot
@@ -540,4 +550,6 @@ class GovernanceTicket:
             "remind_count": self.remind_count,
             "feedback_payload": self.feedback_payload,
             "actor_id": self.actor_id,
+            "gmt_create": _iso(self.gmt_create),
+            "gmt_modified": _iso(self.gmt_modified),
         }
