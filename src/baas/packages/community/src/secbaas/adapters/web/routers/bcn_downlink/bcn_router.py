@@ -19,6 +19,7 @@
 参考: BCN Bot 下行连接接入方案 (内部文档)
 """
 
+import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -278,16 +279,51 @@ async def _dispatch_chat_send_stream(
     converter = converter_factory.create("bcn")
 
     async def _stream() -> AsyncIterator[str]:
+        frame_count = 0
+        close_reason = "eof"
+        last_chunk_type: str | None = None
+        logger.info(
+            "[chat.send.stream] response body started: "
+            "run_id=%s media_type=text/event-stream",
+            req.id,
+        )
         try:
             async for chunk in chunk_iter:
+                last_chunk_type = chunk.type
                 event = converter.convert(chunk, run_id=req.id)
                 if event is None:
                     continue
+                frame_count += 1
+                if frame_count == 1:
+                    logger.info(
+                        "[chat.send.stream] first SSE frame: "
+                        "run_id=%s event=%s chunk_type=%s",
+                        req.id,
+                        event.event,
+                        chunk.type,
+                    )
                 sse = event.to_sse()
                 yield sse
+        except asyncio.CancelledError:
+            close_reason = "cancelled"
+            raise
+        except GeneratorExit:
+            close_reason = "generator_exit"
+            raise
         except Exception as e:
+            close_reason = "error"
             logger.exception("[chat.send.stream] Unexpected error: run_id=%s", req.id)
+            frame_count += 1
             yield _build_sse_error(req.id, "INTERNAL_ERROR", str(e), False)
+        finally:
+            logger.info(
+                "[chat.send.stream] response body closed: "
+                "run_id=%s reason=%s frame_count=%d last_chunk_type=%s",
+                req.id,
+                close_reason,
+                frame_count,
+                last_chunk_type,
+            )
 
     return StreamingResponse(
         _stream(),

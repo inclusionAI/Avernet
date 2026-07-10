@@ -53,7 +53,8 @@ def _chat_send_request() -> ChatSendRequest:
 
 
 @pytest.mark.asyncio
-async def test_stream_dispatch_skips_dropped_converter_events():
+async def test_stream_dispatch_skips_dropped_converter_events(caplog):
+    caplog.set_level("INFO")
     response = await _dispatch_chat_send_stream(
         _chat_send_request(),
         _StreamService(),
@@ -77,3 +78,41 @@ async def test_stream_dispatch_skips_dropped_converter_events():
         "state": "delta",
         "deltaText": "hello",
     }
+    assert response.media_type == "text/event-stream"
+    assert response.headers["x-accel-buffering"] == "no"
+    assert any(
+        "[chat.send.stream] response body started: "
+        "run_id=run-1 media_type=text/event-stream" in message
+        for message in caplog.messages
+    )
+    assert any(
+        "[chat.send.stream] first SSE frame: "
+        "run_id=run-1 event=chat chunk_type=delta" in message
+        for message in caplog.messages
+    )
+    assert any(
+        "[chat.send.stream] response body closed: "
+        "run_id=run-1 reason=eof frame_count=1 last_chunk_type=delta" in message
+        for message in caplog.messages
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_dispatch_logs_generator_exit_when_consumer_closes(caplog):
+    caplog.set_level("INFO")
+    response = await _dispatch_chat_send_stream(
+        _chat_send_request(),
+        _StreamService(),
+        _ConverterFactory(),
+    )
+
+    first = await anext(response.body_iterator)
+    assert first.startswith("id: 1\nevent: chat\n")
+    await response.body_iterator.aclose()
+
+    assert any(
+        "[chat.send.stream] response body closed: "
+        "run_id=run-1 reason=generator_exit frame_count=1 last_chunk_type=delta"
+        in message
+        for message in caplog.messages
+    )

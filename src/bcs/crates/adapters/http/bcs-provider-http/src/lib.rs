@@ -160,15 +160,36 @@ impl BotDeliveryPort for HttpProviderTransport {
                 ProviderTransportPreference::CallbackSse
             ) && matches!(cmd.delivery_kind, BotDeliveryKind::Send);
             let client = if wants_sse { &self.sse_client } else { &self.client };
+            let request_started = Instant::now();
             let resp =
                 send_provider_request(client, &self.url_guard, &cmd.target, &body, wants_sse)
                     .await?;
+            let response_elapsed_ms = request_started.elapsed().as_millis();
+            let response_status = resp.status();
             let ctype = resp
                 .headers()
                 .get(reqwest::header::CONTENT_TYPE)
                 .and_then(|value| value.to_str().ok())
                 .unwrap_or("")
                 .to_string();
+            let transfer_encoding = resp
+                .headers()
+                .get(reqwest::header::TRANSFER_ENCODING)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("");
+            info!(
+                target_bot_id = %target_bot_id,
+                provider_id = %provider_id,
+                method = %method,
+                run_id = %run_id,
+                wants_sse,
+                status = %response_status.as_u16(),
+                content_type = %ctype,
+                content_length = ?resp.content_length(),
+                transfer_encoding = %transfer_encoding,
+                elapsed_ms = %response_elapsed_ms,
+                "provider downlink: HTTP response headers received"
+            );
             if wants_sse && ctype.starts_with("text/event-stream") {
                 let (Some(flow), Some(ctx)) =
                     (self.message_flow.read().expect("message_flow lock poisoned").clone(), self.bot_run_context.read().expect("bot_run_context lock poisoned").clone())
