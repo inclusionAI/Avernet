@@ -172,6 +172,9 @@ async def get_cron_status(
             message=result.get("message", "OK"),
             failed_targets=result.get("failed_targets", []),
         )
+    except CronRelayError as e:
+        logger.warning(f"[get_cron_status] Business error: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=e.error_code)
     except Exception as e:
         logger.error(f"[get_cron_status] Error: {e}")
         return ApiResponse(success=False, message=str(e), error_code=500)

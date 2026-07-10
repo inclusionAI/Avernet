@@ -275,7 +275,8 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
             targets.extend(bot_targets)
             failed_targets.extend(bot_failed_targets)
 
-        targets, instance_failed_targets = self._expand_runtime_targets(targets)
+        # 服务 Bot 的多实例 stage 展开为带 device_uuid 的实际查询目标。
+        targets, instance_failed_targets = await self._expand_runtime_targets(targets)
         failed_targets.extend(instance_failed_targets)
         if device_uuid:
             expanded_targets = targets
@@ -555,7 +556,9 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
                     bot_id=bot_id,
                     bot_name=bot_name,
                     owner_id=owner_id,
-                    runtime_stage=RUNTIME_STAGE_DRAFT,
+                    runtime_stage=(
+                        RUNTIME_STAGE_DRAFT if bot_type == "service" else None
+                    ),
                     publish_id=None,
                     reason="binding_missing",
                     message=f"Bot {bot_id} has no draft binding_id",
