@@ -449,6 +449,7 @@ impl PersistentBotRepo {
     async fn load_from_db(
         &self,
         bot_uuid: &str,
+        include_deleted: bool,
     ) -> Option<(
         BotCapabilities,
         Option<String>,
@@ -460,10 +461,18 @@ impl PersistentBotRepo {
         let env = resolve_env();
         // Code-Review fix #1: include `actor_kind` so the registry read path can
         // propagate it back to callers (O.5 / P.3 / F.3 all gate on actor_kind).
-        let sql = "SELECT name, bot_info, visibility, status, actor_kind, env, created_by, agent_code FROM bcs_bots WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0";
+        //
+        // `include_deleted` skips the soft-delete filter so callers that only
+        // need display metadata (e.g. group participant names of removed bots)
+        // can still read the `name` snapshot from the retained row.
+        let sql = if include_deleted {
+            "SELECT name, bot_info, visibility, status, actor_kind, env, created_by, agent_code FROM bcs_bots WHERE bot_uuid = ? AND env = ?".to_string()
+        } else {
+            "SELECT name, bot_info, visibility, status, actor_kind, env, created_by, agent_code FROM bcs_bots WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0".to_string()
+        };
 
         let rows = self
-            .db_query(sql, vec![Value::from(bot_uuid), Value::from(env.as_str())])
+            .db_query(&sql, vec![Value::from(bot_uuid), Value::from(env.as_str())])
             .await
             .ok()?;
 
@@ -1420,7 +1429,46 @@ impl BotRepoPort for PersistentBotRepo {
         // returning defaults; otherwise O.5/P.3/F.3 will misclassify any actor
         // whose row is no longer cached in process memory.
         let (mut capabilities, env, _hidden, created_by, actor_kind, status) =
-            self.load_from_db(bot_id).await?;
+            self.load_from_db(bot_id, false).await?;
+        let dynamic_status = self.load_status_from_cache(bot_id).await;
+
+        // 清除敏感字段，防止通过常规接口泄露
+        capabilities.agent_code = None;
+        capabilities.agent_token = None;
+
+        Some(RegisteredBot {
+            bot_uuid: bot_id.to_string(),
+            capabilities,
+            dynamic_status,
+            env,
+            created_by,
+            actor_kind,
+            status,
+        })
+    }
+
+    /// Like [`get`](Self::get) but also returns soft-deleted bots (rows with
+    /// `is_deleted = 1`). Used for display-only enrichment where the bot's
+    /// `name` snapshot is still needed after removal (e.g. group participant
+    /// names in `/bots/{id}/groups`). Sensitive fields are stripped the same
+    /// way as `get`.
+    ///
+    /// Checks the in-memory cache first (the common case during backfill, where
+    /// most participants are active, cached bots) and only falls back to a
+    /// database read — with the soft-delete filter dropped — on a cache miss,
+    /// so removed bots can still be resolved from the retained row without
+    /// hitting the database for every participant.
+    async fn get_including_deleted(&self, bot_id: &str) -> Option<RegisteredBot> {
+        let bots = self.bots.read().await;
+        if let Some(bot) = bots.get(bot_id) {
+            if !bot.is_expired() {
+                return Some(bot.to_registered_bot());
+            }
+        }
+        drop(bots);
+
+        let (mut capabilities, env, _hidden, created_by, actor_kind, status) =
+            self.load_from_db(bot_id, true).await?;
         let dynamic_status = self.load_status_from_cache(bot_id).await;
 
         // 清除敏感字段，防止通过常规接口泄露
@@ -1456,7 +1504,7 @@ impl BotRepoPort for PersistentBotRepo {
 
         // Fallback: load from database
         let (capabilities, _env, _hidden, _created_by, _actor_kind, _status) =
-            self.load_from_db(bot_id).await?;
+            self.load_from_db(bot_id, false).await?;
 
         Some(bcs_service_api::AgentCredentials {
             agent_code: capabilities.agent_code,
@@ -1644,7 +1692,7 @@ impl BotRepoPort for PersistentBotRepo {
     // ===== Persistence =====
 
     async fn load_from_storage(&self, bot_id: &str) -> Option<BotCapabilities> {
-        self.load_from_db(bot_id).await.map(
+        self.load_from_db(bot_id, false).await.map(
             |(mut caps, _env, _hidden, _created_by, _actor_kind, _status)| {
                 // agent_token 是运行时敏感字段，只存内存，不从 DB 恢复
                 caps.agent_token = None;
@@ -2306,7 +2354,7 @@ impl BotRepoPort for PersistentBotRepo {
             // reconnected entry reflects the true actor type and lifecycle
             // status (Human reconnects must not silently downgrade to Bot/Online).
             let (capabilities, env, _hidden, created_by, actor_kind, actor_status) =
-                self.load_from_db(&bot_id).await.unwrap_or((
+                self.load_from_db(&bot_id, false).await.unwrap_or((
                     BotCapabilities::default(),
                     Some(resolve_env()),
                     false,

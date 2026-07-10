@@ -67,6 +67,16 @@ pub trait BotRegistryCoreService: Send + Sync {
     /// Note: This method excludes sensitive fields (agent_code, agent_token) from the returned capabilities.
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot>;
 
+    /// Like [`get`](Self::get) but also returns soft-deleted bots.
+    ///
+    /// Used for display-only enrichment (e.g. filling in a removed bot's name
+    /// in group participant listings). Default implementation delegates to
+    /// `get`, so deleted bots resolve to `None` unless the implementation
+    /// overrides this to read the retained row.
+    async fn get_including_deleted(&self, bot_id: &str) -> Option<RegisteredBot> {
+        self.get(bot_id).await
+    }
+
     /// Get sensitive agent credentials (agent_code and agent_token) for a bot.
     /// This is a separate method to avoid leaking sensitive data in regular get() calls.
     /// Used by AI Security Gateway for message validation.
@@ -521,7 +531,11 @@ pub async fn backfill_bot_names(registry: &dyn BotRegistryCoreService, group: &m
             continue;
         }
 
-        if let Some(bot) = registry.get(&participant.bot_uuid).await {
+        // Use get_including_deleted so removed (soft-deleted) bots still resolve
+        // their name snapshot for display; the group participant row is retained
+        // after a bot is deleted, and without this the frontend would only see
+        // the bot_uuid with no bot_name.
+        if let Some(bot) = registry.get_including_deleted(&participant.bot_uuid).await {
             if let Some(name) = bot
                 .capabilities
                 .name
@@ -546,7 +560,8 @@ pub async fn backfill_participant_names(
             continue;
         }
 
-        if let Some(bot) = registry.get(&participant.bot_uuid).await {
+        // See backfill_bot_names: include soft-deleted bots for display.
+        if let Some(bot) = registry.get_including_deleted(&participant.bot_uuid).await {
             if let Some(name) = bot
                 .capabilities
                 .name

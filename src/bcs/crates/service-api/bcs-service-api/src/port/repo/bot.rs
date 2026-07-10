@@ -33,6 +33,16 @@ pub trait BotRepoPort: Send + Sync {
 
     async fn update_status(&self, bot_id: &str, status: BotDynamicStatus) -> bool;
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot>;
+
+    /// Like [`get`](Self::get) but also returns soft-deleted bots.
+    ///
+    /// Default implementation delegates to `get` (which excludes deleted bots),
+    /// returning `None` for deleted bots; persistent stores override this to
+    /// read the retained (soft-deleted) row so display-only callers can still
+    /// resolve a removed bot's name snapshot.
+    async fn get_including_deleted(&self, bot_id: &str) -> Option<RegisteredBot> {
+        self.get(bot_id).await
+    }
     async fn get_agent_credentials(&self, bot_id: &str) -> Option<AgentCredentials>;
 
     /// Set an in-memory extension field on a bot record by key.
