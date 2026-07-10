@@ -568,6 +568,8 @@ def _make_ticket_orm_obj(**overrides) -> SimpleNamespace:
         remind_count=0,
         feedback_payload=None,
         actor_id=None,
+        gmt_create=datetime(2026, 7, 9, 8, 0, 0),
+        gmt_modified=datetime(2026, 7, 9, 9, 0, 0),
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -915,10 +917,14 @@ class TestTicketFromOrm:
         assert t.consecutive_normal_days == 0  # fallback
 
     def test_sealed_not_leaked(self) -> None:
-        """domain 实例没有 sealed 属性(env, gmt_create, gmt_modified)。"""
+        """sealed 列(id/env)不泄漏到领域模型;gmt_create/gmt_modified 作为只读元信息保留。"""
         t = GovernanceTicket.from_orm(_make_ticket_orm_obj())
-        for attr in ("env", "gmt_create", "gmt_modified"):
+        for attr in ("env", "id"):
             assert not hasattr(t, attr), f"domain should not have sealed attr: {attr}"
+        # gmt_create/gmt_modified 现为领域只读元信息,需可读
+        assert hasattr(t, "gmt_create")
+        assert hasattr(t, "gmt_modified")
+        assert t.gmt_create == datetime(2026, 7, 9, 8, 0, 0)
 
     def test_saving_ratio_float_conversion(self) -> None:
         """Numeric → float 转换。"""
