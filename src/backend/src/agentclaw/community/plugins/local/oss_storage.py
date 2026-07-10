@@ -45,6 +45,7 @@ class MockObjectStoragePlugin(MockSeam, ObjectStoragePlugin):
     def __init__(self) -> None:
         self.put_object: MagicMock = MagicMock(return_value=True)
         self.put_file: MagicMock = MagicMock(return_value=True)
+        self.get_object: MagicMock = MagicMock(return_value=None)
         self.delete_object: MagicMock = MagicMock(return_value=True)
         self.list_objects: MagicMock = MagicMock(return_value=[])
         self.sign_url: MagicMock = MagicMock(side_effect=_default_sign_url)
@@ -67,6 +68,10 @@ class MockObjectStoragePlugin(MockSeam, ObjectStoragePlugin):
         self.put_file.reset_mock()
         self.put_file.return_value = True
         self.put_file.side_effect = None
+
+        self.get_object.reset_mock()
+        self.get_object.return_value = None
+        self.get_object.side_effect = None
 
         self.delete_object.reset_mock()
         self.delete_object.return_value = True

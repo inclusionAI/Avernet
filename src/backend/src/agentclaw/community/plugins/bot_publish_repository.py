@@ -34,12 +34,14 @@ reference):
 """
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, List, Optional
 
 from injector import inject
 from sqlalchemy import func
 
+from agentclaw.community.core.service_bot.repository.config_artifact_offload import (
+    ConfigArtifactOffloader,
+)
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishModel,
     BotPublishRecord,
@@ -53,20 +55,39 @@ logger = get_logger()
 
 
 class BotPublishRepository:
-    """Unified ORM ``BotPublishRepositoryProtocol`` implementation."""
+    """Unified ORM ``BotPublishRepositoryProtocol`` implementation.
+
+    An oversized ``ext['config_artifact']`` is offloaded to object storage and
+    re-inlined on read by :class:`ConfigArtifactOffloader`; this class owns only
+    persistence and delegates the ext ⇄ object-storage transform to it.
+    """
 
     @inject
-    def __init__(self, db: DatabasePlugin) -> None:
+    def __init__(
+        self, db: DatabasePlugin, offload: ConfigArtifactOffloader
+    ) -> None:
         self._db = db
         self.Model = BotPublishModel
+        # Offloads an oversized config_artifact out of the ext TEXT column.
+        self._offload = offload
+
+    def _resolve_record(
+        self, record: Optional[BotPublishRecord]
+    ) -> Optional[BotPublishRecord]:
+        """Re-inline an offloaded artifact on a detached record.
+
+        Called AFTER the DB session closes, so the object-storage network fetch
+        never holds a database connection open.
+        """
+        if record is not None:
+            record.ext = self._offload.resolve(record.ext)
+        return record
 
     # ── insert (plain INSERT — never an upsert) ─────────────────
 
     def insert(self, data: Dict[str, Any]) -> BotPublishRecord:
         ext = data.get("ext")
-        ext_json = (
-            json.dumps(ext, ensure_ascii=False) if ext is not None else None
-        )
+        env = data.get("env", get_current_env())
         with self._db.orm_session() as db:
             row = self.Model(
                 source_bot_pk=data["source_bot_pk"],
@@ -79,13 +100,24 @@ class BotPublishRepository:
                 status=data.get("status", PublishStatus.DRAFT),
                 version=data.get("version"),
                 last_pub_id=data.get("last_pub_id", 0),
-                env=data.get("env", get_current_env()),
-                ext=ext_json,
+                env=env,
+                # ext set after flush: offloading keys the OSS object by the
+                # DB-assigned publish_id, which only exists post-flush. Still a
+                # single INSERT in one transaction (a second flush updates ext
+                # before commit).
+                ext=None,
                 permission_owner=data["permission_owner"],
             )
             db.add(row)
             db.flush()
             new_id = row.id
+            # ext + upload only after flush: the OSS key is content-addressed
+            # under the DB-assigned publish_id. The upload runs inside the txn so
+            # a put failure rolls the whole INSERT back (no dangling marker row).
+            ext_json, pending = self._offload.prepare(ext, new_id, env)
+            row.ext = ext_json
+            self._offload.upload(pending)
+            db.flush()
             logger.info("[insert] inserted bot publish id=%s", new_id)
         # Re-read after commit — prod returns get_by_id(inserted_id),
         # so the returned record carries DB-populated gmt_create /
@@ -101,7 +133,8 @@ class BotPublishRepository:
                 .filter(self.Model.id == publish_id)
                 .first()
             )
-            return row.to_record() if row else None
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
 
     def get_by_publish_bot_id(
         self,
@@ -119,7 +152,8 @@ class BotPublishRepository:
             if publish_status:
                 query = query.filter(self.Model.status == publish_status)
             row = query.order_by(self.Model.version.desc()).first()
-            return row.to_record() if row else None
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
 
     def get_draft_by_publish_bot_id(
         self,
@@ -137,7 +171,8 @@ class BotPublishRepository:
                 .order_by(self.Model.version.desc())
                 .first()
             )
-            return row.to_record() if row else None
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
 
     def get_by_publish_bot_id_and_version(
         self,
@@ -157,7 +192,8 @@ class BotPublishRepository:
                 )
                 .first()
             )
-            return row.to_record() if row else None
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
 
     def list_by_owner(
         self,
@@ -173,7 +209,8 @@ class BotPublishRepository:
             if status:
                 query = query.filter(self.Model.status == status)
             rows = query.order_by(self.Model.gmt_create.desc()).all()
-            return [r.to_record() for r in rows]
+            records = [r.to_record() for r in rows]
+        return [self._resolve_record(r) for r in records]
 
     def list_by_source_bot(
         self,
@@ -190,7 +227,8 @@ class BotPublishRepository:
                 .order_by(self.Model.gmt_create.desc())
                 .all()
             )
-            return [r.to_record() for r in rows]
+            records = [r.to_record() for r in rows]
+        return [self._resolve_record(r) for r in records]
 
     def list_by_status(
         self,
@@ -207,7 +245,8 @@ class BotPublishRepository:
                 .order_by(self.Model.gmt_create.desc())
                 .all()
             )
-            return [r.to_record() for r in rows]
+            records = [r.to_record() for r in rows]
+        return [self._resolve_record(r) for r in records]
 
     def get_latest_by_source_bot_id_and_owner_and_status(
         self,
@@ -228,7 +267,8 @@ class BotPublishRepository:
                 .order_by(self.Model.id.desc())
                 .first()
             )
-            return row.to_record() if row else None
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
 
     def get_latest_success_by_source_bot_id(
         self,
@@ -246,7 +286,8 @@ class BotPublishRepository:
                 .order_by(self.Model.id.desc())
                 .first()
             )
-            return row.to_record() if row else None
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
 
     def get_by_last_pub_id(
         self,
@@ -259,7 +300,8 @@ class BotPublishRepository:
                 .order_by(self.Model.id.desc())
                 .first()
             )
-            return row.to_record() if row else None
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
 
     # ── updates (single optimistic-lock statements) ─────────────
 
@@ -293,7 +335,9 @@ class BotPublishRepository:
         ext: Dict[str, Any],
         source_status: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
-        ext_json = json.dumps(ext, ensure_ascii=False)
+        ext_json, pending = self._offload.prepare(
+            ext, publish_id, get_current_env()
+        )
         with self._db.orm_session() as db:
             query = db.query(self.Model).filter(
                 self.Model.id == publish_id
@@ -308,6 +352,13 @@ class BotPublishRepository:
                 },
                 synchronize_session=False,
             )
+            # Upload the offloaded artifact only when a row actually took this
+            # write (affected > 0): a rejected optimistic-lock update OR a
+            # missing publish_id must not write an artifact object that nothing
+            # references (it could never be reaped — delete needs the row's env).
+            # Inside the txn so a put failure rolls back.
+            if affected > 0:
+                self._offload.upload(pending)
         if source_status is not None and affected == 0:
             return None
         return self.get_by_id(publish_id)
@@ -349,11 +400,35 @@ class BotPublishRepository:
 
     # ── delete (single hard DELETE — prod parity) ───────────────
 
+    def _artifact_prefix_of(self, publish_id: int) -> Optional[str]:
+        """The object-storage prefix for this record's artifacts, from its
+        ``env`` column, or ``None`` if the row is gone.
+
+        Uses the deterministic prefix (not a stored marker), so it reaps EVERY
+        offloaded version under the record — the current one plus any superseded
+        (content-addressed) leftovers.
+        """
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self.Model.env)
+                .filter(self.Model.id == publish_id)
+                .first()
+            )
+        if not row or not row[0]:
+            return None
+        return self._offload.prefix(row[0], publish_id)
+
     def delete(self, publish_id: int) -> bool:
+        # Resolve the record's artifact prefix (if any) before the row is gone,
+        # so object storage can be swept after a successful delete. The hard
+        # DELETE below stays a single statement (prod parity).
+        prefix = self._artifact_prefix_of(publish_id)
         with self._db.orm_session() as db:
             affected = (
                 db.query(self.Model)
                 .filter(self.Model.id == publish_id)
                 .delete(synchronize_session=False)
             )
-            return affected > 0
+        if affected > 0 and prefix:
+            self._offload.cleanup(prefix)
+        return affected > 0
