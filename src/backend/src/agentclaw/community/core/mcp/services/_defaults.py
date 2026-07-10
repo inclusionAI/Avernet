@@ -76,6 +76,7 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "mcp.ant.arkai.dimamcpserver"},
         {"server_code": "mcp.ant.agentix.112858.aixAicoding"},
         {"server_code": "mcp.ant.agentclawscs.bcs_mcp"},
+        {"server_code": "mcp.ant.faas.aixjiter.AixCodingMemoryMCP"},
         {"server_code": "hitl"},
     ],
 }
