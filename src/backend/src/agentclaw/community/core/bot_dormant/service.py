@@ -503,11 +503,16 @@ class DormantBotService:
         today = _date.today()
         for row in rows:
             try:
-                if (row.bot_id, row.owner_id) in whitelist:
+                is_owner_protected = str(row.owner_id) in protected_owner_ids
+                is_bot_whitelisted = (row.bot_id, row.owner_id) in whitelist
+                if is_owner_protected or is_bot_whitelisted:
+                    reason = (
+                        "protected_owner" if is_owner_protected else "whitelisted"
+                    )
                     logger.info(
-                        "[dormant.run=%s] event=external_skip reason=whitelisted "
+                        "[dormant.run=%s] event=external_skip reason=%s "
                         "bot_id=%s owner_id=%s",
-                        run_id, row.bot_id, row.owner_id,
+                        run_id, reason, row.bot_id, row.owner_id,
                     )
                     self._write_audit(
                         session,

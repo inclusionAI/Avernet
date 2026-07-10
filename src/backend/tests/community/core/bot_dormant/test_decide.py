@@ -324,6 +324,7 @@ def test_manual_recycle_one_reuses_recycle_side_effects_and_writes_audit():
         session,
         bot_service=bot_service,
         passport_plugin=passport,
+        protected_owner_ids=frozenset({"owner1"}),
     )
     ops_service = DormantOpsService(service)
 
@@ -331,11 +332,12 @@ def test_manual_recycle_one_reuses_recycle_side_effects_and_writes_audit():
         bot_id="ops_bot",
         owner_id="owner1",
         dry_run=False,
-        reason="prepub regression",
+        reason="explicit protected-owner override",
     )
 
     assert result["status"] == "recycled"
     assert result["dry_run"] is False
+    service._common_whitelist_service.get_owner_ids.assert_not_called()
     bot_service.stop_bot.assert_called_once_with(
         bot_id="ops_bot",
         user_id="owner1",
