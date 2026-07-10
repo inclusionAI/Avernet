@@ -93,6 +93,8 @@ if bot.get("template_type") == "applicationCoding" and "token" in template_confi
   一行都不用动，审查者一眼就能确认影响范围。
 - ✅ **通用**：同样的手法能套用到代码库其它“按 `engine_type` / `template_type` / `bot_type`
   分叉”的地方。
+- ✅ **所有权可自治**：每个引擎的策略独占一个目录，配上自己的 `CODEOWNERS`，引擎负责人
+  即可自审自己引擎的改动，不必再请公共服务（TC）负责人 approve（见 §6）。
 
 ---
 
@@ -246,10 +248,27 @@ class AicodingProvisioningStrategy:
 > 关键：**`in ("applicationCoding", "personalCoding")` 这一句，从此只存在于 aicoding 策略里，
 > 而不是散落在 6 个公共文件中。** 这就是 PR #61 应该改的地方——一处，而不是八处。
 
-### 4.5 在组装根注册（Composition Root）
+### 4.5 目录布局：一个引擎一个目录
+
+按引擎分目录存放（而不是所有引擎挤在一个文件里），这样每个引擎都能独立演进、独立配
+`CODEOWNERS`（见 §6）：
+
+```text
+core/bot_management/engines/
+├── provisioning.py          # 接口 + Registry（公共契约，TC 维护）
+├── default.py               # 默认 no-op（公共）
+├── aicoding/                # ← aicoding 引擎自己的目录
+│   ├── __init__.py
+│   └── strategy.py          # AicodingProvisioningStrategy + CODING_TEMPLATE_TYPES
+├── openclaw/                # ← openclaw 引擎自己的目录（如需特化）
+│   └── strategy.py
+└── registry.py              # 组装根：把各引擎策略注册进来
+```
+
+### 4.6 在组装根注册（Composition Root）
 
 ```python
-# core/bot_management/engines/__init__.py（新增）
+# core/bot_management/engines/registry.py（新增）
 def create_provisioning_registry(...deps...) -> EngineProvisioningRegistry:
     reg = EngineProvisioningRegistry()
     for eng in ("openclaw", "moltis", "hermes", "teclaw"):
@@ -315,7 +334,57 @@ raw_token = strategy.deploy_token(template_type=template_type, template_config=t
 
 ---
 
-## 6. 安全的迁移步骤（不要一次推倒重来）
+## 6. 附带收益：按引擎分目录 + CODEOWNERS，引擎负责人自审
+
+这一点对研发效率很关键，值得单独说。
+
+抽出来之后，每个引擎的策略实现都独占一个目录（§4.5）。我们的仓库**已经在用**
+`.github/CODEOWNERS` 做按目录的所有权管理：
+
+```text
+# .github/CODEOWNERS（现状节选）
+/src/backend/   @totalfrank @xianmuyq        # 整个 backend 由公共/TC 负责人兜底
+/src/engine/    @totalfrank @xianmuyq
+/src/baas/      @cassiuscai @pfmiles @phoenixliu ...
+```
+
+现状的问题是：**aicoding 引擎的下发规则今天散落在 `bot_service` / `device_service` /
+`template_service` 里，这些文件都归 `/src/backend/` 的公共/TC 负责人管。** 于是每次只改
+aicoding 一个引擎的行为（比如 PR #61），也必须请 TC 负责人 approve——TC 成了瓶颈，引擎负责人
+反而不能对自己的引擎拍板。
+
+抽成“一个引擎一个目录”之后，只要给每个引擎目录**加一行 CODEOWNERS**：
+
+```text
+# .github/CODEOWNERS（重构后新增）
+# 公共契约（接口 / Registry / 默认实现）仍由 TC 把关
+/src/backend/src/agentclaw/community/core/bot_management/engines/provisioning.py   @totalfrank @xianmuyq
+/src/backend/src/agentclaw/community/core/bot_management/engines/default.py        @totalfrank @xianmuyq
+
+# 各引擎目录交给各自负责人自治
+/src/backend/src/agentclaw/community/core/bot_management/engines/aicoding/   @aicoding-owner-a @aicoding-owner-b
+/src/backend/src/agentclaw/community/core/bot_management/engines/openclaw/   @openclaw-owner
+```
+
+> CODEOWNERS 的匹配规则是**后面的行覆盖前面的行**，所以更精确的引擎目录行会覆盖
+> `/src/backend/` 的兜底行——这套“module-specific owners override 兜底”的写法，我们仓库现有
+> CODEOWNERS 里已经在用。
+
+带来的效果：
+
+- ✅ **引擎负责人自审自己的引擎**。像 PR #61 这种“只改 aicoding”的改动，diff 完全落在
+  `engines/aicoding/` 目录里，由 aicoding 负责人 review + approve 即可合入，**不需要 TC 负责人
+  参与**。
+- ✅ **公共契约仍由 TC 把关**。只有当有人动到 `provisioning.py`（接口本身）或公共服务的调用
+  方式时，才会触发 `/src/backend/` 或接口文件的 TC owner——该管的地方管住，不该管的地方放手。
+- ✅ **权责一致**。谁负责这个引擎，谁就对这个引擎的目录负责，出问题也定位清晰。
+
+**注意前提**：这条收益能成立，恰恰是因为 §4 把引擎逻辑**物理隔离**到了独立目录。只要逻辑还
+散落在公共文件里，CODEOWNERS 就无从按引擎切分——这也是“先抽出来”最实际的回报之一。
+
+---
+
+## 7. 安全的迁移步骤（不要一次推倒重来）
 
 对初级同学最重要的一点：**这是“搬家”，不是“重写”。** 用“绞杀者”（Strangler Fig）方式，
 小步替换、每步测试全绿，把风险压到最低：
@@ -336,7 +405,7 @@ raw_token = strategy.deploy_token(template_type=template_type, template_config=t
 
 ---
 
-## 7. 通用化：这套方法适用于整个代码库
+## 8. 通用化：这套方法适用于整个代码库
 
 这份提案虽然从 `bot_service` 出发，但给出的是一个**通用规则**，请在日常开发中作为准绳：
 
@@ -365,15 +434,16 @@ raw_token = strategy.deploy_token(template_type=template_type, template_config=t
 
 ---
 
-## 8. 给作者的落地清单（Checklist）
+## 9. 给作者的落地清单（Checklist）
 
-- [ ] 新增 `core/bot_management/engines/`：`provisioning.py`（接口）、`default.py`、`aicoding.py`、
-      `__init__.py`（组装根 + Registry）。
+- [ ] 新增 `core/bot_management/engines/`：`provisioning.py`（接口 + Registry）、`default.py`、
+      `registry.py`（组装根），并**按引擎分目录**放策略（`engines/aicoding/`、`engines/openclaw/`…）。
 - [ ] 把 `build_aix_extra_envs` / token 加密 / token 下发 / 创建后钩子的逻辑**原样搬入**策略，
       公共服务改为 `resolve(engine).xxx(...)`。
 - [ ] 公共服务（`bot_service` / `device_service` / `template_service` / `baas_*`）中不再出现
       `applicationCoding` / `personalCoding` / `codefuse` / `RELAY_DEFAULT_*` 字样。
 - [ ] `CODING_TEMPLATE_TYPES` 合并为单一定义。
+- [ ] 给各引擎目录补 `.github/CODEOWNERS` 行（引擎负责人自治，接口/默认实现仍归 TC）。
 - [ ] 保留并跑绿全部现有单测；策略类补齐自己的单测。
 - [ ] **纯重构**与 **personalCoding 功能变更**拆成两个 PR。
 
