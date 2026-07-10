@@ -165,8 +165,8 @@ user_config:
   # application-prod.yaml 提供，例如：
   #   dima:
   #     admin_member_staff_ids:
-  #       - "382716"
-  #       # ...其余工号，仅由 prod overlay 维护（不进入社区源码）。
+  #       - "<staff_id>"   # 占位示例；真实工号由 prod overlay 维护，不进入社区源码
+  #       # ...其余工号
 
   # 操作员白名单（控制 /api/v1/access/allow、/disallow 等管理接口的调用权限）
   # 中性默认为空（无特权操作员）；corp env overlay 提供工号列表，community 在
