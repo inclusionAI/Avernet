@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 from pydantic import BaseModel, Field
@@ -38,6 +38,11 @@ from ._async_session_client import AsyncSessionClient
 from ._async_session_client import SessionInfo as AdapterSessionInfo
 from ._bot_run_utils import resolve_user_id
 from ._internal_protocols import BotService
+
+if TYPE_CHECKING:
+    from secbaas.spi.bot.engine_adapter import BotEngineAdapter
+
+    from ._engine_adapter_registry import BotEngineAdapterRegistry
 
 logger = get_logger("core-bot-run")
 
@@ -73,6 +78,7 @@ class ClawBotService(BotService):
         config: BotServiceConfig,
         client_pool: AsyncChatClientPool,
         secret_store: SecretStorePlugin,
+        engine_adapter_registry: BotEngineAdapterRegistry | None = None,
     ) -> None:
         """Initialize the Bot service.
 
@@ -80,10 +86,15 @@ class ClawBotService(BotService):
             config: Configuration for the Bot WebSocket service.
             client_pool: Connection pool for sandbox-level WS connection reuse.
             secret_store: Secret store plugin for token generation.
+            engine_adapter_registry: Optional registry for engine adapters
+                (aicoding / hermes / claude_code). When set and engine_type
+                matches a registered adapter, _build_ws_url uses
+                adapter.ws_path() instead of the default f"/api/{engine}/ws".
         """
         self._config = config
         self._client_pool = client_pool
         self._secret_store = secret_store
+        self._engine_adapter_registry = engine_adapter_registry
 
     # ── 公开方法 (BotService Protocol) ───────────────────────────────────────
 
@@ -428,6 +439,17 @@ class ClawBotService(BotService):
 
     # ── 私有方法 ─────────────────────────────────────────────────────────────
 
+    def _adapter_for(self, engine_type: str | None) -> BotEngineAdapter | None:
+        """返回 engine_type 对应的已注册 adapter，未注册返回 None。
+
+        只有 aicoding / hermes / claude_code 会命中；openclaw / teclaw 恒返回 None
+        → 走原始分支（字节级不变）。
+        """
+        reg = self._engine_adapter_registry
+        if reg is not None and engine_type and reg.has(engine_type):
+            return reg.get(engine_type)
+        return None
+
     def _build_base_url(self, sandbox_id: str) -> str:
         """Build base URL for session connection.
 
@@ -445,16 +467,25 @@ class ClawBotService(BotService):
     def _build_ws_url(self, sandbox_id: str, engine_type: str = "openclaw") -> str:
         """Construct WebSocket URL.
 
+        When a registered adapter exists for engine_type, uses adapter.ws_path()
+        instead of the default f"/api/{engine_type}/ws".
+
         Args:
             sandbox_id: The sandbox identifier.
+            engine_type: Engine type for WS path routing.
 
         Returns:
             Full WebSocket URL.
         """
+        _adapter = self._adapter_for(engine_type)
+        if _adapter is not None:
+            ws_path = _adapter.ws_path()
+        else:
+            ws_path = f"/api/{engine_type}/ws"
         return (
             f"{self._config.proxy_ws_base_url}/proxypass/"
             f"{self._get_path_target(sandbox_id)}"
-            f"/api/{engine_type}/ws"
+            f"{ws_path}"
         )
 
     def _create_session_client(self, sandbox_id: str) -> AsyncSessionClient:
