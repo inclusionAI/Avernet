@@ -33,9 +33,9 @@ from typing import Any
 
 import yaml
 
+from agentclaw.community.core.config import provider as config_provider
 from agentclaw.community.core.config.provider import (
     AppConfig,
-    reset_config_provider,
     set_config_provider,
 )
 from agentclaw.community.core.config.yaml_provider import _deep_merge
@@ -161,6 +161,8 @@ def compute_effective_config(
     )
 
     saved_dormant = os.environ.pop("DORMANT_DRY_RUN", None)
+    saved_provider = config_provider._provider
+    saved_cached = config_provider._cached
     set_config_provider(_StaticProvider(app_cfg))
     try:
         module = ConfigModule()
@@ -168,7 +170,8 @@ def compute_effective_config(
             name: _normalize(getattr(module, name)()) for name in _PROVIDER_METHODS
         }
     finally:
-        reset_config_provider()
+        config_provider._provider = saved_provider
+        config_provider._cached = saved_cached
         if saved_dormant is not None:
             os.environ["DORMANT_DRY_RUN"] = saved_dormant
 

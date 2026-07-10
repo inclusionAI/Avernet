@@ -98,11 +98,17 @@ if __name__ == "__main__":  # pragma: no cover - entrypoint wiring; profile gate
         from agentclaw.community.local import patch_sofapy_for_local
         patch_sofapy_for_local()
 
+        # 2. Select the Profile-owned YAML overlay before the first config read.
+        # The HTTP composition root repeats this registration when it is imported
+        # so direct ASGI imports keep the same bootstrap contract.
+        from agentclaw.community.di.config_bootstrap import register_config_provider
+        register_config_provider(_profile)
+
         from agentclaw.community.core.config.sofa import sofa_config as config
         logger.info("runtime config (local)")
         logger.info(json.dumps(config.model_dump(), ensure_ascii=False, indent=2))
 
-        # 2. Start uvicorn directly.
+        # 3. Start uvicorn directly.
         # Schema bootstrap, event-listener subscription, and every other
         # startup hook run through the Lifecycle Protocol dispatched by
         # ``_app_lifespan`` in adapters/http/app.py (R11). Nothing to
