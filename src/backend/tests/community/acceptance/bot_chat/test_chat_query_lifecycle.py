@@ -1,14 +1,12 @@
-"""Route-B acceptance: bot_chat read-only query lifecycle on live backend.
+"""Route-B acceptance: bot_chat query lifecycle on a live backend.
 
 Starts a real singlebox backend (in-memory SQLite via local_setup.sh),
 runs the LOCAL-pure flows through httpx, asserts no-data state matches a JSON
 baseline snapshot.
 
-bot_chat is read-only — single box has no chat engine producing traces — so
-acceptance covers only the empty/no-data contract: list returns empty, detail
-returns 4004 (SessionNotFoundError). The seeded path is covered in-process
-by route A (which can write via DatabasePlugin.session()); a future
-LangfuseClient local impl or chat-engine integration would extend this.
+This file pins the empty/no-data query contract: list returns empty and detail
+returns 4004 (SessionNotFoundError). The separate OTLP round-trip acceptance
+test writes traces and business relations through the live HTTP API.
 
 Off by default; enable with RUN_ACCEPTANCE=1.
 """
