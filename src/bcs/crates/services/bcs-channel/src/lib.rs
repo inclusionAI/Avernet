@@ -84,6 +84,7 @@ impl BcsChannelService {
         now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
         new_id: Arc<dyn Fn() -> String + Send + Sync>,
     ) -> Self {
+        let env = env.into();
         Self {
             bindings,
             conversations,
@@ -94,7 +95,7 @@ impl BcsChannelService {
             groups,
             registry,
             providers,
-            env: env.into(),
+            env: env.trim().to_string(),
             now_ms,
             new_id,
             inbound_dedup: InboundDedupGuard::new(DEFAULT_INBOUND_DEDUP_LIMIT),
@@ -736,7 +737,7 @@ impl ChannelService for BcsChannelService {
                         error = %error,
                         "channel outbound: delivery call failed"
                     );
-                    return Err(error.into());
+                    continue;
                 }
             };
             if !result.delivered {
@@ -770,13 +771,12 @@ impl ChannelService for BcsChannelService {
     ) -> Result<ChannelBinding, ChannelUseCaseError> {
         let _guard = self.binding_admin_lock.lock().await;
         let account_ref = normalize_required(&cmd.account_ref, "account_ref")?.to_string();
-        let env = self.env.trim();
-        if env.is_empty() {
+        if self.env.is_empty() {
             return Err(ChannelUseCaseError::Internal(ServiceError::InternalError(
                 "server environment configuration 'env' is empty".to_string(),
             )));
         }
-        let env = env.to_string();
+        let env = self.env.clone();
         let target = validate_target(&*self.groups, &*self.registry, &cmd).await?;
         let provider = self.provider_for(&cmd.channel_type)?;
         provider.validate_config(&cmd.config).map_err(provider_error)?;
@@ -2423,6 +2423,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn try_outbound_continues_after_delivery_call_error() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "binding_failed",
+                "robot_failed",
+                BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                Visibility::FullTranscript,
+            ))
+            .await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "binding_healthy",
+                "robot_healthy",
+                BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                Visibility::FullTranscript,
+            ))
+            .await?;
+        harness
+            .session_repo
+            .create(
+                "group_1",
+                NewSessionParams {
+                    id: Some("group_1:00000001".to_string()),
+                    session_kind: SessionKind::Chat,
+                    ..Default::default()
+                },
+            )
+            .await?;
+        for (binding_id, conversation_id) in [
+            ("binding_failed", "conv_failed"),
+            ("binding_healthy", "conv_healthy"),
+        ] {
+            harness
+                .conversation_repo
+                .upsert(bcs_domain::ConversationSessionMap {
+                    binding_id: binding_id.to_string(),
+                    im_conversation_id: conversation_id.to_string(),
+                    im_conversation_type: "2".to_string(),
+                    session_scope: SessionScope::Conversation,
+                    im_user_id: None,
+                    bcs_session_id: "group_1:00000001".to_string(),
+                    last_active_at: 1,
+                })
+                .await?;
+        }
+        *harness.delivery.call_error_account_ref.lock().await =
+            Some("robot_failed".to_string());
+
+        harness
+            .service
+            .try_outbound(outbound(
+                "group_1:00000001",
+                ParticipantRole::Worker,
+                false,
+            ))
+            .await?;
+
+        let events = harness.delivery.events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].binding_ref.account_ref, "robot_healthy");
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn try_outbound_skips_when_session_does_not_belong_to_group() -> TestResult {
         let harness = TestHarness::new(manager_group("group_1")).await?;
         harness
@@ -2915,6 +2987,7 @@ mod tests {
     struct RecordingDelivery {
         events: Mutex<Vec<ChannelOutboundEvent>>,
         fail_error: Mutex<Option<String>>,
+        call_error_account_ref: Mutex<Option<String>>,
     }
 
     #[async_trait]
@@ -2927,6 +3000,17 @@ mod tests {
             &self,
             event: ChannelOutboundEvent,
         ) -> ServiceResult<ChannelDeliveryResult> {
+            if self
+                .call_error_account_ref
+                .lock()
+                .await
+                .as_deref()
+                .is_some_and(|account_ref| account_ref == event.binding_ref.account_ref)
+            {
+                return Err(ServiceError::InternalError(
+                    "simulated channel delivery call failure".to_string(),
+                ));
+            }
             self.events.lock().await.push(event);
             if let Some(error) = self.fail_error.lock().await.clone() {
                 return Ok(ChannelDeliveryResult {
