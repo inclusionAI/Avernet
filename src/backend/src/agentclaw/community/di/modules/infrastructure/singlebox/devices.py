@@ -68,6 +68,9 @@ from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
 from agentclaw.community.di.modules.infrastructure.singlebox.template_config import (
     SingleboxBaasTemplateConfigLifecycle,
 )
+from agentclaw.community.utils.singlebox_coverage_proxy import (
+    wrap_for_singlebox_coverage,
+)
 
 
 class SingleboxBaasDeviceService(BaasDeviceService):
@@ -144,20 +147,23 @@ class SingleboxDevicesModule(Module):
         from agentclaw.community.plugins.local.device_connection_manager import (
             NoopDeviceConnectionManagerPlugin,
         )
-        from agentclaw.community.plugins.local.device_adapter_transport import (
-            InMemoryDeviceAdapterTransport,
-        )
-
         binder.bind(
             DeviceConnectionManagerPlugin,
             to=NoopDeviceConnectionManagerPlugin,
             scope=singleton,
         )
         binder.bind(BaasDeviceAccessor, to=BaasDeviceAccessor, scope=singleton)
-        binder.bind(
-            DeviceAdapterTransport,
-            to=InMemoryDeviceAdapterTransport,
-            scope=singleton,
+
+    @singleton
+    @provider
+    def device_adapter_transport(self) -> DeviceAdapterTransport:
+        from agentclaw.community.plugins.local.device_adapter_transport import (
+            InMemoryDeviceAdapterTransport,
+        )
+
+        return wrap_for_singlebox_coverage(
+            InMemoryDeviceAdapterTransport(),
+            {"invoke": "DeviceAdapterTransport.invoke"},
         )
 
     @singleton
