@@ -145,20 +145,12 @@ user_config:
   # singlebox 用 AI coding 应用凭证联调钉钉发送
   # 机器人名称：TeamClaw个人机器人
   dingtalk:
-    # Dummy placeholder — real credentials are injected via env vars
-    # (DINGTALK_APP_KEY / DINGTALK_APP_SECRET / DINGTALK_ROBOT_CODE) at runtime
-    # so they never ship in this YAML. singlebox/local dev exports them locally.
     app_key: "dummy-dingtalk-app-key"
     app_secret: "dummy-dingtalk-app-secret"
     robot_code: "dummy-dingtalk-app-key"
 
   # ── Economy / Governance ──────────────────────────────────────────
   economy_governance:
-    # dry_run stays true in shipped config (safe default: dummy creds + no real
-    # send). To actually dispatch DingTalk in singlebox, override via env
-    # (ECONOMY_GOVERNANCE_DRY_RUN=false) alongside the DINGTALK_* credential
-    # env — same env-override pattern as the dingtalk creds, keeps this YAML
-    # (and the golden snapshot) stable.
     dry_run: true
     notify_channel: "tc_card"
     tc_card_id: "card_cb190863"            # Aix 卡片组件 ID (v3 React)
