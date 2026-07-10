@@ -29,6 +29,22 @@ def _seed_recycle_error(world) -> None:
     world.injector.binder.bind(DormantOpsService, to=svc, scope=None)
 
 
+def _seed_unfreeze_passport_ok(world) -> None:
+    svc = MagicMock(spec=DormantOpsService)
+    svc.unfreeze_passport_one.return_value = {
+        "bot_id": "default",
+        "owner_id": "37565",
+        "status": "passport_online",
+    }
+    world.injector.binder.bind(DormantOpsService, to=svc, scope=None)
+
+
+def _seed_unfreeze_passport_error(world) -> None:
+    svc = MagicMock(spec=DormantOpsService)
+    svc.unfreeze_passport_one.side_effect = RuntimeError("passport unavailable")
+    world.injector.binder.bind(DormantOpsService, to=svc, scope=None)
+
+
 def _seed_activate_ok(world) -> None:
     svc = MagicMock(spec=ActivateBotService)
     svc.activate.return_value = {"status": "REACTIVATING", "message": "激活中"}
@@ -78,6 +94,52 @@ def recycle_one_ok():
 )
 def recycle_one_err():
     """Error path: domain validation is surfaced as HTTP 400."""
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/internal/dormant/unfreeze-passport-one",
+    scenario="ok",
+    input=CaseInput(
+        headers=_AUTH_HEADERS,
+        json_body={
+            "bot_id": "default",
+            "owner_id": "37565",
+            "reason": "recover license",
+        },
+    ),
+    seed=_seed_unfreeze_passport_ok,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"ok": True, "data": {"status": "passport_online"}},
+    ),
+)
+def unfreeze_passport_one_ok():
+    """Happy path: passport-only ops returns the online status."""
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/internal/dormant/unfreeze-passport-one",
+    scenario="err",
+    input=CaseInput(
+        headers=_AUTH_HEADERS,
+        json_body={
+            "bot_id": "default",
+            "owner_id": "37565",
+            "reason": "recover license",
+        },
+    ),
+    seed=_seed_unfreeze_passport_error,
+    expect=ExpectError(
+        status=500,
+        json_contains={"detail": "passport unavailable"},
+    ),
+)
+def unfreeze_passport_one_err():
+    """Error path: Passport failures are surfaced as HTTP 500."""
     pass
 
 
