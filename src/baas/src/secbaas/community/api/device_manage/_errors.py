@@ -38,6 +38,11 @@ class ErrorCode(StrEnum):
 
     Template errors:
         TEMPLATE_NOT_FOUND: Device template not found
+
+    File transfer errors:
+        FILE_TRANSFER_NOT_FOUND: File transfer not found
+        FILE_TRANSFER_STATE_CONFLICT: File transfer state conflict
+        FILE_TRANSFER_FAILED: File transfer operation failed (download/upload)
     """
 
     DEVICE_NOT_FOUND = "DEVICE_NOT_FOUND"
@@ -65,6 +70,7 @@ class ErrorCode(StrEnum):
     # File transfer errors (Phase 67)
     FILE_TRANSFER_NOT_FOUND = "FILE_TRANSFER_NOT_FOUND"
     FILE_TRANSFER_STATE_CONFLICT = "FILE_TRANSFER_STATE_CONFLICT"
+    FILE_TRANSFER_FAILED = "FILE_TRANSFER_FAILED"
 
 
 class PaasError(Exception):
@@ -273,6 +279,7 @@ DEVICE_CREATION_ERROR_TO_HTTP_STATUS: dict[str, int] = {
     # File transfer errors (Phase 67)
     "FILE_TRANSFER_NOT_FOUND": 404,
     "FILE_TRANSFER_STATE_CONFLICT": 409,
+    "FILE_TRANSFER_FAILED": 502,
     "RESTART_FAILED": 500,
     "RESOURCE_EXHAUSTED": 503,
     "TIMEOUT": 502,
