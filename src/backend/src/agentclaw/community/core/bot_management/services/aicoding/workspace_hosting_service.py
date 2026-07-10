@@ -8,12 +8,10 @@ from typing import Dict, Any, Optional
 from injector import inject
 
 from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client import WorkspaceHostingClient
+from agentclaw.community.di.config import WorkspaceHostingConfig
 
 # 默认部门 ID，当接口查询失败时作为兜底值
 _DEFAULT_DEPARTMENT_ID = "52146"
-
-# 创建 DIMA 空间后固定加这个工号为空间管理员
-_FIXED_ADMIN_MEMBERS = ["382716", "136677", "204696", "040981", "151710", "024021", "137454", "150839", "227210", "246667", "511549"]
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +21,25 @@ class WorkspaceHostingService:
 
     Dependencies are injected via constructor:
         - WorkspaceHostingClient: DIMA API client
+        - WorkspaceHostingConfig: workspace hosting config; carries
+          ``admin_member_staff_ids`` (the staff IDs auto-granted workspace-admin
+          after a workspace is created). No employee IDs are hardcoded here —
+          the real list comes from the corp env overlay (application-prod.yaml
+          ``dima.admin_member_staff_ids``); community/default builds carry an
+          empty list (no admins added).
     """
 
     @inject
-    def __init__(self, client: WorkspaceHostingClient) -> None:
+    def __init__(
+        self,
+        client: WorkspaceHostingClient,
+        config: WorkspaceHostingConfig,
+    ) -> None:
         self._client = client
+        # Normalise the immutable tuple to a list for the DIMA addMembers API.
+        self._admin_member_staff_ids = list(
+            getattr(config, "admin_member_staff_ids", ()) or ()
+        )
 
     def create_workspace_for_bot(
         self,
@@ -107,18 +119,20 @@ class WorkspaceHostingService:
                     workspace_id, bot_id
                 )
 
-            # TEMP 本地改动：workspace 创建成功后，固定把这 9 个工号加为空间管理员。
-            # 失败只记日志，不影响 bot 创建主流程（不加管理员不应让创建 bot 失败）。
-            if workspace_id:
+            # workspace 创建成功后，把配置里的 admin_member_staff_ids 加为空间管理员
+            # （实际工号由 corp env overlay application-prod.yaml 提供，源码不内置工号，
+            # 避免数据泄露）。失败只记日志，不影响 bot 创建主流程（不加管理员不应让创建
+            # bot 失败）。列表为空（community/默认构建）时跳过调用。
+            if workspace_id and self._admin_member_staff_ids:
                 try:
                     self._client.add_admin_members(
                         staff_id=staff_id,
                         workspace_id=workspace_id,
-                        member_staff_ids=list(_FIXED_ADMIN_MEMBERS),
+                        member_staff_ids=list(self._admin_member_staff_ids),
                     )
                     logger.info(
                         "[dima_workspace] Added admin members %s to workspace %s for bot %s",
-                        _FIXED_ADMIN_MEMBERS, workspace_id, bot_id,
+                        self._admin_member_staff_ids, workspace_id, bot_id,
                     )
                 except Exception as admin_err:
                     logger.warning(
