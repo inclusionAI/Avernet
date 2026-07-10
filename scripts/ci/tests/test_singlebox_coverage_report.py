@@ -115,6 +115,7 @@ def test_repository_manifest_registers_existing_coverage_modules_and_paths():
         "bot_collaborator",
         "cron",
         "expert_chat",
+        "files",
         "harness",
         "resources",
     ]
