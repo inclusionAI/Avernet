@@ -1,9 +1,18 @@
 """Pydantic schemas for economy/governance endpoints."""
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.economy.governance.domain.ticket import (
+        GovernanceTicket,
+    )
+    from agentclaw.community.core.economy.governance.services.admin_service import (
+        TicketActionOutcome,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -96,9 +105,179 @@ class AdminReviewRequest(BaseModel):
 
 class AdminReviewResponse(BaseModel):
     """Response for admin review."""
+
     ticket_id: str = ""
     governance_status: str = ""
     close_reason: str | None = None
+
+    @classmethod
+    def from_outcome(cls, outcome: TicketActionOutcome) -> AdminReviewResponse:
+        """从 TicketActionOutcome 领域返回值构造响应(显式序列化,非裸 dict)。
+
+        Args:
+            outcome: review_ticket / emergency_close 返回的领域 I/O 对象。
+
+        Returns:
+            审批响应,status 取 enum 的 value 字符串。
+        """
+        status = outcome.status.value if hasattr(outcome.status, "value") else str(outcome.status or "")
+        return cls(
+            ticket_id=outcome.ticket_id,
+            governance_status=status,
+            close_reason=outcome.close_reason,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Review router — 评审工单列表/详情响应(从领域模型 GovernanceTicket 显式构造)
+# ---------------------------------------------------------------------------
+
+
+def _iso(value: datetime | None) -> str | None:
+    """datetime → ISO 字符串(None 透传),供 schema 序列化复用。"""
+    return value.isoformat() if value is not None else None
+
+
+class ReviewTicketItem(BaseModel):
+    """评审工单列表单行 — 字段贴合 governance-admin.html 三栏展示。"""
+
+    ticket_id: str | None = None
+    bot_name: str | None = None
+    owner_id: str | None = None
+    governance_status: str = ""
+    latest_decision: str | None = None
+    hit_dimensions: str | None = None
+    saving_ratio: float | None = None
+    response: str | None = None
+    review_reason: str | None = None
+    gmt_create: str | None = None
+
+    @classmethod
+    def from_ticket(cls, ticket: GovernanceTicket) -> ReviewTicketItem:
+        """从 GovernanceTicket 领域模型构造列表行(读 snapshot 委托属性 + 实体字段)。"""
+        s = ticket.snapshot
+        status = ticket.governance_status
+        return cls(
+            ticket_id=ticket.ticket_id,
+            bot_name=ticket.bot_name,
+            owner_id=ticket.owner_id,
+            governance_status=status.value if hasattr(status, "value") else str(status or ""),
+            latest_decision=s.current_decision,
+            hit_dimensions=s.triggered_dimensions,
+            saving_ratio=s.saving_ratio,
+            response=ticket.user_feedback,
+            review_reason=ticket.review_reason,
+            gmt_create=_iso(ticket.gmt_create),
+        )
+
+
+class ReviewTicketListResponse(BaseModel):
+    """评审工单列表响应 — items + 分页元信息。"""
+
+    items: list[ReviewTicketItem] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 50
+    offset: int = 0
+    status_filter: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_tickets(
+        cls,
+        tickets: list[GovernanceTicket],
+        *,
+        total: int,
+        limit: int,
+        offset: int,
+        status_filter: list[str],
+    ) -> ReviewTicketListResponse:
+        """从领域工单列表构造响应(逐条 from_ticket,显式序列化)。"""
+        return cls(
+            items=[ReviewTicketItem.from_ticket(t) for t in tickets],
+            total=total,
+            limit=limit,
+            offset=offset,
+            status_filter=status_filter,
+        )
+
+
+class ReviewTicketDetailResponse(BaseModel):
+    """评审工单详情 — 列表字段外加详情面板所需全部字段。"""
+
+    # 基础信息
+    ticket_id: str | None = None
+    worker_id: str | None = None
+    bot_id: str | None = None
+    owner_id: str | None = None
+    bot_name: str | None = None
+    dt_version: str | None = None
+    task_summary: str | None = None
+    governance_max_priority: str | None = None
+    # 治理态
+    governance_status: str = ""
+    latest_decision: str | None = None
+    hit_dimensions: str | None = None
+    saving_ratio: float | None = None
+    consecutive_normal_days: int = 0
+    # 用户反馈
+    response: str | None = None
+    response_remark: str | None = None
+    response_at: str | None = None
+    response_source: str | None = None
+    feedback_payload: str | None = None
+    # 评审 / 生命周期
+    review_reason: str | None = None
+    review_decision: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: str | None = None
+    review_remark: str | None = None
+    close_reason: str | None = None
+    closed_at: str | None = None
+    cooldown_until: str | None = None
+    mute_until: str | None = None
+    remind_at: str | None = None
+    remind_count: int = 0
+    # 元信息
+    gmt_create: str | None = None
+    gmt_modified: str | None = None
+
+    @classmethod
+    def from_ticket(cls, ticket: GovernanceTicket) -> ReviewTicketDetailResponse:
+        """从 GovernanceTicket 领域模型构造详情(读 snapshot 委托 + 实体字段,datetime→ISO)。"""
+        s = ticket.snapshot
+        status = ticket.governance_status
+        return cls(
+            ticket_id=ticket.ticket_id,
+            worker_id=ticket.worker_id,
+            bot_id=ticket.bot_id,
+            owner_id=ticket.owner_id,
+            bot_name=ticket.bot_name,
+            dt_version=s.dt_version,
+            task_summary=s.task_summary,
+            governance_max_priority=s.severity,
+            governance_status=status.value if hasattr(status, "value") else str(status or ""),
+            latest_decision=s.current_decision,
+            hit_dimensions=s.triggered_dimensions,
+            saving_ratio=s.saving_ratio,
+            consecutive_normal_days=s.consecutive_normal_days,
+            response=ticket.user_feedback,
+            response_remark=ticket.feedback_remark,
+            response_at=_iso(ticket.feedback_at),
+            response_source=ticket.feedback_source,
+            feedback_payload=ticket.feedback_payload,
+            review_reason=ticket.review_reason,
+            review_decision=ticket.review_decision,
+            reviewed_by=ticket.reviewed_by,
+            reviewed_at=_iso(ticket.reviewed_at),
+            review_remark=ticket.review_remark,
+            close_reason=ticket.close_reason,
+            closed_at=_iso(ticket.closed_at),
+            cooldown_until=_iso(ticket.cooldown_until),
+            mute_until=_iso(ticket.resume_at),
+            remind_at=_iso(ticket.remind_at),
+            remind_count=ticket.remind_count,
+            gmt_create=_iso(ticket.gmt_create),
+            gmt_modified=_iso(ticket.gmt_modified),
+        )
 
 
 class AdminPauseRequest(BaseModel):
