@@ -34,20 +34,16 @@ log_warn() {
 }
 
 log_usage() {
-    echo -e "${BLUE}Usage:${NC} $0 {start|stop|restart|status|mosn} [options]"
+    echo -e "${BLUE}Usage:${NC} $0 {start|stop|restart|status} [options]"
     echo ""
     echo "Commands:"
     echo "  start              - 启动应用"
     echo "  stop               - 停止应用"
     echo "  restart            - 重启应用"
     echo "  status             - 查看应用状态"
-    echo "  mosn start         - 启动 Mosn (Layotto)"
-    echo "  mosn stop          - 停止 Mosn (Layotto)"
-    echo "  mosn restart       - 重启 Mosn (Layotto)"
-    echo "  mosn status        - 查看 Mosn (Layotto) 状态"
     echo ""
     echo "Options:"
-    echo "  --singlebox - 单机模式（使用 singlebox-configs，端口 8890，需要 MOSN）"
+    echo "  --singlebox - 单机模式（使用 singlebox-configs，端口 8890）"
     echo "  --mock      - 启用 PaaS Mock 模式（跳过真实设备创建）"
 }
 
@@ -124,102 +120,6 @@ check_port() {
         log_warn "无法检查端口占用 (未安装 lsof 或 netstat)"
     fi
     return 0
-}
-
-# 查看 Mosn 状态
-mosn_status() {
-    if ! command -v meshboot &> /dev/null; then
-        log_error "meshboot 命令不存在，无法查看 Mosn 状态"
-        return 1
-    fi
-
-    local mosn_status_output=$(meshboot status -m binary -a secbaas 2>&1)
-    if echo "$mosn_status_output" | grep -q "UP"; then
-        echo -e "${GREEN}● Mosn 运行中${NC}"
-        echo "$mosn_status_output"
-    else
-        echo -e "${RED}○ Mosn 未运行${NC}"
-        echo "$mosn_status_output"
-    fi
-}
-
-# 启动 Mosn
-mosn_start() {
-    if ! command -v meshboot &> /dev/null; then
-        log_error "meshboot 命令不存在，无法启动 Mosn"
-        return 1
-    fi
-
-    # 检查 Mosn 是否已在运行
-    local mosn_status_output=$(meshboot status -m binary -a secbaas 2>&1)
-    if echo "$mosn_status_output" | grep -q "UP"; then
-        log_warn "Mosn 已在运行，无需重复启动"
-        mosn_status
-        return 0
-    fi
-
-    log_info "正在启动 Mosn..."
-    meshboot start -m binary -a secbaas >> "$LOG_FILE" 2>&1
-
-    # 等待并检查状态
-    sleep 2
-    mosn_status_output=$(meshboot status -m binary -a secbaas 2>&1)
-    if echo "$mosn_status_output" | grep -q "UP"; then
-        log_info "Mosn 启动成功"
-        return 0
-    else
-        log_error "Mosn 启动失败"
-        echo "$mosn_status_output"
-        return 1
-    fi
-}
-
-# 停止 Mosn
-mosn_stop() {
-    if ! command -v meshboot &> /dev/null; then
-        log_error "meshboot 命令不存在，无法停止 Mosn"
-        return 1
-    fi
-
-    # 检查 Mosn 是否在运行
-    local mosn_status_output=$(meshboot status -m binary -a secbaas 2>&1)
-    if ! echo "$mosn_status_output" | grep -q "UP"; then
-        log_warn "Mosn 未在运行"
-        return 0
-    fi
-
-    log_info "正在停止 Mosn..."
-    meshboot stop -m binary -a secbaas >> "$LOG_FILE" 2>&1
-
-    # 等待并检查状态
-    sleep 2
-    mosn_status_output=$(meshboot status -m binary -a secbaas 2>&1)
-    if echo "$mosn_status_output" | grep -q "UP"; then
-        log_error "Mosn 停止失败"
-        echo "$mosn_status_output"
-        return 1
-    else
-        log_info "Mosn 已停止"
-        return 0
-    fi
-}
-
-# 重启 Mosn
-mosn_restart() {
-    if ! command -v meshboot &> /dev/null; then
-        log_error "meshboot 命令不存在，无法重启 Mosn"
-        return 1
-    fi
-
-    log_info "正在重启 Mosn..."
-    mosn_stop
-    sleep 1
-    mosn_start
-}
-
-# 检查并启动 Mosn (Layotto)
-check_and_start_mosn() {
-    mosn_start
 }
 
 # 启动应用
@@ -303,14 +203,6 @@ do_start() {
     # 检查 debug 端口占用
     if [[ -n "$debug_port" ]]; then
         check_port "$debug_port" || exit 1
-    fi
-
-    # 单机模式不依赖 Mosn
-    if [[ "$RUN_MODE" != "singlebox" ]]; then
-        # 检查并启动 Mosn (Layotto)
-        check_and_start_mosn
-    else
-        log_info "单机模式: 跳过 Mosn 启动"
     fi
 
     # 清理遗留的 PID 文件
@@ -559,28 +451,6 @@ case "${1:-start}" in
         ;;
     status)
         do_status
-        ;;
-    mosn)
-        shift 2>/dev/null || true
-        case "${1:-status}" in
-            start)
-                mosn_start || exit 1
-                ;;
-            stop)
-                mosn_stop || exit 1
-                ;;
-            restart)
-                mosn_restart || exit 1
-                ;;
-            status)
-                mosn_status
-                ;;
-            *)
-                log_error "未知 Mosn 命令: $1"
-                echo "支持: mosn start | mosn stop | mosn restart | mosn status"
-                exit 1
-                ;;
-        esac
         ;;
     *)
         log_error "未知命令: $1"

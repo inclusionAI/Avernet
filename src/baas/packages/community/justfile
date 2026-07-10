@@ -4,7 +4,7 @@ set dotenv-load := true
 set positional-arguments := true
 
 import 'justfiles/ctrl-baas.just'
-import 'justfiles/ctrl-mesh.just'
+
 import 'justfiles/lint.just'
 import 'justfiles/test-common.just'
 import 'justfiles/test-self.just'
