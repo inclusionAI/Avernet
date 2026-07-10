@@ -3,14 +3,8 @@
 Satisfies Rule 14 (Plugin Protocol in plugin_api), Rule 20 (local+prod),
 Rule 21 (Noop+Mock).
 
-Phase-1 channels: ``markdown`` and ``tc_card`` (DingTalk).
+Phase-1 channels: ``markdown`` and ``tc_card``.
 Future channels: email, SMS, webhook, etc.
-
-Implementations:
-  - ``CommunityNotifySender`` (community) — no channel, every send returns ``None``
-  - ``NoopNotifySender`` (local/noop) — test double, every send returns ``None``
-  - ``DingTalkNotifySender`` (prod) — routes to DingTalk batchSend
-    or createAndDeliver based on channel selection
 
 All methods must **never raise** — errors are caught internally
 and logged, returning ``None`` instead.
@@ -57,14 +51,8 @@ class NotifyMessage:
 class NotifySenderPlugin(Plugin, Protocol):
     """Send notifications through configurable external channels.
 
-    Phase-1 channels: ``markdown`` and ``tc_card`` (DingTalk).
+    Phase-1 channels: ``markdown`` and ``tc_card``.
     Future channels: email, SMS, webhook, etc.
-
-    Implementations:
-      - ``CommunityNotifySender`` (community) — no channel available
-      - ``NoopNotifySender`` (local/noop) — every send returns ``None``
-      - ``DingTalkNotifySender`` (prod) — routes to DingTalk batchSend
-        or createAndDeliver based on channel selection
 
     All methods must **never raise** — errors are caught internally
     and logged, returning ``None`` instead.

@@ -58,7 +58,6 @@ from agentclaw.community.core.economy.governance.services.whitelist_service impo
 from .conftest import (
     FakeCache,
     FakeDB,
-    FakeDingTalkConfig,
     FakeGovernanceConfig,
     FakeNotifySender,
 )
@@ -185,7 +184,6 @@ def _build_admin_svc(engine):
         task_repo=task_repo,
         config=FakeGovernanceConfig(),
         notify_sender=FakeNotifySender(),
-        dingtalk_config=FakeDingTalkConfig(),
     )
     svc._scan_svc = _FakeScanSvc()
     return svc, db

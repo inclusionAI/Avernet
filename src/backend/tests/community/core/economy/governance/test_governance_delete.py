@@ -225,7 +225,6 @@ class FakeAdminService:
             task_repo=self._task_repo,  # type: ignore[arg-type]
             config=FakeGovernanceConfig(),  # type: ignore[arg-type]
             notify_sender=None,  # type: ignore[arg-type]
-            dingtalk_config=None,  # type: ignore[arg-type]
         )
 
     def delete_records(self, body: dict, operator: str) -> dict:

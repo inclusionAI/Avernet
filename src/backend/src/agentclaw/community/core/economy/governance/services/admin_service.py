@@ -53,7 +53,6 @@ if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
         TaskRecordRepository,
     )
-    from agentclaw.community.di.config import GovernanceDingTalkConfig
     from agentclaw.community.plugin_api.cache_protocol import CachePlugin
 
 log = get_logger(__name__)
@@ -139,7 +138,6 @@ class GovernanceAdminService:
         task_repo: TaskRecordRepository,
         config: Any,  # EconomyGovernanceConfig
         notify_sender: NotifySenderPlugin,
-        dingtalk_config: GovernanceDingTalkConfig,
     ) -> None:
         self._cache = cache
         self._whitelist_service = whitelist_service
@@ -148,7 +146,6 @@ class GovernanceAdminService:
         self._task_repo = task_repo
         self._config = config
         self._notify_sender = notify_sender
-        self._dingtalk_config = dingtalk_config
         self._emergency_key = _EMERGENCY_KEY_TEMPLATE.format(env=get_current_env())
 
     # -- State queries -------------------------------------------------------
@@ -709,7 +706,7 @@ class GovernanceAdminService:
                         card_id=self._config.tc_card_id,
                         notification_data=notification_data,
                         base_url=self._config.tc_card_preview_url,
-                        iframe_callback_url=self._dingtalk_config.iframe_callback_url,
+                        iframe_callback_url="",
                         staff_id=override_recipient,
                     )
                     tc_card_extra = {
