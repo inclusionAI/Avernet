@@ -13,6 +13,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.domain.ticket import (
         GovernanceTicket,
     )
+    from agentclaw.community.core.economy.governance.services.admin_service import (
+        TicketActionOutcome,
+    )
 
 
 @runtime_checkable
@@ -47,7 +50,7 @@ class GovernanceAdminServiceProtocol(Protocol):
 
     def pause_ticket(
         self, ticket_id: str, admin_id: str, reason: str = "",
-    ) -> dict:
+    ) -> TicketActionOutcome:
         ...
 
     def list_review_tickets(
@@ -68,12 +71,12 @@ class GovernanceAdminServiceProtocol(Protocol):
 
     def review_ticket(
         self, ticket_id: str, action: str, admin_id: str, remark: str = "",
-    ) -> dict:
+    ) -> TicketActionOutcome:
         ...
 
     def emergency_close(
         self, ticket_id: str, admin_id: str, reason: str = "",
-    ) -> dict:
+    ) -> TicketActionOutcome:
         ...
 
     def delete_records(
