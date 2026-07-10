@@ -1,6 +1,14 @@
 """Pydantic schemas for bot dormant / reactivation endpoints."""
 
-from pydantic import BaseModel
+from typing import Annotated
+
+from pydantic import BaseModel, StringConstraints
+
+
+NonBlankString = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1),
+]
 
 
 class ActivateBotResponse(BaseModel):
@@ -64,6 +72,12 @@ class OpsRecycleOneRequest(BaseModel):
     owner_id: str
     dry_run: bool = True
     reason: str | None = None
+
+
+class OpsUnfreezePassportOneRequest(BaseModel):
+    bot_id: NonBlankString
+    owner_id: NonBlankString
+    reason: NonBlankString
 
 
 class OpsActivateOneRequest(BaseModel):
