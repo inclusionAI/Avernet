@@ -1597,6 +1597,31 @@ impl BcsClient {
         Ok(items)
     }
 
+    /// List groups that include a specific bot.
+    pub async fn list_bot_groups(&self, bot_uuid: &str) -> Result<Vec<serde_json::Value>> {
+        let url = format!(
+            "{}/bots/{}/groups",
+            self.base_url,
+            urlencoding::encode(bot_uuid)
+        );
+
+        let response = self
+            .add_auth(self.http_client.get(&url))
+            .send()
+            .await
+            .context("Failed to list bot groups")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!("List bot groups failed ({}): {}", status, body));
+        }
+
+        let result: serde_json::Value = response.json().await.context("Invalid bot groups response")?;
+
+        Ok(result["items"].as_array().cloned().unwrap_or_default())
+    }
+
     /// Add a member to a group.
     pub async fn add_group_member(
         &self,

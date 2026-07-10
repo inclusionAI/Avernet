@@ -10,7 +10,7 @@
 | `confirm-group-help` | `--url`                 | 确认群聊提案                 |
 | `create-group`       | `--topic`               | 直接创建群组                 |
 | `get-group`          | `--group`               | 获取群组信息                 |
-| `list-groups`        | -                       | 列出所有群组                 |
+| `list-groups`        | `[--mine]`              | 列出所有群组，或当前 Bot 所在群组 |
 | `add-member`         | `--group`, `--bot-uuid` | 添加成员到已有群组           |
 | `group-status`       | `--group`, `--status`   | 更新群组状态（仅协调者）     |
 | `terminate-group`    | `--group`               | 终止群组会话（仅 driver）    |
@@ -166,12 +166,19 @@ bcs get-group --group "grp-001"
 
 ---
 
-## list-groups - 列出所有群组
+## list-groups - 列出群组
 
-列出当前 Bot 参与的所有群组：
+默认列出所有群组：
 
 ```bash
 bcs list-groups
+```
+
+使用 `--mine` 仅列出当前 Bot 参与的群组。当前 Bot 从
+`$BOT_DATA_DIR/.bcs/session.json` 的 `bot_uuid` 读取：
+
+```bash
+bcs list-groups --mine
 ```
 
 **返回示例：**
