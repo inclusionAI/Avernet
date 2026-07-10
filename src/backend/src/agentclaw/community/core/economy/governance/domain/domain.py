@@ -11,7 +11,9 @@ ORM 映射见 repositories/orm.py; repo 用 from_orm/to_orm/apply_to
 做翻译边界。
 
 关键设计:
-  - sealed 列(id/env/gmt_create/gmt_modified)不在领域模型上 → service 物理接触不到
+  - sealed 列(id/env)不在领域模型上 → service 物理接触不到;
+    gmt_create/gmt_modified 对 GovernanceTicket 作为只读元信息保留
+    (评审/展示用,GovernanceNotification / WhitelistEntry 仍全 sealed)
   - 冻结快照通过 frozen dataclass 组合实现不可变
   - 投递态/生命周期只能通过状态机方法变更,禁止直接赋值
   - 业务初值("pending"/"open")在 create() 工厂,不埋 ORM default
