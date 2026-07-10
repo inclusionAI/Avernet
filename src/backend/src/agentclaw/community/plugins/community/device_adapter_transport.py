@@ -27,6 +27,8 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
         path: str,
         body: Optional[dict[str, Any]] = None,
         params: Optional[dict[str, Any]] = None,
+        *,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         logger.warning(
             "[CommunityDeviceAdapterTransport] no-op (community has no device "

@@ -172,6 +172,9 @@ async def get_cron_status(
             message=result.get("message", "OK"),
             failed_targets=result.get("failed_targets", []),
         )
+    except CronRelayError as e:
+        logger.warning(f"[get_cron_status] Business error: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=e.error_code)
     except Exception as e:
         logger.error(f"[get_cron_status] Error: {e}")
         return ApiResponse(success=False, message=str(e), error_code=500)
@@ -184,7 +187,7 @@ async def get_cron_status(
     persist_audit_log=False,  # 查询操作不记录操作日志
 ))
 async def get_running_crons(
-    bot_id: str | None = Query("all", description="Bot ID，'all' 表示所有 Bots"),
+    bot_id: str = Query(..., description="Bot ID"),
     owner_id: str | None = Query(None, description="Bot 拥有者工号"),
     runtime_stage: str | None = Query(None, description="运行态：draft/verify/online"),
     device_uuid: str | None = Query(None, description="运行实例 device_uuid"),

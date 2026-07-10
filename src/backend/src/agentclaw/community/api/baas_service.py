@@ -183,7 +183,11 @@ class BaasServiceProtocol(Protocol):
         ...
 
     def list_devices_by_bot_uuid(
-        self, bot_uuid: str, tenant: str = ""
+        self,
+        bot_uuid: str,
+        tenant: str = "",
+        *,
+        timeout: float = 30.0,
     ) -> list[dict[str, Any]]:
         """List BaaS devices under a logical bot uuid."""
         ...
