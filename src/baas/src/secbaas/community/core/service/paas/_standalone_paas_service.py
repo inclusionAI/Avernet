@@ -514,3 +514,43 @@ class StandalonePaasService(PaasService):
             "update_outbound_operation_rule not yet implemented — "
             "Docker platform does not support outbound operation rules"
         )
+
+    async def pull_file_from_url(
+        self,
+        paas_device_id: str,
+        source_url: str,
+        device_path: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Not supported: Docker platform does not support file transfer.
+
+        Args:
+            paas_device_id: Container ID.
+            source_url: URL to download from.
+            device_path: Destination path on device.
+            timeout_seconds: Maximum download time (unused).
+
+        Raises:
+            NotImplementedError: Always — file transfer not supported on Docker.
+        """
+        raise NotImplementedError("File transfer not supported on Docker platform")
+
+    async def push_file_to_url(
+        self,
+        paas_device_id: str,
+        device_path: str,
+        target_url: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Not supported: Docker platform does not support file transfer.
+
+        Args:
+            paas_device_id: Container ID.
+            device_path: Source path on device.
+            target_url: URL to upload to.
+            timeout_seconds: Maximum upload time (unused).
+
+        Raises:
+            NotImplementedError: Always — file transfer not supported on Docker.
+        """
+        raise NotImplementedError("File transfer not supported on Docker platform")
