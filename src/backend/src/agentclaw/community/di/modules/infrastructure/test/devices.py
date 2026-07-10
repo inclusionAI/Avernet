@@ -58,6 +58,7 @@ from agentclaw.community.core.service_bot.services.baas_service import BaasServi
 from agentclaw.community.core.workspace.path_factory import _get_aidesktop_root
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
+from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
 from agentclaw.community.plugins.local.local_device_lifecycle import LocalDeviceLifecycle
 
@@ -106,6 +107,7 @@ class TestDevicesModule(Module):
         arca_baas_rollout_policy: ArcaBotCreateBaasRolloutPolicy,
         data_init_service_factory: Callable[[], DataInitService],
         token_vault: TokenVault,
+        passport_plugin: PassportPlugin,
         sandbox_client: SandboxRuntimeClient,
     ) -> DeviceService:
         """Local-only ``DeviceServiceRouter`` build (singlebox via BaaS)."""
@@ -144,6 +146,7 @@ class TestDevicesModule(Module):
             providers=providers,
             default_provider_key=LOCAL_DEVICE_PROVIDER,
             arca_baas_rollout_policy=arca_baas_rollout_policy,
+            passport_plugin=passport_plugin,
             sandbox_client=sandbox_client,
         )
 
