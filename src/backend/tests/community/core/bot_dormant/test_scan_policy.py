@@ -9,6 +9,7 @@ from agentclaw.community.core.bot_dormant.scan_policy import (
     positive_int_or_default,
     resolve_scan_window,
 )
+from agentclaw.community.core.common_config import CommonWhiteListService
 from agentclaw.community.core.bot_dormant.service import DormantBotService
 
 
@@ -160,6 +161,7 @@ def test_dormant_bot_service_reads_dry_run_from_scan_policy():
         bot_service=MagicMock(),
         passport_plugin=MagicMock(),
         scan_policy=scan_policy,
+        common_whitelist_service=MagicMock(spec=CommonWhiteListService),
     )
 
     assert service.is_dry_run() is False

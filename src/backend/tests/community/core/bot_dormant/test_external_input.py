@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from agentclaw.community.core.bot_dormant.baas_client import AliveResult, BaasDormantClient
+from agentclaw.community.core.common_config import CommonWhiteListService
 from agentclaw.community.core.bot_dormant.service import DormantBotService
 from agentclaw.community.core.bot_dormant.sqlite_models import (
     DormantCheckAudit,
@@ -71,7 +72,7 @@ def _insert_external(session, *, bot_id="bot1", owner_id="ow", dt_str=None,
     return row.id
 
 
-def _make_service(session, *, dry_run=False):
+def _make_service(session, *, dry_run=False, protected_owner_ids=frozenset()):
     baas = AsyncMock(spec=BaasDormantClient)
     baas.check_alive = AsyncMock(
         return_value=AliveResult(result="unknown", last_session_time=None)
@@ -81,9 +82,12 @@ def _make_service(session, *, dry_run=False):
     bot_svc.update_status = MagicMock()
     scan_policy = MagicMock()
     scan_policy.dry_run.return_value = dry_run
+    common_whitelist = MagicMock(spec=CommonWhiteListService)
+    common_whitelist.get_owner_ids.return_value = frozenset(protected_owner_ids)
     return DormantBotService(
         db=FakeDB(session), baas_client=baas, bot_service=bot_svc,
         passport_plugin=MagicMock(), scan_policy=scan_policy,
+        common_whitelist_service=common_whitelist,
         N=N, M=M,
     )
 

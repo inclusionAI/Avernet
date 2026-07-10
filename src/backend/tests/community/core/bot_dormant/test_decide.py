@@ -30,6 +30,7 @@ from agentclaw.community.core.bot_dormant.baas_client import (
     AliveResult,
     BaasDormantClient,
 )
+from agentclaw.community.core.common_config import CommonWhiteListService
 from agentclaw.community.core.bot_dormant.ops_service import DormantOpsService
 from agentclaw.community.core.bot_dormant.service import (
     Candidate,
@@ -115,6 +116,8 @@ def _make_service(
     baas_client: BaasDormantClient | None = None,
     bot_service=None,
     passport_plugin=None,
+    protected_owner_ids: frozenset[str] = frozenset(),
+    common_whitelist_service=None,
 ) -> DormantBotService:
     """Build a DormantBotService with all dependencies injected as mocks."""
     if baas_client is None:
@@ -127,12 +130,16 @@ def _make_service(
         passport_plugin = MagicMock()
     scan_policy = MagicMock()
     scan_policy.dry_run.return_value = False
+    if common_whitelist_service is None:
+        common_whitelist_service = MagicMock(spec=CommonWhiteListService)
+        common_whitelist_service.get_owner_ids.return_value = protected_owner_ids
     return DormantBotService(
         db=FakeDB(session),
         baas_client=baas_client,
         bot_service=bot_service,
         passport_plugin=passport_plugin,
         scan_policy=scan_policy,
+        common_whitelist_service=common_whitelist_service,
         N=N,
         M=M,
     )
@@ -202,6 +209,77 @@ def _insert_bot_record(
     session.add(bot)
     session.commit()
     return bot
+
+
+@pytest.mark.unit
+def test_internal_scan_filters_protected_owner_before_alive_check(caplog, monkeypatch):
+    caplog.set_level("INFO")
+    session = _make_session()
+    _insert_bot_record(
+        session,
+        bot_id="protected_bot",
+        owner_id="protected_owner",
+        entity_id="100001",
+    )
+    _insert_bot_record(
+        session,
+        bot_id="normal_bot",
+        owner_id="normal_owner",
+        entity_id="100002",
+    )
+    baas = AsyncMock(spec=BaasDormantClient)
+    baas.check_alive = AsyncMock(
+        return_value=AliveResult(result="true", last_session_time=None)
+    )
+    common_whitelist = MagicMock(spec=CommonWhiteListService)
+    common_whitelist.get_owner_ids.return_value = frozenset({"protected_owner"})
+    monkeypatch.setattr(
+        "agentclaw.community.core.bot_dormant.service.get_current_env",
+        lambda: "prod",
+    )
+    service = _make_service(
+        session,
+        baas_client=baas,
+        common_whitelist_service=common_whitelist,
+    )
+
+    summary = _run(service.process_run(dry_run=True, run_id="owner-protection-run"))
+
+    assert summary.scanned == 1
+    baas.check_alive.assert_awaited_once()
+    assert baas.check_alive.await_args.kwargs["bot_id"] == "normal_bot"
+    common_whitelist.get_owner_ids.assert_called_once_with(
+        business_code="bot_dormant",
+        param_code="protected_owner_ids",
+        env="prod",
+    )
+    assert "event=protected_owners_loaded" in caplog.text
+    assert "event=protected_owners_filtered" in caplog.text
+    assert "protected_bot@protected_owner" in caplog.text
+
+
+@pytest.mark.unit
+def test_owner_config_error_aborts_before_downstream_calls():
+    session = _make_session()
+    _insert_bot_record(session, bot_id="bot1", owner_id="owner1")
+    baas = AsyncMock(spec=BaasDormantClient)
+    common_whitelist = MagicMock(spec=CommonWhiteListService)
+    common_whitelist.get_owner_ids.side_effect = RuntimeError("db unavailable")
+    bot_service = MagicMock()
+    service = _make_service(
+        session,
+        baas_client=baas,
+        bot_service=bot_service,
+        common_whitelist_service=common_whitelist,
+    )
+
+    with pytest.raises(RuntimeError, match="db unavailable"):
+        _run(service.process_run(dry_run=False))
+
+    baas.check_alive.assert_not_awaited()
+    bot_service.stop_bot.assert_not_called()
+    assert session.query(DormantCheckAudit).count() == 0
+    assert session.query(DormantNotifyLog).count() == 0
 
 
 @pytest.mark.unit
