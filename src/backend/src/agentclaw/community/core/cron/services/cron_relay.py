@@ -53,6 +53,8 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
+_CRON_UNSUPPORTED_ENGINES = frozenset({"hermes"})
+
 
 class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
     """Cron 中继服务 — 转发请求到各 Bot 的 Adapter"""
@@ -529,8 +531,12 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         """构造 Bot 可用的 draft、verify 和 online 运行态目标。
 
         个人 Bot 只生成当前 binding 目标；服务 Bot 还会读取验证中和已发布记录。
-        缺失 binding 或发布记录查询失败时返回对应失败项。
+        不支持 cron 的引擎不生成目标；缺失 binding 或发布记录查询失败时返回失败项。
         """
+        active_engine = str(bot.get("active_engine") or "").strip().lower()
+        if active_engine in _CRON_UNSUPPORTED_ENGINES:
+            return [], []
+
         bot_id = bot.get("bot_id")
         bot_name = bot.get("bot_name", "")
         owner_id = bot.get("owner_id") or user_id
