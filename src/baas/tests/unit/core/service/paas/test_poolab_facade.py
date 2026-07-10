@@ -25,6 +25,7 @@ from secbaas.community.api.template_manage import (
     PoolabTemplateConfig,
     TemplateStatus,
 )
+from secbaas.community.api.tenant_manage import TenantType
 from secbaas.community.core.service.paas import (
     DeviceFacadeException,
     ErrorCode,
@@ -32,6 +33,7 @@ from secbaas.community.core.service.paas import (
     PaasServiceFacade,
     PoolabPaasService,
 )
+from secbaas.plugins.sandbox.poolab import StubPoolabSandboxPlugin
 
 # ============================================================================
 # Fixtures
@@ -413,3 +415,44 @@ class TestPoolabCreateDevice:
                 device_template_uuid="test-poolab-template-uuid",
                 detail_config=None,
             )
+
+
+# ============================================================================
+# TestPoolabFileTransferNotImplemented — pull/push raises NotImplementedError
+# ============================================================================
+
+
+class TestPoolabFileTransferNotImplemented:
+    """Verify poolab PaasService pull/push raise NotImplementedError."""
+
+    @pytest.mark.asyncio
+    async def test_pull_file_from_url_raises_not_implemented(self):
+        service = PoolabPaasService(
+            credentials=PoolabCredentials(
+                template_id=1,
+                template_uuid="tpl-test",
+                poolab_endpoint="http://poolab.test:8080",
+            ),
+            plugin=StubPoolabSandboxPlugin(),
+        )
+
+        with pytest.raises(
+            NotImplementedError, match="File transfer not supported on Poolab platform"
+        ):
+            await service.pull_file_from_url("device-1", "http://src", "/dst")
+
+    @pytest.mark.asyncio
+    async def test_push_file_to_url_raises_not_implemented(self):
+        service = PoolabPaasService(
+            credentials=PoolabCredentials(
+                template_id=1,
+                template_uuid="tpl-test",
+                poolab_endpoint="http://poolab.test:8080",
+            ),
+            plugin=StubPoolabSandboxPlugin(),
+        )
+
+        with pytest.raises(
+            NotImplementedError, match="File transfer not supported on Poolab platform"
+        ):
+            await service.push_file_to_url("device-1", "/src", "http://dst")
