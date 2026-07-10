@@ -38,6 +38,12 @@ pub struct MessageTracker {
     /// the accumulated buffer (delta mode) or override with the final frame's
     /// full text (legacy plugin mode). Cleared on run cleanup.
     chat_delta_mode: Mutex<HashSet<String>>,
+    /// run_id → text buffered for the CURRENT open thinking segment.
+    ///
+    /// Raw BCN SSE thinking frames may carry run-cumulative `data.text` across
+    /// tool blocks. BCS rebuilds segment-local thinking text from `data.delta`
+    /// and clears this buffer whenever a non-thinking stream event is observed.
+    streaming_thinking_buf: Mutex<HashMap<String, String>>,
 }
 
 impl MessageTracker {
@@ -47,6 +53,7 @@ impl MessageTracker {
             coordination_echoes: Mutex::new(HashMap::new()),
             streaming_chat_buf: Mutex::new(HashMap::new()),
             chat_delta_mode: Mutex::new(HashSet::new()),
+            streaming_thinking_buf: Mutex::new(HashMap::new()),
         }
     }
 
@@ -95,6 +102,25 @@ impl MessageTracker {
         map.entry(run_id.to_string()).or_default().push_str(delta);
     }
 
+    /// Append an incremental thinking `delta` to the run's current thinking
+    /// segment and return the segment-accumulated text. Memory only.
+    pub async fn append_thinking_delta(&self, run_id: &str, delta: &str) -> String {
+        let mut map = self.streaming_thinking_buf.lock().await;
+        if let Some(buf) = map.get_mut(run_id) {
+            buf.push_str(delta);
+            return buf.clone();
+        }
+        let mut buf = String::new();
+        buf.push_str(delta);
+        map.insert(run_id.to_string(), buf.clone());
+        buf
+    }
+
+    /// Clear the current thinking segment buffer for the run.
+    pub async fn clear_thinking_buf(&self, run_id: &str) {
+        self.streaming_thinking_buf.lock().await.remove(run_id);
+    }
+
     /// Whether the run has received any `delta_text` frame (SSE self-accumulate
     /// mode). At `final`, delta-mode runs flush their accumulated buffer instead
     /// of overriding with the final frame's cumulative full text.
@@ -130,6 +156,7 @@ impl MessageTracker {
     /// Returns any pending chat buffer that was not yet flushed.
     pub async fn cleanup_run(&self, run_id: &str) -> Option<String> {
         self.chat_delta_mode.lock().await.remove(run_id);
+        self.streaming_thinking_buf.lock().await.remove(run_id);
         self.streaming_chat_buf.lock().await.remove(run_id)
     }
 }
