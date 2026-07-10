@@ -10,6 +10,7 @@ Provides CRUD operations for bots:
 
 Each bot is associated with an entity (staff, proj, team) and has its own device.
 """
+import asyncio
 from datetime import datetime, timedelta
 from typing import Any, List, Optional
 
@@ -1341,6 +1342,57 @@ async def refresh_bot_passport_token(
         )
 
 
+def _build_bots_by_owner_or_collaborator_data(
+    owner_id: str,
+    bot_service: BotServiceProtocol,
+) -> dict[str, Any]:
+    """Build list response data synchronously outside the event loop."""
+    engine_types = _get_engine_types()
+    result = bot_service.list_bots_by_owner_or_collaborator(
+        owner_id=owner_id,
+        page=1,
+        page_size=100,
+    )
+    items = result["items"]
+
+    for bot in items:
+        entity_id = bot.get("entity_id")
+        entity_type = bot.get("entity_type", "staff")
+        bot_id = str(bot.get("bot_id"))
+        bot_engine_types = bot.get("engine_types", engine_types)
+        bot["engine_paths"] = bot_service.get_engine_paths(
+            entity_id,
+            bot_id,
+            bot_engine_types,
+            entity_type,
+        )
+
+        active = bot.get("active_engine", DEFAULT_ENGINE_TYPE)
+        engine_paths = bot["engine_paths"]
+        fallback = list(engine_paths.values())[0] if engine_paths else ""
+        bot["bot_work_dir"] = engine_paths.get(active, fallback)
+
+    default_bot = None
+    if items:
+        first_bot = items[0]
+        first_engine = first_bot.get("active_engine", DEFAULT_ENGINE_TYPE)
+        default_bot = {
+            "entity_id": first_bot.get("entity_id"),
+            "bot_id": first_bot.get("bot_id"),
+            "entity_type": first_bot.get("entity_type", "staff"),
+            "bot_work_dir": first_bot.get("engine_paths", {}).get(
+                first_engine,
+                first_bot.get("bot_work_dir", ""),
+            ),
+        }
+
+    return {
+        "total": result["total"],
+        "items": items,
+        "default_bot": default_bot,
+    }
+
+
 @router.get("/by-owner-or-collaborator", response_model=ApiResponse)
 async def list_bots_by_owner_or_collaborator(
     ctx: RequestContext = Depends(get_request_context),
@@ -1356,49 +1408,14 @@ async def list_bots_by_owner_or_collaborator(
     - bots where current authenticated user is a collaborator
     """
     try:
-        owner_id = ctx.user_id
-
-        engine_types = _get_engine_types()
-
-        result = bot_service.list_bots_by_owner_or_collaborator(
-            owner_id=owner_id,
-            page=1,
-            page_size=100,
+        data = await asyncio.to_thread(
+            _build_bots_by_owner_or_collaborator_data,
+            ctx.user_id,
+            bot_service,
         )
-
-        items = result["items"]
-
-        for bot in items:
-            entity_id = bot.get("entity_id")
-            entity_type = bot.get("entity_type", "staff")
-            bot_id = str(bot.get("bot_id"))
-            bot_engine_types = bot.get("engine_types", engine_types)
-
-            bot["engine_paths"] = bot_service.get_engine_paths(entity_id, bot_id, bot_engine_types, entity_type)
-
-            active = bot.get("active_engine", DEFAULT_ENGINE_TYPE)
-            engine_paths = bot["engine_paths"]
-            fallback = list(engine_paths.values())[0] if engine_paths else ""
-            bot["bot_work_dir"] = engine_paths.get(active, fallback)
-
-        default_bot = None
-        if items:
-            first_bot = items[0]
-            first_engine = first_bot.get("active_engine", DEFAULT_ENGINE_TYPE)
-            default_bot = {
-                "entity_id": first_bot.get("entity_id"),
-                "bot_id": first_bot.get("bot_id"),
-                "entity_type": first_bot.get("entity_type", "staff"),
-                "bot_work_dir": first_bot.get("engine_paths", {}).get(first_engine, first_bot.get("bot_work_dir", "")),
-            }
-
         return ApiResponse(
             success=True,
-            data={
-                "total": result["total"],
-                "items": items,
-                "default_bot": default_bot,
-            },
+            data=data,
             message="获取 Bot 列表成功",
         )
     except Exception as e:

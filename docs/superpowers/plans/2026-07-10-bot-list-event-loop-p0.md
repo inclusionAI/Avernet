@@ -42,7 +42,7 @@ def test_desktop_status_uses_persisted_value_without_baas_query(self):
 
 - [ ] **Step 2: Run the test and confirm RED**
 
-Run: `uv run pytest tests/community/core/bot_management/services/test_list_desktop_live_status.py::TestDesktopLiveStatusMerge::test_desktop_status_uses_persisted_value_without_baas_query -q`
+Run: `uv run pytest tests/community/core/bot_management/services/test_list_desktop_live_status.py::TestBotListUsesPersistedStatus::test_desktop_status_uses_persisted_value_without_baas_query -q`
 
 Expected: FAIL because the current bulk merge changes `OFFLINE` to `ACTIVE` and invokes BaaS.
 

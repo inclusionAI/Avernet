@@ -49,4 +49,3 @@ or fail this list endpoint; persisted status is returned instead.
   released.
 - Existing bot-management endpoint and desktop-status resolution tests remain
   green.
-
