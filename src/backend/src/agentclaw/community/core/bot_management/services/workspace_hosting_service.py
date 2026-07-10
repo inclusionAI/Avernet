@@ -13,7 +13,7 @@ from agentclaw.community.core.bot_management.services.workspace_hosting_client i
 _DEFAULT_DEPARTMENT_ID = "52146"
 
 # 创建 DIMA 空间后固定加这个工号为空间管理员
-_FIXED_ADMIN_MEMBERS = ["382716","136677","204696", "040981", "151710", "024021", "137454", "150839", "227210", "246667", "511549"]
+_FIXED_ADMIN_MEMBERS = ["382716", "136677", "204696", "040981", "151710", "024021", "137454", "150839", "227210", "246667", "511549"]
 
 logger = logging.getLogger(__name__)
 
