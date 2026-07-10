@@ -32,7 +32,7 @@ from agentclaw.community.core.bot_dormant.scan_policy import (
     DEFAULT_INACTIVE_THRESHOLD_DAYS,
     DEFAULT_RECYCLE_GRACE_DAYS,
     DormantScanPolicyService,
-    positive_int_or_default,
+    resolve_scan_window,
 )
 from agentclaw.community.core.bot_dormant.sqlite_models import (
     DormantCheckAudit,
@@ -147,30 +147,6 @@ class DormantBotService:
         if self._dry_run_override is not None:
             return self._dry_run_override
         return self._scan_policy.dry_run()
-
-    def _refresh_scan_window_from_policy(self) -> None:
-        """Refresh N/M from ac_common_config-backed policy for this scan run."""
-        try:
-            policy = self._scan_policy.get_policy()
-        except Exception:
-            logger.exception(
-                "[DormantBotService] failed to read dormant scan window policy; "
-                "using defaults N=%d M=%d",
-                self._default_N,
-                self._default_M,
-            )
-            self._N = self._default_N
-            self._M = self._default_M
-            return
-
-        self._N = positive_int_or_default(
-            getattr(policy, "inactive_threshold_days", None),
-            self._default_N,
-        )
-        self._M = positive_int_or_default(
-            getattr(policy, "recycle_grace_days", None),
-            self._default_M,
-        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -756,7 +732,11 @@ class DormantBotService:
         if run_id is None:
             run_id = str(uuid.uuid4())
         summary = RunSummary()
-        self._refresh_scan_window_from_policy()
+        self._N, self._M = resolve_scan_window(
+            self._scan_policy,
+            default_inactive_threshold_days=self._default_N,
+            default_recycle_grace_days=self._default_M,
+        )
 
         logger.info(
             "[dormant.run=%s] event=run_start dry_run=%s N=%d M=%d",

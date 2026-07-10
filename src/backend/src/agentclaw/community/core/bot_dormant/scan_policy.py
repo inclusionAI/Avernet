@@ -150,3 +150,32 @@ class DormantScanPolicyService:
 
     def recycle_grace_days(self) -> int:
         return self.get_policy().recycle_grace_days
+
+
+def resolve_scan_window(
+    scan_policy: DormantScanPolicyService,
+    *,
+    default_inactive_threshold_days: int,
+    default_recycle_grace_days: int,
+) -> tuple[int, int]:
+    """Resolve N/M for one run, preserving the legacy default fallback."""
+    try:
+        policy = scan_policy.get_policy()
+    except Exception:
+        logger.exception(
+            "[dormant.scan_policy] failed to read scan window; "
+            "using defaults N=%d M=%d",
+            default_inactive_threshold_days,
+            default_recycle_grace_days,
+        )
+        return default_inactive_threshold_days, default_recycle_grace_days
+    return (
+        positive_int_or_default(
+            policy.inactive_threshold_days,
+            default_inactive_threshold_days,
+        ),
+        positive_int_or_default(
+            policy.recycle_grace_days,
+            default_recycle_grace_days,
+        ),
+    )
