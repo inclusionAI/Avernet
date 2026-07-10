@@ -625,10 +625,15 @@ pub async fn handle_web_send(
 
     let frontend_deliveries = publish_web_user_message(flow, &cmd).await;
 
-    // Notify when @-mentioned (Send) bots failed delivery (offline/unreachable).
-    // Excludes bots blocked by interceptors (already have their own error surface).
+    // Notify when @-mentioned (Send) bots failed delivery. A failed delivery
+    // is reported as "已离线" when the bot is genuinely unreachable
+    // (is_available=false / no resolvable delivery target); when the bot is
+    // still online (is_available=true) but the delivery itself failed (e.g. a
+    // transient HTTP provider webhook error), it is reported as a retryable
+    // delivery failure instead, so a still-active bot is not wrongly shown as
+    // offline.
     {
-        let offline_bot_names: Vec<String> = decision
+        let failed_targets: Vec<&RoutingTarget> = decision
             .targets
             .iter()
             .filter(|t| t.delivery_type == DeliveryType::Send)
@@ -637,25 +642,51 @@ pub async fn handle_web_send(
                     .iter()
                     .any(|r| r.target_bot_id == t.bot_uuid && !r.delivered)
             })
-            .filter_map(|t| {
-                group
-                    .get_participant(&t.bot_uuid)
-                    .and_then(|p| p.bot_name.clone())
-                    .or_else(|| Some(t.bot_uuid.clone()))
-            })
             .collect();
 
-        if !offline_bot_names.is_empty() {
-            if let Some(ref system_message) = flow.system_message {
-                let session_id = cmd.session_id.as_deref().unwrap_or(&cmd.group_id);
+        let mut offline_bot_names: Vec<String> = Vec::new();
+        let mut failed_bot_names: Vec<String> = Vec::new();
+        for t in &failed_targets {
+            let name = group
+                .get_participant(&t.bot_uuid)
+                .and_then(|p| p.bot_name.clone())
+                .unwrap_or_else(|| t.bot_uuid.clone());
+            let is_online = match flow.registry.resolve_delivery_target(&t.bot_uuid).await {
+                Ok(target) => flow.bot_delivery.is_available(&target).await,
+                Err(_) => false,
+            };
+            if is_online {
+                failed_bot_names.push(name);
+            } else {
+                offline_bot_names.push(name);
+            }
+        }
+
+        if let Some(ref system_message) = flow.system_message {
+            let session_id = cmd.session_id.as_deref().unwrap_or(&cmd.group_id);
+            let receivers: Vec<Participant> = group
+                .participants
+                .iter()
+                .filter(|p| p.is_bot() && p.bot_uuid != cmd.from_actor_id)
+                .cloned()
+                .collect();
+
+            if !offline_bot_names.is_empty() {
                 let names = offline_bot_names.join("、");
                 let message = format!("Bot {} 已离线", names);
-                let receivers: Vec<Participant> = group
-                    .participants
-                    .iter()
-                    .filter(|p| p.is_bot() && p.bot_uuid != cmd.from_actor_id)
-                    .cloned()
-                    .collect();
+                let event = SystemMessageEvent::GenericNotification {
+                    group_id: cmd.group_id.clone(),
+                    message,
+                    receivers: receivers.clone(),
+                };
+                let _ = system_message
+                    .notify(&cmd.group_id, event, session_id, &group.participants)
+                    .await;
+            }
+
+            if !failed_bot_names.is_empty() {
+                let names = failed_bot_names.join("、");
+                let message = format!("消息投递给 Bot {} 失败，请稍后重试", names);
                 let event = SystemMessageEvent::GenericNotification {
                     group_id: cmd.group_id.clone(),
                     message,
