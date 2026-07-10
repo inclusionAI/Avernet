@@ -41,16 +41,17 @@ test_cli_list() {
     info "CLI: bcs-cli list"
     ensure_cli_token CEO || { skip_case "no token"; TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
     bcs_cli CEO list || { fail "bcs-cli list exited $BCS_CLI_EXIT"; TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
-    # Expect at least the 5 demo bots' UUIDs echoed somewhere.
+    # The seeded five-bot environment is the fixture for this story; require the
+    # complete fixture rather than accepting an arbitrary non-empty list.
     local hit=0
     for u in "$BOT_CEO_UUID" "$BOT_PM_UUID" "$BOT_ENG_UUID" "$BOT_QA_UUID" "$BOT_CS_UUID"; do
         _cli_contains "$BCS_CLI_STDOUT" "$u" && hit=$((hit+1))
     done
-    if [[ "$hit" -ge 2 ]]; then
-        pass "bcs-cli list returned >=2 known bot UUIDs"
+    if [[ "$hit" -eq 5 ]]; then
+        pass "bcs-cli list returned all 5 known bot UUIDs"
         TESTS_PASSED=$((TESTS_PASSED+1))
     else
-        fail "bcs-cli list matched only $hit known UUIDs"
+        fail "bcs-cli list matched $hit/5 known UUIDs"
         TESTS_FAILED=$((TESTS_FAILED+1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL+1))
@@ -79,14 +80,8 @@ test_cli_discover() {
         pass "bcs-cli discover matched 客服 (CS) bot"
         TESTS_PASSED=$((TESTS_PASSED+1))
     else
-        # discover match semantics vary; treat non-empty result as acceptable.
-        if [[ -n "$BCS_CLI_STDOUT" && "$BCS_CLI_STDOUT" != "[]" ]]; then
-            pass "bcs-cli discover returned non-empty results"
-            TESTS_PASSED=$((TESTS_PASSED+1))
-        else
-            fail "bcs-cli discover returned empty"
-            TESTS_FAILED=$((TESTS_FAILED+1))
-        fi
+        fail "bcs-cli discover did not return the expected 客服 bot"
+        TESTS_FAILED=$((TESTS_FAILED+1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL+1))
 }
@@ -98,8 +93,9 @@ test_cli_visibility_get_set() {
     bcs_cli CEO visibility get || { fail "visibility get exited $BCS_CLI_EXIT"; TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
     local before
     before="$(_cli_json_field "$BCS_CLI_STDOUT" visibility 2>/dev/null)"
-    # Some bcs-cli shapes put visibility at top-level; fall back to raw scan.
-    [[ -z "$before" ]] && before="$(printf '%s' "$BCS_CLI_STDOUT" | grep -oE '"visibility":"[^"]*"' | head -1 | sed 's/"visibility":"//;s/"//')"
+    # Default CLI output is the stable human-readable contract
+    # `Visibility: <value>`; --json uses the field parsed above.
+    [[ -z "$before" ]] && before="$(printf '%s\n' "$BCS_CLI_STDOUT" | sed -nE 's/^Visibility: (public|protected|private)$/\1/p' | head -1)"
     # Set to public, verify, restore.
     if ! bcs_cli CEO visibility set --value public; then
         fail "visibility set public exited $BCS_CLI_EXIT"
@@ -114,8 +110,23 @@ test_cli_visibility_get_set() {
         TESTS_FAILED=$((TESTS_FAILED+1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL+1))
-    # Restore original (best-effort, not asserted).
-    [[ -n "$before" ]] && bcs_cli CEO visibility set --value "$before" >/dev/null 2>&1 || true
+    if [[ -z "$before" ]]; then
+        fail "visibility get did not expose the original value"
+        TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return
+    fi
+    if ! bcs_cli CEO visibility set --value "$before"; then
+        fail "visibility restore to $before exited $BCS_CLI_EXIT"
+        TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return
+    fi
+    bcs_cli CEO visibility get || true
+    if _cli_contains "$BCS_CLI_STDOUT" "$before"; then
+        pass "bcs-cli visibility restored to $before"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "visibility get after restore did not show $before"
+        TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
 }
 
 # connect: re-connect with CEO's existing token; expect a session/token back.
@@ -256,19 +267,22 @@ test_cli_list_groups() {
         fail "bcs-cli list-groups exited $BCS_CLI_EXIT"
         TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return
     fi
-    # Expect JSON array or pagination structure with total/groups/items.
-    if _cli_contains "$BCS_CLI_STDOUT" "total" || _cli_contains "$BCS_CLI_STDOUT" "groups" || _cli_contains "$BCS_CLI_STDOUT" "items" || _cli_contains "$BCS_CLI_STDOUT" "id"; then
-        pass "bcs-cli list-groups returned a group list"
+    local valid_shape
+    valid_shape=$(printf '%s\n' "$BCS_CLI_STDOUT" | python3 -c '
+import re, sys
+lines = [line for line in sys.stdin.read().splitlines() if line.strip()]
+header = re.fullmatch(r"Groups \((\d+)\):", lines[0]) if lines else None
+expected = int(header.group(1)) if header else -1
+entry = re.compile(r"\s+- bcs_grp_[0-9a-f-]+ \[[^]]+\] driver=\S+")
+ok = header is not None and len(lines[1:]) == expected and all(entry.fullmatch(line) for line in lines[1:])
+print("1" if ok else "0")
+' 2>/dev/null)
+    if [[ "$valid_shape" = "1" ]]; then
+        pass "bcs-cli list-groups returned a valid group-list shape"
         TESTS_PASSED=$((TESTS_PASSED+1))
     else
-        # Empty list acceptable; ensure it is valid JSON array.
-        if _cli_contains "$BCS_CLI_STDOUT" "[" || _cli_contains "$BCS_CLI_STDOUT" "{"; then
-            pass "bcs-cli list-groups returned a JSON payload (empty ok)"
-            TESTS_PASSED=$((TESTS_PASSED+1))
-        else
-            fail "bcs-cli list-groups unexpected output: $(echo "$BCS_CLI_STDOUT" | head -c 120)"
-            TESTS_FAILED=$((TESTS_FAILED+1))
-        fi
+        fail "bcs-cli list-groups unexpected output: $(echo "$BCS_CLI_STDOUT" | head -c 120)"
+        TESTS_FAILED=$((TESTS_FAILED+1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL+1))
 }
@@ -287,14 +301,8 @@ test_cli_friend() {
         pass "bcs-cli friend list contains 研发"
         TESTS_PASSED=$((TESTS_PASSED+1))
     else
-        # Allow empty list if no friends; require valid JSON array/object.
-        if _cli_contains "$BCS_CLI_STDOUT" "[" || _cli_contains "$BCS_CLI_STDOUT" "{"; then
-            pass "bcs-cli friend list returned valid JSON (no 研发 is acceptable)"
-            TESTS_PASSED=$((TESTS_PASSED+1))
-        else
-            fail "bcs-cli friend list unexpected output: $(echo "$BCS_CLI_STDOUT" | head -c 120)"
-            TESTS_FAILED=$((TESTS_FAILED+1))
-        fi
+        fail "bcs-cli friend list did not contain the expected 研发 bot"
+        TESTS_FAILED=$((TESTS_FAILED+1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL+1))
 }
