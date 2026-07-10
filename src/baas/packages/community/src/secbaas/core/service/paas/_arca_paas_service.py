@@ -392,16 +392,43 @@ class ArcaPaasService(PaasService):
         return await asyncio.to_thread(self._destroy_device_sync, paas_device_id)
 
     def _destroy_device_sync(self, paas_device_id: str) -> bool:
-        """Synchronous implementation of destroy_device for use in to_thread()."""
+        """Synchronous implementation of destroy_device for use in to_thread().
+
+        Extracts storage_id from sandbox info before destroying, then
+        attempts best-effort storage cleanup after successful destroy.
+        """
+        # Step 0: Extract storage_id BEFORE destroy
+        # sandbox.get_info() is unavailable after sandbox.destroy()
+        sandbox = None
+        storage_id = None
         try:
-            self._logger.info(
-                f"Destroying sandbox with paas_device_id: {paas_device_id}"
-            )
             sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(paas_device_id)
+            info = sandbox.get_info()
+            storage = getattr(info, "storage", None)
+            if storage and isinstance(storage, dict):
+                storage_id = storage.get("storage_id")
+        except Exception:
+            self._logger.warning(
+                "Failed to get storage info before destroy for %s",
+                paas_device_id,
+                exc_info=True,
+            )
+            sandbox = None
+
+        try:
+            # Step 1: Connect (or reconnect if get_info step failed)
+            if sandbox is None:
+                self._logger.info(
+                    f"Destroying sandbox with paas_device_id: {paas_device_id}"
+                )
+                sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(
+                    paas_device_id
+                )
             result = sandbox.destroy()
-            if isinstance(result, bool):
-                return result
-            return getattr(result, "success", True)
+            success = (
+                result if isinstance(result, bool)
+                else getattr(result, "success", True)
+            )
         except ArcaSandboxNotFoundError:
             # Already destroyed - idempotent destroy
             return True
@@ -423,6 +450,29 @@ class ArcaPaasService(PaasService):
             raise self._translate_error(e, ErrorCode.DEVICE_DESTROY_FAILED)
         except Exception as e:
             raise self._translate_error(e, ErrorCode.DEVICE_DESTROY_FAILED)
+
+        # Step 2: After successful destroy, attempt best-effort storage cleanup
+        if success and storage_id:
+            tenant_name = self._credentials.tenant_name
+            if tenant_name:
+                try:
+                    deleted = self._arca_sandbox_plugin.delete_storage(
+                        storage_id, tenant_name
+                    )
+                    if deleted:
+                        self._logger.info("Storage deleted: %s", storage_id)
+                    else:
+                        self._logger.warning(
+                            "Storage deletion failed: %s", storage_id
+                        )
+                except Exception:
+                    self._logger.warning(
+                        "Storage deletion exception for %s",
+                        storage_id,
+                        exc_info=True,
+                    )
+
+        return success
 
     async def execute_command(
         self,
