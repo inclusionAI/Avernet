@@ -145,6 +145,60 @@ class TestFetchBotCronsUsesResolver:
 
 class TestListAllCronsOwnerId:
     @pytest.mark.asyncio
+    async def test_list_all_crons_skips_hermes_bots(self):
+        bot_provider = MagicMock()
+        bot_provider.list_bots_by_owner_or_collaborator.return_value = {
+            "items": [
+                {
+                    "bot_id": "desktop-hermes",
+                    "owner_id": "owner-1",
+                    "binding_id": 42,
+                    "bot_name": "Desktop Hermes",
+                    "bot_type": "personal",
+                    "active_engine": "hermes",
+                },
+                {
+                    "bot_id": "service-hermes",
+                    "owner_id": "owner-1",
+                    "binding_id": 84,
+                    "bot_name": "Service Hermes",
+                    "bot_type": "service",
+                    "active_engine": "HERMES",
+                },
+            ]
+        }
+        device_provider = MagicMock()
+        resolver = MagicMock()
+        transport = MagicMock()
+        transport.invoke = AsyncMock()
+        publish_repo = MagicMock()
+        svc = _make_service(
+            bot_provider=bot_provider,
+            device_provider=device_provider,
+            resolver=resolver,
+            transport=transport,
+            publish_repo=publish_repo,
+        )
+
+        result = await svc.list_all_crons(
+            user_id="owner-1",
+            nick_name="Owner",
+            bot_id="all",
+        )
+
+        assert result == {
+            "success": True,
+            "data": [],
+            "total": 0,
+            "failed_targets": [],
+        }
+        device_provider.get_device.assert_not_called()
+        resolver.resolve_for_bot.assert_not_called()
+        resolver.resolve_for_binding.assert_not_called()
+        transport.invoke.assert_not_awaited()
+        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_list_all_crons_adds_owner_id_to_each_task(self):
         """Cron rows can share bot_id=default across service bot owners, so the
         aggregated API must surface owner_id for frontend ownership checks.
@@ -867,6 +921,44 @@ class TestRuntimeTargetExpansion:
 
 
 class TestListRunningCronsOwnerId:
+    @pytest.mark.asyncio
+    async def test_list_running_crons_skips_hermes_service_bot(self):
+        bot_provider = MagicMock()
+        bot_provider.get_bot.return_value = {
+            "bot_id": "service-hermes",
+            "owner_id": "owner-1",
+            "binding_id": 42,
+            "bot_name": "Service Hermes",
+            "bot_type": "service",
+            "active_engine": " hermes ",
+        }
+        device_provider = MagicMock()
+        resolver = MagicMock()
+        transport = MagicMock()
+        transport.invoke = AsyncMock()
+        publish_repo = MagicMock()
+        svc = _make_service(
+            bot_provider=bot_provider,
+            device_provider=device_provider,
+            resolver=resolver,
+            transport=transport,
+            publish_repo=publish_repo,
+        )
+
+        result = await svc.list_running_crons(
+            user_id="owner-1",
+            nick_name="Owner",
+            bot_id="service-hermes",
+            runtime_stage="online",
+        )
+
+        assert result == {"success": True, "data": [], "failed_targets": []}
+        device_provider.get_device.assert_not_called()
+        device_provider.list_devices_by_runtime_binding.assert_not_called()
+        resolver.resolve_for_binding.assert_not_called()
+        transport.invoke.assert_not_awaited()
+        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.assert_not_called()
+
     @pytest.mark.asyncio
     async def test_list_running_crons_adds_owner_id_for_specific_bot(self):
         bot_provider = MagicMock()
