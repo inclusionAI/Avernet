@@ -19,6 +19,7 @@ Off by default; enable with RUN_ACCEPTANCE=1.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import httpx
@@ -34,6 +35,33 @@ from tests.community.framework.flow_runner_live import run_flow_live
 
 BASELINE_PATH = Path(__file__).parent / "baseline_device_query.json"
 HEADERS = {"x-user-id": "e2e_user"}
+
+
+def wait_device_active(
+    client: httpx.Client,
+    binding_id: int,
+    *,
+    timeout_sec: int = 180,
+) -> dict:
+    """Wait for the real Backend -> BaaS publish flow to activate a binding."""
+    deadline = time.monotonic() + timeout_sec
+    last: dict | None = None
+    while time.monotonic() < deadline:
+        response = client.get(f"/api/v1/devices/{binding_id}")
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        if payload.get("success") is True:
+            last = payload["data"]
+            if last["status"] == "ACTIVE":
+                return last
+            assert last["status"] != "FAILED", last
+        else:
+            # Bot readiness and the BaaS alive callback are asynchronous. A read
+            # may briefly race the SQLite callback transaction; only a persistent
+            # failure should fail the acceptance story.
+            last = payload
+        time.sleep(2)
+    pytest.fail(f"device binding {binding_id} did not become active; last={last}")
 
 
 @pytest.mark.acceptance
@@ -127,7 +155,7 @@ def test_device_live_local_provider_lifecycle(live_backend):
         binding_id = int(bot["binding_id"])
         device_id = str(bot["device_id"])
 
-        detail = assert_success(client.get(f"/api/v1/devices/{binding_id}"))["data"]
+        detail = wait_device_active(client, binding_id)
         assert detail["entity_id"] == user_id
         assert detail["device_id"] == device_id
         assert detail["device_provider"] == "local"
@@ -147,6 +175,31 @@ def test_device_live_local_provider_lifecycle(live_backend):
         assert connection["available"] is True
         assert connection["url"]
 
+        connection_by_bot = client.get(
+            f"/api/v1/devices/bots/{bot['bot_id']}/connection"
+        ).json()
+        assert connection_by_bot["success"] is False
+        assert connection_by_bot["error_code"] == 40403
+        assert "BotPublishRepository not available" in connection_by_bot["message"]
+
+        config_payload = {
+            "singlebox": {
+                "module": "devices",
+                "story": "device-filesystem-config-roundtrip",
+            }
+        }
+        saved_config = assert_success(
+            client.put(
+                f"/api/bots/{bot['bot_id']}/engine-config",
+                json=config_payload,
+            )
+        )["data"]
+        assert saved_config == config_payload
+        read_config = assert_success(
+            client.get(f"/api/bots/{bot['bot_id']}/engine-config")
+        )["data"]
+        assert read_config == config_payload
+
         connectable = assert_success(
             client.get(
                 "/api/v1/devices/connectable",
@@ -158,6 +211,48 @@ def test_device_live_local_provider_lifecycle(live_backend):
             )
         )["data"]
         assert any(item["id"] == binding_id for item in connectable["items"]), connectable
+
+        inventory = assert_success(
+            client.get(
+                "/api/v1/devices/provider-inventory",
+                params={"entity_id": user_id, "entity_type": "staff"},
+            )
+        )["data"]
+        assert inventory["total"] == 1
+        assert inventory["scanned"] == 1
+        assert inventory["by_provider"]["local"]["total"] == 1
+
+        bootstrap_auth = assert_success(
+            client.post(
+                "/api/v1/devices/callback/bootstrap-auth",
+                json={
+                    "device_id": device_id,
+                    "bot_id": bot["bot_id"],
+                    "owner_id": user_id,
+                },
+            )
+        )["data"]
+        assert bootstrap_auth["agent_code"] == f"local_{bot['bot_id']}"
+
+        invalid_alive = client.post(
+            "/api/v1/devices/callback/alive",
+            headers={"Authorization": "Bearer invalid-device-token"},
+            json={"device_id": device_id},
+        ).json()
+        assert invalid_alive["success"] is False
+        assert invalid_alive["error_code"] == 40302
+
+        invalid_status = client.post(
+            "/api/v1/devices/callback/status",
+            headers={"Authorization": "Bearer invalid-device-token"},
+            json={
+                "device_id": device_id,
+                "status": "SUCCEEDED",
+                "message": "untrusted callback must not mutate device state",
+            },
+        ).json()
+        assert invalid_status["success"] is False
+        assert invalid_status["error_code"] == 40302
 
         with httpx.Client(
             base_url=live_backend,
@@ -173,6 +268,13 @@ def test_device_live_local_provider_lifecycle(live_backend):
         assert instances["error_code"] == 40403
         assert "does not support instances query" in instances["message"]
 
+        instances_by_bot = client.get(
+            f"/api/v1/devices/bots/{bot['bot_id']}/instances"
+        ).json()
+        assert instances_by_bot["success"] is False
+        assert instances_by_bot["error_code"] == 40403
+        assert "BotPublishRepository not available" in instances_by_bot["message"]
+
         restart = client.post(
             f"/api/v1/devices/{binding_id}/restart",
             json={"device_uuid": device_id},
@@ -180,6 +282,18 @@ def test_device_live_local_provider_lifecycle(live_backend):
         assert restart["success"] is False
         assert restart["error_code"] == 40403
         assert "does not support instances query" in restart["message"]
+
+        env_update = assert_success(
+            client.post(
+                "/api/v1/devices/batch/env",
+                json={"binding_ids": [binding_id, 999999], "env": "dev"},
+            )
+        )["data"]
+        assert env_update == {
+            "total": 2,
+            "updated": 1,
+            "updated_ids": [binding_id],
+        }
 
         released = assert_success(
             client.post(
@@ -191,3 +305,28 @@ def test_device_live_local_provider_lifecycle(live_backend):
 
         readback = assert_success(client.get(f"/api/v1/devices/{binding_id}"))["data"]
         assert readback["status"] == "RELEASED"
+
+        reapplied = assert_success(
+            client.post(
+                "/api/v1/devices",
+                json={
+                    "apply_reason": "restore released singlebox device",
+                    "entity_id": user_id,
+                    "entity_type": "staff",
+                    "bot_id": bot["bot_id"],
+                    "engine": "openclaw",
+                },
+            )
+        )["data"]
+        reapplied_binding_id = int(reapplied["id"])
+        assert reapplied["device_provider"] == "local"
+        active_reapplied = wait_device_active(client, reapplied_binding_id)
+        assert active_reapplied["device_id"] == reapplied["device_id"]
+
+        final_release = assert_success(
+            client.post(
+                f"/api/v1/devices/{reapplied_binding_id}/release",
+                json={"release_reason": "reapplied device acceptance complete"},
+            )
+        )["data"]
+        assert final_release["status"] == "RELEASED"
