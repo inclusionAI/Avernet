@@ -22,7 +22,7 @@ done
 cd "$BAAS_DIR" || exit 1
 
 case "$group" in
-  ci)            run_ci_tests ;;
+  ci)            run_ci_pipeline "$mode" "$overlay" ;;
   e2e)           run_e2e_tests "$mode" "$overlay" ;;
   arch)          run_arch_tests ;;
   unit)          run_unit_tests ;;
