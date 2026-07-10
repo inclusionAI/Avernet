@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
-use tracing::warn;
+use tracing::{info, warn};
 
 use bcs_channel_api::{
     ChannelInboundSink, ChannelIngressError, ChannelProvider, ChannelProviderRegistry,
@@ -84,6 +84,7 @@ impl BcsChannelService {
         now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
         new_id: Arc<dyn Fn() -> String + Send + Sync>,
     ) -> Self {
+        let env = env.into();
         Self {
             bindings,
             conversations,
@@ -94,7 +95,7 @@ impl BcsChannelService {
             groups,
             registry,
             providers,
-            env: env.into(),
+            env: env.trim().to_string(),
             now_ms,
             new_id,
             inbound_dedup: InboundDedupGuard::new(DEFAULT_INBOUND_DEDUP_LIMIT),
@@ -245,7 +246,7 @@ impl BcsChannelService {
         &self,
         ctx: &ResolvedInboundContext,
         msg: &InboundMessage,
-    ) -> Result<String, ChannelUseCaseError> {
+    ) -> Result<(String, bool), ChannelUseCaseError> {
         let current = self
             .conversations
             .get(
@@ -262,11 +263,12 @@ impl BcsChannelService {
                 .await
                 .is_some_and(|session| session.status == SessionStatus::Running)
             {
-                return Ok(map.bcs_session_id);
+                return Ok((map.bcs_session_id, true));
             }
         }
 
-        self.create_chat_session(ctx, msg).await
+        let session_id = self.create_chat_session(ctx, msg).await?;
+        Ok((session_id, false))
     }
 
     async fn create_chat_session(
@@ -414,13 +416,45 @@ impl BcsChannelService {
 impl ChannelService for BcsChannelService {
     async fn handle_inbound(&self, msg: InboundMessage) -> Result<(), ChannelUseCaseError> {
         let account_ref = msg.account_ref.trim().to_string();
+        info!(
+            channel_type = %msg.channel_type,
+            account_ref = %account_ref,
+            msg_id = %msg.msg_id,
+            im_conversation_id = %msg.im_conversation_id,
+            conversation_type = %msg.conversation_type,
+            im_user_id = %msg.im_user_id,
+            is_at_bot = msg.is_at_bot,
+            text_len = msg.text.chars().count(),
+            "channel inbound: received"
+        );
         if account_ref.is_empty() {
+            info!(
+                channel_type = %msg.channel_type,
+                msg_id = %msg.msg_id,
+                reason = "empty_account_ref",
+                "channel inbound: ignored"
+            );
             return Ok(());
         }
         if msg.msg_id.trim().is_empty() {
+            info!(
+                channel_type = %msg.channel_type,
+                account_ref = %account_ref,
+                reason = "empty_msg_id",
+                "channel inbound: ignored"
+            );
             return Ok(());
         }
         if msg.conversation_type == "2" && !msg.is_at_bot {
+            info!(
+                channel_type = %msg.channel_type,
+                account_ref = %account_ref,
+                msg_id = %msg.msg_id,
+                im_conversation_id = %msg.im_conversation_id,
+                conversation_type = %msg.conversation_type,
+                reason = "group_message_without_at_bot",
+                "channel inbound: ignored"
+            );
             return Ok(());
         }
         let Some(binding) = self
@@ -428,20 +462,62 @@ impl ChannelService for BcsChannelService {
             .find_active_by_account(msg.channel_type.clone(), &account_ref)
             .await?
         else {
+            info!(
+                channel_type = %msg.channel_type,
+                account_ref = %account_ref,
+                msg_id = %msg.msg_id,
+                im_conversation_id = %msg.im_conversation_id,
+                reason = "binding_missing",
+                "channel inbound: ignored"
+            );
             return Ok(());
         };
+        info!(
+            channel_type = %binding.channel_type,
+            account_ref = %binding.account_ref,
+            binding_id = %binding.id,
+            msg_id = %msg.msg_id,
+            target_kind = binding_target_kind(&binding.target),
+            "channel inbound: binding resolved"
+        );
         let dedup_key = inbound_dedup_key(&msg.channel_type, &account_ref, &msg.msg_id);
         if let Some(key) = dedup_key.as_deref() {
             if !self.inbound_dedup.claim(key).await {
+                info!(
+                    channel_type = %msg.channel_type,
+                    account_ref = %account_ref,
+                    msg_id = %msg.msg_id,
+                    reason = "duplicate_msg_id",
+                    "channel inbound: ignored"
+                );
                 return Ok(());
             }
         }
 
         let result = async {
             let actor_id = self.ensure_im_human_actor(&msg).await?;
+            info!(
+                channel_type = %msg.channel_type,
+                account_ref = %account_ref,
+                msg_id = %msg.msg_id,
+                im_user_id = %msg.im_user_id,
+                actor_id = %actor_id,
+                "channel inbound: actor resolved"
+            );
             let ctx = self
                 .resolve_inbound_context(&binding, &msg, &actor_id)
                 .await?;
+            info!(
+                channel_type = %msg.channel_type,
+                account_ref = %account_ref,
+                binding_id = %ctx.binding_id,
+                msg_id = %msg.msg_id,
+                group_id = %ctx.group_id,
+                session_scope = session_scope_label(ctx.session_scope),
+                context_projection = ctx.context_projection,
+                state_machine_trigger = ctx.state_machine_trigger,
+                "channel inbound: context resolved"
+            );
 
             if ctx.state_machine_trigger {
                 return self
@@ -449,7 +525,18 @@ impl ChannelService for BcsChannelService {
                     .await;
             }
 
-            let session_id = self.resolve_or_create_chat_session(&ctx, &msg).await?;
+            let (session_id, reused_session) = self.resolve_or_create_chat_session(&ctx, &msg).await?;
+            info!(
+                channel_type = %msg.channel_type,
+                account_ref = %account_ref,
+                binding_id = %ctx.binding_id,
+                msg_id = %msg.msg_id,
+                group_id = %ctx.group_id,
+                bcs_session_id = %session_id,
+                reused = reused_session,
+                session_scope = session_scope_label(ctx.session_scope),
+                "channel inbound: session resolved"
+            );
             self.conversations
                 .upsert(ConversationSessionMap {
                     binding_id: binding.id,
@@ -461,30 +548,61 @@ impl ChannelService for BcsChannelService {
                     last_active_at: (self.now_ms)(),
                 })
                 .await?;
+            info!(
+                channel_type = %msg.channel_type,
+                account_ref = %account_ref,
+                binding_id = %ctx.binding_id,
+                msg_id = %msg.msg_id,
+                bcs_session_id = %session_id,
+                im_conversation_id = %msg.im_conversation_id,
+                "channel inbound: conversation mapped"
+            );
 
             let mut participant = Participant::human(actor_id.clone(), ParticipantRole::Consultant);
             participant.mode = Some(ParticipantMode::Present);
             participant.bot_name = msg.im_user_nick.clone();
             self.sessions.add_participant(&session_id, participant).await?;
+            info!(
+                channel_type = %msg.channel_type,
+                account_ref = %account_ref,
+                msg_id = %msg.msg_id,
+                bcs_session_id = %session_id,
+                actor_id = %actor_id,
+                "channel inbound: participant added"
+            );
 
+            let dispatch_group_id = ctx.group_id.clone();
+            let dispatch_session_id = session_id.clone();
+            let dispatch_actor_id = actor_id.clone();
+            let dispatch_msg_id = msg.msg_id.clone();
             self.message_flow
                 .handle_web_send(WebSendCommand {
                     caller: CallerContext::Human(HumanActor {
                         actor_id: actor_id.clone(),
                         staff_no: msg.im_user_id.trim().to_string(),
                     }),
-                    group_id: ctx.group_id,
-                    session_id: Some(session_id),
-                    from_actor_id: actor_id,
+                    group_id: dispatch_group_id.clone(),
+                    session_id: Some(dispatch_session_id.clone()),
+                    from_actor_id: dispatch_actor_id.clone(),
                     from_name: msg.im_user_nick,
                     message: msg.text,
                     mentions: Vec::new(),
                     attachments: None,
                     thinking: None,
-                    idempotency_key: Some(msg.msg_id),
+                    idempotency_key: Some(dispatch_msg_id.clone()),
                     sender_conn_id: None,
                 })
                 .await?;
+            info!(
+                channel_type = %msg.channel_type,
+                account_ref = %account_ref,
+                binding_id = %ctx.binding_id,
+                msg_id = %dispatch_msg_id,
+                group_id = %dispatch_group_id,
+                bcs_session_id = %dispatch_session_id,
+                actor_id = %dispatch_actor_id,
+                "channel inbound: dispatched"
+            );
             Ok(())
         }
         .await;
@@ -552,6 +670,15 @@ impl ChannelService for BcsChannelService {
             };
             let delivery = provider.delivery();
             if !delivery.is_available(&binding_ref).await {
+                info!(
+                    binding_id = %binding.id,
+                    channel_type = %binding.channel_type,
+                    account_ref = %binding.account_ref,
+                    bcs_session_id = %msg.bcs_session_id,
+                    run_id = %msg.run_id,
+                    reason = "delivery_unavailable",
+                    "channel outbound: skipped"
+                );
                 continue;
             }
             let im_user_display_name = match conv.im_user_id.as_deref() {
@@ -562,12 +689,28 @@ impl ChannelService for BcsChannelService {
                     .and_then(|participant| participant.display_name),
                 None => None,
             };
-            let result = delivery
+            let im_conversation_id = conv.im_conversation_id.clone();
+            let im_conversation_type = conv.im_conversation_type.clone();
+            let im_user_id = conv.im_user_id.clone();
+            info!(
+                binding_id = %binding.id,
+                channel_type = %binding.channel_type,
+                account_ref = %binding.account_ref,
+                bcs_session_id = %msg.bcs_session_id,
+                run_id = %msg.run_id,
+                im_conversation_id = %im_conversation_id,
+                conversation_type = %im_conversation_type,
+                im_user_id = im_user_id.as_deref().unwrap_or(""),
+                event_kind = ?msg.kind,
+                text_len = msg.text.as_deref().map(|text| text.chars().count()).unwrap_or(0),
+                "channel outbound: selected"
+            );
+            let result = match delivery
                 .deliver_event(ChannelOutboundEvent {
                     binding_ref,
-                    im_conversation_id: conv.im_conversation_id,
-                    im_conversation_type: conv.im_conversation_type,
-                    im_user_id: conv.im_user_id,
+                    im_conversation_id,
+                    im_conversation_type,
+                    im_user_id,
                     im_user_display_name,
                     bcs_session_id: msg.bcs_session_id.clone(),
                     run_id: msg.run_id.clone(),
@@ -581,13 +724,41 @@ impl ChannelService for BcsChannelService {
                     raw_payload: msg.raw_payload.clone(),
                     render_hint: msg.render_hint,
                 })
-                .await?;
+                .await
+            {
+                Ok(result) => result,
+                Err(error) => {
+                    warn!(
+                        binding_id = %binding.id,
+                        channel_type = %binding.channel_type,
+                        account_ref = %binding.account_ref,
+                        bcs_session_id = %msg.bcs_session_id,
+                        run_id = %msg.run_id,
+                        error = %error,
+                        "channel outbound: delivery call failed"
+                    );
+                    continue;
+                }
+            };
             if !result.delivered {
                 let delivery_error = result.error.as_ref().map(ToString::to_string);
                 warn!(
                     binding_id = %binding.id,
+                    channel_type = %binding.channel_type,
+                    account_ref = %binding.account_ref,
+                    bcs_session_id = %msg.bcs_session_id,
+                    run_id = %msg.run_id,
                     error = delivery_error.as_deref().unwrap_or(""),
                     "channel outbound: delivery not confirmed"
+                );
+            } else {
+                info!(
+                    binding_id = %binding.id,
+                    channel_type = %binding.channel_type,
+                    account_ref = %binding.account_ref,
+                    bcs_session_id = %msg.bcs_session_id,
+                    run_id = %msg.run_id,
+                    "channel outbound: delivered"
                 );
             }
         }
@@ -600,13 +771,12 @@ impl ChannelService for BcsChannelService {
     ) -> Result<ChannelBinding, ChannelUseCaseError> {
         let _guard = self.binding_admin_lock.lock().await;
         let account_ref = normalize_required(&cmd.account_ref, "account_ref")?.to_string();
-        let env = self.env.trim();
-        if env.is_empty() {
+        if self.env.is_empty() {
             return Err(ChannelUseCaseError::Internal(ServiceError::InternalError(
                 "server environment configuration 'env' is empty".to_string(),
             )));
         }
-        let env = env.to_string();
+        let env = self.env.clone();
         let target = validate_target(&*self.groups, &*self.registry, &cmd).await?;
         let provider = self.provider_for(&cmd.channel_type)?;
         provider.validate_config(&cmd.config).map_err(provider_error)?;
@@ -799,6 +969,20 @@ fn channel_meta(
     })
 }
 
+fn session_scope_label(scope: SessionScope) -> &'static str {
+    match scope {
+        SessionScope::Conversation => "conversation",
+        SessionScope::PerSender => "per_sender",
+    }
+}
+
+fn binding_target_kind(target: &BindingTarget) -> &'static str {
+    match target {
+        BindingTarget::Group { .. } => "group",
+        BindingTarget::Bot { .. } => "bot",
+    }
+}
+
 fn binding_relevant_to_group(binding: &ChannelBinding, group_id: &str, session: &Session) -> bool {
     match &binding.target {
         BindingTarget::Group { group_id: target_group_id } => target_group_id == group_id,
@@ -878,7 +1062,7 @@ mod tests {
     use std::collections::HashMap;
     use std::future::Future;
     use std::io::{self, Write};
-    use std::sync::Arc;
+    use std::sync::{Arc, Once, OnceLock};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use async_trait::async_trait;
@@ -983,6 +1167,16 @@ mod tests {
     #[derive(Clone, Default)]
     struct SharedLogBuffer(Arc<std::sync::Mutex<Vec<u8>>>);
 
+    impl SharedLogBuffer {
+        fn clear(&self) {
+            self.0.lock().unwrap().clear();
+        }
+
+        fn contents(&self) -> String {
+            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        }
+    }
+
     struct SharedLogWriter {
         buffer: Arc<std::sync::Mutex<Vec<u8>>>,
     }
@@ -1008,22 +1202,39 @@ mod tests {
         }
     }
 
+    fn tracing_capture_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn tracing_log_buffer() -> &'static SharedLogBuffer {
+        static BUFFER: OnceLock<SharedLogBuffer> = OnceLock::new();
+        BUFFER.get_or_init(SharedLogBuffer::default)
+    }
+
+    fn ensure_tracing_subscriber() {
+        static INIT: Once = Once::new();
+        INIT.call_once(|| {
+            let subscriber = tracing_subscriber::fmt()
+                .with_ansi(false)
+                .with_level(false)
+                .with_target(true)
+                .with_writer(tracing_log_buffer().clone())
+                .finish();
+            let _ = tracing::subscriber::set_global_default(subscriber);
+        });
+    }
+
     async fn capture_tracing_logs<Fut, T>(future: Fut) -> (T, String)
     where
         Fut: Future<Output = T>,
     {
-        let buffer = SharedLogBuffer::default();
-        let subscriber = tracing_subscriber::fmt()
-            .with_ansi(false)
-            .with_level(false)
-            .with_target(true)
-            .with_writer(buffer.clone())
-            .finish();
-        let dispatch = tracing::Dispatch::new(subscriber);
-        let guard = tracing::dispatcher::set_default(&dispatch);
+        let _capture_guard = tracing_capture_lock().lock().await;
+        ensure_tracing_subscriber();
+        let buffer = tracing_log_buffer();
+        buffer.clear();
         let output = future.await;
-        drop(guard);
-        let logs = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+        let logs = buffer.contents();
         (output, logs)
     }
 
@@ -1534,6 +1745,54 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn inbound_chat_logs_binding_actor_session_and_dispatch() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+
+        let (result, logs) = capture_tracing_logs(async {
+            harness
+                .service
+                .handle_inbound(inbound("conv_a", "u1", Some("张三"), "msg_a"))
+                .await
+        })
+        .await;
+        result?;
+
+        for expected in [
+            "channel inbound: received",
+            "channel inbound: binding resolved",
+            "channel inbound: actor resolved",
+            "channel inbound: session resolved",
+            "channel inbound: dispatched",
+            "msg_id=msg_a",
+            "binding_id=generated_id",
+            "actor_id=human_u1",
+            "bcs_session_id=group_1:00000001",
+        ] {
+            assert!(
+                logs.contains(expected),
+                "expected log fragment {expected:?}, got:\n{logs}"
+            );
+        }
+
+        Ok(())
+    }
+
     #[tokio::test]
     async fn single_chat_outbound_preserves_im_user_for_delivery() -> TestResult {
         let harness = TestHarness::new(manager_group("group_1")).await?;
@@ -1976,6 +2235,74 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn try_outbound_logs_selected_binding_and_delivery_result() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "binding_1",
+                "robot_1",
+                BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                Visibility::FullTranscript,
+            ))
+            .await?;
+        harness
+            .session_repo
+            .create(
+                "group_1",
+                NewSessionParams {
+                    id: Some("group_1:00000001".to_string()),
+                    session_kind: SessionKind::Chat,
+                    ..Default::default()
+                },
+            )
+            .await?;
+        harness
+            .conversation_repo
+            .upsert(bcs_domain::ConversationSessionMap {
+                binding_id: "binding_1".to_string(),
+                im_conversation_id: "conv_a".to_string(),
+                im_conversation_type: "2".to_string(),
+                session_scope: SessionScope::Conversation,
+                im_user_id: None,
+                bcs_session_id: "group_1:00000001".to_string(),
+                last_active_at: 1,
+            })
+            .await?;
+
+        let (result, logs) = capture_tracing_logs(async {
+            harness
+                .service
+                .try_outbound(outbound(
+                    "group_1:00000001",
+                    ParticipantRole::Worker,
+                    false,
+                ))
+                .await
+        })
+        .await;
+        result?;
+
+        for expected in [
+            "channel outbound: selected",
+            "channel outbound: delivered",
+            "binding_id=binding_1",
+            "bcs_session_id=group_1:00000001",
+            "run_id=run_1",
+            "im_conversation_id=conv_a",
+        ] {
+            assert!(
+                logs.contains(expected),
+                "expected log fragment {expected:?}, got:\n{logs}"
+            );
+        }
+
+        Ok(())
+    }
+
     #[tokio::test]
     async fn try_outbound_uses_session_mapping_instead_of_listing_bindings() -> TestResult {
         let harness = TestHarness::new_without_binding_list(manager_group("group_1")).await?;
@@ -2030,7 +2357,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn try_outbound_logs_delivery_error_detail_when_not_confirmed() -> TestResult {
         let harness = TestHarness::new(manager_group("group_1")).await?;
         harness
@@ -2091,6 +2418,78 @@ mod tests {
             logs.contains("invalidConversation"),
             "expected delivery error detail in log, got:\n{logs}"
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn try_outbound_continues_after_delivery_call_error() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "binding_failed",
+                "robot_failed",
+                BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                Visibility::FullTranscript,
+            ))
+            .await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "binding_healthy",
+                "robot_healthy",
+                BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                Visibility::FullTranscript,
+            ))
+            .await?;
+        harness
+            .session_repo
+            .create(
+                "group_1",
+                NewSessionParams {
+                    id: Some("group_1:00000001".to_string()),
+                    session_kind: SessionKind::Chat,
+                    ..Default::default()
+                },
+            )
+            .await?;
+        for (binding_id, conversation_id) in [
+            ("binding_failed", "conv_failed"),
+            ("binding_healthy", "conv_healthy"),
+        ] {
+            harness
+                .conversation_repo
+                .upsert(bcs_domain::ConversationSessionMap {
+                    binding_id: binding_id.to_string(),
+                    im_conversation_id: conversation_id.to_string(),
+                    im_conversation_type: "2".to_string(),
+                    session_scope: SessionScope::Conversation,
+                    im_user_id: None,
+                    bcs_session_id: "group_1:00000001".to_string(),
+                    last_active_at: 1,
+                })
+                .await?;
+        }
+        *harness.delivery.call_error_account_ref.lock().await =
+            Some("robot_failed".to_string());
+
+        harness
+            .service
+            .try_outbound(outbound(
+                "group_1:00000001",
+                ParticipantRole::Worker,
+                false,
+            ))
+            .await?;
+
+        let events = harness.delivery.events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].binding_ref.account_ref, "robot_healthy");
 
         Ok(())
     }
@@ -2588,6 +2987,7 @@ mod tests {
     struct RecordingDelivery {
         events: Mutex<Vec<ChannelOutboundEvent>>,
         fail_error: Mutex<Option<String>>,
+        call_error_account_ref: Mutex<Option<String>>,
     }
 
     #[async_trait]
@@ -2600,6 +3000,17 @@ mod tests {
             &self,
             event: ChannelOutboundEvent,
         ) -> ServiceResult<ChannelDeliveryResult> {
+            if self
+                .call_error_account_ref
+                .lock()
+                .await
+                .as_deref()
+                .is_some_and(|account_ref| account_ref == event.binding_ref.account_ref)
+            {
+                return Err(ServiceError::InternalError(
+                    "simulated channel delivery call failure".to_string(),
+                ));
+            }
             self.events.lock().await.push(event);
             if let Some(error) = self.fail_error.lock().await.clone() {
                 return Ok(ChannelDeliveryResult {
