@@ -27,9 +27,10 @@ def test_aicoding_has_its_own_list():
     servers = get_default_mcp_servers("aicoding")
     codes = [s["server_code"] for s in servers]
     assert isinstance(servers, list)
-    assert len(servers) == 8
+    assert len(servers) == 9
     assert "mcp.ant.arkai.assistantmcpserver" in codes
     assert "mcp.ant.arkai.dimamcpserver" in codes
+    assert "mcp.ant.faas.aixjiter.AixCodingMemoryMCP" in codes
     assert BCS_MCP_SERVER_CODE in codes
     assert "hitl" in codes
     # Trimmed servers must no longer be in the aicoding defaults.
