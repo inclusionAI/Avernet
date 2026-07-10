@@ -283,6 +283,35 @@ def test_owner_config_error_aborts_before_downstream_calls():
 
 
 @pytest.mark.unit
+def test_malformed_owner_config_aborts_before_downstream_calls():
+    session = _make_session()
+    _insert_bot_record(session, bot_id="bot1", owner_id="owner1")
+    baas = AsyncMock(spec=BaasDormantClient)
+    config_service = MagicMock()
+    config_service.get_value.return_value = ["owner1", {}]
+    common_whitelist = CommonWhiteListService(config_service)
+    bot_service = MagicMock()
+    passport = MagicMock()
+    service = _make_service(
+        session,
+        baas_client=baas,
+        bot_service=bot_service,
+        passport_plugin=passport,
+        common_whitelist_service=common_whitelist,
+    )
+
+    with pytest.raises(ValueError, match="strings or integers"):
+        _run(service.process_run(dry_run=False))
+
+    baas.check_alive.assert_not_awaited()
+    bot_service.stop_bot.assert_not_called()
+    bot_service.update_status.assert_not_called()
+    passport.freeze_agent_passport.assert_not_called()
+    assert session.query(DormantCheckAudit).count() == 0
+    assert session.query(DormantNotifyLog).count() == 0
+
+
+@pytest.mark.unit
 def test_manual_recycle_one_reuses_recycle_side_effects_and_writes_audit():
     """Manual ops recycle should execute the same stop/update/freeze chain."""
     session = _make_session()

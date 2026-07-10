@@ -256,6 +256,28 @@ def test_get_owner_ids_returns_empty_set_when_config_is_missing_or_disabled():
     ) == frozenset()
 
 
+@pytest.mark.parametrize("invalid_item", [True, {}, []])
+def test_get_owner_ids_rejects_invalid_list_elements(invalid_item, caplog):
+    caplog.set_level("ERROR")
+    value = [100001, invalid_item]
+    service = CommonWhiteListService(
+        FakeCommonConfigService(
+            {("bot_dormant", "protected_owner_ids", "prod"): value}
+        )
+    )
+
+    with pytest.raises(ValueError, match="strings or integers"):
+        service.get_owner_ids(
+            business_code="bot_dormant",
+            param_code="protected_owner_ids",
+            env="prod",
+        )
+
+    assert "item_type=" in caplog.text
+    assert repr(invalid_item) not in caplog.text
+    assert repr(value) not in caplog.text
+
+
 @pytest.mark.parametrize("value", [{"100001": True}, "100001", 100001, True])
 def test_get_owner_ids_rejects_non_list_config(value, caplog):
     caplog.set_level("ERROR")

@@ -108,12 +108,27 @@ class CommonWhiteListService:
                 "protected owner IDs must be a list: "
                 f"business_code={business_code} param_code={param_code} env={env}"
             )
-        return frozenset(
-            normalized
-            for item in value
-            if item is not None
-            and (normalized := str(item).strip())
-        )
+        owner_ids: set[str] = set()
+        for item in value:
+            if item is None:
+                continue
+            if isinstance(item, bool) or not isinstance(item, (str, int)):
+                logger.error(
+                    "[common_whitelist] owner list item invalid "
+                    "business_code=%s param_code=%s env=%s item_type=%s",
+                    business_code,
+                    param_code,
+                    env,
+                    type(item).__name__,
+                )
+                raise ValueError(
+                    "protected owner IDs must contain only strings or integers: "
+                    f"business_code={business_code} param_code={param_code} env={env}"
+                )
+            normalized = str(item).strip()
+            if normalized:
+                owner_ids.add(normalized)
+        return frozenset(owner_ids)
 
     @staticmethod
     def _match_bot_whitelist(
