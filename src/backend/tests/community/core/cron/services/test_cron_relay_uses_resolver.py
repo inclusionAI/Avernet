@@ -754,7 +754,7 @@ class TestListServiceBotRuntimeStages:
                 "runtime_stage": "verify",
                 "publish_id": 101,
                 "reason": "cron_api_timeout",
-                "message": "cron_api_timeout: no response within 8s for /api/cron",
+                "message": "cron_api_timeout: no response within 10s for /api/cron",
             }
         ]
 
@@ -918,6 +918,123 @@ class TestRuntimeTargetExpansion:
         assert failed == []
         assert len(expanded) == 12
         assert 1 < max_active <= 3
+
+
+class TestRuntimeQueryConcurrency:
+    @pytest.mark.asyncio
+    async def test_runtime_query_preparation_is_bounded(self):
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device()
+
+        def resolve(bot_id, user_id):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.02)
+            with lock:
+                active -= 1
+            binding_id = int(bot_id.rsplit("-", 1)[1])
+            return _make_ctx(
+                binding_id=binding_id,
+                bot_id=bot_id,
+                user_id=user_id,
+            )
+
+        resolver = MagicMock()
+        resolver.resolve_for_bot.side_effect = resolve
+        transport = MagicMock()
+        transport.invoke = AsyncMock(return_value={"success": True, "data": []})
+        svc = _make_service(
+            device_provider=device_provider,
+            resolver=resolver,
+            transport=transport,
+        )
+        targets = [
+            CronRuntimeTarget(
+                bot_id=f"personal-bot-{binding_id}",
+                bot_name="Personal Bot",
+                owner_id="owner-1",
+                bot_type="personal",
+                runtime_stage="draft",
+                binding_id=binding_id,
+            )
+            for binding_id in range(12)
+        ]
+
+        results = await asyncio.gather(
+            *(svc._fetch_runtime_target_crons(target, "owner-1") for target in targets)
+        )
+
+        assert all(result["success"] for result in results)
+        assert 1 < max_active <= cron_runtime_targets.RUNTIME_QUERY_PREPARE_CONCURRENCY
+
+    @pytest.mark.asyncio
+    async def test_slow_preparation_does_not_cause_false_transport_timeouts(
+        self,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(
+            cron_runtime_targets,
+            "CRON_READ_TIMEOUT_SECONDS",
+            0.05,
+        )
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device()
+
+        def resolve(bot_id, user_id):
+            time.sleep(0.02)
+            binding_id = int(bot_id.rsplit("-", 1)[1])
+            return _make_ctx(
+                binding_id=binding_id,
+                bot_id=bot_id,
+                user_id=user_id,
+            )
+
+        resolver = MagicMock()
+        resolver.resolve_for_bot.side_effect = resolve
+
+        async def invoke(
+            conn_info,
+            method,
+            path,
+            body=None,
+            params=None,
+            *,
+            timeout=None,
+        ):
+            await asyncio.sleep(0.005)
+            return {"success": True, "data": []}
+
+        transport = MagicMock()
+        transport.invoke = AsyncMock(side_effect=invoke)
+        svc = _make_service(
+            device_provider=device_provider,
+            resolver=resolver,
+            transport=transport,
+        )
+        targets = [
+            CronRuntimeTarget(
+                bot_id=f"personal-bot-{binding_id}",
+                bot_name="Personal Bot",
+                owner_id="owner-1",
+                bot_type="personal",
+                runtime_stage="draft",
+                binding_id=binding_id,
+            )
+            for binding_id in range(6)
+        ]
+
+        results = await asyncio.gather(
+            *(svc._fetch_runtime_target_crons(target, "owner-1") for target in targets)
+        )
+
+        assert all(result["success"] for result in results)
+        assert transport.invoke.await_count == len(targets)
 
 
 class TestListRunningCronsOwnerId:
@@ -2013,7 +2130,7 @@ class TestForwardRequestUsesResolver:
         assert transport.invoke.await_count == 2
         assert {
             call.kwargs["timeout"] for call in transport.invoke.await_args_list
-        } == {8.0}
+        } == {10.0}
 
     @pytest.mark.asyncio
     async def test_get_cron_runs_keeps_partial_results_on_timeout(self, monkeypatch):
