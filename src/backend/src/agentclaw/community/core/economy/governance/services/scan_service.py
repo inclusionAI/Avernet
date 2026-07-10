@@ -123,7 +123,6 @@ class GovernanceBotService:
         audit_repo: GovernanceAuditRepository,
         config: Any,  # EconomyGovernanceConfig
         notify_sender: NotifySenderPlugin,
-        dingtalk_config: Any = None,  # GovernanceDingTalkConfig (retained for tc_card detail_link)
     ) -> None:
         self._task_repo = task_repo
         self._admin_svc = admin_svc
@@ -131,7 +130,6 @@ class GovernanceBotService:
         self._audit_repo = audit_repo
         self._config = config
         self._notify_sender = notify_sender
-        self._dingtalk_config = dingtalk_config
 
         # Parse remind_delays_days from config string (e.g. "3,7,14") or use default
         raw_delays = getattr(config, "remind_delays_days", None)
@@ -803,10 +801,7 @@ class GovernanceBotService:
                 saving_ratio=notify.saving_ratio,
                 governance_max_priority=notify.severity,
             )
-            iframe_callback_url = (
-                self._dingtalk_config.iframe_callback_url
-                if self._dingtalk_config else ""
-            )
+            iframe_callback_url = ""
             detail_link = build_tc_card_detail_link(
                 bot_id=notify.bot_id,
                 card_id=self._config.tc_card_id,

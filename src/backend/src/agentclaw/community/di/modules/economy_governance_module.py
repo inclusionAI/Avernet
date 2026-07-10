@@ -9,7 +9,6 @@ Bindings registered here:
   - GovernanceBotService           — scan-and-decision orchestrator
   - GovernanceBotLifecycle         — single-cron lifecycle participant
   - NotifySenderPlugin             — notification dispatcher (Markdown / TC card)
-  - GovernanceDingTalkConfig       — DingTalk credentials + TC card template
 """
 from __future__ import annotations
 
@@ -56,7 +55,7 @@ from agentclaw.community.core.economy.governance.services.record_process_service
 from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
     GovernanceWhitelistRepository,
 )
-from agentclaw.community.di.config import EconomyGovernanceConfig, GovernanceDingTalkConfig
+from agentclaw.community.di.config import EconomyGovernanceConfig
 from agentclaw.community.core.economy.governance.lifecycle import GovernanceBotLifecycle
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
@@ -88,14 +87,6 @@ def _block(name: str) -> dict[str, object]:
 
 # Env var overrides for governance config knobs.
 _ENV_NOTIFY_CHANNEL = "ECONOMY_GOVERNANCE_NOTIFY_CHANNEL"
-_ENV_IFRAME_CALLBACK_URL = "GOVERNANCE_IFRAME_CALLBACK_URL"
-# DingTalk credentials env overrides — take precedence over the YAML ``dingtalk``
-# block so real creds need never be committed (singlebox/local dev injects real
-# creds via env; the shipped YAML keeps dummy values). Mirrors the
-# ``ECONOMY_GOVERNANCE_*`` / ``GOVERNANCE_IFRAME_CALLBACK_URL`` override pattern.
-_ENV_DINGTALK_APP_KEY = "DINGTALK_APP_KEY"
-_ENV_DINGTALK_APP_SECRET = "DINGTALK_APP_SECRET"
-_ENV_DINGTALK_ROBOT_CODE = "DINGTALK_ROBOT_CODE"
 
 
 class EconomyGovernanceModule(Module):
@@ -179,7 +170,6 @@ class EconomyGovernanceModule(Module):
         task_repo: TaskRecordRepository,
         config: EconomyGovernanceConfig,
         notify_sender: NotifySenderPlugin,
-        dingtalk_config: GovernanceDingTalkConfig,
     ) -> GovernanceAdminService:
         return GovernanceAdminService(
             cache=cache,
@@ -187,7 +177,7 @@ class EconomyGovernanceModule(Module):
             notify_repo=notify_repo, audit_repo=audit_repo,
             task_repo=task_repo,
             config=config,
-            notify_sender=notify_sender, dingtalk_config=dingtalk_config,
+            notify_sender=notify_sender,
         )
 
     @singleton
@@ -209,7 +199,6 @@ class EconomyGovernanceModule(Module):
         audit_repo: GovernanceAuditRepository,
         config: EconomyGovernanceConfig,
         notify_sender: NotifySenderPlugin,
-        dingtalk_config: GovernanceDingTalkConfig,
     ) -> GovernanceBotService:
         """Construct GovernanceBotService."""
         return GovernanceBotService(
@@ -219,7 +208,6 @@ class EconomyGovernanceModule(Module):
             audit_repo=audit_repo,
             config=config,
             notify_sender=notify_sender,
-            dingtalk_config=dingtalk_config,
         )
 
     @singleton
@@ -447,101 +435,11 @@ class EconomyGovernanceModule(Module):
             tc_card_preview_url=tc_card_preview_url,
         )
 
-    @singleton
-    @provider
-    def _governance_dingtalk_config(self) -> GovernanceDingTalkConfig:
-        """Construct DingTalk credentials from YAML ``dingtalk`` block.
-
-        Credentials are read from ``user_config.dingtalk`` in
-        ``application-<env>.yaml``, matching the BCS pattern where each
-        environment's ``bcs-config-<env>.toml`` carries its own
-        ``[[dingtalk_accounts]]`` in plaintext.
-
-        For pre+prod shared YAML, ``_pre`` suffix fields override when
-        ``SERVER_ENV`` is ``pre`` / ``prepub`` (same pattern as
-        bcsfuse.base_url_pre / secbaas.api_base_url_pre).
-
-        Resolution order for ``iframe_callback_url``:
-          1. Env var ``GOVERNANCE_IFRAME_CALLBACK_URL``
-          2. YAML ``economy_governance.iframe_callback_url``
-             (prepub 环境读 ``iframe_callback_url_pre``，同 bcsfuse/secbaas _pre 后缀)
-
-        Resolution order for DingTalk credentials (``app_key`` / ``app_secret`` /
-        ``robot_code``):
-          1. Env var (``DINGTALK_APP_KEY`` / ``DINGTALK_APP_SECRET`` /
-             ``DINGTALK_ROBOT_CODE``) — lets singlebox/local dev inject real creds
-             without committing them; the shipped YAML carries dummy values.
-          2. YAML ``dingtalk`` block (``app_key_pre`` etc. for prepub env).
-
-        All DingTalk creds empty → CommunityNotifySender (log-only, no real delivery).
-        """
-        from agentclaw.community.utils.env_utils import get_current_env
-
-        yaml_block = _block("dingtalk")
-        env = get_current_env()
-        is_pre = env in ("pre", "prepub")
-
-        # Env override takes precedence over YAML so real creds never ship in YAML.
-        app_key = os.environ.get(_ENV_DINGTALK_APP_KEY) or str(yaml_block.get(
-            "app_key_pre" if is_pre else "app_key", "",
-        ))
-        app_secret = os.environ.get(_ENV_DINGTALK_APP_SECRET) or str(yaml_block.get(
-            "app_secret_pre" if is_pre else "app_secret", "",
-        ))
-        robot_code = os.environ.get(_ENV_DINGTALK_ROBOT_CODE) or str(yaml_block.get(
-            "robot_code_pre" if is_pre else "robot_code", "",
-        ))
-        # iframe_callback_url: governance business config, read from
-        # economy_governance YAML block (not dingtalk block).
-        # _pre suffix for prepub env (same pattern as dingtalk credentials).
-        egov_block = _block("economy_governance")
-        iframe_callback_url = (
-            os.environ.get(_ENV_IFRAME_CALLBACK_URL, "")
-            or str(egov_block.get(
-                "iframe_callback_url_pre" if is_pre else "iframe_callback_url", "",
-            ))
-        )
-
-        if app_key:
-            from_env = any(
-                os.environ.get(v) for v in (
-                    _ENV_DINGTALK_APP_KEY,
-                    _ENV_DINGTALK_APP_SECRET,
-                    _ENV_DINGTALK_ROBOT_CODE,
-                )
-            )
-            logger.info(
-                "[economy_governance_module] DingTalk credentials loaded "
-                "(source=%s, app_key=%s***, robot_code=%s)",
-                "env" if from_env else "yaml",
-                app_key[:6] if len(app_key) >= 6 else app_key,
-                robot_code,
-            )
-        else:
-            logger.info(
-                "[economy_governance_module] No DingTalk credentials "
-                "— CommunityNotifySender (log-only) will be used",
-            )
-
-        logger.info(
-            "[economy_governance_module] iframe_callback_url=%s "
-            "(card React component fetch POST target)",
-            iframe_callback_url,
-        )
-
-        return GovernanceDingTalkConfig(
-            app_key=app_key,
-            app_secret=app_secret,
-            robot_code=robot_code,
-            iframe_callback_url=iframe_callback_url,
-        )
-
     # NOTE: the ``NotifySenderPlugin`` binding is profile-specific (corp =
-    # DingTalk, community = no-op), so it is bound by a per-concern column module
-    # (``infrastructure/{corp,community}/notify.py``), NOT here — this
-    # base-list module must name no ``plugins.prod`` import so selecting the
-    # community profile never drags the DingTalk import tree in (B11 Phase A).
-    # The neutral ``GovernanceDingTalkConfig`` it needs is still provided above.
+    # DingTalk real delivery, community = log-only), so it is bound by a
+    # per-concern column module (``infrastructure/{corp,community}/notify.py``),
+    # NOT here — this base-list module must name no ``plugins.prod`` import so
+    # selecting the community profile never drags the DingTalk import tree in.
 
     @singleton
     @provider

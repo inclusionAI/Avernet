@@ -570,25 +570,3 @@ class EconomyGovernanceConfig:
     # supply the real endpoint via ``economy_governance.tc_card_preview_url``
     # (OSS-0 #3). Empty ⇒ the deep link carries no preview host (feature-off).
     tc_card_preview_url: str = ""
-
-
-@dataclass(frozen=True)
-class GovernanceDingTalkConfig:
-    """DingTalk application credentials for governance notification dispatch.
-
-    Produced by ``EconomyGovernanceModule._governance_dingtalk_config``.
-    Credentials are read from YAML ``user_config.dingtalk`` block
-    (matching BCS bcs-config-<env>.toml ``[[dingtalk_accounts]]`` pattern).
-    In pre+prod shared YAML, ``_pre`` suffix fields override for prepub env.
-
-    Resolution order:
-      1. YAML ``dingtalk`` block (app_key / app_secret / robot_code)
-      2. All empty → CommunityNotifySender (log-only, no real delivery).
-
-    The dataclass is ``frozen`` so it can be safely shared across threads.
-    """
-
-    app_key: str = ""
-    app_secret: str = ""
-    robot_code: str = ""
-    iframe_callback_url: str = ""
