@@ -157,16 +157,6 @@ class FakeNotifySender:
         return f"fake-msg-{message.recipient}"
 
 
-@dataclass
-class FakeDingTalkConfig:
-    """Minimal GovernanceDingTalkConfig stand-in for testing."""
-
-    app_key: str = ""
-    app_secret: str = ""
-    robot_code: str = ""
-    iframe_callback_url: str = ""
-
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

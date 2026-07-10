@@ -403,10 +403,6 @@ class FakeNotifyRepo:
         self.audits.append({"run_id": run_id, "bot_id": bot_id, **kwargs})
 
 
-def _dingtalk_config() -> types.SimpleNamespace:
-    return types.SimpleNamespace(iframe_callback_url="https://cb.example/iframe")
-
-
 def _gov_config() -> types.SimpleNamespace:
     return types.SimpleNamespace(
         tc_card_id="card-xyz",
