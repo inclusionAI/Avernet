@@ -304,15 +304,16 @@ class GovernanceAdminService:
 
         Args:
             statuses: 治理状态白名单(open/scheduled/waiting_review/closed);
-                None 时默认全部活跃态(open/scheduled/waiting_review)。
+                None 时默认全部活跃态(open/scheduled/waiting_review);
+                [] 显式表示无任何状态匹配 → 返回空(repo 层空列表短路)。
             offset: 分页偏移。
             limit: 分页上限。
 
         Returns:
             (工单领域模型列表, 满足条件的总数)。领域模型经 from_orm 灌入
-            gmt_create/gmt_create,评审列表直接用,router 层负责序列化。
+            gmt_create/gmt_modified,评审列表直接用,router 层负责序列化。
         """
-        effective = statuses if statuses else [
+        effective = statuses if statuses is not None else [
             GovernanceStatus.OPEN.value,
             GovernanceStatus.SCHEDULED.value,
             GovernanceStatus.WAITING_REVIEW.value,
