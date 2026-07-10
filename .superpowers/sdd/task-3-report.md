@@ -86,3 +86,46 @@ deprecation warnings and no task-specific warnings or failures.
 only six lines. Task 4 should avoid net growth in this module or first extract
 or compact existing code within the established ownership boundary, then rerun
 the architecture line-count test.
+
+## Review Fix: Malformed Owner Elements
+
+Enabled owner-list configurations now validate every element before
+normalization. Only `str` and non-`bool` `int` values are accepted; `None` and
+blank strings are still dropped. Invalid values such as `bool`, `dict`, and
+`list` raise `ValueError`. The error log includes only the config coordinates
+and `item_type`, never the item value or full configuration list.
+
+The process-run regression uses a real `CommonWhiteListService` configured with
+an invalid list element. It proves the `ValueError` escapes before `/alive`,
+audit/notify writes, `stop_bot`, `update_status`, or passport freeze calls.
+
+### Review TDD RED/GREEN
+
+RED:
+
+- three parameterized invalid-element cases did not raise `ValueError`;
+- the malformed process-run configuration also did not raise and therefore
+  demonstrated the unprotected path.
+
+GREEN:
+
+```bash
+DEPLOY_PROFILE=test uv run pytest tests/community/core/common_config/test_common_whitelist_service.py -v
+DEPLOY_PROFILE=test uv run pytest tests/community/core/bot_dormant/test_decide.py -k "owner_config" -v
+uv run ruff check src/agentclaw/community/core/common_config/whitelist_service.py tests/community/core/common_config/test_common_whitelist_service.py tests/community/core/bot_dormant/test_decide.py
+```
+
+Results: 17 common-config tests passed; 2 owner-config abort tests passed; Ruff
+passed. These focused runs emitted the existing Pydantic deprecation warnings.
+
+### Full CI and Coverage Evidence
+
+```bash
+src/backend/scripts/ci_test.sh --base origin/dev --head HEAD
+python3 scripts/ci/report_check.py --junit src/backend/pytest_report/TEST-junit.xml --coverage src/backend/pytest_report/TEST-cov.xml --source-root src/backend/src --min-case-pass-rate 100 --min-line-coverage 75 --base origin/dev --head HEAD --min-change-line-coverage 90
+```
+
+Results: full community CI passed 7331/7331 tests; overall line coverage was
+81.74%; CI's 80% change-line gate reported 96.00% (24/25). The explicit 90%
+change-line gate also passed at 96.00% (24/25). The full run emitted 418
+pre-existing warnings.
