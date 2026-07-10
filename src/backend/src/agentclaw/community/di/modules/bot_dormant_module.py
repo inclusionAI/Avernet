@@ -41,6 +41,9 @@ from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+from agentclaw.community.utils.singlebox_coverage_proxy import (
+    wrap_for_singlebox_coverage,
+)
 
 
 logger = get_logger()
@@ -58,6 +61,16 @@ logger = get_logger()
 # NOTE: this is intentionally a publicly-visible string — it only ever
 # gates singlebox/local where no real authority decision is at stake.
 _SINGLEBOX_FALLBACK_TOKEN = "singlebox-dormant-token-local"
+
+
+def _passport_for_singlebox_coverage(passport_plugin: PassportPlugin) -> PassportPlugin:
+    return wrap_for_singlebox_coverage(
+        passport_plugin,
+        {
+            "freeze_agent_passport": "PassportPlugin.freeze_agent_passport",
+            "unfreeze_agent_passport": "PassportPlugin.unfreeze_agent_passport",
+        },
+    )
 
 
 class BotDormantModule(Module):
@@ -85,7 +98,7 @@ class BotDormantModule(Module):
         """Construct ActivateBotService with the passport plugin explicitly wired."""
         return ActivateBotService(
             bot_service=bot_service,
-            passport_plugin=passport_plugin,
+            passport_plugin=_passport_for_singlebox_coverage(passport_plugin),
         )
 
     @singleton
@@ -124,7 +137,7 @@ class BotDormantModule(Module):
             db=db,
             baas_client=baas_client,
             bot_service=bot_service,
-            passport_plugin=passport_plugin,
+            passport_plugin=_passport_for_singlebox_coverage(passport_plugin),
             scan_policy=scan_policy,
             common_whitelist_service=common_whitelist_service,
             dry_run=config.dry_run,

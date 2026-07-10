@@ -1,4 +1,29 @@
 modules:
+  bot_dormant:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/bot_dormant
+    core_paths:
+      - src/agentclaw/community/core/bot_dormant/
+    router_api:
+      status: applicable
+      reason: Internal activate-one duplicates the public path, unfreeze-passport-one is a repair-only operation, and trigger-scan is asynchronous ops tooling; they are outside this user-story denominator.
+      items:
+        - POST /api/bots/{bot_id}/activate
+        - POST /api/bots/dormant-whitelist/batch
+        - GET /api/internal/dormant/pending-notifications
+        - POST /api/internal/dormant/mark-sent
+        - POST /api/internal/dormant/recycle-one
+    plugin_api:
+      status: applicable
+      reason: Recycle and reactivation must freeze and unfreeze the bot passport through the injected plugin boundary.
+      items:
+        - PassportPlugin.freeze_agent_passport
+        - PassportPlugin.unfreeze_agent_passport
+    thresholds:
+      core_min_percent: 54.13
+      router_min_percent: 100.0
+      plugin_min_percent: 100.0
   devices:
     system: backend
     acceptance_targets:

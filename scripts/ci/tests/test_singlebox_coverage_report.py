@@ -108,6 +108,7 @@ def test_repository_manifest_registers_existing_coverage_modules_and_paths():
     module_names = select_module_names(manifest, [])
 
     assert module_names == [
+        "bot_dormant",
         "devices",
         "access",
         "bot_chat",
