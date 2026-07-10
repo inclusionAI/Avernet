@@ -77,6 +77,23 @@ class TaskRecordRepositoryProtocol(Protocol):
         """Owner's tickets in the given statuses, newest first, paged."""
         ...
 
+    def list_tickets_by_statuses(
+        self,
+        statuses: list[str],
+        *,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> list[GovernanceTicket]:
+        """All tickets in given statuses (cross-owner), newest first, paged.
+
+        评审场景按治理状态过滤工单,跨 owner。
+        """
+        ...
+
+    def count_tickets_by_statuses(self, statuses: list[str]) -> int:
+        """Count tickets in given statuses (cross-owner; list 配套统计)。"""
+        ...
+
     def list_remindable_tickets(self, now: datetime) -> list[GovernanceTicket]:
         """Find tickets eligible for reminder creation (§7.3.2)."""
         ...
