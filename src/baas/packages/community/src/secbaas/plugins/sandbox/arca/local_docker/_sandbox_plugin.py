@@ -193,3 +193,11 @@ class LocalDockerArcaSandboxPlugin(ArcaSandboxPlugin):
             http_url=f"http://localhost:{port}{path}",
             token="local",
         )
+
+    def delete_storage(self, storage_id: str, tenant_name: str) -> bool:
+        logger.info(
+            "[local-docker] delete_storage storage_id=%s tenant_name=%s (local docker mode, no-op)",
+            storage_id,
+            tenant_name,
+        )
+        return True

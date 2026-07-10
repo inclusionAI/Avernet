@@ -180,6 +180,14 @@ class StubArcaSandboxPlugin(ArcaSandboxPlugin):
     def close(self) -> None:
         pass
 
+    def delete_storage(self, storage_id: str, tenant_name: str) -> bool:
+        logger.info(
+            "[stub] delete_storage storage_id=%s tenant_name=%s",
+            storage_id,
+            tenant_name,
+        )
+        return True
+
     def resolve_http_connection_info(
         self,
         paas_device_id: str,

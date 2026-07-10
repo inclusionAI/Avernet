@@ -100,6 +100,8 @@ class ArcaSandboxPlugin(Protocol):
     Note:
         This is a SYNC factory (mirroring Arca SDK's sync API).
         Callers wrap calls in asyncio.to_thread() for async usage.
+        The delete_storage method performs a platform-level HTTP call and is
+        also intended to be wrapped via asyncio.to_thread() by callers.
     """
 
     def create_sync_sandbox(
@@ -155,6 +157,22 @@ class ArcaSandboxPlugin(Protocol):
 
     def close(self) -> None:
         """Release any resources held by the plugin."""
+        ...
+
+    def delete_storage(self, storage_id: str, tenant_name: str) -> bool:
+        """Delete NAS persistent storage associated with a sandbox.
+
+        This is a platform-level operation (requires base_url from
+        SandboxConfig), not a per-sandbox operation like create/destroy.
+
+        Args:
+            storage_id: The storage ID to delete from the platform.
+            tenant_name: Tenant name for authorization header (X-Tenant-Id).
+
+        Returns:
+            True if deletion succeeded or storage was not found (idempotent).
+            False on unexpected errors.
+        """
         ...
 
     def resolve_ws_conn_info(
