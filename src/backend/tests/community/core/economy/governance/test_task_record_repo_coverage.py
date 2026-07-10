@@ -286,6 +286,70 @@ class TestListTicketsByOwnerAndStatuses:
         assert result[0].owner_id == "o1"
 
 
+class TestListTicketsByStatuses:
+    """list_tickets_by_statuses / count_tickets_by_statuses (跨 owner, 评审场景)."""
+
+    def test_cross_owner_filter_and_paging(self, repo, engine):
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(owner_id="o1", governance_status="open"))
+            s.add(_make_ticket(owner_id="o2", governance_status="scheduled"))
+            s.add(_make_ticket(owner_id="o3", governance_status="waiting_review"))
+            s.add(_make_ticket(owner_id="o4", governance_status="closed"))
+            s.add(_make_ticket(owner_id="o5", governance_status="open"))
+            s.commit()
+
+        # 过滤 open(scheduled 被排除)→ 跨 o1/o5 两名 owner
+        result = repo.list_tickets_by_statuses(["open"], limit=50)
+        assert {t.owner_id for t in result} == {"o1", "o5"}
+        # 返回领域模型(非 ORM / dict)
+        assert all(type(t).__name__ == "GovernanceTicket" for t in result)
+
+        # 多状态过滤: open×2 + scheduled×1 + waiting_review×1 = 4
+        active = repo.list_tickets_by_statuses(
+            ["open", "scheduled", "waiting_review"], limit=50,
+        )
+        assert len(active) == 4
+        assert {t.owner_id for t in active} == {"o1", "o2", "o3", "o5"}
+        # gmt_create 经 from_orm 正确灌入(Task 1 链路验证)
+        assert all(t.gmt_create is not None for t in active)
+
+    def test_count_matches_list(self, repo, engine):
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(owner_id="o1", governance_status="open"))
+            s.add(_make_ticket(owner_id="o2", governance_status="open"))
+            s.add(_make_ticket(owner_id="o3", governance_status="closed"))
+            s.commit()
+
+        assert repo.count_tickets_by_statuses(["open"]) == 2
+        assert repo.count_tickets_by_statuses(["closed"]) == 1
+        assert repo.count_tickets_by_statuses(["open", "closed"]) == 3
+
+    def test_ordering_newest_first(self, repo, engine):
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        t_old = datetime(2026, 7, 1, 9, 0, 0)
+        t_new = datetime(2026, 7, 9, 9, 0, 0)
+        with Session() as s:
+            s.add(_make_ticket(
+                ticket_id="t-old", governance_status="open", gmt_create=t_old,
+            ))
+            s.add(_make_ticket(
+                ticket_id="t-new", governance_status="open", gmt_create=t_new,
+            ))
+            s.commit()
+
+        result = repo.list_tickets_by_statuses(["open"], limit=50)
+        # newest first → t-new 在前;同时验证 gmt_create 透传
+        assert result[0].ticket_id == "t-new"
+        assert result[0].gmt_create == t_new
+        assert result[1].ticket_id == "t-old"
+
+    def test_empty_statuses_returns_empty_safe(self, repo):
+        assert repo.list_tickets_by_statuses([]) == []
+        assert repo.count_tickets_by_statuses([]) == 0
+
+
 class TestFindTicketByNotificationId:
     """find_ticket_by_notification_id(notification_id)."""
 
