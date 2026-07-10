@@ -78,10 +78,28 @@ modules:
       - tests/community/acceptance/cron
     core_paths:
       - src/agentclaw/community/core/cron/
-    router_api: *pending_router_denominator
-    plugin_api: *pending_plugin_denominator
+    router_api:
+      status: applicable
+      reason: Public auto-initiate routes are automation integrations and are outside the end-user cron lifecycle denominator.
+      items:
+        - GET /api/cron
+        - GET /api/cron/status
+        - GET /api/cron/running
+        - GET /api/cron/{task_id}
+        - POST /api/cron
+        - PUT /api/cron/{task_id}
+        - DELETE /api/cron/{task_id}
+        - POST /api/cron/{task_id}/run
+        - GET /api/cron/{task_id}/runs
+    plugin_api:
+      status: applicable
+      reason: Cron execution reaches the local engine adapter through DeviceAdapterTransport.
+      items:
+        - DeviceAdapterTransport.invoke
     thresholds:
       core_min_percent: 41.84
+      router_min_percent: 100.0
+      plugin_min_percent: 100.0
 
   expert_chat:
     system: backend
