@@ -16,6 +16,8 @@ declared evidence.
 - The current devices acceptance suite exercises three read routes and one
   repeated no-data baseline. It does not exercise the BaaS-backed device
   lifecycle.
+- The measured devices-only live baseline is Core `1243/3240 = 38.36%` and
+  Router `3/18 = 16.67%`.
 - The device router currently exposes 18 Router APIs. The existing live suite
   reaches three unique Router APIs.
 - Device-owned Plugin API coverage is not currently declared. Service or Core
@@ -72,8 +74,8 @@ runtime artifacts.
   `src/agentclaw/community/core/devices/**` in `backend-coverage.json`.
 - Numerator: statements in that same path executed by the live singlebox
   process while running the devices acceptance target.
-- First milestone: at least 20%, and at least five percentage points above the
-  initial devices-only baseline measured on this branch.
+- First milestone: at least 43.36%, five percentage points above the measured
+  38.36% devices-only baseline.
 
 ### Router API
 
