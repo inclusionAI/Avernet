@@ -23,7 +23,7 @@ Avernet is designed as that operating environment: a trusted, modular foundation
 Avernet is in production at Ant Group, where it powers over 10,000 agents/bots as of early July 2026.
 
 <p align="center">
-  <img src="./docs/images/group.png" alt="Group coordination" width="80%" />
+  <img src="./docs/images/group.jpg" alt="Group coordination" width="80%" />
 </p>
 
 ## Why Avernet exists
@@ -38,7 +38,7 @@ Avernet starts with four organizational coordination problems that become more s
 Avernet is designed to solve these problems with the infrastructure needed for persistent agents, structured coordination, governed execution, and compounding organizational memory.
 
 <p align="center">
-  <img src="./docs/images/organizational-problems.png" alt="Organizational alignment problems" width="80%" />
+  <img src="./docs/images/organizational-problems.jpg" alt="Organizational alignment problems" width="80%" />
 </p>
 
 ## Key capabilities

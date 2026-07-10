@@ -23,7 +23,7 @@ Avernet 正是为此而设计的运行环境：为持久化 Agent、结构化协
 Avernet 已在蚂蚁集团生产环境运行，截至 2026 年 7 月初，支撑超过 10,000 个 bot。
 
 <p align="center">
-  <img src="./docs/images/group.png" alt="团队协作" width="80%" />
+  <img src="./docs/images/group.jpg" alt="团队协作" width="80%" />
 </p>
 
 ## 为什么需要 Avernet
@@ -38,7 +38,7 @@ Avernet 从组织协作的四个问题出发，这些问题随着团队、系统
 Avernet 通过持久化 Agent、结构化协作、可治理执行和可复利的组织记忆等基础设施来解决这些问题。
 
 <p align="center">
-  <img src="./docs/images/organizational-problems-cn.png" alt="组织协作问题" width="80%" />
+  <img src="./docs/images/organizational-problems-cn.jpg" alt="组织协作问题" width="80%" />
 </p>
 
 ## 核心能力
