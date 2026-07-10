@@ -19,7 +19,7 @@ use bcs_service_api::{
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 mod sse;
 
@@ -40,6 +40,31 @@ const SSE_CTX_RETRY_MAX: u32 = 20;
 /// twice (enter + recover), not once per frame.
 const SSE_LAG_ALERT_MS: u64 = 5_000;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ProviderClientPolicy {
+    total_timeout: Option<Duration>,
+    read_timeout: Option<Duration>,
+    http2_only: bool,
+}
+
+impl ProviderClientPolicy {
+    fn for_request(accept_sse: bool) -> Self {
+        if accept_sse {
+            Self {
+                total_timeout: None,
+                read_timeout: Some(Duration::from_secs(125)),
+                http2_only: true,
+            }
+        } else {
+            Self {
+                total_timeout: Some(Duration::from_secs(65)),
+                read_timeout: None,
+                http2_only: false,
+            }
+        }
+    }
+}
+
 /// Edge-triggered tracker for a run's consumption lag, so a sustained backlog
 /// produces exactly one "falling behind" WARN and one "recovered" WARN rather
 /// than a per-frame flood.
@@ -52,8 +77,8 @@ struct LagTracker {
 pub struct HttpProviderTransport {
     /// Callback / history client with a 65s total timeout.
     client: reqwest::Client,
-    /// SSE client with NO total timeout (#3): a total `.timeout()` would cut a
-    /// long-lived stream. Idle detection is handled inside the read loop.
+    /// HTTP/2-only SSE client with NO total timeout (#3): a total `.timeout()`
+    /// would cut a long-lived stream. Idle detection is handled in the read loop.
     sse_client: reqwest::Client,
     url_guard: OutboundUrlGuard,
     message_flow: std::sync::RwLock<Option<Arc<dyn MessageFlowService>>>,
@@ -66,18 +91,33 @@ impl HttpProviderTransport {
     }
 
     pub fn allowing_private_networks_for_tests() -> Self {
-        Self::with_url_guard(OutboundUrlGuard::allowing_private_networks_for_tests())
+        // Local contract servers are HTTP/1. Production constructors and every
+        // DNS-pinned SSE client keep the strict HTTP/2-only policy.
+        Self::with_url_guard_and_sse_policy(
+            OutboundUrlGuard::allowing_private_networks_for_tests(),
+            ProviderClientPolicy {
+                http2_only: false,
+                ..ProviderClientPolicy::for_request(true)
+            },
+        )
     }
 
     pub fn with_url_guard(url_guard: OutboundUrlGuard) -> Self {
+        Self::with_url_guard_and_sse_policy(
+            url_guard,
+            ProviderClientPolicy::for_request(true),
+        )
+    }
+
+    fn with_url_guard_and_sse_policy(
+        url_guard: OutboundUrlGuard,
+        sse_policy: ProviderClientPolicy,
+    ) -> Self {
         Self {
-            client: provider_client_builder()
+            client: provider_client_builder(ProviderClientPolicy::for_request(false))
                 .build()
                 .expect("build provider http client"),
-            sse_client: reqwest::Client::builder()
-                // No total `.timeout()` — only a per-read timeout so a healthy
-                // long stream is never cut while a dead socket still unblocks.
-                .read_timeout(Duration::from_secs(125))
+            sse_client: provider_client_builder(sse_policy)
                 .build()
                 .expect("build provider sse client"),
             url_guard,
@@ -610,9 +650,11 @@ async fn send_provider_request(
             message: format!("provider webhook_url is not allowed: {error}"),
             request_id: Some(body.id.clone()),
         })?;
-    let pinned_client = provider_client_for_url(&guarded_url).map_err(|error| {
+    let client_policy = ProviderClientPolicy::for_request(accept_sse);
+    let pinned_client = provider_client_for_url(&guarded_url, client_policy).map_err(|error| {
         ServiceError::InternalError(format!("provider HTTP client build failed: {error}"))
     })?;
+    let dns_pinned = pinned_client.is_some();
     let request_client = pinned_client.as_ref().unwrap_or(client);
 
     let message_id = uuid::Uuid::new_v4().to_string();
@@ -643,7 +685,9 @@ async fn send_provider_request(
         request_body = %request_body,
         "provider downlink: request body"
     );
-    debug!(
+    let request_started_ms = bcs_protocol::now_ms();
+    let request_started = Instant::now();
+    info!(
         provider_id = %body.to_bot.provider_id,
         method = %body.method,
         frame_id = %body.id,
@@ -652,6 +696,11 @@ async fn send_provider_request(
         protocol_version = %protocol_version,
         accept = %accept,
         transport = %transport,
+        dns_pinned,
+        http2_only = client_policy.http2_only,
+        total_timeout_ms = ?client_policy.total_timeout.map(|timeout| timeout.as_millis()),
+        read_timeout_ms = ?client_policy.read_timeout.map(|timeout| timeout.as_millis()),
+        request_started_ms,
         "provider downlink: posting webhook"
     );
     let mut request = request_client
@@ -670,12 +719,16 @@ async fn send_provider_request(
         .send()
         .await
         .map_err(|error| {
+            let elapsed_ms = request_started.elapsed().as_millis();
             warn!(
                 provider_id = %body.to_bot.provider_id,
                 method = %body.method,
                 frame_id = %body.id,
                 message_id = %message_id,
                 webhook_url = %webhook_url,
+                dns_pinned,
+                http2_only = client_policy.http2_only,
+                elapsed_ms,
                 error = %error,
                 "provider downlink: webhook transport error"
             );
@@ -683,6 +736,35 @@ async fn send_provider_request(
         })?;
 
     let status = response.status();
+    let response_version = response.version();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let transfer_encoding = response
+        .headers()
+        .get(reqwest::header::TRANSFER_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    info!(
+        target_bot_id = %target.bot_id(),
+        provider_id = %body.to_bot.provider_id,
+        method = %body.method,
+        frame_id = %body.id,
+        message_id = %message_id,
+        webhook_url = %webhook_url,
+        dns_pinned,
+        http2_only = client_policy.http2_only,
+        accept_sse,
+        status = %status.as_u16(),
+        http_version = ?response_version,
+        content_type,
+        content_length = ?response.content_length(),
+        transfer_encoding,
+        headers_elapsed_ms = request_started.elapsed().as_millis(),
+        "provider downlink: response headers received"
+    );
     if !status.is_success() {
         warn!(
             provider_id = %body.to_bot.provider_id,
@@ -701,19 +783,28 @@ async fn send_provider_request(
     Ok(response)
 }
 
-fn provider_client_builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(65))
-        .redirect(reqwest::redirect::Policy::none())
+fn provider_client_builder(policy: ProviderClientPolicy) -> reqwest::ClientBuilder {
+    let mut builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
+    if let Some(timeout) = policy.total_timeout {
+        builder = builder.timeout(timeout);
+    }
+    if let Some(read_timeout) = policy.read_timeout {
+        builder = builder.read_timeout(read_timeout);
+    }
+    if policy.http2_only {
+        builder = builder.http2_prior_knowledge();
+    }
+    builder
 }
 
 fn provider_client_for_url(
     guarded_url: &bcs_route_security::ValidatedRequestUrl,
+    policy: ProviderClientPolicy,
 ) -> Result<Option<reqwest::Client>, reqwest::Error> {
     let Some((host, addrs)) = guarded_url.dns_override() else {
         return Ok(None);
     };
-    provider_client_builder()
+    provider_client_builder(policy)
         .resolve_to_addrs(host, addrs)
         .build()
         .map(Some)
@@ -1340,6 +1431,70 @@ async fn ingest(
     };
     if let Err(error) = flow.handle_bot_event(cmd).await {
         warn!(run_id = %bcn_run_id, %error, "ingest handle_bot_event failed");
+    }
+}
+
+#[cfg(test)]
+mod client_policy_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn spawn_http1_server() -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request).await.unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .await
+                .unwrap();
+        });
+        addr
+    }
+
+    #[test]
+    fn sse_policy_is_http2_only_without_total_timeout() {
+        let policy = ProviderClientPolicy::for_request(true);
+
+        assert_eq!(policy.total_timeout, None);
+        assert_eq!(policy.read_timeout, Some(Duration::from_secs(125)));
+        assert!(policy.http2_only);
+    }
+
+    #[test]
+    fn callback_policy_keeps_total_timeout_and_protocol_negotiation() {
+        let policy = ProviderClientPolicy::for_request(false);
+
+        assert_eq!(policy.total_timeout, Some(Duration::from_secs(65)));
+        assert_eq!(policy.read_timeout, None);
+        assert!(!policy.http2_only);
+    }
+
+    #[tokio::test]
+    async fn sse_builder_rejects_http1_while_callback_builder_accepts_it() {
+        let callback_addr = spawn_http1_server().await;
+        let callback_client = provider_client_builder(ProviderClientPolicy::for_request(false))
+            .build()
+            .unwrap();
+        let callback_response = callback_client
+            .get(format!("http://{callback_addr}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(callback_response.version(), reqwest::Version::HTTP_11);
+
+        let sse_addr = spawn_http1_server().await;
+        let sse_client = provider_client_builder(ProviderClientPolicy::for_request(true))
+            .build()
+            .unwrap();
+        let error = sse_client
+            .get(format!("http://{sse_addr}"))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(error.is_request());
     }
 }
 

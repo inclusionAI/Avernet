@@ -67,13 +67,14 @@ where
     fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
         let mut visitor = FieldVisitor::default();
         event.record(&mut visitor);
-        if visitor
-            .fields
-            .get("message")
-            .is_some_and(|message| {
-                message.trim_matches('"') == "provider downlink: history response"
-            })
-        {
+        if visitor.fields.get("message").is_some_and(|message| {
+            matches!(
+                message.trim_matches('"'),
+                "provider downlink: posting webhook"
+                    | "provider downlink: response headers received"
+                    | "provider downlink: history response"
+            )
+        }) {
             self.events
                 .lock()
                 .unwrap()
@@ -540,7 +541,50 @@ async fn provider_history_logs_provider_bot_group_and_history_response() {
         .await
         .unwrap();
 
+    let frame_id = captured.lock().await.clone().unwrap().body["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let events = logs.lock().unwrap();
+    let request_event = events
+        .iter()
+        .find(|event| {
+            event.field("message").as_deref() == Some("provider downlink: posting webhook")
+                && event.field("frame_id").as_deref() == Some(frame_id.as_str())
+        })
+        .expect("provider request start log");
+    assert_eq!(request_event.field("dns_pinned").as_deref(), Some("false"));
+    assert_eq!(request_event.field("http2_only").as_deref(), Some("false"));
+    assert_eq!(
+        request_event.field("total_timeout_ms").as_deref(),
+        Some("Some(65000)")
+    );
+    assert!(request_event.field("request_started_ms").is_some());
+
+    let response_event = events
+        .iter()
+        .find(|event| {
+            event.field("message").as_deref()
+                == Some("provider downlink: response headers received")
+                && event.field("frame_id").as_deref() == Some(frame_id.as_str())
+        })
+        .expect("provider response headers log");
+    assert_eq!(response_event.field("dns_pinned").as_deref(), Some("false"));
+    assert_eq!(response_event.field("http2_only").as_deref(), Some("false"));
+    assert_eq!(response_event.field("accept_sse").as_deref(), Some("false"));
+    assert_eq!(
+        response_event.field("target_bot_id").as_deref(),
+        Some("bot-provider")
+    );
+    assert_eq!(response_event.field("http_version").as_deref(), Some("HTTP/1.1"));
+    assert_eq!(
+        response_event.field("content_type").as_deref(),
+        Some("application/json")
+    );
+    assert!(response_event.field("content_length").is_some());
+    assert_eq!(response_event.field("transfer_encoding").as_deref(), Some(""));
+    assert!(response_event.field("headers_elapsed_ms").is_some());
+
     let event = events
         .iter()
         .find(|event| event.field("session_id").as_deref() == Some("group-log:cafebabe"))
