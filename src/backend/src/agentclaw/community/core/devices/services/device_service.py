@@ -1299,8 +1299,9 @@ class DeviceService:
         self,
         *,
         binding_id: int,
+        timeout: float | None = None,
     ) -> list[str]:
-        """获取运行态路由设备列表。"""
+        """获取运行态路由设备列表，可为单次查询指定超时。"""
         raise NotImplementedError(
             f"{type(self).__name__} does not support runtime device listing"
         )

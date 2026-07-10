@@ -205,7 +205,7 @@ def test_get_instances_returns_full_device_fields():
     bot_repo.get_by_id.assert_called_once_with("bot-001")
 
 
-def test_get_instances_accepts_teclaw_binding_and_queries_baas_devices():
+def test_get_instances_rejects_teclaw_binding():
     repo = MagicMock()
     repo.get_by_id.return_value = _make_record(
         id=1001,
@@ -215,29 +215,11 @@ def test_get_instances_accepts_teclaw_binding_and_queries_baas_devices():
     )
 
     baas = MagicMock()
-    baas.get_bot.return_value = {
-        "bot_uuid": "bot-uuid-teclaw",
-        "devices": [
-            {
-                "device_uuid": "DEVICE-T1",
-                "status": "ACTIVE",
-                "health": "true",
-                "provider_type": "TECLAW",
-                "provider_device_id": "teclaw-pds-1",
-            }
-        ],
-    }
-
     router = _make_router(repo=repo, baas_service=baas, bot_repo=None)
-    result = router.get_instances(binding_id=1001)
+    with pytest.raises(BindingNotFoundError):
+        router.get_instances(binding_id=1001)
 
-    baas.get_bot.assert_called_once_with(
-        "bot-uuid-teclaw", health_check=False, engine_type="openclaw"
-    )
-    assert result["bot_uuid"] == "bot-uuid-teclaw"
-    assert result["devices"][0]["device_uuid"] == "DEVICE-T1"
-    assert result["devices"][0]["provider_device_id"] == "teclaw-pds-1"
-    assert result["devices"][0]["engine_type"] == "openclaw"
+    baas.get_bot.assert_not_called()
 
 
 def test_list_devices_by_runtime_binding_queries_devices_by_bot_uuid():
@@ -264,11 +246,31 @@ def test_list_devices_by_runtime_binding_queries_devices_by_bot_uuid():
     ]
 
     router = _make_router(repo=repo, baas_service=baas, bot_repo=None)
-    result = router.list_devices_by_runtime_binding(binding_id=1001)
+    result = router.list_devices_by_runtime_binding(binding_id=1001, timeout=8.0)
 
     baas.get_bot.assert_not_called()
-    baas.list_devices_by_bot_uuid.assert_called_once_with("bot-uuid-teclaw")
+    baas.list_devices_by_bot_uuid.assert_called_once_with(
+        "bot-uuid-teclaw",
+        timeout=8.0,
+    )
     assert result == ["DEVICE-T1"]
+
+
+def test_list_devices_by_runtime_binding_preserves_default_baas_call():
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_record(
+        id=1001,
+        device_id="bot-uuid-teclaw",
+        device_provider=TECLAW_DEVICE_PROVIDER,
+        device_props={},
+    )
+    baas = MagicMock()
+    baas.list_devices_by_bot_uuid.return_value = []
+
+    router = _make_router(repo=repo, baas_service=baas, bot_repo=None)
+    assert router.list_devices_by_runtime_binding(binding_id=1001) == []
+
+    baas.list_devices_by_bot_uuid.assert_called_once_with("bot-uuid-teclaw")
 
 
 def test_get_instances_engine_type_defaults_openclaw_without_bot_repo():
@@ -419,6 +421,26 @@ def test_restart_device_success_returns_publish_id():
     baas.restart_devices.assert_called_once_with(
         "bot-uuid-abc", device_uuids=["DEVICE-001"], operator="owner-001"
     )
+
+
+def test_restart_device_rejects_teclaw_binding():
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_record(
+        id=1001,
+        device_provider=TECLAW_DEVICE_PROVIDER,
+        entity_id="owner-001",
+    )
+    baas = MagicMock()
+
+    router = _make_router(repo=repo, baas_service=baas)
+    with pytest.raises(BindingNotFoundError):
+        router.restart_device(
+            binding_id=1001,
+            device_uuid="DEVICE-001",
+            operator=_make_operator("owner-001"),
+        )
+
+    baas.restart_devices.assert_not_called()
 
 
 def test_restart_device_non_owner_raises():

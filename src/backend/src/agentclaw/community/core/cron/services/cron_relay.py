@@ -219,63 +219,59 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         self,
         user_id: str,
         nick_name: str,
-        bot_id: Optional[str] = None,
+        bot_id: str,
         runtime_stage: str | None = None,
         device_uuid: str | None = None,
     ) -> dict:
-        """获取正在执行的任务列表"""
+        """获取指定 Bot 的运行中任务。
+
+        服务 Bot 必须指定 runtime_stage，并按运行实例聚合；个人 Bot 不接收
+        runtime_stage 或 device_uuid。
+        """
+        # running 只查询一个 Bot，不接受聚合全部 Bot 的 all 参数。
+        if not bot_id or bot_id == "all":
+            raise CronRelayError("a specific bot_id is required", error_code=400)
         if runtime_stage is not None and runtime_stage not in VALID_RUNTIME_STAGES:
             raise CronRelayError(f"Invalid runtime_stage: {runtime_stage}", error_code=400)
         if device_uuid and not runtime_stage:
             raise CronRelayError("device_uuid requires runtime_stage", error_code=400)
 
-        # 获取 bot 列表（指定 bot 时只查一个 bot）
-        specific_bot = bool(bot_id and bot_id != "all")
-        if bot_id and bot_id != "all":
-            bots = [self._bot_provider.get_bot(bot_id, user_id)]
+        # 根据 Bot 类型校验 stage，并构造唯一的运行态范围。
+        bot = self._bot_provider.get_bot(bot_id, user_id)
+        bot_type = bot.get("bot_type") or "personal"
+        if bot_type == "service":
+            if runtime_stage is None:
+                raise CronRelayError(
+                    "runtime_stage is required for service bot",
+                    error_code=400,
+                )
         else:
-            result = self._bot_provider.list_bots_by_owner_or_collaborator(
-                user_id,
-                page=1,
-                page_size=100,
-            )
-            bots = result.get("items", [])
+            if runtime_stage is not None:
+                raise CronRelayError(
+                    "runtime_stage only supports service bot",
+                    error_code=400,
+                )
+            if device_uuid:
+                raise CronRelayError(
+                    "device_uuid only supports service bot",
+                    error_code=400,
+                )
 
-        if not bots:
-            return {"success": True, "data": [], "failed_targets": []}
+        targets, failed_targets = self._build_runtime_targets(bot, user_id)
+        if runtime_stage is not None:
+            targets = [
+                target
+                for target in targets
+                if target.runtime_stage == runtime_stage
+            ]
+            failed_targets = [
+                target
+                for target in failed_targets
+                if target.get("runtime_stage") == runtime_stage
+            ]
 
-        targets: list[CronRuntimeTarget] = []
-        failed_targets: list[dict[str, Any]] = []
-        for bot in bots:
-            bot_type = bot.get("bot_type") or "personal"
-            if specific_bot and bot_type != "service":
-                if runtime_stage not in (None, RUNTIME_STAGE_DRAFT):
-                    raise CronRelayError(
-                        f"runtime_stage={runtime_stage} only supports service bot",
-                        error_code=400,
-                    )
-                if device_uuid:
-                    raise CronRelayError(
-                        "device_uuid only supports service bot",
-                        error_code=400,
-                    )
-
-            bot_targets, bot_failed_targets = self._build_runtime_targets(bot, user_id)
-            if runtime_stage:
-                bot_targets = [
-                    target
-                    for target in bot_targets
-                    if target.runtime_stage == runtime_stage
-                ]
-                bot_failed_targets = [
-                    target
-                    for target in bot_failed_targets
-                    if target.get("runtime_stage") == runtime_stage
-                ]
-            targets.extend(bot_targets)
-            failed_targets.extend(bot_failed_targets)
-
-        targets, instance_failed_targets = self._expand_runtime_targets(targets)
+        # 服务 Bot 的多实例 stage 展开为带 device_uuid 的实际查询目标。
+        targets, instance_failed_targets = await self._expand_runtime_targets(targets)
         failed_targets.extend(instance_failed_targets)
         if device_uuid:
             expanded_targets = targets
@@ -284,7 +280,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
                 for target in expanded_targets
                 if target.device_uuid == device_uuid
             ]
-            if specific_bot and expanded_targets and not targets:
+            if expanded_targets and not targets:
                 raise CronRelayError(
                     (
                         f"device_uuid={device_uuid} not found for "
@@ -530,6 +526,11 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         bot: dict,
         user_id: str,
     ) -> tuple[list[CronRuntimeTarget], list[dict[str, Any]]]:
+        """构造 Bot 可用的 draft、verify 和 online 运行态目标。
+
+        个人 Bot 只生成当前 binding 目标；服务 Bot 还会读取验证中和已发布记录。
+        缺失 binding 或发布记录查询失败时返回对应失败项。
+        """
         bot_id = bot.get("bot_id")
         bot_name = bot.get("bot_name", "")
         owner_id = bot.get("owner_id") or user_id
@@ -537,6 +538,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         targets: list[CronRuntimeTarget] = []
         failed_targets: list[dict[str, Any]] = []
 
+        # 当前 binding 对应 draft；个人 Bot 构造完该目标后即可返回。
         binding_id = bot.get("binding_id")
         if binding_id:
             targets.append(
@@ -555,7 +557,9 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
                     bot_id=bot_id,
                     bot_name=bot_name,
                     owner_id=owner_id,
-                    runtime_stage=RUNTIME_STAGE_DRAFT,
+                    runtime_stage=(
+                        RUNTIME_STAGE_DRAFT if bot_type == "service" else None
+                    ),
                     publish_id=None,
                     reason="binding_missing",
                     message=f"Bot {bot_id} has no draft binding_id",
@@ -565,6 +569,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         if bot_type != "service":
             return targets, failed_targets
 
+        # 服务 Bot 的 verify/online 分别由验证中和发布成功记录提供 binding。
         for runtime_stage, publish_status, binding_key in (
             (RUNTIME_STAGE_VERIFY, PublishStatus.VALIDATING.value, "verify"),
             (RUNTIME_STAGE_ONLINE, PublishStatus.SUCCESS.value, "online"),
@@ -633,6 +638,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         user_id: str,
         runtime_stage: str,
     ) -> CronRuntimeTarget:
+        """解析服务 Bot 指定发布态的 binding 和发布元数据。"""
         bot_id = bot.get("bot_id")
         owner_id = bot.get("owner_id") or user_id
         bot_type = bot.get("bot_type") or "personal"
@@ -684,6 +690,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         method: str,
         body: Optional[dict],
     ) -> None:
+        """校验发布态允许执行的定时任务操作。"""
         if runtime_stage not in VALID_RUNTIME_STAGES:
             raise CronRelayError(f"Invalid runtime_stage: {runtime_stage}", error_code=400)
 

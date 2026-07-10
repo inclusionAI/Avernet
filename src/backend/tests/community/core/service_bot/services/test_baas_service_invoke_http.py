@@ -16,14 +16,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import httpx
 import pytest
 
-from agentclaw.community.core.service_bot.services.baas_service import (
-    BaasService,
-    BaasServiceError,
-    HttpConnectionInfo,
-)
+from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
 
 
@@ -133,6 +128,7 @@ def test_invoke_http_passes_full_url_and_posts(baas_service, baas_http, general_
     assert posted_path == INVOKE_HTTP_FULL, (
         f"invoke_http must POST the full http_url via general_http, got: {posted_path!r}"
     )
+    assert "timeout" not in post_calls[0].kwargs
 
 
 def test_invoke_http_sends_openclawToken_header(baas_service, baas_http, general_http):
@@ -234,6 +230,27 @@ def test_invoke_http_get_method(baas_service, baas_http, general_http):
     # general_http: the container GET
     assert len(general_http.calls_to("get")) == 1
     assert len(general_http.calls_to("post")) == 0
+
+
+def test_invoke_http_applies_end_to_end_timeout(
+    baas_service,
+    baas_http,
+    general_http,
+):
+    baas_http.set_response("get", _http_info_ok(INVOKE_HTTP_FULL, TOKEN))
+    general_http.set_response("get", _container_ok())
+
+    baas_service.invoke_http(
+        bind_id=42,
+        port=20003,
+        path="/api/cron",
+        method="GET",
+        timeout=8.0,
+    )
+
+    assert baas_http.calls_to("get")[0].kwargs["timeout"] == 5.0
+    request_timeout = general_http.calls_to("get")[0].kwargs["timeout"]
+    assert 0 < request_timeout <= 8.0
 
 
 def test_invoke_http_passes_json_body(baas_service, baas_http, general_http):

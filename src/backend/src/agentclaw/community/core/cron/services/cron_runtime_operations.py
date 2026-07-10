@@ -1,7 +1,6 @@
-"""Explicit cron runtime operations.
+"""Cron 运行态操作。
 
-This module keeps HTTP endpoint intent out of generic relay forwarding. Routers
-call these use-case methods; the methods decide stage and instance behavior.
+每个入口明确处理草稿态、发布态和多实例行为，再复用目标解析与转发能力。
 """
 from __future__ import annotations
 
@@ -20,7 +19,13 @@ logger = get_logger()
 
 
 class CronRuntimeOperationsMixin:
-    """定时任务运行态接口的显式用例入口。"""
+    """定时任务运行态接口的用例入口。
+
+    草稿态始终按单 binding 转发；发布态根据 provider 选择单目标转发或
+    多实例 fan-out，并保持对应接口的响应结构。
+    """
+
+    # ── 目标与设备校验 ────────────────────────────────────────────
 
     def _validate_runtime_stage(self, runtime_stage: str) -> None:
         """校验 runtime_stage 查询参数。"""
@@ -40,6 +45,8 @@ class CronRuntimeOperationsMixin:
         """解析一次请求要访问的运行态目标。"""
         self._validate_runtime_stage(runtime_stage)
         bot = self._bot_provider.get_bot(bot_id, user_id)
+
+        # verify/online 从对应发布记录中取得 binding 和发布元数据。
         if runtime_stage != RUNTIME_STAGE_DRAFT:
             return bot, self._resolve_published_runtime_target(
                 bot,
@@ -47,6 +54,7 @@ class CronRuntimeOperationsMixin:
                 runtime_stage,
             )
 
+        # draft 使用 Bot 当前绑定，不附带发布信息。
         binding_id = bot.get("binding_id")
         if not binding_id:
             raise ValueError(f"Bot {bot_id} has no device binding")
@@ -128,6 +136,7 @@ class CronRuntimeOperationsMixin:
         runtime_stage: str,
         target: CronRuntimeTarget,
     ) -> None:
+        """校验目标 binding 可用于 adapter 转发。"""
         self._get_active_runtime_device(
             bot_id=bot_id,
             runtime_stage=runtime_stage,
@@ -149,6 +158,8 @@ class CronRuntimeOperationsMixin:
             },
             "failed_targets": failed_targets,
         }
+
+    # ── 单目标与多实例转发 ────────────────────────────────────────
 
     def _decorate_single_result(
         self,
@@ -188,6 +199,7 @@ class CronRuntimeOperationsMixin:
         params: Optional[dict] = None,
     ) -> dict:
         """转发到单个运行态目标。"""
+        # 单目标操作依次完成目标解析、设备校验、转发和返回值装饰。
         bot, target = self._resolve_request_target(
             bot_id=bot_id,
             user_id=user_id,
@@ -225,7 +237,8 @@ class CronRuntimeOperationsMixin:
         params: Optional[dict],
     ) -> dict:
         """发布态多实例 fan-out；单实例 provider 保持单次转发。"""
-        expanded_targets, failed_targets = self._expand_runtime_target(
+        # BaaS/Teclaw 会得到多个带 device_uuid 的目标；Arca/local 保持一个目标。
+        expanded_targets, failed_targets = await self._expand_runtime_target(
             target,
             device=device,
         )
@@ -241,6 +254,7 @@ class CronRuntimeOperationsMixin:
         if failed_targets and not expanded_targets:
             return self._runtime_instances_unavailable_response(failed_targets)
 
+        # 单实例 provider 沿用普通响应结构，不包装 results 数组。
         single_target = expanded_targets[0] if expanded_targets else target
         result = await self._forward_runtime_target_request(
             single_target,
@@ -256,6 +270,8 @@ class CronRuntimeOperationsMixin:
             include_runtime=True,
         )
         return result
+
+    # ── 运行态接口 ────────────────────────────────────────────────
 
     async def get_cron_status(
         self,
@@ -320,6 +336,7 @@ class CronRuntimeOperationsMixin:
         runtime_stage: str = RUNTIME_STAGE_DRAFT,
     ) -> dict:
         """更新定时任务；发布态仅支持启停同步。"""
+        # 草稿态允许完整更新，并且只转发到当前草稿 binding。
         if runtime_stage == RUNTIME_STAGE_DRAFT:
             return await self._forward_single_stage_request(
                 bot_id=bot_id,
@@ -330,6 +347,7 @@ class CronRuntimeOperationsMixin:
                 body=body,
             )
 
+        # 发布态只接受 enabled，并同步到该 stage 的所有运行实例。
         if body is not None and not isinstance(body, dict):
             raise CronRelayError("body must be a dictionary", error_code=400)
 
@@ -391,6 +409,7 @@ class CronRuntimeOperationsMixin:
         runtime_stage: str = RUNTIME_STAGE_DRAFT,
     ) -> dict:
         """触发定时任务；发布态会按运行实例 fan-out。"""
+        # 草稿态执行一次；发布态对同一任务逐实例触发。
         if runtime_stage == RUNTIME_STAGE_DRAFT:
             return await self._forward_single_stage_request(
                 bot_id=bot_id,
@@ -441,6 +460,8 @@ class CronRuntimeOperationsMixin:
 
         path = f"/api/cron/{task_id}/runs"
         params = {"limit": limit}
+
+        # 草稿态只有一个目标，直接返回 adapter 的原始 runs 结构。
         if runtime_stage == RUNTIME_STAGE_DRAFT:
             return await self._forward_single_stage_request(
                 bot_id=bot_id,
@@ -462,7 +483,8 @@ class CronRuntimeOperationsMixin:
             target=target,
         )
 
-        expanded_targets, failed_targets = self._expand_runtime_target(
+        # 发布态先展开运行实例，再决定定向查询或聚合全部实例。
+        expanded_targets, failed_targets = await self._expand_runtime_target(
             target,
             device=device,
         )
@@ -494,6 +516,7 @@ class CronRuntimeOperationsMixin:
                 )
             return self._runtime_instances_unavailable_response(failed_targets)
 
+        # 未指定实例时，多实例结果按 results[] 聚合并保留每个 device_uuid。
         if any(expanded.device_uuid for expanded in expanded_targets):
             return await self._forward_multi_instance_request(
                 expanded_targets,
@@ -506,6 +529,7 @@ class CronRuntimeOperationsMixin:
         if failed_targets and not expanded_targets:
             return self._runtime_instances_unavailable_response(failed_targets)
 
+        # Arca/local 等单实例 provider 保持与草稿态一致的 runs 响应结构。
         single_target = expanded_targets[0] if expanded_targets else target
         result = await self._forward_runtime_target_request(
             single_target,

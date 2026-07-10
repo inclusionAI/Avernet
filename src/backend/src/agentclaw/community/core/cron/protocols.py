@@ -117,6 +117,7 @@ class DeviceConnectionProvider(Protocol):
         self,
         *,
         binding_id: int,
+        timeout: float | None = None,
     ) -> list[str]:
         """按运行态 binding 获取设备列表。
 
@@ -124,6 +125,7 @@ class DeviceConnectionProvider(Protocol):
 
         Args:
             binding_id: 设备绑定ID
+            timeout: 设备列表查询超时秒数；不传时使用 provider 默认值
 
         Returns:
             ["device_uuid"]

@@ -37,7 +37,7 @@ from agentclaw.community.utils import env_utils
 logger = get_logger()
 
 _DEFAULT_ENGINE_TYPE = "openclaw"
-_INSTANCE_QUERY_DEVICE_PROVIDERS = {BAAS_DEVICE_PROVIDER, TECLAW_DEVICE_PROVIDER}
+_RUNTIME_DEVICE_PROVIDERS = {BAAS_DEVICE_PROVIDER, TECLAW_DEVICE_PROVIDER}
 
 
 class BotPublishNotFoundError(RuntimeError):
@@ -144,7 +144,7 @@ class DeviceInstanceService:
     ) -> tuple[DeviceBindingRecord, str]:
         """校验 binding 有效性并返回 ``(record, bot_uuid)``。
 
-        校验：存在 / device_provider in {baas, teclaw} / status=ACTIVE / 同环境。
+        校验：存在 / device_provider=baas / status=ACTIVE / 同环境。
 
         Raises:
             BindingNotFoundError: 校验不通过
@@ -153,9 +153,9 @@ class DeviceInstanceService:
         if record is None:
             raise BindingNotFoundError(f"Binding not found: binding_id={binding_id}")
 
-        if record.device_provider not in _INSTANCE_QUERY_DEVICE_PROVIDERS:
+        if record.device_provider != BAAS_DEVICE_PROVIDER:
             raise BindingNotFoundError(
-                f"Binding {binding_id} does not support instances query: "
+                f"Binding {binding_id} is not baas provider: "
                 f"provider={record.device_provider}"
             )
 
@@ -269,12 +269,41 @@ class DeviceInstanceService:
         self,
         *,
         binding_id: int,
+        timeout: float | None = None,
     ) -> list[str]:
-        """运行态设备列表（binding_id 入口）。
+        """返回 BaaS 或 Teclaw 运行态 binding 下的 device_uuid 列表。
 
-        返回运行态路由所需的 device_uuid 列表。
+        校验 binding 与运行环境后取得 bot_uuid，再查询该 Bot 的运行设备。
+
+        Raises:
+            BindingNotFoundError: binding 不存在、状态不可用或 provider 不支持
+            DeviceServiceError: BaasService 不可用
         """
-        _, bot_uuid = self._validate_binding_for_instances(binding_id)
+        record = self._repo.get_by_id(binding_id)
+        if record is None:
+            raise BindingNotFoundError(f"Binding not found: binding_id={binding_id}")
+        if record.device_provider not in _RUNTIME_DEVICE_PROVIDERS:
+            raise BindingNotFoundError(
+                f"Binding {binding_id} does not support runtime device query: "
+                f"provider={record.device_provider}"
+            )
+
+        env = env_utils.get_current_env()
+        if record.env != env:
+            raise BindingNotFoundError(
+                f"Binding {binding_id} env mismatch: "
+                f"binding.env={record.env}, current_env={env}"
+            )
+        if record.status != DeviceBindingStatus.ACTIVE.value:
+            raise BindingNotFoundError(
+                f"Binding {binding_id} is not active: status={record.status}"
+            )
+
+        bot_uuid = record.device_id
+        if not bot_uuid:
+            raise BindingNotFoundError(
+                f"Binding {binding_id} has no device_id (bot_uuid)"
+            )
 
         baas_service = self._get_baas_service()
         if baas_service is None:
@@ -282,8 +311,16 @@ class DeviceInstanceService:
                 "BaasService not available for runtime device query"
             )
 
+        if timeout is None:
+            devices_raw = baas_service.list_devices_by_bot_uuid(bot_uuid)
+        else:
+            devices_raw = baas_service.list_devices_by_bot_uuid(
+                bot_uuid,
+                timeout=timeout,
+            )
+
         devices: list[str] = []
-        for d in baas_service.list_devices_by_bot_uuid(bot_uuid) or []:
+        for d in devices_raw or []:
             device_uuid = d.get("device_uuid")
             if device_uuid:
                 devices.append(str(device_uuid))
