@@ -35,20 +35,22 @@ Keep the existing fresh-state behavior:
 ### 2. BaaS-backed device lifecycle
 
 Create a real personal bot through the public Backend API so Backend allocates
-its device through the live BaaS process. From the returned bot and binding:
+its local-provider device while the full Backend/BaaS stack is running. From
+the returned bot and binding:
 
 - read the binding by binding ID and device ID;
 - observe it in the user's device list;
 - obtain connection information;
-- list its runtime instances;
-- execute one harmless filesystem-inspection command when the endpoint is
-  available to the configured local operator;
-- restart the concrete runtime instance and assert a publish identifier;
+- verify the instance-list and restart APIs reject the local provider with the
+  documented capability error (successful multi-instance operations currently
+  require a `baas` or `teclaw` binding);
 - release the binding and verify its state is `RELEASED`.
 
 Assertions must validate returned identity, ownership, provider, lifecycle
 state, and physical/runtime facts where available. HTTP 200 alone is not a
-valid assertion.
+valid assertion. A successful BaaS multi-instance restart is deferred until
+the open-source singlebox can create a real `baas` provider binding; the test
+must not seed or relabel a local binding to manufacture that success path.
 
 ### 3. Ownership and failure behavior
 
