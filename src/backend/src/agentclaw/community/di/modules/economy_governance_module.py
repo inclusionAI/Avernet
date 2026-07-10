@@ -473,7 +473,7 @@ class EconomyGovernanceModule(Module):
              without committing them; the shipped YAML carries dummy values.
           2. YAML ``dingtalk`` block (``app_key_pre`` etc. for prepub env).
 
-        All DingTalk creds empty → DingTalkMarkdownSender with empty config (send returns None).
+        All DingTalk creds empty → CommunityNotifySender (log-only, no real delivery).
         """
         from agentclaw.community.utils.env_utils import get_current_env
 
@@ -520,7 +520,7 @@ class EconomyGovernanceModule(Module):
         else:
             logger.info(
                 "[economy_governance_module] No DingTalk credentials "
-                "— DingTalkMarkdownSender with empty config will be used",
+                "— CommunityNotifySender (log-only) will be used",
             )
 
         logger.info(

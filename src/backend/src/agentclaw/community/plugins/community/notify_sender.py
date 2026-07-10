@@ -1,19 +1,19 @@
-"""Community ``NotifySenderPlugin`` — no external messaging channel.
+"""Community ``NotifySenderPlugin`` — log-only notification sender.
 
 A real, deployable impl (not a MockSeam test double). The community build
-ships no DingTalk / Slack / Email channel, so every ``send`` returns ``None``
-— the same graceful outcome the corp empty-credentials path already produces.
+ships no DingTalk / Slack / Email channel — notifications are delivered to
+the standard logger via ``get_logger``. Since writing to the log IS the
+delivery, ``send()`` returns a log-based message ID (not ``None``).
 
-Callers already handle ``None``: governance marks the notify for retry,
-audit records the failure. The community deployment simply has no channel
-to retry *to*, so those records remain in ``pending`` / ``failed`` status
-until a real channel is configured. This is intentional — not a bug.
+Corp deployments bind ``DingTalkNotifySender`` instead for real delivery.
 
 Mirrors ``CommunityDRMReader`` (degenerate but real, every flag is unset)
 and ``NoApprovalWorkflow`` (unavailable, tells callers so). Not a
 ``MockSeam`` — bound directly by ``CommunityNotifyModule``.
 """
 from __future__ import annotations
+
+import uuid
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.notify_sender import (
@@ -23,27 +23,18 @@ from agentclaw.community.plugin_api.notify_sender import (
 
 log = get_logger(__name__)
 
-_NO_CHANNEL = (
-    "No notification channel configured in the community build; "
-    "configure a DingTalk / Slack / Email sender to enable delivery"
-)
-
 
 class CommunityNotifySender(NotifySenderPlugin):
-    """Community profile: no notification channel available.
+    """Community profile: log-only notification sender.
 
-    Every ``send`` returns ``None``. The calling service (governance scan,
-    future notification consumers) already handles ``None`` as "send failed,
-    will retry next tick" — this is a graceful degradation, not an error.
-
-    Production governance records will stay in ``pending``/``failed``
-    status until a real channel is bound (corp deployment swaps this
-    module for ``DingTalkNotifySender``).
+    ``send()`` writes the notification to the standard logger and returns
+    a ``log-<uuid>`` message ID — writing to the log IS the delivery,
+    so the caller treats this as a successful send.
     """
 
     @property
     def channels(self) -> frozenset[str]:
-        return frozenset()
+        return frozenset({"log"})
 
     def send(
         self,
@@ -51,9 +42,18 @@ class CommunityNotifySender(NotifySenderPlugin):
         *,
         channel: str = "markdown",
     ) -> str | None:
+        msg_id = f"log-{uuid.uuid4().hex[:12]}"
         log.info(
-            "[CommunityNotifySender] send(channel=%s, recipient=%s, title=%r) "
-            "→ no-op: %s",
-            channel, message.recipient, message.title[:60], _NO_CHANNEL,
+            "[CommunityNotifySender] send(channel=%s → log, recipient=%s, "
+            "title=%r, deep_link=%s) → %s",
+            channel,
+            message.recipient,
+            message.title[:80],
+            message.deep_link[:60] if message.deep_link else "",
+            msg_id,
         )
-        return None
+        log.debug(
+            "[CommunityNotifySender] message body:\n%s",
+            message.body[:500] if message.body else "",
+        )
+        return msg_id
