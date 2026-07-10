@@ -951,130 +951,63 @@ class TestListRunningCronsOwnerId:
         assert result["data"][0]["owner_id"] == "owner-1"
 
     @pytest.mark.asyncio
-    async def test_list_running_crons_adds_owner_id_for_all_bots(self):
+    async def test_list_running_crons_rejects_all_bot_id(self):
         bot_provider = MagicMock()
-        bot_list = {
-            "items": [
-                {
-                    "bot_id": "default",
-                    "owner_id": "owner-1",
-                    "binding_id": 42,
-                    "bot_name": "Service Bot",
-                }
-            ]
-        }
-        bot_provider.list_bots_by_owner.return_value = bot_list
-        bot_provider.list_bots_by_owner_or_collaborator.return_value = bot_list
+        svc = _make_service(bot_provider=bot_provider)
+
+        with pytest.raises(CronRelayError) as exc_info:
+            await svc.list_running_crons(
+                user_id="owner-1",
+                nick_name="Owner",
+                bot_id="all",
+            )
+
+        assert exc_info.value.error_code == 400
+        bot_provider.get_bot.assert_not_called()
+        bot_provider.list_bots_by_owner_or_collaborator.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_list_running_crons_requires_stage_for_service_bot(self):
+        bot_provider = MagicMock()
         bot_provider.get_bot.return_value = {
-            "bot_id": "default",
+            "bot_id": "service-bot",
             "owner_id": "owner-1",
             "binding_id": 42,
             "bot_name": "Service Bot",
+            "bot_type": "service",
         }
+        svc = _make_service(bot_provider=bot_provider)
 
-        device_provider = MagicMock()
-        device_provider.get_device.return_value = MagicMock(
-            status=DeviceBindingStatus.ACTIVE
-        )
+        with pytest.raises(CronRelayError) as exc_info:
+            await svc.list_running_crons(
+                user_id="owner-1",
+                nick_name="Owner",
+                bot_id="service-bot",
+            )
 
-        resolver = MagicMock()
-        ctx = _make_ctx(bot_id="default", user_id="owner-1")
-        resolver.resolve_for_bot.return_value = ctx
-
-        transport = MagicMock()
-        transport.invoke = AsyncMock(return_value={
-            "success": True,
-            "data": {"running": [{"id": "task-1", "name": "daily"}]},
-        })
-
-        svc = _make_service(
-            bot_provider=bot_provider,
-            device_provider=device_provider,
-            transport=transport,
-            resolver=resolver,
-        )
-
-        result = await svc.list_running_crons(
-            user_id="owner-1", nick_name="Owner", bot_id="all"
-        )
-
-        assert result["data"][0]["bot_id"] == "default"
-        assert result["data"][0]["bot_name"] == "Service Bot"
-        assert result["data"][0]["owner_id"] == "owner-1"
+        assert exc_info.value.error_code == 400
 
     @pytest.mark.asyncio
-    async def test_list_running_crons_all_scope_includes_collaborator_bots(self):
+    async def test_list_running_crons_rejects_stage_for_personal_bot(self):
         bot_provider = MagicMock()
-        bot_provider.list_bots_by_owner.return_value = {
-            "items": [
-                {
-                    "bot_id": "owned-bot",
-                    "owner_id": "viewer-1",
-                    "binding_id": 42,
-                    "bot_name": "Owned Bot",
-                }
-            ]
+        bot_provider.get_bot.return_value = {
+            "bot_id": "personal-bot",
+            "owner_id": "owner-1",
+            "binding_id": 42,
+            "bot_name": "Personal Bot",
+            "bot_type": "personal",
         }
-        bot_provider.list_bots_by_owner_or_collaborator.return_value = {
-            "items": [
-                {
-                    "bot_id": "owned-bot",
-                    "owner_id": "viewer-1",
-                    "binding_id": 42,
-                    "bot_name": "Owned Bot",
-                },
-                {
-                    "bot_id": "collab-bot",
-                    "owner_id": "owner-2",
-                    "binding_id": 84,
-                    "bot_name": "Collaborator Bot",
-                },
-            ]
-        }
+        svc = _make_service(bot_provider=bot_provider)
 
-        device_provider = MagicMock()
-        device_provider.get_device.return_value = MagicMock(
-            status=DeviceBindingStatus.ACTIVE
-        )
-
-        resolver = MagicMock()
-        resolver.resolve_for_bot.side_effect = (
-            lambda bot_id, user_id: _make_ctx(
-                binding_id=42 if bot_id == "owned-bot" else 84,
-                bot_id=bot_id,
-                user_id=user_id,
+        with pytest.raises(CronRelayError) as exc_info:
+            await svc.list_running_crons(
+                user_id="owner-1",
+                nick_name="Owner",
+                bot_id="personal-bot",
+                runtime_stage="draft",
             )
-        )
 
-        async def invoke(conn_info, method, path, body=None, params=None, *, timeout=None):
-            binding_id = conn_info["binding_id"]
-            return {
-                "success": True,
-                "data": {"running": [{"id": f"task-{binding_id}"}]},
-            }
-
-        transport = MagicMock()
-        transport.invoke = AsyncMock(side_effect=invoke)
-
-        svc = _make_service(
-            bot_provider=bot_provider,
-            device_provider=device_provider,
-            transport=transport,
-            resolver=resolver,
-        )
-
-        result = await svc.list_running_crons(
-            user_id="viewer-1", nick_name="Viewer", bot_id="all"
-        )
-
-        rows_by_bot = {row["bot_id"]: row for row in result["data"]}
-        assert set(rows_by_bot) == {"owned-bot", "collab-bot"}
-        assert rows_by_bot["collab-bot"]["owner_id"] == "owner-2"
-        resolver.resolve_for_bot.assert_any_call("owned-bot", "viewer-1")
-        resolver.resolve_for_bot.assert_any_call("collab-bot", "owner-2")
-        bot_provider.list_bots_by_owner_or_collaborator.assert_called_once_with(
-            "viewer-1", page=1, page_size=100
-        )
+        assert exc_info.value.error_code == 400
 
     @pytest.mark.asyncio
     async def test_list_running_crons_expands_service_bot_runtime_instances(self):
@@ -1144,7 +1077,10 @@ class TestListRunningCronsOwnerId:
         )
 
         result = await svc.list_running_crons(
-            user_id="owner-1", nick_name="Owner", bot_id="service-bot"
+            user_id="owner-1",
+            nick_name="Owner",
+            bot_id="service-bot",
+            runtime_stage="online",
         )
 
         assert len(result["data"]) == 2
@@ -1381,6 +1317,7 @@ class TestListRunningCronsOwnerId:
             user_id="owner-1",
             nick_name="Owner",
             bot_id="service-bot",
+            runtime_stage="draft",
         )
 
         assert result["data"] == []

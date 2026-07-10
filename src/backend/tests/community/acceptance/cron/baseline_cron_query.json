@@ -3,8 +3,8 @@
     "entries_count": 0,
     "success": true
   },
-  "running_empty": {
-    "entries_count": 0,
-    "success": true
+  "running_all": {
+    "error_code": 400,
+    "success": false
   }
 }
