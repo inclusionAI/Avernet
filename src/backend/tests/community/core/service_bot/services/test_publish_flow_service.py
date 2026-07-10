@@ -1551,13 +1551,15 @@ async def test_execute_rollback_with_config_artifact():
         source_bot_id="bot-456",
     )
 
-    # 目标版本只有 config_artifact（没有 migration_path）
+    # 目标版本只有 config_artifact（没有 migration_path）。旧记录无按阶段存储的
+    # engine_overrides —— overlay no-op，投递 restamp 后的原产物。
+    base_artifact = _enriched_artifact("release")
     target_record = _make_publish_record(
         id=2,
         status=PublishStatus.SUCCESS.value,
         version=2,
         ext={
-            "config_artifact": "s3://bucket/artifact/v2.json",
+            "config_artifact": base_artifact,
             "binding": {"online": 200},
         },
     )
@@ -1582,13 +1584,80 @@ async def test_execute_rollback_with_config_artifact():
         operator="user1",
     )
 
-    # 验证 upgrade_async 使用了 config_artifact
+    # 验证 upgrade_async 使用了 config_artifact（restamp 到 release，无 overlay）
     upgrade_call = build_service.upgrade_async.call_args
-    assert upgrade_call.kwargs["config_artifact"] == "s3://bucket/artifact/v2.json"
+    assert upgrade_call.kwargs["config_artifact"] == base_artifact
+    assert upgrade_call.kwargs["config_artifact"]["engine_ext"]["stage"] == "release"
     assert upgrade_call.kwargs["migration_path"] is None
 
     assert result.publish_id == 2
     assert result.status == PublishStatus.ONLINE_PUB
+
+
+@pytest.mark.asyncio
+async def test_execute_rollback_overlays_stored_online_channel_overrides():
+    """回滚应叠加目标版本**存储的** online 渠道 engine_overrides（含 card_template_id），
+    还原到回滚目标版本发布时的 DingTalk 配置——而非实时重取（实时行可能已被改动）。
+
+    回归 bug：修改钉钉卡片模版 id 并发布后再回滚，卡片 id 未恢复。
+    """
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    bot_service = Mock()
+
+    build_service.upgrade_async = AsyncMock(return_value={"publish_id": 12345})
+    build_service.generate_request_id = Mock(return_value="req-rollback-3")
+    baas_service.approve_publish = Mock()
+
+    svc = _pf(publish_service, build_service, baas_service, bot_service, _arca_router(build_service))
+
+    current_record = _make_publish_record(
+        id=3, status=PublishStatus.DRAFT.value, version=3, source_bot_id="bot-789",
+    )
+
+    # 目标版本发布时快照的 online 渠道（旧卡片模版 id）。构建期产物的 engine_overrides
+    # 是另一个值（draft 渠道），回滚必须投递存储的 online 快照而非构建期值。
+    stored_online = {
+        "channels": {
+            "dingding": {
+                "enabled": True,
+                "accounts": [{"client_id": "cid-1", "card_template_id": "OLD-TEMPLATE"}],
+            }
+        }
+    }
+    build_time = {"channels": {"dingding": {"accounts": [{"client_id": "cid-draft"}]}}}
+    target_record = _make_publish_record(
+        id=2,
+        status=PublishStatus.SUCCESS.value,
+        version=2,
+        ext={
+            "config_artifact": _enriched_artifact("release", build_time),
+            "engine_overrides_by_stage": {"online": stored_online},
+            "binding": {"online": 200},
+        },
+    )
+
+    mock_binding = Mock()
+    mock_binding.device_id = "device-uuid-003"
+
+    def get_publish_side_effect(pk):
+        if pk == 2:
+            return target_record
+        elif pk == 3:
+            return current_record
+        return None
+
+    publish_service.get_publish_by_id = Mock(side_effect=get_publish_side_effect)
+    publish_service.get_device_binding_by_id.return_value = mock_binding
+    bot_service.get_bot.return_value = {"bot_id": "bot-789", "entity_id": "e3", "entity_type": "staff"}
+
+    await svc.execute_rollback(current_publish_id=3, target_publish_id=2, operator="user1")
+
+    delivered = build_service.upgrade_async.call_args.kwargs["config_artifact"]
+    # 投递的产物携带目标版本存储的 online 渠道（旧卡片模版 id），而非构建期 draft 渠道
+    assert delivered["engine_overrides"] == stored_online
+    assert delivered["engine_ext"]["stage"] == "release"
 
 
 # ── teclaw build-time file promotion (Task 10) ───────────────────────

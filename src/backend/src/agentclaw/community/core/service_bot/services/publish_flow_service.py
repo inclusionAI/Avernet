@@ -2033,6 +2033,20 @@ class PublishFlowService:
         if not bot:
             raise PublishFlowServiceError(f"Bot不存在: {current_record.source_bot_id}")
 
+        # 4.5 复原目标版本的线上投递产物：把 engine_ext.stage 盖回 release 并叠加目标
+        # 版本**存储的** online 渠道 engine_overrides（回滚发生时那个版本的 DingTalk
+        # 配置，含 card_template_id），而**不是**从 DB 实时重取——实时渠道行可能已在本次
+        # 回滚之前被改动（如修改了卡片模版 id）。若不叠加，回滚只投递构建期产物，运行中
+        # 的 bot 会保留当前（改动后）的渠道配置，导致 card_template_id 无法恢复到回滚目标
+        # 版本的值。与 _restart_bot_async 的按阶段重放逻辑一致。无存储 overrides（旧记录）
+        # 或无 config_artifact（ARCA 挂载路径）时均 no-op。
+        stored_overrides = (target_ext.get("engine_overrides_by_stage") or {}).get(
+            PublishStage.ONLINE.value
+        )
+        config_artifact = self._artifact_for_stage(
+            config_artifact, PublishStage.ONLINE, stored_overrides
+        )
+
         # 5. 调用 BaaS upgrade 接口重新部署
         version = f"{target_record.version}"
         upgrade_result = await self._build_service.upgrade_async(
