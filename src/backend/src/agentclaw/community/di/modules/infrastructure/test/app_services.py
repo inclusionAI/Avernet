@@ -18,7 +18,7 @@ from injector import Binder, Module, inject, provider, singleton
 from agentclaw.community.api.code_platform_service import CodePlatformServiceProtocol
 from agentclaw.community.api.bot_chat_service import BotChatServiceProtocol
 from agentclaw.community.core.bot_chat.service import BotChatService
-from agentclaw.community.core.bot_management.services.workspace_hosting_client import WorkspaceHostingClient
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client import WorkspaceHostingClient
 from agentclaw.community.di import config as cfg
 from agentclaw.community.di.optional_routers import OptionalRouters
 from agentclaw.community.log import get_logger
