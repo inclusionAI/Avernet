@@ -252,6 +252,67 @@ class TaskRecordRepository:
             )
             return [GovernanceTicket.from_orm(r) for r in rows]
 
+    def list_tickets_by_statuses(
+        self,
+        statuses: list[str],
+        *,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> list[GovernanceTicket]:
+        """All tickets in the given statuses (cross-owner), newest first, paged.
+
+        评审场景:按治理状态过滤工单(活跃 / 待审阅 / 已关闭),跨 owner。
+
+        Args:
+            statuses: 治理状态白名单(open/scheduled/waiting_review/closed)。
+            offset: 分页偏移。
+            limit: 分页上限。
+
+        Returns:
+            List of :class:`GovernanceTicket` (gmt_create 由 from_orm 灌入)。
+        """
+        if not statuses:
+            return []
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            rows = (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.governance_status.in_(statuses),
+                    GovernanceTicketOrm.env == _env,
+                )
+                .order_by(GovernanceTicketOrm.gmt_create.desc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+            return [GovernanceTicket.from_orm(r) for r in rows]
+
+    def count_tickets_by_statuses(
+        self,
+        statuses: list[str],
+    ) -> int:
+        """Count all tickets in the given statuses (cross-owner, paged-list 配套)。
+
+        Args:
+            statuses: 治理状态白名单。
+
+        Returns:
+            满足条件的工单总数(与 list_tickets_by_statuses 同阶过滤)。
+        """
+        if not statuses:
+            return 0
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            return (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.governance_status.in_(statuses),
+                    GovernanceTicketOrm.env == _env,
+                )
+                .count()
+            )
+
     def count_active_open(
         self,
     ) -> int:
