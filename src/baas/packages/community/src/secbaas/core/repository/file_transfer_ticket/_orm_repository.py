@@ -103,32 +103,51 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         from sqlalchemy import func
 
         env = get_current_env()
-        # Phase 1: Query current status
-        row = (
-            self._session.query(FileTransferTicketModel)
-            .filter(
-                FileTransferTicketModel.transfer_id == transfer_id,
-                FileTransferTicketModel.env == env,
-            )
-            .first()
-        )
-        if row is None:
-            raise DeviceCreationError(
-                error_code="FILE_TRANSFER_NOT_FOUND",
-                message=f"Transfer ticket {transfer_id} not found",
-            )
-
-        # Phase 2: Validate transition, then UPDATE
-        self._validate_transition(row.status, new_status)
+        # CAS-style atomic UPDATE: only modify the row if its current
+        # status is one of the allowed source states for new_status
+        # (plus new_status itself — same-state is idempotent).
+        allowed_current = {new_status} | {
+            src for (src, dst) in VALID_TRANSITIONS if dst == new_status
+        }
         update_kwargs = {
             "status": new_status,
             "gmt_modified": func.now(),
         }
         if error_message is not None:
             update_kwargs["error_message"] = error_message
-        self._session.query(FileTransferTicketModel).filter(
-            FileTransferTicketModel.id == row.id,
-        ).update(update_kwargs, synchronize_session=False)
+        result = (
+            self._session.query(FileTransferTicketModel)
+            .filter(
+                FileTransferTicketModel.transfer_id == transfer_id,
+                FileTransferTicketModel.env == env,
+                FileTransferTicketModel.status.in_(allowed_current),
+            )
+            .update(update_kwargs, synchronize_session=False)
+        )
+        if result == 0:
+            # Either ticket not found or invalid transition — distinguish
+            # via a fallback query for the error message.
+            row = (
+                self._session.query(FileTransferTicketModel)
+                .filter(
+                    FileTransferTicketModel.transfer_id == transfer_id,
+                    FileTransferTicketModel.env == env,
+                )
+                .first()
+            )
+            if row is None:
+                raise DeviceCreationError(
+                    error_code="FILE_TRANSFER_NOT_FOUND",
+                    message=f"Transfer ticket {transfer_id} not found",
+                )
+            else:
+                raise DeviceCreationError(
+                    error_code="FILE_TRANSFER_STATE_CONFLICT",
+                    message=(
+                        f"Cannot transition from {row.status} to {new_status}: "
+                        "ticket is in a conflicting or terminal state."
+                    ),
+                )
         log.info("[file-transfer:update_status] result: done")
 
     def _validate_transition(self, current: str, target: str) -> None:
