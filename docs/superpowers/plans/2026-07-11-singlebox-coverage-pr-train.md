@@ -58,11 +58,32 @@ PR-A 只解决：
 - 标题：`refactor(runtime): separate deploy profile from data env`
 - Reviewer：`totalfrank`
 - PR body 中明确要求先读 Spec，再看 Config、DI、Env/启动代码。
+- Avernet 开源 PR 只运行 community/test/singlebox 可执行验证，不伪造
+  `agentclaw.corp` 或 CORP_TEST composition root。
 - 每个实现 commit 的正文引用：
 
 ```text
 Spec: docs/superpowers/specs/2026-07-11-profile-env-separation-design.md
 ```
+
+### 跨仓集成门
+
+Avernet PR 合并并完成内源镜像同步后，在外层 OCB 的 gitlink 更新 PR 中：
+
+1. 更新 `ocb-public` gitlink 到已同步的 Avernet merge commit。
+2. 同步更新 `src/backend/tests/corp/di/test_profile_and_modules_for.py`。
+3. 使用 corp-present composition root 验证 `CORP_TEST` 最终解析为真实
+   `PolicyService`，且四个 qualified HTTP key 全部解析为 `LocalHttpClient`。
+4. 在 OCB `src/backend` 下运行：
+
+```bash
+DEPLOY_PROFILE=corp_test uv run pytest \
+  tests/corp/di/test_profile_and_modules_for.py -q
+```
+
+这是 Avernet 合并后的跨仓集成门，不属于 Avernet 开源 PR 内可执行的测试；Avernet
+仓库不得通过 fake `sys.modules`、伪造 `agentclaw.corp` 或裁剪版 corp module column
+来替代它。
 
 ### 完成条件
 
@@ -70,6 +91,8 @@ Spec: docs/superpowers/specs/2026-07-11-profile-env-separation-design.md
 - 最终 whole-branch review 无 Critical / Important finding。
 - Backend community tests、shell guards、真实 singlebox 和 coverage 入口通过。
 - 创建到 `dev` 的 ready PR，并请求 totalfrank review。
+- Avernet 合并后的 OCB gitlink 更新 PR 已完成上述 corp-present `CORP_TEST`
+  解析验证；在该门通过前，PR-A 的跨仓集成状态不得标记完成。
 
 ## 4. PR-B：修复 Device Coverage PR #62
 

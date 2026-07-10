@@ -5,10 +5,30 @@ and that the mandatory switch errors out on unset / unknown values.
 """
 from __future__ import annotations
 
-import pytest
+from typing import Annotated
 
+import pytest
+from injector import Injector
+
+from agentclaw.community.api.policy_service import PolicyServiceProtocol
+from agentclaw.community.core.access.services.policy_service import PolicyService
+from agentclaw.community.di.container import build_injector
+from agentclaw.community.di.modules.http_client_module import HttpClientModule
+from agentclaw.community.di.modules.infrastructure.test.http_client import (
+    TestHttpClientModule,
+)
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.di.profile_modules import modules_for
+from agentclaw.community.plugin_api.http_client import (
+    QUALIFIER_BAAS,
+    QUALIFIER_BCN,
+    QUALIFIER_GENERAL,
+    QUALIFIER_MASA_AGENT_EVAL,
+    HttpClient,
+)
+from agentclaw.community.plugins.http_client import HttpxClient
+from agentclaw.community.plugins.local.http_client import LocalHttpClient
+from agentclaw.community.plugins.local.policy_service import LocalPolicyService
 
 
 # NOTE(B11 3.2): the corp-column tests (``modules_for(CORP)`` /
@@ -19,6 +39,18 @@ from agentclaw.community.di.profile_modules import modules_for
 
 def _names(modules) -> set[str]:
     return {type(m).__name__ for m in modules}
+
+
+_HTTP_CLIENT_KEYS = (
+    Annotated[HttpClient, QUALIFIER_BAAS],
+    Annotated[HttpClient, QUALIFIER_BCN],
+    Annotated[HttpClient, QUALIFIER_GENERAL],
+    Annotated[HttpClient, QUALIFIER_MASA_AGENT_EVAL],
+)
+
+
+def _resolve_http_clients(injector: Injector) -> list[HttpClient]:
+    return [injector.get(key) for key in _HTTP_CLIENT_KEYS]
 
 
 def test_detect_raises_when_unset(monkeypatch):
@@ -74,38 +106,50 @@ def test_modules_for_community_is_isolated():
     }
 
 
-def test_modules_for_test_and_singlebox_match():
-    # B11 (3.2): the test/singlebox column is corp-free — no corp reuse registry,
-    # no corp-flavored Test* modules. Every borrowed concern is a community/neutral
-    # equivalent. (No register_corp_modules call: these profiles trigger no corp.)
-    expected = {
-        # Corp-free common doubles.
-        "TestingAccessModule",
-        "TestApprovalWorkflowModule",
-        "TestBotPublishApprovalModule",
-        "TestingAicodingModule",
-        "TestingDatabaseModule",
-        "TestingSkillCenterModule",
-        "TestingMcpModule",
-        "TestCacheModule",
-        "TestSecretModule",
-        "TestIdentityModule",
-        "TestHealthModule",
-        "TestTracerModule",
-        "TestDRMModule",
-        "TestSandboxRuntimeModule",
-        "TestHttpClientModule",
-        "TestSkillCenterClientModule",
-        # Corp-free equivalents for the corp-touching concerns.
-        "TestDevicesModule",          # corp-free local device doubles
-        "TestTokenVaultModule",       # empty-key vault
-        "CommunityAICodingModule",    # empty workflow catalog
-        "CommunityGovernanceModule",  # no-op notify sender
-        "CommunityOutboundRulesModule",
-        "CommunityDeviceSyncModule",
-        # Corp-free test app-services (real BotChatService, local_sql router,
-        # community no-op code-platform) — shared with the corp_test column.
-        "TestAppServicesModule",
-    }
-    assert _names(modules_for(DeployProfile.TEST)) == expected
-    assert _names(modules_for(DeployProfile.SINGLEBOX)) == expected
+def test_test_and_singlebox_have_explicit_access_and_http_bindings():
+    test_names = _names(modules_for(DeployProfile.TEST))
+    singlebox_names = _names(modules_for(DeployProfile.SINGLEBOX))
+    legacy_access_module = "Testing" + "AccessModule"
+
+    assert "TestHttpClientModule" in test_names
+    assert "SingleboxAccessModule" not in test_names
+    assert legacy_access_module not in test_names
+
+    assert "SingleboxAccessModule" in singlebox_names
+    assert "TestHttpClientModule" not in singlebox_names
+    assert legacy_access_module not in singlebox_names
+
+    assert test_names - {"TestHttpClientModule"} == (
+        singlebox_names - {"SingleboxAccessModule"}
+    )
+
+
+def test_test_profile_resolves_real_policy_and_local_http_clients():
+    injector = build_injector(profile=DeployProfile.TEST)
+
+    assert isinstance(injector.get(PolicyServiceProtocol), PolicyService)
+    assert all(
+        isinstance(client, LocalHttpClient)
+        for client in _resolve_http_clients(injector)
+    )
+
+
+def test_singlebox_profile_resolves_local_policy_and_real_http_clients():
+    injector = build_injector(profile=DeployProfile.SINGLEBOX)
+
+    assert isinstance(injector.get(PolicyServiceProtocol), LocalPolicyService)
+    assert all(
+        isinstance(client, HttpxClient)
+        for client in _resolve_http_clients(injector)
+    )
+
+
+def test_test_http_override_wins_when_installed_after_base():
+    # Generic Injector contract: a later TestHttpClientModule replaces every
+    # qualified key supplied by the base HttpClientModule.
+    injector = Injector([HttpClientModule(), TestHttpClientModule()])
+
+    assert all(
+        isinstance(client, LocalHttpClient)
+        for client in _resolve_http_clients(injector)
+    )

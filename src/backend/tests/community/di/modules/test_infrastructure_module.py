@@ -6,7 +6,8 @@
 注意：baas/bcn/general/masa http clients 是 profile-无关的，合并到中立的
 ``di/modules/http_client_module.py`` 的 ``HttpClientModule``（B9 收口 —— corp
 与 community 的 http-client module 无 profile-specific 依赖，故合一，装在 base
-module 列表；test/singlebox 由 ``TestHttpClientModule`` 覆盖）。
+module 列表；只有 test/corp_test 由 ``TestHttpClientModule`` 覆盖，singlebox
+刻意消费这个真实 HTTP client binding）。
 """
 from __future__ import annotations
 

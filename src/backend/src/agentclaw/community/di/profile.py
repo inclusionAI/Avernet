@@ -16,16 +16,18 @@ retired two-dimension model).
 | ``corp_test``| LOCAL stubs + corp doubles     | SQLite   |
 | ``community``| community implementations      | (own)    |
 
-``singlebox`` and ``test`` share the same corp-free module column; they differ
-only by the outbound BaaS HTTP target (real local service vs the pytest ``respx``
-mock), which is decided at test runtime, not by DI wiring.
+``singlebox`` and ``test`` share the same corp-free local doubles except for two
+explicit Profile-selected bindings: ``test`` keeps the base real policy service
+and overrides HTTP with no-network ``LocalHttpClient`` doubles, while
+``singlebox`` installs the all-open ``LocalPolicyService`` and deliberately
+consumes the base real HTTP clients for its local services.
 
-``corp_test`` is a **monorepo-only test profile**: the same LOCAL-stub doubles as
-``test`` plus the corp-flavored modules (the corp reuse column + the corp-flavored
-``Test*`` doubles, e.g. the MagicMock ARCA sandbox factory). It exists so the corp
-test suite (``tests/corp``) keeps its corp bindings while ``test``/``singlebox``
-ship corp-free. A community distribution never selects it (it has no ``tests/corp``
-and no ``agentclaw.corp``).
+``corp_test`` is a **monorepo-only test profile**: the same fixed no-network HTTP
+doubles and local stubs as ``test`` plus the corp-flavored modules (the corp reuse
+column + the corp-flavored ``Test*`` doubles, e.g. the MagicMock ARCA sandbox
+factory). It exists so the corp test suite (``tests/corp``) keeps its corp bindings
+while ``test``/``singlebox`` ship corp-free. A community distribution never selects
+it (it has no ``tests/corp`` and no ``agentclaw.corp``).
 
 The profile is selected by the ``DEPLOY_PROFILE`` env var and read **once**
 at the composition root. It is **mandatory** — an unset or unknown value is
