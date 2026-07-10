@@ -379,8 +379,7 @@ class GovernanceBotService:
                         governance_decision=notify_row.decision_at_create,
                         hit_dimensions=notify_row.triggered_dimensions,
                         expected_token_saving=notify_row.estimated_saving_tokens,
-                        saving_ratio=float(notify_row.saving_ratio)
-                        if notify_row.saving_ratio else None,
+                        saving_ratio=notify_row.saving_ratio,
                         action_taken=audit_action,
                         source="online_cron",
                         dry_run=0,
@@ -421,8 +420,7 @@ class GovernanceBotService:
                         governance_decision=notify_row.decision_at_create,
                         hit_dimensions=notify_row.triggered_dimensions,
                         expected_token_saving=notify_row.estimated_saving_tokens,
-                        saving_ratio=float(notify_row.saving_ratio)
-                        if notify_row.saving_ratio else None,
+                        saving_ratio=notify_row.saving_ratio,
                         action_taken=audit_action,
                         source="online_cron",
                         error_msg="Send failed" if not is_terminal
@@ -500,7 +498,7 @@ class GovernanceBotService:
                         hit_dimensions_count=ticket.hit_dimensions_count,
                         severity=ticket.severity,
                         estimated_saving_tokens=ticket.estimated_saving_tokens,
-                        saving_ratio=float(ticket.saving_ratio) if ticket.saving_ratio else None,
+                        saving_ratio=ticket.saving_ratio,
                         notification_md=notification_md,
                         notification_structured=ticket.notification_structured,
                     ),
@@ -525,8 +523,7 @@ class GovernanceBotService:
                     governance_decision=ticket.current_decision,
                     hit_dimensions=ticket.triggered_dimensions,
                     expected_token_saving=ticket.estimated_saving_tokens,
-                    saving_ratio=float(ticket.saving_ratio)
-                    if ticket.saving_ratio else None,
+                    saving_ratio=ticket.saving_ratio,
                     action_taken=AuditAction.REMIND_SCHEDULED,
                     source="online_cron",
                     dry_run=0,
@@ -576,8 +573,7 @@ class GovernanceBotService:
                     governance_decision=ticket.initial_decision,
                     hit_dimensions=ticket.triggered_dimensions,
                     expected_token_saving=ticket.estimated_saving_tokens,
-                    saving_ratio=float(ticket.saving_ratio)
-                    if ticket.saving_ratio else None,
+                    saving_ratio=ticket.saving_ratio,
                     action_taken=AuditAction.SCHEDULE_DUE,
                     source="online_cron",
                     dry_run=0,
@@ -639,8 +635,7 @@ class GovernanceBotService:
                     governance_decision=ticket.initial_decision,
                     hit_dimensions=ticket.triggered_dimensions,
                     expected_token_saving=ticket.estimated_saving_tokens,
-                    saving_ratio=float(ticket.saving_ratio)
-                    if ticket.saving_ratio else None,
+                    saving_ratio=ticket.saving_ratio,
                     action_taken=AuditAction.AUTO_SILENCE_CONVERGED,
                     source="online_cron",
                     dry_run=0,

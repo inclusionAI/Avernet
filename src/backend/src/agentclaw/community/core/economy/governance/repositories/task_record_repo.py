@@ -627,7 +627,7 @@ class TaskRecordRepository:
         current_decision: str | None = None,
         consecutive_normal_days: int = 0,
         last_decision_dt_version: str | None = None,
-        remind_at: datetime | None | object = None,
+        remind_at: datetime | None | object = "",
     ) -> bool:
         """Refresh ticket snapshot from offline batch (aligned with Protocol).
 
@@ -681,7 +681,12 @@ class TaskRecordRepository:
                 db_ticket.consecutive_normal_days = consecutive_normal_days
             if last_decision_dt_version is not None:
                 db_ticket.last_decision_dt_version = last_decision_dt_version
-            if remind_at is not None and remind_at != "":
+            # Sentinel: "" = don't touch (default), datetime = set, None = clear.
+            # `if remind_at != ""` lets None through (None != "" is True) so the
+            # branch assigns db_ticket.remind_at = None → clears it. The previous
+            # `is not None` guard blocked None, making the "None = clear" sentinel
+            # documented in record_process_service impossible to apply.
+            if remind_at != "":
                 db_ticket.remind_at = remind_at
 
             try:
