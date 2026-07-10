@@ -225,6 +225,8 @@ def _load_jsonl_keys(path: Path) -> list[str]:
             item = json.loads(line)
         except json.JSONDecodeError as exc:
             raise ValueError(f"invalid JSONL at {path}:{line_number}: {exc}") from exc
+        if not isinstance(item, dict):
+            continue
         key = item.get("key")
         if isinstance(key, str):
             keys.append(key)

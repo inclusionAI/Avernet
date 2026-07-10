@@ -10,6 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from singlebox_coverage_report import (  # noqa: E402
+    _load_jsonl_keys,
     build_module_report,
     update_report_artifacts,
     validate_thresholds,
@@ -191,3 +192,22 @@ def test_update_report_artifacts_marks_threshold_failure(tmp_path: Path):
     summary = json.loads((report_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary["status"] == "failed"
     assert summary["threshold_errors"] == errors
+
+
+def test_load_jsonl_keys_ignores_non_object_json_values(tmp_path: Path):
+    hits_path = tmp_path / "hits.jsonl"
+    hits_path.write_text(
+        '\n'.join(
+            [
+                '{"key": "GET /api/v1/devices"}',
+                '["not", "an", "object"]',
+                'null',
+                '"plain string"',
+                '{"key": 42}',
+            ]
+        )
+        + '\n',
+        encoding="utf-8",
+    )
+
+    assert _load_jsonl_keys(hits_path) == ["GET /api/v1/devices"]

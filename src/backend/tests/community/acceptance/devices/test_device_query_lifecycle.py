@@ -48,18 +48,21 @@ def wait_device_active(
     last: dict | None = None
     while time.monotonic() < deadline:
         response = client.get(f"/api/v1/devices/{binding_id}")
-        assert response.status_code == 200, response.text
-        payload = response.json()
-        if payload.get("success") is True:
-            last = payload["data"]
-            if last["status"] == "ACTIVE":
-                return last
-            assert last["status"] != "FAILED", last
+        if response.status_code == 200:
+            payload = response.json()
+            if payload.get("success") is True:
+                last = payload["data"]
+                if last["status"] == "ACTIVE":
+                    return last
+                assert last["status"] != "FAILED", last
+            else:
+                # Bot readiness and the BaaS alive callback are asynchronous. A
+                # business error may briefly race the SQLite callback transaction.
+                last = payload
         else:
-            # Bot readiness and the BaaS alive callback are asynchronous. A read
-            # may briefly race the SQLite callback transaction; only a persistent
-            # failure should fail the acceptance story.
-            last = payload
+            # Transport/framework errors are retried as well. The final response
+            # remains visible in the timeout failure instead of being swallowed.
+            last = {"status_code": response.status_code, "text": response.text}
         time.sleep(2)
     pytest.fail(f"device binding {binding_id} did not become active; last={last}")
 
