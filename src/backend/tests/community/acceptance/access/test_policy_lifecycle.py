@@ -1,13 +1,14 @@
-"""Route-B acceptance: access full whitelist + user CRUD lifecycle.
+"""Route-B acceptance: singlebox local-policy + user CRUD lifecycle.
 
 Starts a real singlebox backend (in-memory SQLite via local_setup.sh),
-runs ACCESS_LIFECYCLE_FLOWS end-to-end through httpx, then independently
-re-reads the access endpoints to assert the DB state matches a baseline.
+runs the LocalPolicyService user story through httpx, then independently
+re-reads the access endpoints to assert the observable state matches a
+baseline.
 
-access has NO filesystem artifacts (pure SQLite rows), so the baseline is a
-JSON snapshot of the observable DB state via the GET endpoints, not a tree
-file. The baseline is in git; any change to "what's persisted by the
-lifecycle" must update the baseline explicitly.
+The singlebox policy binding is all-open and its allow/disallow writes are
+no-ops. The user CRUD flow still executes against the real SQLite-backed
+UserService. The baseline therefore documents LocalPolicy no-op behavior plus
+user CRUD, not an ``ac_access_control_policy`` SQLite row.
 
 Off by default; enable with RUN_ACCEPTANCE=1.
 """
@@ -23,29 +24,34 @@ from tests.community._flows.access.api_lifecycle import ACCESS_LIFECYCLE_FLOWS
 from tests.community.framework.flow_runner_live import run_flow_live
 
 BASELINE_PATH = Path(__file__).parent / "baseline_policy_lifecycle.json"
+HEADERS = {"x-user-id": "e2e_user"}
+
+
+def _run_local_policy_noop_lifecycle(client: httpx.Client) -> dict:
+    """Exercise the all-open LocalPolicyService bound by the singlebox profile."""
+    for path, body in (
+        ("/api/v1/access/check", None),
+        ("/api/v1/access/allow", {"entity_id": "e2e_user", "entity_type": "staff"}),
+        ("/api/v1/access/check", None),
+        ("/api/v1/access/disallow", {"entity_id": "e2e_user", "entity_type": "staff"}),
+        ("/api/v1/access/check", None),
+    ):
+        response = client.get(path) if body is None else client.post(path, json=body)
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["success"] is True, payload
+        if body is None:
+            assert payload["data"]["label"] == 1, payload
+            assert payload["data"]["staffNo"] == "e2e_user", payload
+
+    return payload
 
 
 @pytest.mark.acceptance
-def test_access_whitelist_lifecycle_live(live_backend, acceptance_fs_root):
-    """Run whitelist-lifecycle against real backend, then assert DB state."""
-    flow = next(c for c in ACCESS_LIFECYCLE_FLOWS if c.name == "access-whitelist-lifecycle")
-    ctx = run_flow_live(
-        flow, base_url=live_backend, fs_root=acceptance_fs_root,
-        default_headers={"x-user-id": "e2e_user"},
-    )
-    assert "allowed_entity" in ctx
-
-    # Independent re-read: the lifecycle ends with disallow, so /check must
-    # still report deny — proves the disallow persisted to the live SQLite
-    # and isn't just a per-request fake.
-    with httpx.Client(
-        base_url=live_backend,
-        headers={"x-user-id": "e2e_user"},
-        timeout=10.0,
-    ) as client:
-        check_resp = client.get("/api/v1/access/check")
-        assert check_resp.status_code == 200
-        assert check_resp.json()["data"]["label"] == 0
+def test_access_local_policy_noop_lifecycle_live(live_backend):
+    """Singlebox remains open before and after allow/disallow commands."""
+    with httpx.Client(base_url=live_backend, headers=HEADERS, timeout=10.0) as client:
+        _run_local_policy_noop_lifecycle(client)
 
 
 @pytest.mark.acceptance
@@ -54,7 +60,7 @@ def test_access_user_crud_lifecycle_live(live_backend, acceptance_fs_root):
     flow = next(c for c in ACCESS_LIFECYCLE_FLOWS if c.name == "access-user-crud-lifecycle")
     ctx = run_flow_live(
         flow, base_url=live_backend, fs_root=acceptance_fs_root,
-        default_headers={"x-user-id": "e2e_user"},
+        default_headers=HEADERS,
     )
     assert ctx["created_user_id"] == "u_e2e_001"
 
@@ -70,28 +76,29 @@ def test_access_user_crud_lifecycle_live(live_backend, acceptance_fs_root):
 
 @pytest.mark.acceptance
 def test_access_lifecycle_baseline(live_backend, acceptance_fs_root):
-    """Run both lifecycles, dump observable DB state, compare to baseline.
+    """Pin LocalPolicy no-op and user CRUD observable state to the baseline.
 
-    Physical-artifact analogue for a module without filesystem artifacts:
-    the baseline JSON pins exactly what's observable via the public API after
-    the lifecycle. Any change to lifecycle semantics must update the baseline.
+    This is deliberately not a policy-row persistence assertion: singlebox
+    binds LocalPolicyService, which is all-open and makes writes no-ops.
 
     First-run capture mode: if baseline doesn't exist or is empty, write the
     current snapshot and SKIP the comparison (with a message). Reviewer
     commits the baseline; next run does the real diff.
     """
-    for case_name in ("access-whitelist-lifecycle", "access-user-crud-lifecycle"):
-        case = next(c for c in ACCESS_LIFECYCLE_FLOWS if c.name == case_name)
-        run_flow_live(
-            case, base_url=live_backend, fs_root=acceptance_fs_root,
-            default_headers={"x-user-id": "e2e_user"},
-        )
+    with httpx.Client(base_url=live_backend, headers=HEADERS, timeout=10.0) as client:
+        _run_local_policy_noop_lifecycle(client)
+
+    case = next(c for c in ACCESS_LIFECYCLE_FLOWS if c.name == "access-user-crud-lifecycle")
+    run_flow_live(
+        case, base_url=live_backend, fs_root=acceptance_fs_root,
+        default_headers=HEADERS,
+    )
 
     # Dump observable state via GET endpoints (not direct DB — keeps the
     # baseline at the public-API contract level, which is what we ship).
     with httpx.Client(
         base_url=live_backend,
-        headers={"x-user-id": "e2e_user"},
+        headers=HEADERS,
         timeout=10.0,
     ) as client:
         check = client.get("/api/v1/access/check").json()
@@ -107,7 +114,7 @@ def test_access_lifecycle_baseline(live_backend, acceptance_fs_root):
             {"userId": u["userId"], "userType": u["userType"], "status": u["status"]}
             for u in users["data"]
         ],
-        "quota_no_seed": {
+        "quota_local_unlimited": {
             "quota": quota["data"]["quota"],
             "totalLimit": quota["data"]["totalLimit"],
             "activeCount": quota["data"]["activeCount"],

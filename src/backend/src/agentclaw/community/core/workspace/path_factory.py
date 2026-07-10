@@ -128,15 +128,20 @@ def _get_aidesktop_root() -> Path:
     return _get_config_value("aidesktop_root", DEFAULT_AIDESKTOP_ROOT, "AIDESKTOP_ROOT")
 
 
-def _get_aidesktop_env() -> str:
-    """读取当前环境名（dev/pre/prod 等）。"""
+def _get_aidesktop_env_folder() -> str:
+    """Return the physical workspace folder selected by the active Profile."""
+    explicit = os.getenv("WORKSPACE_ENV_FOLDER")
+    if explicit:
+        return explicit
+
     from agentclaw.community.utils.env_utils import get_current_env
-    return get_current_env()
+
+    return f"aidesktop_{get_current_env()}"
 
 
 def get_bolt_base_dir() -> Path:
     """bolt_data 根目录: {aidesktop_root}/aidesktop_{env}/bolt_data"""
-    return _get_aidesktop_root() / f"aidesktop_{_get_aidesktop_env()}" / "bolt_data"
+    return _get_aidesktop_root() / _get_aidesktop_env_folder() / "bolt_data"
 
 
 def get_bolt_shared_dir() -> Path:
@@ -145,7 +150,7 @@ def get_bolt_shared_dir() -> Path:
     dir_name 可被 yaml user_config.git_sync.bolt_shared_dir_name 覆盖，默认 "bolt_shared"。
     """
     aidesktop_root = _get_aidesktop_root()
-    aidesktop_env = _get_aidesktop_env()
+    aidesktop_env_folder = _get_aidesktop_env_folder()
     dir_name = "bolt_shared"
 
     try:
@@ -175,7 +180,7 @@ def get_bolt_shared_dir() -> Path:
     except Exception as e:
         logger.warning(f"[get_bolt_shared_dir] Error reading config: {e}")
 
-    return aidesktop_root / f"aidesktop_{aidesktop_env}" / dir_name
+    return aidesktop_root / aidesktop_env_folder / dir_name
 
 
 def get_global_skills_repo_dir() -> Path:
@@ -235,8 +240,10 @@ def get_bot_nas_storage_id(
     注意：返回值不包含 DEFAULT_ARCA_ROOT 前缀，是相对于 NAS 根目录的路径。
     调用方如需完整绝对路径，需自行拼接 DEFAULT_ARCA_ROOT。
     """
-    current_env = _get_aidesktop_env()
-    return f"{current_env}_{entity_type}_{entity_id}_{engine_type}_{bot_id}"
+    from agentclaw.community.utils.env_utils import get_current_env
+
+    data_env = get_current_env()
+    return f"{data_env}_{entity_type}_{entity_id}_{engine_type}_{bot_id}"
 
 
 def get_entity_identity_dir(

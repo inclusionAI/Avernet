@@ -14,9 +14,41 @@ def _factory():
 def test_get_bolt_base_dir_structure():
     from agentclaw.community.core.workspace.path_factory import get_bolt_base_dir
     with patch("agentclaw.community.core.workspace.path_factory._get_aidesktop_root", return_value=Path("/aidesktop")):
-        with patch("agentclaw.community.core.workspace.path_factory._get_aidesktop_env", return_value="dev"):
+        with patch("agentclaw.community.core.workspace.path_factory._get_aidesktop_env_folder", return_value="aidesktop_dev"):
             result = get_bolt_base_dir()
             assert result == Path("/aidesktop/aidesktop_dev/bolt_data")
+
+
+def test_singlebox_workspace_folder_is_profile_field(monkeypatch, tmp_path):
+    from agentclaw.community.core.workspace.path_factory import get_bolt_base_dir
+
+    monkeypatch.setenv("AIDESKTOP_ROOT", str(tmp_path))
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    monkeypatch.setenv("WORKSPACE_ENV_FOLDER", "aidesktop_singlebox")
+
+    assert get_bolt_base_dir() == tmp_path / "aidesktop_singlebox" / "bolt_data"
+
+
+def test_workspace_folder_defaults_to_data_env(monkeypatch, tmp_path):
+    from agentclaw.community.core.workspace.path_factory import get_bolt_base_dir
+
+    monkeypatch.setenv("AIDESKTOP_ROOT", str(tmp_path))
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    monkeypatch.delenv("WORKSPACE_ENV_FOLDER", raising=False)
+
+    assert get_bolt_base_dir() == tmp_path / "aidesktop_dev" / "bolt_data"
+
+
+def test_nas_storage_id_uses_data_env_not_workspace_folder(monkeypatch):
+    from agentclaw.community.core.workspace.path_factory import get_bot_nas_storage_id
+
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    monkeypatch.setenv("WORKSPACE_ENV_FOLDER", "aidesktop_singlebox")
+
+    assert (
+        get_bot_nas_storage_id("user123", "bot456", "openclaw")
+        == "dev_staff_user123_openclaw_bot456"
+    )
 
 
 def test_get_bot_dir_structure():

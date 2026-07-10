@@ -1,7 +1,7 @@
 """Route-B acceptance: bot_management read-only query lifecycle on live backend.
 
-Starts a real singlebox backend, runs the 3 read-only flows + asserts no-data
-state matches baseline.
+Starts a real singlebox backend, retains the check-name/get-missing flows, and
+asserts an isolated user scope is empty.
 
 bot_management is the largest module (30+ HTTP endpoints, 3000+ line BotService).
 Single box covers ONLY the LOCAL-reachable core CRUD read paths backed by the
@@ -10,8 +10,8 @@ half-baked) and 4 external-dep paths (BCN onboard / DIMA workspace / downstream
 sync ECB+BCSFuse / DataInitService cold-start) are NOT exercised — see
 findings/bot_management-external-deps-unmocked.md.
 
-Acceptance covers the empty/no-data contract:
-  - list returns empty {total: 0, items: []}
+Acceptance covers the scoped empty/no-data contract:
+  - one dedicated user scope returns empty {total: 0, items: []}
   - check-name with non-existent name → available (exists=False)
   - get missing bot_id → success=False, error_code=404
 
@@ -29,18 +29,30 @@ from tests.community._flows.bot_management.api_lifecycle import BOT_MANAGEMENT_L
 from tests.community.framework.flow_runner_live import run_flow_live
 
 BASELINE_PATH = Path(__file__).parent / "baseline_bot_query.json"
-HEADERS = {"x-user-id": "e2e_user"}
+SCOPED_USER_ID = "acceptance_bot_query_user"
+HEADERS = {"x-user-id": SCOPED_USER_ID}
+SCOPED_LIST_PARAMS = {
+    "entity_id": SCOPED_USER_ID,
+    "entity_type": "staff",
+    "page": 1,
+    "page_size": 20,
+}
+
+
+def _list_scoped_bots(client: httpx.Client) -> dict:
+    response = client.get("/api/bots", params=SCOPED_LIST_PARAMS)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["success"] is True, payload
+    return payload
 
 
 @pytest.mark.acceptance
-def test_bot_management_list_empty_live(live_backend, acceptance_fs_root):
-    """List empty on a fresh LOCAL backend with no bots seeded."""
-    flow = next(c for c in BOT_MANAGEMENT_LIFECYCLE_FLOWS if c.name == "bot_management-list-empty")
-    ctx = run_flow_live(
-        flow, base_url=live_backend, fs_root=acceptance_fs_root,
-        default_headers=HEADERS,
-    )
-    assert ctx is not None
+def test_bot_management_list_empty_live(live_backend):
+    """List is empty in a dedicated user/entity scope despite seeded live bots."""
+    with httpx.Client(base_url=live_backend, headers=HEADERS, timeout=10.0) as client:
+        payload = _list_scoped_bots(client)
+    assert payload["data"] == {"total": 0, "items": []}
 
 
 @pytest.mark.acceptance
@@ -67,12 +79,12 @@ def test_bot_management_get_missing_live(live_backend, acceptance_fs_root):
 
 @pytest.mark.acceptance
 def test_bot_management_lifecycle_baseline(live_backend, acceptance_fs_root):
-    """Pin LOCAL no-seed observable state to JSON baseline.
+    """Pin isolated user-scope observable state to JSON baseline.
 
     First-run captures + skips; subsequent runs diff with full equality.
     """
     with httpx.Client(base_url=live_backend, headers=HEADERS, timeout=10.0) as client:
-        list_resp = client.get("/api/bots").json()
+        list_resp = _list_scoped_bots(client)
         check_resp = client.get("/api/bots/check/name?bot_name=NonExistent_Baseline_Bot").json()
         get_missing_resp = client.get("/api/bots/bot_baseline_missing").json()
 

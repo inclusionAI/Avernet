@@ -7,8 +7,9 @@ disk here, so — unlike the ocb-monorepo dist-builder — there is no staging s
 and no need to strip a monorepo ``src`` from ``sys.path``. This script runs the
 three checks directly against this checkout:
 
-  1. **boot** — import ``agentclaw.community`` + build the community-profile
-     injector; assert ``agentclaw.corp`` is unimportable.
+  1. **boot** — import the HTTP composition root (including legacy Env validation,
+     config-provider registration, and injector build); assert ``agentclaw.corp``
+     is unimportable.
   2. **packaging** — the community ``pyproject`` + ``uv.lock`` resolve
      standalone (``uv lock --locked``).
   3. **pytest** — run the whole community suite
@@ -38,11 +39,8 @@ assert importlib.util.find_spec('agentclaw.corp') is None, \\
     'agentclaw.corp is importable — this is not a corp-absent community tree'
 import agentclaw                       # PEP 420 namespace (community child only)
 import agentclaw.community.log         # noqa: F401
-import agentclaw.community.main        # noqa: F401
-from injector import Injector
-from agentclaw.community.di.profile import DeployProfile
-from agentclaw.community.di.profile_modules import modules_for
-assert Injector(modules_for(DeployProfile.COMMUNITY)) is not None
+from agentclaw.community.adapters.http import app as http_app
+assert http_app.injector is not None
 print('COMMUNITY_BOOT_OK')
 """
 
@@ -57,7 +55,9 @@ def _run(argv: list[str], env: dict, timeout: int) -> tuple[int, str]:
 def verify_boot() -> tuple[bool, str]:
     env = dict(os.environ)
     env["DEPLOY_PROFILE"] = "community"
-    env.setdefault("SERVER_ENV", "singlebox")
+    env["SERVER_ENV"] = "dev"
+    env.pop("REAL_SERVER_ENV", None)
+    env.pop("ALIPAY_APP_ENV", None)
     env["PYTHONPATH"] = str(_SRC)
     rc, out = _run([sys.executable, "-c", _BOOT_PROOF], env, timeout=120)
     return rc == 0 and "COMMUNITY_BOOT_OK" in out, out

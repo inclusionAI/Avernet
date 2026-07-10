@@ -36,7 +36,31 @@ a hard error, never a silent default.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from enum import Enum
+
+
+_SERVER_ENV_KEYS = ("SERVER_ENV", "REAL_SERVER_ENV", "ALIPAY_APP_ENV")
+_RETIRED_SERVER_ENV_VALUES = frozenset({"singlebox"})
+
+
+def validate_deploy_environment(
+    source: Mapping[str, str] | None = None,
+) -> None:
+    """Reject the retired singlebox value on the runtime/data Env axis."""
+    values = os.environ if source is None else source
+    retired_keys = [
+        key
+        for key in _SERVER_ENV_KEYS
+        if values.get(key, "").strip().lower() in _RETIRED_SERVER_ENV_VALUES
+    ]
+    if retired_keys:
+        keys = ", ".join(retired_keys)
+        raise RuntimeError(
+            f"Retired runtime Env value 'singlebox' found in {keys}; "
+            "clear the retired environment variable(s) before launch. "
+            "launch singlebox with DEPLOY_PROFILE=singlebox SERVER_ENV=dev"
+        )
 
 
 class DeployProfile(Enum):

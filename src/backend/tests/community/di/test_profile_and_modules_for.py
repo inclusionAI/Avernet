@@ -17,7 +17,7 @@ from agentclaw.community.di.modules.http_client_module import HttpClientModule
 from agentclaw.community.di.modules.infrastructure.test.http_client import (
     TestHttpClientModule,
 )
-from agentclaw.community.di.profile import DeployProfile
+from agentclaw.community.di.profile import DeployProfile, validate_deploy_environment
 from agentclaw.community.di.profile_modules import modules_for
 from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_BAAS,
@@ -79,6 +79,48 @@ def test_detect_raises_on_unknown(monkeypatch):
 def test_detect_parses_value(monkeypatch, raw, expected):
     monkeypatch.setenv("DEPLOY_PROFILE", raw)
     assert DeployProfile.detect() is expected
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["SERVER_ENV", "REAL_SERVER_ENV", "ALIPAY_APP_ENV"],
+)
+def test_legacy_singlebox_env_is_rejected(key):
+    with pytest.raises(
+        RuntimeError, match="DEPLOY_PROFILE=singlebox SERVER_ENV=dev"
+    ):
+        validate_deploy_environment({key: "singlebox"})
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        {"SERVER_ENV": "dev", "REAL_SERVER_ENV": "singlebox"},
+        {"SERVER_ENV": "dev", "ALIPAY_APP_ENV": "singlebox"},
+    ],
+)
+def test_legacy_singlebox_env_names_each_violating_key_and_cleanup(source):
+    with pytest.raises(RuntimeError) as error:
+        validate_deploy_environment(source)
+
+    message = str(error.value)
+    assert "REAL_SERVER_ENV" in message or "ALIPAY_APP_ENV" in message
+    assert "clear the retired environment variable" in message
+    assert "DEPLOY_PROFILE=singlebox SERVER_ENV=dev" in message
+
+
+def test_legacy_singlebox_env_lists_all_violating_keys():
+    with pytest.raises(RuntimeError) as error:
+        validate_deploy_environment(
+            {"SERVER_ENV": "singlebox", "ALIPAY_APP_ENV": "singlebox"}
+        )
+
+    message = str(error.value)
+    assert "SERVER_ENV, ALIPAY_APP_ENV" in message
+
+
+def test_dev_env_is_accepted():
+    validate_deploy_environment({"SERVER_ENV": "dev"})
 
 
 def test_modules_for_community_is_isolated():

@@ -153,6 +153,19 @@ test_ready_banner_describes_full_stack() {
     fail "ready banner should include demo bot and frontend"
 }
 
+test_backend_separates_profile_env_and_workspace_folder() {
+  local start_body
+  start_body="$(sed -n '/^backend_start()/,/^backend_wait_until_ready()/p' "${ROOT}/scripts/modules/backend.sh")"
+
+  grep -F 'SERVER_ENV=dev DEPLOY_PROFILE=singlebox' <<<"$start_body" >/dev/null || \
+    fail "singlebox backend should launch with SERVER_ENV=dev and DEPLOY_PROFILE=singlebox"
+  grep -F 'WORKSPACE_ENV_FOLDER=aidesktop_singlebox' <<<"$start_body" >/dev/null || \
+    fail "singlebox backend should preserve the isolated aidesktop_singlebox folder"
+  if grep -F 'SERVER_ENV=singlebox' <<<"$start_body" >/dev/null; then
+    fail "backend startup must not use singlebox as a data Env"
+  fi
+}
+
 test_all_start_rolls_back_started_services_on_failure
 test_backend_health_failure_stops_backend
 test_backend_wait_fails_when_started_process_exits
@@ -161,5 +174,6 @@ test_service_starts_fail_when_ports_remain_occupied
 test_baas_stop_does_not_delegate_to_app_stop
 test_5bot_openclaw_config_is_written_private
 test_ready_banner_describes_full_stack
+test_backend_separates_profile_env_and_workspace_folder
 
 printf 'PASS: singlebox service guard tests\n'
