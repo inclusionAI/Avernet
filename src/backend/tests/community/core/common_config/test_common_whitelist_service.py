@@ -235,18 +235,15 @@ def test_get_owner_ids_normalizes_deduplicates_and_drops_blanks():
         param_code="protected_owner_ids",
         env="prod",
     ) == frozenset({"100001", "100002"})
-    assert config.calls == [
-        {
-            "business_code": "bot_dormant",
-            "param_code": "protected_owner_ids",
-            "env": "prod",
-            "default": None,
-            "only_enabled": True,
-        }
-    ]
+    assert len(config.calls) == 1
+    assert config.calls[0]["business_code"] == "bot_dormant"
+    assert config.calls[0]["param_code"] == "protected_owner_ids"
+    assert config.calls[0]["env"] == "prod"
+    assert config.calls[0]["only_enabled"] is True
+    assert config.calls[0]["default"] is not None
 
 
-def test_get_owner_ids_returns_empty_set_when_config_is_missing_or_disabled():
+def test_get_owner_ids_returns_empty_set_when_config_is_missing():
     service = CommonWhiteListService(FakeCommonConfigService())
 
     assert service.get_owner_ids(
@@ -254,6 +251,38 @@ def test_get_owner_ids_returns_empty_set_when_config_is_missing_or_disabled():
         param_code="protected_owner_ids",
         env="pre",
     ) == frozenset()
+
+
+def test_get_owner_ids_returns_empty_set_when_config_is_disabled():
+    config = FakeCommonConfigService()
+    config.get_value = lambda **kwargs: kwargs["default"]
+    service = CommonWhiteListService(config)
+
+    assert service.get_owner_ids(
+        business_code="bot_dormant",
+        param_code="protected_owner_ids",
+        env="pre",
+    ) == frozenset()
+
+
+@pytest.mark.parametrize("value", [None], ids=["enabled_top_level_null"])
+def test_get_owner_ids_rejects_enabled_top_level_null(value, caplog):
+    caplog.set_level("ERROR")
+    service = CommonWhiteListService(
+        FakeCommonConfigService(
+            {("bot_dormant", "protected_owner_ids", "prod"): value}
+        )
+    )
+
+    with pytest.raises(ValueError, match="protected owner IDs must be a list"):
+        service.get_owner_ids(
+            business_code="bot_dormant",
+            param_code="protected_owner_ids",
+            env="prod",
+        )
+
+    assert "value_type=NoneType" in caplog.text
+    assert "owner1" not in caplog.text
 
 
 @pytest.mark.parametrize("invalid_item", [True, {}, []])

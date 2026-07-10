@@ -14,6 +14,7 @@ from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
+_MISSING_OWNER_IDS = object()
 
 
 class CommonWhiteListService:
@@ -81,7 +82,7 @@ class CommonWhiteListService:
                 business_code=business_code,
                 param_code=param_code,
                 env=env,
-                default=None,
+                default=_MISSING_OWNER_IDS,
                 only_enabled=True,
             )
         except Exception:
@@ -93,7 +94,7 @@ class CommonWhiteListService:
                 env,
             )
             raise
-        if value is None:
+        if value is _MISSING_OWNER_IDS:
             return frozenset()
         if not isinstance(value, list):
             logger.error(

@@ -31,6 +31,8 @@ from agentclaw.community.core.bot_dormant.baas_client import (
     BaasDormantClient,
 )
 from agentclaw.community.core.common_config import CommonWhiteListService
+from agentclaw.community.core.common_config.models import CommonConfigRecord
+from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.bot_dormant.ops_service import DormantOpsService
 from agentclaw.community.core.bot_dormant.service import (
     Candidate,
@@ -89,6 +91,28 @@ class FakeDB:
 
     def session(self):
         return self.orm_session()
+
+
+class OwnerConfigRepository:
+    """Return one enabled owner-protection record with its raw stored value."""
+
+    def __init__(self, param_value: str | None) -> None:
+        self._record = CommonConfigRecord(
+            id=1,
+            business_code="bot_dormant",
+            business_name="沉寂 bot",
+            param_code="protected_owner_ids",
+            param_name="受保护 owner",
+            param_value=param_value,
+            enable="1",
+            ext_info=None,
+            env="prod",
+            gmt_create=None,
+            gmt_modified=None,
+        )
+
+    def get_by_biz_param(self, **_):
+        return self._record
 
 
 def _now() -> datetime:
@@ -301,6 +325,36 @@ def test_malformed_owner_config_aborts_before_downstream_calls():
     )
 
     with pytest.raises(ValueError, match="strings or integers"):
+        _run(service.process_run(dry_run=False))
+
+    baas.check_alive.assert_not_awaited()
+    bot_service.stop_bot.assert_not_called()
+    bot_service.update_status.assert_not_called()
+    passport.freeze_agent_passport.assert_not_called()
+    assert session.query(DormantCheckAudit).count() == 0
+    assert session.query(DormantNotifyLog).count() == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("raw_value", [None, "null"], ids=["sql_null", "json_null"])
+def test_top_level_null_owner_config_aborts_before_downstream_calls(raw_value):
+    session = _make_session()
+    _insert_bot_record(session, bot_id="bot1", owner_id="owner1")
+    baas = AsyncMock(spec=BaasDormantClient)
+    bot_service = MagicMock()
+    passport = MagicMock()
+    common_whitelist = CommonWhiteListService(
+        CommonConfigService(OwnerConfigRepository(raw_value))
+    )
+    service = _make_service(
+        session,
+        baas_client=baas,
+        bot_service=bot_service,
+        passport_plugin=passport,
+        common_whitelist_service=common_whitelist,
+    )
+
+    with pytest.raises(ValueError, match="protected owner IDs must be a list"):
         _run(service.process_run(dry_run=False))
 
     baas.check_alive.assert_not_awaited()
