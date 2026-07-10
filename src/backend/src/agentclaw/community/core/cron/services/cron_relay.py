@@ -575,16 +575,19 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         if bot_type != "service":
             return targets, failed_targets
 
-        # 服务 Bot 的 verify/online 从对应发布记录中读取 binding。
-        for runtime_stage, binding_key in (
-            (RUNTIME_STAGE_VERIFY, "verify"),
-            (RUNTIME_STAGE_ONLINE, "online"),
+        # 服务 Bot 的 verify/online 分别由验证中和发布成功记录提供 binding。
+        for runtime_stage, publish_status, binding_key in (
+            (RUNTIME_STAGE_VERIFY, PublishStatus.VALIDATING.value, "verify"),
+            (RUNTIME_STAGE_ONLINE, PublishStatus.SUCCESS.value, "online"),
         ):
             try:
-                publish_record = self._get_runtime_publish_record(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    runtime_stage=runtime_stage,
+                publish_record = (
+                    self._publish_repo.get_latest_by_source_bot_id_and_owner_and_status(
+                        source_bot_id=bot_id,
+                        owner_id=owner_id,
+                        status=publish_status,
+                        env=get_current_env(),
+                    )
                 )
             except Exception as e:
                 failed_targets.append(
@@ -629,41 +632,11 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
                     runtime_stage=runtime_stage,
                     binding_id=stage_binding_id,
                     publish_id=publish_id,
-                    publish_status=getattr(publish_record, "status", None),
+                    publish_status=getattr(publish_record, "status", publish_status),
                 )
             )
 
         return targets, failed_targets
-
-    def _get_runtime_publish_record(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        runtime_stage: str,
-    ) -> Any | None:
-        """获取运行态发布记录；verify 优先使用验证中版本，否则使用已发布版本。"""
-        publish_statuses = {
-            RUNTIME_STAGE_VERIFY: (
-                PublishStatus.VALIDATING.value,
-                PublishStatus.SUCCESS.value,
-            ),
-            RUNTIME_STAGE_ONLINE: (PublishStatus.SUCCESS.value,),
-        }[runtime_stage]
-
-        for publish_status in publish_statuses:
-            publish_record = (
-                self._publish_repo.get_latest_by_source_bot_id_and_owner_and_status(
-                    source_bot_id=bot_id,
-                    owner_id=owner_id,
-                    status=publish_status,
-                    env=get_current_env(),
-                )
-            )
-            if publish_record is not None:
-                return publish_record
-
-        return None
 
     def _resolve_published_runtime_target(
         self,
@@ -681,14 +654,15 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
                 error_code=400,
             )
 
-        binding_key = {
-            RUNTIME_STAGE_VERIFY: "verify",
-            RUNTIME_STAGE_ONLINE: "online",
+        publish_status, binding_key = {
+            RUNTIME_STAGE_VERIFY: (PublishStatus.VALIDATING.value, "verify"),
+            RUNTIME_STAGE_ONLINE: (PublishStatus.SUCCESS.value, "online"),
         }[runtime_stage]
-        publish_record = self._get_runtime_publish_record(
-            bot_id=bot_id,
+        publish_record = self._publish_repo.get_latest_by_source_bot_id_and_owner_and_status(
+            source_bot_id=bot_id,
             owner_id=owner_id,
-            runtime_stage=runtime_stage,
+            status=publish_status,
+            env=get_current_env(),
         )
         if publish_record is None:
             raise CronRelayError(
@@ -712,7 +686,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
             runtime_stage=runtime_stage,
             binding_id=binding_id,
             publish_id=getattr(publish_record, "id", None),
-            publish_status=getattr(publish_record, "status", None),
+            publish_status=getattr(publish_record, "status", publish_status),
         )
 
     def _validate_runtime_operation(
