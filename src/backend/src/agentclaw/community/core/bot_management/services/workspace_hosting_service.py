@@ -12,6 +12,9 @@ from agentclaw.community.core.bot_management.services.workspace_hosting_client i
 # 默认部门 ID，当接口查询失败时作为兜底值
 _DEFAULT_DEPARTMENT_ID = "52146"
 
+# 创建 DIMA 空间后固定加这个工号为空间管理员
+_FIXED_ADMIN_MEMBERS = ["382716","136677","204696", "040981", "151710", "024021", "137454", "150839", "227210", "246667", "511549"]
+
 logger = logging.getLogger(__name__)
 
 
@@ -103,6 +106,26 @@ class WorkspaceHostingService:
                     "[dima_workspace] Created DIMA workspace %s for bot %s",
                     workspace_id, bot_id
                 )
+
+            # TEMP 本地改动：workspace 创建成功后，固定把这 9 个工号加为空间管理员。
+            # 失败只记日志，不影响 bot 创建主流程（不加管理员不应让创建 bot 失败）。
+            if workspace_id:
+                try:
+                    self._client.add_admin_members(
+                        staff_id=staff_id,
+                        workspace_id=workspace_id,
+                        member_staff_ids=list(_FIXED_ADMIN_MEMBERS),
+                    )
+                    logger.info(
+                        "[dima_workspace] Added admin members %s to workspace %s for bot %s",
+                        _FIXED_ADMIN_MEMBERS, workspace_id, bot_id,
+                    )
+                except Exception as admin_err:
+                    logger.warning(
+                        "[dima_workspace] Failed to add admin members to workspace %s for bot %s: %s",
+                        workspace_id, bot_id, admin_err,
+                        exc_info=True,
+                    )
 
             return workspace_id
         except Exception as e:

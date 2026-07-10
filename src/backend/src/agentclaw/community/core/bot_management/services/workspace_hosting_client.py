@@ -272,6 +272,45 @@ class WorkspaceHostingClient:
             logger.error(f"[workspace_hosting_client] Failed to create workspace '{workspace_name}': {e}")
             raise
 
+    def add_admin_members(
+        self,
+        staff_id: str,
+        workspace_id: str,
+        member_staff_ids: list[str],
+    ) -> Dict[str, Any]:
+        """Add members as admins to a DIMA workspace (透传模式，临时本地改动).
+
+        调用 POST /arkcooprod/openapi/role/member/addMembers?staffId=xx，把固定工号
+        加入为空间管理员。body 形如::
+
+            {
+                "targetType": "WORKSPACE",
+                "targetId": "<workspace_id>",
+                "roleId": "ADMIN",
+                "memberStaffIds": ["382716", ...]
+            }
+
+        Args:
+            staff_id: 操作人工号 (query param staffId)
+            workspace_id: 空间 ID (作为 body targetId)
+            member_staff_ids: 要加为管理员的工号列表
+        """
+        logger.info(
+            "[workspace_hosting_client] Adding admin members: staff_id=%s, workspace_id=%s, members=%s",
+            staff_id, workspace_id, member_staff_ids,
+        )
+
+        path = "/arkcooprod/openapi/role/member/addMembers"
+        params = {"staffId": staff_id}
+        data = {
+            "targetType": "WORKSPACE",
+            "targetId": workspace_id,
+            "roleId": "ADMIN",
+            "memberStaffIds": member_staff_ids,
+        }
+
+        return self._make_request("POST", path, staff_id, data=data, params=params, allow_empty_data=True)
+
     def create_work_item(
         self,
         staff_id: str,
