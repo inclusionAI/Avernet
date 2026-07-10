@@ -116,6 +116,7 @@ def test_repository_manifest_registers_existing_coverage_modules_and_paths():
         "cron",
         "expert_chat",
         "harness",
+        "resources",
     ]
     for module_name in module_names:
         module = manifest["modules"][module_name]
