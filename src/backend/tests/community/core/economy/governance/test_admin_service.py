@@ -525,6 +525,16 @@ class TestListReviewTickets:
             {t.ticket_id for t in page2}
         )
 
+    def test_empty_statuses_means_no_result_not_default(self, session, engine):
+        """[] 显式表示无状态匹配 → 空结果,不得回落到全活跃态默认。"""
+        svc, _, _ = _build_svc(engine)
+        _make_task_record(session, ticket_id="t-1", governance_status="open")
+        _make_task_record(session, ticket_id="t-2", governance_status="closed")
+
+        tickets, total = svc.list_review_tickets([], limit=50)
+        assert total == 0
+        assert tickets == []
+
 
 class TestGetReviewTicketDetail:
     """get_review_ticket_detail: 单工单领域模型, 不存在返回 None。"""
