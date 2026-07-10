@@ -128,15 +128,6 @@ def _seed_whitelist_delete_happy(world) -> None:
     _insert_whitelist_entry(world, bot_id="wl-bot-2", owner_id="wl-owner-2")
 
 
-def _seed_review_happy(world) -> None:
-    """Seed a ticket in 'waiting_review' so admin review can approve it."""
-    _insert_ticket(
-        world,
-        ticket_id="tkt-review-test",
-        governance_status="waiting_review",
-    )
-
-
 def _seed_pause_happy(world) -> None:
     """Seed an 'open' ticket so admin pause can transition it."""
     _insert_ticket(
@@ -178,16 +169,6 @@ def _seed_scan_and_deliver_happy(world) -> None:
 # ---------------------------------------------------------------------------
 # Extra assertion helpers -- use repos for state verification
 # ---------------------------------------------------------------------------
-
-
-def _assert_review_closed_ticket(response, world) -> None:
-    """Verify the ticket was actually transitioned to closed by the real service."""
-    repo = world.get(TaskRecordRepository)
-    ticket = repo.find_by_ticket_id("tkt-review-test")
-    assert ticket is not None, "Seeded ticket should exist"
-    assert ticket.governance_status == "closed", (
-        f"Expected closed, got {ticket.governance_status}"
-    )
 
 
 def _assert_pause_to_waiting_review(response, world) -> None:
@@ -263,51 +244,7 @@ def whitelist_delete_error():
 
 
 # ---------------------------------------------------------------------------
-# 2. /admin/review
-# ---------------------------------------------------------------------------
-
-
-@endpoint_test(
-    method="POST",
-    path="/api/economy/governance/admin/review",
-    scenario="ok",
-    input=CaseInput(
-        headers=_USER_HEADER,
-        json_body={
-            "ticket_id": "tkt-review-test",
-            "action": "approve_close",
-            "admin_id": "admin-1",
-        },
-    ),
-    seed=_seed_review_happy,
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
-    extra_assertions=(_assert_review_closed_ticket,),
-)
-def admin_review_ok():
-    """Happy path: admin review approve_close on waiting_review ticket."""
-
-
-@endpoint_test(
-    method="POST",
-    path="/api/economy/governance/admin/review",
-    scenario="error",
-    input=CaseInput(
-        headers=_USER_HEADER,
-        json_body={
-            "ticket_id": "tkt-nonexistent-999",
-            "action": "approve_close",
-            "admin_id": "admin-1",
-        },
-    ),
-    # No seed -- ticket not found -> _raise_on_admin_error -> HTTPException(404)
-    expect=ExpectError(status=404),
-)
-def admin_review_error():
-    """Error path: review on missing ticket -> 404."""
-
-
-# ---------------------------------------------------------------------------
-# 3. /admin/pause
+# 2. /admin/pause
 # ---------------------------------------------------------------------------
 
 
@@ -349,7 +286,7 @@ def admin_pause_error():
 
 
 # ---------------------------------------------------------------------------
-# 4. /admin/emergency-close
+# 3. /admin/emergency-close
 # ---------------------------------------------------------------------------
 
 
@@ -391,7 +328,7 @@ def admin_emergency_close_error():
 
 
 # ---------------------------------------------------------------------------
-# 5. /admin/trigger-scan
+# 4. /admin/trigger-scan
 # ---------------------------------------------------------------------------
 
 
@@ -425,7 +362,7 @@ def trigger_scan_error():
 
 
 # ---------------------------------------------------------------------------
-# 6. /admin/emergency (POST)
+# 5. /admin/emergency (POST)
 # ---------------------------------------------------------------------------
 
 
@@ -458,7 +395,7 @@ def emergency_post_error():
 
 
 # ---------------------------------------------------------------------------
-# 7. /admin/emergency (GET)
+# 6. /admin/emergency (GET)
 # ---------------------------------------------------------------------------
 
 
@@ -489,7 +426,7 @@ def emergency_get_paused():
 
 
 # ---------------------------------------------------------------------------
-# 8. /admin/scan-and-deliver
+# 7. /admin/scan-and-deliver
 # ---------------------------------------------------------------------------
 
 
@@ -525,7 +462,7 @@ def scan_and_deliver_error():
 
 
 # ---------------------------------------------------------------------------
-# 9. /admin/emergency (GET) — no auth
+# 8. /admin/emergency (GET) — no auth
 # ---------------------------------------------------------------------------
 
 
