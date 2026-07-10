@@ -13,6 +13,7 @@ from unittest.mock import patch
 import pytest
 
 from agentclaw.community.adapters.http.bot_management.router import (
+    _build_bots_by_owner_or_collaborator_data,
     list_bots_by_owner_or_collaborator as list_bots_route,
 )
 from tests.community.factories.access import make_staff_user
@@ -161,6 +162,48 @@ def _assert_response_has_total_and_items(response, world):
 # ============================================================================
 
 
+def test_owner_or_collaborator_list_defaults_null_engine_types():
+    class BotServiceWithNullEngineTypes:
+        def list_bots_by_owner_or_collaborator(self, **kwargs):
+            return {
+                "total": 1,
+                "items": [
+                    {
+                        "bot_id": "bot-1",
+                        "entity_id": "entity-1",
+                        "entity_type": "staff",
+                        "engine_types": None,
+                        "active_engine": "openclaw",
+                    }
+                ],
+            }
+
+        def get_engine_paths(
+            self,
+            entity_id,
+            bot_id,
+            engine_types,
+            entity_type,
+        ):
+            return {
+                engine: f"/tmp/{bot_id}/{engine}"
+                for engine in engine_types
+            }
+
+    with patch(
+        "agentclaw.community.adapters.http.bot_management.router._get_engine_types",
+        return_value=["openclaw"],
+    ):
+        data = _build_bots_by_owner_or_collaborator_data(
+            owner_id="u",
+            bot_service=BotServiceWithNullEngineTypes(),
+        )
+
+    assert data["items"][0]["engine_paths"] == {
+        "openclaw": "/tmp/bot-1/openclaw"
+    }
+
+
 @pytest.mark.asyncio
 async def test_owner_or_collaborator_list_does_not_block_event_loop():
     release_path_build = threading.Event()
@@ -187,7 +230,6 @@ async def test_owner_or_collaborator_list_does_not_block_event_loop():
 
     loop = asyncio.get_running_loop()
     started = loop.time()
-    fallback_release.start()
     task = asyncio.create_task(
         list_bots_route(
             ctx=SimpleNamespace(user_id="u"),
@@ -195,13 +237,16 @@ async def test_owner_or_collaborator_list_does_not_block_event_loop():
         )
     )
 
-    await asyncio.sleep(0)
-    heartbeat_delay = loop.time() - started
-    release_path_build.set()
-    fallback_release.cancel()
-    response = await task
+    try:
+        fallback_release.start()
+        await asyncio.sleep(0)
+        heartbeat_delay = loop.time() - started
+        assert heartbeat_delay < 0.25
+    finally:
+        release_path_build.set()
+        fallback_release.cancel()
+        response = await task
 
-    assert heartbeat_delay < 0.25
     assert response.success is True
 
 

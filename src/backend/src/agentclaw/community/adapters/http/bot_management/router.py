@@ -1359,7 +1359,9 @@ def _build_bots_by_owner_or_collaborator_data(
         entity_id = bot.get("entity_id")
         entity_type = bot.get("entity_type", "staff")
         bot_id = str(bot.get("bot_id"))
-        bot_engine_types = bot.get("engine_types", engine_types)
+        bot_engine_types = bot.get("engine_types")
+        if bot_engine_types is None:
+            bot_engine_types = engine_types
         bot["engine_paths"] = bot_service.get_engine_paths(
             entity_id,
             bot_id,
