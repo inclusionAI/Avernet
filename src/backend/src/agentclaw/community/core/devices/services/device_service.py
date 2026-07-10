@@ -1295,6 +1295,16 @@ class DeviceService:
             f"{type(self).__name__} does not support multi-instance listing"
         )
 
+    def list_devices_by_runtime_binding(
+        self,
+        *,
+        binding_id: int,
+    ) -> list[str]:
+        """获取运行态路由设备列表。"""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support runtime device listing"
+        )
+
     def restart_device(
         self,
         *,
