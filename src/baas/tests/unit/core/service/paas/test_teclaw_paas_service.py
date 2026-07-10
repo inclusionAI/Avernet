@@ -405,6 +405,22 @@ class TestNotImplementedErrors:
         ):
             await service.list_instances({"limit": 10})
 
+    @pytest.mark.asyncio
+    async def test_pull_file_from_url_raises_not_implemented(self, service):
+        """pull_file_from_url raises NotImplementedError with TeClaw platform message."""
+        with pytest.raises(
+            NotImplementedError, match="File transfer not supported on TeClaw platform"
+        ):
+            await service.pull_file_from_url("bot-123", "http://src", "/dst")
+
+    @pytest.mark.asyncio
+    async def test_push_file_to_url_raises_not_implemented(self, service):
+        """push_file_to_url raises NotImplementedError with TeClaw platform message."""
+        with pytest.raises(
+            NotImplementedError, match="File transfer not supported on TeClaw platform"
+        ):
+            await service.push_file_to_url("bot-123", "/src", "http://dst")
+
 
 # ---------------------------------------------------------------------------
 # Test update_outbound_operation_rule
