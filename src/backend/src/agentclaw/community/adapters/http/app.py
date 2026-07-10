@@ -125,6 +125,7 @@ from agentclaw.community.adapters.http.desktop.router import bot_router as deskt
 from agentclaw.community.adapters.http.harness.router import router as harness_router  # noqa: E402
 from agentclaw.community.adapters.http.economy.router import router as economy_governance_router, internal_router as economy_governance_internal_router  # noqa: E402
 from agentclaw.community.adapters.http.economy.admin_router import admin_router as economy_governance_admin_router  # noqa: E402
+from agentclaw.community.adapters.http.economy.review_router import review_router as economy_governance_review_router  # noqa: E402
 from agentclaw.community.adapters.http.approvals.router import router as approvals_router  # noqa: E402
 from agentclaw.community.adapters.http.identity.router import router as identity_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding.router import router as aicoding_router  # noqa: E402
@@ -454,6 +455,7 @@ app.include_router(harness_router)
 app.include_router(economy_governance_router)
 app.include_router(economy_governance_internal_router)
 app.include_router(economy_governance_admin_router)
+app.include_router(economy_governance_review_router)
 app.include_router(enums_router)
 
 # Runtime-mode-conditional routers (bound by DI: empty in prod, populated
