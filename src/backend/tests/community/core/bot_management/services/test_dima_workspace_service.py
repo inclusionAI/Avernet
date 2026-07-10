@@ -17,6 +17,7 @@ from agentclaw.community.core.bot_management.services.workspace_hosting_client i
 from agentclaw.community.core.bot_management.services.workspace_hosting_service import (
     WorkspaceHostingService,
     _DEFAULT_DEPARTMENT_ID,
+    _FIXED_ADMIN_MEMBERS,
 )
 from agentclaw.community.di.config import WorkspaceHostingConfig
 
@@ -407,3 +408,154 @@ class TestCreateWorkspaceForBot:
 
         assert "ARK_RS_530013001" in str(exc_info.value)
         assert "已经被占用" in str(exc_info.value)
+
+
+
+# ── addMembers（临时本地改动）：新增管理员调用 ────────────────────────────
+
+
+class TestAddAdminMembersClient:
+    """WorkspaceHostingClient.add_admin_members：透传 addMembers 接口。"""
+
+    def test_add_admin_members_builds_admin_payload(self):
+        """verify body: targetType=WORKSPACE / targetId / roleId=ADMIN / memberStaffIds。
+        走 _make_request(POST)，固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定"""
+        client = _make_dima_client()
+        client._make_request = MagicMock(return_value={"success": True})
+
+        result = client.add_admin_members(
+            staff_id="100000",
+            workspace_id="WS001",
+            member_staff_ids=["382716", "040981"],
+        )
+
+        assert result == {"success": True}
+        client._make_request.assert_called_once()
+        args, kwargs = client._make_request.call_args
+        assert args[0] == "POST"
+        assert args[1] == "/arkcooprod/openapi/role/member/addMembers"
+        assert args[2] == "100000"  # staff_id
+        assert kwargs["params"] == {"staffId": "100000"}
+        assert kwargs["data"] == {
+            "targetType": "WORKSPACE",
+            "targetId": "WS001",
+            "roleId": "ADMIN",
+            "memberStaffIds": ["382716", "040981"],
+        }
+        assert kwargs["allow_empty_data"] is True
+
+    def test_add_admin_members_returns_make_request_result(self):
+        """透传 _make_request 返回值，不额外解析。"""
+        client = _make_dima_client()
+        client._make_request = MagicMock(return_value={"success": True, "code": "ARK_RS_100000200"})
+
+        result = client.add_admin_members(
+            staff_id="326018", workspace_id="W23001000283", member_staff_ids=["382716"],
+        )
+
+        assert result == {"success": True, "code": "ARK_RS_100000200"}
+
+    def test_add_admin_members_propagates_make_request_error(self):
+        """_make_request 抛异常时透传（由 service 层吞/抛）。"""
+        client = _make_dima_client()
+        client._make_request = MagicMock(side_effect=Exception("DIMA API error [ARK_RS_310011405]"))
+
+        with pytest.raises(Exception) as exc_info:
+            client.add_admin_members(
+                staff_id="100000", workspace_id="WS001", member_staff_ids=["382716"],
+            )
+
+        assert "ARK_RS_310011405" in str(exc_info.value)
+
+
+# ── create_workspace_for_bot：新增 add_admin_members 联动分支 ────────────────
+
+
+class TestCreateWorkspaceThenAddAdmins:
+    """workspace 创建成功后自动加固定管理员（临时本地改动）。"""
+
+    def test_calls_add_admin_members_with_fixed_members_after_creation(self):
+        """创建成功 → 用固定 9 工号调 add_admin_members，并返回 workspace_id。"""
+        client = _make_dima_client()
+        client.query_staff_department = MagicMock(return_value="D9999")
+        client.create_workspace = MagicMock(return_value={
+            "success": True, "data": {"workspaceId": "WS001"},
+        })
+        client.add_admin_members = MagicMock(return_value={"success": True})
+        svc = _make_workspace_service(client)
+
+        template_config = {}
+        result = svc.create_workspace_for_bot(
+            staff_id="100000", bot_id="bot_001", bot_name="TestBot",
+            template_config=template_config,
+        )
+
+        assert result == "WS001"
+        assert template_config["dima_space_id"] == "WS001"
+        client.add_admin_members.assert_called_once_with(
+            staff_id="100000",
+            workspace_id="WS001",
+            member_staff_ids=list(_FIXED_ADMIN_MEMBERS),
+        )
+
+    def test_fixed_admin_members_list(self):
+        """确认固定管理员列表内容与数量（与 service 常量保持一致）。"""
+        assert _FIXED_ADMIN_MEMBERS == [
+            "382716", "136677", "204696", "040981", "151710",
+            "024021", "137454", "150839", "227210", "246667", "511549",
+        ]
+        assert len(_FIXED_ADMIN_MEMBERS) == 11
+
+    def test_add_admin_members_failure_does_not_block_bot_creation(self):
+        """add_admin_members 失败（ADMIN 无权场景 ARK_RS_310011405）只记 warning，
+        仍正常返回 workspace_id（不加管理员不应让创建 bot 失败）。"""
+        client = _make_dima_client()
+        client.query_staff_department = MagicMock(return_value="D9999")
+        client.create_workspace = MagicMock(return_value={
+            "success": True, "data": {"workspaceId": "WS001"},
+        })
+        client.add_admin_members = MagicMock(side_effect=Exception(
+            "DIMA API error [ARK_RS_310011405]: 本操作【添加管理员】需要【空间管理员】方可进行"
+        ))
+        svc = _make_workspace_service(client)
+
+        template_config = {}
+        result = svc.create_workspace_for_bot(
+            staff_id="100000", bot_id="bot_001", bot_name="TestBot",
+            template_config=template_config,
+        )
+
+        # workspace 创建成功，dima_space_id 已落，加管理员失败不影响结果
+        assert result == "WS001"
+        assert template_config["dima_space_id"] == "WS001"
+        client.add_admin_members.assert_called_once()
+
+    def test_skips_add_admins_when_dima_space_id_already_exists(self):
+        """已有 dima_space_id 跳过创建时，也不调 add_admin_members。"""
+        client = _make_dima_client()
+        client.query_staff_department = MagicMock()
+        client.create_workspace = MagicMock()
+        client.add_admin_members = MagicMock()
+        svc = _make_workspace_service(client)
+
+        result = svc.create_workspace_for_bot(
+            staff_id="100000", bot_id="bot_004", bot_name="TestBot",
+            template_config={"dima_space_id": "EXISTING_WS"},
+        )
+
+        assert result == "EXISTING_WS"
+        client.add_admin_members.assert_not_called()
+
+    def test_skips_add_admins_when_no_workspace_id(self):
+        """create_workspace 未返回 workspace_id 时不调 add_admin_members。"""
+        client = _make_dima_client()
+        client.query_staff_department = MagicMock(return_value="D9999")
+        client.create_workspace = MagicMock(return_value={"success": True, "data": {}})
+        client.add_admin_members = MagicMock()
+        svc = _make_workspace_service(client)
+
+        svc.create_workspace_for_bot(
+            staff_id="100000", bot_id="bot_005", bot_name="TestBot",
+        )
+
+        client.add_admin_members.assert_not_called()
