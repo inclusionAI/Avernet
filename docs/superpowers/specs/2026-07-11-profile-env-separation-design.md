@@ -84,6 +84,10 @@ singlebox  -> local standalone plugins
 `singlebox` 是部署形态，不是数据环境。因此 singlebox 创建的 Device 记录、审计记录
 和其它环境字段统一写入 `dev`。
 
+物理工作目录不属于数据 Env。singlebox 继续通过 Profile 侧字段
+`WORKSPACE_ENV_FOLDER=aidesktop_singlebox` 使用独立目录；Backend 与 BAAS 必须消费
+同一个字段。这样数据分区是 `dev`，但本地文件不会与普通 dev 工作目录混用。
+
 ### 4.2 Composition Root
 
 启动链路在 Composition Root 完成以下步骤：
@@ -215,7 +219,9 @@ singlebox SQLite 数据是本地临时数据，因此已有 `env=singlebox` 数�
 `scripts/modules/backend.sh` 的 singlebox Backend 启动参数改为：
 
 ```bash
-DEPLOY_PROFILE=singlebox SERVER_ENV=dev
+DEPLOY_PROFILE=singlebox \
+SERVER_ENV=dev \
+WORKSPACE_ENV_FOLDER=aidesktop_singlebox
 ```
 
 所有 Backend 启动入口都在读取配置和构建 Injector 前检查 legacy 配置；无论使用
@@ -294,6 +300,7 @@ Env.from_string("singlebox")
   - 空白名单不会阻断本地用户。
   - Backend 真实访问本地 BAAS/BCS。
   - Device 创建、查询和持久化的 Env 为 `dev`。
+  - Backend 与 BAAS 均使用 `aidesktop_singlebox` 物理工作目录。
   - `application-singlebox.yaml` 仍被加载。
 - 停止并重新启动，确认没有依赖 legacy `SERVER_ENV=singlebox` 的隐藏路径。
 
