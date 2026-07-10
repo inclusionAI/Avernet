@@ -4,13 +4,15 @@ All admin/ops endpoints under ``/api/economy/governance/admin/*``:
 
   - /admin/records/delete           应急删除 (record_daily / notify_log)
   - /admin/whitelist/delete         删除白名单条目
-  - /admin/review                   审批审批单 (§7.5.2)
   - /admin/pause                    暂停审批单 (§7.5.1)
   - /admin/emergency-close          紧急关闭审批单 (§6.3)
   - /admin/trigger-scan             手动触发 cron tick (§7.3)
   - /admin/emergency (POST)         紧急制动 (pause/resume/bulk-whitelist/cancel-pending)
   - /admin/emergency (GET)          查询紧急状态
   - /admin/scan-and-deliver         扫描+投递 (指定收件人, 可 dry-run)
+
+审批能力(review)已迁出至 ``review_router``(见
+``/api/economy/governance/review/*``)。
 
 DB logic is fully delegated to :class:`GovernanceAdminService` — this router
 never opens ORM sessions or queries models directly.
@@ -26,15 +28,12 @@ from agentclaw.community.adapters.http.dependencies import RequestContext, get_r
 from agentclaw.community.adapters.http.economy.schemas import (
     AdminEmergencyCloseRequest,
     AdminPauseRequest,
-    AdminReviewRequest,
-    AdminReviewResponse,
     ApiResponse,
     EmergencyRequest,
     EmergencyStateResponse,
     RecordsDeleteRequest,
     WhitelistDeleteRequest,
 )
-from agentclaw.community.core.economy.governance.domain.enums import GovernanceStatus
 from agentclaw.community.api.governance_service import (
     GovernanceAdminServiceProtocol,
     GovernanceBotServiceProtocol,
@@ -165,35 +164,7 @@ async def delete_whitelist(
     return ApiResponse(success=True, data=results)
 
 
-# ── Admin: review / pause / emergency-close ───────────────────────────────
-
-
-@admin_router.post(
-    "/admin/review",
-    summary="审批审批单 (§7.5.2)",
-)
-async def admin_review(
-    body: AdminReviewRequest,
-    ctx: RequestContext = Depends(get_request_context),
-    admin_svc: _AdminSvc = Injected(_AdminSvc),
-) -> ApiResponse:
-    """Admin review: waiting_review → closed (§7.5.2)."""
-    result = await asyncio.to_thread(
-        admin_svc.review_ticket,
-        ticket_id=body.ticket_id,
-        action=body.action,
-        admin_id=body.admin_id or ctx.user_id,
-        remark=body.remark,
-    )
-    _raise_on_admin_error(result)
-    return ApiResponse(
-        success=True,
-        data=AdminReviewResponse(
-            ticket_id=result.ticket_id,
-            governance_status=result.status.value if isinstance(result.status, GovernanceStatus) else str(result.status or ""),
-            close_reason=result.close_reason,
-        ).model_dump(),
-    )
+# ── Admin: pause / emergency-close (审批能力已迁出至 review_router) ──────
 
 
 @admin_router.post(

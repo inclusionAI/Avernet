@@ -14,12 +14,16 @@ Business (1 endpoint — data ingestion, no admin auth):
 
 Admin endpoints are in :mod:`agentclaw.community.adapters.http.economy.admin_router`.
   - /admin/records/delete         应急删除
-  - /admin/review                 管理员审核
   - /admin/pause                  管理员暂停工单
   - /admin/emergency-close        管理员紧急关闭
   - /admin/trigger-scan           手动触发 cron tick
   - /admin/emergency              紧急制动 / 查询状态
   - /admin/scan-and-deliver       扫描+投递
+
+Review endpoints are in :mod:`agentclaw.community.adapters.http.economy.review_router`.
+  - /review/tickets                 评审工单列表
+  - /review/tickets/{id}            单工单评审详情
+  - /review/tickets/{id}/review     审批动作
 """
 from __future__ import annotations
 
@@ -264,6 +268,12 @@ async def offline_batch(
     default thread pool so the event loop stays responsive, matching the
     pattern used by ``desktop_bot``/``task_queue``/``channel``.
     """
+    log.info(
+        "[OfflineBatch] POST /records/offline-batch: batch_id=%s, "
+        "dt_version=%s, total_count=%d, actual_records=%d",
+        body.batch_id, body.dt_version, body.total_count, len(body.records),
+    )
+
     result = await asyncio.to_thread(
         partial_svc.process_offline_batch,
         body.records,
@@ -271,6 +281,18 @@ async def offline_batch(
         dt_version=body.dt_version,
         total_count=body.total_count,
         dry_run=False,  # offline batch always writes
+    )
+
+    # Action distribution summary
+    action_counts: dict[str, int] = {}
+    for pr in result.upsert_results:
+        action_counts[pr.action] = action_counts.get(pr.action, 0) + 1
+    log.info(
+        "[OfflineBatch] Response: batch_id=%s, run_id=%s, "
+        "total=%d, errors=%d, quality_skipped=%s, actions=%s",
+        result.batch_id, result.run_id,
+        result.total_records, result.errors,
+        result.batch_quality_skipped, action_counts,
     )
 
     return ApiResponse(
@@ -304,6 +326,9 @@ async def offline_batch(
 from agentclaw.community.adapters.http.economy.admin_router import (  # noqa: E402
     admin_router as internal_router,
 )
+from agentclaw.community.adapters.http.economy.review_router import (  # noqa: E402
+    review_router as review_router_export,
+)
 
 
-__all__ = ["router", "internal_router"]
+__all__ = ["router", "internal_router", "review_router_export"]
