@@ -157,6 +157,36 @@ modules:
     thresholds:
       core_min_percent: 63.49
 
+  files:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/files
+    core_paths:
+      - src/agentclaw/community/core/files/
+      - src/agentclaw/community/core/services/resource_file_service.py
+    router_api:
+      status: applicable
+      reason: Workspace file browsing and mutation routes owned by ResourceFileService.
+      items:
+        - GET /api/resources/files
+        - POST /api/resources/files/upload
+        - GET /api/resources/files/download
+        - GET /api/resources/files/preview
+        - DELETE /api/resources/files
+        - POST /api/resources/files/mkdir
+    plugin_api:
+      status: applicable
+      reason: Workspace file operations cross the provider-selected DeviceFileSystem boundary.
+      items:
+        - DeviceFileSystem.list_dir
+        - DeviceFileSystem.read_file
+        - DeviceFileSystem.write_file
+        - DeviceFileSystem.delete_file
+    thresholds:
+      core_min_percent: 63.52
+      router_min_percent: 100.0
+      plugin_min_percent: 100.0
+
   harness:
     system: backend
     acceptance_targets:
