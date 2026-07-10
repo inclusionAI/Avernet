@@ -22,6 +22,7 @@ user_config:
     cache: "stub"           # stub | real
     bot_service: "stub"  # real | local | stub
     engine_adapter: "stub"  # stub | real (aicoding/hermes/claude_code engine adapter)
+    file_transfer: "noop"  # noop | oss
     database:
       plugin_database: "SQLITE_ORM"    # ZDAS_ORM (production ORM) | SQLITE_ORM (test only)
       database_url: "sqlite:////tmp/secbaas.db"
