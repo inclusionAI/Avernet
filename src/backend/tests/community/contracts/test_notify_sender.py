@@ -1,13 +1,11 @@
 """Conformance suite for NotifySenderPlugin (Rule 25).
 
-Validates that local impl satisfies the NotifySenderPlugin Protocol
+Validates that the community impl satisfies the NotifySenderPlugin Protocol
 when injected via the ``world`` fixture.
 
-These tests are scoped to the community profile where
-``NoopNotifySender`` is bound.  Under ``corp_test`` the injector
-provides ``DingTalkNotifySender`` instead, so the noop assertions
-would not hold — that binding is exercised by the corp-side contract
-tests instead.
+Under community/singlebox/test profiles, ``CommunityNotifySender`` (log
+channel) is bound.  Under ``corp_test`` the injector provides
+``DingTalkNotifySender`` instead, exercised by corp-side contract tests.
 """
 from __future__ import annotations
 
@@ -21,12 +19,12 @@ from agentclaw.community.plugin_api.notify_sender import (
 )
 
 # Skip entire module when running under corp profiles — the world
-# fixture binds DingTalkNotifySender there, not NoopNotifySender.
+# fixture binds DingTalkNotifySender there, not CommunityNotifySender.
 _allow_profiles = {"test", "community", "singlebox"}
 _current_profile = os.environ.get("DEPLOY_PROFILE", "test").lower()
 pytestmark = pytest.mark.skipif(
     _current_profile not in _allow_profiles,
-    reason=f"NoopNotifySender contract only valid under {_allow_profiles}, "
+    reason=f"CommunityNotifySender contract only valid under {_allow_profiles}, "
     f"got DEPLOY_PROFILE={_current_profile!r}",
 )
 
@@ -42,19 +40,23 @@ def _sample_message() -> NotifyMessage:
     )
 
 
-def test_noop_send_returns_none(world, _sample_message):
-    """NoopNotifySender.send() always returns None."""
+def test_community_send_returns_id(world, _sample_message):
+    """CommunityNotifySender.send() returns a message ID (log delivery succeeds)."""
     sender = world.get(NotifySenderPlugin)
-    assert sender.send(_sample_message, channel="markdown") is None
+    result = sender.send(_sample_message, channel="log")
+    assert result is not None
+    assert result.startswith("log-")
 
 
-def test_noop_channels_empty(world):
-    """NoopNotifySender.channels is empty."""
+def test_community_channels_includes_log(world):
+    """CommunityNotifySender.channels includes 'log'."""
     sender = world.get(NotifySenderPlugin)
-    assert sender.channels == frozenset()
+    assert "log" in sender.channels
 
 
-def test_noop_send_tc_card_returns_none(world, _sample_message):
-    """NoopNotifySender.send() with tc_card channel also returns None."""
+def test_community_send_unsupported_channel_falls_back(world, _sample_message):
+    """CommunityNotifySender.send() with unsupported channel falls back to log."""
     sender = world.get(NotifySenderPlugin)
-    assert sender.send(_sample_message, channel="tc_card") is None
+    result = sender.send(_sample_message, channel="markdown")
+    # Falls back to log channel — still succeeds with a log- ID
+    assert result is not None
