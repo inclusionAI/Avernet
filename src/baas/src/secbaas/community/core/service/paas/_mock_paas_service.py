@@ -51,6 +51,10 @@ class MockPaasService(PaasService):
     - PAAS_MOCK_CREATE_FAILURE: create_device() raises PaasError(DEVICE_CREATION_FAILED)
     - PAAS_MOCK_DESTROY_FAILURE: destroy_device() raises PaasError(DEVICE_DESTROY_FAILED)
     - PAAS_MOCK_DEVICE_NOT_FOUND: destroy_device() raises PaasError(DEVICE_NOT_FOUND)
+
+    Configurable file transfer failure attributes (test-only):
+    - _pull_should_fail: Set to True to make pull_file_from_url() raise PaasError
+    - _push_should_fail: Set to True to make push_file_to_url() raise PaasError
     """
 
     def __init__(self, credentials: PaasCredentials | None = None) -> None:
@@ -245,3 +249,55 @@ class MockPaasService(PaasService):
             True (always succeeds in mock mode).
         """
         return True
+
+    async def pull_file_from_url(
+        self,
+        paas_device_id: str,
+        source_url: str,
+        device_path: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Download file from a URL to the mock device at the specified path.
+
+        Args:
+            paas_device_id: Mock device ID.
+            source_url: The URL to download from, e.g. OSS pre-signed GET URL.
+            device_path: Absolute path on device to save the downloaded file to.
+            timeout_seconds: Maximum download time in seconds (default: 300).
+
+        Returns:
+            None on success.
+
+        Raises:
+            PaasError: With FILE_TRANSFER_FAILED if _pull_should_fail is True.
+        """
+        if getattr(self, "_pull_should_fail", False):
+            raise PaasError(
+                ErrorCode.FILE_TRANSFER_FAILED, "mock file pull failure"
+            )
+
+    async def push_file_to_url(
+        self,
+        paas_device_id: str,
+        device_path: str,
+        target_url: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Upload file from mock device to the target URL (pre-signed PUT).
+
+        Args:
+            paas_device_id: Mock device ID.
+            device_path: Absolute path on device of the file to upload.
+            target_url: The URL to upload to, e.g. OSS pre-signed PUT URL.
+            timeout_seconds: Maximum upload time in seconds (default: 300).
+
+        Returns:
+            None on success.
+
+        Raises:
+            PaasError: With FILE_TRANSFER_FAILED if _push_should_fail is True.
+        """
+        if getattr(self, "_push_should_fail", False):
+            raise PaasError(
+                ErrorCode.FILE_TRANSFER_FAILED, "mock file push failure"
+            )
