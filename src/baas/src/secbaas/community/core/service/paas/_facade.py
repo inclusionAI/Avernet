@@ -1933,3 +1933,183 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                     str(e),
                 ),
             ) from e
+
+    async def pull_file(
+        self, paas_device_id: str, source_url: str, device_path: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Download a file from a URL to the device at the specified path.
+
+        Parses the @template_id suffix from paas_device_id, looks up the
+        template, creates the appropriate PaasService, and delegates to
+        the platform-specific pull_file_from_url() implementation.
+
+        Args:
+            paas_device_id: Device ID with @template_id suffix
+                (e.g., "sandbox-123@42" for Arca platform).
+            source_url: URL to download from (e.g. OSS pre-signed GET URL).
+            device_path: Absolute path on device to save the file to.
+            timeout_seconds: Maximum download time in seconds (default: 300).
+
+        Raises:
+            DeviceFacadeException: If template is not found, or if the
+                platform does not support file transfer, or if the transfer
+                fails.
+        """
+        raw_paas_device_id, template_id = self._parse_device_id(paas_device_id)
+
+        truncated_url = source_url[:80] + "..." if len(source_url) > 80 else source_url
+        self._logger.info(
+            f"Pulling file: raw_id={paas_device_id}, "
+            f"parsed_device_id={raw_paas_device_id}, template_id={template_id}, "
+            f"source_url={truncated_url}, device_path={device_path}, "
+            f"timeout={timeout_seconds}s"
+        )
+
+        service = None
+        try:
+            template = self._device_template_service.get_by_template_id(
+                template_id=template_id,
+            )
+            if not template:
+                raise DeviceFacadeException(
+                    operation="pull_file",
+                    platform_type="UNKNOWN",
+                    template_id=template_id,
+                    paas_device_id=paas_device_id,
+                    original_error=PaasError(
+                        ErrorCode.TEMPLATE_NOT_FOUND,
+                        f"Template not found for template_id: {template_id}",
+                    ),
+                )
+
+            service = self._factory.create(
+                tenant_name=template.tenant,
+                template_uuid=template.template_uuid,
+                template=template,
+            )
+
+            await service.pull_file_from_url(
+                raw_paas_device_id, source_url, device_path, timeout_seconds
+            )
+
+            self._logger.info(
+                f"File pull completed successfully: "
+                f"paas_device_id={paas_device_id}, device_path={device_path}"
+            )
+
+        except NotImplementedError as e:
+            self._logger.error(f"File pull not supported for this platform: {e}")
+            platform_type = await self._get_platform_type(service)
+            raise DeviceFacadeException(
+                operation="pull_file",
+                platform_type=platform_type,
+                template_id=template_id,
+                paas_device_id=paas_device_id,
+                original_error=PaasError(
+                    ErrorCode.PLATFORM_ERROR,
+                    str(e),
+                ),
+            ) from e
+        except PaasError as e:
+            self._logger.error(
+                f"pull_file failed for {paas_device_id}: {e.code} - {e.message}"
+            )
+            platform_type = await self._get_platform_type(service)
+            raise DeviceFacadeException(
+                operation="pull_file",
+                platform_type=platform_type,
+                template_id=template_id,
+                paas_device_id=paas_device_id,
+                original_error=e,
+            ) from e
+
+    async def push_file(
+        self, paas_device_id: str, device_path: str, target_url: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Upload a file from the device path to the target URL.
+
+        Parses the @template_id suffix from paas_device_id, looks up the
+        template, creates the appropriate PaasService, and delegates to
+        the platform-specific push_file_to_url() implementation.
+
+        Args:
+            paas_device_id: Device ID with @template_id suffix
+                (e.g., "sandbox-123@42" for Arca platform).
+            device_path: Absolute path on device of the file to upload.
+            target_url: URL to upload to (e.g. OSS pre-signed PUT URL).
+            timeout_seconds: Maximum upload time in seconds (default: 300).
+
+        Raises:
+            DeviceFacadeException: If template is not found, or if the
+                platform does not support file transfer, or if the transfer
+                fails.
+        """
+        raw_paas_device_id, template_id = self._parse_device_id(paas_device_id)
+
+        truncated_url = target_url[:80] + "..." if len(target_url) > 80 else target_url
+        self._logger.info(
+            f"Pushing file: raw_id={paas_device_id}, "
+            f"parsed_device_id={raw_paas_device_id}, template_id={template_id}, "
+            f"device_path={device_path}, target_url={truncated_url}, "
+            f"timeout={timeout_seconds}s"
+        )
+
+        service = None
+        try:
+            template = self._device_template_service.get_by_template_id(
+                template_id=template_id,
+            )
+            if not template:
+                raise DeviceFacadeException(
+                    operation="push_file",
+                    platform_type="UNKNOWN",
+                    template_id=template_id,
+                    paas_device_id=paas_device_id,
+                    original_error=PaasError(
+                        ErrorCode.TEMPLATE_NOT_FOUND,
+                        f"Template not found for template_id: {template_id}",
+                    ),
+                )
+
+            service = self._factory.create(
+                tenant_name=template.tenant,
+                template_uuid=template.template_uuid,
+                template=template,
+            )
+
+            await service.push_file_to_url(
+                raw_paas_device_id, device_path, target_url, timeout_seconds
+            )
+
+            self._logger.info(
+                f"File push completed successfully: "
+                f"paas_device_id={paas_device_id}, device_path={device_path}"
+            )
+
+        except NotImplementedError as e:
+            self._logger.error(f"File push not supported for this platform: {e}")
+            platform_type = await self._get_platform_type(service)
+            raise DeviceFacadeException(
+                operation="push_file",
+                platform_type=platform_type,
+                template_id=template_id,
+                paas_device_id=paas_device_id,
+                original_error=PaasError(
+                    ErrorCode.PLATFORM_ERROR,
+                    str(e),
+                ),
+            ) from e
+        except PaasError as e:
+            self._logger.error(
+                f"push_file failed for {paas_device_id}: {e.code} - {e.message}"
+            )
+            platform_type = await self._get_platform_type(service)
+            raise DeviceFacadeException(
+                operation="push_file",
+                platform_type=platform_type,
+                template_id=template_id,
+                paas_device_id=paas_device_id,
+                original_error=e,
+            ) from e
