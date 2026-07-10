@@ -2722,7 +2722,11 @@ class BaasService:  # pragma: no cover
             )
 
     def list_devices_by_bot_uuid(
-        self, bot_uuid: str, tenant: str = ""
+        self,
+        bot_uuid: str,
+        tenant: str = "",
+        *,
+        timeout: float = 30.0,
     ) -> list[dict[str, Any]]:
         """根据 bot_uuid 查询该逻辑 Bot 下的所有 BaaS 设备。
 
@@ -2748,7 +2752,7 @@ class BaasService:  # pragma: no cover
             response = self._http.get(
                 f"/api/v1/bots/{bot_uuid}/devices",
                 params={"tenant": effective_tenant},
-                timeout=30.0,
+                timeout=timeout,
             )
             response.raise_for_status()
             response_data = response.json()
