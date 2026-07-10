@@ -519,6 +519,7 @@ class ArcaPaasService(PaasService):
                 resource_spec=getattr(info, "resource_spec", None),
                 mount_points=getattr(info, "mount_points", None),
                 envs=getattr(info, "envs", None),
+                storage=getattr(info, "storage", None),
             )
         except ArcaSandboxNotFoundError:
             raise PaasError(
