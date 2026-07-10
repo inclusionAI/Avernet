@@ -162,3 +162,32 @@ def test_update_report_artifacts_keeps_summary_and_dashboard_consistent(tmp_path
     assert "60.00%" in dashboard
     assert "66.67%" in dashboard
     assert "Not applicable" in dashboard
+
+
+def test_update_report_artifacts_marks_threshold_failure(tmp_path: Path):
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    (report_dir / "summary.json").write_text(
+        json.dumps({"mode": "real", "status": "passed"}),
+        encoding="utf-8",
+    )
+    report = build_module_report(
+        manifest=_manifest(),
+        module_name="devices",
+        coverage={
+            "files": {
+                "src/agentclaw/community/core/devices/models.py": {
+                    "summary": {"covered_lines": 1, "num_statements": 4}
+                }
+            }
+        },
+        router_hits=[],
+        plugin_hits=[],
+    )
+    errors = validate_thresholds(report)
+
+    update_report_artifacts(report_dir, report, threshold_errors=errors)
+
+    summary = json.loads((report_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["status"] == "failed"
+    assert summary["threshold_errors"] == errors
