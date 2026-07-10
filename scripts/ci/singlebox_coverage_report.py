@@ -39,6 +39,26 @@ def _metric(items: list[str], hits: list[str]) -> dict[str, Any]:
     }
 
 
+def _configured_metric(config: dict[str, Any], hits: list[str]) -> dict[str, Any]:
+    status = config.get("status", "applicable")
+    reason = str(config.get("reason") or "")
+    if status == "not_applicable":
+        return {
+            "status": "not_applicable",
+            "reason": reason,
+            "covered": 0,
+            "total": 0,
+            "percent": None,
+            "covered_items": [],
+            "missing_items": [],
+        }
+    return {
+        "status": "applicable",
+        "reason": reason,
+        **_metric(list(config.get("items") or []), hits),
+    }
+
+
 def build_module_report(
     *,
     manifest: dict[str, Any],
@@ -61,24 +81,8 @@ def build_module_report(
         core_covered += int(summary.get("covered_lines") or 0)
         core_total += int(summary.get("num_statements") or 0)
 
-    plugin_config = module.get("plugin_api") or {}
-    plugin_status = plugin_config.get("status", "applicable")
-    if plugin_status == "not_applicable":
-        plugin_metric = {
-            "status": "not_applicable",
-            "reason": str(plugin_config.get("reason") or ""),
-            "covered": 0,
-            "total": 0,
-            "percent": None,
-            "covered_items": [],
-            "missing_items": [],
-        }
-    else:
-        plugin_metric = {
-            "status": "applicable",
-            "reason": str(plugin_config.get("reason") or ""),
-            **_metric(list(plugin_config.get("items") or []), plugin_hits),
-        }
+    router_metric = _configured_metric(module.get("router_api") or {}, router_hits)
+    plugin_metric = _configured_metric(module.get("plugin_api") or {}, plugin_hits)
 
     return {
         "name": module_name,
@@ -88,10 +92,7 @@ def build_module_report(
             "total": core_total,
             "percent": _percent(core_covered, core_total),
         },
-        "router_api": _metric(
-            list((module.get("router_api") or {}).get("items") or []),
-            router_hits,
-        ),
+        "router_api": router_metric,
         "plugin_api": plugin_metric,
         "thresholds": dict(module.get("thresholds") or {}),
     }
@@ -103,9 +104,12 @@ def validate_thresholds(report: dict[str, Any]) -> list[str]:
     checks = (
         ("core", "core coverage", "core_min_percent"),
         ("router_api", "router API coverage", "router_min_percent"),
+        ("plugin_api", "plugin API coverage", "plugin_min_percent"),
     )
     for metric_name, label, threshold_name in checks:
         if threshold_name not in thresholds:
+            continue
+        if report[metric_name].get("status") == "not_applicable":
             continue
         actual = float(report[metric_name]["percent"])
         minimum = float(thresholds[threshold_name])
@@ -262,10 +266,15 @@ def main() -> int:
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
+    def display(metric: dict[str, Any]) -> str:
+        if metric.get("status") == "not_applicable":
+            return "N/A"
+        return f"{metric['percent']:.2f}%"
+
     print(
         f"{args.module} coverage: core={report['core']['percent']:.2f}% "
-        f"router={report['router_api']['percent']:.2f}% "
-        "plugin=N/A"
+        f"router={display(report['router_api'])} "
+        f"plugin={display(report['plugin_api'])}"
     )
     return 0
 

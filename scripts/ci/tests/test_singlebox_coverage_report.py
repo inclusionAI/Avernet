@@ -128,6 +128,56 @@ def test_validate_thresholds_reports_core_and_router_failures():
     ]
 
 
+def test_build_module_report_supports_not_applicable_router_api():
+    manifest = _manifest()
+    manifest["modules"]["devices"]["router_api"] = {
+        "status": "not_applicable",
+        "reason": "The module has no independently attributable HTTP routes.",
+        "items": [],
+    }
+
+    report = build_module_report(
+        manifest=manifest,
+        module_name="devices",
+        coverage=_coverage(),
+        router_hits=["GET /api/v1/devices"],
+        plugin_hits=[],
+    )
+
+    assert report["router_api"] == {
+        "status": "not_applicable",
+        "reason": "The module has no independently attributable HTTP routes.",
+        "covered": 0,
+        "total": 0,
+        "percent": None,
+        "covered_items": [],
+        "missing_items": [],
+    }
+    assert validate_thresholds(report) == []
+
+
+def test_validate_thresholds_reports_applicable_plugin_failure():
+    manifest = _manifest()
+    manifest["modules"]["devices"]["plugin_api"] = {
+        "status": "applicable",
+        "items": ["AuthPlugin.get_current_user", "AuthPlugin.is_admin"],
+    }
+    manifest["modules"]["devices"]["thresholds"]["plugin_min_percent"] = 75.0
+
+    report = build_module_report(
+        manifest=manifest,
+        module_name="devices",
+        coverage=_coverage(),
+        router_hits=DEVICE_ROUTES,
+        plugin_hits=["AuthPlugin.get_current_user"],
+    )
+
+    assert report["plugin_api"]["percent"] == 50.0
+    assert validate_thresholds(report) == [
+        "devices plugin API coverage 50.00% < 75.00%"
+    ]
+
+
 def test_update_report_artifacts_keeps_summary_and_dashboard_consistent(tmp_path: Path):
     report_dir = tmp_path / "reports"
     report_dir.mkdir()
