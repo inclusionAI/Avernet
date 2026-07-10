@@ -173,6 +173,10 @@ impl BotRegistryCoreService for BotCore {
         self.repo.get(bot_id).await
     }
 
+    async fn get_including_deleted(&self, bot_id: &str) -> Option<RegisteredBot> {
+        self.repo.get_including_deleted(bot_id).await
+    }
+
     async fn get_agent_credentials(&self, bot_id: &str) -> Option<AgentCredentials> {
         self.repo.get_agent_credentials(bot_id).await
     }
