@@ -252,7 +252,7 @@ class GovernanceNotification:
                 hit_dimensions_count=obj.hit_dimensions_count,
                 severity=obj.governance_max_priority,
                 estimated_saving_tokens=obj.expected_token_saving,
-                saving_ratio=float(obj.saving_ratio) if obj.saving_ratio else None,
+                saving_ratio=float(obj.saving_ratio) if obj.saving_ratio is not None else None,
                 notification_md=obj.notification_md,
                 notification_structured=obj.notification_structured,
             ),
