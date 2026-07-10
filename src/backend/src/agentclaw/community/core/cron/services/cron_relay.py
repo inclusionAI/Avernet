@@ -309,13 +309,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
                     self._failed_target(target, "cron_api_failed", str(result))
                 )
                 continue
-            data = result.get("data", {})
-            if isinstance(data, dict):
-                running_list = data.get("running", [])
-                for item in running_list:
-                    self._decorate_runtime_item(item, target)
-                all_running.extend(running_list)
-            elif result.get("success") is False:
+            if result.get("success") is False:
                 failed_targets.append(
                     self._failed_target(
                         target,
@@ -323,6 +317,13 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
                         result.get("error") or result.get("message") or "cron api failed",
                     )
                 )
+                continue
+            data = result.get("data", {})
+            if isinstance(data, dict):
+                running_list = data.get("running", [])
+                for item in running_list:
+                    self._decorate_runtime_item(item, target)
+                all_running.extend(running_list)
 
         return {"success": True, "data": all_running, "failed_targets": failed_targets}
 
@@ -510,8 +511,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
             logger.warning(f"[_fetch_bot_crons] Failed to get device status for bot {bot_id}: {e}")
             return {"success": False, "error": f"Device not available: {e}"}
 
-        # 通过 DeviceContextResolver 拿 DeviceContext(全仓唯一 provider 解析点),
-        # 替代旧的 ``device_service.get_device_connection_v2(binding_id, user_id, nick_name)``。
+        # 构造该 bot 当前 binding 的 adapter 连接上下文。
         try:
             ctx = self._resolver.resolve_for_bot(bot_id, user_id)
         except Exception as e:
@@ -769,10 +769,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
                 raise
             raise ValueError(f"Device not available: {e}")
 
-        # 2. 通过 DeviceContextResolver 拿 DeviceContext(全仓唯一 provider 解析点),
-        # 替代旧的 ``get_device_connection_v2`` — 后者对 baas service bot 落 direct
-        # 分支丢 binding_id,transport fallback 裸 httpx 直发 ARCA-SANDBOX 内网 → 500。
-        # 走 resolver → 永填 binding_id → transport 走 baas proxypass。
+        # 2. 构造目标运行态的 adapter 连接上下文。
         if runtime_stage == RUNTIME_STAGE_DRAFT:
             ctx = self._resolver.resolve_for_bot(bot_id, user_id)
         else:

@@ -20,7 +20,10 @@ logger = get_logger()
 
 
 class CronRuntimeOperationsMixin:
+    """定时任务运行态接口的显式用例入口。"""
+
     def _validate_runtime_stage(self, runtime_stage: str) -> None:
+        """校验 runtime_stage 查询参数。"""
         if runtime_stage not in VALID_RUNTIME_STAGES:
             raise CronRelayError(
                 f"Invalid runtime_stage: {runtime_stage}",
@@ -34,6 +37,7 @@ class CronRuntimeOperationsMixin:
         user_id: str,
         runtime_stage: str,
     ) -> tuple[dict, CronRuntimeTarget]:
+        """解析一次请求要访问的运行态目标。"""
         self._validate_runtime_stage(runtime_stage)
         bot = self._bot_provider.get_bot(bot_id, user_id)
         if runtime_stage != RUNTIME_STAGE_DRAFT:
@@ -62,6 +66,7 @@ class CronRuntimeOperationsMixin:
         bot_id: str,
         target: CronRuntimeTarget,
     ) -> Any:
+        """读取运行态 binding 对应的设备记录。"""
         try:
             return self._device_provider.get_device(binding_id=target.binding_id)
         except Exception as e:
@@ -82,6 +87,7 @@ class CronRuntimeOperationsMixin:
         runtime_stage: str,
         device: Any,
     ) -> None:
+        """确保运行态设备处于可转发状态。"""
         device_status = self._read_field(device, "status")
         if device_status == DeviceBindingStatus.ACTIVE:
             return
@@ -106,6 +112,7 @@ class CronRuntimeOperationsMixin:
         runtime_stage: str,
         target: CronRuntimeTarget,
     ) -> Any:
+        """读取并校验运行态设备。"""
         device = self._read_runtime_device(bot_id=bot_id, target=target)
         self._ensure_runtime_device_active(
             bot_id=bot_id,
@@ -131,6 +138,7 @@ class CronRuntimeOperationsMixin:
         self,
         failed_targets: list[dict[str, Any]],
     ) -> dict:
+        """生成发布态实例不可用的统一响应。"""
         return {
             "success": False,
             "message": "runtime instances unavailable",
@@ -150,6 +158,7 @@ class CronRuntimeOperationsMixin:
         bot: dict,
         include_runtime: bool,
     ) -> None:
+        """为单目标 adapter 响应补充 bot 与运行态元数据。"""
         if not (
             result.get("success")
             and result.get("data")
@@ -178,6 +187,7 @@ class CronRuntimeOperationsMixin:
         body: Optional[dict] = None,
         params: Optional[dict] = None,
     ) -> dict:
+        """转发到单个运行态目标。"""
         bot, target = self._resolve_request_target(
             bot_id=bot_id,
             user_id=user_id,
@@ -214,6 +224,7 @@ class CronRuntimeOperationsMixin:
         body: Optional[dict],
         params: Optional[dict],
     ) -> dict:
+        """发布态多实例 fan-out；单实例 provider 保持单次转发。"""
         expanded_targets, failed_targets = self._expand_runtime_target(
             target,
             device=device,
@@ -253,6 +264,7 @@ class CronRuntimeOperationsMixin:
         user_id: str,
         nick_name: str,
     ) -> dict:
+        """获取草稿态 cron 能力状态。"""
         return await self._forward_single_stage_request(
             bot_id=bot_id,
             user_id=user_id,
@@ -270,6 +282,7 @@ class CronRuntimeOperationsMixin:
         task_id: str,
         runtime_stage: str = RUNTIME_STAGE_DRAFT,
     ) -> dict:
+        """获取指定运行态的任务详情。"""
         return await self._forward_single_stage_request(
             bot_id=bot_id,
             user_id=user_id,
@@ -286,6 +299,7 @@ class CronRuntimeOperationsMixin:
         nick_name: str,
         body: dict,
     ) -> dict:
+        """在草稿态创建定时任务。"""
         return await self._forward_single_stage_request(
             bot_id=bot_id,
             user_id=user_id,
@@ -305,6 +319,7 @@ class CronRuntimeOperationsMixin:
         body: Optional[dict],
         runtime_stage: str = RUNTIME_STAGE_DRAFT,
     ) -> dict:
+        """更新定时任务；发布态仅支持启停同步。"""
         if runtime_stage == RUNTIME_STAGE_DRAFT:
             return await self._forward_single_stage_request(
                 bot_id=bot_id,
@@ -353,6 +368,7 @@ class CronRuntimeOperationsMixin:
         task_id: str,
         runtime_stage: str = RUNTIME_STAGE_DRAFT,
     ) -> dict:
+        """删除草稿态定时任务。"""
         self._validate_runtime_stage(runtime_stage)
         if runtime_stage != RUNTIME_STAGE_DRAFT:
             raise CronRelayError("发布态定时任务不支持删除", error_code=403)
@@ -374,6 +390,7 @@ class CronRuntimeOperationsMixin:
         force: bool = False,
         runtime_stage: str = RUNTIME_STAGE_DRAFT,
     ) -> dict:
+        """触发定时任务；发布态会按运行实例 fan-out。"""
         if runtime_stage == RUNTIME_STAGE_DRAFT:
             return await self._forward_single_stage_request(
                 bot_id=bot_id,
@@ -415,6 +432,7 @@ class CronRuntimeOperationsMixin:
         runtime_stage: str = RUNTIME_STAGE_DRAFT,
         device_uuid: str | None = None,
     ) -> dict:
+        """获取任务运行记录；发布态可按实例筛选。"""
         if device_uuid and runtime_stage == RUNTIME_STAGE_DRAFT:
             raise CronRelayError(
                 "device_uuid requires published runtime_stage",
