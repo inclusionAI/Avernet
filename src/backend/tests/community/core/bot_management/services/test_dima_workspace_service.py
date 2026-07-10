@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch, PropertyMock
 
+from injector import Injector, InstanceProvider, singleton
+
 import pytest
 
 from agentclaw.community.core.bot_management.services.workspace_hosting_client import WorkspaceHostingClient
@@ -43,28 +45,34 @@ def _make_config(
 
 
 def _make_dima_client(config: WorkspaceHostingConfig | None = None) -> WorkspaceHostingClient:
-    """Build a WorkspaceHostingClient bypassing @inject (direct construction)."""
+    """Build a WorkspaceHostingClient through its real DI constructor.
+
+    Wires ``WorkspaceHostingConfig`` into an ``Injector`` so the client's
+    ``@inject __init__`` runs normally (no ``object.__new__``). After
+    construction the real ``requests.Session`` is swapped for a ``MagicMock``
+    purely as offline isolation for client-side unit tests (this does not
+    bypass DI — the constructor already executed via the injector).
+    """
     cfg = config or _make_config()
-    client = object.__new__(WorkspaceHostingClient)
-    client._config = cfg
-    client.base_url = cfg.base_url.rstrip("/")
-    client.access_key = cfg.access_key
-    client.access_secret = cfg.access_secret
-    client.tenant = cfg.tenant
-    client.timeout = cfg.timeout
-    # 默认用 pre 环境
-    client.aixcore_base_url = cfg.aixcore_base_url_pre.rstrip("/")
+    injector = Injector()
+    injector.binder.bind(WorkspaceHostingConfig, InstanceProvider(cfg), scope=singleton)
+    injector.binder.bind(WorkspaceHostingClient, to=WorkspaceHostingClient, scope=singleton)
+    client = injector.get(WorkspaceHostingClient)
     client.session = MagicMock()
     return client
 
 
 def _make_workspace_service(client: WorkspaceHostingClient | None = None) -> WorkspaceHostingService:
-    """Build a WorkspaceHostingService bypassing @inject."""
-    hosting_client = client or _make_dima_client()
-    svc = object.__new__(WorkspaceHostingService)
-    svc._client = hosting_client
-    return svc
+    """Build a WorkspaceHostingService through its real DI constructor.
 
+    The ``@inject __init__`` is driven by an ``Injector`` so the service is
+    wired to ``client`` via proper DI instead of ``object.__new__``.
+    """
+    hosting_client = client or _make_dima_client()
+    injector = Injector()
+    injector.binder.bind(WorkspaceHostingClient, InstanceProvider(hosting_client), scope=singleton)
+    injector.binder.bind(WorkspaceHostingService, to=WorkspaceHostingService, scope=singleton)
+    return injector.get(WorkspaceHostingService)
 
 # ── WorkspaceHostingClient.__init__ 环境区分 ────────────────────────────────────────
 

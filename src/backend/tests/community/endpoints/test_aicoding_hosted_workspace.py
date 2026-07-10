@@ -1,10 +1,8 @@
 """Endpoint tests for POST /api/aicoding/bot/{bot_id}/dima-workspace.
 
-Covers happy path (workspace created via stub WorkspaceHostingService)
-and error path (non-applicationCoding bot → 400 in app envelope).
-
-TEMP 本地改动：DI 现在绑真实 ``WorkspaceHostingService``，所以 seed 里对真实
-``WorkspaceHostingClient``（DI 单例）的对外方法打 mock，走真实 service 联动逻辑但离线。
+Covers happy path (workspace created via the stub WorkspaceHostingService that
+DI binds under the test/singlebox profile → synthetic ``W_STUB_<bot_id>``) and
+error path (non-applicationCoding bot → 400 in app envelope).
 """
 from __future__ import annotations
 
@@ -23,17 +21,12 @@ from tests.community.framework import (
 
 
 def _seed_app_coding_bot_without_dima(world):
-    """applicationCoding bot with no dima_space_id + mock DIMA client methods.
+    """applicationCoding bot with no dima_space_id (pure data seed).
 
-    TEMP 本地改动：DI 现在绑真实 WorkspaceHostingService（非 stub），所以这里
-    对真实 WorkspaceHostingClient（DI 单例，与 service 共享）的对外方法打 mock，
-    避免打 localhost:9999 — 走真实 service 联动逻辑但仍离线。
+    The bound ``WorkspaceHostingService`` is the test stub, which synthesises a
+    deterministic ``W_STUB_<bot_id>`` workspace id, so no DIMA client is
+    touched. Seed only writes data through the real repo/template service.
     """
-    from unittest.mock import MagicMock
-    from agentclaw.community.core.bot_management.services.workspace_hosting_client import (
-        WorkspaceHostingClient,
-    )
-
     make_staff_user(world, user_id="u_owner")
     bot_repo = world.get(BotRepository)
     bot_repo.insert({
@@ -50,15 +43,6 @@ def _seed_app_coding_bot_without_dima(world):
 
     template_svc = world.get(TemplateService)
     template_svc.create_template(bot_id="bot_app_coding", template_config={"foo": "bar"})
-
-    # mock 真实 client（DI 单例）的对外方法，与 service 联动逻辑配合
-    client = world.get(WorkspaceHostingClient)
-    client.query_staff_department = MagicMock(return_value="D9999")
-    client.create_workspace = MagicMock(return_value={
-        "success": True,
-        "data": {"workspaceId": "WS_APP_CODING"},
-    })
-    client.add_admin_members = MagicMock(return_value={"success": True})
 
 
 def _seed_non_app_coding_bot(world):
@@ -95,12 +79,12 @@ def _seed_non_app_coding_bot(world):
         status=200,
         json_contains={
             "success": True,
-            "data": {"dima_space_id": "WS_APP_CODING"},
+            "data": {"dima_space_id": "W_STUB_bot_app_coding"},
         },
     ),
 )
 def create_dima_workspace_ok():
-    """Happy path: applicationCoding bot without dima_space_id → DIMA creates WS_APP_CODING (mocked client)."""
+    """Happy path: applicationCoding bot without dima_space_id → stub creates W_STUB_bot_app_coding."""
 
 
 @endpoint_test(
