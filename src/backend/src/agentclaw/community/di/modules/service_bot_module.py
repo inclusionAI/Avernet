@@ -97,6 +97,9 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.plugin_api.outbound_rules import OutboundRuleProvider
 from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlugin
+from agentclaw.community.core.service_bot.repository.config_artifact_offload import (
+    ConfigArtifactOffloader,
+)
 from agentclaw.community.plugins.bot_publish_repository import (
     BotPublishRepository as UnifiedBotPublishRepository,
 )
@@ -110,6 +113,13 @@ class ServiceBotModule(Module):
 
     def configure(self, binder: Binder) -> None:
         binder.bind(WorkspacePathFactory, to=WorkspacePathFactory, scope=singleton)
+        # Offloads an oversized config_artifact out of the ac_bot_publish.ext
+        # TEXT column into object storage; injected into the repo below.
+        binder.bind(
+            ConfigArtifactOffloader,
+            to=ConfigArtifactOffloader,
+            scope=singleton,
+        )
         # Single unified ORM impl — runs on prod OceanBase and SQLite
         # via the injected DatabasePlugin (@inject ctor).
         binder.bind(
