@@ -83,6 +83,7 @@ from secbaas.community.core.service.sse import (
 from secbaas.community.core.service.template_manage import DefaultDeviceTemplateService
 from secbaas.community.core.service.tenant_manage import DefaultTenantManageService
 from secbaas.community.spi.sandbox import PaasSandboxPlugins
+from secbaas.community.plugins.file_transfer import AliyunOssFileTransferBackend
 
 
 def _real_bot_service_plugin(base_url: str = "", timeout: float = 10.0):
@@ -277,6 +278,11 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         paas_sandbox_plugins=paas_sandbox_plugins,
         secret_plugin=secret_plugin,
         ws_relay_session_repository=ws_relay_session_repo,
+    )
+
+    file_transfer_backend = providers.Singleton(
+        AliyunOssFileTransferBackend,
+        secret_store=secret_plugin,
     )
 
     paas_facade = providers.Singleton(
