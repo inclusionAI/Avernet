@@ -244,6 +244,7 @@
     "workspace_hosting": {
       "access_key": "",
       "access_secret": "",
+      "admin_member_staff_ids": [],
       "aixcore_base_url": "",
       "aixcore_base_url_pre": "",
       "base_url": "",
