@@ -278,16 +278,16 @@ class WorkspaceHostingClient:
         workspace_id: str,
         member_staff_ids: list[str],
     ) -> Dict[str, Any]:
-        """Add members as admins to a DIMA workspace (透传模式，临时本地改动).
+        """Add members as admins to a DIMA workspace (透传模式).
 
-        调用 POST /arkcooprod/openapi/role/member/addMembers?staffId=xx，把固定工号
-        加入为空间管理员。body 形如::
+        调用 POST /arkcooprod/openapi/role/member/addMembers?staffId=xx，把传入工号
+        列表加入为空间管理员。body 形如::
 
             {
                 "targetType": "WORKSPACE",
                 "targetId": "<workspace_id>",
                 "roleId": "ADMIN",
-                "memberStaffIds": ["382716", ...]
+                "memberStaffIds": ["<staff_id>", ...]
             }
 
         Args:
