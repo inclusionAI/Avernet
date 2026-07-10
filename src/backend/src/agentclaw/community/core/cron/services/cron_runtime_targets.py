@@ -28,10 +28,11 @@ VALID_RUNTIME_STAGES = {
 MULTI_INSTANCE_DEVICE_PROVIDERS = {"baas", "teclaw"}
 SINGLE_INSTANCE_DEVICE_PROVIDERS = {"arca", "local"}
 
-# Cron 查询只等待有限时间；设备枚举并发数用于限制同步 BaaS 请求占用的线程数。
-CRON_READ_TIMEOUT_SECONDS = 8.0
-RUNTIME_DEVICE_QUERY_TIMEOUT_SECONDS = 8.0
+# Cron 查询只等待有限时间；并发数用于限制同步设备请求占用的线程数。
+CRON_READ_TIMEOUT_SECONDS = 10.0
+RUNTIME_DEVICE_QUERY_TIMEOUT_SECONDS = 10.0
 RUNTIME_DEVICE_QUERY_CONCURRENCY = 8
+RUNTIME_QUERY_PREPARE_CONCURRENCY = 8
 
 
 @dataclass(frozen=True)
@@ -244,19 +245,16 @@ class CronRuntimeTargetMixin:
             **kwargs,
         )
 
-    async def _fetch_runtime_target_crons(
+    def _prepare_runtime_query(
         self,
         target: CronRuntimeTarget,
-        user_id: str,
-        path: str = "/api/cron",
-    ) -> dict:
-        """读取单个运行态目标的 cron 列表或运行中任务。"""
-        # 设备不可用时直接生成该目标的失败结果，不再解析连接。
+    ) -> tuple[Any | None, dict[str, Any] | None]:
+        """校验目标设备并构造 cron 查询所需的连接上下文。"""
         try:
             device = self._device_provider.get_device(binding_id=target.binding_id)
             device_status = self._read_field(device, "status")
             if device_status != DeviceBindingStatus.ACTIVE:
-                return {
+                return None, {
                     "success": False,
                     "reason": "binding_not_active",
                     "error": (
@@ -265,13 +263,40 @@ class CronRuntimeTargetMixin:
                     ),
                 }
         except Exception as e:
-            return {"success": False, "reason": "device_unavailable", "error": str(e)}
+            return None, {
+                "success": False,
+                "reason": "device_unavailable",
+                "error": str(e),
+            }
 
-        # 将运行态目标解析成 adapter 能使用的连接信息。
         try:
-            ctx = self._resolve_runtime_context(target)
+            return self._resolve_runtime_context(target), None
         except Exception as e:
-            return {"success": False, "reason": "resolver_failed", "error": str(e)}
+            return None, {
+                "success": False,
+                "reason": "resolver_failed",
+                "error": str(e),
+            }
+
+    async def _prepare_runtime_query_async(
+        self,
+        target: CronRuntimeTarget,
+    ) -> tuple[Any | None, dict[str, Any] | None]:
+        """在线程中准备查询上下文，并限制设备控制面并发量。"""
+        async with self._runtime_query_prepare_semaphore:
+            return await asyncio.to_thread(self._prepare_runtime_query, target)
+
+    async def _fetch_runtime_target_crons(
+        self,
+        target: CronRuntimeTarget,
+        user_id: str,
+        path: str = "/api/cron",
+    ) -> dict:
+        """读取单个运行态目标的 cron 列表或运行中任务。"""
+        ctx, failure = await self._prepare_runtime_query_async(target)
+        if failure is not None:
+            return failure
+        assert ctx is not None
 
         # 下游异常统一转换成可聚合的失败原因。
         try:
@@ -366,7 +391,7 @@ class CronRuntimeTargetMixin:
         body: Optional[dict],
         params: Optional[dict],
     ) -> dict:
-        """调用 adapter，并为 cron 读请求设置端到端超时。"""
+        """调用 adapter，并为 cron 读请求设置下游请求超时。"""
         # 列表、详情和 runs 等 GET 使用 cron 读超时；写请求使用 transport 默认值。
         if method.upper() != "GET":
             return await self._transport.invoke(

@@ -42,6 +42,7 @@ from agentclaw.community.core.cron.services.cron_runtime_targets import (
     RUNTIME_STAGE_DRAFT,
     RUNTIME_STAGE_ONLINE,
     RUNTIME_STAGE_VERIFY,
+    RUNTIME_QUERY_PREPARE_CONCURRENCY,
     VALID_RUNTIME_STAGES,
 )
 from agentclaw.community.core.cron.services.cron_runtime_operations import (
@@ -90,6 +91,10 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         self._resolver = resolver
         self._template_repo = template_repo
         self._publish_repo = publish_repo
+        # Cron 批量查询共用限流器，控制同步设备连接准备占用的线程数。
+        self._runtime_query_prepare_semaphore = asyncio.Semaphore(
+            RUNTIME_QUERY_PREPARE_CONCURRENCY
+        )
 
     async def list_all_crons(
         self,
