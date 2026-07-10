@@ -583,7 +583,7 @@ class GovernanceDingTalkConfig:
 
     Resolution order:
       1. YAML ``dingtalk`` block (app_key / app_secret / robot_code)
-      2. All empty → DingTalkMarkdownSender with empty config (send calls return None).
+      2. All empty → CommunityNotifySender (log-only, no real delivery).
 
     The dataclass is ``frozen`` so it can be safely shared across threads.
     """
