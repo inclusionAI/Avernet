@@ -186,10 +186,20 @@ section{background:#fff;border:1px solid #dce2e8;border-radius:8px;padding:20px}
 </style><main><h1>Singlebox Coverage</h1>""" + "".join(cards) + "</main></html>\n"
 
 
-def update_report_artifacts(report_dir: Path, report: dict[str, Any]) -> None:
+def update_report_artifacts(
+    report_dir: Path,
+    report: dict[str, Any],
+    *,
+    threshold_errors: list[str] | None = None,
+) -> None:
     summary_path = report_dir / "summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     summary.setdefault("modules", {})[report["name"]] = report
+    if threshold_errors:
+        summary["status"] = "failed"
+        summary["threshold_errors"] = threshold_errors
+    else:
+        summary.pop("threshold_errors", None)
     summary_path.write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -243,8 +253,8 @@ def main() -> int:
         router_hits=_load_jsonl_keys(args.router_hits),
         plugin_hits=_load_jsonl_keys(args.plugin_hits),
     )
-    update_report_artifacts(args.report_dir, report)
     errors = validate_thresholds(report)
+    update_report_artifacts(args.report_dir, report, threshold_errors=errors)
     if errors:
         print("singlebox module coverage threshold failed:", file=sys.stderr)
         for error in errors:

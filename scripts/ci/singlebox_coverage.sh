@@ -269,8 +269,14 @@ PY
 }
 
 write_module_artifacts() {
+  local reporter_python
   [[ -n "$coverage_module" ]] || return 0
-  "${PYTHON:-python3}" "$script_dir/singlebox_coverage_report.py" \
+  reporter_python="${PYTHON:-$repo_root/src/backend/.venv/bin/python}"
+  if [[ ! -x "$reporter_python" ]]; then
+    echo "singlebox coverage reporter Python is not executable: $reporter_python" >&2
+    return 1
+  fi
+  "$reporter_python" "$script_dir/singlebox_coverage_report.py" \
     --manifest "$module_manifest" \
     --module "$coverage_module" \
     --coverage-json "$report_dir/backend-coverage.json" \
