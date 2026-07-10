@@ -4,12 +4,15 @@ use bcs_message_flow::{BcsMessageFlow, MemoryBotRunContextStore};
 use bcs_message_flow::task_store::{new_task_entry, TaskLedgerStatus, TASK_TTL_MS};
 use bcs_protocol::BcsFrame;
 use bcs_service_api::{
-    ActorKind, BotDeliveryKind, BotEventCommand, ChatEventState, ChatResponseMode, DefaultDelivery, FrontendDeliveryTarget,
-    GroupCoreService, GroupKind, MessageFlowService, GroupStatus, BotRunContextPort, Participant, ParticipantMode,
-    ParticipantRole, RoutingMode, RoutingPolicy, ServiceError, GroupStrategy, ServiceSpec,
-    Session, SessionKind, SessionManagementService, SessionStatus, SessionUseCaseError,
-    SystemMessageEvent, SystemMessageService, TaskCompleteCommand, TaskDispatchCommand,
-    TaskMessageCommand, TaskRunAliasRegistration, ChannelService, ChannelUseCaseError,
+    ActorKind, BotDeliveryKind, BotDeliveryTarget, BotEventCommand, BotRegistryCoreService,
+    BotRunContextPort, ChatEventState, ChatResponseMode, DefaultDelivery,
+    FrontendDeliveryTarget, GroupCoreService, GroupKind, GroupStatus, GroupStrategy,
+    MessageFlowService, Participant, ParticipantMode, ParticipantRole,
+    ProviderStreamGrayList, ProviderTransportPreference,
+    RoutingMode, RoutingPolicy, ServiceError, ServiceSpec, Session, SessionKind,
+    SessionManagementService, SessionStatus, SessionUseCaseError, SystemMessageEvent,
+    SystemMessageService, TaskCompleteCommand, TaskDispatchCommand, TaskMessageCommand,
+    TaskRunAliasRegistration, ChannelService, ChannelUseCaseError,
     interceptor::{BlockReason, InterceptorDecision, MessageInterceptor, OutboundMessage},
 };
 use serde_json::{Value, json};
@@ -3976,6 +3979,46 @@ async fn manager_worker_flow_with_repo() -> (
     (support, repo, flow)
 }
 
+async fn configure_provider_v2_target(
+    support: &support::FlowTestSupport,
+    bot_id: &str,
+    created_by: &str,
+) {
+    support
+        .registry
+        .save_created_by(bot_id, created_by, true)
+        .await
+        .unwrap();
+    let mut provider_target = support::FakeRegistryService::provider_target(bot_id);
+    if let BotDeliveryTarget::HttpProvider {
+        protocol_version, ..
+    } = &mut provider_target
+    {
+        *protocol_version = "2.0".to_string();
+    }
+    support
+        .registry
+        .set_delivery_target(bot_id, provider_target)
+        .await;
+}
+
+fn manager_worker_flow_with_provider_stream(
+    support: &support::FlowTestSupport,
+    repo: Arc<RecordingMessageRepo>,
+) -> BcsMessageFlow {
+    BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_message_repo(repo)
+    .with_provider_stream_gray_list(Arc::new(ProviderStreamGrayList::new(vec![
+        "gray-user".to_string(),
+    ])))
+}
+
 async fn manager_worker_flow_with_blocking_repo() -> (
     support::FlowTestSupport,
     Arc<BlockingMessageRepo>,
@@ -4024,6 +4067,101 @@ async fn register_manager_worker_task(
             response_mode,
         ))
         .await;
+}
+
+#[tokio::test]
+async fn manager_worker_task_dispatch_uses_sse_for_eligible_provider_worker() {
+    let (support, repo, _) = manager_worker_flow_with_repo().await;
+    configure_provider_v2_target(&support, "bot-worker", "gray-user").await;
+    let flow = manager_worker_flow_with_provider_stream(&support, repo);
+
+    flow.handle_task_dispatch(TaskDispatchCommand {
+        driver_bot_id: "bot-manager".to_string(),
+        group_id: "group-1".to_string(),
+        target_bot_id: "bot-worker".to_string(),
+        target_bot_name: None,
+        payload: json!({
+            "message": "do work",
+            "bcs_session_id": "group-1:abcdef12",
+        }),
+    })
+    .await
+    .expect("task.dispatch should deliver to provider worker");
+
+    assert_eq!(
+        support.bot_delivery.provider_transports().await,
+        vec![ProviderTransportPreference::CallbackSse]
+    );
+}
+
+#[tokio::test]
+async fn manager_worker_task_message_uses_sse_for_eligible_provider_manager() {
+    let (support, repo, _) = manager_worker_flow_with_repo().await;
+    configure_provider_v2_target(&support, "bot-manager", "gray-user").await;
+    let flow = manager_worker_flow_with_provider_stream(&support, repo);
+
+    flow.handle_task_message(TaskMessageCommand {
+        worker_bot_id: "bot-worker".to_string(),
+        group_id: "group-1".to_string(),
+        payload: json!({
+            "message": "progress update",
+            "bcs_session_id": "group-1:abcdef12",
+        }),
+    })
+    .await
+    .expect("task.message should deliver to provider manager");
+
+    assert_eq!(
+        support.bot_delivery.provider_transports().await,
+        vec![ProviderTransportPreference::CallbackSse]
+    );
+}
+
+#[tokio::test]
+async fn manager_worker_task_result_uses_sse_for_eligible_provider_manager() {
+    let (support, repo, _) = manager_worker_flow_with_repo().await;
+    configure_provider_v2_target(&support, "bot-manager", "gray-user").await;
+    let flow = manager_worker_flow_with_provider_stream(&support, repo);
+
+    let dispatch = flow
+        .handle_task_dispatch(TaskDispatchCommand {
+            driver_bot_id: "bot-manager".to_string(),
+            group_id: "group-1".to_string(),
+            target_bot_id: "bot-worker".to_string(),
+            target_bot_name: None,
+            payload: json!({
+                "message": "do work",
+                "bcs_session_id": "group-1:abcdef12",
+            }),
+        })
+        .await
+        .expect("task.dispatch should deliver to worker");
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-worker".to_string(),
+        run_id: dispatch.task_id,
+        group_id: "group-1".to_string(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({
+            "state": "final",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "task done"}],
+            },
+        }),
+        state: ChatEventState::Final,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .expect("worker final should deliver task result to provider manager");
+
+    assert_eq!(
+        support.bot_delivery.provider_transports().await,
+        vec![
+            ProviderTransportPreference::Callback,
+            ProviderTransportPreference::CallbackSse,
+        ]
+    );
 }
 
 #[tokio::test]

@@ -136,7 +136,13 @@ impl BcsMessageFlow {
         delivery_kind: &BotDeliveryKind,
         delivery_target: &BotDeliveryTarget,
     ) -> ProviderTransportPreference {
-        if !matches!(delivery_kind, BotDeliveryKind::Send) {
+        if !matches!(
+            delivery_kind,
+            BotDeliveryKind::Send
+                | BotDeliveryKind::TaskDispatch
+                | BotDeliveryKind::TaskMessage
+                | BotDeliveryKind::TaskResult
+        ) {
             return ProviderTransportPreference::Callback;
         }
         if !matches!(
