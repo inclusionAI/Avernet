@@ -5,8 +5,17 @@ Tests the following endpoints from ``adapters/http/bot_management/router.py``:
 """
 from __future__ import annotations
 
+import asyncio
+import threading
+from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
+from agentclaw.community.adapters.http.bot_management.router import (
+    _build_bots_by_owner_or_collaborator_data,
+    list_bots_by_owner_or_collaborator as list_bots_route,
+)
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot, make_collaborator
 from tests.community.framework import (
@@ -151,6 +160,94 @@ def _assert_response_has_total_and_items(response, world):
 # ============================================================================
 # GET /api/bots/by-owner-or-collaborator
 # ============================================================================
+
+
+def test_owner_or_collaborator_list_defaults_null_engine_types():
+    class BotServiceWithNullEngineTypes:
+        def list_bots_by_owner_or_collaborator(self, **kwargs):
+            return {
+                "total": 1,
+                "items": [
+                    {
+                        "bot_id": "bot-1",
+                        "entity_id": "entity-1",
+                        "entity_type": "staff",
+                        "engine_types": None,
+                        "active_engine": "openclaw",
+                    }
+                ],
+            }
+
+        def get_engine_paths(
+            self,
+            entity_id,
+            bot_id,
+            engine_types,
+            entity_type,
+        ):
+            return {
+                engine: f"/tmp/{bot_id}/{engine}"
+                for engine in engine_types
+            }
+
+    with patch(
+        "agentclaw.community.adapters.http.bot_management.router._get_engine_types",
+        return_value=["openclaw"],
+    ):
+        data = _build_bots_by_owner_or_collaborator_data(
+            owner_id="u",
+            bot_service=BotServiceWithNullEngineTypes(),
+        )
+
+    assert data["items"][0]["engine_paths"] == {
+        "openclaw": "/tmp/bot-1/openclaw"
+    }
+
+
+@pytest.mark.asyncio
+async def test_owner_or_collaborator_list_does_not_block_event_loop():
+    release_path_build = threading.Event()
+    fallback_release = threading.Timer(0.5, release_path_build.set)
+
+    class SlowBotService:
+        def list_bots_by_owner_or_collaborator(self, **kwargs):
+            return {
+                "total": 1,
+                "items": [
+                    {
+                        "bot_id": "bot-1",
+                        "entity_id": "entity-1",
+                        "entity_type": "staff",
+                        "engine_types": ["openclaw"],
+                        "active_engine": "openclaw",
+                    }
+                ],
+            }
+
+        def get_engine_paths(self, *args):
+            release_path_build.wait(timeout=1)
+            return {"openclaw": "/tmp/bot-1/openclaw"}
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    task = asyncio.create_task(
+        list_bots_route(
+            ctx=SimpleNamespace(user_id="u"),
+            bot_service=SlowBotService(),
+        )
+    )
+
+    try:
+        fallback_release.start()
+        await asyncio.sleep(0)
+        heartbeat_delay = loop.time() - started
+        assert heartbeat_delay < 0.25
+    finally:
+        release_path_build.set()
+        fallback_release.cancel()
+        response = await task
+
+    assert response.success is True
 
 
 @endpoint_test(
