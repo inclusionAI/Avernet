@@ -412,38 +412,6 @@ class TestListAllCronsOwnerId:
 
 
 class TestListServiceBotRuntimeStages:
-    def test_success_publish_record_supplies_verify_and_online_targets(self):
-        bot = {
-            "bot_id": "service-bot",
-            "owner_id": "owner-1",
-            "binding_id": 10,
-            "bot_name": "Service Bot",
-            "bot_type": "service",
-        }
-        success_record = SimpleNamespace(
-            id=202,
-            status=PublishStatus.SUCCESS.value,
-            ext={"binding": {"verify": 20, "online": 30}},
-        )
-        publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
-            lambda source_bot_id, owner_id, status, env: (
-                success_record if status == PublishStatus.SUCCESS.value else None
-            )
-        )
-        svc = _make_service(publish_repo=publish_repo)
-
-        targets, failed_targets = svc._build_runtime_targets(bot, "owner-1")
-
-        assert failed_targets == []
-        by_stage = {target.runtime_stage: target for target in targets}
-        assert by_stage["draft"].binding_id == 10
-        assert by_stage["verify"].binding_id == 20
-        assert by_stage["verify"].publish_id == 202
-        assert by_stage["verify"].publish_status == PublishStatus.SUCCESS.value
-        assert by_stage["online"].binding_id == 30
-        assert by_stage["online"].publish_id == 202
-
     @pytest.mark.asyncio
     async def test_service_bot_list_expands_draft_verify_online_targets(self):
         bot_provider = MagicMock()
@@ -545,10 +513,11 @@ class TestListServiceBotRuntimeStages:
         publish_repo = MagicMock()
         publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
             lambda source_bot_id, owner_id, status, env: {
-                PublishStatus.SUCCESS.value: SimpleNamespace(
-                    id=202,
+                PublishStatus.SUCCESS.value: _make_publish_record(
+                    publish_id=202,
                     status=PublishStatus.SUCCESS.value,
-                    ext={"binding": {"verify": 20, "online": 30}},
+                    binding_key="online",
+                    binding_id=30,
                 ),
             }.get(status)
         )
@@ -557,7 +526,6 @@ class TestListServiceBotRuntimeStages:
         device_provider.get_device.side_effect = (
             lambda *, binding_id: {
                 10: _make_device(device_provider="arca"),
-                20: _make_device(device_provider="arca"),
                 30: _make_device(device_provider="baas"),
             }[binding_id]
         )
@@ -618,7 +586,7 @@ class TestListServiceBotRuntimeStages:
         assert result["failed_targets"] == []
         device_provider.get_instances.assert_not_called()
         device_provider.list_devices_by_runtime_binding.assert_not_called()
-        resolver.resolve_for_binding.assert_any_call(
+        resolver.resolve_for_binding.assert_called_once_with(
             30, "owner-1", bot_id="service-bot"
         )
 
@@ -636,10 +604,11 @@ class TestListServiceBotRuntimeStages:
         publish_repo = MagicMock()
         publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
             lambda source_bot_id, owner_id, status, env: {
-                PublishStatus.SUCCESS.value: SimpleNamespace(
-                    id=202,
+                PublishStatus.SUCCESS.value: _make_publish_record(
+                    publish_id=202,
                     status=PublishStatus.SUCCESS.value,
-                    ext={"binding": {"verify": 20, "online": 30}},
+                    binding_key="online",
+                    binding_id=30,
                 ),
             }.get(status)
         )
@@ -648,7 +617,6 @@ class TestListServiceBotRuntimeStages:
         device_provider.get_device.side_effect = (
             lambda *, binding_id: {
                 10: _make_device(device_provider="arca"),
-                20: _make_device(device_provider="arca"),
                 30: _make_device(device_provider="baas"),
             }[binding_id]
         )
@@ -671,11 +639,6 @@ class TestListServiceBotRuntimeStages:
                 return {
                     "success": True,
                     "data": [{"id": "online-task"}],
-                }
-            if conn_info["binding_id"] == 20:
-                return {
-                    "success": True,
-                    "data": [{"id": "verify-task"}],
                 }
             return {
                 "success": True,
@@ -700,7 +663,6 @@ class TestListServiceBotRuntimeStages:
         assert result["success"] is True
         assert [item["id"] for item in result["data"]] == [
             "draft-task",
-            "verify-task",
             "online-task",
         ]
         assert result["failed_targets"] == []
@@ -1464,45 +1426,6 @@ class TestListRunningCronsOwnerId:
 
 
 class TestForwardRequestUsesResolver:
-    def test_verify_stage_falls_back_to_success_publish_record(self):
-        bot = {
-            "bot_id": "service-bot",
-            "owner_id": "owner-1",
-            "binding_id": 10,
-            "bot_name": "Service Bot",
-            "bot_type": "service",
-        }
-        success_record = SimpleNamespace(
-            id=202,
-            status=PublishStatus.SUCCESS.value,
-            ext={"binding": {"verify": 20, "online": 30}},
-        )
-        publish_repo = MagicMock()
-        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
-            lambda source_bot_id, owner_id, status, env: (
-                success_record if status == PublishStatus.SUCCESS.value else None
-            )
-        )
-        svc = _make_service(publish_repo=publish_repo)
-
-        target = svc._resolve_published_runtime_target(
-            bot,
-            "owner-1",
-            "verify",
-        )
-
-        assert target.binding_id == 20
-        assert target.publish_id == 202
-        assert target.publish_status == PublishStatus.SUCCESS.value
-        queried_statuses = [
-            call.kwargs["status"]
-            for call in publish_repo.get_latest_by_source_bot_id_and_owner_and_status.mock_calls
-        ]
-        assert queried_statuses == [
-            PublishStatus.VALIDATING.value,
-            PublishStatus.SUCCESS.value,
-        ]
-
     @pytest.mark.asyncio
     async def test_forward_request_calls_resolver_not_v2(self):
         """forward_request uses the resolver-built adapter connection context."""
