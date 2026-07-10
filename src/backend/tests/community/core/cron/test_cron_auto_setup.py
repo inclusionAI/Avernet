@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from agentclaw.community.core.cron.services.cron_auto_setup import (
+from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import (
     CronAutoSetupService,
     _is_hosted_24x7,
     _get_trigger_frequency,
@@ -431,7 +431,7 @@ class TestCronAutoSetupService:
     @pytest.mark.asyncio
     async def test_create_cron_model_fallback_to_default(self, monkeypatch):
         """ext 未配置 model 且 runtime 已配置 → model 走 DEFAULT_CRON_MODEL 兜底。"""
-        import agentclaw.community.core.cron.services.cron_auto_setup as mod
+        import agentclaw.community.core.cron.services.aicoding.cron_auto_setup as mod
         monkeypatch.setattr(mod, "DEFAULT_CRON_MODEL", "claude-sonnet")
         service, mock_repo, mock_relay = self._create_service(
             template_data={

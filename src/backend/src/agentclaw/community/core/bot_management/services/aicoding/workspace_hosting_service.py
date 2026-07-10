@@ -7,7 +7,7 @@ import json
 from typing import Dict, Any, Optional
 from injector import inject
 
-from agentclaw.community.core.bot_management.services.workspace_hosting_client import WorkspaceHostingClient
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client import WorkspaceHostingClient
 
 # 默认部门 ID，当接口查询失败时作为兜底值
 _DEFAULT_DEPARTMENT_ID = "52146"

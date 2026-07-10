@@ -15,8 +15,8 @@ from injector import Injector, InstanceProvider, singleton
 
 import pytest
 
-from agentclaw.community.core.bot_management.services.workspace_hosting_client import WorkspaceHostingClient
-from agentclaw.community.core.bot_management.services.workspace_hosting_service import (
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client import WorkspaceHostingClient
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import (
     WorkspaceHostingService,
     _DEFAULT_DEPARTMENT_ID,
     _FIXED_ADMIN_MEMBERS,
@@ -80,7 +80,7 @@ def _make_workspace_service(client: WorkspaceHostingClient | None = None) -> Wor
 class TestWorkspaceHostingClientInitEnvRouting:
     """WorkspaceHostingClient.__init__ 根据环境选择 aixcore_base_url。"""
 
-    @patch("agentclaw.community.core.bot_management.services.workspace_hosting_client.get_current_env", return_value="prod")
+    @patch("agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client.get_current_env", return_value="prod")
     def test_prod_env_uses_aixcore_base_url(self, mock_env):
         cfg = _make_config(
             aixcore_base_url="https://aixcore.teamclaw.com",
@@ -89,7 +89,7 @@ class TestWorkspaceHostingClientInitEnvRouting:
         client = WorkspaceHostingClient(cfg)
         assert client.aixcore_base_url == "https://aixcore.teamclaw.com"
 
-    @patch("agentclaw.community.core.bot_management.services.workspace_hosting_client.get_current_env", return_value="pre")
+    @patch("agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client.get_current_env", return_value="pre")
     def test_pre_env_uses_aixcore_base_url_pre(self, mock_env):
         cfg = _make_config(
             aixcore_base_url="https://aixcore.teamclaw.com",
@@ -98,7 +98,7 @@ class TestWorkspaceHostingClientInitEnvRouting:
         client = WorkspaceHostingClient(cfg)
         assert client.aixcore_base_url == "https://aixcore-pre.teamclaw.com"
 
-    @patch("agentclaw.community.core.bot_management.services.workspace_hosting_client.get_current_env", return_value="dev")
+    @patch("agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client.get_current_env", return_value="dev")
     def test_dev_env_uses_aixcore_base_url_pre(self, mock_env):
         cfg = _make_config(
             aixcore_base_url="https://aixcore.teamclaw.com",
@@ -107,7 +107,7 @@ class TestWorkspaceHostingClientInitEnvRouting:
         client = WorkspaceHostingClient(cfg)
         assert client.aixcore_base_url == "https://aixcore-pre.teamclaw.com"
 
-    @patch("agentclaw.community.core.bot_management.services.workspace_hosting_client.get_current_env", return_value="prod")
+    @patch("agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client.get_current_env", return_value="prod")
     def test_strips_trailing_slash(self, mock_env):
         cfg = _make_config(
             aixcore_base_url="https://aixcore.teamclaw.com/",

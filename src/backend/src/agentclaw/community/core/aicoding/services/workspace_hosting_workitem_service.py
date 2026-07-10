@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.services.workspace_hosting_client import (
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client import (
     WorkspaceHostingClient,
 )
 

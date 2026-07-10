@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 
 from injector import Binder, Module, singleton
 
-from agentclaw.community.core.bot_management.services.workspace_hosting_service import (
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import (
     WorkspaceHostingService,
 )
 

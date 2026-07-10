@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 import requests
 
-from agentclaw.community.core.bot_management.services.workspace_hosting_client import WorkspaceHostingClient
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client import WorkspaceHostingClient
 from agentclaw.community.core.aicoding.services.workspace_hosting_workitem_service import WorkspaceHostingWorkItemService
 
 
