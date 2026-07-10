@@ -56,10 +56,21 @@ modules:
       - tests/community/acceptance/bot_chat
     core_paths:
       - src/agentclaw/community/core/bot_chat/
-    router_api: *pending_router_denominator
-    plugin_api: *pending_plugin_denominator
+    router_api:
+      status: applicable
+      reason: The Langfuse health route is external-service dependent and is outside the local singlebox denominator.
+      items:
+        - POST /api/bot-chat/otel/traces
+        - POST /api/bot-chat/log-relations
+        - GET /api/v1/bot-chats
+        - GET /api/v1/bot-chats/{trace_id}
+    plugin_api:
+      status: not_applicable
+      reason: Bot chat currently has no independently attributable Plugin API boundary.
+      items: []
     thresholds:
-      core_min_percent: 40.66
+      core_min_percent: 67.48
+      router_min_percent: 100.0
 
   bot_collaborator:
     system: backend
