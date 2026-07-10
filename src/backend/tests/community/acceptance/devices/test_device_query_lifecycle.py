@@ -1,11 +1,13 @@
-"""Route-B acceptance: devices read-only query lifecycle on live backend.
+"""Route-B acceptance: devices query and local-provider lifecycle.
 
 Starts a real singlebox backend (in-memory SQLite via local_setup.sh),
-runs the 3 read-only flows + asserts no-data state matches baseline.
+runs the 3 read-only flows, asserts the no-data baseline, and creates one real
+personal bot through Backend -> BaaS before exercising its device binding.
 
-devices write paths (apply/release/connection/exec_shell/callback/batch — 8
-endpoints) all depend on BaasService HTTP without a LocalBaas plugin — out
-of scope for single box (see findings/devices-baas-write-paths-unmocked.md).
+The open-source singlebox records the created binding as provider ``local``.
+Connection and release are supported; instance-list and restart are
+BaaS/Teclaw-only and must return the documented capability error rather than
+silently pretending that a local binding is a remote multi-instance runtime.
 
 Acceptance covers only the empty/no-data contract:
   - list returns empty {total: 0, items: []}
@@ -23,6 +25,11 @@ import httpx
 import pytest
 
 from tests.community._flows.devices.api_lifecycle import DEVICES_LIFECYCLE_FLOWS
+from tests.community.acceptance._fixtures.live_personal_bot import (
+    assert_success,
+    create_live_personal_bot,
+    fresh_id,
+)
 from tests.community.framework.flow_runner_live import run_flow_live
 
 BASELINE_PATH = Path(__file__).parent / "baseline_device_query.json"
@@ -102,3 +109,85 @@ def test_devices_lifecycle_baseline(live_backend, acceptance_fs_root):
         f"  expected: {json.dumps(expected, indent=2, sort_keys=True)}\n"
         f"  actual:   {json.dumps(snapshot, indent=2, sort_keys=True)}"
     )
+
+
+@pytest.mark.acceptance
+def test_device_live_local_provider_lifecycle(live_backend):
+    """Create a real local runtime, inspect its device, then release it."""
+    user_id = fresh_id("device_owner")
+    headers = {"x-user-id": user_id}
+
+    with httpx.Client(base_url=live_backend, headers=headers, timeout=60.0) as client:
+        bot = create_live_personal_bot(
+            client,
+            user_id=user_id,
+            bot_name_prefix="Device Acceptance",
+            bot_desc="device live lifecycle acceptance bot",
+        )
+        binding_id = int(bot["binding_id"])
+        device_id = str(bot["device_id"])
+
+        detail = assert_success(client.get(f"/api/v1/devices/{binding_id}"))["data"]
+        assert detail["entity_id"] == user_id
+        assert detail["device_id"] == device_id
+        assert detail["device_provider"] == "local"
+        assert detail["status"] == "ACTIVE"
+
+        by_device_id = assert_success(
+            client.get(f"/api/v1/devices/by-id/{device_id}")
+        )["data"]
+        assert by_device_id["id"] == binding_id
+
+        listed = assert_success(client.get("/api/v1/devices"))["data"]
+        assert any(item["id"] == binding_id for item in listed["items"]), listed
+
+        connection = assert_success(
+            client.get(f"/api/v1/devices/{binding_id}/connection")
+        )["data"]
+        assert connection["available"] is True
+        assert connection["url"]
+
+        connectable = assert_success(
+            client.get(
+                "/api/v1/devices/connectable",
+                params={
+                    "entity_id": user_id,
+                    "entity_type": "staff",
+                    "with_connection": True,
+                },
+            )
+        )["data"]
+        assert any(item["id"] == binding_id for item in connectable["items"]), connectable
+
+        with httpx.Client(
+            base_url=live_backend,
+            headers={"x-user-id": fresh_id("device_other")},
+            timeout=30.0,
+        ) as other_client:
+            forbidden = other_client.get(f"/api/v1/devices/{binding_id}").json()
+        assert forbidden["success"] is False
+        assert forbidden["error_code"] == 403
+
+        instances = client.get(f"/api/v1/devices/{binding_id}/instances").json()
+        assert instances["success"] is False
+        assert instances["error_code"] == 40403
+        assert "does not support instances query" in instances["message"]
+
+        restart = client.post(
+            f"/api/v1/devices/{binding_id}/restart",
+            json={"device_uuid": device_id},
+        ).json()
+        assert restart["success"] is False
+        assert restart["error_code"] == 40403
+        assert "does not support instances query" in restart["message"]
+
+        released = assert_success(
+            client.post(
+                f"/api/v1/devices/{binding_id}/release",
+                json={"release_reason": "singlebox device lifecycle complete"},
+            )
+        )["data"]
+        assert released["status"] == "RELEASED"
+
+        readback = assert_success(client.get(f"/api/v1/devices/{binding_id}"))["data"]
+        assert readback["status"] == "RELEASED"
