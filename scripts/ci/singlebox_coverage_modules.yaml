@@ -147,6 +147,38 @@ modules:
     thresholds:
       core_min_percent: 41.59
 
+  resources:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/resources/test_resource_metadata_lifecycle.py
+    core_paths:
+      - src/agentclaw/community/core/resources/
+    router_api:
+      status: applicable
+      reason: Resource metadata lifecycle; workspace file APIs are owned by the files module.
+      items:
+        - GET /api/resources/check-name
+        - GET /api/resources
+        - POST /api/resources/url
+        - POST /api/resources/node
+        - POST /api/resources/links
+        - PUT /api/resources/links/{resource_id}
+        - GET /api/resources/{resource_id}
+        - DELETE /api/resources/{resource_id}
+    plugin_api:
+      status: applicable
+      reason: Resource metadata is persisted through the unified ResourceRepository boundary.
+      items:
+        - ResourceRepository.create
+        - ResourceRepository.list_resources
+        - ResourceRepository.get_by_id
+        - ResourceRepository.update
+        - ResourceRepository.delete
+    thresholds:
+      core_min_percent: 39.07
+      router_min_percent: 100.0
+      plugin_min_percent: 100.0
+
 pending_modules:
   skill_center:
     acceptance_targets:
@@ -160,7 +192,3 @@ pending_modules:
     acceptance_targets:
       - tests/community/acceptance/mcp
     reason: Permission baseline and live engine connection assumptions need migration.
-  resources:
-    acceptance_targets:
-      - tests/community/acceptance/resources
-    reason: File lifecycle creates no BaaS-backed bot binding before workspace access.
