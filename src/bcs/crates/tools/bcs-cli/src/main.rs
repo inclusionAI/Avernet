@@ -971,11 +971,15 @@ enum Commands {
         focus: Option<String>,
     },
 
-    /// List all groups
+    /// List groups, optionally limited to groups the current bot participates in
     ListGroups {
         /// Authentication token (auto-discovered if not provided)
         #[arg(short, long)]
         token: Option<String>,
+
+        /// List only groups that include the current bot from the session file
+        #[arg(long)]
+        mine: bool,
     },
 
     /// Add a member to an existing group
@@ -2626,7 +2630,7 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&result)?);
         }
 
-        Commands::ListGroups { token } => {
+        Commands::ListGroups { token, mine } => {
             let token = get_token(token.as_deref())?;
             let client = create_client(
                 &bcs_url,
@@ -2635,9 +2639,20 @@ async fn main() -> Result<()> {
                 oauth_headers.as_ref(),
             );
 
-            debug_request!(debug, "GET", "/groups", json!({}));
-
-            let groups = client.list_groups().await?;
+            let (groups, current_bot_uuid) = if mine {
+                let bot_uuid = resolve_my_bot_uuid()?;
+                debug_request!(
+                    debug,
+                    "GET",
+                    &format!("/bots/{}/groups", &bot_uuid),
+                    json!({})
+                );
+                let groups = client.list_bot_groups(&bot_uuid).await?;
+                (groups, Some(bot_uuid))
+            } else {
+                debug_request!(debug, "GET", "/groups", json!({}));
+                (client.list_groups().await?, None)
+            };
 
             debug_response!(
                 debug,
@@ -2647,7 +2662,11 @@ async fn main() -> Result<()> {
                 })
             );
 
-            println!("Groups ({}):", groups.len());
+            if let Some(bot_uuid) = current_bot_uuid {
+                println!("Groups for current bot {} ({}):", bot_uuid, groups.len());
+            } else {
+                println!("Groups ({}):", groups.len());
+            }
             for group in groups {
                 let id = group
                     .get("id")

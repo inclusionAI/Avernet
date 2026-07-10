@@ -3,3 +3,4 @@
 mod common;
 mod smoke_test;
 mod list_test;
+mod groups_test;
