@@ -56,6 +56,7 @@ from agentclaw.community.core.economy.governance.repositories.whitelist_repo imp
     GovernanceWhitelistRepository,
 )
 from agentclaw.community.di.config import EconomyGovernanceConfig
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.economy.governance.lifecycle import GovernanceBotLifecycle
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
@@ -422,6 +423,33 @@ class EconomyGovernanceModule(Module):
             yaml_block.get("auto_silence_close_days", defaults.auto_silence_close_days)
         )
 
+        # max_notify_per_run: YAML → default
+        max_notify_per_run = int(
+            yaml_block.get("max_notify_per_run", defaults.max_notify_per_run)
+        )
+
+        # auto_resolve_threshold_days: YAML → default
+        auto_resolve_threshold_days = int(
+            yaml_block.get(
+                "auto_resolve_threshold_days",
+                defaults.auto_resolve_threshold_days,
+            )
+        )
+
+        # expire_days: YAML → default
+        expire_days = int(
+            yaml_block.get("expire_days", defaults.expire_days)
+        )
+
+        # iframe_callback_url: YAML _pre suffix → YAML base → default.
+        # Card React component fetch POST target; env-aware (pre/prod differ).
+        _env = get_current_env()
+        _is_pre = _env in ("pre", "prepub")
+        iframe_callback_url = str(yaml_block.get(
+            "iframe_callback_url_pre" if _is_pre else "iframe_callback_url",
+            defaults.iframe_callback_url,
+        ))
+
         return EconomyGovernanceConfig(
             dry_run=dry_run,
             skip_weekends=skip_weekends,
@@ -429,10 +457,14 @@ class EconomyGovernanceModule(Module):
             scan_minute=scan_minute,
             cooldown_days=cooldown_days,
             auto_silence_close_days=auto_silence_close_days,
+            max_notify_per_run=max_notify_per_run,
+            auto_resolve_threshold_days=auto_resolve_threshold_days,
+            expire_days=expire_days,
             notify_channel=notify_channel,
             tc_card_id=tc_card_id,
             tc_card_template_id=tc_card_template_id,
             tc_card_preview_url=tc_card_preview_url,
+            iframe_callback_url=iframe_callback_url,
         )
 
     # NOTE: the ``NotifySenderPlugin`` binding is profile-specific (corp =

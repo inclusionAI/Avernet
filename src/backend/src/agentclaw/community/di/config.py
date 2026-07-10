@@ -570,3 +570,9 @@ class EconomyGovernanceConfig:
     # supply the real endpoint via ``economy_governance.tc_card_preview_url``
     # (OSS-0 #3). Empty ⇒ the deep link carries no preview host (feature-off).
     tc_card_preview_url: str = ""
+    # Backend card-callback URL for the TC-card React component's fetch POST.
+    # Env-aware: pre/prod point at different callback endpoints.
+    # Source: YAML ``economy_governance.iframe_callback_url`` (corp overlay) or
+    # ``economy_governance.iframe_callback_url_pre`` (pre-env).
+    # Empty ⇒ the detailLink carries no callbackUrl (feedback form non-functional).
+    iframe_callback_url: str = ""
