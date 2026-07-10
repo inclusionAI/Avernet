@@ -11,6 +11,9 @@ from typing import Any
 from injector import inject
 
 from agentclaw.community.core.common_config.service import CommonConfigService
+from agentclaw.community.log import get_logger
+
+logger = get_logger()
 
 
 class CommonWhiteListService:
@@ -63,6 +66,53 @@ class CommonWhiteListService:
             whitelist,
             owner_id=owner_id,
             bot_id=bot_id,
+        )
+
+    def get_owner_ids(
+        self,
+        *,
+        business_code: str,
+        param_code: str,
+        env: str,
+    ) -> frozenset[str]:
+        """Read and normalize an enabled owner-ID list from common config."""
+        try:
+            value = self._common_config_service.get_value(
+                business_code=business_code,
+                param_code=param_code,
+                env=env,
+                default=None,
+                only_enabled=True,
+            )
+        except Exception:
+            logger.exception(
+                "[common_whitelist] owner list read failed "
+                "business_code=%s param_code=%s env=%s",
+                business_code,
+                param_code,
+                env,
+            )
+            raise
+        if value is None:
+            return frozenset()
+        if not isinstance(value, list):
+            logger.error(
+                "[common_whitelist] owner list invalid "
+                "business_code=%s param_code=%s env=%s value_type=%s",
+                business_code,
+                param_code,
+                env,
+                type(value).__name__,
+            )
+            raise ValueError(
+                "protected owner IDs must be a list: "
+                f"business_code={business_code} param_code={param_code} env={env}"
+            )
+        return frozenset(
+            normalized
+            for item in value
+            if item is not None
+            and (normalized := str(item).strip())
         )
 
     @staticmethod

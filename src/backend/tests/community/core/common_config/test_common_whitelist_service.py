@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from agentclaw.community.core.common_config.whitelist_service import CommonWhiteListService
 
 
@@ -211,3 +213,82 @@ def test_bot_feature_skips_malformed_whitelist_items_before_match():
         bot_id="bot_1",
         env="pre",
     ) is True
+
+
+def test_get_owner_ids_normalizes_deduplicates_and_drops_blanks():
+    config = FakeCommonConfigService(
+        {
+            ("bot_dormant", "protected_owner_ids", "prod"): [
+                100001,
+                " 100002 ",
+                "100001",
+                "",
+                "   ",
+                None,
+            ]
+        }
+    )
+    service = CommonWhiteListService(config)
+
+    assert service.get_owner_ids(
+        business_code="bot_dormant",
+        param_code="protected_owner_ids",
+        env="prod",
+    ) == frozenset({"100001", "100002"})
+    assert config.calls == [
+        {
+            "business_code": "bot_dormant",
+            "param_code": "protected_owner_ids",
+            "env": "prod",
+            "default": None,
+            "only_enabled": True,
+        }
+    ]
+
+
+def test_get_owner_ids_returns_empty_set_when_config_is_missing_or_disabled():
+    service = CommonWhiteListService(FakeCommonConfigService())
+
+    assert service.get_owner_ids(
+        business_code="bot_dormant",
+        param_code="protected_owner_ids",
+        env="pre",
+    ) == frozenset()
+
+
+@pytest.mark.parametrize("value", [{"100001": True}, "100001", 100001, True])
+def test_get_owner_ids_rejects_non_list_config(value, caplog):
+    caplog.set_level("ERROR")
+    service = CommonWhiteListService(
+        FakeCommonConfigService(
+            {("bot_dormant", "protected_owner_ids", "prod"): value}
+        )
+    )
+
+    with pytest.raises(ValueError, match="protected owner IDs must be a list"):
+        service.get_owner_ids(
+            business_code="bot_dormant",
+            param_code="protected_owner_ids",
+            env="prod",
+        )
+    assert "business_code=bot_dormant" in caplog.text
+    assert "param_code=protected_owner_ids" in caplog.text
+    assert "env=prod" in caplog.text
+    assert repr(value) not in caplog.text
+
+
+def test_get_owner_ids_propagates_config_read_failure(caplog):
+    caplog.set_level("ERROR")
+    config = FakeCommonConfigService()
+    config.get_value = lambda **_: (_ for _ in ()).throw(RuntimeError("db unavailable"))
+    service = CommonWhiteListService(config)
+
+    with pytest.raises(RuntimeError, match="db unavailable"):
+        service.get_owner_ids(
+            business_code="bot_dormant",
+            param_code="protected_owner_ids",
+            env="prod",
+        )
+    assert "business_code=bot_dormant" in caplog.text
+    assert "param_code=protected_owner_ids" in caplog.text
+    assert "env=prod" in caplog.text
