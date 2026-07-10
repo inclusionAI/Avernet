@@ -347,11 +347,20 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         binding_repo=device_binding_repo,
     )
 
+    # Engine adapter registry — 按 config.plugins.engine_adapter 切 stub/real,
+    # 注入 BaasBotService 和 ClawBotService。stub=Noop(测试/本地),real=连真实 engine 通道。
+    engine_adapter_registry = providers.Selector(
+        config.plugins.engine_adapter,
+        real=providers.Singleton(_real_engine_adapter_registry),
+        stub=providers.Singleton(_stub_engine_adapter_registry),
+    )
+
     claw_bot_service = providers.Singleton(
         ClawBotService,
         config=bot_service_config,
         client_pool=chat_client_pool,
         secret_store=secret_plugin,
+        engine_adapter_registry=engine_adapter_registry,
     )
 
     # ── Service providers ─────────────────────────────────────────────────────
@@ -415,14 +424,6 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     session_service = providers.Singleton(
         DefaultSessionService,
         repository=bot_session_repo,
-    )
-
-    # Engine adapter registry — 按 config.plugins.engine_adapter 切 stub/real,
-    # 仅注入 BaasBotService。stub=Noop(测试/本地),real=连真实 engine 通道。
-    engine_adapter_registry = providers.Selector(
-        config.plugins.engine_adapter,
-        real=providers.Singleton(_real_engine_adapter_registry),
-        stub=providers.Singleton(_stub_engine_adapter_registry),
     )
 
     baas_bot_service = providers.Singleton(
