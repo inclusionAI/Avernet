@@ -3,13 +3,17 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import inspect
 import json
 import logging
 import os
 import secrets
+import signal
 import socket
+import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -18,9 +22,14 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.request import Request, urlopen
 
-from websockets.asyncio.client import connect as ws_connect
+try:
+    from websockets.asyncio.client import connect as ws_connect
+except ModuleNotFoundError:
+    ws_connect = None
 
 
 LOGGER = logging.getLogger("hermes_bcn")
@@ -37,6 +46,9 @@ _SECRET_KEYS = frozenset(
 _TERMINAL_HERMES_EVENTS = frozenset({"message.complete", "error"})
 _OBSERVATION_LIMIT = 256
 _OBSERVATION_BYTES = 64 * 1024
+_DEFAULT_BCS_ENDPOINT = "http://127.0.0.1:21000"
+_DEFAULT_BCS_WS_URL = "ws://127.0.0.1:21000/ws/bot"
+_CONNECTOR_VERSION = "1"
 
 
 def _redact(value: Any) -> Any:
@@ -58,10 +70,13 @@ def _log(level: int, event: str, **fields: Any) -> None:
 
 
 async def _open_websocket(
-    uri: str, connector: Callable[..., Any] = ws_connect
+    uri: str, connector: Callable[..., Any] | None = None
 ) -> Any:
     """Disable environment proxies on websockets 15 without breaking 14.x."""
 
+    connector = connector or ws_connect
+    if connector is None:
+        raise RuntimeError("websockets>=14,<16 is required to run the connector")
     try:
         supports_proxy = "proxy" in inspect.signature(connector).parameters
     except (TypeError, ValueError):
@@ -1028,6 +1043,248 @@ class HermesBcnBridge:
         return task
 
 
+@dataclass(frozen=True)
+class ConnectorPaths:
+    session: Path
+    state: Path
+    pid: Path
+    log: Path
+
+
+def resolve_hermes_home(
+    *,
+    profile: str | None = None,
+    hermes_home: str | os.PathLike[str] | None = None,
+) -> Path:
+    if profile and hermes_home:
+        raise ValueError("use either --profile or --hermes-home, not both")
+    if hermes_home:
+        return Path(hermes_home).expanduser().absolute()
+    if profile:
+        if profile in {".", ".."} or Path(profile).name != profile:
+            raise ValueError("profile must be a single directory name")
+        return (Path.home() / ".hermes" / "profiles" / profile).absolute()
+    configured = os.environ.get("HERMES_HOME")
+    return Path(configured or Path.home() / ".hermes").expanduser().absolute()
+
+
+def connector_paths(hermes_home: str | os.PathLike[str]) -> ConnectorPaths:
+    state_dir = Path(hermes_home).expanduser().resolve() / "bcn"
+    return ConnectorPaths(
+        session=state_dir / "session.json",
+        state=state_dir / "groups.json",
+        pid=state_dir / "connector.pid",
+        log=state_dir / "connector.log",
+    )
+
+
+def _post_registration(endpoint: str, human_token: str, bot_name: str) -> dict[str, Any]:
+    query = urlencode({"token": human_token, "bot-name": bot_name})
+    url = f"{endpoint.rstrip('/')}/register?{query}"
+    request = Request(url, data=b"", method="POST")
+    try:
+        with urlopen(request, timeout=30) as response:
+            payload = json.load(response)
+    except HTTPError as exc:
+        raise RuntimeError(f"registration failed (HTTP {exc.code})") from None
+    except (URLError, OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"registration failed ({type(exc).__name__})") from None
+    if not isinstance(payload, dict):
+        raise ValueError("registration response must be a JSON object")
+    return payload
+
+
+def _valid_credentials(session: Any) -> bool:
+    return isinstance(session, dict) and all(
+        isinstance(session.get(key), str) and bool(session[key])
+        for key in ("bot_uuid", "bot_token", "bcs_url")
+    )
+
+
+def register_bot(
+    *,
+    human_token: str,
+    bot_name: str,
+    bcs_endpoint: str,
+    bcs_url: str,
+    hermes_home: str | os.PathLike[str],
+    workspace: str | None = None,
+    replace: bool = False,
+) -> dict[str, Any]:
+    home = Path(hermes_home).expanduser().resolve()
+    paths = connector_paths(home)
+    store = AtomicJsonStore(paths.session)
+    existing = store.load({})
+    if _valid_credentials(existing) and not replace:
+        return existing
+
+    response = _post_registration(bcs_endpoint, human_token, bot_name)
+    for key in ("bot_uuid", "bot_token"):
+        if not isinstance(response.get(key), str) or not response[key]:
+            raise ValueError(f"registration response missing {key}")
+
+    session = {
+        "bcs_url": bcs_url,
+        "bot_uuid": response["bot_uuid"],
+        "bot_token": response["bot_token"],
+        "bot_name": bot_name,
+        "hermes_home": str(home),
+        "workspace": workspace or str(home),
+        "dashboard_port": _free_loopback_port(),
+        "dashboard_token": secrets.token_urlsafe(32),
+        "connector_version": _CONNECTOR_VERSION,
+    }
+    store.save(session)
+    return session
+
+
+def _loopback_port_available(port: int) -> bool:
+    if not isinstance(port, int) or not 0 < port < 65536:
+        return False
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def ensure_dashboard_settings(
+    session: dict[str, Any], hermes_home: str | os.PathLike[str]
+) -> tuple[int, str]:
+    port = session.get("dashboard_port")
+    token = session.get("dashboard_token")
+    changed = False
+    if not isinstance(port, int) or not _loopback_port_available(port):
+        port = _free_loopback_port()
+        session["dashboard_port"] = port
+        changed = True
+    if not isinstance(token, str) or not token:
+        token = secrets.token_urlsafe(32)
+        session["dashboard_token"] = token
+        changed = True
+    if changed:
+        AtomicJsonStore(connector_paths(hermes_home).session).save(session)
+    return port, token
+
+
+def _read_pid_record(path: Path) -> dict[str, Any] | None:
+    value = AtomicJsonStore(path).load(None)
+    if not isinstance(value, dict) or not isinstance(value.get("pid"), int):
+        return None
+    return value
+
+
+def _connector_process_matches(record: dict[str, Any]) -> bool:
+    pid = record.get("pid")
+    home = record.get("hermes_home")
+    if not isinstance(pid, int) or pid <= 0 or not isinstance(home, str):
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return False
+    command = result.stdout
+    return (
+        result.returncode == 0
+        and Path(__file__).name in command
+        and " run" in command
+        and home in command
+    )
+
+
+def connector_status(hermes_home: str | os.PathLike[str]) -> tuple[str, int]:
+    path = connector_paths(hermes_home).pid
+    record = _read_pid_record(path)
+    if record is None:
+        return ("stale", 2) if path.exists() else ("stopped", 1)
+    if _connector_process_matches(record):
+        return "running", 0
+    return "stale", 2
+
+
+def start_connector(
+    hermes_home: str | os.PathLike[str], *, health_wait: float = 1.0
+) -> int:
+    home = Path(hermes_home).expanduser().resolve()
+    paths = connector_paths(home)
+    record = _read_pid_record(paths.pid)
+    if record is not None and _connector_process_matches(record):
+        return int(record["pid"])
+    if record is not None or paths.pid.exists():
+        paths.pid.unlink(missing_ok=True)
+    if not _valid_credentials(AtomicJsonStore(paths.session).load({})):
+        raise RuntimeError(f"missing valid connector session: {paths.session}")
+
+    paths.log.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with paths.log.open("a", encoding="utf-8") as log_handle:
+        paths.log.chmod(0o600)
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "run",
+                "--hermes-home",
+                str(home),
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            close_fds=True,
+        )
+    AtomicJsonStore(paths.pid).save(
+        {
+            "pid": process.pid,
+            "hermes_home": str(home),
+            "script": str(Path(__file__).resolve()),
+        }
+    )
+    deadline = time.monotonic() + max(0.0, health_wait)
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            paths.pid.unlink(missing_ok=True)
+            raise RuntimeError(f"connector exited during startup; see {paths.log}")
+        time.sleep(0.05)
+    if process.poll() is not None:
+        paths.pid.unlink(missing_ok=True)
+        raise RuntimeError(f"connector exited during startup; see {paths.log}")
+    return process.pid
+
+
+def stop_connector(
+    hermes_home: str | os.PathLike[str], *, timeout: float = 15.0
+) -> bool:
+    path = connector_paths(hermes_home).pid
+    record = _read_pid_record(path)
+    if record is None:
+        path.unlink(missing_ok=True)
+        return False
+    if not _connector_process_matches(record):
+        path.unlink(missing_ok=True)
+        return False
+    pid = int(record["pid"])
+    os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            path.unlink(missing_ok=True)
+            return True
+        time.sleep(0.1)
+    raise TimeoutError("connector did not stop after SIGTERM")
+
+
 class _OwnedDashboard:
     def __init__(self, hermes_home: Path, port: int, token: str) -> None:
         self.hermes_home = hermes_home
@@ -1130,6 +1387,8 @@ async def run(
     hermes_home: str | os.PathLike[str] | None = None,
     workspace: str | None = None,
     stop_event: asyncio.Event | None = None,
+    owned_dashboard_port: int | None = None,
+    owned_dashboard_token: str | None = None,
 ) -> None:
     """Run the bridge against an existing or connector-owned Dashboard."""
 
@@ -1142,8 +1401,8 @@ async def run(
         home = Path(
             hermes_home or os.environ.get("HERMES_HOME") or Path.home() / ".hermes"
         ).expanduser()
-        port = _free_loopback_port()
-        hermes_token = secrets.token_urlsafe(32)
+        port = owned_dashboard_port or _free_loopback_port()
+        hermes_token = owned_dashboard_token or secrets.token_urlsafe(32)
         hermes_url = f"http://127.0.0.1:{port}"
         owned = _OwnedDashboard(home, port, hermes_token)
         await owned.start()
@@ -1183,6 +1442,117 @@ async def run(
             await owned.stop()
 
 
+async def _run_saved_session(hermes_home: Path) -> None:
+    paths = connector_paths(hermes_home)
+    session = AtomicJsonStore(paths.session).load({})
+    if not _valid_credentials(session):
+        raise RuntimeError(f"missing valid connector session: {paths.session}")
+    port, dashboard_token = ensure_dashboard_settings(session, hermes_home)
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(signum, stop_event.set)
+        except NotImplementedError:
+            signal.signal(signum, lambda *_: loop.call_soon_threadsafe(stop_event.set))
+    try:
+        await run(
+            bcs_url=session["bcs_url"],
+            bot_id=session["bot_uuid"],
+            bot_token=session["bot_token"],
+            state_path=paths.state,
+            credential_path=paths.session,
+            hermes_home=hermes_home,
+            workspace=session.get("workspace"),
+            stop_event=stop_event,
+            owned_dashboard_port=port,
+            owned_dashboard_token=dashboard_token,
+        )
+    finally:
+        record = _read_pid_record(paths.pid)
+        if record is not None and record.get("pid") == os.getpid():
+            paths.pid.unlink(missing_ok=True)
+
+
+def _add_home_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--profile", help="Hermes profile name")
+    parser.add_argument("--hermes-home", help="explicit Hermes home directory")
+
+
+def _argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    register_parser = commands.add_parser(
+        "register", help="register and save BCS credentials"
+    )
+    _add_home_arguments(register_parser)
+    register_parser.add_argument("--human-token", required=True)
+    register_parser.add_argument("--bot-name", required=True)
+    register_parser.add_argument("--bcs-endpoint", default=_DEFAULT_BCS_ENDPOINT)
+    register_parser.add_argument("--bcs-url", default=_DEFAULT_BCS_WS_URL)
+    register_parser.add_argument("--workspace")
+    register_parser.add_argument("--replace", action="store_true")
+
+    for name in ("run", "start", "stop", "status"):
+        command_parser = commands.add_parser(name)
+        _add_home_arguments(command_parser)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _argument_parser().parse_args(argv)
+    try:
+        home = resolve_hermes_home(profile=args.profile, hermes_home=args.hermes_home)
+        if args.command == "register":
+            session = register_bot(
+                human_token=args.human_token,
+                bot_name=args.bot_name,
+                bcs_endpoint=args.bcs_endpoint,
+                bcs_url=args.bcs_url,
+                hermes_home=home,
+                workspace=args.workspace,
+                replace=args.replace,
+            )
+            print(f"registered {session['bot_uuid']}")
+            return 0
+        if args.command == "run":
+            paths = connector_paths(home)
+            record = _read_pid_record(paths.pid)
+            if (
+                record is not None
+                and record.get("pid") != os.getpid()
+                and _connector_process_matches(record)
+            ):
+                raise RuntimeError(f"connector already running (pid {record['pid']})")
+            AtomicJsonStore(paths.pid).save(
+                {
+                    "pid": os.getpid(),
+                    "hermes_home": str(home),
+                    "script": str(Path(__file__).resolve()),
+                }
+            )
+            try:
+                asyncio.run(_run_saved_session(home))
+            finally:
+                record = _read_pid_record(paths.pid)
+                if record is not None and record.get("pid") == os.getpid():
+                    paths.pid.unlink(missing_ok=True)
+            return 0
+        if args.command == "start":
+            print(f"running (pid {start_connector(home)})")
+            return 0
+        if args.command == "stop":
+            print("stopped" if stop_connector(home) else "not running")
+            return 0
+        state, code = connector_status(home)
+        print(state)
+        return code
+    except (OSError, RuntimeError, ValueError, TimeoutError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+
 __all__ = [
     "AtomicJsonStore",
     "BcsClient",
@@ -1190,5 +1560,17 @@ __all__ = [
     "HermesClient",
     "HermesEventStream",
     "HermesRpcError",
+    "connector_paths",
+    "connector_status",
+    "ensure_dashboard_settings",
+    "main",
+    "register_bot",
+    "resolve_hermes_home",
     "run",
+    "start_connector",
+    "stop_connector",
 ]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

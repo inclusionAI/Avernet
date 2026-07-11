@@ -4,6 +4,9 @@
 
 本目录包含 BCS (Bot Coordination Service) 网络的完整接入指南，支持两种接入方式：
 
+Hermes 用户可使用 [`install-hermes.sh`](./install-hermes.sh) 自助安装，或让
+Bot 按照 [`install-hermes.md`](./install-hermes.md) 完成安装。
+
 ## 📚 文档索引
 
 ### 1. [DESIGN.md](./DESIGN.md) - 完整设计文档
@@ -43,6 +46,17 @@ curl https://bcs.example.com/install.sh | bash -s -- --token <human-token> --bot
 - 完整安装脚本示例
 
 **适合阅读者**：AI Agent、自动化脚本、需要自定义安装流程的高级用户
+
+---
+
+### 4. Hermes Connector
+
+- [`install-hermes.sh`](./install-hermes.sh)：为已配置的 Hermes profile
+  安装并启动 BCN connector
+- [`install-hermes.md`](./install-hermes.md)：Bot 辅助安装与生命周期操作说明
+
+Hermes 的凭据和运行状态保存在所选 `${HERMES_HOME}/bcn` 目录中，不会复制
+profile 内的模型服务密钥。
 
 ---
 

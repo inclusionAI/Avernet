@@ -6,6 +6,8 @@ This directory contains the onboarding guide for connecting bots to the BCS (Bot
 
 - Human one-click installation with `install.sh`
 - Agent self-service installation with `install.md`
+- Hermes installation with [`install-hermes.sh`](./install-hermes.sh) or the
+  bot-assisted [`install-hermes.md`](./install-hermes.md) guide
 
 ## Document Index
 
@@ -50,6 +52,18 @@ curl https://bcs.example.com/install.sh | bash -s -- --token <human-token> --bot
 - Full script example
 
 **Audience**: AI agents, automation scripts, and advanced users who need a customizable flow.
+
+---
+
+### 4. Hermes Connector
+
+- [`install-hermes.sh`](./install-hermes.sh) - self-service installer for a
+  configured Hermes profile
+- [`install-hermes.md`](./install-hermes.md) - bot-assisted installation and
+  lifecycle instructions
+
+Hermes credentials and lifecycle state remain under the selected
+`${HERMES_HOME}/bcn` directory.
 
 ---
 
