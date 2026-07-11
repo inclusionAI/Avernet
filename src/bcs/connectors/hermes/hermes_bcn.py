@@ -638,6 +638,7 @@ class _ActiveRun:
     lock_acquired: bool = False
     prompt_submitted: bool = False
     terminal_sent: bool = False
+    terminal_task: asyncio.Task[None] | None = None
 
 
 class HermesBcnBridge:
@@ -1058,13 +1059,46 @@ class HermesBcnBridge:
         text: str | None = None,
         usage: Any = None,
     ) -> bool:
-        if active.terminal_sent:
-            return False
-        active.terminal_sent = True
-        await self._send_chat_event(
-            run_id, active.group, state, text=text, usage=usage
-        )
-        return True
+        terminal_task = active.terminal_task
+        first_writer = terminal_task is None
+        if terminal_task is None:
+            terminal_task = asyncio.create_task(
+                self._deliver_terminal_chat_event(
+                    run_id,
+                    active.group,
+                    state,
+                    text=text,
+                    usage=usage,
+                ),
+                name=f"hermes-bcn-terminal-{run_id}",
+            )
+            active.terminal_task = terminal_task
+            active.terminal_sent = True
+        await asyncio.shield(terminal_task)
+        return first_writer
+
+    async def _deliver_terminal_chat_event(
+        self,
+        run_id: str,
+        group: str,
+        state: str,
+        *,
+        text: str | None = None,
+        usage: Any = None,
+    ) -> None:
+        try:
+            await self._send_chat_event(
+                run_id, group, state, text=text, usage=usage
+            )
+        except Exception as exc:
+            _log(
+                logging.WARNING,
+                "bridge_terminal_send_failed",
+                run_id=run_id,
+                group=group,
+                state=state,
+                error_type=type(exc).__name__,
+            )
 
     def _group_state(
         self, group: str, params: dict[str, Any] | None = None

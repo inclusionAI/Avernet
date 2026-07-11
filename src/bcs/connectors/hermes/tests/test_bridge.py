@@ -218,8 +218,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             await bridge.handle_frame(
                 {"type": "event", "event": "chat.abort", "payload": {"run_id": run_id}}
             )
-            await asyncio.sleep(0)
-            await asyncio.sleep(0)
+            await asyncio.wait_for(self._wait_bridge_tasks(bridge), timeout=1)
             self.assertEqual(
                 ["error"], [event["payload"]["state"] for event in bcs.events]
             )
@@ -270,6 +269,155 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             ["aborted"], [event["payload"]["state"] for event in bcs.events]
         )
+
+    async def test_terminal_delivery_survives_abort_during_bcs_backpressure(
+        self,
+    ) -> None:
+        prompt_started = asyncio.Event()
+        release_stream = asyncio.Event()
+        interrupted = asyncio.Event()
+        abort_captured = asyncio.Event()
+        continue_abort = asyncio.Event()
+
+        class WireWebSocket:
+            def __init__(self) -> None:
+                self.frames: list[dict] = []
+
+            async def send(self, raw: str) -> None:
+                self.frames.append(json.loads(raw))
+
+        class Hermes:
+            generation = 1
+
+            async def connect(self) -> None:
+                return None
+
+            async def create_session(self, *, cwd=None) -> dict:
+                return {"session_id": "live-1", "stored_session_id": "stored-1"}
+
+            async def submit_prompt(self, session_id: str, text: str):
+                prompt_started.set()
+
+                async def events():
+                    await release_stream.wait()
+                    yield {
+                        "type": "message.complete",
+                        "payload": {"text": "stopped", "status": "interrupted"},
+                    }
+
+                return events()
+
+            async def interrupt_session(self, session_id: str) -> dict:
+                interrupted.set()
+                raise HermesRpcError(5000, "interrupt failed")
+
+        class PausingBridge(HermesBcnBridge):
+            async def _abort_active_run(self, run_id, active) -> None:
+                abort_captured.set()
+                await continue_abort.wait()
+                await super()._abort_active_run(run_id, active)
+
+        websocket = WireWebSocket()
+        bcs = BcsClient(
+            url="ws://unused",
+            bot_id="bot-test",
+            token="bot-token",
+            credential_store=MemoryStateStore(),
+        )
+        bcs._websocket = websocket
+        bridge = PausingBridge(bcs, Hermes(), MemoryStateStore())
+        await bridge.handle_frame(chat_request("send-1", "group-1", "question"))
+        await asyncio.wait_for(prompt_started.wait(), timeout=1)
+
+        ack = websocket.frames[0]
+        run_id = ack["payload"]["run_id"]
+        active = bridge._active[run_id]
+        await bcs._send_lock.acquire()
+        try:
+            await bridge.handle_frame(
+                {"type": "event", "event": "chat.abort", "payload": {"run_id": run_id}}
+            )
+            await asyncio.wait_for(abort_captured.wait(), timeout=1)
+            release_stream.set()
+
+            async def wait_for_terminal_claim() -> None:
+                while not active.terminal_sent:
+                    await asyncio.sleep(0)
+
+            await asyncio.wait_for(wait_for_terminal_claim(), timeout=1)
+            continue_abort.set()
+            await asyncio.wait_for(interrupted.wait(), timeout=1)
+        finally:
+            continue_abort.set()
+            release_stream.set()
+            bcs._send_lock.release()
+
+        await asyncio.wait_for(self._wait_bridge_tasks(bridge), timeout=1)
+
+        terminals = [
+            frame
+            for frame in websocket.frames
+            if frame.get("type") == "event"
+            and frame.get("payload", {}).get("state")
+            in {"final", "aborted", "error"}
+        ]
+        self.assertEqual(("res", "send-1", True), (ack["type"], ack["id"], ack["ok"]))
+        self.assertEqual(2, len(websocket.frames))
+        self.assertEqual(["aborted"], [frame["payload"]["state"] for frame in terminals])
+        self.assertEqual({}, bridge._active)
+
+    async def test_terminal_send_failure_is_observed_and_cleans_active_run(
+        self,
+    ) -> None:
+        class FailingTerminalWebSocket:
+            def __init__(self) -> None:
+                self.frames: list[dict] = []
+
+            async def send(self, raw: str) -> None:
+                frame = json.loads(raw)
+                if frame.get("type") == "event":
+                    raise ConnectionError("BCS terminal send failed")
+                self.frames.append(frame)
+
+        class Hermes:
+            generation = 1
+
+            async def connect(self) -> None:
+                return None
+
+            async def create_session(self, *, cwd=None) -> dict:
+                return {"session_id": "live-1", "stored_session_id": "stored-1"}
+
+            async def submit_prompt(self, session_id: str, text: str):
+                async def events():
+                    yield {
+                        "type": "message.complete",
+                        "payload": {"text": "done", "status": "complete"},
+                    }
+
+                return events()
+
+        websocket = FailingTerminalWebSocket()
+        bcs = BcsClient(
+            url="ws://unused",
+            bot_id="bot-test",
+            token="bot-token",
+            credential_store=MemoryStateStore(),
+        )
+        bcs._websocket = websocket
+        bridge = HermesBcnBridge(bcs, Hermes(), MemoryStateStore())
+        await bridge.handle_frame(chat_request("send-1", "group-1", "question"))
+        run_id = websocket.frames[0]["payload"]["run_id"]
+        active = bridge._active[run_id]
+
+        await asyncio.wait_for(self._wait_bridge_tasks(bridge), timeout=1)
+
+        terminal_task = active.terminal_task
+        self.assertIsNotNone(terminal_task)
+        self.assertTrue(terminal_task.done())
+        self.assertFalse(terminal_task.cancelled())
+        self.assertIsNone(terminal_task.exception())
+        self.assertEqual({}, bridge._active)
 
     async def test_abort_request_without_run_id_uses_session_key_after_ack(self) -> None:
         prompt_started = asyncio.Event()
@@ -726,6 +874,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 await queue.put({"type": "message.delta", "payload": {"text": "x"}})
             await self._wait_bridge_tasks(bridge)
             self.assertEqual({}, dict(client._streams), exit_path)
+            self.assertEqual({}, bridge._active, exit_path)
 
         for exit_path in ("normal", "abort", "bcs-error"):
             with self.subTest(exit_path=exit_path):
