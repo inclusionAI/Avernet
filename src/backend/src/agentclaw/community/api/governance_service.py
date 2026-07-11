@@ -10,6 +10,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.economy.governance.domain.domain import (
+        GovernanceRecord,
+    )
     from agentclaw.community.core.economy.governance.domain.ticket import (
         GovernanceTicket,
     )
@@ -273,7 +276,7 @@ class GovernanceRecordProcessProtocol(Protocol):
 
     def process_offline_batch(
         self,
-        records: list[dict],
+        records: list[GovernanceRecord],
         *,
         batch_id: str,
         dt_version: str,

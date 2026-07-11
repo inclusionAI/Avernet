@@ -6,6 +6,10 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from agentclaw.community.core.economy.governance.domain.domain import (
+    GovernanceRecord,
+)
+
 if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.domain.ticket import (
         GovernanceTicket,
@@ -72,9 +76,54 @@ class RecordProcessResultItem(BaseModel):
 # Offline batch (§7.2, upgraded)
 # ---------------------------------------------------------------------------
 
+class GovernanceRecordInput(BaseModel):
+    """单条离线批治理记录(分层必填) — 边界校验后转 GovernanceRecord 领域模型。
+
+    必填(身份/路由/数据版本):owner_id / bot_id / governance_decision / dt_version。
+    其余可选,缺则 None,由下游 refresh_snapshot/add_ticket 接受 None。
+    """
+
+    # 必填:身份/路由/数据版本
+    owner_id: str = Field(..., min_length=1, description="负责人工号")
+    bot_id: str = Field(..., min_length=1, description="Bot ID")
+    governance_decision: str = Field(..., min_length=1, description="治理判决 actionable/normal")
+    dt_version: str = Field(..., min_length=1, description="数据版本 YYYYMMDD")
+    # 可选:身份补充
+    worker_id: str | None = Field(None, description="生产者优先的 worker_id(owner_id:bot_id);缺则合成")
+    bot_name: str | None = Field(None, description="Bot 名称")
+    # 可选:数据字段,缺则默认 None,传给 refresh_snapshot/add_ticket
+    hit_dimensions: str | None = Field(None, description="命中维度")
+    hit_dimensions_count: int | None = Field(None, description="命中维度数")
+    governance_max_priority: str | None = Field(None, description="治理优先级")
+    expected_token_saving: int | None = Field(None, description="预期 token 节省")
+    saving_ratio: float | None = Field(None, description="节省率 0-1")
+    task_summary: str | None = Field(None, description="任务摘要")
+    notification_structured: str | None = Field(None, description="结构化通知 JSON")
+    analysis_status: str | None = Field(None, description="分析状态")
+
+    def to_record(self) -> GovernanceRecord:
+        """边界转领域模型:Pydantic 校验后由 endpoint 调用,service 接 GovernanceRecord。"""
+        return GovernanceRecord(
+            owner_id=self.owner_id,
+            bot_id=self.bot_id,
+            governance_decision=self.governance_decision,
+            dt_version=self.dt_version,
+            worker_id=self.worker_id,
+            bot_name=self.bot_name,
+            hit_dimensions=self.hit_dimensions,
+            hit_dimensions_count=self.hit_dimensions_count,
+            governance_max_priority=self.governance_max_priority,
+            expected_token_saving=self.expected_token_saving,
+            saving_ratio=self.saving_ratio,
+            task_summary=self.task_summary,
+            notification_structured=self.notification_structured,
+            analysis_status=self.analysis_status,
+        )
+
+
 class OfflineBatchRequest(BaseModel):
     """Request body for offline-batch upsert (§7.2)."""
-    records: list[dict] = Field(..., min_length=1)
+    records: list[GovernanceRecordInput] = Field(..., min_length=1)
     batch_id: str = Field("", description="Batch unique ID from producer")
     dt_version: str = Field("", description="Data version (YYYYMMDD)")
     total_count: int = Field(0, description="Expected record count for quality check")

@@ -251,13 +251,23 @@ async def card_callback(
 
 @router.post(
     "/records/offline-batch",
-    summary="离线批量写入 (§7.2)",
+    summary="离线批量写入 (§7.2, 增量幂等)",
 )
 async def offline_batch(
     body: OfflineBatchRequest,
     partial_svc: _OfflineBatchSvc = Injected(_OfflineBatchSvc),
 ) -> ApiResponse:
     """Upsert ODPS pipeline results via process_offline_batch (§7.2).
+
+    增量幂等(靠内部守卫,非入口去重):同 worker 重提同/旧 dt_version 的记录,已有
+    活跃工单会被 dt_version 守卫 skip(不刷新、不重发,仅 audit);新 worker 创建
+    新工单+首次通知。即「已存在的不动、新的能进」——例如先提 5 条 dt=0711,再提
+    7 条含同 5 条 + 2 新 worker,则原 5 条不变、2 条创新单。靠 process_record 的
+    active ticket 检查 + dt 守卫(≤existing 则 skip) + cooldown 这套既有内部守卫
+    实现,不引入入口去重。响应返回 batch_id + run_id 供上游对账。
+
+    单条记录失败不阻断整批(续跑),失败记录在 upsert_results 中以 action="error"
+    + worker_key + reason 回传,errors 计数同步累加。
 
     No auth: called by offline ODPS pipeline (no user session).
 
@@ -276,7 +286,7 @@ async def offline_batch(
 
     result = await asyncio.to_thread(
         partial_svc.process_offline_batch,
-        body.records,
+        [r.to_record() for r in body.records],
         batch_id=body.batch_id,
         dt_version=body.dt_version,
         total_count=body.total_count,
