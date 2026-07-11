@@ -801,7 +801,7 @@ class GovernanceBotService:
                 saving_ratio=notify.saving_ratio,
                 governance_max_priority=notify.severity,
             )
-            iframe_callback_url = ""
+            iframe_callback_url = self._config.iframe_callback_url
             detail_link = build_tc_card_detail_link(
                 bot_id=notify.bot_id,
                 card_id=self._config.tc_card_id,
