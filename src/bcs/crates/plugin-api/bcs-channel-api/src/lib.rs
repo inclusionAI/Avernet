@@ -214,6 +214,7 @@ mod tests {
     use std::sync::Arc;
 
     use async_trait::async_trait;
+    use bcs_service_api::application::ChannelInboundFailureKind;
     use bcs_service_api::port::channel_delivery::{
         ChannelBindingRef, ChannelDeliveryPort, ChannelDeliveryResult, ChannelOutboundEvent,
     };
@@ -272,6 +273,18 @@ mod tests {
         async fn submit(&self, _msg: InboundMessage) -> Result<(), ChannelIngressError> {
             Ok(())
         }
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn legacy_ingress_error_constructors_map_to_typed_contract() {
+        let invalid = ChannelIngressError::InvalidMessage("missing text".to_string());
+        let service = ChannelIngressError::Service("dispatch unavailable".to_string());
+
+        assert_eq!(invalid.kind, ChannelInboundFailureKind::InvalidInbound);
+        assert!(!invalid.retryable);
+        assert_eq!(service.kind, ChannelInboundFailureKind::Internal);
+        assert!(service.retryable);
     }
 
     struct TestProvider;

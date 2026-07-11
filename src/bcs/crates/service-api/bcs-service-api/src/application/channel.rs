@@ -62,6 +62,20 @@ impl std::fmt::Debug for ChannelInboundError {
 }
 
 impl ChannelInboundError {
+    #[doc(hidden)]
+    #[deprecated(note = "Use ChannelInboundError::new with InvalidInbound instead")]
+    #[allow(non_snake_case)]
+    pub fn InvalidMessage(diagnostic: String) -> Self {
+        Self::new(ChannelInboundFailureKind::InvalidInbound, false, diagnostic)
+    }
+
+    #[doc(hidden)]
+    #[deprecated(note = "Use ChannelInboundError::new with a typed failure kind instead")]
+    #[allow(non_snake_case)]
+    pub fn Service(diagnostic: String) -> Self {
+        Self::new(ChannelInboundFailureKind::Internal, true, diagnostic)
+    }
+
     pub fn new(
         kind: ChannelInboundFailureKind,
         retryable: bool,
