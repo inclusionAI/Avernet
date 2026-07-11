@@ -793,6 +793,10 @@ impl ChannelService for BcsChannelService {
         };
         let provider = self.provider_for(&cmd.channel_type)?;
         provider.validate_config(&cmd.config).map_err(provider_error)?;
+        let binding_id = (self.new_id)();
+        if matches!(&target, BindingTarget::Bot { .. }) {
+            channel_owned_group_id(&cmd.channel_type, &binding_id)?;
+        }
         if self
             .bindings
             .find_active_by_account(cmd.channel_type.clone(), &account_ref)
@@ -805,7 +809,7 @@ impl ChannelService for BcsChannelService {
         }
 
         let binding = ChannelBinding {
-            id: (self.new_id)(),
+            id: binding_id,
             channel_type: cmd.channel_type,
             account_ref,
             target,
@@ -1291,6 +1295,31 @@ mod tests {
         }
 
         async fn new_with_env(group: Group, env: &str) -> ServiceResult<Self> {
+            Self::new_with_env_and_id(
+                group,
+                env,
+                Arc::new(|| "generated_id".to_string()),
+            )
+            .await
+        }
+
+        async fn new_with_generated_id(
+            group: Group,
+            generated_id: String,
+        ) -> ServiceResult<Self> {
+            Self::new_with_env_and_id(
+                group,
+                "pre",
+                Arc::new(move || generated_id.clone()),
+            )
+            .await
+        }
+
+        async fn new_with_env_and_id(
+            group: Group,
+            env: &str,
+            new_id: Arc<dyn Fn() -> String + Send + Sync>,
+        ) -> ServiceResult<Self> {
             let binding_repo = Arc::new(MemoryChannelBindingRepo::new());
             let conversation_repo = Arc::new(MemoryConversationSessionRepo::new());
             let participant_repo = Arc::new(MemoryImParticipantRepo::new());
@@ -1318,7 +1347,7 @@ mod tests {
                 providers,
                 env,
                 Arc::new(|| 42),
-                Arc::new(|| "generated_id".to_string()),
+                new_id,
             );
 
             Ok(Self {
@@ -1489,6 +1518,40 @@ mod tests {
             .await?;
 
         assert_eq!(binding.group_chat_scope, Some(GroupChatScope::PerSender));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_direct_bot_binding_rejects_overlong_generated_session_id_before_persisting(
+    ) -> TestResult {
+        let harness = TestHarness::new_with_generated_id(
+            manager_group("group_1"),
+            "x".repeat(55),
+        )
+        .await?;
+
+        let result = harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Bot {
+                    bot_id: "target_bot".to_string(),
+                },
+                group_chat_scope: None,
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(ChannelUseCaseError::Internal(ServiceError::InternalError(_)))
+        ));
+        assert!(harness.binding_repo.list().await?.is_empty());
 
         Ok(())
     }
