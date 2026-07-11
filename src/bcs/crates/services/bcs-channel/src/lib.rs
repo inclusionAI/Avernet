@@ -39,6 +39,8 @@ use bcs_service_api::{
 pub use visibility::visibility_allows;
 
 const DEFAULT_INBOUND_DEDUP_LIMIT: usize = 4096;
+const MAX_CHANNEL_SESSION_ID_CHARS: usize = 64;
+const GENERATED_SESSION_ID_SUFFIX_CHARS: usize = 9;
 
 /// Channel application service implementation.
 pub struct BcsChannelService {
@@ -141,7 +143,7 @@ impl BcsChannelService {
         let (group_id, is_bot_target) = match &binding.target {
             BindingTarget::Group { group_id } => (group_id.clone(), false),
             BindingTarget::Bot { bot_id } if msg.conversation_type == "1" => {
-                (self.ensure_dm_group(bot_id, msg, actor_id).await?, true)
+                (self.ensure_dm_group(binding, bot_id, msg, actor_id).await?, true)
             }
             BindingTarget::Bot { bot_id } => {
                 (self.ensure_managed_single_bot_group(binding, bot_id).await?, true)
@@ -159,7 +161,11 @@ impl BcsChannelService {
         }
 
         let per_sender = msg.conversation_type == "2"
-            && binding.group_chat_scope == Some(GroupChatScope::PerSender);
+            && match binding.group_chat_scope {
+                Some(GroupChatScope::PerSender) => true,
+                Some(GroupChatScope::ConversationShared) => false,
+                None => is_bot_target,
+            };
         let staff_no = normalize_required(&msg.im_user_id, "im_user_id")?;
         let session_scope = if per_sender {
             SessionScope::PerSender
@@ -190,11 +196,12 @@ impl BcsChannelService {
 
     async fn ensure_dm_group(
         &self,
+        binding: &ChannelBinding,
         bot_id: &str,
         msg: &InboundMessage,
         actor_id: &str,
     ) -> Result<String, ChannelUseCaseError> {
-        let group_id = (self.new_id)();
+        let group_id = channel_owned_group_id(&binding.channel_type, &(self.new_id)())?;
         let label = msg
             .im_user_nick
             .as_ref()
@@ -227,7 +234,7 @@ impl BcsChannelService {
         binding: &ChannelBinding,
         bot_id: &str,
     ) -> Result<String, ChannelUseCaseError> {
-        let group_id = format!("channel_{}_{}", binding.id, bot_id);
+        let group_id = channel_owned_group_id(&binding.channel_type, &binding.id)?;
         if self.groups.get(&group_id).await.is_some() {
             return Ok(group_id);
         }
@@ -261,7 +268,9 @@ impl BcsChannelService {
                 .sessions
                 .get(&map.bcs_session_id)
                 .await
-                .is_some_and(|session| session.status == SessionStatus::Running)
+                .is_some_and(|session| {
+                    session.status == SessionStatus::Running && session.group_id == ctx.group_id
+                })
             {
                 return Ok((map.bcs_session_id, true));
             }
@@ -778,8 +787,16 @@ impl ChannelService for BcsChannelService {
         }
         let env = self.env.clone();
         let target = validate_target(&*self.groups, &*self.registry, &cmd).await?;
+        let group_chat_scope = match (&target, cmd.group_chat_scope) {
+            (BindingTarget::Bot { .. }, None) => Some(GroupChatScope::PerSender),
+            (_, scope) => scope,
+        };
         let provider = self.provider_for(&cmd.channel_type)?;
         provider.validate_config(&cmd.config).map_err(provider_error)?;
+        let binding_id = (self.new_id)();
+        if matches!(&target, BindingTarget::Bot { .. }) {
+            channel_owned_group_id(&cmd.channel_type, &binding_id)?;
+        }
         if self
             .bindings
             .find_active_by_account(cmd.channel_type.clone(), &account_ref)
@@ -792,11 +809,11 @@ impl ChannelService for BcsChannelService {
         }
 
         let binding = ChannelBinding {
-            id: (self.new_id)(),
+            id: binding_id,
             channel_type: cmd.channel_type,
             account_ref,
             target,
-            group_chat_scope: cmd.group_chat_scope,
+            group_chat_scope,
             outbound_visibility: cmd.outbound_visibility,
             env,
             status: BindingStatus::Active,
@@ -1004,6 +1021,25 @@ fn normalize_required<'a>(
     }
 }
 
+fn channel_owned_group_id(
+    channel_type: &str,
+    owner_id: &str,
+) -> Result<String, ChannelUseCaseError> {
+    let channel_type = normalize_required(channel_type, "channel_type")?;
+    let owner_id = normalize_required(owner_id, "channel group owner id")?;
+    let group_id = format!("{channel_type}_{owner_id}");
+    if group_id.chars().count() + GENERATED_SESSION_ID_SUFFIX_CHARS
+        > MAX_CHANNEL_SESSION_ID_CHARS
+    {
+        return Err(ChannelUseCaseError::Internal(ServiceError::InternalError(
+            format!(
+                "generated channel group id cannot produce a session id within {MAX_CHANNEL_SESSION_ID_CHARS} characters"
+            ),
+        )));
+    }
+    Ok(group_id)
+}
+
 fn human_actor_id(staff_no: &str) -> String {
     format!("human_{}", staff_no.trim())
 }
@@ -1113,7 +1149,9 @@ mod tests {
         NewSessionParams, SessionRepoPort,
     };
 
-    use crate::{BcsChannelService, ResolvedInboundContext, channel_meta};
+    use crate::{
+        BcsChannelService, ResolvedInboundContext, channel_meta, channel_owned_group_id,
+    };
 
     type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
@@ -1257,6 +1295,31 @@ mod tests {
         }
 
         async fn new_with_env(group: Group, env: &str) -> ServiceResult<Self> {
+            Self::new_with_env_and_id(
+                group,
+                env,
+                Arc::new(|| "generated_id".to_string()),
+            )
+            .await
+        }
+
+        async fn new_with_generated_id(
+            group: Group,
+            generated_id: String,
+        ) -> ServiceResult<Self> {
+            Self::new_with_env_and_id(
+                group,
+                "pre",
+                Arc::new(move || generated_id.clone()),
+            )
+            .await
+        }
+
+        async fn new_with_env_and_id(
+            group: Group,
+            env: &str,
+            new_id: Arc<dyn Fn() -> String + Send + Sync>,
+        ) -> ServiceResult<Self> {
             let binding_repo = Arc::new(MemoryChannelBindingRepo::new());
             let conversation_repo = Arc::new(MemoryConversationSessionRepo::new());
             let participant_repo = Arc::new(MemoryImParticipantRepo::new());
@@ -1284,7 +1347,7 @@ mod tests {
                 providers,
                 env,
                 Arc::new(|| 42),
-                Arc::new(|| "generated_id".to_string()),
+                new_id,
             );
 
             Ok(Self {
@@ -1432,6 +1495,72 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_direct_bot_binding_defaults_group_scope_to_per_sender() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+
+        let binding = harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Bot {
+                    bot_id: "target_bot".to_string(),
+                },
+                group_chat_scope: None,
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+
+        assert_eq!(binding.group_chat_scope, Some(GroupChatScope::PerSender));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_direct_bot_binding_rejects_overlong_generated_session_id_before_persisting(
+    ) -> TestResult {
+        let harness = TestHarness::new_with_generated_id(
+            manager_group("group_1"),
+            "x".repeat(55),
+        )
+        .await?;
+
+        let result = harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Bot {
+                    bot_id: "target_bot".to_string(),
+                },
+                group_chat_scope: None,
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(ChannelUseCaseError::Internal(ServiceError::InternalError(_)))
+        ));
+        assert!(harness.binding_repo.list().await?.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn channel_owned_group_id_rejects_overlong_session_id() {
+        let result = channel_owned_group_id("dingtalk", &"x".repeat(55));
+
+        assert!(result.is_err());
     }
 
     #[tokio::test]
@@ -1986,7 +2115,13 @@ mod tests {
 
         harness
             .service
-            .handle_inbound(group_inbound("conv_group", "u1", Some("张三"), "msg_u1", true))
+            .handle_inbound(group_inbound(
+                "conv_group",
+                "u1",
+                Some("张三"),
+                "msg_u1",
+                true,
+            ))
             .await?;
         harness
             .service
@@ -2006,6 +2141,88 @@ mod tests {
 
         assert_ne!(u1.bcs_session_id, u2.bcs_session_id);
         assert_eq!(harness.message_flow.web_sends.lock().await.len(), 2);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn direct_bot_group_chat_uses_bounded_channel_session_id() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        let binding_id = "0d86bd1b-6efd-4b5c-8906-1be1b5717c74";
+        let mut binding = active_binding(
+            binding_id,
+            "robot_1",
+            BindingTarget::Bot {
+                bot_id: "20260625_fkxorj0t:410025".to_string(),
+            },
+            Visibility::FullTranscript,
+        );
+        binding.group_chat_scope = Some(GroupChatScope::PerSender);
+        harness.binding_repo.create(binding).await?;
+
+        harness
+            .service
+            .handle_inbound(group_inbound("conv_group", "u1", Some("张三"), "msg_u1", true))
+            .await?;
+
+        let mapped = harness
+            .conversation_repo
+            .get(binding_id, "conv_group", SessionScope::PerSender, Some("u1"))
+            .await?
+            .ok_or_else(|| ServiceError::InternalError("missing conversation".to_string()))?;
+        assert!(mapped.bcs_session_id.starts_with("dingtalk_"));
+        assert!(mapped.bcs_session_id.len() <= 64);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn direct_bot_group_chat_defaults_to_per_sender_scope() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        let binding_id = "binding_bot_default_scope";
+        let mut binding = active_binding(
+            binding_id,
+            "robot_1",
+            BindingTarget::Bot {
+                bot_id: "target_bot".to_string(),
+            },
+            Visibility::FullTranscript,
+        );
+        binding.group_chat_scope = None;
+        harness.binding_repo.create(binding).await?;
+
+        harness
+            .service
+            .handle_inbound(group_inbound(
+                "conv_group",
+                "u1",
+                Some("张三"),
+                "msg_u1",
+                true,
+            ))
+            .await?;
+        harness
+            .service
+            .handle_inbound(group_inbound(
+                "conv_group",
+                "u2",
+                Some("李四"),
+                "msg_u2",
+                true,
+            ))
+            .await?;
+
+        let u1 = harness
+            .conversation_repo
+            .get(binding_id, "conv_group", SessionScope::PerSender, Some("u1"))
+            .await?
+            .ok_or_else(|| ServiceError::InternalError("missing u1 conversation".to_string()))?;
+        let u2 = harness
+            .conversation_repo
+            .get(binding_id, "conv_group", SessionScope::PerSender, Some("u2"))
+            .await?
+            .ok_or_else(|| ServiceError::InternalError("missing u2 conversation".to_string()))?;
+        assert_ne!(u1.bcs_session_id, u2.bcs_session_id);
 
         Ok(())
     }
