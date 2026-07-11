@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 use bcs_fuse_client::FuseClient;
@@ -170,6 +170,25 @@ const BCS_VERSION: &str = concat!(
     ")",
 );
 
+static HEALTH_VERSION_OVERRIDE: OnceLock<&'static str> = OnceLock::new();
+
+pub fn set_health_version(version: &'static str) {
+    if HEALTH_VERSION_OVERRIDE.set(version).is_err() {
+        tracing::warn!(
+            version,
+            "health version override was already set; ignoring subsequent override"
+        );
+    }
+}
+
+fn health_version() -> String {
+    HEALTH_VERSION_OVERRIDE
+        .get()
+        .copied()
+        .unwrap_or(BCS_VERSION)
+        .to_string()
+}
+
 #[async_trait]
 impl HealthPort for BootstrapHealthPort {
     async fn health(&self) -> serde_json::Value {
@@ -185,7 +204,7 @@ impl HealthPort for BootstrapHealthPort {
         serde_json::json!({
             "status": "ok",
             "service": "bcs",
-            "version": BCS_VERSION,
+            "version": health_version(),
             "is_leader": is_leader,
             "pod_ip": bcs_leader_election::get_local_ip(),
             "leader_info": leader_info.map(|m| serde_json::json!({
@@ -316,6 +335,19 @@ mod tests {
     use bcs_ws::web::WorkbenchConnectionRegistry;
     use std::collections::HashMap;
     use tokio::sync::Mutex;
+
+    #[test]
+    fn health_version_uses_runtime_override_when_set() {
+        super::set_health_version("0.1.0 (ocb dev/abc; avernet main/def; 2026-07-10)");
+
+        let version = super::health_version();
+
+        assert!(!version.contains('\n'));
+        assert!(version.contains("ocb dev/abc"));
+        assert!(version.contains("avernet main/def"));
+        assert!(version.contains("2026-07-10"));
+        assert!(!version.contains("build "));
+    }
 
     struct NoopGroupMetricsSnapshotPort;
 
