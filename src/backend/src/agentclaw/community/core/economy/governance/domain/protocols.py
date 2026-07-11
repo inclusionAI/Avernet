@@ -22,11 +22,9 @@ from datetime import datetime
 from typing import Any, Protocol, runtime_checkable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.economy.governance.domain.domain import (
-        GovernanceNotification,
-        GovernanceTicket,
-        WhitelistEntry,
-    )
+    from agentclaw.community.core.economy.governance.domain.notification import GovernanceNotification
+    from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
+    from agentclaw.community.core.economy.governance.domain.whitelist import WhitelistEntry
 
 
 # ---------------------------------------------------------------------------

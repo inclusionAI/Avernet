@@ -10,9 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.economy.governance.domain.domain import (
-        GovernanceRecord,
-    )
+    from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
     from agentclaw.community.core.economy.governance.domain.ticket import (
         GovernanceTicket,
     )

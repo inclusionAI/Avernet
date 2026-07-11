@@ -12,9 +12,7 @@ from agentclaw.community.adapters.http.economy.schemas import (
     GovernanceRecordInput,
     OfflineBatchRequest,
 )
-from agentclaw.community.core.economy.governance.domain.domain import (
-    GovernanceRecord,
-)
+from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
 
 
 def _full_input(**overrides) -> GovernanceRecordInput:

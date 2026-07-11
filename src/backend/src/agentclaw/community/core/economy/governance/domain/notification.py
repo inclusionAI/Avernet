@@ -1,8 +1,8 @@
 """领域模型 — GovernanceNotification 通知投递生命周期。
 
 与 GovernanceTicket / WhitelistEntry 同级,按实体拆文件。
-共享基础(FrozenSnapshot / NOTIFY_TRANSITIONS / IllegalNotifyTransitionError
-/ _iso)在 ``domain.py``;ORM 映射见 ``repositories/orm.py``;
+FrozenSnapshot / NOTIFY_TRANSITIONS / IllegalNotifyTransitionError 本文件内联;
+_iso 共享工具在 ``base.py``;ORM 映射见 ``repositories/orm.py``;
 repo 用 from_orm/to_orm/apply_to 做翻译边界。
 """
 from __future__ import annotations
@@ -11,16 +11,58 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import uuid4
 
+from agentclaw.community.core.economy.governance.domain.base import _iso
 from agentclaw.community.core.economy.governance.domain.enums import (
     NotifyStatus,
     NotifyType,
 )
-from agentclaw.community.core.economy.governance.domain.domain import (
-    FrozenSnapshot,
-    IllegalNotifyTransitionError,
-    NOTIFY_TRANSITIONS,
-    _iso,
-)
+
+
+class IllegalNotifyTransitionError(ValueError):
+    """通知状态非法转换。"""
+
+
+# ── 冻结快照(创建时不可变) ────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenSnapshot:
+    """创建时冻结,永不可变。frozen 使赋值即 FrozenInstanceError。
+
+    对应 ORM 列:
+      - dt_version          ← orm.dt_version
+      - decision_at_create  ← orm.governance_decision
+      - triggered_dimensions ← orm.hit_dimensions
+      - hit_dimensions_count ← orm.hit_dimensions_count
+      - severity            ← orm.governance_max_priority
+      - estimated_saving_tokens ← orm.expected_token_saving
+      - saving_ratio        ← orm.saving_ratio
+      - notification_md     ← orm.notification_md
+      - notification_structured ← orm.notification_structured
+    """
+
+    dt_version: str
+    decision_at_create: str
+    triggered_dimensions: str | None
+    hit_dimensions_count: int | None
+    severity: str | None
+    estimated_saving_tokens: int | None
+    saving_ratio: float | None
+    notification_md: str | None
+    notification_structured: str | None
+
+
+# ── 状态机转换表(通知) ─────────────────────────
+# 合法转换: {当前状态: {允许的目标状态集合}}
+NOTIFY_TRANSITIONS: dict[NotifyStatus, frozenset[NotifyStatus]] = {
+    NotifyStatus.PENDING: frozenset({NotifyStatus.SENDING, NotifyStatus.CANCELLED}),
+    NotifyStatus.SENDING: frozenset({
+        NotifyStatus.SENT, NotifyStatus.FAILED, NotifyStatus.PENDING,
+    }),
+    NotifyStatus.SENT: frozenset(),       # 终态
+    NotifyStatus.FAILED: frozenset(),     # 终态
+    NotifyStatus.CANCELLED: frozenset(),  # 终态
+}
 
 
 @dataclass(slots=True)

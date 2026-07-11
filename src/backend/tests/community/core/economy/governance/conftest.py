@@ -70,7 +70,7 @@ class FakeWhitelistSvc:
 
     def add(self, *, bot_id, owner_id, created_by, whitelist_type="governance",
             source="manual", reason="", expires_at=None):
-        from agentclaw.community.core.economy.governance.domain.domain import WhitelistEntry
+        from agentclaw.community.core.economy.governance.domain.whitelist import WhitelistEntry
         return WhitelistEntry(
             bot_id=bot_id, owner_id=owner_id,
             whitelist_type=whitelist_type, source=source,

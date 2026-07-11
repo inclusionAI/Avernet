@@ -14,7 +14,7 @@ from agentclaw.community.adapters.http.economy.schemas import (
     ReviewTicketListResponse,
 )
 from agentclaw.community.core.economy.governance.domain.enums import GovernanceStatus
-from agentclaw.community.core.economy.governance.domain.domain import MutableSnapshot
+from agentclaw.community.core.economy.governance.domain.ticket import MutableSnapshot
 from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
 from agentclaw.community.core.economy.governance.services.admin_service import (
     TicketActionOutcome,

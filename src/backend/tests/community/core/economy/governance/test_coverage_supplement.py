@@ -48,9 +48,7 @@ from agentclaw.community.core.economy.governance.services.admin_service import (
 from agentclaw.community.core.economy.governance.services.record_process_service import (
     GovernanceRecordService,
 )
-from agentclaw.community.core.economy.governance.domain.domain import (
-    GovernanceRecord,
-)
+from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
 from agentclaw.community.core.economy.governance.services.scan_service import (
     GovernanceBotService,
 )

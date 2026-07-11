@@ -6,9 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from agentclaw.community.core.economy.governance.domain.domain import (
-    GovernanceRecord,
-)
+from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
 
 if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.domain.ticket import (

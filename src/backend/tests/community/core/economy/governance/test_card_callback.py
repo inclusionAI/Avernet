@@ -313,7 +313,7 @@ class TestResultFromTicket:
         from agentclaw.community.core.economy.governance.services.feedback_service import (
             _result_from_ticket,
         )
-        from agentclaw.community.core.economy.governance.domain.domain import GovernanceTicket
+        from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
 
         svc = _build_svc(engine)
         _make_notification(session)
@@ -383,7 +383,7 @@ class TestCardCallbackNoAuth:
 
             def add(self, *, bot_id, owner_id, created_by, **kwargs):
                 wl_calls.append({"bot_id": bot_id, "owner_id": owner_id, "created_by": created_by})
-                from agentclaw.community.core.economy.governance.domain.domain import WhitelistEntry
+                from agentclaw.community.core.economy.governance.domain.whitelist import WhitelistEntry
                 return WhitelistEntry(
                     bot_id=bot_id, owner_id=owner_id,
                     whitelist_type=kwargs.get("whitelist_type", "governance"),

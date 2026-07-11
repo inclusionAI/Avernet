@@ -23,9 +23,7 @@ from agentclaw.community.core.economy.governance.domain.enums import (
     NotifyStatus,
     NotifyType,
 )
-from agentclaw.community.core.economy.governance.domain.domain import (
-    GovernanceNotification,
-)
+from agentclaw.community.core.economy.governance.domain.notification import GovernanceNotification
 from agentclaw.community.core.economy.governance.repositories.orm import (
     GovernanceNotificationOrm,
 )
