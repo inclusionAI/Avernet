@@ -132,18 +132,6 @@ demo_bot_wait_ready() {
     done
 }
 
-demo_bot_bcs_cli() {
-    if command -v bcs-cli >/dev/null 2>&1; then
-        command -v bcs-cli
-        return 0
-    fi
-    if [ -x "${BCS_DIR}/target/debug/bcs-cli" ]; then
-        printf '%s\n' "${BCS_DIR}/target/debug/bcs-cli"
-        return 0
-    fi
-    return 1
-}
-
 demo_bot_connect_bcs() {
     local backend_bot_id="$1"
     local bcs_bot_id base_url payload response
@@ -195,24 +183,31 @@ demo_bot_admin_onboard_bcs() {
 
 demo_bot_verify_bcn() {
     local backend_bot_id="$1"
-    local bcs_bot_id cli
+    local bcs_bot_id base_url response
     bcs_bot_id="$(demo_bot_bcs_bot_id "$backend_bot_id")"
-    cli="$(demo_bot_bcs_cli)" || {
-        log_error "bcs-cli not found; run: ./scripts/singlebox.sh setup bcs"
-        return 1
-    }
-
-    "$cli" --url "http://127.0.0.1:${BCS_PORT}" get "$bcs_bot_id" >> "${DEMO_BOT_LOG}" 2>&1
+    base_url="$(demo_bot_bcs_base_url)"
+    response="$(
+        curl --noproxy '*' --connect-timeout 2 --max-time 10 -fsS \
+            -H "X-Mock-User-Id: ${BCS_MOCK_USER_ID:-001}" \
+            -H "X-Mock-Nick-Name: ${BCS_MOCK_USER_NICK_NAME:-admin}" \
+            "${base_url}/bots/${bcs_bot_id}" \
+            2>>"${DEMO_BOT_LOG}" || true
+    )"
+    printf '%s\n' "$response" >> "${DEMO_BOT_LOG}"
+    printf '%s\n' "$response" | jq -e --arg bot_id "$bcs_bot_id" '.bot_uuid == $bot_id' >/dev/null 2>&1
 }
 
 demo_bot_has_expected_bcn_metadata() {
     local bcs_bot_id="$1"
-    local log_tail
-    log_tail="$(tail -n 20 "${DEMO_BOT_LOG}" 2>/dev/null || true)"
+    local response
+    response="$(tail -n 1 "${DEMO_BOT_LOG}" 2>/dev/null || true)"
 
-    printf '%s\n' "$log_tail" | grep -F "Bot: ${bcs_bot_id}" >/dev/null 2>&1 || return 1
-    printf '%s\n' "$log_tail" | grep -F "Name: ${DEMO_BOT_NAME}" >/dev/null 2>&1 || return 1
-    printf '%s\n' "$log_tail" | grep -F "Summary: ${DEMO_BOT_DESC}" >/dev/null 2>&1 || return 1
+    printf '%s\n' "$response" | jq -e \
+        --arg bot_id "$bcs_bot_id" \
+        --arg name "$DEMO_BOT_NAME" \
+        --arg summary "$DEMO_BOT_DESC" \
+        '.bot_uuid == $bot_id and .capabilities.name == $name and .capabilities.summary == $summary' \
+        >/dev/null 2>&1
 }
 
 demo_bot_ensure_bcn() {
@@ -291,12 +286,6 @@ demo_bot_prereqs() {
         prereq_ok "curl: $(command -v curl)"
     else
         prereq_error "curl not found."
-        has_error=true
-    fi
-    if demo_bot_bcs_cli >/dev/null 2>&1; then
-        prereq_ok "bcs-cli: $(demo_bot_bcs_cli)"
-    else
-        prereq_error "bcs-cli not found. Run: ./scripts/singlebox.sh setup bcs"
         has_error=true
     fi
     [ "$has_error" = false ]

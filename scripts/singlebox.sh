@@ -457,6 +457,13 @@ prepare_bcs_coverage_bin() {
         exit 1
     fi
 
+    # Fresh checkouts do not contain the gitignored panel dist. Build it before
+    # the coverage stack copies runtime assets; reuse existing output locally.
+    if [[ ! -f "${BCS_PANEL_ASSET_DIR}/dist/index.umd.js" ]]; then
+        log_info "BCS panel asset missing; building it for coverage..."
+        ( build_bcs_panel_asset ) || exit 1
+    fi
+
     # Keep the profraw dir present even on a cache hit (it may have been pruned).
     mkdir -p "$cov_dir"
 

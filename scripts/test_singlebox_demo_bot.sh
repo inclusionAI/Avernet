@@ -209,23 +209,24 @@ SH
   fi
 }
 
-test_verify_uses_bcs_cli_get() {
+test_verify_uses_bcs_http_get() {
   setup_env
   tmpbin="$(mktemp -d)"
-  cat > "${tmpbin}/bcs-cli" <<'SH'
+  cat > "${tmpbin}/curl" <<'SH'
 #!/usr/bin/env bash
-[ "$1" = "--url" ] || exit 2
-[ "$3" = "get" ] || exit 3
-[ "$4" = "default:mock-user" ] || exit 4
-printf '%s\n' '{"bot_id":"default:mock-user"}'
+printf '%s\n' "$*" > "${CURL_ARGS_FILE}"
+printf '%s\n' '{"bot_uuid":"default:mock-user","capabilities":{"name":"developer","summary":"Local demo bot for OpenOCB Singlebox"}}'
 SH
-  chmod +x "${tmpbin}/bcs-cli"
+  chmod +x "${tmpbin}/curl"
   PATH="${tmpbin}:$PATH"
+  export CURL_ARGS_FILE="${tmpbin}/args.txt"
 
   # shellcheck source=/dev/null
   source "$MODULE"
   demo_bot_defaults
   demo_bot_verify_bcn "default"
+  grep -F 'X-Mock-User-Id: 001' "$CURL_ARGS_FILE" >/dev/null || fail "mock user header missing"
+  grep -F 'http://127.0.0.1:21000/bots/default:mock-user' "$CURL_ARGS_FILE" >/dev/null || fail "BCS bot URL missing"
 }
 
 test_connect_posts_fixed_bcs_bot_id() {
@@ -286,18 +287,11 @@ SH
 test_ensure_skips_connect_when_already_visible() {
   setup_env
   tmpbin="$(mktemp -d)"
-  cat > "${tmpbin}/bcs-cli" <<'SH'
-#!/usr/bin/env bash
-printf '%s\n' 'Bot: default:mock-user'
-printf '%s\n' '  Name: developer'
-printf '%s\n' '  Summary: Local demo bot for OpenOCB Singlebox'
-printf '%s\n' '  Visibility: protected'
-SH
   cat > "${tmpbin}/curl" <<'SH'
 #!/usr/bin/env bash
-exit 9
+printf '%s\n' '{"bot_uuid":"default:mock-user","capabilities":{"name":"developer","summary":"Local demo bot for OpenOCB Singlebox"}}'
 SH
-  chmod +x "${tmpbin}/bcs-cli" "${tmpbin}/curl"
+  chmod +x "${tmpbin}/curl"
   PATH="${tmpbin}:$PATH"
 
   # shellcheck source=/dev/null
@@ -318,12 +312,11 @@ test_ensure_onboards_minimal_runtime_entry() {
   demo_bot_verify_bcn() {
     verify_count=$((verify_count + 1))
     printf '%s\n' "verify" >> "$sequence_file"
-    printf '%s\n' "Bot: default:mock-user" >> "${DEMO_BOT_LOG}"
     if [ "$verify_count" -gt 1 ]; then
-      printf '%s\n' "  Name: developer" >> "${DEMO_BOT_LOG}"
-      printf '%s\n' "  Summary: Local demo bot for OpenOCB Singlebox" >> "${DEMO_BOT_LOG}"
+      printf '%s\n' '{"bot_uuid":"default:mock-user","capabilities":{"name":"developer","summary":"Local demo bot for OpenOCB Singlebox"}}' >> "${DEMO_BOT_LOG}"
+    else
+      printf '%s\n' '{"bot_uuid":"default:mock-user","capabilities":{}}' >> "${DEMO_BOT_LOG}"
     fi
-    printf '%s\n' "  Visibility: protected" >> "${DEMO_BOT_LOG}"
     return 0
   }
   demo_bot_connect_bcs() {
@@ -352,10 +345,7 @@ test_ensure_onboards_without_connect_when_bcs_entry_missing() {
     if [ "$verify_count" -eq 1 ]; then
       return 1
     fi
-    printf '%s\n' "Bot: default:mock-user" >> "${DEMO_BOT_LOG}"
-    printf '%s\n' "  Name: developer" >> "${DEMO_BOT_LOG}"
-    printf '%s\n' "  Summary: Local demo bot for OpenOCB Singlebox" >> "${DEMO_BOT_LOG}"
-    printf '%s\n' "  Visibility: protected" >> "${DEMO_BOT_LOG}"
+    printf '%s\n' '{"bot_uuid":"default:mock-user","capabilities":{"name":"developer","summary":"Local demo bot for OpenOCB Singlebox"}}' >> "${DEMO_BOT_LOG}"
     return 0
   }
   demo_bot_connect_bcs() {
@@ -417,7 +407,7 @@ test_create_ignores_malformed_response
 test_create_handles_curl_failure_without_exiting
 test_wait_ready_polls_backend_status_success
 test_wait_ready_fails_on_backend_failed_status
-test_verify_uses_bcs_cli_get
+test_verify_uses_bcs_http_get
 test_connect_posts_fixed_bcs_bot_id
 test_admin_onboard_posts_demo_metadata
 test_ensure_skips_connect_when_already_visible
