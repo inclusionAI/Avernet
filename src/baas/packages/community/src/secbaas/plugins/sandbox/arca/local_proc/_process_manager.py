@@ -808,7 +808,7 @@ class LocalProcessManager:
         env["ZERO_CHECK_ENABLED"] = "false"
         no_proxy_hosts = []
         for key in ("NO_PROXY", "no_proxy"):
-            for host in env.get(key, "").split(","):
+            for host in (env.get(key) or "").split(","):
                 host = host.strip()
                 if host and host not in no_proxy_hosts:
                     no_proxy_hosts.append(host)

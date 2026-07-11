@@ -130,6 +130,36 @@ def test_spawn_adapter_uses_numeric_loopback_for_local_engines(
     assert set(captured["env"]["no_proxy"].split(",")) == expected_no_proxy
 
 
+def test_spawn_adapter_tolerates_empty_proxy_values(monkeypatch, tmp_path):
+    manager = pm.LocalProcessManager()
+    captured = {}
+
+    class FakeProcess:
+        pid = 12345
+
+    def fake_popen(*args, **kwargs):
+        captured["env"] = kwargs["env"]
+        return FakeProcess()
+
+    monkeypatch.setattr(pm.os, "environ", {"NO_PROXY": None, "no_proxy": None})
+    monkeypatch.setattr(manager, "_resolve_engine_src_dir", lambda: tmp_path)
+    monkeypatch.setattr(manager, "_resolve_engine_python", lambda _: "/usr/bin/python3")
+    monkeypatch.setattr(manager, "_wait_for_health", lambda *args, **kwargs: True)
+    monkeypatch.setattr(pm.subprocess, "Popen", fake_popen)
+
+    manager._spawn_adapter(
+        adapter_port=20010,
+        engine_port=18888,
+        config_dir=tmp_path,
+        workspace_dir=tmp_path / "workspace",
+        engine="openclaw",
+    )
+
+    expected_no_proxy = {"localhost", "127.0.0.1", "::1"}
+    assert set(captured["env"]["NO_PROXY"].split(",")) == expected_no_proxy
+    assert set(captured["env"]["no_proxy"].split(",")) == expected_no_proxy
+
+
 def test_wait_for_hermes_health_disables_environment_proxies(monkeypatch):
     manager = pm.LocalProcessManager()
 

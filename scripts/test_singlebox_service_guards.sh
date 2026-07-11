@@ -171,6 +171,48 @@ test_baas_bot_cleanup_preserves_bcs_sessions() {
   assert_eq "600" "$mode" "restored BCS session permissions"
 }
 
+test_baas_session_backup_normalizes_trailing_slashes() {
+  setup_env
+  export RUNTIME_DATA_DIR="$(mktemp -d)"
+  local bots_dir backup_dir session_file expected_backup
+  bots_dir="$(mktemp -d)"
+  backup_dir="${RUNTIME_DATA_DIR}/.baas-bcs-sessions"
+  export LOCAL_BOTS_DIR="${bots_dir}///"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/baas.sh"
+
+  session_file="${bots_dir}/staff_mock-user/default/openclaw/.bcs/session.json"
+  expected_backup="${backup_dir}/staff_mock-user/default/openclaw/.bcs/session.json"
+  mkdir -p "$(dirname "$session_file")"
+  printf '%s\n' '{"bot_uuid":"test-bot"}' > "$session_file"
+
+  baas_backup_bcs_sessions "${backup_dir}///"
+
+  [ -f "$expected_backup" ] || \
+    fail "BAAS backup should normalize trailing slashes in bots and backup paths"
+}
+
+test_baas_session_restore_normalizes_trailing_slashes() {
+  setup_env
+  export RUNTIME_DATA_DIR="$(mktemp -d)"
+  local bots_dir backup_dir backup_session expected_session
+  bots_dir="$(mktemp -d)"
+  backup_dir="${RUNTIME_DATA_DIR}/.baas-bcs-sessions"
+  export LOCAL_BOTS_DIR="${bots_dir}///"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/baas.sh"
+
+  backup_session="${backup_dir}/staff_mock-user/default/openclaw/.bcs/session.json"
+  expected_session="${bots_dir}/staff_mock-user/default/openclaw/.bcs/session.json"
+  mkdir -p "$(dirname "$backup_session")"
+  printf '%s\n' '{"bot_uuid":"test-bot"}' > "$backup_session"
+
+  baas_restore_bcs_sessions "${backup_dir}///"
+
+  [ -f "$expected_session" ] || \
+    fail "BAAS restore should normalize trailing slashes in bots and backup paths"
+}
+
 test_baas_session_backup_refuses_to_overwrite_stale_backup() {
   setup_env
   export RUNTIME_DATA_DIR="$(mktemp -d)"
@@ -259,6 +301,38 @@ test_baas_session_scan_failure_keeps_source_and_backup() {
   [ -f "$backup_session" ] || fail "failed restore must keep recovery data"
 }
 
+test_baas_start_refuses_root_bots_dir() (
+  setup_env
+  export RUNTIME_DATA_DIR="$(mktemp -d)"
+  export LOCAL_AIDESKTOP_DIR="$(mktemp -d)"
+  export LOCAL_BOTS_DIR="////"
+  export LOCAL_MODE=true
+  export CHAT_ENGINE="openclaw"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/baas.sh"
+
+  local events_file result
+  events_file="$(mktemp)"
+  stop_port_processes_if_owned() { return 0; }
+  stop_matching_processes_if_owned() { return 0; }
+  require_port_available_after_owned_stop() { return 0; }
+  check_directory_exists() { return 0; }
+  baas_prepare_bcs_session_backup() { return 0; }
+  baas_restore_bcs_sessions() { return 0; }
+  rm() { printf 'rm %s\n' "$*" >> "$events_file"; }
+  env() { return 0; }
+  set -f
+
+  if baas_start; then
+    result=0
+  else
+    result=$?
+  fi
+
+  [ "$result" -ne 0 ] || fail "baas_start should reject a root LOCAL_BOTS_DIR"
+  [ ! -s "$events_file" ] || fail "baas_start must reject root before calling rm"
+)
+
 test_5bot_openclaw_config_is_written_private() {
   grep -F 'umask 077' "${ROOT}/src/bcs/scripts/start_bcs_bots.sh" >/dev/null || \
     fail "5bot openclaw config should be written under umask 077"
@@ -282,9 +356,12 @@ test_service_modules_use_ownership_aware_stop_helpers
 test_service_starts_fail_when_ports_remain_occupied
 test_baas_stop_does_not_delegate_to_app_stop
 test_baas_bot_cleanup_preserves_bcs_sessions
+test_baas_session_backup_normalizes_trailing_slashes
+test_baas_session_restore_normalizes_trailing_slashes
 test_baas_session_backup_refuses_to_overwrite_stale_backup
 test_baas_session_backup_recovers_stale_backup_before_snapshot
 test_baas_session_scan_failure_keeps_source_and_backup
+test_baas_start_refuses_root_bots_dir
 test_5bot_openclaw_config_is_written_private
 test_ready_banner_describes_full_stack
 
