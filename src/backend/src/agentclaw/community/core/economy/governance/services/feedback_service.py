@@ -26,10 +26,8 @@ from agentclaw.community.core.economy.governance.domain.enums import (
     GovernanceStatus,
     Response,
 )
-from agentclaw.community.core.economy.governance.domain.domain import (
-    GovernanceNotification,
-    GovernanceTicket,
-)
+from agentclaw.community.core.economy.governance.domain.notification import GovernanceNotification
+from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
 
 
 if TYPE_CHECKING:

@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from injector import inject
 
-from agentclaw.community.core.economy.governance.domain.domain import WhitelistEntry
+from agentclaw.community.core.economy.governance.domain.whitelist import WhitelistEntry
 from agentclaw.community.core.economy.governance.domain.enums import (
     AuditAction,
     CloseReason,

@@ -1,24 +1,87 @@
 """领域模型 — GovernanceTicket 工单生命周期。
 
 与 GovernanceNotification / WhitelistEntry 同级,按实体拆文件。
-共享基础(MutableSnapshot / TICKET_TRANSITIONS /
-IllegalTicketTransitionError / _iso)在 ``domain.py``;ORM 映射见
-``repositories/orm.py``;repo 用 from_orm/to_orm/apply_to 做翻译边界。
+MutableSnapshot / TICKET_TRANSITIONS / IllegalTicketTransitionError 本文件内联;
+_iso 共享工具在 ``base.py``;ORM 映射见 ``repositories/orm.py``;
+repo 用 from_orm/to_orm/apply_to 做翻译边界。
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime
 
+from agentclaw.community.core.economy.governance.domain.base import _iso
 from agentclaw.community.core.economy.governance.domain.enums import (
     GovernanceStatus,
 )
-from agentclaw.community.core.economy.governance.domain.domain import (
-    IllegalTicketTransitionError,
-    MutableSnapshot,
-    TICKET_TRANSITIONS,
-    _iso,
-)
+
+
+class IllegalTicketTransitionError(ValueError):
+    """工单状态非法转换。"""
+
+
+# ── 可变快照(离线批处理可刷新) ────────────────────
+
+
+@dataclass(slots=True)
+class MutableSnapshot:
+    """可刷新快照 — 离线批处理通过 GovernanceTicket.refresh_snapshot 替换。
+
+    与 FrozenSnapshot 不同:MutableSnapshot 可替换(非 frozen)。
+    外部不直接赋值字段,而是通过 ``GovernanceTicket.refresh_snapshot``
+    创建新 MutableSnapshot 替换 _snapshot,保证单入口。
+
+    对应 ORM 列:
+      - dt_version               ← orm.dt_version
+      - initial_decision         ← orm.governance_decision (永远='actionable')
+      - current_decision         ← orm.latest_decision
+      - triggered_dimensions     ← orm.hit_dimensions
+      - hit_dimensions_count     ← orm.hit_dimensions_count
+      - severity                 ← orm.governance_max_priority
+      - estimated_saving_tokens  ← orm.expected_token_saving
+      - saving_ratio             ← orm.saving_ratio
+      - task_summary             ← orm.task_summary
+      - notification_structured  ← orm.notification_structured
+      - analysis_status          ← orm.analysis_status
+      - consecutive_normal_days  ← orm.consecutive_normal_days
+      - last_decision_dt_version ← orm.last_decision_dt_version
+      - last_seen_at             ← orm.last_seen_at
+      - last_sync_at             ← orm.last_sync_at
+    """
+
+    dt_version: str
+    initial_decision: str
+    current_decision: str | None
+    triggered_dimensions: str | None
+    hit_dimensions_count: int | None
+    severity: str | None
+    estimated_saving_tokens: int | None
+    saving_ratio: float | None
+    task_summary: str | None
+    notification_structured: str | None
+    analysis_status: str | None
+    consecutive_normal_days: int
+    last_decision_dt_version: str | None
+    last_seen_at: datetime | None
+    last_sync_at: datetime | None
+
+
+# ── 状态机转换表(工单) ─────────────────────────
+# 合法转换: {当前状态: {允许的目标状态集合}}
+TICKET_TRANSITIONS: dict[GovernanceStatus, frozenset[GovernanceStatus]] = {
+    GovernanceStatus.OPEN: frozenset({
+        GovernanceStatus.SCHEDULED, GovernanceStatus.WAITING_REVIEW,
+        GovernanceStatus.CLOSED,
+    }),
+    GovernanceStatus.SCHEDULED: frozenset({
+        GovernanceStatus.WAITING_REVIEW, GovernanceStatus.CLOSED,
+    }),
+    GovernanceStatus.WAITING_REVIEW: frozenset({
+        GovernanceStatus.OPEN, GovernanceStatus.SCHEDULED,
+        GovernanceStatus.CLOSED,
+    }),
+    GovernanceStatus.CLOSED: frozenset(),
+}
 
 
 @dataclass(slots=True)

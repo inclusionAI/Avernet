@@ -27,11 +27,8 @@ from agentclaw.community.core.economy.governance.domain.enums import (
     GovernanceStatus,
     NotifyType,
 )
-from agentclaw.community.core.economy.governance.domain.domain import (
-    FrozenSnapshot,
-    GovernanceNotification,
-    GovernanceTicket,
-)
+from agentclaw.community.core.economy.governance.domain.notification import FrozenSnapshot, GovernanceNotification
+from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
 from agentclaw.community.core.economy.governance.services.notify_builder_service import (
     build_card_notification_data,
     build_governance_reason,

@@ -147,7 +147,7 @@ class FakeWhitelistRepo:
         )
 
     def add(self, *, bot_id, owner_id, created_by, **kwargs):
-        from agentclaw.community.core.economy.governance.domain.domain import WhitelistEntry
+        from agentclaw.community.core.economy.governance.domain.whitelist import WhitelistEntry
         self._rows.append({"bot_id": bot_id, "owner_id": owner_id})
         return WhitelistEntry(
             bot_id=bot_id, owner_id=owner_id,

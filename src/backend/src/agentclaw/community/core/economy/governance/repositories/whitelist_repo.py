@@ -14,7 +14,7 @@ from datetime import datetime
 from injector import inject
 from sqlalchemy import or_
 
-from agentclaw.community.core.economy.governance.domain.domain import WhitelistEntry
+from agentclaw.community.core.economy.governance.domain.whitelist import WhitelistEntry
 from agentclaw.community.core.economy.governance.repositories.orm import WhitelistEntryOrm
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin

@@ -16,7 +16,7 @@ from injector import inject
 from sqlalchemy import func
 
 from agentclaw.community.core.economy.governance.repositories.orm import GovernanceTicketOrm
-from agentclaw.community.core.economy.governance.domain.domain import GovernanceTicket
+from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env

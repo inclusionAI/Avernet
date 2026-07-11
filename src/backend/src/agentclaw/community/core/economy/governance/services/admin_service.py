@@ -40,9 +40,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.economy.governance.domain.domain import (
-        GovernanceNotification,
-    )
+    from agentclaw.community.core.economy.governance.domain.notification import GovernanceNotification
     from agentclaw.community.core.economy.governance.domain.ticket import (
         GovernanceTicket,
     )

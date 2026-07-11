@@ -29,9 +29,7 @@ from agentclaw.community.core.economy.governance.services.record_process_service
     GovernanceRecordService,
     OfflineBatchResult,
 )
-from agentclaw.community.core.economy.governance.domain.domain import (
-    GovernanceRecord,
-)
+from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
 
 from .conftest import FakeDB, FakeGovernanceConfig
 

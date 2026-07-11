@@ -16,18 +16,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentclaw.community.core.economy.governance.domain.domain import (
-    FrozenSnapshot,
-    GovernanceNotification,
-    GovernanceRecord,
-    GovernanceTicket,
-    IllegalNotifyTransitionError,
-    IllegalTicketTransitionError,
-    MutableSnapshot,
-    NOTIFY_TRANSITIONS,
-    TICKET_TRANSITIONS,
-    WhitelistEntry,
-)
+from agentclaw.community.core.economy.governance.domain.notification import FrozenSnapshot, GovernanceNotification, IllegalNotifyTransitionError, NOTIFY_TRANSITIONS
+
+from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
+
+from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket, IllegalTicketTransitionError, MutableSnapshot, TICKET_TRANSITIONS
+
+from agentclaw.community.core.economy.governance.domain.whitelist import WhitelistEntry
 from agentclaw.community.core.economy.governance.domain.enums import (
     GovernanceStatus,
     NotifyStatus,
