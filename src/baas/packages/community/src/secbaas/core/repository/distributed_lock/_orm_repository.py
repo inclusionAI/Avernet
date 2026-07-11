@@ -23,10 +23,25 @@ class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository
         self._database = database
 
     @with_orm_session
-    def get_by_lock_name_for_update(self, lock_name: str) -> LockRecord | None:
-        log.info("get_by_lock_name_for_update: lock_name=%s", lock_name)
-        """Get lock record with FOR UPDATE (MySQL/SQLAlchemy) for distributed locking."""
+    def get_by_lock_name(self, lock_name: str) -> LockRecord | None:
+        """Get lock record (read-only, no FOR UPDATE)."""
+        log.info("get_by_lock_name: lock_name=%s", lock_name)
+        row = (
+            self._session.query(DistributedLockModel)
+            .filter(DistributedLockModel.lock_name == lock_name)
+            .first()
+        )
+        record = row.to_record() if row else None
+        log.info(
+            "[distributed-lock:get_by_lock_name] result: %s",
+            record.id if record else "None",
+        )
+        return record
 
+    @with_orm_session
+    def get_by_lock_name_for_update(self, lock_name: str) -> LockRecord | None:
+        """Get lock record with FOR UPDATE for distributed locking."""
+        log.info("get_by_lock_name_for_update: lock_name=%s", lock_name)
         row = (
             self._session.query(DistributedLockModel)
             .filter(DistributedLockModel.lock_name == lock_name)

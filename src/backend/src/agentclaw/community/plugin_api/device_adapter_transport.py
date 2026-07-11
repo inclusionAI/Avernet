@@ -23,6 +23,10 @@ from typing import Any, Optional, Protocol, runtime_checkable
 from agentclaw.community.plugin_api.base import Plugin
 
 
+class DeviceAdapterTimeoutError(TimeoutError):
+    """The adapter transport exceeded its request deadline."""
+
+
 @runtime_checkable
 class DeviceAdapterTransport(Plugin, Protocol):
     """Forward an HTTP request to a bot's engine adapter."""
@@ -34,6 +38,8 @@ class DeviceAdapterTransport(Plugin, Protocol):
         path: str,
         body: Optional[dict[str, Any]] = None,
         params: Optional[dict[str, Any]] = None,
+        *,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         """Issue ``method path`` against the adapter described by ``conn_info``.
 
@@ -45,12 +51,15 @@ class DeviceAdapterTransport(Plugin, Protocol):
             path: Adapter path, e.g. ``/api/cron`` or ``/api/cron/{id}/run``.
             body: JSON request body, if any.
             params: Query parameters, if any.
+            timeout: End-to-end request timeout in seconds. ``None`` uses the
+                transport default.
 
         Returns:
             The adapter's parsed JSON response (an envelope dict, usually
             ``{"success": bool, "data": ...}``).
 
         Raises:
+            DeviceAdapterTimeoutError: When an explicit ``timeout`` is exceeded.
             ValueError: On transport/HTTP failure (prod impl), so callers
                 can surface a uniform error envelope.
         """

@@ -27,9 +27,9 @@ def test_cron_query_empty_live(live_backend, acceptance_fs_root):
             "success": list_body["success"],
             "entries_count": len(list_body["data"]),
         },
-        "running_empty": {
+        "running_all": {
             "success": running_body["success"],
-            "entries_count": len(running_body["data"]),
+            "error_code": running_body["error_code"],
         },
     }
     assert snapshot == json.loads(BASELINE_PATH.read_text())

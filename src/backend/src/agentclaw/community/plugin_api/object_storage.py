@@ -40,6 +40,16 @@ class ObjectStoragePlugin(Plugin, Protocol):
         """
         ...
 
+    def get_object(self, key: str) -> bytes | None:
+        """Return the raw bytes stored at ``key``, or ``None`` if absent.
+
+        The read counterpart of :meth:`put_object`. Implementations should
+        swallow transport/SDK errors and a missing object alike into ``None``
+        rather than raising, so callers can decide policy (mirroring the rest
+        of this Protocol). Decode to text at the call site when needed.
+        """
+        ...
+
     def delete_object(self, key: str) -> bool:
         """Delete the object at ``key``. Return ``True`` on success.
 

@@ -4,7 +4,6 @@ Bot service for managing bot lifecycle.
 This service handles bot creation, retrieval, updates, and deletion.
 It integrates with the device service to allocate devices for bots.
 """
-import concurrent.futures
 import json
 import random
 import re
@@ -1866,21 +1865,13 @@ class BotService:
         except Exception as e:
             logger.warning(f"[bot_service.list_bots_by_owner_or_collaborator] Failed to add can_edit_bot: {e}")
 
-        items = self._merge_desktop_live_status(items)
-        # Teclaw rows are NOT merged here: their stored status is kept fresh by
-        # the TeclawStatusReconciler (persisted post-provision), so the DB column
-        # is authoritative — list, detail, and search all read it directly.
+        # List reads use the persisted status. Live desktop status is reconciled
+        # outside this request path so a slow BaaS cannot delay first paint.
 
         return {
             "total": total,
             "items": items,
         }
-
-    # Concurrency for the per-bot BaaS reads. Small: the list is a user-facing
-    # real-time request, not a bulk scan — it must not saturate BaaS.
-    _MERGE_WORKERS = 8
-    # Total wall-clock budget so a slow/hung BaaS never stalls the first paint.
-    _MERGE_BUDGET_SECONDS = 5.0
 
     # Transient/process states where BaaS is NOT yet an authoritative source of
     # truth: while a desktop bot is creating (PENDING) or releasing (RELEASING),
@@ -1923,73 +1914,6 @@ class BotService:
                 bot.get("bot_id"), e,
             )
             return None
-
-    def _merge_desktop_live_status(self, items: list[dict]) -> list[dict]:
-        """Overwrite steady-state desktop bots' status with BaaS live status.
-
-        Delegates the per-bot判定 + BaaS read to
-        :meth:`resolve_desktop_live_status` so the list and the single-bot
-        upload gate share one definition of "desktop steady-state live status".
-
-        Best-effort and non-blocking by design:
-        - per-bot failure / unmapped status → keep the DB status
-        - total failure → return items unchanged
-        - a ``_MERGE_BUDGET_SECONDS`` wall-clock cap so a hung BaaS can't stall
-          the list (in-flight queries are abandoned, those bots keep DB status)
-
-        Read-only: never writes the DB. Persisting live status is the periodic
-        scan's job, so opening a list never causes writes or gmt_modified churn.
-        """
-        targets = [
-            b for b in items
-            if b.get("bot_type") == "desktop"
-            and b.get("device_id")
-            and b.get("status") not in self._MERGE_SKIP_LOCAL_STATUSES
-        ]
-        if not targets:
-            return items
-
-        try:
-            pool = concurrent.futures.ThreadPoolExecutor(
-                max_workers=min(len(targets), self._MERGE_WORKERS)
-            )
-            try:
-                future_to_bot = {
-                    pool.submit(
-                        self.resolve_desktop_live_status,
-                        bot,
-                    ): bot
-                    for bot in targets
-                }
-                done, not_done = concurrent.futures.wait(
-                    future_to_bot, timeout=self._MERGE_BUDGET_SECONDS
-                )
-                for fut in done:
-                    bot = future_to_bot[fut]
-                    try:
-                        display = fut.result()
-                        if display:
-                            bot["status"] = display
-                    except Exception as e:  # single-bot failure: keep DB status
-                        logger.warning(
-                            "[list-desktop-merge] bot=%s status merge failed: %s",
-                            bot.get("bot_id"), e,
-                        )
-                if not_done:
-                    logger.warning(
-                        "[list-desktop-merge] %d/%d desktop bots timed out "
-                        "(budget=%.1fs), kept DB status",
-                        len(not_done), len(targets), self._MERGE_BUDGET_SECONDS,
-                    )
-            finally:
-                # NOT a `with` block: __exit__ calls shutdown(wait=True), which
-                # would block until every in-flight query finished — defeating
-                # the budget and letting a hung BaaS stall the request. wait=False
-                # returns immediately; cancel_futures drops not-yet-started tasks.
-                pool.shutdown(wait=False, cancel_futures=True)
-        except Exception as e:  # total failure: degrade, items unchanged
-            logger.warning("[list-desktop-merge] merge aborted: %s", e)
-        return items
 
     def update_bot(
         self,

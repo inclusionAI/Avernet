@@ -1286,9 +1286,14 @@ class SkillService:
             logger.info(f"[get_skill_readme] DB lookup result: skill_id={skill_id}, found={skill is not None}")
             if skill:
                 git_path = skill.get('git_path', '')
-                logger.info(f"[get_skill_readme] DB found, git_path={git_path}, bolt_id={bolt_id}")
-                bolt_id = skill.get('bolt_id')
+                db_bolt_id = skill.get('bolt_id')
+                bolt_id = db_bolt_id or bolt_id
                 skill_user_id = skill.get('user_id') or user_id
+                logger.info(
+                    f"[get_skill_readme] DB found, git_path={git_path}, "
+                    f"db_bolt_id={db_bolt_id}, effective_bolt_id={bolt_id}, "
+                    f"skill_user_id={skill_user_id}"
+                )
 
                 if git_path.startswith('local://'):
                     # 本地 skill，使用绝对路径
@@ -1332,7 +1337,7 @@ class SkillService:
                                 return skill_file.read_text(encoding="gbk", errors="replace")
                             except Exception as e:
                                 logger.error(f"[SkillService] Error reading repo readme: {e}")
-                    logger.info(f"[get_skill_readme] Falling through to _get_readme_from_repo")
+                    logger.info("[get_skill_readme] Falling through to _get_readme_from_repo")
                     return self._get_readme_from_repo(skill_id)
                 else:
                     logger.warning(f"[get_skill_readme] Unknown git_path scheme: git_path={git_path}")

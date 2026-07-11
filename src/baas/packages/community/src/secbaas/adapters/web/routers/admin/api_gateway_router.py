@@ -349,8 +349,7 @@ async def get_allowed_bots_admin(
         )
 
     policy = parse_policy(api_key.policy)
-    # 过滤 NONE 哨兵值，对外返回语义为空列表
-    bots = [b for b in policy.allowed_bots if b != "NONE"]
+    bots = policy.allowed_bots
     logger.info(
         f"Audit: get_allowed_bots_admin operator={_op_ctx.operator} "
         f"prefix={api_key_prefix} count={len(bots)}"
@@ -398,9 +397,6 @@ async def grant_allowed_bot_admin(
 
     policy = parse_policy(api_key.policy)
 
-    # 如果当前是 NONE 哨兵，清空后替换为实际 bot_id
-    if policy.allowed_bots == ["NONE"]:
-        policy.allowed_bots = []
     if data.bot_id not in set(policy.allowed_bots):
         policy.allowed_bots.append(data.bot_id)
 

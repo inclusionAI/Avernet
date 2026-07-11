@@ -96,16 +96,23 @@ class OrmAPIKeyRepository(OrmConnectionMixin, APIKeyRepository):
         return record
 
     @with_orm_session
-    def get_by_prefix_and_status(self, prefix: str, status: str) -> APIKeyRecord | None:
-        log.info("get_by_prefix_and_status: prefix=%s, status=%s", prefix, status)
-        row = (
-            self._session.query(APIKeyModel)
-            .filter(
-                APIKeyModel.api_key_prefix == prefix,
-                APIKeyModel.status == status,
-            )
-            .first()
+    def get_by_prefix_and_status(
+        self, prefix: str, status: str, env: str | None = None
+    ) -> APIKeyRecord | None:
+        log.info(
+            "get_by_prefix_and_status: prefix=%s, status=%s, env=%s",
+            prefix,
+            status,
+            env,
         )
+        query = self._session.query(APIKeyModel).filter(
+            APIKeyModel.api_key_prefix == prefix,
+            APIKeyModel.status == status,
+        )
+        # env 过滤：共享 DB 下钉死当前环境，避免跨环境 API Key 互认。
+        if env is not None:
+            query = query.filter(APIKeyModel.env == env)
+        row = query.first()
         record = row.to_record() if row else None
         log.info(
             "[api-gateway:get_by_prefix_and_status] result: %s",

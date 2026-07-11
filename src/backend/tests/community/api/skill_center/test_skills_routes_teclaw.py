@@ -95,3 +95,166 @@ def test_readme_route_teclaw_branch():
     # teclaw branch: service built with an adapter; local_dir resolved is_teclaw=True
     assert factory.create.call_args.kwargs["local_skill_path_adapter"] is not None
     assert path_factory.get_bot_skills_local_dir.call_args.kwargs["is_teclaw"] is True
+
+
+def test_readme_route_uses_skill_owner_context_for_teclaw():
+    lookup_svc = MagicMock()
+    lookup_svc.get_skill.return_value = {
+        "id": "1",
+        "name": "x",
+        "link_name": "x",
+        "git_path": "local://skills-local/x",
+        "bolt_id": "teclaw-bot",
+        "user_id": "owner-u",
+    }
+    read_svc = MagicMock()
+    read_svc.get_skill_readme = AsyncMock(return_value="# readme")
+
+    client, factory, path_factory = _app(lookup_svc)
+    factory.create.side_effect = [lookup_svc, read_svc]
+
+    resp = client.get(
+        "/api/skills/1/readme",
+        params={"entity_id": "viewer-u", "bot_id": "default", "engine_type": "openclaw"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["data"]["content"] == "# readme"
+    assert factory.create.call_count == 2
+    assert factory.create.call_args.kwargs["local_skill_path_adapter"] is not None
+    assert path_factory.get_bot_skills_local_dir.call_args.args[:4] == (
+        "owner-u",
+        "teclaw-bot",
+        "openclaw",
+        "staff",
+    )
+    assert path_factory.get_bot_skills_local_dir.call_args.kwargs["is_teclaw"] is True
+    read_svc.get_skill_readme.assert_awaited_once_with("1", "owner-u", "teclaw-bot")
+
+
+def test_readme_route_link_name_falls_back_to_global_lookup():
+    lookup_svc = MagicMock()
+    lookup_svc.get_skill_by_link_name.side_effect = [
+        None,
+        None,
+        {
+            "id": "2",
+            "name": "x",
+            "link_name": "x",
+            "git_path": "local://skills-local/x",
+            "bolt_id": "teclaw-bot",
+            "user_id": "owner-u",
+        },
+    ]
+    read_svc = MagicMock()
+    read_svc.get_skill_readme = AsyncMock(return_value="# readme")
+
+    client, factory, _ = _app(lookup_svc)
+    factory.create.side_effect = [lookup_svc, read_svc]
+
+    resp = client.get(
+        "/api/skills/x/readme",
+        params={"entity_id": "viewer-u", "bot_id": "default", "engine_type": "openclaw"},
+    )
+
+    assert resp.status_code == 200
+    lookup_svc.get_skill_by_link_name.assert_any_call("x", bolt_id="default")
+    lookup_svc.get_skill_by_link_name.assert_any_call("x", bolt_id="b1")
+    lookup_svc.get_skill_by_link_name.assert_any_call("x", bolt_id=None)
+    read_svc.get_skill_readme.assert_awaited_once_with("x", "owner-u", "teclaw-bot")
+
+
+def test_readme_route_handles_duplicate_link_name_scopes_and_desktop_bot():
+    lookup_svc = MagicMock()
+    lookup_svc.get_skill_by_link_name.side_effect = [
+        None,
+        {
+            "id": "3",
+            "name": "x",
+            "link_name": "x",
+            "git_path": "local://skills-local/x",
+            "bolt_id": "desktop-bot",
+            "user_id": "owner-u",
+        },
+    ]
+    read_svc = MagicMock()
+    read_svc.get_skill_readme = AsyncMock(return_value="# readme")
+
+    client, factory, path_factory = _app(lookup_svc)
+    factory.create.side_effect = [lookup_svc, read_svc]
+    bot_repo = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.core.bot_management.repository.protocol",
+            fromlist=["BotRepository"],
+        ).BotRepository
+    )
+    bot_repo.get_by_id_and_owner.return_value = {
+        "bot_id": "desktop-bot",
+        "owner_id": "owner-u",
+        "active_engine": "openclaw",
+        "bot_type": "desktop",
+        "status": "ACTIVE",
+    }
+
+    resp = client.get(
+        "/api/skills/x/readme",
+        params={"entity_id": "u1", "bot_id": "b1", "engine_type": "openclaw"},
+    )
+
+    assert resp.status_code == 200
+    lookup_svc.get_skill_by_link_name.assert_any_call("x", bolt_id="b1")
+    # effective_bot_id and ctx.bot_id are the same, so duplicate scope is skipped.
+    assert lookup_svc.get_skill_by_link_name.call_count == 2
+    assert path_factory.get_bot_skills_local_dir.call_args.kwargs["is_desktop"] is True
+
+
+def test_readme_route_falls_back_when_skill_not_found_and_bot_type_lookup_fails():
+    lookup_svc = MagicMock()
+    lookup_svc.get_skill.return_value = None
+    lookup_svc.get_skill_by_link_name.return_value = None
+    read_svc = MagicMock()
+    read_svc.get_skill_readme = AsyncMock(return_value="# fallback")
+
+    client, factory, _ = _app(lookup_svc)
+    factory.create.side_effect = [lookup_svc, read_svc]
+    bot_repo = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.core.bot_management.repository.protocol",
+            fromlist=["BotRepository"],
+        ).BotRepository
+    )
+    bot_repo.get_by_id_and_owner.side_effect = [
+        {"bot_type": "service", "active_engine": "openclaw"},
+        RuntimeError("boom"),
+        RuntimeError("boom"),
+    ]
+
+    resp = client.get("/api/skills/404/readme", params=_Q)
+
+    assert resp.status_code == 200
+    read_svc.get_skill_readme.assert_awaited_once_with("404", "u1", "b1")
+
+
+def test_readme_route_numeric_id_falls_back_to_link_name_when_id_missing():
+    lookup_svc = MagicMock()
+    lookup_svc.get_skill.return_value = None
+    lookup_svc.get_skill_by_link_name.return_value = {
+        "id": "999",
+        "name": "numeric-link",
+        "link_name": "123",
+        "git_path": "local://skills-local/numeric-link",
+        "bolt_id": "teclaw-bot",
+        "user_id": "owner-u",
+    }
+    read_svc = MagicMock()
+    read_svc.get_skill_readme = AsyncMock(return_value="# numeric")
+
+    client, factory, _ = _app(lookup_svc)
+    factory.create.side_effect = [lookup_svc, read_svc]
+
+    resp = client.get("/api/skills/123/readme", params=_Q)
+
+    assert resp.status_code == 200
+    lookup_svc.get_skill.assert_called_once_with("123")
+    lookup_svc.get_skill_by_link_name.assert_called_once_with("123", bolt_id="b1")
+    read_svc.get_skill_readme.assert_awaited_once_with("123", "owner-u", "teclaw-bot")
