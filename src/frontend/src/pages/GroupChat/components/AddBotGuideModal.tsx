@@ -21,6 +21,16 @@ import {
   ModalTitle,
 } from '@/components/ui/modal';
 import { useRegisterToken } from '@/pages/BcnHome/hooks/useRegisterToken';
+import {
+  DEFAULT_BOT_ACCESS_ENGINE,
+  getBotAccessMethods,
+  getVisibleBotAccessEngines,
+  replaceBotAccessToken,
+} from '@/pages/BcnHome/lib/botAccess';
+import type {
+  BotAccessEngineId,
+  BotAccessMethodId,
+} from '@/pages/BcnHome/lib/botAccess';
 import { AppExt } from '@/shell';
 import { Bot, Check, Copy, Terminal } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
@@ -30,8 +40,6 @@ interface AddBotGuideModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-type AccessMethod = 'manual' | 'guide';
 
 const TOKEN_PLACEHOLDER = '<YOUR_TOKEN>';
 
@@ -60,10 +68,13 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
   open,
   onOpenChange,
 }) => {
-  const { bcnConnectCmdTemplate, bcnAutoConnectCmdTemplate } =
-    useExt(AppExt).resources;
+  const resources = useExt(AppExt).resources;
   const { token, isLoading, fetchToken } = useRegisterToken();
-  const [method, setMethod] = useState<AccessMethod>('manual');
+  const engineChoices = getVisibleBotAccessEngines(resources);
+  const [engine, setEngine] = useState<BotAccessEngineId>(
+    DEFAULT_BOT_ACCESS_ENGINE,
+  );
+  const [method, setMethod] = useState<BotAccessMethodId>('manual');
   const [copied, setCopied] = useState(false);
 
   // 打开弹窗时拉取注册 token（注入接入指令）
@@ -71,10 +82,18 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
     if (open) fetchToken();
   }, [open, fetchToken]);
 
-  const template =
-    method === 'manual' ? bcnConnectCmdTemplate : bcnAutoConnectCmdTemplate;
-  const command = template
-    ? template.replace('{token}', token ?? TOKEN_PLACEHOLDER)
+  const selectedEngine =
+    engineChoices.find((choice) => choice.id === engine) ?? engineChoices[0];
+  const methods = selectedEngine
+    ? getBotAccessMethods(resources, selectedEngine.id)
+    : [];
+  const selectedMethod =
+    methods.find((accessMethod) => accessMethod.id === method) ?? methods[0];
+  const command = selectedMethod
+    ? replaceBotAccessToken(
+        selectedMethod.template,
+        token ?? TOKEN_PLACEHOLDER,
+      )
     : null;
 
   const handleCopy = async () => {
@@ -112,41 +131,54 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
               接入方式
             </ModalTitle>
             <ModalDescription className="mt-2 text-sm text-[#8b95a5]">
-              选择一种接入方式，将你的 openclaw 接入 Avernet 协作网络。
+              选择一种接入方式，将你的 {selectedEngine?.label ?? 'Bot'} 接入
+              Avernet 协作网络。
             </ModalDescription>
           </div>
 
+          {engineChoices.length > 1 && (
+            <div className="mb-3 flex w-fit gap-1 rounded-xl bg-[#f0f4f8] p-1">
+              {engineChoices.map((choice) => (
+                <button
+                  key={choice.id}
+                  type="button"
+                  onClick={() => setEngine(choice.id)}
+                  aria-pressed={selectedEngine?.id === choice.id}
+                  className={`rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors ${
+                    selectedEngine?.id === choice.id
+                      ? 'bg-white text-[#1d4ed8] shadow-sm'
+                      : 'text-[#8b95a5]'
+                  }`}
+                >
+                  {choice.label}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* 接入方式药丸切换 */}
           <div className="mb-5 flex gap-2 rounded-xl bg-[#f0f4f8] p-1">
-            <button
-              type="button"
-              onClick={() => setMethod('manual')}
-              className={`flex-1 rounded-lg py-2 text-xs font-semibold transition-colors ${
-                method === 'manual'
-                  ? 'bg-white text-[#1d4ed8] shadow-sm'
-                  : 'text-[#8b95a5]'
-              }`}
-            >
-              用户自助接入
-            </button>
-            <button
-              type="button"
-              onClick={() => setMethod('guide')}
-              className={`flex-1 rounded-lg py-2 text-xs font-semibold transition-colors ${
-                method === 'guide'
-                  ? 'bg-white text-[#1d4ed8] shadow-sm'
-                  : 'text-[#8b95a5]'
-              }`}
-            >
-              Bot 自动接入
-            </button>
+            {methods.map((accessMethod) => (
+              <button
+                key={accessMethod.id}
+                type="button"
+                onClick={() => setMethod(accessMethod.id)}
+                className={`flex-1 rounded-lg py-2 text-xs font-semibold transition-colors ${
+                  selectedMethod?.id === accessMethod.id
+                    ? 'bg-white text-[#1d4ed8] shadow-sm'
+                    : 'text-[#8b95a5]'
+                }`}
+              >
+                {accessMethod.title}
+              </button>
+            ))}
           </div>
 
           <div className="space-y-4">
             {/* 方式说明卡 */}
             <div className="flex items-start gap-3 rounded-xl border border-[#e5e9f2] bg-[#f8fafc] px-4 py-4">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#e8f0fe] text-[#1d4ed8]">
-                {method === 'manual' ? (
+                {selectedMethod?.id === 'manual' ? (
                   <Terminal className="h-4 w-4" />
                 ) : (
                   <Bot className="h-4 w-4" />
@@ -154,12 +186,10 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
               </div>
               <div>
                 <p className="text-sm font-medium text-[#1a2332]">
-                  {method === 'manual' ? '用户自助接入' : 'Bot 自动接入'}
+                  {selectedMethod?.title}
                 </p>
                 <p className="mt-1 text-xs leading-5 text-[#52606d]">
-                  {method === 'manual'
-                    ? '复制以下命令并执行，一键接入本地 openclaw。'
-                    : '将以下指令发送给你的 openclaw。'}
+                  {selectedMethod?.description}
                 </p>
               </div>
             </div>

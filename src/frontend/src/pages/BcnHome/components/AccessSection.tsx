@@ -19,6 +19,13 @@ import { Check, Copy } from 'lucide-react';
 import React, { useState } from 'react';
 import { toast } from 'sonner';
 import { useRegisterToken } from '../hooks/useRegisterToken';
+import {
+  DEFAULT_BOT_ACCESS_ENGINE,
+  getBotAccessMethods,
+  getVisibleBotAccessEngines,
+  replaceBotAccessToken,
+} from '../lib/botAccess';
+import type { BotAccessEngineId } from '../lib/botAccess';
 
 const TOKEN_PLACEHOLDER = '<YOUR_TOKEN>';
 
@@ -44,23 +51,18 @@ function fallbackCopyText(text: string): boolean {
 }
 
 const AccessSection: React.FC = () => {
-  const { bcnConnectCmdTemplate, bcnAutoConnectCmdTemplate } =
-    useExt(AppExt).resources;
+  const resources = useExt(AppExt).resources;
   const { token, isLoading } = useRegisterToken();
+  const engineChoices = getVisibleBotAccessEngines(resources);
+  const [engine, setEngine] = useState<BotAccessEngineId>(
+    DEFAULT_BOT_ACCESS_ENGINE,
+  );
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-
-  const ways = [
-    {
-      title: '用户自助接入',
-      description: '复制以下命令并执行，一键接入本地 openclaw。',
-      template: bcnConnectCmdTemplate,
-    },
-    {
-      title: 'Bot 自动接入',
-      description: '将以下指令发送给你的 openclaw。',
-      template: bcnAutoConnectCmdTemplate,
-    },
-  ].filter((w) => w.template);
+  const selectedEngine =
+    engineChoices.find((choice) => choice.id === engine) ?? engineChoices[0];
+  const ways = selectedEngine
+    ? getBotAccessMethods(resources, selectedEngine.id)
+    : [];
 
   if (ways.length === 0) return null;
 
@@ -98,15 +100,36 @@ const AccessSection: React.FC = () => {
         <h2 className="text-2xl font-semibold text-[#1a2332]">接入方式</h2>
       </div>
 
+      {engineChoices.length > 1 && (
+        <div className="mx-auto mb-5 flex w-fit gap-1 rounded-xl bg-[#f0f4f8] p-1">
+          {engineChoices.map((choice) => (
+            <button
+              key={choice.id}
+              type="button"
+              onClick={() => setEngine(choice.id)}
+              aria-pressed={selectedEngine.id === choice.id}
+              className={`rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors ${
+                selectedEngine.id === choice.id
+                  ? 'bg-white text-[#1d4ed8] shadow-sm'
+                  : 'text-[#8b95a5]'
+              }`}
+            >
+              {choice.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="grid gap-5 lg:grid-cols-2">
         {ways.map((item, index) => {
-          const command = (item.template as string).replace(
-            '{token}',
+          const command = replaceBotAccessToken(
+            item.template,
             token ?? TOKEN_PLACEHOLDER,
           );
+          const copyKey = `${selectedEngine.id}:${item.id}`;
           return (
             <div
-              key={item.title}
+              key={item.id}
               className="rounded-[24px] border border-[#e5e9f2] bg-white p-6 shadow-sm"
             >
               <h3 className="text-lg font-semibold text-[#1a2332]">
@@ -121,12 +144,12 @@ const AccessSection: React.FC = () => {
                 </code>
                 <button
                   type="button"
-                  onClick={() => handleCopy(item.title, command)}
+                  onClick={() => handleCopy(copyKey, command)}
                   disabled={isLoading}
                   className="absolute right-3 top-3 rounded-lg bg-white/10 p-2 transition-colors hover:bg-white/20 disabled:opacity-50"
                   title="复制指令"
                 >
-                  {copiedKey === item.title ? (
+                  {copiedKey === copyKey ? (
                     <Check className="h-4 w-4 text-[#4ade80]" />
                   ) : (
                     <Copy className="h-4 w-4 text-white/70" />
