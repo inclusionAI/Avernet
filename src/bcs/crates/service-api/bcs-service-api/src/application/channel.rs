@@ -44,12 +44,21 @@ pub enum ChannelInboundFailureKind {
 }
 
 /// Typed failure returned while processing normalized channel inbound messages.
-#[derive(Debug, thiserror::Error)]
-#[error("channel inbound {kind:?}: {diagnostic}")]
+#[derive(thiserror::Error)]
+#[error("channel inbound {kind:?} (retryable={retryable})")]
 pub struct ChannelInboundError {
     pub kind: ChannelInboundFailureKind,
     pub retryable: bool,
-    pub diagnostic: String,
+    diagnostic: String,
+}
+
+impl std::fmt::Debug for ChannelInboundError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChannelInboundError")
+            .field("kind", &self.kind)
+            .field("retryable", &self.retryable)
+            .finish()
+    }
 }
 
 impl ChannelInboundError {
@@ -63,6 +72,11 @@ impl ChannelInboundError {
             retryable,
             diagnostic: diagnostic.into(),
         }
+    }
+
+    /// Returns diagnostic context intended only for structured logs and telemetry.
+    pub fn diagnostic_for_logging(&self) -> &str {
+        &self.diagnostic
     }
 }
 
@@ -146,7 +160,7 @@ mod tests {
     use super::{ChannelInboundError, ChannelInboundFailureKind};
 
     #[test]
-    fn inbound_error_preserves_failure_kind_retryability_and_diagnostic() {
+    fn inbound_error_exposes_diagnostic_only_for_logging() {
         let error = ChannelInboundError::new(
             ChannelInboundFailureKind::ActorResolutionFailed,
             true,
@@ -155,6 +169,14 @@ mod tests {
 
         assert_eq!(error.kind, ChannelInboundFailureKind::ActorResolutionFailed);
         assert!(error.retryable);
-        assert!(error.diagnostic.contains("actor write failed"));
+        assert_eq!(error.diagnostic_for_logging(), "actor write failed");
+        assert_eq!(
+            error.to_string(),
+            "channel inbound ActorResolutionFailed (retryable=true)"
+        );
+        assert_eq!(
+            format!("{error:?}"),
+            "ChannelInboundError { kind: ActorResolutionFailed, retryable: true }"
+        );
     }
 }

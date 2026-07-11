@@ -428,6 +428,9 @@ impl ChannelService for BcsChannelService {
         &self,
         mut msg: InboundMessage,
     ) -> Result<(), ChannelInboundError> {
+        msg.conversation_type = normalize_required(&msg.conversation_type, "conversation_type")
+            .map_err(|error| invalid_inbound(error))?
+            .to_string();
         if msg.conversation_type == "2" && !msg.is_at_bot {
             info!(
                 channel_type = %msg.channel_type,
@@ -444,10 +447,12 @@ impl ChannelService for BcsChannelService {
             info!(
                 channel_type = %msg.channel_type,
                 account_ref = %msg.account_ref,
-                reason = "empty_msg_id",
-                "channel inbound: ignored"
+                reason = "invalid_empty_msg_id",
+                "channel inbound: rejected"
             );
-            return Ok(());
+            return Err(invalid_inbound(ChannelUseCaseError::InvalidParams(
+                "msg_id must not be empty".to_string(),
+            )));
         }
         msg.channel_type = normalize_required(&msg.channel_type, "channel_type")
             .map_err(|error| invalid_inbound(error))?
@@ -456,9 +461,6 @@ impl ChannelService for BcsChannelService {
             .map_err(|error| invalid_inbound(error))?
             .to_string();
         msg.im_conversation_id = normalize_required(&msg.im_conversation_id, "im_conversation_id")
-            .map_err(|error| invalid_inbound(error))?
-            .to_string();
-        msg.conversation_type = normalize_required(&msg.conversation_type, "conversation_type")
             .map_err(|error| invalid_inbound(error))?
             .to_string();
         msg.im_user_id = normalize_required(&msg.im_user_id, "im_user_id")
@@ -544,7 +546,7 @@ impl ChannelService for BcsChannelService {
                 .map_err(|error| {
                     inbound_failure(
                         ChannelInboundFailureKind::ContextResolutionFailed,
-                        true,
+                        false,
                         error,
                     )
                 })?;
@@ -1600,7 +1602,7 @@ mod tests {
     ) {
         assert_eq!(error.kind, kind);
         assert_eq!(error.retryable, retryable);
-        assert!(error.diagnostic.contains(diagnostic));
+        assert!(error.diagnostic_for_logging().contains(diagnostic));
     }
 
     #[tokio::test]
@@ -2238,10 +2240,24 @@ mod tests {
         assert!(harness.registry.ensured.lock().await.is_empty());
         assert!(harness.message_flow.web_sends.lock().await.is_empty());
 
-        harness
+        let mut whitespace_group =
+            group_inbound("conv_group", "u1", Some("张三"), "msg_whitespace", false);
+        whitespace_group.conversation_type = " 2 ".to_string();
+        harness.service.handle_inbound(whitespace_group).await?;
+        assert!(harness.registry.ensured.lock().await.is_empty());
+        assert!(harness.message_flow.web_sends.lock().await.is_empty());
+
+        let error = harness
             .service
             .handle_inbound(group_inbound("conv_group", "u1", Some("张三"), " ", true))
-            .await?;
+            .await
+            .expect_err("empty message id must be rejected");
+        assert_inbound_error(
+            error,
+            ChannelInboundFailureKind::InvalidInbound,
+            false,
+            "msg_id",
+        );
         assert!(harness.registry.ensured.lock().await.is_empty());
         assert!(harness.message_flow.web_sends.lock().await.is_empty());
 
@@ -2295,6 +2311,64 @@ mod tests {
             ChannelInboundFailureKind::BindingLookupFailed,
             true,
             "binding lookup failed",
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn inbound_classifies_invalid_input_and_context_resolution_failure() -> TestResult {
+        let invalid_input = inbound_service(
+            Arc::new(MemoryChannelBindingRepo::new()),
+            Arc::new(MemoryImParticipantRepo::new()),
+            Arc::new(RecordingSessionRepo::default()),
+            Arc::new(RecordingMessageFlow::default()),
+            Arc::new(RecordingRegistry::default()),
+        )
+        .await;
+        let mut invalid_message = inbound("conv_invalid", "u1", Some("张三"), "msg_invalid");
+        invalid_message.account_ref = " ".to_string();
+
+        let error = invalid_input
+            .handle_inbound(invalid_message)
+            .await
+            .expect_err("missing account reference must be reported");
+        assert_inbound_error(
+            error,
+            ChannelInboundFailureKind::InvalidInbound,
+            false,
+            "account_ref",
+        );
+
+        let bindings = Arc::new(MemoryChannelBindingRepo::new());
+        bindings
+            .create(active_binding(
+                "binding_context",
+                "robot_1",
+                BindingTarget::Group {
+                    group_id: "missing_group".to_string(),
+                },
+                Visibility::FullTranscript,
+            ))
+            .await?;
+        let context_failure = inbound_service(
+            bindings,
+            Arc::new(MemoryImParticipantRepo::new()),
+            Arc::new(RecordingSessionRepo::default()),
+            Arc::new(RecordingMessageFlow::default()),
+            Arc::new(RecordingRegistry::default()),
+        )
+        .await;
+
+        let error = context_failure
+            .handle_inbound(inbound("conv_context", "u1", Some("张三"), "msg_context"))
+            .await
+            .expect_err("missing bound group must be reported");
+        assert_inbound_error(
+            error,
+            ChannelInboundFailureKind::ContextResolutionFailed,
+            false,
+            "missing_group",
         );
 
         Ok(())
