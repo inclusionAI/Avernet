@@ -48,6 +48,9 @@ from agentclaw.community.core.economy.governance.services.admin_service import (
 from agentclaw.community.core.economy.governance.services.record_process_service import (
     GovernanceRecordService,
 )
+from agentclaw.community.core.economy.governance.domain.domain import (
+    GovernanceRecord,
+)
 from agentclaw.community.core.economy.governance.services.scan_service import (
     GovernanceBotService,
 )
@@ -416,23 +419,23 @@ def _sample_record(
     bot_id: str = "bot-001",
     governance_decision: str = "actionable",
     dt_version: str = "20260705",
-) -> dict:
-    """Build a minimal record dict for process_record."""
-    return {
-        "owner_id": owner_id,
-        "bot_id": bot_id,
-        "bot_name": "TestBot",
-        "governance_decision": governance_decision,
-        "dt_version": dt_version,
-        "hit_dimensions": "token_usage",
-        "hit_dimensions_count": "3",
-        "governance_max_priority": "high",
-        "expected_token_saving": 1000.0,
-        "saving_ratio": 0.5,
-        "task_summary": "Token saving opportunity",
-        "notification_structured": None,
-        "analysis_status": "completed",
-    }
+) -> GovernanceRecord:
+    """Build a minimal GovernanceRecord for process_record."""
+    return GovernanceRecord(
+        owner_id=owner_id,
+        bot_id=bot_id,
+        bot_name="TestBot",
+        governance_decision=governance_decision,
+        dt_version=dt_version,
+        hit_dimensions="token_usage",
+        hit_dimensions_count=3,
+        governance_max_priority="high",
+        expected_token_saving=1000,
+        saving_ratio=0.5,
+        task_summary="Token saving opportunity",
+        notification_structured=None,
+        analysis_status="completed",
+    )
 
 
 def _make_ticket(

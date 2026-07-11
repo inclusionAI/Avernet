@@ -19,6 +19,7 @@ import pytest
 from agentclaw.community.core.economy.governance.domain.domain import (
     FrozenSnapshot,
     GovernanceNotification,
+    GovernanceRecord,
     GovernanceTicket,
     IllegalNotifyTransitionError,
     IllegalTicketTransitionError,
@@ -1154,3 +1155,69 @@ class TestWhitelistEntryTranslation:
             expires_at=None,
         )
         assert entry.to_dict()["expires_at"] is None
+
+
+# ---------------------------------------------------------------------------
+# GovernanceRecord — 离线批治理记录领域模型
+# ---------------------------------------------------------------------------
+
+
+class TestGovernanceRecord:
+    """GovernanceRecord: 离线批输入载体,身份+数据平铺,不嵌套 snapshot。"""
+
+    def _make(self, **overrides) -> GovernanceRecord:
+        defaults = dict(
+            owner_id="o-1",
+            bot_id="b-1",
+            governance_decision="actionable",
+            dt_version="20260711",
+        )
+        defaults.update(overrides)
+        return GovernanceRecord(**defaults)
+
+    def test_effective_worker_key_uses_worker_id_when_present(self) -> None:
+        """worker_id 有且含 ':' → 用 worker_id(生产者优先,避免重建错配)。"""
+        rec = self._make(worker_id="o-1:b-1")
+        assert rec.effective_worker_key == "o-1:b-1"
+
+    def test_effective_worker_key_synthesizes_when_missing(self) -> None:
+        """worker_id 缺失 → owner_id:bot_id 合成。"""
+        rec = self._make()
+        assert rec.effective_worker_key == "o-1:b-1"
+
+    def test_effective_worker_key_synthesizes_when_no_colon(self) -> None:
+        """worker_id 有但无 ':' → 视为非法,降级合成 owner_id:bot_id。"""
+        rec = self._make(worker_id="no-colon-here")
+        assert rec.effective_worker_key == "o-1:b-1"
+
+    def test_frozen_immutable(self) -> None:
+        """frozen dataclass:赋值即 FrozenInstanceError。"""
+        rec = self._make()
+        with pytest.raises(FrozenInstanceError):
+            rec.owner_id = "mutated"  # type: ignore[misc]
+
+    def test_optional_fields_default_none(self) -> None:
+        """可选数据字段缺省 None,不影响构造。"""
+        rec = self._make()
+        assert rec.worker_id is None
+        assert rec.bot_name is None
+        assert rec.hit_dimensions is None
+        assert rec.saving_ratio is None
+        assert rec.task_summary is None
+
+    def test_data_fields_round_trip(self) -> None:
+        """数据字段可承载完整记录样貌。"""
+        rec = self._make(
+            bot_name="TestBot",
+            hit_dimensions="token_usage,cost",
+            hit_dimensions_count=2,
+            governance_max_priority="P1",
+            expected_token_saving=5000,
+            saving_ratio=0.5,
+            task_summary="cost high",
+            notification_structured='{"dims":["cost"]}',
+            analysis_status="done",
+        )
+        assert rec.bot_name == "TestBot"
+        assert rec.hit_dimensions_count == 2
+        assert rec.saving_ratio == 0.5

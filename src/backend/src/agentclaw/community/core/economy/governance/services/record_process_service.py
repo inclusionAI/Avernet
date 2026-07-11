@@ -36,6 +36,7 @@ from agentclaw.community.core.economy.governance.domain.enums import (
 from agentclaw.community.core.economy.governance.domain.domain import (
     FrozenSnapshot,
     GovernanceNotification,
+    GovernanceRecord,
     GovernanceTicket,
 )
 from agentclaw.community.core.economy.governance.services.notify_builder_service import (
@@ -69,7 +70,7 @@ class RecordProcessResult:
 
     worker_key: str
     entered_governance_scope: bool = False
-    action: str = ""  # enqueued / still_actionable / whitelist_filtered / cooldown_filtered / whitelist_closed
+    action: str = ""  # enqueued / would_create / still_actionable / whitelist_filtered / cooldown_filtered / whitelist_closed / invalid / error
     reason: str = ""
     ticket_id: str | None = None
     notification_md_preview: str | None = None
@@ -124,7 +125,7 @@ class GovernanceRecordService:
 
     def process_record(
         self,
-        record: dict,
+        record: GovernanceRecord,
         *,
         run_id: str,
         dry_run: bool = False,
@@ -133,11 +134,8 @@ class GovernanceRecordService:
         """Process a single governance record (§7.1.4 Steps 1–6).
 
         Args:
-            record: Dict with keys: owner_id, bot_id, bot_name,
-                governance_decision, dt_version, hit_dimensions,
-                hit_dimensions_count, governance_max_priority,
-                expected_token_saving, saving_ratio, task_summary,
-                notification_structured, analysis_status.
+            record: :class:`GovernanceRecord` 领域模型(owner_id/bot_id/
+                governance_decision/dt_version 必填,数据字段可选)。
             run_id: Correlation ID for audit trail.
             dry_run: True → no writes, return preview only.
             notify_source: ``offline_batch`` / ``online_cron`` / ``manual`` — written
@@ -149,14 +147,14 @@ class GovernanceRecordService:
         # Step 1: Resolve worker_key (§7.1.4 Step 1 + §5.4 validation)
         # Prefer explicit worker_id from producer (CSV/ODPS) to avoid
         # reconstruction mismatch; fall back to owner_id:bot_id.
-        worker_key = record.get("worker_id", "")
-        if not worker_key or ":" not in worker_key:
-            owner_id = record.get("owner_id", "")
-            bot_id = record.get("bot_id", "")
-            worker_key = f"{owner_id}:{bot_id}"
+        worker_key = record.effective_worker_key
+        # Extract owner_id / bot_id for downstream use:worker_id 优先拆,
+        # 否则取 record 的身份字段(必填非空)。
+        if record.worker_id and ":" in record.worker_id:
+            owner_id, bot_id = record.worker_id.split(":", 1)
         else:
-            # Extract owner_id / bot_id from worker_id for downstream use
-            owner_id, bot_id = worker_key.split(":", 1)
+            owner_id = record.owner_id
+            bot_id = record.bot_id
 
         validation_error = self._validate_worker_key(worker_key)
         if validation_error:
@@ -170,7 +168,7 @@ class GovernanceRecordService:
                 reason=validation_error,
             )
 
-        dt_version = record.get("dt_version", "")
+        dt_version = record.dt_version
 
         # Step 2: Whitelist filter (§7.1.4 Step 2) — point query
         is_whitelisted = self._whitelist_repo.is_whitelisted(bot_id, owner_id)
@@ -224,8 +222,8 @@ class GovernanceRecordService:
                 self._audit_repo.add_audit(
                     run_id, bot_id, owner_id,
                     check_result="actionable",
-                    governance_decision=record.get("governance_decision"),
-                    hit_dimensions=record.get("hit_dimensions"),
+                    governance_decision=record.governance_decision,
+                    hit_dimensions=record.hit_dimensions,
                     action_taken=AuditAction.COOLDOWN_FILTERED,
                     dry_run=0,
                 )
@@ -256,7 +254,7 @@ class GovernanceRecordService:
 
     def process_offline_batch(
         self,
-        records: list[dict],
+        records: list[GovernanceRecord],
         *,
         batch_id: str,
         dt_version: str,
@@ -274,7 +272,7 @@ class GovernanceRecordService:
         uploads would falsely silence tickets from other batches.
 
         Args:
-            records: List of governance record dicts.
+            records: List of :class:`GovernanceRecord` (governance records).
             batch_id: Batch unique ID for audit.
             dt_version: Offline data version.
             total_count: Expected record count (for quality check).
@@ -305,12 +303,19 @@ class GovernanceRecordService:
                     notify_source="offline_batch",
                 )
                 result.upsert_results.append(upsert_result)
-            except Exception:
+            except Exception as e:
                 log.exception(
                     "[OfflineBatch] Error processing record worker_key=%s",
-                    rec.get("worker_id", rec.get("owner_id", "")),
+                    rec.effective_worker_key,
                 )
                 result.errors += 1
+                # 失败记录回传:action="error" + worker_key + 截断 reason(200),
+                # 供调用方定点重传(与 errors 计数并存)
+                result.upsert_results.append(RecordProcessResult(
+                    worker_key=rec.effective_worker_key,
+                    action="error",
+                    reason=f"{type(e).__name__}: {e}"[:200],
+                ))
 
         # Phase 2: Data quality validation (§7.2.4)
         skip_reasons = self._validate_batch_quality(
@@ -428,7 +433,7 @@ class GovernanceRecordService:
         self,
         *,
         ticket: GovernanceTicket,
-        record: dict,
+        record: GovernanceRecord,
         worker_key: str,
         owner_id: str,
         bot_id: str,
@@ -457,8 +462,8 @@ class GovernanceRecordService:
             self._audit_repo.add_audit(
                 run_id, bot_id, owner_id,
                 check_result="actionable",
-                governance_decision=record.get("governance_decision"),
-                hit_dimensions=record.get("hit_dimensions"),
+                governance_decision=record.governance_decision,
+                hit_dimensions=record.hit_dimensions,
                 action_taken=AuditAction.STILL_ACTIONABLE,
                 dry_run=0,
             )
@@ -472,7 +477,12 @@ class GovernanceRecordService:
 
         if not dry_run:
             # Refresh snapshot fields via dedicated session
-            incoming_decision = record.get("governance_decision", "actionable")
+            # 等价原 record.get("governance_decision", "actionable"):
+            # 字段缺失/None → "actionable";空串保持空串(不同于 or 短路)。
+            incoming_decision = (
+                record.governance_decision if record.governance_decision is not None
+                else "actionable"
+            )
             is_still_actionable = incoming_decision == "actionable"
 
             # Compute consecutive_normal_days and remind_at
@@ -495,15 +505,15 @@ class GovernanceRecordService:
             self._task_repo.refresh_snapshot(
                 ticket.ticket_id,
                 dt_version=dt_version,
-                bot_name=record.get("bot_name"),
-                triggered_dimensions=record.get("hit_dimensions"),
-                hit_dimensions_count=record.get("hit_dimensions_count"),
-                severity=record.get("governance_max_priority"),
-                estimated_saving_tokens=record.get("expected_token_saving"),
-                saving_ratio=record.get("saving_ratio"),
-                task_summary=record.get("task_summary"),
-                notification_structured=record.get("notification_structured"),
-                analysis_status=record.get("analysis_status"),
+                bot_name=record.bot_name,
+                triggered_dimensions=record.hit_dimensions,
+                hit_dimensions_count=record.hit_dimensions_count,
+                severity=record.governance_max_priority,
+                estimated_saving_tokens=record.expected_token_saving,
+                saving_ratio=record.saving_ratio,
+                task_summary=record.task_summary,
+                notification_structured=record.notification_structured,
+                analysis_status=record.analysis_status,
                 current_decision="actionable" if is_still_actionable else "normal",
                 consecutive_normal_days=consecutive_days,
                 last_seen_at=now,
@@ -529,8 +539,8 @@ class GovernanceRecordService:
             self._audit_repo.add_audit(
                 run_id, bot_id, owner_id,
                 check_result="actionable",
-                governance_decision=record.get("governance_decision"),
-                hit_dimensions=record.get("hit_dimensions"),
+                governance_decision=record.governance_decision,
+                hit_dimensions=record.hit_dimensions,
                 action_taken=AuditAction.STILL_ACTIONABLE,
                 dry_run=0,
             )
@@ -550,7 +560,7 @@ class GovernanceRecordService:
     def _create_new_ticket(
         self,
         *,
-        record: dict,
+        record: GovernanceRecord,
         worker_key: str,
         owner_id: str,
         bot_id: str,
@@ -564,7 +574,8 @@ class GovernanceRecordService:
         now = datetime.now()
         ticket_id = uuid.uuid4().hex
         notification_id = uuid.uuid4().hex
-        owner_id_val = record.get("owner_id") or owner_id
+        # owner_id_val:record.owner_id 优先(必填非空),空则回退 Step1 从 worker_id 拆出的 owner_id
+        owner_id_val = record.owner_id or owner_id
 
         # Determine notification_md: check for review_rejected reopen template
         use_reopen_template = False
@@ -597,8 +608,8 @@ class GovernanceRecordService:
             self._audit_repo.add_audit(
                 run_id, bot_id, owner_id_val,
                 check_result="actionable",
-                governance_decision=record.get("governance_decision"),
-                hit_dimensions=record.get("hit_dimensions"),
+                governance_decision=record.governance_decision,
+                hit_dimensions=record.hit_dimensions,
                 action_taken=AuditAction.ENQUEUED,
                 dry_run=1,
             )
@@ -618,18 +629,18 @@ class GovernanceRecordService:
             assignee=worker_key,
             bot_id=bot_id,
             owner_id=owner_id_val,
-            bot_name=record.get("bot_name"),
+            bot_name=record.bot_name,
             dt_version=dt_version,
             initial_decision="actionable",  # initial_decision (§5.6)
             current_decision="actionable",
-            triggered_dimensions=record.get("hit_dimensions"),
-            hit_dimensions_count=record.get("hit_dimensions_count"),
-            severity=record.get("governance_max_priority"),
-            estimated_saving_tokens=record.get("expected_token_saving"),
-            saving_ratio=record.get("saving_ratio"),
-            task_summary=record.get("task_summary"),
-            notification_structured=record.get("notification_structured"),
-            analysis_status=record.get("analysis_status"),
+            triggered_dimensions=record.hit_dimensions,
+            hit_dimensions_count=record.hit_dimensions_count,
+            severity=record.governance_max_priority,
+            estimated_saving_tokens=record.expected_token_saving,
+            saving_ratio=record.saving_ratio,
+            task_summary=record.task_summary,
+            notification_structured=record.notification_structured,
+            analysis_status=record.analysis_status,
             governance_status=GovernanceStatus.OPEN,
             consecutive_normal_days=0,
             remind_at=None,  # No remind until first_send sent (§7.3.3)
@@ -644,19 +655,19 @@ class GovernanceRecordService:
             notification_id=notification_id,
             ticket_id=ticket_id,
             bot_id=bot_id,
-            bot_name=record.get("bot_name"),
+            bot_name=record.bot_name,
             owner_id=owner_id_val,
             worker_id=worker_key,
             snapshot=FrozenSnapshot(
                 dt_version=dt_version,
                 decision_at_create="actionable",  # freeze latest_decision (§5.6)
-                triggered_dimensions=record.get("hit_dimensions"),
-                hit_dimensions_count=record.get("hit_dimensions_count"),
-                severity=record.get("governance_max_priority"),
-                estimated_saving_tokens=record.get("expected_token_saving"),
-                saving_ratio=record.get("saving_ratio"),
+                triggered_dimensions=record.hit_dimensions,
+                hit_dimensions_count=record.hit_dimensions_count,
+                severity=record.governance_max_priority,
+                estimated_saving_tokens=record.expected_token_saving,
+                saving_ratio=record.saving_ratio,
                 notification_md=notification_md,
-                notification_structured=record.get("notification_structured"),
+                notification_structured=record.notification_structured,
             ),
             notify_type=NotifyType.FIRST_SEND,
             notify_source=notify_source,
@@ -670,10 +681,10 @@ class GovernanceRecordService:
             run_id, bot_id, owner_id_val,
             notification_id=notification_id,
             check_result="actionable",
-            governance_decision=record.get("governance_decision"),
-            hit_dimensions=record.get("hit_dimensions"),
-            expected_token_saving=record.get("expected_token_saving"),
-            saving_ratio=record.get("saving_ratio"),
+            governance_decision=record.governance_decision,
+            hit_dimensions=record.hit_dimensions,
+            expected_token_saving=record.expected_token_saving,
+            saving_ratio=record.saving_ratio,
             action_taken=AuditAction.ENQUEUED,
             dry_run=0,
         )
@@ -700,16 +711,19 @@ class GovernanceRecordService:
     @staticmethod
     def _validate_batch_quality(
         *,
-        records: list[dict],
+        records: list[GovernanceRecord],
         total_count: int,
     ) -> list[str]:
         """Validate batch metadata — record count consistency (§7.2.4).
+
+        total_count <= 0 视为「生产者未提供预期值」,跳过 count 校验(不误报)。
+        仅当显式提供正值且与实际不符时才判 mismatch。
 
         Returns list of failure reasons; empty list means validation passed.
         """
         reasons: list[str] = []
 
-        if len(records) != total_count:
+        if total_count > 0 and len(records) != total_count:
             reasons.append(
                 f"count_mismatch: expected={total_count}, actual={len(records)}"
             )
@@ -742,7 +756,7 @@ class GovernanceRecordService:
     @staticmethod
     def _render_notification_md(
         *,
-        record: dict,
+        record: GovernanceRecord,
         notification_id: str,
         bot_id: str,
         owner_id: str,
@@ -759,24 +773,24 @@ class GovernanceRecordService:
                 else "之前"
             )
             return (
-                f"#### 🔄 重新治理通知 — {record.get('bot_name', '未知Bot')}\n\n"
+                f"#### 🔄 重新治理通知 — {record.bot_name or '未知Bot'}\n\n"
                 f"该治理项曾在 {time_str} 处理过反馈。"
                 f"基于最新数据复核，当前仍需要继续跟进。\n\n"
                 f"请参考以下建议处理；如有补充说明，也可以继续反馈。\n\n"
-                f"**命中维度**: {record.get('hit_dimensions', '—')}\n"
+                f"**命中维度**: {record.hit_dimensions or '—'}\n"
                 f"**数据日期**: {dt_version}\n"
             )
 
         # Standard first notification template — use simplified reason builder
         return build_governance_reason(
-            bot_name=record.get("bot_name", ""),
+            bot_name=record.bot_name or "",
             dt_version=dt_version,
-            hit_dimensions=record.get("hit_dimensions"),
-            governance_max_priority=record.get("governance_max_priority"),
-            expected_token_saving=record.get("expected_token_saving"),
-            saving_ratio=record.get("saving_ratio"),
-            task_summary=record.get("task_summary"),
-            notification_structured=record.get("notification_structured"),
+            hit_dimensions=record.hit_dimensions,
+            governance_max_priority=record.governance_max_priority,
+            expected_token_saving=record.expected_token_saving,
+            saving_ratio=record.saving_ratio,
+            task_summary=record.task_summary,
+            notification_structured=record.notification_structured,
         )
 
     # ------------------------------------------------------------------
@@ -784,7 +798,7 @@ class GovernanceRecordService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _deduplicate_by_worker(records: list[dict]) -> list[dict]:
+    def _deduplicate_by_worker(records: list[GovernanceRecord]) -> list[GovernanceRecord]:
         """Remove duplicate worker_key entries, keeping last occurrence.
 
         When multiple records share the same worker_key, the last one
@@ -792,25 +806,28 @@ class GovernanceRecordService:
         failures when the same worker appears more than once in a batch.
 
         Args:
-            records: Raw records from offline-batch upload.
+            records: Raw records (GovernanceRecord) from offline-batch upload.
 
         Returns:
-            Deduped record list.
+            Deduped record list。同 worker_key 冲突保留 dt_version 最大(最新)者,
+            防乱序批次旧 dt 挤掉新 dt。
         """
-        seen: dict[str, int] = {}
-        for idx, rec in enumerate(records):
-            worker_key = rec.get("worker_id", "")
-            if not worker_key or ":" not in worker_key:
-                worker_key = f"{rec.get('owner_id', '')}:{rec.get('bot_id', '')}"
-            seen[worker_key] = idx
+        # key=worker_key, value=该 key 下 dt_version 最大的 record
+        seen: dict[str, GovernanceRecord] = {}
+        for rec in records:
+            worker_key = rec.effective_worker_key
+            existing = seen.get(worker_key)
+            # dt_version 字符串字典序 = YYYYMMDD 时序;保留更大(更新)者
+            if existing is None or rec.dt_version >= existing.dt_version:
+                seen[worker_key] = rec
 
-        deduped = [records[idx] for idx in seen.values()]
-        dup_count = len(records) - len(seen)
+        deduped = list(seen.values())
+        dup_count = len(records) - len(deduped)
 
         if dup_count > 0:
             log.info(
                 "[OfflineBatch] Deduplicated: %d → %d records "
-                "(%d duplicate worker(s) removed)",
+                "(%d duplicate worker(s) removed, kept latest dt_version)",
                 len(records), len(deduped), dup_count,
             )
 
