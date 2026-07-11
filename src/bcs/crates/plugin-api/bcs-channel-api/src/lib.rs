@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_service_api::application::InboundMessage;
+use bcs_service_api::application::{ChannelInboundError, InboundMessage};
 use bcs_service_api::lifecycle::ServiceLifecycle;
 use bcs_service_api::port::channel_delivery::ChannelDeliveryPort;
 use bytes::Bytes;
@@ -16,6 +16,9 @@ use thiserror::Error;
 
 /// Provider-facing result type.
 pub type ChannelProviderResult<T> = Result<T, ChannelProviderError>;
+
+/// Compatibility alias for plugins compiled against the previous ingress error name.
+pub type ChannelIngressError = ChannelInboundError;
 
 /// Provider contract failures.
 #[derive(Debug, Error)]
@@ -109,15 +112,6 @@ pub trait ChannelHttpIngressPort: Send + Sync {
 #[async_trait]
 pub trait ChannelInboundSink: Send + Sync {
     async fn submit(&self, msg: InboundMessage) -> Result<(), ChannelIngressError>;
-}
-
-/// Ingress submission failure.
-#[derive(Debug, Error)]
-pub enum ChannelIngressError {
-    #[error("invalid channel ingress message: {0}")]
-    InvalidMessage(String),
-    #[error("channel ingress service error: {0}")]
-    Service(String),
 }
 
 /// Provider HTTP route dispatcher built by the host from enabled providers.

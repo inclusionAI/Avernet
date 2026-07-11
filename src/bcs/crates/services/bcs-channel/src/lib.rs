@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use bcs_channel_api::{
-    ChannelInboundSink, ChannelIngressError, ChannelProvider, ChannelProviderRegistry,
+    ChannelInboundSink, ChannelProvider, ChannelProviderRegistry,
 };
 use bcs_domain::{
     ActorKind, BindingStatus, BindingTarget, ChannelBinding, ConversationSessionMap,
@@ -18,7 +18,8 @@ use bcs_domain::{
     ParticipantRole, Session, SessionKind, SessionScope, SessionStatus, Visibility,
 };
 use bcs_service_api::application::channel::{
-    ChannelService, ChannelUseCaseError, CreateBindingCommand, InboundMessage, OutboundMessage,
+    ChannelInboundError, ChannelInboundFailureKind, ChannelService, ChannelUseCaseError,
+    CreateBindingCommand, InboundMessage, OutboundMessage,
 };
 use bcs_service_api::application::collaboration_runtime::StartStateMachineRunCommand;
 use bcs_service_api::application::message_flow::WebSendCommand;
@@ -423,8 +424,50 @@ impl BcsChannelService {
 
 #[async_trait]
 impl ChannelService for BcsChannelService {
-    async fn handle_inbound(&self, msg: InboundMessage) -> Result<(), ChannelUseCaseError> {
-        let account_ref = msg.account_ref.trim().to_string();
+    async fn handle_inbound(
+        &self,
+        mut msg: InboundMessage,
+    ) -> Result<(), ChannelInboundError> {
+        if msg.conversation_type == "2" && !msg.is_at_bot {
+            info!(
+                channel_type = %msg.channel_type,
+                account_ref = %msg.account_ref,
+                msg_id = %msg.msg_id,
+                im_conversation_id = %msg.im_conversation_id,
+                conversation_type = %msg.conversation_type,
+                reason = "group_message_without_at_bot",
+                "channel inbound: ignored"
+            );
+            return Ok(());
+        }
+        if msg.msg_id.trim().is_empty() {
+            info!(
+                channel_type = %msg.channel_type,
+                account_ref = %msg.account_ref,
+                reason = "empty_msg_id",
+                "channel inbound: ignored"
+            );
+            return Ok(());
+        }
+        msg.channel_type = normalize_required(&msg.channel_type, "channel_type")
+            .map_err(|error| invalid_inbound(error))?
+            .to_string();
+        msg.account_ref = normalize_required(&msg.account_ref, "account_ref")
+            .map_err(|error| invalid_inbound(error))?
+            .to_string();
+        msg.im_conversation_id = normalize_required(&msg.im_conversation_id, "im_conversation_id")
+            .map_err(|error| invalid_inbound(error))?
+            .to_string();
+        msg.conversation_type = normalize_required(&msg.conversation_type, "conversation_type")
+            .map_err(|error| invalid_inbound(error))?
+            .to_string();
+        msg.im_user_id = normalize_required(&msg.im_user_id, "im_user_id")
+            .map_err(|error| invalid_inbound(error))?
+            .to_string();
+        msg.msg_id = normalize_required(&msg.msg_id, "msg_id")
+            .map_err(|error| invalid_inbound(error))?
+            .to_string();
+        let account_ref = msg.account_ref.clone();
         info!(
             channel_type = %msg.channel_type,
             account_ref = %account_ref,
@@ -436,50 +479,26 @@ impl ChannelService for BcsChannelService {
             text_len = msg.text.chars().count(),
             "channel inbound: received"
         );
-        if account_ref.is_empty() {
-            info!(
-                channel_type = %msg.channel_type,
-                msg_id = %msg.msg_id,
-                reason = "empty_account_ref",
-                "channel inbound: ignored"
-            );
-            return Ok(());
-        }
-        if msg.msg_id.trim().is_empty() {
-            info!(
-                channel_type = %msg.channel_type,
-                account_ref = %account_ref,
-                reason = "empty_msg_id",
-                "channel inbound: ignored"
-            );
-            return Ok(());
-        }
-        if msg.conversation_type == "2" && !msg.is_at_bot {
-            info!(
-                channel_type = %msg.channel_type,
-                account_ref = %account_ref,
-                msg_id = %msg.msg_id,
-                im_conversation_id = %msg.im_conversation_id,
-                conversation_type = %msg.conversation_type,
-                reason = "group_message_without_at_bot",
-                "channel inbound: ignored"
-            );
-            return Ok(());
-        }
         let Some(binding) = self
             .bindings
             .find_active_by_account(msg.channel_type.clone(), &account_ref)
-            .await?
+            .await
+            .map_err(|error| {
+                inbound_failure(
+                    ChannelInboundFailureKind::BindingLookupFailed,
+                    true,
+                    error,
+                )
+            })?
         else {
-            info!(
-                channel_type = %msg.channel_type,
-                account_ref = %account_ref,
-                msg_id = %msg.msg_id,
-                im_conversation_id = %msg.im_conversation_id,
-                reason = "binding_missing",
-                "channel inbound: ignored"
-            );
-            return Ok(());
+            return Err(ChannelInboundError::new(
+                ChannelInboundFailureKind::BindingNotFound,
+                false,
+                format!(
+                    "active binding not found for channel {} account {}",
+                    msg.channel_type, account_ref
+                ),
+            ));
         };
         info!(
             channel_type = %binding.channel_type,
@@ -504,7 +523,13 @@ impl ChannelService for BcsChannelService {
         }
 
         let result = async {
-            let actor_id = self.ensure_im_human_actor(&msg).await?;
+            let actor_id = self.ensure_im_human_actor(&msg).await.map_err(|error| {
+                inbound_failure(
+                    ChannelInboundFailureKind::ActorResolutionFailed,
+                    true,
+                    error,
+                )
+            })?;
             info!(
                 channel_type = %msg.channel_type,
                 account_ref = %account_ref,
@@ -515,7 +540,14 @@ impl ChannelService for BcsChannelService {
             );
             let ctx = self
                 .resolve_inbound_context(&binding, &msg, &actor_id)
-                .await?;
+                .await
+                .map_err(|error| {
+                    inbound_failure(
+                        ChannelInboundFailureKind::ContextResolutionFailed,
+                        true,
+                        error,
+                    )
+                })?;
             info!(
                 channel_type = %msg.channel_type,
                 account_ref = %account_ref,
@@ -531,10 +563,22 @@ impl ChannelService for BcsChannelService {
             if ctx.state_machine_trigger {
                 return self
                     .start_state_machine_from_inbound(&ctx, &msg, &actor_id)
-                    .await;
+                    .await
+                    .map_err(|error| {
+                        inbound_failure(ChannelInboundFailureKind::DispatchFailed, true, error)
+                    });
             }
 
-            let (session_id, reused_session) = self.resolve_or_create_chat_session(&ctx, &msg).await?;
+            let (session_id, reused_session) = self
+                .resolve_or_create_chat_session(&ctx, &msg)
+                .await
+                .map_err(|error| {
+                    inbound_failure(
+                        ChannelInboundFailureKind::SessionResolutionFailed,
+                        true,
+                        error,
+                    )
+                })?;
             info!(
                 channel_type = %msg.channel_type,
                 account_ref = %account_ref,
@@ -556,7 +600,14 @@ impl ChannelService for BcsChannelService {
                     bcs_session_id: session_id.clone(),
                     last_active_at: (self.now_ms)(),
                 })
-                .await?;
+                .await
+                .map_err(|error| {
+                    inbound_failure(
+                        ChannelInboundFailureKind::SessionResolutionFailed,
+                        true,
+                        error,
+                    )
+                })?;
             info!(
                 channel_type = %msg.channel_type,
                 account_ref = %account_ref,
@@ -570,7 +621,16 @@ impl ChannelService for BcsChannelService {
             let mut participant = Participant::human(actor_id.clone(), ParticipantRole::Consultant);
             participant.mode = Some(ParticipantMode::Present);
             participant.bot_name = msg.im_user_nick.clone();
-            self.sessions.add_participant(&session_id, participant).await?;
+            self.sessions
+                .add_participant(&session_id, participant)
+                .await
+                .map_err(|error| {
+                    inbound_failure(
+                        ChannelInboundFailureKind::SessionResolutionFailed,
+                        true,
+                        error,
+                    )
+                })?;
             info!(
                 channel_type = %msg.channel_type,
                 account_ref = %account_ref,
@@ -584,7 +644,8 @@ impl ChannelService for BcsChannelService {
             let dispatch_session_id = session_id.clone();
             let dispatch_actor_id = actor_id.clone();
             let dispatch_msg_id = msg.msg_id.clone();
-            self.message_flow
+            let outcome = self
+                .message_flow
                 .handle_web_send(WebSendCommand {
                     caller: CallerContext::Human(HumanActor {
                         actor_id: actor_id.clone(),
@@ -601,7 +662,20 @@ impl ChannelService for BcsChannelService {
                     idempotency_key: Some(dispatch_msg_id.clone()),
                     sender_conn_id: None,
                 })
-                .await?;
+                .await
+                .map_err(|error| {
+                    inbound_failure(ChannelInboundFailureKind::DispatchFailed, true, error)
+                })?;
+            if outcome.active_run_ids.is_empty() && outcome.failed_count > 0 {
+                return Err(ChannelInboundError::new(
+                    ChannelInboundFailureKind::DispatchFailed,
+                    true,
+                    format!(
+                        "message flow reported {} failed deliveries without an active run",
+                        outcome.failed_count
+                    ),
+                ));
+            }
             info!(
                 channel_type = %msg.channel_type,
                 account_ref = %account_ref,
@@ -914,12 +988,21 @@ impl ChannelServiceInboundSink {
 
 #[async_trait]
 impl ChannelInboundSink for ChannelServiceInboundSink {
-    async fn submit(&self, msg: InboundMessage) -> Result<(), ChannelIngressError> {
-        self.service
-            .handle_inbound(msg)
-            .await
-            .map_err(|error| ChannelIngressError::Service(error.to_string()))
+    async fn submit(&self, msg: InboundMessage) -> Result<(), ChannelInboundError> {
+        self.service.handle_inbound(msg).await
     }
+}
+
+fn invalid_inbound(error: ChannelUseCaseError) -> ChannelInboundError {
+    inbound_failure(ChannelInboundFailureKind::InvalidInbound, false, error)
+}
+
+fn inbound_failure(
+    kind: ChannelInboundFailureKind,
+    retryable: bool,
+    error: impl std::fmt::Display,
+) -> ChannelInboundError {
+    ChannelInboundError::new(kind, retryable, error.to_string())
 }
 
 async fn validate_target(
@@ -1119,8 +1202,8 @@ mod tests {
     };
     use bcs_service_api::lifecycle::ServiceLifecycle;
     use bcs_service_api::application::channel::{
-        ChannelService, ChannelUseCaseError, CreateBindingCommand, InboundMessage,
-        OutboundMessage,
+        ChannelInboundError, ChannelInboundFailureKind, ChannelService, ChannelUseCaseError,
+        CreateBindingCommand, InboundMessage, OutboundMessage,
     };
     use bcs_service_api::application::collaboration_runtime::{
         CancelStateMachineRunCommand, CollaborationRuntimeError, ConfigureGroupRuntimeCommand,
@@ -1199,6 +1282,61 @@ mod tests {
 
         async fn delete(&self, id: &str) -> ServiceResult<()> {
             self.inner.delete(id).await
+        }
+    }
+
+    struct FailingBindingLookupRepo;
+
+    #[async_trait]
+    impl ChannelBindingRepoPort for FailingBindingLookupRepo {
+        async fn create(&self, _binding: ChannelBinding) -> ServiceResult<()> {
+            unreachable!("inbound binding lookup test only calls find_active_by_account")
+        }
+
+        async fn get(&self, _id: &str) -> ServiceResult<Option<ChannelBinding>> {
+            unreachable!("inbound binding lookup test only calls find_active_by_account")
+        }
+
+        async fn find_active_by_account(
+            &self,
+            _channel_type: ChannelType,
+            _account_ref: &str,
+        ) -> ServiceResult<Option<ChannelBinding>> {
+            Err(ServiceError::InternalError("binding lookup failed".to_string()))
+        }
+
+        async fn list(&self) -> ServiceResult<Vec<ChannelBinding>> {
+            unreachable!("inbound binding lookup test only calls find_active_by_account")
+        }
+
+        async fn set_status(&self, _id: &str, _active: bool) -> ServiceResult<()> {
+            unreachable!("inbound binding lookup test only calls find_active_by_account")
+        }
+
+        async fn set_config(&self, _id: &str, _config: serde_json::Value) -> ServiceResult<()> {
+            unreachable!("inbound binding lookup test only calls find_active_by_account")
+        }
+
+        async fn delete(&self, _id: &str) -> ServiceResult<()> {
+            unreachable!("inbound binding lookup test only calls find_active_by_account")
+        }
+    }
+
+    struct FailingParticipantRepo;
+
+    #[async_trait]
+    impl ImParticipantRepoPort for FailingParticipantRepo {
+        async fn get(
+            &self,
+            _channel_type: ChannelType,
+            _account_ref: &str,
+            _im_user_id: &str,
+        ) -> ServiceResult<Option<bcs_domain::ImParticipantMap>> {
+            unreachable!("inbound actor test only writes the participant mapping")
+        }
+
+        async fn upsert(&self, _map: bcs_domain::ImParticipantMap) -> ServiceResult<()> {
+            Err(ServiceError::InternalError("actor write failed".to_string()))
         }
     }
 
@@ -1408,6 +1546,61 @@ mod tests {
                 collaboration_runtime,
             })
         }
+    }
+
+    async fn inbound_service(
+        bindings: Arc<dyn ChannelBindingRepoPort>,
+        im_participants: Arc<dyn ImParticipantRepoPort>,
+        sessions: Arc<dyn SessionRepoPort>,
+        message_flow: Arc<dyn MessageFlowService>,
+        registry: Arc<dyn BotRegistryCoreService>,
+    ) -> BcsChannelService {
+        let groups = Arc::new(bcs_group::GroupCore::memory());
+        groups
+            .upsert(manager_group("group_1"))
+            .await
+            .expect("inbound test group");
+        BcsChannelService::new(
+            bindings,
+            Arc::new(MemoryConversationSessionRepo::new()),
+            im_participants,
+            sessions,
+            message_flow,
+            Arc::new(RecordingCollaborationRuntime::default()),
+            groups,
+            registry,
+            Arc::new(ChannelProviderRegistry::empty()),
+            "pre",
+            Arc::new(|| 42),
+            Arc::new(|| "generated_id".to_string()),
+        )
+    }
+
+    async fn active_inbound_binding_repo() -> Arc<MemoryChannelBindingRepo> {
+        let bindings = Arc::new(MemoryChannelBindingRepo::new());
+        bindings
+            .create(active_binding(
+                "binding_1",
+                "robot_1",
+                BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                Visibility::FullTranscript,
+            ))
+            .await
+            .expect("active inbound binding");
+        bindings
+    }
+
+    fn assert_inbound_error(
+        error: ChannelInboundError,
+        kind: ChannelInboundFailureKind,
+        retryable: bool,
+        diagnostic: &str,
+    ) {
+        assert_eq!(error.kind, kind);
+        assert_eq!(error.retryable, retryable);
+        assert!(error.diagnostic.contains(diagnostic));
     }
 
     #[tokio::test]
@@ -2063,6 +2256,143 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn inbound_classifies_missing_binding_and_lookup_failure() -> TestResult {
+        let missing_binding = inbound_service(
+            Arc::new(MemoryChannelBindingRepo::new()),
+            Arc::new(MemoryImParticipantRepo::new()),
+            Arc::new(RecordingSessionRepo::default()),
+            Arc::new(RecordingMessageFlow::default()),
+            Arc::new(RecordingRegistry::default()),
+        )
+        .await;
+
+        let error = missing_binding
+            .handle_inbound(inbound("conv_missing", "u1", Some("张三"), "msg_missing"))
+            .await
+            .expect_err("missing binding must be reported");
+        assert_inbound_error(
+            error,
+            ChannelInboundFailureKind::BindingNotFound,
+            false,
+            "active binding",
+        );
+
+        let lookup_failure = inbound_service(
+            Arc::new(FailingBindingLookupRepo),
+            Arc::new(MemoryImParticipantRepo::new()),
+            Arc::new(RecordingSessionRepo::default()),
+            Arc::new(RecordingMessageFlow::default()),
+            Arc::new(RecordingRegistry::default()),
+        )
+        .await;
+
+        let error = lookup_failure
+            .handle_inbound(inbound("conv_lookup", "u1", Some("张三"), "msg_lookup"))
+            .await
+            .expect_err("binding lookup failure must be reported");
+        assert_inbound_error(
+            error,
+            ChannelInboundFailureKind::BindingLookupFailed,
+            true,
+            "binding lookup failed",
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn inbound_classifies_actor_participant_session_and_dispatch_failures() -> TestResult {
+        let bindings = active_inbound_binding_repo().await;
+        let registry = Arc::new(RecordingRegistry::default());
+        *registry.fail_ensure_human.lock().await = Some("actor write failed".to_string());
+        let actor_failure = inbound_service(
+            bindings,
+            Arc::new(MemoryImParticipantRepo::new()),
+            Arc::new(RecordingSessionRepo::default()),
+            Arc::new(RecordingMessageFlow::default()),
+            registry,
+        )
+        .await;
+
+        let error = actor_failure
+            .handle_inbound(inbound("conv_actor", "u1", Some("张三"), "msg_actor"))
+            .await
+            .expect_err("actor write failure must be reported");
+        assert_inbound_error(
+            error,
+            ChannelInboundFailureKind::ActorResolutionFailed,
+            true,
+            "actor write failed",
+        );
+
+        let participant_failure = inbound_service(
+            active_inbound_binding_repo().await,
+            Arc::new(FailingParticipantRepo),
+            Arc::new(RecordingSessionRepo::default()),
+            Arc::new(RecordingMessageFlow::default()),
+            Arc::new(RecordingRegistry::default()),
+        )
+        .await;
+
+        let error = participant_failure
+            .handle_inbound(inbound("conv_participant", "u1", Some("张三"), "msg_participant"))
+            .await
+            .expect_err("participant mapping failure must be reported");
+        assert_inbound_error(
+            error,
+            ChannelInboundFailureKind::ActorResolutionFailed,
+            true,
+            "actor write failed",
+        );
+
+        let session_repo = Arc::new(RecordingSessionRepo::default());
+        *session_repo.fail_create.lock().await = Some("session create failed".to_string());
+        let session_failure = inbound_service(
+            active_inbound_binding_repo().await,
+            Arc::new(MemoryImParticipantRepo::new()),
+            session_repo,
+            Arc::new(RecordingMessageFlow::default()),
+            Arc::new(RecordingRegistry::default()),
+        )
+        .await;
+
+        let error = session_failure
+            .handle_inbound(inbound("conv_session", "u1", Some("张三"), "msg_session"))
+            .await
+            .expect_err("session failure must be reported");
+        assert_inbound_error(
+            error,
+            ChannelInboundFailureKind::SessionResolutionFailed,
+            true,
+            "session create failed",
+        );
+
+        let message_flow = Arc::new(RecordingMessageFlow::default());
+        *message_flow.failed_dispatch_count.lock().await = 1;
+        let dispatch_failure = inbound_service(
+            active_inbound_binding_repo().await,
+            Arc::new(MemoryImParticipantRepo::new()),
+            Arc::new(RecordingSessionRepo::default()),
+            message_flow,
+            Arc::new(RecordingRegistry::default()),
+        )
+        .await;
+
+        let error = dispatch_failure
+            .handle_inbound(inbound("conv_dispatch", "u1", Some("张三"), "msg_dispatch"))
+            .await
+            .expect_err("failed message flow dispatch must be reported");
+        assert_inbound_error(
+            error,
+            ChannelInboundFailureKind::DispatchFailed,
+            true,
+            "failed deliveries",
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn inbound_returns_error_when_session_participant_write_fails() -> TestResult {
         let harness = TestHarness::new(manager_group("group_1")).await?;
         harness
@@ -2088,7 +2418,12 @@ mod tests {
             .handle_inbound(group_inbound("conv_group", "u1", Some("张三"), "msg_fail", true))
             .await;
 
-        assert!(result.is_err());
+        assert_inbound_error(
+            result.expect_err("participant write failure must be reported"),
+            ChannelInboundFailureKind::SessionResolutionFailed,
+            true,
+            "participant write failed",
+        );
         assert!(harness.message_flow.web_sends.lock().await.is_empty());
 
         Ok(())
@@ -2889,6 +3224,7 @@ mod tests {
         next: AtomicU64,
         sessions: Mutex<HashMap<String, Session>>,
         added_participants: Mutex<Vec<(String, Participant)>>,
+        fail_create: Mutex<Option<String>>,
         fail_add_participant: Mutex<Option<String>>,
     }
 
@@ -2899,6 +3235,9 @@ mod tests {
             group_id: &str,
             params: NewSessionParams,
         ) -> ServiceResult<Session> {
+            if let Some(error) = self.fail_create.lock().await.clone() {
+                return Err(ServiceError::InternalError(error));
+            }
             let n = self.next.fetch_add(1, Ordering::SeqCst) + 1;
             let id = match params.id {
                 Some(id) => id,
@@ -3130,12 +3469,14 @@ mod tests {
     #[derive(Default)]
     struct RecordingMessageFlow {
         web_sends: Mutex<Vec<WebSendCommand>>,
+        failed_dispatch_count: Mutex<usize>,
     }
 
     #[async_trait]
     impl MessageFlowService for RecordingMessageFlow {
         async fn handle_web_send(&self, cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
             self.web_sends.lock().await.push(cmd);
+            let failed_count = *self.failed_dispatch_count.lock().await;
             Ok(WebSendOutcome {
                 primary_run_id: "run_1".to_string(),
                 status: "accepted".to_string(),
@@ -3145,7 +3486,7 @@ mod tests {
                 mentions: Vec::new(),
                 hidden_mentions: Vec::new(),
                 delivered_count: 0,
-                failed_count: 0,
+                failed_count,
                 delivery_results: Vec::<MessageDeliveryResult>::new(),
             })
         }
@@ -3412,6 +3753,7 @@ mod tests {
     #[derive(Default)]
     struct RecordingRegistry {
         ensured: Mutex<Vec<(String, String)>>,
+        fail_ensure_human: Mutex<Option<String>>,
     }
 
     #[async_trait]
@@ -3488,6 +3830,9 @@ mod tests {
             staff_no: &str,
             nick_name: &str,
         ) -> ServiceResult<EnsureHumanResult> {
+            if let Some(error) = self.fail_ensure_human.lock().await.clone() {
+                return Err(ServiceError::InternalError(error));
+            }
             self.ensured
                 .lock()
                 .await

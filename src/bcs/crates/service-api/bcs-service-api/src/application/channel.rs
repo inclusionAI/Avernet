@@ -30,6 +30,42 @@ impl From<ServiceError> for ChannelUseCaseError {
     }
 }
 
+/// Failure category for normalized channel inbound processing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelInboundFailureKind {
+    InvalidInbound,
+    BindingNotFound,
+    BindingLookupFailed,
+    ActorResolutionFailed,
+    ContextResolutionFailed,
+    SessionResolutionFailed,
+    DispatchFailed,
+    Internal,
+}
+
+/// Typed failure returned while processing normalized channel inbound messages.
+#[derive(Debug, thiserror::Error)]
+#[error("channel inbound {kind:?}: {diagnostic}")]
+pub struct ChannelInboundError {
+    pub kind: ChannelInboundFailureKind,
+    pub retryable: bool,
+    pub diagnostic: String,
+}
+
+impl ChannelInboundError {
+    pub fn new(
+        kind: ChannelInboundFailureKind,
+        retryable: bool,
+        diagnostic: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind,
+            retryable,
+            diagnostic: diagnostic.into(),
+        }
+    }
+}
+
 /// 一条入站 IM 消息(已由 adapter 从 IM 原生 body 解析为中性结构)。
 #[derive(Debug, Clone)]
 pub struct InboundMessage {
@@ -83,8 +119,8 @@ pub struct OutboundMessage {
 pub trait ChannelService: Send + Sync {
     /// 入站:解析 binding → 确保 Human actor → 按 group strategy 分流:
     /// Chat 型 session 调 MessageFlowService,StateMachine 触发 runtime task。
-    /// 错误内部处理,不让回调 handler 失败。
-    async fn handle_inbound(&self, msg: InboundMessage) -> Result<(), ChannelUseCaseError>;
+    /// Errors are classified for the delivery adapter to provide actionable feedback.
+    async fn handle_inbound(&self, msg: InboundMessage) -> Result<(), ChannelInboundError>;
 
     /// 出站 hook:若 session 绑定了 channel 会话且可见性允许,则投递到 IM。
     /// 无绑定 / 不可见 / 来自 IM(防回环)→ no-op。
@@ -103,4 +139,22 @@ pub trait ChannelService: Send + Sync {
         config: serde_json::Value,
     ) -> Result<(), ChannelUseCaseError>;
     async fn delete_binding(&self, id: &str) -> Result<(), ChannelUseCaseError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ChannelInboundError, ChannelInboundFailureKind};
+
+    #[test]
+    fn inbound_error_preserves_failure_kind_retryability_and_diagnostic() {
+        let error = ChannelInboundError::new(
+            ChannelInboundFailureKind::ActorResolutionFailed,
+            true,
+            "actor write failed",
+        );
+
+        assert_eq!(error.kind, ChannelInboundFailureKind::ActorResolutionFailed);
+        assert!(error.retryable);
+        assert!(error.diagnostic.contains("actor write failed"));
+    }
 }

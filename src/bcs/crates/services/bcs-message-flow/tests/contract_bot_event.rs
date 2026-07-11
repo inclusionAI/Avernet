@@ -12,7 +12,7 @@ use bcs_service_api::{
     RoutingMode, RoutingPolicy, ServiceError, ServiceSpec, Session, SessionKind,
     SessionManagementService, SessionStatus, SessionUseCaseError, SystemMessageEvent,
     SystemMessageService, TaskCompleteCommand, TaskDispatchCommand, TaskMessageCommand,
-    TaskRunAliasRegistration, ChannelService, ChannelUseCaseError,
+    TaskRunAliasRegistration, ChannelInboundError, ChannelService, ChannelUseCaseError,
     interceptor::{BlockReason, InterceptorDecision, MessageInterceptor, OutboundMessage},
 };
 use serde_json::{Value, json};
@@ -50,7 +50,7 @@ impl ChannelService for RecordingChannelService {
     async fn handle_inbound(
         &self,
         _msg: bcs_service_api::application::channel::InboundMessage,
-    ) -> Result<(), ChannelUseCaseError> {
+    ) -> Result<(), ChannelInboundError> {
         Ok(())
     }
 

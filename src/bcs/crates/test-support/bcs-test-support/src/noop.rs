@@ -1649,7 +1649,7 @@ impl ChannelService for NoopChannelService {
     async fn handle_inbound(
         &self,
         _msg: InboundMessage,
-    ) -> Result<(), ChannelUseCaseError> {
+    ) -> Result<(), ChannelInboundError> {
         Ok(())
     }
 

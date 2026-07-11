@@ -32,7 +32,8 @@ pub use actors::{
 };
 pub use application::SystemMessageService;
 pub use application::channel::{
-    ChannelService, ChannelUseCaseError, CreateBindingCommand, InboundMessage, OutboundMessage,
+    ChannelInboundError, ChannelInboundFailureKind, ChannelService, ChannelUseCaseError,
+    CreateBindingCommand, InboundMessage, OutboundMessage,
 };
 pub use application::message_log::{
     MessageLogContent, MessageLogEventType, MessageLogMode, MessageLogStatus,
