@@ -558,8 +558,18 @@ class TestCardCallback:
 class TestOfflineBatch:
     def test_offline_batch(self):
         svc = FakeBatchService()
+        # records 收口为 GovernanceRecordInput(必填 owner_id/bot_id/governance_decision/dt_version)
         body = OfflineBatchRequest(
-            records=[{"worker_key": "u1:b1"}, {"worker_key": "u2:b2"}],
+            records=[
+                {
+                    "owner_id": "u1", "bot_id": "b1",
+                    "governance_decision": "actionable", "dt_version": "20260705",
+                },
+                {
+                    "owner_id": "u2", "bot_id": "b2",
+                    "governance_decision": "actionable", "dt_version": "20260705",
+                },
+            ],
             batch_id="b-test",
             dt_version="20260705",
             total_count=2,
