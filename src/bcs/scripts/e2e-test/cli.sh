@@ -31,7 +31,7 @@ test_cli_health() {
         pass "bcs-cli health returned a health payload"
         TESTS_PASSED=$((TESTS_PASSED+1))
     else
-        fail "bcs-cli health payload unexpected: $(echo "$BCS_CLI_STDOUT" | head -c 120)"
+        fail "bcs-cli health payload unexpected: $(printf '%s\n' "$BCS_CLI_STDOUT" | head -c 120)"
         TESTS_FAILED=$((TESTS_FAILED+1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL+1))
@@ -167,7 +167,7 @@ test_cli_onboard() {
         pass "bcs-cli onboard --web produced a registration URL"
         TESTS_PASSED=$((TESTS_PASSED+1))
     else
-        fail "bcs-cli onboard --web output unexpected: $(echo "$BCS_CLI_STDOUT" | head -c 120)"
+        fail "bcs-cli onboard --web output unexpected: $(printf '%s\n' "$BCS_CLI_STDOUT" | head -c 120)"
         TESTS_FAILED=$((TESTS_FAILED+1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL+1))
@@ -186,7 +186,7 @@ test_cli_update_status() {
         pass "bcs-cli update-status idle accepted (CLI path ok)"
         TESTS_PASSED=$((TESTS_PASSED+1))
     else
-        fail "bcs-cli update-status output unexpected: $(echo "$BCS_CLI_STDOUT" | head -c 120)"
+        fail "bcs-cli update-status output unexpected: $(printf '%s\n' "$BCS_CLI_STDOUT" | head -c 120)"
         TESTS_FAILED=$((TESTS_FAILED+1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL+1))
@@ -253,7 +253,7 @@ test_cli_chat() {
         pass "bcs-cli chat returned a run/session handle"
         TESTS_PASSED=$((TESTS_PASSED+1))
     else
-        fail "bcs-cli chat output had no run/session handle: $(echo "$BCS_CLI_STDOUT" | head -c 120)"
+        fail "bcs-cli chat output had no run/session handle: $(printf '%s\n' "$BCS_CLI_STDOUT" | head -c 120)"
         TESTS_FAILED=$((TESTS_FAILED+1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL+1))
@@ -281,7 +281,7 @@ print("1" if ok else "0")
         pass "bcs-cli list-groups returned a valid group-list shape"
         TESTS_PASSED=$((TESTS_PASSED+1))
     else
-        fail "bcs-cli list-groups unexpected output: $(echo "$BCS_CLI_STDOUT" | head -c 120)"
+        fail "bcs-cli list-groups unexpected output: $(printf '%s\n' "$BCS_CLI_STDOUT" | head -c 120)"
         TESTS_FAILED=$((TESTS_FAILED+1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL+1))
