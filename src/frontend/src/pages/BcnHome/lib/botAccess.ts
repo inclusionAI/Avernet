@@ -71,14 +71,6 @@ const engineDefinitions: Record<
   },
 };
 
-export function getVisibleBotAccessEngines(
-  resources: BotAccessResources,
-): BotAccessEngine[] {
-  return (Object.keys(engineDefinitions) as BotAccessEngineId[])
-    .filter((engine) => getBotAccessMethods(resources, engine).length > 0)
-    .map((id) => ({ id, label: engineDefinitions[id].label }));
-}
-
 export function getBotAccessMethods(
   resources: BotAccessResources,
   engine: BotAccessEngineId,
@@ -89,6 +81,14 @@ export function getBotAccessMethods(
     const template = resources[definition.templateKeys[index]];
     return template ? [{ ...method, template }] : [];
   });
+}
+
+export function getVisibleBotAccessEngines(
+  resources: BotAccessResources,
+): BotAccessEngine[] {
+  return (Object.keys(engineDefinitions) as BotAccessEngineId[])
+    .filter((engine) => getBotAccessMethods(resources, engine).length > 0)
+    .map((id) => ({ id, label: engineDefinitions[id].label }));
 }
 
 export function replaceBotAccessToken(template: string, token: string): string {
