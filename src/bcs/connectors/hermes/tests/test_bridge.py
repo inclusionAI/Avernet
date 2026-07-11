@@ -18,6 +18,9 @@ from hermes_bcn import (  # noqa: E402
     BcsClient,
     HermesBcnBridge,
     HermesClient,
+    HermesRpcError,
+    _OBSERVATION_BYTES,
+    _OBSERVATION_LIMIT,
 )
 
 
@@ -39,10 +42,294 @@ def chat_request(request_id: str, group: str, text: str) -> dict:
     }
 
 
+class RecordingBcs:
+    def __init__(self) -> None:
+        self.responses: list[dict] = []
+        self.events: list[dict] = []
+
+    async def send_response(
+        self,
+        request_id: str,
+        payload: dict | None = None,
+        *,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        self.responses.append(
+            {
+                "id": request_id,
+                "ok": error_code is None,
+                "payload": payload or {},
+                "error_code": error_code,
+                "error_message": error_message,
+            }
+        )
+
+    async def send_event(self, event: str, payload: dict) -> None:
+        self.events.append({"event": event, "payload": payload})
+
+
+class MemoryStateStore:
+    def __init__(self, value: dict | None = None, *, fail_save: bool = False) -> None:
+        self.value = value or {"groups": {}}
+        self.fail_save = fail_save
+
+    def load(self, default=None):
+        return json.loads(json.dumps(self.value))
+
+    def save(self, value) -> None:
+        if self.fail_save:
+            raise OSError("disk full")
+        self.value = json.loads(json.dumps(value))
+
+
 class BridgeTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tempdir.cleanup)
+
+    async def test_stale_created_session_recovers_on_resume_4007(self) -> None:
+        class Hermes:
+            def __init__(self) -> None:
+                self.generation = 1
+                self.create_count = 0
+                self.resume_calls: list[str] = []
+                self.prompts: list[str] = []
+
+            async def connect(self) -> None:
+                return None
+
+            async def create_session(self, *, cwd=None) -> dict:
+                self.create_count += 1
+                suffix = "stale" if self.create_count == 1 else "fresh"
+                return {
+                    "session_id": f"live-{suffix}",
+                    "stored_session_id": f"stored-{suffix}",
+                }
+
+            async def resume_session(self, stored_session_id: str) -> dict:
+                self.resume_calls.append(stored_session_id)
+                raise HermesRpcError(4007, "session not found")
+
+            async def submit_prompt(self, session_id: str, text: str):
+                self.prompts.append(text)
+                if session_id == "live-stale":
+                    self.generation += 1
+                    raise ConnectionError("dashboard restarted")
+
+                async def events():
+                    yield {
+                        "type": "message.complete",
+                        "payload": {"text": "recovered", "status": "complete"},
+                    }
+
+                return events()
+
+        bcs = RecordingBcs()
+        hermes = Hermes()
+        store = MemoryStateStore(
+            {
+                "groups": {
+                    "group-r": {
+                        "session_key": "session-group-r",
+                        "observations": [{"sender": "observer", "text": "keep me"}],
+                    }
+                }
+            }
+        )
+        bridge = HermesBcnBridge(bcs, hermes, store)
+
+        await bridge.handle_frame(chat_request("send-stale", "group-r", "first"))
+        await self._wait_bridge_tasks(bridge)
+        await bridge.handle_frame(chat_request("send-fresh", "group-r", "second"))
+        await self._wait_bridge_tasks(bridge)
+
+        self.assertEqual(["stored-stale"], hermes.resume_calls)
+        self.assertEqual(2, hermes.create_count)
+        self.assertIn("observer: keep me", hermes.prompts[-1])
+        self.assertEqual(
+            "stored-fresh", store.value["groups"]["group-r"]["stored_session_id"]
+        )
+        self.assertEqual([], store.value["groups"]["group-r"]["observations"])
+        self.assertEqual(
+            ["error", "final"], [event["payload"]["state"] for event in bcs.events]
+        )
+
+    async def test_abort_during_session_readiness_failure_emits_one_error(self) -> None:
+        connect_started = asyncio.Event()
+        release_connect = asyncio.Event()
+
+        class Hermes:
+            generation = 1
+
+            async def connect(self) -> None:
+                connect_started.set()
+                await release_connect.wait()
+                raise ConnectionError("dashboard unavailable")
+
+        bcs = RecordingBcs()
+        bridge = HermesBcnBridge(bcs, Hermes(), MemoryStateStore())
+        await bridge.handle_frame(chat_request("send-1", "group-1", "question"))
+        await asyncio.wait_for(connect_started.wait(), timeout=1)
+        run_id = bcs.responses[0]["payload"]["run_id"]
+        await bridge.handle_frame(
+            {"type": "event", "event": "chat.abort", "payload": {"run_id": run_id}}
+        )
+        release_connect.set()
+        await self._wait_bridge_tasks(bridge)
+
+        self.assertEqual(
+            ["error"], [event["payload"]["state"] for event in bcs.events]
+        )
+
+    async def test_interrupt_failure_emits_one_error_terminal(self) -> None:
+        prompt_started = asyncio.Event()
+        never = asyncio.Event()
+
+        class Hermes:
+            generation = 1
+
+            async def connect(self) -> None:
+                return None
+
+            async def create_session(self, *, cwd=None) -> dict:
+                return {"session_id": "live-1", "stored_session_id": "stored-1"}
+
+            async def submit_prompt(self, session_id: str, text: str):
+                prompt_started.set()
+
+                async def events():
+                    await never.wait()
+                    if False:
+                        yield {}
+
+                return events()
+
+            async def interrupt_session(self, session_id: str) -> dict:
+                raise HermesRpcError(5000, "interrupt failed")
+
+        bcs = RecordingBcs()
+        bridge = HermesBcnBridge(bcs, Hermes(), MemoryStateStore())
+        try:
+            await bridge.handle_frame(chat_request("send-1", "group-1", "question"))
+            await asyncio.wait_for(prompt_started.wait(), timeout=1)
+            run_id = bcs.responses[0]["payload"]["run_id"]
+            await bridge.handle_frame(
+                {"type": "event", "event": "chat.abort", "payload": {"run_id": run_id}}
+            )
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            self.assertEqual(
+                ["error"], [event["payload"]["state"] for event in bcs.events]
+            )
+        finally:
+            for task in tuple(bridge._tasks):
+                task.cancel()
+            await asyncio.gather(*tuple(bridge._tasks), return_exceptions=True)
+
+    async def test_successful_interrupt_emits_only_aborted_terminal(self) -> None:
+        prompt_started = asyncio.Event()
+        release_stream = asyncio.Event()
+
+        class Hermes:
+            generation = 1
+
+            async def connect(self) -> None:
+                return None
+
+            async def create_session(self, *, cwd=None) -> dict:
+                return {"session_id": "live-1", "stored_session_id": "stored-1"}
+
+            async def submit_prompt(self, session_id: str, text: str):
+                prompt_started.set()
+
+                async def events():
+                    await release_stream.wait()
+                    yield {
+                        "type": "message.complete",
+                        "payload": {"text": "late", "status": "complete"},
+                    }
+
+                return events()
+
+            async def interrupt_session(self, session_id: str) -> dict:
+                release_stream.set()
+                return {"status": "interrupted"}
+
+        bcs = RecordingBcs()
+        bridge = HermesBcnBridge(bcs, Hermes(), MemoryStateStore())
+        await bridge.handle_frame(chat_request("send-1", "group-1", "question"))
+        await asyncio.wait_for(prompt_started.wait(), timeout=1)
+        run_id = bcs.responses[0]["payload"]["run_id"]
+        await bridge.handle_frame(
+            {"type": "event", "event": "chat.abort", "payload": {"run_id": run_id}}
+        )
+        await self._wait_bridge_tasks(bridge)
+
+        self.assertEqual(
+            ["aborted"], [event["payload"]["state"] for event in bcs.events]
+        )
+
+    async def test_inject_persistence_failure_returns_error_without_success_ack(self) -> None:
+        bcs = RecordingBcs()
+        store = MemoryStateStore(fail_save=True)
+        bridge = HermesBcnBridge(bcs, object(), store)
+        request = {
+            "type": "req",
+            "id": "inject-1",
+            "method": "chat.inject",
+            "params": {
+                "bcs_group_id": "group-1",
+                "message": {"content": [{"type": "text", "text": "context"}]},
+            },
+        }
+
+        await bridge.handle_frame(request)
+
+        self.assertEqual(1, len(bcs.responses))
+        self.assertFalse(bcs.responses[0]["ok"])
+        self.assertEqual("persistence_failed", bcs.responses[0]["error_code"])
+        self.assertEqual([], bridge._state["groups"]["group-1"]["observations"])
+
+    async def test_observation_count_limit_evicts_only_after_boundary(self) -> None:
+        bridge = HermesBcnBridge(RecordingBcs(), object(), MemoryStateStore())
+        for index in range(_OBSERVATION_LIMIT):
+            bridge._append_observation(self._inject_params(f"message-{index}"))
+        observations = bridge._state["groups"]["group-1"]["observations"]
+        self.assertEqual(_OBSERVATION_LIMIT, len(observations))
+        self.assertEqual("message-0", observations[0]["text"])
+
+        bridge._append_observation(self._inject_params("overflow"))
+        observations = bridge._state["groups"]["group-1"]["observations"]
+        self.assertEqual(_OBSERVATION_LIMIT, len(observations))
+        self.assertEqual("message-1", observations[0]["text"])
+        self.assertEqual("overflow", observations[-1]["text"])
+
+    async def test_observation_byte_limit_evicts_only_after_boundary(self) -> None:
+        bridge = HermesBcnBridge(RecordingBcs(), object(), MemoryStateStore())
+        empty = [{"sender": "observer", "text": ""}]
+        text = "x" * (_OBSERVATION_BYTES - bridge._observation_size(empty))
+        bridge._append_observation(self._inject_params(text))
+        observations = bridge._state["groups"]["group-1"]["observations"]
+        self.assertEqual(_OBSERVATION_BYTES, bridge._observation_size(observations))
+        self.assertEqual(text, observations[0]["text"])
+
+        bridge._append_observation(self._inject_params("overflow"))
+        observations = bridge._state["groups"]["group-1"]["observations"]
+        self.assertEqual([{"sender": "observer", "text": "overflow"}], observations)
+
+    @staticmethod
+    def _inject_params(text: str) -> dict:
+        return {
+            "bcs_group_id": "group-1",
+            "message": {"content": [{"type": "text", "text": text}]},
+            "channel": {"user_id": "observer"},
+        }
+
+    @staticmethod
+    async def _wait_bridge_tasks(bridge: HermesBcnBridge) -> None:
+        while bridge._tasks:
+            await asyncio.gather(*tuple(bridge._tasks), return_exceptions=True)
 
     async def test_end_to_end_ack_observations_delta_final_history_and_unknown(self) -> None:
         hermes_requests: list[dict] = []

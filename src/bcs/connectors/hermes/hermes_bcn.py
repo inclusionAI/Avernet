@@ -597,6 +597,7 @@ class _ActiveRun:
     session_ready: asyncio.Future[str]
     task: asyncio.Task[None] | None = None
     aborted: bool = False
+    terminal_sent: bool = False
 
 
 class HermesBcnBridge:
@@ -647,8 +648,22 @@ class HermesBcnBridge:
             self._active[run_id] = active
             active.task = self._spawn(self._handle_send(run_id, params, active))
         elif method == "chat.inject":
-            await self.bcs.send_response(request_id, {})
-            self._append_observation(params)
+            try:
+                self._append_observation(params)
+            except Exception as exc:
+                _log(
+                    logging.WARNING,
+                    "bridge_inject_persist_failed",
+                    group=self._group_key(params),
+                    error_type=type(exc).__name__,
+                )
+                await self.bcs.send_response(
+                    request_id,
+                    error_code="persistence_failed",
+                    error_message="Observation could not be persisted",
+                )
+            else:
+                await self.bcs.send_response(request_id, {})
         elif method == "chat.history":
             self._spawn(self._handle_history(request_id, params))
         elif method == "chat.abort":
@@ -687,45 +702,50 @@ class HermesBcnBridge:
                     elif event_type == "message.complete":
                         status = str(payload.get("status") or "complete")
                         if status == "interrupted":
-                            await self._send_chat_event(run_id, group, "aborted")
+                            await self._send_terminal_chat_event(
+                                active, run_id, "aborted"
+                            )
                         elif status == "error":
-                            await self._send_chat_event(
+                            await self._send_terminal_chat_event(
+                                active,
                                 run_id,
-                                group,
                                 "error",
                                 text=str(payload.get("text") or "Hermes request failed"),
                             )
                         else:
-                            await self._send_chat_event(
+                            await self._send_terminal_chat_event(
+                                active,
                                 run_id,
-                                group,
                                 "final",
                                 text=str(payload.get("text") or cumulative),
                                 usage=payload.get("usage"),
                             )
                     elif event_type == "error":
-                        await self._send_chat_event(
+                        await self._send_terminal_chat_event(
+                            active,
                             run_id,
-                            group,
                             "error",
                             text=str(payload.get("message") or "Hermes request failed"),
                         )
+                if not active.aborted:
+                    await self._send_terminal_chat_event(
+                        active, run_id, "error", text="Hermes stream ended unexpectedly"
+                    )
         except asyncio.CancelledError:
             raise
         except BaseException as exc:
             if not active.session_ready.done():
                 active.session_ready.set_exception(exc)
                 active.session_ready.exception()
-            if not active.aborted:
-                _log(
-                    logging.WARNING,
-                    "bridge_turn_failed",
-                    group=group,
-                    error_type=type(exc).__name__,
-                )
-                await self._send_chat_event(
-                    run_id, group, "error", text="Hermes is unavailable"
-                )
+            _log(
+                logging.WARNING,
+                "bridge_turn_failed",
+                group=group,
+                error_type=type(exc).__name__,
+            )
+            await self._send_terminal_chat_event(
+                active, run_id, "error", text="Hermes is unavailable"
+            )
         finally:
             if self._active.get(run_id) is active:
                 self._active.pop(run_id, None)
@@ -739,6 +759,8 @@ class HermesBcnBridge:
         try:
             session_id = await active.session_ready
             await self.hermes.interrupt_session(session_id)
+        except asyncio.CancelledError:
+            raise
         except BaseException as exc:
             _log(
                 logging.WARNING,
@@ -746,11 +768,17 @@ class HermesBcnBridge:
                 group=active.group,
                 error_type=type(exc).__name__,
             )
+            await self._send_terminal_chat_event(
+                active, run_id, "error", text="Hermes interrupt failed"
+            )
+            if active.task is not None and not active.task.done():
+                active.task.cancel()
             return
+        await self._send_terminal_chat_event(active, run_id, "aborted")
         if active.task is not None and not active.task.done():
             active.task.cancel()
-        await self._send_chat_event(run_id, active.group, "aborted")
-        self._active.pop(run_id, None)
+        if self._active.get(run_id) is active:
+            self._active.pop(run_id, None)
 
     async def _handle_history(
         self, request_id: str, params: dict[str, Any]
@@ -808,7 +836,22 @@ class HermesBcnBridge:
         group_state = self._group_state(group, params)
         stored = group_state.get("stored_session_id")
         if isinstance(stored, str) and stored:
-            result = await self.hermes.resume_session(stored)
+            try:
+                result = await self.hermes.resume_session(stored)
+            except HermesRpcError as exc:
+                if str(exc.code) != "4007":
+                    raise
+                group_state.pop("stored_session_id", None)
+                self._live_sessions.pop(group, None)
+                self._save_state()
+                result = await self.hermes.create_session(cwd=self.workspace)
+                stored = result.get("stored_session_id") or result.get("session_key")
+                if not isinstance(stored, str) or not stored:
+                    raise HermesRpcError(
+                        "INVALID_RESULT", "Hermes did not return a stored session id"
+                    )
+                group_state["stored_session_id"] = stored
+                self._save_state()
         else:
             result = await self.hermes.create_session(cwd=self.workspace)
             stored = result.get("stored_session_id") or result.get("session_key")
@@ -831,12 +874,17 @@ class HermesBcnBridge:
         text = self._message_text(params.get("message"))
         observation = {"sender": sender, "text": text}
         observations = group_state["observations"]
+        previous = list(observations)
         observations.append(observation)
         while len(observations) > _OBSERVATION_LIMIT or self._observation_size(
             observations
         ) > _OBSERVATION_BYTES:
             observations.pop(0)
-        self._save_state()
+        try:
+            self._save_state()
+        except Exception:
+            observations[:] = previous
+            raise
 
     def _build_prompt(
         self, group: str, params: dict[str, Any]
@@ -891,6 +939,23 @@ class HermesBcnBridge:
         if state in {"final", "aborted"}:
             payload["stop_reason"] = "complete" if state == "final" else "aborted"
         await self.bcs.send_event("chat.event", payload)
+
+    async def _send_terminal_chat_event(
+        self,
+        active: _ActiveRun,
+        run_id: str,
+        state: str,
+        *,
+        text: str | None = None,
+        usage: Any = None,
+    ) -> bool:
+        if active.terminal_sent:
+            return False
+        active.terminal_sent = True
+        await self._send_chat_event(
+            run_id, active.group, state, text=text, usage=usage
+        )
+        return True
 
     def _group_state(
         self, group: str, params: dict[str, Any] | None = None
