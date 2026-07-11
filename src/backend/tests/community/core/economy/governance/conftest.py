@@ -33,6 +33,7 @@ class FakeGovernanceConfig:
     tc_card_id: str = "card_cb190863"
     tc_card_preview_url: str = "https://teamclaw.alipay.com/preview"
     tc_card_template_id: str = ""
+    iframe_callback_url: str = ""
 
 
 class FakeDB:

@@ -160,6 +160,10 @@ class GovernanceRecordService:
 
         validation_error = self._validate_worker_key(worker_key)
         if validation_error:
+            log.warning(
+                "[RecordProcess] Invalid worker_key=%s: %s",
+                worker_key, validation_error,
+            )
             return RecordProcessResult(
                 worker_key=worker_key,
                 action="invalid",
@@ -209,6 +213,13 @@ class GovernanceRecordService:
             and latest_closed.cooldown_until > now
         ):
             # Cooldown active → skip
+            log.info(
+                "[RecordProcess] Cooldown filtered: worker_key=%s, "
+                "cooldown_until=%s, ticket_id=%s",
+                worker_key,
+                latest_closed.cooldown_until.isoformat(),
+                latest_closed.ticket_id,
+            )
             if not dry_run:
                 self._audit_repo.add_audit(
                     run_id, bot_id, owner_id,
@@ -321,15 +332,23 @@ class GovernanceRecordService:
 
         if dry_run:
             log.info(
-                "[OfflineBatch] dry_run=True — run_id=%s",
-                run_id,
+                "[OfflineBatch] dry_run=True — run_id=%s, records=%d",
+                run_id, len(records),
             )
             return result
 
+        # Action distribution summary
+        action_counts: dict[str, int] = {}
+        for pr in result.upsert_results:
+            action_counts[pr.action] = action_counts.get(pr.action, 0) + 1
+
         log.info(
-            "[OfflineBatch] Completed: batch_id=%s, records=%d, errors=%d",
-            batch_id, len(records),
+            "[OfflineBatch] Completed: batch_id=%s, run_id=%s, "
+            "records=%d, errors=%d, quality_skipped=%s, actions=%s",
+            batch_id, run_id, len(records),
             result.errors,
+            result.batch_quality_skipped,
+            action_counts,
         )
         return result
 
@@ -657,6 +676,12 @@ class GovernanceRecordService:
             saving_ratio=record.get("saving_ratio"),
             action_taken=AuditAction.ENQUEUED,
             dry_run=0,
+        )
+
+        log.info(
+            "[RecordProcess] Enqueued: worker_key=%s, ticket_id=%s, "
+            "bot_id=%s, owner_id=%s, dt_version=%s",
+            worker_key, ticket_id, bot_id, owner_id_val, dt_version,
         )
 
         return RecordProcessResult(
