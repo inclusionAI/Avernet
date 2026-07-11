@@ -52,8 +52,14 @@ pub async fn handle_bot_event(
     // We accumulate BEFORE publishing to the frontend so we can synthesize the
     // segment-cumulative `message.content` the frontend SDK renders from — the
     // raw SSE delta frame only carries `delta_text` and no `message`.
-    if cmd.state == ChatEventState::Delta && cmd.event_type == "agent" {
-        normalize_thinking_delta(flow, &mut cmd).await;
+    if cmd.event_type == "agent" {
+        match cmd.event_payload.get("stream").and_then(|value| value.as_str()) {
+            Some("thinking") if cmd.state == ChatEventState::Delta => {
+                normalize_thinking_delta(flow, &mut cmd).await;
+            }
+            Some("thinking") | None => {}
+            Some(_) => flow.message_tracker.clear_thinking_buf(&cmd.run_id).await,
+        }
     }
 
     if cmd.state == ChatEventState::Delta
@@ -110,13 +116,6 @@ pub async fn handle_bot_event(
     if is_chat_segment_boundary_stream(&cmd.event_payload) {
         flush_chat_segment(flow, &cmd, None).await;
     }
-    if cmd.state == ChatEventState::Delta
-        && cmd.event_type == "agent"
-        && is_thinking_segment_boundary_stream(&cmd.event_payload)
-    {
-        flow.message_tracker.clear_thinking_buf(&cmd.run_id).await;
-    }
-
     if is_terminal_state(&cmd.state) {
         flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
     }
@@ -1098,14 +1097,6 @@ fn is_chat_segment_boundary_stream(payload: &Value) -> bool {
         payload.get("stream").and_then(|value| value.as_str()),
         Some("thinking") | Some("approval")
     )
-}
-
-fn is_thinking_segment_boundary_stream(payload: &Value) -> bool {
-    payload
-        .get("stream")
-        .and_then(|value| value.as_str())
-        .map(|stream| stream != "thinking")
-        .unwrap_or(false)
 }
 
 async fn cache_tool_start(flow: &BcsMessageFlow, cmd: &BotEventCommand, data: &Value) {

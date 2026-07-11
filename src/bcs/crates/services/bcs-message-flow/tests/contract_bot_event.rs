@@ -264,7 +264,7 @@ async fn bot_event_with_bcs_session_id_publishes_to_session_target() {
 
 
 #[tokio::test]
-async fn agent_thinking_delta_self_accumulates_and_resets_after_tool_block() {
+async fn agent_thinking_delta_self_accumulates_and_resets_after_tool_start() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let flow = BcsMessageFlow::new(
         support.group.clone(),
@@ -308,7 +308,7 @@ async fn agent_thinking_delta_self_accumulates_and_resets_after_tool_block() {
                 "name": "Bash",
             },
         }),
-        state: ChatEventState::Delta,
+        state: ChatEventState::ToolCallStart,
         bcs_session_id: None,
     })
     .await
@@ -346,6 +346,87 @@ async fn agent_thinking_delta_self_accumulates_and_resets_after_tool_block() {
         after_tool["payload"]["data"]["text"],
         "BB",
         "thinking text should be rebuilt from the current segment's delta, not upstream run-cumulative text"
+    );
+}
+
+#[tokio::test]
+async fn agent_thinking_delta_resets_after_tool_end() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "run-thinking-tool-end".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: json!({
+            "stream": "thinking",
+            "data": {
+                "stream": "thinking",
+                "delta": "before",
+                "text": "upstream-before",
+            },
+        }),
+        state: ChatEventState::Delta,
+        bcs_session_id: None,
+    })
+    .await
+    .unwrap();
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "run-thinking-tool-end".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: json!({
+            "stream": "tool",
+            "data": {
+                "phase": "result",
+                "toolCallId": "tool-1",
+                "name": "Bash",
+                "result": "ok",
+            },
+        }),
+        state: ChatEventState::ToolCallEnd,
+        bcs_session_id: None,
+    })
+    .await
+    .unwrap();
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "run-thinking-tool-end".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: json!({
+            "stream": "thinking",
+            "data": {
+                "stream": "thinking",
+                "delta": "after",
+                "text": "upstream-beforeafter",
+            },
+        }),
+        state: ChatEventState::Delta,
+        bcs_session_id: None,
+    })
+    .await
+    .unwrap();
+
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 3);
+
+    let after_tool: Value = serde_json::from_str(&events[2]).unwrap();
+    assert_eq!(after_tool["payload"]["data"]["delta"], "after");
+    assert_eq!(
+        after_tool["payload"]["data"]["text"],
+        "after",
+        "tool-call end should close the previous thinking segment"
     );
 }
 
