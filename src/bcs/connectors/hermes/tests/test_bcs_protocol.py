@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from websockets.asyncio.server import serve
 
@@ -16,6 +17,7 @@ from websockets.asyncio.server import serve
 CONNECTOR_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CONNECTOR_DIR))
 
+import hermes_bcn as connector  # noqa: E402
 from hermes_bcn import AtomicJsonStore, BcsClient, _open_websocket  # noqa: E402
 
 
@@ -142,6 +144,48 @@ class BcsProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("rotated-twice", persisted["bot_token"])
         self.assertEqual("untouched", persisted["keep"])
         self.assertNotIn("must-not-appear-in-logs", "\n".join(captured.output))
+
+    async def test_reconnect_backoff_resets_after_successful_handshake(self) -> None:
+        store = AtomicJsonStore(Path(self.tempdir.name) / "session.json")
+        store.save(
+            {
+                "bcs_url": "ws://127.0.0.1:1",
+                "bot_uuid": "bot-123",
+                "bot_token": "bot-token",
+            }
+        )
+        client = BcsClient(
+            url="ws://127.0.0.1:1",
+            bot_id="bot-123",
+            token="bot-token",
+            credential_store=store,
+            reconnect_delays=(1, 2, 4),
+        )
+        client._connection_generation = 0
+        stop = asyncio.Event()
+        attempts = 0
+        delays: list[float] = []
+
+        async def serve_once(_handler) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 2:
+                client._connection_generation += 1
+            if attempts == 4:
+                stop.set()
+                return
+            raise ConnectionError("disconnected")
+
+        async def skip_delay(awaitable, timeout):
+            delays.append(timeout)
+            awaitable.close()
+            raise asyncio.TimeoutError
+
+        client._serve_once = serve_once
+        with mock.patch.object(connector.asyncio, "wait_for", new=skip_delay):
+            await client.run(lambda _frame: None, stop_event=stop)
+
+        self.assertEqual([1, 1, 2], delays)
 
     @staticmethod
     async def _close_server(server) -> None:

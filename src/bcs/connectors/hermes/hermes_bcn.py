@@ -423,6 +423,7 @@ class BcsClient:
         credential_store: AtomicJsonStore,
         heartbeat_interval: float = 60.0,
         reconnect_delays: Iterable[float] = (1, 2, 4, 8, 16, 30),
+        connection_state_callback: Callable[[bool], None] | None = None,
     ) -> None:
         self.url = url
         self.bot_id = bot_id
@@ -430,10 +431,12 @@ class BcsClient:
         self.credential_store = credential_store
         self.heartbeat_interval = heartbeat_interval
         self.reconnect_delays = tuple(reconnect_delays) or (1.0,)
+        self.connection_state_callback = connection_state_callback
         self._websocket: Any | None = None
         self._send_lock = asyncio.Lock()
         self._next_id = 0
         self._seq = 0
+        self._connection_generation = 0
 
     async def run(
         self,
@@ -444,6 +447,7 @@ class BcsClient:
         stop = stop_event or asyncio.Event()
         attempt = 0
         while not stop.is_set():
+            connection_generation = self._connection_generation
             serve_task = asyncio.create_task(self._serve_once(handler))
             stop_task = asyncio.create_task(stop.wait())
             done, _ = await asyncio.wait(
@@ -464,6 +468,8 @@ class BcsClient:
                 )
             if stop.is_set():
                 return
+            if self._connection_generation != connection_generation:
+                attempt = 0
             delay = self.reconnect_delays[min(attempt, len(self.reconnect_delays) - 1)]
             attempt += 1
             try:
@@ -516,6 +522,7 @@ class BcsClient:
         websocket = await _open_websocket(self.url)
         self._websocket = websocket
         heartbeat: asyncio.Task[None] | None = None
+        connected = False
         try:
             connect_id = self._new_id("connect")
             await self._send(
@@ -543,6 +550,10 @@ class BcsClient:
             if not isinstance(payload, dict) or payload.get("protocol_version") != 2:
                 raise ConnectionError("BCN did not negotiate protocol version 2")
             self._persist_identity(payload)
+            self._connection_generation += 1
+            connected = True
+            if self.connection_state_callback is not None:
+                self.connection_state_callback(True)
             heartbeat = asyncio.create_task(
                 self._heartbeat_loop(), name="hermes-bcn-heartbeat"
             )
@@ -571,7 +582,11 @@ class BcsClient:
                 await asyncio.gather(heartbeat, return_exceptions=True)
             if self._websocket is websocket:
                 self._websocket = None
-            await websocket.close()
+            try:
+                await websocket.close()
+            finally:
+                if connected and self.connection_state_callback is not None:
+                    self.connection_state_callback(False)
 
     async def _heartbeat_loop(self) -> None:
         while True:
@@ -613,9 +628,12 @@ class BcsClient:
 @dataclass
 class _ActiveRun:
     group: str
+    session_key: str
     session_ready: asyncio.Future[str]
     task: asyncio.Task[None] | None = None
     aborted: bool = False
+    lock_acquired: bool = False
+    prompt_submitted: bool = False
     terminal_sent: bool = False
 
 
@@ -662,6 +680,7 @@ class HermesBcnBridge:
             await self.bcs.send_response(request_id, {"run_id": run_id})
             active = _ActiveRun(
                 group=self._group_key(params),
+                session_key=str(params.get("session_key") or ""),
                 session_ready=asyncio.get_running_loop().create_future(),
             )
             self._active[run_id] = active
@@ -699,12 +718,24 @@ class HermesBcnBridge:
         self, run_id: str, params: dict[str, Any], active: _ActiveRun
     ) -> None:
         group = active.group
+        stream: AsyncIterator[dict[str, Any]] | None = None
         try:
+            if active.aborted:
+                await self._send_terminal_chat_event(active, run_id, "aborted")
+                return
             async with self._locks[group]:
+                active.lock_acquired = True
+                if active.aborted:
+                    await self._send_terminal_chat_event(active, run_id, "aborted")
+                    return
                 session_id = await self._ensure_session(group, params)
                 if not active.session_ready.done():
                     active.session_ready.set_result(session_id)
+                if active.aborted:
+                    await self._send_terminal_chat_event(active, run_id, "aborted")
+                    return
                 prompt, observations = self._build_prompt(group, params)
+                active.prompt_submitted = True
                 stream = await self.hermes.submit_prompt(session_id, prompt)
                 self._clear_observations(group, observations)
                 cumulative = ""
@@ -766,18 +797,27 @@ class HermesBcnBridge:
                 active, run_id, "error", text="Hermes is unavailable"
             )
         finally:
+            close_stream = getattr(stream, "close", None)
+            if callable(close_stream):
+                close_stream()
             if self._active.get(run_id) is active:
                 self._active.pop(run_id, None)
 
     async def _handle_abort(self, payload: dict[str, Any]) -> None:
-        run_id = payload.get("run_id")
-        active = self._active.get(run_id) if isinstance(run_id, str) else None
-        if active is None:
+        found = self._find_active_run(payload)
+        if found is None:
             return
+        run_id, active = found
         active.aborted = True
+        if not active.lock_acquired:
+            await self._send_terminal_chat_event(active, run_id, "aborted")
+            if active.task is not None and not active.task.done():
+                active.task.cancel()
+            return
         try:
             session_id = await active.session_ready
-            await self.hermes.interrupt_session(session_id)
+            if active.prompt_submitted:
+                await self.hermes.interrupt_session(session_id)
         except asyncio.CancelledError:
             raise
         except BaseException as exc:
@@ -798,6 +838,29 @@ class HermesBcnBridge:
             active.task.cancel()
         if self._active.get(run_id) is active:
             self._active.pop(run_id, None)
+
+    def _find_active_run(
+        self, payload: dict[str, Any]
+    ) -> tuple[str, _ActiveRun] | None:
+        run_id = payload.get("run_id")
+        if isinstance(run_id, str):
+            active = self._active.get(run_id)
+            if active is not None and not active.terminal_sent:
+                return run_id, active
+
+        candidates = tuple(reversed(self._active.items()))
+        session_key = payload.get("session_key")
+        if isinstance(session_key, str) and session_key:
+            for candidate_run_id, active in candidates:
+                if active.session_key == session_key and not active.terminal_sent:
+                    return candidate_run_id, active
+
+        group = payload.get("bcs_group_id")
+        if isinstance(group, str) and group:
+            for candidate_run_id, active in candidates:
+                if active.group == group and not active.terminal_sent:
+                    return candidate_run_id, active
+        return None
 
     async def _handle_history(
         self, request_id: str, params: dict[str, Any]
@@ -821,6 +884,14 @@ class HermesBcnBridge:
                     normalized = self._normalize_history_message(item)
                     if normalized is not None:
                         messages.append(normalized)
+            before = params.get("before")
+            if isinstance(before, int):
+                messages = [
+                    message
+                    for message in messages
+                    if isinstance(message.get("timestamp"), (int, float))
+                    and message["timestamp"] < before
+                ]
             limit = params.get("limit")
             if isinstance(limit, int) and limit >= 0:
                 messages = messages[-limit:] if limit else []
@@ -988,13 +1059,14 @@ class HermesBcnBridge:
         return state
 
     def _find_group(self, params: dict[str, Any]) -> str | None:
+        session_key = params.get("session_key")
+        if isinstance(session_key, str) and session_key:
+            for candidate, state in self._state["groups"].items():
+                if isinstance(state, dict) and state.get("session_key") == session_key:
+                    return candidate
         group = params.get("bcs_group_id")
         if isinstance(group, str) and group:
             return group
-        session_key = params.get("session_key")
-        for candidate, state in self._state["groups"].items():
-            if isinstance(state, dict) and state.get("session_key") == session_key:
-                return candidate
         return None
 
     @staticmethod
@@ -1053,7 +1125,9 @@ class ConnectorPaths:
     state: Path
     pid: Path
     dashboard_pid: Path
+    health: Path
     lock: Path
+    run_lock: Path
     log: Path
 
 
@@ -1081,9 +1155,52 @@ def connector_paths(hermes_home: str | os.PathLike[str]) -> ConnectorPaths:
         state=state_dir / "groups.json",
         pid=state_dir / "connector.pid",
         dashboard_pid=state_dir / "dashboard.pid",
+        health=state_dir / "health.json",
         lock=state_dir / "lifecycle.lock",
+        run_lock=state_dir / "run.lock",
         log=state_dir / "connector.log",
     )
+
+
+class _ConnectorHealth:
+    def __init__(self, path: Path, pid: int, start_marker: str) -> None:
+        self.path = path
+        self.pid = pid
+        self.start_marker = start_marker
+        self.dashboard_ready = False
+        self.bcs_ready = False
+
+    def initialize(self) -> None:
+        self._save()
+
+    def set_dashboard_ready(self, ready: bool) -> None:
+        self.dashboard_ready = ready
+        self._save()
+
+    def set_bcs_ready(self, ready: bool) -> None:
+        self.bcs_ready = ready
+        self._save()
+
+    def clear(self) -> None:
+        current = AtomicJsonStore(self.path).load({})
+        if (
+            isinstance(current, dict)
+            and current.get("pid") == self.pid
+            and current.get("start_marker") == self.start_marker
+        ):
+            self.path.unlink(missing_ok=True)
+
+    def _save(self) -> None:
+        AtomicJsonStore(self.path).save(
+            {
+                "pid": self.pid,
+                "start_marker": self.start_marker,
+                "dashboard_ready": self.dashboard_ready,
+                "bcs_ready": self.bcs_ready,
+                "ready": self.dashboard_ready and self.bcs_ready,
+                "updated_at": time.time(),
+            }
+        )
 
 
 def _post_registration(endpoint: str, human_token: str, bot_name: str) -> dict[str, Any]:
@@ -1144,7 +1261,12 @@ def register_bot(
         "dashboard_token": secrets.token_urlsafe(32),
         "connector_version": _CONNECTOR_VERSION,
     }
-    store.save(session)
+    if _valid_credentials(existing) and replace:
+        with _lifecycle_lock(paths):
+            _stop_connector_locked(paths, timeout=15.0, require_running_stop=True)
+            store.save(session)
+    else:
+        store.save(session)
     return session
 
 
@@ -1259,7 +1381,24 @@ def _lifecycle_lock(paths: ConnectorPaths) -> Iterable[None]:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def _connector_process_matches(record: dict[str, Any]) -> bool:
+@contextmanager
+def _run_ownership_lock(paths: ConnectorPaths) -> Iterable[None]:
+    paths.run_lock.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with paths.run_lock.open("a", encoding="utf-8") as handle:
+        paths.run_lock.chmod(0o600)
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError("connector run already owns this Hermes profile") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _connector_process_matches(
+    record: dict[str, Any], *, expected_home: Path | None = None
+) -> bool:
     pid = record.get("pid")
     home = record.get("hermes_home")
     script = record.get("script")
@@ -1269,9 +1408,14 @@ def _connector_process_matches(record: dict[str, Any]) -> bool:
         or pid <= 0
         or not isinstance(home, str)
         or not isinstance(script, str)
-        or script != str(Path(__file__).resolve())
+        or not Path(script).expanduser().is_absolute()
         or not isinstance(start_marker, str)
         or not start_marker
+    ):
+        return False
+    if (
+        expected_home is not None
+        and Path(home).expanduser().resolve() != expected_home.resolve()
     ):
         return False
     if _process_start_marker(pid) != start_marker:
@@ -1279,10 +1423,11 @@ def _connector_process_matches(record: dict[str, Any]) -> bool:
     argv = _process_argv(pid)
     if argv is None:
         return False
+    script_path = Path(script).expanduser().resolve()
     expected = ("run", "--hermes-home", home)
-    if len(argv) == 4 and Path(argv[0]).expanduser().resolve() == Path(script):
+    if len(argv) == 4 and Path(argv[0]).expanduser().resolve() == script_path:
         return argv[1:] == expected
-    if len(argv) == 5 and Path(argv[1]).expanduser().resolve() == Path(script):
+    if len(argv) == 5 and Path(argv[1]).expanduser().resolve() == script_path:
         return argv[2:] == expected
     return False
 
@@ -1355,26 +1500,120 @@ def _recover_orphan_dashboard(path: Path, *, timeout: float = 10.0) -> bool:
 
 
 def connector_status(hermes_home: str | os.PathLike[str]) -> tuple[str, int]:
-    path = connector_paths(hermes_home).pid
-    record = _read_pid_record(path)
+    paths = connector_paths(hermes_home)
+    record = _read_pid_record(paths.pid)
     if record is None:
-        return ("stale", 2) if path.exists() else ("stopped", 1)
-    if _connector_process_matches(record):
+        return ("stale", 2) if paths.pid.exists() else ("stopped", 1)
+    if _connector_process_matches(record, expected_home=paths.pid.parent.parent):
         return "running", 0
     return "stale", 2
 
 
+def _connector_health_ready(paths: ConnectorPaths, record: dict[str, Any]) -> bool:
+    health = AtomicJsonStore(paths.health).load({})
+    return (
+        isinstance(health, dict)
+        and health.get("pid") == record.get("pid")
+        and health.get("start_marker") == record.get("start_marker")
+        and health.get("dashboard_ready") is True
+        and health.get("bcs_ready") is True
+        and health.get("ready") is True
+    )
+
+
+def _wait_for_connector_ready(
+    paths: ConnectorPaths,
+    record: dict[str, Any],
+    *,
+    process: subprocess.Popen[Any] | None,
+    timeout: float,
+) -> None:
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        current = _read_pid_record(paths.pid)
+        if (
+            current is not None
+            and current.get("pid") == record.get("pid")
+            and current.get("start_marker") == record.get("start_marker")
+            and _connector_health_ready(paths, current)
+        ):
+            if not _connector_process_matches(
+                current, expected_home=paths.pid.parent.parent
+            ):
+                raise RuntimeError(f"connector identity check failed; see {paths.log}")
+            return
+        if process is not None and process.poll() is not None:
+            raise RuntimeError(f"connector exited before becoming ready; see {paths.log}")
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"connector did not become ready; see {paths.log}")
+        time.sleep(0.05)
+
+
+def _stop_connector_locked(
+    paths: ConnectorPaths,
+    *,
+    timeout: float,
+    require_running_stop: bool = False,
+    owned_process: subprocess.Popen[Any] | None = None,
+) -> bool:
+    record = _read_pid_record(paths.pid)
+    connector_stopped = False
+    expected_home = paths.pid.parent.parent
+    if record is not None and _connector_process_matches(
+        record, expected_home=expected_home
+    ):
+        if not _connector_process_matches(record, expected_home=expected_home):
+            if require_running_stop:
+                raise RuntimeError("connector identity changed before credential replacement")
+        else:
+            pid = int(record["pid"])
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                connector_stopped = True
+            else:
+                wait = getattr(owned_process, "wait", None)
+                if (
+                    owned_process is not None
+                    and owned_process.pid == pid
+                    and callable(wait)
+                ):
+                    try:
+                        wait(timeout=timeout)
+                    except subprocess.TimeoutExpired:
+                        raise TimeoutError(
+                            "connector did not stop after SIGTERM"
+                        ) from None
+                elif not _wait_for_process_exit(pid, timeout):
+                    raise TimeoutError("connector did not stop after SIGTERM")
+                connector_stopped = True
+    paths.pid.unlink(missing_ok=True)
+    paths.health.unlink(missing_ok=True)
+    dashboard_stopped = _recover_orphan_dashboard(paths.dashboard_pid)
+    return connector_stopped or dashboard_stopped
+
+
 def start_connector(
-    hermes_home: str | os.PathLike[str], *, health_wait: float = 1.0
+    hermes_home: str | os.PathLike[str], *, health_wait: float = 30.0
 ) -> int:
     home = Path(hermes_home).expanduser().resolve()
     paths = connector_paths(home)
     with _lifecycle_lock(paths):
         record = _read_pid_record(paths.pid)
-        if record is not None and _connector_process_matches(record):
+        if record is not None and _connector_process_matches(
+            record, expected_home=home
+        ):
+            try:
+                _wait_for_connector_ready(
+                    paths, record, process=None, timeout=health_wait
+                )
+            except Exception:
+                _stop_connector_locked(paths, timeout=15.0)
+                raise
             return int(record["pid"])
         if record is not None or paths.pid.exists():
             paths.pid.unlink(missing_ok=True)
+        paths.health.unlink(missing_ok=True)
         _recover_orphan_dashboard(paths.dashboard_pid)
         if not _valid_credentials(AtomicJsonStore(paths.session).load({})):
             raise RuntimeError(f"missing valid connector session: {paths.session}")
@@ -1401,27 +1640,20 @@ def start_connector(
         except Exception:
             process.terminate()
             raise
-        AtomicJsonStore(paths.pid).save(
-            {
-                "pid": process.pid,
-                "hermes_home": str(home),
-                "script": str(Path(__file__).resolve()),
-                "start_marker": start_marker,
-            }
-        )
-        deadline = time.monotonic() + max(0.0, health_wait)
-        while time.monotonic() < deadline:
-            if process.poll() is not None:
-                paths.pid.unlink(missing_ok=True)
-                raise RuntimeError(f"connector exited during startup; see {paths.log}")
-            time.sleep(0.05)
-        if process.poll() is not None:
-            paths.pid.unlink(missing_ok=True)
-            raise RuntimeError(f"connector exited during startup; see {paths.log}")
-        record = _read_pid_record(paths.pid)
-        if record is None or not _connector_process_matches(record):
-            paths.pid.unlink(missing_ok=True)
-            raise RuntimeError(f"connector identity check failed; see {paths.log}")
+        record = {
+            "pid": process.pid,
+            "hermes_home": str(home),
+            "script": str(Path(__file__).resolve()),
+            "start_marker": start_marker,
+        }
+        AtomicJsonStore(paths.pid).save(record)
+        try:
+            _wait_for_connector_ready(
+                paths, record, process=process, timeout=health_wait
+            )
+        except Exception:
+            _stop_connector_locked(paths, timeout=15.0, owned_process=process)
+            raise
         return process.pid
 
 
@@ -1430,22 +1662,7 @@ def stop_connector(
 ) -> bool:
     paths = connector_paths(hermes_home)
     with _lifecycle_lock(paths):
-        record = _read_pid_record(paths.pid)
-        connector_stopped = False
-        if record is not None and _connector_process_matches(record):
-            if _connector_process_matches(record):
-                pid = int(record["pid"])
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    connector_stopped = True
-                else:
-                    if not _wait_for_process_exit(pid, timeout):
-                        raise TimeoutError("connector did not stop after SIGTERM")
-                    connector_stopped = True
-        paths.pid.unlink(missing_ok=True)
-        dashboard_stopped = _recover_orphan_dashboard(paths.dashboard_pid)
-        return connector_stopped or dashboard_stopped
+        return _stop_connector_locked(paths, timeout=timeout)
 
 
 class _OwnedDashboard:
@@ -1532,9 +1749,14 @@ def _free_loopback_port() -> int:
 
 
 async def _supervise_dashboard(
-    dashboard: _OwnedDashboard, stop: asyncio.Event
+    dashboard: _OwnedDashboard,
+    stop: asyncio.Event,
+    *,
+    readiness_probe: Callable[[], Awaitable[None]] | None = None,
+    readiness_callback: Callable[[bool], None] | None = None,
+    reconnect_delays: Iterable[float] = (1, 2, 4, 8, 16, 30),
 ) -> None:
-    delays = (1, 2, 4, 8, 16, 30)
+    delays = tuple(reconnect_delays) or (1.0,)
     attempt = 0
     while not stop.is_set():
         process = dashboard.process or await dashboard.start()
@@ -1550,12 +1772,31 @@ async def _supervise_dashboard(
         stop_wait.cancel()
         await asyncio.gather(stop_wait, return_exceptions=True)
         _log(logging.WARNING, "owned_dashboard_exited", returncode=process.returncode)
+        if readiness_callback is not None:
+            readiness_callback(False)
         try:
-            await asyncio.wait_for(stop.wait(), timeout=delays[min(attempt, 5)])
+            await asyncio.wait_for(
+                stop.wait(), timeout=delays[min(attempt, len(delays) - 1)]
+            )
             return
         except asyncio.TimeoutError:
             attempt += 1
+        try:
             await dashboard.start()
+            if readiness_probe is not None:
+                await readiness_probe()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _log(
+                logging.WARNING,
+                "owned_dashboard_restart_failed",
+                error_type=type(exc).__name__,
+            )
+            continue
+        if readiness_callback is not None:
+            readiness_callback(True)
+        attempt = 0
 
 
 async def _wait_for_dashboard(
@@ -1592,6 +1833,8 @@ async def run(
     stop_event: asyncio.Event | None = None,
     owned_dashboard_port: int | None = None,
     owned_dashboard_token: str | None = None,
+    dashboard_state_callback: Callable[[bool], None] | None = None,
+    bcs_state_callback: Callable[[bool], None] | None = None,
 ) -> None:
     """Run the bridge against an existing or connector-owned Dashboard."""
 
@@ -1608,7 +1851,6 @@ async def run(
         hermes_token = owned_dashboard_token or secrets.token_urlsafe(32)
         hermes_url = f"http://127.0.0.1:{port}"
         owned = _OwnedDashboard(home, port, hermes_token)
-        await owned.start()
 
     assert hermes_url is not None and hermes_token is not None
     credentials = AtomicJsonStore(credential_path)
@@ -1622,6 +1864,7 @@ async def run(
         bot_id=bot_id,
         token=bot_token,
         credential_store=credentials,
+        connection_state_callback=bcs_state_callback,
     )
     hermes = HermesClient(hermes_url, hermes_token)
     bridge = HermesBcnBridge(
@@ -1629,9 +1872,23 @@ async def run(
     )
     try:
         if owned is not None:
+            await owned.start()
             await _wait_for_dashboard(hermes, owned)
+            if dashboard_state_callback is not None:
+                dashboard_state_callback(True)
+
+            async def restore_dashboard() -> None:
+                await hermes.close()
+                await _wait_for_dashboard(hermes, owned)
+
             supervisor = asyncio.create_task(
-                _supervise_dashboard(owned, stop), name="hermes-dashboard-supervisor"
+                _supervise_dashboard(
+                    owned,
+                    stop,
+                    readiness_probe=restore_dashboard,
+                    readiness_callback=dashboard_state_callback,
+                ),
+                name="hermes-dashboard-supervisor",
             )
         await bcs.run(bridge.handle_frame, stop_event=stop)
     finally:
@@ -1643,6 +1900,8 @@ async def run(
             await asyncio.gather(supervisor, return_exceptions=True)
         if owned is not None:
             await owned.stop()
+        if dashboard_state_callback is not None:
+            dashboard_state_callback(False)
 
 
 async def _run_saved_session(hermes_home: Path) -> None:
@@ -1651,6 +1910,12 @@ async def _run_saved_session(hermes_home: Path) -> None:
     if not _valid_credentials(session):
         raise RuntimeError(f"missing valid connector session: {paths.session}")
     port, dashboard_token = ensure_dashboard_settings(session, hermes_home)
+    health = _ConnectorHealth(
+        paths.health,
+        os.getpid(),
+        _wait_for_process_start_marker(os.getpid()),
+    )
+    health.initialize()
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
@@ -1670,8 +1935,11 @@ async def _run_saved_session(hermes_home: Path) -> None:
             stop_event=stop_event,
             owned_dashboard_port=port,
             owned_dashboard_token=dashboard_token,
+            dashboard_state_callback=health.set_dashboard_ready,
+            bcs_state_callback=health.set_bcs_ready,
         )
     finally:
+        health.clear()
         record = _read_pid_record(paths.pid)
         if record is not None and record.get("pid") == os.getpid():
             paths.pid.unlink(missing_ok=True)
@@ -1702,9 +1970,17 @@ def _argument_parser() -> argparse.ArgumentParser:
     register_parser.add_argument("--workspace")
     register_parser.add_argument("--replace", action="store_true")
 
-    for name in ("run", "start", "stop", "status"):
+    for name in ("run", "stop", "status"):
         command_parser = commands.add_parser(name)
         _add_home_arguments(command_parser)
+    start_parser = commands.add_parser("start")
+    _add_home_arguments(start_parser)
+    start_parser.add_argument(
+        "--health-wait",
+        type=float,
+        default=30.0,
+        help="seconds to wait for Dashboard RPC and BCN handshake readiness",
+    )
     return parser
 
 
@@ -1727,30 +2003,34 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "run":
             paths = connector_paths(home)
-            record = _read_pid_record(paths.pid)
-            if (
-                record is not None
-                and record.get("pid") != os.getpid()
-                and _connector_process_matches(record)
-            ):
-                raise RuntimeError(f"connector already running (pid {record['pid']})")
-            AtomicJsonStore(paths.pid).save(
-                {
-                    "pid": os.getpid(),
-                    "hermes_home": str(home),
-                    "script": str(Path(__file__).resolve()),
-                    "start_marker": _wait_for_process_start_marker(os.getpid()),
-                }
-            )
-            try:
-                asyncio.run(_run_saved_session(home))
-            finally:
+            with _run_ownership_lock(paths):
                 record = _read_pid_record(paths.pid)
-                if record is not None and record.get("pid") == os.getpid():
-                    paths.pid.unlink(missing_ok=True)
+                if (
+                    record is not None
+                    and record.get("pid") != os.getpid()
+                    and _connector_process_matches(record, expected_home=home)
+                ):
+                    raise RuntimeError(f"connector already running (pid {record['pid']})")
+                AtomicJsonStore(paths.pid).save(
+                    {
+                        "pid": os.getpid(),
+                        "hermes_home": str(home),
+                        "script": str(Path(__file__).resolve()),
+                        "start_marker": _wait_for_process_start_marker(os.getpid()),
+                    }
+                )
+                try:
+                    asyncio.run(_run_saved_session(home))
+                finally:
+                    record = _read_pid_record(paths.pid)
+                    if record is not None and record.get("pid") == os.getpid():
+                        paths.pid.unlink(missing_ok=True)
+                    paths.health.unlink(missing_ok=True)
             return 0
         if args.command == "start":
-            print(f"running (pid {start_connector(home)})")
+            print(
+                f"running (pid {start_connector(home, health_wait=args.health_wait)})"
+            )
             return 0
         if args.command == "stop":
             print("stopped" if stop_connector(home) else "not running")

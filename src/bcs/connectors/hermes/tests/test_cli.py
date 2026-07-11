@@ -4,6 +4,8 @@ import io
 import json
 import os
 import re
+import select
+import socket
 import subprocess
 import sys
 import tempfile
@@ -100,6 +102,76 @@ class CliTests(unittest.TestCase):
                 )
         self.assertFalse((self.hermes_home / "bcn" / "session.json").exists())
 
+    def test_replace_registration_failure_preserves_running_session(self) -> None:
+        self._write_session()
+        session_path = cli.connector_paths(self.hermes_home).session
+        original = session_path.read_bytes()
+        with (
+            mock.patch.object(
+                cli, "_post_registration", side_effect=RuntimeError("registration failed")
+            ),
+            mock.patch.object(cli.os, "kill") as kill,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "registration failed"):
+                cli.register_bot(
+                    human_token="human-secret",
+                    bot_name="Hermes Bot",
+                    bcs_endpoint="http://127.0.0.1:21000",
+                    bcs_url="ws://127.0.0.1:21000/ws/bot",
+                    hermes_home=self.hermes_home,
+                    replace=True,
+                )
+
+        kill.assert_not_called()
+        self.assertEqual(original, session_path.read_bytes())
+
+    def test_replace_stops_running_connector_before_saving_new_session(self) -> None:
+        self._write_session()
+        paths = cli.connector_paths(self.hermes_home)
+        cli.AtomicJsonStore(paths.pid).save({"pid": 1234})
+        store = cli.AtomicJsonStore(paths.session)
+        persist = store.save
+        order: list[str] = []
+
+        def stop(pid: int, signum: int) -> None:
+            self.assertEqual((1234, cli.signal.SIGTERM), (pid, signum))
+            order.append(f"stop:{store.load()['bot_uuid']}")
+            stale = store.load()
+            stale["bot_token"] = "late-old-token"
+            persist(stale)
+
+        original_save = cli.AtomicJsonStore.save
+
+        def save(target, value) -> None:
+            if target.path == paths.session:
+                order.append(f"save:{value['bot_uuid']}")
+            original_save(target, value)
+
+        with (
+            mock.patch.object(
+                cli,
+                "_post_registration",
+                return_value={"bot_uuid": "bot-new", "bot_token": "token-new"},
+            ),
+            mock.patch.object(cli, "_connector_process_matches", return_value=True),
+            mock.patch.object(cli, "_wait_for_process_exit", return_value=True),
+            mock.patch.object(cli.os, "kill", side_effect=stop) as kill,
+            mock.patch.object(cli.AtomicJsonStore, "save", new=save),
+        ):
+            session = cli.register_bot(
+                human_token="human-secret",
+                bot_name="Hermes Bot",
+                bcs_endpoint="http://127.0.0.1:21000",
+                bcs_url="ws://127.0.0.1:21000/ws/bot",
+                hermes_home=self.hermes_home,
+                replace=True,
+            )
+
+        kill.assert_called_once_with(1234, cli.signal.SIGTERM)
+        self.assertEqual(["stop:bot-123", "save:bot-new"], order)
+        self.assertEqual("bot-new", session["bot_uuid"])
+        self.assertEqual("token-new", store.load()["bot_token"])
+
     def test_register_cli_reads_human_token_from_stdin_not_argv(self) -> None:
         argv = [
             "register",
@@ -148,11 +220,19 @@ class CliTests(unittest.TestCase):
 
     def test_start_is_idempotent_for_live_recorded_connector(self) -> None:
         paths = cli.connector_paths(self.hermes_home)
+        marker = "Sat Jul 11 21:30:00 2026"
         paths.pid.parent.mkdir(parents=True)
         paths.pid.write_text(
-            json.dumps({"pid": 1234, "hermes_home": str(self.hermes_home)}),
+            json.dumps(
+                {
+                    "pid": 1234,
+                    "hermes_home": str(self.hermes_home),
+                    "start_marker": marker,
+                }
+            ),
             encoding="utf-8",
         )
+        self._publish_ready_health(self.hermes_home, 1234, marker)
         with (
             mock.patch.object(cli, "_connector_process_matches", return_value=True),
             mock.patch.object(cli.subprocess, "Popen") as popen,
@@ -168,6 +248,15 @@ class CliTests(unittest.TestCase):
             encoding="utf-8",
         )
         process = FakeProcess()
+
+        def popen(*_args, **_kwargs):
+            self._publish_ready_health(
+                self.hermes_home,
+                process.pid,
+                "Sat Jul 11 21:30:00 2026",
+            )
+            return process
+
         with (
             mock.patch.object(
                 cli, "_connector_process_matches", side_effect=(False, True)
@@ -178,7 +267,7 @@ class CliTests(unittest.TestCase):
                 return_value="Sat Jul 11 21:30:00 2026",
                 create=True,
             ),
-            mock.patch.object(cli.subprocess, "Popen", return_value=process),
+            mock.patch.object(cli.subprocess, "Popen", side_effect=popen),
             mock.patch.object(cli.time, "sleep"),
         ):
             self.assertEqual(
@@ -188,6 +277,68 @@ class CliTests(unittest.TestCase):
         record = json.loads(paths.pid.read_text(encoding="utf-8"))
         self.assertEqual(process.pid, record["pid"])
         self.assertEqual("Sat Jul 11 21:30:00 2026", record["start_marker"])
+
+    def test_start_requires_matching_ready_health_and_cleans_timeout(self) -> None:
+        self._write_session()
+        paths = cli.connector_paths(self.hermes_home)
+        process = FakeProcess()
+        marker = "Sat Jul 11 21:30:00 2026"
+        cli.AtomicJsonStore(paths.health).save(
+            {
+                "pid": process.pid,
+                "start_marker": marker,
+                "dashboard_ready": True,
+                "bcs_ready": False,
+                "ready": False,
+            }
+        )
+        with (
+            mock.patch.object(cli, "_connector_process_matches", return_value=True),
+            mock.patch.object(
+                cli, "_wait_for_process_start_marker", return_value=marker
+            ),
+            mock.patch.object(cli.subprocess, "Popen", return_value=process),
+            mock.patch.object(cli, "_wait_for_process_exit", return_value=True),
+            mock.patch.object(cli.os, "kill") as kill,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "ready"):
+                cli.start_connector(self.hermes_home, health_wait=0)
+
+        kill.assert_called_once_with(process.pid, cli.signal.SIGTERM)
+        self.assertFalse(paths.pid.exists())
+        self.assertFalse(paths.health.exists())
+
+    def test_start_accepts_matching_ready_health_record(self) -> None:
+        self._write_session()
+        paths = cli.connector_paths(self.hermes_home)
+        process = FakeProcess()
+        marker = "Sat Jul 11 21:30:00 2026"
+
+        def publish_health(_delay) -> None:
+            cli.AtomicJsonStore(paths.health).save(
+                {
+                    "pid": process.pid,
+                    "start_marker": marker,
+                    "dashboard_ready": True,
+                    "bcs_ready": True,
+                    "ready": True,
+                }
+            )
+
+        with (
+            mock.patch.object(cli, "_connector_process_matches", return_value=True),
+            mock.patch.object(
+                cli, "_wait_for_process_start_marker", return_value=marker
+            ),
+            mock.patch.object(cli.subprocess, "Popen", return_value=process),
+            mock.patch.object(cli.time, "sleep", side_effect=publish_health),
+        ):
+            self.assertEqual(
+                process.pid,
+                cli.start_connector(self.hermes_home, health_wait=0.2),
+            )
+
+        self.assertEqual(0o600, paths.health.stat().st_mode & 0o777)
 
     def test_process_identity_requires_exact_script_argv_and_start_marker(self) -> None:
         script = str(Path(cli.__file__).resolve())
@@ -244,6 +395,36 @@ class CliTests(unittest.TestCase):
             ),
         ):
             self.assertFalse(cli._connector_process_matches(record))
+
+    def test_process_identity_accepts_recorded_installed_script_for_replace(self) -> None:
+        installed_script = "/opt/avernet/hermes_bcn.py"
+        home = str(self.hermes_home.resolve())
+        marker = "Sat Jul 11 21:30:00 2026"
+        record = {
+            "pid": 1234,
+            "hermes_home": home,
+            "script": installed_script,
+            "start_marker": marker,
+        }
+        with (
+            mock.patch.object(cli, "_process_start_marker", return_value=marker),
+            mock.patch.object(
+                cli,
+                "_process_argv",
+                return_value=(
+                    sys.executable,
+                    installed_script,
+                    "run",
+                    "--hermes-home",
+                    home,
+                ),
+            ),
+        ):
+            self.assertTrue(
+                cli._connector_process_matches(
+                    record, expected_home=self.hermes_home.resolve()
+                )
+            )
 
     def test_status_distinguishes_running_stale_and_stopped(self) -> None:
         paths = cli.connector_paths(self.hermes_home)
@@ -376,11 +557,14 @@ class CliTests(unittest.TestCase):
 
         def popen(*_args, **_kwargs):
             calls.append(len(calls) + 1)
-            if len(calls) == 1:
-                second_spawn.wait(timeout=0.2)
-            else:
-                second_spawn.set()
-            return FakeProcess(pid=43000 + len(calls))
+            process = FakeProcess(pid=43000 + len(calls))
+            self._publish_ready_health(
+                self.hermes_home,
+                process.pid,
+                "Sat Jul 11 21:30:00 2026",
+            )
+            second_spawn.set()
+            return process
 
         results: list[int] = []
 
@@ -406,6 +590,73 @@ class CliTests(unittest.TestCase):
         self.assertFalse(any(thread.is_alive() for thread in threads))
         self.assertEqual(1, len(calls))
         self.assertEqual([43001, 43001], sorted(results))
+
+    def test_direct_run_uses_nonblocking_singleton_lock_without_lifecycle_deadlock(
+        self,
+    ) -> None:
+        self._write_session()
+        paths = cli.connector_paths(self.hermes_home)
+        with cli._run_ownership_lock(paths):
+            with (
+                mock.patch.object(cli.asyncio, "run") as async_run,
+                mock.patch.object(cli.sys, "stderr", io.StringIO()),
+            ):
+                self.assertEqual(
+                    1,
+                    cli.main(["run", "--hermes-home", str(self.hermes_home)]),
+                )
+            async_run.assert_not_called()
+
+        with cli._lifecycle_lock(paths):
+            with cli._run_ownership_lock(paths):
+                pass
+        self.assertEqual(0o600, paths.run_lock.stat().st_mode & 0o777)
+
+    def test_dashboard_supervisor_resets_backoff_after_ready_restart(self) -> None:
+        async def exercise() -> None:
+            class ExitedProcess:
+                returncode = 1
+
+                async def wait(self) -> int:
+                    return 1
+
+            class Dashboard:
+                def __init__(self) -> None:
+                    self.process = ExitedProcess()
+
+                async def start(self):
+                    self.process = ExitedProcess()
+                    return self.process
+
+            stop = cli.asyncio.Event()
+            delays: list[float] = []
+            probes = 0
+
+            async def probe() -> None:
+                nonlocal probes
+                probes += 1
+                if probes == 1:
+                    raise ConnectionError("not ready")
+
+            async def skip_delay(awaitable, timeout):
+                delays.append(timeout)
+                awaitable.close()
+                if len(delays) == 3:
+                    stop.set()
+                    return True
+                raise cli.asyncio.TimeoutError
+
+            with mock.patch.object(cli.asyncio, "wait_for", new=skip_delay):
+                await cli._supervise_dashboard(
+                    Dashboard(),
+                    stop,
+                    readiness_probe=probe,
+                    reconnect_delays=(1, 2, 4),
+                )
+
+            self.assertEqual([1, 2, 1], delays)
+
+        cli.asyncio.run(exercise())
 
     def test_owned_dashboard_persists_identity_and_cleans_record_on_stop(self) -> None:
         async def exercise() -> None:
@@ -586,6 +837,15 @@ class CliTests(unittest.TestCase):
             encoding="utf-8",
         )
         process = FakeProcess()
+
+        def popen(*_args, **_kwargs):
+            self._publish_ready_health(
+                self.hermes_home,
+                process.pid,
+                "Sat Jul 11 21:31:00 2026",
+            )
+            return process
+
         with (
             mock.patch.object(cli, "_connector_process_matches", return_value=True),
             mock.patch.object(
@@ -600,7 +860,7 @@ class CliTests(unittest.TestCase):
                 return_value="Sat Jul 11 21:31:00 2026",
                 create=True,
             ),
-            mock.patch.object(cli.subprocess, "Popen", return_value=process),
+            mock.patch.object(cli.subprocess, "Popen", side_effect=popen),
             mock.patch.object(cli.os, "kill") as kill,
         ):
             cli.start_connector(self.hermes_home, health_wait=0)
@@ -616,6 +876,15 @@ class CliTests(unittest.TestCase):
             json.dumps({"pid": 2345}), encoding="utf-8"
         )
         process = FakeProcess()
+
+        def popen(*_args, **_kwargs):
+            self._publish_ready_health(
+                self.hermes_home,
+                process.pid,
+                "Sat Jul 11 21:31:00 2026",
+            )
+            return process
+
         with (
             mock.patch.object(cli, "_connector_process_matches", return_value=True),
             mock.patch.object(
@@ -627,7 +896,7 @@ class CliTests(unittest.TestCase):
                 return_value="Sat Jul 11 21:31:00 2026",
                 create=True,
             ),
-            mock.patch.object(cli.subprocess, "Popen", return_value=process),
+            mock.patch.object(cli.subprocess, "Popen", side_effect=popen),
             mock.patch.object(cli.os, "kill") as kill,
         ):
             cli.start_connector(self.hermes_home, health_wait=0)
@@ -741,6 +1010,198 @@ class CliTests(unittest.TestCase):
             "--bcs-ws-url",
         ):
             self.assertIn(preserved, script)
+
+    def test_installer_uses_strict_startup_readiness_wait(self) -> None:
+        script = INSTALLER.read_text(encoding="utf-8")
+        self.assertRegex(script, r'"\$connector" start .*--health-wait [1-9][0-9]*')
+        self.assertLess(script.index('"$connector" start'), script.index('"$connector" status'))
+
+    def test_start_with_unreachable_bcs_fails_and_cleans_owned_processes(self) -> None:
+        home = Path(self.tempdir.name) / "unreachable-bcs-profile"
+        home.mkdir(parents=True)
+        (home / "config.yaml").write_text("model: fake\n", encoding="utf-8")
+        dashboard_port = self._free_port()
+        bcs_port = self._free_port()
+        session_path = cli.connector_paths(home).session
+        cli.AtomicJsonStore(session_path).save(
+            {
+                "bot_uuid": "bot-test",
+                "bot_token": "bot-token",
+                "bcs_url": f"ws://127.0.0.1:{bcs_port}/ws/bot",
+                "dashboard_port": dashboard_port,
+                "dashboard_token": "dashboard-token",
+            }
+        )
+        bin_dir = Path(self.tempdir.name) / "fake-bin"
+        bin_dir.mkdir()
+        self._write_fake_hermes(bin_dir)
+        connector = Path(cli.__file__).resolve()
+        env = {
+            **os.environ,
+            "PATH": f"{bin_dir}:{Path(sys.executable).parent}:{os.environ['PATH']}",
+        }
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(connector),
+                    "start",
+                    "--hermes-home",
+                    str(home),
+                    "--health-wait",
+                    "1",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=env,
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("ready", result.stderr.lower())
+            paths = cli.connector_paths(home)
+            self.assertFalse(paths.pid.exists())
+            self.assertFalse(paths.dashboard_pid.exists())
+            self.assertFalse(paths.health.exists())
+        finally:
+            subprocess.run(
+                [sys.executable, str(connector), "stop", "--hermes-home", str(home)],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=env,
+                check=False,
+            )
+
+    def test_start_waits_for_bcs_handshake_and_stops_cleanly(self) -> None:
+        home = Path(self.tempdir.name) / "ready-profile"
+        home.mkdir(parents=True)
+        (home / "config.yaml").write_text("model: fake\n", encoding="utf-8")
+        dashboard_port = self._free_port()
+        bcs_port = self._free_port()
+        paths = cli.connector_paths(home)
+        cli.AtomicJsonStore(paths.session).save(
+            {
+                "bot_uuid": "bot-test",
+                "bot_token": "bot-token",
+                "bcs_url": f"ws://127.0.0.1:{bcs_port}/ws/bot",
+                "dashboard_port": dashboard_port,
+                "dashboard_token": "dashboard-token",
+            }
+        )
+        bin_dir = Path(self.tempdir.name) / "ready-bin"
+        bin_dir.mkdir()
+        self._write_fake_hermes(bin_dir)
+        bcs_code = """
+import asyncio
+import json
+import signal
+import sys
+from websockets.asyncio.server import serve
+
+stop = asyncio.Event()
+
+async def handler(websocket):
+    frame = json.loads(await websocket.recv())
+    await websocket.send(json.dumps({
+        'type': 'res',
+        'id': frame['id'],
+        'ok': True,
+        'payload': {
+            'bot_uuid': 'bot-test',
+            'token': 'rotated-token',
+            'protocol_version': 2,
+        },
+    }))
+    await websocket.wait_closed()
+
+async def main():
+    loop = asyncio.get_running_loop()
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(signum, stop.set)
+    server = await serve(handler, '127.0.0.1', int(sys.argv[1]))
+    print('ready', flush=True)
+    await stop.wait()
+    server.close()
+    await server.wait_closed()
+
+asyncio.run(main())
+"""
+        bcs = subprocess.Popen(
+            [sys.executable, "-c", bcs_code, str(bcs_port)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        connector = Path(cli.__file__).resolve()
+        env = {
+            **os.environ,
+            "PATH": f"{bin_dir}:{Path(sys.executable).parent}:{os.environ['PATH']}",
+        }
+        try:
+            readable, _, _ = select.select([bcs.stdout], [], [], 5)
+            self.assertTrue(readable, "fake BCN server did not become ready")
+            self.assertEqual("ready", bcs.stdout.readline().strip())
+            start = subprocess.run(
+                [
+                    sys.executable,
+                    str(connector),
+                    "start",
+                    "--hermes-home",
+                    str(home),
+                    "--health-wait",
+                    "3",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=env,
+            )
+            self.assertEqual(0, start.returncode, start.stderr)
+            health = cli.AtomicJsonStore(paths.health).load({})
+            self.assertTrue(health["ready"])
+            self.assertTrue(health["dashboard_ready"])
+            self.assertTrue(health["bcs_ready"])
+            self.assertEqual(0o600, paths.health.stat().st_mode & 0o777)
+
+            status = subprocess.run(
+                [sys.executable, str(connector), "status", "--hermes-home", str(home)],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=env,
+            )
+            self.assertEqual((0, "running"), (status.returncode, status.stdout.strip()))
+
+            stopped = subprocess.run(
+                [sys.executable, str(connector), "stop", "--hermes-home", str(home)],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=env,
+            )
+            self.assertEqual((0, "stopped"), (stopped.returncode, stopped.stdout.strip()))
+            self.assertFalse(paths.pid.exists())
+            self.assertFalse(paths.dashboard_pid.exists())
+            self.assertFalse(paths.health.exists())
+        finally:
+            subprocess.run(
+                [sys.executable, str(connector), "stop", "--hermes-home", str(home)],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=env,
+                check=False,
+            )
+            bcs.terminate()
+            try:
+                bcs.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                bcs.kill()
+                bcs.wait(timeout=5)
+            if bcs.stdout is not None:
+                bcs.stdout.close()
+            if bcs.stderr is not None:
+                bcs.stderr.close()
 
     def test_installer_resume_command_preserves_selected_options(self) -> None:
         command = (
@@ -888,6 +1349,60 @@ class CliTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+
+    @staticmethod
+    def _publish_ready_health(home: Path, pid: int, start_marker: str) -> None:
+        cli.AtomicJsonStore(cli.connector_paths(home).health).save(
+            {
+                "pid": pid,
+                "start_marker": start_marker,
+                "dashboard_ready": True,
+                "bcs_ready": True,
+                "ready": True,
+            }
+        )
+
+    @staticmethod
+    def _write_fake_hermes(bin_dir: Path) -> Path:
+        hermes = bin_dir / "hermes"
+        hermes.write_text(
+            f"""#!{sys.executable}
+import asyncio
+import signal
+import sys
+from websockets.asyncio.server import serve
+
+if '--help' in sys.argv:
+    print('usage: hermes dashboard --isolated')
+    raise SystemExit(0)
+
+port = int(sys.argv[sys.argv.index('--port') + 1])
+stop = asyncio.Event()
+
+async def handler(websocket):
+    await websocket.wait_closed()
+
+async def main():
+    loop = asyncio.get_running_loop()
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(signum, stop.set)
+    server = await serve(handler, '127.0.0.1', port)
+    await stop.wait()
+    server.close()
+    await server.wait_closed()
+
+asyncio.run(main())
+""",
+            encoding="utf-8",
+        )
+        hermes.chmod(0o700)
+        return hermes
+
+    @staticmethod
+    def _free_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            return int(sock.getsockname()[1])
 
 
 if __name__ == "__main__":
