@@ -7,9 +7,16 @@ coverage. The source of truth is the artifact produced by
 `scripts/ci/singlebox_coverage.sh`, not in-process E2E coverage or manually
 declared evidence.
 
+## Profile / Env Prerequisite
+
+This work is stacked on the Profile/Env separation in PR #93. Singlebox is a
+`DeployProfile`, while persisted Device Env remains `dev`. This PR must not add
+an HTTP Schema alias or otherwise teach Device Core that `singlebox` is an Env.
+
 ## Baseline
 
-- Development base: Avernet `origin/dev` at `5dd35c9` or a later rebased commit.
+- Development base: PR #93 (`codex/profile-env-separation`) until it merges into
+  `dev`.
 - The coverage script starts the real standalone product stack and emits
   `backend-coverage.json`, runtime Router hits, runtime Plugin hits, JUnit, and
   HTML reports.

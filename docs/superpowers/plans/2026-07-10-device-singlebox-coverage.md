@@ -6,11 +6,15 @@
 
 **Architecture:** Keep runtime evidence at existing boundaries: Python line data comes from coverage-instrumented Backend processes and Router hits come from FastAPI middleware. A small manifest-driven reporter filters the generated artifacts into module metrics; acceptance tests create real state through Backend and BaaS instead of seeding the database. Device Plugin API remains `not_applicable` until a real device-owned plugin boundary is exercised.
 
+**Prerequisite:** Stack this change on PR #93. Use `DEPLOY_PROFILE=singlebox`
+with runtime/data `SERVER_ENV=dev`; do not restore a Device or HTTP Schema
+`singlebox -> dev` alias.
+
 **Tech Stack:** Bash, Python 3.12, pytest, coverage.py JSON, FastAPI runtime route-hit JSONL, YAML.
 
 ## Global Constraints
 
-- Work from Avernet `origin/dev`, not the older OCB-pinned mock-only coverage script.
+- Work from PR #93 until it merges, then rebase onto the resulting `dev`.
 - Do not add coverage imports or test-only branches to Core, Router handlers, or business services.
 - Do not introduce `exclude_paths` or remove Router APIs from the denominator.
 - All final metrics must come from `scripts/ci/singlebox_coverage.sh --mode real` artifacts.
