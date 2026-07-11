@@ -1303,8 +1303,9 @@ def _dashboard_process_matches(record: dict[str, Any]) -> bool:
     ):
         return False
     expected = tuple(expected_argv)
-    if len(expected) != 7 or expected[1:] != (
+    if len(expected) != 8 or expected[1:] != (
         "dashboard",
+        "--isolated",
         "--host",
         "127.0.0.1",
         "--port",
@@ -1430,26 +1431,21 @@ def stop_connector(
     paths = connector_paths(hermes_home)
     with _lifecycle_lock(paths):
         record = _read_pid_record(paths.pid)
-        if record is None:
-            paths.pid.unlink(missing_ok=True)
-            return False
-        if not _connector_process_matches(record):
-            paths.pid.unlink(missing_ok=True)
-            return False
-        if not _connector_process_matches(record):
-            paths.pid.unlink(missing_ok=True)
-            return False
-        pid = int(record["pid"])
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            paths.pid.unlink(missing_ok=True)
-            return True
-        if not _wait_for_process_exit(pid, timeout):
-            raise TimeoutError("connector did not stop after SIGTERM")
+        connector_stopped = False
+        if record is not None and _connector_process_matches(record):
+            if _connector_process_matches(record):
+                pid = int(record["pid"])
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    connector_stopped = True
+                else:
+                    if not _wait_for_process_exit(pid, timeout):
+                        raise TimeoutError("connector did not stop after SIGTERM")
+                    connector_stopped = True
         paths.pid.unlink(missing_ok=True)
-        _recover_orphan_dashboard(paths.dashboard_pid)
-        return True
+        dashboard_stopped = _recover_orphan_dashboard(paths.dashboard_pid)
+        return connector_stopped or dashboard_stopped
 
 
 class _OwnedDashboard:
@@ -1468,6 +1464,7 @@ class _OwnedDashboard:
         argv = (
             executable,
             "dashboard",
+            "--isolated",
             "--host",
             "127.0.0.1",
             "--port",

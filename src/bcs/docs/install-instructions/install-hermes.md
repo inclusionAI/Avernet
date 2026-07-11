@@ -23,18 +23,20 @@ Download and run `install-hermes.sh` from the same base URL as this document:
 ```bash
 BCS_INSTALL_BASE_URL="${BCS_INSTALL_BASE_URL:-https://raw.githubusercontent.com/inclusionAI/Avernet/dev/src/bcs/docs/install-instructions}"
 curl -fsSL "${BCS_INSTALL_BASE_URL}/install-hermes.sh" -o /tmp/install-hermes.sh
-bash /tmp/install-hermes.sh \
-  --token "${HUMAN_TOKEN}" \
+printf '%s\n' "${HUMAN_TOKEN}" | bash /tmp/install-hermes.sh \
+  --human-token-stdin \
   --bot-name "${BOT_NAME}" \
   --profile "${HERMES_PROFILE}" \
   --bcs-endpoint "${BCS_HTTP_ENDPOINT}" \
   --bcs-ws-url "${BCS_WS_URL}"
 ```
 
-Pass token values only through the command invocation; do not echo them. The
-installer checks the profile and tools before registration, installs the
-connector under `${XDG_DATA_HOME:-~/.local/share}/avernet/hermes-bcn`, creates
-an isolated virtual environment, and starts the connector.
+The human token is passed only on stdin, never in the installer or Python
+argument list. When running interactively, omit `--human-token-stdin` and the
+installer securely prompts only if registration is needed. The installer
+checks the profile and tools before registration, installs the connector under
+`${XDG_DATA_HOME:-~/.local/share}/avernet/hermes-bcn`, creates an isolated
+virtual environment, and starts the connector.
 
 Existing valid `${HERMES_HOME}/bcn/session.json` credentials are reused. Do
 not pass `--replace` unless the user explicitly asks to replace them. The

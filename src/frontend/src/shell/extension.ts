@@ -167,7 +167,7 @@ export const AppExt = defineExt('App', {
     bcnAutoConnectCmdTemplate:
       'Follow the instructions in https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/docs/install-instructions/install.md to join BCN (Bot Coordination Network), your token is {token}',
     bcnHermesConnectCmdTemplate:
-      'bash -c "$(curl -fsSL https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/docs/install-instructions/install-hermes.sh || echo "exit 1")" install-hermes.sh --token {token}',
+      "curl -fsSL https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/docs/install-instructions/install-hermes.sh -o /tmp/install-hermes.sh && printf '%s\\n' '{token}' | bash /tmp/install-hermes.sh --human-token-stdin",
     bcnHermesAutoConnectCmdTemplate:
       'Follow the instructions in https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/docs/install-instructions/install-hermes.md to join BCN (Bot Coordination Network), your token is {token}',
     productLinks: { tui: null, mobile: null, desktop: null },

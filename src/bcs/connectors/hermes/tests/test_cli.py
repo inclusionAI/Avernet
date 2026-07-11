@@ -299,6 +299,76 @@ class CliTests(unittest.TestCase):
         self.assertEqual(2, matches.call_count)
         kill.assert_not_called()
 
+    def test_stop_recovers_orphan_when_connector_pid_is_missing_stale_or_mismatched(
+        self,
+    ) -> None:
+        cases = {
+            "missing": None,
+            "stale": "not-json",
+            "mismatched": json.dumps({"pid": 1234}),
+        }
+        for name, connector_record in cases.items():
+            with self.subTest(name=name):
+                home = Path(self.tempdir.name) / name
+                paths = cli.connector_paths(home)
+                paths.dashboard_pid.parent.mkdir(parents=True)
+                if connector_record is not None:
+                    paths.pid.write_text(connector_record, encoding="utf-8")
+                paths.dashboard_pid.write_text(
+                    json.dumps(
+                        {
+                            "pid": 2345,
+                            "hermes_home": str(home.resolve()),
+                            "port": 24567,
+                            "start_marker": "Sat Jul 11 21:30:00 2026",
+                            "argv": ["/usr/local/bin/hermes", "dashboard"],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                with (
+                    mock.patch.object(
+                        cli, "_connector_process_matches", return_value=False
+                    ),
+                    mock.patch.object(
+                        cli,
+                        "_dashboard_process_matches",
+                        side_effect=(True, True),
+                    ),
+                    mock.patch.object(
+                        cli, "_wait_for_process_exit", return_value=True
+                    ),
+                    mock.patch.object(cli.os, "kill") as kill,
+                ):
+                    self.assertTrue(cli.stop_connector(home))
+                kill.assert_called_once_with(2345, cli.signal.SIGTERM)
+                self.assertFalse(paths.dashboard_pid.exists())
+
+    def test_stop_with_stale_records_never_signals_unrelated_dashboard(self) -> None:
+        paths = cli.connector_paths(self.hermes_home)
+        paths.pid.parent.mkdir(parents=True)
+        paths.pid.write_text(json.dumps({"pid": 1234}), encoding="utf-8")
+        paths.dashboard_pid.write_text(
+            json.dumps(
+                {
+                    "pid": 2345,
+                    "hermes_home": str(self.hermes_home.resolve()),
+                    "port": 24567,
+                    "start_marker": "Sat Jul 11 21:30:00 2026",
+                    "argv": ["/usr/local/bin/hermes", "dashboard"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        with (
+            mock.patch.object(cli, "_connector_process_matches", return_value=False),
+            mock.patch.object(cli, "_dashboard_process_matches", return_value=False),
+            mock.patch.object(cli.os, "kill") as kill,
+        ):
+            self.assertFalse(cli.stop_connector(self.hermes_home))
+        kill.assert_not_called()
+        self.assertFalse(paths.dashboard_pid.exists())
+
     def test_concurrent_start_is_locked_and_spawns_once(self) -> None:
         self._write_session()
         second_spawn = threading.Event()
@@ -348,6 +418,9 @@ class CliTests(unittest.TestCase):
                     cli.asyncio,
                     "create_subprocess_exec",
                     return_value=process,
+                ) as spawn,
+                mock.patch.object(
+                    cli.shutil, "which", return_value="/tmp/hermes/bin/hermes"
                 ),
                 mock.patch.object(
                     cli,
@@ -366,9 +439,35 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(process.pid, record["pid"])
                 self.assertEqual(24567, record["port"])
                 self.assertEqual(
+                    [
+                        "/tmp/hermes/bin/hermes",
+                        "dashboard",
+                        "--isolated",
+                        "--host",
+                        "127.0.0.1",
+                        "--port",
+                        "24567",
+                        "--no-open",
+                    ],
+                    record["argv"],
+                )
+                self.assertEqual(
                     "Sat Jul 11 21:30:00 2026", record["start_marker"]
                 )
                 self.assertEqual(0o600, record_path.stat().st_mode & 0o777)
+                spawn.assert_awaited_once_with(
+                    "/tmp/hermes/bin/hermes",
+                    "dashboard",
+                    "--isolated",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "24567",
+                    "--no-open",
+                    env=mock.ANY,
+                    stdout=cli.asyncio.subprocess.DEVNULL,
+                    stderr=cli.asyncio.subprocess.DEVNULL,
+                )
 
                 await dashboard.stop()
                 kill.assert_called_once_with(process.pid, cli.signal.SIGTERM)
@@ -381,6 +480,7 @@ class CliTests(unittest.TestCase):
         expected = (
             executable,
             "dashboard",
+            "--isolated",
             "--host",
             "127.0.0.1",
             "--port",
@@ -403,6 +503,40 @@ class CliTests(unittest.TestCase):
             ),
         ):
             self.assertTrue(cli._dashboard_process_matches(record))
+
+    def test_dashboard_identity_rejects_missing_isolation_and_extra_flags(self) -> None:
+        safe = [
+            "/tmp/hermes/bin/hermes",
+            "dashboard",
+            "--isolated",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "24567",
+            "--no-open",
+        ]
+        unsafe_argvs = (
+            [arg for arg in safe if arg != "--isolated"],
+            [*safe, "--insecure"],
+        )
+        for argv in unsafe_argvs:
+            with self.subTest(argv=argv):
+                record = {
+                    "pid": 2345,
+                    "hermes_home": str(self.hermes_home.resolve()),
+                    "port": 24567,
+                    "start_marker": "Sat Jul 11 21:30:00 2026",
+                    "argv": argv,
+                }
+                with (
+                    mock.patch.object(
+                        cli,
+                        "_process_start_marker",
+                        return_value=record["start_marker"],
+                    ),
+                    mock.patch.object(cli, "_process_argv", return_value=tuple(argv)),
+                ):
+                    self.assertFalse(cli._dashboard_process_matches(record))
 
     def test_orphan_recovery_rejects_record_from_another_profile(self) -> None:
         paths = cli.connector_paths(self.hermes_home)
@@ -520,6 +654,25 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual("https://packages.example/simple", result.stdout.strip())
 
+    def test_installer_reads_stdin_only_when_registration_is_needed(self) -> None:
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            "human_token=''; read_registration_token \"$1\" 1; "
+            "printf '%s|' \"$human_token\"; "
+            "if IFS= read -r remaining; then printf '%s' \"$remaining\"; "
+            "else printf 'EOF'; fi"
+        )
+        for needed, expected in (("0", "|human-secret"), ("1", "human-secret|EOF")):
+            with self.subTest(registration_needed=needed):
+                result = subprocess.run(
+                    ["bash", "-c", command, "stdin-test", needed],
+                    input="human-secret\n",
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(expected, result.stdout)
+
     def test_installer_preflight_creates_real_venv_and_cleans_artifacts(self) -> None:
         target = Path(self.tempdir.name) / "data" / "avernet" / "hermes-bcn"
         command = (
@@ -536,6 +689,7 @@ class CliTests(unittest.TestCase):
 
     def test_installer_static_security_order_and_resume_contract(self) -> None:
         script = INSTALLER.read_text(encoding="utf-8")
+        self.assertNotIn("--token", script)
         self.assertNotIn("--human-token ", script)
         self.assertRegex(
             script,
@@ -561,8 +715,8 @@ class CliTests(unittest.TestCase):
     def test_installer_resume_command_preserves_selected_options(self) -> None:
         command = (
             f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
-            "export AVERNET_RAW_BASE_URL=https://source.example/connectors; "
-            "export PIP_INDEX_URL=https://packages.example/simple; "
+            "AVERNET_RAW_BASE_URL=https://source.example/connectors; "
+            "PIP_INDEX_URL=https://packages.example/simple; "
             "build_resume_command https://source.example/install-hermes.sh "
             '"$AVERNET_RAW_BASE_URL" --bot-name reviewer --profile review '
             "--bcs-endpoint https://bcs.example --bcs-ws-url wss://bcs.example/ws/bot "
@@ -588,8 +742,37 @@ class CliTests(unittest.TestCase):
         ):
             self.assertIn(preserved, result.stdout)
 
+    def test_installer_resume_environment_reaches_pipeline_rhs(self) -> None:
+        probe = Path(self.tempdir.name) / "resume-probe.sh"
+        probe.write_text(
+            "printf '%s|%s|%s\\n' \"${AVERNET_RAW_BASE_URL:-}\" "
+            '"${PIP_INDEX_URL:-}" "$*"\n',
+            encoding="utf-8",
+        )
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            "AVERNET_RAW_BASE_URL=https://source.example/connectors; "
+            "PIP_INDEX_URL=https://packages.example/simple; "
+            f"build_resume_command {subprocess.list2cmdline([probe.as_uri()])} "
+            '"$AVERNET_RAW_BASE_URL" --bot-name reviewer --profile review; '
+            'eval "$RESUME_COMMAND"'
+        )
+        result = subprocess.run(
+            ["bash", "-c", command],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            "https://source.example/connectors|https://packages.example/simple|"
+            "--bot-name reviewer --profile review",
+            result.stdout.strip(),
+        )
+
     def test_install_markdown_defines_executable_base_url_default_and_override(self) -> None:
         markdown = INSTALL_DOC.read_text(encoding="utf-8")
+        self.assertNotIn("--token", markdown)
+        self.assertIn("--human-token-stdin", markdown)
         match = re.search(
             r'^(BCS_INSTALL_BASE_URL="\$\{BCS_INSTALL_BASE_URL:-[^}]+\}")$',
             markdown,

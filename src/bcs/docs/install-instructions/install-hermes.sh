@@ -49,17 +49,20 @@ build_resume_command() {
   local installer_url="$1" raw_base="$2"
   shift 2
   local command="" quoted=""
+  local -a resume_env=()
   if [[ -n "${AVERNET_RAW_BASE_URL:-}" ]]; then
-    printf -v quoted 'AVERNET_RAW_BASE_URL=%q ' "$raw_base"
-    command+="$quoted"
+    resume_env+=("AVERNET_RAW_BASE_URL=$raw_base")
   fi
   if [[ -n "${PIP_INDEX_URL:-}" ]]; then
-    printf -v quoted 'PIP_INDEX_URL=%q ' "$PIP_INDEX_URL"
-    command+="$quoted"
+    resume_env+=("PIP_INDEX_URL=$PIP_INDEX_URL")
   fi
   printf -v quoted 'curl -fsSL %q | ' "$installer_url"
   command+="$quoted"
-  printf -v quoted '%q ' bash -s -- "$@"
+  if ((${#resume_env[@]})); then
+    printf -v quoted '%q ' env "${resume_env[@]}" bash -s -- "$@"
+  else
+    printf -v quoted '%q ' bash -s -- "$@"
+  fi
   RESUME_COMMAND="${command}${quoted% }"
 }
 
@@ -78,9 +81,25 @@ raise SystemExit(not isinstance(value, dict) or not all(isinstance(value.get(key
 PY
 }
 
+read_registration_token() {
+  local registration_needed="$1" token_stdin="$2"
+  [[ "$registration_needed" == "1" ]] || return 0
+  if [[ "$token_stdin" == "1" ]]; then
+    IFS= read -r human_token \
+      || fail "could not read the human token from stdin"
+  else
+    if ! IFS= read -r -s -p "Human token: " human_token </dev/tty; then
+      fail "use --human-token-stdin in non-interactive mode"
+    fi
+    printf '\n' >/dev/tty
+  fi
+  [[ -n "$human_token" ]] || fail "human token cannot be empty"
+}
+
 usage() {
   cat <<'EOF'
-Usage: install-hermes.sh [--token TOKEN] [options]
+Usage: install-hermes.sh [--human-token-stdin] [options]
+  --human-token-stdin    read the human token from stdin when registration is needed
   --bot-name NAME
   --profile NAME | --hermes-home PATH
   --bcs-endpoint URL       default: http://127.0.0.1:21000
@@ -95,10 +114,10 @@ main() {
   local human_token="" bot_name="" profile="" explicit_home="" workspace=""
   local bcs_endpoint="http://127.0.0.1:21000"
   local bcs_ws_url="ws://127.0.0.1:21000/ws/bot"
-  local replace=0 answer="" hermes_home="" profile_arg=""
+  local replace=0 token_stdin=0 answer="" hermes_home="" profile_arg=""
   while (($#)); do
     case "$1" in
-      --token) human_token="${2:-}"; shift 2 ;;
+      --human-token-stdin) token_stdin=1; shift ;;
       --bot-name) bot_name="${2:-}"; shift 2 ;;
       --profile) profile="${2:-}"; shift 2 ;;
       --hermes-home) explicit_home="${2:-}"; shift 2 ;;
@@ -137,25 +156,28 @@ main() {
     || fail "Hermes profile is not configured: $hermes_home"
 
   if [[ -z "$bot_name" ]]; then
-    [[ -t 0 ]] || fail "--bot-name is required in non-interactive mode"
-    read -r -p "Bot name: " bot_name
+    if ! read -r -p "Bot name: " bot_name </dev/tty; then
+      fail "--bot-name is required in non-interactive mode"
+    fi
   fi
   [[ -n "$bot_name" ]] || fail "bot name cannot be empty"
 
   local session="$hermes_home/bcn/session.json"
-  local existing_valid=0
+  local existing_valid=0 registration_needed=0
   if [[ -f "$session" ]] && valid_session "$session"; then
     existing_valid=1
   fi
-  if [[ "$existing_valid" == "0" || "$replace" == "1" ]]; then
-    [[ -n "$human_token" ]] || fail "--token is required for registration"
-  fi
   if [[ -f "$session" && "$replace" == "1" ]]; then
-    [[ -t 0 ]] || fail "credential replacement requires interactive confirmation"
-    read -r -p "Replace existing BCS credentials? [y/N] " answer
+    if ! read -r -p "Replace existing BCS credentials? [y/N] " answer </dev/tty; then
+      fail "credential replacement requires interactive confirmation"
+    fi
     [[ "$answer" == "y" || "$answer" == "Y" ]] \
       || fail "credential replacement cancelled"
   fi
+  if [[ "$existing_valid" == "0" || "$replace" == "1" ]]; then
+    registration_needed=1
+  fi
+  read_registration_token "$registration_needed" "$token_stdin"
 
   local data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
   local install_dir="$data_home/avernet/hermes-bcn"

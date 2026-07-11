@@ -1,3 +1,5 @@
+import { getExt } from '@/capabilities';
+import { AppExt } from '@/shell/extension';
 import {
   DEFAULT_BOT_ACCESS_ENGINE,
   getBotAccessMethods,
@@ -8,7 +10,8 @@ import {
 const resources = {
   bcnConnectCmdTemplate: 'openclaw install --token {token}',
   bcnAutoConnectCmdTemplate: 'Tell OpenClaw to use {token}',
-  bcnHermesConnectCmdTemplate: 'hermes install --token {token}',
+  bcnHermesConnectCmdTemplate:
+    "printf '%s\\n' '{token}' | bash install-hermes.sh --human-token-stdin",
   bcnHermesAutoConnectCmdTemplate: 'Tell Hermes to use {token}',
 };
 
@@ -25,11 +28,17 @@ describe('bot access resources', () => {
     const methods = getBotAccessMethods(resources, 'hermes');
 
     expect(methods.map(({ id, template }) => ({ id, template }))).toEqual([
-      { id: 'manual', template: 'hermes install --token {token}' },
+      {
+        id: 'manual',
+        template:
+          "printf '%s\\n' '{token}' | bash install-hermes.sh --human-token-stdin",
+      },
       { id: 'automatic', template: 'Tell Hermes to use {token}' },
     ]);
-    expect(replaceBotAccessToken(methods[0].template, 'registration-token')).toBe(
-      'hermes install --token registration-token',
+    expect(
+      replaceBotAccessToken(methods[0].template, 'registration-token'),
+    ).toBe(
+      "printf '%s\\n' 'registration-token' | bash install-hermes.sh --human-token-stdin",
     );
   });
 
@@ -41,5 +50,24 @@ describe('bot access resources', () => {
         bcnHermesAutoConnectCmdTemplate: null,
       }),
     ).toEqual([{ id: 'openclaw', label: 'OpenClaw' }]);
+  });
+
+  it('keeps the Hermes token out of installer argv', () => {
+    const template = getExt(AppExt).resources.bcnHermesConnectCmdTemplate;
+    expect(template).not.toBeNull();
+    expect(template).not.toMatch(/(^|\s)--token(?:\s|$)/);
+    expect(template).toContain('--human-token-stdin');
+    expect(template?.indexOf('curl -fsSL')).toBeLessThan(
+      template?.indexOf("printf '%s\\n'") ?? -1,
+    );
+
+    const rendered = replaceBotAccessToken(
+      template ?? '',
+      'registration-token',
+    );
+    const pipeline = rendered.split('|');
+    const installerArgv = pipeline[pipeline.length - 1] ?? '';
+    expect(installerArgv).not.toContain('registration-token');
+    expect(installerArgv).not.toMatch(/(^|\s)--token(?:\s|$)/);
   });
 });
