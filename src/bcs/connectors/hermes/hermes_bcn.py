@@ -311,6 +311,9 @@ class HermesClient:
     async def session_history(self, session_id: str) -> dict[str, Any]:
         return await self.request("session.history", {"session_id": session_id})
 
+    async def session_list(self, *, timeout: float | None = None) -> dict[str, Any]:
+        return await self.request("session.list", timeout=timeout)
+
     async def interrupt_session(self, session_id: str) -> dict[str, Any]:
         return await self.request("session.interrupt", {"session_id": session_id})
 
@@ -804,15 +807,18 @@ class HermesBcnBridge:
                 self._active.pop(run_id, None)
 
     async def _handle_abort(self, payload: dict[str, Any]) -> None:
-        found = self._find_active_run(payload)
-        if found is None:
+        found = self._find_active_runs(payload)
+        if not found:
             return
-        run_id, active = found
+        await asyncio.gather(
+            *(self._abort_active_run(run_id, active) for run_id, active in found)
+        )
+
+    async def _abort_active_run(self, run_id: str, active: _ActiveRun) -> None:
         active.aborted = True
         if not active.lock_acquired:
             await self._send_terminal_chat_event(active, run_id, "aborted")
-            if active.task is not None and not active.task.done():
-                active.task.cancel()
+            await self._cancel_active_task(run_id, active)
             return
         try:
             session_id = await active.session_ready
@@ -830,37 +836,50 @@ class HermesBcnBridge:
             await self._send_terminal_chat_event(
                 active, run_id, "error", text="Hermes interrupt failed"
             )
-            if active.task is not None and not active.task.done():
-                active.task.cancel()
+            await self._cancel_active_task(run_id, active)
             return
         await self._send_terminal_chat_event(active, run_id, "aborted")
+        await self._cancel_active_task(run_id, active)
+
+    async def _cancel_active_task(self, run_id: str, active: _ActiveRun) -> None:
         if active.task is not None and not active.task.done():
             active.task.cancel()
+            await asyncio.gather(active.task, return_exceptions=True)
         if self._active.get(run_id) is active:
             self._active.pop(run_id, None)
 
-    def _find_active_run(
+    def _find_active_runs(
         self, payload: dict[str, Any]
-    ) -> tuple[str, _ActiveRun] | None:
+    ) -> list[tuple[str, _ActiveRun]]:
         run_id = payload.get("run_id")
         if isinstance(run_id, str):
             active = self._active.get(run_id)
             if active is not None and not active.terminal_sent:
-                return run_id, active
+                return [(run_id, active)]
+            return []
 
-        candidates = tuple(reversed(self._active.items()))
+        candidates = tuple(self._active.items())
         session_key = payload.get("session_key")
         if isinstance(session_key, str) and session_key:
-            for candidate_run_id, active in candidates:
-                if active.session_key == session_key and not active.terminal_sent:
-                    return candidate_run_id, active
+            matching = [
+                (candidate_run_id, active)
+                for candidate_run_id, active in candidates
+                if (
+                    active.session_key == session_key or active.group == session_key
+                )
+                and not active.terminal_sent
+            ]
+            if matching:
+                return matching
 
         group = payload.get("bcs_group_id")
         if isinstance(group, str) and group:
-            for candidate_run_id, active in candidates:
-                if active.group == group and not active.terminal_sent:
-                    return candidate_run_id, active
-        return None
+            return [
+                (candidate_run_id, active)
+                for candidate_run_id, active in candidates
+                if active.group == group and not active.terminal_sent
+            ]
+        return []
 
     async def _handle_history(
         self, request_id: str, params: dict[str, Any]
@@ -889,8 +908,8 @@ class HermesBcnBridge:
                 messages = [
                     message
                     for message in messages
-                    if isinstance(message.get("timestamp"), (int, float))
-                    and message["timestamp"] < before
+                    if not isinstance(message.get("timestamp"), (int, float))
+                    or message["timestamp"] < before
                 ]
             limit = params.get("limit")
             if isinstance(limit, int) and limit >= 0:
@@ -1061,6 +1080,8 @@ class HermesBcnBridge:
     def _find_group(self, params: dict[str, Any]) -> str | None:
         session_key = params.get("session_key")
         if isinstance(session_key, str) and session_key:
+            if session_key in self._state["groups"]:
+                return session_key
             for candidate, state in self._state["groups"].items():
                 if isinstance(state, dict) and state.get("session_key") == session_key:
                     return candidate
@@ -1122,11 +1143,13 @@ class HermesBcnBridge:
 @dataclass(frozen=True)
 class ConnectorPaths:
     session: Path
+    pending_session: Path
     state: Path
     pid: Path
     dashboard_pid: Path
     health: Path
     lock: Path
+    launch_lock: Path
     run_lock: Path
     log: Path
 
@@ -1152,11 +1175,13 @@ def connector_paths(hermes_home: str | os.PathLike[str]) -> ConnectorPaths:
     state_dir = Path(hermes_home).expanduser().resolve() / "bcn"
     return ConnectorPaths(
         session=state_dir / "session.json",
+        pending_session=state_dir / "session.pending.json",
         state=state_dir / "groups.json",
         pid=state_dir / "connector.pid",
         dashboard_pid=state_dir / "dashboard.pid",
         health=state_dir / "health.json",
         lock=state_dir / "lifecycle.lock",
+        launch_lock=state_dir / "launch.lock",
         run_lock=state_dir / "run.lock",
         log=state_dir / "connector.log",
     )
@@ -1242,32 +1267,54 @@ def register_bot(
     existing = store.load({})
     if _valid_credentials(existing) and not replace:
         return existing
-    if not human_token:
-        raise ValueError("human token cannot be empty")
+    pending = AtomicJsonStore(paths.pending_session).load({}) if replace else {}
+    if _valid_credentials(pending):
+        session = pending
+    else:
+        if not human_token:
+            raise ValueError("human token cannot be empty")
+        response = _post_registration(bcs_endpoint, human_token, bot_name)
+        for key in ("bot_uuid", "bot_token"):
+            if not isinstance(response.get(key), str) or not response[key]:
+                raise ValueError(f"registration response missing {key}")
+        session = {
+            "bcs_url": bcs_url,
+            "bot_uuid": response["bot_uuid"],
+            "bot_token": response["bot_token"],
+            "bot_name": bot_name,
+            "hermes_home": str(home),
+            "workspace": workspace or str(home),
+            "dashboard_port": _free_loopback_port(),
+            "dashboard_token": secrets.token_urlsafe(32),
+            "connector_version": _CONNECTOR_VERSION,
+        }
+        if replace:
+            AtomicJsonStore(paths.pending_session).save(session)
 
-    response = _post_registration(bcs_endpoint, human_token, bot_name)
-    for key in ("bot_uuid", "bot_token"):
-        if not isinstance(response.get(key), str) or not response[key]:
-            raise ValueError(f"registration response missing {key}")
-
-    session = {
-        "bcs_url": bcs_url,
-        "bot_uuid": response["bot_uuid"],
-        "bot_token": response["bot_token"],
-        "bot_name": bot_name,
-        "hermes_home": str(home),
-        "workspace": workspace or str(home),
-        "dashboard_port": _free_loopback_port(),
-        "dashboard_token": secrets.token_urlsafe(32),
-        "connector_version": _CONNECTOR_VERSION,
-    }
-    if _valid_credentials(existing) and replace:
-        with _lifecycle_lock(paths):
-            _stop_connector_locked(paths, timeout=15.0, require_running_stop=True)
-            store.save(session)
+    if replace:
+        try:
+            with _lifecycle_lock(paths):
+                _stop_connector_locked(
+                    paths, timeout=15.0, require_running_stop=True
+                )
+                _promote_pending_session(paths)
+        except (OSError, RuntimeError, TimeoutError) as exc:
+            raise RuntimeError(
+                f"credential replacement pending at {paths.pending_session} "
+                f"for bot {session['bot_uuid']}: {exc}"
+            ) from None
     else:
         store.save(session)
     return session
+
+
+def _promote_pending_session(paths: ConnectorPaths) -> None:
+    pending = AtomicJsonStore(paths.pending_session).load({})
+    if not _valid_credentials(pending):
+        raise RuntimeError(f"invalid pending credentials: {paths.pending_session}")
+    paths.session.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.replace(paths.pending_session, paths.session)
+    paths.session.chmod(0o600)
 
 
 def _loopback_port_available(port: int) -> bool:
@@ -1358,12 +1405,27 @@ def _wait_for_process_start_marker(pid: int, timeout: float = 1.0) -> str:
         time.sleep(0.01)
 
 
+def _process_is_zombie(pid: int) -> bool:
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "stat="],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0 and result.stdout.strip().startswith("Z")
+
+
 def _wait_for_process_exit(pid: int, timeout: float) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
             os.kill(pid, 0)
         except OSError:
+            return True
+        if _process_is_zombie(pid):
             return True
         time.sleep(0.1)
     return False
@@ -1382,17 +1444,47 @@ def _lifecycle_lock(paths: ConnectorPaths) -> Iterable[None]:
 
 
 @contextmanager
-def _run_ownership_lock(paths: ConnectorPaths) -> Iterable[None]:
+def _launch_lock(paths: ConnectorPaths) -> Iterable[None]:
+    paths.launch_lock.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with paths.launch_lock.open("a", encoding="utf-8") as handle:
+        paths.launch_lock.chmod(0o600)
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _run_ownership_lock(
+    paths: ConnectorPaths, *, acquire_launch: bool = False
+) -> Iterable[Callable[[], None]]:
+    launch_handle = None
+    if acquire_launch:
+        paths.launch_lock.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        launch_handle = paths.launch_lock.open("a", encoding="utf-8")
+        paths.launch_lock.chmod(0o600)
+        fcntl.flock(launch_handle.fileno(), fcntl.LOCK_EX)
+
+    def release_launch() -> None:
+        nonlocal launch_handle
+        if launch_handle is not None:
+            fcntl.flock(launch_handle.fileno(), fcntl.LOCK_UN)
+            launch_handle.close()
+            launch_handle = None
+
     paths.run_lock.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with paths.run_lock.open("a", encoding="utf-8") as handle:
         paths.run_lock.chmod(0o600)
         try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
+            release_launch()
             raise RuntimeError("connector run already owns this Hermes profile") from exc
         try:
-            yield
+            yield release_launch
         finally:
+            release_launch()
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
@@ -1425,9 +1517,17 @@ def _connector_process_matches(
         return False
     script_path = Path(script).expanduser().resolve()
     expected = ("run", "--hermes-home", home)
-    if len(argv) == 4 and Path(argv[0]).expanduser().resolve() == script_path:
+    if record.get("managed_start") is True:
+        expected = (*expected, "--managed-start")
+    if (
+        len(argv) == len(expected) + 1
+        and Path(argv[0]).expanduser().resolve() == script_path
+    ):
         return argv[1:] == expected
-    if len(argv) == 5 and Path(argv[1]).expanduser().resolve() == script_path:
+    if (
+        len(argv) == len(expected) + 2
+        and Path(argv[1]).expanduser().resolve() == script_path
+    ):
         return argv[2:] == expected
     return False
 
@@ -1556,12 +1656,18 @@ def _stop_connector_locked(
     require_running_stop: bool = False,
     owned_process: subprocess.Popen[Any] | None = None,
 ) -> bool:
+    record_path_exists = paths.pid.exists()
     record = _read_pid_record(paths.pid)
     connector_stopped = False
+    if require_running_stop and record_path_exists and record is None:
+        raise RuntimeError("connector PID record is invalid during credential replacement")
     expected_home = paths.pid.parent.parent
-    if record is not None and _connector_process_matches(
+    process_matches = record is not None and _connector_process_matches(
         record, expected_home=expected_home
-    ):
+    )
+    if require_running_stop and record_path_exists and not process_matches:
+        raise RuntimeError("connector identity mismatch during credential replacement")
+    if record is not None and process_matches:
         if not _connector_process_matches(record, expected_home=expected_home):
             if require_running_stop:
                 raise RuntimeError("connector identity changed before credential replacement")
@@ -1598,7 +1704,7 @@ def start_connector(
 ) -> int:
     home = Path(hermes_home).expanduser().resolve()
     paths = connector_paths(home)
-    with _lifecycle_lock(paths):
+    with _lifecycle_lock(paths), _launch_lock(paths):
         record = _read_pid_record(paths.pid)
         if record is not None and _connector_process_matches(
             record, expected_home=home
@@ -1628,6 +1734,7 @@ def start_connector(
                     "run",
                     "--hermes-home",
                     str(home),
+                    "--managed-start",
                 ],
                 stdin=subprocess.DEVNULL,
                 stdout=log_handle,
@@ -1645,6 +1752,7 @@ def start_connector(
             "hermes_home": str(home),
             "script": str(Path(__file__).resolve()),
             "start_marker": start_marker,
+            "managed_start": True,
         }
         AtomicJsonStore(paths.pid).save(record)
         try:
@@ -1804,19 +1912,27 @@ async def _wait_for_dashboard(
     dashboard: _OwnedDashboard,
     *,
     timeout: float = 30.0,
+    stop_event: asyncio.Event | None = None,
 ) -> None:
-    deadline = asyncio.get_running_loop().time() + timeout
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
     while True:
+        if stop_event is not None and stop_event.is_set():
+            raise RuntimeError("Hermes Dashboard startup was cancelled")
         process = dashboard.process
         if process is not None and process.returncode is not None:
             raise RuntimeError("Hermes Dashboard exited during startup")
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            raise TimeoutError("Hermes Dashboard did not become ready")
         try:
             await client.connect()
+            await client.session_list(timeout=min(0.5, remaining))
             return
-        except (OSError, ConnectionError):
-            if asyncio.get_running_loop().time() >= deadline:
+        except (OSError, ConnectionError, TimeoutError, HermesRpcError):
+            if loop.time() >= deadline:
                 raise TimeoutError("Hermes Dashboard did not become ready")
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(min(0.1, max(0.0, deadline - loop.time())))
 
 
 async def run(
@@ -1873,13 +1989,13 @@ async def run(
     try:
         if owned is not None:
             await owned.start()
-            await _wait_for_dashboard(hermes, owned)
+            await _wait_for_dashboard(hermes, owned, stop_event=stop)
             if dashboard_state_callback is not None:
                 dashboard_state_callback(True)
 
             async def restore_dashboard() -> None:
                 await hermes.close()
-                await _wait_for_dashboard(hermes, owned)
+                await _wait_for_dashboard(hermes, owned, stop_event=stop)
 
             supervisor = asyncio.create_task(
                 _supervise_dashboard(
@@ -1970,7 +2086,14 @@ def _argument_parser() -> argparse.ArgumentParser:
     register_parser.add_argument("--workspace")
     register_parser.add_argument("--replace", action="store_true")
 
-    for name in ("run", "stop", "status"):
+    run_parser = commands.add_parser("run")
+    _add_home_arguments(run_parser)
+    run_parser.add_argument(
+        "--managed-start",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    for name in ("stop", "status"):
         command_parser = commands.add_parser(name)
         _add_home_arguments(command_parser)
     start_parser = commands.add_parser("start")
@@ -2003,7 +2126,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "run":
             paths = connector_paths(home)
-            with _run_ownership_lock(paths):
+            with _run_ownership_lock(
+                paths, acquire_launch=not args.managed_start
+            ) as release_launch:
                 record = _read_pid_record(paths.pid)
                 if (
                     record is not None
@@ -2017,8 +2142,10 @@ def main(argv: list[str] | None = None) -> int:
                         "hermes_home": str(home),
                         "script": str(Path(__file__).resolve()),
                         "start_marker": _wait_for_process_start_marker(os.getpid()),
+                        "managed_start": bool(args.managed_start),
                     }
                 )
+                release_launch()
                 try:
                     asyncio.run(_run_saved_session(home))
                 finally:

@@ -340,6 +340,82 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertLess(bcs.order.index("response:abort-1"), bcs.order.index("event:aborted"))
 
+    async def test_abort_without_run_id_aborts_all_runs_for_session(self) -> None:
+        raw_session_id = "bcs_grp_demo-group-alpha:demo-run-marker"
+        stored_session_key = "group:bcs_grp_demo-gro"
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+
+        def real_chat_request(request_id: str, text: str) -> dict:
+            request = chat_request(request_id, raw_session_id, text)
+            request["params"]["session_key"] = stored_session_key
+            return request
+
+        class Hermes:
+            generation = 1
+
+            def __init__(self) -> None:
+                self.prompts: list[str] = []
+                self.interrupted: list[str] = []
+
+            async def connect(self) -> None:
+                return None
+
+            async def create_session(self, *, cwd=None) -> dict:
+                return {"session_id": "live-1", "stored_session_id": "stored-1"}
+
+            async def submit_prompt(self, session_id: str, text: str):
+                self.prompts.append(text)
+                first_started.set()
+
+                async def events():
+                    await release_first.wait()
+                    yield {
+                        "type": "message.complete",
+                        "payload": {"text": "late", "status": "complete"},
+                    }
+
+                return events()
+
+            async def interrupt_session(self, session_id: str) -> dict:
+                self.interrupted.append(session_id)
+                release_first.set()
+                return {"status": "interrupted"}
+
+        bcs = RecordingBcs()
+        hermes = Hermes()
+        bridge = HermesBcnBridge(bcs, hermes, MemoryStateStore())
+        await bridge.handle_frame(real_chat_request("send-1", "first"))
+        await asyncio.wait_for(first_started.wait(), timeout=1)
+        first_run_id = bcs.responses[0]["payload"]["run_id"]
+        await bridge.handle_frame(real_chat_request("send-2", "second"))
+        second_run_id = bcs.responses[1]["payload"]["run_id"]
+
+        await bridge.handle_frame(
+            {
+                "type": "req",
+                "id": "abort-session",
+                "method": "chat.abort",
+                "params": {"session_key": raw_session_id},
+            }
+        )
+        try:
+            await asyncio.wait_for(self._wait_bridge_tasks(bridge), timeout=1)
+        finally:
+            release_first.set()
+            await self._wait_bridge_tasks(bridge)
+
+        self.assertEqual(["first"], hermes.prompts)
+        self.assertEqual(["live-1"], hermes.interrupted)
+        for run_id in (first_run_id, second_run_id):
+            terminals = [
+                event["payload"]["state"]
+                for event in bcs.events
+                if event["payload"]["run_id"] == run_id
+            ]
+            self.assertEqual(["aborted"], terminals)
+        self.assertEqual({}, bridge._active)
+
     async def test_queued_run_aborted_never_submits_prompt(self) -> None:
         first_started = asyncio.Event()
         release_first = asyncio.Event()
@@ -470,6 +546,131 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             [{"role": "assistant", "content": "two", "timestamp": 2000}],
             bcs.responses[0]["payload"]["messages"],
         )
+
+    async def test_history_real_v2_shape_uses_raw_session_key_and_keeps_no_timestamp(
+        self,
+    ) -> None:
+        raw_session_id = "bcs_grp_demo-group-alpha:demo-run-marker"
+        group_id = "bcs_grp_demo-group-alpha"
+
+        class Hermes:
+            generation = 1
+
+            def __init__(self) -> None:
+                self.resumed: list[str] = []
+
+            async def connect(self) -> None:
+                return None
+
+            async def resume_session(self, stored_session_id: str) -> dict:
+                self.resumed.append(stored_session_id)
+                return {
+                    "session_id": f"live-{stored_session_id}",
+                    "stored_session_id": stored_session_id,
+                }
+
+            async def session_history(self, session_id: str) -> dict:
+                return {
+                    "messages": [
+                        {"role": "user", "text": "real Hermes message"},
+                        {"role": "assistant", "text": "old", "timestamp": 2000},
+                        {"role": "assistant", "text": "new", "timestamp": 4000},
+                    ]
+                }
+
+        store = MemoryStateStore(
+            {
+                "groups": {
+                    raw_session_id: {
+                        "session_key": "group:bcs_grp_demo-gro",
+                        "stored_session_id": "right-session",
+                        "observations": [],
+                    },
+                    group_id: {
+                        "session_key": "different-session",
+                        "stored_session_id": "wrong-group",
+                        "observations": [],
+                    },
+                }
+            }
+        )
+        bcs = RecordingBcs()
+        hermes = Hermes()
+        bridge = HermesBcnBridge(bcs, hermes, store)
+
+        await bridge.handle_frame(
+            {
+                "type": "req",
+                "id": "history-real-v2",
+                "method": "chat.history",
+                "params": {
+                    "session_key": raw_session_id,
+                    "bcs_group_id": group_id,
+                    "before": 3000,
+                    "limit": 50,
+                },
+            }
+        )
+        await self._wait_bridge_tasks(bridge)
+
+        self.assertEqual(["right-session"], hermes.resumed)
+        self.assertEqual(
+            [
+                {"role": "user", "content": "real Hermes message"},
+                {"role": "assistant", "content": "old", "timestamp": 2000},
+            ],
+            bcs.responses[0]["payload"]["messages"],
+        )
+
+    async def test_abort_during_successful_session_setup_never_submits(self) -> None:
+        connect_started = asyncio.Event()
+        release_connect = asyncio.Event()
+
+        class Hermes:
+            generation = 1
+
+            def __init__(self) -> None:
+                self.prompts: list[str] = []
+                self.interrupts: list[str] = []
+
+            async def connect(self) -> None:
+                connect_started.set()
+                await release_connect.wait()
+
+            async def create_session(self, *, cwd=None) -> dict:
+                return {"session_id": "live-1", "stored_session_id": "stored-1"}
+
+            async def submit_prompt(self, session_id: str, text: str):
+                self.prompts.append(text)
+                raise AssertionError("aborted setup must not submit")
+
+            async def interrupt_session(self, session_id: str) -> dict:
+                self.interrupts.append(session_id)
+                return {"status": "interrupted"}
+
+        bcs = RecordingBcs()
+        hermes = Hermes()
+        bridge = HermesBcnBridge(bcs, hermes, MemoryStateStore())
+        await bridge.handle_frame(chat_request("send-setup", "group-1", "question"))
+        await asyncio.wait_for(connect_started.wait(), timeout=1)
+        run_id = bcs.responses[0]["payload"]["run_id"]
+        await bridge.handle_frame(
+            {
+                "type": "event",
+                "event": "chat.abort",
+                "payload": {"run_id": run_id},
+            }
+        )
+        await asyncio.sleep(0)
+        release_connect.set()
+        await self._wait_bridge_tasks(bridge)
+
+        self.assertEqual([], hermes.prompts)
+        self.assertEqual([], hermes.interrupts)
+        self.assertEqual(
+            ["aborted"], [event["payload"]["state"] for event in bcs.events]
+        )
+        self.assertEqual({}, bridge._active)
 
     async def test_send_always_closes_real_hermes_stream_registry(self) -> None:
         async def exercise(exit_path: str) -> None:

@@ -173,9 +173,13 @@ main() {
   [[ -n "$bot_name" ]] || fail "bot name cannot be empty"
 
   local session="$hermes_home/bcn/session.json"
-  local existing_valid=0 registration_needed=0
+  local pending_session="$hermes_home/bcn/session.pending.json"
+  local existing_valid=0 pending_valid=0 registration_needed=0
   if [[ -f "$session" ]] && valid_session "$session"; then
     existing_valid=1
+  fi
+  if [[ -f "$pending_session" ]] && valid_session "$pending_session"; then
+    pending_valid=1
   fi
   if [[ -f "$session" && "$replace" == "1" ]]; then
     if ! read -r -p "Replace existing BCS credentials? [y/N] " answer </dev/tty; then
@@ -184,7 +188,9 @@ main() {
     [[ "$answer" == "y" || "$answer" == "Y" ]] \
       || fail "credential replacement cancelled"
   fi
-  if [[ "$existing_valid" == "0" || "$replace" == "1" ]]; then
+  if [[ "$replace" == "1" && "$pending_valid" == "1" ]]; then
+    registration_needed=0
+  elif [[ "$existing_valid" == "0" || "$replace" == "1" ]]; then
     registration_needed=1
   fi
   read_registration_token "$registration_needed" "$token_stdin"

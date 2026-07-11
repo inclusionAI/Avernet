@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -140,12 +141,12 @@ class CliTests(unittest.TestCase):
             stale["bot_token"] = "late-old-token"
             persist(stale)
 
-        original_save = cli.AtomicJsonStore.save
+        original_promote = cli._promote_pending_session
 
-        def save(target, value) -> None:
-            if target.path == paths.session:
-                order.append(f"save:{value['bot_uuid']}")
-            original_save(target, value)
+        def promote(target_paths) -> None:
+            pending = cli.AtomicJsonStore(target_paths.pending_session).load()
+            order.append(f"promote:{pending['bot_uuid']}")
+            original_promote(target_paths)
 
         with (
             mock.patch.object(
@@ -156,7 +157,7 @@ class CliTests(unittest.TestCase):
             mock.patch.object(cli, "_connector_process_matches", return_value=True),
             mock.patch.object(cli, "_wait_for_process_exit", return_value=True),
             mock.patch.object(cli.os, "kill", side_effect=stop) as kill,
-            mock.patch.object(cli.AtomicJsonStore, "save", new=save),
+            mock.patch.object(cli, "_promote_pending_session", side_effect=promote),
         ):
             session = cli.register_bot(
                 human_token="human-secret",
@@ -168,9 +169,98 @@ class CliTests(unittest.TestCase):
             )
 
         kill.assert_called_once_with(1234, cli.signal.SIGTERM)
-        self.assertEqual(["stop:bot-123", "save:bot-new"], order)
+        self.assertEqual(["stop:bot-123", "promote:bot-new"], order)
         self.assertEqual("bot-new", session["bot_uuid"])
         self.assertEqual("token-new", store.load()["bot_token"])
+
+    def test_replace_stop_timeout_preserves_pending_and_retry_skips_post(self) -> None:
+        self._write_session()
+        paths = cli.connector_paths(self.hermes_home)
+        original = paths.session.read_bytes()
+        cli.AtomicJsonStore(paths.pid).save({"pid": 1234})
+        response = {"bot_uuid": "bot-pending", "bot_token": "pending-secret"}
+
+        with (
+            mock.patch.object(cli, "_post_registration", return_value=response) as post,
+            mock.patch.object(cli, "_connector_process_matches", return_value=True),
+            mock.patch.object(cli, "_wait_for_process_exit", return_value=False),
+            mock.patch.object(cli.os, "kill"),
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                cli.register_bot(
+                    human_token="human-secret",
+                    bot_name="Hermes Bot",
+                    bcs_endpoint="http://127.0.0.1:21000",
+                    bcs_url="ws://127.0.0.1:21000/ws/bot",
+                    hermes_home=self.hermes_home,
+                    replace=True,
+                )
+
+        message = str(raised.exception)
+        self.assertIn(str(paths.pending_session), message)
+        self.assertIn("bot-pending", message)
+        self.assertNotIn("pending-secret", message)
+        self.assertEqual(original, paths.session.read_bytes())
+        self.assertEqual(
+            "bot-pending",
+            cli.AtomicJsonStore(paths.pending_session).load()["bot_uuid"],
+        )
+        self.assertEqual(0o600, paths.pending_session.stat().st_mode & 0o777)
+        post.assert_called_once()
+
+        with (
+            mock.patch.object(cli, "_post_registration") as retry_post,
+            mock.patch.object(cli, "_connector_process_matches", return_value=True),
+            mock.patch.object(cli, "_wait_for_process_exit", return_value=True),
+            mock.patch.object(cli.os, "kill") as retry_kill,
+        ):
+            session = cli.register_bot(
+                human_token="",
+                bot_name="Hermes Bot",
+                bcs_endpoint="http://127.0.0.1:21000",
+                bcs_url="ws://127.0.0.1:21000/ws/bot",
+                hermes_home=self.hermes_home,
+                replace=True,
+            )
+
+        retry_post.assert_not_called()
+        retry_kill.assert_called_once_with(1234, cli.signal.SIGTERM)
+        self.assertEqual("bot-pending", session["bot_uuid"])
+        self.assertEqual("bot-pending", cli.AtomicJsonStore(paths.session).load()["bot_uuid"])
+        self.assertFalse(paths.pending_session.exists())
+
+    def test_replace_identity_failure_keeps_old_session_and_pending(self) -> None:
+        self._write_session()
+        paths = cli.connector_paths(self.hermes_home)
+        original = paths.session.read_bytes()
+        cli.AtomicJsonStore(paths.pid).save({"pid": 1234})
+        with (
+            mock.patch.object(
+                cli,
+                "_post_registration",
+                return_value={"bot_uuid": "bot-new", "bot_token": "new-secret"},
+            ),
+            mock.patch.object(
+                cli, "_connector_process_matches", side_effect=(True, False)
+            ),
+            mock.patch.object(cli.os, "kill") as kill,
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                cli.register_bot(
+                    human_token="human-secret",
+                    bot_name="Hermes Bot",
+                    bcs_endpoint="http://127.0.0.1:21000",
+                    bcs_url="ws://127.0.0.1:21000/ws/bot",
+                    hermes_home=self.hermes_home,
+                    replace=True,
+                )
+
+        self.assertIn(str(paths.pending_session), str(raised.exception))
+        self.assertIn("bot-new", str(raised.exception))
+        self.assertNotIn("new-secret", str(raised.exception))
+        self.assertEqual(original, paths.session.read_bytes())
+        self.assertEqual("bot-new", cli.AtomicJsonStore(paths.pending_session).load()["bot_uuid"])
+        kill.assert_not_called()
 
     def test_register_cli_reads_human_token_from_stdin_not_argv(self) -> None:
         argv = [
@@ -425,6 +515,26 @@ class CliTests(unittest.TestCase):
                     record, expected_home=self.hermes_home.resolve()
                 )
             )
+
+    def test_wait_for_process_exit_treats_zombie_as_stopped(self) -> None:
+        process = subprocess.Popen([sys.executable, "-c", "pass"])
+        try:
+            deadline = time.monotonic() + 1
+            while True:
+                state = subprocess.run(
+                    ["ps", "-p", str(process.pid), "-o", "stat="],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                if state.startswith("Z"):
+                    break
+                if time.monotonic() >= deadline:
+                    self.fail(f"child did not become a zombie: {state!r}")
+                time.sleep(0.01)
+            self.assertTrue(cli._wait_for_process_exit(process.pid, timeout=0.2))
+        finally:
+            process.wait(timeout=1)
 
     def test_status_distinguishes_running_stale_and_stopped(self) -> None:
         paths = cli.connector_paths(self.hermes_home)
@@ -933,7 +1043,11 @@ class CliTests(unittest.TestCase):
                 bin_dir = Path(self.tempdir.name) / f"bin-{supported}"
                 bin_dir.mkdir()
                 hermes = bin_dir / "hermes"
-                help_text = "usage: hermes dashboard [--isolated]" if supported else "usage: hermes dashboard"
+                help_text = (
+                    "usage: hermes dashboard [--isolated]"
+                    if supported
+                    else "usage: hermes dashboard"
+                )
                 hermes.write_text(
                     f"#!/usr/bin/env bash\nprintf '%s\\n' {help_text!r}\n",
                     encoding="utf-8",
@@ -991,6 +1105,8 @@ class CliTests(unittest.TestCase):
             r"printf\s+'%s\\n'\s+\"\$human_token\"\s*\|[\s\\]*\n?\s*python3",
         )
         self.assertIn("--human-token-stdin", script)
+        self.assertIn("session.pending.json", script)
+        self.assertIn('"$replace" == "1" && "$pending_valid" == "1"', script)
         self.assertLess(
             script.index("preflight_install_target \"$install_dir\""),
             script.index("registration=\"$("),
@@ -1091,56 +1207,13 @@ class CliTests(unittest.TestCase):
         bin_dir = Path(self.tempdir.name) / "ready-bin"
         bin_dir.mkdir()
         self._write_fake_hermes(bin_dir)
-        bcs_code = """
-import asyncio
-import json
-import signal
-import sys
-from websockets.asyncio.server import serve
-
-stop = asyncio.Event()
-
-async def handler(websocket):
-    frame = json.loads(await websocket.recv())
-    await websocket.send(json.dumps({
-        'type': 'res',
-        'id': frame['id'],
-        'ok': True,
-        'payload': {
-            'bot_uuid': 'bot-test',
-            'token': 'rotated-token',
-            'protocol_version': 2,
-        },
-    }))
-    await websocket.wait_closed()
-
-async def main():
-    loop = asyncio.get_running_loop()
-    for signum in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(signum, stop.set)
-    server = await serve(handler, '127.0.0.1', int(sys.argv[1]))
-    print('ready', flush=True)
-    await stop.wait()
-    server.close()
-    await server.wait_closed()
-
-asyncio.run(main())
-"""
-        bcs = subprocess.Popen(
-            [sys.executable, "-c", bcs_code, str(bcs_port)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+        bcs = self._start_fake_bcs(bcs_port)
         connector = Path(cli.__file__).resolve()
         env = {
             **os.environ,
             "PATH": f"{bin_dir}:{Path(sys.executable).parent}:{os.environ['PATH']}",
         }
         try:
-            readable, _, _ = select.select([bcs.stdout], [], [], 5)
-            self.assertTrue(readable, "fake BCN server did not become ready")
-            self.assertEqual("ready", bcs.stdout.readline().strip())
             start = subprocess.run(
                 [
                     sys.executable,
@@ -1162,6 +1235,10 @@ asyncio.run(main())
             self.assertTrue(health["dashboard_ready"])
             self.assertTrue(health["bcs_ready"])
             self.assertEqual(0o600, paths.health.stat().st_mode & 0o777)
+            self.assertEqual(
+                "session.list",
+                (home / "bcn" / "session-list.rpc").read_text(encoding="utf-8"),
+            )
 
             status = subprocess.run(
                 [sys.executable, str(connector), "status", "--hermes-home", str(home)],
@@ -1192,16 +1269,171 @@ asyncio.run(main())
                 env=env,
                 check=False,
             )
-            bcs.terminate()
-            try:
-                bcs.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                bcs.kill()
-                bcs.wait(timeout=5)
-            if bcs.stdout is not None:
-                bcs.stdout.close()
-            if bcs.stderr is not None:
-                bcs.stderr.close()
+            self._stop_fake_process(bcs)
+
+    def test_start_rejects_dashboard_that_never_replies_to_rpc(self) -> None:
+        home = Path(self.tempdir.name) / "silent-dashboard-profile"
+        home.mkdir(parents=True)
+        (home / "config.yaml").write_text("model: fake\n", encoding="utf-8")
+        dashboard_port = self._free_port()
+        bcs_port = self._free_port()
+        paths = cli.connector_paths(home)
+        cli.AtomicJsonStore(paths.session).save(
+            {
+                "bot_uuid": "bot-test",
+                "bot_token": "bot-token",
+                "bcs_url": f"ws://127.0.0.1:{bcs_port}/ws/bot",
+                "dashboard_port": dashboard_port,
+                "dashboard_token": "dashboard-token",
+            }
+        )
+        bin_dir = Path(self.tempdir.name) / "silent-dashboard-bin"
+        bin_dir.mkdir()
+        self._write_fake_hermes(bin_dir, respond_to_rpc=False)
+        bcs = self._start_fake_bcs(bcs_port)
+        connector = Path(cli.__file__).resolve()
+        env = {
+            **os.environ,
+            "PATH": f"{bin_dir}:{Path(sys.executable).parent}:{os.environ['PATH']}",
+        }
+        try:
+            start = subprocess.run(
+                [
+                    sys.executable,
+                    str(connector),
+                    "start",
+                    "--hermes-home",
+                    str(home),
+                    "--health-wait",
+                    "2",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=env,
+            )
+            self.assertNotEqual(0, start.returncode)
+            self.assertIn("ready", start.stderr.lower())
+            self.assertFalse(paths.pid.exists())
+            self.assertFalse(paths.dashboard_pid.exists())
+            self.assertFalse(paths.health.exists())
+        finally:
+            subprocess.run(
+                [sys.executable, str(connector), "stop", "--hermes-home", str(home)],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=env,
+                check=False,
+            )
+            self._stop_fake_process(bcs)
+
+    def test_start_and_manual_run_startup_race_leaves_one_connector(self) -> None:
+        home = Path(self.tempdir.name) / "launch-race-profile"
+        home.mkdir(parents=True)
+        (home / "config.yaml").write_text("model: fake\n", encoding="utf-8")
+        dashboard_port = self._free_port()
+        bcs_port = self._free_port()
+        paths = cli.connector_paths(home)
+        cli.AtomicJsonStore(paths.session).save(
+            {
+                "bot_uuid": "bot-test",
+                "bot_token": "bot-token",
+                "bcs_url": f"ws://127.0.0.1:{bcs_port}/ws/bot",
+                "dashboard_port": dashboard_port,
+                "dashboard_token": "dashboard-token",
+            }
+        )
+        bin_dir = Path(self.tempdir.name) / "launch-race-bin"
+        bin_dir.mkdir()
+        hermes = self._write_fake_hermes(bin_dir)
+        bcs = self._start_fake_bcs(bcs_port)
+        connector = Path(cli.__file__).resolve()
+        env = {
+            **os.environ,
+            "PATH": f"{bin_dir}:{Path(sys.executable).parent}:{os.environ['PATH']}",
+        }
+        launch_path = home / "bcn" / "launch.lock"
+        launch_handle = launch_path.open("a", encoding="utf-8")
+        launch_path.chmod(0o600)
+        cli.fcntl.flock(launch_handle.fileno(), cli.fcntl.LOCK_EX)
+        manual = None
+        start = None
+        try:
+            manual = subprocess.Popen(
+                [sys.executable, str(connector), "run", "--hermes-home", str(home)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+            )
+            start = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(connector),
+                    "start",
+                    "--hermes-home",
+                    str(home),
+                    "--health-wait",
+                    "5",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+            )
+            time.sleep(0.2)
+            cli.fcntl.flock(launch_handle.fileno(), cli.fcntl.LOCK_UN)
+            launch_handle.close()
+            start_stdout, start_stderr = start.communicate(timeout=15)
+            self.assertEqual(0, start.returncode, start_stderr)
+            self.assertIn("running (pid", start_stdout)
+
+            connector_record = cli.AtomicJsonStore(paths.pid).load({})
+            dashboard_record = cli.AtomicJsonStore(paths.dashboard_pid).load({})
+            self.assertIsInstance(connector_record.get("pid"), int)
+            self.assertIsInstance(dashboard_record.get("pid"), int)
+            ps = subprocess.run(
+                ["ps", "-ww", "-axo", "pid=,command="],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.splitlines()
+            connector_processes = [
+                line
+                for line in ps
+                if str(connector) in line and str(home) in line and " run " in line
+            ]
+            dashboard_processes = [
+                line
+                for line in ps
+                if str(hermes) in line and f"--port {dashboard_port}" in line
+            ]
+            self.assertEqual(1, len(connector_processes), connector_processes)
+            self.assertEqual(1, len(dashboard_processes), dashboard_processes)
+            self.assertEqual(0o600, paths.launch_lock.stat().st_mode & 0o777)
+        finally:
+            if not launch_handle.closed:
+                cli.fcntl.flock(launch_handle.fileno(), cli.fcntl.LOCK_UN)
+                launch_handle.close()
+            subprocess.run(
+                [sys.executable, str(connector), "stop", "--hermes-home", str(home)],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=env,
+                check=False,
+            )
+            if manual is not None:
+                try:
+                    manual.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    manual.terminate()
+                    manual.communicate(timeout=5)
+            if start is not None and start.poll() is None:
+                start.terminate()
+                start.communicate(timeout=5)
+            self._stop_fake_process(bcs)
 
     def test_installer_resume_command_preserves_selected_options(self) -> None:
         command = (
@@ -1283,7 +1515,11 @@ asyncio.run(main())
             "https://raw.githubusercontent.com/inclusionAI/Avernet/dev/"
             "src/bcs/docs/install-instructions"
         )
-        for override, expected in ((None, expected_default), ("https://mirror.test", "https://mirror.test")):
+        cases = (
+            (None, expected_default),
+            ("https://mirror.test", "https://mirror.test"),
+        )
+        for override, expected in cases:
             env = {**os.environ}
             if override is None:
                 env.pop("BCS_INSTALL_BASE_URL", None)
@@ -1363,13 +1599,16 @@ asyncio.run(main())
         )
 
     @staticmethod
-    def _write_fake_hermes(bin_dir: Path) -> Path:
+    def _write_fake_hermes(bin_dir: Path, *, respond_to_rpc: bool = True) -> Path:
         hermes = bin_dir / "hermes"
         hermes.write_text(
             f"""#!{sys.executable}
 import asyncio
+import json
+import os
 import signal
 import sys
+from pathlib import Path
 from websockets.asyncio.server import serve
 
 if '--help' in sys.argv:
@@ -1378,8 +1617,22 @@ if '--help' in sys.argv:
 
 port = int(sys.argv[sys.argv.index('--port') + 1])
 stop = asyncio.Event()
+respond_to_rpc = {respond_to_rpc!r}
 
 async def handler(websocket):
+    try:
+        raw = await websocket.recv()
+    except Exception:
+        return
+    request = json.loads(raw)
+    if respond_to_rpc:
+        marker = Path(os.environ['HERMES_HOME']) / 'bcn' / 'session-list.rpc'
+        marker.write_text(request['method'], encoding='utf-8')
+        await websocket.send(json.dumps({{
+            'jsonrpc': '2.0',
+            'id': request['id'],
+            'result': {{'sessions': []}},
+        }}))
     await websocket.wait_closed()
 
 async def main():
@@ -1397,6 +1650,69 @@ asyncio.run(main())
         )
         hermes.chmod(0o700)
         return hermes
+
+    @staticmethod
+    def _start_fake_bcs(port: int) -> subprocess.Popen:
+        code = """
+import asyncio
+import json
+import signal
+import sys
+from websockets.asyncio.server import serve
+
+stop = asyncio.Event()
+
+async def handler(websocket):
+    frame = json.loads(await websocket.recv())
+    await websocket.send(json.dumps({
+        'type': 'res',
+        'id': frame['id'],
+        'ok': True,
+        'payload': {
+            'bot_uuid': 'bot-test',
+            'token': 'rotated-token',
+            'protocol_version': 2,
+        },
+    }))
+    await websocket.wait_closed()
+
+async def main():
+    loop = asyncio.get_running_loop()
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(signum, stop.set)
+    server = await serve(handler, '127.0.0.1', int(sys.argv[1]))
+    print('ready', flush=True)
+    await stop.wait()
+    server.close()
+    await server.wait_closed()
+
+asyncio.run(main())
+"""
+        process = subprocess.Popen(
+            [sys.executable, "-c", code, str(port)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        readable, _, _ = select.select([process.stdout], [], [], 5)
+        if not readable or process.stdout.readline().strip() != "ready":
+            CliTests._stop_fake_process(process)
+            raise RuntimeError("fake BCN server did not become ready")
+        return process
+
+    @staticmethod
+    def _stop_fake_process(process: subprocess.Popen) -> None:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
 
     @staticmethod
     def _free_port() -> int:
