@@ -5,12 +5,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import fcntl
 import inspect
 import json
 import logging
 import os
 import secrets
+import shlex
 import signal
+import shutil
 import socket
 import subprocess
 import sys
@@ -19,6 +22,7 @@ import time
 import uuid
 from collections import defaultdict
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -1048,6 +1052,8 @@ class ConnectorPaths:
     session: Path
     state: Path
     pid: Path
+    dashboard_pid: Path
+    lock: Path
     log: Path
 
 
@@ -1074,6 +1080,8 @@ def connector_paths(hermes_home: str | os.PathLike[str]) -> ConnectorPaths:
         session=state_dir / "session.json",
         state=state_dir / "groups.json",
         pid=state_dir / "connector.pid",
+        dashboard_pid=state_dir / "dashboard.pid",
+        lock=state_dir / "lifecycle.lock",
         log=state_dir / "connector.log",
     )
 
@@ -1117,6 +1125,8 @@ def register_bot(
     existing = store.load({})
     if _valid_credentials(existing) and not replace:
         return existing
+    if not human_token:
+        raise ValueError("human token cannot be empty")
 
     response = _post_registration(bcs_endpoint, human_token, bot_name)
     for key in ("bot_uuid", "bot_token"):
@@ -1175,31 +1185,172 @@ def _read_pid_record(path: Path) -> dict[str, Any] | None:
     return value
 
 
-def _connector_process_matches(record: dict[str, Any]) -> bool:
-    pid = record.get("pid")
-    home = record.get("hermes_home")
-    if not isinstance(pid, int) or pid <= 0 or not isinstance(home, str):
-        return False
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
+def _process_start_marker(pid: int) -> str | None:
     try:
         result = subprocess.run(
-            ["ps", "-p", str(pid), "-o", "command="],
+            ["ps", "-p", str(pid), "-o", "lstart="],
             check=False,
             capture_output=True,
             text=True,
         )
     except OSError:
+        return None
+    marker = result.stdout.strip()
+    return marker if result.returncode == 0 and marker else None
+
+
+def _process_argv(pid: int) -> tuple[str, ...] | None:
+    try:
+        data = (Path("/proc") / str(pid) / "cmdline").read_bytes()
+    except OSError:
+        data = b""
+    if data:
+        return tuple(
+            part.decode(errors="surrogateescape") for part in data.split(b"\0") if part
+        )
+    try:
+        result = subprocess.run(
+            ["ps", "-ww", "-p", str(pid), "-o", "command="],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    try:
+        return tuple(shlex.split(result.stdout.strip()))
+    except ValueError:
+        return None
+
+
+def _wait_for_process_start_marker(pid: int, timeout: float = 1.0) -> str:
+    deadline = time.monotonic() + timeout
+    while True:
+        marker = _process_start_marker(pid)
+        if marker is not None:
+            return marker
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"could not identify started process {pid}")
+        time.sleep(0.01)
+
+
+def _wait_for_process_exit(pid: int, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+@contextmanager
+def _lifecycle_lock(paths: ConnectorPaths) -> Iterable[None]:
+    paths.lock.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with paths.lock.open("a", encoding="utf-8") as handle:
+        paths.lock.chmod(0o600)
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _connector_process_matches(record: dict[str, Any]) -> bool:
+    pid = record.get("pid")
+    home = record.get("hermes_home")
+    script = record.get("script")
+    start_marker = record.get("start_marker")
+    if (
+        not isinstance(pid, int)
+        or pid <= 0
+        or not isinstance(home, str)
+        or not isinstance(script, str)
+        or script != str(Path(__file__).resolve())
+        or not isinstance(start_marker, str)
+        or not start_marker
+    ):
         return False
-    command = result.stdout
+    if _process_start_marker(pid) != start_marker:
+        return False
+    argv = _process_argv(pid)
+    if argv is None:
+        return False
+    expected = ("run", "--hermes-home", home)
+    if len(argv) == 4 and Path(argv[0]).expanduser().resolve() == Path(script):
+        return argv[1:] == expected
+    if len(argv) == 5 and Path(argv[1]).expanduser().resolve() == Path(script):
+        return argv[2:] == expected
+    return False
+
+
+def _dashboard_process_matches(record: dict[str, Any]) -> bool:
+    pid = record.get("pid")
+    port = record.get("port")
+    start_marker = record.get("start_marker")
+    expected_argv = record.get("argv")
+    if (
+        not isinstance(pid, int)
+        or pid <= 0
+        or not isinstance(record.get("hermes_home"), str)
+        or not isinstance(port, int)
+        or not isinstance(start_marker, str)
+        or not isinstance(expected_argv, list)
+        or not all(isinstance(arg, str) for arg in expected_argv)
+    ):
+        return False
+    expected = tuple(expected_argv)
+    if len(expected) != 7 or expected[1:] != (
+        "dashboard",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+        "--no-open",
+    ):
+        return False
+    if _process_start_marker(pid) != start_marker:
+        return False
+    actual = _process_argv(pid)
+    if actual == expected:
+        return True
     return (
-        result.returncode == 0
-        and Path(__file__).name in command
-        and " run" in command
-        and home in command
+        actual is not None
+        and len(actual) == len(expected) + 1
+        and Path(actual[1]).expanduser().resolve()
+        == Path(expected[0]).expanduser().resolve()
+        and actual[2:] == expected[1:]
     )
+
+
+def _recover_orphan_dashboard(path: Path, *, timeout: float = 10.0) -> bool:
+    record = _read_pid_record(path)
+    if record is None:
+        path.unlink(missing_ok=True)
+        return False
+    home = record.get("hermes_home")
+    if not isinstance(home, str) or Path(home).resolve() != path.parent.parent.resolve():
+        path.unlink(missing_ok=True)
+        return False
+    if not _dashboard_process_matches(record):
+        path.unlink(missing_ok=True)
+        return False
+    if not _dashboard_process_matches(record):
+        path.unlink(missing_ok=True)
+        return False
+    pid = int(record["pid"])
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        path.unlink(missing_ok=True)
+        return True
+    if not _wait_for_process_exit(pid, timeout):
+        raise TimeoutError("orphan Hermes Dashboard did not stop after SIGTERM")
+    path.unlink(missing_ok=True)
+    return True
 
 
 def connector_status(hermes_home: str | os.PathLike[str]) -> tuple[str, int]:
@@ -1217,72 +1368,88 @@ def start_connector(
 ) -> int:
     home = Path(hermes_home).expanduser().resolve()
     paths = connector_paths(home)
-    record = _read_pid_record(paths.pid)
-    if record is not None and _connector_process_matches(record):
-        return int(record["pid"])
-    if record is not None or paths.pid.exists():
-        paths.pid.unlink(missing_ok=True)
-    if not _valid_credentials(AtomicJsonStore(paths.session).load({})):
-        raise RuntimeError(f"missing valid connector session: {paths.session}")
+    with _lifecycle_lock(paths):
+        record = _read_pid_record(paths.pid)
+        if record is not None and _connector_process_matches(record):
+            return int(record["pid"])
+        if record is not None or paths.pid.exists():
+            paths.pid.unlink(missing_ok=True)
+        _recover_orphan_dashboard(paths.dashboard_pid)
+        if not _valid_credentials(AtomicJsonStore(paths.session).load({})):
+            raise RuntimeError(f"missing valid connector session: {paths.session}")
 
-    paths.log.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with paths.log.open("a", encoding="utf-8") as log_handle:
-        paths.log.chmod(0o600)
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                str(Path(__file__).resolve()),
-                "run",
-                "--hermes-home",
-                str(home),
-            ],
-            stdin=subprocess.DEVNULL,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-            close_fds=True,
+        paths.log.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with paths.log.open("a", encoding="utf-8") as log_handle:
+            paths.log.chmod(0o600)
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "run",
+                    "--hermes-home",
+                    str(home),
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                close_fds=True,
+            )
+        try:
+            start_marker = _wait_for_process_start_marker(process.pid)
+        except Exception:
+            process.terminate()
+            raise
+        AtomicJsonStore(paths.pid).save(
+            {
+                "pid": process.pid,
+                "hermes_home": str(home),
+                "script": str(Path(__file__).resolve()),
+                "start_marker": start_marker,
+            }
         )
-    AtomicJsonStore(paths.pid).save(
-        {
-            "pid": process.pid,
-            "hermes_home": str(home),
-            "script": str(Path(__file__).resolve()),
-        }
-    )
-    deadline = time.monotonic() + max(0.0, health_wait)
-    while time.monotonic() < deadline:
+        deadline = time.monotonic() + max(0.0, health_wait)
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                paths.pid.unlink(missing_ok=True)
+                raise RuntimeError(f"connector exited during startup; see {paths.log}")
+            time.sleep(0.05)
         if process.poll() is not None:
             paths.pid.unlink(missing_ok=True)
             raise RuntimeError(f"connector exited during startup; see {paths.log}")
-        time.sleep(0.05)
-    if process.poll() is not None:
-        paths.pid.unlink(missing_ok=True)
-        raise RuntimeError(f"connector exited during startup; see {paths.log}")
-    return process.pid
+        record = _read_pid_record(paths.pid)
+        if record is None or not _connector_process_matches(record):
+            paths.pid.unlink(missing_ok=True)
+            raise RuntimeError(f"connector identity check failed; see {paths.log}")
+        return process.pid
 
 
 def stop_connector(
     hermes_home: str | os.PathLike[str], *, timeout: float = 15.0
 ) -> bool:
-    path = connector_paths(hermes_home).pid
-    record = _read_pid_record(path)
-    if record is None:
-        path.unlink(missing_ok=True)
-        return False
-    if not _connector_process_matches(record):
-        path.unlink(missing_ok=True)
-        return False
-    pid = int(record["pid"])
-    os.kill(pid, signal.SIGTERM)
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    paths = connector_paths(hermes_home)
+    with _lifecycle_lock(paths):
+        record = _read_pid_record(paths.pid)
+        if record is None:
+            paths.pid.unlink(missing_ok=True)
+            return False
+        if not _connector_process_matches(record):
+            paths.pid.unlink(missing_ok=True)
+            return False
+        if not _connector_process_matches(record):
+            paths.pid.unlink(missing_ok=True)
+            return False
+        pid = int(record["pid"])
         try:
-            os.kill(pid, 0)
-        except OSError:
-            path.unlink(missing_ok=True)
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            paths.pid.unlink(missing_ok=True)
             return True
-        time.sleep(0.1)
-    raise TimeoutError("connector did not stop after SIGTERM")
+        if not _wait_for_process_exit(pid, timeout):
+            raise TimeoutError("connector did not stop after SIGTERM")
+        paths.pid.unlink(missing_ok=True)
+        _recover_orphan_dashboard(paths.dashboard_pid)
+        return True
 
 
 class _OwnedDashboard:
@@ -1291,35 +1458,74 @@ class _OwnedDashboard:
         self.port = port
         self.token = token
         self.process: asyncio.subprocess.Process | None = None
+        self.record_path = connector_paths(hermes_home).dashboard_pid
 
     async def start(self) -> asyncio.subprocess.Process:
         env = os.environ.copy()
         env["HERMES_HOME"] = str(self.hermes_home)
         env["HERMES_DASHBOARD_SESSION_TOKEN"] = self.token
-        self.process = await asyncio.create_subprocess_exec(
-            "hermes",
+        executable = shutil.which("hermes") or "hermes"
+        argv = (
+            executable,
             "dashboard",
             "--host",
             "127.0.0.1",
             "--port",
             str(self.port),
             "--no-open",
+        )
+        self.process = await asyncio.create_subprocess_exec(
+            *argv,
             env=env,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            start_marker = _wait_for_process_start_marker(self.process.pid)
+        except Exception:
+            self.process.terminate()
+            raise
+        AtomicJsonStore(self.record_path).save(
+            {
+                "pid": self.process.pid,
+                "hermes_home": str(self.hermes_home.resolve()),
+                "port": self.port,
+                "start_marker": start_marker,
+                "argv": list(argv),
+            }
         )
         return self.process
 
     async def stop(self) -> None:
         process = self.process
-        if process is None or process.returncode is not None:
+        if process is None:
             return
-        process.terminate()
+        record = _read_pid_record(self.record_path)
+        if process.returncode is not None:
+            if record is not None and record.get("pid") == process.pid:
+                self.record_path.unlink(missing_ok=True)
+            return
+        if (
+            record is None
+            or record.get("pid") != process.pid
+            or not _dashboard_process_matches(record)
+            or not _dashboard_process_matches(record)
+        ):
+            if record is not None and record.get("pid") == process.pid:
+                self.record_path.unlink(missing_ok=True)
+            return
+        os.kill(process.pid, signal.SIGTERM)
         try:
             await asyncio.wait_for(process.wait(), timeout=10)
         except asyncio.TimeoutError:
-            process.kill()
+            record = _read_pid_record(self.record_path)
+            if record is not None and _dashboard_process_matches(record):
+                os.kill(process.pid, signal.SIGKILL)
             await process.wait()
+        finally:
+            record = _read_pid_record(self.record_path)
+            if record is not None and record.get("pid") == process.pid:
+                self.record_path.unlink(missing_ok=True)
 
 
 def _free_loopback_port() -> int:
@@ -1487,7 +1693,12 @@ def _argument_parser() -> argparse.ArgumentParser:
         "register", help="register and save BCS credentials"
     )
     _add_home_arguments(register_parser)
-    register_parser.add_argument("--human-token", required=True)
+    register_parser.add_argument(
+        "--human-token-stdin",
+        action="store_true",
+        required=True,
+        help="read the human token from standard input",
+    )
     register_parser.add_argument("--bot-name", required=True)
     register_parser.add_argument("--bcs-endpoint", default=_DEFAULT_BCS_ENDPOINT)
     register_parser.add_argument("--bcs-url", default=_DEFAULT_BCS_WS_URL)
@@ -1505,8 +1716,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         home = resolve_hermes_home(profile=args.profile, hermes_home=args.hermes_home)
         if args.command == "register":
+            human_token = sys.stdin.read().rstrip("\r\n")
             session = register_bot(
-                human_token=args.human_token,
+                human_token=human_token,
                 bot_name=args.bot_name,
                 bcs_endpoint=args.bcs_endpoint,
                 bcs_url=args.bcs_url,
@@ -1530,6 +1742,7 @@ def main(argv: list[str] | None = None) -> int:
                     "pid": os.getpid(),
                     "hermes_home": str(home),
                     "script": str(Path(__file__).resolve()),
+                    "start_marker": _wait_for_process_start_marker(os.getpid()),
                 }
             )
             try:

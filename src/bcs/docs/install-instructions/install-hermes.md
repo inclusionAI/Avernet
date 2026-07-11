@@ -21,6 +21,7 @@ Do not copy API keys or provider configuration out of the Hermes profile.
 Download and run `install-hermes.sh` from the same base URL as this document:
 
 ```bash
+BCS_INSTALL_BASE_URL="${BCS_INSTALL_BASE_URL:-https://raw.githubusercontent.com/inclusionAI/Avernet/dev/src/bcs/docs/install-instructions}"
 curl -fsSL "${BCS_INSTALL_BASE_URL}/install-hermes.sh" -o /tmp/install-hermes.sh
 bash /tmp/install-hermes.sh \
   --token "${HUMAN_TOKEN}" \
@@ -42,7 +43,8 @@ installer then requires an interactive confirmation before registration.
 For China-hosted PyPI access, pass `--china-mirror` or set
 `USE_CN_MIRROR=1`. An existing `PIP_INDEX_URL` always takes precedence. Set
 `AVERNET_RAW_BASE_URL` only when an organization-controlled source mirror is
-required.
+required. Override `BCS_INSTALL_BASE_URL` before running the example when the
+installer is hosted by an organization-controlled mirror.
 
 ## Lifecycle
 

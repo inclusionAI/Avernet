@@ -4,6 +4,9 @@ set -euo pipefail
 CN_PYPI_INDEX="https://pypi.tuna.tsinghua.edu.cn/simple"
 DEFAULT_RAW_BASE_URL="https://raw.githubusercontent.com/inclusionAI/Avernet/dev/src/bcs/connectors/hermes"
 DEFAULT_INSTALLER_URL="https://raw.githubusercontent.com/inclusionAI/Avernet/dev/src/bcs/docs/install-instructions/install-hermes.sh"
+TEMP_DIR=""
+REGISTERED_UUID=""
+RESUME_COMMAND=""
 
 resolve_pip_index() {
   if [[ -n "${PIP_INDEX_URL:-}" ]]; then
@@ -16,6 +19,48 @@ resolve_pip_index() {
 fail() {
   printf 'error: %s\n' "$*" >&2
   exit 1
+}
+
+preflight_install_target() {
+  local install_dir="$1" existed=0 preflight_dir=""
+  [[ -d "$install_dir" ]] && existed=1
+  mkdir -p "$install_dir"
+  preflight_dir="$(mktemp -d "$install_dir/.preflight.XXXXXX")"
+  if ! python3 -m venv "$preflight_dir/venv"; then
+    rm -rf "$preflight_dir"
+    [[ "$existed" == "1" ]] || rmdir "$install_dir" 2>/dev/null || true
+    return 1
+  fi
+  rm -rf "$preflight_dir"
+  [[ "$existed" == "1" ]] || rmdir "$install_dir" 2>/dev/null || true
+}
+
+on_exit() {
+  local code=$?
+  rm -rf "${TEMP_DIR:-}"
+  if [[ "$code" -ne 0 && -n "${REGISTERED_UUID:-}" ]]; then
+    printf 'Registration was saved for bot %s. Resume with:\n' "$REGISTERED_UUID" >&2
+    printf '%s\n' "$RESUME_COMMAND" >&2
+  fi
+  exit "$code"
+}
+
+build_resume_command() {
+  local installer_url="$1" raw_base="$2"
+  shift 2
+  local command="" quoted=""
+  if [[ -n "${AVERNET_RAW_BASE_URL:-}" ]]; then
+    printf -v quoted 'AVERNET_RAW_BASE_URL=%q ' "$raw_base"
+    command+="$quoted"
+  fi
+  if [[ -n "${PIP_INDEX_URL:-}" ]]; then
+    printf -v quoted 'PIP_INDEX_URL=%q ' "$PIP_INDEX_URL"
+    command+="$quoted"
+  fi
+  printf -v quoted 'curl -fsSL %q | ' "$installer_url"
+  command+="$quoted"
+  printf -v quoted '%q ' bash -s -- "$@"
+  RESUME_COMMAND="${command}${quoted% }"
 }
 
 valid_session() {
@@ -117,12 +162,16 @@ main() {
   local connector="$install_dir/hermes_bcn.py"
   local venv="$install_dir/venv"
   local raw_base="${AVERNET_RAW_BASE_URL:-$DEFAULT_RAW_BASE_URL}"
+  local installer_url="${BCS_INSTALLER_URL:-$DEFAULT_INSTALLER_URL}"
   local temp_dir="" temp_connector=""
   temp_dir="$(mktemp -d)"
+  TEMP_DIR="$temp_dir"
   temp_connector="$temp_dir/hermes_bcn.py"
-  trap 'rm -rf "${temp_dir:-}"' EXIT
+  trap on_exit EXIT
   curl -fsSL "$raw_base/hermes_bcn.py" -o "$temp_connector"
   python3 -m py_compile "$temp_connector"
+  preflight_install_target "$install_dir" \
+    || fail "cannot create a virtual environment in $install_dir"
 
   local -a home_args=()
   if [[ "$profile_arg" == "--profile" ]]; then
@@ -131,16 +180,24 @@ main() {
     home_args=(--hermes-home "$hermes_home")
   fi
   local -a register_args=(
-    register "${home_args[@]}" --human-token "${human_token:-reuse-existing}"
+    register "${home_args[@]}" --human-token-stdin
     --bot-name "$bot_name" --bcs-endpoint "$bcs_endpoint" --bcs-url "$bcs_ws_url"
   )
   [[ -z "$workspace" ]] || register_args+=(--workspace "$workspace")
   [[ "$replace" == "0" ]] || register_args+=(--replace)
 
+  local -a resume_args=(
+    --bot-name "$bot_name" "${home_args[@]}"
+    --bcs-endpoint "$bcs_endpoint" --bcs-ws-url "$bcs_ws_url"
+  )
+  [[ -z "$workspace" ]] || resume_args+=(--workspace "$workspace")
+  [[ "${USE_CN_MIRROR:-0}" != "1" ]] || resume_args+=(--china-mirror)
+  build_resume_command "$installer_url" "$raw_base" "${resume_args[@]}"
+
   local registration="" registered_uuid=""
-  registration="$(python3 "$temp_connector" "${register_args[@]}")"
+  registration="$(printf '%s\n' "$human_token" | python3 "$temp_connector" "${register_args[@]}")"
   registered_uuid="${registration#registered }"
-  trap 'code=$?; rm -rf "${temp_dir:-}"; if [[ $code -ne 0 && -n "${registered_uuid:-}" ]]; then printf "Registration was saved for bot %s. Resume with:\n" "$registered_uuid" >&2; printf "curl -fsSL %q | bash -s -- --bot-name %q %q %q --bcs-endpoint %q --bcs-ws-url %q\n" "$DEFAULT_INSTALLER_URL" "$bot_name" "${home_args[0]}" "${home_args[1]}" "$bcs_endpoint" "$bcs_ws_url" >&2; fi; exit $code' EXIT
+  REGISTERED_UUID="$registered_uuid"
 
   mkdir -p "$install_dir"
   local install_temp=""
@@ -159,6 +216,7 @@ main() {
   "$venv/bin/python" "$connector" start "${home_args[@]}"
   "$venv/bin/python" "$connector" status "${home_args[@]}" >/dev/null
   printf 'Hermes BCN connector is running for bot %s.\n' "$registered_uuid"
+  REGISTERED_UUID=""
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
