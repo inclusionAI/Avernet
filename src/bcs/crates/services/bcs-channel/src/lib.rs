@@ -33,8 +33,8 @@ use bcs_service_api::port::repo::{
     SessionRepoPort,
 };
 use bcs_service_api::{
-    BotRegistryCoreService, CollaborationRuntimeService, GroupCoreService, MessageFlowService,
-    ServiceError,
+    BotRegistryCoreService, ChannelOutboundEventKind, CollaborationRuntimeService,
+    GroupCoreService, MessageFlowService, ServiceError,
 };
 
 pub use visibility::visibility_allows;
@@ -738,7 +738,13 @@ impl ChannelService for BcsChannelService {
             if !binding_relevant_to_group(&binding, &msg.group_id, &session) {
                 continue;
             }
-            if !visibility_allows(group.group_strategy, binding.outbound_visibility, msg.sender_role) {
+            if msg.kind != ChannelOutboundEventKind::System
+                && !visibility_allows(
+                    group.group_strategy,
+                    binding.outbound_visibility,
+                    msg.sender_role,
+                )
+            {
                 continue;
             }
             let binding_ref = ChannelBindingRef {
@@ -2857,6 +2863,60 @@ mod tests {
             ))
             .await?;
         assert_eq!(harness.delivery.events.lock().await.len(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn try_outbound_system_bypasses_visibility_for_synthetic_sender() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "binding_1",
+                "robot_1",
+                BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                Visibility::LeadOnly,
+            ))
+            .await?;
+        harness
+            .session_repo
+            .create(
+                "group_1",
+                NewSessionParams {
+                    id: Some("group_1:00000001".to_string()),
+                    session_kind: SessionKind::Chat,
+                    ..Default::default()
+                },
+            )
+            .await?;
+        harness
+            .conversation_repo
+            .upsert(bcs_domain::ConversationSessionMap {
+                binding_id: "binding_1".to_string(),
+                im_conversation_id: "conv_a".to_string(),
+                im_conversation_type: "2".to_string(),
+                session_scope: SessionScope::Conversation,
+                im_user_id: None,
+                bcs_session_id: "group_1:00000001".to_string(),
+                last_active_at: 1,
+            })
+            .await?;
+
+        let mut msg = outbound(
+            "group_1:00000001",
+            ParticipantRole::Observer,
+            false,
+        );
+        msg.kind = ChannelOutboundEventKind::System;
+        harness.service.try_outbound(msg).await?;
+
+        let events = harness.delivery.events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].im_conversation_id, "conv_a");
+        assert_eq!(events[0].kind, ChannelOutboundEventKind::System);
 
         Ok(())
     }
