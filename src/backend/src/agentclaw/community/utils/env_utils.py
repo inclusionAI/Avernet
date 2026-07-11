@@ -34,7 +34,7 @@ def is_local_mode() -> bool:
     skill_set_service.py``); removed once they stop branching on "am I local".
     """
     profile = (os.getenv("DEPLOY_PROFILE") or "").strip().lower()
-    return _LOCAL_DEPLOY_PROFILES.__contains__(profile)
+    return profile in _LOCAL_DEPLOY_PROFILES
 
 
 def is_empty_env() -> bool:

@@ -45,14 +45,14 @@ _RETIRED_SERVER_ENV_VALUES = frozenset({"singlebox"})
 
 
 def validate_deploy_environment(
-    source: Mapping[str, str] | None = None,
+    source: Mapping[str, str | None] | None = None,
 ) -> None:
     """Reject the retired singlebox value on the runtime/data Env axis."""
     values = os.environ if source is None else source
     retired_keys = [
         key
         for key in _SERVER_ENV_KEYS
-        if values.get(key, "").strip().lower() in _RETIRED_SERVER_ENV_VALUES
+        if (values.get(key) or "").strip().lower() in _RETIRED_SERVER_ENV_VALUES
     ]
     if retired_keys:
         keys = ", ".join(retired_keys)

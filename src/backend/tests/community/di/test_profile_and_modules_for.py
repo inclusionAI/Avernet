@@ -123,6 +123,10 @@ def test_dev_env_is_accepted():
     validate_deploy_environment({"SERVER_ENV": "dev"})
 
 
+def test_none_env_value_is_accepted():
+    validate_deploy_environment({"SERVER_ENV": None})
+
+
 def test_modules_for_community_is_isolated():
     # Community installs only its own column — never the prod infra modules.
     assert _names(modules_for(DeployProfile.COMMUNITY)) == {
