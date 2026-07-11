@@ -26,6 +26,9 @@ def _full_route_path(route, request_path: str) -> str:
 def install_singlebox_coverage_middleware(app: FastAPI) -> None:
     """Record concrete FastAPI route hits while singlebox coverage is enabled."""
 
+    # TODO(totalfrank): move route-hit recording to the shared adapter AOP seam
+    # once that interception mechanism exists. Keep coverage hooks out of Core
+    # and business services during that refactor.
     @app.middleware("http")
     async def _singlebox_coverage_router_hit_middleware(request: Request, call_next):
         response = await call_next(request)

@@ -1,8 +1,8 @@
 """Route-B acceptance: devices query and local-provider lifecycle.
 
-Starts a real singlebox backend (in-memory SQLite via local_setup.sh),
-runs the 3 read-only flows, asserts the no-data baseline, and creates one real
-personal bot through Backend -> BaaS before exercising its device binding.
+Runs against the real standalone stack started by `singlebox_coverage.sh`,
+asserts the no-data query contracts, and creates one real personal bot through
+Backend -> BaaS before exercising its device binding.
 
 The open-source singlebox records the created binding as provider ``local``.
 Connection and release are supported; instance-list and restart are
