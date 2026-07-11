@@ -112,18 +112,26 @@ class TaskRecordRepositoryProtocol(Protocol):
         """Count all active open tickets."""
         ...
 
-    # ── Command 方法 — 每个对应一个业务操作 ──
+    # ── 持久化原语(方案 A):repo 退化为 find/save/bulk,无状态机推进 ──
+    # 状态机推进(close/accept/pause/review/advance/refresh 等)全部上移到
+    # GovernanceLifecycleService(find→领域守卫→save),入口服务只调驱动服务。
+    # 下方 9 个语义 command 的定义已在 Task 9 删除;双 grep 守卫(repo 无
+    # 状态机推进入口 / 除豁免外无 governance_status= 字面量)锁住。
 
-    def close_ticket(
-        self,
-        ticket_id: str,
-        *,
-        close_reason: str,
-        closed_at: datetime,
-        cooldown_until: datetime | None = None,
-        assignee: str | None = None,
-    ) -> bool:
-        """关闭工单 — emergency_close / whitelist_filtered / auto_silenced 等场景。"""
+    def save_ticket(self, ticket: GovernanceTicket) -> bool:
+        """持久化(已改生命周期态的)领域模型回库(find→apply_to→commit)。
+
+        调用方(驱动服务)在调用前已 invoke 模型守卫方法;本原语只写回
+        生命周期字段(快照不动)。找不到返 False。
+        """
+        ...
+
+    def _save_ticket_with_snapshot(self, ticket: GovernanceTicket) -> bool:
+        """持久化快照变更的模型(to_orm 全量写,含快照 + 生命周期)。
+
+        专供驱动服务 refresh_snapshot 路径(快照刷新是唯一改快照的转移类
+        操作,governance_status 不变)。
+        """
         ...
 
     def bulk_close_open(
@@ -133,110 +141,12 @@ class TaskRecordRepositoryProtocol(Protocol):
         closed_at: datetime,
         cooldown_until: datetime | None = None,
     ) -> int:
-        """批量关闭所有活跃工单 — admin close_all_open。返回受影响行数。"""
-        ...
+        """批量关闭所有活跃工单(全量原语,方案 A 唯一豁免)。
 
-    def pause_ticket(
-        self,
-        ticket_id: str,
-        *,
-        review_reason: str,
-    ) -> bool:
-        """暂停工单 — admin 暂停, 进入 waiting_review。"""
-        ...
-
-    def resume_ticket(
-        self,
-        ticket_id: str,
-    ) -> bool:
-        """恢复暂停工单 — admin 恢复, waiting_review → open。"""
-        ...
-
-    def accept_feedback(
-        self,
-        ticket_id: str,
-        *,
-        user_feedback: str,
-        feedback_at: datetime,
-        feedback_source: str,
-        target_status: str,
-        feedback_remark: str | None = None,
-        repair_deadline: datetime | None = None,
-        resume_at: datetime | None = None,
-        review_reason: str | None = None,
-        actor_id: str | None = None,
-        feedback_payload: str | None = None,
-    ) -> bool:
-        """接受用户反馈 — optimized / need_time / dispute / whitelist。"""
-        ...
-
-    def review_ticket(
-        self,
-        ticket_id: str,
-        *,
-        review_decision: str,
-        reviewed_by: str,
-        reviewed_at: datetime,
-        close_reason: str,
-        cooldown_until: datetime | None = None,
-        review_remark: str | None = None,
-    ) -> bool:
-        """管理员审核 — approve / reject。"""
-        ...
-
-    def transition_schedule_due(
-        self,
-        ticket_id: str,
-        *,
-        review_reason: str = "schedule_due",
-        remind_at: datetime | None = None,
-    ) -> bool:
-        """调度到期状态变更 — scheduled→waiting_review。"""
-        ...
-
-    def advance_reminder(
-        self,
-        ticket_id: str,
-        *,
-        remind_at: datetime | None = None,
-        is_reminder: bool = False,
-        remind_count_delta: int = 0,
-    ) -> bool:
-        """推进提醒链 — 更新下次提醒时间 + 计数。"""
-        ...
-
-    def auto_silence_close(
-        self,
-        ticket_id: str,
-        *,
-        closed_at: datetime,
-        cooldown_until: datetime | None = None,
-    ) -> bool:
-        """自动静默关闭 — 连续 N 天正常后自动结案。"""
-        ...
-
-    def refresh_snapshot(
-        self,
-        ticket_id: str,
-        *,
-        dt_version: str,
-        bot_name: str | None = None,
-        triggered_dimensions: str | None = None,
-        hit_dimensions_count: int | None = None,
-        severity: str | None = None,
-        estimated_saving_tokens: int | None = None,
-        saving_ratio: float | None = None,
-        task_summary: str | None = None,
-        notification_structured: str | None = None,
-        analysis_status: str | None = None,
-        current_decision: str | None = None,
-        consecutive_normal_days: int = 0,
-        last_seen_at: datetime | None = None,
-        last_sync_at: datetime | None = None,
-        last_decision_dt_version: str | None = None,
-        remind_at: datetime | None | object = None,
-    ) -> bool:
-        """刷新工单快照 — ODPS 数据更新后同步工单画像。"""
+        SQL ``WHERE governance_status IN ('open','scheduled')`` 与
+        ``active_worker IS NOT NULL`` 是状态合法性守卫。调用方收敛到驱动服务
+        ``bulk_close_open``。返回受影响行数。
+        """
         ...
 
 

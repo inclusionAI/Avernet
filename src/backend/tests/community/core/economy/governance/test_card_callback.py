@@ -31,6 +31,9 @@ from agentclaw.community.core.economy.governance.services.feedback_service impor
     GovernanceFeedbackService,
     ResolveResult,
 )
+from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+    GovernanceLifecycleService,
+)
 
 from .conftest import FakeDB, FakeGovernanceConfig, FakeWhitelistService
 
@@ -91,12 +94,22 @@ def _build_svc(engine):
     """Build feedback service with in-memory DB."""
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     db = FakeDB(lambda: Session(bind=engine))
+    notify_repo = NotifyLogRepository(db=db)
+    task_repo = TaskRecordRepository(db=db)
+    audit_repo = GovernanceAuditRepository(db=db)
+    wl_svc = FakeWhitelistService()
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     feedback_svc = GovernanceFeedbackService(
-        whitelist_service=FakeWhitelistService(),
-        notify_repo=NotifyLogRepository(db=db),
-        task_repo=TaskRecordRepository(db=db),
-        audit_repo=GovernanceAuditRepository(db=db),
+        whitelist_service=wl_svc,
+        notify_repo=notify_repo,
+        task_repo=task_repo,
+        audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
+        lifecycle_svc=lifecycle_svc,
     )
     return feedback_svc
 
@@ -394,12 +407,25 @@ class TestCardCallbackNoAuth:
 
         Session = sessionmaker(bind=engine, expire_on_commit=False)
         db = FakeDB(lambda: Session(bind=engine))
+        wl_svc = _TrackingWhitelistService()
+        notify_repo = NotifyLogRepository(db=db)
+        task_repo = TaskRecordRepository(db=db)
+        audit_repo = GovernanceAuditRepository(db=db)
+        # whitelist-add is owned by feedback_service (lifecycle_service has no
+        # whitelist dep), so wire the tracker into the feedback_service so the
+        # created_by assertion sees feedback_service's add.
+        lifecycle_svc = GovernanceLifecycleService(
+            task_repo=task_repo,
+            notify_repo=notify_repo,
+            audit_repo=audit_repo,
+        )
         svc = GovernanceFeedbackService(
-            whitelist_service=_TrackingWhitelistService(),
-            notify_repo=NotifyLogRepository(db=db),
-            task_repo=TaskRecordRepository(db=db),
-            audit_repo=GovernanceAuditRepository(db=db),
+            whitelist_service=wl_svc,
+            notify_repo=notify_repo,
+            task_repo=task_repo,
+            audit_repo=audit_repo,
             config=FakeGovernanceConfig(),
+            lifecycle_svc=lifecycle_svc,
         )
         _make_notification(session, owner_id="staff-350361", notification_id="wl-1")
 

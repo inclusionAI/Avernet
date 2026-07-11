@@ -54,6 +54,7 @@ internal_dependencies:
   - agentclaw.community.core.access.repository       # UserInfoRecord — typed in user_service.py
   - agentclaw.community.core.bot_chat.schemas        # ConversationDetail, HealthCheckData — typed in bot_chat_service.py
   - agentclaw.community.core.channel.services.repositories  # ChannelRecord — typed in channel_service.py
+  - agentclaw.community.core.economy.governance.domain.enums     # GovernanceStatus — typed in governance_service.py LifecycleServiceProtocol
   - agentclaw.community.core.economy.governance.domain.record    # GovernanceRecord — typed in governance_service.py Protocol
   - agentclaw.community.core.economy.governance.domain.ticket    # GovernanceTicket — typed in governance_service.py Protocol
   - agentclaw.community.core.economy.governance.services.admin_service  # TicketActionOutcome — typed in governance_service.py Protocol

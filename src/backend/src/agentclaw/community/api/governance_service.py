@@ -9,7 +9,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+
 if TYPE_CHECKING:
+    from datetime import datetime
+
+    from agentclaw.community.core.economy.governance.domain.enums import (
+        GovernanceStatus,
+    )
     from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
     from agentclaw.community.core.economy.governance.domain.ticket import (
         GovernanceTicket,
@@ -282,3 +288,183 @@ class GovernanceRecordProcessProtocol(Protocol):
         dry_run: bool = False,
     ) -> Any:
         ...
+
+
+@runtime_checkable
+class GovernanceLifecycleServiceProtocol(Protocol):
+    """Protocol for the governance ticket state-machine driver service (Rule 14).
+
+    This service is the **sole driver** of the ticket main state machine
+    (open / scheduled / waiting_review / closed). Three entry channels
+    (offline-batch / cron tick / ticket review) cease to mutate
+    ``governance_status`` directly and instead express *intent* by calling
+    these intent-named methods. The driver loads the domain model, invokes
+    the white-list-guarded state-machine methods on ``GovernanceTicket``,
+    persists via ``apply_to``/``to_orm``, and orchestrates side effects
+    (cancel pending notifications / add whitelist / write audit).
+
+    Boundary with the notify-delivery state machine
+    (pending → sending → sent/failed/cancelled): the ticket machine is the
+    *cause*; on ticket lifecycle change the driver *orchestrates* a
+    one-way ``cancel_pending_by_ticket`` side effect on the notify side.
+    The notify delivery machine itself is not converged here.
+
+    Note: ``GovernanceLifecycleServiceProtocol`` is a *service* Protocol
+    (lives in ``api/``), not a ``plugin_api`` ``Plugin`` subclass nor a
+    repository Protocol — hence it is NOT scanned by
+    ``test_protocol_contracts.py``; conformance is pinned by the contract
+    suite + the grep guard (see ``test_governance_lifecycle.py``).
+    """
+
+    # ── Entry: offline-batch (record_process_service) ──────────────────
+
+    def open_ticket(self, *, ticket: GovernanceTicket) -> str:
+        """New ticket → OPEN (already OPEN on create): persist + audit.
+
+        Args:
+            ticket: ``GovernanceTicket`` domain model built by the caller
+                (create path migrated from scalar kwargs to domain-model
+                construction — see Task 5 done-when).
+
+        Returns:
+            The persisted ``ticket_id``.
+        """
+        ...
+
+    def refresh_snapshot(self, ticket_id: str, **snapshot_fields: Any) -> bool:
+        """Refresh an active ticket's mutable snapshot (non-state-transition).
+
+        Owned by the driver so the snapshot write is unified with the
+        ticket-lifecycle orchestration surface; ``governance_status`` is
+        unchanged. Returns True if the ticket was found and updated.
+        """
+        ...
+
+    def close_for_whitelist_hit(
+        self, ticket_id: str, *, now: datetime,
+    ) -> bool:
+        """Whitelist hit → CLOSED(whitelist_filtered) + cancel pending + audit.
+
+        Returns True if the ticket was found and closed, False if not found.
+        """
+        ...
+
+    # ── Entry: cron tick (scan_service) ─────────────────────────────────
+
+    def transition_schedule_due(
+        self, ticket_id: str, *, now: datetime,
+    ) -> bool:
+        """SCHEDULED → WAITING_REVIEW + clear remind_at + cancel pending + audit.
+
+        Returns True if the ticket was found and transitioned, False if not found.
+        """
+        ...
+
+    def auto_silence_close(
+        self, ticket_id: str, *, now: datetime,
+    ) -> bool:
+        """OPEN → CLOSED(auto_silenced_normal) on consecutive-normal convergence.
+
+        Returns True if the ticket was found and closed, False if not found.
+        """
+        ...
+
+    def advance_reminder(
+        self,
+        ticket_id: str,
+        *,
+        remind_at: datetime | None,
+        is_reminder: bool = False,
+        remind_count_delta: int = 0,
+    ) -> bool:
+        """Advance the reminder chain on a ticket (non-state-transition).
+
+        Returns True if the ticket was found and updated, False if not found.
+        """
+        ...
+
+    # ── Entry: ticket review (feedback_service / admin_service) ─────────
+
+    def accept_feedback(
+        self,
+        ticket_id: str,
+        *,
+        user_feedback: str,
+        feedback_at: datetime,
+        feedback_source: str,
+        target_status: GovernanceStatus,
+        feedback_remark: str | None = None,
+        repair_deadline: datetime | None = None,
+        resume_at: datetime | None = None,
+        review_reason: str | None = None,
+        actor_id: str | None = None,
+        feedback_payload: str | None = None,
+    ) -> bool:
+        """Accept user feedback → OPEN → WAITING_REVIEW/SCHEDULED + cancel pending
+        + (whitelist) add whitelist + audit. Returns True if found and updated.
+        """
+        ...
+
+    def pause_ticket(
+        self, ticket_id: str, *, review_reason: str,
+    ) -> bool:
+        """OPEN/SCHEDULED → WAITING_REVIEW + clear remind_at. Returns True if found."""
+        ...
+
+    def resume_ticket(self, ticket_id: str) -> bool:
+        """WAITING_REVIEW → OPEN.  # no caller yet — kept for symmetry."""
+        ...
+
+    def review_ticket(
+        self,
+        ticket_id: str,
+        *,
+        review_decision: str,
+        reviewed_by: str,
+        reviewed_at: datetime | None = None,
+        review_remark: str | None = None,
+        close_reason: str | None = None,
+        cooldown_until: datetime | None = None,
+    ) -> bool:
+        """WAITING_REVIEW → CLOSED (three-branch: approve_close /
+        approve_whitelist / reject_for_reopen) + clear remind_at +
+        release active_worker + cancel pending + audit. Returns True if found.
+        """
+        ...
+
+    def emergency_close(
+        self, ticket_id: str, *, now: datetime,
+    ) -> bool:
+        """Any non-CLOSED → CLOSED(emergency_closed) + cancel pending.
+
+        The caller (admin_service) owns the audit row (carries the reason +
+        actor_id=admin_id) — the driver does not write a duplicate audit,
+        matching the audit-ownership convention of its siblings.
+
+        Returns True if the ticket was found and closed, False if not found
+        (or already closed — idempotent no-op).
+        """
+        ...
+
+    def bulk_close_open(
+        self, *, close_reason: str, now: datetime,
+    ) -> int:
+        """Bulk emergency-close all open/scheduled tickets — joint orchestration:
+        land ``task_record`` subject CLOSED (ticket machine) + cancel pending
+        notifications (notify-delivery machine, one-way side effect). Ticket is
+        cause, notify is effect. Returns the number of tickets closed.
+        """
+        ...
+
+    def bulk_close_by_ticket_ids(
+        self, ticket_ids: list[str], *, now: datetime,
+    ) -> int:
+        """Per-ticket emergency-close by ``ticket_id`` set — Task 8 uses this
+        after cancel_pending / bulk_whitelist cancel notify delivery, to close
+        the matching ``task_record`` subjects (口径对齐通知侧). Per-ticket
+        find→guard→save→cancel chain (domain guard active); does NOT bare-use
+        the full bulk_close_open (would over-close responded scheduled tickets).
+        Idempotent. Returns the number of tickets actually closed.
+        """
+        ...
+

@@ -73,6 +73,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.services.admin_service import (
         GovernanceAdminService,
     )
+    from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+        GovernanceLifecycleService,
+    )
 
 log = get_logger(__name__)
 
@@ -120,6 +123,7 @@ class GovernanceBotService:
         audit_repo: GovernanceAuditRepository,
         config: Any,  # EconomyGovernanceConfig
         notify_sender: NotifySenderPlugin,
+        lifecycle_svc: GovernanceLifecycleService,
     ) -> None:
         self._task_repo = task_repo
         self._admin_svc = admin_svc
@@ -127,6 +131,7 @@ class GovernanceBotService:
         self._audit_repo = audit_repo
         self._config = config
         self._notify_sender = notify_sender
+        self._lifecycle_svc = lifecycle_svc
 
         # Parse remind_delays_days from config string (e.g. "3,7,14") or use default
         raw_delays = getattr(config, "remind_delays_days", None)
@@ -548,17 +553,12 @@ class GovernanceBotService:
 
         for ticket in due_tickets:
             try:
-                # Transition via Repo command method
-                self._task_repo.transition_schedule_due(
-                    ticket.ticket_id,
-                    review_reason="schedule_due",
+                # Transition via the driver service (sole driver). Driver
+                # orchestrates the SCHEDULED → WAITING_REVIEW transition and
+                # the one-way cancel-pending-notify side effect.
+                self._lifecycle_svc.transition_schedule_due(
+                    ticket.ticket_id, now=now,
                 )
-
-                # Cancel pending notify (waiting_review = no sends)
-                if ticket.ticket_id:
-                    self._notify_repo.cancel_pending_by_ticket(
-                        ticket.ticket_id,
-                    )
 
                 self._audit_repo.add_audit(
                     run_id,
@@ -610,17 +610,12 @@ class GovernanceBotService:
         now = datetime.now()
         for ticket in eligible:
             try:
-                # Auto-silence close via Repo command method
-                self._task_repo.auto_silence_close(
-                    ticket.ticket_id,
-                    closed_at=now,
+                # Auto-silence close via driver service (sole driver). Driver
+                # orchestrates OPEN → CLOSED(auto_silenced_normal) and the
+                # one-way cancel-pending-notify side effect.
+                self._lifecycle_svc.auto_silence_close(
+                    ticket.ticket_id, now=now,
                 )
-
-                # Cancel any pending notify for this ticket
-                if ticket.ticket_id:
-                    self._notify_repo.cancel_pending_by_ticket(
-                        ticket.ticket_id,
-                    )
 
                 self._audit_repo.add_audit(
                     run_id,
@@ -699,16 +694,17 @@ class GovernanceBotService:
                 # No more reminders
                 new_remind_at = None
 
-        # Persist remind_at change via Repo command method
+        # Persist remind_at change via driver service (sole driver). Remind
+        # chain is a non-state-transition lifecycle write on the ticket.
         if notify_row.notify_type == NotifyType.REMINDER:
-            self._task_repo.advance_reminder(
+            self._lifecycle_svc.advance_reminder(
                 ticket.ticket_id,
                 remind_at=new_remind_at,
                 is_reminder=True,
                 remind_count_delta=1,
             )
         else:
-            self._task_repo.advance_reminder(
+            self._lifecycle_svc.advance_reminder(
                 ticket.ticket_id,
                 remind_at=new_remind_at,
             )

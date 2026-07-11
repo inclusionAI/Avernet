@@ -38,6 +38,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
         GovernanceWhitelistRepository,
     )
+    from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+        GovernanceLifecycleService,
+    )
 
 log = get_logger(__name__)
 
@@ -52,11 +55,13 @@ class GovernanceWhitelistService:
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         config: Any,  # EconomyGovernanceConfig
+        lifecycle_svc: GovernanceLifecycleService,
     ) -> None:
         self._whitelist_repo = whitelist_repo
         self._notify_repo = notify_repo
         self._audit_repo = audit_repo
         self._config = config
+        self._lifecycle_svc = lifecycle_svc
 
     def bulk_whitelist(
         self,
@@ -64,7 +69,12 @@ class GovernanceWhitelistService:
         reason: str,
         operator: str,
     ) -> dict:
-        """批量加白 + 取消待通知 (service 编排循环 add)。
+        """批量加白 + 取消待通知 + 关对应 ``task_record`` 主体 (Task 8 口径对齐)。
+
+        通知侧 cancel scope = bot_id IN (...) 且 response IS NULL +
+        open/muted。工单侧按被关通知的 ``ticket_id`` 集合关 —— 逐条走
+        :meth:`emergency_close` 链路激活领域模型守卫、幂等(不可裸用全量
+        ``bulk_close_open``,会多关已反馈的 scheduled 单)。
 
         Returns ``{"whitelisted": N, "cancelled": N}``.
         """
@@ -86,13 +96,22 @@ class GovernanceWhitelistService:
             if not already:
                 whitelisted += 1
 
-        # 2. Cancel pending + close open/muted notifications
+        # 2. Pre-collect the ticket_id set scoped to the same filter as the
+        # notify bulk-cancel (bot_id IN (...) + response IS NULL + open/muted),
+        # before the cancel mutates rows.
+        ticket_ids = self._notify_repo.list_ticket_ids_by_bots(bot_ids)
+
+        # 3. Cancel pending + close open/muted notifications (behavior unchanged)
         cancelled = self._notify_repo.bulk_cancel_by_bots(
             bot_ids,
             close_reason=CloseReason.EMERGENCY_CLOSED,
             closed_at=now,
             cooldown_until=now + timedelta(days=cooldown_days),
         )
+
+        # 4. Ticket-side close — per-ticket guard-activated (EMERGENCY_CLOSED),
+        # idempotent. Aligns the ticket/notify sets (Task 8).
+        self._lifecycle_svc.bulk_close_by_ticket_ids(ticket_ids, now=now)
 
         self._audit_repo.add_audit(
             "emergency",
@@ -103,8 +122,8 @@ class GovernanceWhitelistService:
             dry_run=0,
         )
         log.info(
-            "[GovernanceWhitelist] bulk_whitelist by %s: whitelisted=%d, cancelled=%d",
-            operator, whitelisted, cancelled,
+            "[GovernanceWhitelist] bulk_whitelist by %s: whitelisted=%d, cancelled=%d, tickets_closed_by=%d",
+            operator, whitelisted, cancelled, len(ticket_ids),
         )
         return {"whitelisted": whitelisted, "cancelled": cancelled}
 

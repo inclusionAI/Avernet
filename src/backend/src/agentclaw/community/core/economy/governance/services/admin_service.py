@@ -54,6 +54,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
         TaskRecordRepository,
     )
+    from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+        GovernanceLifecycleService,
+    )
     from agentclaw.community.plugin_api.cache_protocol import CachePlugin
 
 log = get_logger(__name__)
@@ -139,6 +142,7 @@ class GovernanceAdminService:
         task_repo: TaskRecordRepository,
         config: Any,  # EconomyGovernanceConfig
         notify_sender: NotifySenderPlugin,
+        lifecycle_svc: GovernanceLifecycleService,
     ) -> None:
         self._cache = cache
         self._whitelist_service = whitelist_service
@@ -147,6 +151,7 @@ class GovernanceAdminService:
         self._task_repo = task_repo
         self._config = config
         self._notify_sender = notify_sender
+        self._lifecycle_svc = lifecycle_svc
         self._emergency_key = _EMERGENCY_KEY_TEMPLATE.format(env=get_current_env())
 
     # -- State queries -------------------------------------------------------
@@ -231,13 +236,28 @@ class GovernanceAdminService:
         return self._whitelist_service.bulk_whitelist(bot_ids, reason, operator)
 
     def cancel_pending(self, reason: str, operator: str) -> BulkOperationResult:
-        """Cancel ALL pending notifications (emergency close).
+        """Cancel ALL pending notifications (emergency close) + close the
+        matching ``task_record`` subjects (Task 8 口径对齐).
 
-        Returns ``BulkOperationResult(affected=N, label="cancelled")``.
+        通知侧 cancel scope = open/muted 且 response IS NULL。工单侧按被关
+        通知的 ``ticket_id`` 集合关 —— **不可裸用全量** :meth:`bulk_close_open`
+        (会多关已反馈的 scheduled 单)。逐条走 :meth:`emergency_close` 链路
+        激活领域模型守卫、幂等。
+
+        Returns ``BulkOperationResult(affected=N, label="cancelled")``。
         """
         now = datetime.now()
         cooldown_days = self._config.cooldown_days
 
+        # Step 1: pre-collect the ticket_id set scoped to the same filter as
+        # the notify bulk-cancel (only_unresponded=True), before the cancel
+        # mutates rows. 无 None(record_process 创建处恒非空,且查询已剔 None)。
+        ticket_ids = self._notify_repo.list_ticket_ids_open_muted(
+            only_unresponded=True,
+        )
+
+        # Step 2: notify-side bulk cancel (behavior unchanged) — mirrors
+        # notify_status/governance_status/close_reason/closed_at/cooldown_until.
         cancelled = self._notify_repo.bulk_close_open_muted(
             close_reason=CloseReason.EMERGENCY_CLOSED,
             closed_at=now,
@@ -245,37 +265,52 @@ class GovernanceAdminService:
             only_unresponded=True,
         )
 
+        # Step 3: ticket-side close — per-ticket guard-activated, idempotent.
+        # Driver's emergency_close uses EMERGENCY_CLOSED (aligns notify side).
+        self._lifecycle_svc.bulk_close_by_ticket_ids(ticket_ids, now=now)
+
         self._write_emergency_audit(
             action_taken=AuditAction.ADMIN_CANCEL_PENDING,
             actor_id=operator,
             error_msg=f"reason={reason}; operator={operator}",
         )
         log.info(
-            "[GovernanceEmergency] cancel_pending by %s: cancelled=%d",
-            operator, cancelled,
+            "[GovernanceEmergency] cancel_pending by %s: cancelled=%d, tickets_closed_by=%d",
+            operator, cancelled, len(ticket_ids),
         )
         return BulkOperationResult(affected=cancelled, label="cancelled")
 
     def close_all_open(self, reason: str, operator: str) -> BulkOperationResult:
-        """Close ALL open/muted records, including already-responded ones.
+        """Close ALL open/muted records, including already-responded ones,
+        + close all open/scheduled ``task_record`` subjects (Task 8 口径对齐).
 
         Unlike :meth:`cancel_pending` which only touches ``response IS NULL``
         records, this closes **every** open/muted notification regardless of
         whether the user has already responded (e.g. ``need_time`` → muted).
 
-        Existing ``response`` / ``response_source`` / ``mute_until`` are
-        preserved — only governance_status and close metadata are updated.
+        工单侧用全量 :meth:`bulk_close_open`(WHERE status IN (open,scheduled))
+        ——与通知侧 ``governance_status IN (open,muted)`` 口径天然对齐(全量
+        关,不区分反馈)。Existing notify ``response`` / ``response_source`` /
+        ``mute_until`` preserved.
 
-        Returns ``BulkOperationResult(affected=N, label="closed")``.
+        Returns ``BulkOperationResult(affected=N, label="closed")``。
         """
         now = datetime.now()
         cooldown_days = self._config.cooldown_days
 
+        # Step 1: notify-side bulk close (behavior unchanged).
         closed = self._notify_repo.bulk_close_open_muted(
             close_reason=CloseReason.ADMIN_CLOSED,
             closed_at=now,
             cooldown_until=now + timedelta(days=cooldown_days),
             only_unresponded=False,
+        )
+
+        # Step 2: ticket-side full close (ADMIN_CLOSED). bulk_close_open's
+        # WHERE status IN (open,scheduled) + active_worker IS NOT NULL
+        # predicate is the state-legality guard (per-spec bulk exemption).
+        tickets_closed = self._lifecycle_svc.bulk_close_open(
+            close_reason=CloseReason.ADMIN_CLOSED, now=now,
         )
 
         self._write_emergency_audit(
@@ -284,8 +319,8 @@ class GovernanceAdminService:
             error_msg=f"reason={reason}; operator={operator}",
         )
         log.info(
-            "[GovernanceAdmin] close_all_open by %s: closed=%d",
-            operator, closed,
+            "[GovernanceAdmin] close_all_open by %s: notify_closed=%d, tickets_closed=%d",
+            operator, closed, tickets_closed,
         )
         return BulkOperationResult(affected=closed, label="closed")
 
@@ -354,11 +389,10 @@ class GovernanceAdminService:
                 error_code="INVALID_STATUS",
             )
 
-        # Update via Repo command method
-        self._task_repo.pause_ticket(ticket_id, review_reason="admin_paused")
-
-        if ticket.ticket_id:
-            self._notify_repo.cancel_pending_by_ticket(ticket.ticket_id)
+        # Advance via driver service (sole driver). Driver orchestrates the
+        # OPEN/SCHEDULED → WAITING_REVIEW transition + one-way
+        # cancel-pending side effect.
+        self._lifecycle_svc.pause_ticket(ticket_id, review_reason="admin_paused")
 
         self._audit_repo.add_audit(
             "admin-pause",
@@ -436,8 +470,13 @@ class GovernanceAdminService:
             close_reason = "review_rejected"
             cooldown_until = None
 
-        # Update via Repo command method
-        self._task_repo.review_ticket(
+        # Advance via driver service (sole driver). Driver orchestrates the
+        # WAITING_REVIEW → CLOSED (three-branch) transition + one-way
+        # cancel-pending side effect. ``close_reason`` resolved above per
+        # action; driver's model.review() also sets it but we pass the
+        # already-computed value so approve_close carries the
+        # `{review_reason}_approved` form exactly.
+        self._lifecycle_svc.review_ticket(
             ticket_id,
             review_decision=action,
             reviewed_by=admin_id,
@@ -446,9 +485,6 @@ class GovernanceAdminService:
             cooldown_until=cooldown_until,
             review_remark=remark,
         )
-
-        if ticket.ticket_id:
-            self._notify_repo.cancel_pending_by_ticket(ticket.ticket_id)
 
         audit_action_map = {
             "approve_close": AuditAction.REVIEW_APPROVE_CLOSE,
@@ -492,15 +528,13 @@ class GovernanceAdminService:
 
         now = datetime.now()
 
-        # Update via Repo command method
-        self._task_repo.close_ticket(
-            ticket_id,
-            close_reason=CloseReason.EMERGENCY_CLOSED,
-            closed_at=now,
+        # Advance via driver service (sole driver). Driver orchestrates the
+        # CLOSE + cancel-pending. The audit row (with reason + actor_id=
+        # admin_id) is owned by admin_service below — the driver does not
+        # duplicate it, matching pause_ticket / review_ticket siblings.
+        self._lifecycle_svc.emergency_close(
+            ticket_id, now=now,
         )
-
-        if ticket.ticket_id:
-            self._notify_repo.cancel_pending_by_ticket(ticket.ticket_id)
 
         self._audit_repo.add_audit(
             "admin-emergency-close",

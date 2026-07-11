@@ -49,6 +49,9 @@ from agentclaw.community.core.economy.governance.services.record_process_service
     GovernanceRecordService,
 )
 from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
+from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+    GovernanceLifecycleService,
+)
 from agentclaw.community.core.economy.governance.services.scan_service import (
     GovernanceBotService,
 )
@@ -171,11 +174,20 @@ def _build_admin_svc(engine):
     task_repo = TaskRecordRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
     whitelist_repo = GovernanceWhitelistRepository(db=db)
+    # Driver first — lifecycle_service has no whitelist dependency (the
+    # accept_feedback whitelist-add is owned by feedback_service), so build
+    # it directly, then whitelist_service (which calls back into the driver).
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     whitelist_service = GovernanceWhitelistService(
         whitelist_repo=whitelist_repo,
         notify_repo=notify_repo,
         audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
+        lifecycle_svc=lifecycle_svc,
     )
     svc = GovernanceAdminService(
         cache=cache,
@@ -185,6 +197,7 @@ def _build_admin_svc(engine):
         task_repo=task_repo,
         config=FakeGovernanceConfig(),
         notify_sender=FakeNotifySender(),
+        lifecycle_svc=lifecycle_svc,
     )
     svc._scan_svc = _FakeScanSvc()
     return svc, db
@@ -402,12 +415,18 @@ def _build_record_svc(engine):
     whitelist_repo = GovernanceWhitelistRepository(db=db)
     notify_repo = NotifyLogRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     svc = GovernanceRecordService(
         task_repo=task_repo,
         whitelist_repo=whitelist_repo,
         notify_repo=notify_repo,
         audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
+        lifecycle_svc=lifecycle_svc,
     )
     return svc, db
 
@@ -666,6 +685,11 @@ def _build_scan_svc(engine, *, config=None):
     notify_repo = NotifyLogRepository(db=db)
     task_repo = TaskRecordRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     if config is None:
         config = FakeGovernanceConfig()
     svc = GovernanceBotService(
@@ -675,6 +699,7 @@ def _build_scan_svc(engine, *, config=None):
         audit_repo=audit_repo,
         config=config,
         notify_sender=FakeNotifySender(),
+        lifecycle_svc=lifecycle_svc,
     )
     return svc, db
 
@@ -791,6 +816,11 @@ def _build_scan_svc(engine, *, config=None):
     notify_repo = NotifyLogRepository(db=db)
     task_repo = TaskRecordRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     if config is None:
         config = FakeGovernanceConfig()
     svc = GovernanceBotService(
@@ -800,6 +830,7 @@ def _build_scan_svc(engine, *, config=None):
         audit_repo=audit_repo,
         config=config,
         notify_sender=FakeNotifySender(),
+        lifecycle_svc=lifecycle_svc,
     )
     return svc, db
 
