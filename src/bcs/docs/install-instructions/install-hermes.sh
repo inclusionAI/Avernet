@@ -21,6 +21,15 @@ fail() {
   exit 1
 }
 
+preflight_dashboard_isolation() {
+  local dashboard_help=""
+  if ! dashboard_help="$(hermes dashboard --help 2>&1)"; then
+    fail "could not inspect Hermes Dashboard capabilities"
+  fi
+  [[ "$dashboard_help" == *"--isolated"* ]] \
+    || fail "installed Hermes does not support dashboard --isolated"
+}
+
 preflight_install_target() {
   local install_dir="$1" existed=0 preflight_dir=""
   [[ -d "$install_dir" ]] && existed=1
@@ -136,6 +145,7 @@ main() {
   command -v curl >/dev/null 2>&1 || fail "curl is required"
   python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' \
     || fail "Python 3.11 or newer is required"
+  preflight_dashboard_isolation
   [[ -z "$profile" || -z "$explicit_home" ]] \
     || fail "use either --profile or --hermes-home, not both"
 

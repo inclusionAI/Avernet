@@ -21,14 +21,19 @@ Do not copy API keys or provider configuration out of the Hermes profile.
 Download and run `install-hermes.sh` from the same base URL as this document:
 
 ```bash
-BCS_INSTALL_BASE_URL="${BCS_INSTALL_BASE_URL:-https://raw.githubusercontent.com/inclusionAI/Avernet/dev/src/bcs/docs/install-instructions}"
-curl -fsSL "${BCS_INSTALL_BASE_URL}/install-hermes.sh" -o /tmp/install-hermes.sh
-printf '%s\n' "${HUMAN_TOKEN}" | bash /tmp/install-hermes.sh \
-  --human-token-stdin \
-  --bot-name "${BOT_NAME}" \
-  --profile "${HERMES_PROFILE}" \
-  --bcs-endpoint "${BCS_HTTP_ENDPOINT}" \
-  --bcs-ws-url "${BCS_WS_URL}"
+(
+  set -e
+  BCS_INSTALL_BASE_URL="${BCS_INSTALL_BASE_URL:-https://raw.githubusercontent.com/inclusionAI/Avernet/dev/src/bcs/docs/install-instructions}"
+  installer="$(mktemp "${TMPDIR:-/tmp}/install-hermes.XXXXXX")"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL "${BCS_INSTALL_BASE_URL}/install-hermes.sh" -o "$installer"
+  printf '%s\n' "${HUMAN_TOKEN}" | bash "$installer" \
+    --human-token-stdin \
+    --bot-name "${BOT_NAME}" \
+    --profile "${HERMES_PROFILE}" \
+    --bcs-endpoint "${BCS_HTTP_ENDPOINT}" \
+    --bcs-ws-url "${BCS_WS_URL}"
+)
 ```
 
 The human token is passed only on stdin, never in the installer or Python

@@ -654,6 +654,32 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual("https://packages.example/simple", result.stdout.strip())
 
+    def test_installer_preflights_isolated_dashboard_capability(self) -> None:
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            "preflight_dashboard_isolation"
+        )
+        for supported in (True, False):
+            with self.subTest(supported=supported):
+                bin_dir = Path(self.tempdir.name) / f"bin-{supported}"
+                bin_dir.mkdir()
+                hermes = bin_dir / "hermes"
+                help_text = "usage: hermes dashboard [--isolated]" if supported else "usage: hermes dashboard"
+                hermes.write_text(
+                    f"#!/usr/bin/env bash\nprintf '%s\\n' {help_text!r}\n",
+                    encoding="utf-8",
+                )
+                hermes.chmod(0o700)
+                result = subprocess.run(
+                    ["bash", "-c", command],
+                    capture_output=True,
+                    text=True,
+                    env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+                )
+                self.assertEqual(0 if supported else 1, result.returncode)
+                if not supported:
+                    self.assertIn("--isolated", result.stderr)
+
     def test_installer_reads_stdin_only_when_registration_is_needed(self) -> None:
         command = (
             f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
@@ -698,6 +724,10 @@ class CliTests(unittest.TestCase):
         self.assertIn("--human-token-stdin", script)
         self.assertLess(
             script.index("preflight_install_target \"$install_dir\""),
+            script.index("registration=\"$("),
+        )
+        self.assertLess(
+            script.index("  preflight_dashboard_isolation\n"),
             script.index("registration=\"$("),
         )
         for preserved in (
@@ -773,8 +803,16 @@ class CliTests(unittest.TestCase):
         markdown = INSTALL_DOC.read_text(encoding="utf-8")
         self.assertNotIn("--token", markdown)
         self.assertIn("--human-token-stdin", markdown)
+        self.assertIn(
+            'mktemp "${TMPDIR:-/tmp}/install-hermes.XXXXXX"', markdown
+        )
+        self.assertIn("trap 'rm -f \"$installer\"' EXIT", markdown)
+        self.assertNotIn("/tmp/install-hermes.sh", markdown)
+        self.assertLess(markdown.index("mktemp "), markdown.index("trap 'rm -f"))
+        self.assertLess(markdown.index("trap 'rm -f"), markdown.index("curl -fsSL"))
+        self.assertIn("```bash\n(\n", markdown)
         match = re.search(
-            r'^(BCS_INSTALL_BASE_URL="\$\{BCS_INSTALL_BASE_URL:-[^}]+\}")$',
+            r'^\s*(BCS_INSTALL_BASE_URL="\$\{BCS_INSTALL_BASE_URL:-[^}]+\}")$',
             markdown,
             flags=re.MULTILINE,
         )
@@ -798,6 +836,44 @@ class CliTests(unittest.TestCase):
                 env=env,
             )
             self.assertEqual(expected, result.stdout)
+
+    def test_install_markdown_bootstrap_cleans_temp_file(self) -> None:
+        markdown = INSTALL_DOC.read_text(encoding="utf-8")
+        block = re.search(r"```bash\n(.*?)```", markdown, flags=re.DOTALL)
+        self.assertIsNotNone(block)
+        source_dir = Path(self.tempdir.name) / "source"
+        source_dir.mkdir()
+        (source_dir / "install-hermes.sh").write_text(
+            "IFS= read -r token\n[[ \"$token\" == human-secret ]]\n",
+            encoding="utf-8",
+        )
+        for name, base_url, expected_code in (
+            ("success", source_dir.as_uri(), 0),
+            ("download-failure", (source_dir / "missing").as_uri(), 37),
+        ):
+            with self.subTest(name=name):
+                temp_dir = Path(self.tempdir.name) / f"tmp-{name}"
+                temp_dir.mkdir()
+                result = subprocess.run(
+                    ["bash", "-c", block.group(1)],
+                    capture_output=True,
+                    text=True,
+                    env={
+                        **os.environ,
+                        "BCS_INSTALL_BASE_URL": base_url,
+                        "TMPDIR": str(temp_dir),
+                        "HUMAN_TOKEN": "human-secret",
+                        "BOT_NAME": "Hermes Bot",
+                        "HERMES_PROFILE": "review",
+                        "BCS_HTTP_ENDPOINT": "http://127.0.0.1:21000",
+                        "BCS_WS_URL": "ws://127.0.0.1:21000/ws/bot",
+                    },
+                )
+                if expected_code == 0:
+                    self.assertEqual(0, result.returncode, result.stderr)
+                else:
+                    self.assertNotEqual(0, result.returncode)
+                self.assertEqual([], list(temp_dir.iterdir()))
 
     def _write_session(self) -> None:
         path = self.hermes_home / "bcn" / "session.json"

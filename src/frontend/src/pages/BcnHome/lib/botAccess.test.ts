@@ -57,6 +57,19 @@ describe('bot access resources', () => {
     expect(template).not.toBeNull();
     expect(template).not.toMatch(/(^|\s)--token(?:\s|$)/);
     expect(template).toContain('--human-token-stdin');
+    expect(template).toContain(
+      'mktemp "${TMPDIR:-/tmp}/install-hermes.XXXXXX"',
+    );
+    expect(template).toContain('trap \'rm -f "$installer"\' EXIT');
+    expect(template).not.toContain('/tmp/install-hermes.sh');
+    expect(template?.trim().startsWith('(')).toBe(true);
+    expect(template?.trim().endsWith(')')).toBe(true);
+    expect(template?.indexOf('mktemp ')).toBeLessThan(
+      template?.indexOf("trap 'rm -f") ?? -1,
+    );
+    expect(template?.indexOf("trap 'rm -f")).toBeLessThan(
+      template?.indexOf('curl -fsSL') ?? -1,
+    );
     expect(template?.indexOf('curl -fsSL')).toBeLessThan(
       template?.indexOf("printf '%s\\n'") ?? -1,
     );
