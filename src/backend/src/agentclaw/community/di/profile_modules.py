@@ -139,14 +139,6 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             # App services — corp-free test module: real BotChatService, local_sql
             # router, dummy Dima config, community no-op code-platform (AntCode).
             TestAppServicesModule(),
-            # Devices — corp-free local/SQLite doubles (no ARCA factory / corp config).
-            # Installed LAST on purpose: ``CommunityDeviceSyncModule`` also binds
-            # ``DeviceAdapterTransport`` to the community no-op, but the test column
-            # needs the stateful ``InMemoryDeviceAdapterTransport`` (cron gateway
-            # contract tests). Injector is last-wins, so ``TestDevicesModule`` must
-            # come after ``CommunityDeviceSyncModule`` to reinstate the in-memory
-            # transport.
-            TestDevicesModule(),
         ]
 
         if profile is DeployProfile.TEST:
@@ -154,13 +146,16 @@ def modules_for(profile: DeployProfile) -> list[Module]:
                 TestHttpClientModule,
             )
 
-            column.append(TestHttpClientModule())
+            column.extend([TestDevicesModule(), TestHttpClientModule()])
         else:
             from agentclaw.community.di.modules.singlebox_access_module import (
                 SingleboxAccessModule,
             )
+            from agentclaw.community.di.modules.infrastructure.singlebox.devices import (
+                SingleboxDevicesModule,
+            )
 
-            column.append(SingleboxAccessModule())
+            column.extend([SingleboxDevicesModule(), SingleboxAccessModule()])
 
         return column
 
