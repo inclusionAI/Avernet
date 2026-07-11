@@ -137,6 +137,128 @@ test_baas_stop_does_not_delegate_to_app_stop() {
     fail "baas_stop should clean the BAAS port with ownership verification"
 }
 
+test_baas_bot_cleanup_preserves_bcs_sessions() {
+  setup_env
+  export RUNTIME_DATA_DIR="$(mktemp -d)"
+  export LOCAL_BOTS_DIR="$(mktemp -d)"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/baas.sh"
+
+  local session_file unrelated_file backup_dir mode
+  session_file="${LOCAL_BOTS_DIR}/staff_mock-user/default/openclaw/.bcs/session.json"
+  unrelated_file="${LOCAL_BOTS_DIR}/staff_mock-user/default/openclaw/runtime.tmp"
+  backup_dir="${RUNTIME_DATA_DIR}/.baas-bcs-sessions"
+  mkdir -p "$(dirname "$session_file")"
+  printf '%s\n' '{"bot_uuid":"test-bot","token":"test-token"}' > "$session_file"
+  printf '%s\n' 'remove me' > "$unrelated_file"
+  chmod 600 "$session_file"
+
+  baas_backup_bcs_sessions "$backup_dir"
+  rm -rf "${LOCAL_BOTS_DIR:?}/"*
+  baas_restore_bcs_sessions "$backup_dir"
+
+  [ -f "$session_file" ] || fail "BAAS cleanup should restore BCS session files"
+  assert_eq '{"bot_uuid":"test-bot","token":"test-token"}' "$(cat "$session_file")" \
+    "restored BCS session content"
+  [ ! -e "$unrelated_file" ] || fail "BAAS cleanup should not restore unrelated bot files"
+  [ ! -e "$backup_dir" ] || fail "BAAS cleanup should remove the temporary session backup"
+
+  if stat -f '%Lp' "$session_file" >/dev/null 2>&1; then
+    mode="$(stat -f '%Lp' "$session_file")"
+  else
+    mode="$(stat -c '%a' "$session_file")"
+  fi
+  assert_eq "600" "$mode" "restored BCS session permissions"
+}
+
+test_baas_session_backup_refuses_to_overwrite_stale_backup() {
+  setup_env
+  export RUNTIME_DATA_DIR="$(mktemp -d)"
+  export LOCAL_BOTS_DIR="$(mktemp -d)"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/baas.sh"
+
+  local backup_dir stale_session current_session result
+  backup_dir="${RUNTIME_DATA_DIR}/.baas-bcs-sessions"
+  stale_session="${backup_dir}/staff_mock-user/stale/openclaw/.bcs/session.json"
+  current_session="${LOCAL_BOTS_DIR}/staff_mock-user/current/openclaw/.bcs/session.json"
+  mkdir -p "$(dirname "$stale_session")" "$(dirname "$current_session")"
+  printf '%s\n' '{"bot_uuid":"stale-bot"}' > "$stale_session"
+  printf '%s\n' '{"bot_uuid":"current-bot"}' > "$current_session"
+
+  if baas_backup_bcs_sessions "$backup_dir"; then
+    result=0
+  else
+    result=$?
+  fi
+
+  [ "$result" -ne 0 ] || fail "BAAS backup should refuse to overwrite stale recovery data"
+  assert_eq '{"bot_uuid":"stale-bot"}' "$(cat "$stale_session")" \
+    "stale BCS backup content"
+}
+
+test_baas_session_backup_recovers_stale_backup_before_snapshot() {
+  setup_env
+  export RUNTIME_DATA_DIR="$(mktemp -d)"
+  export LOCAL_BOTS_DIR="$(mktemp -d)"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/baas.sh"
+
+  local backup_dir stale_session current_session
+  backup_dir="${RUNTIME_DATA_DIR}/.baas-bcs-sessions"
+  stale_session="${backup_dir}/staff_mock-user/stale/openclaw/.bcs/session.json"
+  current_session="${LOCAL_BOTS_DIR}/staff_mock-user/current/openclaw/.bcs/session.json"
+  mkdir -p "$(dirname "$stale_session")" "$(dirname "$current_session")"
+  printf '%s\n' '{"bot_uuid":"stale-bot"}' > "$stale_session"
+  printf '%s\n' '{"bot_uuid":"current-bot"}' > "$current_session"
+
+  baas_prepare_bcs_session_backup "$backup_dir"
+
+  [ -f "${backup_dir}/staff_mock-user/stale/openclaw/.bcs/session.json" ] || \
+    fail "recovered stale session should be included in the fresh backup"
+  [ -f "${backup_dir}/staff_mock-user/current/openclaw/.bcs/session.json" ] || \
+    fail "current session should be included in the fresh backup"
+}
+
+test_baas_session_scan_failure_keeps_source_and_backup() {
+  setup_env
+  export RUNTIME_DATA_DIR="$(mktemp -d)"
+  export LOCAL_BOTS_DIR="$(mktemp -d)"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/baas.sh"
+
+  local backup_dir source_session backup_session backup_result restore_result
+  backup_dir="${RUNTIME_DATA_DIR}/.baas-bcs-sessions"
+  source_session="${LOCAL_BOTS_DIR}/staff_mock-user/default/openclaw/.bcs/session.json"
+  backup_session="${backup_dir}/staff_mock-user/default/openclaw/.bcs/session.json"
+  mkdir -p "$(dirname "$source_session")"
+  printf '%s\n' '{"bot_uuid":"source-bot"}' > "$source_session"
+
+  find() { return 23; }
+  if baas_backup_bcs_sessions "$backup_dir"; then
+    backup_result=0
+  else
+    backup_result=$?
+  fi
+  unset -f find
+
+  [ "$backup_result" -ne 0 ] || fail "BAAS backup should fail when session scan fails"
+  [ -f "$source_session" ] || fail "failed backup must keep source sessions"
+
+  mkdir -p "$(dirname "$backup_session")"
+  printf '%s\n' '{"bot_uuid":"backup-bot"}' > "$backup_session"
+  find() { return 23; }
+  if baas_restore_bcs_sessions "$backup_dir"; then
+    restore_result=0
+  else
+    restore_result=$?
+  fi
+  unset -f find
+
+  [ "$restore_result" -ne 0 ] || fail "BAAS restore should fail when session scan fails"
+  [ -f "$backup_session" ] || fail "failed restore must keep recovery data"
+}
+
 test_5bot_openclaw_config_is_written_private() {
   grep -F 'umask 077' "${ROOT}/src/bcs/scripts/start_bcs_bots.sh" >/dev/null || \
     fail "5bot openclaw config should be written under umask 077"
@@ -159,6 +281,10 @@ test_backend_wait_fails_when_started_process_exits
 test_service_modules_use_ownership_aware_stop_helpers
 test_service_starts_fail_when_ports_remain_occupied
 test_baas_stop_does_not_delegate_to_app_stop
+test_baas_bot_cleanup_preserves_bcs_sessions
+test_baas_session_backup_refuses_to_overwrite_stale_backup
+test_baas_session_backup_recovers_stale_backup_before_snapshot
+test_baas_session_scan_failure_keeps_source_and_backup
 test_5bot_openclaw_config_is_written_private
 test_ready_banner_describes_full_stack
 
