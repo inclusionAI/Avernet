@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Callable, cast  # noqa: UP035 - injector binding key must match provider side
 
-from injector import Injector, Module, inject, provider, singleton
+from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.core.bot_management.token_vault import TokenVault
@@ -50,6 +50,8 @@ from agentclaw.community.core.devices.services.device_service import (
     DeviceService,
 )
 from agentclaw.community.core.devices.services.device_service_router import DeviceServiceRouter
+from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
+from agentclaw.community.core.devices.services.local_device_accessor import LocalDeviceAccessor
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.notify.protocol import NotifyBotLister
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
@@ -57,6 +59,7 @@ from agentclaw.community.core.workspace.path_factory import _get_aidesktop_root
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
 from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
+from agentclaw.community.plugins.local.local_device_lifecycle import LocalDeviceLifecycle
 
 
 logger = get_logger()
@@ -65,7 +68,7 @@ logger = get_logger()
 class TestDevicesModule(Module):
     """Corp-free SQLite + local-mode overrides for devices (test / singlebox)."""
 
-    def configure(self, binder) -> None:
+    def configure(self, binder: Binder) -> None:
         """Rebind the prod Moltis ``DeviceConnectionManagerPlugin`` to the Noop.
 
         ``DevicesModule`` unconditionally binds the prod Moltis impl; local/SQLite
@@ -84,6 +87,9 @@ class TestDevicesModule(Module):
             to=NoopDeviceConnectionManagerPlugin,
             scope=singleton,
         )
+        binder.bind(LocalDeviceAccessor, to=LocalDeviceAccessor, scope=singleton)
+        binder.bind(DeviceAccessor, to=LocalDeviceAccessor, scope=singleton)
+        binder.bind(LocalDeviceLifecycle, to=LocalDeviceLifecycle, scope=singleton)
 
     @singleton
     @provider

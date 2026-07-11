@@ -1,0 +1,168 @@
+"""Singlebox BaaS-only device runtime bindings."""
+
+from __future__ import annotations
+
+from typing import cast  # noqa: UP035 - injector binding key matches provider side
+
+from injector import Binder, Module, inject, provider, singleton
+
+from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.bot_management.services.teclaw_status_reconciler import (
+    TeclawStatusReconciler,
+)
+from agentclaw.community.core.devices.protocols import BotQueryProtocol
+from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_policy import (
+    ArcaBotCreateBaasRolloutDecision,
+    ArcaBotCreateBaasRolloutPolicy,
+)
+from agentclaw.community.core.devices.services.baas_device_accessor import (
+    BaasDeviceAccessor,
+)
+from agentclaw.community.core.devices.services.baas_device_service import (
+    BaasDeviceService,
+)
+from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
+from agentclaw.community.core.devices.services.device_service import (
+    BAAS_DEVICE_PROVIDER,
+    DeviceService,
+)
+from agentclaw.community.core.devices.services.device_service_router import (
+    DeviceServiceRouter,
+)
+from agentclaw.community.core.notify.protocol import NotifyBotLister
+from agentclaw.community.core.system_config import SystemConfigService
+from agentclaw.community.di import config as cfg
+from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
+    BotPublishRepositoryProtocol,
+)
+from agentclaw.community.core.service_bot.services.baas_service import BaasService
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterTransport,
+)
+from agentclaw.community.plugin_api.device_connection_manager import (
+    DeviceConnectionManagerPlugin,
+)
+from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
+from agentclaw.community.di.modules.infrastructure.singlebox.template_config import (
+    SingleboxBaasTemplateConfigLifecycle,
+)
+
+
+class _SingleboxAllBaasRolloutPolicy(ArcaBotCreateBaasRolloutPolicy):
+    """Singlebox has no ARCA provider, so every allocation is BaaS-owned."""
+
+    def __init__(self) -> None:
+        pass
+
+    def decide(
+        self,
+        *,
+        user_id: str,
+        bot_type: str | None,
+        engine_type: str | None = None,
+        template_type: str | None = None,
+    ) -> ArcaBotCreateBaasRolloutDecision:
+        return ArcaBotCreateBaasRolloutDecision(
+            target_provider=BAAS_DEVICE_PROVIDER,
+            reason="singlebox_baas_only",
+            engine_bucket=self.normalize_engine_bucket(
+                engine_type=engine_type,
+                template_type=template_type,
+            ),
+        )
+
+
+class SingleboxDevicesModule(Module):
+    """Bind singlebox to the real BaaS domain provider over local HTTP."""
+
+    def configure(self, binder: Binder) -> None:
+        from agentclaw.community.plugins.local.device_connection_manager import (
+            NoopDeviceConnectionManagerPlugin,
+        )
+
+        binder.bind(
+            DeviceConnectionManagerPlugin,
+            to=NoopDeviceConnectionManagerPlugin,
+            scope=singleton,
+        )
+        binder.bind(DeviceAccessor, to=BaasDeviceAccessor, scope=singleton)
+
+    @singleton
+    @provider
+    @inject
+    def singlebox_baas_template_config_lifecycle(
+        self,
+        config_service: SystemConfigService,
+        baas: cfg.BaasConfig,
+    ) -> SingleboxBaasTemplateConfigLifecycle:
+        return SingleboxBaasTemplateConfigLifecycle(
+            config_service=config_service,
+            template_uuid=baas.template_uuid,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def device_service(
+        self,
+        baas_device_service: BaasDeviceService,
+        repository: DeviceBindingRepository,
+        bot_repository: BotRepository,
+        bot_publish_repo: BotPublishRepositoryProtocol,
+        passport_plugin: PassportPlugin,
+        sandbox_client: SandboxRuntimeClient,
+    ) -> DeviceService:
+        bot_query = cast(BotQueryProtocol, bot_repository)
+        providers: dict[str, DeviceService] = {
+            BAAS_DEVICE_PROVIDER: baas_device_service,
+        }
+        return DeviceServiceRouter(
+            repository=repository,
+            bot_query=bot_query,
+            providers=providers,
+            default_provider_key=BAAS_DEVICE_PROVIDER,
+            arca_baas_rollout_policy=_SingleboxAllBaasRolloutPolicy(),
+            passport_plugin=passport_plugin,
+            sandbox_client=sandbox_client,
+            publish_repo=bot_publish_repo,
+            bot_repo=bot_repository,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def teclaw_status_reconciler(
+        self,
+        baas_service: BaasService,
+        bot_repository: BotRepository,
+        device_binding_repo: DeviceBindingRepository,
+    ) -> TeclawStatusReconciler:
+        """Keep background reconciliation disabled in the local stack."""
+        return TeclawStatusReconciler(
+            baas_service=baas_service,
+            bot_repository=bot_repository,
+            device_binding_repo=device_binding_repo,
+            schedule=lambda _fn, _delay: None,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def notify_bot_lister(self, bot_repository: BotRepository) -> NotifyBotLister:
+        from agentclaw.community.core.notify.local_bot_lister import (
+            LocalNotifyBotLister,
+        )
+
+        return LocalNotifyBotLister(bot_repository=bot_repository)
+
+    @singleton
+    @provider
+    def device_adapter_transport(self) -> DeviceAdapterTransport:
+        """Preserve the current in-memory adapter seam in the OSS singlebox."""
+        from agentclaw.community.plugins.local.device_adapter_transport import (
+            InMemoryDeviceAdapterTransport,
+        )
+
+        return InMemoryDeviceAdapterTransport()
