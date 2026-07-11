@@ -149,6 +149,64 @@ class NotifyLogRepository:
             )
             return [(r.bot_id, r.owner_id) for r in rows]
 
+    def list_ticket_ids_open_muted(
+        self, *, only_unresponded: bool = False,
+    ) -> list[str]:
+        """Distinct non-None ``ticket_id`` set for open/muted notifications.
+
+        Mirrors the filter of :meth:`bulk_close_open_muted` so the caller can
+        pre-collect the affected ticket set (Task 8 aligns ticket/notify sets).
+        ``only_unresponded=True`` adds ``response IS NULL`` (cancel_pending
+        scope); ``False`` is the close_all_open scope. Duplicates de-duped;
+        ``None`` ticket_ids (nullable at ORM level but non-None at creation)
+        filtered out.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            q = (
+                s.query(GovernanceNotificationOrm.ticket_id)
+                .filter(
+                    GovernanceNotificationOrm.governance_status.in_(
+                        [GovernanceStatus.OPEN, "muted"],
+                    ),
+                    GovernanceNotificationOrm.env == _env,
+                    GovernanceNotificationOrm.ticket_id.isnot(None),
+                )
+            )
+            if only_unresponded:
+                q = q.filter(GovernanceNotificationOrm.response.is_(None))
+            rows = q.distinct().all()
+            return [r.ticket_id for r in rows]
+
+    def list_ticket_ids_by_bots(
+        self, bot_ids: list[str],
+    ) -> list[str]:
+        """Distinct non-None ``ticket_id`` set for the given bots (unresponded).
+
+        Mirrors the filter of :meth:`bulk_cancel_by_bots` (``bot_id IN (...)``
+        + ``response IS NULL`` + open/muted) so bulk_whitelist can pre-collect
+        the affected ticket set. ``None`` ticket_ids filtered out.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            rows = (
+                s.query(GovernanceNotificationOrm.ticket_id)
+                .filter(
+                    GovernanceNotificationOrm.bot_id.in_(bot_ids),
+                    GovernanceNotificationOrm.response.is_(None),
+                    GovernanceNotificationOrm.governance_status.in_(
+                        [GovernanceStatus.OPEN, "muted"],
+                    ),
+                    GovernanceNotificationOrm.env == _env,
+                    GovernanceNotificationOrm.ticket_id.isnot(None),
+                )
+                .distinct()
+                .all()
+            )
+            return [r.ticket_id for r in rows]
+
     def count_open_muted(
         self,
     ) -> int:

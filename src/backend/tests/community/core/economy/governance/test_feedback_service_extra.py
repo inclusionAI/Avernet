@@ -28,6 +28,9 @@ from agentclaw.community.core.economy.governance.repositories.task_record_repo i
 from agentclaw.community.core.economy.governance.services.feedback_service import (
     GovernanceFeedbackService,
 )
+from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+    GovernanceLifecycleService,
+)
 
 from .conftest import FakeDB, FakeGovernanceConfig, FakeWhitelistService
 
@@ -109,12 +112,26 @@ def _make_notification(session, **overrides):
 def _make_svc(engine, whitelist_service=None):
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     db = FakeDB(lambda: Session(bind=engine))
+    notify_repo = NotifyLogRepository(db=db)
+    task_repo = TaskRecordRepository(db=db)
+    audit_repo = GovernanceAuditRepository(db=db)
+    wl_svc = whitelist_service or FakeWhitelistService()
+    # whitelist-add side effect is owned by feedback_service (not the driver)
+    # to keep lifecycle_service free of a whitelist_service dependency. Wire
+    # the same wl_svc into the feedback_service — keeps the raise-failure
+    # test exercising feedback_service's whitelist-add swallow path.
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     return GovernanceFeedbackService(
-        whitelist_service=whitelist_service or FakeWhitelistService(),
-        notify_repo=NotifyLogRepository(db=db),
-        task_repo=TaskRecordRepository(db=db),
-        audit_repo=GovernanceAuditRepository(db=db),
+        whitelist_service=wl_svc,
+        notify_repo=notify_repo,
+        task_repo=task_repo,
+        audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
+        lifecycle_svc=lifecycle_svc,
     )
 
 

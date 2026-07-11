@@ -30,6 +30,9 @@ from agentclaw.community.core.economy.governance.services.record_process_service
     OfflineBatchResult,
 )
 from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
+from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+    GovernanceLifecycleService,
+)
 
 from .conftest import FakeDB, FakeGovernanceConfig
 
@@ -38,19 +41,29 @@ from .conftest import FakeDB, FakeGovernanceConfig
 
 
 def _build_svc(engine):
-    """Build GovernanceRecordService with in-memory DB."""
+    """Build GovernanceRecordService with in-memory DB.
+
+    The real ``GovernanceLifecycleService`` (sole ticket-machine driver) is
+    wired in — record_process delegates open/close/refresh to it.
+    """
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     db = FakeDB(lambda: Session(bind=engine))
     task_repo = TaskRecordRepository(db=db)
     whitelist_repo = GovernanceWhitelistRepository(db=db)
     notify_repo = NotifyLogRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     svc = GovernanceRecordService(
         task_repo=task_repo,
         whitelist_repo=whitelist_repo,
         notify_repo=notify_repo,
         audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
+        lifecycle_svc=lifecycle_svc,
     )
     return svc, db
 

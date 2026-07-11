@@ -40,6 +40,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
         TaskRecordRepository,
     )
+    from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+        GovernanceLifecycleService,
+    )
     from agentclaw.community.core.economy.governance.services.whitelist_service import (
         GovernanceWhitelistService,
     )
@@ -112,12 +115,19 @@ class GovernanceFeedbackService:
         audit_repo: GovernanceAuditRepository,
         task_repo: TaskRecordRepository,
         config: Any,  # EconomyGovernanceConfig
+        lifecycle_svc: GovernanceLifecycleService,
     ) -> None:
+        # ``whitelist_service`` / ``notify_repo`` retained as injected deps
+        # (constructor signature stable across migration); the resolve path
+        # now delegates whitelist-add + cancel-pending to lifecycle_svc, so
+        # these are read only by future admin/review paths. Group C cleanup
+        # may drop them if confirmed unused.
         self._whitelist_service = whitelist_service
         self._notify_repo = notify_repo
         self._audit_repo = audit_repo
         self._task_repo = task_repo
         self._config = config
+        self._lifecycle_svc = lifecycle_svc
 
     def resolve(
         self,
@@ -279,8 +289,11 @@ class GovernanceFeedbackService:
                     notification_id=notification_id,
                 )
 
-        # Update ticket via Repo command method
-        updated = self._task_repo.accept_feedback(
+        # Advance ticket state via the driver service (sole driver). The
+        # driver orchestrates: state transition (guard-activated) + cancel
+        # pending notifies. Pre-business checks (one-time rule, response
+        # validity, remark/deadline requirements) stay here in feedback_service.
+        updated = self._lifecycle_svc.accept_feedback(
             ticket.ticket_id,
             user_feedback=response,
             feedback_at=now,
@@ -301,13 +314,11 @@ class GovernanceFeedbackService:
                 notification_id=notification_id,
             )
 
-        # Cancel pending notifies (§7.4.2 footnote) — self-managed session
-        if ticket.ticket_id:
-            self._notify_repo.cancel_pending_by_ticket(
-                ticket.ticket_id,
-            )
-
-        # Whitelist → also add to whitelist table
+        # Whitelist feedback → add to the whitelist table. Owned by
+        # feedback_service (not the driver) to keep lifecycle_service free of
+        # a whitelist_service dependency (breaks the whitelist↔lifecycle DI
+        # cycle). Source & created_by carry the rich feedback semantics
+        # (effective_user_id = owner; original source e.g. card_callback).
         if response == Response.WHITELIST:
             try:
                 self._whitelist_service.add(
@@ -323,7 +334,9 @@ class GovernanceFeedbackService:
                     ticket.bot_id,
                 )
 
-        # Audit (§7.4.3)
+        # Audit (§7.4.3) — feedback_service keeps its per-response audit
+        # (USER_OPTIMIZED / USER_NEED_TIME / USER_DISPUTE / USER_WHITELIST),
+        # which the driver does not duplicate.
         _RESPONSE_AUDIT_MAP: dict[str, str] = {
             Response.OPTIMIZED: AuditAction.USER_OPTIMIZED,
             Response.NEED_TIME: AuditAction.USER_NEED_TIME,

@@ -14,25 +14,13 @@ from __future__ import annotations
 
 import os
 
-from injector import Binder, Module, inject, provider, singleton
-
-from agentclaw.community.core.economy.governance.services.admin_service import (
-    GovernanceAdminService,
-)
-from agentclaw.community.core.economy.governance.services.feedback_service import (
-    GovernanceFeedbackService,
-)
-from agentclaw.community.core.economy.governance.services.whitelist_service import (
-    GovernanceWhitelistService,
-)
-from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-    NotifyLogRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.audit_repo import (
-    GovernanceAuditRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
-    TaskRecordRepository,
+from agentclaw.community.api.governance_service import (
+    GovernanceAdminServiceProtocol,
+    GovernanceBotServiceProtocol,
+    GovernanceFeedbackServiceProtocol,
+    GovernanceLifecycleServiceProtocol,
+    GovernanceRecordProcessProtocol,
+    GovernanceWhitelistServiceProtocol,
 )
 from agentclaw.community.core.economy.governance.domain.protocols import (
     AuditRepositoryProtocol,
@@ -40,27 +28,43 @@ from agentclaw.community.core.economy.governance.domain.protocols import (
     TaskRecordRepositoryProtocol,
     WhitelistRepositoryProtocol,
 )
-from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
-from agentclaw.community.api.governance_service import (
-    GovernanceAdminServiceProtocol,
-    GovernanceBotServiceProtocol,
-    GovernanceFeedbackServiceProtocol,
-    GovernanceRecordProcessProtocol,
-    GovernanceWhitelistServiceProtocol,
+from agentclaw.community.core.economy.governance.lifecycle import GovernanceBotLifecycle
+from agentclaw.community.core.economy.governance.repositories.audit_repo import (
+    GovernanceAuditRepository,
 )
-from agentclaw.community.core.economy.governance.services.scan_service import GovernanceBotService
-from agentclaw.community.core.economy.governance.services.record_process_service import (
-    GovernanceRecordService,
+from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
+    NotifyLogRepository,
+)
+from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
+    TaskRecordRepository,
 )
 from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
     GovernanceWhitelistRepository,
 )
+from agentclaw.community.core.economy.governance.services.admin_service import (
+    GovernanceAdminService,
+)
+from agentclaw.community.core.economy.governance.services.feedback_service import (
+    GovernanceFeedbackService,
+)
+from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+    GovernanceLifecycleService,
+)
+from agentclaw.community.core.economy.governance.services.record_process_service import (
+    GovernanceRecordService,
+)
+from agentclaw.community.core.economy.governance.services.scan_service import GovernanceBotService
+from agentclaw.community.core.economy.governance.services.whitelist_service import (
+    GovernanceWhitelistService,
+)
 from agentclaw.community.di.config import EconomyGovernanceConfig
-from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.economy.governance.lifecycle import GovernanceBotLifecycle
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
+from agentclaw.community.utils.env_utils import get_current_env
+from injector import Binder, Module, inject, provider, singleton
+
 
 logger = get_logger()
 
@@ -138,10 +142,12 @@ class EconomyGovernanceModule(Module):
         audit_repo: GovernanceAuditRepository,
         task_repo: TaskRecordRepository,
         config: EconomyGovernanceConfig,
+        lifecycle_service: GovernanceLifecycleService,
     ) -> GovernanceFeedbackService:
         return GovernanceFeedbackService(
             whitelist_service=whitelist_service, notify_repo=notify_repo,
             audit_repo=audit_repo, task_repo=task_repo, config=config,
+            lifecycle_svc=lifecycle_service,
         )
 
     @singleton
@@ -153,10 +159,36 @@ class EconomyGovernanceModule(Module):
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         config: EconomyGovernanceConfig,
+        lifecycle_service: GovernanceLifecycleService,
     ) -> GovernanceWhitelistService:
+        # Circular DI (whitelist_service ↔ lifecycle_service) is resolved by
+        # injector's singleton providers at injection time — no runtime cycle.
         return GovernanceWhitelistService(
             whitelist_repo=whitelist_repo, notify_repo=notify_repo,
             audit_repo=audit_repo, config=config,
+            lifecycle_svc=lifecycle_service,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def _lifecycle_service(
+        self,
+        task_repo: TaskRecordRepository,
+        notify_repo: NotifyLogRepository,
+        audit_repo: GovernanceAuditRepository,
+    ) -> GovernanceLifecycleService:
+        """Construct GovernanceLifecycleService — sole driver of the ticket
+        main state machine (Rule 14). Injected into the entry services
+        (Feedback/Admin/Bot/Record/Whitelist). Deliberately has NO
+        whitelist_service dependency — the whitelist-add side effect of
+        accept_feedback is owned by feedback_service, and whitelist_service's
+        bulk_whitelist ticket-close calls back into this driver; keeping
+        whitelist_service out of this constructor breaks the DI cycle."""
+        return GovernanceLifecycleService(
+            task_repo=task_repo,
+            notify_repo=notify_repo,
+            audit_repo=audit_repo,
         )
 
     @singleton
@@ -171,6 +203,7 @@ class EconomyGovernanceModule(Module):
         task_repo: TaskRecordRepository,
         config: EconomyGovernanceConfig,
         notify_sender: NotifySenderPlugin,
+        lifecycle_service: GovernanceLifecycleService,
     ) -> GovernanceAdminService:
         return GovernanceAdminService(
             cache=cache,
@@ -179,6 +212,7 @@ class EconomyGovernanceModule(Module):
             task_repo=task_repo,
             config=config,
             notify_sender=notify_sender,
+            lifecycle_svc=lifecycle_service,
         )
 
     @singleton
@@ -200,6 +234,7 @@ class EconomyGovernanceModule(Module):
         audit_repo: GovernanceAuditRepository,
         config: EconomyGovernanceConfig,
         notify_sender: NotifySenderPlugin,
+        lifecycle_service: GovernanceLifecycleService,
     ) -> GovernanceBotService:
         """Construct GovernanceBotService."""
         return GovernanceBotService(
@@ -209,6 +244,7 @@ class EconomyGovernanceModule(Module):
             audit_repo=audit_repo,
             config=config,
             notify_sender=notify_sender,
+            lifecycle_svc=lifecycle_service,
         )
 
     @singleton
@@ -221,6 +257,7 @@ class EconomyGovernanceModule(Module):
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         config: EconomyGovernanceConfig,
+        lifecycle_service: GovernanceLifecycleService,
     ) -> GovernanceRecordService:
         """Construct GovernanceRecordService."""
         return GovernanceRecordService(
@@ -229,6 +266,7 @@ class EconomyGovernanceModule(Module):
             notify_repo=notify_repo,
             audit_repo=audit_repo,
             config=config,
+            lifecycle_svc=lifecycle_service,
         )
 
     # -----------------------------------------------------------------
@@ -289,6 +327,18 @@ class EconomyGovernanceModule(Module):
     def _whitelist_service_protocol(
         self, svc: GovernanceWhitelistService,
     ) -> GovernanceWhitelistServiceProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _lifecycle_service_protocol(
+        self, svc: GovernanceLifecycleService,
+    ) -> GovernanceLifecycleServiceProtocol:
+        """Rule 14 binding: router/other services inject the service Protocol
+        rather than the concrete class (avoids ``Protocols cannot be
+        instantiated``). Service Protocol, not a Plugin — conformance pinned
+        by the contract suite + grep guard (see test_governance_lifecycle)."""
         return svc
 
     # -----------------------------------------------------------------

@@ -303,6 +303,9 @@ class GovernanceTicket:
         self.review_reason = review_reason
         self.actor_id = actor_id
         self.feedback_payload = feedback_payload
+        # 对齐 repo accept_feedback L190:离开 open 态时清 remind_at,
+        # 避免残留 remind_at 触发 stale 提醒(TC-37)。review §LOW。
+        self.remind_at = None
 
     def close(
         self,
@@ -317,21 +320,82 @@ class GovernanceTicket:
             close_reason: 关闭原因。
             closed_at: 关闭时间。
             cooldown_until: 冷却截止时间。
+
+        逐字段对齐 repo ``close_ticket`` L226-237:
+        governance_status='closed' / close_reason / closed_at / remind_at=None /
+        cooldown_until(仅当传入) / active_worker=None(closed 释放)。
         """
         self.transition_to(GovernanceStatus.CLOSED)
         self.close_reason = close_reason
         self.closed_at = closed_at
         self.cooldown_until = cooldown_until
         self.assignee = None  # closed 释放 active_worker
+        self.remind_at = None  # 对齐 repo L229,默认 None 清空
 
     def pause(self, *, review_reason: str) -> None:
         """暂停工单 — 进入 waiting_review。
 
         Args:
             review_reason: 暂停原因(admin_paused/schedule_due/...)。
+
+        逐字段对齐 repo ``pause_ticket`` L270-272:
+        governance_status='waiting_review' / review_reason / remind_at=None。
         """
         self.transition_to(GovernanceStatus.WAITING_REVIEW)
         self.review_reason = review_reason
+        self.remind_at = None  # 对齐 repo L272,默认 None 清空
+
+    def review(
+        self,
+        *,
+        review_decision: str,
+        reviewed_by: str,
+        reviewed_at: datetime | None = None,
+        review_remark: str | None = None,
+        close_reason: str | None = None,
+        cooldown_until: datetime | None = None,
+    ) -> None:
+        """管理员审核 — WAITING_REVIEW → CLOSED(三态分支)。
+
+        Args:
+            review_decision: 审核决策(approve_close / approve_whitelist /
+                reject_for_reopen)。
+            reviewed_by: 审核人 ID。
+            reviewed_at: 审核时间(None → 取 now)。
+            review_remark: 审核备注。
+            close_reason: 关闭原因(None 时按 review_decision 取默认)。
+            cooldown_until: 冷却截止时间(仅 approve_close 可带)。
+
+        逐字段对齐 repo ``review_ticket`` L310-341:
+          - review_decision / reviewed_by / reviewed_at(默认 now) /
+            review_remark / remind_at=None(无条件清,L314)
+          - 三态分支:
+            approve_close    → close_reason=close_reason|'approve_close',
+                              可带 cooldown_until
+            approve_whitelist→ close_reason='whitelisted'
+            reject_for_reopen→ close_reason='review_rejected'(打回仍关闭,
+                              下个 scan 重建 open 单)
+          - 共性:closed_at=now、active_worker=None(释放,L320/327/336/341)
+        """
+        self.transition_to(GovernanceStatus.CLOSED)
+        now = datetime.now()
+        self.review_decision = review_decision
+        self.reviewed_by = reviewed_by
+        self.reviewed_at = reviewed_at or now
+        self.review_remark = review_remark
+        self.closed_at = now
+        self.remind_at = None  # 无条件清,对齐 repo L314
+        self.assignee = None   # 释放 active_worker
+        if review_decision == "approve_close":
+            self.close_reason = close_reason or "approve_close"
+            if cooldown_until is not None:
+                self.cooldown_until = cooldown_until
+        elif review_decision == "approve_whitelist":
+            self.close_reason = close_reason or "whitelisted"
+        elif review_decision == "reject_for_reopen":
+            self.close_reason = close_reason or "review_rejected"
+        else:
+            self.close_reason = close_reason or review_decision
 
     def resume(self) -> None:
         """恢复暂停工单 — waiting_review → open。"""

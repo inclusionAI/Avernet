@@ -1,7 +1,13 @@
 """TaskRecord repository — ``ac_governance_task_record_daily`` ticket lifecycle.
 
-Ticket CRUD (query), lifecycle mutations, admin delete/count, and test
-seeding for the governance task_record_daily table.
+方案 A:本 repo **退化为加载-持久化原语**,不含状态机推进。查询方法
+(find_/list_/count_)继承自 :class:`TaskRecordQueryMixin`;本类保留
+``__init__``、持久化原语(``save_ticket`` / ``_save_ticket_with_snapshot`` /
+``add_ticket``)、唯一豁免的批量原语 ``bulk_close_open``(SQL WHERE 守卫)、
+admin delete/count、test seeding。**状态机推进全部上移** 到
+:class:`GovernanceLifecycleService`(find→领域守卫→save),入口服务(三渠道)
+只调驱动服务、不再调本 repo 语义 command —— 方案 A"唯一驱动者"由分层保证。
+本 repo 残留的 9 个语义 command 已在 Task 9 删除(双 grep 守卫锁住)。
 
 Follows the ``DatabasePlugin`` self-managed session pattern
 (see ``harness_patch_record_repository``): each method opens its
@@ -12,9 +18,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from injector import inject
-from sqlalchemy import func
-
+from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
 from agentclaw.community.core.economy.governance.repositories.orm import GovernanceTicketOrm
 from agentclaw.community.core.economy.governance.repositories.task_record_query import (
     TaskRecordQueryMixin,
@@ -22,6 +26,8 @@ from agentclaw.community.core.economy.governance.repositories.task_record_query 
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
+from injector import inject
+from sqlalchemy import func
 
 
 log = get_logger(__name__)
@@ -119,35 +125,22 @@ class TaskRecordRepository(TaskRecordQueryMixin):
             s.flush()
             return row.ticket_id
 
-    def accept_feedback(
-        self,
-        ticket_id: str,
-        *,
-        user_feedback: str,
-        feedback_at: datetime,
-        feedback_source: str,
-        target_status: str,
-        feedback_remark: str | None = None,
-        repair_deadline: datetime | None = None,
-        resume_at: datetime | None = None,
-        review_reason: str | None = None,
-        actor_id: str | None = None,
-        feedback_payload: str | None = None,
-    ) -> bool:
-        """Accept user feedback on a ticket (aligned with Protocol signature).
+    def save_ticket(self, ticket: GovernanceTicket) -> bool:
+        """Persist a (mutated) domain ticket back to its row (方案 A primitive).
 
-        Args:
-            ticket_id: Ticket stable UUID.
-            user_feedback: Feedback type (optimized/need_time/dispute/whitelist).
-            feedback_at: Feedback timestamp.
-            feedback_source: Feedback origin (http_api/card_callback/admin_api).
-            target_status: Target governance_status (scheduled/waiting_review).
-            feedback_remark: Optional user remark.
-            repair_deadline: Repair deadline (need_time required).
-            resume_at: Resume time (need_time: repair_deadline + cooldown_days).
-            review_reason: Review reason (for non-need_time feedbacks).
-            actor_id: Actor who submitted the feedback.
-            feedback_payload: Structured feedback JSON.
+        Loads the existing ORM row by ``ticket_id`` (env-scoped), writes the
+        model's mutable lifecycle state back via ``apply_to`` (snapshot and
+        sealed columns untouched), and commits. This is the **sole
+        persistence primitive** for state-machine transitions driven by
+        ``GovernanceLifecycleService`` — repo holds no semantic transition
+        command; the caller (driver service) invokes the model's guarded
+        state-machine method before calling this.
+
+        ``apply_to`` writes only lifecycle fields (governance_status /
+        close_reason / closed_at / remind_at / active_worker / ...), so this
+        is correct for state transitions (which do not change the snapshot).
+        For snapshot refresh (``refresh_snapshot`` path), the driver uses
+        ``to_orm`` instead — see ``_save_ticket_with_snapshot``.
 
         Returns True if the ticket was found and updated, False if not found.
         """
@@ -156,39 +149,14 @@ class TaskRecordRepository(TaskRecordQueryMixin):
             db_ticket = (
                 s.query(GovernanceTicketOrm)
                 .filter(
-                    GovernanceTicketOrm.ticket_id == ticket_id,
+                    GovernanceTicketOrm.ticket_id == ticket.ticket_id,
                     GovernanceTicketOrm.env == _env,
                 )
                 .one_or_none()
             )
             if db_ticket is None:
                 return False
-
-            # domain → ORM 列名映射
-            db_ticket.response = user_feedback
-            db_ticket.response_at = feedback_at
-            db_ticket.response_remark = feedback_remark
-            db_ticket.response_source = feedback_source
-            db_ticket.actor_id = actor_id
-            db_ticket.governance_status = target_status
-
-            if feedback_payload is not None:
-                db_ticket.feedback_payload = feedback_payload
-
-            if user_feedback == "need_time":
-                db_ticket.repair_deadline = repair_deadline
-                db_ticket.mute_until = resume_at
-            else:
-                db_ticket.review_reason = review_reason
-
-            # Clear remind_at on feedback transitions — both target states
-            # (waiting_review / scheduled) are blocked: scan/reminder/dispatch all
-            # gate on governance_status='open', so a leftover remind_at would be a
-            # dead, semantically-wrong field. Mirrors ``pause_ticket``/``close_ticket``
-            # which also null remind_at when leaving the open state. Fixes TC-37
-            # (waiting_review ticket upload refresh must not see a stale remind_at).
-            db_ticket.remind_at = None
-
+            ticket.apply_to(db_ticket)
             try:
                 s.commit()
             except Exception:
@@ -196,17 +164,14 @@ class TaskRecordRepository(TaskRecordQueryMixin):
                 raise
             return True
 
-    def close_ticket(
-        self,
-        ticket_id: str,
-        *,
-        close_reason: str,
-        closed_at: datetime | None = None,
-        cooldown_until: datetime | None = None,
-        assignee: str | None = None,
-        remind_at: datetime | None = None,
-    ) -> bool:
-        """Close a ticket (aligned with Protocol: assignee, not active_worker).
+    def _save_ticket_with_snapshot(self, ticket: GovernanceTicket) -> bool:
+        """Persist a ticket whose **snapshot** changed (方案 A primitive).
+
+        Unlike ``save_ticket`` (which uses ``apply_to`` and skips the
+        snapshot), this uses ``to_orm`` to write the full row — snapshot +
+        lifecycle + identity. Used by the driver's ``refresh_snapshot`` path
+        (offline-batch snapshot refresh is the only transition-class operation
+        that mutates the snapshot; ``governance_status`` is unchanged).
 
         Returns True if the ticket was found and updated, False if not found.
         """
@@ -215,301 +180,20 @@ class TaskRecordRepository(TaskRecordQueryMixin):
             db_ticket = (
                 s.query(GovernanceTicketOrm)
                 .filter(
-                    GovernanceTicketOrm.ticket_id == ticket_id,
+                    GovernanceTicketOrm.ticket_id == ticket.ticket_id,
                     GovernanceTicketOrm.env == _env,
                 )
                 .one_or_none()
             )
             if db_ticket is None:
                 return False
-
-            db_ticket.governance_status = "closed"
-            db_ticket.close_reason = close_reason
-            db_ticket.closed_at = closed_at or datetime.now()
-            db_ticket.remind_at = remind_at
-
-            if cooldown_until is not None:
-                db_ticket.cooldown_until = cooldown_until
-            # assignee → active_worker (ORM column)
-            if assignee is not None:
-                db_ticket.active_worker = assignee
-            else:
-                db_ticket.active_worker = None  # Release on close
-
+            ticket.to_orm(db_ticket)
             try:
                 s.commit()
             except Exception:
                 s.rollback()
                 raise
             return True
-
-    def pause_ticket(
-        self,
-        ticket_id: str,
-        *,
-        review_reason: str,
-        remind_at: datetime | None = None,
-    ) -> bool:
-        """Pause a ticket to waiting_review (replaces pause / schedule_due session blocks).
-
-        Returns True if the ticket was found and updated, False if not found.
-        """
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            db_ticket = (
-                s.query(GovernanceTicketOrm)
-                .filter(
-                    GovernanceTicketOrm.ticket_id == ticket_id,
-                    GovernanceTicketOrm.env == _env,
-                )
-                .one_or_none()
-            )
-            if db_ticket is None:
-                return False
-
-            db_ticket.governance_status = "waiting_review"
-            db_ticket.review_reason = review_reason
-            db_ticket.remind_at = remind_at
-
-            try:
-                s.commit()
-            except Exception:
-                s.rollback()
-                raise
-            return True
-
-    def review_ticket(
-        self,
-        ticket_id: str,
-        *,
-        review_decision: str,
-        reviewed_by: str,
-        reviewed_at: datetime | None = None,
-        review_remark: str | None = None,
-        close_reason: str | None = None,
-        cooldown_until: datetime | None = None,
-        remind_at: datetime | None = None,
-    ) -> bool:
-        """Review a ticket (replaces admin_service review_ticket session block).
-
-        Returns True if the ticket was found and updated, False if not found.
-        """
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            db_ticket = (
-                s.query(GovernanceTicketOrm)
-                .filter(
-                    GovernanceTicketOrm.ticket_id == ticket_id,
-                    GovernanceTicketOrm.env == _env,
-                )
-                .one_or_none()
-            )
-            if db_ticket is None:
-                return False
-
-            db_ticket.review_decision = review_decision
-            db_ticket.reviewed_by = reviewed_by
-            db_ticket.reviewed_at = reviewed_at or datetime.now()
-            db_ticket.review_remark = review_remark
-            db_ticket.remind_at = remind_at
-
-            if review_decision == "approve_close":
-                db_ticket.governance_status = "closed"
-                db_ticket.close_reason = close_reason or review_decision
-                db_ticket.closed_at = datetime.now()
-                db_ticket.active_worker = None
-                if cooldown_until is not None:
-                    db_ticket.cooldown_until = cooldown_until
-            elif review_decision == "approve_whitelist":
-                db_ticket.governance_status = "closed"
-                db_ticket.close_reason = close_reason or "whitelisted"
-                db_ticket.closed_at = datetime.now()
-                db_ticket.active_worker = None
-            elif review_decision == "reject_for_reopen":
-                # Close the ticket (no cooldown) so the next scan cycle
-                # creates a fresh open ticket — consistent with the
-                # service-layer return value (governance_status="closed",
-                # close_reason="review_rejected").
-                db_ticket.governance_status = "closed"
-                db_ticket.close_reason = close_reason or "review_rejected"
-                db_ticket.closed_at = datetime.now()
-                db_ticket.active_worker = None
-            else:
-                db_ticket.governance_status = "closed"
-                db_ticket.close_reason = close_reason or review_decision
-                db_ticket.closed_at = datetime.now()
-                db_ticket.active_worker = None
-
-            try:
-                s.commit()
-            except Exception:
-                s.rollback()
-                raise
-            return True
-
-    def refresh_snapshot(
-        self,
-        ticket_id: str,
-        *,
-        dt_version: str,
-        last_seen_at: datetime | None = None,
-        last_sync_at: datetime | None = None,
-        bot_name: str | None = None,
-        initial_decision: str | None = None,
-        triggered_dimensions: str | None = None,
-        hit_dimensions_count: int | None = None,
-        severity: str | None = None,
-        estimated_saving_tokens: int | None = None,
-        saving_ratio: float | None = None,
-        task_summary: str | None = None,
-        notification_structured: str | None = None,
-        analysis_status: str | None = None,
-        current_decision: str | None = None,
-        consecutive_normal_days: int = 0,
-        last_decision_dt_version: str | None = None,
-        remind_at: datetime | None | object = "",
-    ) -> bool:
-        """Refresh ticket snapshot from offline batch (aligned with Protocol).
-
-        Parameter names use domain terminology; internal mapping writes
-        the corresponding ORM column names.
-
-        Returns True if the ticket was found and updated, False if not found.
-        """
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            db_ticket = (
-                s.query(GovernanceTicketOrm)
-                .filter(
-                    GovernanceTicketOrm.ticket_id == ticket_id,
-                    GovernanceTicketOrm.env == _env,
-                )
-                .one_or_none()
-            )
-            if db_ticket is None:
-                return False
-
-            db_ticket.dt_version = dt_version
-            if last_seen_at is not None:
-                db_ticket.last_seen_at = last_seen_at
-            if last_sync_at is not None:
-                db_ticket.last_sync_at = last_sync_at
-            # domain → ORM 列名映射
-            if bot_name is not None:
-                db_ticket.bot_name = bot_name
-            if initial_decision is not None:
-                db_ticket.governance_decision = initial_decision
-            if triggered_dimensions is not None:
-                db_ticket.hit_dimensions = triggered_dimensions
-            if hit_dimensions_count is not None:
-                db_ticket.hit_dimensions_count = hit_dimensions_count
-            if severity is not None:
-                db_ticket.governance_max_priority = severity
-            if estimated_saving_tokens is not None:
-                db_ticket.expected_token_saving = estimated_saving_tokens
-            if saving_ratio is not None:
-                db_ticket.saving_ratio = saving_ratio
-            if task_summary is not None:
-                db_ticket.task_summary = task_summary
-            if notification_structured is not None:
-                db_ticket.notification_structured = notification_structured
-            if analysis_status is not None:
-                db_ticket.analysis_status = analysis_status
-            if current_decision is not None:
-                db_ticket.latest_decision = current_decision
-            if consecutive_normal_days is not None:
-                db_ticket.consecutive_normal_days = consecutive_normal_days
-            if last_decision_dt_version is not None:
-                db_ticket.last_decision_dt_version = last_decision_dt_version
-            # Sentinel: "" = don't touch (default), datetime = set, None = clear.
-            # `if remind_at != ""` lets None through (None != "" is True) so the
-            # branch assigns db_ticket.remind_at = None → clears it. The previous
-            # `is not None` guard blocked None, making the "None = clear" sentinel
-            # documented in record_process_service impossible to apply.
-            if remind_at != "":
-                db_ticket.remind_at = remind_at
-
-            try:
-                s.commit()
-            except Exception:
-                s.rollback()
-                raise
-            return True
-
-    def advance_reminder(
-        self,
-        ticket_id: str,
-        *,
-        remind_at: datetime | None = None,
-        is_reminder: bool = False,
-        remind_count_delta: int = 0,
-    ) -> bool:
-        """Advance reminder chain on a ticket (replaces _advance_reminder_chain session).
-
-        Args:
-            ticket_id: The ticket to update.
-            remind_at: New remind_at value (None = clear).
-            is_reminder: If True, increment remind_count by remind_count_delta.
-            remind_count_delta: How many to add to remind_count (typically 1).
-
-        Returns True if the ticket was found and updated, False if not found.
-        """
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            db_ticket = (
-                s.query(GovernanceTicketOrm)
-                .filter(
-                    GovernanceTicketOrm.ticket_id == ticket_id,
-                    GovernanceTicketOrm.env == _env,
-                )
-                .one_or_none()
-            )
-            if db_ticket is None:
-                return False
-
-            db_ticket.remind_at = remind_at
-            if is_reminder and remind_count_delta:
-                db_ticket.remind_count = (db_ticket.remind_count or 0) + remind_count_delta
-
-            try:
-                s.commit()
-            except Exception:
-                s.rollback()
-                raise
-            return True
-
-    def transition_schedule_due(
-        self,
-        ticket_id: str,
-        *,
-        review_reason: str = "schedule_due",
-        remind_at: datetime | None = None,
-    ) -> bool:
-        """Scheduled → waiting_review when mute period expires (§7.3.4).
-
-        Delegates to pause_ticket which sets governance_status=waiting_review.
-
-        Returns True if the ticket was found and updated, False if not found.
-        """
-        return self.pause_ticket(ticket_id, review_reason=review_reason, remind_at=remind_at)
-
-    def auto_silence_close(
-        self,
-        ticket_id: str,
-        *,
-        closed_at: datetime,
-        cooldown_until: datetime | None = None,
-    ) -> bool:
-        """Auto-silence convergence close — consecutive N days normal (§7.2.6).
-
-        Returns True if the ticket was found and updated, False if not found.
-        """
-        return self.close_ticket(
-            ticket_id,
-            close_reason="auto_silenced_normal",
-            closed_at=closed_at,
-            cooldown_until=cooldown_until,
-        )
 
     def bulk_close_open(
         self,
@@ -519,6 +203,13 @@ class TaskRecordRepository(TaskRecordQueryMixin):
         cooldown_until: datetime | None = None,
     ) -> int:
         """Bulk-close all active open tickets — admin close_all_open.
+
+        **Bulk primitive — sole exemption from the load→model→apply_to chain**
+        (performance: cannot load N domain models for batch UPDATE). State
+        legality is enforced by the SQL ``WHERE governance_status IN
+        ('open','scheduled')`` predicate (equivalent to the white-list guard).
+        Callers are converged to the driver service ``bulk_close_open``, which
+        orchestrates audit + notify-cancel around this primitive.
 
         Returns the number of rows affected.
         """
@@ -552,37 +243,6 @@ class TaskRecordRepository(TaskRecordQueryMixin):
                 s.rollback()
                 raise
             return count
-
-    def resume_ticket(
-        self,
-        ticket_id: str,
-    ) -> bool:
-        """Resume a paused ticket — waiting_review → open.
-
-        Returns True if the ticket was found and updated, False if not found.
-        """
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            db_ticket = (
-                s.query(GovernanceTicketOrm)
-                .filter(
-                    GovernanceTicketOrm.ticket_id == ticket_id,
-                    GovernanceTicketOrm.env == _env,
-                )
-                .one_or_none()
-            )
-            if db_ticket is None:
-                return False
-
-            db_ticket.governance_status = "open"
-            db_ticket.review_reason = None
-
-            try:
-                s.commit()
-            except Exception:
-                s.rollback()
-                raise
-            return True
 
     # ------------------------------------------------------------------
     # Admin delete / count (emergency delete endpoint, §7.5)

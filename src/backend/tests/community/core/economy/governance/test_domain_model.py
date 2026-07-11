@@ -775,7 +775,7 @@ class TestTicketAcceptFeedback:
 
 
 class TestTicketClose:
-    """close: → CLOSED, 释放 assignee。"""
+    """close: → CLOSED, 释放 assignee, 清 remind_at。"""
 
     def test_close_sets_fields(self) -> None:
         t = _make_ticket()
@@ -787,6 +787,29 @@ class TestTicketClose:
         assert t.cooldown_until == datetime(2026, 8, 1)
         assert t.assignee is None
 
+    def test_close_clears_remind_at(self) -> None:
+        """对齐 repo close_ticket L229(默认 None 清空)。review §LOW 盲区。"""
+        t = _make_ticket(remind_at=datetime(2026, 8, 1, 9, 0, 0))
+        t.close(close_reason="auto_silenced_normal", closed_at=datetime.now())
+        assert t.remind_at is None
+
+
+class TestTicketAcceptFeedbackRemindAt:
+    """accept_feedback 清 remind_at — 对齐 repo L190。review §LOW 盲区。"""
+
+    def test_accept_feedback_clears_remind_at(self) -> None:
+        t = _make_ticket(remind_at=datetime(2026, 8, 1, 9, 0, 0))
+        now = datetime.now()
+        t.accept_feedback(
+            user_feedback="optimized",
+            feedback_at=now,
+            feedback_source="http_api",
+            target_status=GovernanceStatus.WAITING_REVIEW,
+            review_reason="user_optimized",
+        )
+        assert t.governance_status == GovernanceStatus.WAITING_REVIEW
+        assert t.remind_at is None
+
 
 class TestTicketPauseResume:
     """pause → WAITING_REVIEW; resume → OPEN。"""
@@ -797,10 +820,97 @@ class TestTicketPauseResume:
         assert t.governance_status == GovernanceStatus.WAITING_REVIEW
         assert t.review_reason == "admin_paused"
 
+    def test_pause_clears_remind_at(self) -> None:
+        """对齐 repo pause_ticket L272(默认 None 清空)。review §LOW 盲区。"""
+        t = _make_ticket(remind_at=datetime(2026, 8, 1, 9, 0, 0))
+        t.pause(review_reason="schedule_due")
+        assert t.governance_status == GovernanceStatus.WAITING_REVIEW
+        assert t.remind_at is None
+
     def test_resume(self) -> None:
         t = _make_ticket(governance_status=GovernanceStatus.WAITING_REVIEW)
         t.resume()
         assert t.governance_status == GovernanceStatus.OPEN
+
+
+class TestTicketReview:
+    """review():WAITING_REVIEW → CLOSED 三态分支,对齐 repo review_ticket。
+
+    逐字段对齐 repo task_record_repo.review_ticket:
+      - approve_close   → close_reason=close_reason|'approve_close', 可带 cooldown_until
+      - approve_whitelist→ close_reason='whitelisted'
+      - reject_for_reopen→ close_reason='review_rejected'
+    共性:无条件清 remind_at(L314)、清 active_worker(L320/327/336/341)、
+        closed_at=now(L312/L319/L326/L335)、写 review_decision/reviewed_by/
+        reviewed_at/review_remark。
+    """
+
+    def test_review_approve_close(self) -> None:
+        t = _make_ticket(governance_status=GovernanceStatus.WAITING_REVIEW,
+                         remind_at=datetime(2026, 8, 1, 9, 0, 0))
+        now = datetime.now()
+        t.review(
+            review_decision="approve_close",
+            reviewed_by="admin-1",
+            reviewed_at=now,
+            review_remark="ok",
+            close_reason="user_optimized_approved",
+            cooldown_until=datetime(2026, 9, 1),
+        )
+        assert t.governance_status == GovernanceStatus.CLOSED
+        assert t.review_decision == "approve_close"
+        assert t.reviewed_by == "admin-1"
+        assert t.reviewed_at == now
+        assert t.review_remark == "ok"
+        assert t.close_reason == "user_optimized_approved"
+        assert t.cooldown_until == datetime(2026, 9, 1)
+        assert t.assignee is None          # active_worker 释放
+        assert t.remind_at is None         # 无条件清(L314)
+
+    def test_review_approve_whitelist(self) -> None:
+        t = _make_ticket(governance_status=GovernanceStatus.WAITING_REVIEW,
+                         remind_at=datetime(2026, 8, 1, 9, 0, 0))
+        t.review(review_decision="approve_whitelist", reviewed_by="admin-1")
+        assert t.governance_status == GovernanceStatus.CLOSED
+        assert t.close_reason == "whitelisted"
+        assert t.assignee is None
+        assert t.remind_at is None
+
+    def test_review_reject_for_reopen(self) -> None:
+        """打回 → 仍 CLOSED(review_rejected),释放 active_worker,下个 scan 重建 open 单。"""
+        t = _make_ticket(governance_status=GovernanceStatus.WAITING_REVIEW,
+                         remind_at=datetime(2026, 8, 1, 9, 0, 0))
+        t.review(review_decision="reject_for_reopen", reviewed_by="admin-1")
+        assert t.governance_status == GovernanceStatus.CLOSED
+        assert t.close_reason == "review_rejected"
+        assert t.assignee is None
+        assert t.remind_at is None
+
+    def test_review_defaults_reviewed_at_to_now(self) -> None:
+        t = _make_ticket(governance_status=GovernanceStatus.WAITING_REVIEW)
+        before = datetime.now()
+        t.review(review_decision="approve_close", reviewed_by="admin-1")
+        after = datetime.now()
+        assert before <= t.reviewed_at <= after
+        assert t.closed_at is not None
+
+    def test_review_from_any_active_state(self) -> None:
+        """review() 在领域层只受 transition_to 白名单约束(OPEN/SCHEDULED/
+        WAITING_REVIEW → CLOSED 均合法);WAITING_REVIEW 限制是 service 层
+        业务守卫(admin_service.review_ticket L401),非领域状态机不变量。"""
+        for src in (GovernanceStatus.OPEN, GovernanceStatus.SCHEDULED,
+                    GovernanceStatus.WAITING_REVIEW):
+            t = _make_ticket(governance_status=src,
+                             remind_at=datetime(2026, 8, 1, 9, 0, 0))
+            t.review(review_decision="approve_close", reviewed_by="admin-1")
+            assert t.governance_status == GovernanceStatus.CLOSED
+            assert t.remind_at is None
+
+    def test_review_illegal_from_closed(self) -> None:
+        """CLOSED → CLOSED 不在白名单(TICKET_TRANSITIONS[CLOSED]=∅),必须拒绝。"""
+        t = _make_ticket(governance_status=GovernanceStatus.CLOSED, assignee=None)
+        with pytest.raises(IllegalTicketTransitionError):
+            t.review(review_decision="approve_close", reviewed_by="admin-1")
 
 
 class TestTicketBusinessProperties:

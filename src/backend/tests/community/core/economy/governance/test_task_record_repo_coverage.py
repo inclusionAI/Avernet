@@ -25,6 +25,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.core.economy.governance.domain.enums import (
+    GovernanceStatus,
+)
+from agentclaw.community.core.economy.governance.domain.ticket import (
+    GovernanceTicket,
+    MutableSnapshot,
+)
 from agentclaw.community.core.economy.governance.repositories.orm import (
     GovernanceNotificationOrm,
     GovernanceTicketOrm,
@@ -131,6 +138,90 @@ class TestFindByTicketId:
 
     def test_not_found(self, repo):
         assert repo.find_by_ticket_id("nonexistent") is None
+
+
+class TestSaveTicket:
+    """save_ticket(ticket): 方案 A 持久化原语。
+
+    find→apply_to→commit round-trip;apply_to 只写生命周期态,不碰快照。
+    """
+
+    def test_save_persists_lifecycle_change(self, repo, engine):
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(ticket_id="tkt-save-001", active_worker="w:sv1",
+                               governance_status="open"))
+            s.commit()
+
+        ticket = repo.find_by_ticket_id("tkt-save-001")
+        assert ticket is not None
+        # 模型上做状态机转移(驱动服务职责,此处直接调模型模拟)
+        ticket.close(close_reason="auto_silenced_normal", closed_at=datetime.now())
+        assert repo.save_ticket(ticket) is True
+
+        reloaded = repo.find_by_ticket_id("tkt-save-001")
+        assert reloaded.governance_status == GovernanceStatus.CLOSED
+        assert reloaded.close_reason == "auto_silenced_normal"
+        assert reloaded.assignee is None  # active_worker released on close
+        assert reloaded.remind_at is None
+
+    def test_save_not_found_returns_false(self, repo):
+        # Build a detached model that has no DB row.
+        ticket = GovernanceTicket.create(
+            ticket_id="no-such-ticket",
+            worker_id="w:x",
+            bot_id="b:x",
+            owner_id="o:x",
+            bot_name="X",
+            snapshot=MutableSnapshot(
+                dt_version="v1", initial_decision="actionable",
+                current_decision="actionable", triggered_dimensions=None,
+                hit_dimensions_count=None, severity=None,
+                estimated_saving_tokens=None, saving_ratio=None,
+                task_summary=None, notification_structured=None,
+                analysis_status=None, consecutive_normal_days=0,
+                last_decision_dt_version=None, last_seen_at=None,
+                last_sync_at=datetime.now(),
+            ),
+        )
+        assert repo.save_ticket(ticket) is False
+
+    def test_save_preserves_snapshot(self, repo, engine):
+        """save_ticket 用 apply_to,不改快照字段(dt_version 等)。"""
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(ticket_id="tkt-snap-001", active_worker="w:sn1",
+                               governance_status="open", dt_version="vOrig"))
+            s.commit()
+
+        ticket = repo.find_by_ticket_id("tkt-snap-001")
+        assert ticket is not None
+        ticket.close(close_reason="auto_silenced_normal", closed_at=datetime.now())
+        # 故意改模型快照(模拟不该发生的事),验证 save_ticket 不会落库它
+        ticket.refresh_snapshot(dt_version="vTampered")
+        repo.save_ticket(ticket)
+
+        reloaded = repo.find_by_ticket_id("tkt-snap-001")
+        assert reloaded.governance_status == GovernanceStatus.CLOSED
+        assert reloaded.dt_version == "vOrig"  # 快照未被 save_ticket 改动
+
+    def test_save_ticket_with_snapshot_writes_snapshot(self, repo, engine):
+        """_save_ticket_with_snapshot 用 to_orm,快照字段会落库(refresh_snapshot 路径)。"""
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(ticket_id="tkt-snapsave-001", active_worker="w:ss1",
+                               governance_status="open", dt_version="vOrig"))
+            s.commit()
+
+        ticket = repo.find_by_ticket_id("tkt-snapsave-001")
+        assert ticket is not None
+        ticket.refresh_snapshot(dt_version="vRefreshed", current_decision="normal")
+        assert repo._save_ticket_with_snapshot(ticket) is True  # noqa: SLF001
+
+        reloaded = repo.find_by_ticket_id("tkt-snapsave-001")
+        assert reloaded.dt_version == "vRefreshed"
+        assert reloaded.current_decision == "normal"
+        assert reloaded.governance_status == GovernanceStatus.OPEN  # 状态不变
 
 
 class TestFindLatestClosedByWorker:

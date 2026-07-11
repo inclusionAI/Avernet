@@ -42,6 +42,9 @@ from agentclaw.community.core.economy.governance.repositories.notify_log_repo im
 from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
     TaskRecordRepository,
 )
+from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+    GovernanceLifecycleService,
+)
 from agentclaw.community.core.economy.governance.services.scan_service import (
     CronTickSummary,
     GovernanceBotService,
@@ -209,6 +212,11 @@ def _build_service(engine, *, config=None, admin_svc=None, notify_sender=None):
     notify_repo = NotifyLogRepository(db=db)
     task_repo = TaskRecordRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     if config is None:
         config = FakeGovernanceConfig()
     if admin_svc is None:
@@ -222,6 +230,7 @@ def _build_service(engine, *, config=None, admin_svc=None, notify_sender=None):
         audit_repo=audit_repo,
         config=config,
         notify_sender=notify_sender,
+        lifecycle_svc=lifecycle_svc,
     )
     return svc, db, Sess
 

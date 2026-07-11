@@ -199,6 +199,9 @@ class FakeAdminService:
         from agentclaw.community.core.economy.governance.services.admin_service import (
             GovernanceAdminService,
         )
+        from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+            GovernanceLifecycleService,
+        )
         from agentclaw.community.core.economy.governance.services.whitelist_service import (
             GovernanceWhitelistService,
         )
@@ -209,12 +212,25 @@ class FakeAdminService:
         self._whitelist_repo = whitelist_repo or FakeWhitelistRepo()
         self._db = FakeDatabasePlugin()
 
-        # Build whitelist_service with proper in-memory fake whitelist_repo
+        # Build the driver — lifecycle_service has no whitelist dependency
+        # (accept_feedback whitelist-add is owned by feedback_service), so no
+        # stub needed. delete_records / delete_whitelist_entry do not
+        # exercise the timer state machine or bulk_whitelist.
+        self._lifecycle_svc = GovernanceLifecycleService(
+            task_repo=self._task_repo,  # type: ignore[arg-type]
+            notify_repo=self._notify_repo,  # type: ignore[arg-type]
+            audit_repo=self._audit_repo,
+        )
+
+        # Build whitelist_service with proper in-memory fake whitelist_repo.
+        # It needs lifecycle_svc (Task 8 bulk_whitelist closes task_record);
+        # not invoked by delete tests, so the driver above suffices.
         self._whitelist_service = GovernanceWhitelistService(
             whitelist_repo=self._whitelist_repo,  # type: ignore[arg-type]
             notify_repo=self._notify_repo,  # type: ignore[arg-type]
             audit_repo=self._audit_repo,
             config=FakeGovernanceConfig(),  # type: ignore[arg-type]
+            lifecycle_svc=self._lifecycle_svc,
         )
 
         self._real_svc = GovernanceAdminService(
@@ -225,6 +241,7 @@ class FakeAdminService:
             task_repo=self._task_repo,  # type: ignore[arg-type]
             config=FakeGovernanceConfig(),  # type: ignore[arg-type]
             notify_sender=None,  # type: ignore[arg-type]
+            lifecycle_svc=self._lifecycle_svc,
         )
 
     def delete_records(self, body: dict, operator: str) -> dict:

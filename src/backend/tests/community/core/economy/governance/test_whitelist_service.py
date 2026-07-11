@@ -15,6 +15,7 @@ from agentclaw.community.core.economy.governance.repositories.orm import (
     WhitelistEntryOrm,
     AuditLogOrm,
     GovernanceNotificationOrm,
+    GovernanceTicketOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.audit_repo import (
     GovernanceAuditRepository,
@@ -22,8 +23,14 @@ from agentclaw.community.core.economy.governance.repositories.audit_repo import 
 from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
     NotifyLogRepository,
 )
+from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
+    TaskRecordRepository,
+)
 from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
     GovernanceWhitelistRepository,
+)
+from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+    GovernanceLifecycleService,
 )
 from agentclaw.community.core.economy.governance.services.whitelist_service import (
     GovernanceWhitelistService,
@@ -48,11 +55,21 @@ def _build_svc(engine):
     notify_repo = NotifyLogRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
     config = FakeGovernanceConfig()
+    # whitelist_service needs lifecycle_svc (Task 8: bulk_whitelist closes
+    # task_record subjects). lifecycle_service no longer depends on a whitelist
+    # service (the accept_feedback whitelist-add is owned by feedback_service),
+    # so the construction cycle is gone — build the driver directly.
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=TaskRecordRepository(db=db),
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     return GovernanceWhitelistService(
         whitelist_repo=whitelist_repo,
         notify_repo=notify_repo,
         audit_repo=audit_repo,
         config=config,
+        lifecycle_svc=lifecycle_svc,
     ), db
 
 
@@ -93,6 +110,27 @@ def _make_whitelist(session, *, bot_id, owner_id, whitelist_type="governance",
         reason=overrides.pop("reason", ""),
         created_by=overrides.pop("created_by", "admin"),
         env=overrides.pop("env", "dev"),
+    )
+    session.add(row)
+    session.commit()
+    return row
+
+
+def _make_ticket(session, *, ticket_id, bot_id, owner_id, governance_status="open"):
+    """Insert a GovernanceTicketOrm row linked to a notification via ticket_id."""
+    worker = f"{owner_id}:{bot_id}"
+    row = GovernanceTicketOrm(
+        ticket_id=ticket_id,
+        worker_id=worker,
+        active_worker=worker if governance_status != "closed" else None,
+        bot_id=bot_id,
+        bot_name="TestBot",
+        owner_id=owner_id,
+        dt_version="20260629",
+        governance_decision="actionable",
+        governance_status=governance_status,
+        latest_decision="actionable",
+        last_sync_at=datetime.now(),
     )
     session.add(row)
     session.commit()
@@ -246,6 +284,52 @@ class TestBulkWhitelist:
         )
         assert result2["whitelisted"] == 0  # skip — already in whitelist
         assert result2["cancelled"] == 1     # still cancels the open notification
+
+
+# ── Task 8 口径对齐 ──────────────────────────────────────────────
+
+
+class TestBulkWhitelistTicketAlignment:
+    """Task 8: bulk_whitelist 取消通知投递的同时,按 ticket_id 集合关 task_record
+    主体(逐条 domain guard、幂等)——修正"只关通知、工单留 open"脱钩。
+    bot_id IN (...) 且 response IS NULL 口径精确:已反馈的通知/工单不动。"""
+
+    def test_closes_task_record_subjects_for_unresponded(self, session, engine):
+        """unresponded open 通知对应工单 → CLOSED(emergency_closed)。"""
+        svc, db = _build_svc(engine)
+        _make_notification(
+            session, notification_id="n-a", bot_id="bot-a", owner_id="owner-a",
+            governance_status="open", ticket_id="t-a",
+        )
+        _make_ticket(session, ticket_id="t-a", bot_id="bot-a", owner_id="owner-a")
+
+        result = svc.bulk_whitelist(["bot-a"], reason="cleanup", operator="admin")
+        assert result["cancelled"] == 1
+
+        with db.orm_session() as s:
+            ticket = s.query(GovernanceTicketOrm).one()
+            assert ticket.governance_status == "closed"
+            assert ticket.close_reason == "emergency_closed"
+
+    def test_preserves_responded_ticket_subject(self, session, engine):
+        """已反馈通知(bot 命中但 response 非 None)不在 cancel scope,
+        工单不动——按口径精确,不裸用全量关闭。"""
+        svc, db = _build_svc(engine)
+        _make_notification(
+            session, notification_id="n-responded", bot_id="bot-a", owner_id="owner-a",
+            governance_status="muted", response="need_time", ticket_id="t-responded",
+        )
+        _make_ticket(
+            session, ticket_id="t-responded", bot_id="bot-a", owner_id="owner-a",
+            governance_status="scheduled",
+        )
+
+        result = svc.bulk_whitelist(["bot-a"], reason="cleanup", operator="admin")
+        assert result["cancelled"] == 0  # 已反馈,不取消
+
+        with db.orm_session() as s:
+            ticket = s.query(GovernanceTicketOrm).one()
+            assert ticket.governance_status == "scheduled"  # 精确口径:不动
 
 
 # ── delete_whitelist_entry ──────────────────────────────────────

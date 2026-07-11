@@ -35,7 +35,10 @@ from agentclaw.community.core.economy.governance.domain.enums import (
 )
 from agentclaw.community.core.economy.governance.domain.notification import FrozenSnapshot, GovernanceNotification
 from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
-from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
+from agentclaw.community.core.economy.governance.domain.ticket import (
+    GovernanceTicket,
+    MutableSnapshot,
+)
 from agentclaw.community.core.economy.governance.services.notify_builder_service import (
     build_governance_reason,
 )
@@ -53,6 +56,9 @@ if TYPE_CHECKING:
     )
     from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
         GovernanceWhitelistRepository,
+    )
+    from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+        GovernanceLifecycleService,
     )
 
 log = get_logger(__name__)
@@ -109,12 +115,14 @@ class GovernanceRecordService:
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         config: Any,  # EconomyGovernanceConfig
+        lifecycle_svc: GovernanceLifecycleService,
     ) -> None:
         self._task_repo = task_repo
         self._whitelist_repo = whitelist_repo
         self._notify_repo = notify_repo
         self._audit_repo = audit_repo
         self._config = config
+        self._lifecycle_svc = lifecycle_svc
 
     # ------------------------------------------------------------------
     # Public: process_record (§7.1.4)
@@ -393,20 +401,13 @@ class GovernanceRecordService:
                 reason="whitelist_hit_no_active_ticket",
             )
 
-        # Whitelist hit + active ticket → close ticket (§7.2.7)
+        # Whitelist hit + active ticket → close ticket (§7.2.7) via driver
+        # service (sole driver of the ticket machine). Driver orchestrates
+        # the close + cancel-pending-notify side effect atomically.
         if not dry_run:
-            # Close ticket via Repo command method
-            self._task_repo.close_ticket(
-                active_ticket.ticket_id,
-                close_reason=CloseReason.WHITELIST_FILTERED,
-                closed_at=now,
+            self._lifecycle_svc.close_for_whitelist_hit(
+                active_ticket.ticket_id, now=now,
             )
-
-            # Cancel pending notify (self-managed session)
-            if active_ticket.ticket_id:
-                self._notify_repo.cancel_pending_by_ticket(
-                    active_ticket.ticket_id,
-                )
 
             self._audit_repo.add_audit(
                 run_id, bot_id, owner_id,
@@ -499,7 +500,10 @@ class GovernanceRecordService:
             # refresh_snapshot sentinel: "" = don't touch, datetime = set, None = clear
             effective_remind_at: datetime | None | object = now if should_resume_remind else ""
 
-            self._task_repo.refresh_snapshot(
+            # Snapshot refresh via driver service (sole driver). Driver
+            # handles bot_name (identity) + remind_at sentinel passthrough
+            # and persists via to_orm (snapshot path).
+            self._lifecycle_svc.refresh_snapshot(
                 ticket.ticket_id,
                 dt_version=dt_version,
                 bot_name=record.bot_name,
@@ -619,33 +623,37 @@ class GovernanceRecordService:
                 notification_md_preview=notification_md,
             )
 
-        # CREATE task_record (self-managed session + flush)
-        self._task_repo.add_ticket(
+        # CREATE task_record — build domain model then delegate to the
+        # driver service (sole driver of ticket creation). Same-method
+        # consistency with the notify_log domain-model construction below
+        # (L651 GovernanceNotification.create). The driver persists + audits.
+        ticket_model = GovernanceTicket.create(
             ticket_id=ticket_id,
             worker_id=worker_key,
-            assignee=worker_key,
             bot_id=bot_id,
             owner_id=owner_id_val,
             bot_name=record.bot_name,
-            dt_version=dt_version,
-            initial_decision="actionable",  # initial_decision (§5.6)
-            current_decision="actionable",
-            triggered_dimensions=record.hit_dimensions,
-            hit_dimensions_count=record.hit_dimensions_count,
-            severity=record.governance_max_priority,
-            estimated_saving_tokens=record.expected_token_saving,
-            saving_ratio=record.saving_ratio,
-            task_summary=record.task_summary,
-            notification_structured=record.notification_structured,
-            analysis_status=record.analysis_status,
-            governance_status=GovernanceStatus.OPEN,
-            consecutive_normal_days=0,
-            remind_at=None,  # No remind until first_send sent (§7.3.3)
-            remind_count=0,
-            last_seen_at=now,
-            last_sync_at=now,
-            last_decision_dt_version=dt_version,
+            snapshot=MutableSnapshot(
+                dt_version=dt_version,
+                initial_decision="actionable",  # initial_decision (§5.6)
+                current_decision="actionable",
+                triggered_dimensions=record.hit_dimensions,
+                hit_dimensions_count=record.hit_dimensions_count,
+                severity=record.governance_max_priority,
+                estimated_saving_tokens=record.expected_token_saving,
+                saving_ratio=record.saving_ratio,
+                task_summary=record.task_summary,
+                notification_structured=record.notification_structured,
+                analysis_status=record.analysis_status,
+                consecutive_normal_days=0,
+                last_decision_dt_version=dt_version,
+                last_seen_at=now,
+                last_sync_at=now,
+            ),
         )
+        # Remind chained by scan after first_send; None until then (§7.3.3).
+        assert ticket_model.remind_at is None
+        self._lifecycle_svc.open_ticket(ticket=ticket_model)
 
         # CREATE notify_log — frozen snapshot at creation time (§5.6)
         notify_row = GovernanceNotification.create(

@@ -27,6 +27,9 @@ from agentclaw.community.core.economy.governance.repositories.whitelist_repo imp
 from agentclaw.community.core.economy.governance.services.admin_service import (
     GovernanceAdminService,
 )
+from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+    GovernanceLifecycleService,
+)
 from agentclaw.community.core.economy.governance.services.whitelist_service import (
     GovernanceWhitelistService,
 )
@@ -106,11 +109,21 @@ def _build_svc(engine):
     task_repo = TaskRecordRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
     whitelist_repo = GovernanceWhitelistRepository(db=db)
+    # Driver first — lifecycle_service no longer depends on a whitelist
+    # service (the accept_feedback whitelist-add is owned by feedback_service),
+    # so the whitelist↔driver construction cycle is gone. Build the driver
+    # directly, then the whitelist_service (which calls back into the driver).
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     whitelist_service = GovernanceWhitelistService(
         whitelist_repo=whitelist_repo,
         notify_repo=notify_repo,
         audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
+        lifecycle_svc=lifecycle_svc,
     )
     svc = GovernanceAdminService(
         cache=cache,
@@ -120,6 +133,7 @@ def _build_svc(engine):
         task_repo=task_repo,
         config=FakeGovernanceConfig(),
         notify_sender=FakeNotifySender(),
+        lifecycle_svc=lifecycle_svc,
     )
     return svc, db, cache
 
@@ -298,6 +312,76 @@ class TestCancelPendingVsCloseAllOpen:
                 assert row.cooldown_until is not None
 
 
+# ── Task 8 口径对齐:应急操作通知侧 + 工单侧 双关闭 ───────────────
+
+
+class TestEmergencyTicketNotifyAlignment:
+    """Task 8: cancel_pending / close_all_open 在取消通知投递的同时,
+    按口径对齐把对应 task_record 工单主体关闭(修"只关通知、工单留 open"脱钩)。
+    两 notify_log_repo 批量方法行为面不动(镜像字段写入保留),仅新增驱动服务
+    对 task_record 主体的关闭编排。"""
+
+    def test_close_all_open_closes_ticket_subjects(self, session, engine):
+        """close_all_open:open/muted 通知对应的 open/scheduled 工单 → CLOSED(admin_closed)。
+        用全量 bulk_close_open(WHERE status IN (open,scheduled) 口径天然对齐通知侧
+        governance_status IN (open,muted))。"""
+        svc, db, _ = _build_svc(engine)
+        _make_notification(session, notification_id="n-a", governance_status="open", ticket_id="t-a")
+        _make_notification(session, notification_id="n-b", governance_status="muted",
+                           response="need_time", ticket_id="t-b")
+        _make_task_record(session, ticket_id="t-a", governance_status="open")
+        _make_task_record(session, ticket_id="t-b", governance_status="scheduled")  # responded need_time
+
+        result = svc.close_all_open(reason="test", operator="admin")
+        assert result.affected == 2  # 通知侧两条
+
+        with db.orm_session() as s:
+            tickets = {t.ticket_id: t for t in s.query(GovernanceTicketOrm).all()}
+            assert tickets["t-a"].governance_status == "closed"
+            assert tickets["t-a"].close_reason == "admin_closed"
+            assert tickets["t-b"].governance_status == "closed"
+            assert tickets["t-b"].close_reason == "admin_closed"
+
+    def test_cancel_pending_closes_only_unresponded_ticket_subjects(self, session, engine):
+        """cancel_pending:仅取消 response IS NULL 的通知,按被关通知的 ticket_id
+        集合关工单(逐条 domain guard)—— **不可裸用全量 bulk_close_open**(会
+        多关已反馈的 scheduled 单)。已反馈的 scheduled 工单保留(口径精确)。"""
+        svc, db, _ = _build_svc(engine)
+        # unresponded open → 取消通知 + 关工单(emergency_closed)
+        _make_notification(session, notification_id="n-unresp", governance_status="open",
+                           ticket_id="t-unresp")
+        _make_task_record(session, ticket_id="t-unresp", governance_status="open")
+        # responded muted (need_time) → 不在 cancel scope,通知+工单都不动
+        _make_notification(session, notification_id="n-responded", governance_status="muted",
+                           response="need_time", ticket_id="t-responded")
+        _make_task_record(session, ticket_id="t-responded", governance_status="scheduled")
+
+        result = svc.cancel_pending(reason="test", operator="admin")
+        assert result.affected == 1  # 仅 n-unresp
+
+        with db.orm_session() as s:
+            tickets = {t.ticket_id: t for t in s.query(GovernanceTicketOrm).all()}
+            assert tickets["t-unresp"].governance_status == "closed"
+            assert tickets["t-unresp"].close_reason == "emergency_closed"
+            # 已反馈的 scheduled 单保留 open-status 精确口径(critical:不是 closed)
+            assert tickets["t-responded"].governance_status == "scheduled"
+
+    def test_cancel_pending_idempotent_on_already_closed_ticket(self, session, engine):
+        """工单已 closed → driver emergency_close 幂等跳过,不重复审计/不报错。"""
+        svc, db, _ = _build_svc(engine)
+        _make_notification(session, notification_id="n-dup", governance_status="open",
+                           ticket_id="t-closed")
+        _make_task_record(session, ticket_id="t-closed", governance_status="closed")
+
+        result = svc.cancel_pending(reason="test", operator="admin")
+        assert result.affected == 1  # 通知侧仍取消
+
+        with db.orm_session() as s:
+            ticket = s.query(GovernanceTicketOrm).filter_by(ticket_id="t-closed").one()
+            assert ticket.governance_status == "closed"  # 状态不变
+            assert ticket.close_reason is None  # 既有 close_reason 未被覆盖
+
+
 # ── get_state includes active_count ───────────────────────────────
 
 
@@ -460,6 +544,29 @@ class TestEmergencyClose:
         svc, db, _ = _build_svc(engine)
         result = svc.emergency_close("nonexistent", admin_id="admin-1")
         assert result.error_code == "NOT_FOUND"
+
+    def test_emergency_close_audit_actor_is_admin_id(self, session, engine):
+        """Group A review §Finding 2 (re-anchored at admin_service after the
+        Group B double-audit fix): the emergency-close audit row records the
+        admin who executed it (actor_id=admin_id), not the ticket's original
+        actor. The driver no longer writes its own audit (de-duped in Group B
+        review), so exactly ONE audit row with action=ADMIN_CLOSE_ALL is
+        emitted, and it carries actor_id=admin_id.
+        """
+        svc, db, _ = _build_svc(engine)
+        _make_task_record(session, ticket_id="t-em-audit", governance_status="open")
+
+        result = svc.emergency_close("t-em-audit", admin_id="admin-77", reason="uh")
+        assert result.status.value == "closed"
+
+        with db.orm_session() as s:
+            emg_audits = [
+                a for a in s.query(AuditLogOrm).all()
+                if a.action_taken == AuditAction.ADMIN_CLOSE_ALL
+            ]
+            assert len(emg_audits) == 1, "emergency_close must emit exactly one audit row"
+            assert emg_audits[0].actor_id == "admin-77"
+            assert "t-em-audit" in (emg_audits[0].error_msg or "")
 
 
 # ── list_review_tickets / get_review_ticket_detail (评审只读查询) ────
