@@ -111,7 +111,7 @@
   - [ ] Build-phase tests (arca mount, external artifact, failure) green.
 - **Depends on:** Task 3
 
-## Task 6: Extract `ProgressSynchronizer`
+## Task 6: Extract progress-sync (mixin) — [x] DONE
 - **Goal:** Move status/progress sync into its own module; destroy-verify gated
   by `ProviderBehavior`.
 - **Files:** `.../publish_flow/progress_sync.py` (new), `.../publish_flow_service.py`
