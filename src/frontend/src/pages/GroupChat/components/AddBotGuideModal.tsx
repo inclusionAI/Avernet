@@ -176,6 +176,12 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
             </div>
           )}
 
+          {selectedEngine?.id === 'hermes' && (
+            <p className="mb-3 text-xs leading-5 text-[#52606d]">
+              {HERMES_MULTI_PROFILE_NOTICE}
+            </p>
+          )}
+
           {/* 接入方式药丸切换 */}
           <div className="mb-5 flex gap-2 rounded-xl bg-[#f0f4f8] p-1">
             {methods.map((accessMethod) => (
@@ -216,9 +222,6 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
 
             {hermesManual && (
               <div className="space-y-3">
-                <p className="text-xs leading-5 text-[#52606d]">
-                  {HERMES_MULTI_PROFILE_NOTICE}
-                </p>
                 <HermesBotConfigFields
                   idPrefix="add-bot-guide-hermes-manual"
                   botName={hermesBotName}
@@ -237,28 +240,36 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
             )}
 
             {/* 深色命令框 + 复制 */}
-            {command ? (
-              <div className="relative rounded-xl bg-[#0f172a] px-4 py-4 pr-12">
+            <div className="relative rounded-xl bg-[#0f172a] px-4 py-4 pr-12">
+              {command ? (
                 <code className="block whitespace-pre-wrap break-all font-mono text-xs leading-6 text-[#c7d2fe]">
                   {command}
                 </code>
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  disabled={!token || (hermesManual && !hermesValidation.valid)}
-                  className="absolute right-3 top-3 rounded-lg bg-white/10 p-2 transition-colors hover:bg-white/20 disabled:opacity-50"
-                  title="复制"
-                >
-                  {copied ? (
-                    <Check className="h-4 w-4 text-[#4ade80]" />
-                  ) : (
-                    <Copy className="h-4 w-4 text-white/70" />
-                  )}
-                </button>
-              </div>
-            ) : (
-              <p className="text-xs text-[#8b95a5]">暂无可用的接入指令。</p>
-            )}
+              ) : (
+                <p className="text-xs leading-6 text-[#94a3b8]">
+                  {hermesManual
+                    ? '请先填写有效的 Bot 名称和 Profile。'
+                    : '暂无可用的接入指令。'}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={handleCopy}
+                disabled={
+                  !command ||
+                  !token ||
+                  (hermesManual && !hermesValidation.valid)
+                }
+                className="absolute right-3 top-3 rounded-lg bg-white/10 p-2 transition-colors hover:bg-white/20 disabled:opacity-50"
+                title="复制"
+              >
+                {copied ? (
+                  <Check className="h-4 w-4 text-[#4ade80]" />
+                ) : (
+                  <Copy className="h-4 w-4 text-white/70" />
+                )}
+              </button>
+            </div>
 
             {!token && !isLoading && (
               <p className="text-xs text-[#8b95a5]">

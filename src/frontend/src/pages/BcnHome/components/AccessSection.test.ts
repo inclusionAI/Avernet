@@ -1,6 +1,7 @@
 import { useExt } from '@/capabilities';
 import React from 'react';
 import { useRegisterToken } from '../hooks/useRegisterToken';
+import { HERMES_MULTI_PROFILE_NOTICE } from '../lib/botAccess';
 import AccessSection from './AccessSection';
 import { HermesBotConfigFields } from './HermesBotConfigFields';
 
@@ -121,6 +122,12 @@ function commandsIn(tree: TestElement): string[] {
     .map(textOf);
 }
 
+function countText(tree: TestElement, text: string): number {
+  return elementsIn(tree).filter(
+    (element) => element.type === 'p' && textOf(element) === text,
+  ).length;
+}
+
 describe('AccessSection Hermes configuration', () => {
   beforeEach(() => {
     (useExt as jest.Mock).mockReturnValue({ resources });
@@ -162,7 +169,22 @@ describe('AccessSection Hermes configuration', () => {
     expect(getCopyButtons(tree).map((button) => button.props.disabled)).toEqual(
       [true, false],
     );
-    expect(commandsIn(tree)[1]).toBe('hermes automatic registration-token');
+    expect(commandsIn(tree)).toEqual(['hermes automatic registration-token']);
+    expect(textOf(tree)).toContain('请先填写有效的 Bot 名称和 Profile。');
+    expect(countText(tree, HERMES_MULTI_PROFILE_NOTICE)).toBe(1);
+
+    getInput(tree, 'bcn-access-hermes-manual-bot-name').props.onChange({
+      target: { value: 'Hermes Reviewer' },
+    });
+    tree = render();
+    getInput(tree, 'bcn-access-hermes-manual-profile').props.onChange({
+      target: { value: 'INVALID_PROFILE' },
+    });
+    tree = render();
+
+    expect(commandsIn(tree)).toEqual(['hermes automatic registration-token']);
+    expect(textOf(tree)).not.toContain('--profile');
+    expect(getCopyButtons(tree)[0].props.disabled).toBe(true);
   });
 
   it('reveals and describes only the invalid field that has been touched', () => {

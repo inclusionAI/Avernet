@@ -1,6 +1,7 @@
 import { useExt } from '@/capabilities';
 import { HermesBotConfigFields } from '@/pages/BcnHome/components/HermesBotConfigFields';
 import { useRegisterToken } from '@/pages/BcnHome/hooks/useRegisterToken';
+import { HERMES_MULTI_PROFILE_NOTICE } from '@/pages/BcnHome/lib/botAccess';
 import React from 'react';
 import AddBotGuideModal from './AddBotGuideModal';
 
@@ -125,6 +126,18 @@ function commandIn(tree: TestElement): string {
   return textOf(command);
 }
 
+function commandsIn(tree: TestElement): string[] {
+  return elementsIn(tree)
+    .filter((element) => element.type === 'code')
+    .map(textOf);
+}
+
+function countText(tree: TestElement, text: string): number {
+  return elementsIn(tree).filter(
+    (element) => element.type === 'p' && textOf(element) === text,
+  ).length;
+}
+
 describe('AddBotGuideModal Hermes configuration', () => {
   beforeEach(() => {
     (useExt as jest.Mock).mockReturnValue({ resources });
@@ -162,11 +175,28 @@ describe('AddBotGuideModal Hermes configuration', () => {
       ],
     ).toBeUndefined();
     expect(getCopyButton(tree).props.disabled).toBe(true);
+    expect(commandsIn(tree)).toEqual([]);
+    expect(textOf(tree)).toContain('请先填写有效的 Bot 名称和 Profile。');
+    expect(countText(tree, HERMES_MULTI_PROFILE_NOTICE)).toBe(1);
+
+    getInput(tree, 'add-bot-guide-hermes-manual-bot-name').props.onChange({
+      target: { value: 'Hermes Reviewer' },
+    });
+    tree = render();
+    getInput(tree, 'add-bot-guide-hermes-manual-profile').props.onChange({
+      target: { value: 'INVALID_PROFILE' },
+    });
+    tree = render();
+
+    expect(commandsIn(tree)).toEqual([]);
+    expect(textOf(tree)).not.toContain('--profile');
+    expect(getCopyButton(tree).props.disabled).toBe(true);
 
     getButton(tree, 'Bot 自动接入').props.onClick();
     tree = render();
     expect(commandIn(tree)).toBe('hermes automatic registration-token');
     expect(getCopyButton(tree).props.disabled).toBe(false);
+    expect(countText(tree, HERMES_MULTI_PROFILE_NOTICE)).toBe(1);
   });
 
   it('reveals and describes only the invalid field that has been touched', () => {

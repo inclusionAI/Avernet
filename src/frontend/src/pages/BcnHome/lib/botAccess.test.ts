@@ -53,6 +53,18 @@ describe('bot access resources', () => {
     }
   });
 
+  it.each([
+    ['uppercase', 'ReviewBot', false],
+    ['invalid leading character', '-review-bot', false],
+    ['invalid symbol', 'review.bot', false],
+    ['exactly 64 characters', 'a'.repeat(64), true],
+    ['65 characters', 'a'.repeat(65), false],
+  ])('validates the %s profile boundary', (_case, profile, valid) => {
+    expect(
+      validateHermesBotConfig({ botName: 'Reviewer', profile }).valid,
+    ).toBe(valid);
+  });
+
   it('quotes Hermes configuration and renders it into the command', () => {
     expect(quoteShellArg("Hermes O'Brien")).toBe("'Hermes O'\\''Brien'");
     expect(
@@ -64,6 +76,16 @@ describe('bot access resources', () => {
     ).toBe(
       "run registration-token --bot-name 'Hermes O'\\''Brien' --profile 'review_bot-2' --create-profile",
     );
+  });
+
+  it('refuses to render invalid Hermes configuration', () => {
+    expect(
+      renderBotAccessCommand(
+        'run {token} --bot-name {bot_name} --profile {profile}',
+        'registration-token',
+        { botName: 'Hermes Reviewer', profile: 'INVALID_PROFILE' },
+      ),
+    ).toBe('');
   });
 
   it('keeps OpenClaw selected by default', () => {

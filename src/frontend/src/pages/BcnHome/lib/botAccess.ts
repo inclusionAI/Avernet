@@ -139,6 +139,8 @@ export function renderBotAccessCommand(
   token: string,
   hermes?: HermesBotConfig,
 ): string {
+  if (hermes && !validateHermesBotConfig(hermes).valid) return '';
+
   let command = template.replace('{token}', token);
   if (hermes) {
     command = command

@@ -137,6 +137,12 @@ const AccessSection: React.FC = () => {
         </div>
       )}
 
+      {selectedEngine.id === 'hermes' && (
+        <p className="mx-auto mb-5 text-center text-xs leading-5 text-[#52606d]">
+          {HERMES_MULTI_PROFILE_NOTICE}
+        </p>
+      )}
+
       <div className="grid gap-5 lg:grid-cols-2">
         {ways.map((item, index) => {
           const hermesManual =
@@ -160,9 +166,6 @@ const AccessSection: React.FC = () => {
               </p>
               {hermesManual && (
                 <div className="mt-4 space-y-3">
-                  <p className="text-xs leading-5 text-[#52606d]">
-                    {HERMES_MULTI_PROFILE_NOTICE}
-                  </p>
                   <HermesBotConfigFields
                     idPrefix="bcn-access-hermes-manual"
                     botName={hermesBotName}
@@ -180,14 +183,22 @@ const AccessSection: React.FC = () => {
                 </div>
               )}
               <div className="relative mt-4 rounded-2xl bg-[#0f172a] px-4 py-4 pr-14">
-                <code className="block whitespace-pre-wrap break-all font-mono text-xs leading-6 text-[#c7d2fe]">
-                  {command}
-                </code>
+                {command ? (
+                  <code className="block whitespace-pre-wrap break-all font-mono text-xs leading-6 text-[#c7d2fe]">
+                    {command}
+                  </code>
+                ) : (
+                  <p className="text-xs leading-6 text-[#94a3b8]">
+                    请先填写有效的 Bot 名称和 Profile。
+                  </p>
+                )}
                 <button
                   type="button"
                   onClick={() => handleCopy(copyKey, command)}
                   disabled={
-                    isLoading || (hermesManual && !hermesValidation.valid)
+                    isLoading ||
+                    !command ||
+                    (hermesManual && !hermesValidation.valid)
                   }
                   className="absolute right-3 top-3 rounded-lg bg-white/10 p-2 transition-colors hover:bg-white/20 disabled:opacity-50"
                   title="复制指令"
