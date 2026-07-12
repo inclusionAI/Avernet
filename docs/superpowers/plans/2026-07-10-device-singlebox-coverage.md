@@ -2,23 +2,24 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make Avernet's real `singlebox_coverage.sh` run the devices acceptance suite, report honest module-level Core/Router/Plugin metrics, and raise devices coverage through a meaningful live local-provider lifecycle.
+**Goal:** Make Avernet's real `singlebox_coverage.sh` run the devices acceptance suite, report honest module-level Core/Router/Plugin metrics, and raise devices coverage through a meaningful live BaaS-provider lifecycle.
 
 **Architecture:** Keep runtime evidence at existing boundaries: Python line data comes from coverage-instrumented Backend processes and Router hits come from FastAPI middleware. A small manifest-driven reporter filters the generated artifacts into module metrics; acceptance tests create real state through Backend and BaaS instead of seeding the database. Device Plugin API remains `not_applicable` until a real device-owned plugin boundary is exercised.
 
-**Prerequisite:** Stack this change on PR #93. Use `DEPLOY_PROFILE=singlebox`
-with runtime/data `SERVER_ENV=dev`; do not restore a Device or HTTP Schema
-`singlebox -> dev` alias.
+**Prerequisite:** Stack this change on PR #98, which itself stacks on PR #93.
+Use `DEPLOY_PROFILE=singlebox` with runtime/data `SERVER_ENV=dev` and persisted
+`device_provider=baas`; do not restore a Device or HTTP Schema `singlebox -> dev`
+alias.
 
 **Tech Stack:** Bash, Python 3.12, pytest, coverage.py JSON, FastAPI runtime route-hit JSONL, YAML.
 
 ## Global Constraints
 
-- Work from PR #93 until it merges, then rebase onto the resulting `dev`.
+- Work from PR #98 until the stacked PR train merges, then rebase onto `dev`.
 - Do not add coverage imports or test-only branches to Core, Router handlers, or business services.
 - Do not introduce `exclude_paths` or remove Router APIs from the denominator.
 - All final metrics must come from `scripts/ci/singlebox_coverage.sh --mode real` artifacts.
-- The real open-source singlebox creates a `local` provider binding; instance-list and restart success remain BaaS/Teclaw-only capability gaps.
+- The real open-source singlebox creates a `baas` provider binding. Current local-BaaS gaps are asserted honestly instead of being mocked into success.
 - Existing default CI behavior must keep working when no module is selected.
 
 ---
@@ -200,13 +201,16 @@ binding_id = bot["binding_id"]
 device_id = bot["device_id"]
 ```
 
-Then validate owner list/get/by-id/connection/connectable responses, validate another user receives the ownership error, assert local-provider instances/restart return the documented capability error, release the binding, and read it back as `RELEASED`.
+Then validate owner list/get/by-id/connection/connectable responses, validate
+another user receives the ownership error, assert the current local-BaaS
+publish/instance/restart/reapply gaps, release the binding, and read it back as
+`RELEASED`.
 
 - [ ] **Step 2: Run the new acceptance test against the real stack**
 
 ```bash
 RUN_ACCEPTANCE=1 uv run pytest \
-  tests/community/acceptance/devices/test_device_query_lifecycle.py::test_device_live_local_provider_lifecycle \
+  tests/community/acceptance/devices/test_device_query_lifecycle.py::test_device_live_baas_provider_lifecycle \
   -v -s
 ```
 

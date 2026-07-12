@@ -9,14 +9,16 @@ declared evidence.
 
 ## Profile / Env Prerequisite
 
-This work is stacked on the Profile/Env separation in PR #93. Singlebox is a
-`DeployProfile`, while persisted Device Env remains `dev`. This PR must not add
-an HTTP Schema alias or otherwise teach Device Core that `singlebox` is an Env.
+This work is stacked on the Profile/Env separation in PR #93 and the singlebox
+BaaS provider assembly in PR #98. Singlebox is a `DeployProfile`, persisted
+Device Env remains `dev`, and the persisted provider is `baas`. This PR must not
+add an HTTP Schema alias or otherwise teach Device Core that `singlebox` is an
+Env.
 
 ## Baseline
 
-- Development base: PR #93 (`codex/profile-env-separation`) until it merges into
-  `dev`.
+- Development base: PR #98 (`codex/singlebox-baas-device-provider`) until the
+  stacked PR train merges into `dev`.
 - The coverage script starts the real standalone product stack and emits
   `backend-coverage.json`, runtime Router hits, runtime Plugin hits, JUnit, and
   HTML reports.
@@ -44,22 +46,22 @@ Keep the existing fresh-state behavior:
 ### 2. BaaS-backed device lifecycle
 
 Create a real personal bot through the public Backend API so Backend allocates
-its local-provider device while the full Backend/BaaS stack is running. From
-the returned bot and binding:
+its BaaS-provider device while the full Backend/BaaS stack is running. From the
+returned bot and binding:
 
 - read the binding by binding ID and device ID;
 - observe it in the user's device list;
 - obtain connection information;
-- verify the instance-list and restart APIs reject the local provider with the
-  documented capability error (successful multi-instance operations currently
-  require a `baas` or `teclaw` binding);
+- verify binding-level connection succeeds through BaaS;
+- make current local-BaaS gaps explicit: bot-id routes have no successful
+  publish record, instance inventory is empty, restart cannot target an
+  instance, and reapply lacks the required `bot_type` input;
 - release the binding and verify its state is `RELEASED`.
 
 Assertions must validate returned identity, ownership, provider, lifecycle
 state, and physical/runtime facts where available. HTTP 200 alone is not a
-valid assertion. A successful BaaS multi-instance restart is deferred until
-the open-source singlebox can create a real `baas` provider binding; the test
-must not seed or relabel a local binding to manufacture that success path.
+valid assertion. The test must not seed records or manufacture instance state
+to turn the current local-BaaS capability gaps into synthetic success paths.
 
 ### 3. Ownership and failure behavior
 

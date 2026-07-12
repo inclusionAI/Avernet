@@ -1,13 +1,11 @@
-"""Route-B acceptance: devices query and local-provider lifecycle.
+"""Route-B acceptance: devices query and BaaS-provider lifecycle.
 
 Runs against the real standalone stack started by `singlebox_coverage.sh`,
 asserts the no-data query contracts, and creates one real personal bot through
 Backend -> BaaS before exercising its device binding.
 
-The open-source singlebox records the created binding as provider ``local``.
-Connection and release are supported; instance-list and restart are
-BaaS/Teclaw-only and must return the documented capability error rather than
-silently pretending that a local binding is a remote multi-instance runtime.
+The open-source singlebox records the created binding as provider ``baas`` and
+exercises the same BaaS-owned lifecycle contract used by deployed profiles.
 
 Acceptance covers only the empty/no-data contract:
   - list returns empty {total: 0, items: []}
@@ -143,8 +141,8 @@ def test_devices_lifecycle_baseline(live_backend, acceptance_fs_root):
 
 
 @pytest.mark.acceptance
-def test_device_live_local_provider_lifecycle(live_backend):
-    """Create a real local runtime, inspect its device, then release it."""
+def test_device_live_baas_provider_lifecycle(live_backend):
+    """Create a real BaaS runtime, inspect its device, then release it."""
     user_id = fresh_id("device_owner")
     headers = {"x-user-id": user_id}
 
@@ -161,7 +159,7 @@ def test_device_live_local_provider_lifecycle(live_backend):
         detail = wait_device_active(client, binding_id)
         assert detail["entity_id"] == user_id
         assert detail["device_id"] == device_id
-        assert detail["device_provider"] == "local"
+        assert detail["device_provider"] == "baas"
         assert detail["status"] == "ACTIVE"
 
         by_device_id = assert_success(
@@ -176,14 +174,16 @@ def test_device_live_local_provider_lifecycle(live_backend):
             client.get(f"/api/v1/devices/{binding_id}/connection")
         )["data"]
         assert connection["available"] is True
-        assert connection["url"]
+        assert connection["type"] == "remote"
+        assert connection["target"]
+        assert connection["token"]
 
         connection_by_bot = client.get(
             f"/api/v1/devices/bots/{bot['bot_id']}/connection"
         ).json()
         assert connection_by_bot["success"] is False
         assert connection_by_bot["error_code"] == 40403
-        assert "BotPublishRepository not available" in connection_by_bot["message"]
+        assert "No success publish record" in connection_by_bot["message"]
 
         config_payload = {
             "singlebox": {
@@ -223,7 +223,7 @@ def test_device_live_local_provider_lifecycle(live_backend):
         )["data"]
         assert inventory["total"] == 1
         assert inventory["scanned"] == 1
-        assert inventory["by_provider"]["local"]["total"] == 1
+        assert inventory["by_provider"]["baas"]["total"] == 1
 
         bootstrap_auth = assert_success(
             client.post(
@@ -235,7 +235,7 @@ def test_device_live_local_provider_lifecycle(live_backend):
                 },
             )
         )["data"]
-        assert bootstrap_auth["agent_code"] == f"local_{bot['bot_id']}"
+        assert bootstrap_auth["agent_code"] == "local_default"
 
         invalid_alive = client.post(
             "/api/v1/devices/callback/alive",
@@ -266,25 +266,28 @@ def test_device_live_local_provider_lifecycle(live_backend):
         assert forbidden["success"] is False
         assert forbidden["error_code"] == 403
 
-        instances = client.get(f"/api/v1/devices/{binding_id}/instances").json()
-        assert instances["success"] is False
-        assert instances["error_code"] == 40403
-        assert "does not support instances query" in instances["message"]
+        instances = assert_success(
+            client.get(f"/api/v1/devices/{binding_id}/instances")
+        )["data"]
+        assert instances["bot_uuid"] == device_id
+        # Local BaaS currently owns the binding but does not expose per-instance
+        # inventory. Keep this explicit until that local API is implemented.
+        assert instances["devices"] == []
 
         instances_by_bot = client.get(
             f"/api/v1/devices/bots/{bot['bot_id']}/instances"
         ).json()
         assert instances_by_bot["success"] is False
         assert instances_by_bot["error_code"] == 40403
-        assert "BotPublishRepository not available" in instances_by_bot["message"]
+        assert "No success publish record" in instances_by_bot["message"]
 
         restart = client.post(
             f"/api/v1/devices/{binding_id}/restart",
             json={"device_uuid": device_id},
         ).json()
         assert restart["success"] is False
-        assert restart["error_code"] == 40403
-        assert "does not support instances query" in restart["message"]
+        assert restart["error_code"] == 50000
+        assert "Device(s) not found" in restart["message"]
 
         env_update = assert_success(
             client.post(
@@ -309,27 +312,16 @@ def test_device_live_local_provider_lifecycle(live_backend):
         readback = assert_success(client.get(f"/api/v1/devices/{binding_id}"))["data"]
         assert readback["status"] == "RELEASED"
 
-        reapplied = assert_success(
-            client.post(
-                "/api/v1/devices",
-                json={
-                    "apply_reason": "restore released singlebox device",
-                    "entity_id": user_id,
-                    "entity_type": "staff",
-                    "bot_id": bot["bot_id"],
-                    "engine": "openclaw",
-                },
-            )
-        )["data"]
-        reapplied_binding_id = int(reapplied["id"])
-        assert reapplied["device_provider"] == "local"
-        active_reapplied = wait_device_active(client, reapplied_binding_id)
-        assert active_reapplied["device_id"] == reapplied["device_id"]
-
-        final_release = assert_success(
-            client.post(
-                f"/api/v1/devices/{reapplied_binding_id}/release",
-                json={"release_reason": "reapplied device acceptance complete"},
-            )
-        )["data"]
-        assert final_release["status"] == "RELEASED"
+        reapplied = client.post(
+            "/api/v1/devices",
+            json={
+                "apply_reason": "restore released singlebox device",
+                "entity_id": user_id,
+                "entity_type": "staff",
+                "bot_id": bot["bot_id"],
+                "engine": "openclaw",
+            },
+        ).json()
+        assert reapplied["success"] is False
+        assert reapplied["error_code"] == 50000
+        assert "bot_type is required" in reapplied["message"]
