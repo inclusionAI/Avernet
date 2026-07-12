@@ -22,6 +22,9 @@ from agentclaw.community.adapters.http.economy import admin_router
 from agentclaw.community.adapters.http.economy.schemas import (
     RecordsDeleteRequest,
 )
+from agentclaw.community.core.economy.governance.services.notify_render_service import (
+    NotifyRenderService,
+)
 
 
 def _run(coro):
@@ -199,6 +202,7 @@ class FakeAdminService:
         from agentclaw.community.core.economy.governance.services.admin_service import (
             GovernanceAdminService,
         )
+
         from agentclaw.community.core.economy.governance.services.lifecycle_service import (
             GovernanceLifecycleService,
         )
@@ -242,6 +246,7 @@ class FakeAdminService:
             config=FakeGovernanceConfig(),  # type: ignore[arg-type]
             notify_sender=None,  # type: ignore[arg-type]
             lifecycle_svc=self._lifecycle_svc,
+        render_svc=NotifyRenderService(),
         )
 
     def delete_records(self, body: dict, operator: str) -> dict:

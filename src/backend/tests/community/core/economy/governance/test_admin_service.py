@@ -27,6 +27,13 @@ from agentclaw.community.core.economy.governance.repositories.whitelist_repo imp
 from agentclaw.community.core.economy.governance.services.admin_service import (
     GovernanceAdminService,
 )
+from agentclaw.community.core.economy.governance.services.notify_render_service import (
+    NotifyRenderService,
+)
+from agentclaw.community.core.economy.governance.services.workflow_service import (
+    GovernanceWorkflowService,
+)
+
 from agentclaw.community.core.economy.governance.services.lifecycle_service import (
     GovernanceLifecycleService,
 )
@@ -134,8 +141,43 @@ def _build_svc(engine):
         config=FakeGovernanceConfig(),
         notify_sender=FakeNotifySender(),
         lifecycle_svc=lifecycle_svc,
+        render_svc=NotifyRenderService(),
     )
     return svc, db, cache
+
+
+def _build_workflow_svc(engine):
+    """Build GovernanceWorkflowService with in-memory DB(审批测试用)。
+
+    review_ticket / list_review_tickets / get_review_ticket_detail 已从
+    admin_service 拆至 workflow_service,审批测试改用本 helper 构造 workflow svc。
+    """
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    db = FakeDB(lambda: Session(bind=engine))
+    task_repo = TaskRecordRepository(db=db)
+    notify_repo = NotifyLogRepository(db=db)
+    audit_repo = GovernanceAuditRepository(db=db)
+    whitelist_repo = GovernanceWhitelistRepository(db=db)
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
+    whitelist_service = GovernanceWhitelistService(
+        whitelist_repo=whitelist_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+        config=FakeGovernanceConfig(),
+        lifecycle_svc=lifecycle_svc,
+    )
+    svc = GovernanceWorkflowService(
+        task_repo=task_repo,
+        audit_repo=audit_repo,
+        config=FakeGovernanceConfig(),
+        lifecycle_svc=lifecycle_svc,
+        whitelist_service=whitelist_service,
+    )
+    return svc, db
 
 
 # ── close_all_open ──────────────────────────────────────────────
@@ -446,7 +488,7 @@ class TestReviewTicket:
     """Test GovernanceAdminService.review_ticket()."""
 
     def _setup_waiting_review(self, engine):
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         with db.orm_session() as s:
             _make_task_record(
                 s, ticket_id="t-review",
@@ -498,7 +540,7 @@ class TestReviewTicket:
         assert result.error is not None
 
     def test_not_waiting_review_rejected(self, session, engine):
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         _make_task_record(session, ticket_id="t-review-open", governance_status="open")
 
         result = svc.review_ticket(
@@ -507,7 +549,7 @@ class TestReviewTicket:
         assert result.error is not None
 
     def test_not_found(self, session, engine):
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         result = svc.review_ticket("nonexistent", action="approve_close", admin_id="admin-1")
         assert result.error_code == "NOT_FOUND"
 
@@ -576,7 +618,7 @@ class TestListReviewTickets:
     """list_review_tickets: 按治理状态跨 owner 过滤 + 分页,返回领域模型 + total。"""
 
     def test_default_statuses_is_all_active(self, session, engine):
-        svc, _, _ = _build_svc(engine)
+        svc, _ = _build_workflow_svc(engine)
         _make_task_record(session, ticket_id="t-1", governance_status="open")
         _make_task_record(session, ticket_id="t-2", governance_status="scheduled")
         _make_task_record(session, ticket_id="t-3", governance_status="waiting_review")
@@ -588,7 +630,7 @@ class TestListReviewTickets:
         assert {t.ticket_id for t in tickets} == {"t-1", "t-2", "t-3"}
 
     def test_explicit_status_filter(self, session, engine):
-        svc, _, _ = _build_svc(engine)
+        svc, _ = _build_workflow_svc(engine)
         _make_task_record(
             session, ticket_id="t-1", owner_id="o-A", governance_status="open",
         )
@@ -606,7 +648,7 @@ class TestListReviewTickets:
         assert {t.owner_id for t in tickets} == {"o-C"}
 
     def test_returns_domain_model_not_dict(self, session, engine):
-        svc, _, _ = _build_svc(engine)
+        svc, _ = _build_workflow_svc(engine)
         _make_task_record(session, ticket_id="t-1", governance_status="open")
 
         tickets, _ = svc.list_review_tickets(["open"], limit=50)
@@ -617,7 +659,7 @@ class TestListReviewTickets:
         assert tickets[0].gmt_create is not None
 
     def test_paging_offset_limit(self, session, engine):
-        svc, _, _ = _build_svc(engine)
+        svc, _ = _build_workflow_svc(engine)
         for i in range(5):
             _make_task_record(
                 session, ticket_id=f"t-{i}", governance_status="open",
@@ -634,7 +676,7 @@ class TestListReviewTickets:
 
     def test_empty_statuses_means_no_result_not_default(self, session, engine):
         """[] 显式表示无状态匹配 → 空结果,不得回落到全活跃态默认。"""
-        svc, _, _ = _build_svc(engine)
+        svc, _ = _build_workflow_svc(engine)
         _make_task_record(session, ticket_id="t-1", governance_status="open")
         _make_task_record(session, ticket_id="t-2", governance_status="closed")
 
@@ -647,7 +689,7 @@ class TestGetReviewTicketDetail:
     """get_review_ticket_detail: 单工单领域模型, 不存在返回 None。"""
 
     def test_found(self, session, engine):
-        svc, _, _ = _build_svc(engine)
+        svc, _ = _build_workflow_svc(engine)
         _make_task_record(
             session, ticket_id="t-detail", governance_status="waiting_review",
         )
@@ -657,7 +699,7 @@ class TestGetReviewTicketDetail:
         assert t.governance_status.value == "waiting_review"
 
     def test_not_found_returns_none(self, session, engine):
-        svc, _, _ = _build_svc(engine)
+        svc, _ = _build_workflow_svc(engine)
         assert svc.get_review_ticket_detail("nonexistent") is None
 
 

@@ -17,7 +17,7 @@
   - ``cancel_pending_by_ticket``   — pending→cancelled,ticket 变化副作用批量。
   - ``bulk_close_open_muted``      — 批量取消,WHERE + 循环守卫(紧急制动)。
   - ``bulk_cancel_by_bots``        — 批量取消,WHERE 守卫(批量加白)。
-  - ``update_delivery_status``     — by-id 投递状态变更(manual / delivery_runner
+  - ``update_delivery_status``     — by-id 投递状态变更(manual / admin._run_delivery
     手动投递路径专用,操作者已知在干嘛,豁免前置状态校验)。
 
 **守卫 B — 前置状态守卫**:白名单原语(除 ``update_delivery_status`` 手动豁免)
@@ -25,7 +25,7 @@
 循环判断),不得无条件改 ``notify_status`` —— 避免误覆盖已投递(sent/failed)的行。
 
 豁免 ``update_delivery_status`` 的理由:它是 admin ``deliver_pending`` /
-``deliver_by_worker`` / 卡片回调等**手动/单点**投递路径的写回(经 delivery_runner
+``deliver_by_worker`` / 卡片回调等**手动/单点**投递路径的写回(经 admin._run_delivery
 按已知 notification_id 改),非自动 cron 状态推进;前置状态由调用方语境保证,不强
 求 SQL WHERE。锁死后若要改手动路径前置校验,需 review。
 """
@@ -56,7 +56,7 @@ _TRANSFER_PRIMITIVES_ALLOWLIST: dict[str, str] = {
     "cancel_pending_by_ticket": "pending→cancelled WHERE 守卫;ticket 变化副作用批量。",
     "bulk_close_open_muted": "批量取消 WHERE + 循环守卫;紧急制动 cancel_pending/close_all_open。",
     "bulk_cancel_by_bots": "批量取消 WHERE 守卫;批量加白副作用。",
-    "update_delivery_status": "by-id 手动/单点投递写回(delivery_runner),操作者已知,豁免前置。",
+    "update_delivery_status": "by-id 手动/单点投递写回(admin._run_delivery),操作者已知,豁免前置。",
 }
 
 # update_delivery_status 豁免守卫 B(手动路径,不强求 SQL WHERE 前置)。

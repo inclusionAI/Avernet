@@ -73,27 +73,6 @@ class GovernanceAdminServiceProtocol(Protocol):
     ) -> TicketActionOutcome:
         ...
 
-    def list_review_tickets(
-        self,
-        statuses: list[str] | None,
-        *,
-        offset: int = 0,
-        limit: int = 50,
-    ) -> tuple[list[GovernanceTicket], int]:
-        """评审工单列表(跨 owner, 按治理状态过滤, 分页)。返回领域模型 + 总数。"""
-        ...
-
-    def get_review_ticket_detail(
-        self, ticket_id: str,
-    ) -> GovernanceTicket | None:
-        """评审工单详情(单工单领域模型)。"""
-        ...
-
-    def review_ticket(
-        self, ticket_id: str, action: str, admin_id: str, remark: str = "",
-    ) -> TicketActionOutcome:
-        ...
-
     def emergency_close(
         self, ticket_id: str, admin_id: str, reason: str = "",
     ) -> TicketActionOutcome:
@@ -419,4 +398,37 @@ class NotifyLifecycleServiceProtocol(Protocol):
         terminal: bool,
     ) -> bool:
         """sending→failed(终态)/ sending→pending(重试);领域守卫;返 False 同上。"""
+        ...
+
+
+@runtime_checkable
+class GovernanceWorkflowServiceProtocol(Protocol):
+    """工单审批服务契约(从 admin_service 按路由边界拆出)。
+
+    审批面(workflow_router 的 list/detail/review 端点)对应本 Protocol;
+    管理面(admin_router)对应 GovernanceAdminServiceProtocol。两服务各管一面,
+    零反向依赖:workflow 不依赖 admin,审批副作用(加白名单/关工单经状态机驱动)
+    自带。
+    """
+
+    def list_review_tickets(
+        self,
+        statuses: list[str] | None,
+        *,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> tuple[list[GovernanceTicket], int]:
+        """评审工单列表(跨 owner, 按治理状态过滤, 分页)。返回领域模型 + 总数。"""
+        ...
+
+    def get_review_ticket_detail(
+        self, ticket_id: str,
+    ) -> GovernanceTicket | None:
+        """评审工单详情(单工单领域模型)。"""
+        ...
+
+    def review_ticket(
+        self, ticket_id: str, action: str, admin_id: str, remark: str = "",
+    ) -> TicketActionOutcome:
+        """审批:approve_close / approve_whitelist / reject_for_reopen(§7.5.2)。"""
         ...
