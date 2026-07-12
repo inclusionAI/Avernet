@@ -128,9 +128,9 @@ async fn test_health_server_error_human() {
 // the Err arm of the structured_mode health fork in main.rs.
 #[tokio::test]
 async fn test_health_unreachable_json() {
-    // Use a malformed URL to force health_check() into its Err branch without
+    // Use a valid IPv6 loopback URL to trigger a connection failure without
     // depending on local port allocation or host-level localhost proxies.
-    let unreachable_url = "http://[::1";
+    let unreachable_url = "http://[::1]:1";
 
     let mut cmd = Command::cargo_bin("bcs-cli").unwrap();
     cmd.arg("--json")
