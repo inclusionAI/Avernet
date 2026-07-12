@@ -216,6 +216,7 @@ impl A2aChatRunService for RecordingA2aChat {
             tags: cmd.tags,
             response_mode: cmd.response_mode,
             caller_wait_mode: None,
+            organization_code: cmd.organization_code,
         });
         self.run_channel_froms
             .lock()
@@ -264,6 +265,7 @@ impl A2aChatRunService for RecordingA2aChat {
             tags: cmd.tags,
             response_mode: cmd.response_mode,
             caller_wait_mode: cmd.caller_wait_mode,
+            organization_code: cmd.organization_code,
         });
         self.run_channel_froms
             .lock()
@@ -554,6 +556,7 @@ async fn bot_chat_waits_for_final_event_and_preserves_response_shape() {
     assert_eq!(commands[0].client, None);
     assert_eq!(commands[0].from_actor_id.as_deref(), Some("human_123"));
     assert_eq!(commands[0].authenticated_staff_id.as_deref(), Some("123"));
+    assert_eq!(commands[0].organization_code, None);
     assert_eq!(
         a2a.run_channel_froms.lock().await.as_slice(),
         &[Some("human_123".to_string())]
@@ -615,7 +618,60 @@ async fn bot_chat_async_returns_accepted_and_preserves_cli_session_fallback() {
     assert_eq!(commands[0].tags, vec!["tag1", "tag2"]);
     assert_eq!(commands[0].response_mode, ChatResponseMode::AfterLastToolCall);
     assert_eq!(commands[0].caller_wait_mode.as_deref(), Some("detached"));
+    assert_eq!(commands[0].organization_code, None);
     assert_eq!(a2a.run_channel_froms.lock().await.as_slice(), &[None]);
+}
+
+#[tokio::test]
+async fn bot_chat_forwards_organization_code_to_blocking_service() {
+    let (app, a2a, _run_events) = build_chat_app().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/bots/target-bot/chat")
+                .header("authorization", "Bearer caller-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "message": "ping",
+                        "organization_code": "promo-2026"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let commands = a2a.commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].organization_code.as_deref(), Some("promo-2026"));
+}
+
+#[tokio::test]
+async fn bot_chat_async_forwards_organization_code_to_async_service() {
+    let (app, a2a, _run_events) = build_chat_app().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/bots/target-bot/chat-async")
+                .header("authorization", "Bearer caller-token")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"message":"ping","organization_code":"promo-2026"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let commands = a2a.commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].organization_code.as_deref(), Some("promo-2026"));
 }
 
 #[tokio::test]

@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use bcs_message_flow::a2a_chat::{A2aChat, ChatRunStore, DrainOutcome, drain_chat_event, drain_chat_event_with_mode};
 use bcs_protocol::BcsFrame;
+use bcs_domain::{Organization, OrganizationMember};
 use bcs_service_api::{
     A2aChatCommand, A2aChatRunService, A2aChatService, ActorKind, ActorStatus, AgentCredentials,
     AsyncA2aChatCommand, BlockingA2aChatCommand, BotActor, BotCapabilities, BotDeliveryCommand,
     BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus,
     BotRegistryCoreService, CallerContext, ChatResponseMode, ChatRunCancelCommand, ChatRunCleanupPort, ChatRunEventPort, ChatRunQueryCommand,
-    DirectChatClientKind, DirectChatRunSnapshotPort, FriendCoreService, RegisteredBot,
-    ServiceError, ServiceResult,
+    AuthorizedOrganizationPair, DirectChatClientKind, DirectChatRunSnapshotPort, FriendCoreService, OrganizationCoreService, RegisteredBot,
+    OrganizationCandidateBot, OrganizationCandidateQuery, ServiceError, ServiceResult,
     interceptor::{
         BlockReason, InterceptorChain, InterceptorDecision, MessageInterceptor, OutboundMessage,
     },
@@ -38,7 +39,31 @@ fn chat_command(target_bot_id: &str) -> A2aChatCommand {
         tags: Vec::new(),
         response_mode: ChatResponseMode::Full,
         caller_wait_mode: None,
+        organization_code: None,
     }
+}
+
+fn scoped_chat_command(target_bot_id: &str) -> A2aChatCommand {
+    A2aChatCommand {
+        organization_code: Some("promo-2026".to_string()),
+        ..chat_command(target_bot_id)
+    }
+}
+
+async fn build_organization_service(
+    bots: Vec<(&str, &str, Option<&str>)>,
+    friendships: Vec<(&str, &str)>,
+    members: Vec<&str>,
+) -> A2aChat {
+    let bot_delivery = Arc::new(RecordingDelivery::new(true));
+    let run_store = Arc::new(ChatRunStore::new());
+    let registry = Arc::new(MemoryRegistry::default());
+    let friend = Arc::new(StaticFriendCoreService::new(friendships));
+    for (bot_id, visibility, created_by) in bots {
+        registry.insert(bot_id, visibility, created_by).await;
+    }
+    let organization = Arc::new(StaticOrganizationCoreService::new(members));
+    A2aChat::new(bot_delivery, run_store, 30_000, registry, friend).with_organization(organization)
 }
 
 async fn build_service(
@@ -184,6 +209,7 @@ async fn direct_chat_run_snapshot_maps_http_client_kinds() {
             timeout_ms: 1_000,
             client: None,
             response_mode: ChatResponseMode::Full,
+            organization_code: None,
         })
         .await
         .unwrap();
@@ -204,6 +230,7 @@ async fn direct_chat_run_snapshot_maps_http_client_kinds() {
             client: None,
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
+            organization_code: None,
         })
         .await
         .unwrap();
@@ -256,6 +283,7 @@ async fn async_chat_creates_run_and_delivers_chat_send_frame() {
             tags: vec!["tag1".to_string(), "tag2".to_string()],
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: Some("detached".to_string()),
+            organization_code: None,
         })
         .await
         .unwrap();
@@ -323,6 +351,7 @@ async fn blocking_run_service_records_final_event_and_unregisters_run() {
             timeout_ms: 1_000,
             client: Some("contract-test".to_string()),
             response_mode: ChatResponseMode::Full,
+            organization_code: None,
         })
         .await
         .unwrap();
@@ -381,6 +410,7 @@ async fn detached_provider_async_run_submits_after_downlink_ack_then_runs_on_cal
             tags: Vec::new(),
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: Some("detached".to_string()),
+            organization_code: None,
         })
         .await
         .unwrap();
@@ -463,6 +493,7 @@ async fn blocking_run_service_unregisters_when_recording_event_fails() {
                     timeout_ms: 1_000,
                     client: None,
                     response_mode: ChatResponseMode::Full,
+                    organization_code: None,
                 })
                 .await
         })
@@ -505,6 +536,7 @@ async fn run_service_preserves_omitted_from_as_run_channel_metadata_none() {
             timeout_ms: 1_000,
             client: None,
             response_mode: ChatResponseMode::Full,
+            organization_code: None,
         })
         .await
         .unwrap();
@@ -542,6 +574,7 @@ async fn async_run_service_accepts_and_drains_events_until_final() {
             client: Some("contract-test".to_string()),
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
+            organization_code: None,
         })
         .await
         .unwrap();
@@ -608,6 +641,7 @@ async fn async_run_after_last_tool_call_mode_returns_only_followup_text() {
             client: Some("contract-test".to_string()),
             response_mode: ChatResponseMode::AfterLastToolCall,
             caller_wait_mode: None,
+            organization_code: None,
         })
         .await
         .unwrap();
@@ -668,6 +702,7 @@ async fn async_run_after_last_tool_call_mode_uses_agent_tool_boundary() {
             client: Some("contract-test".to_string()),
             response_mode: ChatResponseMode::AfterLastToolCall,
             caller_wait_mode: None,
+            organization_code: None,
         })
         .await
         .unwrap();
@@ -727,6 +762,7 @@ async fn async_run_after_last_tool_call_mode_uses_final_when_agent_tool_has_no_f
             client: Some("contract-test".to_string()),
             response_mode: ChatResponseMode::AfterLastToolCall,
             caller_wait_mode: None,
+            organization_code: None,
         })
         .await
         .unwrap();
@@ -779,6 +815,7 @@ async fn async_run_service_marks_failed_on_chat_event_error() {
             client: Some("contract-test".to_string()),
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
+            organization_code: None,
         })
         .await
         .unwrap();
@@ -830,6 +867,7 @@ async fn async_run_service_times_out_and_unregisters_when_no_terminal_event_arri
             client: None,
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
+            organization_code: None,
         })
         .await
         .unwrap();
@@ -881,6 +919,7 @@ async fn cancel_run_service_cancels_underlying_run_and_unregisters_channel() {
             client: None,
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
+            organization_code: None,
         })
         .await
         .unwrap();
@@ -944,6 +983,7 @@ async fn cancel_run_marks_running_run_cancelled() {
             tags: Vec::new(),
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
+            organization_code: None,
         })
         .await
         .unwrap();
@@ -998,6 +1038,7 @@ async fn run_events_update_status_and_wake_waiters() {
             tags: Vec::new(),
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
+            organization_code: None,
         })
         .await
         .unwrap();
@@ -1380,6 +1421,106 @@ fn a2a_event_parser_deduplicates_repeated_after_tool_delta_before_final_snapshot
     assert_eq!(accumulated, "answer after tool");
 }
 
+#[tokio::test]
+async fn organization_scoped_a2a_allows_public_and_protected_without_friendship() {
+    let service = build_organization_service(
+        vec![
+            ("bot-source", "public", Some("owner-1")),
+            ("public-target", "public", None),
+            ("protected-target", "protected", None),
+        ],
+        vec![],
+        vec!["bot-source", "public-target", "protected-target"],
+    )
+    .await;
+
+    let mut public_cmd = scoped_chat_command("public-target");
+    public_cmd.run_id = Some("org-public-run".to_string());
+    public_cmd.session_key = Some("org-public-session".to_string());
+    assert!(service.chat(public_cmd).await.is_ok());
+    let mut protected_cmd = scoped_chat_command("protected-target");
+    protected_cmd.run_id = Some("org-protected-run".to_string());
+    protected_cmd.session_key = Some("org-protected-session".to_string());
+    assert!(service.chat(protected_cmd).await.is_ok());
+}
+
+#[tokio::test]
+async fn organization_scoped_a2a_allows_private_friends_and_hides_private_strangers() {
+    let friend_service = build_organization_service(
+        vec![
+            ("bot-source", "public", Some("owner-1")),
+            ("private-friend", "private", None),
+        ],
+        vec![("bot-source", "private-friend")],
+        vec!["bot-source", "private-friend"],
+    )
+    .await;
+    assert!(friend_service.chat(scoped_chat_command("private-friend")).await.is_ok());
+
+    let stranger_service = build_organization_service(
+        vec![
+            ("bot-source", "public", Some("owner-1")),
+            ("private-stranger", "private", None),
+        ],
+        vec![],
+        vec!["bot-source", "private-stranger"],
+    )
+    .await;
+    assert!(matches!(
+        stranger_service.chat(scoped_chat_command("private-stranger")).await.unwrap_err(),
+        ServiceError::BotNotFound(id) if id == "private-stranger"
+    ));
+}
+
+#[tokio::test]
+async fn organization_scoped_a2a_rejects_sender_or_target_outside_effective_membership() {
+    let sender_rejected = build_organization_service(
+        vec![
+            ("bot-source", "public", Some("owner-1")),
+            ("bot-target", "public", None),
+        ],
+        vec![],
+        vec!["bot-target"],
+    )
+    .await;
+    assert!(matches!(
+        sender_rejected.chat(scoped_chat_command("bot-target")).await.unwrap_err(),
+        ServiceError::Forbidden(message) if message == "organization_member_required"
+    ));
+
+    let target_rejected = build_organization_service(
+        vec![
+            ("bot-source", "public", Some("owner-1")),
+            ("bot-target", "public", None),
+        ],
+        vec![("bot-source", "bot-target")],
+        vec!["bot-source"],
+    )
+    .await;
+    assert!(matches!(
+        target_rejected.chat(scoped_chat_command("bot-target")).await.unwrap_err(),
+        ServiceError::Forbidden(message) if message == "organization_member_required"
+    ));
+}
+
+#[tokio::test]
+async fn organization_scoped_a2a_rejects_disabled_organization_before_friendship() {
+    let bot_delivery = Arc::new(RecordingDelivery::new(true));
+    let run_store = Arc::new(ChatRunStore::new());
+    let registry = Arc::new(MemoryRegistry::default());
+    registry.insert("bot-source", "public", Some("owner-1")).await;
+    registry.insert("private-friend", "private", None).await;
+    let friend = Arc::new(StaticFriendCoreService::new(vec![("bot-source", "private-friend")]));
+    let organization = Arc::new(StaticOrganizationCoreService::new(vec!["bot-source", "private-friend"]).disabled());
+    let service = A2aChat::new(bot_delivery, run_store, 30_000, registry, friend)
+        .with_organization(organization);
+
+    assert!(matches!(
+        service.chat(scoped_chat_command("private-friend")).await.unwrap_err(),
+        ServiceError::Forbidden(message) if message == "organization_disabled"
+    ));
+}
+
 #[derive(Default)]
 struct MemoryRegistry {
     bots: RwLock<HashMap<String, RegisteredBot>>,
@@ -1568,6 +1709,119 @@ impl BotRegistryCoreService for MemoryRegistry {
 
     async fn register_http_connection(&self, _bot_id: String, token: String) -> String {
         token
+    }
+}
+
+
+#[derive(Clone)]
+struct StaticOrganizationCoreService {
+    members: HashSet<String>,
+    disabled: bool,
+}
+
+impl StaticOrganizationCoreService {
+    fn new(members: Vec<&str>) -> Self {
+        Self {
+            members: members.into_iter().map(str::to_string).collect(),
+            disabled: false,
+        }
+    }
+
+    fn disabled(mut self) -> Self {
+        self.disabled = true;
+        self
+    }
+
+    fn member(bot_uuid: &str) -> OrganizationMember {
+        OrganizationMember {
+            env: "test".to_string(),
+            organization_code: "promo-2026".to_string(),
+            bot_uuid: bot_uuid.to_string(),
+            role: None,
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    fn organization() -> Organization {
+        Organization {
+            env: "test".to_string(),
+            code: "promo-2026".to_string(),
+            name: "Promo 2026".to_string(),
+            description: None,
+            managing_provider_id: "provider-a".to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl OrganizationCoreService for StaticOrganizationCoreService {
+    async fn create(&self, _managing_provider_id: &str, _code: &str, _name: &str, _description: Option<&str>) -> ServiceResult<Organization> {
+        Ok(Self::organization())
+    }
+
+    async fn get_for_manager(&self, _managing_provider_id: &str, _code: &str) -> ServiceResult<Organization> {
+        Ok(Self::organization())
+    }
+
+    async fn list_for_manager(&self, _managing_provider_id: &str, _include_disabled: bool) -> ServiceResult<Vec<Organization>> {
+        Ok(vec![Self::organization()])
+    }
+
+    async fn update_for_manager(&self, _managing_provider_id: &str, _code: &str, _name: Option<&str>, _description: Option<Option<&str>>, _disabled: Option<bool>) -> ServiceResult<Organization> {
+        Ok(Self::organization())
+    }
+
+    async fn put_member(&self, _managing_provider_id: &str, _organization_code: &str, bot_uuid: &str, _role: Option<&str>) -> ServiceResult<OrganizationMember> {
+        Ok(Self::member(bot_uuid))
+    }
+
+    async fn delete_member(&self, _managing_provider_id: &str, _organization_code: &str, _bot_uuid: &str) -> ServiceResult<()> {
+        Ok(())
+    }
+
+    async fn get_member_for_manager(&self, _managing_provider_id: &str, _organization_code: &str, bot_uuid: &str) -> ServiceResult<Option<OrganizationMember>> {
+        Ok(self.members.contains(bot_uuid).then(|| Self::member(bot_uuid)))
+    }
+
+    async fn list_members_for_manager(&self, _managing_provider_id: &str, _organization_code: &str, _include_disabled: bool, _role: Option<&str>) -> ServiceResult<Vec<OrganizationMember>> {
+        Ok(self.members.iter().map(|bot| Self::member(bot)).collect())
+    }
+
+    async fn candidate_bots(&self, _managing_provider_id: &str, _query: OrganizationCandidateQuery) -> ServiceResult<Vec<OrganizationCandidateBot>> {
+        Ok(Vec::new())
+    }
+
+    async fn require_effective_member(&self, _organization_code: &str, bot_uuid: &str) -> ServiceResult<OrganizationMember> {
+        if self.disabled {
+            return Err(ServiceError::Forbidden("organization_disabled".to_string()));
+        }
+        if self.members.contains(bot_uuid) {
+            Ok(Self::member(bot_uuid))
+        } else {
+            Err(ServiceError::Forbidden("organization_member_required".to_string()))
+        }
+    }
+
+    async fn list_effective_members(&self, _organization_code: &str, _role: Option<&str>) -> ServiceResult<Vec<OrganizationMember>> {
+        if self.disabled {
+            return Err(ServiceError::Forbidden("organization_disabled".to_string()));
+        }
+        Ok(self.members.iter().map(|bot| Self::member(bot)).collect())
+    }
+
+    async fn authorize_pair(&self, organization_code: &str, sender_bot_uuid: &str, target_bot_uuid: &str) -> ServiceResult<AuthorizedOrganizationPair> {
+        let sender = self.require_effective_member(organization_code, sender_bot_uuid).await?;
+        let target = self.require_effective_member(organization_code, target_bot_uuid).await?;
+        Ok(AuthorizedOrganizationPair {
+            organization: Self::organization(),
+            sender,
+            target,
+        })
     }
 }
 
@@ -1841,6 +2095,7 @@ async fn a2a_chat_blocking_interceptor_prevents_bot_delivery() {
             tags: Vec::new(),
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
+            organization_code: None,
         })
         .await;
 

@@ -42,6 +42,7 @@ pub struct A2aChatCommand {
     pub tags: Vec<String>,
     pub response_mode: ChatResponseMode,
     pub caller_wait_mode: Option<String>,
+    pub organization_code: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +69,7 @@ pub struct BlockingA2aChatCommand {
     pub client: Option<String>,
     pub tags: Vec<String>,
     pub response_mode: ChatResponseMode,
+    pub organization_code: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -96,6 +98,7 @@ pub struct AsyncA2aChatCommand {
     pub tags: Vec<String>,
     pub response_mode: ChatResponseMode,
     pub caller_wait_mode: Option<String>,
+    pub organization_code: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

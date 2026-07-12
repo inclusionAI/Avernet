@@ -920,6 +920,7 @@ impl Default for BcsServerState {
                 a2a_run_port.clone(),
                 a2a_run_port.clone(),
             )
+            .with_organization(organization_core.clone())
             .with_interceptors(interceptors.clone())
             .with_run_lifecycle_hook(direct_chat_run_lifecycle_hook(metrics.as_ref()))
             .with_bot_run_context(bot_run_context.clone()),
@@ -2071,6 +2072,7 @@ impl BcsServer {
                 a2a_run_port.clone(),
                 a2a_run_port.clone(),
             )
+            .with_organization(organization_core.clone())
             .with_interceptors(interceptors.clone())
             .with_run_lifecycle_hook(direct_chat_run_lifecycle_hook(metrics.as_ref()))
             .with_bot_run_context(bot_run_context.clone()),
@@ -2581,6 +2583,7 @@ impl BcsServer {
                 a2a_run_port.clone(),
                 a2a_run_port.clone(),
             )
+            .with_organization(organization_core.clone())
             .with_interceptors(interceptors.clone())
             .with_run_lifecycle_hook(direct_chat_run_lifecycle_hook(metrics.as_ref()))
             .with_bot_run_context(bot_run_context.clone()),
