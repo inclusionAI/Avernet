@@ -198,7 +198,7 @@
         via `run_once`). Existing worker + devices-poller tests green.
 - **Depends on:** Task 9
 
-## Task 11: Durable publish task handlers + idempotency + lifecycle
+## Task 11: Durable publish task handlers + idempotency + lifecycle — [x] CORE DONE (restart handler deferred)
 - **Goal:** Model build/release/restart/poll as persisted, idempotent,
   self-chaining tasks. (Durability + issue #2.)
 - **Files:** `.../publish_flow/tasks.py` (new),
