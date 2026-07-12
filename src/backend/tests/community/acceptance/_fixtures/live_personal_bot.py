@@ -1,8 +1,8 @@
 """Helpers for acceptance tests that need a live personal bot.
 
 These helpers intentionally use the public backend API instead of repository
-seeding: route-B acceptance should exercise backend -> BaaS -> local device
-allocation before module-specific assertions run.
+seeding: route-B acceptance should exercise Backend -> BaaS device allocation
+before module-specific assertions run.
 """
 from __future__ import annotations
 
@@ -66,6 +66,5 @@ def create_live_personal_bot(
     )
     bot = create_payload["data"]["bot"]
     ready = wait_bot_ready(client, bot["bot_id"])
-    assert ready["device_provider"] == "local", ready
+    assert ready["device_provider"] == "baas", ready
     return bot
-
