@@ -443,17 +443,9 @@ impl ChannelService for BcsChannelService {
             );
             return Ok(());
         }
-        if msg.msg_id.trim().is_empty() {
-            info!(
-                channel_type = %msg.channel_type,
-                account_ref = %msg.account_ref,
-                reason = "invalid_empty_msg_id",
-                "channel inbound: rejected"
-            );
-            return Err(invalid_inbound(ChannelUseCaseError::InvalidParams(
-                "msg_id must not be empty".to_string(),
-            )));
-        }
+        msg.msg_id = normalize_required(&msg.msg_id, "msg_id")
+            .map_err(|error| invalid_inbound(error))?
+            .to_string();
         msg.channel_type = normalize_required(&msg.channel_type, "channel_type")
             .map_err(|error| invalid_inbound(error))?
             .to_string();
@@ -464,9 +456,6 @@ impl ChannelService for BcsChannelService {
             .map_err(|error| invalid_inbound(error))?
             .to_string();
         msg.im_user_id = normalize_required(&msg.im_user_id, "im_user_id")
-            .map_err(|error| invalid_inbound(error))?
-            .to_string();
-        msg.msg_id = normalize_required(&msg.msg_id, "msg_id")
             .map_err(|error| invalid_inbound(error))?
             .to_string();
         let account_ref = msg.account_ref.clone();
