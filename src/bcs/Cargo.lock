@@ -297,6 +297,8 @@ dependencies = [
  "bcs-message",
  "bcs-message-flow",
  "bcs-message-store",
+ "bcs-organization",
+ "bcs-organization-store",
  "bcs-proposal",
  "bcs-protocol",
  "bcs-provider-http",

@@ -11,7 +11,8 @@ use bcs_test_support::{
     NoopFriendService, NoopFrontendDeliveryPort,
     NoopFusionCoreService, NoopGroupCoreService, NoopGroupFusionService,
     NoopGroupManagementService, NoopGroupMessageHistoryService, NoopGroupProposalService,
-    NoopGroupQueryService, NoopHumanActorService, NoopMessageFlowService, NoopProposalCoreService,
+    NoopGroupQueryService, NoopHumanActorService, NoopMessageFlowService,
+    NoopOrganizationCoreService, NoopOrganizationManagementService, NoopProposalCoreService,
     NoopProviderBotCoreService, NoopProviderBotEventService, NoopProviderCoreService,
     NoopProviderManagementService, NoopRelationCoreService, NoopRoutingCoreService,
     NoopSessionManagementService, NoopSystemMessageService, NoopWorkbenchSessionService,
@@ -49,6 +50,8 @@ pub fn with_all_noop() -> ServicesBuilder {
         .provider_bot_core(Arc::new(NoopProviderBotCoreService))
         .provider_management(Arc::new(NoopProviderManagementService))
         .provider_bot_events(Arc::new(NoopProviderBotEventService))
+        .organization(Arc::new(NoopOrganizationCoreService))
+        .organization_management(Arc::new(NoopOrganizationManagementService))
         .group_query(Arc::new(NoopGroupQueryService))
         .group_management(Arc::new(NoopGroupManagementService))
         .workbench_sessions(Arc::new(NoopWorkbenchSessionService))
