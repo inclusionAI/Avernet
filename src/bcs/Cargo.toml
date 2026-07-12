@@ -22,6 +22,7 @@ members = [
     "crates/services/bcs-message",
     "crates/services/bcs-message-flow",
     "crates/services/bcs-message-store",
+    "crates/services/bcs-organization-store",
     "crates/services/bcs-bot",
     "crates/services/bcs-bot-store",
     "crates/services/bcs-channel-store",
@@ -202,6 +203,7 @@ bcs-group-store = { path = "crates/services/bcs-group-store" }
 bcs-message = { path = "crates/services/bcs-message" }
 bcs-message-flow = { path = "crates/services/bcs-message-flow" }
 bcs-message-store = { path = "crates/services/bcs-message-store" }
+bcs-organization-store = { path = "crates/services/bcs-organization-store" }
 bcs-routing    = { path = "crates/services/bcs-routing" }
 bcs-fusion      = { path = "crates/services/bcs-fusion" }
 bcs-leader-election = { path = "crates/services/bcs-leader-election" }

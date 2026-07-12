@@ -11,9 +11,75 @@ use bcs_service_api::{
     FriendRequestDirection, FriendRequestRepoPort, FriendRequestStatus, Group, GroupChatProposal,
     GroupKind, GroupRepoPort, GroupStatus, NewSessionParams, Participant,
     ParticipantMode, ParticipantRole, ProposalCoreService, RelationEdge, RelationRepoPort,
-    ServiceError, ServiceSpec, Session, SessionKind, SessionRepoPort, SessionStatus, Skill,
+    ServiceSpec, Session, SessionKind, SessionRepoPort, SessionStatus, Skill,
 };
-use bcs_service_api::port::repo::MessageRepoPort;
+use bcs_service_api::ServiceError;
+use bcs_service_api::port::repo::{
+    CreateOrganizationRecord, ListOrganizationMembersQuery, MessageRepoPort,
+    OrganizationRepoPort, UpsertOrganizationMemberRecord,
+};
+
+pub async fn organization_repo_contract_tests<T: OrganizationRepoPort + ?Sized>(repo: &T) {
+    let created = repo
+        .create_organization(CreateOrganizationRecord {
+            env: "contract".to_string(),
+            code: "promo-2026".to_string(),
+            name: "Promo 2026".to_string(),
+            description: Some("contract organization".to_string()),
+            managing_provider_id: "provider-a".to_string(),
+        })
+        .await
+        .expect("create organization");
+    assert!(!created.disabled);
+
+    let duplicate = repo
+        .create_organization(CreateOrganizationRecord {
+            env: "contract".to_string(),
+            code: "promo-2026".to_string(),
+            name: "Duplicate".to_string(),
+            description: None,
+            managing_provider_id: "provider-a".to_string(),
+        })
+        .await;
+    assert!(matches!(duplicate, Err(ServiceError::Conflict(_))));
+
+    let member = repo
+        .upsert_member(UpsertOrganizationMemberRecord {
+            env: "contract".to_string(),
+            organization_code: "promo-2026".to_string(),
+            bot_uuid: "bot-b".to_string(),
+            role: Some("traffic_analyst".to_string()),
+        })
+        .await
+        .expect("upsert member");
+    assert!(!member.disabled);
+
+    repo.set_member_disabled("contract", "promo-2026", "bot-b", true)
+        .await
+        .expect("disable member");
+    assert!(repo
+        .list_members(ListOrganizationMembersQuery {
+            env: "contract".to_string(),
+            organization_code: "promo-2026".to_string(),
+            include_disabled: false,
+            role: None,
+        })
+        .await
+        .expect("list active members")
+        .is_empty());
+
+    let restored = repo
+        .upsert_member(UpsertOrganizationMemberRecord {
+            env: "contract".to_string(),
+            organization_code: "promo-2026".to_string(),
+            bot_uuid: "bot-b".to_string(),
+            role: Some("merchant_growth".to_string()),
+        })
+        .await
+        .expect("restore member");
+    assert_eq!(restored.role.as_deref(), Some("merchant_growth"));
+    assert!(!restored.disabled);
+}
 
 pub async fn bot_repo_contract_tests<T: BotRepoPort + ?Sized>(repo: &T) {
     let bot_id = "repo-contract-bot";
