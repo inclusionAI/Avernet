@@ -2,7 +2,8 @@
 from agentclaw.community.adapters.http.economy import (
     admin_router,  # noqa: F401
     router,  # noqa: F401
+    workflow_router,  # noqa: F401
 )
 
 
-__all__ = ["admin_router", "router"]
+__all__ = ["admin_router", "router", "workflow_router"]

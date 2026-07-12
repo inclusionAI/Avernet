@@ -19,10 +19,7 @@ from agentclaw.community.adapters.http.dependencies import RequestContext
 from agentclaw.community.adapters.http.economy import admin_router, router
 from agentclaw.community.adapters.http.economy.schemas import (
     CardCallbackIFrameRequest,
-    EmergencyRequest,
-    GovernanceNotifyResolveRequest,
     OfflineBatchRequest,
-    WhitelistAddRequest,
 )
 
 
@@ -415,105 +412,6 @@ def _gov_config() -> types.SimpleNamespace:
 # ===========================================================================
 
 
-class TestListNotifications:
-    def test_list_pending(self):
-        svc = FakeFeedbackService()
-        svc.pending = [_Dictable({"id": "a"}), _Dictable({"id": "b"})]
-        resp = _run(router.list_pending_notifications(ctx=_ctx(), feedback_svc=svc, limit=50, offset=0))
-        assert resp.success is True
-        assert resp.data == [{"id": "a"}, {"id": "b"}]
-
-    def test_list_history(self):
-        svc = FakeFeedbackService()
-        svc.history = [_Dictable({"id": "c"})]
-        resp = _run(router.list_history_notifications(ctx=_ctx(), feedback_svc=svc, limit=10, offset=0))
-        assert resp.success is True
-        assert resp.data == [{"id": "c"}]
-
-
-class TestGetNotificationDetail:
-    def test_found(self):
-        svc = FakeFeedbackService()
-        svc.notifications["n-9"] = _Dictable({"id": "n-9", "status": "open"})
-        resp = _run(router.get_notification_detail(notification_id="n-9", ctx=_ctx(), feedback_svc=svc))
-        assert resp.success is True
-        assert resp.data["id"] == "n-9"
-
-    def test_not_found_404(self):
-        svc = FakeFeedbackService()
-        with pytest.raises(HTTPException) as exc:
-            _run(router.get_notification_detail(notification_id="missing", ctx=_ctx(), feedback_svc=svc))
-        assert exc.value.status_code == 404
-
-
-class TestResolveNotification:
-    def test_success(self):
-        svc = FakeFeedbackService()
-        body = GovernanceNotifyResolveRequest(response="optimized")
-        resp = _run(router.resolve_notification(notification_id="n-1", body=body, ctx=_ctx(), feedback_svc=svc))
-        assert resp.success is True
-        assert resp.data["notification_id"] == "n-1"
-        assert resp.data["governance_status"] == "closed"
-
-    def test_success_with_mute_until(self):
-        from datetime import datetime
-
-        svc = FakeFeedbackService()
-        svc.resolve_result = _ResolveResult(
-            governance_status="muted",
-            close_reason=None,
-            mute_until=datetime(2026, 7, 1, 12, 0, 0),
-        )
-        body = GovernanceNotifyResolveRequest(response="need_time", repair_deadline="2026-07-10")
-        resp = _run(router.resolve_notification(notification_id="n-1", body=body, ctx=_ctx(), feedback_svc=svc))
-        assert resp.data["mute_until"] == "2026-07-01T12:00:00"
-        # repair_deadline was parsed & forwarded
-        assert svc.resolve_calls[0]["repair_deadline"] is not None
-
-    def test_bad_repair_deadline_400(self):
-        svc = FakeFeedbackService()
-        body = GovernanceNotifyResolveRequest(response="need_time", repair_deadline="not-a-date")
-        with pytest.raises(HTTPException) as exc:
-            _run(router.resolve_notification(notification_id="n-1", body=body, ctx=_ctx(), feedback_svc=svc))
-        assert exc.value.status_code == 400
-        assert "repair_deadline" in exc.value.detail
-
-    def test_resolve_not_found_404(self):
-        svc = FakeFeedbackService()
-        svc.resolve_result = _ResolveResult(success=False, error="nope", error_code="NOT_FOUND")
-        body = GovernanceNotifyResolveRequest(response="optimized")
-        with pytest.raises(HTTPException) as exc:
-            _run(router.resolve_notification(notification_id="n-1", body=body, ctx=_ctx(), feedback_svc=svc))
-        assert exc.value.status_code == 404
-
-    def test_resolve_generic_error_400(self):
-        svc = FakeFeedbackService()
-        svc.resolve_result = _ResolveResult(success=False, error="bad", error_code="INVALID_RESPONSE")
-        body = GovernanceNotifyResolveRequest(response="optimized")
-        with pytest.raises(HTTPException) as exc:
-            _run(router.resolve_notification(notification_id="n-1", body=body, ctx=_ctx(), feedback_svc=svc))
-        assert exc.value.status_code == 400
-
-
-class TestWhitelist:
-    def test_add_whitelist(self):
-        svc = FakeWhitelistService()
-        body = WhitelistAddRequest(
-            bot_id="b1", owner_id="o1", source="admin",
-        )
-        resp = _run(router.add_whitelist(body=body, ctx=_ctx(), whitelist_svc=svc))
-        assert resp.success is True
-        assert resp.data["bot_id"] == "b1"
-        assert resp.data["owner_id"] == "o1"
-
-    def test_list_whitelist(self):
-        svc = FakeWhitelistService()
-        svc.entries = [_Dictable({"bot_id": "b1"})]
-        resp = _run(router.list_whitelist(ctx=_ctx(), whitelist_svc=svc, limit=100, offset=0))
-        assert resp.success is True
-        assert resp.data == [{"bot_id": "b1"}]
-
-
 class TestCardCallback:
     def test_success(self):
         svc = FakeFeedbackService()
@@ -597,67 +495,6 @@ class TestTriggerScan:
         assert resp.error_code == "SCAN_ERROR"
 
 
-class TestEmergencyAction:
-    def _call(self, body: EmergencyRequest, admin: FakeAdminService):
-        return _run(admin_router.emergency_action(body=body, ctx=None, admin_svc=admin))
-
-    def test_pause(self):
-        admin = FakeAdminService()
-        resp = self._call(EmergencyRequest(action="pause", reason="r"), admin)
-        assert resp.success is True and resp.message == "Paused"
-        assert "pause" in admin.calls
-
-    def test_resume(self):
-        admin = FakeAdminService()
-        resp = self._call(EmergencyRequest(action="resume", reason="r"), admin)
-        assert resp.message == "Resumed"
-        assert "resume" in admin.calls
-
-    def test_bulk_whitelist(self):
-        admin = FakeAdminService()
-        resp = self._call(EmergencyRequest(action="bulk-whitelist", reason="r", bot_ids=["b1", "b2"]), admin)
-        assert resp.success is True
-        assert resp.data == {"whitelisted": 2}
-
-    def test_bulk_whitelist_missing_bot_ids_400(self):
-        admin = FakeAdminService()
-        with pytest.raises(HTTPException) as exc:
-            self._call(EmergencyRequest(action="bulk-whitelist", reason="r"), admin)
-        assert exc.value.status_code == 400
-
-    def test_cancel_pending(self):
-        admin = FakeAdminService()
-        resp = self._call(EmergencyRequest(action="cancel-pending", reason="r"), admin)
-        assert resp.data == {"cancelled": 3}
-
-    def test_close_all_open(self):
-        admin = FakeAdminService()
-        resp = self._call(EmergencyRequest(action="close-all-open", reason="r"), admin)
-        assert resp.data == {"closed": 5}
-
-    def test_unknown_action_400(self):
-        admin = FakeAdminService()
-        with pytest.raises(HTTPException) as exc:
-            self._call(EmergencyRequest(action="nuke", reason="r"), admin)
-        assert exc.value.status_code == 400
-        assert "Unknown action" in exc.value.detail
-
-
-class TestEmergencyState:
-    def test_get_state(self):
-        admin = FakeAdminService()
-        admin._state_data["pending_count"] = 7
-        resp = _run(admin_router.get_emergency_state(ctx=_ctx(), admin_svc=admin))
-        assert resp.success is True
-        assert resp.data["pending_count"] == 7
-        assert resp.data["paused"] is False
-
-
-# ===========================================================================
-# scan_and_deliver — the big one
-# ===========================================================================
-
-
 def _deliver_kwargs(*, admin_svc: FakeAdminService | None = None, scan_svc: FakeScanService | None = None, **overrides: Any) -> dict:
     """Assemble the full kwargs bag for scan_and_deliver, with sane defaults.
 
@@ -731,7 +568,7 @@ class TestScanAndDeliver:
 
     def test_max_send_passed_through(self):
         admin = FakeAdminService()
-        resp = _run(admin_router.scan_and_deliver(**_deliver_kwargs(
+        _run(admin_router.scan_and_deliver(**_deliver_kwargs(
             admin_svc=admin, max_send=2,
         )))
         assert admin.deliver_calls[0]["max_send"] == 2
@@ -747,7 +584,7 @@ class TestScanAndDeliver:
 
     def test_channel_passed_through(self):
         admin = FakeAdminService()
-        resp = _run(admin_router.scan_and_deliver(**_deliver_kwargs(
+        _run(admin_router.scan_and_deliver(**_deliver_kwargs(
             admin_svc=admin, channel="tc_card",
         )))
         assert admin.deliver_calls[0]["channel"] == "tc_card"

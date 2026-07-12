@@ -1,9 +1,9 @@
-"""Endpoint coverage for governance review router endpoints.
+"""Endpoint coverage for governance workflow router endpoints.
 
-评审场景独立 router(`/api/economy/governance/review/*`):
-  - GET  /review/tickets                 评审工单列表(按治理状态过滤 + 分页)
-  - GET  /review/tickets/{ticket_id}     单工单评审详情
-  - POST /review/tickets/{ticket_id}/review  审批动作(waiting_review 三态流转)
+正常业务流程 router(`/api/economy/governance/workflow/*`):
+  - GET  /workflow/tickets                 工单列表(按治理状态过滤 + 分页)
+  - GET  /workflow/tickets/detail          单工单详情(ticket_id 走 query)
+  - POST /workflow/tickets/review          审批动作(ticket_id 走 body,waiting_review 三态流转)
 
 Uses real DI services and in-memory SQLite -- no MagicMock / unittest.mock.
 Each seed inserts real rows via repos so handlers exercise the full
@@ -205,13 +205,13 @@ def _assert_review_reject_not_closed(response, world) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 1. GET /review/tickets — list
+# 1. GET /workflow/tickets — list
 # ---------------------------------------------------------------------------
 
 
 @endpoint_test(
     method="GET",
-    path="/api/economy/governance/review/tickets",
+    path="/api/economy/governance/workflow/tickets",
     scenario="ok_default",
     input=CaseInput(headers=_USER_HEADER),
     seed=_seed_list_mixed,
@@ -225,7 +225,7 @@ def review_list_default_ok():
 
 @endpoint_test(
     method="GET",
-    path="/api/economy/governance/review/tickets",
+    path="/api/economy/governance/workflow/tickets",
     scenario="ok_filter_waiting",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -241,7 +241,7 @@ def review_list_filter_waiting_ok():
 
 @endpoint_test(
     method="GET",
-    path="/api/economy/governance/review/tickets",
+    path="/api/economy/governance/workflow/tickets",
     scenario="ok_pagination",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -257,7 +257,7 @@ def review_list_pagination_ok():
 
 @endpoint_test(
     method="GET",
-    path="/api/economy/governance/review/tickets",
+    path="/api/economy/governance/workflow/tickets",
     scenario="error_invalid_status",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -271,17 +271,17 @@ def review_list_invalid_status_error():
 
 
 # ---------------------------------------------------------------------------
-# 2. GET /review/tickets/{ticket_id} — detail
+# 2. GET /workflow/tickets/detail — detail
 # ---------------------------------------------------------------------------
 
 
 @endpoint_test(
     method="GET",
-    path="/api/economy/governance/review/tickets/{ticket_id}",
+    path="/api/economy/governance/workflow/tickets/detail",
     scenario="ok",
     input=CaseInput(
         headers=_USER_HEADER,
-        path_params={"ticket_id": "tkt-detail-1"},
+        query_params={"ticket_id": "tkt-detail-1"},
     ),
     seed=_seed_detail,
     expect=ExpectSuccess(status=200, json_contains={"success": True}),
@@ -293,11 +293,11 @@ def review_detail_ok():
 
 @endpoint_test(
     method="GET",
-    path="/api/economy/governance/review/tickets/{ticket_id}",
+    path="/api/economy/governance/workflow/tickets/detail",
     scenario="error_not_found",
     input=CaseInput(
         headers=_USER_HEADER,
-        path_params={"ticket_id": "tkt-nonexistent-999"},
+        query_params={"ticket_id": "tkt-nonexistent-999"},
     ),
     # No seed -- ticket not found → HTTPException(404)
     expect=ExpectError(status=404),
@@ -307,17 +307,16 @@ def review_detail_not_found_error():
 
 
 # ---------------------------------------------------------------------------
-# 3. POST /review/tickets/{ticket_id}/review — approve_close
+# 3. POST /workflow/tickets/review — approve_close
 # ---------------------------------------------------------------------------
 
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/review/tickets/{ticket_id}/review",
+    path="/api/economy/governance/workflow/tickets/review",
     scenario="ok_approve_close",
     input=CaseInput(
         headers=_USER_HEADER,
-        path_params={"ticket_id": "tkt-review-approve"},
         json_body={
             "ticket_id": "tkt-review-approve",
             "action": "approve_close",
@@ -334,23 +333,22 @@ def review_detail_not_found_error():
 def review_action_approve_close_ok():
     """Happy path: approve_close → closed, close_reason *_approved.
 
-    AdminReviewRequest requires ``ticket_id`` in the body (path param is
+    WorkflowReviewRequest requires ``ticket_id`` in the body (path param is
     separate but the body schema still mandates it for validation).
     """
 
 
 # ---------------------------------------------------------------------------
-# 4. POST /review/tickets/{ticket_id}/review — approve_whitelist
+# 4. POST /workflow/tickets/review — approve_whitelist
 # ---------------------------------------------------------------------------
 
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/review/tickets/{ticket_id}/review",
+    path="/api/economy/governance/workflow/tickets/review",
     scenario="ok_approve_whitelist",
     input=CaseInput(
         headers=_USER_HEADER,
-        path_params={"ticket_id": "tkt-review-wl"},
         json_body={
             "ticket_id": "tkt-review-wl",
             "action": "approve_whitelist",
@@ -369,17 +367,16 @@ def review_action_approve_whitelist_ok():
 
 
 # ---------------------------------------------------------------------------
-# 5. POST /review/tickets/{ticket_id}/review — reject_for_reopen
+# 5. POST /workflow/tickets/review — reject_for_reopen
 # ---------------------------------------------------------------------------
 
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/review/tickets/{ticket_id}/review",
+    path="/api/economy/governance/workflow/tickets/review",
     scenario="ok_reject_for_reopen",
     input=CaseInput(
         headers=_USER_HEADER,
-        path_params={"ticket_id": "tkt-review-reject"},
         json_body={
             "ticket_id": "tkt-review-reject",
             "action": "reject_for_reopen",
@@ -395,20 +392,20 @@ def review_action_reject_for_reopen_ok():
 
 
 # ---------------------------------------------------------------------------
-# 6. POST /review/tickets/{ticket_id}/review — error: not found (404)
+# 6. POST /workflow/tickets/review — error: not found (404)
 # ---------------------------------------------------------------------------
 
 
-# ticket_id is a path param but the body ALSO carries ticket_id (AdminReviewRequest).
+# ticket_id is a path param but the body ALSO carries ticket_id (WorkflowReviewRequest).
 # The body takes precedence inside the handler (body.ticket_id), so point the
 # body at a nonexistent id to hit the NOT_FOUND branch.
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/review/tickets/{ticket_id}/review",
+    path="/api/economy/governance/workflow/tickets/review",
     scenario="error_not_found",
     input=CaseInput(
         headers=_USER_HEADER,
-        path_params={"ticket_id": "tkt-nonexistent-999"},
+        query_params={"ticket_id": "tkt-nonexistent-999"},
         json_body={
             "ticket_id": "tkt-nonexistent-999",
             "action": "approve_close",
@@ -424,17 +421,16 @@ def review_action_not_found_error():
 
 
 # ---------------------------------------------------------------------------
-# 7. POST /review/tickets/{ticket_id}/review — error: invalid action (400)
+# 7. POST /workflow/tickets/review — error: invalid action (400)
 # ---------------------------------------------------------------------------
 
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/review/tickets/{ticket_id}/review",
+    path="/api/economy/governance/workflow/tickets/review",
     scenario="error_invalid_action",
     input=CaseInput(
         headers=_USER_HEADER,
-        path_params={"ticket_id": "tkt-review-reject"},
         json_body={
             "ticket_id": "tkt-review-reject",
             "action": "bogus_action",
@@ -450,7 +446,7 @@ def review_action_invalid_action_error():
 
 
 # ---------------------------------------------------------------------------
-# 8. POST /review/tickets/{ticket_id}/review — error: invalid status (400)
+# 8. POST /workflow/tickets/review — error: invalid status (400)
 # ---------------------------------------------------------------------------
 
 
@@ -464,11 +460,10 @@ def _seed_review_open_ticket(world) -> None:
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/review/tickets/{ticket_id}/review",
+    path="/api/economy/governance/workflow/tickets/review",
     scenario="error_invalid_status",
     input=CaseInput(
         headers=_USER_HEADER,
-        path_params={"ticket_id": "tkt-review-open-status"},
         json_body={
             "ticket_id": "tkt-review-open-status",
             "action": "approve_close",

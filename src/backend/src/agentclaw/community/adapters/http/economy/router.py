@@ -1,53 +1,36 @@
-"""Public + business-data router for economy/governance endpoints.
+"""Open + business-data router for economy/governance endpoints.
 
-Public (7 endpoints — user-facing):
-  - /notifications            查询待处理通知
-  - /notifications/history    历史反馈记录
-  - /notifications/{id}       通知详情
-  - /notifications/{id}/resolve  用户反馈
-  - /whitelist                添加白名单 (点对点)
-  - /whitelist                查询加白列表
-  - /card-callback            卡片回调 (iframe fetch POST)
+已开放接口(免鉴权,有外部调用约定,不动):
+  - /card-callback            钉钉卡片回调(iframe fetch POST,治理反馈真入口)
+  - /records/offline-batch    ODPS 离线批量写入(§7.2, 增量幂等)
 
-Business (1 endpoint — data ingestion, no admin auth):
-  - /records/offline-batch    离线批量写入 (§7.2)
+用户自助端点(/notifications*、用户 /whitelist)已删除:无真实用户主动调用场景,
+治理反馈真入口是 card-callback(靠 notification_id 不可猜保证安全)。
 
-Admin endpoints are in :mod:`agentclaw.community.adapters.http.economy.admin_router`.
-  - /admin/records/delete         应急删除
-  - /admin/pause                  管理员暂停工单
-  - /admin/emergency-close        管理员紧急关闭
-  - /admin/trigger-scan           手动触发 cron tick
-  - /admin/emergency              紧急制动 / 查询状态
-  - /admin/scan-and-deliver       扫描+投递
-
-Review endpoints are in :mod:`agentclaw.community.adapters.http.economy.review_router`.
-  - /review/tickets                 评审工单列表
-  - /review/tickets/{id}            单工单评审详情
-  - /review/tickets/{id}/review     审批动作
+Admin 端点在 :mod:`agentclaw.community.adapters.http.economy.admin_router`
+(/admin/tickets:* / /admin/whitelist:* / /admin/brake / /admin/records:delete /
+/admin/trigger-scan / /admin/scan-and-deliver)。
+Workflow(正常业务流程)端点在 :mod:`agentclaw.community.adapters.http.economy.workflow_router`
+(/workflow/tickets / /workflow/tickets/detail / /workflow/tickets/review)。
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 
-from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
 from agentclaw.community.adapters.http.economy.schemas import (
     ApiResponse,
     CardCallbackIFrameRequest,
     CardCallbackResponse,
-    GovernanceNotifyResolveRequest,
-    GovernanceNotifyResolveResponse,
     OfflineBatchRequest,
     OfflineBatchResponse,
     RecordProcessResultItem,
-    WhitelistAddRequest,
 )
 from agentclaw.community.api.governance_service import (
     GovernanceFeedbackServiceProtocol,
     GovernanceRecordProcessProtocol,
-    GovernanceWhitelistServiceProtocol,
 )
 from agentclaw.community.di import Injected
 
@@ -62,138 +45,7 @@ router = APIRouter(prefix="/api/economy/governance", tags=["economy-governance"]
 
 # Lazy imports to avoid circular dependency at module level
 _FeedbackService = GovernanceFeedbackServiceProtocol
-_WhitelistService = GovernanceWhitelistServiceProtocol
 _OfflineBatchSvc = GovernanceRecordProcessProtocol
-
-
-@router.get("/notifications", summary="查询当前用户待处理通知")
-async def list_pending_notifications(
-    ctx: RequestContext = Depends(get_request_context),
-    feedback_svc: _FeedbackService = Injected(_FeedbackService),
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-) -> ApiResponse:
-    """List pending (open/muted) notifications for the current user."""
-    owner_id = ctx.user_id
-    items = await asyncio.to_thread(feedback_svc.list_pending, owner_id, limit=limit, offset=offset)
-    data = [t.to_dict() for t in items]
-    return ApiResponse(success=True, data=data)
-
-
-@router.get("/notifications/history", summary="历史反馈记录")
-async def list_history_notifications(
-    ctx: RequestContext = Depends(get_request_context),
-    feedback_svc: _FeedbackService = Injected(_FeedbackService),
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-) -> ApiResponse:
-    """List closed/expired notifications for the current user."""
-    owner_id = ctx.user_id
-    items = await asyncio.to_thread(feedback_svc.list_history, owner_id, limit=limit, offset=offset)
-    data = [t.to_dict() for t in items]
-    return ApiResponse(success=True, data=data)
-
-
-@router.get("/notifications/{notification_id}", summary="通知详情")
-async def get_notification_detail(
-    notification_id: str,
-    ctx: RequestContext = Depends(get_request_context),
-    feedback_svc: _FeedbackService = Injected(_FeedbackService),
-) -> ApiResponse:
-    """Get a single notification by ID."""
-    owner_id = ctx.user_id
-    item = await asyncio.to_thread(feedback_svc.get_notification, notification_id, owner_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Notification not found")
-    return ApiResponse(success=True, data=item.to_dict())
-
-
-@router.post("/notifications/{notification_id}/resolve", summary="用户反馈")
-async def resolve_notification(
-    notification_id: str,
-    body: GovernanceNotifyResolveRequest,
-    ctx: RequestContext = Depends(get_request_context),
-    feedback_svc: _FeedbackService = Injected(_FeedbackService),
-) -> ApiResponse:
-    """User feedback: optimized / need_time / dispute / whitelist."""
-    owner_id = ctx.user_id
-
-    from datetime import datetime as _dt
-    repair_deadline = None
-    if body.repair_deadline:
-        try:
-            repair_deadline = _dt.fromisoformat(body.repair_deadline)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid repair_deadline format") from None
-
-    result = await asyncio.to_thread(
-        feedback_svc.resolve,
-        notification_id=notification_id,
-        response=body.response,
-        user_id=owner_id,
-        remark=body.remark,
-        source="http_api",
-        repair_deadline=repair_deadline,
-        feedback_payload=body.feedback_payload,
-    )
-
-    if not result.success:
-        error_code = getattr(result, "error_code", None) or ""
-        if error_code == "NOT_FOUND":
-            status_code = 404
-        else:
-            status_code = 400
-        raise HTTPException(status_code=status_code, detail=result.error)
-
-    return ApiResponse(
-        success=True,
-        data=GovernanceNotifyResolveResponse(
-            notification_id=result.notification_id,
-            governance_status=result.governance_status,
-            close_reason=result.close_reason,
-            mute_until=result.mute_until.isoformat() if result.mute_until else None,
-            ticket_id=getattr(result, "ticket_id", "") or "",
-        ).model_dump(),
-    )
-
-
-@router.post("/whitelist", summary="添加白名单")
-async def add_whitelist(
-    body: WhitelistAddRequest,
-    ctx: RequestContext = Depends(get_request_context),
-    whitelist_svc: _WhitelistService = Injected(_WhitelistService),
-) -> ApiResponse:
-    """Add a single bot to governance whitelist (point-to-point)."""
-    owner_id = ctx.user_id
-    result = await asyncio.to_thread(
-        whitelist_svc.add,
-        bot_id=body.bot_id,
-        owner_id=body.owner_id,
-        created_by=owner_id,
-        reason=body.reason,
-        whitelist_type="governance",
-        source=body.source,
-    )
-    return ApiResponse(success=True, data=result.to_dict())
-
-
-@router.get("/whitelist", summary="查询加白列表")
-async def list_whitelist(
-    ctx: RequestContext = Depends(get_request_context),
-    whitelist_svc: _WhitelistService = Injected(_WhitelistService),
-    limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-) -> ApiResponse:
-    """List governance whitelist entries for the current user."""
-    owner_id = ctx.user_id
-    items = await asyncio.to_thread(
-        whitelist_svc.list_by_owner,
-        owner_id=owner_id,
-        whitelist_type="governance",
-        limit=limit,
-        offset=offset,
-    )
-    return ApiResponse(success=True, data=[e.to_dict() for e in items])
 
 
 @router.post("/card-callback", summary="卡片回调 (iframe fetch POST)")
@@ -330,15 +182,12 @@ async def offline_batch(
 
 
 # ---------------------------------------------------------------------------
-# Re-export admin_router for backward compatibility (app.py imports from here)
+# Re-export workflow_router (app.py 经此 import workflow router)
 # ---------------------------------------------------------------------------
 
-from agentclaw.community.adapters.http.economy.admin_router import (  # noqa: E402
-    admin_router as internal_router,
-)
-from agentclaw.community.adapters.http.economy.review_router import (  # noqa: E402
-    review_router as review_router_export,
+from agentclaw.community.adapters.http.economy.workflow_router import (  # noqa: E402
+    workflow_router as workflow_router_export,
 )
 
 
-__all__ = ["router", "internal_router", "review_router_export"]
+__all__ = ["router", "workflow_router_export"]

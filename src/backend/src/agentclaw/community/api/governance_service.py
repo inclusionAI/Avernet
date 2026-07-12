@@ -116,6 +116,17 @@ class GovernanceAdminServiceProtocol(Protocol):
     ) -> dict:
         ...
 
+    def deliver_by_worker(
+        self,
+        *,
+        worker_id: str,
+        override_recipient: str | None = None,
+        dry_run: bool = True,
+        channel: str = "auto",
+    ) -> dict:
+        """按 worker_id 精准投递该工单 pending 通知(不重跑状态机)。"""
+        ...
+
 
 @runtime_checkable
 class GovernanceWhitelistServiceProtocol(Protocol):
@@ -180,22 +191,11 @@ class GovernanceWhitelistServiceProtocol(Protocol):
 
 @runtime_checkable
 class GovernanceFeedbackServiceProtocol(Protocol):
-    """Protocol for user-facing governance feedback interactions."""
+    """Protocol for user-facing governance feedback interactions.
 
-    def list_pending(
-        self, owner_id: str, *, limit: int, offset: int,
-    ) -> list[dict]:
-        ...
-
-    def list_history(
-        self, owner_id: str, *, limit: int, offset: int,
-    ) -> list[dict]:
-        ...
-
-    def get_notification(
-        self, notification_id: str, owner_id: str,
-    ) -> dict | None:
-        ...
+    list_pending / list_history / get_notification 已删除:无真实用户主动调用,
+    治理反馈真入口是 card-callback(经 ``resolve``)。仅保留 ``resolve``。
+    """
 
     def resolve(
         self,

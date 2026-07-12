@@ -30,33 +30,6 @@ class ApiResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Resolve (task_record based, §7.4)
-# ---------------------------------------------------------------------------
-
-class GovernanceNotifyResolveRequest(BaseModel):
-    """Request body for resolving a governance notification."""
-    response: str = Field(..., description="optimized / need_time / dispute / whitelist")
-    remark: str | None = Field(None, description="Optional remark (required for dispute)")
-    repair_deadline: str | None = Field(
-        None,
-        description="ISO date, required for need_time",
-    )
-    feedback_payload: dict | None = Field(
-        None,
-        description="Structured feedback JSON (validated as JSON only)",
-    )
-
-
-class GovernanceNotifyResolveResponse(BaseModel):
-    """Response for resolve endpoint — now ticket-based (§7.4)."""
-    notification_id: str = ""
-    ticket_id: str = ""
-    governance_status: str = ""
-    close_reason: str | None = None
-    mute_until: str | None = None
-
-
-# ---------------------------------------------------------------------------
 # Record process result (shared by offline-batch)
 # ---------------------------------------------------------------------------
 
@@ -139,26 +112,26 @@ class OfflineBatchResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Admin: review (§7.5.2) / pause (§7.5.1) / emergency-close
+# Workflow: review (§7.5.2) — 正常业务流程面,ticket_id 走 body/query(零 path 参数)
 # ---------------------------------------------------------------------------
 
-class AdminReviewRequest(BaseModel):
-    """Request body for admin review (§7.5.2)."""
+class WorkflowReviewRequest(BaseModel):
+    """Request body for workflow ticket review (§7.5.2)."""
     ticket_id: str = Field(..., description="Ticket to review")
     action: str = Field(..., description="approve_close / approve_whitelist / reject_for_reopen")
     admin_id: str = Field("", description="Admin who triggered the review")
     remark: str = Field("", description="Review remark")
 
 
-class AdminReviewResponse(BaseModel):
-    """Response for admin review."""
+class WorkflowReviewResponse(BaseModel):
+    """Response for workflow ticket review."""
 
     ticket_id: str = ""
     governance_status: str = ""
     close_reason: str | None = None
 
     @classmethod
-    def from_outcome(cls, outcome: TicketActionOutcome) -> AdminReviewResponse:
+    def from_outcome(cls, outcome: TicketActionOutcome) -> WorkflowReviewResponse:
         """从 TicketActionOutcome 领域返回值构造响应(显式序列化,非裸 dict)。
 
         Args:
@@ -325,22 +298,6 @@ class ReviewTicketDetailResponse(BaseModel):
             gmt_create=_iso(ticket.gmt_create),
             gmt_modified=_iso(ticket.gmt_modified),
         )
-
-
-class AdminPauseRequest(BaseModel):
-    """Request body for admin pause (§7.5.1)."""
-    ticket_id: str = Field(..., description="Ticket to pause")
-    admin_id: str = Field("", description="Admin who triggered the pause")
-    reason: str = Field("", description="Pause reason")
-
-
-class AdminEmergencyCloseRequest(BaseModel):
-    """Request body for emergency close (§6.3)."""
-    ticket_id: str = Field(..., description="Ticket to close")
-    admin_id: str = Field("", description="Admin who triggered the close")
-    reason: str = Field("", description="Close reason")
-
-
 # ---------------------------------------------------------------------------
 # Whitelist
 # ---------------------------------------------------------------------------
@@ -351,16 +308,6 @@ class WhitelistEntry(BaseModel):
     owner_id: str
     reason: str | None = None
     expires_at: str | None = None
-
-
-class WhitelistAddRequest(BaseModel):
-    """Request body for single whitelist add (point-to-point)."""
-    bot_id: str = Field(..., description="Bot ID to whitelist")
-    owner_id: str = Field(..., description="Owner (staff) ID")
-    reason: str = Field("", description="Optional reason for whitelisting")
-    source: str = Field("manual", description="manual / owner / admin / system")
-
-
 class WhitelistDeletePair(BaseModel):
     """A single (bot_id, owner_id) pair for whitelist deletion."""
     bot_id: str
@@ -376,19 +323,63 @@ class WhitelistDeleteRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Emergency
+# Admin: 制动 (brake) / 工单批量管理 / 白名单批量 / 按 worker 投递
+# 拆自原 5-action EmergencyRequest(action 开关分发多资源),全 body 驱动。
 # ---------------------------------------------------------------------------
 
-class EmergencyRequest(BaseModel):
-    """Request body for emergency brake / admin actions."""
-    action: str = Field(..., description="pause / resume / bulk-whitelist / cancel-pending / close-all-open")
-    reason: str = Field(..., description="Required: reason for the action")
-    operator: str = Field("", description="Who triggered the action")
-    bot_ids: list[str] | None = Field(None, description="Required for bulk-whitelist")
+class BrakeToggleRequest(BaseModel):
+    """Request body for global governance brake toggle (pause/resume)."""
+    enabled: bool = Field(..., description="true=pause(暂停治理流程), false=resume(恢复)")
+    reason: str = Field("", description="Optional reason for audit")
+    operator: str = Field("", description="Who triggered the toggle")
 
 
-class EmergencyStateResponse(BaseModel):
-    """Response for emergency state query."""
+class TicketsCloseRequest(BaseModel):
+    """Request body for closing one or more governance tickets.
+
+    单条/批量统一入参:把要关的 ticket_id 放进列表,handler 循环调
+    ``admin_svc.emergency_close``(已委托 ``lifecycle_svc``,关工单+cancel_pending
+    由 driver 编排)。禁止直调 repo。
+    """
+    reason: str = Field(..., description="Close reason for audit")
+    ticket_ids: list[str] = Field(..., min_length=1, description="Ticket IDs to close")
+
+
+class TicketsCloseAllRequest(BaseModel):
+    """Request body for closing all active governance tickets (emergency bulk).
+
+    handler dispatch 复用状态机收口后的两方法:
+    ``only_unresponded=true`` → ``admin_svc.cancel_pending``(仅未响应,EMERGENCY_CLOSED);
+    否则 → ``admin_svc.close_all_open``(全量含已响应,ADMIN_CLOSED)。两方法已联合编排
+    task_record 工单主体 + notify_log 通知 + audit(状态机 Task 8 口径对齐)。
+   cooldown_days 走 config.cool_down_days,无入参。
+    """
+    reason: str = Field(..., description="Close reason for audit")
+    only_unresponded: bool = Field(False, description="true=仅关未响应(cancel_pending),false=全量(close_all_open)")
+
+
+class WhitelistBulkAddRequest(BaseModel):
+    """Request body for bulk whitelist add (admin 代加白)."""
+    bot_ids: list[str] = Field(..., min_length=1, description="Bot IDs to whitelist")
+    reason: str = Field(..., description="Required: reason for audit")
+    operator: str = Field("", description="Who triggered the bulk add")
+
+
+class TicketsDeliverRequest(BaseModel):
+    """Request body for delivering pending notifications by worker_id.
+
+    按 worker 精准取该工单 pending 通知投递,**不重跑状态机**(治理决策进入时
+    已跑过,pending 已躺 notify_log)。前一档 scan-and-deliver 是随机批量兜底,
+    本端点是精准单 worker。
+    """
+    worker_id: str = Field(..., description="owner_id:bot_id")
+    override_recipient: str | None = Field(None, description="覆盖收件人工号(纯数字 4~10 位)")
+    dry_run: bool = Field(True, description="true=只构建不发钉钉")
+    channel: str = Field("auto", description="auto(跟随DB)|markdown|tc_card")
+
+
+class BrakeStateResponse(BaseModel):
+    """Response for brake state query."""
     paused: bool = False
     reason: str | None = None
     operator: str | None = None
@@ -396,8 +387,6 @@ class EmergencyStateResponse(BaseModel):
     pending_count: int = 0
     open_count: int = 0
     whitelist_count: int = 0
-
-
 # ---------------------------------------------------------------------------
 # Records / Notifications delete
 # ---------------------------------------------------------------------------
