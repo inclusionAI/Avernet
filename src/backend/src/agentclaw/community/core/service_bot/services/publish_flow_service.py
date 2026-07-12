@@ -41,6 +41,9 @@ from agentclaw.community.core.service_bot.services.publish_flow.provider_behavio
     ProviderBehaviorRouter,
     TeclawProviderBehavior,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.build_stage import (
+    BuildStageRunner,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.release_stage import (
     ONLINE_SPEC,
     VERIFY_SPEC,
@@ -170,6 +173,7 @@ class PublishFlowService:
         # implementation for both verify and online (was four near-duplicate
         # methods). Operates through this facade for the shared helpers.
         self._release_runner = ReleaseStageRunner(self)
+        self._build_stage_runner = BuildStageRunner(self)
 
     def _stage_overrides(
         self, publish_record: BotPublishRecord, stage: PublishStage
@@ -397,113 +401,8 @@ class PublishFlowService:
         publish_record: BotPublishRecord,
         operator: str,
     ) -> PublishFlowResult:
-        """执行构建阶段。
-
-        流程：
-        1. 更新状态为 BUILDING
-        2. 调用 BotBuildService.build_async() 执行构建（异步）
-        3. 更新状态为 BUILT，记录构建目录
-
-        Args:
-            publish_record: 发布单
-            operator: 操作者
-
-        Returns:
-            PublishFlowResult: 构建结果
-        """
-        publish_id = publish_record.id
-        bot_id = publish_record.source_bot_id
-        version = publish_record.version or 1
-        owner_id = self._get_owner_id(publish_record)
-
-        try:
-            # 更新状态为构建中
-            self._publish_service.update_publish_status(
-                publish_id=publish_id,
-                target_status=PublishStatus.BUILDING,
-                source_status=PublishStatus.DRAFT,
-            )
-
-            logger.info(
-                f"[PublishFlowService._execute_build_phase] Starting build: "
-                f"publish_id={publish_id}, bot_id={bot_id}, operator={operator}, owner_id={owner_id}"
-            )
-
-            # 获取 Bot 信息
-            bot = self._bot_service.get_bot(bot_id=bot_id, user_id=owner_id)
-            if not bot:
-                raise PublishFlowServiceError(f"Bot不存在: {bot_id}")
-
-            # 按 device_provider 选择产物生产者：ARCA/baas → 既有 build()（行为等价）；
-            # teclaw → compose+冻结。容器由 baas 决定（非 engine）——查 baas 取源 bot
-            # 的容器 provider_type 映射成 device_provider；baas 不知该 bot（如未经
-            # baas 备容器的 ARCA 草稿）则回退 baas。produce_artifact 是同步的，包进
-            # to_thread 复刻 build_async 的非阻塞语义。
-            device_provider = self._baas_service.resolve_container_provider(bot)
-            producer = self._producer_router.resolve(device_provider)
-            behavior = self._provider_behaviors.resolve(device_provider)
-            artifact = await asyncio.to_thread(
-                producer.produce_artifact, bot, version
-            )
-
-            if not artifact.success:
-                raise PublishFlowServiceError(artifact.message or "构建失败")
-
-            # Provider-specific post-build file staging (teclaw snapshots the
-            # running source container's /workspace + /identity into OSS and embeds
-            # the refs; ARCA/baas mirror to ac_file already → no-op).
-            await behavior.stage_build_files(
-                artifact=artifact, bot=bot, bot_id=bot_id,
-                owner_id=owner_id, publish_id=publish_id,
-            )
-
-            # 构建成功，把产物指针合并进 ext。ARCA 产 migration_path/
-            # build_target_path（与改造前同键同值）；external 产 config_artifact/
-            # content_hash/engine_ext。verify/online 仍从同一 ext 读取。
-            ext = self._get_latest_ext(publish_id)
-            ext.update(artifact.ext)
-
-            # 更新状态为构建成功
-            self._update_publish_status(
-                publish_id=publish_id,
-                target_status=PublishStatus.BUILT,
-                source_status=PublishStatus.BUILDING,
-                ext=ext,
-            )
-
-            logger.info(
-                f"[PublishFlowService._execute_build_phase] Build completed: "
-                f"publish_id={publish_id}, provider={device_provider}"
-            )
-
-            return PublishFlowResult(
-                publish_id=publish_id,
-                status=PublishStatus.BUILT,
-                message="构建完成",
-                action="process",
-            )
-
-        except Exception as e:
-            logger.error(f"[PublishFlowService._execute_build_phase] Build failed: {e}")
-
-            # 构建失败，更新状态和错误信息
-            ext = self._get_latest_ext(publish_id)
-            self._clear_retry_flag(ext)
-            ext["error_message"] = str(e)
-            ext["source_status"] = PublishStatus.BUILDING.value
-            self._update_publish_status(
-                publish_id=publish_id,
-                target_status=PublishStatus.FAILED,
-                source_status=PublishStatus.BUILDING,
-                ext=ext,
-            )
-
-            return PublishFlowResult(
-                publish_id=publish_id,
-                status=PublishStatus.FAILED,
-                message=f"构建失败: {str(e)}",
-                action="process",
-            )
+        """执行构建阶段（DRAFT → BUILDING → BUILT）。委托给 BuildStageRunner。"""
+        return await self._build_stage_runner.run(publish_record, operator)
 
     async def _execute_verify_release_phase(
         self,

@@ -99,7 +99,7 @@
         and `ext` writes as before. Full suite green.
 - **Depends on:** Task 3
 
-## Task 5: Extract `BuildStageRunner`
+## Task 5: Extract `BuildStageRunner` — [x] DONE
 - **Goal:** Move the build phase into its own runner; file-staging goes through
   `ProviderBehavior.stage_build_files`.
 - **Files:** `.../publish_flow/build_stage.py` (new), `.../publish_flow_service.py`
