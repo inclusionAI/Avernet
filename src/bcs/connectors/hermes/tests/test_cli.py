@@ -284,6 +284,95 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("human-secret", argv)
         self.assertEqual("human-secret", register.call_args.kwargs["human_token"])
 
+    def test_register_cli_rejects_existing_profile_for_different_bot_name(
+        self,
+    ) -> None:
+        paths = cli.connector_paths(self.hermes_home)
+        cli.AtomicJsonStore(paths.session).save(
+            {
+                "bot_uuid": "bot-existing",
+                "bot_token": "bot-secret",
+                "bcs_url": "ws://127.0.0.1:21000/ws/bot",
+                "bot_name": "existing-bot",
+            }
+        )
+
+        for replace_args in ([], ["--replace"]):
+            with self.subTest(replace=bool(replace_args)):
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(Path(cli.__file__).resolve()),
+                        "register",
+                        "--human-token-stdin",
+                        "--bot-name",
+                        "requested-bot",
+                        "--hermes-home",
+                        str(self.hermes_home),
+                        *replace_args,
+                    ],
+                    input="unused-human-token\n",
+                    capture_output=True,
+                    text=True,
+                )
+
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("already registered as existing-bot", result.stderr)
+                self.assertIn("choose another profile", result.stderr)
+                self.assertNotIn("registered bot-existing", result.stdout)
+
+    def test_register_reuses_legacy_profile_without_bot_name(self) -> None:
+        paths = cli.connector_paths(self.hermes_home)
+        legacy = {
+            "bot_uuid": "bot-existing",
+            "bot_token": "bot-secret",
+            "bcs_url": "ws://127.0.0.1:21000/ws/bot",
+        }
+        cli.AtomicJsonStore(paths.session).save(legacy)
+
+        with mock.patch.object(cli, "_post_registration") as post:
+            session = cli.register_bot(
+                human_token="unused-human-token",
+                bot_name="requested-bot",
+                bcs_endpoint="http://127.0.0.1:21000",
+                bcs_url="ws://127.0.0.1:21000/ws/bot",
+                hermes_home=self.hermes_home,
+            )
+
+        self.assertEqual(legacy, session)
+        post.assert_not_called()
+
+    def test_register_rejects_pending_profile_for_wrong_or_missing_bot_name(
+        self,
+    ) -> None:
+        self._write_session()
+        paths = cli.connector_paths(self.hermes_home)
+
+        for replace in (False, True):
+            for pending_name in (None, "other-bot"):
+                with self.subTest(replace=replace, pending_name=pending_name):
+                    pending = {
+                        "bot_uuid": "bot-pending",
+                        "bot_token": "pending-secret",
+                        "bcs_url": "ws://127.0.0.1:21000/ws/bot",
+                    }
+                    if pending_name is not None:
+                        pending["bot_name"] = pending_name
+                    cli.AtomicJsonStore(paths.pending_session).save(pending)
+
+                    expected = (
+                        "missing bot_name" if pending_name is None else "other-bot"
+                    )
+                    with self.assertRaisesRegex(ValueError, expected):
+                        cli.register_bot(
+                            human_token="",
+                            bot_name="Hermes Bot",
+                            bcs_endpoint="http://127.0.0.1:21000",
+                            bcs_url="ws://127.0.0.1:21000/ws/bot",
+                            hermes_home=self.hermes_home,
+                            replace=replace,
+                        )
+
     def test_dashboard_settings_are_reused_or_replaced_when_port_is_busy(self) -> None:
         session = {
             "dashboard_port": 24567,
@@ -1173,6 +1262,30 @@ class CliTests(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertIn("reviewer is already registered as hermes2", result.stderr)
 
+    def test_installer_allows_legacy_registered_profile_without_bot_name(self) -> None:
+        session = Path(self.tempdir.name) / "session.json"
+        session.write_text(
+            json.dumps(
+                {
+                    "bot_uuid": "bot-existing",
+                    "bot_token": "secret",
+                    "bcs_url": "ws://127.0.0.1:21000/ws/bot",
+                }
+            ),
+            encoding="utf-8",
+        )
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            'reject_profile_bot_name_mismatch "$1" hermes4 reviewer'
+        )
+        result = subprocess.run(
+            ["/bin/bash", "-c", command, "missing-name", str(session)],
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+
     def test_installer_installs_dependencies_without_pip_index_under_nounset(
         self,
     ) -> None:
@@ -1641,10 +1754,11 @@ class CliTests(unittest.TestCase):
             self._stop_fake_process(bcs)
 
     def test_installer_resume_command_preserves_selected_options(self) -> None:
+        pip_index = "https://mirror-user:mirror-pass@packages.example/simple"
         command = (
             f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
             "AVERNET_RAW_BASE_URL=https://source.example/connectors; "
-            "PIP_INDEX_URL=https://packages.example/simple; "
+            f"PIP_INDEX_URL={pip_index}; "
             "build_resume_command https://source.example/install-hermes.sh "
             '"$AVERNET_RAW_BASE_URL" --bot-name reviewer --profile review '
             "--bcs-endpoint https://bcs.example --bcs-ws-url wss://bcs.example/ws/bot "
@@ -1657,9 +1771,13 @@ class CliTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
+        self.assertNotIn(pip_index, result.stdout)
+        self.assertIn(
+            'PIP_INDEX_URL="${PIP_INDEX_URL:?export PIP_INDEX_URL before resuming}"',
+            result.stdout,
+        )
         for preserved in (
             "AVERNET_RAW_BASE_URL=https://source.example/connectors",
-            "PIP_INDEX_URL=https://packages.example/simple",
             "https://source.example/install-hermes.sh",
             "--bot-name reviewer",
             "--profile review",
@@ -1669,6 +1787,244 @@ class CliTests(unittest.TestCase):
             "--china-mirror",
         ):
             self.assertIn(preserved, result.stdout)
+
+    def test_installer_recovers_pending_replacement_with_printed_command(
+        self,
+    ) -> None:
+        source_dir = Path(self.tempdir.name) / "replacement-source"
+        source_dir.mkdir()
+        fake_connector = source_dir / "hermes_bcn.py"
+        fake_connector.write_text(
+            "import json\n"
+            "import os\n"
+            "import sys\n"
+            "from pathlib import Path\n"
+            "args = sys.argv[1:]\n"
+            "command = args[0]\n"
+            "if command in {'start', 'status'}:\n"
+            "    if os.environ.get('FAIL_STAGE') == command:\n"
+            "        raise SystemExit(42)\n"
+            "    raise SystemExit(0)\n"
+            "if command != 'register':\n"
+            "    raise SystemExit(2)\n"
+            "if '--profile' in args:\n"
+            "    home = Path.home() / '.hermes' / 'profiles' / args[args.index('--profile') + 1]\n"
+            "else:\n"
+            "    home = Path(args[args.index('--hermes-home') + 1])\n"
+            "state = home / 'bcn'\n"
+            "pending = state / 'session.pending.json'\n"
+            "session = state / 'session.json'\n"
+            "if '--replace' not in args:\n"
+            "    if not session.exists():\n"
+            "        raise SystemExit(2)\n"
+            "    current = json.loads(session.read_text(encoding='utf-8'))\n"
+            "    print('registered ' + current['bot_uuid'])\n"
+            "    raise SystemExit(0)\n"
+            "if pending.exists():\n"
+            "    os.replace(pending, session)\n"
+            "    print('registered bot-pending')\n"
+            "    raise SystemExit(0)\n"
+            "state.mkdir(parents=True, exist_ok=True)\n"
+            "payload = {\n"
+            "    'bot_uuid': 'bot-pending',\n"
+            "    'bot_token': 'pending-secret',\n"
+            "    'bcs_url': args[args.index('--bcs-url') + 1],\n"
+            "    'bot_name': args[args.index('--bot-name') + 1],\n"
+            "}\n"
+            "pending.write_text(json.dumps(payload), encoding='utf-8')\n"
+            "pending.chmod(0o600)\n"
+            "print('error: simulated post-registration replacement failure', file=sys.stderr)\n"
+            "raise SystemExit(1)\n",
+            encoding="utf-8",
+        )
+
+        bin_dir = Path(self.tempdir.name) / "replacement-bin"
+        bin_dir.mkdir()
+        hermes = bin_dir / "hermes"
+        hermes.write_text(
+            "#!/bin/sh\n"
+            "test \"$1 $2\" = 'dashboard --help' || exit 9\n"
+            "printf '%s\\n' 'usage: hermes dashboard --isolated'\n",
+            encoding="utf-8",
+        )
+        hermes.chmod(0o700)
+        python_bin = bin_dir / "python"
+        python_bin.write_text(
+            "#!/bin/sh\n"
+            "if [ \"$1\" = '-m' ] && [ \"$2\" = 'venv' ]; then\n"
+            "  mkdir -p \"$3/bin\"\n"
+            "  cp \"$0\" \"$3/bin/python\"\n"
+            "  chmod 700 \"$3/bin/python\"\n"
+            "  exit 0\n"
+            "fi\n"
+            "if [ \"$1\" = '-m' ] && [ \"$2\" = 'pip' ]; then\n"
+            "  [ \"${FAIL_STAGE:-}\" = 'pip' ] && exit 41\n"
+            "  exit 0\n"
+            "fi\n"
+            "exec \"$TEST_PYTHON\" \"$@\"\n",
+            encoding="utf-8",
+        )
+        python_bin.chmod(0o700)
+
+        base_env = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"FAIL_STAGE", "PIP_INDEX_URL", "USE_CN_MIRROR"}
+        }
+        marker = "Resume with:\n"
+        for failure_stage in ("pip", "start", "status"):
+            with self.subTest(failure_stage=failure_stage):
+                home = Path(self.tempdir.name) / f"replacement-home-{failure_stage}"
+                profile_home = home / ".hermes" / "profiles" / "review"
+                profile_home.mkdir(parents=True)
+                (profile_home / "config.yaml").write_text(
+                    "model: fake\n", encoding="utf-8"
+                )
+                env = {
+                    **base_env,
+                    "HOME": str(home),
+                    "XDG_DATA_HOME": str(
+                        Path(self.tempdir.name) / f"replacement-data-{failure_stage}"
+                    ),
+                    "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                    "PYTHON_BIN": str(python_bin),
+                    "TEST_PYTHON": sys.executable,
+                    "AVERNET_RAW_BASE_URL": source_dir.as_uri(),
+                    "BCS_INSTALLER_URL": INSTALLER.as_uri(),
+                }
+                first = subprocess.run(
+                    [
+                        "/bin/bash",
+                        str(INSTALLER),
+                        "--human-token-stdin",
+                        "--bot-name",
+                        "replacement-bot",
+                        "--profile",
+                        "review",
+                        "--replace",
+                    ],
+                    input="human-token\n",
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    timeout=30,
+                )
+
+                self.assertNotEqual(0, first.returncode)
+                self.assertIn(marker, first.stderr)
+                resume_command = (
+                    first.stderr.split(marker, 1)[1].strip().splitlines()[0]
+                )
+                self.assertIn("--replace", resume_command)
+
+                promoted = subprocess.run(
+                    ["/bin/bash", "-c", resume_command],
+                    capture_output=True,
+                    text=True,
+                    env={**env, "FAIL_STAGE": failure_stage},
+                    timeout=30,
+                )
+                paths = cli.connector_paths(profile_home)
+                self.assertNotEqual(0, promoted.returncode)
+                self.assertIn(marker, promoted.stderr)
+                post_promotion_resume = (
+                    promoted.stderr.split(marker, 1)[1].strip().splitlines()[0]
+                )
+                self.assertNotIn("--replace", post_promotion_resume)
+                self.assertEqual(
+                    "bot-pending",
+                    cli.AtomicJsonStore(paths.session).load()["bot_uuid"],
+                )
+                self.assertFalse(paths.pending_session.exists())
+
+                retry = subprocess.run(
+                    ["/bin/bash", "-c", post_promotion_resume],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    timeout=30,
+                )
+                self.assertEqual(0, retry.returncode, retry.stderr)
+                self.assertIn("running for bot bot-pending", retry.stdout)
+
+    def test_installer_pending_recovery_requires_matching_bot_name(self) -> None:
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            'recoverable_pending_uuid "$1" replacement-bot'
+        )
+        cases = (
+            ("matching", "replacement-bot", 0, "bot-pending"),
+            ("missing", None, 1, ""),
+            ("different", "other-bot", 1, ""),
+        )
+
+        for name, stored_name, expected_code, expected_output in cases:
+            with self.subTest(name=name):
+                pending = Path(self.tempdir.name) / f"pending-{name}.json"
+                payload = {
+                    "bot_uuid": "bot-pending",
+                    "bot_token": "pending-secret",
+                    "bcs_url": "ws://127.0.0.1:21000/ws/bot",
+                }
+                if stored_name is not None:
+                    payload["bot_name"] = stored_name
+                pending.write_text(json.dumps(payload), encoding="utf-8")
+
+                result = subprocess.run(
+                    ["/bin/bash", "-c", command, "pending-recovery", str(pending)],
+                    capture_output=True,
+                    text=True,
+                )
+
+                self.assertEqual(expected_code, result.returncode, result.stderr)
+                self.assertEqual(expected_output, result.stdout.strip())
+
+    def test_installer_failure_output_does_not_expose_authenticated_pip_index(
+        self,
+    ) -> None:
+        fake_python = Path(self.tempdir.name) / "mirror-python"
+        recorded_args = Path(self.tempdir.name) / "mirror-args"
+        fake_python.write_text(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PIP_ARGS_FILE\"\n",
+            encoding="utf-8",
+        )
+        fake_python.chmod(0o700)
+        pip_index = "https://mirror-user:mirror-pass@packages.example/simple"
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            'install_connector_dependencies "$1"; '
+            "build_resume_command https://source.example/install-hermes.sh "
+            "https://source.example/connectors --bot-name reviewer --profile review; "
+            "REGISTERED_UUID=bot-test; trap on_exit EXIT; false"
+        )
+        result = subprocess.run(
+            ["/bin/bash", "-c", command, "mirror-failure", str(fake_python)],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "PIP_INDEX_URL": pip_index,
+                "PIP_ARGS_FILE": str(recorded_args),
+            },
+        )
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertNotIn(pip_index, result.stdout + result.stderr)
+        self.assertIn(
+            'PIP_INDEX_URL="${PIP_INDEX_URL:?export PIP_INDEX_URL before resuming}"',
+            result.stderr,
+        )
+        self.assertEqual(
+            [
+                "-m",
+                "pip",
+                "install",
+                "--index-url",
+                pip_index,
+                "websockets>=14,<16",
+            ],
+            recorded_args.read_text(encoding="utf-8").splitlines(),
+        )
 
     def test_installer_main_preserves_create_profile_in_resume_command(self) -> None:
         home = Path(self.tempdir.name) / "resume-home"
@@ -1871,6 +2227,38 @@ class CliTests(unittest.TestCase):
             result.stdout.strip(),
         )
 
+    def test_installer_resume_requires_pip_index_in_fresh_nounset_shell(
+        self,
+    ) -> None:
+        source = Path(self.tempdir.name) / "resume-source.sh"
+        source.write_text("exit 0\n", encoding="utf-8")
+        pip_index = "https://mirror-user:mirror-pass@packages.example/simple"
+        build = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            f"PIP_INDEX_URL={pip_index}; "
+            f"build_resume_command {subprocess.list2cmdline([source.as_uri()])} "
+            "https://source.example/connectors --bot-name reviewer --profile review; "
+            'printf \'%s\\n\' "$RESUME_COMMAND"'
+        )
+        generated = subprocess.run(
+            ["bash", "-c", build],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+        env = {key: value for key, value in os.environ.items() if key != "PIP_INDEX_URL"}
+        result = subprocess.run(
+            ["bash", "-u", "-c", generated],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("export PIP_INDEX_URL before resuming", result.stderr)
+        self.assertNotIn(pip_index, result.stdout + result.stderr)
+
     def test_install_markdown_defines_executable_base_url_default_and_override(self) -> None:
         markdown = INSTALL_DOC.read_text(encoding="utf-8")
         self.assertNotIn("--token", markdown)
@@ -1963,6 +2351,7 @@ class CliTests(unittest.TestCase):
                     "bot_uuid": "bot-123",
                     "bot_token": "bot-secret",
                     "bcs_url": "ws://127.0.0.1:21000/ws/bot",
+                    "bot_name": "Hermes Bot",
                 }
             ),
             encoding="utf-8",

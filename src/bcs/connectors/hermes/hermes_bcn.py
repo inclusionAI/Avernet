@@ -1285,6 +1285,24 @@ def _valid_credentials(session: Any) -> bool:
     )
 
 
+def _require_matching_bot_name(
+    session: dict[str, Any],
+    requested_name: str,
+    *,
+    label: str,
+    allow_missing: bool = False,
+) -> None:
+    stored_name = session.get("bot_name")
+    if not isinstance(stored_name, str) or not stored_name:
+        if allow_missing:
+            return
+        raise ValueError(f"{label} is missing bot_name; choose another profile")
+    if stored_name != requested_name:
+        raise ValueError(
+            f"{label} is already registered as {stored_name}; choose another profile"
+        )
+
+
 def register_bot(
     *,
     human_token: str,
@@ -1299,10 +1317,21 @@ def register_bot(
     paths = connector_paths(home)
     store = AtomicJsonStore(paths.session)
     existing = store.load({})
-    if _valid_credentials(existing) and not replace:
-        return existing
-    pending = AtomicJsonStore(paths.pending_session).load({}) if replace else {}
+    pending = AtomicJsonStore(paths.pending_session).load({})
     if _valid_credentials(pending):
+        _require_matching_bot_name(
+            pending, bot_name, label="Pending Hermes profile"
+        )
+    if _valid_credentials(existing):
+        _require_matching_bot_name(
+            existing,
+            bot_name,
+            label="Hermes profile",
+            allow_missing=True,
+        )
+        if not replace:
+            return existing
+    if replace and _valid_credentials(pending):
         session = pending
     else:
         if not human_token:

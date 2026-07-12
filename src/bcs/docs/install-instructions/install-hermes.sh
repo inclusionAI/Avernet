@@ -104,18 +104,27 @@ on_exit() {
 build_resume_command() {
   local installer_url="$1" raw_base="$2"
   shift 2
-  local command="" quoted=""
+  local command="" quoted="" preserve_pip_index=0
   local -a resume_env=()
   if [[ -n "${AVERNET_RAW_BASE_URL:-}" ]]; then
     resume_env+=("AVERNET_RAW_BASE_URL=$raw_base")
   fi
   if [[ -n "${PIP_INDEX_URL:-}" ]]; then
-    resume_env+=("PIP_INDEX_URL=$PIP_INDEX_URL")
+    preserve_pip_index=1
   fi
   printf -v quoted 'curl -fsSL %q | ' "$installer_url"
   command+="$quoted"
-  if ((${#resume_env[@]})); then
-    printf -v quoted '%q ' env "${resume_env[@]}" bash -s -- "$@"
+  if ((${#resume_env[@]} || preserve_pip_index)); then
+    if ((${#resume_env[@]})); then
+      printf -v quoted '%q ' env "${resume_env[@]}"
+    else
+      printf -v quoted '%q ' env
+    fi
+    command+="$quoted"
+    if [[ "$preserve_pip_index" == "1" ]]; then
+      command+='PIP_INDEX_URL="${PIP_INDEX_URL:?export PIP_INDEX_URL before resuming}" '
+    fi
+    printf -v quoted '%q ' bash -s -- "$@"
   else
     printf -v quoted '%q ' bash -s -- "$@"
   fi
@@ -151,12 +160,46 @@ print(name if isinstance(name, str) else "")
 PY
 }
 
+session_bot_uuid() {
+  ensure_python || return 1
+  "$PYTHON_CMD" - "$1" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    value = json.load(handle)
+bot_uuid = value.get("bot_uuid")
+print(bot_uuid if isinstance(bot_uuid, str) else "")
+PY
+}
+
 reject_profile_bot_name_mismatch() {
   local session="$1" requested_name="$2" profile="$3" stored_name=""
   stored_name="$(session_bot_name "$session")" || return 1
   if [[ -n "$stored_name" && "$stored_name" != "$requested_name" ]]; then
     fail "profile $profile is already registered as $stored_name; choose another profile"
   fi
+}
+
+reject_pending_bot_name_mismatch() {
+  local session="$1" requested_name="$2" profile="$3" stored_name=""
+  stored_name="$(session_bot_name "$session")" || return 1
+  if [[ -z "$stored_name" ]]; then
+    fail "profile $profile has pending credentials without a Bot name"
+  fi
+  if [[ "$stored_name" != "$requested_name" ]]; then
+    fail "profile $profile has pending credentials for $stored_name; use the matching Bot name"
+  fi
+}
+
+recoverable_pending_uuid() {
+  local session="$1" requested_name="$2" stored_name="" bot_uuid=""
+  [[ -f "$session" ]] && valid_session "$session" || return 1
+  stored_name="$(session_bot_name "$session")" || return 1
+  [[ -n "$stored_name" && "$stored_name" == "$requested_name" ]] || return 1
+  bot_uuid="$(session_bot_uuid "$session")" || return 1
+  [[ -n "$bot_uuid" ]] || return 1
+  printf '%s\n' "$bot_uuid"
 }
 
 read_registration_token() {
@@ -278,6 +321,9 @@ main() {
   if [[ "$existing_valid" == "1" ]]; then
     reject_profile_bot_name_mismatch "$session" "$bot_name" "$profile"
   fi
+  if [[ "$pending_valid" == "1" ]]; then
+    reject_pending_bot_name_mismatch "$pending_session" "$bot_name" "$profile"
+  fi
   if [[ -f "$session" && "$replace" == "1" ]]; then
     if ! read -r -p "Replace existing BCS credentials? [y/N] " answer </dev/tty; then
       fail "credential replacement requires interactive confirmation"
@@ -328,12 +374,27 @@ main() {
   [[ -z "$workspace" ]] || resume_args+=(--workspace "$workspace")
   [[ "${USE_CN_MIRROR:-0}" != "1" ]] || resume_args+=(--china-mirror)
   [[ "$create_profile" == "0" ]] || resume_args+=(--create-profile)
-  build_resume_command "$installer_url" "$raw_base" "${resume_args[@]}"
+  local -a registration_resume_args=("${resume_args[@]}")
+  [[ "$replace" == "0" ]] || registration_resume_args+=(--replace)
+  build_resume_command \
+    "$installer_url" "$raw_base" "${registration_resume_args[@]}"
 
-  local registration="" registered_uuid=""
-  registration="$(printf '%s\n' "$human_token" | "$PYTHON_CMD" "$temp_connector" "${register_args[@]}")"
+  local registration="" registered_uuid="" pending_uuid=""
+  if ! registration="$(
+    printf '%s\n' "$human_token" | \
+      "$PYTHON_CMD" "$temp_connector" "${register_args[@]}"
+  )"; then
+    if [[ "$replace" == "1" ]] \
+      && pending_uuid="$(recoverable_pending_uuid "$pending_session" "$bot_name")"; then
+      REGISTERED_UUID="$pending_uuid"
+    fi
+    return 1
+  fi
   registered_uuid="${registration#registered }"
   REGISTERED_UUID="$registered_uuid"
+  if [[ "$replace" == "1" ]]; then
+    build_resume_command "$installer_url" "$raw_base" "${resume_args[@]}"
+  fi
 
   mkdir -p "$install_dir"
   local install_temp=""
@@ -351,6 +412,6 @@ main() {
   REGISTERED_UUID=""
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]:-}" == "$0" ]]; then
   main "$@"
 fi
