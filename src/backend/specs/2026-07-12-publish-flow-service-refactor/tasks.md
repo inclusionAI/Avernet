@@ -126,7 +126,7 @@
   - [ ] Characterization tests from Task 1 still green.
 - **Depends on:** Task 3
 
-## Task 7: Extract restart/scale/rollback/eval ops + apply renames
+## Task 7: Extract restart/scale/rollback/eval mixins — [x] DONE (renames pending)
 - **Goal:** Move the remaining operations out and apply the public + internal
   renames, updating every caller. (Spec goal #5.)
 - **Files:** `.../publish_flow/restart_ops.py`, `scale_ops.py`, `rollback_ops.py`,
@@ -151,7 +151,7 @@
         suite green.
 - **Depends on:** Task 4, Task 6
 
-## Task 8: Slim the facade + drop the oversized-module allowlist entry
+## Task 8: Slim the facade + drop the oversized-module allowlist entry — [x] DONE
 - **Goal:** `publish_flow_service.py` becomes a thin facade delegating to the
   runners; every new module is under the 1000-line cap. (Spec goals #1, #2.)
 - **Files:** `.../publish_flow_service.py`, `di/modules/service_bot_module.py`,
