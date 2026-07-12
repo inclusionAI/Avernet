@@ -14,7 +14,7 @@ Env is resolved internally via ``get_current_env()``.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from injector import inject
 
@@ -227,33 +227,6 @@ class NotifyLogRepository:
     # Bulk WRITE (self-managed session)
     # ------------------------------------------------------------------
 
-    def recover_sending_timeout(
-        self, timeout_minutes: int = 30,
-    ) -> int:
-        """Revert stale ``sending`` notifies back to ``pending``.
-
-        Called by cron: if a consumer crashed mid-send, the notify stays
-        in ``sending``. After ``timeout_minutes``, revert to ``pending``
-        so another consumer can pick it up.
-        """
-        _env = get_current_env()
-        cutoff = datetime.now() - timedelta(minutes=timeout_minutes)
-        with self._db.orm_session() as s:
-            s.expire_on_commit = False
-            count = (
-                s.query(GovernanceNotificationOrm)
-                .filter(
-                    GovernanceNotificationOrm.notify_status == NotifyStatus.SENDING,
-                    GovernanceNotificationOrm.last_send_at < cutoff,
-                    GovernanceNotificationOrm.env == _env,
-                )
-                .update(
-                    {GovernanceNotificationOrm.notify_status: NotifyStatus.PENDING},
-                    synchronize_session="fetch",
-                )
-            )
-            return count
-
     def list_pending_for_cron(
         self,
     ) -> list[GovernanceNotification]:
@@ -453,6 +426,39 @@ class NotifyLogRepository:
             s.flush()
             return orm_row.notification_id
 
+    def save_notification(self, notification: GovernanceNotification) -> bool:
+        """Persist a (mutated) domain notification back to its row.
+
+        通知发送状态机领域往返的写回原语(对齐 ``save_ticket`` 范式):
+        按 ``notification_id`` + env 查出 ORM 行 → ``apply_to`` 只写可变投递态
+        (notify_status / send_attempt_count / last_send_at / last_send_error /
+        external_message_id / sent_at)→ commit。冻结快照/sealed 列不动。
+
+        调用方(``NotifyLifecycleService``)在调本原语前已 invoke 领域守卫方法
+        (``mark_claimed`` / ``mark_sent`` / ``mark_failed``);本原语只写回,
+        repo 持无状态转移语义命令。Returns True if found+updated, False if not found.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            db_row = (
+                s.query(GovernanceNotificationOrm)
+                .filter(
+                    GovernanceNotificationOrm.notification_id == notification.notification_id,
+                    GovernanceNotificationOrm.env == _env,
+                )
+                .one_or_none()
+            )
+            if db_row is None:
+                return False
+            notification.apply_to(db_row)
+            try:
+                s.commit()
+            except Exception:
+                s.rollback()
+                raise
+            return True
+
     # ------------------------------------------------------------------
     # Test seeding (self-managed session + commit)
     # ------------------------------------------------------------------
@@ -598,6 +604,8 @@ class NotifyLogRepository:
                     GovernanceNotificationOrm.governance_status.in_(
                         [GovernanceStatus.OPEN, "muted"],
                     ),
+                    # 状态守卫:只取消待发通知,不动已投递(sent/failed/sending)。
+                    GovernanceNotificationOrm.notify_status == NotifyStatus.PENDING,
                     GovernanceNotificationOrm.env == _env,
                 )
                 .all()

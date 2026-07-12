@@ -21,6 +21,7 @@ from agentclaw.community.core.economy.governance.services.service_protocols impo
     GovernanceAdminServiceProtocol,
     GovernanceLifecycleServiceProtocol,
     GovernanceWhitelistServiceProtocol,
+    NotifyLifecycleServiceProtocol,
 )
 
 

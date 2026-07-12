@@ -32,6 +32,7 @@ from agentclaw.community.core.economy.governance.domain.ticket import Governance
 from agentclaw.community.core.economy.governance.services.service_protocols import (
     GovernanceAdminServiceProtocol,
     GovernanceLifecycleServiceProtocol,
+    NotifyLifecycleServiceProtocol,
 )
 from agentclaw.community.core.economy.governance.services.notify_render_service import (
     NotifyRenderService,
@@ -47,10 +48,6 @@ from agentclaw.community.core.economy.governance.services.notify_render_service 
 _MAX_SEND_ATTEMPTS: int = 5
 """Terminal failure threshold — after this many failed sends the notify is
 marked as permanently failed and no further attempts are made."""
-
-_SENDING_TIMEOUT_MINUTES: int = 30
-"""Minutes before a stuck ``sending`` status reverts to ``pending``
-so the next cron tick can reclaim it."""
 
 _DEFAULT_REMIND_DELAYS_DAYS: tuple[int, ...] = (3, 7, 14)
 """Default reminder rhythm (days after the previous send).
@@ -97,7 +94,6 @@ class CronTickSummary:
     cancelled_count: int = 0
     reminders_created: int = 0
     schedule_due_count: int = 0
-    timeout_recovered: int = 0
     auto_silence_closed: int = 0
     errors: int = 0
     dry_run: bool = False
@@ -105,9 +101,9 @@ class CronTickSummary:
     def to_dict(self) -> dict:
         """API 序列化视图 — router 直接 ``data=summary.to_dict()``。
 
-        字段集与原 admin_router ``_cron_tick_to_dict`` 一致(admin trigger-scan /
-        scan-and-deliver 端点)。``auto_silence_closed`` 不在此 API 视图(原助手无,
-        保持响应形态不变)。
+        admin trigger-scan / scan-and-deliver 端点的响应字段集。
+        ``auto_silence_closed`` 及原 ``timeout_recovered``(已随主动超时恢复
+        步删除)不在 API 视图。
         """
         return {
             "run_id": self.run_id,
@@ -116,7 +112,6 @@ class CronTickSummary:
             "cancelled_count": self.cancelled_count,
             "reminders_created": self.reminders_created,
             "schedule_due_count": self.schedule_due_count,
-            "timeout_recovered": self.timeout_recovered,
             "errors": self.errors,
             "dry_run": self.dry_run,
             "duration_seconds": self.duration_seconds,
@@ -141,6 +136,7 @@ class GovernanceBotService:
         notify_sender: NotifySenderPlugin,
         lifecycle_svc: GovernanceLifecycleServiceProtocol,
         render_svc: NotifyRenderService,
+        notify_lifecycle_svc: NotifyLifecycleServiceProtocol,
     ) -> None:
         self._task_repo = task_repo
         self._admin_svc = admin_svc
@@ -150,6 +146,7 @@ class GovernanceBotService:
         self._notify_sender = notify_sender
         self._lifecycle_svc = lifecycle_svc
         self._render_svc = render_svc
+        self._notify_lifecycle_svc = notify_lifecycle_svc
 
         # Parse remind_delays_days from config string (e.g. "3,7,14") or use default
         raw_delays = getattr(config, "remind_delays_days", None)
@@ -192,18 +189,9 @@ class GovernanceBotService:
             log.info("[GovernanceCron] Emergency brake active — skipping tick, run_id=%s", run_id)
             return summary
 
-        # Step 1: Sending timeout recovery (§7.3.1 Step 7)
-        if not dry_run:
-            timeout_minutes = _SENDING_TIMEOUT_MINUTES
-            recovered = self._notify_repo.recover_sending_timeout(
-                timeout_minutes,
-            )
-            summary.timeout_recovered = recovered
-            if recovered:
-                log.info(
-                    "[GovernanceCron] Recovered %d sending timeout(s), run_id=%s",
-                    recovered, run_id,
-                )
+        # Step 1: Sending timeout recovery removed (best-effort: failure has
+        # mark_failed 回退 + _MAX_SEND_ATTEMPTS 封顶兜底;极端崩溃窗口个别
+        # 通知漏发可接受。cron 不再背主动超时扫 — §7.3.1 § spec A3)。
 
         # Step 2: Send pending notifies (§7.3.1)
         self._send_pending_notifies(
@@ -243,7 +231,6 @@ class GovernanceBotService:
             + summary.cancelled_count
             + summary.reminders_created
             + summary.schedule_due_count
-            + summary.timeout_recovered
             + summary.auto_silence_closed
         ) == 0
         no_action_note = (
@@ -252,7 +239,7 @@ class GovernanceBotService:
         )
         log.info(
             "[GovernanceCron] Tick completed: run_id=%s, sent=%d, failed=%d, "
-            "cancelled=%d, reminders=%d, schedule_due=%d, timeout_recovered=%d, "
+            "cancelled=%d, reminders=%d, schedule_due=%d, "
             "auto_silence_closed=%d, dry_run=%s, duration=%.1fs%s",
             run_id,
             summary.sent_count,
@@ -260,7 +247,6 @@ class GovernanceBotService:
             summary.cancelled_count,
             summary.reminders_created,
             summary.schedule_due_count,
-            summary.timeout_recovered,
             summary.auto_silence_closed,
             summary.dry_run,
             summary.duration_seconds,
@@ -363,19 +349,21 @@ class GovernanceBotService:
                     skip_dry_run_count += 1
                     continue
 
-                # Atomic claim (§7.3.1 Step 4)
-                claimed = self._notify_repo.claim_pending(
-                    notify_row.notification_id, now,
+                # Atomic claim (§7.3.1 Step 4) — 经通知状态机驱动(SQL CAS 原子领用
+                # + 领域 guard)。返 sending 态领域模型;None=被并发抢/已非 pending。
+                claimed_notify = self._notify_lifecycle_svc.claim(
+                    notify_row.notification_id, now=now,
                 )
-                if not claimed:
+                if claimed_notify is None:
                     continue  # Another consumer already claimed
 
-                # Send (§7.3.1 Step 5)
+                # Send (§7.3.1 Step 5) — notify_row 身份/快照字段 claim 后不变,
+                # 沿用原 pending 模型投递即可。
                 result = self._send_notification(notify_row)
 
                 if result.success:
-                    # Mark sent (§7.3.1 Step 5)
-                    self._notify_repo.mark_sent(
+                    # Mark sent (§7.3.1 Step 5) — 领域守卫(sending→sent)
+                    self._notify_lifecycle_svc.mark_sent(
                         notify_row.notification_id,
                         external_message_id=result.external_message_id,
                         sent_at=now,
@@ -416,10 +404,10 @@ class GovernanceBotService:
                     # Read actual attempt count from the row after claim
                     attempt_count = notify_row.send_attempt_count or 1
                     is_terminal = attempt_count >= max_attempts
-                    self._notify_repo.mark_send_failed(
+                    self._notify_lifecycle_svc.mark_failed(
                         notify_row.notification_id,
-                        error_msg="Send failed",
-                        is_terminal=is_terminal,
+                        error="Send failed",
+                        terminal=is_terminal,
                     )
                     summary.failed_count += 1
 

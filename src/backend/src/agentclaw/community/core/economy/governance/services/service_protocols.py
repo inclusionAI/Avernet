@@ -27,6 +27,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.domain.enums import (
         GovernanceStatus,
     )
+    from agentclaw.community.core.economy.governance.domain.notification import (
+        GovernanceNotification,
+    )
     from agentclaw.community.core.economy.governance.domain.ticket import (
         GovernanceTicket,
     )
@@ -374,4 +377,46 @@ class GovernanceLifecycleServiceProtocol(Protocol):
         the full bulk_close_open (would over-close responded scheduled tickets).
         Idempotent. Returns the number of tickets actually closed.
         """
+        ...
+
+
+@runtime_checkable
+class NotifyLifecycleServiceProtocol(Protocol):
+    """通知发送状态机正常路径唯一驱动(service↔service 契约,住 core 自家)。
+
+    对齐工单机的 ``GovernanceLifecycleService`` 收口标准:正常投递路径
+    (单条 pending→sending→sent/failed)的状态推进经此驱动,每次先 invoke
+    ``GovernanceNotification`` 领域守卫再 save。批量/紧急路径(批量取消、
+    紧急制动批量关、手动投递)不走此驱动,直接走 repo SQL 原语(紧急而准确,
+    SQL 一条原子 UPDATE 带 WHERE 守卫是最准确形态)。
+
+    Note: 本 Protocol 定义在 core 自家(``services/service_protocols.py``),
+    ``api/governance_service.py`` 可 re-export 给 router(若有需要);service
+    间消费直接 import 本文件,不跨层依赖 ``api/``。
+    """
+
+    def claim(
+        self, notification_id: str, *, now: datetime,
+    ) -> GovernanceNotification | None:
+        """领用 pending→sending(原子 CAS,并发安全);返改后领域模型,被抢/非 pending 返 None。"""
+        ...
+
+    def mark_sent(
+        self,
+        notification_id: str,
+        *,
+        external_message_id: str | None,
+        sent_at: datetime,
+    ) -> bool:
+        """sending→sent(领域守卫);找不到/guard 失败返 False。"""
+        ...
+
+    def mark_failed(
+        self,
+        notification_id: str,
+        *,
+        error: str,
+        terminal: bool,
+    ) -> bool:
+        """sending→failed(终态)/ sending→pending(重试);领域守卫;返 False 同上。"""
         ...
