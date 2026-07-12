@@ -378,7 +378,7 @@ class PublishFlowService(
         operator: str,
     ) -> PublishFlowResult:
         """执行构建阶段（DRAFT → BUILDING → BUILT）。委托给 BuildStageRunner。"""
-        return await self._build_stage_runner.run(publish_record, operator)
+        return await self._build_stage_runner.build(publish_record, operator)
 
     async def _execute_verify_release_phase(
         self,

@@ -490,6 +490,16 @@ def create_rejected_by_baas():
     rejects the create → FAILED, never approved. (BaaS-originated failure → stub.)"""
 
 
+@endpoint_test(
+    method="POST", path=_PROCESS, scenario="process_publish_not_found",
+    input=CaseInput(json_body={"publish_id": 9_999_999}, headers=_HEADERS),
+    expect=ExpectError(status=200, json_contains={"success": False, "error_code": 404}),
+)
+def process_publish_not_found():
+    """/process for a non-existent publish_id → PublishNotFoundError → 404 error
+    envelope (the endpoint's error path)."""
+
+
 # ── verify stage: VALIDATE_PUB → VALIDATING (the sync poll) ──────────────────
 
 

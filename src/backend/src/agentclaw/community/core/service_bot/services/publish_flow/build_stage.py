@@ -26,7 +26,7 @@ class BuildStageRunner:
     def __init__(self, flow) -> None:
         self._flow = flow
 
-    async def run(
+    async def build(
         self,
         publish_record: BotPublishRecord,
         operator: str,
