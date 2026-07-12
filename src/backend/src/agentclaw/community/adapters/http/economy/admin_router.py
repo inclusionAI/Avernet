@@ -68,22 +68,6 @@ _ScanService = GovernanceBotServiceProtocol
 # ---------------------------------------------------------------------------
 
 
-def _cron_tick_to_dict(summary: object) -> dict:
-    """Serialize a CronTickSummary to the dict shape returned by API."""
-    return {
-        "run_id": summary.run_id,
-        "sent_count": summary.sent_count,
-        "failed_count": summary.failed_count,
-        "cancelled_count": summary.cancelled_count,
-        "reminders_created": summary.reminders_created,
-        "schedule_due_count": summary.schedule_due_count,
-        "timeout_recovered": summary.timeout_recovered,
-        "errors": summary.errors,
-        "dry_run": summary.dry_run,
-        "duration_seconds": summary.duration_seconds,
-    }
-
-
 def _raise_on_admin_error(result: dict | object) -> None:
     """Raise HTTPException if the admin-service result contains an error.
 
@@ -336,7 +320,7 @@ async def trigger_scan(
     """Manually trigger a governance cron tick (§7.3)."""
     try:
         summary = await asyncio.to_thread(scan_svc.process_cron_tick, dry_run=dry_run)
-        return ApiResponse(success=True, data=_cron_tick_to_dict(summary))
+        return ApiResponse(success=True, data=summary.to_dict())
     except Exception:
         log.exception("[EconomyGovernance] trigger-scan failed")
         return ApiResponse(success=False, message="Scan failed", error_code="SCAN_ERROR")
@@ -391,7 +375,7 @@ async def scan_and_deliver(
     if not skip_scan:
         try:
             result = await asyncio.to_thread(scan_svc.process_cron_tick, dry_run=scan_dry_run)
-            scan_summary = _cron_tick_to_dict(result)
+            scan_summary = result.to_dict()
         except Exception:
             log.exception("[scan-and-deliver] Cron tick phase failed")
             scan_summary = {"error": "Cron tick failed — see backend logs"}

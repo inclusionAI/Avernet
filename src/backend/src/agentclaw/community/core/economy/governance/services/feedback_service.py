@@ -1,4 +1,4 @@
-"""Governance feedback service — task_record based (§7.4).
+"""[编排] Governance feedback service — task_record based (§7.4).
 
 Handles 4 formal responses (optimized / need_time / dispute / whitelist)
 via the **one-time feedback rule** (§7.4.1): one task_record gets at most
@@ -26,6 +26,10 @@ from agentclaw.community.core.economy.governance.domain.enums import (
     GovernanceStatus,
     Response,
 )
+from agentclaw.community.core.economy.governance.services.service_protocols import (
+    GovernanceLifecycleServiceProtocol,
+    GovernanceWhitelistServiceProtocol,
+)
 
 
 if TYPE_CHECKING:
@@ -37,12 +41,6 @@ if TYPE_CHECKING:
     )
     from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
         TaskRecordRepository,
-    )
-    from agentclaw.community.core.economy.governance.services.lifecycle_service import (
-        GovernanceLifecycleService,
-    )
-    from agentclaw.community.core.economy.governance.services.whitelist_service import (
-        GovernanceWhitelistService,
     )
 
 log = get_logger(__name__)
@@ -108,12 +106,12 @@ class GovernanceFeedbackService:
     @inject
     def __init__(
         self,
-        whitelist_service: GovernanceWhitelistService,
+        whitelist_service: GovernanceWhitelistServiceProtocol,
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         task_repo: TaskRecordRepository,
         config: Any,  # EconomyGovernanceConfig
-        lifecycle_svc: GovernanceLifecycleService,
+        lifecycle_svc: GovernanceLifecycleServiceProtocol,
     ) -> None:
         # ``whitelist_service`` / ``notify_repo`` retained as injected deps
         # (constructor signature stable across migration); the resolve path

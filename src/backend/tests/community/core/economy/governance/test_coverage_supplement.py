@@ -55,6 +55,10 @@ from agentclaw.community.core.economy.governance.services.lifecycle_service impo
 from agentclaw.community.core.economy.governance.services.scan_service import (
     GovernanceBotService,
 )
+from agentclaw.community.core.economy.governance.services.notify_render_service import (
+    NotifyRenderService,
+)
+
 from agentclaw.community.core.economy.governance.services.whitelist_service import (
     GovernanceWhitelistService,
 )
@@ -427,6 +431,7 @@ def _build_record_svc(engine):
         audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
         lifecycle_svc=lifecycle_svc,
+        render_svc=NotifyRenderService(),
     )
     return svc, db
 
@@ -700,6 +705,7 @@ def _build_scan_svc(engine, *, config=None):
         config=config,
         notify_sender=FakeNotifySender(),
         lifecycle_svc=lifecycle_svc,
+        render_svc=NotifyRenderService(),
     )
     return svc, db
 
@@ -831,6 +837,7 @@ def _build_scan_svc(engine, *, config=None):
         config=config,
         notify_sender=FakeNotifySender(),
         lifecycle_svc=lifecycle_svc,
+        render_svc=NotifyRenderService(),
     )
     return svc, db
 

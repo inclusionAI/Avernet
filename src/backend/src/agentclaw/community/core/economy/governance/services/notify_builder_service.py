@@ -1,4 +1,4 @@
-"""Markdown notification builders for governance notifications.
+"""[内核·底层 builder] Markdown notification builders for governance notifications.
 
 The **simplified reason** (``build_governance_reason``) is the single
 source of truth for notification text.  It renders a concise Markdown

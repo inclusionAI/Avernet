@@ -1,4 +1,4 @@
-"""Governance admin service — backend management operations (§7.5).
+"""[编排] Governance admin service — backend management operations (§7.5).
 
 Covers:
   - Emergency brake (pause/resume) — cross-pod distributed cache
@@ -32,8 +32,9 @@ from agentclaw.community.core.economy.governance.domain.enums import (
     CloseReason,
     GovernanceStatus,
 )
-from agentclaw.community.core.economy.governance.services.whitelist_service import (
-    GovernanceWhitelistService,
+from agentclaw.community.core.economy.governance.services.service_protocols import (
+    GovernanceLifecycleServiceProtocol,
+    GovernanceWhitelistServiceProtocol,
 )
 from agentclaw.community.core.economy.governance.services.delivery_runner import (
     run_delivery,
@@ -54,9 +55,6 @@ if TYPE_CHECKING:
     )
     from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
         TaskRecordRepository,
-    )
-    from agentclaw.community.core.economy.governance.services.lifecycle_service import (
-        GovernanceLifecycleService,
     )
     from agentclaw.community.plugin_api.cache_protocol import CachePlugin
 
@@ -137,13 +135,13 @@ class GovernanceAdminService:
     def __init__(
         self,
         cache: CachePlugin,
-        whitelist_service: GovernanceWhitelistService,
+        whitelist_service: GovernanceWhitelistServiceProtocol,
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         task_repo: TaskRecordRepository,
         config: Any,  # EconomyGovernanceConfig
         notify_sender: NotifySenderPlugin,
-        lifecycle_svc: GovernanceLifecycleService,
+        lifecycle_svc: GovernanceLifecycleServiceProtocol,
     ) -> None:
         self._cache = cache
         self._whitelist_service = whitelist_service

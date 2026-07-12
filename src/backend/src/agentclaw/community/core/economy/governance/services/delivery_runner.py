@@ -1,4 +1,4 @@
-"""Delivery runner — 投递链路 Phase 3-5(build → send → update DB + audit)。
+"""[辅助] Delivery runner — 投递链路 Phase 3-5(build → send → update DB + audit)。
 
 从 GovernanceAdminService._run_delivery 抽出(admin-router-regroup Task 9):该链路
 被 deliver_pending(scan_and_deliver 全量)与 deliver_by_worker(按 worker 精准)复用,
