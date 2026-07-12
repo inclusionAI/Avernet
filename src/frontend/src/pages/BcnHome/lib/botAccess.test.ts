@@ -137,9 +137,9 @@ describe('bot access resources', () => {
       template?.indexOf("trap 'rm -f") ?? -1,
     );
     expect(template?.indexOf("trap 'rm -f")).toBeLessThan(
-      template?.indexOf('curl -fsSL') ?? -1,
+      template?.indexOf('curl --ipv4') ?? -1,
     );
-    expect(template?.indexOf('curl -fsSL')).toBeLessThan(
+    expect(template?.indexOf('curl --ipv4')).toBeLessThan(
       template?.indexOf("printf '%s\\n'") ?? -1,
     );
 
@@ -160,14 +160,28 @@ describe('bot access resources', () => {
   it('renders Bot name and Hermes Profile in the automatic instructions', () => {
     const template = getExt(AppExt).resources.bcnHermesAutoConnectCmdTemplate;
     expect(template).not.toBeNull();
-    expect(
-      renderBotAccessCommand(template ?? '', 'registration-token', {
-        botName: 'Hermes Reviewer',
-      }),
-    ).toContain(
-      "Bot name 'Hermes Reviewer' and Hermes Profile " +
-        "'avernet-hermes-reviewer'",
+    const rendered = renderBotAccessCommand(
+      template ?? '',
+      'registration-token',
+      { botName: 'Hermes Reviewer' },
     );
+    expect(rendered).toContain("--bot-name 'Hermes Reviewer'");
+    expect(rendered).toContain("--profile 'avernet-hermes-reviewer'");
+  });
+
+  it('uses a resilient installer command for both Hermes access methods', () => {
+    const manual = getExt(AppExt).resources.bcnHermesConnectCmdTemplate ?? '';
+    const automatic =
+      getExt(AppExt).resources.bcnHermesAutoConnectCmdTemplate ?? '';
+
+    expect(manual).toContain('curl --ipv4');
+    expect(manual).toContain('--retry 3');
+    expect(manual).toContain('--retry-all-errors');
+    expect(manual).toContain('--connect-timeout 10');
+    expect(manual).toContain('--max-time 30');
+    expect(manual).toContain('--china-mirror');
+    expect(automatic).toContain('Execute this exact command');
+    expect(automatic).toContain(manual);
   });
 
   it('uses the same Git ref for the Hermes installer and connector', () => {
@@ -182,6 +196,6 @@ describe('bot access resources', () => {
     expect(template).toContain('BCS_INSTALLER_URL=');
     expect(sourceRefs).toHaveLength(2);
     expect(new Set(sourceRefs).size).toBe(1);
-    expect(sourceRefs[0]).toBe('refs/heads/dev');
+    expect(sourceRefs[0]).toMatch(/^[0-9a-f]{40}$/);
   });
 });

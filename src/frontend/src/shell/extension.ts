@@ -46,6 +46,9 @@ const defaultAuthAdapter: AuthAdapter = {
   },
 };
 
+const hermesBcnInstallerCommand =
+  '( set -e; installer_url="https://raw.githubusercontent.com/inclusionAI/Avernet/6e8fa66a7475d4d1561efc7e1060b11a02abde9e/src/bcs/docs/install-instructions/install-hermes.sh"; installer_fallback_url="https://api.github.com/repos/inclusionAI/Avernet/contents/src/bcs/docs/install-instructions/install-hermes.sh?ref=6e8fa66a7475d4d1561efc7e1060b11a02abde9e"; raw_base="https://raw.githubusercontent.com/inclusionAI/Avernet/6e8fa66a7475d4d1561efc7e1060b11a02abde9e/src/bcs/connectors/hermes"; installer="$(mktemp "${TMPDIR:-/tmp}/install-hermes.XXXXXX")"; trap \'rm -f "$installer"\' EXIT; if ! curl --ipv4 --fail --silent --show-error --location --retry 1 --retry-all-errors --connect-timeout 10 --max-time 15 "$installer_url" -o "$installer"; then curl --ipv4 --fail --silent --show-error --location --retry 3 --retry-all-errors --connect-timeout 10 --max-time 30 -H "Accept: application/vnd.github.raw+json" "$installer_fallback_url" -o "$installer"; fi; printf \'%s\\n\' \'{token}\' | env AVERNET_RAW_BASE_URL="$raw_base" BCS_INSTALLER_URL="$installer_url" bash "$installer" --human-token-stdin --bot-name {bot_name} --profile {profile} --create-profile --china-mirror )';
+
 export const AppExt = defineExt('App', {
   /**
    * 模块清单（驱动主导航菜单 buildMenus）。开源默认 = 对外可见的模块。
@@ -166,10 +169,8 @@ export const AppExt = defineExt('App', {
     // 方式2：Bot 自动接入
     bcnAutoConnectCmdTemplate:
       'Follow the instructions in https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/docs/install-instructions/install.md to join BCN (Bot Coordination Network), your token is {token}',
-    bcnHermesConnectCmdTemplate:
-      '( set -e; installer_url="https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/docs/install-instructions/install-hermes.sh"; raw_base="https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/connectors/hermes"; installer="$(mktemp "${TMPDIR:-/tmp}/install-hermes.XXXXXX")"; trap \'rm -f "$installer"\' EXIT; curl -fsSL "$installer_url" -o "$installer"; printf \'%s\\n\' \'{token}\' | env AVERNET_RAW_BASE_URL="$raw_base" BCS_INSTALLER_URL="$installer_url" bash "$installer" --human-token-stdin --bot-name {bot_name} --profile {profile} --create-profile )',
-    bcnHermesAutoConnectCmdTemplate:
-      'Follow the instructions in https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/docs/install-instructions/install-hermes.md to join BCN (Bot Coordination Network) with Bot name {bot_name} and Hermes Profile {profile}; your token is {token}',
+    bcnHermesConnectCmdTemplate: hermesBcnInstallerCommand,
+    bcnHermesAutoConnectCmdTemplate: `Execute this exact command in a local shell without using another BCN integration method:\n${hermesBcnInstallerCommand}`,
     productLinks: { tui: null, mobile: null, desktop: null },
   } as Resources,
 
