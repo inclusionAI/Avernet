@@ -175,7 +175,7 @@ pub use workbench_use_cases::{
 pub use types::{
     BotDeliveryTarget, CallbackChannelConfig, CallbackConfig, CoordinationMode,
     CoordinationSurface, ProviderAuthMode, ProviderBotBinding, ProviderCoordinationConfig,
-    ProviderCredential, ProviderRecord, RedactedToken,
+    ProviderCredential, ProviderOrganizationManagementConfig, ProviderRecord, RedactedToken,
     ChatRuntimeProfile, CollaborationDefinition,
     CollaborationDefinitionRef, CollaborationMetadata, CollaborationParticipantBinding,
     CollaborationRequirements, CollaborationRuntimeDefinition, GroupRuntimeBinding,

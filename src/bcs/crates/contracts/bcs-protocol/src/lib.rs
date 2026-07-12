@@ -41,7 +41,7 @@ pub use http::{
     ProviderAckResponse, ProviderAuthDto, ProviderAuthModeDto, ProviderCoordinationConfigDto,
     ProviderCoordinationEventKindDto, ProviderCoordinationEventRequest,
     ProviderCoordinationIntentDto, ProviderCoordinationModeDto, ProviderHistoryResponse,
-    ProviderInfoResponse,
+    ProviderInfoResponse, ProviderOrganizationManagementConfigDto,
     ProviderWebhookBotRef, ProviderWebhookRequest, ProviderWebhookSender, QueryBotEntry,
     QueryBotsRequest, RegisterProviderBotRequest, RegisterProviderBotResponse,
     RegisterProviderRequest, RegisterProviderResponse, SetVisibilityRequest, UpdateStatusRequest,

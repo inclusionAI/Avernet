@@ -34,7 +34,8 @@ pub use provider::{
     PatchProviderBotRequest, PatchProviderRequest, ProviderAckResponse, ProviderAuthDto,
     ProviderAuthModeDto, ProviderCoordinationConfigDto, ProviderCoordinationEventKindDto,
     ProviderCoordinationEventRequest, ProviderCoordinationIntentDto, ProviderCoordinationModeDto,
-    ProviderHistoryResponse, ProviderInfoResponse, ProviderWebhookBotRef, ProviderWebhookRequest,
-    ProviderWebhookSender, RegisterProviderBotRequest, RegisterProviderBotResponse,
-    RegisterProviderRequest, RegisterProviderResponse,
+    ProviderHistoryResponse, ProviderInfoResponse, ProviderOrganizationManagementConfigDto,
+    ProviderWebhookBotRef, ProviderWebhookRequest, ProviderWebhookSender,
+    RegisterProviderBotRequest, RegisterProviderBotResponse, RegisterProviderRequest,
+    RegisterProviderResponse,
 };

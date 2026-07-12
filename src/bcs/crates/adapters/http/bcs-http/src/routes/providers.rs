@@ -7,13 +7,13 @@ use axum::{
 use bcs_protocol::{
     BCN_PROVIDER_ID_HEADER, PatchProviderRequest, ProviderAuthModeDto,
     ProviderCoordinationConfigDto, ProviderCoordinationModeDto, ProviderInfoResponse,
-    RegisterProviderBotRequest, RegisterProviderBotResponse, RegisterProviderRequest,
-    RegisterProviderResponse,
+    ProviderOrganizationManagementConfigDto, RegisterProviderBotRequest,
+    RegisterProviderBotResponse, RegisterProviderRequest, RegisterProviderResponse,
 };
 use bcs_service_api::{
     BotUseCaseError, CoordinationMode, DeleteProviderBotCommand, ProviderAuthMode,
-    ProviderBotBinding, ProviderCoordinationConfig, ProviderRecord,
-    RegisterProviderBotCommand, RegisterProviderCommand, ServiceError,
+    ProviderBotBinding, ProviderCoordinationConfig, ProviderOrganizationManagementConfig,
+    ProviderRecord, RegisterProviderBotCommand, RegisterProviderCommand, ServiceError,
     SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult, UpdateProviderCommand,
 };
 use serde_json::{Value, json};
@@ -141,7 +141,7 @@ pub async fn get_provider(
         .get_provider(&provider_id, &provider_admin_token)
         .await
         .map_err(provider_error)?;
-    Ok(Json(provider_to_response(provider)))
+    Ok(Json(provider_to_response(provider).map_err(provider_error)?))
 }
 
 pub async fn patch_provider(
@@ -164,10 +164,13 @@ pub async fn patch_provider(
             webhook_url: req.webhook_url,
             protocol_version: req.protocol_version,
             coordination: req.coordination.map(coordination_from_wire),
+            organization_management: req
+                .organization_management
+                .map(organization_management_from_wire),
         })
         .await
         .map_err(provider_error)?;
-    Ok(Json(provider_to_response(provider)))
+    Ok(Json(provider_to_response(provider).map_err(provider_error)?))
 }
 
 pub async fn register_provider_bot(
@@ -359,7 +362,7 @@ async fn set_provider_disabled(
         )
         .await
         .map_err(provider_error)?;
-    Ok(Json(provider_to_response(provider)))
+    Ok(Json(provider_to_response(provider).map_err(provider_error)?))
 }
 
 fn auth_mode_from_wire(mode: ProviderAuthModeDto) -> ProviderAuthMode {
@@ -394,6 +397,22 @@ fn coordination_from_wire(config: ProviderCoordinationConfigDto) -> ProviderCoor
 fn coordination_to_wire(config: &Value) -> Option<ProviderCoordinationConfigDto> {
     let coordination = config.get("coordination")?;
     serde_json::from_value::<ProviderCoordinationConfigDto>(coordination.clone()).ok()
+}
+
+fn organization_management_from_wire(
+    config: ProviderOrganizationManagementConfigDto,
+) -> ProviderOrganizationManagementConfig {
+    ProviderOrganizationManagementConfig {
+        authorized_manager_provider_ids: config.authorized_manager_provider_ids,
+    }
+}
+
+fn organization_management_to_wire(
+    config: ProviderOrganizationManagementConfig,
+) -> ProviderOrganizationManagementConfigDto {
+    ProviderOrganizationManagementConfigDto {
+        authorized_manager_provider_ids: config.authorized_manager_provider_ids,
+    }
 }
 
 fn bearer_token(headers: &HeaderMap) -> Result<String, ProviderRouteError> {
@@ -467,8 +486,8 @@ fn provider_error(error: ServiceError) -> ProviderRouteError {
     }
 }
 
-fn provider_to_response(provider: ProviderRecord) -> ProviderInfoResponse {
-    let config: Value = serde_json::from_str(&provider.config).unwrap_or(Value::Null);
+fn provider_to_response(provider: ProviderRecord) -> Result<ProviderInfoResponse, ServiceError> {
+    let config: Value = serde_json::from_str(&provider.config)?;
     let downlink = config.get("downlink").unwrap_or(&Value::Null);
     let webhook_url = downlink
         .get("webhook_url")
@@ -481,17 +500,25 @@ fn provider_to_response(provider: ProviderRecord) -> ProviderInfoResponse {
         .map(auth_mode_to_wire)
         .unwrap_or(ProviderAuthModeDto::StaticBearer);
     let coordination = coordination_to_wire(&config);
+    let organization_management = config
+        .get("organization_management")
+        .map(|_| {
+            ProviderOrganizationManagementConfig::from_provider_config(&provider.config)
+                .map(organization_management_to_wire)
+        })
+        .transpose()?;
 
-    ProviderInfoResponse {
+    Ok(ProviderInfoResponse {
         provider_id: provider.provider_id,
         name: provider.name,
         webhook_url,
         auth_mode,
         coordination,
+        organization_management,
         disabled: provider.disabled,
         created_at: provider.created_at,
         updated_at: provider.updated_at,
-    }
+    })
 }
 
 fn binding_to_json(binding: ProviderBotBinding) -> Value {

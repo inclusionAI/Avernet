@@ -356,6 +356,7 @@ impl ProviderCoreService for NoopProviderCoreService {
         _webhook_url: Option<String>,
         _protocol_version: Option<String>,
         _coordination: Option<ProviderCoordinationConfig>,
+        _organization_management: Option<ProviderOrganizationManagementConfig>,
     ) -> ServiceResult<ProviderRecord> {
         Err(service_not_configured("provider core service"))
     }

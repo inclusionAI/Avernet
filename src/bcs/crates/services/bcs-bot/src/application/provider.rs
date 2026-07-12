@@ -171,6 +171,7 @@ impl ProviderManagementService for ProviderManagement {
                 command.webhook_url,
                 command.protocol_version,
                 command.coordination,
+                command.organization_management,
             )
             .await
     }
