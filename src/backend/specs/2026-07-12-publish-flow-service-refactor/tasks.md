@@ -263,7 +263,7 @@
         under the test profile.
 - **Depends on:** Task 12
 
-## Task 14: End-to-end durable-pipeline integration tests
+## Task 14: End-to-end durable-pipeline integration tests — [x] DONE (restart-task durability deferred)
 - **Goal:** Prove a full run advances autonomously (no manual `/sync`) and
   survives a simulated crash, for both provider families.
 - **Files:** `tests/community/endpoints/` (new integration case, or extend the
