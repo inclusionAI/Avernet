@@ -53,6 +53,11 @@ The copy button is disabled while either value is invalid. Inline validation
 uses concise field-level text; invalid values are never inserted into a shell
 command.
 
+The landing-page `AccessSection` and the workbench `AddBotGuideModal` render
+the same small Hermes configuration form and consume the same validation and
+command-rendering helpers. The two entry points must not drift in copy,
+defaults, or generated arguments.
+
 The bot-assisted Hermes method remains available and receives the same
 multi-profile notice. This MVP does not attempt to send form values through an
 unstructured prompt.
