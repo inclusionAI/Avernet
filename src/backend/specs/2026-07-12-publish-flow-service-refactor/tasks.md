@@ -26,7 +26,7 @@
   - [x] Task 11 idempotency design references this conclusion.
 - **Depends on:** —
 
-## Task 1: Characterization tests for thin-coverage entry points
+## Task 1: Characterization tests for thin-coverage entry points — [x] DONE
 - **Goal:** Pin *current* behavior of the under-tested public methods before any
   code moves, so the refactor is provably behavior-preserving.
 - **Files:** `tests/community/core/service_bot/services/test_publish_flow_service.py`

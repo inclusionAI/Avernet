@@ -1,11 +1,18 @@
 from datetime import datetime
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService, BotBuildServiceError
-from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowService
+from agentclaw.community.core.service_bot.services.publish_flow_service import (
+    PublishFlowService,
+    PublishFlowServiceError,
+)
+from agentclaw.community.core.service_bot.services.bot_publish_service import (
+    PublishNotFoundError,
+    PublishStatusInvalidError,
+)
 from agentclaw.community.core.service_bot.types import PublishStage
 
 
@@ -2380,3 +2387,311 @@ def test_handle_sync_success_online_publish_logs_warning_when_destroy_verify_fai
     assert result.status == PublishStatus.SUCCESS
     svc._destroy_bot_by_stage.assert_called_once_with(publish_record, PublishStage.VERIFY)
     assert publish_service.update_publish_status_with_ext.called
+
+
+# ===========================================================================
+# Characterization tests (Task 1) — pin CURRENT behavior of the thin-coverage
+# public entry points (process / sync_publish_progress / sync_restart_progress /
+# restart_bot / retry) before the publish-flow refactor, so the restructure can
+# be shown to preserve behavior. Deliberately dispatch-level (collaborators
+# mocked): they assert which branch/handler current code takes, not deep effects
+# already covered elsewhere.
+# ===========================================================================
+
+
+def _svc_with_record(record, *, build_service=None, baas_service=None, bot_service=None):
+    """PublishFlowService whose publish_service.get_publish_by_id returns `record`."""
+    publish_service = Mock()
+    publish_service.get_publish_by_id.return_value = record
+    build_service = build_service or Mock()
+    svc = _pf(
+        publish_service,
+        build_service,
+        baas_service or Mock(),
+        bot_service or Mock(),
+        _arca_router(build_service),
+    )
+    return svc, publish_service
+
+
+_CREATE_TASK = (
+    "agentclaw.community.core.service_bot.services.publish_flow_service.asyncio.create_task"
+)
+
+
+# ---- process() dispatch ----------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_process_draft_spawns_full_verify_flow_and_returns_building():
+    record = _make_publish_record(status=PublishStatus.DRAFT.value)
+    svc, _ = _svc_with_record(record)
+    svc._execute_full_verify_flow_async = Mock()
+    with patch(_CREATE_TASK) as create_task:
+        result = await svc.process(publish_id=1, operator="op")
+    create_task.assert_called_once()
+    assert result.status == PublishStatus.BUILDING
+    assert result.action == "process"
+    assert "构建已启动" in result.message
+
+
+@pytest.mark.asyncio
+async def test_process_built_awaits_verify_release_phase():
+    record = _make_publish_record(status=PublishStatus.BUILT.value)
+    svc, _ = _svc_with_record(record)
+    sentinel = Mock()
+    svc._execute_verify_release_phase = AsyncMock(return_value=sentinel)
+    result = await svc.process(publish_id=1, operator="op")
+    assert result is sentinel
+    svc._execute_verify_release_phase.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_process_validating_awaits_release_phase():
+    record = _make_publish_record(status=PublishStatus.VALIDATING.value)
+    svc, _ = _svc_with_record(record)
+    sentinel = Mock()
+    svc._execute_release_phase = AsyncMock(return_value=sentinel)
+    result = await svc.process(publish_id=1, operator="op")
+    assert result is sentinel
+    svc._execute_release_phase.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status,fragment",
+    [
+        (PublishStatus.BUILDING, "构建进行中"),
+        (PublishStatus.VALIDATE_PUB, "验证环境发布进行中"),
+        (PublishStatus.ONLINE_PUB, "线上发布进行中"),
+        (PublishStatus.SUCCESS, "发布已完成"),
+    ],
+)
+async def test_process_describe_only_states_do_not_mutate(status, fragment):
+    record = _make_publish_record(status=status.value)
+    svc, publish_service = _svc_with_record(record)
+    result = await svc.process(publish_id=1, operator="op")
+    assert result.status == status
+    assert fragment in result.message
+    publish_service.update_publish_status_with_ext.assert_not_called()
+    publish_service.update_publish_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_process_failed_reports_error_message():
+    record = _make_publish_record(
+        status=PublishStatus.FAILED.value, ext={"error_message": "boom"}
+    )
+    svc, _ = _svc_with_record(record)
+    result = await svc.process(publish_id=1, operator="op")
+    assert result.status == PublishStatus.FAILED
+    assert "boom" in result.message
+
+
+@pytest.mark.asyncio
+async def test_process_not_found_raises():
+    svc, _ = _svc_with_record(None)
+    with pytest.raises(PublishNotFoundError):
+        await svc.process(publish_id=999, operator="op")
+
+
+# ---- sync_publish_progress() dispatch --------------------------------------
+
+def test_sync_publish_progress_not_found_raises():
+    svc, _ = _svc_with_record(None)
+    with pytest.raises(PublishNotFoundError):
+        svc.sync_publish_progress(publish_id=999)
+
+
+def test_sync_publish_progress_retry_flag_redirects_to_restart_sync():
+    record = _make_publish_record(
+        status=PublishStatus.VALIDATE_PUB.value,
+        ext={"retry": True, "source_status": PublishStatus.VALIDATE_PUB.value},
+    )
+    svc, _ = _svc_with_record(record)
+    sentinel = Mock()
+    svc.sync_restart_progress = Mock(return_value=sentinel)
+    assert svc.sync_publish_progress(publish_id=1) is sentinel
+    svc.sync_restart_progress.assert_called_once_with(1)
+
+
+def test_sync_publish_progress_failed_status_asks_retry():
+    record = _make_publish_record(status=PublishStatus.FAILED.value)
+    svc, _ = _svc_with_record(record)
+    result = svc.sync_publish_progress(publish_id=1)
+    assert result.status == PublishStatus.FAILED
+    assert "请重试" in result.message
+
+
+def test_sync_publish_progress_no_baas_publish_id_returns_guard():
+    record = _make_publish_record(status=PublishStatus.VALIDATE_PUB.value, ext={})
+    svc, _ = _svc_with_record(record)
+    result = svc.sync_publish_progress(publish_id=1)
+    assert "未找到" in result.message
+
+
+def test_sync_publish_progress_success_dispatches_handle_success():
+    record = _make_publish_record(
+        status=PublishStatus.VALIDATE_PUB.value, ext={"publish": {"verify": 500}}
+    )
+    svc, _ = _svc_with_record(record)
+    svc.get_baas_publish_progress = Mock(return_value={"status": "SUCCESS"})
+    sentinel = Mock()
+    svc._handle_sync_success = Mock(return_value=sentinel)
+    assert svc.sync_publish_progress(publish_id=1) is sentinel
+    svc._handle_sync_success.assert_called_once()
+
+
+def test_sync_publish_progress_failed_baas_dispatches_handle_failure():
+    record = _make_publish_record(
+        status=PublishStatus.VALIDATE_PUB.value, ext={"publish": {"verify": 500}}
+    )
+    svc, _ = _svc_with_record(record)
+    svc.get_baas_publish_progress = Mock(return_value={"status": "FAILED"})
+    sentinel = Mock()
+    svc._handle_sync_failure = Mock(return_value=sentinel)
+    assert svc.sync_publish_progress(publish_id=1) is sentinel
+    svc._handle_sync_failure.assert_called_once()
+
+
+def test_sync_publish_progress_other_status_reports_without_mutation():
+    record = _make_publish_record(
+        status=PublishStatus.VALIDATE_PUB.value, ext={"publish": {"verify": 500}}
+    )
+    svc, publish_service = _svc_with_record(record)
+    svc.get_baas_publish_progress = Mock(return_value={"status": "PENDING"})
+    result = svc.sync_publish_progress(publish_id=1)
+    assert "PENDING" in result.message
+    publish_service.update_publish_status_with_ext.assert_not_called()
+
+
+# ---- sync_restart_progress() dispatch (previously zero coverage) -----------
+
+def test_sync_restart_progress_not_found_raises():
+    svc, _ = _svc_with_record(None)
+    with pytest.raises(PublishNotFoundError):
+        svc.sync_restart_progress(publish_id=999)
+
+
+def test_sync_restart_progress_unsupported_status_returns_guard():
+    record = _make_publish_record(status=PublishStatus.BUILT.value)
+    svc, _ = _svc_with_record(record)
+    result = svc.sync_restart_progress(publish_id=1)
+    assert "不支持查询重启进度" in result.message
+
+
+def test_sync_restart_progress_no_handle_returns_guard():
+    record = _make_publish_record(status=PublishStatus.ONLINE_PUB.value, ext={})
+    svc, _ = _svc_with_record(record)
+    result = svc.sync_restart_progress(publish_id=1)
+    assert "未找到" in result.message
+
+
+def test_sync_restart_progress_success_dispatches_handle_success():
+    record = _make_publish_record(
+        status=PublishStatus.ONLINE_PUB.value, ext={"restart": {"online": 700}}
+    )
+    svc, _ = _svc_with_record(record)
+    svc.get_baas_publish_progress = Mock(return_value={"status": "SUCCESS"})
+    sentinel = Mock()
+    svc._handle_sync_success = Mock(return_value=sentinel)
+    assert svc.sync_restart_progress(publish_id=1) is sentinel
+    svc._handle_sync_success.assert_called_once()
+
+
+def test_sync_restart_progress_stable_status_still_fails_on_baas_failed():
+    # VALIDATING is a stable state → no forward advance, but a BaaS FAILED still
+    # routes to _handle_sync_failure.
+    record = _make_publish_record(
+        status=PublishStatus.VALIDATING.value, ext={"restart": {"verify": 700}}
+    )
+    svc, _ = _svc_with_record(record)
+    svc.get_baas_publish_progress = Mock(return_value={"status": "FAILED"})
+    sentinel = Mock()
+    svc._handle_sync_failure = Mock(return_value=sentinel)
+    assert svc.sync_restart_progress(publish_id=1) is sentinel
+    svc._handle_sync_failure.assert_called_once()
+
+
+# ---- restart_bot() submit path ---------------------------------------------
+
+def test_restart_bot_not_found_returns_failure():
+    svc, _ = _svc_with_record(None)
+    result = svc.restart_bot(publish_id=999, operator="op")
+    assert result["success"] is False
+
+
+def test_restart_bot_unsupported_status_returns_failure():
+    record = _make_publish_record(status=PublishStatus.DRAFT.value)
+    svc, _ = _svc_with_record(record)
+    result = svc.restart_bot(publish_id=1, operator="op")
+    assert result["success"] is False
+    assert "不支持重启" in result["message"]
+
+
+def test_restart_bot_missing_binding_returns_failure():
+    record = _make_publish_record(status=PublishStatus.SUCCESS.value, ext={})
+    svc, _ = _svc_with_record(record)
+    result = svc.restart_bot(publish_id=1, operator="op")
+    assert result["success"] is False
+
+
+def test_restart_bot_success_schedules_async_and_returns_stage():
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 42}, "migration_path": "/m"},
+    )
+    svc, publish_service = _svc_with_record(record)
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id="BOT-x")
+    svc._bot_service.get_bot = Mock(return_value={"bot_id": "bot-source"})
+    svc._restart_bot_async = Mock()
+    with patch(_CREATE_TASK) as create_task:
+        result = svc.restart_bot(publish_id=1, operator="op")
+    create_task.assert_called_once()
+    assert result["success"] is True
+    assert result["stage"] == PublishStage.ONLINE.value
+    assert result["bot_uuid"] == "BOT-x"
+
+
+# ---- retry() across source_status ------------------------------------------
+
+@pytest.mark.asyncio
+async def test_retry_rejects_non_failed_status():
+    record = _make_publish_record(status=PublishStatus.VALIDATING.value)
+    svc, _ = _svc_with_record(record)
+    with pytest.raises(PublishFlowServiceError):
+        await svc.retry(publish_id=1, operator="op")
+
+
+@pytest.mark.asyncio
+async def test_retry_missing_source_status_raises():
+    record = _make_publish_record(status=PublishStatus.FAILED.value, ext={})
+    svc, _ = _svc_with_record(record)
+    with pytest.raises(PublishFlowServiceError):
+        await svc.retry(publish_id=1, operator="op")
+
+
+@pytest.mark.asyncio
+async def test_retry_from_online_pub_source_calls_restart():
+    record = _make_publish_record(
+        status=PublishStatus.FAILED.value,
+        ext={"source_status": PublishStatus.ONLINE_PUB.value},
+    )
+    svc, _ = _svc_with_record(record)
+    svc.restart_bot = Mock(return_value={"success": True})
+    result = await svc.retry(publish_id=1, operator="op")
+    svc.restart_bot.assert_called_once()
+    assert result.action == "restart"
+
+
+@pytest.mark.asyncio
+async def test_retry_from_built_source_calls_process():
+    record = _make_publish_record(
+        status=PublishStatus.FAILED.value,
+        ext={"source_status": PublishStatus.BUILT.value},
+    )
+    svc, _ = _svc_with_record(record)
+    sentinel = Mock()
+    svc.process = AsyncMock(return_value=sentinel)
+    result = await svc.retry(publish_id=1, operator="op")
+    assert result is sentinel
+    svc.process.assert_awaited_once()
