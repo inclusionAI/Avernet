@@ -17,7 +17,8 @@ Make multi-Hermes onboarding explicit and functional:
 
 - state that multiple Hermes bots are supported;
 - require one Hermes profile per BCN bot;
-- collect the bot display name and profile name before command generation;
+- collect a bot display name separately for manual and bot-assisted onboarding;
+- derive a safe, stable Hermes profile from each bot display name;
 - create a missing profile by cloning the default Hermes profile; and
 - reject a profile that is already registered under a different bot name.
 
@@ -36,35 +37,57 @@ change OpenClaw onboarding.
 When Hermes is selected, the access section shows a compact notice above the
 method cards:
 
-> Multiple Hermes bots are supported. Each bot must use a separate profile;
-> reusing a profile resumes the bot already registered in it.
+> Multiple Hermes bots are supported. Avernet automatically creates an
+> isolated Profile from the Bot name; reusing the same name resumes that Bot.
 
-The manual-access card adds two inputs before the generated command:
+Each Hermes method adds its own **Bot name** input before its generated
+command. The manual and bot-assisted values are independent and remain intact
+when the user switches methods in the workbench modal. The landing page shows
+one field in each method card.
 
-- **Bot name**: the BCN display name, required and trimmed;
-- **Profile name**: a named Hermes profile slug, required and validated against
-  Hermes' native `[a-z0-9][a-z0-9_-]{0,63}` format.
+There is no editable Profile field. The frontend derives the profile from the
+trimmed Bot name and passes it to the installer or bot-assisted instruction.
+The notice explains that Avernet creates this isolated profile automatically.
 
-The profile field starts empty and shows `avernet-hermes-2` as an example
-placeholder. `default` and Hermes-reserved profile names are rejected because
-this flow is specifically for creating an independently named instance.
-
-The copy button is disabled while either value is invalid. Inline validation
-uses concise field-level text; invalid values are never inserted into a shell
-command.
+The copy button is disabled while that method's Bot name is empty. Inline
+validation uses concise field-level text; invalid values are never inserted
+into a shell command or bot instruction.
 
 The landing-page `AccessSection` and the workbench `AddBotGuideModal` render
-the same small Hermes configuration form and consume the same validation and
-command-rendering helpers. The two entry points must not drift in copy,
-defaults, or generated arguments.
+the same small Bot-name field and consume the same profile derivation,
+validation, and command-rendering helpers. The two entry points must not drift
+in copy, defaults, or generated arguments.
 
 The bot-assisted Hermes method remains available and receives the same
-multi-profile notice. This MVP does not attempt to send form values through an
-unstructured prompt.
+multi-profile notice. Its generated instruction includes the selected Bot name
+and derived Profile so Hermes can execute the guide without asking the user to
+invent either value.
+
+## Derived Profile Names
+
+Profile generation is deterministic and frontend-owned:
+
+1. Trim the Bot name and normalize it with Unicode NFKD.
+2. Lowercase it, remove combining marks, replace every run outside
+   `[a-z0-9]` with `-`, and trim leading or trailing `-` characters.
+3. When an ASCII slug remains, prefix it with `avernet-` and truncate the slug
+   so the complete Profile is at most 64 characters. Remove a trailing `-`
+   after truncation.
+4. When no ASCII slug remains, calculate a stable 32-bit FNV-1a hash over the
+   trimmed JavaScript string's UTF-16 code units: start at `0x811c9dc5`, XOR
+   each `charCodeAt` value, and multiply with `Math.imul` by `0x01000193`.
+   Use `avernet-bot-<8 lowercase hex digits>`. An empty Bot name is invalid and
+   never reaches this fallback.
+
+For example, `Hermes Reviewer` becomes `avernet-hermes-reviewer`. The same Bot
+name always produces the same Profile. Pure slug conversion can map distinct
+names to one Profile; the installer's existing stored-bot-name conflict guard
+then rejects the second name with an actionable error instead of reconnecting
+the wrong bot.
 
 ## Command Rendering
 
-The Hermes manual template gains placeholders for the bot and profile names.
+Both Hermes templates gain placeholders for the bot and derived profile names.
 The shared access helper renders all placeholders:
 
 ```text
@@ -78,7 +101,7 @@ values are shell-escaped by one shared helper before template substitution.
 Profile validation prevents path traversal and option injection; bot names may
 contain spaces or non-ASCII display text after shell escaping.
 
-The rendered installer invocation includes:
+The rendered manual installer invocation includes:
 
 ```text
 --bot-name <escaped bot name>
@@ -88,6 +111,10 @@ The rendered installer invocation includes:
 
 OpenClaw templates continue to render only `{token}` and retain their current
 behavior.
+
+The bot-assisted instruction includes the escaped display name and derived
+profile as data for `install-hermes.md`. That guide uses `--create-profile` so a
+new derived profile is cloned from `default` before registration.
 
 ## Installer Semantics
 
@@ -126,17 +153,20 @@ The installer fails before registration for:
 - an existing valid BCN session whose stored bot name differs from the
   requested name.
 
-The frontend prevents the first two cases for copied commands. Installer-side
-validation remains authoritative for direct CLI users.
+The frontend generator always produces a non-reserved profile matching
+`[a-z0-9][a-z0-9_-]{0,63}`. Installer-side validation remains authoritative for
+direct CLI users and protects against future frontend drift.
 
 ## Testing
 
 Frontend unit tests cover:
 
 - Hermes multi-instance copy and field metadata;
-- profile validation;
+- independent manual and bot-assisted Bot-name state;
+- ASCII, accented, long, and non-ASCII-only profile derivation;
 - shell-safe bot-name rendering;
-- command rendering with all three installer flags;
+- manual command rendering with all three installer flags;
+- bot-assisted instruction rendering with Bot and Profile values;
 - copy disabled for invalid values; and
 - unchanged OpenClaw command rendering.
 
@@ -154,10 +184,12 @@ repository pre-push gates remain required.
 
 ## Acceptance Criteria
 
-1. A user can copy two commands with different profile names and register two
-   independently running Hermes bots.
-2. Rerunning a command with the same bot and profile resumes the existing bot.
-3. Reusing that profile with a different bot name produces an actionable error
-   instead of silently reconnecting the old bot.
-4. The UI explicitly states the one-profile-per-bot rule.
-5. Registration tokens are never exposed in installer arguments or logs.
+1. Manual and bot-assisted Hermes onboarding each require only a Bot name and
+   generate their own command or instruction.
+2. A Bot name deterministically produces a valid Hermes Profile without an
+   editable Profile field, including for non-ASCII-only names.
+3. Rerunning a method with the same Bot name resumes the existing bot.
+4. Reusing a derived Profile that already belongs to a different Bot name
+   produces an actionable error instead of silently reconnecting the old bot.
+5. The UI states that an isolated Profile is generated automatically.
+6. Registration tokens are never exposed in installer arguments or logs.
