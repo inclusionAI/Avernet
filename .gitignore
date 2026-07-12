@@ -64,6 +64,8 @@ src/bcs/configs/bcs-config.toml
 .memsearch/
 .omc/
 .night-kit/
+# Regenerated on every test run (test_module_boundaries dependents view)
+docs/arch/generated/
 
 # Local/private agent and tooling state
 .claude/
