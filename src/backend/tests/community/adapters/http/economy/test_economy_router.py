@@ -250,7 +250,7 @@ class _ScanSummary:
 
 
 class _CronTickSummary:
-    """Fake CronTickSummary matching _cron_tick_to_dict expected fields."""
+    """Fake CronTickSummary matching CronTickSummary.to_dict() expected fields."""
 
     def __init__(self) -> None:
         self.run_id = "run-1"
@@ -264,6 +264,21 @@ class _CronTickSummary:
         self.errors = 0
         self.dry_run = True
         self.duration_seconds = 0.1
+
+    def to_dict(self) -> dict:
+        """Mirror CronTickSummary.to_dict() field shape (Task 7 收口)。"""
+        return {
+            "run_id": self.run_id,
+            "sent_count": self.sent_count,
+            "failed_count": self.failed_count,
+            "cancelled_count": self.cancelled_count,
+            "reminders_created": self.reminders_created,
+            "schedule_due_count": self.schedule_due_count,
+            "timeout_recovered": self.timeout_recovered,
+            "errors": self.errors,
+            "dry_run": self.dry_run,
+            "duration_seconds": self.duration_seconds,
+        }
 
 
 class _OfflineBatchResult:

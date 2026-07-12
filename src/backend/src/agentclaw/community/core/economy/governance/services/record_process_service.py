@@ -1,4 +1,4 @@
-"""Record process and offline-batch service for governance task_record / notify_log.
+"""[编排] Record process and offline-batch service for governance task_record / notify_log.
 
 Implements:
   - :meth:`process_record` — §7.1.4 Steps 1–6: single record processing
@@ -39,8 +39,11 @@ from agentclaw.community.core.economy.governance.domain.ticket import (
     GovernanceTicket,
     MutableSnapshot,
 )
-from agentclaw.community.core.economy.governance.services.notify_builder_service import (
-    build_governance_reason,
+from agentclaw.community.core.economy.governance.services.notify_render_service import (
+    NotifyRenderService,
+)
+from agentclaw.community.core.economy.governance.services.service_protocols import (
+    GovernanceLifecycleServiceProtocol,
 )
 
 
@@ -56,9 +59,6 @@ if TYPE_CHECKING:
     )
     from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
         GovernanceWhitelistRepository,
-    )
-    from agentclaw.community.core.economy.governance.services.lifecycle_service import (
-        GovernanceLifecycleService,
     )
 
 log = get_logger(__name__)
@@ -115,7 +115,8 @@ class GovernanceRecordService:
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         config: Any,  # EconomyGovernanceConfig
-        lifecycle_svc: GovernanceLifecycleService,
+        lifecycle_svc: GovernanceLifecycleServiceProtocol,
+        render_svc: NotifyRenderService,
     ) -> None:
         self._task_repo = task_repo
         self._whitelist_repo = whitelist_repo
@@ -123,6 +124,7 @@ class GovernanceRecordService:
         self._audit_repo = audit_repo
         self._config = config
         self._lifecycle_svc = lifecycle_svc
+        self._render_svc = render_svc
 
     # ------------------------------------------------------------------
     # Public: process_record (§7.1.4)
@@ -594,11 +596,8 @@ class GovernanceRecordService:
             )
 
         # Render notification markdown
-        notification_md = self._render_notification_md(
-            record=record,
-            notification_id=notification_id,
-            bot_id=bot_id,
-            owner_id=owner_id_val,
+        notification_md = self._render_svc.render_first_notification_md(
+            record,
             dt_version=dt_version,
             use_reopen_template=use_reopen_template,
             reopen_ref_time=reopen_ref_time,
@@ -754,49 +753,6 @@ class GovernanceRecordService:
             return f"worker_key has empty side: {worker_key!r}"
         return None
 
-    # ------------------------------------------------------------------
-    # Internal: Notification rendering
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _render_notification_md(
-        *,
-        record: GovernanceRecord,
-        notification_id: str,
-        bot_id: str,
-        owner_id: str,
-        dt_version: str,
-        use_reopen_template: bool = False,
-        reopen_ref_time: datetime | None = None,
-    ) -> str:
-        """Render notification markdown, with optional reopen template."""
-        if use_reopen_template:
-            # "重新治理" template (§7.1.4 Step 6)
-            time_str = (
-                reopen_ref_time.strftime("%Y-%m-%d %H:%M")
-                if reopen_ref_time
-                else "之前"
-            )
-            return (
-                f"#### 🔄 重新治理通知 — {record.bot_name or '未知Bot'}\n\n"
-                f"该治理项曾在 {time_str} 处理过反馈。"
-                f"基于最新数据复核，当前仍需要继续跟进。\n\n"
-                f"请参考以下建议处理；如有补充说明，也可以继续反馈。\n\n"
-                f"**命中维度**: {record.hit_dimensions or '—'}\n"
-                f"**数据日期**: {dt_version}\n"
-            )
-
-        # Standard first notification template — use simplified reason builder
-        return build_governance_reason(
-            bot_name=record.bot_name or "",
-            dt_version=dt_version,
-            hit_dimensions=record.hit_dimensions,
-            governance_max_priority=record.governance_max_priority,
-            expected_token_saving=record.expected_token_saving,
-            saving_ratio=record.saving_ratio,
-            task_summary=record.task_summary,
-            notification_structured=record.notification_structured,
-        )
 
     # ------------------------------------------------------------------
     # Internal: Helpers

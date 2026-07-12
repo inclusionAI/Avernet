@@ -29,6 +29,10 @@ from agentclaw.community.core.economy.governance.services.record_process_service
     GovernanceRecordService,
     OfflineBatchResult,
 )
+from agentclaw.community.core.economy.governance.services.notify_render_service import (
+    NotifyRenderService,
+)
+
 from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
 from agentclaw.community.core.economy.governance.services.lifecycle_service import (
     GovernanceLifecycleService,
@@ -64,6 +68,7 @@ def _build_svc(engine):
         audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
         lifecycle_svc=lifecycle_svc,
+        render_svc=NotifyRenderService(),
     )
     return svc, db
 

@@ -1,4 +1,4 @@
-"""Governance cron service — time-driven tick (§7.3).
+"""[编排] Governance cron service — time-driven tick (§7.3).
 
 Replaces the old monolithic daily scan with a stateless, idempotent cron
 tick that processes only time-driven actions:
@@ -29,10 +29,12 @@ from agentclaw.community.core.economy.governance.domain.enums import (
 )
 from agentclaw.community.core.economy.governance.domain.notification import FrozenSnapshot, GovernanceNotification
 from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
-from agentclaw.community.core.economy.governance.services.notify_builder_service import (
-    build_card_notification_data,
-    build_governance_reason,
-    build_tc_card_detail_link,
+from agentclaw.community.core.economy.governance.services.service_protocols import (
+    GovernanceAdminServiceProtocol,
+    GovernanceLifecycleServiceProtocol,
+)
+from agentclaw.community.core.economy.governance.services.notify_render_service import (
+    NotifyRenderService,
 )
 
 
@@ -70,12 +72,6 @@ if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
         TaskRecordRepository,
     )
-    from agentclaw.community.core.economy.governance.services.admin_service import (
-        GovernanceAdminService,
-    )
-    from agentclaw.community.core.economy.governance.services.lifecycle_service import (
-        GovernanceLifecycleService,
-    )
 
 log = get_logger(__name__)
 
@@ -106,6 +102,26 @@ class CronTickSummary:
     errors: int = 0
     dry_run: bool = False
 
+    def to_dict(self) -> dict:
+        """API 序列化视图 — router 直接 ``data=summary.to_dict()``。
+
+        字段集与原 admin_router ``_cron_tick_to_dict`` 一致(admin trigger-scan /
+        scan-and-deliver 端点)。``auto_silence_closed`` 不在此 API 视图(原助手无,
+        保持响应形态不变)。
+        """
+        return {
+            "run_id": self.run_id,
+            "sent_count": self.sent_count,
+            "failed_count": self.failed_count,
+            "cancelled_count": self.cancelled_count,
+            "reminders_created": self.reminders_created,
+            "schedule_due_count": self.schedule_due_count,
+            "timeout_recovered": self.timeout_recovered,
+            "errors": self.errors,
+            "dry_run": self.dry_run,
+            "duration_seconds": self.duration_seconds,
+        }
+
 
 class GovernanceBotService:
     """Time-driven cron orchestrator (§7.3).
@@ -118,12 +134,13 @@ class GovernanceBotService:
     def __init__(
         self,
         task_repo: TaskRecordRepository,
-        admin_svc: GovernanceAdminService,
+        admin_svc: GovernanceAdminServiceProtocol,
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         config: Any,  # EconomyGovernanceConfig
         notify_sender: NotifySenderPlugin,
-        lifecycle_svc: GovernanceLifecycleService,
+        lifecycle_svc: GovernanceLifecycleServiceProtocol,
+        render_svc: NotifyRenderService,
     ) -> None:
         self._task_repo = task_repo
         self._admin_svc = admin_svc
@@ -132,6 +149,7 @@ class GovernanceBotService:
         self._config = config
         self._notify_sender = notify_sender
         self._lifecycle_svc = lifecycle_svc
+        self._render_svc = render_svc
 
         # Parse remind_delays_days from config string (e.g. "3,7,14") or use default
         raw_delays = getattr(config, "remind_delays_days", None)
@@ -482,7 +500,7 @@ class GovernanceBotService:
 
                 # Create reminder notify_log
                 notification_id = uuid.uuid4().hex
-                notification_md = self._render_reminder_md(ticket, now)
+                notification_md = self._render_svc.render_reminder_md(ticket, now=now)
 
                 notify_row = GovernanceNotification.create(
                     notification_id=notification_id,
@@ -716,6 +734,8 @@ class GovernanceBotService:
     def _send_notification(self, notify: GovernanceNotification) -> SendResult:
         """Send a notification via configured channel.
 
+        渲染委托 ``render_svc.build_send_payload``(TC 卡片);标题在这里取
+        (依 notify_type),markdown 频道用通知 frozen 快照里的 notification_md。
         Returns SendResult indicating success/failure and metadata.
         """
         from agentclaw.community.plugin_api.notify_sender import NotifyMessage
@@ -728,14 +748,16 @@ class GovernanceBotService:
             else "⚠️ 治理通知提醒"
         )
 
-        # Build channel-agnostic message; tc_card extras populated only when needed.
+        # 渲染交内核服务;TC 卡片构建失败 → render 返 None → 降级 markdown。
         deep_link = ""
         extra: dict[str, Any] = {}
-        reason = ""  # Simplified reason from build_governance_reason (tc_card only)
+        reason = ""
         if notify_channel == "tc_card":
-            tc_payload = self._build_tc_card_payload(notify, user_id)
-            if tc_payload is not None:
-                reason, deep_link, extra = tc_payload
+            payload = self._render_svc.build_send_payload(
+                notify, user_id=user_id, config=self._config,
+            )
+            if payload is not None:
+                reason, deep_link, extra = payload.body, payload.deep_link, payload.extra
             else:
                 # TC card build failed → degrade to markdown
                 notify_channel = "markdown"
@@ -763,62 +785,8 @@ class GovernanceBotService:
             success=False,
         )
 
-    def _build_tc_card_payload(
-        self, notify: GovernanceNotification, user_id: str,
-    ) -> tuple[str, str, dict[str, Any]] | None:
-        """Build TC card reason, deep_link + extra dict for NotifyMessage.
-
-        Returns (reason, deep_link, extra) on success, None on build failure
-        (caller should degrade to markdown).
-        """
-        try:
-            reason = build_governance_reason(
-                notification_structured=notify.notification_structured,
-                bot_name=notify.bot_name,
-                dt_version=notify.dt_version,
-                hit_dimensions=notify.triggered_dimensions,
-                governance_max_priority=notify.severity,
-                expected_token_saving=notify.estimated_saving_tokens,
-                saving_ratio=notify.saving_ratio,
-                task_summary=None,
-            )
-
-            notification_data = build_card_notification_data(
-                notification_structured=notify.notification_structured,
-                notification_id=notify.notification_id,
-                bot_id=notify.bot_id,
-                bot_name=notify.bot_name,
-                owner_id=notify.owner_id,
-                dt_version=notify.dt_version,
-                expected_token_saving=notify.estimated_saving_tokens,
-                saving_ratio=notify.saving_ratio,
-                governance_max_priority=notify.severity,
-            )
-            iframe_callback_url = self._config.iframe_callback_url
-            detail_link = build_tc_card_detail_link(
-                bot_id=notify.bot_id,
-                card_id=self._config.tc_card_id,
-                notification_data=notification_data,
-                base_url=self._config.tc_card_preview_url,
-                iframe_callback_url=iframe_callback_url,
-                staff_id=user_id,
-            )
-
-            extra = {
-                "bot_id": notify.bot_id,
-                "card_id": self._config.tc_card_id,
-                "notification_data": notification_data,
-                "out_track_id_prefix": "gov-notify",
-            }
-            # Override body with reason for TC card rendering
-            return reason, detail_link, extra
-        except Exception:
-            log.exception(
-                "[GovernanceCron] TC card build failed for notification_id=%s",
-                notify.notification_id,
-            )
-            return None
-
+    
+    
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -830,20 +798,6 @@ class GovernanceBotService:
         if not notify.ticket_id:
             return None
         return self._task_repo.find_by_ticket_id(notify.ticket_id)
-
-    @staticmethod
-    def _render_reminder_md(
-        ticket: GovernanceTicket, now: datetime,
-    ) -> str:
-        """Render reminder markdown from ticket fields."""
-        days_since = (now - ticket.last_sync_at).days if ticket.last_sync_at else 0
-        return build_governance_reason(
-            bot_name=ticket.bot_name,
-            dt_version=ticket.dt_version,
-            hit_dimensions=ticket.triggered_dimensions,
-            governance_max_priority=ticket.severity,
-            overdue_days=days_since,
-        )
 
     def _should_skip_delivery(self) -> bool:
         """Return True when skip_weekends is enabled and today is Sat/Sun."""

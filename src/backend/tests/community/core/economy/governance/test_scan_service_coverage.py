@@ -49,6 +49,10 @@ from agentclaw.community.core.economy.governance.services.scan_service import (
     CronTickSummary,
     GovernanceBotService,
 )
+from agentclaw.community.core.economy.governance.services.notify_render_service import (
+    NotifyRenderService,
+)
+
 
 from .conftest import FakeDB, FakeGovernanceConfig, FakeNotifySender
 
@@ -231,6 +235,7 @@ def _build_service(engine, *, config=None, admin_svc=None, notify_sender=None):
         config=config,
         notify_sender=notify_sender,
         lifecycle_svc=lifecycle_svc,
+        render_svc=NotifyRenderService(),
     )
     return svc, db, Sess
 

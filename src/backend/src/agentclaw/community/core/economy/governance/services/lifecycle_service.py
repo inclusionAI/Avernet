@@ -1,4 +1,4 @@
-"""GovernanceLifecycleService — sole driver of the ticket main state machine.
+"""[内核] GovernanceLifecycleService — sole driver of the ticket main state machine.
 
 This is the **heavy orchestration layer** for the governance ticket lifecycle
 (open / scheduled / waiting_review / closed). It is the only component the

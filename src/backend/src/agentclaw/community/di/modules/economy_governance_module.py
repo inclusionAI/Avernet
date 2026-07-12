@@ -50,6 +50,9 @@ from agentclaw.community.core.economy.governance.services.feedback_service impor
 from agentclaw.community.core.economy.governance.services.lifecycle_service import (
     GovernanceLifecycleService,
 )
+from agentclaw.community.core.economy.governance.services.notify_render_service import (
+    NotifyRenderService,
+)
 from agentclaw.community.core.economy.governance.services.record_process_service import (
     GovernanceRecordService,
 )
@@ -193,6 +196,17 @@ class EconomyGovernanceModule(Module):
 
     @singleton
     @provider
+    def _notify_render_service(self) -> NotifyRenderService:
+        """Construct NotifyRenderService — 通知渲染内核(收口散落三处渲染)。
+
+        无状态、无 IO:不依赖 repo / notify_sender / config,只复用
+        ``notify_builder_service`` 模块函数(直接 import)。注入到编排服务
+        scan/record_process(Task 3/4),达成"渲染口径唯一"(spec A4)。
+        """
+        return NotifyRenderService()
+
+    @singleton
+    @provider
     @inject
     def _admin_service(
         self,
@@ -235,6 +249,7 @@ class EconomyGovernanceModule(Module):
         config: EconomyGovernanceConfig,
         notify_sender: NotifySenderPlugin,
         lifecycle_service: GovernanceLifecycleService,
+        render_svc: NotifyRenderService,
     ) -> GovernanceBotService:
         """Construct GovernanceBotService."""
         return GovernanceBotService(
@@ -245,6 +260,7 @@ class EconomyGovernanceModule(Module):
             config=config,
             notify_sender=notify_sender,
             lifecycle_svc=lifecycle_service,
+            render_svc=render_svc,
         )
 
     @singleton
@@ -258,6 +274,7 @@ class EconomyGovernanceModule(Module):
         audit_repo: GovernanceAuditRepository,
         config: EconomyGovernanceConfig,
         lifecycle_service: GovernanceLifecycleService,
+        render_svc: NotifyRenderService,
     ) -> GovernanceRecordService:
         """Construct GovernanceRecordService."""
         return GovernanceRecordService(
@@ -267,6 +284,7 @@ class EconomyGovernanceModule(Module):
             audit_repo=audit_repo,
             config=config,
             lifecycle_svc=lifecycle_service,
+            render_svc=render_svc,
         )
 
     # -----------------------------------------------------------------

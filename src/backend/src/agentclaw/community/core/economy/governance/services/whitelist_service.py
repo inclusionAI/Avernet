@@ -1,4 +1,4 @@
-"""Governance whitelist service — single-entry whitelist add + delete (§7.5).
+"""[能力] Governance whitelist service — single-entry whitelist add + delete (§7.5).
 
 Standalone service extracted from ``admin_service.py`` — whitelist management
 is an independent functional domain, not a mixin of admin operations.
@@ -26,6 +26,9 @@ from agentclaw.community.core.economy.governance.domain.enums import (
     AuditAction,
     CloseReason,
 )
+from agentclaw.community.core.economy.governance.services.service_protocols import (
+    GovernanceLifecycleServiceProtocol,
+)
 
 
 if TYPE_CHECKING:
@@ -37,9 +40,6 @@ if TYPE_CHECKING:
     )
     from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
         GovernanceWhitelistRepository,
-    )
-    from agentclaw.community.core.economy.governance.services.lifecycle_service import (
-        GovernanceLifecycleService,
     )
 
 log = get_logger(__name__)
@@ -55,7 +55,7 @@ class GovernanceWhitelistService:
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         config: Any,  # EconomyGovernanceConfig
-        lifecycle_svc: GovernanceLifecycleService,
+        lifecycle_svc: GovernanceLifecycleServiceProtocol,
     ) -> None:
         self._whitelist_repo = whitelist_repo
         self._notify_repo = notify_repo
