@@ -1,7 +1,6 @@
 # tests/core/workspace/test_path_factory.py
 from pathlib import Path
 from unittest.mock import patch
-import pytest
 
 from agentclaw.community.plugins.local.skill_repo_sync import LocalSkillRepoSyncPlugin
 
@@ -21,10 +20,20 @@ def test_get_bolt_base_dir_structure():
 
 def test_singlebox_workspace_folder_is_profile_field(monkeypatch, tmp_path):
     from agentclaw.community.core.workspace.path_factory import get_bolt_base_dir
+    from agentclaw.community.core.config.provider import AppConfig
 
     monkeypatch.setenv("AIDESKTOP_ROOT", str(tmp_path))
     monkeypatch.setenv("SERVER_ENV", "dev")
-    monkeypatch.setenv("WORKSPACE_ENV_FOLDER", "aidesktop_singlebox")
+    config = AppConfig(
+        user_config={"workspace": {"env_folder": "aidesktop_singlebox"}},
+        raw={},
+        app_name="agentclaw",
+        delegate=None,
+    )
+    monkeypatch.setattr(
+        "agentclaw.community.core.config.provider.load_config",
+        lambda: config,
+    )
 
     assert get_bolt_base_dir() == tmp_path / "aidesktop_singlebox" / "bolt_data"
 
@@ -34,7 +43,13 @@ def test_workspace_folder_defaults_to_data_env(monkeypatch, tmp_path):
 
     monkeypatch.setenv("AIDESKTOP_ROOT", str(tmp_path))
     monkeypatch.setenv("SERVER_ENV", "dev")
-    monkeypatch.delenv("WORKSPACE_ENV_FOLDER", raising=False)
+    from agentclaw.community.core.config.provider import AppConfig
+
+    config = AppConfig(user_config={}, raw={}, app_name="agentclaw", delegate=None)
+    monkeypatch.setattr(
+        "agentclaw.community.core.config.provider.load_config",
+        lambda: config,
+    )
 
     assert get_bolt_base_dir() == tmp_path / "aidesktop_dev" / "bolt_data"
 
@@ -43,12 +58,19 @@ def test_nas_storage_id_uses_data_env_not_workspace_folder(monkeypatch):
     from agentclaw.community.core.workspace.path_factory import get_bot_nas_storage_id
 
     monkeypatch.setenv("SERVER_ENV", "dev")
-    monkeypatch.setenv("WORKSPACE_ENV_FOLDER", "aidesktop_singlebox")
-
     assert (
         get_bot_nas_storage_id("user123", "bot456", "openclaw")
         == "dev_staff_user123_openclaw_bot456"
     )
+
+
+def test_rsync_target_dir_resolves_lazily(monkeypatch, tmp_path):
+    from agentclaw.community.core.workspace import path_factory
+
+    expected = tmp_path / "skills-repo"
+    monkeypatch.setattr(path_factory, "_get_rsync_target_dir", lambda: expected)
+
+    assert Path(path_factory.RSYNC_TARGET_DIR) == expected
 
 
 def test_get_bot_dir_structure():

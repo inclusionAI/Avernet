@@ -2,9 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Post-review amendment (2026-07-13):** Detailed historical steps below that
+> pass an `application-*.yaml` filename into `YamlConfigProvider` or inject
+> `WORKSPACE_ENV_FOLDER` are superseded. The provider now accepts a semantic
+> profile value and owns overlay selection; Backend and BAAS read
+> `workspace.env_folder` from their active singlebox overlays.
+
 **Goal:** Make `DeployProfile` the only Backend implementation selector while limiting runtime/data Env to `dev` / `pre` / `prod`, with singlebox running as `DEPLOY_PROFILE=singlebox SERVER_ENV=dev`.
 
-**Architecture:** The composition root selects the non-corp YAML overlay and DI module column from `DeployProfile`. Runtime Env continues to select fields and data partitions only. Singlebox-specific infrastructure is installed explicitly, while the existing `WORKSPACE_ENV_FOLDER=aidesktop_singlebox` field preserves Backend/BAAS physical path isolation without turning `singlebox` back into a data Env.
+**Architecture:** The composition root passes the semantic `DeployProfile` to the non-corp YAML provider and selects the DI module column. The provider owns the profile-to-overlay mapping. Runtime Env continues to select fields and data partitions only. Singlebox overlays preserve Backend/BAAS physical path isolation through `workspace.env_folder: aidesktop_singlebox` without turning `singlebox` back into a data Env.
 
 **Tech Stack:** Python 3.12, Injector, FastAPI, Pydantic, pytest, Bash, SQLite, uv
 
@@ -12,7 +18,7 @@
 
 - `DeployProfile` is the only implementation/module selector.
 - `get_current_env()` returns only `dev`, `pre`, or `prod`; `get_current_env_with_gray()` may additionally return `gray`.
-- The singlebox Backend launch contract is exactly `DEPLOY_PROFILE=singlebox`, `SERVER_ENV=dev`, and `WORKSPACE_ENV_FOLDER=aidesktop_singlebox`.
+- The singlebox Backend launch contract is exactly `DEPLOY_PROFILE=singlebox` and `SERVER_ENV=dev`; its physical workspace partition is declared in the profile overlay.
 - `application-singlebox.yaml` is selected by Profile, never by `SERVER_ENV=singlebox`.
 - Legacy `SERVER_ENV=singlebox` must fail at every Backend startup entrypoint with an actionable migration message.
 - Do not introduce `RuntimeEnvironmentModule`, `DataEnvironment`, or `DeviceRuntimeEnvironment`.
@@ -27,15 +33,15 @@
 
 | File | Responsibility after this change |
 | --- | --- |
-| `src/backend/src/agentclaw/community/core/config/yaml_provider.py` | Load a caller-selected YAML overlay; never inspect Profile or Env |
-| `src/backend/src/agentclaw/community/di/config_bootstrap.py` | Map non-corp Profile to YAML overlay and register the provider |
+| `src/backend/src/agentclaw/community/core/config/yaml_provider.py` | Accept a semantic profile value and own the profile-to-overlay mapping |
+| `src/backend/src/agentclaw/community/di/config_bootstrap.py` | Register the provider with the selected non-corp Profile |
 | `src/backend/src/agentclaw/community/di/modules/singlebox_access_module.py` | Bind `PolicyServiceProtocol` to `LocalPolicyService` for singlebox only |
 | `src/backend/src/agentclaw/community/di/modules/infrastructure/test/http_client.py` | Bind fixed no-network `LocalHttpClient` instances for test profiles only |
 | `src/backend/src/agentclaw/community/di/profile_modules.py` | Install explicit test versus singlebox binding differences |
 | `src/backend/src/agentclaw/community/di/profile.py` | Detect Profile and reject the retired Env value `singlebox` |
 | `src/backend/src/agentclaw/community/utils/env_utils.py` | Normalize runtime/data Env without any singlebox case |
 | `src/backend/src/agentclaw/community/core/devices/models.py` | Keep Device `Env` strict to `dev` / `pre` / `prod` |
-| `src/backend/src/agentclaw/community/core/workspace/path_factory.py` | Use `WORKSPACE_ENV_FOLDER` for physical folder isolation, Env only as fallback |
+| `src/backend/src/agentclaw/community/core/workspace/path_factory.py` | Read physical folder isolation from the active profile overlay, Env only as fallback |
 | `scripts/modules/backend.sh` | Launch singlebox Backend with Profile and Env on separate axes |
 | `src/backend/tests/community/architecture/test_no_singlebox_env_axis.py` | Prevent singlebox from re-entering Env comparisons or aliases |
 

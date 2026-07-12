@@ -1,9 +1,10 @@
 """Community-safe YAML configuration provider (B2).
 
-Reads ``configs/application.yaml`` plus a caller-selected overlay and deep-merges
-them into an :class:`~agentclaw.community.core.config.provider.AppConfig`. This is
-the default provider (community / test / local) and the body of the loader the
-local-mode monkeypatch used to carry inline.
+Reads ``configs/application.yaml`` plus the overlay owned by a semantic deploy
+profile and deep-merges them into an
+:class:`~agentclaw.community.core.config.provider.AppConfig`. This is the default
+provider (community / test / local) and the body of the loader the local-mode
+monkeypatch used to carry inline.
 
 Imports nothing internal beyond the neutral :class:`AppConfig` type — no
 ``sofapy_base``, no plugins — so a community checkout can read its configuration
@@ -13,13 +14,44 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import yaml
 
 from agentclaw.community.core.config.provider import AppConfig
 
 logger = logging.getLogger(__name__)
+
+_OVERLAY_BY_PROFILE = {
+    "community": "application-community.yaml",
+    "test": "application-test.yaml",
+    "corp_test": "application-test.yaml",
+    "singlebox": "application-singlebox.yaml",
+}
+
+
+class DeployProfileLike(Protocol):
+    """Structural profile contract; avoids a Core-to-DI dependency."""
+
+    @property
+    def value(self) -> str: ...
+
+
+def _profile_name(profile: DeployProfileLike) -> str:
+    value = getattr(profile, "value", None)
+    if not isinstance(value, str):
+        raise ValueError(f"Unknown YAML config profile: {profile!r}")
+    return value.strip().lower()
+
+
+def _overlay_for_profile(profile: DeployProfileLike) -> str:
+    normalized = _profile_name(profile)
+    try:
+        return _OVERLAY_BY_PROFILE[normalized]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unknown YAML config profile: {normalized!r}"
+        ) from exc
 
 
 def _load_yaml_configs(
@@ -66,10 +98,12 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 class YamlConfigProvider:
-    """Load AppConfig from the neutral base plus one explicit overlay."""
+    """Load AppConfig from the overlay owned by a semantic deploy profile."""
 
-    def __init__(self, overlay_name: str = "application-dev.yaml") -> None:
-        self.overlay_name = overlay_name
+    def __init__(self, profile: DeployProfileLike) -> None:
+        self.profile = profile
+        self.profile_name = _profile_name(profile)
+        self.overlay_name = _overlay_for_profile(profile)
 
     def load(self) -> AppConfig:
         raw = _load_yaml_configs(self.overlay_name)

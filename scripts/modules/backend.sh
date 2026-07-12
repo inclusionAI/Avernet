@@ -90,7 +90,6 @@ backend_start() {
         fi
 
         SERVER_ENV=dev DEPLOY_PROFILE=singlebox \
-            WORKSPACE_ENV_FOLDER=aidesktop_singlebox \
             DATABASE_URL="sqlite:///${RUNTIME_DATA_DIR}/backend.db" \
             ENABLE_OSS_SYNC=false \
             CHAT_ENGINE="${CHAT_ENGINE}" \

@@ -4,7 +4,6 @@ import pytest
 from agentclaw.community.core.config import provider as P
 from agentclaw.community.core.config.yaml_provider import YamlConfigProvider
 from agentclaw.community.di.config_bootstrap import (
-    _yaml_overlay_for,
     register_config_provider,
 )
 from agentclaw.community.di.profile import DeployProfile
@@ -33,9 +32,16 @@ def _isolate_registry():
     ],
 )
 def test_non_corp_profile_registers_explicit_yaml_provider(profile, expected):
-    assert _yaml_overlay_for(profile) == expected
-
     register_config_provider(profile)
 
     assert isinstance(P._provider, YamlConfigProvider)
+    assert P._provider.profile is profile
+    assert P._provider.profile_name == profile.value
     assert P._provider.overlay_name == expected
+
+
+def test_config_load_requires_composition_root_registration():
+    P.reset_config_provider()
+
+    with pytest.raises(RuntimeError, match="ConfigProvider has not been registered"):
+        P.load_config()

@@ -159,8 +159,19 @@ test_backend_separates_profile_env_and_workspace_folder() {
 
   grep -F 'SERVER_ENV=dev DEPLOY_PROFILE=singlebox' <<<"$start_body" >/dev/null || \
     fail "singlebox backend should launch with SERVER_ENV=dev and DEPLOY_PROFILE=singlebox"
-  grep -F 'WORKSPACE_ENV_FOLDER=aidesktop_singlebox' <<<"$start_body" >/dev/null || \
-    fail "singlebox backend should preserve the isolated aidesktop_singlebox folder"
+  if grep -F 'WORKSPACE_ENV_FOLDER=' <<<"$start_body" >/dev/null; then
+    fail "singlebox backend should read its workspace folder from the profile overlay"
+  fi
+  grep -F 'env_folder: "aidesktop_singlebox"' \
+    "${ROOT}/src/backend/src/agentclaw/community/configs/application-singlebox.yaml" >/dev/null || \
+    fail "singlebox backend overlay should preserve the isolated workspace folder"
+  if grep -F 'WORKSPACE_ENV_FOLDER=' \
+    "${ROOT}/src/baas/packages/community/scripts/app.sh" >/dev/null; then
+    fail "singlebox BAAS should read its workspace folder from config"
+  fi
+  grep -F 'env_folder: "aidesktop_singlebox"' \
+    "${ROOT}/src/baas/packages/community/singlebox-configs/application-dev.yaml" >/dev/null || \
+    fail "singlebox BAAS overlay should preserve the isolated workspace folder"
   if grep -F 'SERVER_ENV=singlebox' <<<"$start_body" >/dev/null; then
     fail "backend startup must not use singlebox as a data Env"
   fi

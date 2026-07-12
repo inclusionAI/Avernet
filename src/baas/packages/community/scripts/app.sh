@@ -157,11 +157,10 @@ do_start() {
         esac
     done
 
-    # 单机模式：复用 application-dev.yaml,但额外注入 WORKSPACE_ENV_FOLDER 让 baas 算
-    # workspace 时落在 aidesktop_singlebox/, 跟 backend SERVER_ENV=singlebox 对齐。
+    # 单机模式使用 singlebox-configs/application-dev.yaml；workspace 物理分区
+    # 也由该 overlay 声明，不再通过额外环境变量覆盖。
     if [[ "$RUN_MODE" == "singlebox" ]]; then
         env_name="dev"
-        export WORKSPACE_ENV_FOLDER="aidesktop_singlebox"
         log_info "单机模式: 已启用 (配置: $CONFIG_DIR, 端口: $APP_PORT)"
     fi
 

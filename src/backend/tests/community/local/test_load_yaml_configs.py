@@ -6,7 +6,11 @@ B2 把 YAML 加载逻辑从 ``agentclaw.community.local`` 搬到了 ``core/confi
 import pytest
 
 from agentclaw.community.core.config import yaml_provider
-from agentclaw.community.core.config.yaml_provider import _load_yaml_configs
+from agentclaw.community.core.config.yaml_provider import (
+    YamlConfigProvider,
+    _load_yaml_configs,
+)
+from agentclaw.community.di.profile import DeployProfile
 
 # The corp domain markers these guards scan for are assembled from fragments so
 # this guard's own source carries no literal internal-domain token for an OSS
@@ -20,6 +24,18 @@ class TestLoadYamlConfigsOverlaySelection:
         cfg = _load_yaml_configs("application-singlebox.yaml")
         # singlebox.yaml 标志位：app.title = "AgentClaw Single Box"
         assert cfg["user_config"]["app"]["title"] == "AgentClaw Single Box"
+
+    def test_provider_selects_overlay_from_profile_semantics(self):
+        provider = YamlConfigProvider(DeployProfile.SINGLEBOX)
+
+        config = provider.load()
+
+        assert provider.overlay_name == "application-singlebox.yaml"
+        assert config.user_config["app"]["title"] == "AgentClaw Single Box"
+
+    def test_provider_rejects_physical_overlay_name_as_public_input(self):
+        with pytest.raises(ValueError, match="Unknown YAML config profile"):
+            YamlConfigProvider("application-singlebox.yaml")
 
     # B11: dev/prod are corp overlays (corp/configs); the community yaml_provider
     # searches only cwd/configs + community/configs, so it no longer loads them (corp

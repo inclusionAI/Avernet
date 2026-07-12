@@ -130,9 +130,16 @@ def _get_aidesktop_root() -> Path:
 
 def _get_aidesktop_env_folder() -> str:
     """Return the physical workspace folder selected by the active Profile."""
-    explicit = os.getenv("WORKSPACE_ENV_FOLDER")
-    if explicit:
-        return explicit
+    from agentclaw.community.core.config.provider import load_config
+
+    workspace_config = load_config().user_config.get("workspace", {})
+    configured = (
+        workspace_config.get("env_folder")
+        if isinstance(workspace_config, dict)
+        else None
+    )
+    if configured:
+        return str(configured)
 
     from agentclaw.community.utils.env_utils import get_current_env
 
@@ -647,4 +654,14 @@ def _get_rsync_target_dir() -> Path:
     return get_global_skills_repo_dir()
 
 
-RSYNC_TARGET_DIR = _get_rsync_target_dir()
+class _LazyRsyncTargetDir(os.PathLike[str]):
+    """Compatibility path that resolves after config bootstrap, not at import."""
+
+    def __fspath__(self) -> str:
+        return str(_get_rsync_target_dir())
+
+    def __str__(self) -> str:
+        return self.__fspath__()
+
+
+RSYNC_TARGET_DIR = _LazyRsyncTargetDir()

@@ -10,6 +10,7 @@ _BACKEND_ROOT = _THIS_FILE.parents[3]
 _SOURCE_ROOT = _BACKEND_ROOT / "src" / "agentclaw" / "community"
 _PROFILE_PATH = "di/profile.py"
 _ENV_UTILS_PATH = "utils/env_utils.py"
+_YAML_PROVIDER_PATH = "core/config/yaml_provider.py"
 
 
 def _is_singlebox_literal(node: ast.AST) -> bool:
@@ -84,6 +85,12 @@ def _is_canonical_literal(
         and _is_exact_frozenset(
             assignment.value, {"test", "singlebox", "corp_test"}
         )
+    ):
+        return True
+    if (
+        rel == _YAML_PROVIDER_PATH
+        and isinstance(assignment_parent, ast.Module)
+        and _is_single_target_assignment(assignment, "_OVERLAY_BY_PROFILE")
     ):
         return True
     return (
