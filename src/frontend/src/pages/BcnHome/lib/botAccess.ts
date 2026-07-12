@@ -25,6 +25,27 @@ export interface BotAccessMethod {
   template: string;
 }
 
+export interface HermesBotConfig {
+  botName: string;
+  profile: string;
+}
+
+export interface HermesBotConfigValidation {
+  botNameError: string | null;
+  profileError: string | null;
+  valid: boolean;
+}
+
+const HERMES_PROFILE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const HERMES_RESERVED_PROFILES = new Set([
+  'default',
+  'hermes',
+  'test',
+  'tmp',
+  'root',
+  'sudo',
+]);
+
 const engineDefinitions: Record<
   BotAccessEngineId,
   BotAccessEngine & {
@@ -91,6 +112,40 @@ export function getVisibleBotAccessEngines(
     .map((id) => ({ id, label: engineDefinitions[id].label }));
 }
 
+export function validateHermesBotConfig(
+  config: HermesBotConfig,
+): HermesBotConfigValidation {
+  const botName = config.botName.trim();
+  const profile = config.profile.trim();
+  const botNameError = botName ? null : '请输入 Bot 名称';
+  let profileError: string | null = null;
+  if (!profile) profileError = '请输入 Profile 名称';
+  else if (!HERMES_PROFILE_PATTERN.test(profile)) {
+    profileError = '仅支持小写字母、数字、连字符和下划线，最长 64 位';
+  } else if (HERMES_RESERVED_PROFILES.has(profile)) {
+    profileError = '该 Profile 名称不可用于多 Bot 接入';
+  }
+  return { botNameError, profileError, valid: !botNameError && !profileError };
+}
+
+export function quoteShellArg(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+export function renderBotAccessCommand(
+  template: string,
+  token: string,
+  hermes?: HermesBotConfig,
+): string {
+  let command = template.replace('{token}', token);
+  if (hermes) {
+    command = command
+      .replace('{bot_name}', quoteShellArg(hermes.botName.trim()))
+      .replace('{profile}', quoteShellArg(hermes.profile.trim()));
+  }
+  return command;
+}
+
 export function replaceBotAccessToken(template: string, token: string): string {
-  return template.replace('{token}', token);
+  return renderBotAccessCommand(template, token);
 }

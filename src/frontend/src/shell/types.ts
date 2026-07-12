@@ -167,9 +167,15 @@ export interface Resources {
    * null = 该卡不渲染。与 bcnConnectCmdTemplate 并列，对应「用户自助接入」之外的第二种接入方式。
    */
   bcnAutoConnectCmdTemplate: string | null;
-  /** Hermes 本地 Bot 接入指令模板（含 `{token}` 占位）；null = 该卡不渲染。 */
+  /**
+   * Hermes 本地 Bot 接入指令模板（含 `{token}`、`{bot_name}`、`{profile}` 占位）；
+   * null = 该卡不渲染。`{token}` 经 stdin 传入安装器，后两项为 shell 转义后的 Bot 配置。
+   */
   bcnHermesConnectCmdTemplate: string | null;
-  /** Hermes Bot 自动接入指令模板（含 `{token}` 占位）；null = 该卡不渲染。 */
+  /**
+   * Hermes Bot 自动接入指令模板（可含 `{token}`、`{bot_name}`、`{profile}` 占位）；
+   * null = 该卡不渲染。
+   */
   bcnHermesAutoConnectCmdTemplate: string | null;
   /** 产品获取链接（移动端导航「产品获取」区）；各项 null = 该项不渲染 */
   productLinks: {

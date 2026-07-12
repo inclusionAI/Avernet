@@ -4,7 +4,10 @@ import {
   DEFAULT_BOT_ACCESS_ENGINE,
   getBotAccessMethods,
   getVisibleBotAccessEngines,
+  quoteShellArg,
+  renderBotAccessCommand,
   replaceBotAccessToken,
+  validateHermesBotConfig,
 } from './botAccess';
 
 const resources = {
@@ -16,6 +19,46 @@ const resources = {
 };
 
 describe('bot access resources', () => {
+  it('validates Hermes Bot names and profiles', () => {
+    expect(validateHermesBotConfig({ botName: '', profile: '' })).toEqual({
+      botNameError: '请输入 Bot 名称',
+      profileError: '请输入 Profile 名称',
+      valid: false,
+    });
+    expect(
+      validateHermesBotConfig({
+        botName: 'Hermes Reviewer',
+        profile: 'review_bot-2',
+      }),
+    ).toEqual({ botNameError: null, profileError: null, valid: true });
+
+    for (const profile of [
+      'default',
+      'hermes',
+      'test',
+      'tmp',
+      'root',
+      'sudo',
+    ]) {
+      expect(
+        validateHermesBotConfig({ botName: 'Reviewer', profile }).valid,
+      ).toBe(false);
+    }
+  });
+
+  it('quotes Hermes configuration and renders it into the command', () => {
+    expect(quoteShellArg("Hermes O'Brien")).toBe("'Hermes O'\\''Brien'");
+    expect(
+      renderBotAccessCommand(
+        'run {token} --bot-name {bot_name} --profile {profile} --create-profile',
+        'registration-token',
+        { botName: "Hermes O'Brien", profile: 'review_bot-2' },
+      ),
+    ).toBe(
+      "run registration-token --bot-name 'Hermes O'\\''Brien' --profile 'review_bot-2' --create-profile",
+    );
+  });
+
   it('keeps OpenClaw selected by default', () => {
     expect(DEFAULT_BOT_ACCESS_ENGINE).toBe('openclaw');
     expect(getVisibleBotAccessEngines(resources)).toEqual([
@@ -74,14 +117,18 @@ describe('bot access resources', () => {
       template?.indexOf("printf '%s\\n'") ?? -1,
     );
 
-    const rendered = replaceBotAccessToken(
+    const rendered = renderBotAccessCommand(
       template ?? '',
       'registration-token',
+      { botName: 'Hermes Reviewer', profile: 'review_bot-2' },
     );
     const pipeline = rendered.split('|');
     const installerArgv = pipeline[pipeline.length - 1] ?? '';
     expect(installerArgv).not.toContain('registration-token');
     expect(installerArgv).not.toMatch(/(^|\s)--token(?:\s|$)/);
+    expect(installerArgv).toContain("--bot-name 'Hermes Reviewer'");
+    expect(installerArgv).toContain("--profile 'review_bot-2'");
+    expect(installerArgv).toContain('--create-profile');
   });
 
   it('uses the same Git ref for the Hermes installer and connector', () => {
@@ -96,5 +143,6 @@ describe('bot access resources', () => {
     expect(template).toContain('BCS_INSTALLER_URL=');
     expect(sourceRefs).toHaveLength(2);
     expect(new Set(sourceRefs).size).toBe(1);
+    expect(sourceRefs[0]).toBe('refs/heads/dev');
   });
 });
