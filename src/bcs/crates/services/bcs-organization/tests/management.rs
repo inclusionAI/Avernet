@@ -7,7 +7,7 @@ use bcs_organization::{OrganizationCore, OrganizationManagement};
 use bcs_organization_store::MemoryOrganizationRepo;
 use bcs_service_api::{
     BotRegistryCoreService, CreateOrganizationCommand, OrganizationAuth,
-    OrganizationCandidateQuery, OrganizationManagementService, ProviderAuthMode,
+    OrganizationCandidateQuery, OrganizationCoreService, OrganizationManagementService, ProviderAuthMode,
     ProviderBotBindingRepoPort, ProviderBotCoreService, ProviderCoreService,
     ProviderCredentialRepoPort, ProviderOrganizationManagementConfig, ProviderRepoPort,
     PutOrganizationMemberCommand, RegisterProviderBotParams, ServiceError, Skill,
@@ -21,6 +21,7 @@ struct ProviderFixture {
 
 struct TestContext {
     service: OrganizationManagement,
+    core: Arc<OrganizationCore>,
     registry: Arc<BotCore>,
     provider_core: Arc<ProviderCore>,
     _temp_dir: tempfile::TempDir,
@@ -66,9 +67,10 @@ async fn test_context() -> TestContext {
         provider_bindings,
         registry.clone(),
     ));
-    let service = OrganizationManagement::new(provider_core.clone(), organization_core);
+    let service = OrganizationManagement::new(provider_core.clone(), organization_core.clone());
     TestContext {
         service,
+        core: organization_core,
         registry,
         provider_core,
         _temp_dir: temp_dir,
@@ -408,4 +410,217 @@ async fn candidate_bots_include_manager_and_granted_bots_without_leaking_ungrant
         .expect("filtered candidate bots");
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].bot_uuid, "bot-b");
+}
+
+
+#[tokio::test]
+async fn effective_membership_authorizes_pair_and_fails_after_grant_revocation() {
+    let ctx = test_context().await;
+    let provider_a = register_provider(&ctx, "Provider A").await;
+    let provider_b = register_provider(&ctx, "Provider B").await;
+    grant_manager(&ctx, &provider_b, &provider_a).await;
+    register_bot(&ctx, &provider_a, "bot-a").await;
+    register_bot(&ctx, &provider_b, "bot-b").await;
+    create_org(&ctx, &provider_a).await;
+    ctx.service
+        .put_member(PutOrganizationMemberCommand {
+            auth: provider_auth(&provider_a),
+            organization_code: "promo-2026".to_string(),
+            bot_uuid: "bot-a".to_string(),
+            role: Some("planner".to_string()),
+        })
+        .await
+        .expect("add sender");
+    ctx.service
+        .put_member(PutOrganizationMemberCommand {
+            auth: provider_auth(&provider_a),
+            organization_code: "promo-2026".to_string(),
+            bot_uuid: "bot-b".to_string(),
+            role: Some("traffic_analyst".to_string()),
+        })
+        .await
+        .expect("add target");
+
+    let pair = ctx
+        .core
+        .authorize_pair("promo-2026", "bot-a", "bot-b")
+        .await
+        .expect("authorized pair");
+    assert_eq!(pair.organization.code, "promo-2026");
+    assert_eq!(pair.sender.bot_uuid, "bot-a");
+    assert_eq!(pair.target.bot_uuid, "bot-b");
+
+    ctx.provider_core
+        .update_provider(
+            &provider_b.provider_id,
+            &provider_b.admin_token,
+            "11111111",
+            None,
+            None,
+            None,
+            None,
+            Some(ProviderOrganizationManagementConfig {
+                authorized_manager_provider_ids: Vec::new(),
+            }),
+        )
+        .await
+        .expect("revoke organization manager");
+
+    assert!(matches!(
+        ctx.core.authorize_pair("promo-2026", "bot-a", "bot-b").await,
+        Err(ServiceError::Forbidden(message))
+            if message == "organization_provider_grant_required"
+    ));
+}
+
+#[tokio::test]
+async fn effective_membership_rejects_disabled_org_disabled_member_and_nonmember_sender() {
+    let ctx = test_context().await;
+    let provider_a = register_provider(&ctx, "Provider A").await;
+    register_bot(&ctx, &provider_a, "bot-a").await;
+    register_bot(&ctx, &provider_a, "bot-b").await;
+    create_org(&ctx, &provider_a).await;
+    for bot_uuid in ["bot-a", "bot-b"] {
+        ctx.service
+            .put_member(PutOrganizationMemberCommand {
+                auth: provider_auth(&provider_a),
+                organization_code: "promo-2026".to_string(),
+                bot_uuid: bot_uuid.to_string(),
+                role: None,
+            })
+            .await
+            .expect("add member");
+    }
+
+    ctx.service
+        .delete_member(provider_auth(&provider_a), "promo-2026", "bot-b")
+        .await
+        .expect("disable member");
+    let disabled_member = ctx
+        .core
+        .authorize_pair("promo-2026", "bot-a", "bot-b")
+        .await
+        .expect_err("disabled target member must be rejected");
+    assert!(matches!(disabled_member, ServiceError::Forbidden(reason) if reason == "organization_member_disabled"));
+
+    let nonmember = ctx
+        .core
+        .authorize_pair("promo-2026", "missing-member", "bot-a")
+        .await
+        .expect_err("nonmember sender must be rejected");
+    assert!(matches!(nonmember, ServiceError::Forbidden(reason) if reason == "organization_member_required"));
+
+    ctx.service
+        .update(UpdateOrganizationCommand {
+            auth: provider_auth(&provider_a),
+            organization_code: "promo-2026".to_string(),
+            name: None,
+            description: None,
+            disabled: Some(true),
+        })
+        .await
+        .expect("disable organization");
+    let disabled_org = ctx
+        .core
+        .require_effective_member("promo-2026", "bot-a")
+        .await
+        .expect_err("disabled organization must be rejected");
+    assert!(matches!(disabled_org, ServiceError::Forbidden(reason) if reason == "organization_disabled"));
+}
+
+#[tokio::test]
+async fn effective_member_list_filters_by_role_and_omits_revoked_members() {
+    let ctx = test_context().await;
+    let provider_a = register_provider(&ctx, "Provider A").await;
+    let provider_b = register_provider(&ctx, "Provider B").await;
+    let provider_c = register_provider(&ctx, "Provider C").await;
+    grant_manager(&ctx, &provider_b, &provider_a).await;
+    register_bot(&ctx, &provider_a, "bot-a").await;
+    register_bot(&ctx, &provider_b, "bot-b").await;
+    register_bot(&ctx, &provider_c, "bot-c").await;
+    create_org(&ctx, &provider_a).await;
+    for (bot_uuid, role) in [
+        ("bot-a", "planner"),
+        ("bot-b", "traffic_analyst"),
+        ("bot-c", "traffic_analyst"),
+    ] {
+        if bot_uuid == "bot-c" {
+            grant_manager(&ctx, &provider_c, &provider_a).await;
+        }
+        ctx.service
+            .put_member(PutOrganizationMemberCommand {
+                auth: provider_auth(&provider_a),
+                organization_code: "promo-2026".to_string(),
+                bot_uuid: bot_uuid.to_string(),
+                role: Some(role.to_string()),
+            })
+            .await
+            .expect("add member");
+    }
+    ctx.provider_core
+        .update_provider(
+            &provider_c.provider_id,
+            &provider_c.admin_token,
+            "11111111",
+            None,
+            None,
+            None,
+            None,
+            Some(ProviderOrganizationManagementConfig {
+                authorized_manager_provider_ids: Vec::new(),
+            }),
+        )
+        .await
+        .expect("revoke provider c");
+
+    let members = ctx
+        .core
+        .list_effective_members("promo-2026", Some("traffic_analyst"))
+        .await
+        .expect("list effective members");
+    let bot_ids = members
+        .iter()
+        .map(|member| member.bot_uuid.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(bot_ids, vec!["bot-b"]);
+}
+
+#[tokio::test]
+async fn effective_membership_rejects_disabled_resource_provider_and_missing_org() {
+    let ctx = test_context().await;
+    let provider_a = register_provider(&ctx, "Provider A").await;
+    let provider_b = register_provider(&ctx, "Provider B").await;
+    grant_manager(&ctx, &provider_b, &provider_a).await;
+    register_bot(&ctx, &provider_a, "bot-a").await;
+    register_bot(&ctx, &provider_b, "bot-b").await;
+    create_org(&ctx, &provider_a).await;
+    for bot_uuid in ["bot-a", "bot-b"] {
+        ctx.service
+            .put_member(PutOrganizationMemberCommand {
+                auth: provider_auth(&provider_a),
+                organization_code: "promo-2026".to_string(),
+                bot_uuid: bot_uuid.to_string(),
+                role: None,
+            })
+            .await
+            .expect("add member");
+    }
+
+    let missing_org = ctx
+        .core
+        .require_effective_member("missing-org", "bot-a")
+        .await
+        .expect_err("missing org must be rejected");
+    assert!(matches!(missing_org, ServiceError::InvalidOperation { message, .. } if message.contains("organization 'missing-org' not found")));
+
+    ctx.provider_core
+        .set_provider_disabled(&provider_b.provider_id, &provider_b.admin_token, "11111111", true)
+        .await
+        .expect("disable provider b");
+    let disabled_provider = ctx
+        .core
+        .authorize_pair("promo-2026", "bot-a", "bot-b")
+        .await
+        .expect_err("disabled resource provider must be rejected");
+    assert!(matches!(disabled_provider, ServiceError::Forbidden(reason) if reason == "organization_provider_grant_required"));
 }

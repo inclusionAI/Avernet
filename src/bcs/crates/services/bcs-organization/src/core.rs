@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_domain::{Organization, OrganizationMember, ProviderOrganizationManagementConfig};
 use bcs_service_api::{
-    BotCapabilities, BotRegistryCoreService, CreateOrganizationRecord,
+    AuthorizedOrganizationPair, BotCapabilities, BotRegistryCoreService, CreateOrganizationRecord,
     ListOrganizationMembersQuery, ListOrganizationsQuery, OrganizationCandidateBot,
     OrganizationCandidateQuery, OrganizationCoreService, OrganizationRepoPort,
     ProviderBotBindingRepoPort, ProviderRepoPort, ServiceError, ServiceResult,
@@ -122,6 +122,95 @@ impl OrganizationCore {
             .authorized_manager_provider_ids
             .iter()
             .any(|provider_id| provider_id == manager_provider_id))
+    }
+
+
+
+    async fn require_organization_for_runtime(
+        &self,
+        code: &str,
+    ) -> ServiceResult<Organization> {
+        validate_external_id("organization_code", code)?;
+        let organization = self
+            .organizations
+            .get_organization(&self.env, code)
+            .await?
+            .ok_or_else(|| ServiceError::InvalidOperation {
+                message: format!("organization '{}' not found", code),
+                request_id: None,
+            })?;
+        if organization.disabled {
+            return Err(ServiceError::Forbidden("organization_disabled".to_string()));
+        }
+        Ok(organization)
+    }
+
+    async fn effective_member_in(
+        &self,
+        organization: &Organization,
+        bot_uuid: &str,
+    ) -> ServiceResult<OrganizationMember> {
+        validate_external_id("bot_uuid", bot_uuid)?;
+        let member = self
+            .organizations
+            .get_member(&self.env, &organization.code, bot_uuid)
+            .await?
+            .ok_or_else(|| ServiceError::Forbidden("organization_member_required".to_string()))?;
+        self.ensure_member_effective(organization, member).await
+    }
+
+    async fn ensure_member_effective(
+        &self,
+        organization: &Organization,
+        member: OrganizationMember,
+    ) -> ServiceResult<OrganizationMember> {
+        if member.disabled {
+            return Err(ServiceError::Forbidden("organization_member_disabled".to_string()));
+        }
+        let binding = self
+            .provider_bindings
+            .get_binding_by_bot_uuid(&member.bot_uuid)
+            .await?
+            .ok_or_else(|| ServiceError::Forbidden("provider_managed_bot_required".to_string()))?;
+        if binding.disabled {
+            return Err(ServiceError::Forbidden("provider_bot_disabled".to_string()));
+        }
+        let Some(resource_provider) = self.providers.get_provider(&binding.provider_id).await? else {
+            return Err(ServiceError::Forbidden("organization_provider_grant_required".to_string()));
+        };
+        let Some(manager_provider) = self
+            .providers
+            .get_provider(&organization.managing_provider_id)
+            .await?
+        else {
+            return Err(ServiceError::Forbidden("organization_provider_grant_required".to_string()));
+        };
+        if resource_provider.disabled || manager_provider.disabled {
+            return Err(ServiceError::Forbidden("organization_provider_grant_required".to_string()));
+        }
+        let config = ProviderOrganizationManagementConfig::from_provider_config(&resource_provider.config)
+            .map_err(|_| ServiceError::Forbidden("organization_provider_grant_required".to_string()))?;
+        if provider_scope_allows(
+            &organization.managing_provider_id,
+            &binding.provider_id,
+            &config.authorized_manager_provider_ids,
+        ) {
+            Ok(member)
+        } else {
+            Err(ServiceError::Forbidden("organization_provider_grant_required".to_string()))
+        }
+    }
+
+    async fn member_is_effective(
+        &self,
+        organization: &Organization,
+        member: OrganizationMember,
+    ) -> ServiceResult<Option<OrganizationMember>> {
+        match self.ensure_member_effective(organization, member).await {
+            Ok(member) => Ok(Some(member)),
+            Err(ServiceError::Forbidden(_)) | Err(ServiceError::BotNotFound(_)) => Ok(None),
+            Err(err) => Err(err),
+        }
     }
 
     async fn allowed_provider_ids(&self, manager: &str) -> ServiceResult<HashSet<String>> {
@@ -312,6 +401,61 @@ impl OrganizationCoreService for OrganizationCore {
             .await
     }
 
+
+
+    async fn require_effective_member(
+        &self,
+        organization_code: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<OrganizationMember> {
+        let organization = self.require_organization_for_runtime(organization_code).await?;
+        self.effective_member_in(&organization, bot_uuid).await
+    }
+
+    async fn list_effective_members(
+        &self,
+        organization_code: &str,
+        role: Option<&str>,
+    ) -> ServiceResult<Vec<OrganizationMember>> {
+        if let Some(role) = role {
+            validate_external_id("role", role)?;
+        }
+        let organization = self.require_organization_for_runtime(organization_code).await?;
+        let members = self
+            .organizations
+            .list_members(ListOrganizationMembersQuery {
+                env: self.env.clone(),
+                organization_code: organization.code.clone(),
+                include_disabled: false,
+                role: role.map(str::to_string),
+            })
+            .await?;
+        let mut effective = Vec::new();
+        for member in members {
+            if let Some(member) = self.member_is_effective(&organization, member).await? {
+                effective.push(member);
+            }
+        }
+        effective.sort_by(|left, right| left.bot_uuid.cmp(&right.bot_uuid));
+        Ok(effective)
+    }
+
+    async fn authorize_pair(
+        &self,
+        organization_code: &str,
+        sender_bot_uuid: &str,
+        target_bot_uuid: &str,
+    ) -> ServiceResult<AuthorizedOrganizationPair> {
+        let organization = self.require_organization_for_runtime(organization_code).await?;
+        let sender = self.effective_member_in(&organization, sender_bot_uuid).await?;
+        let target = self.effective_member_in(&organization, target_bot_uuid).await?;
+        Ok(AuthorizedOrganizationPair {
+            organization,
+            sender,
+            target,
+        })
+    }
+
     async fn candidate_bots(
         &self,
         managing_provider_id: &str,
@@ -365,6 +509,18 @@ impl OrganizationCoreService for OrganizationCore {
         candidates.dedup_by(|left, right| left.bot_uuid == right.bot_uuid);
         Ok(candidates)
     }
+}
+
+
+fn provider_scope_allows(
+    managing_provider_id: &str,
+    resource_provider_id: &str,
+    authorized_manager_provider_ids: &[String],
+) -> bool {
+    resource_provider_id == managing_provider_id
+        || authorized_manager_provider_ids
+            .iter()
+            .any(|provider_id| provider_id == managing_provider_id)
 }
 
 fn validate_required_text(kind: &str, value: &str) -> ServiceResult<()> {

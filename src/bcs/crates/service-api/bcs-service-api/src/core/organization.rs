@@ -4,6 +4,13 @@ use bcs_domain::{Organization, OrganizationMember};
 use crate::{BotCapabilities, ServiceResult};
 
 #[derive(Debug, Clone)]
+pub struct AuthorizedOrganizationPair {
+    pub organization: Organization,
+    pub sender: OrganizationMember,
+    pub target: OrganizationMember,
+}
+
+#[derive(Debug, Clone)]
 pub struct OrganizationCandidateBot {
     pub bot_uuid: String,
     pub provider_id: String,
@@ -76,4 +83,20 @@ pub trait OrganizationCoreService: Send + Sync {
         managing_provider_id: &str,
         query: OrganizationCandidateQuery,
     ) -> ServiceResult<Vec<OrganizationCandidateBot>>;
+    async fn require_effective_member(
+        &self,
+        organization_code: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<OrganizationMember>;
+    async fn list_effective_members(
+        &self,
+        organization_code: &str,
+        role: Option<&str>,
+    ) -> ServiceResult<Vec<OrganizationMember>>;
+    async fn authorize_pair(
+        &self,
+        organization_code: &str,
+        sender_bot_uuid: &str,
+        target_bot_uuid: &str,
+    ) -> ServiceResult<AuthorizedOrganizationPair>;
 }

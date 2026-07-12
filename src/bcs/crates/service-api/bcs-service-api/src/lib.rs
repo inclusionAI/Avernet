@@ -199,7 +199,7 @@ pub use core::{
     GroupMessage, GroupMessageType, GroupStatus, GroupStrategy, MessageRole, Participant,
     ParticipantKind, ParticipantMode, ParticipantRole, ProposalCoreService,
     ProviderBotCoreService, ProviderCoreService, RegisterProviderBotParams, RegisteredBot,
-    RegisteredProvider, OrganizationCandidateBot, OrganizationCandidateQuery,
+    RegisteredProvider, AuthorizedOrganizationPair, OrganizationCandidateBot, OrganizationCandidateQuery,
     OrganizationCoreService,
     RelationCoreService, BCS_SYSTEM_MESSAGE, RelationEdge, ResponseMode, RouteAndSendResult,
     RouteParticipantOverlay, RouteSelectorWire, RoutingCoreService, RoutingDecision,
