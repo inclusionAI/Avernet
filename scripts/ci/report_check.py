@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import subprocess
-import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -59,15 +58,42 @@ def changed_lines(base: str, head: str, source_root: Path) -> dict[str, set[int]
     return result
 
 
-def coverage_candidates(diff_file: str, source_root: Path) -> list[str]:
+def coverage_candidates(
+    diff_file: str, source_root: Path, repository_root: Path
+) -> list[str]:
     path = Path(diff_file)
     candidates = [diff_file]
     try:
-        candidates.append(str(path.relative_to(source_root)))
+        source_root_relative = source_root.resolve().relative_to(
+            repository_root.resolve()
+        )
+        candidates.append(str(path.relative_to(source_root_relative)))
     except ValueError:
         pass
-    candidates.append(path.name)
     return candidates
+
+
+def find_coverage_hits(
+    diff_file: str,
+    coverage_hits: dict[str, dict[int, int]],
+    source_root: Path,
+    repository_root: Path,
+) -> dict[int, int] | None:
+    candidates = coverage_candidates(diff_file, source_root, repository_root)
+    for candidate in candidates:
+        for name, hits in coverage_hits.items():
+            if name == candidate or name.endswith("/" + candidate):
+                return hits
+
+    # Some coverage producers report only basenames. Keep that compatibility
+    # only when the basename identifies exactly one file in the report.
+    basename = Path(diff_file).name
+    basename_matches = [
+        hits for name, hits in coverage_hits.items() if Path(name).name == basename
+    ]
+    if len(basename_matches) == 1:
+        return basename_matches[0]
+    return None
 
 
 def check_change_coverage(
@@ -76,28 +102,37 @@ def check_change_coverage(
     source_root: Path,
     minimum: float,
 ) -> None:
+    repository_root = Path(
+        subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            check=True,
+            stdout=subprocess.PIPE,
+            text=True,
+        ).stdout.strip()
+    )
     total = 0
     covered = 0
     for diff_file, lines in changed.items():
-      matched_hits = None
-      candidates = coverage_candidates(diff_file, source_root)
-      for name, hits in coverage_hits.items():
-          if name in candidates or any(name.endswith("/" + candidate) for candidate in candidates):
-              matched_hits = hits
-              break
-      if matched_hits is None:
-          continue
-      for line in lines:
-          if line in matched_hits:
-              total += 1
-              covered += 1 if matched_hits[line] > 0 else 0
+        matched_hits = find_coverage_hits(
+            diff_file, coverage_hits, source_root, repository_root
+        )
+        if matched_hits is None:
+            continue
+        for line in lines:
+            if line in matched_hits:
+                total += 1
+                covered += 1 if matched_hits[line] > 0 else 0
 
     if total == 0:
-        print("change line coverage: no changed executable lines found; treated as pass")
+        print(
+            "change line coverage: no changed executable lines found; treated as pass"
+        )
         return
 
     rate = covered / total * 100
-    print(f"change line coverage: {rate:.2f}% ({covered}/{total}, required >= {minimum:.2f}%)")
+    print(
+        f"change line coverage: {rate:.2f}% ({covered}/{total}, required >= {minimum:.2f}%)"
+    )
     if rate + 1e-9 < minimum:
         raise SystemExit(1)
 
@@ -117,19 +152,25 @@ def main() -> int:
     tests, failures, errors = parse_junit(args.junit)
     passed = tests - failures - errors
     case_rate = 100.0 if tests == 0 else passed / tests * 100
-    print(f"case pass rate: {case_rate:.2f}% ({passed}/{tests}, required >= {args.min_case_pass_rate:.2f}%)")
+    print(
+        f"case pass rate: {case_rate:.2f}% ({passed}/{tests}, required >= {args.min_case_pass_rate:.2f}%)"
+    )
     if case_rate + 1e-9 < args.min_case_pass_rate:
         return 1
 
     line_rate, hits = parse_coverage(args.coverage)
     if args.min_line_coverage is not None:
-        print(f"line coverage: {line_rate:.2f}% (required >= {args.min_line_coverage:.2f}%)")
+        print(
+            f"line coverage: {line_rate:.2f}% (required >= {args.min_line_coverage:.2f}%)"
+        )
         if line_rate + 1e-9 < args.min_line_coverage:
             return 1
 
     if args.min_change_line_coverage is not None and args.base:
         changed = changed_lines(args.base, args.head, args.source_root)
-        check_change_coverage(hits, changed, args.source_root, args.min_change_line_coverage)
+        check_change_coverage(
+            hits, changed, args.source_root, args.min_change_line_coverage
+        )
 
     return 0
 
