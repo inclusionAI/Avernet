@@ -259,7 +259,6 @@ class _CronTickSummary:
         self.cancelled_count = 0
         self.reminders_created = 0
         self.schedule_due_count = 0
-        self.timeout_recovered = 0
         self.auto_silence_closed = 0
         self.errors = 0
         self.dry_run = True
@@ -274,7 +273,6 @@ class _CronTickSummary:
             "cancelled_count": self.cancelled_count,
             "reminders_created": self.reminders_created,
             "schedule_due_count": self.schedule_due_count,
-            "timeout_recovered": self.timeout_recovered,
             "errors": self.errors,
             "dry_run": self.dry_run,
             "duration_seconds": self.duration_seconds,

@@ -21,6 +21,7 @@ from agentclaw.community.api.governance_service import (
     GovernanceLifecycleServiceProtocol,
     GovernanceRecordProcessProtocol,
     GovernanceWhitelistServiceProtocol,
+    NotifyLifecycleServiceProtocol,
 )
 from agentclaw.community.core.economy.governance.domain.protocols import (
     AuditRepositoryProtocol,
@@ -49,6 +50,9 @@ from agentclaw.community.core.economy.governance.services.feedback_service impor
 )
 from agentclaw.community.core.economy.governance.services.lifecycle_service import (
     GovernanceLifecycleService,
+)
+from agentclaw.community.core.economy.governance.services.notify_lifecycle_service import (
+    NotifyLifecycleService,
 )
 from agentclaw.community.core.economy.governance.services.notify_render_service import (
     NotifyRenderService,
@@ -208,6 +212,20 @@ class EconomyGovernanceModule(Module):
     @singleton
     @provider
     @inject
+    def _notify_lifecycle_service(
+        self, notify_repo: NotifyLogRepository,
+    ) -> NotifyLifecycleService:
+        """Construct NotifyLifecycleService — 通知发送状态机正常路径唯一驱动。
+
+        对齐工单机 GovernanceLifecycleService 收口标准:claim/mark_sent/
+        mark_failed 走领域往返(领域守卫复活)。注入到 scan_service(Task 4),
+        完成"正常路径单一驱动"(spec A1/A2)。
+        """
+        return NotifyLifecycleService(notify_repo=notify_repo)
+
+    @singleton
+    @provider
+    @inject
     def _admin_service(
         self,
         cache: CachePlugin,
@@ -250,6 +268,7 @@ class EconomyGovernanceModule(Module):
         notify_sender: NotifySenderPlugin,
         lifecycle_service: GovernanceLifecycleService,
         render_svc: NotifyRenderService,
+        notify_lifecycle_service: NotifyLifecycleService,
     ) -> GovernanceBotService:
         """Construct GovernanceBotService."""
         return GovernanceBotService(
@@ -261,6 +280,7 @@ class EconomyGovernanceModule(Module):
             notify_sender=notify_sender,
             lifecycle_svc=lifecycle_service,
             render_svc=render_svc,
+            notify_lifecycle_svc=notify_lifecycle_service,
         )
 
     @singleton
@@ -357,6 +377,17 @@ class EconomyGovernanceModule(Module):
         rather than the concrete class (avoids ``Protocols cannot be
         instantiated``). Service Protocol, not a Plugin — conformance pinned
         by the contract suite + grep guard (see test_governance_lifecycle)."""
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _notify_lifecycle_service_protocol(
+        self, svc: NotifyLifecycleService,
+    ) -> NotifyLifecycleServiceProtocol:
+        """Rule 14 binding: scan_service 注入 NotifyLifecycleServiceProtocol
+        而非具体类(对齐 lifecycle_service_protocol)。通知发送状态机正常路径
+        唯一驱动;conformance 由 test_notify_lifecycle_service 钉住。"""
         return svc
 
     # -----------------------------------------------------------------

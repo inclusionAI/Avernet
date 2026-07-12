@@ -44,7 +44,6 @@ class _FakeCronTickSummary:
     cancelled_count: int = 0
     reminders_created: int = 1
     schedule_due_count: int = 0
-    timeout_recovered: int = 0
     errors: int = 0
     dry_run: bool = False
 
@@ -294,7 +293,6 @@ def test_run_scan_logs_summary():
             cancelled_count=0,
             reminders_created=2,
             schedule_due_count=3,
-            timeout_recovered=1,
             duration_seconds=1.2,
         ),
     )

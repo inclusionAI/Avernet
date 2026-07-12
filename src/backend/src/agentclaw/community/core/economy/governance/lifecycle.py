@@ -153,7 +153,7 @@ class GovernanceBotLifecycle(LifecycleBase):
             log.info(
                 "[GovernanceLifecycle] Scan completed: run_id=%s, "
                 "sent=%d, failed=%d, cancelled=%d, reminders=%d, "
-                "schedule_due=%d, timeout_recovered=%d, "
+                "schedule_due=%d, "
                 "dry_run=%s, duration=%.1fs",
                 summary.run_id,
                 summary.sent_count,
@@ -161,7 +161,6 @@ class GovernanceBotLifecycle(LifecycleBase):
                 summary.cancelled_count,
                 summary.reminders_created,
                 summary.schedule_due_count,
-                summary.timeout_recovered,
                 summary.dry_run,
                 duration,
             )

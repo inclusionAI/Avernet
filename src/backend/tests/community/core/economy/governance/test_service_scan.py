@@ -38,6 +38,10 @@ from agentclaw.community.core.economy.governance.services.scan_service import (
 from agentclaw.community.core.economy.governance.services.notify_render_service import (
     NotifyRenderService,
 )
+from agentclaw.community.core.economy.governance.services.notify_lifecycle_service import (
+    NotifyLifecycleService,
+)
+
 
 
 from .conftest import FakeDB, FakeGovernanceConfig, FakeNotifySender
@@ -192,6 +196,7 @@ def _build_service(engine, *, config=None, admin_svc=None, notify_sender=None):
         notify_sender=notify_sender,
         lifecycle_svc=lifecycle_svc,
         render_svc=NotifyRenderService(),
+        notify_lifecycle_svc=NotifyLifecycleService(notify_repo=notify_repo),
     )
     return svc, db, Sess
 
@@ -345,7 +350,6 @@ class TestProcessCronTick:
         assert summary.cancelled_count == 0
         assert summary.reminders_created == 0
         assert summary.schedule_due_count == 0
-        assert summary.timeout_recovered == 0
 
     @pytest.mark.asyncio
     async def test_dry_run_skips_sending_and_reminders(self, engine):
@@ -415,25 +419,6 @@ class TestProcessCronTick:
         with db.orm_session() as s2:
             ticket = s2.query(GovernanceTicketOrm).filter_by(ticket_id=ticket_id).one()
             assert ticket.governance_status == "waiting_review"
-
-    @pytest.mark.asyncio
-    async def test_timeout_recovery_reverts_stale_sending(self, engine):
-        """Stale 'sending' notify (last_send_at old) → reverted to pending."""
-        svc, db, Sess = _build_service(engine)
-        s = Sess()
-        ticket_id = _seed_ticket(s)
-        notif_id = _seed_pending_notify(s, ticket_id=ticket_id, notify_channel="markdown")
-        # Manually mark as 'sending' with old last_send_at
-        notify_row = s.query(GovernanceNotificationOrm).filter_by(notification_id=notif_id).one()
-        notify_row.notify_status = "sending"
-        notify_row.last_send_at = datetime.now() - timedelta(hours=2)
-        notify_row.send_attempt_count = 1
-        s.commit()
-        s.close()
-
-        summary = svc.process_cron_tick(dry_run=False)
-
-        assert summary.timeout_recovered >= 1
 
     @pytest.mark.asyncio
     async def test_auto_silence_converge_closes_recovered_ticket(self, engine):

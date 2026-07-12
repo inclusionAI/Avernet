@@ -213,6 +213,14 @@ class NotifyLogRepositoryProtocol(Protocol):
         """Insert a new notify_log row. Returns notification_id."""
         ...
 
+    def save_notification(self, notification: GovernanceNotification) -> bool:
+        """Persist a (mutated) domain notification back (领域往返写回原语)。
+
+        调用方(driver)已 invoke 领域守卫 方法;本原语只写回投递态。
+        Returns True if found+updated, False if not found.
+        """
+        ...
+
     def claim_pending(self, notification_id: str, now: datetime) -> bool:
         """Atomic claim: UPDATE pending → sending."""
         ...
@@ -237,10 +245,6 @@ class NotifyLogRepositoryProtocol(Protocol):
 
     def cancel_pending_by_ticket(self, ticket_id: str) -> int:
         """Cancel all pending notifies for a ticket. Returns rows cancelled."""
-        ...
-
-    def recover_sending_timeout(self, timeout_minutes: int = 30) -> int:
-        """Revert stale ``sending`` notifies back to ``pending``."""
         ...
 
     # ── 批量关闭 (替代 Service 中 orm_session 直查) ──
