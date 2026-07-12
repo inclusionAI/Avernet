@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -31,10 +32,38 @@ def parse_coverage(path: Path) -> tuple[float, dict[str, dict[int, int]]]:
     return line_rate, hits_by_file
 
 
+def repository_relative_path(path: Path, repository_root: Path) -> Path:
+    try:
+        return path.resolve().relative_to(repository_root.resolve())
+    except ValueError:
+        return path
+
+
+def find_repository_root(path: Path) -> Path:
+    current = path.resolve()
+    if current.is_file():
+        current = current.parent
+    for candidate in (current, *current.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    raise RuntimeError(f"could not find repository root from {path}")
+
+
+def clean_git_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_PREFIX", "GIT_INDEX_FILE"):
+        environment.pop(name, None)
+    return environment
+
+
 def changed_lines(base: str, head: str, source_root: Path) -> dict[str, set[int]]:
+    repository_root = find_repository_root(source_root)
+    source_pathspec = repository_relative_path(source_root, repository_root)
     diff = subprocess.run(
-        ["git", "diff", "--unified=0", base, head, "--", str(source_root)],
+        ["git", "diff", "--unified=0", base, head, "--", str(source_pathspec)],
         check=True,
+        cwd=repository_root,
+        env=clean_git_environment(),
         stdout=subprocess.PIPE,
         text=True,
     ).stdout
@@ -64,9 +93,7 @@ def coverage_candidates(
     path = Path(diff_file)
     candidates = [diff_file]
     try:
-        source_root_relative = source_root.resolve().relative_to(
-            repository_root.resolve()
-        )
+        source_root_relative = repository_relative_path(source_root, repository_root)
         candidates.append(str(path.relative_to(source_root_relative)))
     except ValueError:
         pass
@@ -102,26 +129,26 @@ def check_change_coverage(
     source_root: Path,
     minimum: float,
 ) -> None:
-    repository_root = Path(
-        subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            check=True,
-            stdout=subprocess.PIPE,
-            text=True,
-        ).stdout.strip()
-    )
+    repository_root = find_repository_root(source_root)
     total = 0
     covered = 0
+    uncovered_by_file: dict[str, list[int]] = {}
     for diff_file, lines in changed.items():
         matched_hits = find_coverage_hits(
             diff_file, coverage_hits, source_root, repository_root
         )
         if matched_hits is None:
             continue
+        uncovered: list[int] = []
         for line in lines:
             if line in matched_hits:
                 total += 1
-                covered += 1 if matched_hits[line] > 0 else 0
+                if matched_hits[line] > 0:
+                    covered += 1
+                else:
+                    uncovered.append(line)
+        if uncovered:
+            uncovered_by_file[diff_file] = sorted(uncovered)
 
     if total == 0:
         print(
@@ -134,6 +161,9 @@ def check_change_coverage(
         f"change line coverage: {rate:.2f}% ({covered}/{total}, required >= {minimum:.2f}%)"
     )
     if rate + 1e-9 < minimum:
+        print("uncovered changed executable lines:")
+        for filename, lines in uncovered_by_file.items():
+            print(f"  {filename}: {','.join(str(line) for line in lines)}")
         raise SystemExit(1)
 
 
