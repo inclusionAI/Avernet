@@ -169,7 +169,7 @@
         pass). Full suite green.
 - **Depends on:** Task 5, Task 7
 
-## Task 9: Add `renew_lease` to the task-queue repository
+## Task 9: Add `renew_lease` to the task-queue repository — [x] DONE
 - **Goal:** Give the shared infra a lease-extension primitive (additive).
 - **Files:** `core/task_queue/repository/protocol.py`,
   `plugins/task_queue_repository.py`,
