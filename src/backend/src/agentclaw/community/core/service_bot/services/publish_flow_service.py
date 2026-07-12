@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import time
 from collections.abc import Callable
 from typing import Any, Dict, TYPE_CHECKING
@@ -23,10 +22,6 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishStatusInvalidError,
 )
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
-from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
-    apply_engine_overrides,
-    restamp_stage,
-)
 from agentclaw.community.core.service_bot.services.deploy.producer import (
     DeployArtifactProducerRouter,
 )
@@ -35,6 +30,12 @@ from agentclaw.community.core.service_bot.services.deploy.provider_resolver impo
 )
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.core.common_config.service import CommonConfigService
+from agentclaw.community.core.service_bot.services.publish_flow.errors import (
+    PublishFlowServiceError,
+)
+from agentclaw.community.core.service_bot.services.publish_flow.ext_state import (
+    PublishExtState,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -59,10 +60,9 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
-
-class PublishFlowServiceError(Exception):
-    """发布流程服务错误."""
-    pass
+# ``PublishFlowServiceError`` now lives in ``publish_flow.errors`` and is imported
+# above; it stays importable from this module for backward compatibility
+# (services/__init__.py, router_publish.py, tests).
 
 
 class PublishFlowService:
@@ -130,24 +130,17 @@ class PublishFlowService:
         # on the shared build artifact. Always DI-provided.
         self._channel_overrides_reader = channel_overrides_reader
 
+        # Shared ext/state helpers (record read-back, atomic status+ext writes,
+        # per-stage engine_overrides composition). The runners extracted from this
+        # facade read/write publish records through this one collaborator.
+        self._ext_state = PublishExtState(
+            bot_publish_service, channel_overrides_reader
+        )
+
     def _stage_overrides(
         self, publish_record: BotPublishRecord, stage: PublishStage
     ) -> dict | None:
-        """That stage's ``engine_overrides`` (DingTalk channels), or ``None``.
-
-        Returns ``None`` when the publish record carries no ``config_artifact`` —
-        the ARCA mount path pins ``migration_path`` and handles per-stage channels
-        out-of-band (``generate_openclaw_configs``), so there is nothing to overlay
-        and we skip the channel fetch entirely. Otherwise re-reads the bot's active
-        channels for ``stage`` (engine-neutral; same reader the draft collector uses).
-        """
-        if not (publish_record.ext or {}).get("config_artifact"):
-            return None
-        return self._channel_overrides_reader.overrides_for_stage(
-            user_id=self._get_owner_id(publish_record),
-            bot_id=publish_record.source_bot_id,
-            accept_stages={stage.value},
-        )
+        return self._ext_state.stage_overrides(publish_record, stage)
 
     @staticmethod
     def _artifact_for_stage(
@@ -155,25 +148,13 @@ class PublishFlowService:
         stage: PublishStage,
         overrides: dict | None,
     ) -> dict | None:
-        """The artifact to deliver for ``stage``: stamp ``engine_ext.stage`` and
-        overlay that stage's channel ``engine_overrides``.
-
-        The single delivery-composition seam shared by promotion (overrides freshly
-        fetched + stored) and restart (overrides read back from storage). Both
-        sub-steps no-op for the ARCA mount path (no ``config_artifact``)."""
-        return apply_engine_overrides(restamp_stage(config_artifact, stage), overrides)
+        return PublishExtState.artifact_for_stage(config_artifact, stage, overrides)
 
     @staticmethod
     def _store_stage_overrides(
         ext: dict, stage: PublishStage, overrides: dict | None
     ) -> None:
-        """Persist that stage's ``engine_overrides`` under
-        ``ext["engine_overrides_by_stage"][stage]`` so restart/redeliver of the
-        stage reproduces the promoted channels. No-op when ``overrides`` is ``None``
-        (ARCA mount path — nothing to store)."""
-        if overrides is None:
-            return
-        ext.setdefault("engine_overrides_by_stage", {})[stage.value] = overrides
+        PublishExtState.store_stage_overrides(ext, stage, overrides)
 
     def _refresh_publish_handle(self, binding_id, publish_id) -> None:
         """Refresh the baas ``publish_id`` stashed in a reused binding's
@@ -2870,51 +2851,24 @@ class PublishFlowService:
 
     @staticmethod
     def _restamp_ext_artifact(ext: dict, stage: PublishStage) -> None:
-        """Persist the promoted ``stage`` into the stored ``config_artifact`` snapshot.
-
-        Re-stamps ``ext["config_artifact"].engine_ext.stage`` to the engine-facing
-        value for ``stage`` (canary/release). No-op for the ARCA mount path, which
-        pins ``migration_path`` instead of ``config_artifact`` — we never add a
-        spurious ``config_artifact`` key when one wasn't there.
-        """
-        config_artifact = ext.get("config_artifact")
-        if config_artifact is not None:
-            ext["config_artifact"] = restamp_stage(config_artifact, stage)
+        PublishExtState.stamp_stage_on_stored_artifact(ext, stage)
 
     def _get_owner_id(self, publish_record: BotPublishRecord) -> str:
-        """获取发布单 owner_id，协作者操作时执行链路必须使用 owner 身份。"""
-        owner_id = publish_record.owner_id
-        if not owner_id:
-            raise PublishFlowServiceError(
-                f"发布单缺少 owner_id: publish_id={publish_record.id}"
-            )
-        return owner_id
+        return self._ext_state.owner_id(publish_record)
 
     @staticmethod
     def _clear_retry_flag(ext: dict) -> None:
-        """清理发布单重试中的临时标记。"""
-        ext.pop("retry", None)
+        PublishExtState.clear_retry_flag(ext)
 
     def _get_latest_ext(self, publish_id: int) -> dict:
-        """获取发布单最新 ext，避免基于旧快照回写。"""
-        latest_record = self._publish_service.get_publish_by_id(publish_id)
-        if not latest_record:
-            raise PublishNotFoundError(f"Publish order not found: {publish_id}")
-        return copy.deepcopy(latest_record.ext or {})
+        return self._ext_state.get_latest_ext(publish_id)
 
     def _merge_and_update_ext(
         self,
         publish_id: int,
         mutator: Callable[[dict], None],
     ) -> dict:
-        """基于最新 ext 执行变更后写回，减少覆盖历史数据风险。"""
-        ext = self._get_latest_ext(publish_id)
-        mutator(ext)
-        self._publish_service.update_publish_ext(
-            publish_id=publish_id,
-            ext=ext,
-        )
-        return ext
+        return self._ext_state.merge_and_update_ext(publish_id, mutator)
 
     def _update_publish_status(
         self,
@@ -2923,20 +2877,7 @@ class PublishFlowService:
         source_status: PublishStatus,
         ext: dict | None = None,
     ) -> None:
-        """更新发布单状态。
-
-        Args:
-            publish_id: 发布单 ID
-            target_status: 目标状态
-            source_status: 源状态
-            ext: 扩展字段
-        """
-        self._publish_service.update_publish_status_with_ext(
-            publish_id=publish_id,
-            target_status=target_status,
-            ext=ext or {},
-            source_status=source_status,
-        )
+        self._ext_state.update_status(publish_id, target_status, source_status, ext)
 
     async def general_publish(
         self,

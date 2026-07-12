@@ -46,7 +46,7 @@
   - [ ] All new tests pass against the *unmodified* service.
 - **Depends on:** —
 
-## Task 2: Create `publish_flow/` package + extract `PublishExtState`
+## Task 2: Create `publish_flow/` package + extract `PublishExtState` — [x] DONE
 - **Goal:** Stand up the new package and move the ext/state helpers into it; the
   facade delegates to `PublishExtState`. No behavior change.
 - **Files:** `core/service_bot/services/publish_flow/__init__.py` (new),
