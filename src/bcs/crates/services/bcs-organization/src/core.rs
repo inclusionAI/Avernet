@@ -7,7 +7,7 @@ use bcs_service_api::{
     AuthorizedOrganizationPair, BotCapabilities, BotRegistryCoreService, CreateOrganizationRecord,
     ListOrganizationMembersQuery, ListOrganizationsQuery, OrganizationCandidateBot,
     OrganizationCandidateQuery, OrganizationCoreService, OrganizationRepoPort,
-    ProviderBotBindingRepoPort, ProviderRepoPort, ServiceError, ServiceResult,
+    ProviderBotBindingRepoPort, ProviderRecord, ProviderRepoPort, ServiceError, ServiceResult,
     UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
 };
 
@@ -164,6 +164,27 @@ impl OrganizationCore {
         organization: &Organization,
         member: OrganizationMember,
     ) -> ServiceResult<OrganizationMember> {
+        let manager_provider = self.manager_provider(organization).await?;
+        self.ensure_member_effective_with(organization, member, &manager_provider)
+            .await
+    }
+
+    async fn manager_provider(
+        &self,
+        organization: &Organization,
+    ) -> ServiceResult<ProviderRecord> {
+        self.providers
+            .get_provider(&organization.managing_provider_id)
+            .await?
+            .ok_or_else(|| ServiceError::Forbidden("organization_provider_grant_required".to_string()))
+    }
+
+    async fn ensure_member_effective_with(
+        &self,
+        organization: &Organization,
+        member: OrganizationMember,
+        manager_provider: &ProviderRecord,
+    ) -> ServiceResult<OrganizationMember> {
         if member.disabled {
             return Err(ServiceError::Forbidden("organization_member_disabled".to_string()));
         }
@@ -176,13 +197,6 @@ impl OrganizationCore {
             return Err(ServiceError::Forbidden("provider_bot_disabled".to_string()));
         }
         let Some(resource_provider) = self.providers.get_provider(&binding.provider_id).await? else {
-            return Err(ServiceError::Forbidden("organization_provider_grant_required".to_string()));
-        };
-        let Some(manager_provider) = self
-            .providers
-            .get_provider(&organization.managing_provider_id)
-            .await?
-        else {
             return Err(ServiceError::Forbidden("organization_provider_grant_required".to_string()));
         };
         if resource_provider.disabled || manager_provider.disabled {
@@ -207,6 +221,22 @@ impl OrganizationCore {
         member: OrganizationMember,
     ) -> ServiceResult<Option<OrganizationMember>> {
         match self.ensure_member_effective(organization, member).await {
+            Ok(member) => Ok(Some(member)),
+            Err(ServiceError::Forbidden(_)) | Err(ServiceError::BotNotFound(_)) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    async fn member_is_effective_with(
+        &self,
+        organization: &Organization,
+        member: OrganizationMember,
+        manager_provider: &ProviderRecord,
+    ) -> ServiceResult<Option<OrganizationMember>> {
+        match self
+            .ensure_member_effective_with(organization, member, manager_provider)
+            .await
+        {
             Ok(member) => Ok(Some(member)),
             Err(ServiceError::Forbidden(_)) | Err(ServiceError::BotNotFound(_)) => Ok(None),
             Err(err) => Err(err),
@@ -430,9 +460,13 @@ impl OrganizationCoreService for OrganizationCore {
                 role: role.map(str::to_string),
             })
             .await?;
+        let manager_provider = self.manager_provider(&organization).await?;
         let mut effective = Vec::new();
         for member in members {
-            if let Some(member) = self.member_is_effective(&organization, member).await? {
+            if let Some(member) = self
+                .member_is_effective_with(&organization, member, &manager_provider)
+                .await?
+            {
                 effective.push(member);
             }
         }
