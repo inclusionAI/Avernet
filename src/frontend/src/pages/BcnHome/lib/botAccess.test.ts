@@ -73,6 +73,9 @@ describe('bot access resources', () => {
     ).toBe(
       "automatic registration-token bot='产品经理' profile='avernet-bot-397dc3e8'",
     );
+    expect(
+      renderBotAccessCommand('{token}:{token}', 'registration-token'),
+    ).toBe('registration-token:registration-token');
   });
 
   it('refuses to render Hermes configuration without a Bot name', () => {
@@ -196,6 +199,7 @@ describe('bot access resources', () => {
     expect(template).toContain('BCS_INSTALLER_URL=');
     expect(sourceRefs).toHaveLength(2);
     expect(new Set(sourceRefs).size).toBe(1);
-    expect(sourceRefs[0]).toMatch(/^[0-9a-f]{40}$/);
+    expect(sourceRefs[0]).toBe('refs/heads/dev');
+    expect(template).toContain('install-hermes.sh?ref=dev');
   });
 });

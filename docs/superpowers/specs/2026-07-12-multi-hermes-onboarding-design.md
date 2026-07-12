@@ -59,9 +59,9 @@ validation, and command-rendering helpers. The two entry points must not drift
 in copy, defaults, or generated arguments.
 
 The bot-assisted Hermes method remains available and receives the same
-multi-profile notice. Its generated instruction includes the selected Bot name
-and derived Profile so Hermes can execute the guide without asking the user to
-invent either value.
+multi-profile notice. Its generated instruction embeds the same installer
+command as self-service onboarding, including the selected Bot name and derived
+Profile, so Hermes does not improvise another BCN integration path.
 
 ## Derived Profile Names
 
@@ -113,8 +113,9 @@ OpenClaw templates continue to render only `{token}` and retain their current
 behavior.
 
 The bot-assisted instruction includes the escaped display name and derived
-profile as data for `install-hermes.md`. That guide uses `--create-profile` so a
-new derived profile is cloned from `default` before registration.
+profile in the exact `install-hermes.sh` command. That command uses
+`--create-profile` so a new derived profile is cloned from `default` before
+registration.
 
 ## Installer Semantics
 

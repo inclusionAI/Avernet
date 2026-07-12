@@ -61,7 +61,8 @@ export function deriveHermesProfile(botName: string): string {
 
   if (!slug) return `${HERMES_PROFILE_PREFIX}bot-${fnv1a32(trimmed)}`;
 
-  const maxSlugLength = HERMES_PROFILE_MAX_LENGTH - HERMES_PROFILE_PREFIX.length;
+  const maxSlugLength =
+    HERMES_PROFILE_MAX_LENGTH - HERMES_PROFILE_PREFIX.length;
   const shortened = slug.slice(0, maxSlugLength).replace(/-+$/g, '');
   return `${HERMES_PROFILE_PREFIX}${shortened}`;
 }
@@ -150,7 +151,7 @@ export function renderBotAccessCommand(
 ): string {
   if (hermes && !validateHermesBotConfig(hermes).valid) return '';
 
-  let command = template.replace('{token}', token);
+  let command = template.replace(/\{token\}/g, token);
   if (hermes) {
     command = command
       .replace('{bot_name}', quoteShellArg(hermes.botName.trim()))

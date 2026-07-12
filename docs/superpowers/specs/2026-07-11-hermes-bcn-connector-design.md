@@ -187,9 +187,11 @@ environment through the repository's existing public PyPI mirror convention.
 downloads at an organization-controlled mirror; the installer does not
 hard-code an unaffiliated GitHub proxy.
 
-The bot-assisted instruction points Hermes to `install-hermes.md`, which
-performs the same checks and registration while requiring explicit user
-confirmation before replacing an existing `${HERMES_HOME}/bcn/session.json`.
+The bot-assisted instruction asks Hermes to execute the same exact
+`install-hermes.sh` command shown by self-service onboarding. The bootstrap
+falls back from GitHub Raw to GitHub's official Contents API and requires
+explicit user confirmation before replacing an existing
+`${HERMES_HOME}/bcn/session.json`.
 
 ## Hermes Lifecycle
 

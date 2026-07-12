@@ -319,7 +319,7 @@ main() {
   validate_named_profile "$profile" "$create_profile"
 
   if [[ -n "$explicit_home" ]]; then
-    hermes_home="${explicit_home/#\~/$HOME}"
+    hermes_home="$explicit_home"
     profile_arg="--hermes-home"
   elif [[ -n "$profile" ]]; then
     [[ "$profile" != */* && "$profile" != "." && "$profile" != ".." ]] \
@@ -331,6 +331,7 @@ main() {
     explicit_home="$hermes_home"
     profile_arg="--hermes-home"
   fi
+  hermes_home="${hermes_home/#\~/$HOME}"
   ensure_hermes_profile "$profile" "$hermes_home" "$create_profile"
 
   if [[ -z "$bot_name" ]]; then

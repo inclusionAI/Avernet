@@ -1444,6 +1444,37 @@ class CliTests(unittest.TestCase):
             "--bcs-ws-url",
         ):
             self.assertIn(preserved, script)
+        self.assertNotIn(
+            'hermes_home="${explicit_home/#\\~/$HOME}"', script
+        )
+        self.assertEqual(
+            1, script.count('hermes_home="${hermes_home/#\\~/$HOME}"')
+        )
+
+    def test_installer_expands_tilde_from_hermes_home_environment(self) -> None:
+        home = Path(self.tempdir.name) / "home"
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            "hermes() { :; }; "
+            "ensure_python() { PYTHON_CMD=/bin/true; }; "
+            "preflight_dashboard_isolation() { :; }; "
+            'ensure_hermes_profile() { printf "%s" "$2"; exit 0; }; '
+            "main --bot-name reviewer"
+        )
+
+        result = subprocess.run(
+            ["/bin/bash", "-c", command],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "HOME": str(home),
+                "HERMES_HOME": "~/.hermes/custom",
+            },
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(str(home / ".hermes" / "custom"), result.stdout)
 
     def test_installer_downloads_raw_sources_with_ipv4_and_retries(self) -> None:
         script = INSTALLER.read_text(encoding="utf-8")
