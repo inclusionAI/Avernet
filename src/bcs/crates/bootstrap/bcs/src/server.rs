@@ -836,6 +836,7 @@ impl Default for BcsServerState {
         let bot_connections = Arc::new(BotConnectionRegistry::new());
         let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend_store.clone())
             .with_bot_core(bot_core_arc.clone())
+            .with_organization(organization_core.clone())
             .with_relation(
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>
             )
@@ -1328,6 +1329,7 @@ fn build_use_case_bundle(
     config: &BcsConfig,
     bot_registry: Arc<dyn BotRegistryCoreService>,
     bot_core: Arc<BotCore>,
+    organization_core: Arc<dyn OrganizationCoreService>,
     bot_connection_control: Arc<dyn bcs_service_api::BotConnectionControlPort>,
     group: Arc<dyn GroupCoreService>,
     proposal: Arc<dyn bcs_service_api::ProposalCoreService>,
@@ -1356,6 +1358,7 @@ fn build_use_case_bundle(
 
     let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend.clone())
         .with_bot_core(bot_core.clone())
+        .with_organization(organization_core.clone())
         .with_relation(relation.clone())
         .with_connection_control(bot_connection_control.clone());
     if let Some(user_directory) = user_directory {
@@ -1986,6 +1989,7 @@ impl BcsServer {
         let bot_connections = Arc::new(BotConnectionRegistry::new());
         let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend_store.clone())
             .with_bot_core(bot_core_arc.clone())
+            .with_organization(organization_core.clone())
             .with_relation(
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>
             )
@@ -2079,6 +2083,7 @@ impl BcsServer {
             &config,
             bot_registry.clone(),
             bot_core_arc.clone(),
+            organization_core.clone(),
             bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>,
             sessions.clone(),
             proposals.clone(),
@@ -2457,6 +2462,7 @@ impl BcsServer {
         let mut bot_runtime_for_session =
             Bot::new_with_friend(bot_registry.clone(), friend_svc.clone())
                 .with_bot_core(bot_core_arc.clone())
+                .with_organization(organization_core.clone())
                 .with_connection_control(
                     bot_connections.clone()
                         as Arc<dyn bcs_service_api::BotConnectionControlPort>,
@@ -2587,6 +2593,7 @@ impl BcsServer {
             &config,
             bot_registry.clone(),
             bot_core_arc.clone(),
+            organization_core.clone(),
             bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>,
             sessions.clone(),
             proposals.clone(),

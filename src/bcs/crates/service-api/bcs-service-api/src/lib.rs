@@ -76,6 +76,7 @@ pub use bot_runtime_use_cases::{
 pub use bot_use_cases::{
     BotConnectCommand, BotDetailCommand, BotDetailResult, BotDiscoveryCommand, BotDiscoveryEntry,
     BotDiscoveryProviderInfo, BotDiscoveryResult, BotDiscoveryService, BotLeaveCommand,
+    OrganizationMemberSummary,
     BotLeaveResult, BotListCommand, BotListEntry, BotListResult, BotManagementService,
     BotPagedListCommand, BotPagedListResult, BotQueryByIdsCommand, BotQueryByIdsResult,
     BotQueryEntry, BotQueryService,

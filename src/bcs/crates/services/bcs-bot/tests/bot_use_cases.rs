@@ -7,11 +7,13 @@ use bcs_service_api::{
     BotRuntimeConnectCommand, BotRuntimeConnectionService, BotRuntimeDisconnectCommand,
     BotRuntimeStatusCommand, BotStatusUpdateCommand, BotUseCaseError, BotVisibilityCommand,
     BotVisibilityQueryCommand, ConnectError, FriendCoreService, ProviderAuthMode,
-    ProviderBotBindingRepoPort, ProviderBotCoreService, ProviderCoreService,
-    ProviderCredentialRepoPort, ProviderRepoPort, RegisterProviderBotParams, ServiceError,
-    ServiceResult,
+    AuthorizedOrganizationPair, OrganizationCandidateBot, OrganizationCandidateQuery,
+    OrganizationCoreService, ProviderBotBindingRepoPort, ProviderBotCoreService,
+    ProviderCoreService, ProviderCredentialRepoPort, ProviderRepoPort, RegisterProviderBotParams,
+    ServiceError, ServiceResult,
 };
 use bcs_bot_store::provider::MemoryProviderStore;
+use bcs_service_api::types::{Organization, OrganizationMember};
 use bcs_bot_store::MemoryBotRepo;
 use tempfile::TempDir;
 
@@ -165,6 +167,103 @@ impl FriendCoreService for StaticFriendCoreService {
 
     async fn remove_all_friendships(&self, _bot_id: &str) -> ServiceResult<usize> {
         Ok(0)
+    }
+}
+
+#[derive(Debug, Default)]
+struct StaticOrganizationCoreService {
+    members: Vec<OrganizationMember>,
+    fail_requester: bool,
+}
+
+impl StaticOrganizationCoreService {
+    fn with_members(members: Vec<OrganizationMember>) -> Self {
+        Self {
+            members,
+            fail_requester: false,
+        }
+    }
+
+    fn rejecting_requester() -> Self {
+        Self {
+            members: Vec::new(),
+            fail_requester: true,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl OrganizationCoreService for StaticOrganizationCoreService {
+    async fn create(&self, _: &str, _: &str, _: &str, _: Option<&str>) -> ServiceResult<Organization> {
+        Err(ServiceError::InvalidOperation { message: "not implemented".to_string(), request_id: None })
+    }
+
+    async fn get_for_manager(&self, _: &str, _: &str) -> ServiceResult<Organization> {
+        Err(ServiceError::InvalidOperation { message: "not implemented".to_string(), request_id: None })
+    }
+
+    async fn list_for_manager(&self, _: &str, _: bool) -> ServiceResult<Vec<Organization>> {
+        Err(ServiceError::InvalidOperation { message: "not implemented".to_string(), request_id: None })
+    }
+
+    async fn update_for_manager(&self, _: &str, _: &str, _: Option<&str>, _: Option<Option<&str>>, _: Option<bool>) -> ServiceResult<Organization> {
+        Err(ServiceError::InvalidOperation { message: "not implemented".to_string(), request_id: None })
+    }
+
+    async fn put_member(&self, _: &str, _: &str, _: &str, _: Option<&str>) -> ServiceResult<OrganizationMember> {
+        Err(ServiceError::InvalidOperation { message: "not implemented".to_string(), request_id: None })
+    }
+
+    async fn delete_member(&self, _: &str, _: &str, _: &str) -> ServiceResult<()> {
+        Err(ServiceError::InvalidOperation { message: "not implemented".to_string(), request_id: None })
+    }
+
+    async fn get_member_for_manager(&self, _: &str, _: &str, _: &str) -> ServiceResult<Option<OrganizationMember>> {
+        Err(ServiceError::InvalidOperation { message: "not implemented".to_string(), request_id: None })
+    }
+
+    async fn list_members_for_manager(&self, _: &str, _: &str, _: bool, _: Option<&str>) -> ServiceResult<Vec<OrganizationMember>> {
+        Err(ServiceError::InvalidOperation { message: "not implemented".to_string(), request_id: None })
+    }
+
+    async fn candidate_bots(&self, _: &str, _: OrganizationCandidateQuery) -> ServiceResult<Vec<OrganizationCandidateBot>> {
+        Err(ServiceError::InvalidOperation { message: "not implemented".to_string(), request_id: None })
+    }
+
+    async fn require_effective_member(&self, organization_code: &str, bot_uuid: &str) -> ServiceResult<OrganizationMember> {
+        if self.fail_requester {
+            return Err(ServiceError::Forbidden("organization_member_required".to_string()));
+        }
+        self.members
+            .iter()
+            .find(|member| member.organization_code == organization_code && member.bot_uuid == bot_uuid)
+            .cloned()
+            .ok_or_else(|| ServiceError::Forbidden("organization_member_required".to_string()))
+    }
+
+    async fn list_effective_members(&self, organization_code: &str, role: Option<&str>) -> ServiceResult<Vec<OrganizationMember>> {
+        Ok(self.members
+            .iter()
+            .filter(|member| member.organization_code == organization_code)
+            .filter(|member| role.is_none_or(|role| member.role.as_deref() == Some(role)))
+            .cloned()
+            .collect())
+    }
+
+    async fn authorize_pair(&self, _: &str, _: &str, _: &str) -> ServiceResult<AuthorizedOrganizationPair> {
+        Err(ServiceError::InvalidOperation { message: "not implemented".to_string(), request_id: None })
+    }
+}
+
+fn org_member(bot_uuid: &str, role: &str) -> OrganizationMember {
+    OrganizationMember {
+        env: "test".to_string(),
+        organization_code: "promo-2026".to_string(),
+        bot_uuid: bot_uuid.to_string(),
+        role: Some(role.to_string()),
+        disabled: false,
+        created_at: 1,
+        updated_at: 1,
     }
 }
 
@@ -678,6 +777,80 @@ async fn discover_provider_bots_returns_provider_metadata_and_agent_code() {
     let provider_info = entry.provider_info.as_ref().expect("provider info");
     assert_eq!(provider_info.provider_id, provider.provider.provider_id);
     assert_eq!(provider_info.provider_name, "Provider Directory");
+}
+
+
+#[tokio::test]
+async fn organization_scoped_discovery_filters_effective_members_and_attaches_metadata() {
+    let fixture = RegistryFixture::new();
+    let registry: Arc<dyn BotRegistryCoreService> = fixture.registry.clone();
+    let organization = Arc::new(StaticOrganizationCoreService::with_members(vec![
+        org_member("bot-a", "planner"),
+        org_member("bot-b", "traffic_analyst"),
+        org_member("bot-c", "traffic_analyst"),
+        org_member("bot-d", "traffic_analyst"),
+    ]));
+    let service = Bot::new_with_friend(
+        registry,
+        Arc::new(StaticFriendCoreService::new(vec![("bot-a", "bot-d")])),
+    )
+    .with_bot_core(fixture.registry.clone())
+    .with_organization(organization);
+
+    register_bot(&fixture.registry, "bot-a", caps(Some("Requester"), Some("planner"), "public"), None).await;
+    register_bot(&fixture.registry, "bot-b", caps(Some("Traffic Public"), Some("traffic"), "protected"), None).await;
+    register_bot(&fixture.registry, "bot-c", caps(Some("Traffic Private"), Some("traffic"), "private"), None).await;
+    register_bot(&fixture.registry, "bot-d", caps(Some("Traffic Friend"), Some("traffic"), "private"), None).await;
+    register_bot(&fixture.registry, "bot-x", caps(Some("Traffic Global"), Some("traffic"), "public"), None).await;
+
+    let result = service
+        .discover_bots(BotDiscoveryCommand {
+            q: Some("traffic".to_string()),
+            requester_bot_id: Some("bot-a".to_string()),
+            organization_code: Some("promo-2026".to_string()),
+            role: Some("traffic_analyst".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect("scoped discovery");
+
+    let ids = result
+        .bots
+        .iter()
+        .map(|entry| entry.bot_uuid.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["bot-b", "bot-d"]);
+    assert!(result.bots.iter().all(|entry| entry.organization_member.as_ref().is_some_and(|member| {
+        member.organization_code == "promo-2026" && member.role.as_deref() == Some("traffic_analyst")
+    })));
+    assert_eq!(result.bots[0].is_friend, Some(false));
+    assert_eq!(result.bots[1].is_friend, Some(true));
+}
+
+#[tokio::test]
+async fn organization_scoped_discovery_rejects_role_without_org_and_nonmember_requester() {
+    let fixture = RegistryFixture::new();
+    let registry: Arc<dyn BotRegistryCoreService> = fixture.registry.clone();
+    let service = Bot::new(registry).with_organization(Arc::new(StaticOrganizationCoreService::rejecting_requester()));
+
+    let role_without_org = service
+        .discover_bots(BotDiscoveryCommand {
+            role: Some("traffic_analyst".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect_err("role without organization should fail");
+    assert!(matches!(role_without_org, BotUseCaseError::Service(ServiceError::InvalidOperation { message, .. }) if message == "role_requires_organization_code"));
+
+    let nonmember = service
+        .discover_bots(BotDiscoveryCommand {
+            requester_bot_id: Some("bot-a".to_string()),
+            organization_code: Some("promo-2026".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect_err("nonmember requester should fail");
+    assert!(matches!(nonmember, BotUseCaseError::Service(ServiceError::Forbidden(reason)) if reason == "organization_member_required"));
 }
 
 #[tokio::test]

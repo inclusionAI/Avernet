@@ -611,6 +611,31 @@ impl OrganizationCoreService for NoopOrganizationCoreService {
     ) -> ServiceResult<Vec<OrganizationCandidateBot>> {
         Err(service_not_configured("organization service"))
     }
+
+    async fn require_effective_member(
+        &self,
+        _organization_code: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<OrganizationMember> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn list_effective_members(
+        &self,
+        _organization_code: &str,
+        _role: Option<&str>,
+    ) -> ServiceResult<Vec<OrganizationMember>> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn authorize_pair(
+        &self,
+        _organization_code: &str,
+        _sender_bot_uuid: &str,
+        _target_bot_uuid: &str,
+    ) -> ServiceResult<AuthorizedOrganizationPair> {
+        Err(service_not_configured("organization service"))
+    }
 }
 
 #[derive(Debug, Default)]

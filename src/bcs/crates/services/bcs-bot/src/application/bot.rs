@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_user_directory_api::UserDirectoryPlugin;
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCapabilities, BotConnectCommand, BotConnectParams, BotConnectResult,
     BotConnectionControlPort, BotDeliveryTarget, BotDetailCommand, BotDetailResult,
@@ -10,7 +9,7 @@ use bcs_service_api::{
     BotDiscoveryService, BotLeaveCommand, BotLeaveResult, BotListCommand, BotListEntry,
     BotListResult, BotManagementService, BotPagedListCommand, BotPagedListResult,
     BotQueryByIdsCommand, BotQueryByIdsResult, BotQueryEntry, BotQueryService,
-    BotRegistryCoreService,
+    BotRegistryCoreService, OrganizationCoreService, OrganizationMemberSummary,
     BotRuntimeConnectCommand, BotRuntimeConnectOutcome, BotRuntimeConnectionService,
     BotRuntimeDisconnectCommand, BotRuntimeStatusCommand, BotRuntimeStatusOutcome,
     BotStatusUpdateCommand, BotStatusUpdateResult, BotUseCaseError, BotVisibilityCommand,
@@ -19,6 +18,7 @@ use bcs_service_api::{
     ProviderBotDiscoverySelector, RegisteredBot, RelationCoreService, ServiceError, ServiceResult,
     SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult,
 };
+use bcs_user_directory_api::UserDirectoryPlugin;
 
 use crate::core::BotCore;
 
@@ -31,6 +31,7 @@ pub struct Bot {
     relation: Option<Arc<dyn RelationCoreService>>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     connection_control: Option<Arc<dyn BotConnectionControlPort>>,
+    organization: Option<Arc<dyn OrganizationCoreService>>,
 }
 
 impl Bot {
@@ -49,6 +50,7 @@ impl Bot {
             relation: None,
             user_directory: None,
             connection_control: None,
+            organization: None,
         }
     }
 
@@ -77,6 +79,14 @@ impl Bot {
         port: Arc<dyn BotConnectionControlPort>,
     ) -> Self {
         self.connection_control = Some(port);
+        self
+    }
+
+    pub fn with_organization(
+        mut self,
+        organization: Arc<dyn OrganizationCoreService>,
+    ) -> Self {
+        self.organization = Some(organization);
         self
     }
 
@@ -341,6 +351,18 @@ impl BotDiscoveryService for Bot {
         &self,
         command: BotDiscoveryCommand,
     ) -> Result<BotDiscoveryResult, BotUseCaseError> {
+        if command.role.is_some() && command.organization_code.is_none() {
+            return Err(ServiceError::InvalidOperation {
+                message: "role_requires_organization_code".to_string(),
+                request_id: None,
+            }
+            .into());
+        }
+        if command.organization_code.is_some() {
+            let code = command.organization_code.clone().unwrap_or_default();
+            return self.discover_organization_bots(&code, command).await;
+        }
+
         let bots = self.discover_candidates(&command).await;
 
         if let Some(collaborate_bot) = command.collaborate_bot.as_deref() {
@@ -742,6 +764,84 @@ impl BotRuntimeConnectionService for Bot {
 }
 
 impl Bot {
+    async fn discover_organization_bots(
+        &self,
+        organization_code: &str,
+        command: BotDiscoveryCommand,
+    ) -> Result<BotDiscoveryResult, BotUseCaseError> {
+        let requester = command.requester_bot_id.as_deref().ok_or_else(|| {
+            BotUseCaseError::Forbidden("organization discovery requires a bot caller".to_string())
+        })?;
+        let organization = self.organization.as_ref().ok_or_else(|| {
+            ServiceError::InvalidOperation {
+                message: "organization service is not configured".to_string(),
+                request_id: None,
+            }
+        })?;
+        organization
+            .require_effective_member(organization_code, requester)
+            .await?;
+        let members = organization
+            .list_effective_members(organization_code, command.role.as_deref())
+            .await?;
+        let member_by_bot = members
+            .iter()
+            .map(|member| (member.bot_uuid.clone(), member.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let bot_ids = members
+            .iter()
+            .map(|member| member.bot_uuid.clone())
+            .collect::<Vec<_>>();
+        let bots = self.registry.get_by_ids(&bot_ids).await;
+        let mut entries = Vec::new();
+        for bot in bots {
+            if bot.actor_kind != ActorKind::Bot || bot.capabilities.name.is_none() {
+                continue;
+            }
+            if !matches_discovery_selector(&bot, &command) {
+                continue;
+            }
+            let visibility = bot.capabilities.visibility.clone();
+            if let Some(visibility_filter) = command.visibility.as_deref() {
+                if visibility != visibility_filter {
+                    continue;
+                }
+            }
+            let is_friend = self.friend.are_friends(requester, &bot.bot_uuid).await;
+            if !is_organization_discover_visible(&visibility) && !is_friend {
+                continue;
+            }
+            let Some(member) = member_by_bot.get(&bot.bot_uuid) else {
+                continue;
+            };
+            entries.push(BotDiscoveryEntry {
+                bot_uuid: bot.bot_uuid,
+                capabilities: bot.capabilities,
+                visibility,
+                is_friend: Some(is_friend),
+                agent_code: None,
+                provider_info: None,
+                organization_member: Some(OrganizationMemberSummary {
+                    organization_code: organization_code.to_string(),
+                    role: member.role.clone(),
+                }),
+            });
+        }
+        let mut entries_with_agent_code = Vec::with_capacity(entries.len());
+        for mut entry in entries {
+            entry.agent_code = self
+                .registry
+                .get_agent_credentials(&entry.bot_uuid)
+                .await
+                .and_then(|credentials| credentials.agent_code);
+            entries_with_agent_code.push(entry);
+        }
+        Ok(BotDiscoveryResult {
+            count: entries_with_agent_code.len(),
+            bots: entries_with_agent_code,
+        })
+    }
+
     async fn validate_connect_bot_id(&self, bot_id: &str) -> Result<(), BotUseCaseError> {
         if !bot_id.starts_with("human_") {
             return Ok(());
@@ -1044,10 +1144,15 @@ fn discover_entry(
         is_friend,
         agent_code: None,
         provider_info,
+        organization_member: None,
     })
 }
 
 fn is_discover_visible(visibility: &str) -> bool {
+    matches!(visibility, "public" | "protected")
+}
+
+fn is_organization_discover_visible(visibility: &str) -> bool {
     matches!(visibility, "public" | "protected")
 }
 
