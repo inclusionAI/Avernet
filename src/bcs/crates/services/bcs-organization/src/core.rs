@@ -10,6 +10,7 @@ use bcs_service_api::{
     ProviderBotBindingRepoPort, ProviderRecord, ProviderRepoPort, ServiceError, ServiceResult,
     UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
 };
+use futures::future::try_join_all;
 
 #[derive(Clone)]
 pub struct OrganizationCore {
@@ -488,16 +489,34 @@ impl OrganizationCoreService for OrganizationCore {
             return Ok(Vec::new());
         }
 
-        let mut bindings = Vec::new();
-        for provider_id in &allowed {
-            bindings.extend(
-                self.provider_bindings
-                    .list_bindings_by_provider(provider_id)
-                    .await?
-                    .into_iter()
-                    .filter(|binding| !binding.disabled),
-            );
-        }
+        // Optional narrowing: an explicit provider_id must be within the
+        // manager's authorized set, else 403 rather than a misleading empty
+        // result. When omitted, query every authorized provider (option (a)).
+        let scoped: Vec<String> = match &query.provider_id {
+            Some(pid) if allowed.contains(pid) => vec![pid.clone()],
+            Some(_) => {
+                return Err(ServiceError::Forbidden(
+                    "organization_manager_not_authorized".to_string(),
+                ));
+            }
+            None => allowed.iter().cloned().collect(),
+        };
+
+        // Fetch each (scoped) provider's bindings concurrently rather than
+        // one sequential await per provider (review comment 2B). try_join_all
+        // short-circuits on the first Err, matching the original `?` semantics.
+        let per_provider = try_join_all(
+            scoped
+                .iter()
+                .map(|pid| self.provider_bindings.list_bindings_by_provider(pid)),
+        )
+        .await?;
+        let bindings = per_provider
+            .into_iter()
+            .flatten()
+            .filter(|binding| !binding.disabled)
+            .collect::<Vec<_>>();
+
         let bot_ids = bindings
             .iter()
             .map(|binding| binding.bot_uuid.clone())
@@ -512,9 +531,6 @@ impl OrganizationCoreService for OrganizationCore {
 
         let mut candidates = Vec::new();
         for binding in bindings {
-            if !allowed.contains(&binding.provider_id) {
-                continue;
-            }
             let Some(bot) = bots.get(&binding.bot_uuid) else {
                 continue;
             };
@@ -588,28 +604,6 @@ fn matches_query(
         .as_deref()
         .map(|q| contains_any_text(bot_uuid, capabilities, q))
         .unwrap_or(true)
-        && query
-            .domains
-            .as_deref()
-            .map(|domains| all_terms_match(domains, &capabilities.domains))
-            .unwrap_or(true)
-        && query
-            .skills
-            .as_deref()
-            .map(|skills| {
-                let names = capabilities
-                    .skills
-                    .iter()
-                    .map(|skill| skill.name.as_str())
-                    .collect::<Vec<_>>();
-                all_terms_match(skills, &names)
-            })
-            .unwrap_or(true)
-        && query
-            .scopes
-            .as_deref()
-            .map(|scopes| all_terms_match(scopes, &capabilities.scopes))
-            .unwrap_or(true)
 }
 
 fn contains_any_text(bot_uuid: &str, capabilities: &BotCapabilities, query: &str) -> bool {
@@ -638,24 +632,4 @@ fn contains_any_text(bot_uuid: &str, capabilities: &BotCapabilities, query: &str
             .scopes
             .iter()
             .any(|scope| scope.to_ascii_lowercase().contains(&query))
-}
-
-fn all_terms_match<T>(raw_terms: &str, values: &[T]) -> bool
-where
-    T: AsRef<str>,
-{
-    split_terms(raw_terms).into_iter().all(|term| {
-        values
-            .iter()
-            .any(|value| value.as_ref().to_ascii_lowercase().contains(&term))
-    })
-}
-
-fn split_terms(raw_terms: &str) -> Vec<String> {
-    raw_terms
-        .split(',')
-        .map(str::trim)
-        .filter(|term| !term.is_empty())
-        .map(str::to_ascii_lowercase)
-        .collect()
 }

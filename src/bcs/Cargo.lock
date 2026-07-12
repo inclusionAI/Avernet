@@ -1055,6 +1055,7 @@ dependencies = [
  "bcs-domain",
  "bcs-organization-store",
  "bcs-service-api",
+ "futures",
  "tempfile",
  "tokio",
 ]

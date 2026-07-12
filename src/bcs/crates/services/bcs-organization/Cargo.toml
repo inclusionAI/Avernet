@@ -11,6 +11,7 @@ version = { workspace = true }
 async-trait = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-service-api = { workspace = true }
+futures = { workspace = true }
 
 [dev-dependencies]
 bcs-bot = { workspace = true }

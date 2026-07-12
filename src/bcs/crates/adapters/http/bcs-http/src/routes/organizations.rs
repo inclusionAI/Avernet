@@ -37,9 +37,7 @@ pub struct ListMembersQuery {
 #[derive(Debug, Deserialize)]
 pub struct CandidateBotsQuery {
     q: Option<String>,
-    domains: Option<String>,
-    skills: Option<String>,
-    scopes: Option<String>,
+    provider_id: Option<String>,
 }
 
 pub async fn create_organization(
@@ -207,9 +205,7 @@ pub async fn candidate_bots(
             auth,
             OrganizationCandidateQuery {
                 q: query.q,
-                domains: query.domains,
-                skills: query.skills,
-                scopes: query.scopes,
+                provider_id: query.provider_id,
             },
         )
         .await

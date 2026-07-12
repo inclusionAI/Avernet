@@ -20,9 +20,7 @@ pub struct OrganizationCandidateBot {
 #[derive(Debug, Clone, Default)]
 pub struct OrganizationCandidateQuery {
     pub q: Option<String>,
-    pub domains: Option<String>,
-    pub skills: Option<String>,
-    pub scopes: Option<String>,
+    pub provider_id: Option<String>,
 }
 
 #[async_trait]

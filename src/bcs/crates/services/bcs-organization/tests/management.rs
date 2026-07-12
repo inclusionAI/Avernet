@@ -401,15 +401,50 @@ async fn candidate_bots_include_manager_and_granted_bots_without_leaking_ungrant
             provider_auth(&provider_a),
             OrganizationCandidateQuery {
                 q: Some("bot-b name".to_string()),
-                domains: Some("marketing".to_string()),
-                skills: Some("planning".to_string()),
-                scopes: Some("campaign".to_string()),
+                ..OrganizationCandidateQuery::default()
             },
         )
         .await
         .expect("filtered candidate bots");
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].bot_uuid, "bot-b");
+
+    // An explicit provider_id narrows to that one authorized resource provider.
+    let narrowed = ctx
+        .service
+        .candidate_bots(
+            provider_auth(&provider_a),
+            OrganizationCandidateQuery {
+                provider_id: Some(provider_b.provider_id.clone()),
+                ..OrganizationCandidateQuery::default()
+            },
+        )
+        .await
+        .expect("narrowed candidate bots");
+    assert_eq!(narrowed.len(), 1);
+    assert_eq!(narrowed[0].bot_uuid, "bot-b");
+    assert_eq!(narrowed[0].provider_id, provider_b.provider_id);
+
+    // A provider_id outside the manager's authorized set is rejected (403),
+    // not silently returned as an empty list.
+    let unauthorized = ctx
+        .service
+        .candidate_bots(
+            provider_auth(&provider_a),
+            OrganizationCandidateQuery {
+                provider_id: Some(provider_c.provider_id.clone()),
+                ..OrganizationCandidateQuery::default()
+            },
+        )
+        .await;
+    match unauthorized {
+        Err(ServiceError::Forbidden(reason)) => {
+            assert_eq!(reason, "organization_manager_not_authorized");
+        }
+        other => panic!(
+            "unauthorized provider_id should be rejected with 403, got {other:?}"
+        ),
+    }
 }
 
 
