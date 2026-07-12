@@ -169,7 +169,7 @@ impl ChannelService for DisabledChannelService {
     async fn handle_inbound(
         &self,
         _msg: bcs_service_api::application::channel::InboundMessage,
-    ) -> std::result::Result<(), bcs_service_api::application::channel::ChannelUseCaseError> {
+    ) -> std::result::Result<(), bcs_service_api::application::channel::ChannelInboundError> {
         Ok(())
     }
 
