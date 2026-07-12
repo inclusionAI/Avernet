@@ -1033,6 +1033,41 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual("https://packages.example/simple", result.stdout.strip())
 
+    def test_installer_installs_dependencies_without_pip_index_under_nounset(
+        self,
+    ) -> None:
+        fake_python = Path(self.tempdir.name) / "fake-python"
+        recorded_args = Path(self.tempdir.name) / "pip-args"
+        fake_python.write_text(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PIP_ARGS_FILE\"\n",
+            encoding="utf-8",
+        )
+        fake_python.chmod(0o700)
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            "unset PIP_INDEX_URL USE_CN_MIRROR; "
+            'install_connector_dependencies "$1"'
+        )
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"PIP_INDEX_URL", "USE_CN_MIRROR"}
+        }
+        env["PIP_ARGS_FILE"] = str(recorded_args)
+
+        result = subprocess.run(
+            ["/bin/bash", "-c", command, "dependency-test", str(fake_python)],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            ["-m", "pip", "install", "websockets>=14,<16"],
+            recorded_args.read_text(encoding="utf-8").splitlines(),
+        )
+
     def test_installer_preflights_isolated_dashboard_capability(self) -> None:
         command = (
             f"source {subprocess.list2cmdline([str(INSTALLER)])}; "

@@ -17,6 +17,16 @@ resolve_pip_index() {
   fi
 }
 
+install_connector_dependencies() {
+  local python="$1" pip_index=""
+  pip_index="$(resolve_pip_index)"
+  if [[ -n "$pip_index" ]]; then
+    "$python" -m pip install --index-url "$pip_index" 'websockets>=14,<16'
+  else
+    "$python" -m pip install 'websockets>=14,<16'
+  fi
+}
+
 fail() {
   printf 'error: %s\n' "$*" >&2
   exit 1
@@ -281,11 +291,7 @@ main() {
   mv -f "$install_temp" "$connector"
 
   [[ -x "$venv/bin/python" ]] || "$PYTHON_CMD" -m venv "$venv"
-  local pip_index=""
-  local -a pip_args=()
-  pip_index="$(resolve_pip_index)"
-  [[ -z "$pip_index" ]] || pip_args+=(--index-url "$pip_index")
-  "$venv/bin/python" -m pip install "${pip_args[@]}" 'websockets>=14,<16'
+  install_connector_dependencies "$venv/bin/python"
 
   "$venv/bin/python" "$connector" start "${home_args[@]}" --health-wait 45
   "$venv/bin/python" "$connector" status "${home_args[@]}" >/dev/null
