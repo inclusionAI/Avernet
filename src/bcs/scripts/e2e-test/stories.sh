@@ -669,6 +669,8 @@ story_provider_operator_publishes_agent() {
     assert_json_eq "provider agent keeps provider ref" "$RESPONSE" "provider_bot_ref" "$provider_bot_ref"
     [[ -n "$provider_bot_uuid" && -n "$runtime_token" ]] || return
 
+    _story_provider_manages_organization "$provider_id" "$admin_token" "$provider_bot_uuid" || return
+
     api_request_headers GET "/providers/${provider_id}/bots" "" \
         "Authorization: Bearer ${admin_token}"
     require_status "operator lists provider-backed agents" "200" || return
@@ -734,6 +736,76 @@ print("1" if any(i.get("bot_uuid") == target for i in d.get("items", [])) else "
     require_status "operator restores provider streaming rollout" "200" || return
     assert_json_eq "stream rollout is restored to disabled" "$RESPONSE" "enabled" "false"
     assert_json_eq "stream rollout owner list is cleared" "$RESPONSE" "created_by" "[]"
+}
+
+_story_provider_manages_organization() {
+    local provider_id="$1" admin_token="$2" provider_bot_uuid="$3"
+    local organization_code="e2e-org-$$-$(date +%s)"
+
+    api_request_headers POST "/providers/${provider_id}/organizations" \
+        "{\"organization_code\":\"${organization_code}\",\"name\":\"E2E release organization\",\"description\":\"provider-managed release team\"}" \
+        "Authorization: Bearer ${admin_token}"
+    require_status "provider creates an organization" "200" || return
+    assert_json_eq "organization creation keeps its code" "$RESPONSE" "organization_code" "$organization_code"
+
+    api_request_headers GET "/providers/${provider_id}/organizations" "" \
+        "Authorization: Bearer ${admin_token}"
+    require_status "provider lists its organizations" "200" || return
+    local listed_organization
+    listed_organization=$(printf '%s' "$RESPONSE" | python3 -c '
+import json,sys
+target=sys.argv[1]
+print("1" if any(item.get("organization_code") == target for item in json.load(sys.stdin).get("organizations", [])) else "0")
+' "$organization_code" 2>/dev/null || echo 0)
+    assert_eq "organization list includes the created organization" "$listed_organization" "1"
+
+    api_request_headers GET "/providers/${provider_id}/organizations/${organization_code}" "" \
+        "Authorization: Bearer ${admin_token}"
+    require_status "provider reads its organization" "200" || return
+    assert_json_eq "organization read keeps its name" "$RESPONSE" "name" "E2E release organization"
+
+    api_request_headers PATCH "/providers/${provider_id}/organizations/${organization_code}" \
+        '{"name":"E2E release organization updated"}' \
+        "Authorization: Bearer ${admin_token}"
+    require_status "provider updates its organization" "200" || return
+    assert_json_eq "organization update is persisted" "$RESPONSE" "name" "E2E release organization updated"
+
+    api_request_headers GET "/providers/${provider_id}/organization-candidate-bots?q=Provider" "" \
+        "Authorization: Bearer ${admin_token}"
+    require_status "provider finds candidate bots for its organization" "200" || return
+    local candidate_bot
+    candidate_bot=$(printf '%s' "$RESPONSE" | python3 -c '
+import json,sys
+target=sys.argv[1]
+print("1" if any(item.get("bot_uuid") == target for item in json.load(sys.stdin).get("bots", [])) else "0")
+' "$provider_bot_uuid" 2>/dev/null || echo 0)
+    assert_eq "organization candidates include the provider bot" "$candidate_bot" "1"
+
+    api_request_headers PUT "/providers/${provider_id}/organizations/${organization_code}/members/${provider_bot_uuid}" \
+        '{"role":"reviewer"}' \
+        "Authorization: Bearer ${admin_token}"
+    require_status "provider adds its bot to the organization" "200" || return
+    assert_json_eq "organization member keeps its role" "$RESPONSE" "role" "reviewer"
+
+    api_request_headers GET "/providers/${provider_id}/organizations/${organization_code}/members/${provider_bot_uuid}" "" \
+        "Authorization: Bearer ${admin_token}"
+    require_status "provider reads an organization member" "200" || return
+    assert_json_eq "organization member read keeps the bot id" "$RESPONSE" "bot_uuid" "$provider_bot_uuid"
+
+    api_request_headers GET "/providers/${provider_id}/organizations/${organization_code}/members?role=reviewer" "" \
+        "Authorization: Bearer ${admin_token}"
+    require_status "provider lists organization members by role" "200" || return
+    local listed_member
+    listed_member=$(printf '%s' "$RESPONSE" | python3 -c '
+import json,sys
+target=sys.argv[1]
+print("1" if any(item.get("bot_uuid") == target for item in json.load(sys.stdin).get("members", [])) else "0")
+' "$provider_bot_uuid" 2>/dev/null || echo 0)
+    assert_eq "organization member list includes the provider bot" "$listed_member" "1"
+
+    api_request_headers DELETE "/providers/${provider_id}/organizations/${organization_code}/members/${provider_bot_uuid}" "" \
+        "Authorization: Bearer ${admin_token}"
+    require_status "provider removes its bot from the organization" "204" || return
 }
 
 # User story: A user validates channel behavior before an external provider is installed.
