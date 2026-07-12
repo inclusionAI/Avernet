@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from agentclaw.community.adapters.http.economy.schemas import (
-    AdminReviewResponse,
+    WorkflowReviewResponse,
     ReviewTicketDetailResponse,
     ReviewTicketItem,
     ReviewTicketListResponse,
@@ -173,14 +173,14 @@ class TestReviewTicketDetailResponse:
         assert d.gmt_create is None
 
 
-class TestAdminReviewResponse:
+class TestWorkflowReviewResponse:
     def test_from_outcome_success(self) -> None:
         outcome = TicketActionOutcome(
             ticket_id="T-001",
             status=GovernanceStatus.CLOSED,
             close_reason="user_disputed_approved",
         )
-        resp = AdminReviewResponse.from_outcome(outcome)
+        resp = WorkflowReviewResponse.from_outcome(outcome)
         assert resp.ticket_id == "T-001"
         assert resp.governance_status == "closed"
         assert resp.close_reason == "user_disputed_approved"
@@ -189,6 +189,6 @@ class TestAdminReviewResponse:
         outcome = TicketActionOutcome(
             ticket_id="T-002", status=GovernanceStatus.WAITING_REVIEW,
         )
-        data = AdminReviewResponse.from_outcome(outcome).model_dump()
+        data = WorkflowReviewResponse.from_outcome(outcome).model_dump()
         assert data["governance_status"] == "waiting_review"
         assert data["close_reason"] is None

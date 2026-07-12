@@ -1,4 +1,4 @@
-"""Endpoint coverage for POST /admin/records/delete (emergency records deletion).
+"""Endpoint coverage for POST /admin/records:delete (emergency records deletion).
 
 Covers error-path cases flagged in Phase 2 coverage:
   - no auth → 401
@@ -82,13 +82,13 @@ def _seed_notify_log_for_delete(world) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 1. POST /admin/records/delete — happy path (dry_run)
+# 1. POST /admin/records:delete — happy path (dry_run)
 # ---------------------------------------------------------------------------
 
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/records/delete",
+    path="/api/economy/governance/admin/records:delete",
     scenario="ok",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -107,13 +107,13 @@ def delete_records_ok():
 
 
 # ---------------------------------------------------------------------------
-# 2. POST /admin/records/delete — no auth → 401
+# 2. POST /admin/records:delete — no auth → 401
 # ---------------------------------------------------------------------------
 
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/records/delete",
+    path="/api/economy/governance/admin/records:delete",
     scenario="no_auth",
     input=CaseInput(
         json_body={
@@ -130,13 +130,13 @@ def delete_records_no_auth():
 
 
 # ---------------------------------------------------------------------------
-# 3. POST /admin/records/delete — missing filter fields → 400
+# 3. POST /admin/records:delete — missing filter fields → 400
 # ---------------------------------------------------------------------------
 
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/records/delete",
+    path="/api/economy/governance/admin/records:delete",
     scenario="missing_filters",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -153,13 +153,13 @@ def delete_records_missing_filters():
 
 
 # ---------------------------------------------------------------------------
-# 4. POST /admin/records/delete — invalid table name → 400
+# 4. POST /admin/records:delete — invalid table name → 400
 # ---------------------------------------------------------------------------
 
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/records/delete",
+    path="/api/economy/governance/admin/records:delete",
     scenario="invalid_table",
     input=CaseInput(
         headers=_USER_HEADER,

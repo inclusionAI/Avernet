@@ -271,6 +271,36 @@ class NotifyLogRepository:
             )
             return [GovernanceNotification.from_orm(r) for r in rows]
 
+    def list_pending_by_worker(
+        self,
+        worker_id: str,
+    ) -> list[GovernanceNotification]:
+        """Pending notifies scoped to one worker (owner_id:bot_id) — for deliver_by_worker.
+
+        Unlike :meth:`list_pending_for_cron` (全量),本方法按 worker 精准过滤,
+        供 admin ``tickets:deliver`` 端点用(不重跑状态机,pending 已躺 notify_log)。
+
+        Args:
+            worker_id: ``owner_id:bot_id`` 复合键,与 GovernanceNotification.worker_id 对齐。
+
+        Returns:
+            该 worker 的 pending 通知领域模型列表(按 gmt_create 升序,与 cron 一致)。
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            rows = (
+                s.query(GovernanceNotificationOrm)
+                .filter(
+                    GovernanceNotificationOrm.worker_id == worker_id,
+                    GovernanceNotificationOrm.notify_status == NotifyStatus.PENDING,
+                    GovernanceNotificationOrm.env == _env,
+                )
+                .order_by(GovernanceNotificationOrm.gmt_create.asc())
+                .all()
+            )
+            return [GovernanceNotification.from_orm(r) for r in rows]
+
     def cancel_pending_by_ticket(
         self, ticket_id: str,
     ) -> int:

@@ -659,3 +659,122 @@ class TestGetReviewTicketDetail:
     def test_not_found_returns_none(self, session, engine):
         svc, _, _ = _build_svc(engine)
         assert svc.get_review_ticket_detail("nonexistent") is None
+
+
+class TestDeliverByWorker:
+    """deliver_by_worker: 按 worker_id 精准投递 pending 通知(不重跑状态机)。
+
+    复用 _run_delivery 链路(与 deliver_pending 同 build/send/update/audit),
+    仅 Phase 2 改为 list_pending_by_worker 精准过滤。
+    """
+
+    def test_dry_run_builds_without_sending(self, session, engine):
+        """dry_run=true:只构建投递清单,不发钉钉、不更新 notify_status、不写审计。"""
+        svc, _, _ = _build_svc(engine)
+        _make_notification(
+            session, notification_id="n-a1", worker_id="ownerA:botA",
+            bot_id="botA", owner_id="ownerA", notify_status="pending",
+        )
+        _make_notification(
+            session, notification_id="n-b1", worker_id="ownerB:botB",
+            bot_id="botB", owner_id="ownerB", notify_status="pending",
+        )
+
+        result = svc.deliver_by_worker(
+            worker_id="ownerA:botA", dry_run=True,
+        )
+
+        assert result["dry_run"] is True
+        assert result["total"] == 1  # 仅 worker A
+        assert result["sent_count"] == 0
+        assert len(result["results"]) == 1
+        assert result["results"][0]["notification_id"] == "n-a1"
+        # dry_run 不改 notify_status
+        rows = session.query(GovernanceNotificationOrm).filter_by(
+            notification_id="n-a1",
+        ).all()
+        assert rows[0].notify_status == "pending"
+
+    def test_live_send_updates_status_and_audits(self, session, engine):
+        """非 dry_run:发送成功 → notify_status=sent + 审计 NOTIFICATION_SENT。"""
+        svc, db, _ = _build_svc(engine)
+        _make_notification(
+            session, notification_id="n-live", worker_id="ownerA:botA",
+            bot_id="botA", owner_id="ownerA", notify_status="pending",
+        )
+
+        with db.orm_session() as s:
+            pre_audit = s.query(AuditLogOrm).count()
+
+        result = svc.deliver_by_worker(
+            worker_id="ownerA:botA", override_recipient="9999", dry_run=False,
+        )
+
+        assert result["sent_count"] == 1
+        assert result["results"][0]["success"] is True
+        # notify_status 翻 sent
+        rows = session.query(GovernanceNotificationOrm).filter_by(
+            notification_id="n-live",
+        ).all()
+        assert rows[0].notify_status == "sent"
+        # 审计多一条
+        with db.orm_session() as s:
+            post_audit = s.query(AuditLogOrm).count()
+        assert post_audit == pre_audit + 1
+
+    def test_worker_id_filter_excludes_other_workers(self, session, engine):
+        """只投递指定 worker 的 pending,其它 worker 的不动。"""
+        svc, _, _ = _build_svc(engine)
+        _make_notification(
+            session, notification_id="n-a", worker_id="ownerA:botA",
+            bot_id="botA", owner_id="ownerA", notify_status="pending",
+        )
+        _make_notification(
+            session, notification_id="n-b", worker_id="ownerB:botB",
+            bot_id="botB", owner_id="ownerB", notify_status="pending",
+        )
+
+        result = svc.deliver_by_worker(
+            worker_id="ownerA:botA", dry_run=True,
+        )
+
+        delivered_ids = {r["notification_id"] for r in result["results"]}
+        assert delivered_ids == {"n-a"}
+        # worker B 的保持 pending
+        rows = session.query(GovernanceNotificationOrm).filter_by(
+            notification_id="n-b",
+        ).all()
+        assert rows[0].notify_status == "pending"
+
+    def test_empty_worker_returns_zero(self, session, engine):
+        """该 worker 无 pending → total=0,sent_count=0,results 空。"""
+        svc, _, _ = _build_svc(engine)
+        _make_notification(
+            session, notification_id="n-x", worker_id="ownerX:botX",
+            bot_id="botX", owner_id="ownerX", notify_status="pending",
+        )
+
+        result = svc.deliver_by_worker(
+            worker_id="ownerA:botA", dry_run=True,
+        )
+
+        assert result["total"] == 0
+        assert result["sent_count"] == 0
+        assert result["results"] == []
+
+    def test_no_override_recipient_falls_back_to_owner(self, session, engine):
+        """不传 override_recipient → 逐条按通知 owner 兜底发送(FakeNotifySender 记录)。"""
+        svc, _, _ = _build_svc(engine)
+        _make_notification(
+            session, notification_id="n-fb", worker_id="ownerA:botA",
+            bot_id="botA", owner_id="ownerA", notify_status="pending",
+        )
+
+        result = svc.deliver_by_worker(
+            worker_id="ownerA:botA", override_recipient=None, dry_run=False,
+        )
+
+        assert result["sent_count"] == 1
+        # FakeNotifySender.send 返回 fake-msg-{recipient},recipient 应为 owner 兜底
+        assert result["results"][0]["external_message_id"] == "fake-msg-ownerA"
+        assert result["results"][0]["sent_to"] == "ownerA"

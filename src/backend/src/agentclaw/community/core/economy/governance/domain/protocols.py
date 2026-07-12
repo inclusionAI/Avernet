@@ -173,6 +173,12 @@ class NotifyLogRepositoryProtocol(Protocol):
         """All pending notifies for cron to pick up and send."""
         ...
 
+    def list_pending_by_worker(
+        self, worker_id: str,
+    ) -> list[GovernanceNotification]:
+        """Pending notifies scoped to one worker (owner_id:bot_id) — for deliver_by_worker."""
+        ...
+
     def list_by_owner_and_statuses(
         self,
         owner_id: str,

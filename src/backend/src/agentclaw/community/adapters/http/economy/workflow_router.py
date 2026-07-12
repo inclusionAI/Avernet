@@ -1,16 +1,19 @@
-"""Review router for economy/governance review endpoints (AuthPlugin auth).
+"""Workflow router for economy/governance 正常业务流程 (AuthPlugin auth).
 
 评审场景独立 router — 把评审运营同学需要的工单视角查询/审批能力从
-admin_router 抽出来(审批能力迁出 admin_router,运维归运维、审批归审批):
+admin_router 抽出来(审批能力迁出 admin_router,运维归运维、审批归审批),
+并作为治理「正常业务流程」面,为后续正常流程端点扩展留位:
 
-  - GET  /review/tickets                 评审工单列表(按治理状态过滤 + 分页)
-  - GET  /review/tickets/{ticket_id}     单工单评审详情(评审全貌)
-  - POST /review/tickets/{ticket_id}/review  审批动作(waiting_review 三态流转)
+  - GET  /workflow/tickets                 工单列表(按治理状态过滤 + 分页)
+  - GET  /workflow/tickets/detail          单工单详情(ticket_id 走 query)
+  - POST /workflow/tickets/review          审批动作(ticket_id 走 body,waiting_review 三态流转)
 
 数据流转全程走领域模型(``GovernanceTicket`` / ``TicketActionOutcome``),
 router 层用带 ``from_ticket()`` / ``from_outcome()`` 的 Pydantic schema 做
 显式序列化,统一响应壳 ``ApiResponse``。DB 逻辑全部委托
 :class:`GovernanceAdminService`,router 不直接开 ORM 会话。
+
+路径风格:全 body/query 驱动,ticket_id 不进 path(与 admin 写操作统一)。
 """
 from __future__ import annotations
 
@@ -24,11 +27,11 @@ from agentclaw.community.adapters.http.dependencies import (
     get_request_context,
 )
 from agentclaw.community.adapters.http.economy.schemas import (
-    AdminReviewRequest,
-    AdminReviewResponse,
     ApiResponse,
     ReviewTicketDetailResponse,
     ReviewTicketListResponse,
+    WorkflowReviewRequest,
+    WorkflowReviewResponse,
 )
 from agentclaw.community.api.governance_service import (
     GovernanceAdminServiceProtocol,
@@ -39,12 +42,12 @@ from agentclaw.community.di import Injected
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Review router — /api/economy/governance/review (AuthPlugin auth)
+# Workflow router — /api/economy/governance/workflow (AuthPlugin auth)
 # ---------------------------------------------------------------------------
 
-review_router = APIRouter(
-    prefix="/api/economy/governance/review",
-    tags=["economy-governance-review"],
+workflow_router = APIRouter(
+    prefix="/api/economy/governance/workflow",
+    tags=["economy-governance-workflow"],
 )
 
 _AdminSvc = GovernanceAdminServiceProtocol
@@ -96,12 +99,12 @@ def _validate_status_filter(statuses: list[str] | None) -> list[str] | None:
     return statuses
 
 
-# ── Review: 工单列表 ──────────────────────────────────────────────────────
+# ── Workflow: 工单列表 ────────────────────────────────────────────────────
 
 
-@review_router.get(
+@workflow_router.get(
     "/tickets",
-    summary="评审工单列表(按治理状态过滤 + 分页)",
+    summary="工单列表(按治理状态过滤 + 分页)",
 )
 async def list_review_tickets(
     ctx: RequestContext = Depends(get_request_context),
@@ -116,7 +119,7 @@ async def list_review_tickets(
     offset: int = Query(0, ge=0, description="分页偏移"),
     limit: int = Query(50, ge=1, le=200, description="分页上限(<=200)"),
 ) -> ApiResponse:
-    """评审列表 — 活跃(open∪scheduled) / 待审阅(waiting_review) / 已关闭(closed)。
+    """工单列表 — 活跃(open∪scheduled) / 待审阅(waiting_review) / 已关闭(closed)。
 
     只读 GET,不产生副作用、不写 audit。
     """
@@ -141,21 +144,21 @@ async def list_review_tickets(
     return ApiResponse(success=True, data=data.model_dump())
 
 
-# ── Review: 单工单详情 ─────────────────────────────────────────────────────
+# ── Workflow: 单工单详情 ──────────────────────────────────────────────────
 
 
-@review_router.get(
-    "/tickets/{ticket_id}",
-    summary="单工单评审详情",
+@workflow_router.get(
+    "/tickets/detail",
+    summary="单工单详情",
 )
 async def get_review_ticket_detail(
-    ticket_id: str,
+    ticket_id: str = Query(..., description="工单 ID"),
     ctx: RequestContext = Depends(get_request_context),
     admin_svc: _AdminSvc = Injected(_AdminSvc),
 ) -> ApiResponse:
-    """评审工单全貌(基础信息 / 用户反馈 / 命中维度 / 节省率 / review_reason ...)。
+    """工单全貌(基础信息 / 用户反馈 / 命中维度 / 节省率 / review_reason ...)。
 
-    只读 GET;工单不存在 → 404。
+    只读 GET;工单不存在 → 404。ticket_id 走 query(与 admin 写操作零 path 参数风格统一)。
     """
     del ctx  # RequestContext 仅用于走 AuthPlugin 鉴权链路
     ticket = await asyncio.to_thread(admin_svc.get_review_ticket_detail, ticket_id)
@@ -165,31 +168,30 @@ async def get_review_ticket_detail(
     return ApiResponse(success=True, data=data.model_dump())
 
 
-# ── Review: 审批动作 ──────────────────────────────────────────────────────
+# ── Workflow: 审批动作 ────────────────────────────────────────────────────
 
 
-@review_router.post(
-    "/tickets/{ticket_id}/review",
+@workflow_router.post(
+    "/tickets/review",
     summary="审批动作(waiting_review 三态流转)",
 )
 async def review_ticket(
-    ticket_id: str,
-    body: AdminReviewRequest,
+    body: WorkflowReviewRequest,
     ctx: RequestContext = Depends(get_request_context),
     admin_svc: _AdminSvc = Injected(_AdminSvc),
 ) -> ApiResponse:
     """审批:approve_close / approve_whitelist / reject_for_reopen(§7.5.2)。
 
-    与原 ``/admin/review`` 行为等价,委托
+    ticket_id 走 body(与 admin 写操作统一,零 path 参数);委托
     :meth:`GovernanceAdminService.review_ticket`,不改变状态机语义。
     """
     result = await asyncio.to_thread(
         admin_svc.review_ticket,
-        ticket_id=ticket_id,
+        ticket_id=body.ticket_id,
         action=body.action,
         admin_id=body.admin_id or ctx.user_id,
         remark=body.remark,
     )
     _raise_on_admin_error(result)
-    data = AdminReviewResponse.from_outcome(result)
+    data = WorkflowReviewResponse.from_outcome(result)
     return ApiResponse(success=True, data=data.model_dump())

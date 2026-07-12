@@ -26,8 +26,6 @@ from agentclaw.community.core.economy.governance.domain.enums import (
     GovernanceStatus,
     Response,
 )
-from agentclaw.community.core.economy.governance.domain.notification import GovernanceNotification
-from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
 
 
 if TYPE_CHECKING:
@@ -368,44 +366,9 @@ class GovernanceFeedbackService:
         )
 
     # ------------------------------------------------------------------
-    # List queries (task_record based)
+    # List queries (list_pending/list_history/get_notification) 已删除:
+    # 无真实用户主动调用,    治理反馈真入口是 card-callback(经 resolve)。完整移除于
+    # admin-router-regroup Task 7。仅保留 resolve。
     # ------------------------------------------------------------------
-
-    def list_pending(
-        self,
-        owner_id: str,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[GovernanceTicket]:
-        """List pending (open/scheduled) tickets for a user."""
-        return self._task_repo.list_tickets_by_owner_and_statuses(
-            owner_id, [GovernanceStatus.OPEN, GovernanceStatus.SCHEDULED],
-            offset=offset, limit=limit,
-        )
-
-    def list_history(
-        self,
-        owner_id: str,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[GovernanceTicket]:
-        """List closed tickets for a user."""
-        return self._task_repo.list_tickets_by_owner_and_statuses(
-            owner_id, [GovernanceStatus.CLOSED],
-            offset=offset, limit=limit,
-        )
-
-    def get_notification(
-        self,
-        notification_id: str,
-        owner_id: str,
-    ) -> GovernanceNotification | None:
-        """Get a single ticket by notification_id (owner check)."""
-        ticket = self._task_repo.find_ticket_by_notification_id(
-            notification_id,
-        )
-        if ticket is None or ticket.owner_id != owner_id:
-            return None
-        return ticket
 
     
