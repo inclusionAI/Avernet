@@ -34,7 +34,7 @@ from agentclaw.community.adapters.http.economy.schemas import (
     WorkflowReviewResponse,
 )
 from agentclaw.community.api.governance_service import (
-    GovernanceAdminServiceProtocol,
+    GovernanceWorkflowServiceProtocol,
 )
 from agentclaw.community.di import Injected
 
@@ -50,7 +50,7 @@ workflow_router = APIRouter(
     tags=["economy-governance-workflow"],
 )
 
-_AdminSvc = GovernanceAdminServiceProtocol
+_AdminSvc = GovernanceWorkflowServiceProtocol
 
 # 评审允许的治理状态过滤值(open / scheduled = 活跃, waiting_review = 待审阅,
 # closed = 已关闭)。

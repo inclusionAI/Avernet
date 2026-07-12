@@ -1,16 +1,18 @@
-"""[编排] Governance admin service — backend management operations (§7.5).
+"""[编排] Governance admin service — 管理面(§7.5)。
 
-Covers:
+Covers(对 admin_router):
   - Emergency brake (pause/resume) — cross-pod distributed cache
   - bulk_whitelist — delegate to :class:`GovernanceWhitelistService`
   - cancel_pending / close_all_open — emergency bulk operations
   - pause_ticket — admin pause to waiting_review (§7.5.1)
-  - review_ticket — admin review: approve_close / approve_whitelist /
-    reject_for_reopen (§7.5.2)
   - emergency_close — immediate ticket close without cooldown
   - delete_records — emergency delete for record_daily / notify_log
   - delete_whitelist_entry — delegate to :class:`GovernanceWhitelistService`
-  - deliver_pending — scan-and-deliver pipeline (testing tool)
+  - deliver_pending / deliver_by_worker — manual delivery pipeline
+    (_run_delivery 内部实现,原 delivery_runner 已并回)
+
+审批面(list_review_tickets / get_review_ticket_detail / review_ticket)已按
+路由边界拆至 :class:`GovernanceWorkflowService`(对应 workflow_router)。
 
 All ticket lifecycle transitions land on ``task_record`` — never on
 ``notify_log`` (§4.2.3 读写路由规则). Close paths cancel pending
@@ -31,13 +33,14 @@ from agentclaw.community.core.economy.governance.domain.enums import (
     AuditAction,
     CloseReason,
     GovernanceStatus,
+    NotifyStatus,
 )
 from agentclaw.community.core.economy.governance.services.service_protocols import (
     GovernanceLifecycleServiceProtocol,
     GovernanceWhitelistServiceProtocol,
 )
-from agentclaw.community.core.economy.governance.services.delivery_runner import (
-    run_delivery,
+from agentclaw.community.core.economy.governance.services.notify_render_service import (
+    NotifyRenderService,
 )
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -142,6 +145,7 @@ class GovernanceAdminService:
         config: Any,  # EconomyGovernanceConfig
         notify_sender: NotifySenderPlugin,
         lifecycle_svc: GovernanceLifecycleServiceProtocol,
+        render_svc: NotifyRenderService,
     ) -> None:
         self._cache = cache
         self._whitelist_service = whitelist_service
@@ -151,6 +155,7 @@ class GovernanceAdminService:
         self._config = config
         self._notify_sender = notify_sender
         self._lifecycle_svc = lifecycle_svc
+        self._render_svc = render_svc
         self._emergency_key = _EMERGENCY_KEY_TEMPLATE.format(env=get_current_env())
 
     # -- State queries -------------------------------------------------------
@@ -325,50 +330,6 @@ class GovernanceAdminService:
 
     # -- Ticket-level admin operations (§7.5) ----------------------------------
 
-    def list_review_tickets(
-        self,
-        statuses: list[str] | None,
-        *,
-        offset: int = 0,
-        limit: int = 50,
-    ) -> tuple[list[GovernanceTicket], int]:
-        """评审工单列表:按治理状态过滤(跨 owner)、分页,返回领域模型 + 总数。
-
-        Args:
-            statuses: 治理状态白名单(open/scheduled/waiting_review/closed);
-                None 时默认全部活跃态(open/scheduled/waiting_review);
-                [] 显式表示无任何状态匹配 → 返回空(repo 层空列表短路)。
-            offset: 分页偏移。
-            limit: 分页上限。
-
-        Returns:
-            (工单领域模型列表, 满足条件的总数)。领域模型经 from_orm 灌入
-            gmt_create/gmt_modified,评审列表直接用,router 层负责序列化。
-        """
-        effective = statuses if statuses is not None else [
-            GovernanceStatus.OPEN.value,
-            GovernanceStatus.SCHEDULED.value,
-            GovernanceStatus.WAITING_REVIEW.value,
-        ]
-        tickets = self._task_repo.list_tickets_by_statuses(
-            effective, offset=offset, limit=limit,
-        )
-        total = self._task_repo.count_tickets_by_statuses(effective)
-        return tickets, total
-
-    def get_review_ticket_detail(
-        self, ticket_id: str,
-    ) -> GovernanceTicket | None:
-        """评审工单详情:取单个工单领域模型,供详情面板展示。
-
-        Args:
-            ticket_id: 工单稳定 UUID。
-
-        Returns:
-            :class:`GovernanceTicket` 或 None(不存在)。
-        """
-        return self._task_repo.find_by_ticket_id(ticket_id)
-
     def pause_ticket(
         self, ticket_id: str, admin_id: str, reason: str = "",
     ) -> TicketActionOutcome:
@@ -408,103 +369,6 @@ class GovernanceAdminService:
             ticket_id=ticket_id,
             status=GovernanceStatus.WAITING_REVIEW,
             review_reason="admin_paused",
-        )
-
-    def review_ticket(
-        self, ticket_id: str, action: str, admin_id: str, remark: str = "",
-    ) -> TicketActionOutcome:
-        """Admin review: waiting_review → closed (§7.5.2).
-
-        Actions: approve_close / approve_whitelist / reject_for_reopen.
-        """
-        valid_actions = {"approve_close", "approve_whitelist", "reject_for_reopen"}
-        if action not in valid_actions:
-            return TicketActionOutcome(
-                ticket_id=ticket_id, status=GovernanceStatus.WAITING_REVIEW,
-                error=f"Invalid action: {action}", error_code="INVALID_ACTION",
-            )
-
-        ticket = self._task_repo.find_by_ticket_id(ticket_id)
-        if not ticket:
-            return TicketActionOutcome(
-                ticket_id=ticket_id, status=GovernanceStatus.WAITING_REVIEW,
-                error="Ticket not found", error_code="NOT_FOUND",
-            )
-
-        if ticket.governance_status != GovernanceStatus.WAITING_REVIEW:
-            return TicketActionOutcome(
-                ticket_id=ticket_id,
-                status=GovernanceStatus(ticket.governance_status),
-                error=f"Ticket not in waiting_review (status={ticket.governance_status})",
-                error_code="INVALID_STATUS",
-            )
-
-        now = datetime.now()
-        cooldown_days = self._config.cooldown_days
-
-        close_reason: str
-        cooldown_until: datetime | None = None
-
-        if action == "approve_close":
-            review_reason = ticket.review_reason or "unknown"
-            close_reason = f"{review_reason}_approved"
-            cooldown_until = now + timedelta(days=cooldown_days)
-        elif action == "approve_whitelist":
-            close_reason = "whitelist_approved"
-            cooldown_until = None
-            try:
-                self._whitelist_service.add(
-                    bot_id=ticket.bot_id,
-                    owner_id=ticket.owner_id,
-                    created_by=admin_id,
-                    whitelist_type="governance",
-                    source="admin_review",
-                )
-            except Exception:
-                log.exception(
-                    "[GovernanceAdmin] Failed to add whitelist for bot_id=%s",
-                    ticket.bot_id,
-                )
-        elif action == "reject_for_reopen":
-            close_reason = "review_rejected"
-            cooldown_until = None
-
-        # Advance via driver service (sole driver). Driver orchestrates the
-        # WAITING_REVIEW → CLOSED (three-branch) transition + one-way
-        # cancel-pending side effect. ``close_reason`` resolved above per
-        # action; driver's model.review() also sets it but we pass the
-        # already-computed value so approve_close carries the
-        # `{review_reason}_approved` form exactly.
-        self._lifecycle_svc.review_ticket(
-            ticket_id,
-            review_decision=action,
-            reviewed_by=admin_id,
-            reviewed_at=now,
-            close_reason=close_reason,
-            cooldown_until=cooldown_until,
-            review_remark=remark,
-        )
-
-        audit_action_map = {
-            "approve_close": AuditAction.REVIEW_APPROVE_CLOSE,
-            "approve_whitelist": AuditAction.REVIEW_APPROVE_WHITELIST,
-            "reject_for_reopen": AuditAction.REVIEW_REJECT_FOR_REOPEN,
-        }
-        self._audit_repo.add_audit(
-            "admin-review",
-            bot_id=ticket.bot_id,
-            owner_id=ticket.owner_id,
-            actor_id=admin_id,
-            action_taken=audit_action_map.get(action, action),
-            source="admin_api",
-            error_msg=f"ticket_id={ticket_id}; action={action}; remark={remark}",
-            dry_run=0,
-        )
-
-        return TicketActionOutcome(
-            ticket_id=ticket_id,
-            status=GovernanceStatus.CLOSED,
-            close_reason=close_reason,
         )
 
     def emergency_close(
@@ -698,7 +562,7 @@ class GovernanceAdminService:
         """Orchestrate: read pending → build → send → update DB + audit.
 
         Phase 1 (cron tick) is the caller's responsibility — this method
-        handles Phase 2-5 only. Phase 3-5 共用 func:`run_delivery`
+        handles Phase 2-5 only. Phase 3-5 共用 :meth:`_run_delivery`
         (与 :meth:`deliver_by_worker` 同链路,消除重复)。
 
         ``scan_svc`` / ``skip_scan`` / ``scan_dry_run`` 透传占位
@@ -709,16 +573,12 @@ class GovernanceAdminService:
         if max_send and max_send > 0:
             pending_rows = pending_rows[:max_send]
 
-        return run_delivery(
+        return self._run_delivery(
             pending_rows,
             override_recipient=override_recipient,
             dry_run=dry_run,
             channel=channel,
             source="scan_and_deliver",
-            notify_sender=self._notify_sender,
-            notify_repo=self._notify_repo,
-            audit_repo=self._audit_repo,
-            config=self._config,
         )
 
     def deliver_by_worker(
@@ -734,7 +594,7 @@ class GovernanceAdminService:
         与 :meth:`deliver_pending` 的差别仅在 Phase 2:前者全量
         ``list_pending_for_cron``,本方法按 worker ``list_pending_by_worker``
         精准过滤。Phase 3-5 build/send/update/audit 共用
-        func:`run_delivery`。
+        :meth:`_run_delivery`。
 
         Args:
             worker_id: ``owner_id:bot_id`` 复合键。
@@ -747,17 +607,236 @@ class GovernanceAdminService:
         """
         effective_recipient = override_recipient or ""
         pending_rows = self._notify_repo.list_pending_by_worker(worker_id)
-        return run_delivery(
+        return self._run_delivery(
             pending_rows,
             override_recipient=effective_recipient,
             dry_run=dry_run,
             channel=channel,
             source="deliver_by_worker",
-            notify_sender=self._notify_sender,
-            notify_repo=self._notify_repo,
-            audit_repo=self._audit_repo,
-            config=self._config,
         )
+
+    def _run_delivery(
+            self,
+            pending_rows: list,
+            *,
+            override_recipient: str,
+            dry_run: bool,
+            channel: str,
+            source: str,
+        ) -> dict:
+        """Build → send → update DB + audit(Phase 3-5 共用链路)。
+
+        Args:
+            pending_rows: Phase 2 已读的 pending 通知领域模型(全量或按 worker)。
+            source: audit source 标记(scan_and_deliver / deliver_by_worker)。
+            notify_sender/notify_repo/audit_repo/config/render_svc: 取自 self._*
+                (admin_service 注入),无需外部透传。
+
+        Returns:
+            投递汇总 dict(total/dry_run/override_recipient/channel/sent_count/results)。
+        """
+        if not pending_rows:
+            return {
+                "total": 0,
+                "dry_run": dry_run,
+                "override_recipient": override_recipient,
+                "channel": channel,
+                "sent_count": 0,
+                "results": [],
+            }
+
+        # ---- Phase 4: Build payloads & optionally send ----
+        # (Phase 3 dict 中转已删:直接用领域模型 p,渲染经 render_svc 出口)
+        results: list[dict] = []
+        sent_count = 0
+        for p in pending_rows:
+            notify_channel = p.channel if channel == "auto" else channel
+            # deliver_by_worker 传空 override_recipient 时,逐条按通知 owner 兜底;
+            # deliver_pending 透传非空时与之等价(不影响既有 scan-and-deliver 行为)。
+            recipient = override_recipient or p.owner_id
+            msg_id: str | None = None
+            channel_used = notify_channel
+            bot_name = p.bot_name or "N/A"
+
+            if notify_channel == "tc_card":
+                # 渲染经出口(唯一),build_send_payload 失败返 None → 降级 markdown
+                payload = self._render_svc.build_send_payload(p, user_id=recipient, config=self._config)
+
+                if payload is not None:
+                    if not dry_run:
+                        from agentclaw.community.plugin_api.notify_sender import NotifyMessage
+                        msg = NotifyMessage(
+                            title="🔔 Bot 治理通知",
+                            body=payload.body,
+                            recipient=recipient,
+                            deep_link=payload.deep_link,
+                            extra=payload.extra,
+                        )
+                        msg_id = self._notify_sender.send(msg, channel="tc_card")
+
+                    if not dry_run and msg_id is None and notify_channel == "tc_card":
+                        log.warning(
+                            "[DeliverPending] TC card send failed for %s, degrading to Markdown",
+                            p.notification_id,
+                        )
+                        channel_used = "markdown"
+
+                    if not dry_run and channel_used == "markdown":
+                        from agentclaw.community.plugin_api.notify_sender import NotifyMessage as _NM
+                        msg_md = _NM(
+                            title="🔔 Bot 治理通知",
+                            body=p.notification_md or "",
+                            recipient=recipient,
+                        )
+                        msg_id = self._notify_sender.send(msg_md, channel="markdown")
+
+                    if dry_run:
+                        notification_data = payload.extra.get("notification_data") or {}
+                        tc_preview = {
+                            "reason_preview": payload.body[:200],
+                            "detail_link": payload.deep_link,
+                            "notification_data_keys": list(notification_data.keys()),
+                        }
+                        results.append({
+                            "notification_id": p.notification_id,
+                            "bot_name": bot_name,
+                            "original_recipient": p.owner_id,
+                            "sent_to": recipient,
+                            "channel": channel_used,
+                            "dry_run": True,
+                            "tc_card": tc_preview,
+                        })
+                        continue
+                else:
+                    # TC card 渲染失败 → 降级 markdown
+                    log.warning(
+                        "[DeliverPending] TC card build failed for %s, degrading to Markdown",
+                        p.notification_id,
+                    )
+                    channel_used = "markdown"
+                    if not dry_run:
+                        from agentclaw.community.plugin_api.notify_sender import NotifyMessage as _NM
+                        msg_md = _NM(
+                            title="🔔 Bot 治理通知",
+                            body=p.notification_md or "",
+                            recipient=recipient,
+                        )
+                        msg_id = self._notify_sender.send(msg_md, channel="markdown")
+
+                    if dry_run:
+                        results.append({
+                            "notification_id": p.notification_id,
+                            "bot_name": bot_name,
+                            "original_recipient": p.owner_id,
+                            "sent_to": recipient,
+                            "channel": channel_used,
+                            "dry_run": True,
+                        })
+                        continue
+            else:
+                if not dry_run:
+                    from agentclaw.community.plugin_api.notify_sender import NotifyMessage as _NM
+                    msg_plain = _NM(
+                        title="🔔 Bot 治理通知",
+                        body=p.notification_md or "",
+                        recipient=recipient,
+                    )
+                    msg_id = self._notify_sender.send(msg_plain, channel="markdown")
+
+                if dry_run:
+                    results.append({
+                        "notification_id": p.notification_id,
+                        "bot_name": bot_name,
+                        "original_recipient": p.owner_id,
+                        "sent_to": recipient,
+                        "channel": channel_used,
+                        "dry_run": True,
+                    })
+                    continue
+
+            ok = msg_id is not None
+            if ok:
+                sent_count += 1
+            results.append({
+                "notification_id": p.notification_id,
+                "bot_name": bot_name,
+                "original_recipient": p.owner_id,
+                "sent_to": recipient,
+                "channel": channel_used,
+                "dry_run": False,
+                "success": ok,
+                "external_message_id": msg_id,
+            })
+
+        # ---- Phase 5: Update notify_status + audit (live only) ----
+        if not dry_run:
+            audit_run_id = f"deliver-{uuid.uuid4().hex[:8]}"
+            now = datetime.now()
+
+            # Build lookup from Phase 2 domain objects (avoids re-querying)
+            pending_by_id: dict[str, GovernanceNotification] = {
+                p.notification_id: p for p in pending_rows
+            }
+
+            # ---- Sent: update delivery status + audit ----
+            for r in results:
+                if not r.get("success"):
+                    continue
+                nid = r["notification_id"]
+                p = pending_by_id.get(nid)
+                if p is None:
+                    continue
+                result_channel = r.get("channel")
+                original_channel = p.channel or "markdown"
+                self._notify_repo.update_delivery_status(
+                    nid,
+                    status=NotifyStatus.SENT,
+                    external_id=r.get("external_message_id"),
+                    at=now,
+                    channel=result_channel if result_channel and result_channel != original_channel else None,
+                )
+                self._audit_repo.add_audit(
+                    audit_run_id, p.bot_id, p.owner_id,
+                    notification_id=nid,
+                    check_result=p.decision_at_create,
+                    governance_decision=p.decision_at_create,
+                    hit_dimensions=p.triggered_dimensions,
+                    expected_token_saving=p.estimated_saving_tokens,
+                    saving_ratio=p.saving_ratio,
+                    action_taken=AuditAction.NOTIFICATION_SENT,
+                    source=source,
+                    dry_run=0,
+                )
+
+            # ---- Failed: audit only ----
+            for r in results:
+                if r.get("success"):
+                    continue
+                nid = r["notification_id"]
+                p = pending_by_id.get(nid)
+                if p is None:
+                    continue
+                self._audit_repo.add_audit(
+                    audit_run_id, p.bot_id, p.owner_id,
+                    notification_id=nid,
+                    check_result=p.decision_at_create,
+                    governance_decision=p.decision_at_create,
+                    hit_dimensions=p.triggered_dimensions,
+                    expected_token_saving=p.estimated_saving_tokens,
+                    saving_ratio=p.saving_ratio,
+                    action_taken=AuditAction.NOTIFICATION_SEND_FAILED,
+                    source=source,
+                    dry_run=0,
+                )
+
+        return {
+            "total": len(pending_rows),
+            "dry_run": dry_run,
+            "override_recipient": override_recipient,
+            "channel": channel,
+            "sent_count": sent_count,
+            "results": results,
+        }
 
     # -- Internal --------------------------------------------------------------
 

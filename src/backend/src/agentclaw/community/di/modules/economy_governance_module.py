@@ -21,6 +21,7 @@ from agentclaw.community.api.governance_service import (
     GovernanceLifecycleServiceProtocol,
     GovernanceRecordProcessProtocol,
     GovernanceWhitelistServiceProtocol,
+    GovernanceWorkflowServiceProtocol,
     NotifyLifecycleServiceProtocol,
 )
 from agentclaw.community.core.economy.governance.domain.protocols import (
@@ -61,6 +62,9 @@ from agentclaw.community.core.economy.governance.services.record_process_service
     GovernanceRecordService,
 )
 from agentclaw.community.core.economy.governance.services.scan_service import GovernanceBotService
+from agentclaw.community.core.economy.governance.services.workflow_service import (
+    GovernanceWorkflowService,
+)
 from agentclaw.community.core.economy.governance.services.whitelist_service import (
     GovernanceWhitelistService,
 )
@@ -236,6 +240,7 @@ class EconomyGovernanceModule(Module):
         config: EconomyGovernanceConfig,
         notify_sender: NotifySenderPlugin,
         lifecycle_service: GovernanceLifecycleService,
+        render_svc: NotifyRenderService,
     ) -> GovernanceAdminService:
         return GovernanceAdminService(
             cache=cache,
@@ -245,6 +250,31 @@ class EconomyGovernanceModule(Module):
             config=config,
             notify_sender=notify_sender,
             lifecycle_svc=lifecycle_service,
+            render_svc=render_svc,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def _workflow_service(
+        self,
+        task_repo: TaskRecordRepository,
+        audit_repo: GovernanceAuditRepository,
+        config: EconomyGovernanceConfig,
+        lifecycle_service: GovernanceLifecycleService,
+        whitelist_service: GovernanceWhitelistService,
+    ) -> GovernanceWorkflowService:
+        """Construct GovernanceWorkflowService — 工单审批(从 admin 按路由边界拆出)。
+
+        审批副作用(加白名单/关工单经状态机驱动)自带,零反向依赖 admin_service。
+        workflow_router 注入 GovernanceWorkflowServiceProtocol。
+        """
+        return GovernanceWorkflowService(
+            task_repo=task_repo,
+            audit_repo=audit_repo,
+            config=config,
+            lifecycle_svc=lifecycle_service,
+            whitelist_service=whitelist_service,
         )
 
     @singleton
@@ -333,6 +363,16 @@ class EconomyGovernanceModule(Module):
     def _admin_service_protocol(
         self, svc: GovernanceAdminService,
     ) -> GovernanceAdminServiceProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _workflow_service_protocol(
+        self, svc: GovernanceWorkflowService,
+    ) -> GovernanceWorkflowServiceProtocol:
+        """Rule 14 binding:workflow_router 注入 GovernanceWorkflowServiceProtocol
+        而非具体类(对齐其他 service protocol binding)。"""
         return svc
 
     @singleton

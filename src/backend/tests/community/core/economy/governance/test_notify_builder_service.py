@@ -15,7 +15,7 @@ import base64
 import json
 import urllib.parse
 
-from agentclaw.community.core.economy.governance.services import notify_builder_service as nb
+from agentclaw.community.core.economy.governance.services import notify_render_service as nb
 
 
 # ── _parse_notification_structured ──────────────────────────────

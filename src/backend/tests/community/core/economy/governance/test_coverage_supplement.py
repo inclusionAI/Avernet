@@ -206,6 +206,7 @@ def _build_admin_svc(engine):
         config=FakeGovernanceConfig(),
         notify_sender=FakeNotifySender(),
         lifecycle_svc=lifecycle_svc,
+        render_svc=NotifyRenderService(),
     )
     svc._scan_svc = _FakeScanSvc()
     return svc, db
