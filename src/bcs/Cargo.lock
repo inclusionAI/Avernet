@@ -1044,6 +1044,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-organization"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-bot",
+ "bcs-bot-store",
+ "bcs-domain",
+ "bcs-organization-store",
+ "bcs-service-api",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "bcs-organization-store"
 version = "0.1.0"
 dependencies = [

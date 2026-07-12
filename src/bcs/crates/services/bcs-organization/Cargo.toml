@@ -1,0 +1,23 @@
+[package]
+name = "bcs-organization"
+description = "Organization management and authorization services for BCS"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+async-trait = { workspace = true }
+bcs-domain = { workspace = true }
+bcs-service-api = { workspace = true }
+
+[dev-dependencies]
+bcs-bot = { workspace = true }
+bcs-bot-store = { workspace = true }
+bcs-organization-store = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true
