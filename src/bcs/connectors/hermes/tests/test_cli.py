@@ -1033,6 +1033,146 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual("https://packages.example/simple", result.stdout.strip())
 
+    def test_installer_create_profile_requires_named_profile(self) -> None:
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            "validate_named_profile '' 1"
+        )
+        result = subprocess.run(
+            ["/bin/bash", "-c", command], capture_output=True, text=True
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("--create-profile requires --profile", result.stderr)
+
+    def test_installer_creates_missing_named_profile_from_default(self) -> None:
+        bin_dir = Path(self.tempdir.name) / "profile-bin"
+        home = Path(self.tempdir.name) / "home"
+        profile_home = home / ".hermes" / "profiles" / "reviewer"
+        bin_dir.mkdir()
+        hermes = bin_dir / "hermes"
+        hermes.write_text(
+            "#!/bin/sh\n"
+            "test \"$1 $2 $3 $4\" = 'profile create reviewer --clone-from' || exit 9\n"
+            "test \"$5\" = 'default' || exit 10\n"
+            "mkdir -p \"$HOME/.hermes/profiles/reviewer\"\n"
+            "printf 'model: inherited\\n' > \"$HOME/.hermes/profiles/reviewer/config.yaml\"\n",
+            encoding="utf-8",
+        )
+        hermes.chmod(0o700)
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            'ensure_hermes_profile reviewer "$HOME/.hermes/profiles/reviewer" 1'
+        )
+        result = subprocess.run(
+            ["/bin/bash", "-c", command],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "HOME": str(home), "PATH": f"{bin_dir}:/usr/bin:/bin"},
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue((profile_home / "config.yaml").is_file())
+
+    def test_installer_accepts_underscore_and_hyphen_profile_names(self) -> None:
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            'validate_named_profile "$1" 1'
+        )
+        for profile in ("reviewer_1", "reviewer-one"):
+            with self.subTest(profile=profile):
+                result = subprocess.run(
+                    ["/bin/bash", "-c", command, "profile-test", profile],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_installer_rejects_reserved_profile_names(self) -> None:
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            'validate_named_profile "$1" 1'
+        )
+        for profile in ("default", "hermes", "test", "tmp", "root", "sudo"):
+            with self.subTest(profile=profile):
+                result = subprocess.run(
+                    ["/bin/bash", "-c", command, "profile-test", profile],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(f"profile name is reserved: {profile}", result.stderr)
+
+    def test_installer_rejects_profile_names_over_64_characters(self) -> None:
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            'validate_named_profile "$1" 1'
+        )
+        result = subprocess.run(
+            ["/bin/bash", "-c", command, "profile-test", "a" * 65],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn(
+            "profile must match [a-z0-9][a-z0-9_-]{0,63}", result.stderr
+        )
+
+    def test_installer_keeps_existing_configured_profile(self) -> None:
+        profile_home = Path(self.tempdir.name) / "reviewer"
+        profile_home.mkdir()
+        (profile_home / "config.yaml").write_text("model: inherited\n", encoding="utf-8")
+        bin_dir = Path(self.tempdir.name) / "profile-bin"
+        bin_dir.mkdir()
+        call_log = Path(self.tempdir.name) / "hermes-calls"
+        hermes = bin_dir / "hermes"
+        hermes.write_text(
+            "#!/bin/sh\n"
+            "printf '%s\\n' \"$*\" > \"$HERMES_CALL_LOG\"\n"
+            "exit 9\n",
+            encoding="utf-8",
+        )
+        hermes.chmod(0o700)
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            'ensure_hermes_profile reviewer "$1" 1'
+        )
+        result = subprocess.run(
+            ["/bin/bash", "-c", command, "profile-test", str(profile_home)],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "HERMES_CALL_LOG": str(call_log),
+                "PATH": f"{bin_dir}:/usr/bin:/bin",
+            },
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse(call_log.exists())
+
+    def test_installer_rejects_different_bot_name_for_registered_profile(self) -> None:
+        session = Path(self.tempdir.name) / "session.json"
+        session.write_text(
+            json.dumps(
+                {
+                    "bot_uuid": "bot-existing",
+                    "bot_token": "secret",
+                    "bcs_url": "ws://127.0.0.1:21000/ws/bot",
+                    "bot_name": "hermes2",
+                }
+            ),
+            encoding="utf-8",
+        )
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            'reject_profile_bot_name_mismatch "$1" hermes4 reviewer'
+        )
+        result = subprocess.run(
+            ["/bin/bash", "-c", command, "conflict", str(session)],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("reviewer is already registered as hermes2", result.stderr)
+
     def test_installer_installs_dependencies_without_pip_index_under_nounset(
         self,
     ) -> None:
@@ -1184,6 +1324,7 @@ class CliTests(unittest.TestCase):
             "--workspace",
             "--china-mirror",
             "--profile",
+            "--create-profile",
             "--hermes-home",
             "--bot-name",
             "--bcs-endpoint",
@@ -1507,7 +1648,7 @@ class CliTests(unittest.TestCase):
             "build_resume_command https://source.example/install-hermes.sh "
             '"$AVERNET_RAW_BASE_URL" --bot-name reviewer --profile review '
             "--bcs-endpoint https://bcs.example --bcs-ws-url wss://bcs.example/ws/bot "
-            "--workspace '/tmp/work space' --china-mirror; "
+            "--workspace '/tmp/work space' --china-mirror --create-profile; "
             'printf "%s" "$RESUME_COMMAND"'
         )
         result = subprocess.run(
@@ -1526,6 +1667,7 @@ class CliTests(unittest.TestCase):
             "--bcs-ws-url wss://bcs.example/ws/bot",
             "--workspace /tmp/work\\ space",
             "--china-mirror",
+            "--create-profile",
         ):
             self.assertIn(preserved, result.stdout)
 

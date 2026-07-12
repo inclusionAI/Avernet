@@ -138,6 +138,27 @@ raise SystemExit(not isinstance(value, dict) or not all(isinstance(value.get(key
 PY
 }
 
+session_bot_name() {
+  ensure_python || return 1
+  "$PYTHON_CMD" - "$1" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    value = json.load(handle)
+name = value.get("bot_name")
+print(name if isinstance(name, str) else "")
+PY
+}
+
+reject_profile_bot_name_mismatch() {
+  local session="$1" requested_name="$2" profile="$3" stored_name=""
+  stored_name="$(session_bot_name "$session")" || return 1
+  if [[ -n "$stored_name" && "$stored_name" != "$requested_name" ]]; then
+    fail "profile $profile is already registered as $stored_name; choose another profile"
+  fi
+}
+
 read_registration_token() {
   local registration_needed="$1" token_stdin="$2"
   [[ "$registration_needed" == "1" ]] || return 0
@@ -159,6 +180,7 @@ Usage: install-hermes.sh [--human-token-stdin] [options]
   --human-token-stdin    read the human token from stdin when registration is needed
   --bot-name NAME
   --profile NAME | --hermes-home PATH
+  --create-profile       create a missing named Hermes profile from default
   --bcs-endpoint URL       default: http://127.0.0.1:21000
   --bcs-ws-url URL         default: ws://127.0.0.1:21000/ws/bot
   --workspace PATH
@@ -167,16 +189,42 @@ Usage: install-hermes.sh [--human-token-stdin] [options]
 EOF
 }
 
+validate_named_profile() {
+  local profile="$1" create_profile="$2"
+  if [[ "$create_profile" == "1" && -z "$profile" ]]; then
+    fail "--create-profile requires --profile"
+  fi
+  [[ -z "$profile" ]] && return 0
+  [[ ${#profile} -le 64 && "$profile" =~ ^[a-z0-9][a-z0-9_-]*$ ]] \
+    || fail "profile must match [a-z0-9][a-z0-9_-]{0,63}"
+  case "$profile" in
+    default|hermes|test|tmp|root|sudo)
+      fail "profile name is reserved: $profile"
+      ;;
+  esac
+}
+
+ensure_hermes_profile() {
+  local profile="$1" hermes_home="$2" create_profile="$3"
+  [[ -f "$hermes_home/config.yaml" ]] && return 0
+  [[ "$create_profile" == "1" ]] \
+    || fail "Hermes profile is not configured: $hermes_home"
+  hermes profile create "$profile" --clone-from default
+  [[ -f "$hermes_home/config.yaml" ]] \
+    || fail "Hermes profile creation did not produce config.yaml: $profile"
+}
+
 main() {
   local human_token="" bot_name="" profile="" explicit_home="" workspace=""
   local bcs_endpoint="http://127.0.0.1:21000"
   local bcs_ws_url="ws://127.0.0.1:21000/ws/bot"
-  local replace=0 token_stdin=0 answer="" hermes_home="" profile_arg=""
+  local replace=0 token_stdin=0 create_profile=0 answer="" hermes_home="" profile_arg=""
   while (($#)); do
     case "$1" in
       --human-token-stdin) token_stdin=1; shift ;;
       --bot-name) bot_name="${2:-}"; shift 2 ;;
       --profile) profile="${2:-}"; shift 2 ;;
+      --create-profile) create_profile=1; shift ;;
       --hermes-home) explicit_home="${2:-}"; shift 2 ;;
       --bcs-endpoint) bcs_endpoint="${2:-}"; shift 2 ;;
       --bcs-ws-url) bcs_ws_url="${2:-}"; shift 2 ;;
@@ -194,6 +242,7 @@ main() {
   preflight_dashboard_isolation
   [[ -z "$profile" || -z "$explicit_home" ]] \
     || fail "use either --profile or --hermes-home, not both"
+  validate_named_profile "$profile" "$create_profile"
 
   if [[ -n "$explicit_home" ]]; then
     hermes_home="${explicit_home/#\~/$HOME}"
@@ -208,8 +257,7 @@ main() {
     explicit_home="$hermes_home"
     profile_arg="--hermes-home"
   fi
-  [[ -d "$hermes_home" && -f "$hermes_home/config.yaml" ]] \
-    || fail "Hermes profile is not configured: $hermes_home"
+  ensure_hermes_profile "$profile" "$hermes_home" "$create_profile"
 
   if [[ -z "$bot_name" ]]; then
     if ! read -r -p "Bot name: " bot_name </dev/tty; then
@@ -226,6 +274,9 @@ main() {
   fi
   if [[ -f "$pending_session" ]] && valid_session "$pending_session"; then
     pending_valid=1
+  fi
+  if [[ "$existing_valid" == "1" ]]; then
+    reject_profile_bot_name_mismatch "$session" "$bot_name" "$profile"
   fi
   if [[ -f "$session" && "$replace" == "1" ]]; then
     if ! read -r -p "Replace existing BCS credentials? [y/N] " answer </dev/tty; then
@@ -276,6 +327,7 @@ main() {
   )
   [[ -z "$workspace" ]] || resume_args+=(--workspace "$workspace")
   [[ "${USE_CN_MIRROR:-0}" != "1" ]] || resume_args+=(--china-mirror)
+  [[ "$create_profile" == "0" ]] || resume_args+=(--create-profile)
   build_resume_command "$installer_url" "$raw_base" "${resume_args[@]}"
 
   local registration="" registered_uuid=""
