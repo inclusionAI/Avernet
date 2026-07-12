@@ -17,6 +17,7 @@ pub mod fusion;
 pub mod group;
 pub mod invite;
 pub mod message;
+pub mod organization;
 pub mod proposal;
 pub mod provider;
 pub mod register;
@@ -57,6 +58,7 @@ pub use message::{
     AuditEntry, DeliveryType, GroupMessage, GroupMessageType, MessageOwnerFilter, MessagePage, MessageQuery,
     MessageRole, NewMessage, PersistedMessage, PersistedMessageStatus, SenderType, Task, TaskStatus,
 };
+pub use organization::{Organization, OrganizationMember};
 pub use proposal::GroupChatProposal;
 pub use provider::{
     BotDeliveryTarget, CoordinationMode, CoordinationSurface, ProviderAuthMode,

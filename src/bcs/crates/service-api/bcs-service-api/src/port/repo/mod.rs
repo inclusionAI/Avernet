@@ -5,6 +5,7 @@ pub mod collaboration;
 pub mod friend;
 pub mod group;
 pub mod message;
+pub mod organization;
 pub mod provider;
 pub mod relation;
 pub mod session;
@@ -20,6 +21,10 @@ pub use collaboration::{
 pub use friend::{FriendRepoPort, FriendRequestRepoPort};
 pub use group::GroupRepoPort;
 pub use message::{MessageRepoError, MessageRepoPort};
+pub use organization::{
+    CreateOrganizationRecord, ListOrganizationMembersQuery, ListOrganizationsQuery,
+    OrganizationRepoPort, UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
+};
 pub use provider::{
     ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector,
     ProviderCredentialRepoPort, ProviderRepoPort,

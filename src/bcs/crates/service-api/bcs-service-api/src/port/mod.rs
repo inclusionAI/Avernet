@@ -44,6 +44,8 @@ pub use repo::{
     FriendRepoPort, FriendRequestRepoPort,
     GroupRepoPort, GroupRuntimeBindingRepoPort, NewSessionParams, ProviderBotBindingRepoPort,
     ImParticipantRepoPort,
+    CreateOrganizationRecord, ListOrganizationMembersQuery, ListOrganizationsQuery,
+    OrganizationRepoPort, UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
     ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector, ProviderCredentialRepoPort,
     ProviderRepoPort, RelationRepoPort, SessionRepoPort, StateMachineDefinitionRepoPort,
     StateMachineRunRepoPort,
