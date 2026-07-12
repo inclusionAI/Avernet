@@ -36,6 +36,11 @@ from agentclaw.community.core.service_bot.services.publish_flow.errors import (
 from agentclaw.community.core.service_bot.services.publish_flow.ext_state import (
     PublishExtState,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.provider_behavior import (
+    DefaultProviderBehavior,
+    ProviderBehaviorRouter,
+    TeclawProviderBehavior,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -129,6 +134,25 @@ class PublishFlowService:
         # action the flow re-derives that stage's channels from DB and overlays them
         # on the shared build artifact. Always DI-provided.
         self._channel_overrides_reader = channel_overrides_reader
+
+        # Provider-behavior seam: the deploy-time steps that vary by container
+        # (post-build file staging, post-upgrade MCP refresh, scale support,
+        # destroy-verify-on-online) are selected by ``device_provider`` instead of
+        # inline ``== teclaw`` branches. Assembled from the already-injected
+        # collaborators; ``resolve_container_provider`` maps a bot to the key.
+        self._provider_behaviors = ProviderBehaviorRouter(
+            {
+                TECLAW_DEVICE_PROVIDER: TeclawProviderBehavior(
+                    build_service=bot_build_service,
+                    resolver=resolver,
+                    device_fs_dispatcher=device_fs_dispatcher,
+                    teclaw_file_promotion=teclaw_file_promotion,
+                ),
+                "arca": DefaultProviderBehavior(),
+                "baas": DefaultProviderBehavior(),
+            },
+            default_provider_key="baas",
+        )
 
         # Shared ext/state helpers (record read-back, atomic status+ext writes,
         # per-stage engine_overrides composition). The runners extracted from this
@@ -351,50 +375,11 @@ class PublishFlowService:
                     f"Failed to update ext: publish_id={publish_id}, error={update_error}"
                 )
 
-    async def _stage_teclaw_files(
-        self,
-        *,
-        artifact,
-        bot: dict,
-        bot_id: str,
-        owner_id: str,
-        publish_id: int,
-    ) -> None:
-        """Snapshot the running teclaw bot's files into OSS and merge the refs
-        into the just-composed ``config_artifact``.
-
-        Reads the source container via ``device_fs`` (resolver+dispatcher), writes
-        a stage-scoped OSS snapshot, and extends the artifact's ``resources`` /
-        ``identity_files``. Raises (failing the build) on an unreachable source or
-        OSS failure — the artifact IS the delivery payload, so a partial snapshot
-        must not ship.
-        """
-        config_artifact = artifact.ext.get("config_artifact")
-        if not isinstance(config_artifact, dict):
-            raise PublishFlowServiceError(
-                f"teclaw build produced no config_artifact dict for bot={bot_id}"
-            )
-        ctx_dev = self._resolver.resolve_for_bot(bot_id, owner_id)
-        device_fs = self._device_fs_dispatcher.dispatch(ctx_dev)
-        refs = await self._teclaw_file_promotion.stage_files(
-            device_fs=device_fs,
-            env=get_current_env(),
-            entity_type=bot.get("entity_type", "staff"),
-            entity_id=bot.get("entity_id", ""),
-            bot_id=bot_id,
-            publish_id=publish_id,
-            # Option 1: the artifact is composed once at build and reused by
-            # verify + online, so the stage segment is fixed to the build target
-            # (verify). It only namespaces the OSS snapshot; the snapshot is not
-            # re-taken per stage.
-            stage=PublishStage.VERIFY.value,
-        )
-        config_artifact.setdefault("resources", []).extend(refs.resources)
-        config_artifact.setdefault("identity_files", []).extend(refs.identity_files)
-        logger.info(
-            "[PublishFlowService._stage_teclaw_files] merged %d resource(s) + "
-            "%d identity file(s) into artifact for bot=%s publish_id=%s",
-            len(refs.resources), len(refs.identity_files), bot_id, publish_id,
+    def _provider_behavior(self, bot: dict):
+        """The :class:`ProviderBehavior` for ``bot``'s container, resolved via the
+        same ``resolve_container_provider`` mapping used for producer selection."""
+        return self._provider_behaviors.resolve(
+            self._baas_service.resolve_container_provider(bot)
         )
 
     async def _execute_build_phase(
@@ -446,6 +431,7 @@ class PublishFlowService:
             # to_thread 复刻 build_async 的非阻塞语义。
             device_provider = self._baas_service.resolve_container_provider(bot)
             producer = self._producer_router.resolve(device_provider)
+            behavior = self._provider_behaviors.resolve(device_provider)
             artifact = await asyncio.to_thread(
                 producer.produce_artifact, bot, version
             )
@@ -453,16 +439,13 @@ class PublishFlowService:
             if not artifact.success:
                 raise PublishFlowServiceError(artifact.message or "构建失败")
 
-            # teclaw: the running source container owns its live files (no ac_file
-            # mirror), so the just-composed artifact has no file refs. Snapshot the
-            # container's /workspace + /identity files into OSS and embed the refs
-            # (Option 1: a single snapshot at build, reused by verify + online —
-            # consistent with the ARCA release pipeline).
-            if device_provider == TECLAW_DEVICE_PROVIDER:
-                await self._stage_teclaw_files(
-                    artifact=artifact, bot=bot, bot_id=bot_id,
-                    owner_id=owner_id, publish_id=publish_id,
-                )
+            # Provider-specific post-build file staging (teclaw snapshots the
+            # running source container's /workspace + /identity into OSS and embeds
+            # the refs; ARCA/baas mirror to ac_file already → no-op).
+            await behavior.stage_build_files(
+                artifact=artifact, bot=bot, bot_id=bot_id,
+                owner_id=owner_id, publish_id=publish_id,
+            )
 
             # 构建成功，把产物指针合并进 ext。ARCA 产 migration_path/
             # build_target_path（与改造前同键同值）；external 产 config_artifact/
@@ -874,14 +857,11 @@ class PublishFlowService:
             stage=PublishStage.VERIFY,
             request_id=request_id,
         )
-        if (
-            approved is True
-            and self._baas_service.resolve_container_provider(bot)
-            == TECLAW_DEVICE_PROVIDER
-        ):
-            # ARCA 升级会重建容器并通过启动回调刷新 MCP 鉴权；
-            # Teclaw 升级没有启动回调，BaaS 发布完成后再主动刷新当前实例的规则。
-            self._build_service.refresh_teclaw_mcp_outbound_rule(
+        if approved is True:
+            # Provider-specific post-upgrade refresh: an ARCA upgrade rebuilds the
+            # container and refreshes MCP auth via its startup callback; a teclaw
+            # upgrade has no callback, so its behavior re-pushes the outbound rule.
+            self._provider_behavior(bot).refresh_after_upgrade(
                 bot_uuid=bot_uuid,
                 bot=bot,
             )
@@ -1247,14 +1227,11 @@ class PublishFlowService:
             stage=PublishStage.ONLINE,
             request_id=request_id,
         )
-        if (
-            approved is True
-            and self._baas_service.resolve_container_provider(bot)
-            == TECLAW_DEVICE_PROVIDER
-        ):
-            # ARCA 升级会重建容器并通过启动回调刷新 MCP 鉴权；
-            # Teclaw 升级没有启动回调，BaaS 发布完成后再主动刷新当前实例的规则。
-            self._build_service.refresh_teclaw_mcp_outbound_rule(
+        if approved is True:
+            # Provider-specific post-upgrade refresh: an ARCA upgrade rebuilds the
+            # container and refreshes MCP auth via its startup callback; a teclaw
+            # upgrade has no callback, so its behavior re-pushes the outbound rule.
+            self._provider_behavior(bot).refresh_after_upgrade(
                 bot_uuid=bot_uuid,
                 bot=bot,
             )
@@ -1714,7 +1691,7 @@ class PublishFlowService:
             raise PublishFlowServiceError(f"Bot不存在: {publish_record.source_bot_id}")
 
         active_engine = (bot.get("active_engine") or "").strip().lower()
-        if active_engine == "teclaw":
+        if not self._provider_behavior(bot).supports_scale:
             return {
                 "success": True,
                 "message": "teclaw引擎的服务bot不支持扩容",
@@ -2290,11 +2267,10 @@ class PublishFlowService:
                     f"Bot不存在: {publish_record.source_bot_id}"
                 )
 
-            active_engine = (bot.get("active_engine") or "").strip().lower()
-            if active_engine == "teclaw":
+            if not self._provider_behavior(bot).destroys_verify_bot_on_online:
                 logger.info(
                     "[PublishFlowService._handle_sync_success] "
-                    "Skip destroying verify BaaS bot for teclaw engine: "
+                    "Skip destroying verify BaaS bot for this provider: "
                     f"publish_id={publish_id}, bot_id={publish_record.source_bot_id}"
                 )
             else:

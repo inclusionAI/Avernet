@@ -60,7 +60,7 @@
   - [ ] Facade delegates to it; full suite green.
 - **Depends on:** Task 1
 
-## Task 3: Provider-behavior seam + router (kills the 6 teclaw branches)
+## Task 3: Provider-behavior seam + router (kills the 6 teclaw branches) — [x] DONE
 - **Goal:** Route all provider-specific behavior through a `ProviderBehavior`
   interface selected by `device_provider`, removing every inline
   `active_engine=="teclaw"` / `provider==TECLAW` conditional. (Spec goal #3.)

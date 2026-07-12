@@ -1598,50 +1598,8 @@ async def test_execute_rollback_with_config_artifact():
     assert result.status == PublishStatus.ONLINE_PUB
 
 
-# ── teclaw build-time file promotion (Task 10) ───────────────────────
-
-from types import SimpleNamespace  # noqa: E402
-
-from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion import (  # noqa: E402
-    PromotedRefs,
-)
-
-
-@pytest.mark.asyncio
-async def test_stage_teclaw_files_merges_refs_into_artifact():
-    promotion = Mock()
-    promotion.stage_files = AsyncMock(return_value=PromotedRefs(
-        resources=[{"name": "a.csv", "store": "bot-data",
-                    "path": "staff_u/b_5_verify/teclaw/workspace/a.csv"}],
-        identity_files=[{"name": "MEMORY.md", "store": "bot-data",
-                         "path": "staff_u/b_5_verify/teclaw/identity/MEMORY.md"}],
-    ))
-    resolver = Mock()
-    dispatcher = Mock()
-    svc = _pf(
-        Mock(), Mock(), Mock(), Mock(), _arca_router(Mock()),
-        resolver=resolver, device_fs_dispatcher=dispatcher,
-        teclaw_file_promotion=promotion,
-    )
-    artifact = SimpleNamespace(ext={"config_artifact": {"resources": [], "identity_files": []}})
-
-    await svc._stage_teclaw_files(
-        artifact=artifact, bot={"entity_type": "staff", "entity_id": "u"},
-        bot_id="b", owner_id="u", publish_id=5,
-    )
-
-    ca = artifact.ext["config_artifact"]
-    assert ca["resources"] == [
-        {"name": "a.csv", "store": "bot-data", "path": "staff_u/b_5_verify/teclaw/workspace/a.csv"},
-    ]
-    assert ca["identity_files"][0]["name"] == "MEMORY.md"
-    # promotion got the resolved device_fs + stage-scoped args (stage = verify)
-    kwargs = promotion.stage_files.call_args.kwargs
-    assert kwargs["bot_id"] == "b"
-    assert kwargs["publish_id"] == 5
-    assert kwargs["stage"] == "verify"
-    assert kwargs["device_fs"] is dispatcher.dispatch.return_value
-    resolver.resolve_for_bot.assert_called_once_with("b", "u")
+# teclaw build-time file promotion moved to TeclawProviderBehavior; its test now
+# lives in test_provider_behavior.py (test_teclaw_stage_build_files_merges_refs).
 
 
 @pytest.mark.unit
@@ -1751,6 +1709,9 @@ def test_scale_bot_teclaw_returns_supported_message_without_baas_call():
     bot_service.get_bot = Mock(
         return_value={"bot_id": "bot-source", "active_engine": "teclaw", "ext": {}}
     )
+    # resolve_container_provider derives from active_engine in real code; the
+    # provider seam reads teclaw → TeclawProviderBehavior (supports_scale=False).
+    baas_service.resolve_container_provider.return_value = "teclaw"
 
     result = svc.scale_bot(publish_id=15, operator="u1")
 
@@ -2192,6 +2153,8 @@ def test_handle_sync_success_skips_destroy_verify_bot_for_teclaw_online_publish(
     bot_service.get_bot = Mock(
         return_value={"bot_id": "bot-source", "active_engine": "teclaw", "ext": {}}
     )
+    # teclaw → TeclawProviderBehavior (destroys_verify_bot_on_online=False).
+    baas_service.resolve_container_provider.return_value = "teclaw"
     svc._upgrade_last_publish = Mock()
     svc._update_binding_on_success = Mock()
     svc._destroy_bot_by_stage = Mock()
