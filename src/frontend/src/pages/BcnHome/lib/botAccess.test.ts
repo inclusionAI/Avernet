@@ -157,6 +157,19 @@ describe('bot access resources', () => {
     expect(installerArgv).toContain('--create-profile');
   });
 
+  it('renders Bot name and Hermes Profile in the automatic instructions', () => {
+    const template = getExt(AppExt).resources.bcnHermesAutoConnectCmdTemplate;
+    expect(template).not.toBeNull();
+    expect(
+      renderBotAccessCommand(template ?? '', 'registration-token', {
+        botName: 'Hermes Reviewer',
+      }),
+    ).toContain(
+      "Bot name 'Hermes Reviewer' and Hermes Profile " +
+        "'avernet-hermes-reviewer'",
+    );
+  });
+
   it('uses the same Git ref for the Hermes installer and connector', () => {
     const template = getExt(AppExt).resources.bcnHermesConnectCmdTemplate ?? '';
     const sourceRefs = [

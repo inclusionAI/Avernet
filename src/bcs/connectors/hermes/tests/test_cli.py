@@ -1875,6 +1875,9 @@ class CliTests(unittest.TestCase):
         markdown = INSTALL_DOC.read_text(encoding="utf-8")
         self.assertNotIn("--token", markdown)
         self.assertIn("--human-token-stdin", markdown)
+        self.assertIn('--bot-name "${BOT_NAME}"', markdown)
+        self.assertIn('--profile "${HERMES_PROFILE}"', markdown)
+        self.assertIn("--create-profile", markdown)
         self.assertIn(
             'mktemp "${TMPDIR:-/tmp}/install-hermes.XXXXXX"', markdown
         )
