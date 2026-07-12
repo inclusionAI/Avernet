@@ -41,6 +41,11 @@ from agentclaw.community.core.service_bot.services.publish_flow.provider_behavio
     ProviderBehaviorRouter,
     TeclawProviderBehavior,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.release_stage import (
+    ONLINE_SPEC,
+    VERIFY_SPEC,
+    ReleaseStageRunner,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -160,6 +165,11 @@ class PublishFlowService:
         self._ext_state = PublishExtState(
             bot_publish_service, channel_overrides_reader
         )
+
+        # Stage-parameterized release runner: one first-release + one upgrade
+        # implementation for both verify and online (was four near-duplicate
+        # methods). Operates through this facade for the shared helpers.
+        self._release_runner = ReleaseStageRunner(self)
 
     def _stage_overrides(
         self, publish_record: BotPublishRecord, stage: PublishStage
@@ -686,72 +696,9 @@ class PublishFlowService:
             migration_path: str,
             bot: dict,
     ) -> PublishFlowResult:
-        """执行验证环境首次发布（创建新 Bot）。
-
-        Args:
-            publish_record: 发布单
-            operator: 操作者
-            migration_path: 构建产物路径
-            bot: Bot 信息字典
-
-        Returns:
-            PublishFlowResult: 发布结果
-        """
-        publish_id = publish_record.id
-        owner_id = self._get_owner_id(publish_record)
-
-        # 首次：创建新 Bot。teclaw 走非挂载投递（build 冻结的产物 config_artifact，
-        # 由 release_async 按容器 provider 路由到 create_teclaw_bot）。投递前把
-        # engine_ext.stage 重盖为 canary（验证环境）并叠加本阶段的 DingTalk 渠道
-        # engine_overrides（从 DB 按 verify 重取）；ARCA 无 config_artifact 时均 no-op。
-        verify_overrides = self._stage_overrides(publish_record, PublishStage.VERIFY)
-        config_artifact = self._artifact_for_stage(
-            (publish_record.ext or {}).get("config_artifact"),
-            PublishStage.VERIFY,
-            verify_overrides,
-        )
-        release_result = await self._build_service.release_async(
-            bot=bot,
-            user_id=owner_id,
-            migration_path=migration_path,
-            device_count=1,
-            publish_stage=PublishStage.VERIFY,
-            config_artifact=config_artifact,
-        )
-
-        bot_uuid = release_result.get("bot_uuid")
-        baas_publish_id = release_result.get("publish_id")
-        if not bot_uuid:
-            raise PublishFlowServiceError("BaaS 层未返回 bot_uuid")
-
-        # 记录发布结果：创建 device binding 并更新状态
-        ext = publish_record.ext or {}
-        binding_id, ext = self._record_release_result(
-            publish_id=publish_id,
-            bot=bot,
-            bot_uuid=bot_uuid,
-            baas_publish_id=baas_publish_id,
-            operator=operator,
-            ext=ext,
-            stage=PublishStage.VERIFY,
-            source_status=PublishStatus.BUILT,
-            target_status=PublishStatus.VALIDATE_PUB,
-            engine_overrides=verify_overrides,
-        )
-
-        logger.info(
-            f"[PublishFlowService._execute_verify_first_release] "
-            f"Release to verify environment completed: bot_uuid={bot_uuid}"
-        )
-
-        return PublishFlowResult(
-            publish_id=publish_id,
-            status=PublishStatus.VALIDATE_PUB,
-            message="已发布到验证环境",
-            action="process",
-            bot_uuid=bot_uuid,
-            baas_publish_id=str(baas_publish_id) if baas_publish_id else None,
-            device_binding_id=binding_id,
+        """执行验证环境首次发布（创建新 Bot）。委托给统一的 ReleaseStageRunner。"""
+        return await self._release_runner.first_release(
+            VERIFY_SPEC, publish_record, operator, migration_path, bot
         )
 
     async def _execute_verify_upgrade(
@@ -763,122 +710,16 @@ class PublishFlowService:
             bot_uuid: str,
             verify_binding_id: int,
     ) -> PublishFlowResult:
-        """执行验证环境升级发布（复用已有 Bot）。
-
-        Args:
-            publish_record: 发布单
-            operator: 操作者
-            migration_path: 构建产物路径
-            bot: Bot 信息字典
-            bot_uuid: 已有 Bot 的 UUID
-            verify_binding_id: 验证环境的 device binding ID
-
-        Returns:
-            PublishFlowResult: 发布结果
-        """
-        publish_id = publish_record.id
-        version = f"{publish_record.version}"
-        owner_id = self._get_owner_id(publish_record)
-
-        # 升级：复用已有 Bot。teclaw 走非挂载重投递（update_teclaw_bot），由
-        # upgrade_async 按容器 provider 路由。投递前把 engine_ext.stage 重盖为
-        # canary（验证环境）并叠加本阶段的 DingTalk 渠道 engine_overrides（从 DB 按
-        # verify 重取）；ARCA 无 config_artifact 时均 no-op。
-        verify_overrides = self._stage_overrides(publish_record, PublishStage.VERIFY)
-        config_artifact = self._artifact_for_stage(
-            (publish_record.ext or {}).get("config_artifact"),
-            PublishStage.VERIFY,
-            verify_overrides,
-        )
-        upgrade_result = await self._build_service.upgrade_async(
+        """执行验证环境升级发布（复用已有 Bot）。委托给统一的 ReleaseStageRunner。"""
+        return await self._release_runner.upgrade_release(
+            VERIFY_SPEC,
+            publish_record,
+            operator,
+            migration_path,
+            bot,
             bot_uuid=bot_uuid,
-            bot=bot,
-            user_id=owner_id,
-            migration_path=migration_path,
-            device_count = 1,
-            publish_stage=PublishStage.VERIFY,
-            version=version,
-            config_artifact=config_artifact,
-        )
-
-        if upgrade_result.get("success") is False and upgrade_result.get("error_code") == "BOT_NOT_FOUND":
-            logger.warning(
-                f"[PublishFlowService._execute_verify_upgrade] "
-                f"Upgrade target bot not found, fallback to first verify release: "
-                f"publish_id={publish_id}, bot_uuid={bot_uuid}, verify_binding_id={verify_binding_id}"
-            )
-            return await self._execute_verify_first_release(
-                publish_record=publish_record,
-                operator=operator,
-                migration_path=migration_path,
-                bot=bot,
-            )
-
-        baas_publish_id = upgrade_result.get("publish_id")
-        if not baas_publish_id:
-            raise PublishFlowServiceError("BaaS 层升级未返回 publish_id")
-
-        # 复用已有 binding，更新 ext
-        ext = self._get_latest_ext(publish_id)
-        if "binding" not in ext:
-            ext["binding"] = {}
-        ext["binding"][PublishStage.VERIFY.value] = verify_binding_id
-        if "publish" not in ext:
-            ext["publish"] = {}
-        ext["publish"][PublishStage.VERIFY.value] = baas_publish_id
-
-        # 把 stage=canary 持久化进存储的 config_artifact 快照（ARCA 无产物时 no-op）。
-        self._restamp_ext_artifact(ext, PublishStage.VERIFY)
-
-        # Persist this stage's engine_overrides (channels) for restart/redeliver.
-        self._store_stage_overrides(ext, PublishStage.VERIFY, verify_overrides)
-
-        # Refresh the reused binding's teclaw status read handle to this new
-        # publish workflow (no-op for non-teclaw; best-effort).
-        self._refresh_publish_handle(
-            verify_binding_id, baas_publish_id
-        )
-
-        self._update_publish_status(
-            publish_id=publish_id,
-            target_status=PublishStatus.VALIDATE_PUB,
-            source_status=PublishStatus.BUILT,
-            ext=ext,
-        )
-
-        # 审批 BaaS 发布单
-        request_id = self._build_service.generate_request_id(
-            bot=bot,
-            publish_stage="upgrade_verify",
-        )
-        approved = self._approve_baas_publish(
-            baas_publish_id=baas_publish_id,
-            operator=operator,
-            stage=PublishStage.VERIFY,
-            request_id=request_id,
-        )
-        if approved is True:
-            # Provider-specific post-upgrade refresh: an ARCA upgrade rebuilds the
-            # container and refreshes MCP auth via its startup callback; a teclaw
-            # upgrade has no callback, so its behavior re-pushes the outbound rule.
-            self._provider_behavior(bot).refresh_after_upgrade(
-                bot_uuid=bot_uuid,
-                bot=bot,
-            )
-
-        logger.info(
-            f"[PublishFlowService._execute_verify_upgrade] "
-            f"Upgrade to verify environment completed: bot_uuid={bot_uuid}"
-        )
-
-        return PublishFlowResult(
-            publish_id=publish_id,
-            status=PublishStatus.VALIDATE_PUB,
-            message="已升级发布到验证环境",
-            action="process",
-            bot_uuid=bot_uuid,
-            baas_publish_id=str(baas_publish_id) if baas_publish_id else None,
-            device_binding_id=verify_binding_id,
+            existing_binding_id=verify_binding_id,
+            fallback=self._execute_verify_first_release,
         )
 
     async def _execute_release_phase(
@@ -1035,63 +876,9 @@ class PublishFlowService:
             migration_path: str,
             bot: dict,
     ) -> PublishFlowResult:
-        """执行首次发布（创建新 Bot）。
-
-        复用原有的 release 逻辑。
-        """
-        publish_id = publish_record.id
-        version = f"{publish_record.version}"
-        owner_id = self._get_owner_id(publish_record)
-
-        # 异步执行发布到 BaaS 层（teclaw 非挂载投递冻结产物，由 release_async 路由）。
-        # 投递前把 engine_ext.stage 重盖为 release（线上）并叠加本阶段的 DingTalk 渠道
-        # engine_overrides（从 DB 按 online 重取）；ARCA 无产物时均 no-op。
-        online_overrides = self._stage_overrides(publish_record, PublishStage.ONLINE)
-        config_artifact = self._artifact_for_stage(
-            (publish_record.ext or {}).get("config_artifact"),
-            PublishStage.ONLINE,
-            online_overrides,
-        )
-        release_result = await self._build_service.release_async(
-            bot=bot,
-            user_id=owner_id,
-            migration_path=migration_path,
-            device_count=1,
-            publish_stage=PublishStage.ONLINE,
-            version=version,
-            config_artifact=config_artifact,
-        )
-
-        bot_uuid = release_result.get("bot_uuid")
-        baas_publish_id = release_result.get("publish_id")
-        if not bot_uuid:
-            raise PublishFlowServiceError("BaaS 层未返回 bot_uuid")
-
-        # 记录发布结果：创建 device binding 并更新状态
-        ext = publish_record.ext or {}
-        binding_id, ext = self._record_release_result(
-            publish_id=publish_id,
-            bot=bot,
-            bot_uuid=bot_uuid,
-            baas_publish_id=baas_publish_id,
-            operator=operator,
-            ext=ext,
-            stage=PublishStage.ONLINE,
-            source_status=PublishStatus.VALIDATING,
-            target_status=PublishStatus.ONLINE_PUB,
-            engine_overrides=online_overrides,
-        )
-
-        logger.info(f"[PublishFlowService._execute_first_release] Release completed: {bot_uuid}")
-
-        return PublishFlowResult(
-            publish_id=publish_id,
-            status=PublishStatus.ONLINE_PUB,
-            message="发布已提交",
-            action="process",
-            bot_uuid=bot_uuid,
-            baas_publish_id=str(baas_publish_id) if baas_publish_id else None,
-            device_binding_id=binding_id,
+        """执行线上首次发布（创建新 Bot）。委托给统一的 ReleaseStageRunner。"""
+        return await self._release_runner.first_release(
+            ONLINE_SPEC, publish_record, operator, migration_path, bot
         )
 
     async def _execute_upgrade_release(
@@ -1101,43 +888,35 @@ class PublishFlowService:
             migration_path: str,
             bot: dict,
     ) -> PublishFlowResult:
-        """执行升级发布（复用现有 BaaS Bot）。
+        """执行线上升级发布（复用现有 BaaS Bot）。
 
-        流程：
-        1. 通过 last_pub_id 获取上一个发布单
-        2. 从 ext.binding.online 获取 binding_id
-        3. 通过 binding_id 获取 device_binding.device_id（即 bot_uuid）
-        4. 调用 BotBuildService.upgrade_async() 升级 Bot
-        5. 复用现有 device_binding，不创建新记录
+        先从 last_pub_id 解析线上 binding / bot_uuid（线上专有），再委托给统一的
+        ReleaseStageRunner.upgrade_release。
         """
         publish_id = publish_record.id
         last_pub_id = publish_record.last_pub_id
-        version = f"{publish_record.version}"
-        owner_id = self._get_owner_id(publish_record)
 
-        # Step 1: 获取上一个发布单
+        # 解析上一个发布单的线上 binding → bot_uuid（复用现有 Bot，不新建记录）。
         last_publish = self._publish_service.get_publish_by_id(last_pub_id)
         if not last_publish:
             raise PublishFlowServiceError(f"上一个发布单不存在: last_pub_id={last_pub_id}")
 
-        # Step 2: 从 ext 获取线上环境的 binding_id
-        last_ext = last_publish.ext or {}
-        last_binding_info = last_ext.get("binding", {})
+        last_binding_info = (last_publish.ext or {}).get("binding", {})
         online_binding_id = last_binding_info.get(PublishStage.ONLINE.value)
-
         if not online_binding_id:
             raise PublishFlowServiceError(
                 f"上一个发布单没有线上环境的绑定信息: last_pub_id={last_pub_id}"
             )
 
-        # Step 3: 获取 device_binding，提取 bot_uuid
         binding = self._publish_service.get_device_binding_by_id(online_binding_id)
         if not binding:
             raise PublishFlowServiceError(f"设备绑定记录不存在: binding_id={online_binding_id}")
 
         bot_uuid = binding.device_id
         if not bot_uuid:
-            raise PublishFlowServiceError(f"设备绑定记录中没有 device_id: binding_id={online_binding_id}")
+            raise PublishFlowServiceError(
+                f"设备绑定记录中没有 device_id: binding_id={online_binding_id}"
+            )
 
         logger.info(
             f"[PublishFlowService._execute_upgrade_release] "
@@ -1145,110 +924,15 @@ class PublishFlowService:
             f"bot_uuid={bot_uuid}"
         )
 
-        # Step 4: 调用 BotBuildService.upgrade_async 升级 Bot（teclaw 路由到
-        # update_teclaw_bot，重投递冻结产物）。投递前把 engine_ext.stage 重盖为
-        # release（线上）并叠加本阶段的 DingTalk 渠道 engine_overrides（从 DB 按 online
-        # 重取）；ARCA 无产物时均 no-op。
-        online_overrides = self._stage_overrides(publish_record, PublishStage.ONLINE)
-        config_artifact = self._artifact_for_stage(
-            (publish_record.ext or {}).get("config_artifact"),
-            PublishStage.ONLINE,
-            online_overrides,
-        )
-        upgrade_result = await self._build_service.upgrade_async(
+        return await self._release_runner.upgrade_release(
+            ONLINE_SPEC,
+            publish_record,
+            operator,
+            migration_path,
+            bot,
             bot_uuid=bot_uuid,
-            bot=bot,
-            user_id=owner_id,
-            device_count=1,
-            migration_path=migration_path,
-            publish_stage=PublishStage.ONLINE,
-            version=version,
-            config_artifact=config_artifact,
-        )
-
-        if upgrade_result.get("success") is False and upgrade_result.get("error_code") == "BOT_NOT_FOUND":
-            logger.warning(
-                f"[PublishFlowService._execute_upgrade_release] "
-                f"Upgrade target bot not found, fallback to first release: "
-                f"publish_id={publish_id}, last_pub_id={last_pub_id}, bot_uuid={bot_uuid}"
-            )
-            return await self._execute_first_release(
-                publish_record=publish_record,
-                operator=operator,
-                migration_path=migration_path,
-                bot=bot,
-            )
-
-        baas_publish_id = upgrade_result.get("publish_id")
-        if not baas_publish_id:
-            raise PublishFlowServiceError("BaaS 层升级未返回 publish_id")
-
-        # Step 5: 记录发布结果 - 复用现有 binding，不创建新记录
-        ext = self._get_latest_ext(publish_id)
-
-        # 记录到 ext（复用上一个发布单的 binding_id）
-        if "binding" not in ext:
-            ext["binding"] = {}
-        ext["binding"][PublishStage.ONLINE.value] = online_binding_id
-
-        # 记录 BaaS 层发布单 ID
-        if "publish" not in ext:
-            ext["publish"] = {}
-        ext["publish"][PublishStage.ONLINE.value] = baas_publish_id
-
-        # 把 stage=release 持久化进存储的 config_artifact 快照（ARCA 无产物时 no-op）。
-        self._restamp_ext_artifact(ext, PublishStage.ONLINE)
-
-        # Persist this stage's engine_overrides (channels) for restart/redeliver.
-        self._store_stage_overrides(ext, PublishStage.ONLINE, online_overrides)
-
-        # Refresh the reused binding's teclaw status read handle to this new
-        # publish workflow (no-op for non-teclaw; best-effort).
-        self._refresh_publish_handle(
-            online_binding_id, baas_publish_id
-        )
-
-        # 更新状态为 ONLINE_PUB
-        self._update_publish_status(
-            publish_id=publish_id,
-            target_status=PublishStatus.ONLINE_PUB,
-            source_status=PublishStatus.VALIDATING,
-            ext=ext,
-        )
-
-        # 审批 BaaS 层发布单
-        request_id = self._build_service.generate_request_id(
-            bot=bot,
-            publish_stage="upgrade_online",
-        )
-        approved = self._approve_baas_publish(
-            baas_publish_id=baas_publish_id,
-            operator=operator,
-            stage=PublishStage.ONLINE,
-            request_id=request_id,
-        )
-        if approved is True:
-            # Provider-specific post-upgrade refresh: an ARCA upgrade rebuilds the
-            # container and refreshes MCP auth via its startup callback; a teclaw
-            # upgrade has no callback, so its behavior re-pushes the outbound rule.
-            self._provider_behavior(bot).refresh_after_upgrade(
-                bot_uuid=bot_uuid,
-                bot=bot,
-            )
-
-        logger.info(
-            f"[PublishFlowService._execute_upgrade_release] "
-            f"Upgrade completed: bot_uuid={bot_uuid}, baas_publish_id={baas_publish_id}"
-        )
-
-        return PublishFlowResult(
-            publish_id=publish_id,
-            status=PublishStatus.ONLINE_PUB,
-            message="升级发布已提交",
-            action="process",
-            bot_uuid=bot_uuid,
-            baas_publish_id=str(baas_publish_id) if baas_publish_id else None,
-            device_binding_id=online_binding_id,  # 复用现有 binding
+            existing_binding_id=online_binding_id,
+            fallback=self._execute_first_release,
         )
 
     async def retry(

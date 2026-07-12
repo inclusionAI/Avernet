@@ -81,7 +81,7 @@
         (existing teclaw tests still assert the same outcomes).
 - **Depends on:** Task 2
 
-## Task 4: Unify verify/online release into `ReleaseStageRunner`
+## Task 4: Unify verify/online release into `ReleaseStageRunner` — [x] DONE
 - **Goal:** Replace the four near-duplicate release methods with one
   stage-parameterized path. (Spec goal #4.)
 - **Files:** `.../publish_flow/release_stage.py` (new),
