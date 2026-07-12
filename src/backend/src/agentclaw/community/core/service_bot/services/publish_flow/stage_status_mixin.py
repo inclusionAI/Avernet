@@ -63,7 +63,7 @@ class StageStatusMixin:
             return PublishStage.ONLINE
         return None
 
-    def _upgrade_last_publish(
+    def _mark_previous_publish_superseded(
         self,
         publish_record: BotPublishRecord,
         stage: PublishStage,
@@ -88,7 +88,7 @@ class StageStatusMixin:
         last_publish = self._publish_service.get_publish_by_id(last_pub_id)
         if not last_publish:
             logger.warning(
-                f"[PublishFlowService._upgrade_last_publish] "
+                f"[PublishFlowService._mark_previous_publish_superseded] "
                 f"Last publish record not found: last_pub_id={last_pub_id}"
             )
             return
@@ -97,7 +97,7 @@ class StageStatusMixin:
         last_ext = last_publish.ext or {}
         if last_ext.pop("rollback_restored_from", None):
             logger.info(
-                f"[PublishFlowService._upgrade_last_publish] "
+                f"[PublishFlowService._mark_previous_publish_superseded] "
                 f"Clearing rollback_restored_from for publish {last_pub_id}"
             )
 
@@ -110,12 +110,12 @@ class StageStatusMixin:
                 source_status=PublishStatus.SUCCESS,
             )
             logger.info(
-                f"[PublishFlowService._upgrade_last_publish] "
+                f"[PublishFlowService._mark_previous_publish_superseded] "
                 f"Last publish status updated to UPGRADED: last_pub_id={last_pub_id}"
             )
         except Exception as e:
             logger.warning(
-                f"[PublishFlowService._upgrade_last_publish] "
+                f"[PublishFlowService._mark_previous_publish_superseded] "
                 f"Failed to update last publish status: last_pub_id={last_pub_id}, error={e}"
             )
 

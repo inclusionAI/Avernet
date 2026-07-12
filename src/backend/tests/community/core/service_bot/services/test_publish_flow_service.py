@@ -210,7 +210,7 @@ async def test_execute_upgrade_release_falls_back_to_first_release_on_bot_not_fo
     )
 
 
-def test_should_execute_upgrade_release_requires_last_publish_success():
+def test_should_upgrade_online_requires_last_publish_success():
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -222,23 +222,23 @@ def test_should_execute_upgrade_release_requires_last_publish_success():
         status=PublishStatus.SUCCESS.value,
     )
     svc.get_publish_bot_status = Mock(return_value={'baas_bot_status': 'RUNNING'})
-    assert svc._should_execute_upgrade_release(publish_record) is True
+    assert svc._should_upgrade_online(publish_record) is True
 
     publish_service.get_publish_by_id.return_value = _make_publish_record(
         id=10,
         status=PublishStatus.SUCCESS.value,
     )
     svc.get_publish_bot_status = Mock(return_value={'baas_bot_status': 'RELEASED'})
-    assert svc._should_execute_upgrade_release(publish_record) is False
+    assert svc._should_upgrade_online(publish_record) is False
 
     publish_service.get_publish_by_id.return_value = _make_publish_record(
         id=10,
         status=PublishStatus.RELEASED.value,
     )
-    assert svc._should_execute_upgrade_release(publish_record) is False
+    assert svc._should_upgrade_online(publish_record) is False
 
     publish_service.get_publish_by_id.return_value = None
-    assert svc._should_execute_upgrade_release(publish_record) is False
+    assert svc._should_upgrade_online(publish_record) is False
 
 
 def test_approve_baas_publish_returns_false_without_publish_id():
@@ -726,12 +726,12 @@ def test_refresh_publish_handle_swallows_repo_error():
 
 
 # ---------------------------------------------------------------------------
-# Rollback: _upgrade_last_publish clears rollback_restored_from marker
+# Rollback: _mark_previous_publish_superseded clears rollback_restored_from marker
 # ---------------------------------------------------------------------------
 
 
-def test_upgrade_last_publish_clears_rollback_restored_from_marker():
-    """_upgrade_last_publish 应清除目标版本的 rollback_restored_from 标记。"""
+def test_mark_previous_publish_superseded_clears_rollback_restored_from_marker():
+    """_mark_previous_publish_superseded 应清除目标版本的 rollback_restored_from 标记。"""
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -755,8 +755,8 @@ def test_upgrade_last_publish_clears_rollback_restored_from_marker():
     publish_service.get_publish_by_id.return_value = last_publish
     publish_service.update_publish_status_with_ext.return_value = last_publish
 
-    # 调用 _upgrade_last_publish
-    svc._upgrade_last_publish(
+    # 调用 _mark_previous_publish_superseded
+    svc._mark_previous_publish_superseded(
         publish_record=current_record,
         stage=PublishStage.ONLINE,
         target_status=PublishStatus.SUCCESS,
@@ -776,7 +776,7 @@ def test_upgrade_last_publish_clears_rollback_restored_from_marker():
     assert call_kwargs["ext"]["migration_path"] == "/tmp/build"
 
 
-def test_upgrade_last_publish_preserves_ext_without_rollback_marker():
+def test_mark_previous_publish_superseded_preserves_ext_without_rollback_marker():
     """目标版本没有 rollback_restored_from 标记时，ext 保持不变。"""
     publish_service = Mock()
     build_service = Mock()
@@ -799,7 +799,7 @@ def test_upgrade_last_publish_preserves_ext_without_rollback_marker():
     publish_service.get_publish_by_id.return_value = last_publish
     publish_service.update_publish_status_with_ext.return_value = last_publish
 
-    svc._upgrade_last_publish(
+    svc._mark_previous_publish_superseded(
         publish_record=current_record,
         stage=PublishStage.ONLINE,
         target_status=PublishStatus.SUCCESS,
@@ -812,8 +812,8 @@ def test_upgrade_last_publish_preserves_ext_without_rollback_marker():
     assert call_kwargs["ext"]["other_key"] == "other_value"
 
 
-def test_upgrade_last_publish_no_op_for_verify_stage():
-    """VERIFY 阶段不调用 _upgrade_last_publish 逻辑。"""
+def test_mark_previous_publish_superseded_no_op_for_verify_stage():
+    """VERIFY 阶段不调用 _mark_previous_publish_superseded 逻辑。"""
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -826,7 +826,7 @@ def test_upgrade_last_publish_no_op_for_verify_stage():
         version=3,
     )
 
-    svc._upgrade_last_publish(
+    svc._mark_previous_publish_superseded(
         publish_record=current_record,
         stage=PublishStage.VERIFY,  # 非 ONLINE 阶段
         target_status=PublishStatus.SUCCESS,
@@ -837,8 +837,8 @@ def test_upgrade_last_publish_no_op_for_verify_stage():
     publish_service.update_publish_status_with_ext.assert_not_called()
 
 
-def test_upgrade_last_publish_no_op_for_non_success_status():
-    """目标状态非 SUCCESS 时，不调用 _upgrade_last_publish 逻辑。"""
+def test_mark_previous_publish_superseded_no_op_for_non_success_status():
+    """目标状态非 SUCCESS 时，不调用 _mark_previous_publish_superseded 逻辑。"""
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -851,7 +851,7 @@ def test_upgrade_last_publish_no_op_for_non_success_status():
         version=3,
     )
 
-    svc._upgrade_last_publish(
+    svc._mark_previous_publish_superseded(
         publish_record=current_record,
         stage=PublishStage.ONLINE,
         target_status=PublishStatus.VALIDATING,  # 非 SUCCESS
@@ -861,7 +861,7 @@ def test_upgrade_last_publish_no_op_for_non_success_status():
     publish_service.update_publish_status_with_ext.assert_not_called()
 
 
-def test_upgrade_last_publish_no_op_when_last_pub_id_is_zero():
+def test_mark_previous_publish_superseded_no_op_when_last_pub_id_is_zero():
     """last_pub_id 为 0 时，不调用升级逻辑。"""
     publish_service = Mock()
     build_service = Mock()
@@ -875,7 +875,7 @@ def test_upgrade_last_publish_no_op_when_last_pub_id_is_zero():
         version=1,
     )
 
-    svc._upgrade_last_publish(
+    svc._mark_previous_publish_superseded(
         publish_record=current_record,
         stage=PublishStage.ONLINE,
         target_status=PublishStatus.SUCCESS,
@@ -1353,7 +1353,7 @@ async def test_arca_path_has_no_config_artifact_and_is_not_restamped():
     assert "config_artifact" not in persisted
 
 
-def test_upgrade_last_publish_warns_when_last_publish_not_found():
+def test_mark_previous_publish_superseded_warns_when_last_publish_not_found():
     """上一版本不存在时，记录警告但不抛出异常。"""
     publish_service = Mock()
     build_service = Mock()
@@ -1370,7 +1370,7 @@ def test_upgrade_last_publish_warns_when_last_publish_not_found():
     publish_service.get_publish_by_id.return_value = None
 
     # 不应抛出异常
-    svc._upgrade_last_publish(
+    svc._mark_previous_publish_superseded(
         publish_record=current_record,
         stage=PublishStage.ONLINE,
         target_status=PublishStatus.SUCCESS,
@@ -2155,7 +2155,7 @@ def test_handle_sync_success_skips_destroy_verify_bot_for_teclaw_online_publish(
     )
     # teclaw → TeclawProviderBehavior (destroys_verify_bot_on_online=False).
     baas_service.resolve_container_provider.return_value = "teclaw"
-    svc._upgrade_last_publish = Mock()
+    svc._mark_previous_publish_superseded = Mock()
     svc._update_binding_on_success = Mock()
     svc._destroy_bot_by_stage = Mock()
 
@@ -2194,7 +2194,7 @@ def test_handle_sync_success_destroys_verify_bot_for_non_teclaw_online_publish()
     bot_service.get_bot = Mock(
         return_value={"bot_id": "bot-source", "active_engine": "openclaw", "ext": {}}
     )
-    svc._upgrade_last_publish = Mock()
+    svc._mark_previous_publish_superseded = Mock()
     svc._update_binding_on_success = Mock()
     svc._destroy_bot_by_stage = Mock()
 
@@ -2230,7 +2230,7 @@ def test_handle_sync_success_verify_stage_updates_validating_and_clears_retry():
     ext = dict(publish_record.ext)
     progress = {"status": "SUCCESS", "device_details": []}
 
-    svc._upgrade_last_publish = Mock()
+    svc._mark_previous_publish_superseded = Mock()
     svc._update_binding_on_success = Mock()
     svc._destroy_bot_by_stage = Mock()
 
@@ -2254,7 +2254,7 @@ def test_handle_sync_success_verify_stage_updates_validating_and_clears_retry():
         ext=ext,
         source_status=PublishStatus.VALIDATE_PUB,
     )
-    svc._upgrade_last_publish.assert_called_once_with(
+    svc._mark_previous_publish_superseded.assert_called_once_with(
         publish_record, PublishStage.VERIFY, PublishStatus.VALIDATING
     )
     svc._update_binding_on_success.assert_called_once_with(
@@ -2287,7 +2287,7 @@ def test_handle_sync_success_online_publish_raises_when_bot_missing():
     progress = {"status": "SUCCESS"}
 
     bot_service.get_bot = Mock(return_value=None)
-    svc._upgrade_last_publish = Mock()
+    svc._mark_previous_publish_superseded = Mock()
     svc._update_binding_on_success = Mock()
     svc._destroy_bot_by_stage = Mock()
 
@@ -2305,7 +2305,7 @@ def test_handle_sync_success_online_publish_raises_when_bot_missing():
         )
 
     publish_service.update_publish_status_with_ext.assert_called_once()
-    svc._upgrade_last_publish.assert_called_once_with(
+    svc._mark_previous_publish_superseded.assert_called_once_with(
         publish_record, PublishStage.ONLINE, PublishStatus.SUCCESS
     )
     svc._update_binding_on_success.assert_called_once()
@@ -2332,7 +2332,7 @@ def test_handle_sync_success_online_publish_logs_warning_when_destroy_verify_fai
     bot_service.get_bot = Mock(
         return_value={"bot_id": "bot-source", "active_engine": "openclaw", "ext": {}}
     )
-    svc._upgrade_last_publish = Mock()
+    svc._mark_previous_publish_superseded = Mock()
     svc._update_binding_on_success = Mock()
     svc._destroy_bot_by_stage = Mock(side_effect=RuntimeError("destroy failed"))
 

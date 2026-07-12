@@ -701,7 +701,7 @@ class PublishFlowService(
                 raise PublishFlowServiceError(f"Bot不存在: {bot_id}")
 
             # ========== 核心逻辑：判断是否升级场景 ==========
-            if self._should_execute_upgrade_release(publish_record):
+            if self._should_upgrade_online(publish_record):
                 # 升级发布：复用现有 Bot
                 return await self._execute_upgrade_release(
                     publish_record=publish_record,
@@ -740,7 +740,7 @@ class PublishFlowService(
                 action="process",
             )
 
-    def _should_execute_upgrade_release(self, publish_record: BotPublishRecord) -> bool:
+    def _should_upgrade_online(self, publish_record: BotPublishRecord) -> bool:
         """判断线上发布阶段是否应走升级发布。
 
         升级场景需要同时满足：
@@ -757,7 +757,7 @@ class PublishFlowService(
         last_publish = self._publish_service.get_publish_by_id(last_pub_id)
         if not last_publish:
             logger.warning(
-                f"[PublishFlowService._should_execute_upgrade_release] "
+                f"[PublishFlowService._should_upgrade_online] "
                 f"Last publish record not found, fallback to first release: last_pub_id={last_pub_id}"
             )
             return False
@@ -766,7 +766,7 @@ class PublishFlowService(
             last_status = PublishStatus(last_publish.status)
         except ValueError:
             logger.warning(
-                f"[PublishFlowService._should_execute_upgrade_release] "
+                f"[PublishFlowService._should_upgrade_online] "
                 f"Invalid last publish status, fallback to first release: "
                 f"last_pub_id={last_pub_id}, status={last_publish.status}"
             )
@@ -774,7 +774,7 @@ class PublishFlowService(
 
         if last_status != PublishStatus.SUCCESS and last_status != PublishStatus.RELEASED:
             logger.info(
-                f"[PublishFlowService._should_execute_upgrade_release] "
+                f"[PublishFlowService._should_upgrade_online] "
                 f"Last publish is not released, fallback to first release: "
                 f"last_pub_id={last_pub_id}, status={last_status}"
             )

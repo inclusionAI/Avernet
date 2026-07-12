@@ -130,7 +130,7 @@ class ProgressSyncMixin:
         )
 
         # 如果是 online 阶段成功，更新上一个发布单状态为 UPGRADED
-        self._upgrade_last_publish(publish_record, stage, target_status)
+        self._mark_previous_publish_superseded(publish_record, stage, target_status)
 
         # 更新 device_binding 状态为 ACTIVE
         self._update_binding_on_success(
