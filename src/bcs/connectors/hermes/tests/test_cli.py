@@ -1648,7 +1648,7 @@ class CliTests(unittest.TestCase):
             "build_resume_command https://source.example/install-hermes.sh "
             '"$AVERNET_RAW_BASE_URL" --bot-name reviewer --profile review '
             "--bcs-endpoint https://bcs.example --bcs-ws-url wss://bcs.example/ws/bot "
-            "--workspace '/tmp/work space' --china-mirror --create-profile; "
+            "--workspace '/tmp/work space' --china-mirror; "
             'printf "%s" "$RESUME_COMMAND"'
         )
         result = subprocess.run(
@@ -1667,9 +1667,182 @@ class CliTests(unittest.TestCase):
             "--bcs-ws-url wss://bcs.example/ws/bot",
             "--workspace /tmp/work\\ space",
             "--china-mirror",
-            "--create-profile",
         ):
             self.assertIn(preserved, result.stdout)
+
+    def test_installer_main_preserves_create_profile_in_resume_command(self) -> None:
+        home = Path(self.tempdir.name) / "resume-home"
+        profile_home = home / ".hermes" / "profiles" / "review"
+        profile_home.mkdir(parents=True)
+        (profile_home / "config.yaml").write_text("model: fake\n", encoding="utf-8")
+        resume_args_file = Path(self.tempdir.name) / "resume-args"
+        bin_dir = Path(self.tempdir.name) / "resume-bin"
+        bin_dir.mkdir()
+        hermes = bin_dir / "hermes"
+        hermes.write_text(
+            "#!/bin/sh\n"
+            "test \"$1 $2\" = 'dashboard --help' || exit 9\n"
+            "printf '%s\\n' 'usage: hermes dashboard --isolated'\n",
+            encoding="utf-8",
+        )
+        hermes.chmod(0o700)
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            "preflight_install_target() { :; }; "
+            'build_resume_command() { shift 2; printf \'%s\\n\' "$@" '
+            '> "$RESUME_ARGS_FILE"; exit 0; }; '
+            'main "$@"'
+        )
+        result = subprocess.run(
+            [
+                "/bin/bash",
+                "-c",
+                command,
+                "resume-main",
+                "--human-token-stdin",
+                "--bot-name",
+                "reviewer",
+                "--profile",
+                "review",
+                "--create-profile",
+            ],
+            input="human-token\n",
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "HOME": str(home),
+                "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                "PYTHON_BIN": sys.executable,
+                "AVERNET_RAW_BASE_URL": CONNECTOR_DIR.as_uri(),
+                "BCS_INSTALLER_URL": INSTALLER.as_uri(),
+                "RESUME_ARGS_FILE": str(resume_args_file),
+            },
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            [
+                "--bot-name",
+                "reviewer",
+                "--profile",
+                "review",
+                "--bcs-endpoint",
+                "http://127.0.0.1:21000",
+                "--bcs-ws-url",
+                "ws://127.0.0.1:21000/ws/bot",
+                "--create-profile",
+            ],
+            resume_args_file.read_text(encoding="utf-8").splitlines(),
+        )
+
+    def test_installer_main_resumes_same_registered_bot_without_registration(
+        self,
+    ) -> None:
+        home = Path(self.tempdir.name) / "idempotent-home"
+        profile_home = home / ".hermes" / "profiles" / "review"
+        profile_home.mkdir(parents=True)
+        (profile_home / "config.yaml").write_text("model: fake\n", encoding="utf-8")
+        bcs_port = self._free_port()
+        session = profile_home / "bcn" / "session.json"
+        session.parent.mkdir()
+        session.write_text(
+            json.dumps(
+                {
+                    "bot_uuid": "bot-test",
+                    "bot_token": "bot-secret",
+                    "bcs_url": f"ws://127.0.0.1:{bcs_port}/ws/bot",
+                    "bot_name": "reviewer",
+                }
+            ),
+            encoding="utf-8",
+        )
+        bin_dir = Path(self.tempdir.name) / "idempotent-bin"
+        bin_dir.mkdir()
+        self._write_fake_hermes(bin_dir)
+        data_home = Path(self.tempdir.name) / "idempotent-data"
+        install_dir = data_home / "avernet" / "hermes-bcn"
+        venv_bin = install_dir / "venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        installed_python = venv_bin / "python"
+        installed_python.write_text(
+            "#!/bin/sh\nexec \"$TEST_PYTHON\" \"$@\"\n", encoding="utf-8"
+        )
+        installed_python.chmod(0o700)
+        installed_connector = install_dir / "hermes_bcn.py"
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            "preflight_install_target() { :; }; "
+            "install_connector_dependencies() { :; }; "
+            'main "$@"; '
+            "printf '|'; "
+            "if IFS= read -r remaining; then printf '%s' \"$remaining\"; "
+            "else printf 'EOF'; fi"
+        )
+        env = {
+            **os.environ,
+            "HOME": str(home),
+            "XDG_DATA_HOME": str(data_home),
+            "PATH": f"{bin_dir}:{Path(sys.executable).parent}:{os.environ['PATH']}",
+            "PYTHON_BIN": sys.executable,
+            "TEST_PYTHON": sys.executable,
+            "AVERNET_RAW_BASE_URL": CONNECTOR_DIR.as_uri(),
+            "BCS_INSTALLER_URL": INSTALLER.as_uri(),
+        }
+        bcs = self._start_fake_bcs(bcs_port)
+        try:
+            result = subprocess.run(
+                [
+                    "/bin/bash",
+                    "-c",
+                    command,
+                    "idempotent-main",
+                    "--human-token-stdin",
+                    "--bot-name",
+                    "reviewer",
+                    "--profile",
+                    "review",
+                    "--bcs-endpoint",
+                    "http://127.0.0.1:1",
+                ],
+                input="unused-human-token\n",
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            connector_log = profile_home / "bcn" / "connector.log"
+            log_output = (
+                connector_log.read_text(encoding="utf-8")
+                if connector_log.is_file()
+                else ""
+            )
+            self.assertEqual(0, result.returncode, f"{result.stderr}\n{log_output}")
+            self.assertIn(
+                "Hermes BCN connector is running for bot bot-test.", result.stdout
+            )
+            self.assertTrue(
+                result.stdout.endswith("|unused-human-token"), result.stdout
+            )
+            saved = json.loads(session.read_text(encoding="utf-8"))
+            self.assertEqual("bot-test", saved["bot_uuid"])
+            self.assertEqual("reviewer", saved["bot_name"])
+        finally:
+            if installed_connector.is_file():
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(installed_connector),
+                        "stop",
+                        "--profile",
+                        "review",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    timeout=15,
+                    check=False,
+                )
+            self._stop_fake_process(bcs)
 
     def test_installer_resume_environment_reaches_pipeline_rhs(self) -> None:
         probe = Path(self.tempdir.name) / "resume-probe.sh"
