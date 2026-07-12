@@ -1445,6 +1445,73 @@ class CliTests(unittest.TestCase):
         ):
             self.assertIn(preserved, script)
 
+    def test_installer_downloads_raw_sources_with_ipv4_and_retries(self) -> None:
+        script = INSTALLER.read_text(encoding="utf-8")
+
+        self.assertIn("download_file() {", script)
+        self.assertIn("--ipv4", script)
+        self.assertIn("--retry 3", script)
+        self.assertIn("--retry-all-errors", script)
+        self.assertIn("--connect-timeout 10", script)
+        self.assertIn("--max-time 30", script)
+        self.assertIn(
+            'download_file "$raw_base/hermes_bcn.py" "$temp_connector"',
+            script,
+        )
+        self.assertIn("curl --ipv4", script)
+
+    def test_installer_falls_back_to_github_contents_api(self) -> None:
+        bin_dir = Path(self.tempdir.name) / "bin"
+        bin_dir.mkdir()
+        curl_log = Path(self.tempdir.name) / "curl.log"
+        output = Path(self.tempdir.name) / "downloaded.py"
+        fake_curl = bin_dir / "curl"
+        fake_curl.write_text(
+            "#!/bin/bash\n"
+            "printf '%s\\n' \"$*\" >> \"$CURL_LOG\"\n"
+            "output=''\n"
+            "previous=''\n"
+            "for argument in \"$@\"; do\n"
+            "  if [[ \"$previous\" == '-o' ]]; then output=\"$argument\"; fi\n"
+            "  previous=\"$argument\"\n"
+            "done\n"
+            "if [[ \"$*\" == *'raw.githubusercontent.com'* ]]; then exit 28; fi\n"
+            "printf '# connector\\n' > \"$output\"\n",
+            encoding="utf-8",
+        )
+        fake_curl.chmod(0o700)
+        raw_url = (
+            "https://raw.githubusercontent.com/inclusionAI/Avernet/"
+            "abc123/src/bcs/connectors/hermes/hermes_bcn.py"
+        )
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            f"download_file {subprocess.list2cmdline([raw_url])} "
+            f"{subprocess.list2cmdline([str(output)])}"
+        )
+
+        result = subprocess.run(
+            ["bash", "-c", command],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "PATH": f"{bin_dir}:/usr/bin:/bin",
+                "CURL_LOG": str(curl_log),
+            },
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("# connector\n", output.read_text(encoding="utf-8"))
+        calls = curl_log.read_text(encoding="utf-8")
+        self.assertIn("raw.githubusercontent.com", calls)
+        self.assertIn(
+            "api.github.com/repos/inclusionAI/Avernet/contents/"
+            "src/bcs/connectors/hermes/hermes_bcn.py?ref=abc123",
+            calls,
+        )
+        self.assertIn("application/vnd.github.raw+json", calls)
+
     def test_installer_uses_strict_startup_readiness_wait(self) -> None:
         script = INSTALLER.read_text(encoding="utf-8")
         self.assertRegex(script, r'"\$connector" start .*--health-wait [1-9][0-9]*')
@@ -2266,13 +2333,17 @@ class CliTests(unittest.TestCase):
         self.assertIn('--bot-name "${BOT_NAME}"', markdown)
         self.assertIn('--profile "${HERMES_PROFILE}"', markdown)
         self.assertIn("--create-profile", markdown)
+        self.assertIn("--china-mirror", markdown)
+        self.assertIn("curl --ipv4", markdown)
         self.assertIn(
             'mktemp "${TMPDIR:-/tmp}/install-hermes.XXXXXX"', markdown
         )
         self.assertIn("trap 'rm -f \"$installer\"' EXIT", markdown)
         self.assertNotIn("/tmp/install-hermes.sh", markdown)
         self.assertLess(markdown.index("mktemp "), markdown.index("trap 'rm -f"))
-        self.assertLess(markdown.index("trap 'rm -f"), markdown.index("curl -fsSL"))
+        self.assertLess(
+            markdown.index("trap 'rm -f"), markdown.index("curl --ipv4")
+        )
         self.assertIn("```bash\n(\n", markdown)
         match = re.search(
             r'^\s*(BCS_INSTALL_BASE_URL="\$\{BCS_INSTALL_BASE_URL:-[^}]+\}")$',

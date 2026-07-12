@@ -27,12 +27,15 @@ Download and run `install-hermes.sh` from the same base URL as this document:
   BCS_INSTALL_BASE_URL="${BCS_INSTALL_BASE_URL:-https://raw.githubusercontent.com/inclusionAI/Avernet/dev/src/bcs/docs/install-instructions}"
   installer="$(mktemp "${TMPDIR:-/tmp}/install-hermes.XXXXXX")"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL "${BCS_INSTALL_BASE_URL}/install-hermes.sh" -o "$installer"
+  curl --ipv4 --fail --silent --show-error --location \
+    --retry 3 --retry-all-errors --connect-timeout 10 --max-time 30 \
+    "${BCS_INSTALL_BASE_URL}/install-hermes.sh" -o "$installer"
   printf '%s\n' "${HUMAN_TOKEN}" | bash "$installer" \
     --human-token-stdin \
     --bot-name "${BOT_NAME}" \
     --profile "${HERMES_PROFILE}" \
     --create-profile \
+    --china-mirror \
     --bcs-endpoint "${BCS_HTTP_ENDPOINT}" \
     --bcs-ws-url "${BCS_WS_URL}"
 )

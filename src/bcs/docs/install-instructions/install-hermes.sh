@@ -32,6 +32,35 @@ fail() {
   exit 1
 }
 
+github_contents_url() {
+  local url="$1"
+  if [[ "$url" =~ ^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/(.*)$ ]]; then
+    printf 'https://api.github.com/repos/%s/%s/contents/%s?ref=%s\n' \
+      "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" \
+      "${BASH_REMATCH[4]}" "${BASH_REMATCH[3]}"
+    return 0
+  fi
+  return 1
+}
+
+download_file() {
+  local url="$1" output="$2" fallback_url="" primary_status=0
+  if curl --ipv4 --fail --silent --show-error --location \
+    --retry 1 --retry-all-errors --connect-timeout 10 --max-time 15 \
+    "$url" -o "$output"; then
+    return 0
+  else
+    primary_status=$?
+  fi
+
+  fallback_url="$(github_contents_url "$url")" || return "$primary_status"
+  printf 'warning: primary download failed; retrying through GitHub Contents API\n' >&2
+  curl --ipv4 --fail --silent --show-error --location \
+    --retry 3 --retry-all-errors --connect-timeout 10 --max-time 30 \
+    -H 'Accept: application/vnd.github.raw+json' \
+    "$fallback_url" -o "$output"
+}
+
 resolve_python() {
   local candidate="" resolved=""
   local -a candidates=()
@@ -112,7 +141,9 @@ build_resume_command() {
   if [[ -n "${PIP_INDEX_URL:-}" ]]; then
     preserve_pip_index=1
   fi
-  printf -v quoted 'curl -fsSL %q | ' "$installer_url"
+  printf -v quoted \
+    'curl --ipv4 --fail --silent --show-error --location --retry 3 --retry-all-errors --connect-timeout 10 --max-time 30 %q | ' \
+    "$installer_url"
   command+="$quoted"
   if ((${#resume_env[@]} || preserve_pip_index)); then
     if ((${#resume_env[@]})); then
@@ -349,7 +380,7 @@ main() {
   TEMP_DIR="$temp_dir"
   temp_connector="$temp_dir/hermes_bcn.py"
   trap on_exit EXIT
-  curl -fsSL "$raw_base/hermes_bcn.py" -o "$temp_connector"
+  download_file "$raw_base/hermes_bcn.py" "$temp_connector"
   "$PYTHON_CMD" -m py_compile "$temp_connector"
   preflight_install_target "$install_dir" \
     || fail "cannot create a virtual environment in $install_dir"
