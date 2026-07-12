@@ -16,10 +16,10 @@
 import { useExt } from '@/capabilities';
 import { AppExt } from '@/shell';
 import { Check, Copy } from 'lucide-react';
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { toast } from 'sonner';
 import { useRegisterToken } from '../hooks/useRegisterToken';
-import type { BotAccessEngineId } from '../lib/botAccess';
+import type { BotAccessEngineId, BotAccessMethodId } from '../lib/botAccess';
 import {
   DEFAULT_BOT_ACCESS_ENGINE,
   getBotAccessMethods,
@@ -28,7 +28,7 @@ import {
   renderBotAccessCommand,
   validateHermesBotConfig,
 } from '../lib/botAccess';
-import { HermesBotConfigFields } from './HermesBotConfigFields';
+import { HermesBotNameField } from './HermesBotNameField';
 
 const TOKEN_PLACEHOLDER = '<YOUR_TOKEN>';
 
@@ -61,26 +61,17 @@ const AccessSection: React.FC = () => {
     DEFAULT_BOT_ACCESS_ENGINE,
   );
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [hermesBotName, setHermesBotName] = useState('');
-  const [hermesProfile, setHermesProfile] = useState('');
-  const [hermesBotNameTouched, setHermesBotNameTouched] = useState(false);
-  const [hermesProfileTouched, setHermesProfileTouched] = useState(false);
+  const [hermesBotNames, setHermesBotNames] = useState<
+    Record<BotAccessMethodId, string>
+  >({ manual: '', automatic: '' });
+  const [hermesBotNameTouched, setHermesBotNameTouched] = useState<
+    Record<BotAccessMethodId, boolean>
+  >({ manual: false, automatic: false });
   const selectedEngine =
     engineChoices.find((choice) => choice.id === engine) ?? engineChoices[0];
   const ways = selectedEngine
     ? getBotAccessMethods(resources, selectedEngine.id)
     : [];
-  const hermesConfig = { botName: hermesBotName, profile: hermesProfile };
-  const hermesValidation = useMemo(
-    () => validateHermesBotConfig(hermesConfig),
-    [hermesBotName, hermesProfile],
-  );
-  const hermesFieldValidation = {
-    ...hermesValidation,
-    botNameError: hermesBotNameTouched ? hermesValidation.botNameError : null,
-    profileError: hermesProfileTouched ? hermesValidation.profileError : null,
-  };
-
   if (ways.length === 0) return null;
 
   const handleCopy = async (key: string, command: string) => {
@@ -145,12 +136,16 @@ const AccessSection: React.FC = () => {
 
       <div className="grid gap-5 lg:grid-cols-2">
         {ways.map((item, index) => {
-          const hermesManual =
-            selectedEngine.id === 'hermes' && item.id === 'manual';
+          const hermesMethod = selectedEngine.id === 'hermes';
+          const botName = hermesBotNames[item.id];
+          const validation = validateHermesBotConfig({ botName });
+          const botNameError = hermesBotNameTouched[item.id]
+            ? validation.botNameError
+            : null;
           const command = renderBotAccessCommand(
             item.template,
             token ?? TOKEN_PLACEHOLDER,
-            hermesManual ? hermesConfig : undefined,
+            hermesMethod ? { botName } : undefined,
           );
           const copyKey = `${selectedEngine.id}:${item.id}`;
           return (
@@ -164,20 +159,21 @@ const AccessSection: React.FC = () => {
               <p className="mt-3 text-sm leading-7 text-[#52606d]">
                 {item.description}
               </p>
-              {hermesManual && (
+              {hermesMethod && (
                 <div className="mt-4 space-y-3">
-                  <HermesBotConfigFields
-                    idPrefix="bcn-access-hermes-manual"
-                    botName={hermesBotName}
-                    profile={hermesProfile}
-                    validation={hermesFieldValidation}
+                  <HermesBotNameField
+                    idPrefix={`bcn-access-hermes-${item.id}`}
+                    botName={botName}
+                    botNameError={botNameError}
                     onBotNameChange={(value) => {
-                      setHermesBotNameTouched(true);
-                      setHermesBotName(value);
-                    }}
-                    onProfileChange={(value) => {
-                      setHermesProfileTouched(true);
-                      setHermesProfile(value);
+                      setHermesBotNameTouched((current) => ({
+                        ...current,
+                        [item.id]: true,
+                      }));
+                      setHermesBotNames((current) => ({
+                        ...current,
+                        [item.id]: value,
+                      }));
                     }}
                   />
                 </div>
@@ -189,7 +185,7 @@ const AccessSection: React.FC = () => {
                   </code>
                 ) : (
                   <p className="text-xs leading-6 text-[#94a3b8]">
-                    请先填写有效的 Bot 名称和 Profile。
+                    请先填写 Bot 名称。
                   </p>
                 )}
                 <button
@@ -198,7 +194,7 @@ const AccessSection: React.FC = () => {
                   disabled={
                     isLoading ||
                     !command ||
-                    (hermesManual && !hermesValidation.valid)
+                    (hermesMethod && !validation.valid)
                   }
                   className="absolute right-3 top-3 rounded-lg bg-white/10 p-2 transition-colors hover:bg-white/20 disabled:opacity-50"
                   title="复制指令"

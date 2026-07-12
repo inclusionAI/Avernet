@@ -20,7 +20,7 @@ import {
   ModalDescription,
   ModalTitle,
 } from '@/components/ui/modal';
-import { HermesBotConfigFields } from '@/pages/BcnHome/components/HermesBotConfigFields';
+import { HermesBotNameField } from '@/pages/BcnHome/components/HermesBotNameField';
 import { useRegisterToken } from '@/pages/BcnHome/hooks/useRegisterToken';
 import type {
   BotAccessEngineId,
@@ -79,10 +79,12 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
   );
   const [method, setMethod] = useState<BotAccessMethodId>('manual');
   const [copied, setCopied] = useState(false);
-  const [hermesBotName, setHermesBotName] = useState('');
-  const [hermesProfile, setHermesProfile] = useState('');
-  const [hermesBotNameTouched, setHermesBotNameTouched] = useState(false);
-  const [hermesProfileTouched, setHermesProfileTouched] = useState(false);
+  const [hermesBotNames, setHermesBotNames] = useState<
+    Record<BotAccessMethodId, string>
+  >({ manual: '', automatic: '' });
+  const [hermesBotNameTouched, setHermesBotNameTouched] = useState<
+    Record<BotAccessMethodId, boolean>
+  >({ manual: false, automatic: false });
 
   // 打开弹窗时拉取注册 token（注入接入指令）
   useEffect(() => {
@@ -96,23 +98,21 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
     : [];
   const selectedMethod =
     methods.find((accessMethod) => accessMethod.id === method) ?? methods[0];
-  const hermesConfig = { botName: hermesBotName, profile: hermesProfile };
+  const selectedMethodId = selectedMethod?.id ?? 'manual';
+  const hermesMethod = selectedEngine?.id === 'hermes';
+  const hermesBotName = hermesBotNames[selectedMethodId];
   const hermesValidation = useMemo(
-    () => validateHermesBotConfig(hermesConfig),
-    [hermesBotName, hermesProfile],
+    () => validateHermesBotConfig({ botName: hermesBotName }),
+    [hermesBotName],
   );
-  const hermesFieldValidation = {
-    ...hermesValidation,
-    botNameError: hermesBotNameTouched ? hermesValidation.botNameError : null,
-    profileError: hermesProfileTouched ? hermesValidation.profileError : null,
-  };
-  const hermesManual =
-    selectedEngine?.id === 'hermes' && selectedMethod?.id === 'manual';
+  const hermesBotNameError = hermesBotNameTouched[selectedMethodId]
+    ? hermesValidation.botNameError
+    : null;
   const command = selectedMethod
     ? renderBotAccessCommand(
         selectedMethod.template,
         token ?? TOKEN_PLACEHOLDER,
-        hermesManual ? hermesConfig : undefined,
+        hermesMethod ? { botName: hermesBotName } : undefined,
       )
     : null;
 
@@ -220,20 +220,21 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
               </div>
             </div>
 
-            {hermesManual && (
+            {hermesMethod && (
               <div className="space-y-3">
-                <HermesBotConfigFields
-                  idPrefix="add-bot-guide-hermes-manual"
+                <HermesBotNameField
+                  idPrefix={`add-bot-guide-hermes-${selectedMethodId}`}
                   botName={hermesBotName}
-                  profile={hermesProfile}
-                  validation={hermesFieldValidation}
+                  botNameError={hermesBotNameError}
                   onBotNameChange={(value) => {
-                    setHermesBotNameTouched(true);
-                    setHermesBotName(value);
-                  }}
-                  onProfileChange={(value) => {
-                    setHermesProfileTouched(true);
-                    setHermesProfile(value);
+                    setHermesBotNameTouched((current) => ({
+                      ...current,
+                      [selectedMethodId]: true,
+                    }));
+                    setHermesBotNames((current) => ({
+                      ...current,
+                      [selectedMethodId]: value,
+                    }));
                   }}
                 />
               </div>
@@ -247,8 +248,8 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
                 </code>
               ) : (
                 <p className="text-xs leading-6 text-[#94a3b8]">
-                  {hermesManual
-                    ? '请先填写有效的 Bot 名称和 Profile。'
+                  {hermesMethod
+                    ? '请先填写 Bot 名称。'
                     : '暂无可用的接入指令。'}
                 </p>
               )}
@@ -258,7 +259,7 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
                 disabled={
                   !command ||
                   !token ||
-                  (hermesManual && !hermesValidation.valid)
+                  (hermesMethod && !hermesValidation.valid)
                 }
                 className="absolute right-3 top-3 rounded-lg bg-white/10 p-2 transition-colors hover:bg-white/20 disabled:opacity-50"
                 title="复制"

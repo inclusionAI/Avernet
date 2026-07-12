@@ -1,5 +1,5 @@
 import { useExt } from '@/capabilities';
-import { HermesBotConfigFields } from '@/pages/BcnHome/components/HermesBotConfigFields';
+import { HermesBotNameField } from '@/pages/BcnHome/components/HermesBotNameField';
 import { useRegisterToken } from '@/pages/BcnHome/hooks/useRegisterToken';
 import { HERMES_MULTI_PROFILE_NOTICE } from '@/pages/BcnHome/lib/botAccess';
 import React from 'react';
@@ -18,7 +18,8 @@ const resources = {
   bcnAutoConnectCmdTemplate: 'openclaw automatic {token}',
   bcnHermesConnectCmdTemplate:
     'hermes manual {token} --bot-name {bot_name} --profile {profile} --create-profile',
-  bcnHermesAutoConnectCmdTemplate: 'hermes automatic {token}',
+  bcnHermesAutoConnectCmdTemplate:
+    'hermes automatic {token} --bot-name {bot_name} --profile {profile}',
 };
 
 type TestElement = React.ReactElement<any, any>;
@@ -71,8 +72,8 @@ function createRenderer<P>(Component: React.FC<P>, props: P) {
 }
 
 function resolvedChildren(node: TestElement): React.ReactNode[] {
-  if (node.type === HermesBotConfigFields) {
-    return [HermesBotConfigFields(node.props)];
+  if (node.type === HermesBotNameField) {
+    return [HermesBotNameField(node.props)];
   }
   return React.Children.toArray(node.props.children);
 }
@@ -149,7 +150,7 @@ describe('AddBotGuideModal Hermes configuration', () => {
     });
   });
 
-  it('keeps selection error-free while invalid manual config blocks only Hermes manual copy', () => {
+  it('collects independent Bot names for both Hermes access methods', () => {
     const render = createRenderer(AddBotGuideModal, {
       open: true,
       onOpenChange: jest.fn(),
@@ -162,44 +163,48 @@ describe('AddBotGuideModal Hermes configuration', () => {
     getButton(tree, 'Hermes').props.onClick();
     tree = render();
 
-    expect(textOf(tree)).not.toContain('请输入 Bot 名称');
-    expect(textOf(tree)).not.toContain('请输入 Profile 名称');
+    expect(
+      getInput(tree, 'add-bot-guide-hermes-manual-bot-name'),
+    ).toBeDefined();
+    expect(textOf(tree)).not.toContain('Profile 名称');
     expect(
       getInput(tree, 'add-bot-guide-hermes-manual-bot-name').props[
         'aria-describedby'
       ],
     ).toBeUndefined();
-    expect(
-      getInput(tree, 'add-bot-guide-hermes-manual-profile').props[
-        'aria-describedby'
-      ],
-    ).toBeUndefined();
     expect(getCopyButton(tree).props.disabled).toBe(true);
     expect(commandsIn(tree)).toEqual([]);
-    expect(textOf(tree)).toContain('请先填写有效的 Bot 名称和 Profile。');
+    expect(textOf(tree)).toContain('请先填写 Bot 名称。');
     expect(countText(tree, HERMES_MULTI_PROFILE_NOTICE)).toBe(1);
 
     getInput(tree, 'add-bot-guide-hermes-manual-bot-name').props.onChange({
-      target: { value: 'Hermes Reviewer' },
+      target: { value: 'Hermes Manual' },
     });
     tree = render();
-    getInput(tree, 'add-bot-guide-hermes-manual-profile').props.onChange({
-      target: { value: 'INVALID_PROFILE' },
-    });
-    tree = render();
-
-    expect(commandsIn(tree)).toEqual([]);
-    expect(textOf(tree)).not.toContain('--profile');
-    expect(getCopyButton(tree).props.disabled).toBe(true);
+    expect(commandIn(tree)).toContain("--profile 'avernet-hermes-manual'");
 
     getButton(tree, 'Bot 自动接入').props.onClick();
     tree = render();
-    expect(commandIn(tree)).toBe('hermes automatic registration-token');
-    expect(getCopyButton(tree).props.disabled).toBe(false);
-    expect(countText(tree, HERMES_MULTI_PROFILE_NOTICE)).toBe(1);
+    expect(
+      getInput(tree, 'add-bot-guide-hermes-automatic-bot-name').props.value,
+    ).toBe('');
+    expect(getCopyButton(tree).props.disabled).toBe(true);
+    expect(textOf(tree)).toContain('请先填写 Bot 名称。');
+
+    getInput(tree, 'add-bot-guide-hermes-automatic-bot-name').props.onChange({
+      target: { value: 'Hermes Automatic' },
+    });
+    tree = render();
+    expect(commandIn(tree)).toContain("--profile 'avernet-hermes-automatic'");
+
+    getButton(tree, '用户自助接入').props.onClick();
+    tree = render();
+    expect(
+      getInput(tree, 'add-bot-guide-hermes-manual-bot-name').props.value,
+    ).toBe('Hermes Manual');
   });
 
-  it('reveals and describes only the invalid field that has been touched', () => {
+  it('reveals and describes only a touched invalid Bot name', () => {
     const render = createRenderer(AddBotGuideModal, {
       open: true,
       onOpenChange: jest.fn(),
@@ -215,7 +220,7 @@ describe('AddBotGuideModal Hermes configuration', () => {
 
     const botNameInput = getInput(tree, 'add-bot-guide-hermes-manual-bot-name');
     expect(textOf(tree)).toContain('请输入 Bot 名称');
-    expect(textOf(tree)).not.toContain('请输入 Profile 名称');
+    expect(textOf(tree)).not.toContain('Profile 名称');
     expect(botNameInput.props['aria-invalid']).toBe(true);
     expect(botNameInput.props['aria-describedby']).toBe(
       'add-bot-guide-hermes-manual-bot-name-error',
@@ -227,29 +232,9 @@ describe('AddBotGuideModal Hermes configuration', () => {
       ),
     ).toBe(true);
 
-    botNameInput.props.onChange({ target: { value: 'Hermes Reviewer' } });
-    tree = render();
-    getInput(tree, 'add-bot-guide-hermes-manual-profile').props.onChange({
-      target: { value: ' ' },
-    });
-    tree = render();
-
-    const profileInput = getInput(tree, 'add-bot-guide-hermes-manual-profile');
-    expect(textOf(tree)).not.toContain('请输入 Bot 名称');
-    expect(textOf(tree)).toContain('请输入 Profile 名称');
-    expect(profileInput.props['aria-invalid']).toBe(true);
-    expect(profileInput.props['aria-describedby']).toBe(
-      'add-bot-guide-hermes-manual-profile-error',
-    );
-    expect(
-      elementsIn(tree).some(
-        (element) =>
-          element.props.id === 'add-bot-guide-hermes-manual-profile-error',
-      ),
-    ).toBe(true);
   });
 
-  it('renders valid Hermes values and preserves them across method and engine switches', () => {
+  it('preserves independent Hermes names across method and engine switches', () => {
     const render = createRenderer(AddBotGuideModal, {
       open: true,
       onOpenChange: jest.fn(),
@@ -259,23 +244,16 @@ describe('AddBotGuideModal Hermes configuration', () => {
     tree = render();
 
     getInput(tree, 'add-bot-guide-hermes-manual-bot-name').props.onChange({
-      target: { value: 'Hermes Reviewer' },
+      target: { value: 'Hermes Manual' },
     });
     tree = render();
-    getInput(tree, 'add-bot-guide-hermes-manual-profile').props.onChange({
-      target: { value: 'review_bot-2' },
-    });
-    tree = render();
-
-    expect(commandIn(tree)).toContain(
-      "--bot-name 'Hermes Reviewer' --profile 'review_bot-2' --create-profile",
-    );
-    expect(getCopyButton(tree).props.disabled).toBe(false);
 
     getButton(tree, 'Bot 自动接入').props.onClick();
     tree = render();
-    expect(commandIn(tree)).toBe('hermes automatic registration-token');
-    expect(textOf(tree)).not.toContain('--create-profile');
+    getInput(tree, 'add-bot-guide-hermes-automatic-bot-name').props.onChange({
+      target: { value: 'Hermes Automatic' },
+    });
+    tree = render();
 
     getButton(tree, 'OpenClaw').props.onClick();
     tree = render();
@@ -288,9 +266,12 @@ describe('AddBotGuideModal Hermes configuration', () => {
     tree = render();
     expect(
       getInput(tree, 'add-bot-guide-hermes-manual-bot-name').props.value,
-    ).toBe('Hermes Reviewer');
+    ).toBe('Hermes Manual');
+    getButton(tree, 'Bot 自动接入').props.onClick();
+    tree = render();
     expect(
-      getInput(tree, 'add-bot-guide-hermes-manual-profile').props.value,
-    ).toBe('review_bot-2');
+      getInput(tree, 'add-bot-guide-hermes-automatic-bot-name').props.value,
+    ).toBe('Hermes Automatic');
+    expect(textOf(tree)).not.toContain('Profile 名称');
   });
 });

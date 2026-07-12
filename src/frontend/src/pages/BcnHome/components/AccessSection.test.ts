@@ -3,7 +3,7 @@ import React from 'react';
 import { useRegisterToken } from '../hooks/useRegisterToken';
 import { HERMES_MULTI_PROFILE_NOTICE } from '../lib/botAccess';
 import AccessSection from './AccessSection';
-import { HermesBotConfigFields } from './HermesBotConfigFields';
+import { HermesBotNameField } from './HermesBotNameField';
 
 jest.mock('@/capabilities', () => ({
   ...jest.requireActual('@/capabilities'),
@@ -18,7 +18,8 @@ const resources = {
   bcnAutoConnectCmdTemplate: 'openclaw automatic {token}',
   bcnHermesConnectCmdTemplate:
     'hermes manual {token} --bot-name {bot_name} --profile {profile} --create-profile',
-  bcnHermesAutoConnectCmdTemplate: 'hermes automatic {token}',
+  bcnHermesAutoConnectCmdTemplate:
+    'hermes automatic {token} --bot-name {bot_name} --profile {profile}',
 };
 
 type TestElement = React.ReactElement<any, any>;
@@ -68,8 +69,8 @@ function createRenderer<P>(Component: React.FC<P>, props: P) {
 }
 
 function resolvedChildren(node: TestElement): React.ReactNode[] {
-  if (node.type === HermesBotConfigFields) {
-    return [HermesBotConfigFields(node.props)];
+  if (node.type === HermesBotNameField) {
+    return [HermesBotNameField(node.props)];
   }
   return React.Children.toArray(node.props.children);
 }
@@ -139,7 +140,7 @@ describe('AccessSection Hermes configuration', () => {
     });
   });
 
-  it('keeps selection error-free while invalid manual config blocks only Hermes manual copy', () => {
+  it('collects independent Bot names for both Hermes access methods', () => {
     const render = createRenderer(AccessSection, {});
     let tree = render();
 
@@ -154,40 +155,41 @@ describe('AccessSection Hermes configuration', () => {
     getButton(tree, 'Hermes').props.onClick();
     tree = render();
 
-    expect(textOf(tree)).not.toContain('请输入 Bot 名称');
-    expect(textOf(tree)).not.toContain('请输入 Profile 名称');
     expect(
-      getInput(tree, 'bcn-access-hermes-manual-bot-name').props[
-        'aria-describedby'
-      ],
-    ).toBeUndefined();
+      getInput(tree, 'bcn-access-hermes-manual-bot-name'),
+    ).toBeDefined();
     expect(
-      getInput(tree, 'bcn-access-hermes-manual-profile').props[
-        'aria-describedby'
-      ],
-    ).toBeUndefined();
+      getInput(tree, 'bcn-access-hermes-automatic-bot-name'),
+    ).toBeDefined();
+    expect(textOf(tree)).not.toContain('Profile 名称');
     expect(getCopyButtons(tree).map((button) => button.props.disabled)).toEqual(
-      [true, false],
+      [true, true],
     );
-    expect(commandsIn(tree)).toEqual(['hermes automatic registration-token']);
-    expect(textOf(tree)).toContain('请先填写有效的 Bot 名称和 Profile。');
+    expect(commandsIn(tree)).toEqual([]);
+    expect(textOf(tree)).toContain('请先填写 Bot 名称。');
     expect(countText(tree, HERMES_MULTI_PROFILE_NOTICE)).toBe(1);
 
     getInput(tree, 'bcn-access-hermes-manual-bot-name').props.onChange({
-      target: { value: 'Hermes Reviewer' },
+      target: { value: 'Hermes Manual' },
     });
     tree = render();
-    getInput(tree, 'bcn-access-hermes-manual-profile').props.onChange({
-      target: { value: 'INVALID_PROFILE' },
+    getInput(tree, 'bcn-access-hermes-automatic-bot-name').props.onChange({
+      target: { value: 'Hermes Automatic' },
     });
     tree = render();
 
-    expect(commandsIn(tree)).toEqual(['hermes automatic registration-token']);
-    expect(textOf(tree)).not.toContain('--profile');
-    expect(getCopyButtons(tree)[0].props.disabled).toBe(true);
+    expect(commandsIn(tree)).toEqual([
+      "hermes manual registration-token --bot-name 'Hermes Manual' " +
+        "--profile 'avernet-hermes-manual' --create-profile",
+      "hermes automatic registration-token --bot-name 'Hermes Automatic' " +
+        "--profile 'avernet-hermes-automatic'",
+    ]);
+    expect(getCopyButtons(tree).map((button) => button.props.disabled)).toEqual(
+      [false, false],
+    );
   });
 
-  it('reveals and describes only the invalid field that has been touched', () => {
+  it('reveals and describes only a touched invalid Bot name', () => {
     const render = createRenderer(AccessSection, {});
     let tree = render();
     getButton(tree, 'Hermes').props.onClick();
@@ -200,7 +202,7 @@ describe('AccessSection Hermes configuration', () => {
 
     const botNameInput = getInput(tree, 'bcn-access-hermes-manual-bot-name');
     expect(textOf(tree)).toContain('请输入 Bot 名称');
-    expect(textOf(tree)).not.toContain('请输入 Profile 名称');
+    expect(textOf(tree)).not.toContain('Profile 名称');
     expect(botNameInput.props['aria-invalid']).toBe(true);
     expect(botNameInput.props['aria-describedby']).toBe(
       'bcn-access-hermes-manual-bot-name-error',
@@ -212,47 +214,22 @@ describe('AccessSection Hermes configuration', () => {
       ),
     ).toBe(true);
 
-    botNameInput.props.onChange({ target: { value: 'Hermes Reviewer' } });
-    tree = render();
-    getInput(tree, 'bcn-access-hermes-manual-profile').props.onChange({
-      target: { value: ' ' },
-    });
-    tree = render();
-
-    const profileInput = getInput(tree, 'bcn-access-hermes-manual-profile');
-    expect(textOf(tree)).not.toContain('请输入 Bot 名称');
-    expect(textOf(tree)).toContain('请输入 Profile 名称');
-    expect(profileInput.props['aria-invalid']).toBe(true);
-    expect(profileInput.props['aria-describedby']).toBe(
-      'bcn-access-hermes-manual-profile-error',
-    );
-    expect(
-      elementsIn(tree).some(
-        (element) =>
-          element.props.id === 'bcn-access-hermes-manual-profile-error',
-      ),
-    ).toBe(true);
   });
 
-  it('renders valid Hermes values and preserves them across engine switches', () => {
+  it('preserves independent Hermes names across engine switches', () => {
     const render = createRenderer(AccessSection, {});
     let tree = render();
     getButton(tree, 'Hermes').props.onClick();
     tree = render();
 
     getInput(tree, 'bcn-access-hermes-manual-bot-name').props.onChange({
-      target: { value: 'Hermes Reviewer' },
+      target: { value: 'Hermes Manual' },
     });
     tree = render();
-    getInput(tree, 'bcn-access-hermes-manual-profile').props.onChange({
-      target: { value: 'review_bot-2' },
+    getInput(tree, 'bcn-access-hermes-automatic-bot-name').props.onChange({
+      target: { value: 'Hermes Automatic' },
     });
     tree = render();
-
-    expect(commandsIn(tree)[0]).toContain(
-      "--bot-name 'Hermes Reviewer' --profile 'review_bot-2' --create-profile",
-    );
-    expect(getCopyButtons(tree)[0].props.disabled).toBe(false);
 
     getButton(tree, 'OpenClaw').props.onClick();
     tree = render();
@@ -265,9 +242,10 @@ describe('AccessSection Hermes configuration', () => {
 
     expect(
       getInput(tree, 'bcn-access-hermes-manual-bot-name').props.value,
-    ).toBe('Hermes Reviewer');
-    expect(getInput(tree, 'bcn-access-hermes-manual-profile').props.value).toBe(
-      'review_bot-2',
-    );
+    ).toBe('Hermes Manual');
+    expect(
+      getInput(tree, 'bcn-access-hermes-automatic-bot-name').props.value,
+    ).toBe('Hermes Automatic');
+    expect(textOf(tree)).not.toContain('Profile 名称');
   });
 });
