@@ -16,16 +16,19 @@
 import { useExt } from '@/capabilities';
 import { AppExt } from '@/shell';
 import { Check, Copy } from 'lucide-react';
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useRegisterToken } from '../hooks/useRegisterToken';
+import type { BotAccessEngineId } from '../lib/botAccess';
 import {
   DEFAULT_BOT_ACCESS_ENGINE,
   getBotAccessMethods,
   getVisibleBotAccessEngines,
-  replaceBotAccessToken,
+  HERMES_MULTI_PROFILE_NOTICE,
+  renderBotAccessCommand,
+  validateHermesBotConfig,
 } from '../lib/botAccess';
-import type { BotAccessEngineId } from '../lib/botAccess';
+import { HermesBotConfigFields } from './HermesBotConfigFields';
 
 const TOKEN_PLACEHOLDER = '<YOUR_TOKEN>';
 
@@ -58,11 +61,25 @@ const AccessSection: React.FC = () => {
     DEFAULT_BOT_ACCESS_ENGINE,
   );
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [hermesBotName, setHermesBotName] = useState('');
+  const [hermesProfile, setHermesProfile] = useState('');
+  const [hermesBotNameTouched, setHermesBotNameTouched] = useState(false);
+  const [hermesProfileTouched, setHermesProfileTouched] = useState(false);
   const selectedEngine =
     engineChoices.find((choice) => choice.id === engine) ?? engineChoices[0];
   const ways = selectedEngine
     ? getBotAccessMethods(resources, selectedEngine.id)
     : [];
+  const hermesConfig = { botName: hermesBotName, profile: hermesProfile };
+  const hermesValidation = useMemo(
+    () => validateHermesBotConfig(hermesConfig),
+    [hermesBotName, hermesProfile],
+  );
+  const hermesFieldValidation = {
+    ...hermesValidation,
+    botNameError: hermesBotNameTouched ? hermesValidation.botNameError : null,
+    profileError: hermesProfileTouched ? hermesValidation.profileError : null,
+  };
 
   if (ways.length === 0) return null;
 
@@ -122,9 +139,12 @@ const AccessSection: React.FC = () => {
 
       <div className="grid gap-5 lg:grid-cols-2">
         {ways.map((item, index) => {
-          const command = replaceBotAccessToken(
+          const hermesManual =
+            selectedEngine.id === 'hermes' && item.id === 'manual';
+          const command = renderBotAccessCommand(
             item.template,
             token ?? TOKEN_PLACEHOLDER,
+            hermesManual ? hermesConfig : undefined,
           );
           const copyKey = `${selectedEngine.id}:${item.id}`;
           return (
@@ -138,6 +158,27 @@ const AccessSection: React.FC = () => {
               <p className="mt-3 text-sm leading-7 text-[#52606d]">
                 {item.description}
               </p>
+              {hermesManual && (
+                <div className="mt-4 space-y-3">
+                  <p className="text-xs leading-5 text-[#52606d]">
+                    {HERMES_MULTI_PROFILE_NOTICE}
+                  </p>
+                  <HermesBotConfigFields
+                    idPrefix="bcn-access-hermes-manual"
+                    botName={hermesBotName}
+                    profile={hermesProfile}
+                    validation={hermesFieldValidation}
+                    onBotNameChange={(value) => {
+                      setHermesBotNameTouched(true);
+                      setHermesBotName(value);
+                    }}
+                    onProfileChange={(value) => {
+                      setHermesProfileTouched(true);
+                      setHermesProfile(value);
+                    }}
+                  />
+                </div>
+              )}
               <div className="relative mt-4 rounded-2xl bg-[#0f172a] px-4 py-4 pr-14">
                 <code className="block whitespace-pre-wrap break-all font-mono text-xs leading-6 text-[#c7d2fe]">
                   {command}
@@ -145,7 +186,9 @@ const AccessSection: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => handleCopy(copyKey, command)}
-                  disabled={isLoading}
+                  disabled={
+                    isLoading || (hermesManual && !hermesValidation.valid)
+                  }
                   className="absolute right-3 top-3 rounded-lg bg-white/10 p-2 transition-colors hover:bg-white/20 disabled:opacity-50"
                   title="复制指令"
                 >

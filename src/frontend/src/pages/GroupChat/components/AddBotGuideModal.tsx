@@ -20,20 +20,23 @@ import {
   ModalDescription,
   ModalTitle,
 } from '@/components/ui/modal';
+import { HermesBotConfigFields } from '@/pages/BcnHome/components/HermesBotConfigFields';
 import { useRegisterToken } from '@/pages/BcnHome/hooks/useRegisterToken';
-import {
-  DEFAULT_BOT_ACCESS_ENGINE,
-  getBotAccessMethods,
-  getVisibleBotAccessEngines,
-  replaceBotAccessToken,
-} from '@/pages/BcnHome/lib/botAccess';
 import type {
   BotAccessEngineId,
   BotAccessMethodId,
 } from '@/pages/BcnHome/lib/botAccess';
+import {
+  DEFAULT_BOT_ACCESS_ENGINE,
+  getBotAccessMethods,
+  getVisibleBotAccessEngines,
+  HERMES_MULTI_PROFILE_NOTICE,
+  renderBotAccessCommand,
+  validateHermesBotConfig,
+} from '@/pages/BcnHome/lib/botAccess';
 import { AppExt } from '@/shell';
 import { Bot, Check, Copy, Terminal } from 'lucide-react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 interface AddBotGuideModalProps {
@@ -76,6 +79,10 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
   );
   const [method, setMethod] = useState<BotAccessMethodId>('manual');
   const [copied, setCopied] = useState(false);
+  const [hermesBotName, setHermesBotName] = useState('');
+  const [hermesProfile, setHermesProfile] = useState('');
+  const [hermesBotNameTouched, setHermesBotNameTouched] = useState(false);
+  const [hermesProfileTouched, setHermesProfileTouched] = useState(false);
 
   // 打开弹窗时拉取注册 token（注入接入指令）
   useEffect(() => {
@@ -89,10 +96,23 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
     : [];
   const selectedMethod =
     methods.find((accessMethod) => accessMethod.id === method) ?? methods[0];
+  const hermesConfig = { botName: hermesBotName, profile: hermesProfile };
+  const hermesValidation = useMemo(
+    () => validateHermesBotConfig(hermesConfig),
+    [hermesBotName, hermesProfile],
+  );
+  const hermesFieldValidation = {
+    ...hermesValidation,
+    botNameError: hermesBotNameTouched ? hermesValidation.botNameError : null,
+    profileError: hermesProfileTouched ? hermesValidation.profileError : null,
+  };
+  const hermesManual =
+    selectedEngine?.id === 'hermes' && selectedMethod?.id === 'manual';
   const command = selectedMethod
-    ? replaceBotAccessToken(
+    ? renderBotAccessCommand(
         selectedMethod.template,
         token ?? TOKEN_PLACEHOLDER,
+        hermesManual ? hermesConfig : undefined,
       )
     : null;
 
@@ -194,6 +214,28 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
               </div>
             </div>
 
+            {hermesManual && (
+              <div className="space-y-3">
+                <p className="text-xs leading-5 text-[#52606d]">
+                  {HERMES_MULTI_PROFILE_NOTICE}
+                </p>
+                <HermesBotConfigFields
+                  idPrefix="add-bot-guide-hermes-manual"
+                  botName={hermesBotName}
+                  profile={hermesProfile}
+                  validation={hermesFieldValidation}
+                  onBotNameChange={(value) => {
+                    setHermesBotNameTouched(true);
+                    setHermesBotName(value);
+                  }}
+                  onProfileChange={(value) => {
+                    setHermesProfileTouched(true);
+                    setHermesProfile(value);
+                  }}
+                />
+              </div>
+            )}
+
             {/* 深色命令框 + 复制 */}
             {command ? (
               <div className="relative rounded-xl bg-[#0f172a] px-4 py-4 pr-12">
@@ -203,7 +245,7 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
                 <button
                   type="button"
                   onClick={handleCopy}
-                  disabled={!token}
+                  disabled={!token || (hermesManual && !hermesValidation.valid)}
                   className="absolute right-3 top-3 rounded-lg bg-white/10 p-2 transition-colors hover:bg-white/20 disabled:opacity-50"
                   title="复制"
                 >
@@ -220,7 +262,8 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
 
             {!token && !isLoading && (
               <p className="text-xs text-[#8b95a5]">
-                指令中的 <code className="text-[#52606d]">{TOKEN_PLACEHOLDER}</code>{' '}
+                指令中的{' '}
+                <code className="text-[#52606d]">{TOKEN_PLACEHOLDER}</code>{' '}
                 为占位；登录后将自动填充你的专属注册 token（有效期 6 小时）。
               </p>
             )}

@@ -4,6 +4,7 @@ import {
   DEFAULT_BOT_ACCESS_ENGINE,
   getBotAccessMethods,
   getVisibleBotAccessEngines,
+  HERMES_MULTI_PROFILE_NOTICE,
   quoteShellArg,
   renderBotAccessCommand,
   replaceBotAccessToken,
@@ -19,6 +20,12 @@ const resources = {
 };
 
 describe('bot access resources', () => {
+  it('keeps the Hermes multi-profile notice explicit', () => {
+    expect(HERMES_MULTI_PROFILE_NOTICE).toBe(
+      '支持接入多个 Hermes Bot。每个 Bot 必须使用独立 Profile；重复使用同一 Profile 将恢复原 Bot。',
+    );
+  });
+
   it('validates Hermes Bot names and profiles', () => {
     expect(validateHermesBotConfig({ botName: '', profile: '' })).toEqual({
       botNameError: '请输入 Bot 名称',

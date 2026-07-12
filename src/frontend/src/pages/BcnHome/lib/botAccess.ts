@@ -4,6 +4,8 @@ export type BotAccessEngineId = 'openclaw' | 'hermes';
 export type BotAccessMethodId = 'manual' | 'automatic';
 
 export const DEFAULT_BOT_ACCESS_ENGINE: BotAccessEngineId = 'openclaw';
+export const HERMES_MULTI_PROFILE_NOTICE =
+  '支持接入多个 Hermes Bot。每个 Bot 必须使用独立 Profile；重复使用同一 Profile 将恢复原 Bot。';
 
 type BotAccessResources = Pick<
   Resources,
