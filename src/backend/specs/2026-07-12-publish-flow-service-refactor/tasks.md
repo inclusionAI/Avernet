@@ -184,7 +184,7 @@
         task-queue tests green.
 - **Depends on:** —
 
-## Task 10: Worker lease-renewal heartbeat
+## Task 10: Worker lease-renewal heartbeat — [x] DONE
 - **Goal:** Keep a long-running handler's claim alive so it is not re-claimed
   and double-executed on multi-pod.
 - **Files:** `core/task_queue/services/worker.py`,
