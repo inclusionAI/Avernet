@@ -5,7 +5,7 @@ export type BotAccessMethodId = 'manual' | 'automatic';
 
 export const DEFAULT_BOT_ACCESS_ENGINE: BotAccessEngineId = 'openclaw';
 export const HERMES_MULTI_PROFILE_NOTICE =
-  '支持接入多个 Hermes Bot。每个 Bot 必须使用独立 Profile；重复使用同一 Profile 将恢复原 Bot。';
+  '支持接入多个 Hermes Bot。Avernet 会根据 Bot 名称自动创建独立 Profile；相同名称将恢复原 Bot。';
 
 type BotAccessResources = Pick<
   Resources,
@@ -29,24 +29,42 @@ export interface BotAccessMethod {
 
 export interface HermesBotConfig {
   botName: string;
-  profile: string;
 }
 
 export interface HermesBotConfigValidation {
   botNameError: string | null;
-  profileError: string | null;
   valid: boolean;
 }
 
-const HERMES_PROFILE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
-const HERMES_RESERVED_PROFILES = new Set([
-  'default',
-  'hermes',
-  'test',
-  'tmp',
-  'root',
-  'sudo',
-]);
+const HERMES_PROFILE_PREFIX = 'avernet-';
+const HERMES_PROFILE_MAX_LENGTH = 64;
+
+function fnv1a32(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+export function deriveHermesProfile(botName: string): string {
+  const trimmed = botName.trim();
+  if (!trimmed) return '';
+
+  const slug = trimmed
+    .normalize('NFKD')
+    .toLowerCase()
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  if (!slug) return `${HERMES_PROFILE_PREFIX}bot-${fnv1a32(trimmed)}`;
+
+  const maxSlugLength = HERMES_PROFILE_MAX_LENGTH - HERMES_PROFILE_PREFIX.length;
+  const shortened = slug.slice(0, maxSlugLength).replace(/-+$/g, '');
+  return `${HERMES_PROFILE_PREFIX}${shortened}`;
+}
 
 const engineDefinitions: Record<
   BotAccessEngineId,
@@ -117,17 +135,8 @@ export function getVisibleBotAccessEngines(
 export function validateHermesBotConfig(
   config: HermesBotConfig,
 ): HermesBotConfigValidation {
-  const botName = config.botName.trim();
-  const profile = config.profile.trim();
-  const botNameError = botName ? null : '请输入 Bot 名称';
-  let profileError: string | null = null;
-  if (!profile) profileError = '请输入 Profile 名称';
-  else if (!HERMES_PROFILE_PATTERN.test(profile)) {
-    profileError = '仅支持小写字母、数字、连字符和下划线，最长 64 位';
-  } else if (HERMES_RESERVED_PROFILES.has(profile)) {
-    profileError = '该 Profile 名称不可用于多 Bot 接入';
-  }
-  return { botNameError, profileError, valid: !botNameError && !profileError };
+  const botNameError = config.botName.trim() ? null : '请输入 Bot 名称';
+  return { botNameError, valid: !botNameError };
 }
 
 export function quoteShellArg(value: string): string {
@@ -145,7 +154,7 @@ export function renderBotAccessCommand(
   if (hermes) {
     command = command
       .replace('{bot_name}', quoteShellArg(hermes.botName.trim()))
-      .replace('{profile}', quoteShellArg(hermes.profile.trim()));
+      .replace('{profile}', quoteShellArg(deriveHermesProfile(hermes.botName)));
   }
   return command;
 }

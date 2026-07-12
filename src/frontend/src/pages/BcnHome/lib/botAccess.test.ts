@@ -2,6 +2,7 @@ import { getExt } from '@/capabilities';
 import { AppExt } from '@/shell/extension';
 import {
   DEFAULT_BOT_ACCESS_ENGINE,
+  deriveHermesProfile,
   getBotAccessMethods,
   getVisibleBotAccessEngines,
   HERMES_MULTI_PROFILE_NOTICE,
@@ -22,47 +23,34 @@ const resources = {
 describe('bot access resources', () => {
   it('keeps the Hermes multi-profile notice explicit', () => {
     expect(HERMES_MULTI_PROFILE_NOTICE).toBe(
-      '支持接入多个 Hermes Bot。每个 Bot 必须使用独立 Profile；重复使用同一 Profile 将恢复原 Bot。',
+      '支持接入多个 Hermes Bot。Avernet 会根据 Bot 名称自动创建独立 Profile；相同名称将恢复原 Bot。',
     );
   });
 
-  it('validates Hermes Bot names and profiles', () => {
-    expect(validateHermesBotConfig({ botName: '', profile: '' })).toEqual({
-      botNameError: '请输入 Bot 名称',
-      profileError: '请输入 Profile 名称',
-      valid: false,
-    });
-    expect(
-      validateHermesBotConfig({
-        botName: 'Hermes Reviewer',
-        profile: 'review_bot-2',
-      }),
-    ).toEqual({ botNameError: null, profileError: null, valid: true });
-
-    for (const profile of [
-      'default',
-      'hermes',
-      'test',
-      'tmp',
-      'root',
-      'sudo',
-    ]) {
-      expect(
-        validateHermesBotConfig({ botName: 'Reviewer', profile }).valid,
-      ).toBe(false);
-    }
+  it('derives deterministic Hermes profiles from Bot names', () => {
+    expect(deriveHermesProfile('Hermes Reviewer')).toBe(
+      'avernet-hermes-reviewer',
+    );
+    expect(deriveHermesProfile('  Hermes   Reviewer  ')).toBe(
+      'avernet-hermes-reviewer',
+    );
+    expect(deriveHermesProfile('Hermes Réviewer')).toBe(
+      'avernet-hermes-reviewer',
+    );
+    expect(deriveHermesProfile('产品经理')).toBe('avernet-bot-397dc3e8');
+    expect(deriveHermesProfile('a'.repeat(100))).toHaveLength(64);
+    expect(deriveHermesProfile('')).toBe('');
   });
 
-  it.each([
-    ['uppercase', 'ReviewBot', false],
-    ['invalid leading character', '-review-bot', false],
-    ['invalid symbol', 'review.bot', false],
-    ['exactly 64 characters', 'a'.repeat(64), true],
-    ['65 characters', 'a'.repeat(65), false],
-  ])('validates the %s profile boundary', (_case, profile, valid) => {
-    expect(
-      validateHermesBotConfig({ botName: 'Reviewer', profile }).valid,
-    ).toBe(valid);
+  it('validates Hermes Bot names', () => {
+    expect(validateHermesBotConfig({ botName: '' })).toEqual({
+      botNameError: '请输入 Bot 名称',
+      valid: false,
+    });
+    expect(validateHermesBotConfig({ botName: 'Hermes Reviewer' })).toEqual({
+      botNameError: null,
+      valid: true,
+    });
   });
 
   it('quotes Hermes configuration and renders it into the command', () => {
@@ -71,19 +59,28 @@ describe('bot access resources', () => {
       renderBotAccessCommand(
         'run {token} --bot-name {bot_name} --profile {profile} --create-profile',
         'registration-token',
-        { botName: "Hermes O'Brien", profile: 'review_bot-2' },
+        { botName: "Hermes O'Brien" },
       ),
     ).toBe(
-      "run registration-token --bot-name 'Hermes O'\\''Brien' --profile 'review_bot-2' --create-profile",
+      "run registration-token --bot-name 'Hermes O'\\''Brien' --profile 'avernet-hermes-o-brien' --create-profile",
+    );
+    expect(
+      renderBotAccessCommand(
+        'automatic {token} bot={bot_name} profile={profile}',
+        'registration-token',
+        { botName: '产品经理' },
+      ),
+    ).toBe(
+      "automatic registration-token bot='产品经理' profile='avernet-bot-397dc3e8'",
     );
   });
 
-  it('refuses to render invalid Hermes configuration', () => {
+  it('refuses to render Hermes configuration without a Bot name', () => {
     expect(
       renderBotAccessCommand(
         'run {token} --bot-name {bot_name} --profile {profile}',
         'registration-token',
-        { botName: 'Hermes Reviewer', profile: 'INVALID_PROFILE' },
+        { botName: '' },
       ),
     ).toBe('');
   });
@@ -149,14 +146,14 @@ describe('bot access resources', () => {
     const rendered = renderBotAccessCommand(
       template ?? '',
       'registration-token',
-      { botName: 'Hermes Reviewer', profile: 'review_bot-2' },
+      { botName: 'Hermes Reviewer' },
     );
     const pipeline = rendered.split('|');
     const installerArgv = pipeline[pipeline.length - 1] ?? '';
     expect(installerArgv).not.toContain('registration-token');
     expect(installerArgv).not.toMatch(/(^|\s)--token(?:\s|$)/);
     expect(installerArgv).toContain("--bot-name 'Hermes Reviewer'");
-    expect(installerArgv).toContain("--profile 'review_bot-2'");
+    expect(installerArgv).toContain("--profile 'avernet-hermes-reviewer'");
     expect(installerArgv).toContain('--create-profile');
   });
 
