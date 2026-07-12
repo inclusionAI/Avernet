@@ -5,6 +5,12 @@
 # stand-ins; the test suite mocks the actual endpoints, so only the keys' presence /
 # shape matters, not where they point.
 user_config:
+  # Keep the durable task-queue worker OFF under the test profile (base enables
+  # it) so unit/endpoint tests don't spin a background loop; tests drive the
+  # worker deterministically via run_once() where needed.
+  task_queue_worker:
+    enabled: false
+
   # Privileged-user allow-lists (admin scopes) — SYNTHETIC ids, tests only. Real
   # employee ids never ship in community source; corp overlays carry production
   # ids. Endpoint tests authorize with "100000" (the doc-example placeholder).

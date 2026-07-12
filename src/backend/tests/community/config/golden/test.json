@@ -76,6 +76,9 @@
       "scan_interval_hours": 1,
       "storage_dir": "./data/skills_scan"
     },
+    "task_queue_worker": {
+      "enabled": false
+    },
     "whitelist": {
       "operator_names": []
     },

@@ -248,7 +248,7 @@
         response shape. Full suite green.
 - **Depends on:** Task 11
 
-## Task 13: Enable the task-queue worker in base config + regenerate goldens
+## Task 13: Enable the task-queue worker in base config + regenerate goldens — [x] DONE
 - **Goal:** Turn autonomous/durable advancement on in every profile except test.
 - **Files:** `configs/application.yaml`, `configs/application-community.yaml`,
   `configs/application-test.yaml`,
