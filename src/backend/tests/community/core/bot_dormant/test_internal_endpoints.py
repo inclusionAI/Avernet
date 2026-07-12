@@ -305,6 +305,87 @@ def test_recycle_one_returns_500_for_unexpected_error():
 
 
 @pytest.mark.unit
+def test_unfreeze_passport_one_forwards_audit_reason():
+    """Passport-only ops must not enter the full bot activation flow."""
+    ops_svc = MagicMock(spec=DormantOpsService)
+    ops_svc.unfreeze_passport_one.return_value = {
+        "bot_id": "default",
+        "owner_id": "37565",
+        "status": "passport_online",
+    }
+    activate_svc = MagicMock(spec=ActivateBotService)
+    client = _build_app(ops_svc=ops_svc, activate_svc=activate_svc)
+
+    response = client.post(
+        "/api/internal/dormant/unfreeze-passport-one",
+        json={
+            "bot_id": "default",
+            "owner_id": "37565",
+            "reason": "recover license",
+        },
+        headers={"Authorization": "Bearer test-tok"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "data": {
+            "bot_id": "default",
+            "owner_id": "37565",
+            "status": "passport_online",
+        },
+    }
+    ops_svc.unfreeze_passport_one.assert_called_once_with(
+        bot_id="default",
+        owner_id="37565",
+        reason="recover license",
+    )
+    activate_svc.activate.assert_not_called()
+
+
+@pytest.mark.unit
+def test_unfreeze_passport_one_returns_500_for_passport_error():
+    ops_svc = MagicMock(spec=DormantOpsService)
+    ops_svc.unfreeze_passport_one.side_effect = RuntimeError(
+        "passport unavailable"
+    )
+    client = _build_app(ops_svc=ops_svc)
+
+    response = client.post(
+        "/api/internal/dormant/unfreeze-passport-one",
+        json={
+            "bot_id": "default",
+            "owner_id": "37565",
+            "reason": "recover",
+        },
+        headers={"Authorization": "Bearer test-tok"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "passport unavailable"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("field", ["bot_id", "owner_id", "reason"])
+def test_unfreeze_passport_one_rejects_blank_fields(field: str):
+    payload = {
+        "bot_id": "default",
+        "owner_id": "37565",
+        "reason": "recover",
+    }
+    payload[field] = "   "
+    client = _build_app()
+
+    response = client.post(
+        "/api/internal/dormant/unfreeze-passport-one",
+        json=payload,
+        headers={"Authorization": "Bearer test-tok"},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.unit
 def test_activate_one_forwards_to_activate_service():
     """ops activate-one should reuse the normal RECYCLED bot activation path."""
     activate_svc = MagicMock(spec=ActivateBotService)
