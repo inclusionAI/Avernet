@@ -229,7 +229,7 @@
         restart-sync, crash-resume (re-run from BUILT skips rebuild).
 - **Depends on:** Task 8, Task 10, Task 0
 
-## Task 12: Wire tasks into DI + facade `/process` async-submit + retry mapping
+## Task 12: Wire tasks into DI + /process async-submit + retry mapping — [x] DONE
 - **Goal:** Make `/process` uniform async-submit and route retry/restart through
   the durable tasks. (Intended behavior changes.)
 - **Files:** `di/modules/service_bot_module.py`, `.../publish_flow_service.py`,

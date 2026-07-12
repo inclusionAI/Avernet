@@ -266,10 +266,13 @@ def _seed_process_build_fail(world) -> None:
     _install_baas(world)
 
 
-def _seed_built_create_rejected(world) -> None:
+def _seed_draft_create_rejected(world) -> None:
+    # DRAFT: /process enqueues verify_flow → build succeeds, BaaS rejects the
+    # create in the verify-release sub-step → FAILED. (BUILT /process is now
+    # describe-only; the create runs inside the verify_flow task.)
     _seed_draft(world)
     _install_baas(world, create=http_envelope_response(code=1, message="create quota exceeded"))
-    _advance(world, _V1, PublishStatus.BUILT, {"config_artifact": _ARTIFACT})
+    _install_engine(world)
 
 
 def _seed_validate_pub(world, *, progress_status: str) -> None:
@@ -474,8 +477,8 @@ def build_failure_unresolvable_mcp():
 @endpoint_test(
     method="POST", path=_PROCESS, scenario="create_rejected_by_baas",
     input=CaseInput(json_body={"publish_id": _V1}, headers=_HEADERS),
-    seed=_seed_built_create_rejected,
-    expect=ExpectError(status=200, json_contains={"success": False}),
+    seed=_seed_draft_create_rejected, drain_background=True,
+    expect=ExpectSuccess(status=200, json_contains={"data": {"status": "building"}}),
     extra_assertions=(
         _expect_status(_V1, PublishStatus.FAILED),
         _expect_error_message("create quota exceeded"),
@@ -483,8 +486,8 @@ def build_failure_unresolvable_mcp():
     ),
 )
 def create_rejected_by_baas():
-    """Seeded at BUILT, /process runs verify-release inline; BaaS rejects the
-    create → FAILED, never approved. (BaaS-originated failure → boundary stub.)"""
+    """DRAFT /process enqueues verify_flow; the durable task builds then BaaS
+    rejects the create → FAILED, never approved. (BaaS-originated failure → stub.)"""
 
 
 # ── verify stage: VALIDATE_PUB → VALIDATING (the sync poll) ──────────────────
@@ -536,12 +539,13 @@ def verify_sync_pending():
     method="POST", path=_PROCESS, scenario="online_release",
     input=CaseInput(json_body={"publish_id": _V1}, headers=_HEADERS),
     seed=_seed_validating,
-    expect=ExpectSuccess(status=200, json_contains={"success": True, "data": {"status": "online_pub"}}),
+    expect=ExpectSuccess(status=200, json_contains={"success": True, "data": {"status": "validating"}}),
     extra_assertions=(_expect_status(_V1, PublishStatus.ONLINE_PUB),),
 )
 def online_release():
-    """Seeded at VALIDATING, /process runs the online create+approve inline →
-    ONLINE_PUB (no background task)."""
+    """Seeded at VALIDATING, /process enqueues the online_release task (async-submit
+    returns 'validating'); the drained task does the online create+approve →
+    ONLINE_PUB."""
 
 
 @endpoint_test(

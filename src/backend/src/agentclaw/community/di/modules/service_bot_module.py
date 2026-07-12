@@ -78,6 +78,13 @@ from agentclaw.community.core.service_bot.services.deploy.producer import (
     DeployArtifactProducerRouter,
 )
 from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowService
+from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+    PublishTaskLifecycle,
+)
+from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
+from agentclaw.community.core.task_queue.services.task_queue_service import (
+    TaskQueueService,
+)
 from agentclaw.community.core.service_bot.services.publish_approval_service import PublishApprovalService
 from agentclaw.community.core.system_config import SystemConfigService
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
@@ -403,6 +410,7 @@ class ServiceBotModule(Module):
         device_fs_dispatcher: DeviceFilesystemDispatcher,
         oss_storage: ObjectStoragePlugin,
         channel_overrides_reader: ChannelEngineOverridesReader,
+        task_queue_service: TaskQueueService,
     ) -> PublishFlowService:
         """Construct ``PublishFlowService``.
 
@@ -425,6 +433,27 @@ class ServiceBotModule(Module):
             device_fs_dispatcher=device_fs_dispatcher,
             teclaw_file_promotion=TeclawFilePromotion(oss_storage=oss_storage),
             channel_overrides_reader=channel_overrides_reader,
+            task_queue_service=task_queue_service,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def publish_task_lifecycle(
+        self,
+        registry: HandlerRegistry,
+        flow: PublishFlowService,
+        task_queue_service: TaskQueueService,
+    ) -> PublishTaskLifecycle:
+        """Register the durable publish task handlers into the shared
+        ``HandlerRegistry``. A singleton ``Lifecycle`` so discovery runs its
+        ``bootstrap()`` before ``TaskWorker.startup()`` claims (mirrors
+        ``baas_publish_task_lifecycle`` in ``DevicesModule``).
+        """
+        return PublishTaskLifecycle(
+            registry=registry,
+            flow=flow,
+            task_queue_service=task_queue_service,
         )
 
     @singleton

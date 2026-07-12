@@ -42,6 +42,7 @@ def _pf(*args, **kw):
     """Construct PublishFlowService for tests, defaulting the DI-required teclaw
     promotion deps to Mocks (the arca/verify flow tests don't exercise them)."""
     kw.setdefault("common_config_service", Mock())
+    kw.setdefault("task_queue_service", Mock())
     kw.setdefault("resolver", Mock())
     kw.setdefault("device_fs_dispatcher", Mock())
     kw.setdefault("teclaw_file_promotion", Mock())
@@ -2362,17 +2363,24 @@ def test_handle_sync_success_online_publish_logs_warning_when_destroy_verify_fai
 # ===========================================================================
 
 
-def _svc_with_record(record, *, build_service=None, baas_service=None, bot_service=None):
+def _svc_with_record(
+    record, *, build_service=None, baas_service=None, bot_service=None,
+    task_queue_service=None,
+):
     """PublishFlowService whose publish_service.get_publish_by_id returns `record`."""
     publish_service = Mock()
     publish_service.get_publish_by_id.return_value = record
     build_service = build_service or Mock()
+    kw = {}
+    if task_queue_service is not None:
+        kw["task_queue_service"] = task_queue_service
     svc = _pf(
         publish_service,
         build_service,
         baas_service or Mock(),
         bot_service or Mock(),
         _arca_router(build_service),
+        **kw,
     )
     return svc, publish_service
 
@@ -2385,38 +2393,40 @@ _CREATE_TASK = (
 # ---- process() dispatch ----------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_process_draft_spawns_full_verify_flow_and_returns_building():
+async def test_process_draft_enqueues_verify_flow_and_returns_building():
     record = _make_publish_record(status=PublishStatus.DRAFT.value)
-    svc, _ = _svc_with_record(record)
-    svc._execute_full_verify_flow_async = Mock()
-    with patch(_CREATE_TASK) as create_task:
-        result = await svc.process(publish_id=1, operator="op")
-    create_task.assert_called_once()
+    tq = Mock()
+    svc, _ = _svc_with_record(record, task_queue_service=tq)
+    result = await svc.process(publish_id=1, operator="op")
+    # async-submit: enqueue the durable verify_flow task, no inline advance
+    tq.enqueue.assert_called_once()
+    assert tq.enqueue.call_args.args[0] == "service_bot.publish.verify_flow"
     assert result.status == PublishStatus.BUILDING
     assert result.action == "process"
     assert "构建已启动" in result.message
 
 
 @pytest.mark.asyncio
-async def test_process_built_awaits_verify_release_phase():
-    record = _make_publish_record(status=PublishStatus.BUILT.value)
-    svc, _ = _svc_with_record(record)
-    sentinel = Mock()
-    svc._execute_verify_release_phase = AsyncMock(return_value=sentinel)
+async def test_process_validating_enqueues_online_release_in_progress():
+    record = _make_publish_record(status=PublishStatus.VALIDATING.value)
+    tq = Mock()
+    svc, _ = _svc_with_record(record, task_queue_service=tq)
     result = await svc.process(publish_id=1, operator="op")
-    assert result is sentinel
-    svc._execute_verify_release_phase.assert_awaited_once()
+    tq.enqueue.assert_called_once()
+    assert tq.enqueue.call_args.args[0] == "service_bot.publish.online_release"
+    assert result.status == PublishStatus.VALIDATING
+    assert result.bot_uuid is None  # no synchronous ids in the async-submit response
+    assert "已提交" in result.message
 
 
 @pytest.mark.asyncio
-async def test_process_validating_awaits_release_phase():
-    record = _make_publish_record(status=PublishStatus.VALIDATING.value)
-    svc, _ = _svc_with_record(record)
-    sentinel = Mock()
-    svc._execute_release_phase = AsyncMock(return_value=sentinel)
+async def test_process_built_is_describe_only_no_enqueue():
+    record = _make_publish_record(status=PublishStatus.BUILT.value)
+    tq = Mock()
+    svc, _ = _svc_with_record(record, task_queue_service=tq)
     result = await svc.process(publish_id=1, operator="op")
-    assert result is sentinel
-    svc._execute_release_phase.assert_awaited_once()
+    assert result.status == PublishStatus.BUILT
+    tq.enqueue.assert_not_called()  # verify_flow task owns BUILT -> VALIDATE_PUB
 
 
 @pytest.mark.asyncio
@@ -2431,10 +2441,12 @@ async def test_process_validating_awaits_release_phase():
 )
 async def test_process_describe_only_states_do_not_mutate(status, fragment):
     record = _make_publish_record(status=status.value)
-    svc, publish_service = _svc_with_record(record)
+    tq = Mock()
+    svc, publish_service = _svc_with_record(record, task_queue_service=tq)
     result = await svc.process(publish_id=1, operator="op")
     assert result.status == status
     assert fragment in result.message
+    tq.enqueue.assert_not_called()
     publish_service.update_publish_status_with_ext.assert_not_called()
     publish_service.update_publish_status.assert_not_called()
 
@@ -2647,14 +2659,15 @@ async def test_retry_from_online_pub_source_calls_restart():
 
 
 @pytest.mark.asyncio
-async def test_retry_from_built_source_calls_process():
+async def test_retry_from_built_source_enqueues_verify_flow():
+    # retry must enqueue directly (NOT via process(), which is describe-only on BUILT)
     record = _make_publish_record(
         status=PublishStatus.FAILED.value,
         ext={"source_status": PublishStatus.BUILT.value},
     )
-    svc, _ = _svc_with_record(record)
-    sentinel = Mock()
-    svc.process = AsyncMock(return_value=sentinel)
+    tq = Mock()
+    svc, _ = _svc_with_record(record, task_queue_service=tq)
     result = await svc.retry(publish_id=1, operator="op")
-    assert result is sentinel
-    svc.process.assert_awaited_once()
+    tq.enqueue.assert_called_once()
+    assert tq.enqueue.call_args.args[0] == "service_bot.publish.verify_flow"
+    assert result.action == "process"

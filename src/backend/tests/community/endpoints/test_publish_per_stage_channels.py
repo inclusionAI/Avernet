@@ -136,7 +136,9 @@ def _expect_online_channel_delivered_and_stored(response, world):  # noqa: ARG00
     method="POST", path=_PROCESS, scenario="validating_process_delivers_online_stage_channels",
     input=CaseInput(json_body={"publish_id": _V1}, headers=_HEADERS),
     seed=_seed_online_channels,
-    expect=ExpectSuccess(status=200, json_contains={"data": {"status": "online_pub"}}),
+    # async-submit: /process on VALIDATING returns "validating"; the drained
+    # online_release task delivers the online-stage channel and advances to ONLINE_PUB.
+    expect=ExpectSuccess(status=200, json_contains={"data": {"status": "validating"}}),
     extra_assertions=(_expect_online_channel_delivered_and_stored,),
 )
 def validating_process_delivers_online_stage_channels():

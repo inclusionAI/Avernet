@@ -68,6 +68,13 @@ from agentclaw.community.core.service_bot.services.publish_flow.release_stage im
     VERIFY_SPEC,
     ReleaseStageRunner,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+    enqueue_online_release,
+    enqueue_verify_flow,
+)
+from agentclaw.community.core.task_queue.services.task_queue_service import (
+    TaskQueueService,
+)
 from agentclaw.community.log import get_logger
 
 
@@ -127,6 +134,7 @@ class PublishFlowService(
         teclaw_file_promotion: "TeclawFilePromotion",
         device_binding_repo: "DeviceBindingRepository",
         channel_overrides_reader: "ChannelEngineOverridesReader",
+        task_queue_service: TaskQueueService,
     ):
         """初始化流程处理服务.
 
@@ -193,6 +201,11 @@ class PublishFlowService(
         # methods). Operates through this facade for the shared helpers.
         self._release_runner = ReleaseStageRunner(self)
         self._build_stage_runner = BuildStageRunner(self)
+
+        # Durable task queue: backend-driven advances (build+verify release, online
+        # release) are enqueued as persisted, crash-safe tasks instead of
+        # fire-and-forget asyncio tasks. See publish_flow/tasks.py.
+        self._task_queue_service = task_queue_service
 
     def _stage_overrides(
         self, publish_record: BotPublishRecord, stage: PublishStage
@@ -270,11 +283,13 @@ class PublishFlowService(
 
         logger.info(f"[PublishFlowService] Current status: {current_status}")
 
-        # Step 2: 根据状态判断当前阶段并执行
+        # Step 2: 根据状态分派。两个用户驱动的推进点（DRAFT 起构建、VALIDATING 上线
+        # 闸门）改为投递持久化任务后立即返回“进行中”（uniform async-submit）；其余状态
+        # 为只读查询（describe-only），不产生副作用。
         if current_status == PublishStatus.DRAFT:
-            # 异步执行完整验证发布流程，不等待完成
-            asyncio.create_task(
-                self._execute_full_verify_flow_async(publish_record, operator)
+            # 投递 verify_flow 任务（构建 + 验证发布），由 worker 持久驱动至 VALIDATE_PUB。
+            enqueue_verify_flow(
+                self._task_queue_service, publish_id=publish_id, operator=operator
             )
             return PublishFlowResult(
                 publish_id=publish_id,
@@ -283,11 +298,26 @@ class PublishFlowService(
                 action="process",
             )
 
-        elif current_status == PublishStatus.BUILT:
-            return await self._execute_verify_release_phase(publish_record, operator)
-
         elif current_status == PublishStatus.VALIDATING:
-            return await self._execute_release_phase(publish_record, operator)
+            # 上线闸门：仅用户 /process 会投递 online_release 任务。
+            enqueue_online_release(
+                self._task_queue_service, publish_id=publish_id, operator=operator
+            )
+            return PublishFlowResult(
+                publish_id=publish_id,
+                status=current_status,
+                message="上线发布已提交，请稍后查询进度",
+                action="process",
+            )
+
+        elif current_status == PublishStatus.BUILT:
+            # 不再是用户推进点：verify_flow 任务链自动承接 BUILT → VALIDATE_PUB。
+            return PublishFlowResult(
+                publish_id=publish_id,
+                status=current_status,
+                message="构建完成，发布进行中，请稍后查询进度",
+                action="process",
+            )
 
         elif current_status == PublishStatus.BUILDING:
             return PublishFlowResult(
@@ -334,79 +364,6 @@ class PublishFlowService(
 
         else:
             raise PublishStatusInvalidError(f"Unknown publish status: {current_status}")
-
-    async def _execute_full_verify_flow_async(
-        self,
-        publish_record: BotPublishRecord,
-        operator: str,
-    ) -> None:
-        """异步执行完整的验证环境发布流程（构建 + 发布）。
-
-        该方法设计为后台任务执行，不返回结果。
-        异常会被捕获并记录到日志，同时更新发布单状态为 FAILED。
-
-        流程：
-        1. 执行构建阶段 (_execute_build_phase)
-        2. 构建成功后，执行验证环境发布 (_execute_verify_release_phase)
-
-        Args:
-            publish_record: 发布单
-            operator: 操作者
-        """
-        publish_id = publish_record.id
-
-        owner_id = self._get_owner_id(publish_record)
-        logger.info(
-            f"[PublishFlowService._execute_full_verify_flow_async] "
-            f"Starting full verify flow: publish_id={publish_id}, operator={operator}, owner_id={owner_id}"
-        )
-
-        try:
-            # Step 1: 执行构建阶段
-            build_result = await self._execute_build_phase(publish_record, operator)
-
-            # 检查构建是否成功
-            if build_result.status != PublishStatus.BUILT:
-                logger.warning(
-                    f"[PublishFlowService._execute_full_verify_flow_async] "
-                    f"Build phase failed or not completed: status={build_result.status}"
-                )
-                return
-
-            # Step 2: 重新获取发布单（状态已更新为 BUILT）
-            updated_record = self._publish_service.get_publish_by_id(publish_id)
-            if not updated_record:
-                raise PublishNotFoundError(f"Publish order not found after build: {publish_id}")
-
-            # Step 3: 执行验证环境发布阶段
-            release_result = await self._execute_verify_release_phase(updated_record, operator)
-
-            logger.info(
-                f"[PublishFlowService._execute_full_verify_flow_async] "
-                f"Full verify flow completed: publish_id={publish_id}, status={release_result.status}"
-            )
-
-        except Exception as e:
-            error_message = str(e)
-            logger.error(
-                f"[PublishFlowService._execute_full_verify_flow_async] "
-                f"Full verify flow failed: publish_id={publish_id}, error={error_message}"
-            )
-            # 只更新 ext 属性，不更新状态
-            try:
-                def _mutate(ext: dict) -> None:
-                    self._clear_retry_flag(ext)
-                    ext["error_message"] = error_message
-
-                self._merge_and_update_ext(
-                    publish_id=publish_id,
-                    mutator=_mutate,
-                )
-            except Exception as update_error:
-                logger.error(
-                    f"[PublishFlowService._execute_full_verify_flow_async] "
-                    f"Failed to update ext: publish_id={publish_id}, error={update_error}"
-                )
 
     def _provider_behavior(self, bot: dict):
         """The :class:`ProviderBehavior` for ``bot``'s container, resolved via the
@@ -938,7 +895,8 @@ class PublishFlowService(
             f"publish_id={publish_id}, FAILED -> {rollback_status.value}"
         )
 
-        # Step 6: 执行重试动作
+        # Step 6: 执行重试动作。直接投递对应任务（不再走 process()，因为 /process 对
+        # BUILT 已是只读；BUILT 重试必须重新驱动 verify_flow）。
         if rollback_status in (PublishStatus.VALIDATE_PUB, PublishStatus.ONLINE_PUB, PublishStatus.SUCCESS):
             # BaaS 发布失败，调用 restart_bot 重试
             restart_result = self.restart_bot(
@@ -957,12 +915,22 @@ class PublishFlowService(
                 action="restart",
                 message="重试已提交（BaaS 重启）" if success else f"重试失败: {restart_result.get('message', '未知错误')}",
             )
-        else:
-            # DRAFT / BUILT / VALIDATING，调用 process 重新推进流程
-            return await self.process(
-                publish_id=publish_id,
-                operator=operator,
+        elif rollback_status == PublishStatus.VALIDATING:
+            # 线上发布失败重试：重新投递 online_release 任务。
+            enqueue_online_release(
+                self._task_queue_service, publish_id=publish_id, operator=operator
             )
+        else:
+            # DRAFT / BUILT：重新投递 verify_flow 任务（BUILT 时构建子步会被跳过）。
+            enqueue_verify_flow(
+                self._task_queue_service, publish_id=publish_id, operator=operator
+            )
+        return PublishFlowResult(
+            publish_id=publish_id,
+            status=rollback_status,
+            action="process",
+            message="重试已提交，请稍后查询进度",
+        )
 
     @staticmethod
     def _restamp_ext_artifact(ext: dict, stage: PublishStage) -> None:
