@@ -1,7 +1,7 @@
 use axum::{
     Json,
     extract::{Path, State},
-    http::{HeaderMap, StatusCode, Uri, header},
+    http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
 use bcs_protocol::{
@@ -423,13 +423,7 @@ fn bearer_token_with_message(
     headers: &HeaderMap,
     message: &'static str,
 ) -> Result<String, ProviderRouteError> {
-    headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
-        .map(str::to_string)
+    crate::headers::extract_bearer_token(headers)
         .ok_or_else(|| ProviderRouteError::unauthorized(message))
 }
 

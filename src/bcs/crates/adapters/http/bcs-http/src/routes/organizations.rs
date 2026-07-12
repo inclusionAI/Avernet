@@ -1,7 +1,7 @@
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, StatusCode},
 };
 use bcs_domain::{Organization, OrganizationMember};
 use bcs_protocol::{
@@ -230,14 +230,9 @@ fn organization_auth(
 }
 
 fn bearer_token(headers: &HeaderMap) -> Result<String, HttpAdapterError> {
-    headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| HttpAdapterError::Unauthorized("valid provider admin token is required".to_string()))
+    crate::headers::extract_bearer_token(headers).ok_or_else(|| {
+        HttpAdapterError::Unauthorized("valid provider admin token is required".to_string())
+    })
 }
 
 fn organization_error(error: ServiceError) -> HttpAdapterError {

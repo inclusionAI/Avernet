@@ -1,4 +1,7 @@
-use axum::http::{HeaderMap, Uri, header};
+use axum::http::{HeaderMap, Uri};
+
+#[cfg(test)]
+use axum::http::header;
 
 use crate::{error::HttpAdapterError, state::HttpAppState};
 
@@ -11,11 +14,7 @@ pub(super) fn bot_token_from_headers(headers: &HeaderMap) -> Option<String> {
         return Some(token.to_string());
     }
 
-    headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .map(str::to_string)
+    crate::headers::extract_bearer_token(headers)
 }
 
 pub(super) async fn bot_id_from_headers(
@@ -163,10 +162,27 @@ mod tests {
     }
 
     #[test]
-    fn empty_bearer_token_returns_empty_token() {
+    fn bearer_scheme_is_case_insensitive() {
+        for scheme in ["bearer", "Bearer", "BEARER", "BeArEr"] {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::AUTHORIZATION,
+                format!("{scheme} bearer-123").parse().unwrap(),
+            );
+
+            assert_eq!(
+                bot_token_from_headers(&headers),
+                Some("bearer-123".to_string()),
+                "scheme {scheme:?} should be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_bearer_token_returns_none() {
         let mut headers = HeaderMap::new();
         headers.insert(header::AUTHORIZATION, "Bearer ".parse().unwrap());
 
-        assert_eq!(bot_token_from_headers(&headers), Some(String::new()));
+        assert_eq!(bot_token_from_headers(&headers), None);
     }
 }

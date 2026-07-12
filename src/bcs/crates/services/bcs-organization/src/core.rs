@@ -215,18 +215,6 @@ impl OrganizationCore {
         }
     }
 
-    async fn member_is_effective(
-        &self,
-        organization: &Organization,
-        member: OrganizationMember,
-    ) -> ServiceResult<Option<OrganizationMember>> {
-        match self.ensure_member_effective(organization, member).await {
-            Ok(member) => Ok(Some(member)),
-            Err(ServiceError::Forbidden(_)) | Err(ServiceError::BotNotFound(_)) => Ok(None),
-            Err(err) => Err(err),
-        }
-    }
-
     async fn member_is_effective_with(
         &self,
         organization: &Organization,
@@ -283,7 +271,7 @@ impl OrganizationCoreService for OrganizationCore {
         description: Option<&str>,
     ) -> ServiceResult<Organization> {
         validate_external_id("organization_code", code)?;
-        validate_required_text("name", name)?;
+        validate_required_text("name", name, 256)?;
         self.organizations
             .create_organization(CreateOrganizationRecord {
                 env: self.env.clone(),
@@ -333,7 +321,7 @@ impl OrganizationCoreService for OrganizationCore {
             });
         }
         if let Some(name) = name {
-            validate_required_text("name", name)?;
+            validate_required_text("name", name, 256)?;
         }
         self.require_managed_organization(managing_provider_id, code)
             .await?;
@@ -557,10 +545,17 @@ fn provider_scope_allows(
             .any(|provider_id| provider_id == managing_provider_id)
 }
 
-fn validate_required_text(kind: &str, value: &str) -> ServiceResult<()> {
-    if value.trim().is_empty() {
+fn validate_required_text(kind: &str, value: &str, max_len: usize) -> ServiceResult<()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
         return Err(ServiceError::InvalidOperation {
             message: format!("{kind} is required"),
+            request_id: None,
+        });
+    }
+    if trimmed.len() > max_len {
+        return Err(ServiceError::InvalidOperation {
+            message: format!("{kind} cannot exceed {max_len} characters"),
             request_id: None,
         });
     }
