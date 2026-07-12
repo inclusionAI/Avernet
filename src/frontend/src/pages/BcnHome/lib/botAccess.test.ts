@@ -83,4 +83,18 @@ describe('bot access resources', () => {
     expect(installerArgv).not.toContain('registration-token');
     expect(installerArgv).not.toMatch(/(^|\s)--token(?:\s|$)/);
   });
+
+  it('uses the same Git ref for the Hermes installer and connector', () => {
+    const template = getExt(AppExt).resources.bcnHermesConnectCmdTemplate ?? '';
+    const sourceRefs = [
+      ...template.matchAll(
+        /https:\/\/raw\.githubusercontent\.com\/inclusionAI\/Avernet\/(.+?)\/src\//g,
+      ),
+    ].map((match) => match[1]);
+
+    expect(template).toContain('AVERNET_RAW_BASE_URL=');
+    expect(template).toContain('BCS_INSTALLER_URL=');
+    expect(sourceRefs).toHaveLength(2);
+    expect(new Set(sourceRefs).size).toBe(1);
+  });
 });

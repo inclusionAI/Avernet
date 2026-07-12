@@ -1096,13 +1096,42 @@ class CliTests(unittest.TestCase):
         )
         self.assertFalse(target.exists())
 
+    def test_installer_selects_versioned_python_when_python3_is_too_old(self) -> None:
+        bin_dir = Path(self.tempdir.name) / "python-bin"
+        bin_dir.mkdir()
+        old_python = bin_dir / "python3"
+        new_python = bin_dir / "python3.12"
+        old_python.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        new_python.write_text(
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"-c\" ]; then exit 0; fi\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        old_python.chmod(0o700)
+        new_python.chmod(0o700)
+        command = (
+            f"source {subprocess.list2cmdline([str(INSTALLER)])}; "
+            "resolve_python"
+        )
+
+        result = subprocess.run(
+            ["bash", "-c", command],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PATH": f"{bin_dir}:/usr/bin:/bin"},
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(str(new_python), result.stdout.strip())
+
     def test_installer_static_security_order_and_resume_contract(self) -> None:
         script = INSTALLER.read_text(encoding="utf-8")
         self.assertNotIn("--token", script)
         self.assertNotIn("--human-token ", script)
         self.assertRegex(
             script,
-            r"printf\s+'%s\\n'\s+\"\$human_token\"\s*\|[\s\\]*\n?\s*python3",
+            r"printf\s+'%s\\n'\s+\"\$human_token\"\s*\|[\s\\]*\n?\s*\"\$PYTHON_CMD\"",
         )
         self.assertIn("--human-token-stdin", script)
         self.assertIn("session.pending.json", script)

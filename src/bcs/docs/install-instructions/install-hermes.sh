@@ -7,6 +7,7 @@ DEFAULT_INSTALLER_URL="https://raw.githubusercontent.com/inclusionAI/Avernet/dev
 TEMP_DIR=""
 REGISTERED_UUID=""
 RESUME_COMMAND=""
+PYTHON_CMD=""
 
 resolve_pip_index() {
   if [[ -n "${PIP_INDEX_URL:-}" ]]; then
@@ -21,6 +22,41 @@ fail() {
   exit 1
 }
 
+resolve_python() {
+  local candidate="" resolved=""
+  local -a candidates=()
+  if [[ -n "${PYTHON_BIN:-}" ]]; then
+    candidates+=("$PYTHON_BIN")
+  else
+    candidates+=(
+      python3 python3.14 python3.13 python3.12 python3.11
+      /opt/homebrew/bin/python3 /usr/local/bin/python3
+    )
+  fi
+
+  for candidate in "${candidates[@]}"; do
+    if [[ "$candidate" == */* ]]; then
+      [[ -x "$candidate" ]] || continue
+      resolved="$candidate"
+    else
+      resolved="$(command -v "$candidate" 2>/dev/null || true)"
+      [[ -n "$resolved" ]] || continue
+    fi
+    if "$resolved" -c \
+      'import sys; raise SystemExit(sys.version_info < (3, 11))' \
+      >/dev/null 2>&1; then
+      printf '%s\n' "$resolved"
+      return 0
+    fi
+  done
+  return 1
+}
+
+ensure_python() {
+  [[ -n "$PYTHON_CMD" ]] && return 0
+  PYTHON_CMD="$(resolve_python)" || return 1
+}
+
 preflight_dashboard_isolation() {
   local dashboard_help=""
   if ! dashboard_help="$(hermes dashboard --help 2>&1)"; then
@@ -32,10 +68,11 @@ preflight_dashboard_isolation() {
 
 preflight_install_target() {
   local install_dir="$1" existed=0 preflight_dir=""
+  ensure_python || return 1
   [[ -d "$install_dir" ]] && existed=1
   mkdir -p "$install_dir"
   preflight_dir="$(mktemp -d "$install_dir/.preflight.XXXXXX")"
-  if ! python3 -m venv "$preflight_dir/venv"; then
+  if ! "$PYTHON_CMD" -m venv "$preflight_dir/venv"; then
     rm -rf "$preflight_dir"
     [[ "$existed" == "1" ]] || rmdir "$install_dir" 2>/dev/null || true
     return 1
@@ -76,7 +113,8 @@ build_resume_command() {
 }
 
 valid_session() {
-  python3 - "$1" <<'PY'
+  ensure_python || return 1
+  "$PYTHON_CMD" - "$1" <<'PY'
 import json
 import sys
 
@@ -141,10 +179,8 @@ main() {
   done
 
   command -v hermes >/dev/null 2>&1 || fail "hermes is required"
-  command -v python3 >/dev/null 2>&1 || fail "python3 is required"
   command -v curl >/dev/null 2>&1 || fail "curl is required"
-  python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' \
-    || fail "Python 3.11 or newer is required"
+  ensure_python || fail "Python 3.11 or newer is required"
   preflight_dashboard_isolation
   [[ -z "$profile" || -z "$explicit_home" ]] \
     || fail "use either --profile or --hermes-home, not both"
@@ -207,7 +243,7 @@ main() {
   temp_connector="$temp_dir/hermes_bcn.py"
   trap on_exit EXIT
   curl -fsSL "$raw_base/hermes_bcn.py" -o "$temp_connector"
-  python3 -m py_compile "$temp_connector"
+  "$PYTHON_CMD" -m py_compile "$temp_connector"
   preflight_install_target "$install_dir" \
     || fail "cannot create a virtual environment in $install_dir"
 
@@ -233,7 +269,7 @@ main() {
   build_resume_command "$installer_url" "$raw_base" "${resume_args[@]}"
 
   local registration="" registered_uuid=""
-  registration="$(printf '%s\n' "$human_token" | python3 "$temp_connector" "${register_args[@]}")"
+  registration="$(printf '%s\n' "$human_token" | "$PYTHON_CMD" "$temp_connector" "${register_args[@]}")"
   registered_uuid="${registration#registered }"
   REGISTERED_UUID="$registered_uuid"
 
@@ -244,7 +280,7 @@ main() {
   chmod 700 "$install_temp"
   mv -f "$install_temp" "$connector"
 
-  [[ -x "$venv/bin/python" ]] || python3 -m venv "$venv"
+  [[ -x "$venv/bin/python" ]] || "$PYTHON_CMD" -m venv "$venv"
   local pip_index=""
   local -a pip_args=()
   pip_index="$(resolve_pip_index)"

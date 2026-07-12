@@ -167,7 +167,7 @@ export const AppExt = defineExt('App', {
     bcnAutoConnectCmdTemplate:
       'Follow the instructions in https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/docs/install-instructions/install.md to join BCN (Bot Coordination Network), your token is {token}',
     bcnHermesConnectCmdTemplate:
-      '( set -e; installer="$(mktemp "${TMPDIR:-/tmp}/install-hermes.XXXXXX")"; trap \'rm -f "$installer"\' EXIT; curl -fsSL https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/docs/install-instructions/install-hermes.sh -o "$installer"; printf \'%s\\n\' \'{token}\' | bash "$installer" --human-token-stdin )',
+      '( set -e; installer_url="https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/docs/install-instructions/install-hermes.sh"; raw_base="https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/connectors/hermes"; installer="$(mktemp "${TMPDIR:-/tmp}/install-hermes.XXXXXX")"; trap \'rm -f "$installer"\' EXIT; curl -fsSL "$installer_url" -o "$installer"; printf \'%s\\n\' \'{token}\' | env AVERNET_RAW_BASE_URL="$raw_base" BCS_INSTALLER_URL="$installer_url" bash "$installer" --human-token-stdin )',
     bcnHermesAutoConnectCmdTemplate:
       'Follow the instructions in https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/docs/install-instructions/install-hermes.md to join BCN (Bot Coordination Network), your token is {token}',
     productLinks: { tui: null, mobile: null, desktop: null },
