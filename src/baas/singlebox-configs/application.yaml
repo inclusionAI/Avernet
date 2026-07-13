@@ -94,6 +94,16 @@ user_config:
     stale_seconds: 120  # RUNNING 超过此时长无心跳视为悬挂（秒），默认: 120
     dry_run: false  # 测试模式：只打印日志
 
+  # 文件传输轮询器配置（定期检测 OSS 上传完成并触发 device 下载）
+  file_transfer_poller:
+    enabled: true  # 是否启用定时任务
+    cron_interval_seconds: 10  # 执行间隔（秒），默认: 10
+    upload_timeout_seconds: 3600  # 上传超时（秒），超时未完成写入的 ticket 标记 FAILED
+    lock_name: "file_transfer_poller_lock"  # 分布式锁名称（未使用，per-ticket 锁用 transfer_id 构造）
+    lock_expire_seconds: 300  # per-ticket 锁过期时间（秒），默认: 300
+    max_concurrent_tickets: 5  # 单次扫描并发处理的 ticket 数上限
+    dry_run: false  # 测试模式：只打印日志
+
   # BotRun 队列 Worker 配置（单机模式）
   bot_run_queue:
     enabled: false
