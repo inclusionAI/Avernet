@@ -8,11 +8,18 @@ makes local mode side-effect free (no ``backend.db`` ever appears on
 disk) and gives tests true per-process isolation when paired with
 ``reset_for_tests()``.
 
+Because ``StaticPool`` exposes that one DBAPI connection to every local
+Session, the DatabasePlugin serializes the full ``session()`` and
+``orm_session()`` lifetimes with one process-wide reentrant lock. SQLite
+transaction locks only coordinate separate connections; they cannot protect
+two concurrent Sessions using this same connection.
+
 Trade-off: ``./scripts/local_setup.sh --local`` no longer persists DB
 state across backend restarts. Documented in the project ``CLAUDE.md``
 "Running Modes" table.
 """
 import os
+import threading
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine, event
@@ -62,6 +69,7 @@ def _make_engine_and_session():
 # Module-level lazy singleton (created on first use)
 _engine = None
 _session_factory = None
+_session_lock = threading.RLock()
 
 
 def _get_session_factory():
@@ -171,15 +179,16 @@ class SqliteDB(MockSeam, DatabasePlugin, LifecycleBase):
     @contextmanager
     def session(self):
         """Yield a SQLAlchemy Session."""
-        factory = _get_session_factory()
-        db = factory()
-        try:
-            yield db
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        with _session_lock:
+            factory = _get_session_factory()
+            db = factory()
+            try:
+                yield db
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()
 
     @contextmanager
     def orm_session(self):
@@ -190,13 +199,14 @@ class SqliteDB(MockSeam, DatabasePlugin, LifecycleBase):
         ``AUTOCOMMIT``). ``session()`` is left unchanged for all other
         callers, so no other repository's persistence behaviour changes.
         """
-        factory = _get_session_factory()
-        db = factory()
-        try:
-            yield db
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        with _session_lock:
+            factory = _get_session_factory()
+            db = factory()
+            try:
+                yield db
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()

@@ -102,10 +102,11 @@ isolation level, locks and reloads the binding, and repeats the guard against
 the task's exact ``binding_id`` and ``publish_id``. Only a PENDING Teclaw
 binding may proceed. A stale, released, terminal, non-Teclaw, or superseded
 binding rolls back and returns ``False`` without mutating either row, and the
-handler completes the obsolete task. If a runtime has already acquired the
-Session connection, SQLAlchemy ignores a later isolation override and emits a
-warning; the repository promotes that warning to an exception so the handler
-retries instead of silently falling back to AUTOCOMMIT.
+handler completes the obsolete task. The repository explicitly requires a
+fresh Session before connection acquisition and verifies the normalized
+active isolation level after applying the override. An already-active Session
+or an isolation mismatch raises, rolls back, and makes the handler retry;
+transaction safety does not depend on process-global warning filters.
 
 ### Poll result mapping
 
@@ -137,7 +138,17 @@ MySQL/OceanBase/Postgres-style dialects, the connection uses a non-autocommit
 isolation level so ``SELECT ... FOR UPDATE`` holds the binding lock until the
 explicit commit or rollback. SQLite ignores ``FOR UPDATE``, so the repository
 starts ``BEGIN IMMEDIATE`` before the guarded read; a concurrent writer cannot
-slip between the guard and the two writes.
+slip between the guard and the two writes. The file-SQLite concurrency test
+pauses in ``after_cursor_execute`` so the guarded SELECT has actually read
+before the competing writer attempts its UPDATE.
+
+Local singlebox uses in-memory SQLite with ``StaticPool``, where every Session
+shares one DBAPI connection and ``BEGIN IMMEDIATE`` cannot isolate concurrent
+Sessions on that same connection. Its DatabasePlugin therefore holds one
+process-wide reentrant lock across the complete ``session()`` and
+``orm_session()`` lifetime, including commit, rollback, and close. Corp and
+community runtimes retain per-connection explicit transactions; only local
+single-connection SQLite requires process-level Session serialization.
 
 After locking and validating the binding, the repository updates the expected
 bot first, requiring the task's ``bot_id``, ``owner_id``, and ``binding_id``

@@ -75,12 +75,10 @@ Zero genuine upserts → zero dialect branches in S5.
 from __future__ import annotations
 
 import json
-import warnings
 from typing import Any
 
 from injector import inject
 from sqlalchemy import func
-from sqlalchemy.exc import SAWarning
 
 from agentclaw.community.core.devices.repository.protocol import (
     DeviceBindingRepository as _DeviceBindingRepositoryProtocol,
@@ -103,6 +101,13 @@ class _DeviceBindingStatus:
     ACTIVE = "ACTIVE"
     FAILED = "FAILED"
     RELEASED = "RELEASED"
+
+
+def _normalize_isolation_level(value: str) -> str:
+    """Normalize dialect spelling before comparing isolation levels."""
+    return " ".join(
+        value.replace("_", " ").replace("-", " ").upper().split()
+    )
 
 
 def _to_record(m: EntityDeviceBinding | None) -> DeviceBindingRecord | None:
@@ -456,22 +461,32 @@ class DeviceRepository(_DeviceBindingRepositoryProtocol):
         """Guard and persist a Teclaw terminal result in one transaction."""
         with self._db.orm_session() as db:
             try:
+                if db.in_transaction():
+                    raise RuntimeError(
+                        "Teclaw terminal transition requires a fresh ORM "
+                        "Session before selecting transaction isolation"
+                    )
                 dialect_name = db.get_bind().dialect.name
                 isolation_level = (
                     "SERIALIZABLE"
                     if dialect_name == "sqlite"
                     else "READ COMMITTED"
                 )
-                # This must be the Session's first connection acquisition:
-                # SQLAlchemy ignores an isolation override once a transaction
-                # has already begun. Promote that warning to an exception so
-                # an unsafe AUTOCOMMIT fallback becomes a retry, never a write.
-                with warnings.catch_warnings():
-                    warnings.simplefilter("error", SAWarning)
-                    connection = db.connection(
-                        execution_options={
-                            "isolation_level": isolation_level
-                        }
+                connection = db.connection(
+                    execution_options={"isolation_level": isolation_level}
+                )
+                actual_isolation = _normalize_isolation_level(
+                    connection.get_isolation_level()
+                )
+                expected_isolation = _normalize_isolation_level(
+                    isolation_level
+                )
+                if actual_isolation != expected_isolation:
+                    db.rollback()
+                    raise RuntimeError(
+                        "Teclaw terminal transaction isolation mismatch: "
+                        f"expected {expected_isolation}, got "
+                        f"{actual_isolation}"
                     )
                 if dialect_name == "sqlite":
                     connection.exec_driver_sql("BEGIN IMMEDIATE")

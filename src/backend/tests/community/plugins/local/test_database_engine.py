@@ -7,7 +7,7 @@ connection across checkouts so seeded rows are visible, and
 """
 from __future__ import annotations
 
-import os
+from threading import Event, Thread
 
 import pytest
 from sqlalchemy import text
@@ -109,3 +109,52 @@ def test_no_backend_db_file_on_disk_after_use(tmp_path, monkeypatch: pytest.Monk
     finally:
         s.close()
     assert not (tmp_path / "backend.db").exists()
+
+
+def test_session_and_orm_session_share_one_process_lock() -> None:
+    """Both public context managers must serialize the shared connection.
+
+    ``StaticPool`` exposes one DBAPI connection process-wide.  A writer that
+    enters through ``orm_session()`` must therefore wait until a concurrent
+    ``session()`` context has released that connection.
+    """
+    db = db_mod.SqliteDB()
+    first_entered = Event()
+    allow_first_exit = Event()
+    second_attempted = Event()
+    second_entered = Event()
+    errors: list[BaseException] = []
+
+    def hold_session() -> None:
+        try:
+            with db.session():
+                first_entered.set()
+                if not allow_first_exit.wait(timeout=5):
+                    raise RuntimeError("session lock coordination timed out")
+        except BaseException as exc:  # noqa: BLE001 - re-raised below
+            errors.append(exc)
+
+    def enter_orm_session() -> None:
+        try:
+            second_attempted.set()
+            with db.orm_session():
+                second_entered.set()
+        except BaseException as exc:  # noqa: BLE001 - re-raised below
+            errors.append(exc)
+
+    first_thread = Thread(target=hold_session)
+    second_thread = Thread(target=enter_orm_session)
+    first_thread.start()
+    assert first_entered.wait(timeout=5)
+    second_thread.start()
+    assert second_attempted.wait(timeout=5)
+    entered_while_first_active = second_entered.wait(timeout=0.25)
+    allow_first_exit.set()
+    first_thread.join(timeout=5)
+    second_thread.join(timeout=5)
+
+    assert errors == []
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
+    assert entered_while_first_active is False
+    assert second_entered.is_set()
