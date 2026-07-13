@@ -307,7 +307,7 @@ jobs:
         if: steps.changes.outputs.skip != 'true'
         # ci_test.sh runs pytest with coverage and enforces the case-pass-rate /
         # line-coverage / changed-line-coverage gates via scripts/ci/report_check.py.
-        run: DEPLOY_ENV=dev bash scripts/ci_test.sh --group ci
+        run: DEPLOY_ENV=dev bash scripts/ci_test.sh --base "${BAAS_BASE_REF}"
 
       - name: Upload baas test results
         if: always() && steps.changes.outputs.skip != 'true'
