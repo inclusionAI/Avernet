@@ -320,7 +320,6 @@ def review_detail_not_found_error():
         json_body={
             "ticket_id": "tkt-review-approve",
             "action": "approve_close",
-            "admin_id": "admin-1",
         },
     ),
     seed=_seed_review_waiting,
@@ -352,7 +351,6 @@ def review_action_approve_close_ok():
         json_body={
             "ticket_id": "tkt-review-wl",
             "action": "approve_whitelist",
-            "admin_id": "admin-1",
         },
     ),
     seed=_seed_review_whitelist,
@@ -380,7 +378,6 @@ def review_action_approve_whitelist_ok():
         json_body={
             "ticket_id": "tkt-review-reject",
             "action": "reject_for_reopen",
-            "admin_id": "admin-1",
         },
     ),
     seed=_seed_review_reject,
@@ -409,7 +406,6 @@ def review_action_reject_for_reopen_ok():
         json_body={
             "ticket_id": "tkt-nonexistent-999",
             "action": "approve_close",
-            "admin_id": "admin-1",
         },
     ),
     # No seed → service returns TicketActionOutcome(error_code=NOT_FOUND)
@@ -434,7 +430,6 @@ def review_action_not_found_error():
         json_body={
             "ticket_id": "tkt-review-reject",
             "action": "bogus_action",
-            "admin_id": "admin-1",
         },
     ),
     seed=_seed_review_reject,
@@ -467,7 +462,6 @@ def _seed_review_open_ticket(world) -> None:
         json_body={
             "ticket_id": "tkt-review-open-status",
             "action": "approve_close",
-            "admin_id": "admin-1",
         },
     ),
     seed=_seed_review_open_ticket,
