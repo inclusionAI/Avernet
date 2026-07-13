@@ -21,11 +21,14 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from agentclaw.community.adapters.http.dependencies import (
     RequestContext,
     get_request_context,
+)
+from agentclaw.community.adapters.http.economy.auth import (
+    verify_economy_internal_token,
 )
 from agentclaw.community.adapters.http.economy.schemas import (
     ApiResponse,
@@ -35,12 +38,11 @@ from agentclaw.community.adapters.http.economy.schemas import (
     OfflineBatchResponse,
     RecordProcessResultItem,
 )
-from agentclaw.community.di import Injected
-from agentclaw.community.di.config import EconomyInternalToken
 from agentclaw.community.api.governance_service import (
     GovernanceFeedbackServiceProtocol,
     GovernanceRecordProcessProtocol,
 )
+from agentclaw.community.di import Injected
 
 
 log = logging.getLogger(__name__)
@@ -54,27 +56,6 @@ router = APIRouter(prefix="/api/economy/governance", tags=["economy-governance"]
 # Lazy imports to avoid circular dependency at module level
 _FeedbackService = GovernanceFeedbackServiceProtocol
 _OfflineBatchSvc = GovernanceRecordProcessProtocol
-
-
-async def verify_economy_internal_token(
-    authorization: str | None = Header(None, description="Bearer <token>"),
-    token_cfg: EconomyInternalToken = Injected(EconomyInternalToken),
-) -> None:
-    """Raise 401 unless the request carries the configured offline-batch token.
-
-    Static Bearer token gate for offline-batch — its callers (ODPS pipeline /
-    upload_governance_data.py) have no user session (cookie/SSO unreachable),
-    so API-friendly static token is the only viable auth. Token value is
-    resolved by ``EconomyGovernanceModule`` via SecretResolver (singlebox
-    fallback / prod Mist). ``Header(None)`` so a missing header yields a
-    uniform 401 (not a 422 leaking "header required").
-    """
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid authorization header")
-    token = authorization[7:]
-    # No token configured = feature off / secret unresolvable → reject all.
-    if not token_cfg.value or token != token_cfg.value:
-        raise HTTPException(status_code=401, detail="Invalid token")
 
 
 @router.post("/card-callback", summary="卡片回调 (iframe fetch POST)")
