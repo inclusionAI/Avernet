@@ -18,10 +18,9 @@ def _percent(covered: int, total: int) -> float:
 
 
 def _matches_core_path(filename: str, prefixes: list[str]) -> bool:
-    normalized = filename.replace("\\", "/").lstrip("./")
+    normalized = f"/{filename.replace('\\', '/').strip('./')}/"
     return any(
-        normalized.startswith(prefix)
-        or f"/{prefix}" in normalized
+        f"/{prefix.replace('\\', '/').strip('./').rstrip('/')}/" in normalized
         for prefix in prefixes
     )
 
@@ -114,9 +113,7 @@ def validate_thresholds(report: dict[str, Any]) -> list[str]:
         actual = float(report[metric_name]["percent"])
         minimum = float(thresholds[threshold_name])
         if actual < minimum:
-            errors.append(
-                f"{report['name']} {label} {actual:.2f}% < {minimum:.2f}%"
-            )
+            errors.append(f"{report['name']} {label} {actual:.2f}% < {minimum:.2f}%")
     return errors
 
 
@@ -124,8 +121,7 @@ def _metric_markdown(label: str, metric: dict[str, Any]) -> str:
     if metric.get("status") == "not_applicable":
         return f"- {label}: N/A - {metric['reason']}"
     return (
-        f"- {label}: {metric['percent']:.2f}% "
-        f"({metric['covered']}/{metric['total']})"
+        f"- {label}: {metric['percent']:.2f}% ({metric['covered']}/{metric['total']})"
     )
 
 
@@ -179,7 +175,8 @@ def _render_dashboard(summary: dict[str, Any]) -> str:
             + _metric_html("Plugin API", report["plugin_api"])
             + "</div></section>"
         )
-    return """<!doctype html>
+    return (
+        """<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Singlebox Coverage</title>
 <style>
@@ -187,7 +184,10 @@ body{font-family:system-ui,sans-serif;margin:0;background:#f4f6f8;color:#18212b}
 section{background:#fff;border:1px solid #dce2e8;border-radius:8px;padding:20px}.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .metric{border-left:4px solid #1677ff;padding:12px;background:#f8fafc}.metric span,.metric small{display:block;color:#5c6b7a}.metric strong{display:block;font-size:28px;margin:8px 0}
 @media(max-width:720px){.metrics{grid-template-columns:1fr}}
-</style><main><h1>Singlebox Coverage</h1>""" + "".join(cards) + "</main></html>\n"
+</style><main><h1>Singlebox Coverage</h1>"""
+        + "".join(cards)
+        + "</main></html>\n"
+    )
 
 
 def update_report_artifacts(
@@ -222,18 +222,21 @@ def _load_jsonl_keys(path: Path) -> list[str]:
     if not path.is_file():
         return []
     keys: list[str] = []
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        if not line.strip():
-            continue
-        try:
-            item = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"invalid JSONL at {path}:{line_number}: {exc}") from exc
-        if not isinstance(item, dict):
-            continue
-        key = item.get("key")
-        if isinstance(key, str):
-            keys.append(key)
+    with path.open(encoding="utf-8") as lines:
+        for line_number, line in enumerate(lines, 1):
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"invalid JSONL at {path}:{line_number}: {exc}"
+                ) from exc
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key")
+            if isinstance(key, str):
+                keys.append(key)
     return keys
 
 
@@ -266,6 +269,7 @@ def main() -> int:
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
+
     def display(metric: dict[str, Any]) -> str:
         if metric.get("status") == "not_applicable":
             return "N/A"

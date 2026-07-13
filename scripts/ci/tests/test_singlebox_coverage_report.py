@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from singlebox_coverage_report import (  # noqa: E402
     _load_jsonl_keys,
+    _matches_core_path,
     build_module_report,
     update_report_artifacts,
     validate_thresholds,
@@ -94,6 +95,18 @@ def test_build_module_report_filters_core_and_deduplicates_router_hits():
         "covered_items": [],
         "missing_items": [],
     }
+
+
+def test_matches_core_path_requires_a_directory_boundary():
+    prefix = ["src/agentclaw/community/core/devices"]
+
+    assert _matches_core_path("src/agentclaw/community/core/devices/models.py", prefix)
+    assert _matches_core_path(
+        "/repo/src/agentclaw/community/core/devices/models.py", prefix
+    )
+    assert not _matches_core_path(
+        "src/agentclaw/community/core/devices_other/models.py", prefix
+    )
 
 
 def test_build_module_report_rejects_unknown_module():
@@ -247,17 +260,37 @@ def test_update_report_artifacts_marks_threshold_failure(tmp_path: Path):
 def test_load_jsonl_keys_ignores_non_object_json_values(tmp_path: Path):
     hits_path = tmp_path / "hits.jsonl"
     hits_path.write_text(
-        '\n'.join(
+        "\n".join(
             [
                 '{"key": "GET /api/v1/devices"}',
                 '["not", "an", "object"]',
-                'null',
+                "null",
                 '"plain string"',
                 '{"key": 42}',
             ]
         )
-        + '\n',
+        + "\n",
         encoding="utf-8",
     )
 
     assert _load_jsonl_keys(hits_path) == ["GET /api/v1/devices"]
+
+
+def test_load_jsonl_keys_streams_lines_without_read_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    hits_path = tmp_path / "hits.jsonl"
+    hits_path.write_text(
+        '{"key": "GET /api/v1/devices"}\n{"key": "DevicePlugin.read"}\n',
+        encoding="utf-8",
+    )
+
+    def fail_read_text(*_args, **_kwargs):
+        raise AssertionError("JSONL input must be streamed")
+
+    monkeypatch.setattr(Path, "read_text", fail_read_text)
+
+    assert _load_jsonl_keys(hits_path) == [
+        "GET /api/v1/devices",
+        "DevicePlugin.read",
+    ]

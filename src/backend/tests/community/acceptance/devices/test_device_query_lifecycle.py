@@ -14,6 +14,7 @@ Acceptance covers only the empty/no-data contract:
 
 Off by default; enable with RUN_ACCEPTANCE=1.
 """
+
 from __future__ import annotations
 
 import json
@@ -43,16 +44,17 @@ def wait_device_active(
 ) -> dict:
     """Wait for the real Backend -> BaaS publish flow to activate a binding."""
     deadline = time.monotonic() + timeout_sec
-    last: dict | None = None
+    last: object | None = None
     while time.monotonic() < deadline:
         response = client.get(f"/api/v1/devices/{binding_id}")
         if response.status_code == 200:
             payload = response.json()
-            if payload.get("success") is True:
-                last = payload["data"]
-                if last["status"] == "ACTIVE":
-                    return last
-                assert last["status"] != "FAILED", last
+            if isinstance(payload, dict) and payload.get("success") is True:
+                last = payload.get("data")
+                if isinstance(last, dict):
+                    if last.get("status") == "ACTIVE":
+                        return last
+                    assert last.get("status") != "FAILED", last
             else:
                 # Bot readiness and the BaaS alive callback are asynchronous. A
                 # business error may briefly race the SQLite callback transaction.
@@ -70,7 +72,9 @@ def test_devices_list_empty_live(live_backend, acceptance_fs_root):
     """List empty on a fresh LOCAL backend with no device bindings seeded."""
     flow = next(c for c in DEVICES_LIFECYCLE_FLOWS if c.name == "devices-list-empty")
     ctx = run_flow_live(
-        flow, base_url=live_backend, fs_root=acceptance_fs_root,
+        flow,
+        base_url=live_backend,
+        fs_root=acceptance_fs_root,
         default_headers=HEADERS,
     )
     assert ctx is not None
@@ -107,7 +111,9 @@ def test_devices_lifecycle_baseline(live_backend, acceptance_fs_root):
     with httpx.Client(base_url=live_backend, headers=HEADERS, timeout=10.0) as client:
         list_resp = client.get("/api/v1/devices").json()
         get_missing_resp = client.get("/api/v1/devices/9999").json()
-        by_id_missing_resp = client.get("/api/v1/devices/by-id/dev_baseline_missing").json()
+        by_id_missing_resp = client.get(
+            "/api/v1/devices/by-id/dev_baseline_missing"
+        ).json()
 
     # List envelope confirmed by Task 0 probe: data: {total, items}.
     snapshot = {
@@ -162,9 +168,9 @@ def test_device_live_baas_provider_lifecycle(live_backend):
         assert detail["device_provider"] == "baas"
         assert detail["status"] == "ACTIVE"
 
-        by_device_id = assert_success(
-            client.get(f"/api/v1/devices/by-id/{device_id}")
-        )["data"]
+        by_device_id = assert_success(client.get(f"/api/v1/devices/by-id/{device_id}"))[
+            "data"
+        ]
         assert by_device_id["id"] == binding_id
 
         listed = assert_success(client.get("/api/v1/devices"))["data"]
@@ -213,7 +219,9 @@ def test_device_live_baas_provider_lifecycle(live_backend):
                 },
             )
         )["data"]
-        assert any(item["id"] == binding_id for item in connectable["items"]), connectable
+        assert any(item["id"] == binding_id for item in connectable["items"]), (
+            connectable
+        )
 
         inventory = assert_success(
             client.get(
