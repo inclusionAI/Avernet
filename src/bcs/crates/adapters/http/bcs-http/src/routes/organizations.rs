@@ -12,8 +12,8 @@ use bcs_protocol::{
 };
 use bcs_service_api::{
     CreateOrganizationCommand, OrganizationAuth, OrganizationCandidateBot,
-    OrganizationCandidateQuery, PutOrganizationMemberCommand, ServiceError,
-    UpdateOrganizationCommand,
+    OrganizationCandidateQuery, OrganizationMemberPageQuery, PutOrganizationMemberCommand,
+    ServiceError, UpdateOrganizationCommand,
 };
 use serde::Deserialize;
 
@@ -32,6 +32,8 @@ pub struct ListMembersQuery {
     #[serde(default)]
     include_disabled: bool,
     role: Option<String>,
+    offset: Option<u64>,
+    limit: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -175,23 +177,33 @@ pub async fn list_members(
     Query(query): Query<ListMembersQuery>,
 ) -> Result<Json<OrganizationMemberListResponse>, HttpAdapterError> {
     let auth = organization_auth(provider_id, &headers)?;
-    let members = state
+    let offset = query.offset.unwrap_or(0);
+    let limit = query.limit.unwrap_or(50);
+    if !(1..=200).contains(&limit) {
+        return Err(HttpAdapterError::BadRequest(
+            "limit must be between 1 and 200".to_string(),
+        ));
+    }
+    let page = state
         .services
         .organization_management
-        .list_members(
+        .list_members_page(
             auth,
             &organization_code,
-            query.include_disabled,
-            query.role.as_deref(),
+            OrganizationMemberPageQuery {
+                include_disabled: query.include_disabled,
+                role: query.role,
+                offset,
+                limit,
+            },
         )
         .await
         .map_err(organization_error)?;
-    let total = members.len() as u64;
     Ok(Json(OrganizationMemberListResponse {
-        members: members.into_iter().map(member_to_response).collect(),
-        offset: 0,
-        limit: total,
-        total,
+        members: page.members.into_iter().map(member_to_response).collect(),
+        offset: page.offset,
+        limit: page.limit,
+        total: page.total,
     }))
 }
 

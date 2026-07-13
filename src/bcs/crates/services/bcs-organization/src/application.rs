@@ -5,7 +5,8 @@ use bcs_domain::{Organization, OrganizationMember};
 use bcs_service_api::{
     CreateOrganizationCommand, OrganizationAuth, OrganizationCandidateBot,
     OrganizationCandidateQuery, OrganizationCoreService, OrganizationManagementService,
-    ProviderCoreService, PutOrganizationMemberCommand, ServiceResult, UpdateOrganizationCommand,
+    OrganizationMemberPage, OrganizationMemberPageQuery, ProviderCoreService,
+    PutOrganizationMemberCommand, ServiceResult, UpdateOrganizationCommand,
 };
 
 #[derive(Clone)]
@@ -130,6 +131,18 @@ impl OrganizationManagementService for OrganizationManagement {
                 include_disabled,
                 role,
             )
+            .await
+    }
+
+    async fn list_members_page(
+        &self,
+        auth: OrganizationAuth,
+        organization_code: &str,
+        query: OrganizationMemberPageQuery,
+    ) -> ServiceResult<OrganizationMemberPage> {
+        self.authenticate(&auth).await?;
+        self.core
+            .list_members_page_for_manager(&auth.provider_id, organization_code, query)
             .await
     }
 

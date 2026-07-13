@@ -5,8 +5,9 @@ use async_trait::async_trait;
 use bcs_domain::{Organization, OrganizationMember, ProviderOrganizationManagementConfig};
 use bcs_service_api::{
     AuthorizedOrganizationPair, BotCapabilities, BotRegistryCoreService, CreateOrganizationRecord,
-    ListOrganizationMembersQuery, ListOrganizationsQuery, OrganizationCandidateBot,
-    OrganizationCandidateQuery, OrganizationCoreService, OrganizationRepoPort,
+    ListOrganizationMembersPageQuery, ListOrganizationMembersQuery, ListOrganizationsQuery,
+    OrganizationCandidateBot, OrganizationCandidateQuery, OrganizationCoreService,
+    OrganizationMemberPage, OrganizationMemberPageQuery, OrganizationRepoPort,
     ProviderBotBindingRepoPort, ProviderRecord, ProviderRepoPort, ServiceError, ServiceResult,
     UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
 };
@@ -416,6 +417,29 @@ impl OrganizationCoreService for OrganizationCore {
                 organization_code: organization_code.to_string(),
                 include_disabled,
                 role: role.map(str::to_string),
+            })
+            .await
+    }
+
+    async fn list_members_page_for_manager(
+        &self,
+        managing_provider_id: &str,
+        organization_code: &str,
+        query: OrganizationMemberPageQuery,
+    ) -> ServiceResult<OrganizationMemberPage> {
+        if let Some(role) = query.role.as_deref() {
+            validate_external_id("role", role)?;
+        }
+        self.require_managed_organization(managing_provider_id, organization_code)
+            .await?;
+        self.organizations
+            .list_members_page(ListOrganizationMembersPageQuery {
+                env: self.env.clone(),
+                organization_code: organization_code.to_string(),
+                include_disabled: query.include_disabled,
+                role: query.role,
+                offset: query.offset,
+                limit: query.limit,
             })
             .await
     }

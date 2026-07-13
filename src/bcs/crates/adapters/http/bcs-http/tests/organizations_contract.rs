@@ -10,7 +10,8 @@ use bcs_domain::{Organization, OrganizationMember};
 use bcs_http::{router::build_router, state::HttpAppState};
 use bcs_service_api::{
     CreateOrganizationCommand, OrganizationAuth, OrganizationCandidateBot,
-    OrganizationCandidateQuery, OrganizationManagementService, OrganizationMemberPageQuery,
+    OrganizationCandidateQuery, OrganizationManagementService, OrganizationMemberPage,
+    OrganizationMemberPageQuery,
     PutOrganizationMemberCommand, ServiceError, ServiceResult, UpdateOrganizationCommand,
 };
 use bcs_services_container::Services;
@@ -123,6 +124,33 @@ impl OrganizationManagementService for RecordingOrganizationManagement {
         Ok(vec![sample_member(organization_code.to_string(), "bot-b".to_string())])
     }
 
+    async fn list_members_page(
+        &self,
+        auth: OrganizationAuth,
+        organization_code: &str,
+        query: OrganizationMemberPageQuery,
+    ) -> ServiceResult<OrganizationMemberPage> {
+        self.record(format!(
+            "list_members_page:{}:{organization_code}:{}:{:?}:{}:{}",
+            auth.provider_id,
+            query.include_disabled,
+            query.role,
+            query.offset,
+            query.limit,
+        ))
+        .await?;
+        Ok(OrganizationMemberPage {
+            members: if query.offset == 0 {
+                vec![sample_member(organization_code.to_string(), "bot-b".to_string())]
+            } else {
+                Vec::new()
+            },
+            total: 1,
+            offset: query.offset,
+            limit: query.limit,
+        })
+    }
+
     async fn candidate_bots(
         &self,
         auth: OrganizationAuth,
@@ -208,6 +236,52 @@ async fn pagination_returns_requested_page_metadata() {
 }
 
 #[tokio::test]
+async fn pagination_defaults_to_first_page_of_fifty() {
+    let app = test_app();
+    let response = request(
+        &app.app,
+        "GET",
+        "/providers/provider-a/organizations/promo-2026/members",
+        Some("provider-token"),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "members": [{
+                "organization_code": "promo-2026",
+                "bot_uuid": "bot-b",
+                "role": "traffic",
+                "disabled": false
+            }],
+            "offset": 0,
+            "limit": 50,
+            "total": 1
+        })
+    );
+    assert_eq!(
+        app.recording.calls.lock().await.as_slice(),
+        ["list_members_page:provider-a:promo-2026:false:None:0:50"]
+    );
+}
+
+#[tokio::test]
+async fn pagination_rejects_invalid_limit() {
+    let app = test_app();
+    for uri in [
+        "/providers/provider-a/organizations/promo-2026/members?limit=0",
+        "/providers/provider-a/organizations/promo-2026/members?limit=201",
+    ] {
+        let response = request(&app.app, "GET", uri, Some("provider-token"), None).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+    }
+    assert!(app.recording.calls.lock().await.is_empty());
+}
+
+#[tokio::test]
 async fn member_page_service_contract_applies_page_query() {
     let app = test_app();
     let page = app
@@ -234,7 +308,7 @@ async fn member_page_service_contract_applies_page_query() {
     assert_eq!(page.total, 1);
     assert_eq!(
         app.recording.calls.lock().await.as_slice(),
-        ["list_members:provider-a:promo-2026:false:Some(\"traffic\")"]
+        ["list_members_page:provider-a:promo-2026:false:Some(\"traffic\"):10:25"]
     );
 }
 

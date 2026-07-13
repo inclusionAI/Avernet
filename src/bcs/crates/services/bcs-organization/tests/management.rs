@@ -7,7 +7,8 @@ use bcs_organization::{OrganizationCore, OrganizationManagement};
 use bcs_organization_store::MemoryOrganizationRepo;
 use bcs_service_api::{
     BotRegistryCoreService, CreateOrganizationCommand, OrganizationAuth,
-    OrganizationCandidateQuery, OrganizationCoreService, OrganizationManagementService, ProviderAuthMode,
+    OrganizationCandidateQuery, OrganizationCoreService, OrganizationManagementService,
+    OrganizationMemberPageQuery, ProviderAuthMode,
     ProviderBotBindingRepoPort, ProviderBotCoreService, ProviderCoreService,
     ProviderCredentialRepoPort, ProviderOrganizationManagementConfig, ProviderRepoPort,
     PutOrganizationMemberCommand, RegisterProviderBotParams, ServiceError, Skill,
@@ -658,4 +659,48 @@ async fn effective_membership_rejects_disabled_resource_provider_and_missing_org
         .await
         .expect_err("disabled resource provider must be rejected");
     assert!(matches!(disabled_provider, ServiceError::Forbidden(reason) if reason == "organization_provider_grant_required"));
+}
+
+#[tokio::test]
+async fn member_page_for_manager_forwards_query_to_repository_page() {
+    let ctx = test_context().await;
+    let provider_a = register_provider(&ctx, "Provider A").await;
+    for bot_uuid in ["bot-c", "bot-a", "bot-b"] {
+        register_bot(&ctx, &provider_a, bot_uuid).await;
+    }
+    create_org(&ctx, &provider_a).await;
+    for bot_uuid in ["bot-c", "bot-a", "bot-b"] {
+        ctx.service
+            .put_member(PutOrganizationMemberCommand {
+                auth: provider_auth(&provider_a),
+                organization_code: "promo-2026".to_string(),
+                bot_uuid: bot_uuid.to_string(),
+                role: Some("traffic_analyst".to_string()),
+            })
+            .await
+            .expect("add member");
+    }
+
+    let page = ctx
+        .service
+        .list_members_page(
+            provider_auth(&provider_a),
+            "promo-2026",
+            OrganizationMemberPageQuery {
+                include_disabled: false,
+                role: Some("traffic_analyst".to_string()),
+                offset: 1,
+                limit: 1,
+            },
+        )
+        .await
+        .expect("list member page");
+
+    assert_eq!(page.total, 3);
+    assert_eq!(page.offset, 1);
+    assert_eq!(page.limit, 1);
+    assert_eq!(
+        page.members.iter().map(|member| member.bot_uuid.as_str()).collect::<Vec<_>>(),
+        vec!["bot-b"]
+    );
 }
