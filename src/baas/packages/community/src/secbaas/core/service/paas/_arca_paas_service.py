@@ -438,13 +438,10 @@ class ArcaPaasService(PaasService):
                 self._logger.info(
                     f"Destroying sandbox with paas_device_id: {paas_device_id}"
                 )
-                sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(
-                    paas_device_id
-                )
+                sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(paas_device_id)
             result = sandbox.destroy()
             success = (
-                result if isinstance(result, bool)
-                else getattr(result, "success", True)
+                result if isinstance(result, bool) else getattr(result, "success", True)
             )
         except ArcaSandboxNotFoundError:
             # Already destroyed — idempotent.  Fall through to storage cleanup.
@@ -459,8 +456,7 @@ class ArcaPaasService(PaasService):
             # "failed to connect" is NOT idempotent — it may be a transient
             # network error and the sandbox is still running.
             if "sandbox" in error_str and (
-                "not found" in error_str
-                or "does not exist" in error_str
+                "not found" in error_str or "does not exist" in error_str
             ):
                 self._logger.warning(
                     "Sandbox %s not found during destroy, "
@@ -486,9 +482,7 @@ class ArcaPaasService(PaasService):
                     if deleted:
                         self._logger.info("Storage deleted: %s", storage_id)
                     else:
-                        self._logger.warning(
-                            "Storage deletion failed: %s", storage_id
-                        )
+                        self._logger.warning("Storage deletion failed: %s", storage_id)
                 except Exception:
                     self._logger.warning(
                         "Storage deletion exception for %s",

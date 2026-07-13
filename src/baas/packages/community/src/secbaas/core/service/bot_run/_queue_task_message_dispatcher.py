@@ -31,9 +31,9 @@ from secbaas.core.repository.bot_run import BotRunRepository
 from secbaas.logger import get_logger
 
 if TYPE_CHECKING:
+    from secbaas.api.config_manage import SystemConfigManageService
     from secbaas.core.repository.bot_run_queue import BotRunQueueRepository
     from secbaas.core.repository.bot_run_queue_chunk import BotRunQueueChunkRepository
-    from secbaas.core.service.bot_run import BotConcurrencyManager
     from secbaas.spi.cache import CachePlugin
 
 logger = get_logger("core-bot-run")
@@ -51,25 +51,24 @@ class QueueTaskMessageDispatcher:
         self,
         run_repository: BotRunRepository,
         queue_repository: BotRunQueueRepository,
-        qpm_manager: BotConcurrencyManager,
         chunk_repository: BotRunQueueChunkRepository,
         cache_plugin: CachePlugin,
         max_queue_depth: int = 0,
+        system_config_service: SystemConfigManageService | None = None,
     ):
         self._run_repository = run_repository
         self._queue_repository = queue_repository
-        self._qpm_manager = qpm_manager
         self._max_queue_depth = max_queue_depth
         self._chunk_repository = chunk_repository
         self._cache_plugin = cache_plugin
+        self._system_config_service = system_config_service
 
     @property
     def order(self) -> int:
         return 100
 
     def accepts(self, bot_id: str) -> bool:
-        """Accept only bot_ids that have a QPM config entry."""
-        return self._qpm_manager.get_concurrency_num(bot_id) is not None
+        return True
 
     async def dispatch_send(
         self,
@@ -267,7 +266,33 @@ class QueueTaskMessageDispatcher:
                     return
 
         finally:
-            self._cleanup_chunks(run_id)
+            if self._should_cleanup_chunks():
+                self._cleanup_chunks(run_id)
+
+    def _should_cleanup_chunks(self) -> bool:
+        """是否在流结束后清理 chunk 记录。
+
+        从 system_config 读取 ``bot_run.chunk_cleanup_enabled`` 配置：
+        - 未配置或值为 ``"true"``：执行清理（默认行为）
+        - 值为 ``"false"``：跳过清理
+        """
+
+        if self._system_config_service is None:
+            return True
+        try:
+            config = self._system_config_service.get_config(
+                "bot_run.chunk_cleanup_enabled"
+            )
+        except Exception:
+            logger.warning(
+                "[queue_dispatcher] failed to read chunk cleanup config, "
+                "defaulting to cleanup enabled",
+                exc_info=True,
+            )
+            return False
+        if config is None:
+            return False
+        return (config.conf_value or "").strip().lower() == "true"
 
     def _cleanup_chunks(self, run_id: str) -> None:
         """清理 chunk 表中该 run 的所有记录。"""

@@ -26,7 +26,7 @@ import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from secbaas.api.bot_runtime import (
     BotBindingInfo,
@@ -52,6 +52,9 @@ from ._bot_run_utils import (
 )
 from ._bot_service_selector import BotServiceSelector
 from ._internal_protocols import BotService, MessageDispatcher
+
+if TYPE_CHECKING:
+    from secbaas.api.config_manage import SystemConfigManageService
 
 logger = get_logger("core-bot-run")
 
@@ -83,15 +86,17 @@ class BotRunner:
         bot_service_selector: BotServiceSelector,
         run_repository: BotRunRepository,
         bot_service_plugin: BotServicePlugin,
-        dispatcher: MessageDispatcher | list[MessageDispatcher],
+        dispatchers: list[MessageDispatcher],
+        system_config_service: SystemConfigManageService | None = None,
     ):
         self._bot_service_selector = bot_service_selector
         self._run_repository = run_repository
         self._bot_service_plugin = bot_service_plugin
-        if isinstance(dispatcher, list):
-            self._dispatchers = dispatcher
-        else:
-            self._dispatchers = [dispatcher]
+        self._dispatchers = dispatchers
+        self._system_config_service = system_config_service
+        self._dispatcher_map: dict[str, MessageDispatcher] = {
+            d.__class__.__name__: d for d in self._dispatchers
+        }
 
     # ── 公开方法 ─────────────────────────────────────────────────────────
 
@@ -357,7 +362,9 @@ class BotRunner:
         )
 
         # 委托 dispatcher 流式发送
-        stream_iter = self._select_dispatcher(bot_id).dispatch_send_stream(
+        stream_iter = self._select_dispatcher(
+            bot_id, method="stream"
+        ).dispatch_send_stream(
             bot_service=route.bot_service,
             run_id=message_id,
             session_id=actual_session_id,
@@ -541,16 +548,38 @@ class BotRunner:
                 exc_info=exc,
             )
 
-    def _select_dispatcher(self, bot_id: str) -> MessageDispatcher:
-        """Select the highest-order dispatcher that accepts the given bot_id.
+    def _select_dispatcher(
+        self, bot_id: str, *, method: str | None = "chat"
+    ) -> MessageDispatcher:
+        """根据 system_config 选择 dispatcher。
 
-        Dispatchers are tried in descending order of ``order``; the first
-        one whose ``accepts(bot_id)`` returns True is selected.
+        查找顺序：``bot_run.dispatcher_route.{bot_id}:{method}`` → ``{bot_id}`` → ``*``。
+        值为 dispatcher 类名（如 ``"QueueTaskMessageDispatcher"``），未配置默认走 TaskMessageDispatcher。
         """
-        for d in sorted(self._dispatchers, key=lambda x: x.order, reverse=True):
-            if d.accepts(bot_id):
-                return d
-        return self._dispatchers[-1]
+        default_name = "TaskMessageDispatcher"
+        name = default_name
+        if self._system_config_service is not None:
+            keys = []
+            if method:
+                keys.append(f"bot_run.dispatcher_route.{bot_id}:{method}")
+            keys.append(f"bot_run.dispatcher_route.{bot_id}")
+            keys.append("bot_run.dispatcher_route.*")
+            for key in keys:
+                try:
+                    config = self._system_config_service.get_config(key)
+                except Exception:
+                    logger.warning(
+                        "[runner] failed to read dispatcher_route config for key=%s",
+                        key,
+                        exc_info=True,
+                    )
+                    continue
+                if config is not None:
+                    val = (config.conf_value or "").strip()
+                    if val:
+                        name = val
+                        break
+        return self._dispatcher_map.get(name, self._dispatchers[-1])
 
     async def _resolve_bot_route(
         self,
