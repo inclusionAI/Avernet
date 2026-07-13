@@ -17,7 +17,43 @@ make_fake_repo() {
   mkdir -p "${tmp}/src/backend" "${tmp}/src/baas/packages/community"
   cp "$SCRIPT" "${tmp}/scripts/ci/singlebox_coverage.sh"
   cp "$REPORTER" "${tmp}/scripts/ci/singlebox_coverage_report.py"
-  cp "$MANIFEST" "${tmp}/scripts/ci/singlebox_coverage_modules.yaml"
+  cat > "${tmp}/scripts/ci/singlebox_coverage_modules.yaml" <<'YAML'
+modules:
+  devices:
+    acceptance_targets:
+      - tests/community/acceptance/devices
+    system: backend
+    core_paths:
+      - src/agentclaw/community/core/devices/
+    router_api:
+      items:
+        - GET /api/v1/devices
+        - GET /api/v1/devices/{binding_id:int}
+        - GET /api/v1/devices/by-id/{device_id}
+    plugin_api:
+      status: not_applicable
+      reason: No device plugin denominator.
+      items: []
+    thresholds:
+      core_min_percent: 40
+      router_min_percent: 30
+  cron:
+    acceptance_targets:
+      - tests/community/acceptance/cron
+    system: backend
+    core_paths:
+      - src/agentclaw/community/core/cron/
+    router_api:
+      items:
+        - GET /api/cron
+    plugin_api:
+      status: not_applicable
+      reason: No cron plugin denominator in this fixture.
+      items: []
+    thresholds:
+      core_min_percent: 40
+      router_min_percent: 100
+YAML
   chmod +x "${tmp}/scripts/ci/singlebox_coverage.sh"
   cat > "${tmp}/scripts/singlebox.sh" <<'SH'
 #!/usr/bin/env bash
@@ -55,7 +91,10 @@ if [ "$*" = "--standalone start all" ]; then
 {"key":"POST /api/v1/devices/{binding_id:int}/release"}
 JSONL
   else
-    printf '%s\n' '{"key":"GET /api/health"}' > "${SINGLEBOX_COVERAGE_DIR}/backend/router_hits.jsonl"
+    cat > "${SINGLEBOX_COVERAGE_DIR}/backend/router_hits.jsonl" <<'JSONL'
+{"key":"GET /api/v1/devices"}
+{"key":"GET /api/cron"}
+JSONL
   fi
   printf '%s\n' '{"key":"BotService.create_bot"}' > "${SINGLEBOX_COVERAGE_DIR}/backend/plugin_hits.jsonl"
   printf '%s\n' '{"key":"GET /health"}' > "${SINGLEBOX_COVERAGE_DIR}/baas/router_hits.jsonl"
@@ -104,7 +143,7 @@ if [ "${1:-}" = "run" ] && [ "${2:-}" = "coverage" ]; then
       done
       [ -n "$output" ] || exit 23
       mkdir -p "$(dirname "$output")"
-      printf '%s\n' '{"totals":{"percent_covered":100},"files":{"src/agentclaw/community/core/devices/services/device_service.py":{"summary":{"covered_lines":50,"num_statements":100}}}}' > "$output"
+      printf '%s\n' '{"totals":{"percent_covered":100},"files":{"src/agentclaw/community/core/devices/services/device_service.py":{"summary":{"covered_lines":50,"num_statements":100}},"src/agentclaw/community/core/cron/services/cron_service.py":{"summary":{"covered_lines":50,"num_statements":100}}}}' > "$output"
       ;;
     html)
       output_dir=""
@@ -142,7 +181,9 @@ test_default_mode_runs_real_singlebox() {
 
   (
     cd "$tmp"
-    PATH="${tmp}/fake-bin:$PATH" SINGLEBOX_STUB_LOG="$log" UV_STUB_LOG="$uv_log" \
+    PATH="${tmp}/fake-bin:$PATH" \
+      PYTHON="${ROOT}/src/backend/.venv/bin/python" \
+      SINGLEBOX_STUB_LOG="$log" UV_STUB_LOG="$uv_log" \
       "${tmp}/scripts/ci/singlebox_coverage.sh" >/dev/null
   )
 
@@ -150,8 +191,10 @@ test_default_mode_runs_real_singlebox() {
     fail "default coverage mode should start the full standalone singlebox stack"
   grep -Fx -- "--standalone stop all" "$log" >/dev/null || \
     fail "default coverage mode should stop the full standalone singlebox stack"
-  grep -F "run pytest tests/community/acceptance/cron/test_cron_query_lifecycle.py" "$uv_log" >/dev/null || \
-    fail "default coverage mode should run the live acceptance smoke"
+  grep -F "run pytest tests/community/acceptance/devices tests/community/acceptance/cron" "$uv_log" >/dev/null || \
+    fail "default coverage mode should run every manifest acceptance target"
+  [ "$(grep -Fc -- '--standalone start all' "$log")" -eq 1 ] || \
+    fail "all modules should share one singlebox startup"
   grep -F "run coverage combine" "$uv_log" >/dev/null || \
     fail "default coverage mode should combine coverage"
   [ -s "${tmp}/scripts/.dependencies/coverage/singlebox/reports/summary.json" ] || \
@@ -160,6 +203,13 @@ test_default_mode_runs_real_singlebox() {
     fail "summary.md artifact missing"
   [ -s "${tmp}/scripts/.dependencies/coverage/singlebox/reports/dashboard.html" ] || \
     fail "dashboard.html artifact missing"
+  "${ROOT}/src/backend/.venv/bin/python" - "${tmp}/scripts/.dependencies/coverage/singlebox/reports/summary.json" <<'PY'
+import json
+import sys
+
+summary = json.load(open(sys.argv[1], encoding="utf-8"))
+assert list(summary["modules"]) == ["devices", "cron"]
+PY
 }
 
 test_mock_mode_is_not_supported() {
@@ -192,8 +242,7 @@ test_module_mode_reports_device_metrics() {
       SINGLEBOX_STUB_DEVICE_HITS=1 \
       UV_STUB_LOG="$uv_log" \
       "${tmp}/scripts/ci/singlebox_coverage.sh" \
-        --module devices \
-        --acceptance-target tests/community/acceptance/devices >/dev/null
+        --module devices >/dev/null
   )
 
   grep -F "run pytest tests/community/acceptance/devices" "$uv_log" >/dev/null || \
@@ -206,14 +255,41 @@ import sys
 summary = json.load(open(sys.argv[1], encoding="utf-8"))
 devices = summary["modules"]["devices"]
 assert devices["core"]["percent"] == 50.0
-assert devices["router_api"]["covered"] == 8
-assert devices["router_api"]["total"] == 18
+assert devices["router_api"]["covered"] == 3
+assert devices["router_api"]["total"] == 3
 assert devices["plugin_api"]["status"] == "not_applicable"
 PY
+}
+
+test_reporter_selection_failure_is_preserved() {
+  local tmp output rc
+  tmp="$(mktemp -d)"
+  make_fake_repo "$tmp"
+  cat > "${tmp}/scripts/ci/singlebox_coverage_modules.yaml" <<'YAML'
+modules:
+  empty:
+YAML
+
+  set +e
+  output="$(
+    cd "$tmp"
+    PYTHON="${ROOT}/src/backend/.venv/bin/python" \
+      "${tmp}/scripts/ci/singlebox_coverage.sh" 2>&1
+  )"
+  rc=$?
+  set -e
+
+  [ "$rc" -eq 2 ] || fail "invalid manifest should return reporter usage error"
+  grep -F "coverage module config must be a mapping: empty" <<<"$output" >/dev/null || \
+    fail "reporter selection error should be preserved"
+  if grep -F "singlebox coverage manifest selected no modules" <<<"$output" >/dev/null; then
+    fail "reporter failure should not be replaced by an empty-selection error"
+  fi
 }
 
 test_default_mode_runs_real_singlebox
 test_mock_mode_is_not_supported
 test_module_mode_reports_device_metrics
+test_reporter_selection_failure_is_preserved
 
 printf 'PASS: singlebox coverage gate tests\n'

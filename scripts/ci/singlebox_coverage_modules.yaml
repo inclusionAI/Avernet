@@ -1,6 +1,8 @@
 modules:
   devices:
     system: backend
+    acceptance_targets:
+      - tests/community/acceptance/devices
     core_paths:
       - src/agentclaw/community/core/devices/
     router_api:
@@ -30,3 +32,93 @@ modules:
     thresholds:
       core_min_percent: 43.36
       router_min_percent: 44.44
+
+  access:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/access
+    core_paths:
+      - src/agentclaw/community/core/access/
+    router_api: &pending_router_denominator
+      status: not_applicable
+      reason: Router denominator audit has not been migrated to the Avernet manifest yet.
+      items: []
+    plugin_api: &pending_plugin_denominator
+      status: not_applicable
+      reason: Plugin boundary denominator audit has not been migrated to the Avernet manifest yet.
+      items: []
+    thresholds:
+      core_min_percent: 42.80
+
+  bot_chat:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/bot_chat
+    core_paths:
+      - src/agentclaw/community/core/bot_chat/
+    router_api: *pending_router_denominator
+    plugin_api: *pending_plugin_denominator
+    thresholds:
+      core_min_percent: 40.66
+
+  bot_collaborator:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/bot_collaborator
+    core_paths:
+      - src/agentclaw/community/core/bot_collaborator/
+    router_api: *pending_router_denominator
+    plugin_api: *pending_plugin_denominator
+    thresholds:
+      core_min_percent: 53.88
+
+  cron:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/cron
+    core_paths:
+      - src/agentclaw/community/core/cron/
+    router_api: *pending_router_denominator
+    plugin_api: *pending_plugin_denominator
+    thresholds:
+      core_min_percent: 41.84
+
+  expert_chat:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/expert_chat
+    core_paths:
+      - src/agentclaw/community/core/expert_chat/
+    router_api: *pending_router_denominator
+    plugin_api: *pending_plugin_denominator
+    thresholds:
+      core_min_percent: 63.49
+
+  harness:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/harness
+    core_paths:
+      - src/agentclaw/community/core/harness/
+    router_api: *pending_router_denominator
+    plugin_api: *pending_plugin_denominator
+    thresholds:
+      core_min_percent: 41.59
+
+pending_modules:
+  skill_center:
+    acceptance_targets:
+      - tests/community/acceptance/skill_center
+    reason: Latest BaaS-backed runtime run has three failing acceptance stories.
+  bot_management:
+    acceptance_targets:
+      - tests/community/acceptance/bot_management
+    reason: Live owner lifecycle still expects the retired local device provider.
+  mcp:
+    acceptance_targets:
+      - tests/community/acceptance/mcp
+    reason: Permission baseline and live engine connection assumptions need migration.
+  resources:
+    acceptance_targets:
+      - tests/community/acceptance/resources
+    reason: File lifecycle creates no BaaS-backed bot binding before workspace access.

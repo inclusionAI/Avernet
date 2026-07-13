@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -12,7 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from singlebox_coverage_report import (  # noqa: E402
     _load_jsonl_keys,
     _matches_core_path,
+    acceptance_targets_for,
     build_module_report,
+    select_module_names,
     update_report_artifacts,
     validate_thresholds,
 )
@@ -44,6 +47,83 @@ def _manifest() -> dict:
             }
         }
     }
+
+
+def test_select_module_names_defaults_to_all_enabled_modules():
+    manifest = _manifest()
+    manifest["modules"]["devices"]["acceptance_targets"] = [
+        "tests/community/acceptance/devices"
+    ]
+    manifest["modules"]["cron"] = {
+        "enabled": True,
+        "acceptance_targets": ["tests/community/acceptance/cron"],
+    }
+    manifest["modules"]["future"] = {
+        "enabled": False,
+        "acceptance_targets": ["tests/community/acceptance/future"],
+    }
+
+    assert select_module_names(manifest, []) == ["devices", "cron"]
+    assert acceptance_targets_for(manifest, ["devices", "cron"]) == [
+        "tests/community/acceptance/devices",
+        "tests/community/acceptance/cron",
+    ]
+
+
+def test_select_module_names_rejects_unknown_requested_module():
+    with pytest.raises(ValueError, match="unknown coverage module: missing"):
+        select_module_names(_manifest(), ["missing"])
+
+
+def test_select_module_names_rejects_non_mapping_module_config():
+    with pytest.raises(
+        ValueError, match="coverage module config must be a mapping: empty"
+    ):
+        select_module_names({"modules": {"empty": None}}, [])
+
+
+def test_acceptance_targets_are_deduplicated_in_module_order():
+    manifest = {
+        "modules": {
+            "one": {"acceptance_targets": ["shared", "one"]},
+            "two": {"acceptance_targets": ["shared", "two"]},
+        }
+    }
+
+    assert acceptance_targets_for(manifest, ["one", "two"]) == [
+        "shared",
+        "one",
+        "two",
+    ]
+
+
+def test_repository_manifest_registers_existing_coverage_modules_and_paths():
+    repo_root = Path(__file__).resolve().parents[3]
+    manifest = yaml.safe_load(
+        (repo_root / "scripts/ci/singlebox_coverage_modules.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    module_names = select_module_names(manifest, [])
+
+    assert module_names == [
+        "devices",
+        "access",
+        "bot_chat",
+        "bot_collaborator",
+        "cron",
+        "expert_chat",
+        "harness",
+    ]
+    for module_name in module_names:
+        module = manifest["modules"][module_name]
+        for target in module["acceptance_targets"]:
+            assert (repo_root / "src/backend" / target).exists(), target
+        for core_path in module["core_paths"]:
+            assert (repo_root / "src/backend" / core_path).exists(), core_path
+    for module in manifest["pending_modules"].values():
+        for target in module["acceptance_targets"]:
+            assert (repo_root / "src/backend" / target).exists(), target
 
 
 def _coverage() -> dict:
@@ -253,6 +333,37 @@ def test_update_report_artifacts_marks_threshold_failure(tmp_path: Path):
     update_report_artifacts(report_dir, report, threshold_errors=errors)
 
     summary = json.loads((report_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["status"] == "failed"
+    assert summary["threshold_errors"] == errors
+
+
+def test_update_report_artifacts_aggregates_multiple_modules_and_errors(
+    tmp_path: Path,
+):
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    (report_dir / "summary.json").write_text(
+        json.dumps({"mode": "real", "status": "passed"}),
+        encoding="utf-8",
+    )
+    devices = build_module_report(
+        manifest=_manifest(),
+        module_name="devices",
+        coverage=_coverage(),
+        router_hits=DEVICE_ROUTES,
+        plugin_hits=[],
+    )
+    cron = {
+        **devices,
+        "name": "cron",
+        "core": {"covered": 1, "total": 4, "percent": 25.0},
+    }
+    errors = ["cron core coverage 25.00% < 40.00%"]
+
+    update_report_artifacts(report_dir, [devices, cron], threshold_errors=errors)
+
+    summary = json.loads((report_dir / "summary.json").read_text(encoding="utf-8"))
+    assert list(summary["modules"]) == ["devices", "cron"]
     assert summary["status"] == "failed"
     assert summary["threshold_errors"] == errors
 
