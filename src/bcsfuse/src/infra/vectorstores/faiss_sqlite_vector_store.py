@@ -85,10 +85,23 @@ class FaissSqliteVectorStore:
         try:
             points = self._backend.load_all()
             if points:
-                self._faiss_store.upsert(points)
+                # Filter out vectors with mismatched dimensions (legacy pickle data)
+                valid_points = []
+                for p in points:
+                    if len(p.vector) == self._dimension:
+                        valid_points.append(p)
+                    else:
+                        logger.warning(
+                            "[FaissSqliteVectorStore] Skipping vector with mismatched dimension: "
+                            "id='%s', expected=%d, got=%d",
+                            p.id, self._dimension, len(p.vector),
+                        )
+                if valid_points:
+                    self._faiss_store.upsert(valid_points)
+                skipped = len(points) - len(valid_points)
                 logger.info(
-                    "[FaissSqliteVectorStore] Loaded %d vectors from SQLite",
-                    len(points)
+                    "[FaissSqliteVectorStore] Loaded %d vectors from SQLite (skipped %d with bad dimension)",
+                    len(valid_points), skipped,
                 )
             self._last_sync_time = self._backend.get_last_modified_time()
         except Exception as e:

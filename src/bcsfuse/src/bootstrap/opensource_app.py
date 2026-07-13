@@ -138,4 +138,128 @@ def create_opensource_app(mode: str = None) -> FastAPI:
         # Log but don't fail - OSS routes are optional
         logger.warning(f"Failed to mount OSS business routes: {e}. Continuing with health endpoints only.", exc_info=True)
 
+    # ========================================
+    # Background Index Build (non-blocking)
+    # ========================================
+    # Start vector index build in a daemon thread so that search/recommend
+    # requests are responsive immediately.  Results will be empty until the
+    # build completes, but the API won't block for minutes.
+    try:
+        from src.infra.config.feature_flags import FeatureFlags
+        if FeatureFlags.is_enabled("ENABLE_PROFILE_EMBEDDING_INDEX"):
+            import threading
+
+            def _background_build_index():
+                import time
+                start = time.time()
+                try:
+                    logger.info("[Startup] Background vector index build starting...")
+                    from src.interfaces.api.dependencies.fusion_dependencies import (
+                        _get_embedding_generator,
+                        _get_profile_source,
+                        _get_registry_store,
+                        _get_runtime_state_store,
+                    )
+
+                    embedding_gen = _get_embedding_generator()
+                    profile_src = _get_profile_source()
+                    vector_store = context.registry.get("vector_store")
+
+                    if not embedding_gen:
+                        logger.warning("[Startup] Embedding generator not available — skipping background index build")
+                        return
+                    if not profile_src:
+                        logger.warning("[Startup] Profile source not available — skipping background index build")
+                        return
+                    if vector_store and vector_store.size() > 0:
+                        logger.info("[Startup] Vector store already has %d vectors — skipping background index build", vector_store.size())
+                        return
+
+                    from src.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
+                    from src.infra.indexing.profile_embedding_store import ProfileEmbeddingStore
+                    from src.infra.config.data_paths import resolve_data_path
+
+                    dimension = getattr(vector_store, "dimension", 4096) if vector_store else 4096
+                    profile_store = ProfileEmbeddingStore(
+                        dimension=dimension,
+                        index_type="local",
+                        db_path=resolve_data_path("data/vector_store.db"),
+                        database=None,
+                        datasource_name="agentclaw_ds",
+                        vector_store=vector_store,
+                    )
+                    indexer = ProfileEmbeddingIndexer(
+                        embedding_provider=embedding_gen,
+                        profile_store=profile_store,
+                    )
+
+                    scan_result = profile_src.scan()
+                    all_profiles = scan_result.profiles
+                    logger.info("[Startup] Found %d profiles to index", len(all_profiles))
+
+                    if not all_profiles:
+                        logger.warning("[Startup] No profiles found — skipping background index build")
+                        return
+
+                    # Build worker_states for payload (availability, runtime_state)
+                    worker_states = {}
+                    try:
+                        from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
+                        from src.domain.models.worker_runtime_state import WorkerRuntimeState
+
+                        registry_store = _get_registry_store()
+                        runtime_state_store = _get_runtime_state_store()
+                        active_workers = registry_store.list(lifecycle_states=[WorkerLifecycleState.ACTIVE])
+                        worker_ids = [w.id for w in active_workers]
+                        runtime_states = runtime_state_store.batch_get_runtime_states(worker_ids)
+
+                        for worker in active_workers:
+                            runtime_state = runtime_states.get(worker.id)
+                            state_info = {
+                                "availability": worker.state.availability.value,
+                                "runtime_state": runtime_state.value if runtime_state else WorkerRuntimeState.OFFLINE.value,
+                            }
+                            worker_states[worker.id] = state_info
+                            handle = worker.identity.handle
+                            if handle and handle.startswith("@"):
+                                worker_states[handle[1:]] = state_info
+                            if hasattr(worker, "external_id") and worker.external_id:
+                                worker_states[worker.external_id] = state_info
+
+                        logger.info("[Startup] Loaded %d worker states for indexing", len(worker_states))
+                    except Exception as e:
+                        logger.warning("[Startup] Failed to load worker states: %s — indexing without visibility filters", e)
+
+                    result = indexer.build_index(
+                        profiles=all_profiles,
+                        clear_existing=False,
+                        worker_states=worker_states,
+                    )
+
+                    elapsed = time.time() - start
+                    if result.indexed_count > 0:
+                        logger.info(
+                            "✅ [Startup] Background index build completed: indexed=%d, failed=%d, duration=%.1fs",
+                            result.indexed_count, result.failed_count, elapsed,
+                        )
+                        # Sync vectors to service index
+                        if vector_store:
+                            if hasattr(vector_store, "sync_from_backend"):
+                                vector_store.sync_from_backend(force=True)
+                            elif hasattr(vector_store, "sync_incremental"):
+                                vector_store.sync_incremental()
+                            logger.info("[Startup] Vector store now has %d vectors", vector_store.size())
+                    else:
+                        logger.warning("⚠️ [Startup] Background index build produced no results (duration=%.1fs)", elapsed)
+
+                except Exception as e:
+                    elapsed = time.time() - start
+                    logger.error("❌ [Startup] Background index build failed (duration=%.1fs): %s", elapsed, e, exc_info=True)
+
+            thread = threading.Thread(target=_background_build_index, daemon=True, name="bg-index-build")
+            thread.start()
+            logger.info("[Startup] Background index build thread started — search will return empty results until complete")
+    except Exception as e:
+        logger.warning("[Startup] Could not start background index build: %s", e)
+
     return app

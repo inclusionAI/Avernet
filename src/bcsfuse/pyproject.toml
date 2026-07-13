@@ -35,6 +35,7 @@ dependencies = [
     # Vector Store (numpy must be installed before faiss-cpu)
     "numpy==1.26.4",
     "faiss-cpu==1.8.0",
+    "packaging>=21.0",  # faiss loader requires packaging.version
     "qdrant-client>=1.12.0",
     # Database
     "mysql-connector-python>=8.0.0",

@@ -320,22 +320,56 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
         model=embedding_model,
         dimension=embedding_dimension,
     )
-    embedding_provider = RealEmbeddingProvider(settings=embedding_settings)
-    registry.register("embedding_provider", embedding_provider)
+    if embedding_settings.is_configured():
+        embedding_provider = RealEmbeddingProvider(settings=embedding_settings)
+        registry.register("embedding_provider", embedding_provider)
+    else:
+        missing = embedding_settings.missing_config()
+        logger.warning(
+            "Embedding not configured (missing: %s). Falling back to FakeEmbeddingProvider. "
+            "Semantic search will return deterministic but meaningless results.",
+            ", ".join(missing),
+        )
+        from src.infra.embedding.providers.fake_provider import FakeEmbeddingProvider
+        embedding_provider = FakeEmbeddingProvider(dimension=embedding_dimension)
+        registry.register("embedding_provider", embedding_provider)
 
     # HTTP reranker
     reranker_provider = HttpReranker()
     registry.register("reranker_provider", reranker_provider)
 
-    # Anthropic-compatible LLM provider (HTTP)
-    llm_settings = LLMSettings(
-        base_url=config.get("llm.base_url"),
-        auth_token=config.get("llm.auth_token"),
-        fast_model=config.get("llm.fast_model", "claude-3-sonnet"),
-        reasoning_model=config.get("llm.reasoning_model", "claude-3-opus"),
+    # Anthropic-compatible LLM provider (HTTP) — fallback to FakeLLMProvider if not configured
+    llm_base_url = (
+        os.getenv("LLM_BASE_URL")
+        or config.get("llm.base_url")
+        or ""
     )
-    llm_provider = AnthropicCompatibleProvider(settings=llm_settings)
-    registry.register("llm_provider", llm_provider)
+    llm_auth_token = (
+        os.getenv("LLM_AUTH_TOKEN")
+        or config.get("llm.auth_token")
+        or ""
+    )
+    if llm_base_url and llm_auth_token:
+        llm_settings = LLMSettings(
+            base_url=llm_base_url,
+            auth_token=llm_auth_token,
+            fast_model=config.get("llm.fast_model", "claude-3-sonnet"),
+            reasoning_model=config.get("llm.reasoning_model", "claude-3-opus"),
+        )
+        llm_provider = AnthropicCompatibleProvider(settings=llm_settings)
+        registry.register("llm_provider", llm_provider)
+    else:
+        logger.warning(
+            "LLM not configured (missing: %s). Falling back to FakeLLMProvider. "
+            "LLM-dependent features (fusion, question-rewrite, etc.) will use echo responses.",
+            ", ".join(filter(None, [
+                "LLM_BASE_URL" if not llm_base_url else None,
+                "LLM_AUTH_TOKEN" if not llm_auth_token else None,
+            ])),
+        )
+        from src.infra.public.llm.fake_llm_provider import FakeLLMProvider
+        llm_provider = FakeLLMProvider()
+        registry.register("llm_provider", llm_provider)
 
 
 def _build_dev_smoke_providers(registry: "ProviderRegistry", config: "YamlEnvConfigProvider") -> None:
