@@ -302,18 +302,21 @@ bcsfuse_clean() {
     # Stop first
     bcsfuse_stop || true
 
-    # Clean .runtime/data (Qdrant/Faiss data used by runtime mode)
+    # Resolve paths (same as bcsfuse_load_env)
+    BCSFUSE_RUNTIME_DIR="${BCSFUSE_RUNTIME_DIR:-${BCSFUSE_DIR}/.runtime}"
+
+    # Clean runtime data (SQLite DBs, Faiss index, Qdrant — all under .runtime/data/)
     local runtime_data_dir="${BCSFUSE_RUNTIME_DIR}/data"
-    if [ -d "$runtime_data_dir" ]; then
-        log_info "Removing bcsfuse runtime vector data: ${runtime_data_dir}"
+    if [ -d "$runtime_data_dir" ] && [ "$(ls -A "$runtime_data_dir" 2>/dev/null)" ]; then
+        log_info "Removing bcsfuse runtime data: ${runtime_data_dir}"
         rm -rf "${runtime_data_dir:?}"/*
     fi
 
-    # Clean project data/ directory (SQLite DBs, Faiss index — used by dev mode)
-    local project_data_dir="${BCSFUSE_DIR}/data"
-    if [ -d "$project_data_dir" ]; then
-        log_info "Removing bcsfuse project data: ${project_data_dir}"
-        rm -rf "${project_data_dir:?}"/*
+    # Clean legacy data/ directory (pre-unification; new data goes to .runtime/data/)
+    local legacy_data_dir="${BCSFUSE_DIR}/data"
+    if [ -d "$legacy_data_dir" ] && [ "$(ls -A "$legacy_data_dir" 2>/dev/null)" ]; then
+        log_warn "Removing legacy bcsfuse data (old path): ${legacy_data_dir}"
+        rm -rf "${legacy_data_dir:?}"/*
     fi
 
     # Clean logs
@@ -328,7 +331,10 @@ bcsfuse_clean() {
         rm -rf "${pids_dir:?}"/*
     fi
 
-    # Note: MySQL tables and .runtime/env/ are NOT cleaned
+    # NOT cleaned by default:
+    #   - .runtime/env/   (environment config with API keys)
+    #   - MySQL tables    (runtime mode business data)
+    # To reset MySQL: DROP DATABASE bcsfuse_oss; then re-run bootstrap
     log_info "bcsfuse cleaned (env and MySQL preserved)"
 }
 
