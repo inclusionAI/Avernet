@@ -1073,6 +1073,7 @@ dependencies = [
  "bcs-service-api",
  "bcs-test-support",
  "hex",
+ "serde_json",
  "sha2",
  "tokio",
 ]
