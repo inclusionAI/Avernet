@@ -60,9 +60,9 @@ class _SingleboxAllBaasRolloutPolicy(ArcaBotCreateBaasRolloutPolicy):
         self,
         *,
         user_id: str,
-        bot_type: str | None,
-        engine_type: str | None = None,
-        template_type: str | None = None,
+        bot_type: str,
+        engine_type: str,
+        template_type: str,
     ) -> ArcaBotCreateBaasRolloutDecision:
         return ArcaBotCreateBaasRolloutDecision(
             target_provider=BAAS_DEVICE_PROVIDER,
@@ -81,6 +81,9 @@ class SingleboxDevicesModule(Module):
         from agentclaw.community.plugins.local.device_connection_manager import (
             NoopDeviceConnectionManagerPlugin,
         )
+        from agentclaw.community.plugins.local.device_adapter_transport import (
+            InMemoryDeviceAdapterTransport,
+        )
 
         binder.bind(
             DeviceConnectionManagerPlugin,
@@ -88,6 +91,11 @@ class SingleboxDevicesModule(Module):
             scope=singleton,
         )
         binder.bind(BaasDeviceAccessor, to=BaasDeviceAccessor, scope=singleton)
+        binder.bind(
+            DeviceAdapterTransport,
+            to=InMemoryDeviceAdapterTransport,
+            scope=singleton,
+        )
 
     @singleton
     @provider
@@ -163,13 +171,3 @@ class SingleboxDevicesModule(Module):
         )
 
         return LocalNotifyBotLister(bot_repository=bot_repository)
-
-    @singleton
-    @provider
-    def device_adapter_transport(self) -> DeviceAdapterTransport:
-        """Preserve the current in-memory adapter seam in the OSS singlebox."""
-        from agentclaw.community.plugins.local.device_adapter_transport import (
-            InMemoryDeviceAdapterTransport,
-        )
-
-        return InMemoryDeviceAdapterTransport()

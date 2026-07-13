@@ -202,6 +202,7 @@ class TestDeviceServiceRouterInit:
             user_id="u001",
             bot_type="personal",
             engine_type="openclaw",
+            template_type="",
         )
 
         assert decision.target_provider == LOCAL_DEVICE_PROVIDER
@@ -321,6 +322,13 @@ class TestGetProviderForNewDevice:
         router._arca_baas_rollout_policy = _FakeArcaBotCreateBaasRolloutPolicy(LOCAL_DEVICE_PROVIDER)
 
         provider = router._get_provider_for_new_device("u001")
+
+        router._arca_baas_rollout_policy.decide.assert_called_once_with(
+            user_id="u001",
+            bot_type="",
+            engine_type="openclaw",
+            template_type="",
+        )
         assert provider is router._providers[LOCAL_DEVICE_PROVIDER]
 
     def test_unknown_create_provider_raises(self):

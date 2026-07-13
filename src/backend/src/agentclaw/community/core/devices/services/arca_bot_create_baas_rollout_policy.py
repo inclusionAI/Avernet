@@ -53,15 +53,15 @@ class ArcaBotCreateBaasRolloutPolicy:
         self,
         *,
         user_id: str,
-        bot_type: str | None,
-        engine_type: str | None = None,
-        template_type: str | None = None,
+        bot_type: str,
+        engine_type: str,
+        template_type: str,
     ) -> ArcaBotCreateBaasRolloutDecision:
         engine_bucket = self.normalize_engine_bucket(
             engine_type=engine_type,
             template_type=template_type,
         )
-        normalized_bot_type = (bot_type or "").strip().lower()
+        normalized_bot_type = bot_type.strip().lower()
 
         # 这里是存量 ARCA 创建分支的 BaaS 灰度，不是新引擎的强制路由。
         # 未分类分支先回退 ARCA，并通过 warning 暴露待归类的接入方。
@@ -195,10 +195,10 @@ class ArcaBotCreateBaasRolloutPolicy:
     def normalize_engine_bucket(
         cls,
         *,
-        engine_type: str | None,
-        template_type: str | None,
+        engine_type: str,
+        template_type: str,
     ) -> str:
-        normalized_engine = (engine_type or "openclaw").strip().lower().replace("-", "_")
+        normalized_engine = engine_type.strip().lower().replace("-", "_")
         if (
             normalized_engine == "claude_code"
             and template_type in cls.CODING_TEMPLATE_TYPES

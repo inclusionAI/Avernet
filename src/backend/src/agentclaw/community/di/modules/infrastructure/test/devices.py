@@ -160,9 +160,9 @@ class TestDevicesModule(Module):
                 self,
                 *,
                 user_id: str,
-                bot_type: str | None,
-                engine_type: str | None = None,
-                template_type: str | None = None,
+                bot_type: str,
+                engine_type: str,
+                template_type: str,
             ) -> ArcaBotCreateBaasRolloutDecision:
                 return ArcaBotCreateBaasRolloutDecision(
                     target_provider=LOCAL_DEVICE_PROVIDER,

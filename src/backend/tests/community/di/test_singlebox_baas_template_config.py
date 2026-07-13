@@ -57,8 +57,16 @@ async def test_missing_template_uuid_fails_with_clear_startup_error():
     config_service.get_config.return_value = None
     lifecycle = SingleboxBaasTemplateConfigLifecycle(
         config_service=config_service,
-        template_uuid=None,
+        template_uuid="",
     )
 
     with pytest.raises(RuntimeError, match="baas.template_uuid"):
         await lifecycle.startup()
+
+
+def test_template_uuid_rejects_none_at_construction():
+    with pytest.raises(TypeError, match="template_uuid must be str"):
+        SingleboxBaasTemplateConfigLifecycle(
+            config_service=MagicMock(),
+            template_uuid=None,  # type: ignore[arg-type]
+        )

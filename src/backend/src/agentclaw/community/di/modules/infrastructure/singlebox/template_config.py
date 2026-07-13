@@ -25,10 +25,12 @@ class SingleboxBaasTemplateConfigLifecycle(LifecycleBase):
         self,
         *,
         config_service: SystemConfigService,
-        template_uuid: str | None,
+        template_uuid: str,
     ) -> None:
+        if not isinstance(template_uuid, str):
+            raise TypeError("template_uuid must be str")
         self._config_service = config_service
-        self._template_uuid = template_uuid.strip() if template_uuid else ""
+        self._template_uuid = template_uuid.strip()
 
     async def startup(self) -> None:
         env = env_utils.get_current_env()
