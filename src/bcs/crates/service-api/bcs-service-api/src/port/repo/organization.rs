@@ -44,6 +44,24 @@ pub struct ListOrganizationMembersQuery {
     pub role: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ListOrganizationMembersPageQuery {
+    pub env: String,
+    pub organization_code: String,
+    pub include_disabled: bool,
+    pub role: Option<String>,
+    pub offset: u64,
+    pub limit: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct OrganizationMemberPage {
+    pub members: Vec<OrganizationMember>,
+    pub total: u64,
+    pub offset: u64,
+    pub limit: u64,
+}
+
 #[async_trait]
 pub trait OrganizationRepoPort: Send + Sync {
     async fn create_organization(
@@ -84,4 +102,29 @@ pub trait OrganizationRepoPort: Send + Sync {
         &self,
         query: ListOrganizationMembersQuery,
     ) -> ServiceResult<Vec<OrganizationMember>>;
+    async fn list_members_page(
+        &self,
+        query: ListOrganizationMembersPageQuery,
+    ) -> ServiceResult<OrganizationMemberPage> {
+        let members = self
+            .list_members(ListOrganizationMembersQuery {
+                env: query.env,
+                organization_code: query.organization_code,
+                include_disabled: query.include_disabled,
+                role: query.role,
+            })
+            .await?;
+        let total = members.len() as u64;
+        let members = members
+            .into_iter()
+            .skip(query.offset as usize)
+            .take(query.limit as usize)
+            .collect();
+        Ok(OrganizationMemberPage {
+            members,
+            total,
+            offset: query.offset,
+            limit: query.limit,
+        })
+    }
 }

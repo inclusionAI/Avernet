@@ -1,7 +1,10 @@
 use async_trait::async_trait;
 use bcs_domain::{Organization, OrganizationMember};
 
-use crate::{OrganizationCandidateBot, OrganizationCandidateQuery, ServiceResult};
+use crate::{
+    OrganizationCandidateBot, OrganizationCandidateQuery, OrganizationMemberPage, ServiceResult,
+};
+use crate::core::OrganizationMemberPageQuery;
 
 #[derive(Debug, Clone)]
 pub struct OrganizationAuth {
@@ -67,6 +70,33 @@ pub trait OrganizationManagementService: Send + Sync {
         include_disabled: bool,
         role: Option<&str>,
     ) -> ServiceResult<Vec<OrganizationMember>>;
+    async fn list_members_page(
+        &self,
+        auth: OrganizationAuth,
+        organization_code: &str,
+        query: OrganizationMemberPageQuery,
+    ) -> ServiceResult<OrganizationMemberPage> {
+        let members = self
+            .list_members(
+                auth,
+                organization_code,
+                query.include_disabled,
+                query.role.as_deref(),
+            )
+            .await?;
+        let total = members.len() as u64;
+        let members = members
+            .into_iter()
+            .skip(query.offset as usize)
+            .take(query.limit as usize)
+            .collect();
+        Ok(OrganizationMemberPage {
+            members,
+            total,
+            offset: query.offset,
+            limit: query.limit,
+        })
+    }
     async fn candidate_bots(
         &self,
         auth: OrganizationAuth,

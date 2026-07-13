@@ -49,6 +49,9 @@ pub struct OrganizationListResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrganizationMemberListResponse {
     pub members: Vec<OrganizationMemberResponse>,
+    pub offset: u64,
+    pub limit: u64,
+    pub total: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

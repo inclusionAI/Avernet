@@ -186,8 +186,12 @@ pub async fn list_members(
         )
         .await
         .map_err(organization_error)?;
+    let total = members.len() as u64;
     Ok(Json(OrganizationMemberListResponse {
         members: members.into_iter().map(member_to_response).collect(),
+        offset: 0,
+        limit: total,
+        total,
     }))
 }
 

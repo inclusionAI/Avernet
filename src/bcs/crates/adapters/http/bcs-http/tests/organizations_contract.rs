@@ -10,8 +10,8 @@ use bcs_domain::{Organization, OrganizationMember};
 use bcs_http::{router::build_router, state::HttpAppState};
 use bcs_service_api::{
     CreateOrganizationCommand, OrganizationAuth, OrganizationCandidateBot,
-    OrganizationCandidateQuery, OrganizationManagementService, PutOrganizationMemberCommand,
-    ServiceError, ServiceResult, UpdateOrganizationCommand,
+    OrganizationCandidateQuery, OrganizationManagementService, OrganizationMemberPageQuery,
+    PutOrganizationMemberCommand, ServiceError, ServiceResult, UpdateOrganizationCommand,
 };
 use bcs_services_container::Services;
 use serde_json::{Value, json};
@@ -181,6 +181,61 @@ async fn provider_scoped_organization_routes_call_application_service() {
         let response = request(&app.app, method, uri, Some("provider-token"), body).await;
         assert_eq!(response.status(), expected_status, "{method} {uri}");
     }
+}
+
+#[tokio::test]
+async fn pagination_returns_requested_page_metadata() {
+    let app = test_app();
+    let response = request(
+        &app.app,
+        "GET",
+        "/providers/provider-a/organizations/promo-2026/members?offset=10&limit=25",
+        Some("provider-token"),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "members": [],
+            "offset": 10,
+            "limit": 25,
+            "total": 1
+        })
+    );
+}
+
+#[tokio::test]
+async fn member_page_service_contract_applies_page_query() {
+    let app = test_app();
+    let page = app
+        .recording
+        .list_members_page(
+            OrganizationAuth {
+                provider_id: "provider-a".to_string(),
+                provider_admin_token: "provider-token".to_string(),
+            },
+            "promo-2026",
+            OrganizationMemberPageQuery {
+                include_disabled: false,
+                role: Some("traffic".to_string()),
+                offset: 10,
+                limit: 25,
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(page.members.is_empty());
+    assert_eq!(page.offset, 10);
+    assert_eq!(page.limit, 25);
+    assert_eq!(page.total, 1);
+    assert_eq!(
+        app.recording.calls.lock().await.as_slice(),
+        ["list_members:provider-a:promo-2026:false:Some(\"traffic\")"]
+    );
 }
 
 #[tokio::test]

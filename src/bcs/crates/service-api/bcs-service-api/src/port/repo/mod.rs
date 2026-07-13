@@ -22,8 +22,9 @@ pub use friend::{FriendRepoPort, FriendRequestRepoPort};
 pub use group::GroupRepoPort;
 pub use message::{MessageRepoError, MessageRepoPort};
 pub use organization::{
-    CreateOrganizationRecord, ListOrganizationMembersQuery, ListOrganizationsQuery,
-    OrganizationRepoPort, UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
+    CreateOrganizationRecord, ListOrganizationMembersPageQuery, ListOrganizationMembersQuery,
+    ListOrganizationsQuery, OrganizationMemberPage, OrganizationRepoPort, UpdateOrganizationRecord,
+    UpsertOrganizationMemberRecord,
 };
 pub use provider::{
     ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector,

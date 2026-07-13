@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use bcs_domain::{Organization, OrganizationMember};
 
-use crate::{BotCapabilities, ServiceResult};
+use crate::{BotCapabilities, OrganizationMemberPage, ServiceResult};
 
 #[derive(Debug, Clone)]
 pub struct AuthorizedOrganizationPair {
@@ -21,6 +21,14 @@ pub struct OrganizationCandidateBot {
 pub struct OrganizationCandidateQuery {
     pub q: Option<String>,
     pub provider_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OrganizationMemberPageQuery {
+    pub include_disabled: bool,
+    pub role: Option<String>,
+    pub offset: u64,
+    pub limit: u64,
 }
 
 #[async_trait]
@@ -76,6 +84,33 @@ pub trait OrganizationCoreService: Send + Sync {
         include_disabled: bool,
         role: Option<&str>,
     ) -> ServiceResult<Vec<OrganizationMember>>;
+    async fn list_members_page_for_manager(
+        &self,
+        managing_provider_id: &str,
+        organization_code: &str,
+        query: OrganizationMemberPageQuery,
+    ) -> ServiceResult<OrganizationMemberPage> {
+        let members = self
+            .list_members_for_manager(
+                managing_provider_id,
+                organization_code,
+                query.include_disabled,
+                query.role.as_deref(),
+            )
+            .await?;
+        let total = members.len() as u64;
+        let members = members
+            .into_iter()
+            .skip(query.offset as usize)
+            .take(query.limit as usize)
+            .collect();
+        Ok(OrganizationMemberPage {
+            members,
+            total,
+            offset: query.offset,
+            limit: query.limit,
+        })
+    }
     async fn candidate_bots(
         &self,
         managing_provider_id: &str,
