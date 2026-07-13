@@ -28,9 +28,6 @@ from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.data_init_service import DataInitService
-from agentclaw.community.core.bot_management.services.teclaw_status_reconciler import (
-    TeclawStatusReconciler,
-)
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
@@ -188,19 +185,6 @@ class TestDevicesModule(Module):
                 )
 
         return _LocalArcaBotCreateBaasRolloutPolicy()
-
-    @singleton
-    @provider
-    def teclaw_status_reconciler(self) -> TeclawStatusReconciler:
-        """No-thread reconciler for test boots (schedule seam is a no-op)."""
-        from unittest.mock import MagicMock
-
-        return TeclawStatusReconciler(
-            baas_service=MagicMock(),
-            bot_repository=MagicMock(),
-            device_binding_repo=MagicMock(),
-            schedule=lambda _fn, _delay: None,
-        )
 
     @singleton
     @provider

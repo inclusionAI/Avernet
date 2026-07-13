@@ -54,8 +54,8 @@ from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting
 from agentclaw.community.core.bot_management.services.teclaw_provision_service import (
     TeclawProvisionService,
 )
-from agentclaw.community.core.bot_management.services.teclaw_status_reconciler import (
-    TeclawStatusReconciler,
+from agentclaw.community.core.bot_management.services.teclaw_publish_task_handler import (
+    TeclawPublishTaskLifecycle,
 )
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
@@ -78,6 +78,7 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import Bo
 from agentclaw.community.core.service_bot.services.deploy.producer import (
     DeployArtifactProducerRouter,
 )
+from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.core.system_config import SystemConfigService
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
@@ -357,17 +358,15 @@ class BotManagementModule(Module):
     @singleton
     @provider
     @inject
-    def teclaw_status_reconciler(
+    def teclaw_publish_task_lifecycle(
         self,
+        registry: HandlerRegistry,
         baas_service: BaasService,
         bot_repository: BotRepository,
         device_binding_repo: DeviceBindingRepository,
-    ) -> TeclawStatusReconciler:
-        # Post-approve poller that converges a teclaw bot's status from PENDING to
-        # ACTIVE/FAILED, persisting to the bot row + device binding so the stored
-        # column is authoritative (read-through removed). Cycle-safe: its deps
-        # (baas / bot repo / binding repo) don't reach TeclawProvisionService.
-        return TeclawStatusReconciler(
+    ) -> TeclawPublishTaskLifecycle:
+        return TeclawPublishTaskLifecycle(
+            registry=registry,
             baas_service=baas_service,
             bot_repository=bot_repository,
             device_binding_repo=device_binding_repo,
@@ -381,7 +380,8 @@ class BotManagementModule(Module):
         baas_service: BaasService,
         deploy_artifact_producer_router: DeployArtifactProducerRouter,
         device_binding_repo: DeviceBindingRepository,
-        teclaw_status_reconciler: TeclawStatusReconciler,
+        task_queue_service: TaskQueueService,
+        bot_repository: BotRepository,
         baas_config: cfg.BaasConfig,
     ) -> TeclawProvisionService:
         # Eager teclaw container provisioning at bot creation. teclaw_template_uuid
@@ -392,7 +392,8 @@ class BotManagementModule(Module):
             baas_service=baas_service,
             deploy_artifact_producer_router=deploy_artifact_producer_router,
             device_binding_repo=device_binding_repo,
-            status_reconciler=teclaw_status_reconciler,
+            task_queue_service=task_queue_service,
+            bot_repository=bot_repository,
             teclaw_template_uuid=baas_config.teclaw_template_uuid,
         )
 

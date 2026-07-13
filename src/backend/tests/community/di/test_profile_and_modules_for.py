@@ -13,8 +13,8 @@ from injector import Injector
 
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.bot_management.services.teclaw_status_reconciler import (
-    TeclawStatusReconciler,
+from agentclaw.community.core.bot_management.services.teclaw_publish_task_handler import (
+    TeclawPublishTaskLifecycle,
 )
 from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
 from agentclaw.community.core.devices.services.baas_device_accessor import (
@@ -242,14 +242,19 @@ def test_singlebox_rollout_policy_preserves_normalized_engine_bucket():
     assert decision.engine_bucket == "aicoding"
 
 
-def test_singlebox_reconciler_uses_real_dependencies_with_noop_scheduler():
-    injector = build_injector(profile=DeployProfile.SINGLEBOX)
+@pytest.mark.parametrize("profile", [DeployProfile.TEST, DeployProfile.SINGLEBOX])
+def test_teclaw_publish_lifecycle_uses_real_dependencies_in_every_local_profile(profile):
+    injector = build_injector(profile=profile)
 
-    reconciler = injector.get(TeclawStatusReconciler)
+    lifecycle = injector.get(TeclawPublishTaskLifecycle)
 
-    assert reconciler._baas is injector.get(BaasService)
-    assert reconciler._bot_repository is injector.get(BotRepository)
-    assert reconciler._device_binding_repo is injector.get(DeviceBindingRepository)
+    assert lifecycle._baas_service is injector.get(BaasService)
+    assert lifecycle._bot_repository is injector.get(BotRepository)
+    assert lifecycle._device_binding_repo is injector.get(DeviceBindingRepository)
+    assert "TeclawPublishTaskLifecycle" in {
+        type(participant).__name__
+        for participant in discover_lifecycle_participants(injector)
+    }
 
 
 def test_test_http_override_wins_when_installed_after_base():
