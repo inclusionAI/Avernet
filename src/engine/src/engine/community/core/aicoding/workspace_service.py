@@ -54,6 +54,18 @@ def _resolve_workspace_base() -> str:
     return raw or CONTAINER_WORKSPACE_BASE
 
 
+def _strip_trailing_sep(path: str) -> str:
+    """去末尾 ``/`` 但保留根 ``/``，全斜杠输入归一为 ``/``，永不返回空串。
+
+    直接 ``rstrip("/")`` 会把根 ``/`` 与 POSIX 双斜杠 ``//``（:func:`os.path.normpath`
+    不归一 ``//``）掏成空串 ``""``，在 :func:`WorkspaceService._validate_cwd_prefix`
+    的前缀比较里 ``"" + "/" == "/"`` 会让任何绝对路径都满足 ``startswith("/")``，
+    cwd 白名单完全失效（gemini code review PR#132 HIGH + 对抗验证发现的 ``//``
+    回归）。
+    """
+    return path.rstrip("/") or "/"
+
+
 def _allowed_cwd_roots() -> tuple[str, ...]:
     """读取 ``cwd`` 直传允许根（请求态白名单）。
 
@@ -61,18 +73,32 @@ def _allowed_cwd_roots() -> tuple[str, ...]:
     （逗号分隔）可追加额外根（Rule 14：配置驱动）。每次调用重新读 env，
     便于测试用 monkeypatch 覆盖。
 
+    normpath 后经 :func:`_strip_trailing_sep` 等于根 ``/`` 的条目（如 ``/``、
+    ``//``、``/foo/..``、``/.``、``/..``）一律丢弃——把根当允许根等于关闭白名单
+    （放行容器内所有绝对路径），与白名单语义相悖，视为无效配置，避免运维手滑 /
+    占位符导致整盘开放；丢弃时打 warning。
+
     与 :class:`engine.community.core.bash.base.BaseBashService.exec` 的 exec 态
     白名单 ``ALLOWED_CWD_PREFIXES`` 互补：请求态拦端点入参 cwd，exec 态拦最终
     下沉到 subprocess 的 cwd。默认 ``CONTAINER_WORKSPACE_BASE`` 落在
     ``/home/admin/`` 下，两闸同向。
     """
     raw = os.getenv("AICODING_CWD_ALLOW_ROOTS", "").strip()
-    extras = tuple(
-        os.path.normpath(p.strip()).rstrip("/")
-        for p in raw.split(",")
-        if p.strip()
-    )
-    return (CONTAINER_WORKSPACE_BASE,) + extras
+    extras: list[str] = []
+    for piece in raw.split(","):
+        stripped = piece.strip()
+        if not stripped:
+            continue
+        normalized = os.path.normpath(stripped)
+        if _strip_trailing_sep(normalized) == "/":
+            log.warning(
+                "ignoring root path in AICODING_CWD_ALLOW_ROOTS "
+                "(would disable cwd allow-list): %r",
+                stripped,
+            )
+            continue
+        extras.append(normalized)
+    return (CONTAINER_WORKSPACE_BASE,) + tuple(extras)
 
 
 class WorkspaceService:
@@ -139,15 +165,19 @@ class WorkspaceService:
 
         供 :meth:`resolve_workspace` 使用——worktree-status 这类"目录缺失仍要
         返 200"的端点只需前缀校验，不能因目录不存在抛错。
+
+        比较 ``cwd`` 与每个允许根时两侧都过 :func:`_strip_trailing_sep`，保证根
+        ``/`` / ``//`` 不被掏成空串（否则 ``"" + "/" == "/"`` 会让任何绝对路径过关，
+        见 gemini code review PR#132 HIGH）。
         """
         if not cwd or not cwd.strip():
             raise ValueError("cwd is required")
         normalized = os.path.normpath(cwd)
         if not os.path.isabs(normalized):
             raise ValueError(f"cwd must be absolute: {cwd!r}")
-        normalized_norm = normalized.rstrip("/")
+        normalized_norm = _strip_trailing_sep(normalized)
         for root in _allowed_cwd_roots():
-            root_norm = os.path.normpath(root).rstrip("/")
+            root_norm = _strip_trailing_sep(os.path.normpath(root))
             if normalized_norm == root_norm or normalized_norm.startswith(
                 root_norm + "/"
             ):
@@ -367,5 +397,6 @@ __all__ = [
     "CONTAINER_WORKSPACE_BASE",
     "PREVIEW_MAX_BYTES",
     "_resolve_workspace_base",
+    "_strip_trailing_sep",
     "_allowed_cwd_roots",
 ]

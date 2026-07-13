@@ -1339,3 +1339,84 @@ async def test_get_session_runs_cwd_outrange_raises_value_error() -> None:
     service = _make_service(plugin)
     with pytest.raises(ValueError, match="cwd not allowed"):
         await service.get_session_runs(SESSION_ID, cwd="/etc")
+
+
+# ── get_session_runs 复用 ensure_workspace_exists 返回值（gemini PR#132 #3/#4/#5）─
+
+
+async def test_get_session_runs_reuses_workspace_from_ensure(monkeypatch) -> None:
+    """``get_session_runs`` 复用 ``ensure_workspace_exists`` 的返回值作为
+    ``workspace_root`` 透传给 aix，不再让 ``_collect_runs_for_session`` 内部二次
+    ``resolve_workspace``。钉法：stub ensure 返回哨兵路径，断言 resolve 零调用、
+    aix 收到哨兵。"""
+    sentinel = "/ws/sentinel-from-ensure"
+    ensure_calls: list[tuple] = []
+
+    def _ensure_stub(session_id, cwd=None):
+        ensure_calls.append((session_id, cwd))
+        return sentinel
+
+    resolve_calls: list[tuple] = []
+
+    def _resolve_stub(session_id, cwd=None):
+        resolve_calls.append((session_id, cwd))
+        return sentinel
+
+    monkeypatch.setattr(
+        WorkspaceService, "ensure_workspace_exists", staticmethod(_ensure_stub)
+    )
+    monkeypatch.setattr(
+        WorkspaceService, "resolve_workspace", staticmethod(_resolve_stub)
+    )
+
+    aix_calls: list[str] = []
+    service = _make_service(FakeBashPlugin())
+
+    async def _aix_stub(workspace_root):
+        aix_calls.append(workspace_root)
+        return []
+
+    service._aix_run_list = _aix_stub  # type: ignore[assignment]
+
+    runs = await service.get_session_runs("sid-reuse", cwd=None)
+    assert runs == []
+    assert ensure_calls == [("sid-reuse", None)]
+    assert resolve_calls == []          # 关键：不再二次 resolve
+    assert aix_calls == [sentinel]      # 复用的 workspace 透传到 aix
+
+
+async def test_collect_runs_for_session_workspace_root_takes_precedence(
+    monkeypatch,
+) -> None:
+    """显式 ``workspace_root`` 时跳过 ``resolve_workspace``；不传时回退
+    ``resolve_workspace``（保持 :meth:`get_active_run_status` 旧行为）。"""
+    resolve_calls: list[tuple] = []
+
+    def _resolve_stub(session_id, cwd=None):
+        resolve_calls.append((session_id, cwd))
+        return f"/resolved/{session_id}"
+
+    monkeypatch.setattr(
+        WorkspaceService, "resolve_workspace", staticmethod(_resolve_stub)
+    )
+
+    aix_calls: list[str] = []
+    service = _make_service(FakeBashPlugin())
+
+    async def _aix_stub(workspace_root):
+        aix_calls.append(workspace_root)
+        return []
+
+    service._aix_run_list = _aix_stub  # type: ignore[assignment]
+
+    # 显式 workspace_root -> 直接用，不 resolve
+    await service._collect_runs_for_session(
+        "sid-a", cwd=None, workspace_root="/explicit-ws"
+    )
+    assert resolve_calls == []
+    assert aix_calls == ["/explicit-ws"]
+
+    # 不传 workspace_root -> 回退 resolve_workspace（旧行为）
+    await service._collect_runs_for_session("sid-b", cwd=None)
+    assert resolve_calls == [("sid-b", None)]
+    assert aix_calls == ["/explicit-ws", "/resolved/sid-b"]

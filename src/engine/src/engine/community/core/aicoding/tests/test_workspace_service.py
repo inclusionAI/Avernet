@@ -954,3 +954,79 @@ async def test_preview_file_forwards_cwd_as_workspace_root(
     out = await service.preview_file("sid", "a.txt", cwd=str(custom))
     assert out.content == "hi"
     assert file_plugin.calls[0][1]["file_path"] == target
+
+
+# ── cwd 白名单收紧：根路径 / 不得被掏成空串（gemini code review PR#132 HIGH）──
+
+
+def test_strip_trailing_sep_preserves_root_and_never_empties() -> None:
+    """``rstrip("/")`` 会把根 ``/`` 与 POSIX 双斜杠 ``//``（normpath 不归一）掏成
+    空串，使前缀比较 ``"" + "/" == "/"`` 让任何绝对路径过关。helper 必须把全斜杠
+    输入归一到 ``/``，永不返回空串。"""
+    from engine.community.core.aicoding.workspace_service import _strip_trailing_sep
+
+    assert _strip_trailing_sep("/") == "/"
+    assert _strip_trailing_sep("//") == "/"
+    assert _strip_trailing_sep("///") == "/"
+    # 普通路径只去末尾斜杠
+    assert _strip_trailing_sep("/home/admin/") == "/home/admin"
+    assert _strip_trailing_sep("/home/admin") == "/home/admin"
+    assert _strip_trailing_sep("/foo//") == "/foo"
+
+
+def test_allowed_cwd_roots_drops_root_slash(monkeypatch, caplog) -> None:
+    """配 ``=/`` 时根路径被显式丢弃，extras 不含 ``/`` 也不含 ``""``，并打 warning。"""
+    import logging
+    from engine.community.core.aicoding.workspace_service import _allowed_cwd_roots
+
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", "/")
+    with caplog.at_level(logging.WARNING, logger="aicoding-workspace"):
+        roots = _allowed_cwd_roots()
+    assert roots == (CONTAINER_WORKSPACE_BASE,)
+    assert "" not in roots and "/" not in roots
+    assert any("ignoring root path" in r.message for r in caplog.records)
+
+
+def test_allowed_cwd_roots_drops_path_normalizing_to_root(monkeypatch) -> None:
+    """normpath 后等于根 ``/`` 的伪装根（``/foo/..``、``//``、``/.``、``/..``）
+    同样应被丢弃，不能以 ``""`` 形式混入 extras 导致白名单失效。"""
+    from engine.community.core.aicoding.workspace_service import _allowed_cwd_roots
+
+    for bad in ("/foo/..", "//", "/.", "/.."):
+        monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", bad)
+        roots = _allowed_cwd_roots()
+        assert roots == (CONTAINER_WORKSPACE_BASE,), bad
+        assert "" not in roots and "/" not in roots
+
+
+def test_validate_cwd_prefix_rejects_double_slash_root_configured(
+    monkeypatch,
+) -> None:
+    """配 ``=//`` 后系统路径仍被拒——对抗验证发现的链式回归核心：若
+    ``_strip_trailing_sep('//')`` 返回 ``""``，前缀比较会让任何绝对路径过关。
+    helper 归一 ``//`` 为 ``/`` 后被 ``_allowed_cwd_roots`` 丢弃，白名单未失效。"""
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", "//")
+    for bad in ("/etc", "/root", "/"):
+        with pytest.raises(ValueError, match="cwd not allowed"):
+            WorkspaceService._validate_cwd_prefix(bad)
+
+
+def test_validate_cwd_prefix_rejects_system_paths_when_root_configured(
+    monkeypatch,
+) -> None:
+    """配 ``=/``（根路径被丢弃）后系统路径 /etc、/etc/passwd、/root、/var/log 仍被拒，
+    白名单不会因运维把允许根配成根 而失效。"""
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", "/")
+    for bad in ("/etc", "/etc/passwd", "/root", "/var/log"):
+        with pytest.raises(ValueError, match="cwd not allowed"):
+            WorkspaceService._validate_cwd_prefix(bad)
+
+
+def test_validate_cwd_prefix_rejects_root_slash_as_cwd(monkeypatch) -> None:
+    """cwd 直传 ``/`` 本身被拒（``_strip_trailing_sep`` 保留 ``/``，不与任何非根
+    允许根相等或前缀匹配）；含存在性的 :meth:`validate_cwd` 也在前缀校验阶段被拒。"""
+    monkeypatch.delenv("AICODING_CWD_ALLOW_ROOTS", raising=False)
+    with pytest.raises(ValueError, match="cwd not allowed"):
+        WorkspaceService._validate_cwd_prefix("/")
+    with pytest.raises(ValueError, match="cwd not allowed"):
+        WorkspaceService.validate_cwd("/")

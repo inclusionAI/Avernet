@@ -199,12 +199,16 @@ class RunStatusService:
         """API 4.2：返回该 session 工作空间下的所有 runs，倒序。
 
         ``cwd`` 直传优先（经 :meth:`WorkspaceService.validate_cwd` 校验含存在性），
-        缺省回退 ``resolve_workspace(session_id)``。若 workspace 不存在，抛
-        ``FileNotFoundError`` 让 router 层转 404；这与 API 4.1（列表+enrich）
-        的"静默兜底为 idle"区分开。
+        缺省回退 ``resolve_workspace(session_id)``。复用 ``ensure_workspace_exists``
+        的返回值作为 ``workspace_root`` 透传给 :meth:`_collect_runs_for_session`,
+        避免内部再 ``resolve_workspace`` 一次的冗余解析 + 前缀校验（gemini code
+        review PR#132 medium #3）。若 workspace 不存在，抛 ``FileNotFoundError``
+        让 router 层转 404；这与 API 4.1（列表+enrich）的"静默兜底为 idle"区分开。
         """
-        WorkspaceService.ensure_workspace_exists(session_id, cwd)
-        runs = await self._collect_runs_for_session(session_id, cwd)
+        workspace = WorkspaceService.ensure_workspace_exists(session_id, cwd)
+        runs = await self._collect_runs_for_session(
+            session_id, cwd, workspace_root=workspace
+        )
         return runs or []
 
     async def get_run_phase_status(
@@ -267,17 +271,27 @@ class RunStatusService:
     # ── internal ──────────────────────────────────────────────────────────────
 
     async def _collect_runs_for_session(
-        self, session_id: str, cwd: str | None = None
+        self,
+        session_id: str,
+        cwd: str | None = None,
+        workspace_root: str | None = None,
     ) -> Optional[list[dict]]:
         """在 session workspace root 上执行 ``aix run list --filter <root> --json``，
         由 aix 自己向下递归找 ``.aix/`` 并返回所有 run（含 ``projectDir``）。
 
         ``cwd`` 直传优先（经 ``resolve_workspace`` 前缀校验），缺省回退旧拼接。
+        调用方可通过 ``workspace_root`` 传入已解析（且经 ``ensure_workspace_exists``
+        校验过存在性）的路径，跳过内部 ``resolve_workspace`` 的冗余解析 + 校验
+        （gemini code review PR#132 medium #4/#5）；不传时按 ``(session_id, cwd)``
+        重新解析，供 :meth:`get_active_run_status` 等不做存在性校验的路径使用，
+        保持旧行为。
+
         新命令一次返回所有 run，因此不再需要旧实现的 ``find -name .aix`` 预扫 +
         多 project 串行调用 + 合并步骤。排序仍按 ``updatedAtUnixMs`` 兜底，因为
         aix 返回顺序未约定。
         """
-        workspace_root = WorkspaceService.resolve_workspace(session_id, cwd)
+        if not workspace_root:
+            workspace_root = WorkspaceService.resolve_workspace(session_id, cwd)
         runs = await self._aix_run_list(workspace_root)
         if not runs:
             return None
