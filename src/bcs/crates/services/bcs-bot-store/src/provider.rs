@@ -938,9 +938,9 @@ impl ProviderBotBindingRepoPort for DbProviderStore {
               ON b.bot_uuid = pb.bot_uuid \
              AND b.env = pb.env \
             WHERE pb.env = ? \
-              AND COALESCE(pb.disabled, 0) = 0 \
-              AND COALESCE(p.disabled, 0) = 0 \
-              AND COALESCE(b.is_deleted, 0) = 0 \
+              AND pb.disabled = 0 \
+              AND p.disabled = 0 \
+              AND b.is_deleted = 0 \
               AND b.actor_kind = 'bot'"
             .to_string();
         let mut params = vec![DbValue::from(env.as_str())];
