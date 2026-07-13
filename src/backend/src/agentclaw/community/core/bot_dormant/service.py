@@ -51,7 +51,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.bot_dormant.sqlite_models import DormantExternalInput
 
 # Re-export so existing callers importing from this module continue to work.
-from agentclaw.community.core.bot_dormant.candidates import Candidate, filter_candidates  # noqa: F401
+from agentclaw.community.core.bot_dormant.candidates import (
+    Candidate, filter_candidates, owner_is_protected, partition_by_protected_owner,
+)
 
 
 logger = get_logger()
@@ -503,11 +505,11 @@ class DormantBotService:
         today = _date.today()
         for row in rows:
             try:
-                is_owner_protected = str(row.owner_id) in protected_owner_ids
+                owner_protected = owner_is_protected(row.owner_id, protected_owner_ids)
                 is_bot_whitelisted = (row.bot_id, row.owner_id) in whitelist
-                if is_owner_protected or is_bot_whitelisted:
+                if owner_protected or is_bot_whitelisted:
                     reason = (
-                        "protected_owner" if is_owner_protected else "whitelisted"
+                        "protected_owner" if owner_protected else "whitelisted"
                     )
                     logger.info(
                         "[dormant.run=%s] event=external_skip reason=%s "
@@ -762,10 +764,9 @@ class DormantBotService:
 
         # Step 1: gather candidates
         candidates = filter_candidates(session, self._N)
-        protected_candidates = [
-            c for c in candidates if str(c.owner_id) in protected_owner_ids
-        ]
-        candidates = [c for c in candidates if str(c.owner_id) not in protected_owner_ids]
+        protected_candidates, candidates = partition_by_protected_owner(
+            candidates, protected_owner_ids
+        )
         summary.scanned = len(candidates)
         logger.info("[dormant.run=%s] event=protected_owners_filtered skipped=%d sample=%s",
                     run_id, len(protected_candidates),

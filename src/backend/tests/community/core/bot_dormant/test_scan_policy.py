@@ -182,6 +182,30 @@ def test_resolve_scan_window_uses_policy_values():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("value", "enable"),
+    [
+        (None, None),
+        ({"scheduled_scan_enabled": True, "dry_run": True}, "1"),
+    ],
+)
+def test_resolve_scan_window_uses_caller_defaults_when_thresholds_missing(
+    value, enable,
+):
+    scan_policy = _svc(value, enable=enable)
+
+    with patch(
+        "agentclaw.community.core.bot_dormant.scan_policy.get_current_env",
+        return_value="prod",
+    ):
+        assert resolve_scan_window(
+            scan_policy,
+            default_inactive_threshold_days=90,
+            default_recycle_grace_days=6,
+        ) == (90, 6)
+
+
+@pytest.mark.unit
 def test_dormant_bot_service_scan_window_parser_falls_back_for_invalid_values():
     assert positive_int_or_default(None, 7) == 7
     assert positive_int_or_default(False, 7) == 7

@@ -772,7 +772,7 @@ Expected: `change line coverage` is greater than 90% and the command exits 0.
 
 ```bash
 git diff origin/dev...HEAD --check
-git grep -n -E 'Downloads/|protected_owner_ids.*\[[[:space:]]*[0-9]{4,}' -- . ':!docs/superpowers/specs' ':!docs/superpowers/plans'
+git grep -n -E 'Downloads/|protected_owner_ids.*\[[[:space:]]*[0-9]{4,}' -- . ':!src/backend/docs/superpowers/specs' ':!src/backend/docs/superpowers/plans'
 git status --short
 ```
 

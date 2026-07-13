@@ -64,12 +64,20 @@ class DormantScanPolicyService:
         self._common_config_service = common_config_service
 
     @staticmethod
-    def _fallback(env: str, source: str = "fallback_missing") -> DormantScanPolicy:
+    def _fallback(
+        env: str,
+        source: str = "fallback_missing",
+        *,
+        inactive_threshold_days: int = DEFAULT_INACTIVE_THRESHOLD_DAYS,
+        recycle_grace_days: int = DEFAULT_RECYCLE_GRACE_DAYS,
+    ) -> DormantScanPolicy:
         return DormantScanPolicy(
             scheduled_scan_enabled=(env == "prod"),
             dry_run=True,
             source=source,
             env=env,
+            inactive_threshold_days=inactive_threshold_days,
+            recycle_grace_days=recycle_grace_days,
         )
 
     @staticmethod
@@ -84,8 +92,17 @@ class DormantScanPolicyService:
             return value.strip().lower() in {"1", "true", "yes", "y", "on"}
         return default
 
-    def get_policy(self) -> DormantScanPolicy:
+    def get_policy(
+        self,
+        *,
+        default_inactive_threshold_days: int = DEFAULT_INACTIVE_THRESHOLD_DAYS,
+        default_recycle_grace_days: int = DEFAULT_RECYCLE_GRACE_DAYS,
+    ) -> DormantScanPolicy:
         env = get_current_env()
+        fallback_kwargs = {
+            "inactive_threshold_days": default_inactive_threshold_days,
+            "recycle_grace_days": default_recycle_grace_days,
+        }
         try:
             config = self._common_config_service.get_config(
                 business_code=BUSINESS_CODE,
@@ -98,10 +115,10 @@ class DormantScanPolicyService:
                 "[dormant.scan_policy] failed to read ac_common_config, using fallback env=%s",
                 env,
             )
-            return self._fallback(env, source="fallback_error")
+            return self._fallback(env, source="fallback_error", **fallback_kwargs)
 
         if config is None:
-            return self._fallback(env)
+            return self._fallback(env, **fallback_kwargs)
 
         if str(config.get("enable")) != "1":
             return DormantScanPolicy(
@@ -109,6 +126,7 @@ class DormantScanPolicyService:
                 dry_run=True,
                 source="common_config_disabled",
                 env=env,
+                **fallback_kwargs,
             )
 
         raw_value = config.get("param_value")
@@ -118,9 +136,9 @@ class DormantScanPolicyService:
                 env,
                 raw_value,
             )
-            return self._fallback(env, source="fallback_invalid")
+            return self._fallback(env, source="fallback_invalid", **fallback_kwargs)
 
-        fallback = self._fallback(env, source="fallback_partial")
+        fallback = self._fallback(env, source="fallback_partial", **fallback_kwargs)
         return DormantScanPolicy(
             scheduled_scan_enabled=self._as_bool(
                 raw_value.get("scheduled_scan_enabled"),
@@ -131,11 +149,11 @@ class DormantScanPolicyService:
             env=env,
             inactive_threshold_days=positive_int_or_default(
                 raw_value.get("inactive_threshold_days"),
-                DEFAULT_INACTIVE_THRESHOLD_DAYS,
+                default_inactive_threshold_days,
             ),
             recycle_grace_days=positive_int_or_default(
                 raw_value.get("recycle_grace_days"),
-                DEFAULT_RECYCLE_GRACE_DAYS,
+                default_recycle_grace_days,
             ),
         )
 
@@ -160,7 +178,10 @@ def resolve_scan_window(
 ) -> tuple[int, int]:
     """Resolve N/M for one run, preserving the legacy default fallback."""
     try:
-        policy = scan_policy.get_policy()
+        policy = scan_policy.get_policy(
+            default_inactive_threshold_days=default_inactive_threshold_days,
+            default_recycle_grace_days=default_recycle_grace_days,
+        )
     except Exception:
         logger.exception(
             "[dormant.scan_policy] failed to read scan window; "
