@@ -406,17 +406,28 @@ class ArcaPaasService(PaasService):
         storage_id = None
         try:
             sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(paas_device_id)
-            info = sandbox.get_info()
-            storage = getattr(info, "storage", None)
-            if storage and isinstance(storage, dict):
-                storage_id = storage.get("storage_id")
+            try:
+                info = sandbox.get_info()
+                storage = getattr(info, "storage", None)
+                if storage and isinstance(storage, dict):
+                    storage_id = storage.get("storage_id")
+            except Exception:
+                self._logger.warning(
+                    "Failed to get storage info before destroy for %s",
+                    paas_device_id,
+                    exc_info=True,
+                )
+        except ArcaSandboxNotFoundError:
+            # Sandbox already gone — normal idempotent destroy.
+            # No traceback needed; Step 1 will confirm and fall through
+            # to storage cleanup.
+            pass
         except Exception:
             self._logger.warning(
-                "Failed to get storage info before destroy for %s",
+                "Failed to connect to sandbox before destroy for %s",
                 paas_device_id,
                 exc_info=True,
             )
-            sandbox = None
 
         # Step 1: Destroy (or confirm already destroyed)
         # Default to True — if sandbox is already gone that's a successful
