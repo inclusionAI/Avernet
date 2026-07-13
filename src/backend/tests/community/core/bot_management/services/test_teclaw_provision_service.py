@@ -205,6 +205,7 @@ def test_enqueue_failure_marks_bot_and_binding_failed_without_destroying_remote(
     bot_repo.update_by_owner.assert_called_once_with("b1", "u1", {"status": "FAILED"})
     binding_repo.update_status.assert_called_once_with(binding_id=77, status="FAILED")
     baas.destroy_bot.assert_not_called()
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_not_called()
 
 
 @pytest.mark.unit
@@ -214,6 +215,18 @@ def test_enqueue_failure_propagates_bot_write_failure() -> None:
     bot_repo.update_by_owner.side_effect = RuntimeError("bot db down")
 
     with pytest.raises(RuntimeError, match="bot db down"):
+        svc.provision(bot=_BOT, owner_id="u1")
+
+    binding_repo.update_status.assert_not_called()
+
+
+@pytest.mark.unit
+def test_enqueue_failure_propagates_unmatched_bot_update_without_updating_binding():
+    svc, _, _, binding_repo, task_queue_service, bot_repo = _make_service()
+    task_queue_service.enqueue.side_effect = RuntimeError("queue down")
+    bot_repo.update_by_owner.return_value = None
+
+    with pytest.raises(RuntimeError, match="bot status update matched no record"):
         svc.provision(bot=_BOT, owner_id="u1")
 
     binding_repo.update_status.assert_not_called()

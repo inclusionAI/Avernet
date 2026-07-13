@@ -133,11 +133,15 @@ class TeclawProvisionService:
 
         Returns:
             :class:`TeclawProvisionResult` with the new binding id, the baas
-            ``bot_uuid`` (stored as binding ``device_id``), and PENDING status.
+            ``bot_uuid`` (stored as binding ``device_id``), and ``PENDING``
+            status after durable poll enqueue succeeds. If enqueue fails and
+            both failure-state writes succeed, returns ``FAILED``.
 
         Raises:
             BaasServiceError: provisioning failed (propagated to the caller, like
                 ``apply_device`` failures, so bot creation surfaces the error).
+            Exception: Persisting the bot or binding ``FAILED`` state after an
+                enqueue failure failed; the persistence error is propagated.
         """
         bot_id = str(bot.get("bot_id", ""))
         entity_id = bot.get("entity_id", "")
