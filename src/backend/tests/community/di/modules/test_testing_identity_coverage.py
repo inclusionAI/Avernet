@@ -33,6 +33,7 @@ async def test_auth_provider_records_runtime_reachable_plugin_methods(
     keys = {
         json.loads(line)["key"]
         for line in hit_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
     }
     assert keys == {
         "AuthPlugin.resolve_user_from_request",
