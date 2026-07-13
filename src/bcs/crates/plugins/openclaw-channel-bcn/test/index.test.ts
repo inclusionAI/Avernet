@@ -470,24 +470,42 @@ describe('openclaw-channel-bcn', () => {
               runId,
               stream: 'assistant',
               ts: 3,
-              data: { text: 'snapshot: before tool after first tool', delta: '\nafter first tool' },
+              data: { text: 'snapshot: before tool after first tool draft', delta: '\nafter first tool draft' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'assistant',
+              ts: 4,
+              data: { text: '\nafter first tool', delta: '', replace: true },
             });
             agentEventHandler?.({
               runId,
               stream: 'tool',
-              ts: 4,
+              ts: 5,
               data: { phase: 'result', toolCallId: 'tool-1' },
             });
             agentEventHandler?.({
               runId,
               stream: 'assistant',
-              ts: 5,
+              ts: 6,
+              data: { text: 'ignored snapshot without delta' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'assistant',
+              ts: 7,
+              data: { text: 'ignored empty delta snapshot', delta: '' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'assistant',
+              ts: 8,
               data: { text: 'snapshot: before tool after first tool final answer', delta: '\nfinal answer' },
             });
             agentEventHandler?.({
               runId,
               stream: 'lifecycle',
-              ts: 6,
+              ts: 9,
               data: { phase: 'end' },
             });
             await dispatcherOptions.deliver({ text: 'stale dispatcher block' }, { kind: 'block' });
@@ -532,7 +550,7 @@ describe('openclaw-channel-bcn', () => {
       assert.equal(typeof runId, 'string');
       assert.equal(capturedReplyOptions?.disableBlockStreaming, false);
       assert.equal(capturedReplyOptions?.sourceReplyDeliveryMode, 'automatic');
-      assert.equal(events.filter(item => item.event === 'agent').length, 6);
+      assert.equal(events.filter(item => item.event === 'agent').length, 9);
       const chatEvents = events.filter(item => item.event === 'chat.event');
       assert.deepEqual(chatEvents.map(item => item.payload.state), [ 'delta', 'delta', 'delta', 'final' ]);
       assert.deepEqual(

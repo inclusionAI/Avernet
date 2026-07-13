@@ -65,6 +65,7 @@ const runContexts = new Map<string, RunContext>();
 interface VisibleReplyState {
   text: string;
   flushedOffset: number;
+  segmentOffset: number;
   deltaCount: number;
   sawAssistantText: boolean;
 }
@@ -249,6 +250,7 @@ function ensureVisibleReplyState(runId: string): VisibleReplyState {
     state = {
       text: '',
       flushedOffset: 0,
+      segmentOffset: 0,
       deltaCount: 0,
       sawAssistantText: false,
     };
@@ -301,27 +303,35 @@ function assistantDeltaText(data: unknown): string | undefined {
   return stringField(data as Record<string, unknown>, 'delta');
 }
 
+function assistantReplacesCurrentSegment(data: unknown): boolean {
+  if (!data || typeof data !== 'object') return false;
+  return (data as Record<string, unknown>).replace === true;
+}
+
 function recordAssistantAgentText(runId: string, data: unknown): void {
   const state = ensureVisibleReplyState(runId);
+  if (assistantReplacesCurrentSegment(data)) {
+    const snapshot = assistantSnapshotText(data);
+    if (snapshot === undefined) return;
+
+    state.text = state.text.slice(0, state.segmentOffset) + snapshot;
+    state.sawAssistantText = Boolean(state.text.trim());
+    return;
+  }
+
   const delta = assistantDeltaText(data);
-  if (delta !== undefined) {
+  if (delta !== undefined && delta.length > 0) {
     state.text += delta;
     if (delta.trim()) {
       state.sawAssistantText = true;
     }
-    return;
   }
+}
 
-  const snapshot = assistantSnapshotText(data);
-  if (snapshot !== undefined) {
-    if (snapshot.trim()) {
-      if (snapshot.length >= state.text.length) {
-        state.text = snapshot;
-      } else if (!state.text.includes(snapshot)) {
-        state.text += snapshot;
-      }
-      state.sawAssistantText = true;
-    }
+function markVisibleReplySegmentBoundary(runId: string): void {
+  const state = visibleReplyByRunId.get(runId);
+  if (state) {
+    state.segmentOffset = state.text.length;
   }
 }
 
@@ -1679,6 +1689,7 @@ export function initAgentEventsSubscription(log?: {
         recordAssistantAgentText(resolvedRunId, evt.data);
       } else {
         sendVisibleReplyDelta(resolvedRunId, log);
+        markVisibleReplySegmentBoundary(resolvedRunId);
       }
 
       if (isTerminalLifecycleEvent(evt)) {
