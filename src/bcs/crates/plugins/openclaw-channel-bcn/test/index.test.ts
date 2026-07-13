@@ -6,9 +6,11 @@ import plugin, { bcsPlugin, registerBcsCore, setBcsRuntime } from '../src/index.
 import { getDefaultBcsUrl, listAccountIds, resolveAccount } from '../src/accounts.js';
 import {
   abortAllStreams,
+  cleanupAgentEventsSubscription,
   combineDeliveredReplyParts,
   handleChatSend,
   handleBcsRouteTool,
+  initAgentEventsSubscription,
   rememberTaskToolSession,
   resolveGroupIdFromSessionKey,
 } from '../src/inbound-handler.js';
@@ -396,9 +398,10 @@ describe('openclaw-channel-bcn', () => {
     assert.equal(combineDeliveredReplyParts([ 'first', 'second' ]), 'first\n\nsecond');
   });
 
-  it('streams block deliveries as chat deltas before the final chat event', async () => {
+  it('builds chat deltas and final from assistant agent events', async () => {
     const responses: Array<{ id: string; ok: boolean; payload?: Record<string, unknown> }> = [];
     const events: Array<{ event: string; payload: Record<string, unknown>; seq: number }> = [];
+    let agentEventHandler: ((evt: Record<string, unknown>) => boolean) | undefined;
     let capturedReplyOptions: Record<string, unknown> | undefined;
     const client = {
       sendResponse(id: string, ok: boolean, payload?: Record<string, unknown>) {
@@ -430,6 +433,14 @@ describe('openclaw-channel-bcn', () => {
           return {};
         },
       },
+      events: {
+        onAgentEvent(handler: (evt: Record<string, unknown>) => boolean) {
+          agentEventHandler = handler;
+          return () => {
+            agentEventHandler = undefined;
+          };
+        },
+      },
       channel: {
         routing: {
           resolveAgentRoute() {
@@ -442,9 +453,45 @@ describe('openclaw-channel-bcn', () => {
           },
           async dispatchReplyWithBufferedBlockDispatcher({ dispatcherOptions, replyOptions }: any) {
             capturedReplyOptions = replyOptions;
-            await dispatcherOptions.deliver({ text: 'before tool' }, { kind: 'block' });
-            await dispatcherOptions.deliver({ text: 'after first tool' }, { kind: 'block' });
-            await dispatcherOptions.deliver({ text: 'final answer' }, { kind: 'final' });
+            const runId = replyOptions.runId;
+            agentEventHandler?.({
+              runId,
+              stream: 'assistant',
+              ts: 1,
+              data: { text: 'snapshot: before tool', delta: 'before tool' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'tool',
+              ts: 2,
+              data: { phase: 'start', toolCallId: 'tool-1' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'assistant',
+              ts: 3,
+              data: { text: 'snapshot: before tool after first tool', delta: '\nafter first tool' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'tool',
+              ts: 4,
+              data: { phase: 'result', toolCallId: 'tool-1' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'assistant',
+              ts: 5,
+              data: { text: 'snapshot: before tool after first tool final answer', delta: '\nfinal answer' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'lifecycle',
+              ts: 6,
+              data: { phase: 'end' },
+            });
+            await dispatcherOptions.deliver({ text: 'stale dispatcher block' }, { kind: 'block' });
+            await dispatcherOptions.deliver({ text: 'stale dispatcher final' }, { kind: 'final' });
           },
         },
         session: {
@@ -458,6 +505,7 @@ describe('openclaw-channel-bcn', () => {
       },
     };
     setBcsRuntime(runtime as any);
+    initAgentEventsSubscription();
 
     const request: RequestFrame = {
       type: 'req',
@@ -475,26 +523,39 @@ describe('openclaw-channel-bcn', () => {
       },
     };
 
-    await handleChatSend(request, client as any, account);
+    try {
+      await handleChatSend(request, client as any, account);
 
-    assert.equal(responses.length, 1);
-    assert.equal(responses[0].ok, true);
-    const runId = responses[0].payload?.run_id;
-    assert.equal(typeof runId, 'string');
-    assert.equal(capturedReplyOptions?.disableBlockStreaming, false);
-    assert.equal(capturedReplyOptions?.sourceReplyDeliveryMode, 'automatic');
-    assert.deepEqual(events.map(item => item.event), [ 'chat.event', 'chat.event', 'chat.event' ]);
-    assert.deepEqual(events.map(item => item.payload.state), [ 'delta', 'delta', 'final' ]);
-    assert.deepEqual(
-      events.map(item => (item.payload.message as any).content[0].text),
-      [ 'before tool', 'after first tool', 'final answer' ],
-    );
-    assert.deepEqual(events.map(item => item.payload.run_id), [ runId, runId, runId ]);
+      assert.equal(responses.length, 1);
+      assert.equal(responses[0].ok, true);
+      const runId = responses[0].payload?.run_id;
+      assert.equal(typeof runId, 'string');
+      assert.equal(capturedReplyOptions?.disableBlockStreaming, false);
+      assert.equal(capturedReplyOptions?.sourceReplyDeliveryMode, 'automatic');
+      assert.equal(events.filter(item => item.event === 'agent').length, 6);
+      const chatEvents = events.filter(item => item.event === 'chat.event');
+      assert.deepEqual(chatEvents.map(item => item.payload.state), [ 'delta', 'delta', 'delta', 'final' ]);
+      assert.deepEqual(
+        chatEvents.map(item => (item.payload.message as any).content[0].text),
+        [
+          'before tool',
+          '\nafter first tool',
+          '\nfinal answer',
+          'before tool\nafter first tool\nfinal answer',
+        ],
+      );
+      assert.deepEqual(chatEvents.map(item => item.payload.run_id), [ runId, runId, runId, runId ]);
+    } finally {
+      cleanupAgentEventsSubscription();
+      abortAllStreams();
+    }
   });
 
-  it('uses block deliveries as the final chat snapshot when no final part is delivered', async () => {
+  it('sends lifecycle final before dispatcher settles without duplicating final', async () => {
     const responses: Array<{ id: string; ok: boolean; payload?: Record<string, unknown> }> = [];
     const events: Array<{ event: string; payload: Record<string, unknown>; seq: number }> = [];
+    let agentEventHandler: ((evt: Record<string, unknown>) => boolean) | undefined;
+    let releaseDispatch: (() => void) | undefined;
     const client = {
       sendResponse(id: string, ok: boolean, payload?: Record<string, unknown>) {
         responses.push({ id, ok, payload });
@@ -525,6 +586,146 @@ describe('openclaw-channel-bcn', () => {
           return {};
         },
       },
+      events: {
+        onAgentEvent(handler: (evt: Record<string, unknown>) => boolean) {
+          agentEventHandler = handler;
+          return () => {
+            agentEventHandler = undefined;
+          };
+        },
+      },
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return { agentId: 'agent-1', sessionKey: 'bcs:group-1' };
+          },
+        },
+        reply: {
+          finalizeInboundContext(ctx: Record<string, unknown>) {
+            return ctx;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ replyOptions }: any) {
+            const runId = replyOptions.runId;
+            agentEventHandler?.({
+              runId,
+              stream: 'assistant',
+              ts: 1,
+              data: { delta: 'reply before dispatcher completion' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'lifecycle',
+              ts: 2,
+              data: { phase: 'end' },
+            });
+            await new Promise<void>(resolve => {
+              releaseDispatch = resolve;
+            });
+          },
+        },
+        session: {
+          resolveStorePath() {
+            return '/tmp/openclaw-bcn-test';
+          },
+          async recordInboundSession() {
+            return undefined;
+          },
+        },
+      },
+    };
+    setBcsRuntime(runtime as any);
+    initAgentEventsSubscription();
+
+    const request: RequestFrame = {
+      type: 'req',
+      id: 'chat-lifecycle-final',
+      method: 'chat.send',
+      params: {
+        bcs_group_id: 'group-1',
+        channel: { source: 'api', user_id: 'user-1' },
+        session_context: {},
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'finish from lifecycle' }],
+          timestamp: Date.now(),
+        },
+      },
+    };
+
+    try {
+      const pending = handleChatSend(request, client as any, account);
+      await new Promise(resolve => setImmediate(resolve));
+
+      assert.equal(responses.length, 1);
+      const runId = responses[0].payload?.run_id;
+      const chatEventsBeforeDispatchSettles = events.filter(item => item.event === 'chat.event');
+      assert.deepEqual(
+        chatEventsBeforeDispatchSettles.map(item => item.payload.state),
+        [ 'delta', 'final' ],
+      );
+      assert.deepEqual(
+        chatEventsBeforeDispatchSettles.map(item => (item.payload.message as any).content[0].text),
+        [ 'reply before dispatcher completion', 'reply before dispatcher completion' ],
+      );
+      assert.deepEqual(chatEventsBeforeDispatchSettles.map(item => item.payload.run_id), [ runId, runId ]);
+
+      assert.ok(releaseDispatch, 'dispatcher should still be waiting when lifecycle final is sent');
+      releaseDispatch();
+      await pending;
+
+      const finalEvents = events
+        .filter(item => item.event === 'chat.event')
+        .filter(item => item.payload.state === 'final');
+      assert.equal(finalEvents.length, 1, 'dispatcher completion must not send a duplicate final');
+    } finally {
+      cleanupAgentEventsSubscription();
+      abortAllStreams();
+      releaseDispatch?.();
+    }
+  });
+
+  it('sends NO_REPLY final when no assistant agent text is observed', async () => {
+    const responses: Array<{ id: string; ok: boolean; payload?: Record<string, unknown> }> = [];
+    const events: Array<{ event: string; payload: Record<string, unknown>; seq: number }> = [];
+    let agentEventHandler: ((evt: Record<string, unknown>) => boolean) | undefined;
+    const client = {
+      sendResponse(id: string, ok: boolean, payload?: Record<string, unknown>) {
+        responses.push({ id, ok, payload });
+      },
+      sendEvent(event: string, payload: Record<string, unknown>, seq: number) {
+        events.push({ event, payload, seq });
+      },
+    };
+    const account: ResolvedBcsAccount = {
+      accountId: 'default',
+      enabled: true,
+      bcsUrl: 'ws://bcs.test/ws/bot',
+      botId: 'bot-1',
+      botName: 'Bot 1',
+      capabilities: {
+        summary: 'test bot',
+        domains: [],
+        skills: [],
+        scopes: [],
+      },
+      heartbeatIntervalMs: 60000,
+      reconnectIntervalMs: 5000,
+      connectionTimeoutMs: 10000,
+    };
+    const runtime = {
+      config: {
+        async loadConfig() {
+          return {};
+        },
+      },
+      events: {
+        onAgentEvent(handler: (evt: Record<string, unknown>) => boolean) {
+          agentEventHandler = handler;
+          return () => {
+            agentEventHandler = undefined;
+          };
+        },
+      },
       channel: {
         routing: {
           resolveAgentRoute() {
@@ -536,6 +737,12 @@ describe('openclaw-channel-bcn', () => {
             return ctx;
           },
           async dispatchReplyWithBufferedBlockDispatcher({ dispatcherOptions }: any) {
+            agentEventHandler?.({
+              runId: 'unrelated-run',
+              stream: 'assistant',
+              ts: 1,
+              data: { text: 'ignored text', delta: 'ignored text' },
+            });
             await dispatcherOptions.deliver({ text: 'visible part 1' }, { kind: 'block' });
             await dispatcherOptions.deliver({ text: 'visible part 2' }, { kind: 'block' });
           },
@@ -551,6 +758,7 @@ describe('openclaw-channel-bcn', () => {
       },
     };
     setBcsRuntime(runtime as any);
+    initAgentEventsSubscription();
 
     const request: RequestFrame = {
       type: 'req',
@@ -568,17 +776,22 @@ describe('openclaw-channel-bcn', () => {
       },
     };
 
-    await handleChatSend(request, client as any, account);
+    try {
+      await handleChatSend(request, client as any, account);
 
-    assert.equal(responses.length, 1);
-    const runId = responses[0].payload?.run_id;
-    assert.deepEqual(events.map(item => item.event), [ 'chat.event', 'chat.event', 'chat.event' ]);
-    assert.deepEqual(events.map(item => item.payload.state), [ 'delta', 'delta', 'final' ]);
-    assert.deepEqual(
-      events.map(item => (item.payload.message as any).content[0].text),
-      [ 'visible part 1', 'visible part 2', 'visible part 1\n\nvisible part 2' ],
-    );
-    assert.deepEqual(events.map(item => item.payload.run_id), [ runId, runId, runId ]);
+      assert.equal(responses.length, 1);
+      const runId = responses[0].payload?.run_id;
+      const chatEvents = events.filter(item => item.event === 'chat.event');
+      assert.deepEqual(chatEvents.map(item => item.payload.state), [ 'final' ]);
+      assert.deepEqual(
+        chatEvents.map(item => (item.payload.message as any).content[0].text),
+        [ 'NO_REPLY' ],
+      );
+      assert.deepEqual(chatEvents.map(item => item.payload.run_id), [ runId ]);
+    } finally {
+      cleanupAgentEventsSubscription();
+      abortAllStreams();
+    }
   });
 
   it('returns route.resolve candidates when bcs_route targets an unknown name', async () => {

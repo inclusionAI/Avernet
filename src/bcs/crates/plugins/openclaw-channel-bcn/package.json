@@ -1,6 +1,6 @@
 {
   "name": "@avernet-plugin/openclaw-channel-bcn",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "description": "Installable OpenClaw BCS WebSocket channel plugin package.",
   "dependencies": {
     "ws": "^8.18.3"

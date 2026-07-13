@@ -12,12 +12,15 @@ async function startBcsStub(responseBotUuid?: string) {
   let cookieHeader: string | undefined;
   let requestUrl: string | undefined;
   let connectParams: Record<string, unknown> | undefined;
+  const sockets = new Set<any>();
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await once(server, 'listening');
 
   server.on('connection', (socket, request) => {
+    sockets.add(socket);
     cookieHeader = request.headers.cookie;
     requestUrl = request.url;
+    socket.on('close', () => sockets.delete(socket));
 
     socket.on('message', data => {
       const frame = JSON.parse(data.toString());
@@ -52,6 +55,11 @@ async function startBcsStub(responseBotUuid?: string) {
     },
     get connectParams() {
       return connectParams;
+    },
+    sendToClients(data: string | Buffer) {
+      for (const socket of sockets) {
+        socket.send(data);
+      }
     },
     async close() {
       await new Promise<void>((resolve, reject) => {
@@ -350,6 +358,56 @@ describe('BcsWsClient security behavior', () => {
       assert.equal(sessionStat.mode.toString(8).slice(-3), '600');
     } finally {
       process.umask(originalUmask);
+      await client.disconnect();
+      await bcs.close();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the close callback active after a runtime WebSocket error', async () => {
+    const bcs = await startBcsStub();
+    const dataDir = await mkdtemp(join(tmpdir(), 'bcn-runtime-error-'));
+    const account: ResolvedBcsAccount = {
+      accountId: 'default',
+      enabled: true,
+      bcsUrl: `ws://127.0.0.1:${bcs.port}/ws/bot`,
+      botId: 'bot-1',
+      botName: 'Bot 1',
+      capabilities: {
+        summary: 'test bot',
+        domains: [],
+        skills: [],
+        scopes: [],
+      },
+      heartbeatIntervalMs: 60_000,
+      reconnectIntervalMs: 5_000,
+      connectionTimeoutMs: 10_000,
+    };
+    const client = new BcsWsClient({
+      account,
+      dataDir,
+      log: {
+        info: () => undefined,
+        warn: () => undefined,
+        error: () => undefined,
+      },
+    });
+
+    try {
+      await client.connect(null);
+      const closed = new Promise<void>(resolve => {
+        client.onClose(() => resolve());
+      });
+
+      bcs.sendToClients(Buffer.alloc((2 * 1024 * 1024) + 1));
+
+      await Promise.race([
+        closed,
+        new Promise((_resolve, reject) => {
+          setTimeout(() => reject(new Error('close callback was not called')), 1000);
+        }),
+      ]);
+    } finally {
       await client.disconnect();
       await bcs.close();
       await rm(dataDir, { recursive: true, force: true });
