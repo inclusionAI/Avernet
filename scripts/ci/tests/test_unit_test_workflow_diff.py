@@ -15,7 +15,7 @@ MODULE_JOBS = {
     "bcs": ("BCS_BASE_REF", "src/bcs"),
     "backend": ("BACKEND_BASE_REF", "src/backend"),
     "engine": ("ENGINE_BASE_REF", "src/engine"),
-    "baas": ("BAAS_BASE_REF", "src/baas/packages/community"),
+    "baas": ("BAAS_BASE_REF", "src/baas"),
 }
 
 
@@ -50,6 +50,7 @@ class UnitTestWorkflowDiffTest(unittest.TestCase):
             '--base-ref "$BCS_BASE_REF"',
             '--base "$BACKEND_BASE_REF"',
             '--base "$ENGINE_BASE_REF"',
+            '--base "${BAAS_BASE_REF}"',
         ):
             self.assertIn(coverage_argument, workflow)
         self.assertIn(
@@ -75,7 +76,7 @@ class UnitTestWorkflowDiffTest(unittest.TestCase):
             for module_path in (
                 "src/backend",
                 "src/engine",
-                "src/baas/packages/community",
+                "src/baas",
             ):
                 _write(repository, f"{module_path}/target-only.txt", "target branch\n")
             _git(repository, "add", ".")
