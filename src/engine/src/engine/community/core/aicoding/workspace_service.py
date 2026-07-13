@@ -54,6 +54,53 @@ def _resolve_workspace_base() -> str:
     return raw or CONTAINER_WORKSPACE_BASE
 
 
+def _strip_trailing_sep(path: str) -> str:
+    """去末尾 ``/`` 但保留根 ``/``，全斜杠输入归一为 ``/``，永不返回空串。
+
+    直接 ``rstrip("/")`` 会把根 ``/`` 与 POSIX 双斜杠 ``//``（:func:`os.path.normpath`
+    不归一 ``//``）掏成空串 ``""``，在 :func:`WorkspaceService._validate_cwd_prefix`
+    的前缀比较里 ``"" + "/" == "/"`` 会让任何绝对路径都满足 ``startswith("/")``，
+    cwd 白名单完全失效（gemini code review PR#132 HIGH + 对抗验证发现的 ``//``
+    回归）。
+    """
+    return path.rstrip("/") or "/"
+
+
+def _allowed_cwd_roots() -> tuple[str, ...]:
+    """读取 ``cwd`` 直传允许根（请求态白名单）。
+
+    默认只放 :data:`CONTAINER_WORKSPACE_BASE`；env ``AICODING_CWD_ALLOW_ROOTS``
+    （逗号分隔）可追加额外根（Rule 14：配置驱动）。每次调用重新读 env，
+    便于测试用 monkeypatch 覆盖。
+
+    normpath 后经 :func:`_strip_trailing_sep` 等于根 ``/`` 的条目（如 ``/``、
+    ``//``、``/foo/..``、``/.``、``/..``）一律丢弃——把根当允许根等于关闭白名单
+    （放行容器内所有绝对路径），与白名单语义相悖，视为无效配置，避免运维手滑 /
+    占位符导致整盘开放；丢弃时打 warning。
+
+    与 :class:`engine.community.core.bash.base.BaseBashService.exec` 的 exec 态
+    白名单 ``ALLOWED_CWD_PREFIXES`` 互补：请求态拦端点入参 cwd，exec 态拦最终
+    下沉到 subprocess 的 cwd。默认 ``CONTAINER_WORKSPACE_BASE`` 落在
+    ``/home/admin/`` 下，两闸同向。
+    """
+    raw = os.getenv("AICODING_CWD_ALLOW_ROOTS", "").strip()
+    extras: list[str] = []
+    for piece in raw.split(","):
+        stripped = piece.strip()
+        if not stripped:
+            continue
+        normalized = os.path.normpath(stripped)
+        if _strip_trailing_sep(normalized) == "/":
+            log.warning(
+                "ignoring root path in AICODING_CWD_ALLOW_ROOTS "
+                "(would disable cwd allow-list): %r",
+                stripped,
+            )
+            continue
+        extras.append(normalized)
+    return (CONTAINER_WORKSPACE_BASE,) + tuple(extras)
+
+
 class WorkspaceService:
     """File tree + git operations for an AICoding session workspace."""
 
@@ -68,23 +115,31 @@ class WorkspaceService:
     # ── path helpers ──────────────────────────────────────────────────
 
     @staticmethod
-    def resolve_workspace(session_id: str) -> str:
+    def resolve_workspace(session_id: str, cwd: str | None = None) -> str:
         """Return the container-internal workspace root for a session.
 
-        Base 由 :func:`_resolve_workspace_base` 决定：``RELAY_DEFAULT_CWD``
-        环境变量优先，未设置回落到硬编码 ``CONTAINER_WORKSPACE_BASE``。
-        ``session_id`` 本身可能含 ``:``（例如
-        ``user:u1:session:s1:agent:b1``），按原样拼接。
+        ``cwd`` 直传优先：非空时经 :meth:`_validate_cwd_prefix` 校验格式 + 允许根
+        前缀（**不**校验存在性，供 ``worktree-status`` 这类"目录缺失仍返 200"
+        的端点）后原样返回；为空则按 ``RELAY_DEFAULT_CWD`` /
+        ``CONTAINER_WORKSPACE_BASE`` + ``session_id`` 拼接。``session_id`` 本身
+        可能含 ``:``（例如 ``user:u1:session:s1:agent:b1``），按原样拼接。
         """
+        if cwd:
+            return WorkspaceService._validate_cwd_prefix(cwd)
         return f"{_resolve_workspace_base()}/{session_id}"
 
     @staticmethod
-    def ensure_workspace_exists(session_id: str) -> str:
+    def ensure_workspace_exists(session_id: str, cwd: str | None = None) -> str:
         """解析 + 校验 session 工作空间是否存在；不存在抛 ``FileNotFoundError``。
 
-        返回校验通过的 workspace 绝对路径，便于调用方复用。Router 层应将
-        :class:`FileNotFoundError` 转换为 HTTP 404 返回前端。
+        ``cwd`` 直传优先：非空时经 :meth:`validate_cwd` 做完整校验（含存在性），
+        cwd 指文件抛 ``NotADirectoryError``、不存在抛 ``FileNotFoundError``、
+        越界/非绝对抛 ``ValueError``；为空则走旧 ``resolve_workspace(session_id)``
+        + ``os.path.isdir`` 检查。返回校验通过的 workspace 绝对路径，便于调用方
+        复用。Router 层应将 :class:`FileNotFoundError` 转换为 HTTP 404 返回前端。
         """
+        if cwd:
+            return WorkspaceService.validate_cwd(cwd)
         workspace = WorkspaceService.resolve_workspace(session_id)
         if not os.path.isdir(workspace):
             raise FileNotFoundError(
@@ -102,11 +157,58 @@ class WorkspaceService:
         if normalized != workspace_norm and not normalized.startswith(prefix):
             raise ValueError(f"path traversal detected: {full_path}")
 
+    # ── cwd 直传校验（前端入参） ─────────────────────────────────────────
+
+    @staticmethod
+    def _validate_cwd_prefix(cwd: str) -> str:
+        """校验 ``cwd`` 的格式 + 允许根前缀（**不**校验存在性），返回规范化绝对路径。
+
+        供 :meth:`resolve_workspace` 使用——worktree-status 这类"目录缺失仍要
+        返 200"的端点只需前缀校验，不能因目录不存在抛错。
+
+        比较 ``cwd`` 与每个允许根时两侧都过 :func:`_strip_trailing_sep`，保证根
+        ``/`` / ``//`` 不被掏成空串（否则 ``"" + "/" == "/"`` 会让任何绝对路径过关，
+        见 gemini code review PR#132 HIGH）。
+        """
+        if not cwd or not cwd.strip():
+            raise ValueError("cwd is required")
+        normalized = os.path.normpath(cwd)
+        if not os.path.isabs(normalized):
+            raise ValueError(f"cwd must be absolute: {cwd!r}")
+        normalized_norm = _strip_trailing_sep(normalized)
+        for root in _allowed_cwd_roots():
+            root_norm = _strip_trailing_sep(os.path.normpath(root))
+            if normalized_norm == root_norm or normalized_norm.startswith(
+                root_norm + "/"
+            ):
+                return normalized
+        raise ValueError(f"cwd not allowed: {cwd!r}")
+
+    @staticmethod
+    def validate_cwd(cwd: str) -> str:
+        """校验前端直传的 ``cwd``（含存在性），返回规范化绝对路径。
+
+        供 :meth:`ensure_workspace_exists` 与各 router 入口使用。规则：
+
+        1. 非空且为绝对路径，否则 ``ValueError``（→400）；
+        2. normpath 后真实存在且是目录，否则 ``NotADirectoryError``（指向文件,
+           →400）/ ``FileNotFoundError``（不存在，→404）；
+        3. 必须落在允许根之一之下，否则 ``ValueError``（→400）。
+        """
+        normalized = WorkspaceService._validate_cwd_prefix(cwd)
+        if os.path.isdir(normalized):
+            return normalized
+        if os.path.exists(normalized):
+            raise NotADirectoryError(f"cwd not a directory: {cwd!r}")
+        raise FileNotFoundError(f"cwd not found: {cwd!r}")
+
     # ── file tree ─────────────────────────────────────────────────────
 
-    async def list_file_tree(self, session_id: str) -> list[FileTreeNode]:
+    async def list_file_tree(
+        self, session_id: str, cwd: str | None = None
+    ) -> list[FileTreeNode]:
         """List workspace files recursively, grouped by project."""
-        workspace = self.ensure_workspace_exists(session_id)
+        workspace = self.ensure_workspace_exists(session_id, cwd)
         result = await self._file.list_dir(
             workspace, recursive=True, exclude_dirs=_FILTERED_DIRS
         )
@@ -124,12 +226,14 @@ class WorkspaceService:
 
     # ── file preview ──────────────────────────────────────────────────
 
-    async def preview_file(self, session_id: str, path: str) -> FileContent:
+    async def preview_file(
+        self, session_id: str, path: str, cwd: str | None = None
+    ) -> FileContent:
         """Read a single workspace file (size-bounded, traversal-safe)."""
         if not path or not path.strip():
             raise ValueError("path is required")
 
-        workspace = self.ensure_workspace_exists(session_id)
+        workspace = self.ensure_workspace_exists(session_id, cwd)
         full_path = os.path.normpath(os.path.join(workspace, path.strip()))
         self._ensure_within_workspace(full_path, workspace)
 
@@ -148,9 +252,11 @@ class WorkspaceService:
 
     # ── git diff ──────────────────────────────────────────────────────
 
-    async def list_git_diff(self, session_id: str) -> GitDiffTreeResult:
+    async def list_git_diff(
+        self, session_id: str, cwd: str | None = None
+    ) -> GitDiffTreeResult:
         """List changed files across all git projects in the workspace."""
-        workspace = self.ensure_workspace_exists(session_id)
+        workspace = self.ensure_workspace_exists(session_id, cwd)
 
         # 1) Discover git projects under the workspace.
         #
@@ -237,12 +343,13 @@ class WorkspaceService:
         project: str,
         file_path: str,
         old_path: str | None = None,
+        cwd: str | None = None,
     ) -> GitDiffResult:
         """Single-file unified diff with untracked / renamed fallbacks."""
         if not project or "/" in project or project in ("", ".", ".."):
             raise ValueError(f"invalid project: {project!r}")
 
-        workspace = self.ensure_workspace_exists(session_id)
+        workspace = self.ensure_workspace_exists(session_id, cwd)
         project_path = os.path.normpath(os.path.join(workspace, project))
         self._ensure_within_workspace(project_path, workspace)
 
@@ -290,4 +397,6 @@ __all__ = [
     "CONTAINER_WORKSPACE_BASE",
     "PREVIEW_MAX_BYTES",
     "_resolve_workspace_base",
+    "_strip_trailing_sep",
+    "_allowed_cwd_roots",
 ]

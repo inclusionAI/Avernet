@@ -1,12 +1,25 @@
 """HTTP routes for AICoding session workspace inspection.
 
-Four endpoints, all read-only, all served directly by the engine
-running inside the aicoding container:
+Nine read-only endpoints, all served directly by the engine running inside
+the aicoding container:
 
-* ``GET /api/aicoding/sessions/file-tree``     — recursive workspace tree
-* ``GET /api/aicoding/sessions/files/preview`` — file content (size-bounded)
-* ``GET /api/aicoding/sessions/git-diff``      — changed files (tree per project)
-* ``GET /api/aicoding/sessions/files/diff``    — unified diff for one file
+* ``GET /api/aicoding/sessions``                     — sessions list + run_status enrich
+* ``GET /api/aicoding/sessions/file-tree``           — recursive workspace tree
+* ``GET /api/aicoding/sessions/files/preview``       — file content (size-bounded)
+* ``GET /api/aicoding/sessions/git-diff``            — changed files (tree per project)
+* ``GET /api/aicoding/sessions/files/diff``          — unified diff for one file
+* ``GET /api/aicoding/sessions/runs``                — devflow runs for a session
+* ``GET /api/aicoding/sessions/phases``              — phase detail for a run
+* ``GET /api/aicoding/sessions/runs/pull-requests``  — PR outputs for a session
+* ``GET /api/aicoding/sessions/worktree-status``     — .worktree.json existence/status
+
+The workspace-inspection endpoints (file-tree / files/preview / git-diff /
+files/diff / worktree-status / runs / phases / runs/pull-requests) accept an
+optional ``cwd`` query parameter: when provided it is validated
+(``WorkspaceService.validate_cwd`` / ``_validate_cwd_prefix``) and used directly
+as the session workspace root; when omitted, the legacy ``base/{session_id}``
+derivation serves as a fallback (full backwards compatibility). ``session_id``
+stays required for response correlation and fallback.
 
 Each handler composes a fresh
 :class:`engine.community.core.aicoding.workspace_service.WorkspaceService` over
@@ -121,12 +134,17 @@ def _diff_node_to_schema(node: DiffTreeNode) -> DiffTreeNodeSchema:
 @router.get("/file-tree", response_model=FileTreeResponse)
 async def list_file_tree(
     session_id: str = Query(..., description="AICoding session ID"),
+    cwd: str | None = Query(
+        None,
+        description="可选：前端直传工作目录绝对路径，"
+        "缺省回退 base/{session_id}",
+    ),
 ) -> FileTreeResponse:
     """Return the full workspace tree (recursive, filtered, sorted)."""
     check_capability(Capability.FILE_LIST)
     service = _workspace_service()
     try:
-        tree = await service.list_file_tree(session_id)
+        tree = await service.list_file_tree(session_id, cwd)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except NotADirectoryError as e:
@@ -147,15 +165,24 @@ async def list_file_tree(
 async def preview_file(
     session_id: str = Query(..., description="AICoding session ID"),
     path: str = Query(..., description="File path relative to workspace root"),
+    cwd: str | None = Query(
+        None,
+        description="可选：前端直传工作目录绝对路径，"
+        "缺省回退 base/{session_id}",
+    ),
 ) -> FilePreviewResponse:
     """Read a single workspace file (size-bounded, traversal-safe)."""
     check_capability(Capability.FILE_READ)
     service = _workspace_service()
     try:
-        content = await service.preview_file(session_id, path)
+        content = await service.preview_file(session_id, path, cwd)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except NotADirectoryError as e:
+        # cwd 直传指向文件（validate_cwd 阶段）→ 400。
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except IsADirectoryError as e:
+        # preview 的 path（相对 workspace）指向目录 → 400。
         raise HTTPException(status_code=400, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -174,16 +201,25 @@ async def preview_file(
 @router.get("/git-diff", response_model=GitDiffResponse)
 async def list_git_diff(
     session_id: str = Query(..., description="AICoding session ID"),
+    cwd: str | None = Query(
+        None,
+        description="可选：前端直传工作目录绝对路径，"
+        "缺省回退 base/{session_id}",
+    ),
 ) -> GitDiffResponse:
     """Return per-project trees of changed files (modified/added/...)."""
     check_capability(Capability.BASH_EXEC)
     service = _workspace_service()
     try:
-        result = await service.list_git_diff(session_id)
+        result = await service.list_git_diff(session_id, cwd)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except NotADirectoryError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
 
     return GitDiffResponse(
         success=True,
@@ -205,6 +241,11 @@ async def get_file_diff(
     old_path: str | None = Query(
         None, description="Original path for renamed/copied files"
     ),
+    cwd: str | None = Query(
+        None,
+        description="可选：前端直传工作目录绝对路径，"
+        "缺省回退 base/{session_id}",
+    ),
 ) -> FileDiffResponse:
     """Return the unified diff for a single file (HEAD-based, with fallbacks)."""
     check_capability(Capability.BASH_EXEC)
@@ -215,14 +256,19 @@ async def get_file_diff(
             project=project,
             file_path=path,
             old_path=old_path,
+            cwd=cwd,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except NotADirectoryError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except ValueError as e:
         # Covers both "Not a git repository" and traversal/invalid-project.
         detail = str(e)
         status_code = 400
         raise HTTPException(status_code=status_code, detail=detail) from e
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
 
     return FileDiffResponse(
         success=True,
@@ -273,14 +319,23 @@ async def list_sessions_with_run_status(
 @router.get("/runs", response_model=SessionRunsResponse)
 async def list_session_runs(
     session_id: str = Query(..., description="AICoding session ID"),
+    cwd: str | None = Query(
+        None,
+        description="可选：前端直传工作目录绝对路径，"
+        "缺省回退 base/{session_id}",
+    ),
 ) -> SessionRunsResponse:
     """API 4.2：返回该 session 工作空间下的所有 devflow runs（透传 aix 输出）。"""
     check_capability(Capability.BASH_EXEC)
     service = _runstatus_service()
     try:
-        runs = await service.get_session_runs(session_id)
+        runs = await service.get_session_runs(session_id, cwd)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except NotADirectoryError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return SessionRunsResponse(success=True, session_id=session_id, runs=runs)
 
 
@@ -288,14 +343,23 @@ async def list_session_runs(
 async def get_run_phases(
     session_id: str = Query(..., description="AICoding session ID"),
     run_id: str = Query(..., description="Run ID（来自 /sessions/runs）"),
+    cwd: str | None = Query(
+        None,
+        description="可选：前端直传工作目录绝对路径，"
+        "缺省回退 base/{session_id}",
+    ),
 ) -> RunPhaseStatusResponse:
     """API 4.3：返回某个 run 的 phase 详情（透传 ``aix run phase status --verbose``）。"""
     check_capability(Capability.BASH_EXEC)
     service = _runstatus_service()
     try:
-        data = await service.get_run_phase_status(session_id, run_id)
+        data = await service.get_run_phase_status(session_id, run_id, cwd)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except NotADirectoryError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return RunPhaseStatusResponse(
         success=True,
         session_id=session_id,
@@ -306,21 +370,31 @@ async def get_run_phases(
 @router.get("/runs/pull-requests", response_model=SessionPullRequestsResponse)
 async def list_session_pull_requests(
     session_id: str = Query(..., description="AICoding session ID"),
+    cwd: str | None = Query(
+        None,
+        description="可选：前端直传工作目录绝对路径，"
+        "缺省回退 base/{session_id}",
+    ),
 ) -> SessionPullRequestsResponse:
     """API 4.4：返回 session 工作空间下所有 run 产出的 pull-request outputs。
 
     按 ``at`` (unix ms) 倒序排列。错误语义：
 
-    - workspace 不存在 → 404
+    - cwd 越界 / 非绝对 → 400
     - 命令执行失败 → 500（带 stderr）
     - JSON 解析失败 → 500
+
+    注：本端点用 ``resolve_workspace``（仅前缀校验，不校验存在性），故 cwd
+    指向不存在目录不会抛 ``FileNotFoundError``，而是交由 aix CLI 处理。
     """
     check_capability(Capability.BASH_EXEC)
     service = _runstatus_service()
     try:
-        items = await service.get_session_pull_requests(session_id)
+        items = await service.get_session_pull_requests(session_id, cwd)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return SessionPullRequestsResponse(
         success=True,
         session_id=session_id,
@@ -334,12 +408,28 @@ async def list_session_pull_requests(
 @router.get("/worktree-status", response_model=WorktreeStatusResponse)
 async def get_worktree_status(
     session_id: str = Query(..., description="AICoding session ID"),
+    cwd: str | None = Query(
+        None,
+        description="可选：前端直传工作目录绝对路径，"
+        "缺省回退 base/{session_id}",
+    ),
 ) -> WorktreeStatusResponse:
     """Check .worktree.json existence and status in session workspace."""
     import json
     from pathlib import Path
 
-    workspace = WorkspaceService.resolve_workspace(session_id)
+    # worktree-status 走 resolve_workspace（前缀校验，不校验存在性），始终返 200。
+    # cwd 直传但越界/非绝对 → resolve_workspace 抛 ValueError → 兜成 exists:false，
+    # 不破坏既有客户端契约（缺失即 idle）。
+    try:
+        workspace = WorkspaceService.resolve_workspace(session_id, cwd)
+    except ValueError as e:
+        log.warning(
+            "invalid cwd for worktree-status session=%s: %s", session_id, e
+        )
+        return WorktreeStatusResponse(
+            session_id=session_id, exists=False, status="idle"
+        )
     worktree_path = Path(workspace) / ".worktree.json"
 
     if not worktree_path.is_file():
