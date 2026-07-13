@@ -147,6 +147,11 @@ class EngineWebSocketServer:
         self._mcp_token_settings = load_mcp_token_settings()
         self._connections: Dict[str, WebSocket] = {}
         self._conn_auth: Dict[str, AuthContext] = {}
+        self._session_subscribers: Dict[str, set[str]] = {}
+        self._conn_sessions: Dict[str, set[str]] = {}
+        self._inject_listener_refs: Dict[
+            tuple[str | None, int], tuple[Any, Callable[[EventFrame], Any]]
+        ] = {}
         self._seq = 0
         self._version = "1.0.0"
 
@@ -213,7 +218,8 @@ class EngineWebSocketServer:
             log.info(f"WebSocket connection closed: {conn_id}")
 
     async def _release_conn(self, conn_id: str) -> None:
-        """Tell the active engine this connection is gone."""
+        """Tell the active engine this connection is gone and drop session subscriptions."""
+        self._unsubscribe_conn(conn_id)
         auth = self._conn_auth.pop(conn_id, None)
         if auth is None:
             return
@@ -435,6 +441,10 @@ class EngineWebSocketServer:
                 return response, []
             elif method == "chat.abort":
                 return await self._handle_chat_abort(conn_id, request, params)
+            elif method == "chat.subscribe":
+                return await self._handle_chat_subscribe(conn_id, request, params)
+            elif method == "chat.unsubscribe":
+                return await self._handle_chat_unsubscribe(conn_id, request, params)
             elif method == "sessions.reset":
                 response = await self._handle_session_reset(conn_id, request, params)
                 return response, []
@@ -600,6 +610,161 @@ class EngineWebSocketServer:
             seq=payload["seq"],
         )
         await websocket.send_text(event.to_json())
+
+
+    # ── chat.subscribe / injected event fanout ───────────────────────────────
+
+    async def _handle_chat_subscribe(
+        self,
+        conn_id: str,
+        request: RequestFrame,
+        params: Dict[str, Any],
+    ) -> tuple[ResponseFrame, list[tuple[str, Dict[str, Any]]]]:
+        session_key = params.get("sessionKey")
+        if not session_key:
+            return ResponseFrame.err_response(
+                request.id,
+                ErrorShape(ErrorCodes.INVALID_REQUEST, "Missing sessionKey"),
+            ), []
+
+        self._session_subscribers.setdefault(session_key, set()).add(conn_id)
+        self._conn_sessions.setdefault(conn_id, set()).add(session_key)
+        live_inject = await self._ensure_openclaw_inject_listener(conn_id)
+        return ResponseFrame.ok_response(
+            request.id,
+            {
+                "subscribed": True,
+                "sessionKey": session_key,
+                "liveInject": live_inject,
+            },
+        ), []
+
+    async def _handle_chat_unsubscribe(
+        self,
+        conn_id: str,
+        request: RequestFrame,
+        params: Dict[str, Any],
+    ) -> tuple[ResponseFrame, list[tuple[str, Dict[str, Any]]]]:
+        session_key = params.get("sessionKey")
+        if not session_key:
+            return ResponseFrame.err_response(
+                request.id,
+                ErrorShape(ErrorCodes.INVALID_REQUEST, "Missing sessionKey"),
+            ), []
+
+        self._unsubscribe_conn_from_session(conn_id, session_key)
+        self._drop_idle_inject_listeners()
+        return ResponseFrame.ok_response(
+            request.id,
+            {"unsubscribed": True, "sessionKey": session_key},
+        ), []
+
+    def _unsubscribe_conn(self, conn_id: str) -> None:
+        for session_key in list(self._conn_sessions.pop(conn_id, set())):
+            subscribers = self._session_subscribers.get(session_key)
+            if subscribers is None:
+                continue
+            subscribers.discard(conn_id)
+            if not subscribers:
+                self._session_subscribers.pop(session_key, None)
+        self._drop_idle_inject_listeners()
+
+    def _unsubscribe_conn_from_session(self, conn_id: str, session_key: str) -> None:
+        sessions = self._conn_sessions.get(conn_id)
+        if sessions is not None:
+            sessions.discard(session_key)
+            if not sessions:
+                self._conn_sessions.pop(conn_id, None)
+        subscribers = self._session_subscribers.get(session_key)
+        if subscribers is not None:
+            subscribers.discard(conn_id)
+            if not subscribers:
+                self._session_subscribers.pop(session_key, None)
+
+    async def _ensure_openclaw_inject_listener(self, conn_id: str) -> bool:
+        manager = EngineManager.get_instance()
+        if manager.engine != "openclaw":
+            return False
+
+        auth = self._auth_for(conn_id)
+        token = auth.token
+        try:
+            pool = getattr(manager._require_engine(), "token_pool")
+            client = await pool.get(token)
+        except Exception as e:
+            log.warning("chat.subscribe: failed to bind openclaw inject listener: %s", e)
+            return False
+
+        key = (token, id(client))
+        if key in self._inject_listener_refs:
+            return True
+
+        async def on_injected_event(event: EventFrame) -> None:
+            await self._fanout_injected_event(event)
+
+        try:
+            client.on_event("chat", on_injected_event)
+            client.on_event("agent", on_injected_event)
+        except Exception as e:
+            log.warning("chat.subscribe: client.on_event failed: %s", e)
+            return False
+
+        self._inject_listener_refs[key] = (client, on_injected_event)
+        return True
+
+    async def _fanout_injected_event(self, event: EventFrame) -> None:
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        session_key = payload.get("sessionKey")
+        run_id = payload.get("runId")
+        if not session_key:
+            return
+        if not (isinstance(run_id, str) and run_id.startswith("inject-")):
+            return
+
+        subscribers = list(self._session_subscribers.get(session_key) or [])
+        if not subscribers:
+            return
+
+        send_payload = dict(payload)
+        if "seq" not in send_payload:
+            send_payload["seq"] = self._next_seq()
+        if "ts" not in send_payload:
+            send_payload["ts"] = int(time.time() * 1000)
+        frame = EventFrame(
+            event=event.event,
+            payload=send_payload,
+            seq=send_payload["seq"],
+        )
+        raw = frame.to_json()
+        stale: list[str] = []
+        for subscriber_conn_id in subscribers:
+            websocket = self._connections.get(subscriber_conn_id)
+            if websocket is None:
+                stale.append(subscriber_conn_id)
+                continue
+            try:
+                await websocket.send_text(raw)
+            except Exception as e:
+                log.debug(
+                    "chat.subscribe: fanout failed conn=%s: %s",
+                    subscriber_conn_id,
+                    e,
+                )
+                stale.append(subscriber_conn_id)
+
+        for stale_conn_id in stale:
+            self._unsubscribe_conn(stale_conn_id)
+
+    def _drop_idle_inject_listeners(self) -> None:
+        if self._session_subscribers:
+            return
+        for client, listener in list(self._inject_listener_refs.values()):
+            try:
+                client.off_event("chat", listener)
+                client.off_event("agent", listener)
+            except Exception as e:
+                log.debug("chat.subscribe: off_event failed: %s", e)
+        self._inject_listener_refs.clear()
 
     # ── chat.send ──────────────────────────────────────────────────────────
 
