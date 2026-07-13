@@ -47,6 +47,7 @@ from agentclaw.community.core.bot_management.utils import (
     is_baas_publish_failure_message as _utils_is_baas_publish_failure_message,
 )
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
+from agentclaw.community.core.mcp.services._defaults import get_default_cli_items
 from agentclaw.community.core.mcp.services.passport_scope import filter_passport_mcp_codes
 from agentclaw.community.core.services.engine_config import EngineConfigService
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
@@ -849,6 +850,7 @@ async def create_bot(
 
         # ===== 3. 申请 Passport =====
         passport_result = None
+        default_cli_items = get_default_cli_items(passport_engine_type, data.get("template_type"))
 
         try:
             if is_first_bot:
@@ -856,6 +858,7 @@ async def create_bot(
                     bot_id=bot_id,
                     owner_workno=user_id,
                     mcp_codes=mcp_codes,
+                    cli_items=default_cli_items,
                     bot_name=data.get("bot_name"),
                     bot_desc=data.get("bot_desc"),
                     engine_type=passport_engine_type,
@@ -867,6 +870,7 @@ async def create_bot(
                     bot_id=bot_id,
                     owner_workno=user_id,
                     mcp_codes=mcp_codes,
+                    cli_items=default_cli_items,
                     bot_name=data.get("bot_name"),
                     bot_desc=data.get("bot_desc"),
                     engine_type=passport_engine_type,

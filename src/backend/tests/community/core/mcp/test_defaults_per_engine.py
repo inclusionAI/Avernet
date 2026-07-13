@@ -23,6 +23,30 @@ def test_claude_code_has_its_own_list():
     assert isinstance(servers, list)
 
 
+def test_claude_code_merges_aicoding_research_mcps():
+    servers = get_default_mcp_servers("claude_code")
+    codes = [s["server_code"] for s in servers]
+    # claude_code 原有 12 项全部保留（不丢能力）。
+    assert "mcp.ant.antcodemcp.code.mcpserver" in codes
+    assert "mcp.ant.brwithub.worksummaryserver" in codes
+    assert "mcp.ant.homistudio.meetmcp" in codes
+    # aicoding 独有的 6 个研发 MCP 已补入（不重复添加，不靠 template_type 判定）。
+    aicoding_only = (
+        "mcp.ant.zlatan.yuntumcpserver",
+        "mcp.ant.alipaybase-antlogsmcp.mcp-server",
+        "mcp.ant.arkai.assistantmcpserver",
+        "mcp.ant.agentix.112858.aixAicoding",
+        "mcp.ant.faas.aixjiter.AixCodingMemoryMCP",
+        "mcp.ant.rgmcpserver.rgfastcheckmcpserver",
+    )
+    for code in aicoding_only:
+        assert code in codes, f"missing aicoding-only MCP in claude_code: {code}"
+    # 无重复。
+    assert len(codes) == len(set(codes))
+    # 12 原有 + 6 新增 = 18。
+    assert len(codes) == 18
+
+
 def test_aicoding_has_its_own_list():
     servers = get_default_mcp_servers("aicoding")
     codes = [s["server_code"] for s in servers]
@@ -131,3 +155,75 @@ def test_uct_auth_header_ignores_blank_or_nonstring_token(monkeypatch):
     assert _uct_auth_header() == {}
     _patch_config(monkeypatch, {})  # no mcp block at all
     assert _uct_auth_header() == {}
+
+
+
+# ── 默认 CLI 列表（aicoding 链路：aicoding 引擎 / claude_code 研发模板）──
+
+from agentclaw.community.core.mcp.services._defaults import (
+    get_default_cli_items,
+)
+
+_EXPECTED_CLI_CODES = (
+    "adev", "acli", "antcode", "linke", "linke-cli",
+    "linkw-cli", "qmx-invoke-cli", "serverless", "derisk",
+)
+
+
+def _assert_nine_default_clis(items):
+    codes = [it["cli_code"] for it in items]
+    assert len(items) == 9
+    for code in _EXPECTED_CLI_CODES:
+        assert code in codes
+    for it in items:
+        assert "cli_code" in it
+        assert "cli_name" in it
+        assert "cli_desc" in it
+    assert len(codes) == len(set(codes))
+
+
+def test_aicoding_engine_has_default_cli_items():
+    items = get_default_cli_items("aicoding")
+    _assert_nine_default_clis(items)
+
+
+def test_claude_code_personal_coding_uses_aicoding_link():
+    items = get_default_cli_items("claude_code", "personalCoding")
+    _assert_nine_default_clis(items)
+
+
+def test_claude_code_application_coding_uses_aicoding_link():
+    items = get_default_cli_items("claude_code", "applicationCoding")
+    _assert_nine_default_clis(items)
+
+
+def test_claude_code_without_template_or_unknown_template_returns_empty():
+    # claude_code 不带 template_type → 走 aicoding 链路
+    assert get_default_cli_items("claude_code") == []
+    # 非 personalCoding/applicationCoding 的 template_type → 空（fail-closed）
+    assert get_default_cli_items("claude_code", "service") == []
+    assert get_default_cli_items("claude_code", "other") == []
+
+
+def test_non_aicoding_engines_return_empty_regardless_of_template():
+    for engine in ("openclaw", "hermes", "moltis"):
+        assert get_default_cli_items(engine) == []
+        assert get_default_cli_items(engine, "personalCoding") == []
+        assert get_default_cli_items(engine, "applicationCoding") == []
+
+
+def test_default_cli_items_none_engine_returns_empty():
+    assert get_default_cli_items(None) == []
+    assert get_default_cli_items(None, "personalCoding") == []
+    assert get_default_cli_items("") == []
+
+
+def test_default_cli_items_returns_copy():
+    items = get_default_cli_items("aicoding")
+    items[0]["cli_code"] = "mutated"
+    # 再次取不应被污染
+    assert get_default_cli_items("aicoding")[0]["cli_code"] == "adev"
+    # claude_code 研发模板同样返还副本
+    items2 = get_default_cli_items("claude_code", "personalCoding")
+    items2[0]["cli_code"] = "mutated"
+    assert get_default_cli_items("claude_code", "personalCoding")[0]["cli_code"] == "adev"

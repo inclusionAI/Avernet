@@ -994,6 +994,128 @@ class TestCreateBot:
         assert resp.json()["success"] is True
         passport_kwargs = mock_passport.apply_first_agent_passport.call_args.kwargs
         assert passport_kwargs["mcp_codes"] == ["mcp.remote.1"]
+        # openclaw (default engine) carries no CLI items — fail-closed for non-aicoding
+        assert passport_kwargs["cli_items"] == []
+
+    def test_create_passport_carries_default_cli_items_for_aicoding(
+        self, mock_bot_service, mock_passport
+    ):
+        """aicoding engine create path carries the 9 default CLI items.
+
+        Mirrors test_create_filters_local_mcp_codes_before_passport but posts
+        engine_type=aicoding, then asserts the passport call receives the full
+        default CLI list (verifies router.py wiring end-to-end, not just the
+        _defaults getter in isolation).
+        """
+        from agentclaw.community.adapters.http.bot_management.router import router
+        import agentclaw.community.adapters.http.bot_management.router as router_module
+
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[get_request_context] = lambda: _make_ctx()
+        mock_auth = MagicMock()
+        mock_auth.authorize_entity_access = AsyncMock(
+            side_effect=lambda ctx, requested_entity_id, requested_entity_type: (
+                requested_entity_id, requested_entity_type,
+            )
+        )
+        attach_injector(app, Injector([_bind_bot_service(
+            mock_bot_service,
+            bot_repo=MagicMock(),
+            passport=mock_passport,
+            auth=mock_auth,
+            auth_rel=MagicMock(),
+            skill_set_factory=_stub_skill_set_factory(["mcp.remote.1"]),
+        )]))
+
+        with patch.object(router_module, "generate_bot_id", return_value="default"):
+            resp = TestClient(app).post(
+                "/api/bots", json={"bot_name": "NewBot", "engine_type": "aicoding"}
+            )
+
+        assert resp.json()["success"] is True
+        passport_kwargs = mock_passport.apply_first_agent_passport.call_args.kwargs
+        assert passport_kwargs["engine_type"] == "aicoding"
+        # MCP codes still passed through independently of CLI items
+        assert passport_kwargs["mcp_codes"] == ["mcp.remote.1"]
+        cli_codes = [c["cli_code"] for c in passport_kwargs["cli_items"]]
+        assert len(cli_codes) == 9
+        assert "antcode" in cli_codes
+        assert "adev" in cli_codes
+        assert "derisk" in cli_codes
+
+    def test_create_passport_carries_default_cli_items_for_claude_code_coding_templates(
+        self, mock_bot_service, mock_passport
+    ):
+        """claude_code engine + personalCoding/applicationCoding templates share
+        the aicoding default-CLI link (end-to-end router wiring).
+
+        Mirrors the aicoding case but posts engine_type=claude_code with a
+        personalCoding template — verifies the router passes template_type into
+        get_default_cli_items and the aicoding CLI link fires.
+        """
+        from agentclaw.community.adapters.http.bot_management.router import router
+        import agentclaw.community.adapters.http.bot_management.router as router_module
+
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[get_request_context] = lambda: _make_ctx()
+        mock_auth = MagicMock()
+        mock_auth.authorize_entity_access = AsyncMock(
+            side_effect=lambda ctx, requested_entity_id, requested_entity_type: (
+                requested_entity_id, requested_entity_type,
+            )
+        )
+        attach_injector(app, Injector([_bind_bot_service(
+            mock_bot_service,
+            bot_repo=MagicMock(),
+            passport=mock_passport,
+            auth=mock_auth,
+            auth_rel=MagicMock(),
+            skill_set_factory=_stub_skill_set_factory(["mcp.remote.1"]),
+        )]))
+
+        # personalCoding → aicoding CLI link fires.
+        with patch.object(router_module, "generate_bot_id", return_value="default"):
+            resp = TestClient(app).post(
+                "/api/bots",
+                json={"bot_name": "NewBot", "engine_type": "claude_code",
+                      "template_type": "personalCoding"},
+            )
+        assert resp.json()["success"] is True
+        kwargs = mock_passport.apply_first_agent_passport.call_args.kwargs
+        assert kwargs["engine_type"] == "claude_code"
+        cli_codes = [c["cli_code"] for c in kwargs["cli_items"]]
+        assert len(cli_codes) == 9
+        assert {"antcode", "adev", "derisk"} <= set(cli_codes)
+
+        # applicationCoding → 同样走 aicoding CLI 链路。
+        mock_passport.apply_first_agent_passport.reset_mock()
+        mock_passport.apply_first_agent_passport.return_value = {
+            "token": "tok123", "agent_code": "ac1",
+        }
+        with patch.object(router_module, "generate_bot_id", return_value="default"):
+            TestClient(app).post(
+                "/api/bots",
+                json={"bot_name": "NewBot", "engine_type": "claude_code",
+                      "template_type": "applicationCoding"},
+            )
+        kwargs = mock_passport.apply_first_agent_passport.call_args.kwargs
+        assert kwargs["engine_type"] == "claude_code"
+        assert len(kwargs["cli_items"]) == 9
+
+        # claude_code 不带 template_type / 带 service 等非研发模板 → fail-closed 空。
+        mock_passport.apply_first_agent_passport.reset_mock()
+        mock_passport.apply_first_agent_passport.return_value = {
+            "token": "tok123", "agent_code": "ac1",
+        }
+        with patch.object(router_module, "generate_bot_id", return_value="default"):
+            TestClient(app).post(
+                "/api/bots", json={"bot_name": "NewBot", "engine_type": "claude_code"},
+            )
+        kwargs = mock_passport.apply_first_agent_passport.call_args.kwargs
+        assert kwargs["engine_type"] == "claude_code"
+        assert kwargs["cli_items"] == []
 
     def test_passport_error(self, client):
         tc, svc, passport = client
