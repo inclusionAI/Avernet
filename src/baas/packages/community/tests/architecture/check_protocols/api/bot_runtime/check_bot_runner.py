@@ -14,5 +14,5 @@ _bot_runner: BotRunnerProtocol = BotRunner(
     bot_service_selector=MagicMock(spec=BotServiceSelector),
     run_repository=MagicMock(spec=BotRunRepository),
     bot_service_plugin=MagicMock(spec=BotServicePlugin),
-    dispatcher=MagicMock(spec=MessageDispatcher),
+    dispatchers=[MagicMock(spec=MessageDispatcher)],
 )

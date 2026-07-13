@@ -149,12 +149,9 @@ def test_rebuild_context_api_key_not_found():
 def _dispatcher_fresh(repo, queue):
     from secbaas.core.service.bot_run import QueueTaskMessageDispatcher
 
-    qpm_manager = MagicMock()
-    qpm_manager.get_qpm = MagicMock(return_value=None)
     return QueueTaskMessageDispatcher(
         run_repository=repo,
         queue_repository=queue,
-        qpm_manager=qpm_manager,
         chunk_repository=MagicMock(),
         cache_plugin=MagicMock(),
     )
@@ -533,13 +530,158 @@ def test_dispatch_disabled_backpressure_skips_count():
 def _dispatcher_with_depth(repo, queue, depth):
     from secbaas.core.service.bot_run import QueueTaskMessageDispatcher
 
-    qpm_manager = MagicMock()
-    qpm_manager.get_qpm = MagicMock(return_value=None)
     return QueueTaskMessageDispatcher(
         run_repository=repo,
         queue_repository=queue,
-        qpm_manager=qpm_manager,
         chunk_repository=MagicMock(),
         cache_plugin=MagicMock(),
         max_queue_depth=depth,
     )
+
+
+# ----------------------------- _should_cleanup_chunks config tests -----------------------------
+
+
+def _dispatcher_with_config(config_service=None):
+    from secbaas.core.service.bot_run import QueueTaskMessageDispatcher
+
+    return QueueTaskMessageDispatcher(
+        run_repository=MagicMock(),
+        queue_repository=MagicMock(),
+        chunk_repository=MagicMock(),
+        cache_plugin=MagicMock(),
+        system_config_service=config_service,
+    )
+
+
+def _config_response(value: str | None):
+    from datetime import datetime
+
+    from secbaas.api.config_manage import SystemConfigResponse
+
+    return SystemConfigResponse(
+        id=1,
+        conf_key="bot_run.chunk_cleanup_enabled",
+        conf_value=value,
+        env="dev",
+        name="chunk_cleanup",
+        description=None,
+        creator="test",
+        modifier="test",
+        gmt_create=datetime.now(),
+        gmt_modified=datetime.now(),
+    )
+
+
+class TestShouldCleanupChunks:
+    def test_no_config_service_returns_true(self):
+        """When system_config_service is None, cleanup is enabled by default."""
+        dispatcher = _dispatcher_with_config(config_service=None)
+        assert dispatcher._should_cleanup_chunks() is True
+
+    def test_config_value_true_returns_true(self):
+        """When conf_value is 'true', cleanup is enabled."""
+        mock_service = MagicMock()
+        mock_service.get_config.return_value = _config_response("true")
+        dispatcher = _dispatcher_with_config(config_service=mock_service)
+        assert dispatcher._should_cleanup_chunks() is True
+
+    def test_config_value_false_returns_false(self):
+        """When conf_value is 'false', cleanup is disabled."""
+        mock_service = MagicMock()
+        mock_service.get_config.return_value = _config_response("false")
+        dispatcher = _dispatcher_with_config(config_service=mock_service)
+        assert dispatcher._should_cleanup_chunks() is False
+
+    def test_config_value_true_uppercase_returns_true(self):
+        """When conf_value is 'TRUE' (case-insensitive), cleanup is enabled."""
+        mock_service = MagicMock()
+        mock_service.get_config.return_value = _config_response("TRUE")
+        dispatcher = _dispatcher_with_config(config_service=mock_service)
+        assert dispatcher._should_cleanup_chunks() is True
+
+    def test_config_value_true_with_spaces_returns_true(self):
+        """When conf_value has surrounding whitespace, cleanup is enabled."""
+        mock_service = MagicMock()
+        mock_service.get_config.return_value = _config_response("  true  ")
+        dispatcher = _dispatcher_with_config(config_service=mock_service)
+        assert dispatcher._should_cleanup_chunks() is True
+
+    def test_config_none_returns_false(self):
+        """When config record does not exist (None), cleanup is disabled."""
+        mock_service = MagicMock()
+        mock_service.get_config.return_value = None
+        dispatcher = _dispatcher_with_config(config_service=mock_service)
+        assert dispatcher._should_cleanup_chunks() is False
+
+    def test_config_value_empty_returns_false(self):
+        """When conf_value is empty string, cleanup is disabled."""
+        mock_service = MagicMock()
+        mock_service.get_config.return_value = _config_response("")
+        dispatcher = _dispatcher_with_config(config_service=mock_service)
+        assert dispatcher._should_cleanup_chunks() is False
+
+    def test_config_value_none_returns_false(self):
+        """When conf_value is None, cleanup is disabled."""
+        mock_service = MagicMock()
+        mock_service.get_config.return_value = _config_response(None)
+        dispatcher = _dispatcher_with_config(config_service=mock_service)
+        assert dispatcher._should_cleanup_chunks() is False
+
+    def test_config_value_arbitrary_returns_false(self):
+        """When conf_value is not 'true', cleanup is disabled."""
+        mock_service = MagicMock()
+        mock_service.get_config.return_value = _config_response("yes")
+        dispatcher = _dispatcher_with_config(config_service=mock_service)
+        assert dispatcher._should_cleanup_chunks() is False
+
+    def test_config_read_exception_returns_false(self):
+        """When get_config raises, cleanup is disabled (fail-safe)."""
+        mock_service = MagicMock()
+        mock_service.get_config.side_effect = RuntimeError("db down")
+        dispatcher = _dispatcher_with_config(config_service=mock_service)
+        assert dispatcher._should_cleanup_chunks() is False
+
+
+# ----------------------------- accepts -----------------------------
+
+
+class TestAccepts:
+    def test_accepts_returns_true(self):
+        """QueueTaskMessageDispatcher.accepts always returns True."""
+        dispatcher = _dispatcher_fresh(MagicMock(), MagicMock())
+        assert dispatcher.accepts("any-bot-id") is True
+
+
+# ----------------------------- _cleanup_chunks -----------------------------
+
+
+class TestCleanupChunks:
+    def test_should_cleanup_true_calls_delete(self):
+        """When _should_cleanup_chunks is True, _cleanup_chunks deletes records."""
+        from secbaas.core.service.bot_run import QueueTaskMessageDispatcher
+
+        chunk_repo = MagicMock()
+        dispatcher = QueueTaskMessageDispatcher(
+            run_repository=MagicMock(),
+            queue_repository=MagicMock(),
+            chunk_repository=chunk_repo,
+            cache_plugin=MagicMock(),
+        )
+        dispatcher._cleanup_chunks("run-1")
+        chunk_repo.delete_chunks_by_run.assert_called_once_with("run-1")
+
+    def test_cleanup_exception_is_swallowed(self):
+        """_cleanup_chunks swallows exceptions from chunk_repository."""
+        from secbaas.core.service.bot_run import QueueTaskMessageDispatcher
+
+        chunk_repo = MagicMock()
+        chunk_repo.delete_chunks_by_run.side_effect = RuntimeError("db error")
+        dispatcher = QueueTaskMessageDispatcher(
+            run_repository=MagicMock(),
+            queue_repository=MagicMock(),
+            chunk_repository=chunk_repo,
+            cache_plugin=MagicMock(),
+        )
+        # should not raise
+        dispatcher._cleanup_chunks("run-1")
