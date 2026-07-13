@@ -100,8 +100,10 @@ class ArcaSandboxPlugin(Protocol):
     Note:
         This is a SYNC factory (mirroring Arca SDK's sync API).
         Callers wrap calls in asyncio.to_thread() for async usage.
-        The delete_storage method performs a platform-level HTTP call and is
-        also intended to be wrapped via asyncio.to_thread() by callers.
+        The delete_storage method performs a platform-level HTTP call.
+        Callers may invoke it synchronously from within an existing
+        asyncio.to_thread() context (e.g. inside _destroy_device_sync),
+        or wrap it in its own asyncio.to_thread() when called standalone.
     """
 
     def create_sync_sandbox(
