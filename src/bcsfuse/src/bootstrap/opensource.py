@@ -111,7 +111,7 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
     mysql_pool = MySQLConnectionPoolProvider(
         host=os.getenv("MYSQL_HOST", "localhost"),
         port=int(os.getenv("MYSQL_PORT", "3306")),
-        user=os.getenv("MYSQL_USER", "root"),
+        user=os.getenv("MYSQL_USER", ""),
         password=os.getenv("MYSQL_PASSWORD", ""),
         database=os.getenv("MYSQL_DATABASE", "bcsfuse"),
         pool_size=15,

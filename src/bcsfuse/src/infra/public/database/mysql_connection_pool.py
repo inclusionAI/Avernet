@@ -106,8 +106,8 @@ class MySQLConnectionPoolProvider:
         pool = MySQLConnectionPoolProvider(
             host="localhost",
             port=3306,
-            user="root",
-            password="secret",
+            user="your_user",
+            password="your_password",
             database="bcsfuse",
             pool_size=15,
         )
@@ -159,7 +159,7 @@ class MySQLConnectionPoolProvider:
         """
         self.host = host or os.getenv("MYSQL_HOST", "localhost")
         self.port = port or int(os.getenv("MYSQL_PORT", "3306"))
-        self.user = user or os.getenv("MYSQL_USER", "root")
+        self.user = user or os.getenv("MYSQL_USER", "")
         self.password = password or os.getenv("MYSQL_PASSWORD", "")
         if not self.password:
             logger.warning(

@@ -88,7 +88,7 @@ class MySQLFusedProfileStore(FusedProfileRepository):
             self._pool = MySQLConnectionPoolProvider(
                 host=host or os.getenv("MYSQL_HOST", "localhost"),
                 port=port or int(os.getenv("MYSQL_PORT", "3306")),
-                user=user or os.getenv("MYSQL_USER", "root"),
+                user=user or os.getenv("MYSQL_USER", ""),
                 password=password or os.getenv("MYSQL_PASSWORD", ""),
                 database=database or os.getenv("MYSQL_DATABASE", "bcsfuse"),
             )

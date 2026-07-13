@@ -52,7 +52,7 @@ class MySQLWorkerRuntimeStateStore:
             self._pool = MySQLConnectionPoolProvider(
                 host=kwargs.get("host") or os.getenv("MYSQL_HOST", "localhost"),
                 port=kwargs.get("port") or int(os.getenv("MYSQL_PORT", "3306")),
-                user=kwargs.get("user") or os.getenv("MYSQL_USER", "root"),
+                user=kwargs.get("user") or os.getenv("MYSQL_USER", ""),
                 password=kwargs.get("password") or os.getenv("MYSQL_PASSWORD", ""),
                 database=kwargs.get("database") or os.getenv("MYSQL_DATABASE", "bcsfuse"),
             )

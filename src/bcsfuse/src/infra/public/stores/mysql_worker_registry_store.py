@@ -183,8 +183,8 @@ class MySQLWorkerRegistryStore:
                 store = MySQLWorkerRegistryStore(
                     host="localhost",
                     port=3306,
-                    user="root",
-                    password="secret",
+                    user="your_user",
+                    password="your_password",
                     database="bcsfuse"
                 )
 
@@ -194,8 +194,8 @@ class MySQLWorkerRegistryStore:
                 pool = MySQLConnectionPoolProvider(
                     host="localhost",
                     port=3306,
-                    user="root",
-                    password="secret",
+                    user="your_user",
+                    password="your_password",
                     database="bcsfuse",
                     pool_size=15
                 )
@@ -214,7 +214,7 @@ class MySQLWorkerRegistryStore:
             self._pool = MySQLConnectionPoolProvider(
                 host=host or os.getenv("MYSQL_HOST", "localhost"),
                 port=port or int(os.getenv("MYSQL_PORT", "3306")),
-                user=user or os.getenv("MYSQL_USER", "root"),
+                user=user or os.getenv("MYSQL_USER", ""),
                 password=_password,
                 database=database or os.getenv("MYSQL_DATABASE", "bcsfuse"),
                 pool_size=pool_size,

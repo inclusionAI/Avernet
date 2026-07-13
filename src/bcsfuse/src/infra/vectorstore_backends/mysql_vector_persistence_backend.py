@@ -105,7 +105,7 @@ class MySQLVectorPersistenceBackend:
         """
         self.host = host or os.getenv("MYSQL_HOST", "localhost")
         self.port = port or int(os.getenv("MYSQL_PORT", "3306"))
-        self.user = user or os.getenv("MYSQL_USER", "root")
+        self.user = user or os.getenv("MYSQL_USER", "")
         self.password = password or os.getenv("MYSQL_PASSWORD", "")
         self.database = database or os.getenv("MYSQL_DATABASE", "bcsfuse")
         self.collection_name = collection_name

@@ -19,7 +19,7 @@ export CAPABILITY_VERIFY_ENABLED="true"
 # MySQL Configuration
 export MYSQL_HOST="127.0.0.1"
 export MYSQL_PORT="3306"
-export MYSQL_USER="root"
+export MYSQL_USER="your_mysql_user"
 export MYSQL_PASSWORD="<YOUR_MYSQL_PASSWORD>"  # Set your MySQL password
 export MYSQL_DATABASE="bcsfuse_oss_test"
 

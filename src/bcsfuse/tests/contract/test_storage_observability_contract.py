@@ -107,10 +107,10 @@ class TestSecretRedaction:
 
     def test_mask_url_masks_password(self):
         """Test that URL passwords are masked."""
-        url = "mysql://admin:secret123@localhost:3306/db"
+        url = "mysql://testuser:testpass@localhost:3306/db"
         masked = mask_url(url)
-        assert masked == "mysql://admin:****@localhost:3306/db"
-        assert "secret123" not in masked
+        assert masked == "mysql://testuser:****@localhost:3306/db"
+        assert "testpass" not in masked
 
     def test_mask_url_preserves_no_password(self):
         """Test that URLs without passwords are preserved."""
@@ -128,8 +128,8 @@ class TestSecretRedaction:
         config = {
             "host": "localhost",
             "port": 3306,
-            "user": "admin",
-            "password": "secret123",
+            "user": "testuser",
+            "password": "testpass",
             "api_key": "ak_1234567890abcdef",
             "auth_token": "tok_xyz987",
         }
