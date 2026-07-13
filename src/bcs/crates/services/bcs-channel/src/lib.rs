@@ -648,7 +648,7 @@ impl ChannelService for BcsChannelService {
                     from_name: msg.im_user_nick,
                     message: msg.text,
                     mentions: Vec::new(),
-                    attachments: None,
+                    attachments: msg.attachments,
                     thinking: None,
                     idempotency_key: Some(dispatch_msg_id.clone()),
                     sender_conn_id: None,
@@ -2550,6 +2550,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn inbound_image_attachment_reaches_message_flow() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+        let mut inbound = group_inbound("conv_group", "u1", Some("张三"), "msg-image", true);
+        inbound.attachments = Some(vec![serde_json::from_value(serde_json::json!({
+            "attachment_id": "att-1",
+            "type": "image",
+            "file_name": "image",
+            "url": "https://download.example.com/image?token=temporary"
+        }))?]);
+
+        harness.service.handle_inbound(inbound).await?;
+
+        let web_sends = harness.message_flow.web_sends.lock().await;
+        assert_eq!(web_sends.len(), 1);
+        let attachments = serde_json::to_value(&web_sends[0].attachments)?;
+        assert_eq!(attachments[0]["attachment_id"], "att-1");
+        assert_eq!(
+            attachments[0]["url"],
+            "https://download.example.com/image?token=temporary"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn direct_bot_group_chat_uses_bounded_channel_session_id() -> TestResult {
         let harness = TestHarness::new(manager_group("group_1")).await?;
         let binding_id = "0d86bd1b-6efd-4b5c-8906-1be1b5717c74";
@@ -2774,6 +2813,7 @@ mod tests {
             im_user_id: "u1".to_string(),
             im_user_nick: Some("张三".to_string()),
             text: "hello".to_string(),
+            attachments: None,
             is_at_bot: true,
             msg_id: "msg_meta".to_string(),
         };
@@ -3297,6 +3337,7 @@ mod tests {
             im_user_id: user_id.to_string(),
             im_user_nick: user_nick.map(str::to_string),
             text: "hello".to_string(),
+            attachments: None,
             is_at_bot: true,
             msg_id: msg_id.to_string(),
         }
@@ -3317,6 +3358,7 @@ mod tests {
             im_user_id: user_id.to_string(),
             im_user_nick: user_nick.map(str::to_string),
             text: "hello".to_string(),
+            attachments: None,
             is_at_bot,
             msg_id: msg_id.to_string(),
         }

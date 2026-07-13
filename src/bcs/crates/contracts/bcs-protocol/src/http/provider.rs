@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::{Skill, deserialize_skills};
+use crate::{Attachment, Skill, deserialize_skills};
 
 pub const BCN_PROTOCOL_VERSION_HEADER: &str = "X-BCN-Protocol-Version";
 pub const BCN_TRANSPORT_HEADER: &str = "X-BCN-Transport";
@@ -206,6 +206,8 @@ pub struct ProviderWebhookRequest {
     pub from: Option<ProviderWebhookSender>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub before: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

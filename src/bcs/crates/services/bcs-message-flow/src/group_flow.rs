@@ -3,7 +3,7 @@ use std::sync::{Arc, OnceLock};
 use async_trait::async_trait;
 use bcs_domain::{NewMessage, SenderType};
 use bcs_protocol::{
-    BcsFrame, RequestFrame, build_chat_inject_frame, build_chat_send_frame,
+    Attachment, BcsFrame, RequestFrame, build_chat_inject_frame, build_chat_send_frame,
     build_direct_chat_inject_frame, build_direct_chat_send_frame, build_session_key, now_ms,
 };
 use bcs_service_api::{
@@ -322,6 +322,47 @@ pub(crate) async fn try_persist_group_message(
     }
 }
 
+fn persisted_inbound_content(content: &str, attachments: Option<&[Attachment]>) -> Value {
+    let Some(attachments) = attachments.filter(|items| !items.is_empty()) else {
+        return Value::String(content.to_string());
+    };
+    serde_json::json!({
+        "text": content,
+        "attachments": attachments
+            .iter()
+            .map(Attachment::stable_metadata)
+            .collect::<Vec<_>>(),
+    })
+}
+
+#[cfg(test)]
+mod attachment_persistence_tests {
+    use bcs_protocol::{Attachment, AttachmentType};
+
+    use super::persisted_inbound_content;
+
+    #[test]
+    fn temporary_attachment_url_is_not_persisted_in_message_history() {
+        let attachment = Attachment {
+            attachment_id: "att-1".to_string(),
+            attachment_type: AttachmentType::Image,
+            file_name: "image".to_string(),
+            mime_type: None,
+            size: None,
+            sha256: None,
+            url: "https://download.example.com/image?token=temporary".to_string(),
+            expires_at: None,
+        };
+
+        let persisted = persisted_inbound_content("look", Some(&[attachment]));
+
+        assert_eq!(persisted["text"], "look");
+        assert_eq!(persisted["attachments"][0]["attachment_id"], "att-1");
+        assert!(persisted["attachments"][0].get("url").is_none());
+        assert!(!persisted.to_string().contains("token=temporary"));
+    }
+}
+
 pub(crate) async fn manager_worker_self_owner(
     flow: &BcsMessageFlow,
     group_id: &str,
@@ -449,7 +490,7 @@ pub async fn handle_web_send(
         &cmd.from_actor_id,
         sender_type,
         "chat",
-        Value::String(decision.cleaned_message.clone()),
+        persisted_inbound_content(&decision.cleaned_message, cmd.attachments.as_deref()),
         cmd.idempotency_key.as_deref(),
         None,
         "", // run_id: user messages don't associate with bot runs
@@ -2125,6 +2166,7 @@ async fn frame_for_target(
                     &cmd.from_actor_id,
                     sender_display_name,
                     &target.bot_uuid,
+                    &cmd.attachments,
                     protocol_version,
                     cmd.session_id.as_deref(),
                 );
@@ -2139,6 +2181,7 @@ async fn frame_for_target(
                 sender_display_name,
                 &decision.mentions,
                 &target.bot_uuid,
+                &cmd.attachments,
                 is_self,
                 protocol_version,
                 from_bot_owner,

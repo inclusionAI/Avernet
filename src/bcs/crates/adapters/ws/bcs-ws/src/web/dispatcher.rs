@@ -235,7 +235,7 @@ struct ChatSendParams {
     thinking: Option<String>,
     #[serde(alias = "idempotencyKey")]
     idempotency_key: Option<String>,
-    attachments: Option<Vec<Value>>,
+    attachments: Option<Vec<bcs_protocol::Attachment>>,
 }
 
 #[derive(Debug, Serialize)]

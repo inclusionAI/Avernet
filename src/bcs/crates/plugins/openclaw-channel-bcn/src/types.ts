@@ -109,6 +109,17 @@ export interface MessageContent {
   timestamp: number;
 }
 
+export interface Attachment {
+  attachment_id: string;
+  type: 'image';
+  file_name: string;
+  mime_type?: string;
+  size?: number;
+  sha256?: string;
+  url: string;
+  expires_at?: number;
+}
+
 export type ChannelSource = 'webui' | 'dingtalk' | 'api';
 
 export interface ChannelInfo {
@@ -187,6 +198,7 @@ export interface ChatSendParams {
   session_context: GroupContext;
   timeout_ms?: number;
   idempotency_key?: string;
+  attachments?: Attachment[];
 }
 
 /** Parameters for chat.inject - incoming message that bot should observe silently.
@@ -201,6 +213,7 @@ export interface ChatInjectParams {
   message: MessageContent;
   channel: ChannelInfo;
   session_context: GroupContext;
+  attachments?: Attachment[];
 }
 
 export interface ChatSendResponse {

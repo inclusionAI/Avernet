@@ -279,6 +279,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                             BCS_SYSTEM_MESSAGE,
                             &[],
                             recipient,
+                            &None,
                             false,
                             protocol_version,
                             None,

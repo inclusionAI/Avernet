@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use bcs_domain::BotDeliveryTarget;
 use bcs_protocol::{
-    AgentEventPayload, AgentStream, BCN_MESSAGE_ID_HEADER, BCN_PROTOCOL_VERSION_HEADER,
+    AgentEventPayload, AgentStream, Attachment, BCN_MESSAGE_ID_HEADER, BCN_PROTOCOL_VERSION_HEADER,
     BCN_TIMESTAMP_HEADER, BCN_TRANSPORT_HEADER, BcsFrame, ChatEventPayload,
     ChatEventState as WireChatState, ContentBlock, MessageContent,
     ProviderAckResponse, ProviderHistoryResponse, ProviderWebhookBotRef, ProviderWebhookRequest,
@@ -517,6 +517,16 @@ fn provider_request_from_frame(
     } else {
         timeout_ms
     };
+    let attachments = params
+        .get("attachments")
+        .cloned()
+        .map(serde_json::from_value::<Vec<Attachment>>)
+        .transpose()
+        .map_err(|error| ServiceError::InvalidOperation {
+            message: format!("provider attachment payload is invalid: {error}"),
+            request_id: Some(request.id.clone()),
+        })?
+        .unwrap_or_default();
 
     Ok(ProviderWebhookRequest {
         frame_type: "req".to_string(),
@@ -531,6 +541,7 @@ fn provider_request_from_frame(
         },
         from: provider_sender_from_params(&params),
         message: params.get("message").cloned(),
+        attachments,
         before: params.get("before").and_then(Value::as_u64),
         after: params.get("after").and_then(Value::as_u64),
         limit: params.get("limit").and_then(Value::as_u64),
@@ -811,7 +822,21 @@ fn provider_client_for_url(
 }
 
 fn provider_body_log(body: &ProviderWebhookRequest) -> String {
-    serde_json::to_string(body).unwrap_or_else(|error| {
+    let mut redacted = match serde_json::to_value(body) {
+        Ok(value) => value,
+        Err(error) => return format!("{{\"serialize_error\":\"{}\"}}", error),
+    };
+    if let Some(attachments) = redacted
+        .get_mut("attachments")
+        .and_then(Value::as_array_mut)
+    {
+        for attachment in attachments {
+            if let Some(url) = attachment.get_mut("url") {
+                *url = Value::String("<redacted>".to_string());
+            }
+        }
+    }
+    serde_json::to_string(&redacted).unwrap_or_else(|error| {
         format!("{{\"serialize_error\":\"{}\"}}", error)
     })
 }
@@ -1470,6 +1495,48 @@ mod client_policy_tests {
         assert_eq!(policy.total_timeout, Some(Duration::from_secs(65)));
         assert_eq!(policy.read_timeout, None);
         assert!(!policy.http2_only);
+    }
+
+    #[test]
+    fn provider_body_log_redacts_temporary_attachment_urls() {
+        let body = ProviderWebhookRequest {
+            frame_type: "event".to_string(),
+            id: "frame-1".to_string(),
+            method: "chat.send".to_string(),
+            session_id: "session-1".to_string(),
+            bcn_group_id: "group-1".to_string(),
+            to_bot: ProviderWebhookBotRef {
+                provider_id: "provider-1".to_string(),
+                provider_bot_ref: "bot-1".to_string(),
+                tags: Vec::new(),
+            },
+            from: None,
+            message: None,
+            attachments: vec![Attachment {
+                attachment_id: "att-1".to_string(),
+                attachment_type: bcs_protocol::AttachmentType::Image,
+                file_name: "image".to_string(),
+                mime_type: None,
+                size: None,
+                sha256: None,
+                url: "https://download.example.com/image?token=secret".to_string(),
+                expires_at: None,
+            }],
+            before: None,
+            after: None,
+            limit: None,
+            timeout_ms: 1_000,
+            extensions: None,
+        };
+
+        let logged = provider_body_log(&body);
+
+        assert!(logged.contains("\"url\":\"<redacted>\""));
+        assert!(!logged.contains("token=secret"));
+        assert_eq!(
+            body.attachments[0].url,
+            "https://download.example.com/image?token=secret"
+        );
     }
 
     #[tokio::test]

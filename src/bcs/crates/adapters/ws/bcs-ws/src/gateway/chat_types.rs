@@ -3,6 +3,7 @@
 //! Parameter and result types for chat.send, chat.history, chat.abort.
 
 use serde::{Deserialize, Serialize};
+use bcs_protocol::Attachment;
 
 // ============================================================================
 // chat.history
@@ -68,7 +69,7 @@ pub struct ChatSendParams {
 
     /// Attachments.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attachments: Option<Vec<serde_json::Value>>,
+    pub attachments: Option<Vec<Attachment>>,
 
     /// Timeout in milliseconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -329,7 +330,16 @@ mod tests {
             "from": "user-1",
             "thinking": "high",
             "deliver": false,
-            "attachments": [{"type": "image", "url": "http://example.com/image.png"}],
+            "attachments": [{
+                "attachment_id": "att-1",
+                "type": "image",
+                "file_name": "image.png",
+                "mime_type": "image/png",
+                "size": 4,
+                "sha256": "abcd",
+                "url": "https://example.com/image.png",
+                "expires_at": 123
+            }],
             "timeout_ms": 30000,
             "idempotency_key": "run-unique"
         }"#;

@@ -1286,6 +1286,7 @@ fn build_chat_send_frame(
         idempotency_key: None,
         bcs_session_id: None,
         tags: tags.to_vec(),
+        attachments: Vec::new(),
     };
     let mut params = serde_json::to_value(params)?;
     if let Some(wait_mode) = caller_wait_mode.map(str::trim).filter(|mode| !mode.is_empty()) {
