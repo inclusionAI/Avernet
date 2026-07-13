@@ -511,6 +511,8 @@ dependencies = [
  "bcs-config",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-organization",
+ "bcs-organization-store",
  "bcs-route-security",
  "bcs-service-api",
  "bcs-test-support",

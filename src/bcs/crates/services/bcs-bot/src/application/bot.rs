@@ -779,10 +779,10 @@ impl Bot {
             }
         })?;
         organization
-            .require_effective_member(organization_code, requester)
+            .require_runtime_member(organization_code, requester)
             .await?;
         let members = organization
-            .list_effective_members(organization_code, command.role.as_deref())
+            .list_runtime_members(organization_code, command.role.as_deref())
             .await?;
         let member_by_bot = members
             .iter()

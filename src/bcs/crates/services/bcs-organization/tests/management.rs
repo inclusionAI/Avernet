@@ -592,7 +592,7 @@ async fn effective_membership_rejects_disabled_org_disabled_member_and_nonmember
 }
 
 #[tokio::test]
-async fn effective_member_list_filters_by_role_and_omits_revoked_members() {
+async fn runtime_member_list_keeps_active_members_after_provider_grant_revocation() {
     let ctx = test_context().await;
     let provider_a = register_provider(&ctx, "Provider A").await;
     let provider_b = register_provider(&ctx, "Provider B").await;
@@ -635,17 +635,31 @@ async fn effective_member_list_filters_by_role_and_omits_revoked_members() {
         )
         .await
         .expect("revoke provider c");
+    ctx.provider_core
+        .set_provider_bot_disabled(
+            &provider_b.provider_id,
+            "bot-b",
+            &provider_b.admin_token,
+            true,
+        )
+        .await
+        .expect("disable provider b binding");
+
+    ctx.core
+        .require_runtime_member("promo-2026", "bot-b")
+        .await
+        .expect("disabled provider binding must not remove an active runtime member");
 
     let members = ctx
         .core
-        .list_effective_members("promo-2026", Some("traffic_analyst"))
+        .list_runtime_members("promo-2026", Some("traffic_analyst"))
         .await
         .expect("list effective members");
     let bot_ids = members
         .iter()
         .map(|member| member.bot_uuid.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(bot_ids, vec!["bot-b"]);
+    assert_eq!(bot_ids, vec!["bot-b", "bot-c"]);
 }
 
 #[tokio::test]

@@ -162,6 +162,23 @@ impl OrganizationCore {
         self.ensure_member_effective(organization, member).await
     }
 
+    async fn runtime_member_in(
+        &self,
+        organization: &Organization,
+        bot_uuid: &str,
+    ) -> ServiceResult<OrganizationMember> {
+        validate_external_id("bot_uuid", bot_uuid)?;
+        let member = self
+            .organizations
+            .get_member(&self.env, &organization.code, bot_uuid)
+            .await?
+            .ok_or_else(|| ServiceError::Forbidden("organization_member_required".to_string()))?;
+        if member.disabled {
+            return Err(ServiceError::Forbidden("organization_member_disabled".to_string()));
+        }
+        Ok(member)
+    }
+
     async fn ensure_member_effective(
         &self,
         organization: &Organization,
@@ -486,6 +503,40 @@ impl OrganizationCoreService for OrganizationCore {
         }
         effective.sort_by(|left, right| left.bot_uuid.cmp(&right.bot_uuid));
         Ok(effective)
+    }
+
+    async fn require_runtime_member(
+        &self,
+        organization_code: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<OrganizationMember> {
+        let organization = self.require_organization_for_runtime(organization_code).await?;
+        self.runtime_member_in(&organization, bot_uuid).await
+    }
+
+    async fn list_runtime_members(
+        &self,
+        organization_code: &str,
+        role: Option<&str>,
+    ) -> ServiceResult<Vec<OrganizationMember>> {
+        if let Some(role) = role {
+            validate_external_id("role", role)?;
+        }
+        let organization = self.require_organization_for_runtime(organization_code).await?;
+        let mut members = self
+            .organizations
+            .list_members(ListOrganizationMembersQuery {
+                env: self.env.clone(),
+                organization_code: organization.code,
+                include_disabled: false,
+                role: role.map(str::to_string),
+            })
+            .await?
+            .into_iter()
+            .filter(|member| !member.disabled)
+            .collect::<Vec<_>>();
+        members.sort_by(|left, right| left.bot_uuid.cmp(&right.bot_uuid));
+        Ok(members)
     }
 
     async fn authorize_pair(

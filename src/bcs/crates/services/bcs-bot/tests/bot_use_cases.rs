@@ -10,9 +10,12 @@ use bcs_service_api::{
     AuthorizedOrganizationPair, OrganizationCandidateBot, OrganizationCandidateQuery,
     OrganizationCoreService, ProviderBotBindingRepoPort, ProviderBotCoreService,
     ProviderCoreService, ProviderCredentialRepoPort, ProviderRepoPort, RegisterProviderBotParams,
-    ServiceError, ServiceResult,
+    CreateOrganizationCommand, OrganizationAuth, OrganizationManagementService,
+    ProviderOrganizationManagementConfig, PutOrganizationMemberCommand, ServiceError, ServiceResult,
 };
 use bcs_bot_store::provider::MemoryProviderStore;
+use bcs_organization::{OrganizationCore, OrganizationManagement};
+use bcs_organization_store::MemoryOrganizationRepo;
 use bcs_service_api::types::{Organization, OrganizationMember};
 use bcs_bot_store::MemoryBotRepo;
 use tempfile::TempDir;
@@ -112,6 +115,61 @@ impl ProviderRegistryFixture {
             .await
             .expect("register provider bot");
         binding.bot_uuid
+    }
+}
+
+struct OrganizationProviderFixture {
+    provider_id: String,
+    admin_token: String,
+}
+
+async fn register_organization_provider(
+    provider: &ProviderCore,
+    name: &str,
+) -> OrganizationProviderFixture {
+    let registered = provider
+        .register_provider(
+            name.to_string(),
+            "https://provider.example.com/bcs/webhook".to_string(),
+            ProviderAuthMode::StaticBearer,
+            "11111111".to_string(),
+            None,
+            None,
+        )
+        .await
+        .expect("register provider");
+    OrganizationProviderFixture {
+        provider_id: registered.provider.provider_id,
+        admin_token: registered.provider_admin_token,
+    }
+}
+
+async fn register_organization_bot(
+    provider: &ProviderCore,
+    owner: &OrganizationProviderFixture,
+    bot_uuid: &str,
+) {
+    provider
+        .register_provider_bot_with_bot_uuid(
+            &owner.provider_id,
+            &owner.admin_token,
+            RegisterProviderBotParams {
+                bot_name: format!("{bot_uuid} name"),
+                summary: Some(format!("{bot_uuid} summary")),
+                owners: vec!["11111111".to_string()],
+                provider_bot_ref: format!("{bot_uuid}-ref"),
+                bot_uuid: Some(bot_uuid.to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("register provider bot");
+}
+
+fn organization_auth(provider: &OrganizationProviderFixture) -> OrganizationAuth {
+    OrganizationAuth {
+        provider_id: provider.provider_id.clone(),
+        provider_admin_token: provider.admin_token.clone(),
     }
 }
 
@@ -248,6 +306,14 @@ impl OrganizationCoreService for StaticOrganizationCoreService {
             .filter(|member| role.is_none_or(|role| member.role.as_deref() == Some(role)))
             .cloned()
             .collect())
+    }
+
+    async fn require_runtime_member(&self, organization_code: &str, bot_uuid: &str) -> ServiceResult<OrganizationMember> {
+        self.require_effective_member(organization_code, bot_uuid).await
+    }
+
+    async fn list_runtime_members(&self, organization_code: &str, role: Option<&str>) -> ServiceResult<Vec<OrganizationMember>> {
+        self.list_effective_members(organization_code, role).await
     }
 
     async fn authorize_pair(&self, _: &str, _: &str, _: &str) -> ServiceResult<AuthorizedOrganizationPair> {
@@ -851,6 +917,137 @@ async fn organization_scoped_discovery_rejects_role_without_org_and_nonmember_re
         .await
         .expect_err("nonmember requester should fail");
     assert!(matches!(nonmember, BotUseCaseError::Service(ServiceError::Forbidden(reason)) if reason == "organization_member_required"));
+}
+
+#[tokio::test]
+async fn organization_scoped_discovery_keeps_members_after_provider_state_changes() {
+    let data_dir = tempfile::tempdir().expect("temp data dir");
+    let provider_store = Arc::new(MemoryProviderStore::new());
+    let providers: Arc<dyn ProviderRepoPort> = provider_store.clone();
+    let credentials: Arc<dyn ProviderCredentialRepoPort> = provider_store.clone();
+    let bindings: Arc<dyn ProviderBotBindingRepoPort> = provider_store.clone();
+    let registry = Arc::new(BotCore::with_provider_repos(
+        Arc::new(MemoryBotRepo::with_base_dir(data_dir.path().to_path_buf())),
+        providers.clone(),
+        credentials.clone(),
+        bindings.clone(),
+    ));
+    let provider_core = Arc::new(ProviderCore::new(
+        providers.clone(),
+        credentials,
+        bindings.clone(),
+        registry.clone(),
+    ));
+    let organization_core = Arc::new(OrganizationCore::new(
+        "test".to_string(),
+        Arc::new(MemoryOrganizationRepo::new()),
+        providers,
+        bindings,
+        registry.clone(),
+    ));
+    let organization_management = OrganizationManagement::new(
+        provider_core.clone(),
+        organization_core.clone(),
+    );
+    let service = Bot::new_with_friend(
+        registry.clone(),
+        Arc::new(StaticFriendCoreService::default()),
+    )
+    .with_bot_core(registry.clone())
+    .with_organization(organization_core);
+
+    let provider_a = register_organization_provider(&provider_core, "Provider A").await;
+    let provider_b = register_organization_provider(&provider_core, "Provider B").await;
+    let provider_c = register_organization_provider(&provider_core, "Provider C").await;
+    for (resource, managers) in [
+        (&provider_b, vec![provider_a.provider_id.clone()]),
+        (&provider_c, vec![provider_a.provider_id.clone()]),
+    ] {
+        provider_core
+            .update_provider(
+                &resource.provider_id,
+                &resource.admin_token,
+                "11111111",
+                None,
+                None,
+                None,
+                None,
+                Some(ProviderOrganizationManagementConfig {
+                    authorized_manager_provider_ids: managers,
+                }),
+            )
+            .await
+            .expect("grant manager");
+    }
+    register_organization_bot(&provider_core, &provider_a, "bot-a").await;
+    register_organization_bot(&provider_core, &provider_b, "bot-b").await;
+    register_organization_bot(&provider_core, &provider_c, "bot-c").await;
+    organization_management
+        .create(CreateOrganizationCommand {
+            auth: organization_auth(&provider_a),
+            organization_code: "promo-2026".to_string(),
+            name: "Promo 2026".to_string(),
+            description: None,
+        })
+        .await
+        .expect("create organization");
+    for (bot_uuid, role) in [
+        ("bot-a", "planner"),
+        ("bot-b", "traffic_analyst"),
+        ("bot-c", "traffic_analyst"),
+    ] {
+        organization_management
+            .put_member(PutOrganizationMemberCommand {
+                auth: organization_auth(&provider_a),
+                organization_code: "promo-2026".to_string(),
+                bot_uuid: bot_uuid.to_string(),
+                role: Some(role.to_string()),
+            })
+            .await
+            .expect("add organization member");
+    }
+
+    provider_core
+        .update_provider(
+            &provider_c.provider_id,
+            &provider_c.admin_token,
+            "11111111",
+            None,
+            None,
+            None,
+            None,
+            Some(ProviderOrganizationManagementConfig {
+                authorized_manager_provider_ids: Vec::new(),
+            }),
+        )
+        .await
+        .expect("revoke manager grant");
+    provider_core
+        .set_provider_bot_disabled(
+            &provider_b.provider_id,
+            "bot-b",
+            &provider_b.admin_token,
+            true,
+        )
+        .await
+        .expect("disable provider binding");
+
+    let result = service
+        .discover_bots(BotDiscoveryCommand {
+            requester_bot_id: Some("bot-a".to_string()),
+            organization_code: Some("promo-2026".to_string()),
+            role: Some("traffic_analyst".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect("discover organization members");
+
+    let ids = result
+        .bots
+        .iter()
+        .map(|bot| bot.bot_uuid.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["bot-b", "bot-c"]);
 }
 
 #[tokio::test]

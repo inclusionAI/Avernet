@@ -1814,6 +1814,14 @@ impl OrganizationCoreService for StaticOrganizationCoreService {
         Ok(self.members.iter().map(|bot| Self::member(bot)).collect())
     }
 
+    async fn require_runtime_member(&self, organization_code: &str, bot_uuid: &str) -> ServiceResult<OrganizationMember> {
+        self.require_effective_member(organization_code, bot_uuid).await
+    }
+
+    async fn list_runtime_members(&self, organization_code: &str, role: Option<&str>) -> ServiceResult<Vec<OrganizationMember>> {
+        self.list_effective_members(organization_code, role).await
+    }
+
     async fn authorize_pair(&self, organization_code: &str, sender_bot_uuid: &str, target_bot_uuid: &str) -> ServiceResult<AuthorizedOrganizationPair> {
         let sender = self.require_effective_member(organization_code, sender_bot_uuid).await?;
         let target = self.require_effective_member(organization_code, target_bot_uuid).await?;

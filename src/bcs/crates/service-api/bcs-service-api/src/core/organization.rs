@@ -155,6 +155,16 @@ pub trait OrganizationCoreService: Send + Sync {
         organization_code: &str,
         role: Option<&str>,
     ) -> ServiceResult<Vec<OrganizationMember>>;
+    async fn require_runtime_member(
+        &self,
+        organization_code: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<OrganizationMember>;
+    async fn list_runtime_members(
+        &self,
+        organization_code: &str,
+        role: Option<&str>,
+    ) -> ServiceResult<Vec<OrganizationMember>>;
     async fn authorize_pair(
         &self,
         organization_code: &str,

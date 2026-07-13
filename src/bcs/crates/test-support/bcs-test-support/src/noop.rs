@@ -628,6 +628,22 @@ impl OrganizationCoreService for NoopOrganizationCoreService {
         Err(service_not_configured("organization service"))
     }
 
+    async fn require_runtime_member(
+        &self,
+        _organization_code: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<OrganizationMember> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn list_runtime_members(
+        &self,
+        _organization_code: &str,
+        _role: Option<&str>,
+    ) -> ServiceResult<Vec<OrganizationMember>> {
+        Err(service_not_configured("organization service"))
+    }
+
     async fn authorize_pair(
         &self,
         _organization_code: &str,
