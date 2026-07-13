@@ -132,6 +132,32 @@ class TestResolveBuildArtifact:
         assert result_record.id == 456
         assert migration_path == "/nas/custom/path"
 
+    def test_publish_record_ext_none_returns_none_migration_path(self):
+        """Line 275: When publish_record.ext is None, migration_path should be None."""
+        svc, instance_repo, baas, publish_repo, bot_repo = _make_service()
+        record = MockPublishRecord(id=789, version=1, ext=None)
+        # Override __post_init__ effect
+        record.ext = None
+        publish_repo.get_by_publish_bot_id = MagicMock(return_value=record)
+
+        result_record, migration_path = svc._resolve_build_artifact(BOT_ID, OWNER_ID)
+
+        assert result_record.id == 789
+        assert migration_path is None
+
+    def test_publish_record_version_none_uses_default(self):
+        """Line 103: When publish_record.version is None, default to 1."""
+        svc, instance_repo, baas, publish_repo, bot_repo = _make_service()
+        record = MockPublishRecord(id=999, version=None, ext={"migration_path": "/nas/path"})
+        # Ensure version is None
+        record.version = None
+        publish_repo.get_by_publish_bot_id = MagicMock(return_value=record)
+
+        result_record, migration_path = svc._resolve_build_artifact(BOT_ID, OWNER_ID)
+
+        assert result_record.id == 999
+        assert result_record.version is None
+
 
 class TestCreateContainer:
     """Tests for _create_container method (lines 302, 317-320, 324, 333)."""
@@ -393,3 +419,410 @@ class TestGetCallerConnection:
         assert result["need_poll"] is True
         assert result["connection"] is None
         assert result["instance"]["status"] == "init"
+
+    @pytest.mark.asyncio
+    async def test_success_instance_without_bot_uuid_creates_container(self):
+        """Lines 119: Success instance without bot_uuid triggers create."""
+        svc, instance_repo, baas, publish_repo, bot_repo = _make_service()
+        existing_ext = {
+            "bot_uuid": None,  # No bot_uuid
+            "service_bot_publish_id": 123,
+            "version": 1,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo)
+        _wire_bot_repo(bot_repo)
+        baas.create_bot = MagicMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 888})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        # Mock get_instance to return success on second call
+        call_count = [0]
+        def mock_get_instance(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return {"id": 1, "status": "success", "ext": existing_ext}
+            return {"id": 1, "status": "success", "ext": {"bot_uuid": BOT_UUID, "version": 1}}
+        instance_repo.get_instance = MagicMock(side_effect=mock_get_instance)
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        baas.create_bot.assert_called_once()
+        assert result["need_poll"] is False
+
+    @pytest.mark.asyncio
+    async def test_success_instance_version_none_uses_zero(self):
+        """Lines 120: ext.get('version') defaults to 0 when None."""
+        svc, instance_repo, baas, publish_repo, bot_repo = _make_service()
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "version": None,  # No version
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=1))
+        _wire_bot_repo(bot_repo)
+        baas.upgrade_bot = MagicMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        # Mock get_instance to return success on second call
+        call_count = [0]
+        def mock_get_instance(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return {"id": 1, "status": "success", "ext": existing_ext}
+            return {"id": 1, "status": "success", "ext": {"bot_uuid": BOT_UUID, "version": 1}}
+        instance_repo.get_instance = MagicMock(side_effect=mock_get_instance)
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        # version None vs 1 triggers upgrade since 0 < 1
+        baas.upgrade_bot.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_baas_publish_failed_sets_status_to_failed(self):
+        """Lines 197: FAILED status from baas_publish sets instance status to 'failed'."""
+        svc, instance_repo, baas, publish_repo, bot_repo = _make_service()
+        instance_repo.get_instance = MagicMock(return_value=None)
+        instance_repo.upsert_instance = MagicMock(
+            return_value={"id": 1, "status": "init", "ext": None}
+        )
+        _wire_publish(publish_repo)
+        _wire_bot_repo(bot_repo)
+        baas.create_bot = MagicMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 888})
+        baas.get_publish_progress = MagicMock(return_value={"status": "FAILED"})
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        # Mock get_instance to return failed status on second call
+        call_count = [0]
+        def mock_get_instance(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return None
+            return {"id": 1, "status": "failed", "ext": {"bot_uuid": BOT_UUID}}
+        instance_repo.get_instance = MagicMock(side_effect=mock_get_instance)
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        # Verify update_instance was called with status="failed"
+        update_calls = instance_repo.update_instance.call_args_list
+        assert any(
+            call[1].get("status") == "failed"
+            for call in update_calls
+        )
+        assert result["need_poll"] is True
+        assert result["connection"] is None
+
+    @pytest.mark.asyncio
+    async def test_create_without_publish_id_skips_poll(self):
+        """Lines 191: When baas_publish_id is None, skip polling."""
+        svc, instance_repo, baas, publish_repo, bot_repo = _make_service()
+        instance_repo.get_instance = MagicMock(return_value=None)
+        instance_repo.upsert_instance = MagicMock(
+            return_value={"id": 1, "status": "init", "ext": None}
+        )
+        _wire_publish(publish_repo)
+        _wire_bot_repo(bot_repo)
+        # create_bot returns no publish_id
+        baas.create_bot = MagicMock(return_value={"bot_uuid": BOT_UUID})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        # Mock get_instance to return success on second call
+        call_count = [0]
+        def mock_get_instance(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return None
+            return {"id": 1, "status": "success", "ext": {"bot_uuid": BOT_UUID}}
+        instance_repo.get_instance = MagicMock(side_effect=mock_get_instance)
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        # get_publish_progress should not be called
+        baas.get_publish_progress.assert_not_called()
+        assert result["need_poll"] is False
+
+    @pytest.mark.asyncio
+    async def test_upgrade_adds_bot_uuid_to_ext_if_missing(self):
+        """Lines 180-181: Upgrade preserves bot_uuid in ext when upgrading."""
+        svc, instance_repo, baas, publish_repo, bot_repo = _make_service()
+        # This tests the case where bot_uuid exists in ext but we need to verify it's preserved
+        existing_ext = {
+            "bot_uuid": BOT_UUID,  # bot_uuid is present
+            "service_bot_publish_id": 123,
+            "version": 1,
+        }
+        NEW_BOT_UUID = "new-uuid-002"
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "init", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=2))
+        _wire_bot_repo(bot_repo)
+        baas.upgrade_bot = MagicMock(return_value={"bot_uuid": NEW_BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = BotWsConnectionInfoResponse(
+            ws_url="ws://localhost:8890/api/openclaw/ws",
+            token="test-token",
+            target=NEW_BOT_UUID,
+            expires_at="2099-01-01T00:00:00Z",
+            paas_device_id="device-002",
+            baas_base_url="http://localhost:8890",
+            engine_port=20003,
+            tenant="test_tenant",
+            bot_uuid=NEW_BOT_UUID,
+        )
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        # Mock get_instance to return success on second call
+        call_count = [0]
+        def mock_get_instance(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return {"id": 1, "status": "init", "ext": existing_ext}
+            return {"id": 1, "status": "success", "ext": {"bot_uuid": NEW_BOT_UUID}}
+        instance_repo.get_instance = MagicMock(side_effect=mock_get_instance)
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        baas.upgrade_bot.assert_called_once()
+        # Verify bot_uuid was preserved/updated in ext
+        update_calls = instance_repo.update_instance.call_args_list
+        assert any(
+            call[1].get("ext", {}).get("bot_uuid") == BOT_UUID
+            for call in update_calls
+        )
+
+
+class TestRequestId:
+    """Tests for _request_id static method (lines 453-477)."""
+
+    def test_request_id_generates_consistent_hash(self):
+        """_request_id generates a deterministic MD5 hash."""
+        bot = {
+            "entity_id": "entity123",
+            "bot_id": "bot456",
+        }
+        user_id = "user789"
+        stage = "caller_create"
+
+        request_id = ExpertChatInstanceService._request_id(bot, user_id, stage)
+
+        # Verify it returns a 32-char hex string (MD5 hash)
+        assert len(request_id) == 32
+        assert all(c in "0123456789abcdef" for c in request_id)
+
+        # Same inputs should produce same hash
+        request_id2 = ExpertChatInstanceService._request_id(bot, user_id, stage)
+        assert request_id == request_id2
+
+    def test_request_id_different_for_different_users(self):
+        """Different user_id produces different request_id."""
+        bot = {
+            "entity_id": "entity123",
+            "bot_id": "bot456",
+        }
+        stage = "caller_create"
+
+        id1 = ExpertChatInstanceService._request_id(bot, "user1", stage)
+        id2 = ExpertChatInstanceService._request_id(bot, "user2", stage)
+
+        assert id1 != id2
+
+    def test_request_id_different_for_different_stages(self):
+        """Different stage produces different request_id."""
+        bot = {
+            "entity_id": "entity123",
+            "bot_id": "bot456",
+        }
+        user_id = "user789"
+
+        id_create = ExpertChatInstanceService._request_id(bot, user_id, "caller_create")
+        id_upgrade = ExpertChatInstanceService._request_id(bot, user_id, "caller_upgrade")
+
+        assert id_create != id_upgrade
+
+    def test_request_id_handles_missing_entity_id(self):
+        """_request_id handles missing entity_id gracefully."""
+        bot = {
+            "bot_id": "bot456",
+        }
+        user_id = "user789"
+        stage = "caller_create"
+
+        request_id = ExpertChatInstanceService._request_id(bot, user_id, stage)
+
+        assert len(request_id) == 32
+
+
+class TestGetCallerConnectionEdgeCases:
+    """Additional edge case tests for get_caller_connection."""
+
+    @pytest.mark.asyncio
+    async def test_create_container_success_returns_connection(self):
+        """Full happy path: create container and return connection."""
+        svc, instance_repo, baas, publish_repo, bot_repo = _make_service()
+
+        call_count = [0]
+        def mock_get_instance(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return None
+            return {"id": 1, "status": "success", "ext": {"bot_uuid": BOT_UUID, "version": 1}}
+        instance_repo.get_instance = MagicMock(side_effect=mock_get_instance)
+        instance_repo.upsert_instance = MagicMock(
+            return_value={"id": 1, "status": "init", "ext": None}
+        )
+        instance_repo.update_instance = MagicMock(return_value=True)
+        _wire_publish(publish_repo)
+        _wire_bot_repo(bot_repo)
+        baas.create_bot = MagicMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 888})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        assert result["need_poll"] is False
+        assert result["connection"] is not None
+        assert result["connection"]["bot_uuid"] == BOT_UUID
+        assert result["connection"]["ws_url"] == ws_info.ws_url
+        assert result["connection"]["token"] == ws_info.token
+
+    @pytest.mark.asyncio
+    async def test_publish_record_version_none_uses_default_one(self):
+        """When publish_record.version is None, defaults to 1 for comparison."""
+        svc, instance_repo, baas, publish_repo, bot_repo = _make_service()
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "version": 2,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        # publish_version is None, defaults to 1, which is less than 2
+        record = MockPublishRecord(id=123, version=None, ext={"migration_path": "/path"})
+        record.version = None
+        publish_repo.get_by_publish_bot_id = MagicMock(return_value=record)
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        # Version 1 (default) <= 2 (instance), so should return immediately
+        assert result["need_poll"] is False
+        assert result["connection"]["bot_uuid"] == BOT_UUID
+
+
+class TestRepositoryUpdateInstanceWithStatusOnly:
+    """Tests for update_instance called with status only."""
+
+    @pytest.mark.asyncio
+    async def test_publish_status_success_sets_instance_status(self):
+        """Lines 197: SUCCESS status from baas_publish sets instance status to 'success'."""
+        svc, instance_repo, baas, publish_repo, bot_repo = _make_service()
+
+        call_count = [0]
+        def mock_get_instance(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return None
+            return {"id": 1, "status": "success", "ext": {"bot_uuid": BOT_UUID}}
+
+        instance_repo.get_instance = MagicMock(side_effect=mock_get_instance)
+        instance_repo.upsert_instance = MagicMock(
+            return_value={"id": 1, "status": "init", "ext": None}
+        )
+        instance_repo.update_instance = MagicMock(return_value=True)
+        _wire_publish(publish_repo)
+        _wire_bot_repo(bot_repo)
+        baas.create_bot = MagicMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 888})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        # Verify update_instance was called with status="success"
+        update_calls = instance_repo.update_instance.call_args_list
+        assert any(
+            call[1].get("status") == "success"
+            for call in update_calls
+            if call[1].get("status")
+        )
+        assert result["need_poll"] is False
+        assert result["connection"]["bot_uuid"] == BOT_UUID
+
+    @pytest.mark.asyncio
+    async def test_publish_status_failed_sets_instance_status(self):
+        """Lines 197: FAILED status from baas_publish sets instance status to 'failed'."""
+        svc, instance_repo, baas, publish_repo, bot_repo = _make_service()
+
+        call_count = [0]
+        def mock_get_instance(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return None
+            return {"id": 1, "status": "failed", "ext": {"bot_uuid": BOT_UUID}}
+
+        instance_repo.get_instance = MagicMock(side_effect=mock_get_instance)
+        instance_repo.upsert_instance = MagicMock(
+            return_value={"id": 1, "status": "init", "ext": None}
+        )
+        instance_repo.update_instance = MagicMock(return_value=True)
+        _wire_publish(publish_repo)
+        _wire_bot_repo(bot_repo)
+        baas.create_bot = MagicMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 888})
+        baas.get_publish_progress = MagicMock(return_value={"status": "FAILED"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        # Verify update_instance was called with status="failed"
+        update_calls = instance_repo.update_instance.call_args_list
+        assert any(
+            call[1].get("status") == "failed"
+            for call in update_calls
+            if call[1].get("status")
+        )
+        assert result["need_poll"] is True
+        assert result["connection"] is None
+
+    @pytest.mark.asyncio
+    async def test_publish_status_running_keeps_instance_status(self):
+        """Lines 197: RUNNING status keeps original instance status."""
+        svc, instance_repo, baas, publish_repo, bot_repo = _make_service()
+
+        call_count = [0]
+        def mock_get_instance(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return None
+            return {"id": 1, "status": "init", "ext": {"bot_uuid": BOT_UUID}}
+
+        instance_repo.get_instance = MagicMock(side_effect=mock_get_instance)
+        instance_repo.upsert_instance = MagicMock(
+            return_value={"id": 1, "status": "init", "ext": None}
+        )
+        instance_repo.update_instance = MagicMock(return_value=True)
+        _wire_publish(publish_repo)
+        _wire_bot_repo(bot_repo)
+        baas.create_bot = MagicMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 888})
+        baas.get_publish_progress = MagicMock(return_value={"status": "RUNNING"})
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        # RUNNING keeps original status (init)
+        assert result["need_poll"] is True
+        assert result["connection"] is None

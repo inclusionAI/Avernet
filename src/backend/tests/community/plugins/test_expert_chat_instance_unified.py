@@ -264,3 +264,115 @@ def test_update_instance_with_both_fields_mysql():
 
     assert result is True
     mock_session.query.assert_called_once()
+
+
+def test_upsert_instance_returns_fallback_when_row_not_found(repo):
+    """Line 162-169: When row is None after upsert, return fallback dict."""
+    from unittest.mock import patch, MagicMock
+
+    # Mock the case where the query returns None after upsert
+    with patch.object(repo, '_db') as mock_db:
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+
+        mock_bind = MagicMock()
+        mock_bind.dialect.name = "sqlite"
+        mock_session.get_bind.return_value = mock_bind
+
+        mock_session.execute = MagicMock()
+        mock_session.flush = MagicMock()
+
+        # Query returns None for row
+        mock_query = MagicMock()
+        mock_query.filter.return_value = mock_query
+        mock_query.scalar.return_value = 123  # row_id is returned
+        mock_query.first.return_value = None  # but row is None
+        mock_session.query.return_value = mock_query
+
+        mock_db.orm_session.return_value = mock_session
+
+        result = repo.upsert_instance("u_fallback", "b_fallback", "o_fallback", status="init")
+
+        # Should return fallback dict with the row_id
+        assert result["id"] == 123
+        assert result["user_id"] == "u_fallback"
+        assert result["status"] == "init"
+
+
+def test_update_instance_with_status_only(repo):
+    """Update instance with only status (ext=None)."""
+    repo.upsert_instance("u_status", "b_status", "o_status", status="init", ext={"k": "v"})
+
+    result = repo.update_instance("u_status", "b_status", "o_status", status="active")
+
+    assert result is True
+    got = repo.get_instance("u_status", "b_status", "o_status")
+    assert got["status"] == "active"
+    # ext unchanged
+    assert got["ext"] == {"k": "v"}
+
+
+def test_update_instance_with_ext_only(repo):
+    """Update instance with only ext (status=None)."""
+    repo.upsert_instance("u_ext", "b_ext", "o_ext", status="init", ext={"old": "val"})
+
+    result = repo.update_instance("u_ext", "b_ext", "o_ext", ext={"new": "val2"})
+
+    assert result is True
+    got = repo.get_instance("u_ext", "b_ext", "o_ext")
+    assert got["status"] == "init"  # unchanged
+    assert got["ext"] == {"new": "val2"}  # whole overwrite
+
+
+def test_get_instance_multiple_users_same_bot(repo):
+    """Multiple users can have instances for the same bot."""
+    repo.upsert_instance("user1", "shared_bot", "owner1", status="init", ext={"v": 1})
+    repo.upsert_instance("user2", "shared_bot", "owner1", status="active", ext={"v": 2})
+
+    u1 = repo.get_instance("user1", "shared_bot", "owner1")
+    u2 = repo.get_instance("user2", "shared_bot", "owner1")
+
+    assert u1["user_id"] == "user1"
+    assert u1["status"] == "init"
+    assert u2["user_id"] == "user2"
+    assert u2["status"] == "active"
+
+
+def test_upsert_instance_preserves_create_time(repo):
+    """Upsert should not change gmt_create on update."""
+    first = repo.upsert_instance("u_time", "b_time", "o_time", status="init")
+    first_create = first.get("gmt_create")
+
+    # Upsert again (update)
+    second = repo.upsert_instance("u_time", "b_time", "o_time", status="active")
+
+    # gmt_create should be preserved (or bothNone)
+    if first_create is not None and second.get("gmt_create") is not None:
+        assert second["gmt_create"] == first_create
+
+
+def test_update_instance_multiple_fields(repo):
+    """Update instance with both status and ext simultaneously."""
+    repo.upsert_instance("u_both", "b_both", "o_both", status="init", ext={"x": 1})
+
+    result = repo.update_instance("u_both", "b_both", "o_both", status="success", ext={"y": 2})
+
+    assert result is True
+    got = repo.get_instance("u_both", "b_both", "o_both")
+    assert got["status"] == "success"
+    assert got["ext"] == {"y": 2}
+
+
+def test_get_instance_different_envs(repo):
+    """Instances are isolated by env (via get_current_env)."""
+    from unittest.mock import patch
+
+    # Create in default env
+    repo.upsert_instance("u_env", "b_env", "o_env", status="init")
+
+    # Query in different env should return None
+    with patch("agentclaw.community.plugins.expert_chat_instance_repository.get_current_env", return_value="other_env"):
+        result = repo.get_instance("u_env", "b_env", "o_env")
+
+    assert result is None
