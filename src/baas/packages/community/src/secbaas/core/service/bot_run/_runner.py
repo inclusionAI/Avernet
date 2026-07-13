@@ -553,7 +553,7 @@ class BotRunner:
     ) -> MessageDispatcher:
         """根据 system_config 选择 dispatcher。
 
-        查找顺序：``bot_run.dispatcher_route.{bot_id}:{method}`` → ``{bot_id}`` → ``*``。
+        查找顺序：``bot_run.dispatcher_route.{bot_id}:{method}`` → ``{bot_id}`` → ``default``。
         值为 dispatcher 类名（如 ``"QueueTaskMessageDispatcher"``），未配置默认走 TaskMessageDispatcher。
         """
         default_name = "TaskMessageDispatcher"
@@ -563,7 +563,7 @@ class BotRunner:
             if method:
                 keys.append(f"bot_run.dispatcher_route.{bot_id}:{method}")
             keys.append(f"bot_run.dispatcher_route.{bot_id}")
-            keys.append("bot_run.dispatcher_route.*")
+            keys.append("bot_run.dispatcher_route.default")
             for key in keys:
                 try:
                     config = self._system_config_service.get_config(key)
