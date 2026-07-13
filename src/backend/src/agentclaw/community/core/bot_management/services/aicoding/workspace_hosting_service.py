@@ -24,9 +24,8 @@ class WorkspaceHostingService:
         - WorkspaceHostingConfig: workspace hosting config; carries
           ``admin_member_staff_ids`` (the staff IDs auto-granted workspace-admin
           after a workspace is created). No employee IDs are hardcoded here —
-          the real list comes from the corp env overlay (application-prod.yaml
-          ``dima.admin_member_staff_ids``); community/default builds carry an
-          empty list (no admins added).
+          the real list comes from the environment overlay; community/default
+          builds carry an empty list (no admins added).
     """
 
     @inject
@@ -120,9 +119,9 @@ class WorkspaceHostingService:
                 )
 
             # workspace 创建成功后，把配置里的 admin_member_staff_ids 加为空间管理员
-            # （实际工号由 corp env overlay application-prod.yaml 提供，源码不内置工号，
-            # 避免数据泄露）。失败只记日志，不影响 bot 创建主流程（不加管理员不应让创建
-            # bot 失败）。列表为空（community/默认构建）时跳过调用。
+            # （实际工号由各环境 overlay 提供，源码不内置工号，避免数据泄露）。失败只记日志，
+            # 不影响 bot 创建主流程（不加管理员不应让创建 bot 失败）。列表为空（community/
+            # 默认构建）时跳过调用。
             if workspace_id and self._admin_member_staff_ids:
                 try:
                     self._client.add_admin_members(

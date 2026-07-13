@@ -371,10 +371,10 @@ class ConfigModule(Module):
         block = _block("dima")
         defaults = cfg.WorkspaceHostingConfig()
         # admin_member_staff_ids: employee IDs granted workspace-admin on
-        # creation. Corp env overlays (application-prod.yaml) supply the real
-        # list via ``dima.admin_member_staff_ids``; neutral empty default keeps
-        # community source free of employee IDs (data-leak guard). Normalised to
-        # a tuple to satisfy the frozen dataclass + immutability invariant.
+        # creation. Environment overlays supply the real list via
+        # ``admin_member_staff_ids``; neutral empty default keeps community
+        # source free of employee IDs (data-leak guard). Normalised to a tuple
+        # to satisfy the frozen dataclass + immutability invariant.
         admin_ids = block.get("admin_member_staff_ids", defaults.admin_member_staff_ids)
         if isinstance(admin_ids, (list, tuple)):
             admin_ids = tuple(str(i) for i in admin_ids)

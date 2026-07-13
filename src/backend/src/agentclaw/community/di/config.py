@@ -353,10 +353,10 @@ class WorkspaceHostingConfig:
     # Staff IDs auto-added as workspace admins after a bot workspace is created.
     # Neutral empty default — no employee IDs ship in community source (data-
     # leak guard, enforced by test_shipped_config_no_corp_identifiers). The real
-    # corp list is supplied via the ``dima`` yaml block
-    # (``admin_member_staff_ids``) in the corp env overlay (application-prod.yaml).
-    # Tuple so the frozen dataclass stays immutable; the service normalises to a
-    # list when calling the DIMA addMembers API.
+    # list is supplied via the hosting backend yaml block
+    # (``admin_member_staff_ids``) by each environment overlay. Tuple so the
+    # frozen dataclass stays immutable; the service normalises to a list when
+    # calling the hosting addMembers API.
     admin_member_staff_ids: tuple[str, ...] = ()
 
 
