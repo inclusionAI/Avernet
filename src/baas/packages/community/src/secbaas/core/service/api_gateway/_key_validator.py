@@ -5,6 +5,7 @@
 
 from secbaas.api.api_gateway import APIKeyRecord
 from secbaas.core.repository.api_gateway import APIKeyRepository
+from secbaas.core.utils import env_utils
 from secbaas.logger import get_logger
 
 from ._key_gen import APIKeyGenerator
@@ -34,7 +35,11 @@ class DefaultAPIKeyValidator(APIKeyValidator):
 
         prefix = api_key[:8]
 
-        record = self._repository.get_by_prefix_and_status(prefix, "ACTIVE")
+        # 鉴权钉死当前环境：共享 DB 下避免跨环境 API Key 互认。
+        # env 口径与创建侧一致（均经 env_utils.get_current_env 归一）。
+        record = self._repository.get_by_prefix_and_status(
+            prefix, "ACTIVE", env=env_utils.get_current_env()
+        )
 
         if record is None:
             logger.debug(f"[verify] No active key found for prefix: {prefix}")
@@ -64,7 +69,9 @@ class DefaultAPIKeyValidator(APIKeyValidator):
 
         prefix = api_key[:8]
 
-        record = self._repository.get_by_prefix_and_status(prefix, "ACTIVE")
+        record = self._repository.get_by_prefix_and_status(
+            prefix, "ACTIVE", env=env_utils.get_current_env()
+        )
 
         if record is None:
             logger.debug(f"[verify_sync] No active key found for prefix: {prefix}")

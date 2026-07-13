@@ -158,6 +158,15 @@ class TestBaasServiceHttpMethods:
         call = http.calls_to("get")[0]
         assert call.args[0] == "/api/v1/bots/BOT-1/devices"
         assert call.kwargs["params"] == {"tenant": "other"}
+        assert call.kwargs["timeout"] == 30.0
+
+    def test_list_devices_by_bot_uuid_uses_request_timeout(self):
+        service, http = _make_service()
+        http.set_response("get", _resp([{"items": []}]))
+
+        service.list_devices_by_bot_uuid("BOT-1", timeout=8.0)
+
+        assert http.calls_to("get")[0].kwargs["timeout"] == 8.0
 
     def test_approve_publish(self):
         service, http = _make_service()

@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import json
+import time
 import uuid
 
 import httpx
@@ -2722,7 +2723,11 @@ class BaasService:  # pragma: no cover
             )
 
     def list_devices_by_bot_uuid(
-        self, bot_uuid: str, tenant: str = ""
+        self,
+        bot_uuid: str,
+        tenant: str = "",
+        *,
+        timeout: float = 30.0,
     ) -> list[dict[str, Any]]:
         """根据 bot_uuid 查询该逻辑 Bot 下的所有 BaaS 设备。
 
@@ -2748,7 +2753,7 @@ class BaasService:  # pragma: no cover
             response = self._http.get(
                 f"/api/v1/bots/{bot_uuid}/devices",
                 params={"tenant": effective_tenant},
-                timeout=30.0,
+                timeout=timeout,
             )
             response.raise_for_status()
             response_data = response.json()
@@ -3232,6 +3237,7 @@ class BaasService:  # pragma: no cover
         device_affinity: Optional[str] = None,
         device_uuid: Optional[str] = None,
         auth_header: str = "openclawToken",
+        timeout: float | None = None,
     ) -> httpx.Response:
         """容器内 API 统一出口：封装 get_http_info + 直传完整 http_url。
 
@@ -3260,6 +3266,7 @@ class BaasService:  # pragma: no cover
                 （teclaw/arca，``http_url`` 形如 ``{base}/proxypass/{target}{path}``）
                 需传 ``"x-proxypass-token"`` —— 该网关用此 header 鉴权，传 openclawToken
                 会 401。``info.token`` 是网关对应的 token，header 名不同而已。
+            timeout: 获取连接信息并调用容器 API 的总超时秒数；不传时沿用各请求默认值。
 
         Returns:
             httpx.Response — 来自 self._general_http 的原始响应，供调用方自行处理
@@ -3267,6 +3274,13 @@ class BaasService:  # pragma: no cover
         Raises:
             BaasServiceError: get_http_info 失败（404/503/网络超时等）
         """
+        if timeout is not None and timeout <= 0:
+            raise ValueError("timeout must be positive")
+
+        started_at = time.monotonic() if timeout is not None else None
+        http_info_timeout_kwargs = (
+            {"timeout": min(timeout, 5.0)} if timeout is not None else {}
+        )
         info = self.get_http_info(
             bind_id=bind_id,
             port=port,
@@ -3274,7 +3288,15 @@ class BaasService:  # pragma: no cover
             tenant=tenant,
             device_affinity=device_affinity,
             device_uuid=device_uuid,
+            **http_info_timeout_kwargs,
         )
+
+        request_timeout_kwargs: dict[str, float] = {}
+        if timeout is not None and started_at is not None:
+            request_timeout_kwargs["timeout"] = max(
+                timeout - (time.monotonic() - started_at),
+                0.001,
+            )
 
         # 直接传完整 http_url 给 general_http（base_url=""）：httpx.Client 收到绝对
         # URL 时不拼 base_url；local MockSeam 按 method 记录调用，path 参数存入 calls。
@@ -3282,19 +3304,29 @@ class BaasService:  # pragma: no cover
 
         m = method.upper()
         if m == "GET":
-            return self._general_http.get(info.http_url, params=params, headers=headers)
+            return self._general_http.get(
+                info.http_url, params=params, headers=headers, **request_timeout_kwargs
+            )
         elif m == "PUT":
-            return self._general_http.put(info.http_url, json=json, params=params, headers=headers)
+            return self._general_http.put(
+                info.http_url, json=json, params=params, headers=headers, **request_timeout_kwargs
+            )
         elif m == "DELETE":
-            return self._general_http.delete(info.http_url, params=params, headers=headers)
+            return self._general_http.delete(
+                info.http_url, params=params, headers=headers, **request_timeout_kwargs
+            )
         elif files is not None:
             # 写文件等 multipart 链路：files+data 走 httpx multipart，json 必为空。
             return self._general_http.post(
-                info.http_url, files=files, data=data, json=json, params=params, headers=headers
+                info.http_url, files=files, data=data, json=json, params=params,
+                headers=headers, **request_timeout_kwargs
             )
         else:
             # POST（默认）或任何其他方法走 POST
-            return self._general_http.post(info.http_url, json=json, params=params, headers=headers)
+            return self._general_http.post(
+                info.http_url, json=json, params=params, headers=headers,
+                **request_timeout_kwargs
+            )
 
     def get_bot_start_progress(
         self,

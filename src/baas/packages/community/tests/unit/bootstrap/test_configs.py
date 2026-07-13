@@ -90,6 +90,9 @@ class TestPluginConfigDataclass:
         assert cfg.secret == "stub"
         assert cfg.auth == "stub"
         assert cfg.scheduler == "stub"
+        # engine_adapter 默认 stub —— 缺失该键的配置(如 singlebox)靠此默认兜底,
+        # 否则 bootstrap 的 providers.Selector(config.plugins.engine_adapter) 装配失败。
+        assert cfg.engine_adapter == "stub"
 
     def test_partial_override(self):
         cfg = PluginConfig(crypto="real")
@@ -102,9 +105,27 @@ class TestPluginConfigDataclass:
             secret="real",
             auth="buservice",
             scheduler="real",
+            engine_adapter="real",
         )
         assert cfg.auth == "buservice"
         assert cfg.scheduler == "real"
+        assert cfg.engine_adapter == "real"
+
+    def test_engine_adapter_invalid_value_rejected(self):
+        # pattern=r"^(real|stub)$" —— 非法值须被 pydantic 拒绝
+        import pydantic
+
+        with pytest.raises(pydantic.ValidationError):
+            PluginConfig(engine_adapter="local")
+
+    def test_engine_adapter_in_schema_defaults(self):
+        # _schema_defaults() 在 init_container_config 第一步播种,保证 YAML 缺
+        # engine_adapter 键时(如 singlebox-configs)config.plugins.engine_adapter
+        # 仍解析为 "stub",bootstrap 的 providers.Selector 不会拿到 None。
+        from secbaas.bootstrap._configs import _schema_defaults
+
+        plugins_defaults = _schema_defaults()["plugins"]
+        assert plugins_defaults["engine_adapter"] == "stub"
 
 
 class TestBotServiceConfigDataclass:

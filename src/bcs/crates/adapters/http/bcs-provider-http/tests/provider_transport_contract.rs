@@ -324,6 +324,7 @@ async fn provider_delivery_protocol2_sse_ingests_events() {
     assert_eq!(events.len(), 3);
     assert_eq!(events[0].run_id, "run-sse");
     assert_eq!(events[0].event_type, "agent");
+    assert_eq!(events[0].state, ChatEventState::ToolCallEnd);
     assert_eq!(events[0].event_payload["stream"], "tool");
     assert_eq!(events[1].event_type, "chat.event");
     assert_eq!(events[1].state, ChatEventState::Delta);

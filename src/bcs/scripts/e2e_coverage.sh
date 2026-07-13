@@ -10,19 +10,22 @@ set -euo pipefail
 # Gate semantics:
 #   - e2e is always a 100% gate (no switch): any e2e failure makes the script
 #     exit with the non-zero e2e exit code.
-#   - --bcs-min defaults to 0 (collect + report only, no threshold). Pass a
-#     value N to additionally gate: e2e_cov_gate.py enforces line AND method
-#     (function) coverage >= N%; region coverage is reported but NOT gated.
-#     Emits GitHub ::notice::/::error:: annotations (local: OK/FAIL) for each.
-#   - The two gates are independent and BOTH can fail the run: e2e failure
-#     takes precedence, but a passing e2e with coverage below threshold still
-#     fails (the gate runs and surfaces annotations regardless of e2e_status).
+#   - Line and method coverage thresholds default to 0 (collect + report only).
+#     Pass --bcs-line-min / --bcs-method-min to gate them independently.
+#     --bcs-min remains as a compatibility shortcut that sets both thresholds.
+#     Region coverage is reported but NOT gated. Emits GitHub
+#     ::notice::/::error:: annotations (local: OK/FAIL) for each metric.
+#   - Adapter HTTP endpoint coverage is always gated at 100%.
+#   - bcs-cli leaf-command coverage is always gated at 100%.
+#   - The gates are independent and can fail the run: e2e failure takes
+#     precedence, followed by endpoint/CLI coverage, then line/method coverage.
 #
 # Usage:
 #   bash src/bcs/scripts/e2e_coverage.sh              # full flow
 #   bash src/bcs/scripts/e2e_coverage.sh --skip-start # instrumented bcs already running; run e2e + stop + aggregate only
 #   bash src/bcs/scripts/e2e_coverage.sh --no-stop    # do not stop bcs after running (debug; no aggregation)
-#   bash src/bcs/scripts/e2e_coverage.sh --bcs-min 20 # gate line+method coverage >= 20% (region report-only)
+#   bash src/bcs/scripts/e2e_coverage.sh --bcs-line-min 40 --bcs-method-min 36
+#                                                    # gate line >=40%, method >=36%
 #   bash src/bcs/scripts/e2e_coverage.sh --force-rebuild # force-rebuild instrumented bcs (ignore cache)
 #
 # Coverage scope: bcs server (crate bcs) only; excludes the 5 bots / Python.
@@ -33,7 +36,9 @@ cov_dir="$bcs_dir/target/cov-e2e"
 out_xml="$cov_dir/cobertura.xml"
 report_file="$cov_dir/coverage.txt"
 bcs_port="${BCS_PORT:-21000}"
-bcs_min="${BCS_E2E_COVERAGE_MIN:-0}"
+compat_min="${BCS_E2E_COVERAGE_MIN:-0}"
+line_min="${BCS_E2E_LINE_MIN:-$compat_min}"
+method_min="${BCS_E2E_METHOD_MIN:-$compat_min}"
 
 skip_start=0
 no_stop=0
@@ -47,9 +52,21 @@ while [[ "$#" -gt 0 ]]; do
         echo "Error: --bcs-min requires a value" >&2
         exit 2
       fi
-      bcs_min="$2"; shift 2 ;;
+      line_min="$2"; method_min="$2"; shift 2 ;;
+    --bcs-line-min)
+      if [[ "$#" -lt 2 ]]; then
+        echo "Error: --bcs-line-min requires a value" >&2
+        exit 2
+      fi
+      line_min="$2"; shift 2 ;;
+    --bcs-method-min)
+      if [[ "$#" -lt 2 ]]; then
+        echo "Error: --bcs-method-min requires a value" >&2
+        exit 2
+      fi
+      method_min="$2"; shift 2 ;;
     --force-rebuild) force_rebuild=1; shift ;;
-    -h|--help)      sed -n '2,18p' "$0"; exit 0 ;;
+    -h|--help)      sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -130,7 +147,7 @@ if [[ "$skip_start" -eq 0 ]]; then
   # keeps runtime profraw next to the objects cargo llvm-cov report merges.
   cov_runtime_dir="$bcs_dir/target/cov-e2e/llvm-cov-target"
   export LLVM_PROFILE_FILE="$cov_runtime_dir/bcs-%m-%p.profraw"
-  # Enable BCS_DEBUG so bcs's debug_middleware logs every non-/health request as
+  # Enable BCS_DEBUG so bcs's debug_middleware logs every request as
   # `[→BCS] METHOD PATH` to bcs.log (singlebox redirects bcs stderr there). The
   # endpoint-coverage report below diffs those hits against router.rs's full
   # registered endpoint set. Exported here so the bcs server singlebox launches
@@ -173,6 +190,8 @@ fi
 #    to see what was covered).
 e2e_status=0
 cov_gate_status=0
+endpoint_gate_status=0
+cli_gate_status=0
 # Baseline the BCS_DEBUG hit log so the endpoint-coverage report (run at
 # aggregation time) counts only this e2e suite's requests, not singlebox's
 # bot-onboarding setup nor a prior run's stale log. bcs appends to bcs_log, so
@@ -181,6 +200,10 @@ cov_gate_status=0
 # caller also set BCS_LOG to point elsewhere — otherwise reuse the default.
 bcs_log="${bcs_log:-$repo_root/scripts/.dependencies/logs/bcs.log}"
 : > "$bcs_log" 2>/dev/null || true
+cli_coverage_log="$cov_dir/cli_commands.log"
+mkdir -p "$cov_dir"
+: > "$cli_coverage_log"
+export BCS_CLI_COVERAGE_LOG="$cli_coverage_log"
 bash "$bcs_dir/scripts/e2e-test/e2e.sh" || e2e_status=$?
 if [[ "$e2e_status" -ne 0 ]]; then
   echo "WARN: e2e exited with $e2e_status; continuing to flush profraw and aggregate coverage." >&2
@@ -252,29 +275,31 @@ if [[ "$no_stop" -eq 0 ]]; then
   grep '^TOTAL' "$report_file" || tail -20 "$report_file"
 
   # Coverage gate (e2e_cov_gate.py). Replaces the old --fail-under-lines gate:
-  #   - Enforces line AND method (function) coverage >= --bcs-min; region is
+  #   - Enforces line and method (function) coverage independently; region is
   #     reported but NOT gated (e2e runtime region coverage is low/noisy).
   #   - Emits GitHub ::notice::/::error:: annotations (local: OK/FAIL lines)
   #     for each metric, mirroring cov_gate.py's style.
   #   - Runs regardless of e2e_status so its annotations always surface, and
   #     its exit code is combined with e2e's below — no more swallowed gate
   #     (the old `[[ e2e eq 0 ]] && exit` skipped coverage failure when e2e
-  #     itself failed, so --bcs-min appeared not to take effect).
-  # bcs_min=0 (default / no --bcs-min) -> line & method thresholds = 0 =>
-  # report-only (does not block). Pre-push/CI pass --bcs-min 20 to gate.
+  #     itself failed, so coverage thresholds appeared not to take effect).
+  # A threshold of 0 is report-only. Pre-push/CI gate line >=40% and method
+  # >=36%; --bcs-min remains available to set both to one value.
   if [[ -f "$summary_json" ]]; then
     ( cd "$bcs_dir" && python3 scripts/e2e_cov_gate.py \
         --summary "$summary_json" \
-        --line-min "$bcs_min" \
-        --method-min "$bcs_min" ) || cov_gate_status=$?
+        --line-min "$line_min" \
+        --method-min "$method_min" ) || cov_gate_status=$?
   else
     echo "WARN: coverage summary.json not found ($summary_json); skipping coverage gate." >&2
     # Missing summary is itself a gate failure when a threshold was requested:
     # silently passing would let coverage regressions go unnoticed.
-    [[ "$bcs_min" -gt 0 ]] && cov_gate_status=1
+    if [[ "$line_min" != "0" || "$method_min" != "0" ]]; then
+      cov_gate_status=1
+    fi
   fi
 
-  # Adapters endpoint coverage (report-only, never gates): of all HTTP routes
+  # Adapters endpoint coverage (hard 100% gate): of all HTTP routes
   # registered in bcs-http's router.rs, which does this e2e run exercise? Diff
   # the BCS_DEBUG hit log (collected above) against the parsed endpoint set.
   # See scripts/adapters_endpoint_coverage.py for the over/under-count self-checks.
@@ -286,8 +311,24 @@ if [[ "$no_stop" -eq 0 ]]; then
       --router crates/adapters/http/bcs-http/src/router.rs \
       --log "$bcs_log" \
       --out-txt "$endpoint_txt" \
-      --out-xml "$endpoint_xml" ) \
-      || echo "WARN: endpoint coverage report failed (see stderr above)" >&2
+      --out-xml "$endpoint_xml" \
+      --min 100 ) || endpoint_gate_status=$?
+
+  # bcs-cli command coverage (hard 100% gate): discover the complete leaf
+  # command tree recursively from Clap --help and compare it with command paths
+  # recorded by the shared E2E bcs_cli wrapper. Help pseudo-commands and aliases
+  # are intentionally excluded by the reporter.
+  cli_coverage_txt="$cov_dir/cli_command_coverage.txt"
+  if [[ -x "$cov_cli_bin" ]]; then
+    ( cd "$bcs_dir" && python3 scripts/cli_command_coverage.py \
+        --cli "$cov_cli_bin" \
+        --log "$cli_coverage_log" \
+        --out-txt "$cli_coverage_txt" \
+        --min 100 ) || cli_gate_status=$?
+  else
+    echo "FAIL: bcs-cli command coverage binary not found at $cov_cli_bin" >&2
+    cli_gate_status=1
+  fi
 fi
 
 # Post-aggregation cleanup of profraw. The instrumented cargo build redirects
@@ -321,11 +362,17 @@ if [[ "$no_stop" -eq 0 ]]; then
 fi
 
 # Final exit code: e2e is always a 100% gate; the coverage gate (when a
-# --bcs-min threshold was requested) is an independent gate. e2e failure takes
+# a line/method threshold was requested) is an independent gate. e2e failure takes
 # precedence (the suite is broken), but a passing e2e with a breached coverage
 # threshold must still fail the run — which the old swallowed `[[ e2e eq 0 ]]
 # && exit` logic did not guarantee.
 if [[ "$e2e_status" -ne 0 ]]; then
   exit "$e2e_status"
+fi
+if [[ "$endpoint_gate_status" -ne 0 ]]; then
+  exit "$endpoint_gate_status"
+fi
+if [[ "$cli_gate_status" -ne 0 ]]; then
+  exit "$cli_gate_status"
 fi
 exit "$cov_gate_status"

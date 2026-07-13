@@ -9,7 +9,7 @@ Two inputs:
      inspection (build_api_routes is the single, unconditional, no-nest
      registration site; there is no OpenAPI/utoipa spec to read instead).
   2. The set of endpoints actually hit — the instrumented bcs logs every
-     non-/health request as `[→BCS] METHOD PATH` (see debug_middleware in
+     request as `[→BCS] METHOD PATH` (see debug_middleware in
      crates/bootstrap/bcs/src/server.rs, gated on BCS_DEBUG=true; e2e_coverage.sh
      exports it). Path params in hits are concrete (a real bot uuid), registered
      templates have `{param}` placeholders, so hits are matched to templates.
@@ -125,7 +125,7 @@ def parse_router(router_path: str) -> list:
             hstart = mm.end()
             hend = _matching_paren(block, hstart - 1)
             inside = block[hstart:hend].strip()
-            handler = re.split(r"[,\s]", inside, 1)[0]
+            handler = re.split(r"[,\s]", inside, maxsplit=1)[0]
             endpoints.append(Endpoint(method, path, handler, line))
     return endpoints
 
@@ -296,6 +296,12 @@ def gh_notice(msg):
         sys.stdout.write("::notice::" + msg + "\n")
 
 
+def gh_error(msg):
+    """Emit a GitHub Actions error annotation in CI."""
+    if in_ci():
+        sys.stdout.write("::error::" + msg + "\n")
+
+
 def build_summary(endpoints, cov, hits, seen_hits, args):
     """Return (summary_lines, per_method_totals, covered_eps, uncov_eps, pct).
     summary_lines is the short human summary (no per-endpoint detail)."""
@@ -448,7 +454,12 @@ def main():
                     help="live-probe each parsed route against --probe-base to drop over-counts")
     ap.add_argument("--probe-base", default="http://127.0.0.1:21000",
                     help="base URL for --probe")
+    ap.add_argument("--min", type=float, default=0.0,
+                    help="minimum endpoint coverage %% (0 = report only)")
     args = ap.parse_args()
+
+    if args.min < 0 or args.min > 100:
+        ap.error("--min must be between 0 and 100")
 
     endpoints = parse_router(args.router)
     if not endpoints:
@@ -509,6 +520,18 @@ def main():
             sys.stdout.write(ln + "\n")
     else:
         sys.stdout.write(summary)
+
+    if args.min > 0:
+        if pct + 1e-9 < args.min:
+            message = ("Adapter endpoint coverage %.1f%% (%d / %d) is below "
+                       "the required %.1f%%" %
+                       (pct, covered_n, total_eps, args.min))
+            gh_error(message)
+            if not in_ci():
+                sys.stderr.write("FAIL: " + message + "\n")
+            sys.exit(1)
+        gh_notice("Adapter endpoint coverage gate passed: %.1f%% (%d / %d)"
+                  % (pct, covered_n, total_eps))
 
 
 if __name__ == "__main__":

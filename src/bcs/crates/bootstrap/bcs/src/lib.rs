@@ -161,6 +161,7 @@ pub use config::{
 pub use error::{BcsError, Result};
 pub use plugins::{CachePluginKind, DbPluginKind, InfrastructurePlugins};
 pub use server::{BcsServer, BcsServerExtensions};
+pub use http_adapter::set_health_version;
 
 pub const BCS_VERSION: &str = concat!(
     env!("CARGO_PKG_VERSION"),

@@ -5,6 +5,7 @@ on:
     branches:
       - dev
       - main
+      - 'REL*'
   push:
     branches:
       - dev
@@ -157,16 +158,18 @@ jobs:
         #   singlebox --standalone --with-bcs-coverage start bcs_bots
         #     -> builds the instrumented bcs in target/cov-e2e/llvm-cov-target,
         #        starts BCS + 5 OpenClaw bots (BCN plugin built by setup_bcn_plugin)
-        #   e2e.sh                      -> 60 cases (group/friends/cli)
+        #   e2e.sh                      -> 12 user-story cases
         #   SIGTERM bcs                 -> flush profraw
         #   singlebox stop bcs_bots     -> tear down
-        #   cargo llvm-cov report --cobertura --fail-under-lines=20
-        #     -> aggregate + enforce e2e line-coverage gate
+        #   cargo llvm-cov report + endpoint coverage report
+        #     -> aggregate + enforce line >=40%, method >=36%, HTTP endpoints=100%,
+        #        and bcs-cli leaf commands=100%
         # --force-rebuild (mirroring pre_push): always rebuild the instrumented
         # binary from the pushed source instead of reusing a cached one, so the
         # measured coverage is correct. Exits non-zero on ANY e2e failure OR
-        # e2e line-coverage < 20%.
-        run: bash src/bcs/scripts/e2e_coverage.sh --bcs-min 20 --force-rebuild
+        # e2e line-coverage <40%, method coverage <36%, HTTP endpoint coverage
+        # below 100%, or CLI command coverage below 100%.
+        run: bash src/bcs/scripts/e2e_coverage.sh --bcs-line-min 40 --bcs-method-min 36 --force-rebuild
 
       - name: Stop stack (best-effort cleanup)
         if: always() && steps.changes.outputs.skip-bcs != 'true'
@@ -189,4 +192,5 @@ jobs:
             src/bcs/target/cov-e2e/summary.json
             src/bcs/target/cov-e2e/endpoint_coverage.txt
             src/bcs/target/cov-e2e/endpoint_coverage.xml
+            src/bcs/target/cov-e2e/cli_command_coverage.txt
           if-no-files-found: ignore

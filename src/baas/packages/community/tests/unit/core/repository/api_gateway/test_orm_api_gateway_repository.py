@@ -284,6 +284,39 @@ class TestGetByPrefixAndStatus:
 
         assert result is None
 
+    def test_filters_by_env_when_provided(self, repository, mock_session):
+        """传入 env 时，查询应追加 env 过滤条件。"""
+        record = _mock_record(id_val=11, api_key_prefix="sk-env", status="ACTIVE")
+        mock_model = MagicMock()
+        mock_model.to_record.return_value = record
+        filtered = mock_session.query.return_value.filter.return_value
+        filtered.filter.return_value.first.return_value = mock_model
+
+        from secbaas.core.repository.api_gateway._orm_model import APIKeyModel
+
+        result = repository.get_by_prefix_and_status("sk-env", "ACTIVE", env="prod")
+
+        assert result is not None
+        # 应有两次 filter 调用：第一次 prefix+status，第二次 env
+        first_filter = mock_session.query.return_value.filter
+        first_filter.assert_called_once()
+        second_filter = first_filter.return_value.filter
+        second_filter.assert_called_once()
+        # 第二次 filter 的参数应为 env 过滤条件
+        env_arg = second_filter.call_args[0][0]
+        assert str(env_arg) == str(APIKeyModel.env == "prod")
+
+    def test_no_env_filter_when_env_none(self, repository, mock_session):
+        """不传 env 时，不追加额外过滤（向后兼容）。"""
+        mock_session.query.return_value.filter.return_value.first.return_value = None
+
+        repository.get_by_prefix_and_status("sk-env", "ACTIVE")
+
+        first_filter = mock_session.query.return_value.filter
+        # 不传 env → 只有一次 filter（prefix+status），不追加 env 过滤
+        first_filter.assert_called_once()
+        first_filter.return_value.filter.assert_not_called()
+
 
 # ==================== list_keys ====================
 

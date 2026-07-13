@@ -38,6 +38,17 @@ def _model_to_dict(model: Model) -> dict:
     if model.provider_category is not None:
         result["provider_category"] = model.provider_category
 
+    # Merge engine-specific extra fields (e.g. runtime, quota info, …)
+    # into the top-level response dict so the frontend receives them
+    # without needing a DTO field for every relay key.  Filtering on
+    # existing result keys protects against relay-provided keys that
+    # collide with explicitly validated fields (id, provider, pricing,
+    # enterprise_enabled, …) — they must not be overwritten.
+    if model.extra:
+        for k, v in model.extra.items():
+            if k not in result:
+                result[k] = v
+
     if model.capabilities:
         result["capabilities"] = {
             "context_window": model.capabilities.context_window,

@@ -1,10 +1,4 @@
-"""Tests for desktop live-status merge in list_bots_by_owner_or_collaborator.
-
-The frontend bot list calls /by-owner-or-collaborator. Desktop bots' DB status
-lags, so the list directly consumes BaaS live status (read-only, no DB write).
-Only desktop bots with a device_id are touched; non-desktop bots pass through;
-per-bot failure degrades to the DB status; total failure leaves items unchanged.
-"""
+"""Tests for persisted list status and explicit desktop live-status reads."""
 from unittest.mock import MagicMock, Mock
 
 from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -63,79 +57,17 @@ def _teclaw(bot_id, status="PENDING", binding_id=5):
             "binding_id": binding_id, "owner_id": "u", "status": status, "entity_id": "e"}
 
 
-class TestDesktopLiveStatusMerge:
-    def test_desktop_status_overwritten_with_baas_live(self):
+class TestBotListUsesPersistedStatus:
+    def test_desktop_status_uses_persisted_value_without_baas_query(self):
         items = [_desktop("d1", status="OFFLINE")]
-        client = _client_returning(bot_status="ACTIVE", device_status="ALL_ONLINE")
-        svc = _make_bot_service(_repo_returning(items), client)
-        result = svc.list_bots_by_owner_or_collaborator(owner_id="u")
-        assert result["items"][0]["status"] == "ACTIVE"
-
-    def test_pending_trusts_backend_not_queried(self):
-        # Process state: a PENDING bot (creating/restarting) is NOT yet reliably
-        # reflected by BaaS — the container may be up while the process hasn't
-        # reconnected (BaaS would say ALL_OFFLINE). Trust the backend status and
-        # don't even query BaaS.
-        items = [_desktop("d1", status="PENDING")]
-        client = _client_returning(bot_status="ACTIVE", device_status="ALL_OFFLINE")
-        svc = _make_bot_service(_repo_returning(items), client)
-        result = svc.list_bots_by_owner_or_collaborator(owner_id="u")
-        assert result["items"][0]["status"] == "PENDING"
-        client.query_device_status.assert_not_called()
-
-    def test_releasing_trusts_backend_not_queried(self):
-        items = [_desktop("d1", status="RELEASING")]
-        client = _client_returning(bot_status="ACTIVE", device_status="ALL_ONLINE")
-        svc = _make_bot_service(_repo_returning(items), client)
-        result = svc.list_bots_by_owner_or_collaborator(owner_id="u")
-        assert result["items"][0]["status"] == "RELEASING"
-        client.query_device_status.assert_not_called()
-
-    def test_offline_steady_state_consumes_baas(self):
-        # Steady state OFFLINE → consume BaaS live value (may flip to ACTIVE).
-        items = [_desktop("d1", status="OFFLINE")]
-        client = _client_returning(bot_status="ACTIVE", device_status="ALL_ONLINE")
-        svc = _make_bot_service(_repo_returning(items), client)
-        result = svc.list_bots_by_owner_or_collaborator(owner_id="u")
-        assert result["items"][0]["status"] == "ACTIVE"
-
-    def test_non_desktop_not_touched(self):
-        items = [_personal("p1", status="ACTIVE")]
-        client = _client_returning(bot_status="ACTIVE", device_status="ALL_OFFLINE")
-        svc = _make_bot_service(_repo_returning(items), client)
-        result = svc.list_bots_by_owner_or_collaborator(owner_id="u")
-        assert result["items"][0]["status"] == "ACTIVE"
-        client.query_device_status.assert_not_called()
-
-    def test_desktop_without_device_id_skipped(self):
-        items = [_desktop("d1", status="OFFLINE", device_id="")]
         client = _client_returning(bot_status="ACTIVE", device_status="ALL_ONLINE")
         svc = _make_bot_service(_repo_returning(items), client)
         result = svc.list_bots_by_owner_or_collaborator(owner_id="u")
         assert result["items"][0]["status"] == "OFFLINE"
         client.query_device_status.assert_not_called()
-
-    def test_none_mapping_keeps_db_status(self):
-        # BaaS PENDING → map_baas_to_display returns None → keep DB status.
-        items = [_desktop("d1", status="ACTIVE")]
-        client = _client_returning(bot_status="PENDING", device_status="ALL_OFFLINE")
-        svc = _make_bot_service(_repo_returning(items), client)
-        result = svc.list_bots_by_owner_or_collaborator(owner_id="u")
-        assert result["items"][0]["status"] == "ACTIVE"
-
-    def test_per_bot_failure_keeps_db_status(self):
-        items = [_desktop("d1", status="OFFLINE")]
-        client = MagicMock()
-        client.query_device_status.side_effect = RuntimeError("boom")
-        svc = _make_bot_service(_repo_returning(items), client)
-        result = svc.list_bots_by_owner_or_collaborator(owner_id="u")
-        assert result["items"][0]["status"] == "OFFLINE"
-
 
 class TestResolveDesktopLiveStatus:
-    """Unit tests for the shared single-bot resolver the list-merge and the
-    upload gate both call. Covers every branch: who is queried, who is skipped,
-    and how failures degrade."""
+    """Unit tests for the single-bot resolver used by the upload gate."""
 
     def test_non_desktop_returns_none_without_query(self):
         # Cloud bot (personal/service) never consults BaaS — gate trusts DB.
@@ -194,4 +126,3 @@ class TestTeclawStatusNotMerged:
         assert result["items"][0]["status"] == "PENDING"
         # No read-through: the list never probes baas for a teclaw bot.
         teclaw.get_live_status_by_binding_id.assert_not_called()
-

@@ -380,7 +380,7 @@ def test_manual_recycle_one_reuses_recycle_side_effects_and_writes_audit():
         passport_plugin=passport,
         protected_owner_ids=frozenset({"owner1"}),
     )
-    ops_service = DormantOpsService(service)
+    ops_service = DormantOpsService(service, passport)
 
     result = ops_service.recycle_one(
         bot_id="ops_bot",
@@ -429,7 +429,7 @@ def test_manual_recycle_one_dry_run_skips_side_effects_but_records_intent():
         bot_service=bot_service,
         passport_plugin=passport,
     )
-    ops_service = DormantOpsService(service)
+    ops_service = DormantOpsService(service, passport)
 
     result = ops_service.recycle_one(
         bot_id="ops_bot",
@@ -451,7 +451,7 @@ def test_manual_recycle_one_dry_run_skips_side_effects_but_records_intent():
 def test_manual_recycle_one_rejects_missing_bot():
     """Manual ops recycle should fail clearly when bot_id + owner_id misses."""
     session = _make_session()
-    ops_service = DormantOpsService(_make_service(session))
+    ops_service = DormantOpsService(_make_service(session), MagicMock())
 
     with pytest.raises(ValueError, match="bot not found"):
         ops_service.recycle_one(
@@ -471,7 +471,7 @@ def test_manual_recycle_one_rejects_non_active_bot():
         owner_id="owner1",
         status="RECYCLED",
     )
-    ops_service = DormantOpsService(_make_service(session))
+    ops_service = DormantOpsService(_make_service(session), MagicMock())
 
     with pytest.raises(ValueError, match="only ACTIVE bot"):
         ops_service.recycle_one(
@@ -491,7 +491,7 @@ def test_manual_recycle_one_rejects_non_personal_bot():
         owner_id="owner1",
         bot_type="team",
     )
-    ops_service = DormantOpsService(_make_service(session))
+    ops_service = DormantOpsService(_make_service(session), MagicMock())
 
     with pytest.raises(ValueError, match="only personal bot"):
         ops_service.recycle_one(

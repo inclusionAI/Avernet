@@ -457,6 +457,19 @@ prepare_bcs_coverage_bin() {
         exit 1
     fi
 
+    # The panel dist is gitignored and may be missing or stale. Always rebuild
+    # it before the coverage stack copies runtime assets, then fail here rather
+    # than later as a manifest download 404.
+    log_info "Building BCS panel asset for coverage..."
+    if ! ( build_bcs_panel_asset ); then
+        log_error "Failed to build BCS panel asset for coverage"
+        return 1
+    fi
+    if [[ ! -f "${BCS_PANEL_ASSET_DIR}/dist/index.umd.js" ]]; then
+        log_error "BCS panel build completed without expected artifact: ${BCS_PANEL_ASSET_DIR}/dist/index.umd.js"
+        return 1
+    fi
+
     # Keep the profraw dir present even on a cache hit (it may have been pruned).
     mkdir -p "$cov_dir"
 

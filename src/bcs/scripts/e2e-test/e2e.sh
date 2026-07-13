@@ -14,9 +14,7 @@
 #
 # Usage:
 #   ./e2e.sh                  # Run all tests
-#   ./e2e.sh -t group         # Run group tests only
-#   ./e2e.sh -t friends       # Run friends tests only
-#   ./e2e.sh -t group friends # Run multiple test suites
+#   ./e2e.sh -t stories       # Run user-story E2E tests
 #   ./e2e.sh -l               # List available tests
 #   ./e2e.sh --skip-setup     # Skip BCS health check and ensure-human
 #   ./e2e.sh --help           # Show usage
@@ -57,15 +55,14 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [options]"
             echo ""
             echo "Options:"
-            echo "  -t <suite...>    Run specific test suites (group, friends)"
+            echo "  -t <suite...>    Run specific test suites (stories)"
             echo "  -l, --list       List available tests"
             echo "  --skip-setup     Skip BCS health check and ensure-human"
             echo "  --help           Show this help"
             echo ""
             echo "Examples:"
             echo "  $0                # Run all tests"
-            echo "  $0 -t group       # Run group tests only"
-            echo "  $0 -t group friends"
+            echo "  $0 -t stories     # Run user-story tests"
             exit 0
             ;;
         *)
@@ -84,28 +81,18 @@ source "$SCRIPT_DIR/friends.sh"
 source "$SCRIPT_DIR/cli.sh"
 source "$SCRIPT_DIR/actor.sh"
 source "$SCRIPT_DIR/register.sh"
+source "$SCRIPT_DIR/stories.sh"
+source "$SCRIPT_DIR/cli-stories.sh"
 
 # ============================================================================
 # Collect All Tests (Bash 3.2 compatible — no associative arrays)
 # ============================================================================
 
-ALL_SUITES=(group friends cli actor register)
+ALL_SUITES=(stories)
 ALL_TESTS=()
 
-for test_name in "${E2E_TESTS_GROUP[@]}"; do
-    ALL_TESTS+=("group:$test_name")
-done
-for test_name in "${E2E_TESTS_FRIENDS[@]}"; do
-    ALL_TESTS+=("friends:$test_name")
-done
-for test_name in "${E2E_TESTS_CLI[@]}"; do
-    ALL_TESTS+=("cli:$test_name")
-done
-for test_name in "${E2E_TESTS_ACTOR[@]}"; do
-    ALL_TESTS+=("actor:$test_name")
-done
-for test_name in "${E2E_TESTS_REGISTER[@]}"; do
-    ALL_TESTS+=("register:$test_name")
+for test_name in "${E2E_TESTS_STORIES[@]}"; do
+    ALL_TESTS+=("stories:$test_name")
 done
 
 # ============================================================================
@@ -114,24 +101,8 @@ done
 
 if [ "$LIST_ONLY" = true ]; then
     echo "Available test suites:"
-    echo "  group:"
-    for test_name in "${E2E_TESTS_GROUP[@]}"; do
-        echo "    - $test_name"
-    done
-    echo "  friends:"
-    for test_name in "${E2E_TESTS_FRIENDS[@]}"; do
-        echo "    - $test_name"
-    done
-    echo "  cli:"
-    for test_name in "${E2E_TESTS_CLI[@]}"; do
-        echo "    - $test_name"
-    done
-    echo "  actor:"
-    for test_name in "${E2E_TESTS_ACTOR[@]}"; do
-        echo "    - $test_name"
-    done
-    echo "  register:"
-    for test_name in "${E2E_TESTS_REGISTER[@]}"; do
+    echo "  stories:"
+    for test_name in "${E2E_TESTS_STORIES[@]}"; do
         echo "    - $test_name"
     done
     exit 0
@@ -199,12 +170,17 @@ for entry in "${RUN_TESTS[@]}"; do
     test_name="${entry#*:}"
     echo ""
     info "[$suite] $test_name"
+    failures_before=$TESTS_FAILED
     if $test_name; then
         : # test function handles its own assertions
     else
-        fail "$test_name exited with error"
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+            fail "$test_name exited without recording an assertion failure"
+            TESTS_FAILED=$((TESTS_FAILED + 1))
+            TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        else
+            warn "$test_name stopped after a failed assertion"
+        fi
     fi
 done
 

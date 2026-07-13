@@ -132,18 +132,6 @@ demo_bot_wait_ready() {
     done
 }
 
-demo_bot_bcs_cli() {
-    if command -v bcs-cli >/dev/null 2>&1; then
-        command -v bcs-cli
-        return 0
-    fi
-    if [ -x "${BCS_DIR}/target/debug/bcs-cli" ]; then
-        printf '%s\n' "${BCS_DIR}/target/debug/bcs-cli"
-        return 0
-    fi
-    return 1
-}
-
 demo_bot_connect_bcs() {
     local backend_bot_id="$1"
     local bcs_bot_id base_url payload response
@@ -193,42 +181,93 @@ demo_bot_admin_onboard_bcs() {
     printf '%s\n' "$response" | jq -e '.onboarded == true' >/dev/null 2>&1
 }
 
+# Return 0 when the BCS entry is exact, 1 when it is missing or repairable by
+# admin onboard, and 2 for fatal transport, authentication, or contract errors.
 demo_bot_verify_bcn() {
     local backend_bot_id="$1"
-    local bcs_bot_id cli
+    local bcs_bot_id base_url response_file response http_status curl_rc actual_bot_id actual_name actual_summary
     bcs_bot_id="$(demo_bot_bcs_bot_id "$backend_bot_id")"
-    cli="$(demo_bot_bcs_cli)" || {
-        log_error "bcs-cli not found; run: ./scripts/singlebox.sh setup bcs"
-        return 1
+    base_url="$(demo_bot_bcs_base_url)"
+    response_file="$(mktemp)" || {
+        log_error "Failed to allocate a temporary file for demo bot verification"
+        return 2
     }
 
-    "$cli" --url "http://127.0.0.1:${BCS_PORT}" get "$bcs_bot_id" >> "${DEMO_BOT_LOG}" 2>&1
-}
+    curl_rc=0
+    http_status="$(
+        curl --noproxy '*' --connect-timeout 2 --max-time 10 -sS \
+            -o "$response_file" \
+            -w '%{http_code}' \
+            -H "X-Mock-User-Id: ${BCS_MOCK_USER_ID:-001}" \
+            -H "X-Mock-Nick-Name: ${BCS_MOCK_USER_NICK_NAME:-admin}" \
+            "${base_url}/bots/${bcs_bot_id}" \
+            2>>"${DEMO_BOT_LOG}"
+    )" || curl_rc=$?
+    response="$(<"$response_file")"
+    rm -f "$response_file"
+    printf '%s\n' "$response" >> "${DEMO_BOT_LOG}"
 
-demo_bot_has_expected_bcn_metadata() {
-    local bcs_bot_id="$1"
-    local log_tail
-    log_tail="$(tail -n 20 "${DEMO_BOT_LOG}" 2>/dev/null || true)"
+    if [ "$curl_rc" -ne 0 ]; then
+        log_error "Failed to query demo bot from local BCS: curl exit ${curl_rc}. Check ${DEMO_BOT_LOG}"
+        return 2
+    fi
 
-    printf '%s\n' "$log_tail" | grep -F "Bot: ${bcs_bot_id}" >/dev/null 2>&1 || return 1
-    printf '%s\n' "$log_tail" | grep -F "Name: ${DEMO_BOT_NAME}" >/dev/null 2>&1 || return 1
-    printf '%s\n' "$log_tail" | grep -F "Summary: ${DEMO_BOT_DESC}" >/dev/null 2>&1 || return 1
+    case "$http_status" in
+        200) ;;
+        404)
+            return 1
+            ;;
+        401|403)
+            log_error "BCS rejected demo bot verification with HTTP ${http_status}; singlebox local mock human authentication must be enabled"
+            return 2
+            ;;
+        *)
+            log_error "Unexpected HTTP ${http_status:-unknown} while verifying demo bot in local BCS"
+            return 2
+            ;;
+    esac
+
+    if ! printf '%s\n' "$response" | jq -e 'type == "object"' >/dev/null 2>&1; then
+        log_error "BCS returned invalid JSON while verifying demo bot: ${bcs_bot_id}"
+        return 2
+    fi
+
+    actual_bot_id="$(printf '%s\n' "$response" | jq -r '.bot_uuid // empty')"
+    if [ "$actual_bot_id" != "$bcs_bot_id" ]; then
+        log_error "BCS demo bot identity mismatch: expected=${bcs_bot_id}, actual=${actual_bot_id:-missing}"
+        return 2
+    fi
+
+    if printf '%s\n' "$response" | jq -e \
+        --arg name "$DEMO_BOT_NAME" \
+        --arg summary "$DEMO_BOT_DESC" \
+        '.capabilities.name == $name and .capabilities.summary == $summary' \
+        >/dev/null 2>&1; then
+        return 0
+    fi
+
+    actual_name="$(printf '%s\n' "$response" | jq -r '.capabilities.name // empty')"
+    actual_summary="$(printf '%s\n' "$response" | jq -r '.capabilities.summary // empty')"
+    log_warn "BCS demo bot metadata needs repair: name=${actual_name:-missing}, summary=${actual_summary:-missing}"
+    return 1
 }
 
 demo_bot_ensure_bcn() {
     local backend_bot_id="$1"
-    local bcs_bot_id
+    local bcs_bot_id verify_rc=0
     bcs_bot_id="$(demo_bot_bcs_bot_id "$backend_bot_id")"
 
-    if demo_bot_verify_bcn "$backend_bot_id"; then
-        if demo_bot_has_expected_bcn_metadata "$bcs_bot_id"; then
-            return 0
-        fi
+    demo_bot_verify_bcn "$backend_bot_id" || verify_rc=$?
+    if [ "$verify_rc" -eq 0 ]; then
+        return 0
+    fi
+    if [ "$verify_rc" -ne 1 ]; then
+        return "$verify_rc"
     fi
 
     log_info "Registering demo bot in local BCS: ${bcs_bot_id}"
     demo_bot_admin_onboard_bcs "$backend_bot_id" || return 1
-    demo_bot_verify_bcn "$backend_bot_id" && demo_bot_has_expected_bcn_metadata "$bcs_bot_id"
+    demo_bot_verify_bcn "$backend_bot_id"
 }
 
 demo_bot_start() {
@@ -291,12 +330,6 @@ demo_bot_prereqs() {
         prereq_ok "curl: $(command -v curl)"
     else
         prereq_error "curl not found."
-        has_error=true
-    fi
-    if demo_bot_bcs_cli >/dev/null 2>&1; then
-        prereq_ok "bcs-cli: $(demo_bot_bcs_cli)"
-    else
-        prereq_error "bcs-cli not found. Run: ./scripts/singlebox.sh setup bcs"
         has_error=true
     fi
     [ "$has_error" = false ]

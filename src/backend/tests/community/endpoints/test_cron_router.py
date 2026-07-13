@@ -349,19 +349,19 @@ def get_cron_status_success():
 @endpoint_test(
     method="GET",
     path="/api/cron/running",
-    scenario="get_running",
+    scenario="get_running_rejects_all",
     input=CaseInput(
         headers={"x-user-id": "u001"},
         query_params={"bot_id": "all"},
     ),
     seed=_seed_user,
-    expect=ExpectSuccess(
+    expect=ExpectError(
         status=200,
-        json_contains={"success": True, "data": []},
+        json_contains={"success": False, "error_code": 400},
     ),
 )
-def get_running_crons_success():
-    """get_running_crons returns success."""
+def get_running_crons_rejects_all():
+    """get_running_crons requires a specific bot_id."""
 
 
 # ============================================================================
@@ -785,7 +785,7 @@ def get_status_owner_success():
     scenario="get_running_owner",
     input=CaseInput(
         headers={"x-user-id": "u_owner"},
-        query_params={"bot_id": "bot_test"},
+        query_params={"bot_id": "bot_test", "runtime_stage": "draft"},
     ),
     seed=_seed_bot_for_error,
     expect=ExpectSuccess(
@@ -930,9 +930,8 @@ def get_cron_runs_default_limit():
 # relay raise ("Bot ... has no device binding"), which the router maps to a
 # success=False / error_code=500 envelope. No artificial error flag.
 #
-# Note: the aggregate "all" endpoints (list / running) are deliberately
-# resilient — they swallow per-bot failures and still return success=True —
-# so there is no faithful 500 scenario for them, and no error case here.
+# The list endpoint remains resilient for bot_id=all. The running endpoint
+# requires a specific bot_id and validates its runtime scope.
 
 def _seed_bot_no_device(world):
     """Seed a bot WITHOUT a device binding so forward_request raises."""

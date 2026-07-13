@@ -5,14 +5,15 @@ use bcs_message_flow::task_store::{new_task_entry, TaskLedgerStatus, TASK_TTL_MS
 use bcs_protocol::BcsFrame;
 use bcs_service_api::{
     ActorKind, BotDeliveryKind, BotDeliveryTarget, BotEventCommand, BotRegistryCoreService,
-    BotRunContextPort, ChatEventState, ChatResponseMode, DefaultDelivery,
+    BotRunContextPort, ChannelOutboundEventKind, ChannelRenderHint, ChatEventState,
+    ChatResponseMode, DefaultDelivery,
     FrontendDeliveryTarget, GroupCoreService, GroupKind, GroupStatus, GroupStrategy,
     MessageFlowService, Participant, ParticipantMode, ParticipantRole,
     ProviderStreamGrayList, ProviderTransportPreference,
     RoutingMode, RoutingPolicy, ServiceError, ServiceSpec, Session, SessionKind,
     SessionManagementService, SessionStatus, SessionUseCaseError, SystemMessageEvent,
     SystemMessageService, TaskCompleteCommand, TaskDispatchCommand, TaskMessageCommand,
-    TaskRunAliasRegistration, ChannelService, ChannelUseCaseError,
+    TaskRunAliasRegistration, ChannelInboundError, ChannelService, ChannelUseCaseError,
     interceptor::{BlockReason, InterceptorDecision, MessageInterceptor, OutboundMessage},
 };
 use serde_json::{Value, json};
@@ -50,7 +51,7 @@ impl ChannelService for RecordingChannelService {
     async fn handle_inbound(
         &self,
         _msg: bcs_service_api::application::channel::InboundMessage,
-    ) -> Result<(), ChannelUseCaseError> {
+    ) -> Result<(), ChannelInboundError> {
         Ok(())
     }
 
@@ -264,7 +265,7 @@ async fn bot_event_with_bcs_session_id_publishes_to_session_target() {
 
 
 #[tokio::test]
-async fn agent_thinking_delta_self_accumulates_and_resets_after_tool_block() {
+async fn agent_thinking_delta_self_accumulates_and_resets_after_tool_start() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let flow = BcsMessageFlow::new(
         support.group.clone(),
@@ -308,7 +309,7 @@ async fn agent_thinking_delta_self_accumulates_and_resets_after_tool_block() {
                 "name": "Bash",
             },
         }),
-        state: ChatEventState::Delta,
+        state: ChatEventState::ToolCallStart,
         bcs_session_id: None,
     })
     .await
@@ -346,6 +347,87 @@ async fn agent_thinking_delta_self_accumulates_and_resets_after_tool_block() {
         after_tool["payload"]["data"]["text"],
         "BB",
         "thinking text should be rebuilt from the current segment's delta, not upstream run-cumulative text"
+    );
+}
+
+#[tokio::test]
+async fn agent_thinking_delta_resets_after_tool_end() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "run-thinking-tool-end".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: json!({
+            "stream": "thinking",
+            "data": {
+                "stream": "thinking",
+                "delta": "before",
+                "text": "upstream-before",
+            },
+        }),
+        state: ChatEventState::Delta,
+        bcs_session_id: None,
+    })
+    .await
+    .unwrap();
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "run-thinking-tool-end".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: json!({
+            "stream": "tool",
+            "data": {
+                "phase": "result",
+                "toolCallId": "tool-1",
+                "name": "Bash",
+                "result": "ok",
+            },
+        }),
+        state: ChatEventState::ToolCallEnd,
+        bcs_session_id: None,
+    })
+    .await
+    .unwrap();
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "run-thinking-tool-end".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: json!({
+            "stream": "thinking",
+            "data": {
+                "stream": "thinking",
+                "delta": "after",
+                "text": "upstream-beforeafter",
+            },
+        }),
+        state: ChatEventState::Delta,
+        bcs_session_id: None,
+    })
+    .await
+    .unwrap();
+
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 3);
+
+    let after_tool: Value = serde_json::from_str(&events[2]).unwrap();
+    assert_eq!(after_tool["payload"]["data"]["delta"], "after");
+    assert_eq!(
+        after_tool["payload"]["data"]["text"],
+        "after",
+        "tool-call end should close the previous thinking segment"
     );
 }
 
@@ -669,6 +751,72 @@ async fn bot_delta_channel_outbound_uses_delta_text_not_synthesized_snapshot() {
         "ChatDelta sent to channel adapters must stay incremental even when BCS synthesizes cumulative message.content for frontend rendering"
     );
     assert_eq!(outbound[1].raw_payload["message"]["content"][0]["text"], "你好");
+}
+
+#[tokio::test]
+async fn bot_terminal_failures_emit_safe_system_channel_feedback() {
+    for (state, run_id, expected_text) in [
+        (
+            ChatEventState::Error,
+            "run-error-1234567890",
+            "机器人连接或执行失败，请稍后重试。",
+        ),
+        (
+            ChatEventState::Aborted,
+            "run-aborted-1234567890",
+            "机器人已中止本次处理，请重新发送。",
+        ),
+    ] {
+        let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+        let recording_channel = Arc::new(RecordingChannelService::default());
+        let flow = BcsMessageFlow::new(
+            support.group.clone(),
+            support.routing.clone(),
+            support.registry.clone(),
+            support.bot_delivery.clone(),
+            support.frontend_delivery.clone(),
+        );
+        let channel: Arc<dyn ChannelService> = recording_channel.clone();
+        assert!(flow.channel_slot().set(channel).is_ok());
+
+        flow.handle_bot_event(BotEventCommand {
+            bot_id: "bot-observer".to_string(),
+            run_id: run_id.to_string(),
+            group_id: "group-1".to_string(),
+            event_type: "chat.event".to_string(),
+            event_payload: json!({
+                "state": state_payload_name(&state),
+                "errorMessage": "provider secret detail",
+                "errorKind": "provider_internal_error",
+            }),
+            state,
+            bcs_session_id: Some("group-1:abcdef12".to_string()),
+        })
+        .await
+        .unwrap();
+
+        let outbound = recording_channel.outbound().await;
+        assert_eq!(outbound.len(), 1);
+        let outbound = &outbound[0];
+        assert_eq!(outbound.kind, ChannelOutboundEventKind::System);
+        assert_eq!(outbound.render_hint, ChannelRenderHint::Render);
+        let text = outbound.text.as_deref().expect("system feedback text");
+        assert!(text.contains(expected_text));
+        assert!(text.contains("追踪标识"));
+        assert!(!text.contains("provider secret detail"));
+        assert!(!text.contains("provider_internal_error"));
+        assert!(!text.contains(run_id), "trace reference must be shortened");
+        let raw_payload = outbound.raw_payload.to_string();
+        assert!(!raw_payload.contains("provider secret detail"));
+        assert!(!raw_payload.contains("provider_internal_error"));
+        let trace = text
+            .split("追踪标识: ")
+            .nth(1)
+            .and_then(|suffix| suffix.strip_suffix(')'))
+            .expect("short trace reference");
+        assert!(trace.is_ascii());
+        assert!(trace.len() <= 12);
+    }
 }
 
 #[tokio::test]

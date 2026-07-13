@@ -42,7 +42,11 @@ from agentclaw.community.core.cron.services.cron_runtime_targets import (
     RUNTIME_STAGE_DRAFT,
     RUNTIME_STAGE_ONLINE,
     RUNTIME_STAGE_VERIFY,
+    RUNTIME_QUERY_PREPARE_CONCURRENCY,
     VALID_RUNTIME_STAGES,
+)
+from agentclaw.community.core.cron.services.cron_runtime_operations import (
+    CronRuntimeOperationsMixin,
 )
 from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
 from agentclaw.community.utils.env_utils import get_current_env
@@ -50,8 +54,10 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
+_CRON_UNSUPPORTED_ENGINES = frozenset({"hermes"})
 
-class CronRelayService(CronRuntimeTargetMixin):
+
+class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
     """Cron 中继服务 — 转发请求到各 Bot 的 Adapter"""
 
     @inject
@@ -85,6 +91,10 @@ class CronRelayService(CronRuntimeTargetMixin):
         self._resolver = resolver
         self._template_repo = template_repo
         self._publish_repo = publish_repo
+        # Cron 批量查询共用限流器，控制同步设备连接准备占用的线程数。
+        self._runtime_query_prepare_semaphore = asyncio.Semaphore(
+            RUNTIME_QUERY_PREPARE_CONCURRENCY
+        )
 
     async def list_all_crons(
         self,
@@ -117,15 +127,15 @@ class CronRelayService(CronRuntimeTargetMixin):
         if not bots:
             return {"success": True, "data": [], "total": 0}
 
-        # 2. 展开每个 bot 的 runtime target，再并发获取 cron 列表
+        # 2. 获取每个 bot 的 runtime target，再并发获取 cron 配置列表。
+        # Cron 配置在同一运行态的多实例间保持一致，列表只展示到 stage 维度；
+        # running/runs/启停/触发才需要实例维度。
         targets: list[CronRuntimeTarget] = []
         failed_targets: list[dict[str, Any]] = []
         for bot in bots:
             bot_targets, bot_failed_targets = self._build_runtime_targets(bot, user_id)
             targets.extend(bot_targets)
             failed_targets.extend(bot_failed_targets)
-        targets, instance_failed_targets = self._expand_runtime_targets(targets)
-        failed_targets.extend(instance_failed_targets)
 
         tasks = []
         for target in targets:
@@ -216,31 +226,75 @@ class CronRelayService(CronRuntimeTargetMixin):
         self,
         user_id: str,
         nick_name: str,
-        bot_id: Optional[str] = None
+        bot_id: str,
+        runtime_stage: str | None = None,
+        device_uuid: str | None = None,
     ) -> dict:
-        """获取正在执行的任务列表"""
-        # 获取 bot 列表（指定 bot 时只查一个 bot）
-        if bot_id and bot_id != "all":
-            bots = [self._bot_provider.get_bot(bot_id, user_id)]
+        """获取指定 Bot 的运行中任务。
+
+        服务 Bot 必须指定 runtime_stage，并按运行实例聚合；个人 Bot 不接收
+        runtime_stage 或 device_uuid。
+        """
+        # running 只查询一个 Bot，不接受聚合全部 Bot 的 all 参数。
+        if not bot_id or bot_id == "all":
+            raise CronRelayError("a specific bot_id is required", error_code=400)
+        if runtime_stage is not None and runtime_stage not in VALID_RUNTIME_STAGES:
+            raise CronRelayError(f"Invalid runtime_stage: {runtime_stage}", error_code=400)
+        if device_uuid and not runtime_stage:
+            raise CronRelayError("device_uuid requires runtime_stage", error_code=400)
+
+        # 根据 Bot 类型校验 stage，并构造唯一的运行态范围。
+        bot = self._bot_provider.get_bot(bot_id, user_id)
+        bot_type = bot.get("bot_type") or "personal"
+        if bot_type == "service":
+            if runtime_stage is None:
+                raise CronRelayError(
+                    "runtime_stage is required for service bot",
+                    error_code=400,
+                )
         else:
-            result = self._bot_provider.list_bots_by_owner_or_collaborator(
-                user_id,
-                page=1,
-                page_size=100,
-            )
-            bots = result.get("items", [])
+            if runtime_stage is not None:
+                raise CronRelayError(
+                    "runtime_stage only supports service bot",
+                    error_code=400,
+                )
+            if device_uuid:
+                raise CronRelayError(
+                    "device_uuid only supports service bot",
+                    error_code=400,
+                )
 
-        if not bots:
-            return {"success": True, "data": [], "failed_targets": []}
+        targets, failed_targets = self._build_runtime_targets(bot, user_id)
+        if runtime_stage is not None:
+            targets = [
+                target
+                for target in targets
+                if target.runtime_stage == runtime_stage
+            ]
+            failed_targets = [
+                target
+                for target in failed_targets
+                if target.get("runtime_stage") == runtime_stage
+            ]
 
-        targets: list[CronRuntimeTarget] = []
-        failed_targets: list[dict[str, Any]] = []
-        for bot in bots:
-            bot_targets, bot_failed_targets = self._build_runtime_targets(bot, user_id)
-            targets.extend(bot_targets)
-            failed_targets.extend(bot_failed_targets)
-        targets, instance_failed_targets = self._expand_runtime_targets(targets)
+        # 服务 Bot 的多实例 stage 展开为带 device_uuid 的实际查询目标。
+        targets, instance_failed_targets = await self._expand_runtime_targets(targets)
         failed_targets.extend(instance_failed_targets)
+        if device_uuid:
+            expanded_targets = targets
+            targets = [
+                target
+                for target in expanded_targets
+                if target.device_uuid == device_uuid
+            ]
+            if expanded_targets and not targets:
+                raise CronRelayError(
+                    (
+                        f"device_uuid={device_uuid} not found for "
+                        f"runtime_stage={runtime_stage}"
+                    ),
+                    error_code=404,
+                )
 
         # 并发获取每个 runtime target 的 running 任务
         tasks = []
@@ -258,13 +312,7 @@ class CronRelayService(CronRuntimeTargetMixin):
                     self._failed_target(target, "cron_api_failed", str(result))
                 )
                 continue
-            data = result.get("data", {})
-            if isinstance(data, dict):
-                running_list = data.get("running", [])
-                for item in running_list:
-                    self._decorate_runtime_item(item, target)
-                all_running.extend(running_list)
-            elif result.get("success") is False:
+            if result.get("success") is False:
                 failed_targets.append(
                     self._failed_target(
                         target,
@@ -272,6 +320,13 @@ class CronRelayService(CronRuntimeTargetMixin):
                         result.get("error") or result.get("message") or "cron api failed",
                     )
                 )
+                continue
+            data = result.get("data", {})
+            if isinstance(data, dict):
+                running_list = data.get("running", [])
+                for item in running_list:
+                    self._decorate_runtime_item(item, target)
+                all_running.extend(running_list)
 
         return {"success": True, "data": all_running, "failed_targets": failed_targets}
 
@@ -459,8 +514,7 @@ class CronRelayService(CronRuntimeTargetMixin):
             logger.warning(f"[_fetch_bot_crons] Failed to get device status for bot {bot_id}: {e}")
             return {"success": False, "error": f"Device not available: {e}"}
 
-        # 通过 DeviceContextResolver 拿 DeviceContext(全仓唯一 provider 解析点),
-        # 替代旧的 ``device_service.get_device_connection_v2(binding_id, user_id, nick_name)``。
+        # 构造该 bot 当前 binding 的 adapter 连接上下文。
         try:
             ctx = self._resolver.resolve_for_bot(bot_id, user_id)
         except Exception as e:
@@ -479,6 +533,15 @@ class CronRelayService(CronRuntimeTargetMixin):
         bot: dict,
         user_id: str,
     ) -> tuple[list[CronRuntimeTarget], list[dict[str, Any]]]:
+        """构造 Bot 可用的 draft、verify 和 online 运行态目标。
+
+        个人 Bot 只生成当前 binding 目标；服务 Bot 还会读取验证中和已发布记录。
+        不支持 cron 的引擎不生成目标；缺失 binding 或发布记录查询失败时返回失败项。
+        """
+        active_engine = str(bot.get("active_engine") or "").strip().lower()
+        if active_engine in _CRON_UNSUPPORTED_ENGINES:
+            return [], []
+
         bot_id = bot.get("bot_id")
         bot_name = bot.get("bot_name", "")
         owner_id = bot.get("owner_id") or user_id
@@ -486,6 +549,7 @@ class CronRelayService(CronRuntimeTargetMixin):
         targets: list[CronRuntimeTarget] = []
         failed_targets: list[dict[str, Any]] = []
 
+        # 当前 binding 对应 draft；个人 Bot 构造完该目标后即可返回。
         binding_id = bot.get("binding_id")
         if binding_id:
             targets.append(
@@ -504,7 +568,9 @@ class CronRelayService(CronRuntimeTargetMixin):
                     bot_id=bot_id,
                     bot_name=bot_name,
                     owner_id=owner_id,
-                    runtime_stage=RUNTIME_STAGE_DRAFT,
+                    runtime_stage=(
+                        RUNTIME_STAGE_DRAFT if bot_type == "service" else None
+                    ),
                     publish_id=None,
                     reason="binding_missing",
                     message=f"Bot {bot_id} has no draft binding_id",
@@ -514,6 +580,7 @@ class CronRelayService(CronRuntimeTargetMixin):
         if bot_type != "service":
             return targets, failed_targets
 
+        # 服务 Bot 的 verify/online 分别由验证中和发布成功记录提供 binding。
         for runtime_stage, publish_status, binding_key in (
             (RUNTIME_STAGE_VERIFY, PublishStatus.VALIDATING.value, "verify"),
             (RUNTIME_STAGE_ONLINE, PublishStatus.SUCCESS.value, "online"),
@@ -582,6 +649,7 @@ class CronRelayService(CronRuntimeTargetMixin):
         user_id: str,
         runtime_stage: str,
     ) -> CronRuntimeTarget:
+        """解析服务 Bot 指定发布态的 binding 和发布元数据。"""
         bot_id = bot.get("bot_id")
         owner_id = bot.get("owner_id") or user_id
         bot_type = bot.get("bot_type") or "personal"
@@ -633,6 +701,7 @@ class CronRelayService(CronRuntimeTargetMixin):
         method: str,
         body: Optional[dict],
     ) -> None:
+        """校验发布态允许执行的定时任务操作。"""
         if runtime_stage not in VALID_RUNTIME_STAGES:
             raise CronRelayError(f"Invalid runtime_stage: {runtime_stage}", error_code=400)
 
@@ -705,7 +774,7 @@ class CronRelayService(CronRuntimeTargetMixin):
         # 检查设备状态是否为 ACTIVE
         try:
             device = self._device_provider.get_device(binding_id=target.binding_id)
-            device_status = self._read_field(device, "status")
+            device_status = device.status if hasattr(device, 'status') else device.get("status")
             if device_status != DeviceBindingStatus.ACTIVE:
                 raise CronRelayError(
                     f"Bot {bot_id} runtime_stage={runtime_stage} "
@@ -718,52 +787,15 @@ class CronRelayService(CronRuntimeTargetMixin):
                 raise
             raise ValueError(f"Device not available: {e}")
 
-        if self._should_fan_out_runtime_operation(
-            target,
-            method=method,
-            path=path,
-        ):
-            expanded_targets, failed_targets = self._expand_runtime_target(
-                target,
-                device=device,
+        # 2. 构造目标运行态的 adapter 连接上下文。
+        if runtime_stage == RUNTIME_STAGE_DRAFT:
+            ctx = self._resolver.resolve_for_bot(bot_id, user_id)
+        else:
+            ctx = self._resolver.resolve_for_binding(
+                target.binding_id,
+                user_id,
+                bot_id=bot_id,
             )
-            if any(expanded.device_uuid for expanded in expanded_targets):
-                result = await self._forward_multi_instance_request(
-                    expanded_targets,
-                    method=method,
-                    path=path,
-                    body=body,
-                    params=params,
-                    failed_targets=failed_targets,
-                )
-                logger.info(
-                    "[forward_request] Fan-out for bot %s stage=%s: %s %s "
-                    "succeeded=%s failed=%s",
-                    bot_id,
-                    runtime_stage,
-                    method,
-                    path,
-                    result["data"]["succeeded"],
-                    result["data"]["failed"],
-                )
-                return result
-            if failed_targets and not expanded_targets:
-                return {
-                    "success": False,
-                    "message": "runtime instances unavailable",
-                    "data": {
-                        "results": [],
-                        "succeeded": 0,
-                        "failed": len(failed_targets),
-                    },
-                    "failed_targets": failed_targets,
-                }
-
-        # 2. 通过 DeviceContextResolver 拿 DeviceContext(全仓唯一 provider 解析点),
-        # 替代旧的 ``get_device_connection_v2`` — 后者对 baas service bot 落 direct
-        # 分支丢 binding_id,transport fallback 裸 httpx 直发 ARCA-SANDBOX 内网 → 500。
-        # 走 resolver → 永填 binding_id → transport 走 baas proxypass。
-        ctx = self._resolve_runtime_context(target)
 
         # 3. 通过中继 transport 转发请求
         result = await self._transport.invoke(ctx.conn_info, method, path, body, params)

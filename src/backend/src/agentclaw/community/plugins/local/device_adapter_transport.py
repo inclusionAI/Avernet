@@ -104,6 +104,8 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
         path: str,
         body: Optional[dict[str, Any]] = None,
         params: Optional[dict[str, Any]] = None,
+        *,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         store = self._store(conn_info)
         # Segments after ``/api/cron``: [] | [status] | [running] |

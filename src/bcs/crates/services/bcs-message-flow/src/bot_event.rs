@@ -52,8 +52,14 @@ pub async fn handle_bot_event(
     // We accumulate BEFORE publishing to the frontend so we can synthesize the
     // segment-cumulative `message.content` the frontend SDK renders from — the
     // raw SSE delta frame only carries `delta_text` and no `message`.
-    if cmd.state == ChatEventState::Delta && cmd.event_type == "agent" {
-        normalize_thinking_delta(flow, &mut cmd).await;
+    if cmd.event_type == "agent" {
+        match cmd.event_payload.get("stream").and_then(|value| value.as_str()) {
+            Some("thinking") if cmd.state == ChatEventState::Delta => {
+                normalize_thinking_delta(flow, &mut cmd).await;
+            }
+            Some("thinking") | None => {}
+            Some(_) => flow.message_tracker.clear_thinking_buf(&cmd.run_id).await,
+        }
     }
 
     if cmd.state == ChatEventState::Delta
@@ -110,13 +116,6 @@ pub async fn handle_bot_event(
     if is_chat_segment_boundary_stream(&cmd.event_payload) {
         flush_chat_segment(flow, &cmd, None).await;
     }
-    if cmd.state == ChatEventState::Delta
-        && cmd.event_type == "agent"
-        && is_thinking_segment_boundary_stream(&cmd.event_payload)
-    {
-        flow.message_tracker.clear_thinking_buf(&cmd.run_id).await;
-    }
-
     if is_terminal_state(&cmd.state) {
         flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
     }
@@ -204,7 +203,12 @@ async fn try_channel_outbound(flow: &BcsMessageFlow, cmd: &BotEventCommand) {
             .unwrap_or((bcs_domain::ParticipantRole::Observer, cmd.bot_id.clone())),
         None => (bcs_domain::ParticipantRole::Observer, cmd.bot_id.clone()),
     };
-    let text = channel_outbound_text(kind, &cmd.event_payload);
+    let text = channel_outbound_text(kind, cmd);
+    let raw_payload = if kind == ChannelOutboundEventKind::System {
+        serde_json::json!({ "state": channel_terminal_state(&cmd.state) })
+    } else {
+        cmd.event_payload.clone()
+    };
     let render_hint = match kind {
         ChannelOutboundEventKind::Agent => ChannelRenderHint::IgnoreByDefault,
         ChannelOutboundEventKind::ChatDelta
@@ -225,7 +229,7 @@ async fn try_channel_outbound(flow: &BcsMessageFlow, cmd: &BotEventCommand) {
             sender_label,
             kind,
             text: (!text.is_empty()).then_some(text),
-            raw_payload: cmd.event_payload.clone(),
+            raw_payload,
             render_hint,
             source_is_channel: false,
         })
@@ -240,6 +244,9 @@ fn channel_event_kind(cmd: &BotEventCommand) -> Option<ChannelOutboundEventKind>
         ("agent", _) => Some(ChannelOutboundEventKind::Agent),
         ("chat" | "chat.event", ChatEventState::Delta) => Some(ChannelOutboundEventKind::ChatDelta),
         ("chat" | "chat.event", ChatEventState::Final) => Some(ChannelOutboundEventKind::ChatFinal),
+        ("chat" | "chat.event", ChatEventState::Error | ChatEventState::Aborted) => {
+            Some(ChannelOutboundEventKind::System)
+        }
         ("chat" | "chat.event", ChatEventState::ToolCallStart | ChatEventState::ToolCallEnd) => {
             Some(ChannelOutboundEventKind::Agent)
         }
@@ -247,13 +254,42 @@ fn channel_event_kind(cmd: &BotEventCommand) -> Option<ChannelOutboundEventKind>
     }
 }
 
-fn channel_outbound_text(kind: ChannelOutboundEventKind, event: &Value) -> String {
+fn channel_outbound_text(kind: ChannelOutboundEventKind, cmd: &BotEventCommand) -> String {
+    if kind == ChannelOutboundEventKind::System {
+        let message = match cmd.state {
+            ChatEventState::Error => "机器人连接或执行失败，请稍后重试。",
+            ChatEventState::Aborted => "机器人已中止本次处理，请重新发送。",
+            _ => return String::new(),
+        };
+        return format!("{message} (追踪标识: {})", short_ascii_run_id(&cmd.run_id));
+    }
     if kind == ChannelOutboundEventKind::ChatDelta {
-        if let Some(delta) = extract_delta_text(event) {
+        if let Some(delta) = extract_delta_text(&cmd.event_payload) {
             return delta.to_string();
         }
     }
-    extract_message_text(event)
+    extract_message_text(&cmd.event_payload)
+}
+
+fn channel_terminal_state(state: &ChatEventState) -> &'static str {
+    match state {
+        ChatEventState::Error => "error",
+        ChatEventState::Aborted => "aborted",
+        _ => "unknown",
+    }
+}
+
+fn short_ascii_run_id(run_id: &str) -> String {
+    let trace: String = run_id
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+        .take(12)
+        .collect();
+    if trace.is_empty() {
+        "unknown".to_string()
+    } else {
+        trace
+    }
 }
 
 struct RelayOutcome {
@@ -1098,14 +1134,6 @@ fn is_chat_segment_boundary_stream(payload: &Value) -> bool {
         payload.get("stream").and_then(|value| value.as_str()),
         Some("thinking") | Some("approval")
     )
-}
-
-fn is_thinking_segment_boundary_stream(payload: &Value) -> bool {
-    payload
-        .get("stream")
-        .and_then(|value| value.as_str())
-        .map(|stream| stream != "thinking")
-        .unwrap_or(false)
 }
 
 async fn cache_tool_start(flow: &BcsMessageFlow, cmd: &BotEventCommand, data: &Value) {

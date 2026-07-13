@@ -924,6 +924,23 @@ class DeviceServiceRouter(DeviceService):
         )
 
     @override
+    def list_devices_by_runtime_binding(
+        self,
+        *,
+        binding_id: int,
+        timeout: float | None = None,
+    ) -> list[str]:
+        """按运行态 binding 获取设备列表。委托 DeviceInstanceService。"""
+        if timeout is None:
+            return self._instance_service().list_devices_by_runtime_binding(
+                binding_id=binding_id
+            )
+        return self._instance_service().list_devices_by_runtime_binding(
+            binding_id=binding_id,
+            timeout=timeout,
+        )
+
+    @override
     def restart_device(
         self,
         *,

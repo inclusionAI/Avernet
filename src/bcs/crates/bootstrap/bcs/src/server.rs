@@ -169,7 +169,7 @@ impl ChannelService for DisabledChannelService {
     async fn handle_inbound(
         &self,
         _msg: bcs_service_api::application::channel::InboundMessage,
-    ) -> std::result::Result<(), bcs_service_api::application::channel::ChannelUseCaseError> {
+    ) -> std::result::Result<(), bcs_service_api::application::channel::ChannelInboundError> {
         Ok(())
     }
 
@@ -447,10 +447,9 @@ async fn debug_middleware(req: Request<Body>, next: Next) -> Response {
         let uri = req.uri();
         let path = uri.path();
 
-        // Skip health check spam
-        if path != "/health" {
-            eprintln!("\x1b[2m[→BCS] {} {}\x1b[0m", method, path);
-        }
+        // BCS_DEBUG is also the E2E endpoint-coverage signal, so health must
+        // be logged together with every other registered HTTP route.
+        eprintln!("\x1b[2m[→BCS] {} {}\x1b[0m", method, path);
     }
 
     next.run(req).await

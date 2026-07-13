@@ -1077,13 +1077,15 @@ impl GroupRepoPort for MySqlGroupStore {
     }
 
     /// Update workspace - NOT PERSISTED (memory only, lost on restart).
-    async fn update_workspace(&self, id: &str, _workspace: Workspace) -> ServiceResult<()> {
-        // Verify group exists
-        if self.get(id).await.is_none() {
-            return Err(ServiceError::GroupNotFound(id.to_string()));
-        }
+    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()> {
+        let mut group = self
+            .get(id)
+            .await
+            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
+        group.workspace = workspace;
+        self.cache.write().await.insert(id.to_string(), group);
 
-        debug!(group_id = %id, "Group workspace update ignored (not persisted)");
+        debug!(group_id = %id, "Group workspace updated in memory (not persisted)");
         Ok(())
     }
 
@@ -2773,6 +2775,30 @@ mod tests {
                 && statement.contains("group_id = ?")
                 && statement.contains("dm_pair_key = ?")
         }));
+    }
+
+    #[tokio::test]
+    async fn workspace_update_is_visible_until_restart() {
+        let db = Arc::new(RecordingDbPlugin::default());
+        let repo = MySqlGroupStore::new(db, "local".to_string());
+        let group = Group::new("group-1", "driver", Vec::new());
+        repo.cache
+            .write()
+            .await
+            .insert(group.id.clone(), group);
+        let workspace = Workspace {
+            decisions: vec!["ship the hotfix".to_string()],
+            notes: vec!["customer impact contained".to_string()],
+            ..Workspace::default()
+        };
+
+        repo.update_workspace("group-1", workspace.clone())
+            .await
+            .expect("update workspace");
+
+        let stored = repo.get("group-1").await.expect("group exists");
+        assert_eq!(stored.workspace.decisions, workspace.decisions);
+        assert_eq!(stored.workspace.notes, workspace.notes);
     }
 
     #[test]

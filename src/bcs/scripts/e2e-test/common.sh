@@ -44,6 +44,10 @@ TESTS_PASSED=0
 TESTS_FAILED=0
 TESTS_TOTAL=0
 RESPONSE=""
+RESPONSE_HEADERS=""
+BCS_CLI_STDOUT=""
+BCS_CLI_STDERR=""
+BCS_CLI_EXIT=0
 
 # ============================================================================
 # Assertion Helpers
@@ -95,6 +99,71 @@ assert_contains() {
         TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
+}
+
+assert_status() {
+    local desc="$1" expected="$2"
+    assert_eq "$desc" "$HTTP_STATUS" "$expected"
+}
+
+assert_json_eq() {
+    local desc="$1" json="$2" path="$3" expected="$4"
+    local actual
+    actual=$(printf '%s' "$json" | python3 -c '
+import json, sys
+try:
+    value = json.load(sys.stdin)
+    for part in sys.argv[1].split("."):
+        value = value[int(part)] if isinstance(value, list) else value[part]
+    if isinstance(value, bool):
+        print("true" if value else "false")
+    elif value is None:
+        print("null")
+    elif isinstance(value, (dict, list)):
+        print(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    else:
+        print(value)
+except Exception:
+    print("__JSON_PATH_ERROR__")
+' "$path")
+    assert_eq "$desc" "$actual" "$expected"
+}
+
+assert_json_not_empty() {
+    local desc="$1" json="$2" path="$3"
+    local actual
+    actual=$(printf '%s' "$json" | python3 -c '
+import json, sys
+try:
+    value = json.load(sys.stdin)
+    for part in sys.argv[1].split("."):
+        value = value[int(part)] if isinstance(value, list) else value[part]
+    if value is None or value == "" or value == [] or value == {}:
+        print("")
+    elif isinstance(value, (dict, list)):
+        print(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    else:
+        print(value)
+except Exception:
+    print("")
+' "$path")
+    assert_not_empty "$desc" "$actual"
+}
+
+assert_json_array_contains() {
+    local desc="$1" json="$2" path="$3" expected="$4"
+    local found
+    found=$(printf '%s' "$json" | python3 -c '
+import json, sys
+try:
+    value = json.load(sys.stdin)
+    for part in sys.argv[1].split("."):
+        value = value[int(part)] if isinstance(value, list) else value[part]
+    print("1" if sys.argv[2] in value else "0")
+except Exception:
+    print("0")
+' "$path" "$expected")
+    assert_eq "$desc" "$found" "1"
 }
 
 # ============================================================================
@@ -167,7 +236,8 @@ summary() {
 
 # Temp file for response body (persists across subshell boundaries).
 _RESPONSE_FILE=$(mktemp)
-trap 'rm -f "$_RESPONSE_FILE"' EXIT
+_RESPONSE_HEADERS_FILE=$(mktemp)
+trap 'rm -f "$_RESPONSE_FILE" "$_RESPONSE_HEADERS_FILE"' EXIT
 
 # Generic request helper. Sets globals:
 #   HTTP_STATUS — the HTTP status code (e.g. "200")
@@ -176,7 +246,7 @@ trap 'rm -f "$_RESPONSE_FILE"' EXIT
 _api_request() {
     local method="$1" path="$2" body="${3:-}"
     local url="${BCS_API_BASE_URL}${path}"
-    local curl_args=(-s -o "$_RESPONSE_FILE" -w '%{http_code}' -X "$method"
+    local curl_args=(-s -o "$_RESPONSE_FILE" -D "$_RESPONSE_HEADERS_FILE" -w '%{http_code}' -X "$method"
         -H "X-Mock-User-Id: $BCS_MOCK_USER_ID"
         -H "X-Mock-Nick-Name: $BCS_MOCK_USER_NICK_NAME"
         -H "Content-Type: application/json")
@@ -185,6 +255,28 @@ _api_request() {
     fi
     HTTP_STATUS=$(curl "${curl_args[@]}" "$url" 2>/dev/null) || HTTP_STATUS="000"
     RESPONSE=$(cat "$_RESPONSE_FILE")
+    RESPONSE_HEADERS=$(cat "$_RESPONSE_HEADERS_FILE")
+}
+
+# Request with caller-supplied headers. The usual mock-human headers are still
+# present, so stories can add provider admin/runtime credentials without
+# losing the local human identity used by owner checks.
+# Usage: api_request_headers METHOD PATH BODY "Header: value" ...
+api_request_headers() {
+    local method="$1" path="$2" body="$3"; shift 3
+    local url="${BCS_API_BASE_URL}${path}"
+    local curl_args=(-s -o "$_RESPONSE_FILE" -D "$_RESPONSE_HEADERS_FILE" -w '%{http_code}' -X "$method"
+        -H "X-Mock-User-Id: $BCS_MOCK_USER_ID"
+        -H "X-Mock-Nick-Name: $BCS_MOCK_USER_NICK_NAME"
+        -H "Content-Type: application/json")
+    while [[ "$#" -gt 0 ]]; do
+        curl_args+=(-H "$1")
+        shift
+    done
+    [[ -n "$body" ]] && curl_args+=(-d "$body")
+    HTTP_STATUS=$(curl "${curl_args[@]}" "$url" 2>/dev/null) || HTTP_STATUS="000"
+    RESPONSE=$(cat "$_RESPONSE_FILE")
+    RESPONSE_HEADERS=$(cat "$_RESPONSE_HEADERS_FILE")
 }
 
 api_get() {
@@ -216,12 +308,13 @@ bot_request() {
     local method="$1" path="$2" bot="$3" body="${4:-}"
     ensure_cli_token "$bot" >/dev/null || { HTTP_STATUS="000"; RESPONSE=""; return 1; }
     local url="${BCS_API_BASE_URL}${path}"
-    local curl_args=(-s -o "$_RESPONSE_FILE" -w '%{http_code}' -X "$method"
+    local curl_args=(-s -o "$_RESPONSE_FILE" -D "$_RESPONSE_HEADERS_FILE" -w '%{http_code}' -X "$method"
         -H "X-BCS-Bot-Token: $BCS_CLI_TOKEN"
         -H "Content-Type: application/json")
     [ -n "$body" ] && curl_args+=(-d "$body")
     HTTP_STATUS=$(curl "${curl_args[@]}" "$url" 2>/dev/null) || HTTP_STATUS="000"
     RESPONSE=$(cat "$_RESPONSE_FILE")
+    RESPONSE_HEADERS=$(cat "$_RESPONSE_HEADERS_FILE")
 }
 
 bot_get()    { bot_request GET    "$1" "$2"; }
@@ -489,8 +582,9 @@ bcs_cli() {
     local bin
     get_bcs_cli_bin >/dev/null
     bin="$BCS_CLI_BIN_PATH"
-    local sub="$1"
-    local args=()
+    local sub="$1" nested="${2:-}" command_path
+    local args=() global_args=()
+    [[ "${BCS_CLI_FORCE_JSON:-0}" = "1" ]] && global_args+=(--json)
     # bcs-cli's top-level URL flag is -u/--url (NOT --base-url), and
     # confirm-group-help reuses --url/<URL> for the confirm URL. To avoid any
     # flag-namespace collision, inject the base URL via the MOLTIS_BCS_URL env
@@ -498,13 +592,18 @@ bcs_cli() {
     export MOLTIS_BCS_URL="$BCS_API_BASE_URL"
     if [[ -z "$sub" ]]; then
         BCS_CLI_STDOUT=""
+        BCS_CLI_STDERR=""
         BCS_CLI_EXIT=2
         warn "bcs_cli: no subcommand given"
         return 2
     fi
     args+=("$sub")
     if [[ -n "$bot" ]]; then
-        ensure_cli_token "$bot" >/dev/null || { BCS_CLI_STDOUT=""; BCS_CLI_EXIT=126; return 126; }
+        if [[ "$bot" == token:* ]]; then
+            BCS_CLI_TOKEN="${bot#token:}"
+        else
+            ensure_cli_token "$bot" >/dev/null || { BCS_CLI_STDOUT=""; BCS_CLI_STDERR=""; BCS_CLI_EXIT=126; return 126; }
+        fi
         args+=(--token "$BCS_CLI_TOKEN")
     fi
     shift
@@ -519,19 +618,35 @@ bcs_cli() {
     # inline for THIS call only (no leak to the parent shell). For tokenless
     # calls (bot=""), leave the env untouched.
     local bot_dir=""
-    if [[ -n "$bot" ]]; then
+    if [[ -n "$bot" && "$bot" != token:* ]]; then
         bot_dir="$(_get_bot_data_dir "$bot")"
     fi
+    command_path="$sub"
+    case "$sub" in
+        friend|channel|visibility|session|service)
+            [[ -n "$nested" && "$nested" != -* ]] && command_path="$sub $nested"
+            ;;
+    esac
+    if [[ -n "${BCS_CLI_COVERAGE_LOG:-}" ]]; then
+        printf '%s\n' "$command_path" >> "$BCS_CLI_COVERAGE_LOG"
+    fi
     if [[ -n "$bot_dir" ]]; then
-        out="$( BOT_DATA_DIR="$bot_dir" $bin "${args[@]}" 2>"$err_file" )" && rc=$? || rc=$?
+        out="$( BOT_DATA_DIR="$bot_dir" $bin ${global_args[@]+"${global_args[@]}"} "${args[@]}" 2>"$err_file" )" && rc=$? || rc=$?
     else
-        out="$( $bin "${args[@]}" 2>"$err_file" )" && rc=$? || rc=$?
+        out="$( $bin ${global_args[@]+"${global_args[@]}"} "${args[@]}" 2>"$err_file" )" && rc=$? || rc=$?
     fi
     BCS_CLI_STDOUT="$out"
+    BCS_CLI_STDERR="$(cat "$err_file")"
     BCS_CLI_EXIT="$rc"
     if [[ "$rc" -ne 0 ]] && [[ -s "$err_file" ]]; then
-        warn "bcs-cli $sub exited $rc: $(head -c 200 "$err_file")"
+        warn "bcs-cli $command_path exited $rc: $(printf '%s' "$BCS_CLI_STDERR" | head -c 200)"
     fi
     rm -f "$err_file"
     return "$rc"
+}
+
+# Run bcs-cli with structured JSON output while preserving the regular
+# human-readable behavior used by existing CLI assertions.
+bcs_cli_json() {
+    BCS_CLI_FORCE_JSON=1 bcs_cli "$@"
 }
