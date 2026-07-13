@@ -7,6 +7,7 @@ ExpertChat Router — HTTP接口入口
 - DELETE /api/v1/expert-chats/{bot_id}/{owner_id} - 从对话列表移除
 - POST /api/v1/expert-chats/{bot_id}/{owner_id}/session - 获取/创建 Session
 - DELETE /api/v1/expert-chats/{bot_id}/{owner_id}/session - 删除 Session
+- POST /api/v1/expert-chats/caller-connection - 获取 caller 独立容器连接(管理员接口)
 
 依赖规则：
   OK:  import api.expert_chat.schemas          (同层)
@@ -16,7 +17,7 @@ ExpertChat Router — HTTP接口入口
 """
 import traceback
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from agentclaw.community.adapters.http.expert_chat.schemas import (
     AddChatBotRequest,
@@ -25,6 +26,10 @@ from agentclaw.community.adapters.http.expert_chat.schemas import (
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+from agentclaw.community.api.expert_chat_instance_service import (
+    ExpertChatInstanceServiceProtocol,
+)
+from agentclaw.community.core.access.admin_scopes import super_admin
 from agentclaw.community.di import Injected
 from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError,
@@ -207,3 +212,57 @@ async def delete_chat_session(
         logger.error(f"[expert_chats.delete_chat_session] Error: {e}")
         logger.error(f"[expert_chats.delete_chat_session] Traceback: {traceback.format_exc()}")
         return ApiResponse(success=False, message="删除 Session 失败，请稍后重试", error_code=5999)
+
+
+@router.post("/caller-connection", response_model=ApiResponse)
+async def get_caller_connection_for_other(
+    bot_id: str = Query(..., description="Bot ID"),
+    owner_id: str = Query(..., description="Bot 所有者ID"),
+    user_id: str = Query(..., description="调用者(Caller)用户ID"),
+    user: AuthenticatedUser = Depends(get_current_user),
+    instance_service: ExpertChatInstanceServiceProtocol = Injected(ExpertChatInstanceServiceProtocol)
+):
+    """
+    获取 caller 独立容器连接信息(管理员接口)
+
+    为每个 caller (user_id) 创建/复用独立的 BaaS 容器实例。
+    仅限超级管理员调用，用于为其他用户（caller）管理独立容器实例。
+
+    参数通过 query string 传递:
+        - bot_id: Bot ID
+        - owner_id: Bot 所有者ID
+        - user_id: 调用者用户ID
+
+    返回:
+        - instance: 实例记录
+        - connection: WebSocket 连接信息 (当 need_poll=False 时)
+        - need_poll: 是否需要轮询等待容器就绪
+    """
+    try:
+        operator_id = user.staffId
+
+        # 操作者身份校验
+        if not operator_id or operator_id == "anonymous":
+            return ApiResponse(success=False, message="无法获取操作者信息", error_code=400, data=None)
+
+        # 权限校验：只有 SUPER_ADMIN 中的用户才能操作
+        if operator_id not in super_admin():
+            logger.warning(f"[get_caller_connection_for_other] Permission denied: operator={operator_id}")
+            return ApiResponse(success=False, message="无权限执行此操作", error_code=403, data=None)
+
+        logger.info(
+            f"[get_caller_connection_for_other] Creating/retrieving caller instance: "
+            f"bot_id={bot_id}, owner_id={owner_id}, user_id={user_id}, operator={operator_id}"
+        )
+
+        result = await instance_service.get_caller_connection(
+            user_id=user_id,
+            bot_id=bot_id,
+            owner_id=owner_id
+        )
+        return ApiResponse(success=True, message="获取成功", error_code=0, data=result)
+
+    except Exception as e:
+        logger.error(f"[expert_chats.get_caller_connection_for_other] Unexpected error: {type(e).__name__}: {e}")
+        logger.error(f"[expert_chats.get_caller_connection_for_other] Traceback: {traceback.format_exc()}")
+        return ApiResponse(success=False, message="获取 Caller 连接失败，请稍后重试", error_code=5999)

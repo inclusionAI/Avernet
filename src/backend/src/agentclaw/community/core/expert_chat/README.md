@@ -24,6 +24,7 @@ internal_dependencies:
   - agentclaw.community.log
   - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.plugin_api.models
+  - agentclaw.community.utils
 ```
 
 ### Change impact
