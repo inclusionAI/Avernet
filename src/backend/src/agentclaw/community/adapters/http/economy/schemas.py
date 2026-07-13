@@ -116,10 +116,12 @@ class OfflineBatchResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class WorkflowReviewRequest(BaseModel):
-    """Request body for workflow ticket review (§7.5.2)."""
+    """Request body for workflow ticket review (§7.5.2).
+
+    审计操作人不在 body(取自鉴权上下文 ``ctx.user_id``,防 body 顶替)。
+    """
     ticket_id: str = Field(..., description="Ticket to review")
     action: str = Field(..., description="approve_close / approve_whitelist / reject_for_reopen")
-    admin_id: str = Field("", description="Admin who triggered the review")
     remark: str = Field("", description="Review remark")
 
 
@@ -328,10 +330,12 @@ class WhitelistDeleteRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 class BrakeToggleRequest(BaseModel):
-    """Request body for global governance brake toggle (pause/resume)."""
+    """Request body for global governance brake toggle (pause/resume).
+
+    审计操作人不在 body(取自鉴权上下文 ``ctx.user_id``,防 body 顶替)。
+    """
     enabled: bool = Field(..., description="true=pause(暂停治理流程), false=resume(恢复)")
     reason: str = Field("", description="Optional reason for audit")
-    operator: str = Field("", description="Who triggered the toggle")
 
 
 class TicketsCloseRequest(BaseModel):
@@ -359,10 +363,12 @@ class TicketsCloseAllRequest(BaseModel):
 
 
 class WhitelistBulkAddRequest(BaseModel):
-    """Request body for bulk whitelist add (admin 代加白)."""
+    """Request body for bulk whitelist add (admin 代加白).
+
+    审计操作人不在 body(取自鉴权上下文 ``ctx.user_id``,防 body 顶替)。
+    """
     bot_ids: list[str] = Field(..., min_length=1, description="Bot IDs to whitelist")
     reason: str = Field(..., description="Required: reason for audit")
-    operator: str = Field("", description="Who triggered the bulk add")
 
 
 class TicketsDeliverRequest(BaseModel):

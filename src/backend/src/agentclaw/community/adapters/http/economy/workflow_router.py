@@ -184,12 +184,13 @@ async def review_ticket(
 
     ticket_id 走 body(与 admin 写操作统一,零 path 参数);委托
     :meth:`GovernanceAdminService.review_ticket`,不改变状态机语义。
+    审计操作人严格取自鉴权上下文 ``ctx.user_id``(不允许 body 顶替)。
     """
     result = await asyncio.to_thread(
         admin_svc.review_ticket,
         ticket_id=body.ticket_id,
         action=body.action,
-        admin_id=body.admin_id or ctx.user_id,
+        admin_id=ctx.user_id,
         remark=body.remark,
     )
     _raise_on_admin_error(result)

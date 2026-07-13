@@ -224,7 +224,7 @@ async def whitelist_bulk_add(
     admin_svc: _AdminSvc = Injected(_AdminSvc),
 ) -> ApiResponse:
     """Bulk whitelist bots — delegates to ``admin_svc.bulk_whitelist``."""
-    operator = body.operator or ctx.user_id
+    operator = ctx.user_id
     result = await asyncio.to_thread(
         admin_svc.bulk_whitelist,
         bot_ids=body.bot_ids,
@@ -246,8 +246,11 @@ async def brake_toggle(
     ctx: RequestContext = Depends(get_request_context),
     admin_svc: _AdminSvc = Injected(_AdminSvc),
 ) -> ApiResponse:
-    """Toggle global governance brake: ``enabled=true`` → pause, ``false`` → resume."""
-    operator = body.operator or ctx.user_id
+    """Toggle global governance brake: ``enabled=true`` → pause, ``false`` → resume.
+
+    审计操作人取自鉴权上下文 ``ctx.user_id``(不允许 body 顶替)。
+    """
+    operator = ctx.user_id
     if body.enabled:
         await asyncio.to_thread(admin_svc.pause, reason=body.reason, operator=operator)
         return ApiResponse(success=True, message="Paused")
