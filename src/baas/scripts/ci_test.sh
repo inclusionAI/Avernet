@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 baas_root="$(cd "$script_dir/.." && pwd)"
 repo_root="$(cd "$baas_root/../.." && pwd)"
-baas_dir="${BAAS_COMMUNITY_DIR:-$baas_root/packages/community}"
+baas_dir="${BAAS_COMMUNITY_DIR:-$baas_root}"
 ci_workspace="${CITEST_WORKSPACE:-$repo_root}"
 report_dir="$baas_dir/pytest_report"
 junit_report="$report_dir/TEST-junit.xml"
@@ -49,7 +49,7 @@ set +e
 PYTHONPATH="$baas_dir/src:$baas_dir:${PYTHONPATH:-}" \
 "$baas_python" -m pytest tests -v \
   --junitxml="$junit_report" \
-  --cov="$ci_workspace/src/baas/packages/community/src" \
+  --cov="$baas_dir/src" \
   --cov-report="xml:$coverage_report" \
   --cov-report=term-missing
 pytest_status=$?
@@ -65,7 +65,7 @@ check_args=(
   "$repo_root/scripts/ci/report_check.py"
   --junit "$junit_report"
   --coverage "$coverage_report"
-  --source-root "$repo_root/src/baas/packages/community/src"
+  --source-root "$baas_dir/src"
   --min-case-pass-rate 100
   --min-line-coverage "$line_coverage_min"
 )

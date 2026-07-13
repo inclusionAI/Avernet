@@ -1,0 +1,30 @@
+from unittest.mock import MagicMock
+
+from secbaas.community.api.bot_manage import BotManageService
+from secbaas.community.api.device_manage import DeviceService
+from secbaas.community.api.publish_manage import (
+    PublishService as PublishServiceProtocol,
+)
+from secbaas.community.api.template_manage import DeviceTemplateManageService
+from secbaas.community.core.repository.bot import BotRepository
+from secbaas.community.core.repository.bot_device_rel import BotDeviceRelRepository
+from secbaas.community.core.repository.bot_session import BotSessionRepository
+from secbaas.community.core.repository.device import DeviceRepository
+from secbaas.community.core.repository.publish import PublishRepository
+from secbaas.community.core.repository.publish_batch import PublishBatchRepository
+from secbaas.community.core.repository.publish_record import PublishRecordRepository
+from secbaas.community.core.service.publish_manage import DefaultPublishService
+
+# Assign value, will trigger mypy type check
+_publish_service: PublishServiceProtocol = DefaultPublishService(
+    bot_repo=MagicMock(spec=BotRepository),
+    device_repo=MagicMock(spec=DeviceRepository),
+    rel_repo=MagicMock(spec=BotDeviceRelRepository),
+    session_repo=MagicMock(spec=BotSessionRepository),
+    publish_repo=MagicMock(spec=PublishRepository),
+    batch_repo=MagicMock(spec=PublishBatchRepository),
+    publish_record_repo=MagicMock(spec=PublishRecordRepository),
+    template_service=MagicMock(spec=DeviceTemplateManageService),
+    bot_service=MagicMock(spec=BotManageService),
+    device_service=MagicMock(spec=DeviceService),
+)
