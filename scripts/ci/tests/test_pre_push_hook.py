@@ -22,6 +22,10 @@ def _run(
     env: dict[str, str] | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
+    effective_env = (env if env is not None else os.environ).copy()
+    effective_env["HOME"] = str(repository)
+    effective_env["GIT_CONFIG_GLOBAL"] = os.devnull
+    effective_env["GIT_CONFIG_NOSYSTEM"] = "1"
     return subprocess.run(
         command,
         cwd=repository,
@@ -30,7 +34,7 @@ def _run(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        env=env,
+        env=effective_env,
     )
 
 
@@ -70,11 +74,11 @@ def _create_repositories(root: Path) -> tuple[Path, Path, Path]:
 
 def _install_test_hook(developer: Path) -> Path:
     hook = developer / ".githooks/pre-push"
-    hook.parent.mkdir(parents=True)
+    hook.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(HOOK_PATH, hook)
     hook.chmod(0o755)
     dispatcher = developer / "scripts/ci/pre_push.sh"
-    dispatcher.parent.mkdir(parents=True)
+    dispatcher.parent.mkdir(parents=True, exist_ok=True)
     dispatcher.write_text(
         """#!/usr/bin/env bash
 set -euo pipefail
@@ -146,6 +150,50 @@ def _create_feature_on_remote_target(
 
 
 class PrePushHookTest(unittest.TestCase):
+    def test_git_commands_ignore_user_global_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            repository = root / "repository"
+            global_home = root / "global-home"
+            repository.mkdir()
+            global_home.mkdir()
+            _write(
+                global_home,
+                ".gitconfig",
+                "[avernet \"prePush\"]\n"
+                "\tmergeTarget = origin/leaked-global-target\n",
+            )
+            env = os.environ.copy()
+            env["HOME"] = str(global_home)
+            env.pop("GIT_CONFIG_GLOBAL", None)
+            env.pop("GIT_CONFIG_NOSYSTEM", None)
+
+            result = _run(
+                repository,
+                "git",
+                "config",
+                "--get",
+                "avernet.prePush.mergeTarget",
+                env=env,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, "")
+
+    def test_install_test_hook_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            _, _, developer = _create_repositories(root)
+
+            first_hook = _install_test_hook(developer)
+            try:
+                second_hook = _install_test_hook(developer)
+            except FileExistsError as error:
+                self.fail(f"test hook installation must be idempotent: {error}")
+
+            self.assertEqual(second_hook, first_hook)
+
     def test_refreshes_stale_default_target_before_selecting_modules(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
