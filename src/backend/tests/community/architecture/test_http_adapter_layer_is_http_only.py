@@ -152,6 +152,11 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     # Pure-function helpers / generators:
     "generate_bot_id", "validate_bot_name", "resolve_engine_for_bot",
     "filter_passport_mcp_codes",
+    # Pure functions in core/mcp/services/_defaults that build the passport
+    # resource scope (default MCP server codes / default CLI items) from
+    # engine-scoped module constants. Read-only helpers, not service instances;
+    # parallel to filter_passport_mcp_codes above.
+    "get_default_cli_items",
     "generate_report",
     # ContentScanner static helpers used directly by harness router:
     "ContentScanner",

@@ -142,7 +142,7 @@ def get_default_mcp_server_codes(engine_type: Optional[str] = None) -> List[str]
 
 # ============ 默认 CLI 列表（按 engine 分桶）============
 # 仿 _DEFAULT_MCP_SERVERS_BY_ENGINE：创建时读常量 → 传 apply_agent_passport(cli_items=)。
-# CLI 无需 MCP Center 元信息拉取，其"执行内容"由 AgentPass 侧据 cli_code 关联 Skill。
+# CLI 无需 MCP Center 元信息拉取，其"执行内容"由 passport 授权侧据 cli_code 关联 Skill。
 _DEFAULT_CLI_ITEMS_BY_ENGINE: Dict[str, List[dict]] = {
     "aicoding": [
         {"cli_code": "adev",           "cli_name": "adev",           "cli_desc": "Ant Adev 研发命令行工具"},
