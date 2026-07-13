@@ -34,6 +34,8 @@ class FileTransferTicketModel(Base):
     device_path = Column(String(1024), nullable=True)
     fileservice_staging_path = Column(String(1024), nullable=False)
     error_message = Column(Text, nullable=True)
+    download_url = Column(String(2048), nullable=True)
+    upload_url = Column(String(2048), nullable=True)
     env = Column(String(16), nullable=False)
 
     __table_args__ = (
@@ -56,5 +58,7 @@ class FileTransferTicketModel(Base):
             device_path=self.device_path,
             fileservice_staging_path=self.fileservice_staging_path,
             error_message=self.error_message,
+            download_url=self.download_url,
+            upload_url=self.upload_url,
             env=self.env,
         )
