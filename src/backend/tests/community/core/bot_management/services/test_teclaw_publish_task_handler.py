@@ -1,8 +1,11 @@
 import asyncio
+from contextlib import contextmanager
 from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_management.services.teclaw_publish_task_handler import (
     TECLAW_CREATE_PUBLISH_POLL_TASK,
@@ -15,6 +18,79 @@ from agentclaw.community.core.bot_management.services.teclaw_publish_task_handle
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule, Retry
+from agentclaw.community.plugin_api.models import BotModel
+from agentclaw.community.plugins.device_repository import DeviceRepository
+from agentclaw.community.plugins.local.sqlite_models import EntityDeviceBinding
+
+
+class _FileSqliteDB:
+    def __init__(self, engine):
+        self._factory = sessionmaker(
+            bind=engine, autocommit=False, autoflush=False
+        )
+
+    @contextmanager
+    def orm_session(self):
+        db = self._factory()
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    session = orm_session
+
+
+@pytest.fixture
+def sqlite_db(tmp_path):
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'teclaw-handler.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    EntityDeviceBinding.__table__.create(engine)
+    BotModel.__table__.create(engine)
+    return _FileSqliteDB(engine)
+
+
+def _real_pending_teclaw(sqlite_db):
+    binding_repo = DeviceRepository(sqlite_db)
+    binding_id = binding_repo.insert_binding(
+        entity_id="staff-1",
+        entity_type="staff",
+        device_id="BOT-x",
+        device_provider="teclaw",
+        env="dev",
+        device_props={"publish_id": 9},
+        status="PENDING",
+        apply_reason=None,
+        applied_by="u1",
+    )
+    with sqlite_db.orm_session() as session:
+        session.add(
+            BotModel(
+                bot_id="b1",
+                entity_id="staff-1",
+                entity_type="staff",
+                creator_id="u1",
+                owner_id="u1",
+                status="PENDING",
+                active_engine="moltis",
+                device_id="BOT-x",
+                binding_id=binding_id,
+                env="dev",
+            )
+        )
+    return binding_id, binding_repo
+
+
+def _real_statuses(sqlite_db, binding_repo, binding_id):
+    binding = binding_repo.get_by_id(binding_id)
+    with sqlite_db.orm_session() as session:
+        bot_status = session.query(BotModel.status).filter_by(bot_id="b1").scalar()
+    return binding, bot_status
 
 
 def _binding(
@@ -57,18 +133,16 @@ def _payload(**updates) -> dict:
 
 def _handler(*, clock=lambda: 200.0):
     baas = MagicMock()
-    bot_repo = MagicMock()
-    bot_repo.update_by_owner.return_value = {"status": "PENDING"}
     binding_repo = MagicMock()
     binding_repo.get_by_id.return_value = _binding()
+    binding_repo.transition_teclaw_publish_terminal.return_value = True
     handler = TeclawPublishTaskHandler(
         baas_service=baas,
-        bot_repository=bot_repo,
         device_binding_repo=binding_repo,
         poll_delay_seconds=10.0,
         clock=clock,
     )
-    return handler, baas, bot_repo, binding_repo
+    return handler, baas, binding_repo
 
 
 def test_build_publish_poll_payload_and_deadline():
@@ -104,22 +178,20 @@ def test_map_publish_status(publish_status, expected):
 
 
 def test_pending_publish_reschedules_before_timeout():
-    handler, baas, bot_repo, binding_repo = _handler(clock=lambda: 699.0)
+    handler, baas, binding_repo = _handler(clock=lambda: 699.0)
     baas.get_publish_progress.return_value = {"status": "PENDING"}
 
     assert handler.handle(_payload()) == Reschedule(10.0)
-    bot_repo.update_by_owner.assert_not_called()
-    binding_repo.update_status.assert_not_called()
+    binding_repo.transition_teclaw_publish_terminal.assert_not_called()
 
 
 def test_timeout_polls_once_then_preserves_pending():
-    handler, baas, bot_repo, binding_repo = _handler(clock=lambda: 700.0)
+    handler, baas, binding_repo = _handler(clock=lambda: 700.0)
     baas.get_publish_progress.return_value = {"status": "PENDING"}
 
     assert handler.handle(_payload()) == Complete()
     baas.get_publish_progress.assert_called_once_with(9)
-    bot_repo.update_by_owner.assert_not_called()
-    binding_repo.update_status.assert_not_called()
+    binding_repo.transition_teclaw_publish_terminal.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -131,73 +203,129 @@ def test_timeout_polls_once_then_preserves_pending():
         ("REVOKED", "FAILED"),
     ],
 )
-def test_terminal_publish_persists_bot_then_binding(publish_status, stored_status):
-    handler, baas, bot_repo, binding_repo = _handler()
+def test_terminal_publish_uses_guarded_atomic_transition(publish_status, stored_status):
+    handler, baas, binding_repo = _handler()
     baas.get_publish_progress.return_value = {"status": publish_status}
 
     assert handler.handle(_payload()) == Complete()
-    bot_repo.update_by_owner.assert_called_once_with(
-        "b1", "u1", {"status": stored_status}
-    )
-    binding_repo.update_status.assert_called_once_with(
-        binding_id=77, status=stored_status
+    binding_repo.transition_teclaw_publish_terminal.assert_called_once_with(
+        binding_id=77,
+        bot_id="b1",
+        owner_id="u1",
+        publish_id=9,
+        status=stored_status,
     )
 
 
 def test_terminal_publish_still_converges_after_business_timeout():
-    handler, baas, bot_repo, binding_repo = _handler(clock=lambda: 900.0)
+    handler, baas, binding_repo = _handler(clock=lambda: 900.0)
     baas.get_publish_progress.return_value = {"status": "SUCCESS"}
 
     assert handler.handle(_payload()) == Complete()
-    bot_repo.update_by_owner.assert_called_once_with("b1", "u1", {"status": "ACTIVE"})
-    binding_repo.update_status.assert_called_once_with(binding_id=77, status="ACTIVE")
+    binding_repo.transition_teclaw_publish_terminal.assert_called_once_with(
+        binding_id=77,
+        bot_id="b1",
+        owner_id="u1",
+        publish_id=9,
+        status="ACTIVE",
+    )
 
 
-def test_bot_write_failure_retries_before_binding_write():
-    handler, baas, bot_repo, binding_repo = _handler()
+def test_terminal_publish_does_not_overwrite_binding_released_during_poll(sqlite_db):
+    binding_id, binding_repo = _real_pending_teclaw(sqlite_db)
+    baas = MagicMock()
+
+    def release_then_succeed(_publish_id):
+        binding_repo.release_binding(
+            binding_id=binding_id,
+            release_reason="user released",
+            released_by="u1",
+        )
+        return {"status": "SUCCESS"}
+
+    baas.get_publish_progress.side_effect = release_then_succeed
+    handler = TeclawPublishTaskHandler(
+        baas_service=baas,
+        device_binding_repo=binding_repo,
+    )
+
+    assert handler.handle(_payload(binding_id=binding_id)) == Complete()
+    binding, bot_status = _real_statuses(sqlite_db, binding_repo, binding_id)
+    assert binding.status == "RELEASED"
+    assert bot_status == "PENDING"
+
+
+def test_terminal_publish_does_not_overwrite_new_publish_id_during_poll(sqlite_db):
+    binding_id, binding_repo = _real_pending_teclaw(sqlite_db)
+    baas = MagicMock()
+
+    def replace_publish_then_succeed(_publish_id):
+        binding_repo.update_device_props(
+            binding_id=binding_id,
+            props={"publish_id": 10},
+        )
+        return {"status": "SUCCESS"}
+
+    baas.get_publish_progress.side_effect = replace_publish_then_succeed
+    handler = TeclawPublishTaskHandler(
+        baas_service=baas,
+        device_binding_repo=binding_repo,
+    )
+
+    assert handler.handle(_payload(binding_id=binding_id)) == Complete()
+    binding, bot_status = _real_statuses(sqlite_db, binding_repo, binding_id)
+    assert binding.status == "PENDING"
+    assert binding.device_props["publish_id"] == 10
+    assert bot_status == "PENDING"
+
+
+def test_atomic_terminal_write_failure_returns_retry():
+    handler, baas, binding_repo = _handler()
     baas.get_publish_progress.return_value = {"status": "SUCCESS"}
-    bot_repo.update_by_owner.side_effect = RuntimeError("bot db down")
+    binding_repo.transition_teclaw_publish_terminal.side_effect = RuntimeError(
+        "database down"
+    )
 
     outcome = handler.handle(_payload())
 
     assert isinstance(outcome, Retry)
-    binding_repo.update_status.assert_not_called()
+    assert "database down" in outcome.error
 
 
-def test_missing_bot_write_retries_before_binding_write():
-    handler, baas, bot_repo, binding_repo = _handler()
+def test_guard_mismatch_after_poll_completes_as_stale():
+    handler, baas, binding_repo = _handler()
     baas.get_publish_progress.return_value = {"status": "SUCCESS"}
-    bot_repo.update_by_owner.return_value = None
+    binding_repo.transition_teclaw_publish_terminal.return_value = False
 
     outcome = handler.handle(_payload())
 
-    assert isinstance(outcome, Retry)
-    binding_repo.update_status.assert_not_called()
+    assert outcome == Complete()
 
 
-def test_partial_terminal_write_retries_until_binding_converges():
-    handler, baas, bot_repo, binding_repo = _handler()
+def test_atomic_terminal_write_retries_until_transaction_succeeds():
+    handler, baas, binding_repo = _handler()
     baas.get_publish_progress.return_value = {"status": "SUCCESS"}
-    binding_repo.update_status.side_effect = [RuntimeError("db down"), None]
+    binding_repo.transition_teclaw_publish_terminal.side_effect = [
+        RuntimeError("db down"),
+        True,
+    ]
 
     first = handler.handle(_payload())
     second = handler.handle(_payload())
 
     assert isinstance(first, Retry)
     assert second == Complete()
-    assert bot_repo.update_by_owner.call_count == 2
-    assert binding_repo.update_status.call_count == 2
+    assert binding_repo.transition_teclaw_publish_terminal.call_count == 2
 
 
 def test_transient_publish_query_returns_retry():
-    handler, baas, bot_repo, binding_repo = _handler()
+    handler, baas, binding_repo = _handler()
     baas.get_publish_progress.side_effect = RuntimeError("baas down")
 
     outcome = handler.handle(_payload())
 
     assert isinstance(outcome, Retry)
-    bot_repo.update_by_owner.assert_not_called()
-    binding_repo.update_status.assert_not_called()
+    binding_repo.transition_teclaw_publish_terminal.assert_not_called()
 
 
 def test_lifecycle_registers_handler():
@@ -205,7 +333,6 @@ def test_lifecycle_registers_handler():
     lifecycle = TeclawPublishTaskLifecycle(
         registry=registry,
         baas_service=MagicMock(),
-        bot_repository=MagicMock(),
         device_binding_repo=MagicMock(),
     )
 
@@ -229,13 +356,12 @@ def test_lifecycle_registers_handler():
     ],
 )
 def test_stale_or_terminal_binding_completes_without_polling(binding):
-    handler, baas, bot_repo, binding_repo = _handler()
+    handler, baas, binding_repo = _handler()
     binding_repo.get_by_id.return_value = binding
 
     assert handler.handle(_payload()) == Complete()
     baas.get_publish_progress.assert_not_called()
-    bot_repo.update_by_owner.assert_not_called()
-    binding_repo.update_status.assert_not_called()
+    binding_repo.transition_teclaw_publish_terminal.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -251,7 +377,7 @@ def test_stale_or_terminal_binding_completes_without_polling(binding):
     ],
 )
 def test_invalid_payload_fails_before_repository_access(payload):
-    handler, baas, _, binding_repo = _handler()
+    handler, baas, binding_repo = _handler()
 
     outcome = handler.handle(payload)
 
@@ -262,7 +388,7 @@ def test_invalid_payload_fails_before_repository_access(payload):
 
 
 def test_binding_read_failure_returns_retry():
-    handler, baas, _, binding_repo = _handler()
+    handler, baas, binding_repo = _handler()
     binding_repo.get_by_id.side_effect = RuntimeError("binding db down")
 
     outcome = handler.handle(_payload())

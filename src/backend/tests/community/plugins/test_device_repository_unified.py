@@ -1,7 +1,7 @@
 """Unified DeviceBindingRepository — behavior + contract.
 
 The last DB-repo twin in the unification program (S5). Covers all
-17 Protocol methods + the 3 adopt-prod behavior changes:
+18 Protocol methods + the 3 adopt-prod behavior changes:
 - ``gmt_modified`` advances DB-side after each UPDATE (proves the
   ``func.now()`` reaches the column on SQLite).
 - ``get_active_engine_by_device_id`` falls back to
@@ -370,6 +370,129 @@ def test_update_bot_status_on_device_failed_unconditional(repo, db):
     repo.update_bot_status_on_device_failed(binding_id=bid)
     with db.orm_session() as s:
         assert s.query(BotModel).filter_by(bot_id="b1").one().status == "FAILED"
+
+
+# ── guarded Teclaw terminal transition ─────────────────────────────
+
+def test_transition_teclaw_publish_terminal_updates_bot_and_binding(repo, db):
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="teclaw",
+            device_props={"publish_id": 9},
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-teclaw",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+    )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        transitioned = repo.transition_teclaw_publish_terminal(
+            binding_id=bid,
+            bot_id="bot-teclaw",
+            owner_id="emp-1",
+            publish_id=9,
+            status="ACTIVE",
+        )
+
+    assert transitioned is True
+    assert repo.get_by_id(bid).status == "ACTIVE"
+    with db.orm_session() as s:
+        assert (
+            s.query(BotModel).filter_by(bot_id="bot-teclaw").one().status
+            == "ACTIVE"
+        )
+
+
+@pytest.mark.parametrize(
+    "binding_overrides",
+    [
+        {"status": "RELEASED"},
+        {"device_provider": "baas"},
+        {"device_props": {"publish_id": 10}},
+    ],
+)
+def test_transition_teclaw_publish_terminal_guard_mismatch_is_noop(
+    repo, db, binding_overrides
+):
+    binding_data = {
+        "device_provider": "teclaw",
+        "device_props": {"publish_id": 9},
+        **binding_overrides,
+    }
+    bid = repo.insert_binding(**_binding(**binding_data))
+    _bot(
+        db,
+        bot_id="bot-teclaw",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+    )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        transitioned = repo.transition_teclaw_publish_terminal(
+            binding_id=bid,
+            bot_id="bot-teclaw",
+            owner_id="emp-1",
+            publish_id=9,
+            status="ACTIVE",
+        )
+
+    assert transitioned is False
+    assert repo.get_by_id(bid).status == binding_overrides.get("status", "PENDING")
+    with db.orm_session() as s:
+        assert (
+            s.query(BotModel).filter_by(bot_id="bot-teclaw").one().status
+            == "PENDING"
+        )
+
+
+@pytest.mark.parametrize(
+    "bot_overrides",
+    [
+        None,
+        {"owner_id": "different-owner"},
+        {"binding_id": None},
+        {"env": "prod"},
+        {"is_delete": 1},
+    ],
+)
+def test_transition_teclaw_publish_terminal_bot_mismatch_rolls_back_binding(
+    repo, db, bot_overrides
+):
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="teclaw",
+            device_props={"publish_id": 9},
+        )
+    )
+    if bot_overrides is not None:
+        bot_data = {
+            "owner_id": "emp-1",
+            "binding_id": bid,
+            "env": "dev",
+            **bot_overrides,
+        }
+        _bot(
+            db,
+            bot_id="bot-teclaw",
+            **bot_data,
+        )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        with pytest.raises(RuntimeError, match="expected exactly one"):
+            repo.transition_teclaw_publish_terminal(
+                binding_id=bid,
+                bot_id="bot-teclaw",
+                owner_id="emp-1",
+                publish_id=9,
+                status="ACTIVE",
+            )
+
+    assert repo.get_by_id(bid).status == "PENDING"
 
 
 # ── get_active_by_bot_and_owner — DeviceContextResolver 入口 ───────

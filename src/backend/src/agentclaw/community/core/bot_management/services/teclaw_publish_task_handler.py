@@ -19,9 +19,6 @@ from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.bot_management.repository.protocol import (
-        BotRepository,
-    )
     from agentclaw.community.core.devices.repository.protocol import (
         DeviceBindingRepository,
     )
@@ -93,13 +90,11 @@ class TeclawPublishTaskHandler:
         self,
         *,
         baas_service: BaasService,
-        bot_repository: BotRepository,
         device_binding_repo: DeviceBindingRepository,
         poll_delay_seconds: float = 5.0,
         clock: Callable[[], float] = time.time,
     ) -> None:
         self._baas = baas_service
-        self._bot_repository = bot_repository
         self._device_binding_repo = device_binding_repo
         self._poll_delay_seconds = poll_delay_seconds
         self._clock = clock
@@ -157,6 +152,7 @@ class TeclawPublishTaskHandler:
                 bot_id=bot_id,
                 owner_id=owner_id,
                 binding_id=binding_id,
+                publish_id=publish_id,
                 status=status,
             )
         if (self._clock() - started_at_epoch_s) >= _PUBLISH_POLL_TIMEOUT_SECONDS:
@@ -169,26 +165,19 @@ class TeclawPublishTaskHandler:
         bot_id: str,
         owner_id: str,
         binding_id: int,
+        publish_id: int,
         status: str,
     ) -> TaskOutcome:
         try:
-            updated = self._bot_repository.update_by_owner(
-                bot_id,
-                owner_id,
-                {"status": status},
-            )
-            if updated is None:
-                raise RuntimeError("bot status update matched no record")
-        except Exception as exc:
-            return Retry(f"persist Teclaw bot status failed: {exc}")
-
-        try:
-            self._device_binding_repo.update_status(
+            self._device_binding_repo.transition_teclaw_publish_terminal(
                 binding_id=binding_id,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                publish_id=publish_id,
                 status=status,
             )
         except Exception as exc:
-            return Retry(f"persist Teclaw binding status failed: {exc}")
+            return Retry(f"persist Teclaw terminal status failed: {exc}")
 
         return Complete()
 
@@ -199,19 +188,16 @@ class TeclawPublishTaskLifecycle(LifecycleBase):
         *,
         registry: HandlerRegistry,
         baas_service: BaasService,
-        bot_repository: BotRepository,
         device_binding_repo: DeviceBindingRepository,
     ) -> None:
         self._registry = registry
         self._baas_service = baas_service
-        self._bot_repository = bot_repository
         self._device_binding_repo = device_binding_repo
 
     async def bootstrap(self) -> None:
         self._registry.register(
             TeclawPublishTaskHandler(
                 baas_service=self._baas_service,
-                bot_repository=self._bot_repository,
                 device_binding_repo=self._device_binding_repo,
             )
         )

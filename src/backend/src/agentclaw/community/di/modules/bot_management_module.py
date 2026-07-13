@@ -362,13 +362,11 @@ class BotManagementModule(Module):
         self,
         registry: HandlerRegistry,
         baas_service: BaasService,
-        bot_repository: BotRepository,
         device_binding_repo: DeviceBindingRepository,
     ) -> TeclawPublishTaskLifecycle:
         return TeclawPublishTaskLifecycle(
             registry=registry,
             baas_service=baas_service,
-            bot_repository=bot_repository,
             device_binding_repo=device_binding_repo,
         )
 

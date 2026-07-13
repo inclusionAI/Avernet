@@ -283,8 +283,6 @@ def test_teclaw_publish_task_is_reclaimed_after_worker_restart():
     w = _world(lease_seconds=0)
     baas = MagicMock()
     baas.get_publish_progress.return_value = {"status": "SUCCESS"}
-    bot_repo = MagicMock()
-    bot_repo.update_by_owner.return_value = {"status": "ACTIVE"}
     binding_repo = MagicMock()
     binding_repo.get_by_id.return_value = SimpleNamespace(
         status="PENDING",
@@ -294,7 +292,6 @@ def test_teclaw_publish_task_is_reclaimed_after_worker_restart():
     w.registry.register(
         TeclawPublishTaskHandler(
             baas_service=baas,
-            bot_repository=bot_repo,
             device_binding_repo=binding_repo,
         )
     )
@@ -320,9 +317,10 @@ def test_teclaw_publish_task_is_reclaimed_after_worker_restart():
     asyncio.run(restarted_worker.run_once())
 
     assert w.status_of(record.id) == TaskStatus.SUCCEEDED
-    bot_repo.update_by_owner.assert_called_once_with(
-        "b1", "u1", {"status": "ACTIVE"}
-    )
-    binding_repo.update_status.assert_called_once_with(
-        binding_id=77, status="ACTIVE"
+    binding_repo.transition_teclaw_publish_terminal.assert_called_once_with(
+        binding_id=77,
+        bot_id="b1",
+        owner_id="u1",
+        publish_id=9,
+        status="ACTIVE",
     )

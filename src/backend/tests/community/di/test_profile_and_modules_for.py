@@ -12,7 +12,6 @@ import pytest
 from injector import Injector
 
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.teclaw_publish_task_handler import (
     TeclawPublishTaskLifecycle,
 )
@@ -249,7 +248,6 @@ def test_teclaw_publish_lifecycle_uses_real_dependencies_in_every_local_profile(
     lifecycle = injector.get(TeclawPublishTaskLifecycle)
 
     assert lifecycle._baas_service is injector.get(BaasService)
-    assert lifecycle._bot_repository is injector.get(BotRepository)
     assert lifecycle._device_binding_repo is injector.get(DeviceBindingRepository)
     assert "TeclawPublishTaskLifecycle" in {
         type(participant).__name__

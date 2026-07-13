@@ -91,6 +91,15 @@ These checks make duplicate delivery and lease reclaim harmless, and prevent
 an old task from overwriting a newer publish. Invalid or structurally
 incomplete payloads are permanent task failures rather than retryable work.
 
+Because the BaaS request can overlap another binding transition, a normal
+second read after the poll would still leave a race before persistence. For a
+terminal result, the handler therefore delegates to a repository operation
+that opens one ORM transaction, locks and reloads the binding, and repeats the
+guard against the task's exact ``binding_id`` and ``publish_id``. Only a
+PENDING Teclaw binding may proceed. A stale, released, terminal, non-Teclaw,
+or superseded binding returns ``False`` without mutating either row, and the
+handler completes the obsolete task.
+
 ### Poll result mapping
 
 Each execution performs at most one BaaS status query, then returns a task
@@ -116,14 +125,17 @@ work durable; it does not introduce a new timeout failure policy.
 
 ### Terminal persistence
 
-Terminal state remains a dual write in the existing order: update the bot,
-then update the binding. The task returns `Complete` only after both writes
-succeed. Any persistence exception returns `Retry` so a partially completed
-attempt can converge on a later delivery.
+Terminal state is one guarded transaction. After locking and validating the
+binding, the repository updates the expected bot first, requiring the task's
+``bot_id``, ``owner_id``, and ``binding_id`` together with the current
+environment and ``is_delete = 0``. The update must affect exactly one row;
+otherwise the repository raises and the transaction rolls back. It then
+updates the locked binding and commits both writes atomically.
 
-The stale-task guard is based on terminal binding state, not terminal bot
-state. This is important when the bot write succeeded but the binding write
-failed: the retry must still finish the binding update.
+The handler returns `Complete` for either a committed transition or a `False`
+stale-task result. Any repository exception returns `Retry`; a failed bot or
+binding write can never be reported as success, and no partial bot-only
+terminal state is committed.
 
 ### Runtime wiring and cleanup
 
@@ -159,8 +171,13 @@ sequenceDiagram
         else current pending publish
             H->>B: Query publish status once
             alt terminal publish
-                H->>DB: Persist bot then binding terminal state
-                H-->>W: Complete, or Retry on write failure
+                H->>DB: Lock/reload binding and repeat stale-task guard
+                alt guard still matches
+                    H->>DB: Atomically update expected bot, then binding
+                    H-->>W: Complete, or Retry on transaction failure
+                else released, terminal, or superseded
+                    H-->>W: Complete without mutation
+                end
             else pending before 600 seconds
                 H-->>W: Reschedule after 10 seconds
             else pending at or after 600 seconds
@@ -183,8 +200,10 @@ Focused tests will cover:
 - timeout querying once, then completing without changing `PENDING`;
 - missing, non-Teclaw, stale-publish, and already-terminal bindings completing
   without polling or mutation;
-- bot or binding persistence failure returning `Retry`, including convergence
-  after a partial bot-only write;
+- transaction persistence failure returning `Retry` with both rows rolled
+  back;
+- release and publish-id replacement during the BaaS poll completing as stale
+  without mutating the PENDING bot or replacement binding;
 - lifecycle registration of the dedicated task handler;
 - provisioning enqueueing the exact task after binding persistence;
 - enqueue failure marking the bot and binding `FAILED` and returning failure;
