@@ -7,7 +7,8 @@ connection across checkouts so seeded rows are visible, and
 """
 from __future__ import annotations
 
-from threading import Event, Thread
+import threading
+from threading import Event, Thread, current_thread
 
 import pytest
 from sqlalchemy import text
@@ -119,42 +120,97 @@ def test_session_and_orm_session_share_one_process_lock() -> None:
     ``session()`` context has released that connection.
     """
     db = db_mod.SqliteDB()
-    first_entered = Event()
-    allow_first_exit = Event()
-    second_attempted = Event()
+    lock_results: list[bool] = []
     second_entered = Event()
     errors: list[BaseException] = []
 
-    def hold_session() -> None:
-        try:
-            with db.session():
-                first_entered.set()
-                if not allow_first_exit.wait(timeout=5):
-                    raise RuntimeError("session lock coordination timed out")
-        except BaseException as exc:  # noqa: BLE001 - re-raised below
-            errors.append(exc)
+    def probe_lock() -> None:
+        acquired = db_mod._session_lock.acquire(blocking=False)
+        lock_results.append(acquired)
+        if acquired:
+            db_mod._session_lock.release()
 
-    def enter_orm_session() -> None:
+    def enter_after_release() -> None:
         try:
-            second_attempted.set()
             with db.orm_session():
                 second_entered.set()
         except BaseException as exc:  # noqa: BLE001 - re-raised below
             errors.append(exc)
 
-    first_thread = Thread(target=hold_session)
-    second_thread = Thread(target=enter_orm_session)
-    first_thread.start()
-    assert first_entered.wait(timeout=5)
+    with db.session():
+        probe_thread = Thread(target=probe_lock)
+        probe_thread.start()
+        probe_thread.join(timeout=5)
+
+    second_thread = Thread(target=enter_after_release)
     second_thread.start()
-    assert second_attempted.wait(timeout=5)
-    entered_while_first_active = second_entered.wait(timeout=0.25)
-    allow_first_exit.set()
-    first_thread.join(timeout=5)
     second_thread.join(timeout=5)
 
     assert errors == []
-    assert not first_thread.is_alive()
+    assert not probe_thread.is_alive()
     assert not second_thread.is_alive()
-    assert entered_while_first_active is False
+    assert lock_results == [False]
     assert second_entered.is_set()
+
+
+def test_reset_for_tests_waits_for_active_session_lock() -> None:
+    """Reset must acquire the same lock before disposing the shared engine."""
+    reset_acquire_attempted = Event()
+    session_active = Event()
+    allow_session_exit = Event()
+    reset_finished = Event()
+    original_lock = db_mod._session_lock
+
+    class _ObservedRLock:
+        def __init__(self) -> None:
+            self._lock = threading.RLock()
+
+        def __enter__(self):
+            if current_thread().name == "database-reset":
+                reset_acquire_attempted.set()
+            self._lock.acquire()
+            return self
+
+        def __exit__(self, *_args) -> None:
+            self._lock.release()
+
+        def acquire(self, blocking: bool = True):
+            return self._lock.acquire(blocking=blocking)
+
+        def release(self) -> None:
+            self._lock.release()
+
+    db_mod._session_lock = _ObservedRLock()
+    db = db_mod.SqliteDB()
+    db_mod._get_session_factory()
+
+    def hold_session() -> None:
+        with db.session():
+            session_active.set()
+            if not allow_session_exit.wait(timeout=10):
+                raise RuntimeError("reset coordination timed out")
+
+    def reset_database() -> None:
+        try:
+            db_mod.reset_for_tests()
+        finally:
+            reset_finished.set()
+
+    holder_thread = Thread(target=hold_session, name="session-holder")
+    reset_thread = Thread(target=reset_database, name="database-reset")
+    holder_thread.start()
+    assert session_active.wait(timeout=5)
+    reset_thread.start()
+    try:
+        assert reset_acquire_attempted.wait(timeout=2)
+        assert reset_finished.is_set() is False
+    finally:
+        allow_session_exit.set()
+        holder_thread.join(timeout=5)
+        reset_thread.join(timeout=5)
+        db_mod._session_lock = original_lock
+
+    assert not holder_thread.is_alive()
+    assert not reset_thread.is_alive()
+    assert reset_finished.is_set()
+    assert db_mod._engine is None

@@ -80,15 +80,15 @@ def _get_session_factory():
 
 
 def get_session():
-    """Return a new SQLAlchemy Session. Caller is responsible for closing it."""
+    """Return an unmanaged legacy/test Session; production must use the plugin."""
     factory = _get_session_factory()
     return factory()
 
 
-# SessionLocal is a callable that returns a new Session, matching the old db.py pattern.
-# It lazily initializes the factory on first call.
+# Unmanaged legacy/test callable matching the old db.py pattern. Production
+# code must use SqliteDB.session()/orm_session() so the shared lock is held.
 def SessionLocal():
-    """Create and return a new SQLAlchemy Session (compatible with old db.py usage)."""
+    """Return an unmanaged legacy/test Session; production must use the plugin."""
     return _get_session_factory()()
 
 
@@ -100,10 +100,11 @@ def reset_for_tests() -> None:
     including before the singletons have ever been initialised.
     """
     global _engine, _session_factory
-    if _engine is not None:
-        _engine.dispose()
-    _engine = None
-    _session_factory = None
+    with _session_lock:
+        if _engine is not None:
+            _engine.dispose()
+        _engine = None
+        _session_factory = None
 
 
 @plugin_impl(

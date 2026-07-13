@@ -148,7 +148,12 @@ Sessions on that same connection. Its DatabasePlugin therefore holds one
 process-wide reentrant lock across the complete ``session()`` and
 ``orm_session()`` lifetime, including commit, rollback, and close. Corp and
 community runtimes retain per-connection explicit transactions; only local
-single-connection SQLite requires process-level Session serialization.
+single-connection SQLite requires process-level Session serialization. Local
+lifecycle cleanup and orphan discovery receive the same DatabasePlugin and use
+these managed contexts; orphan snapshots leave the read context before device
+allocation opens repository Sessions. Test resets acquire the same lock before
+disposing or replacing the shared engine, while raw Session helpers remain
+unmanaged legacy/test-only entry points.
 
 After locking and validating the binding, the repository updates the expected
 bot first, requiring the task's ``bot_id``, ``owner_id``, and ``binding_id``

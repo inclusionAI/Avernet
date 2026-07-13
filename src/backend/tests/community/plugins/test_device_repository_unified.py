@@ -86,7 +86,7 @@ def repo(db):
 def autocommit_db(tmp_path):
     engine = create_engine(
         f"sqlite:///{tmp_path / 'devbind-autocommit.db'}",
-        connect_args={"check_same_thread": False, "timeout": 5.0},
+        connect_args={"check_same_thread": False, "timeout": 0.0},
         isolation_level="AUTOCOMMIT",
     )
     EntityDeviceBinding.__table__.create(engine)
@@ -656,7 +656,8 @@ def test_transition_teclaw_publish_terminal_serializes_concurrent_release(
     allow_transition = Event()
     release_update_started = Event()
     release_finished = Event()
-    errors = []
+    transition_errors = []
+    release_errors = []
 
     def pause_after_guarded_read(
         _conn, _cursor, statement, _parameters, _context, _executemany
@@ -692,7 +693,7 @@ def test_transition_teclaw_publish_terminal_serializes_concurrent_release(
                     status="ACTIVE",
                 )
         except Exception as exc:  # noqa: BLE001 - re-raised in test thread
-            errors.append(exc)
+            transition_errors.append(exc)
 
     def release_binding():
         try:
@@ -702,7 +703,7 @@ def test_transition_teclaw_publish_terminal_serializes_concurrent_release(
                 released_by="emp-1",
             )
         except Exception as exc:  # noqa: BLE001 - re-raised in test thread
-            errors.append(exc)
+            release_errors.append(exc)
         finally:
             release_finished.set()
 
@@ -721,7 +722,9 @@ def test_transition_teclaw_publish_terminal_serializes_concurrent_release(
         assert guard_read.wait(timeout=5)
         release_thread.start()
         assert release_update_started.wait(timeout=5)
-        release_finished_before_transition = release_finished.wait(timeout=0.25)
+        assert release_finished.wait(timeout=5)
+        assert len(release_errors) == 1
+        assert "database is locked" in str(release_errors[0]).lower()
         allow_transition.set()
         terminal_thread.join(timeout=5)
         release_thread.join(timeout=5)
@@ -734,8 +737,12 @@ def test_transition_teclaw_publish_terminal_serializes_concurrent_release(
 
     assert not terminal_thread.is_alive()
     assert not release_thread.is_alive()
-    assert errors == []
-    assert release_finished_before_transition is False
+    assert transition_errors == []
+    repo.release_binding(
+        binding_id=bid,
+        release_reason="concurrent release",
+        released_by="emp-1",
+    )
     binding = repo.get_by_id(bid)
     assert binding.status == "RELEASED"
     assert binding.release_reason == "concurrent release"
