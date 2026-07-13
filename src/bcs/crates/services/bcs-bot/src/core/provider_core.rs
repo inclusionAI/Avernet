@@ -6,11 +6,12 @@ use serde_json::Value;
 use tracing::{info, warn};
 
 use bcs_service_api::{
-    BotCapabilities, BotRegistryCoreService, CoordinationMode, ProviderAuthMode, ProviderBotBinding,
-    ProviderBotBindingRepoPort, ProviderCoordinationConfig, ProviderBotCoreService, ProviderCoreService,
-    ProviderCredential, ProviderCredentialRepoPort, ProviderOrganizationManagementConfig,
-    ProviderRecord, ProviderRepoPort, RegisterProviderBotParams, RegisteredProvider,
-    RuntimeBotIdentity, ServiceError, ServiceResult,
+    BotCapabilities, BotRegistryCoreService, CoordinationMode, ProviderAuthMode,
+    ProviderBotBinding, ProviderBotBindingRepoPort, ProviderBotCoreService,
+    ProviderCoordinationConfig, ProviderCoreService, ProviderCredential,
+    ProviderCredentialRepoPort, ProviderOrganizationManagementConfig, ProviderRecord,
+    ProviderRepoPort, RegisterProviderBotParams, RegisteredProvider, RuntimeBotIdentity,
+    ServiceError, ServiceResult,
 };
 
 use super::ids::{new_bot_uuid, new_provider_id, new_session_token};
@@ -187,12 +188,7 @@ impl ProviderCore {
         )
         .then(|| session_token.clone());
         self.registry
-            .register_with_owner_and_token(
-                bot_uuid.clone(),
-                capabilities,
-                owner,
-                &session_token,
-            )
+            .register_with_owner_and_token(bot_uuid.clone(), capabilities, owner, &session_token)
             .await
             .inspect_err(|err| {
                 warn!(
@@ -294,9 +290,7 @@ pub(crate) fn parse_downlink_config(config: &str) -> ServiceResult<DownlinkConfi
     })
 }
 
-pub(crate) fn parse_coordination_config(
-    config: &str,
-) -> ServiceResult<ProviderCoordinationConfig> {
+pub(crate) fn parse_coordination_config(config: &str) -> ServiceResult<ProviderCoordinationConfig> {
     let value: Value = serde_json::from_str(config)?;
     let Some(coordination) = value.get("coordination") else {
         return Ok(ProviderCoordinationConfig::disabled());
@@ -309,8 +303,7 @@ pub(crate) fn parse_coordination_config(
 pub(crate) fn parse_organization_management_config(
     config: &str,
 ) -> ServiceResult<ProviderOrganizationManagementConfig> {
-    ProviderOrganizationManagementConfig::from_provider_config(config)
-        .map_err(ServiceError::from)
+    ProviderOrganizationManagementConfig::from_provider_config(config).map_err(ServiceError::from)
 }
 
 fn now_ms() -> u64 {
@@ -340,13 +333,13 @@ fn validate_external_id(kind: &str, value: &str) -> ServiceResult<()> {
     }
 }
 
-fn validate_webhook_url(guard: &OutboundUrlGuard, webhook_url: &str) -> ServiceResult<()> {
-    guard.validate_configured_http_url(webhook_url).map_err(|error| {
-        ServiceError::InvalidOperation {
-            message: format!("webhook_url is not allowed: {error}"),
+fn validate_outbound_url(guard: &OutboundUrlGuard, field: &str, url: &str) -> ServiceResult<()> {
+    guard
+        .validate_configured_http_url(url)
+        .map_err(|error| ServiceError::InvalidOperation {
+            message: format!("{field} is not allowed: {error}"),
             request_id: None,
-        }
-    })
+        })
 }
 
 fn validate_provider_coordination_config(
@@ -448,6 +441,21 @@ fn replace_webhook_url(config: &str, webhook_url: &str) -> ServiceResult<String>
     Ok(value.to_string())
 }
 
+fn replace_admin_callback_url(config: &str, admin_callback_url: &str) -> ServiceResult<String> {
+    let mut value: Value = serde_json::from_str(config)?;
+    let Some(config) = value.as_object_mut() else {
+        return Err(ServiceError::InvalidOperation {
+            message: "provider config is not an object".to_string(),
+            request_id: None,
+        });
+    };
+    config.insert(
+        "admin_callback_url".to_string(),
+        Value::String(admin_callback_url.to_string()),
+    );
+    Ok(value.to_string())
+}
+
 fn replace_protocol_version(config: &str, protocol_version: &str) -> ServiceResult<String> {
     // Same validation as register: only "1.0" / "2.0" are supported.
     let normalized = match protocol_version.trim() {
@@ -501,14 +509,15 @@ fn ensure_provider_owner(provider: &ProviderRecord, staff_no: &str) -> ServiceRe
             "valid human identity is required".to_string(),
         ));
     }
-    let owners: Vec<String> = serde_json::from_str(&provider.owners).map_err(|_| {
-        ServiceError::Forbidden("provider_owner_required".to_string())
-    })?;
+    let owners: Vec<String> = serde_json::from_str(&provider.owners)
+        .map_err(|_| ServiceError::Forbidden("provider_owner_required".to_string()))?;
     let is_owner = owners.iter().any(|owner| owner.trim() == staff_no);
     if is_owner {
         Ok(())
     } else {
-        Err(ServiceError::Forbidden("provider_owner_required".to_string()))
+        Err(ServiceError::Forbidden(
+            "provider_owner_required".to_string(),
+        ))
     }
 }
 
@@ -525,7 +534,7 @@ impl ProviderCoreService for ProviderCore {
     ) -> ServiceResult<RegisteredProvider> {
         let provider_id = new_provider_id();
         validate_external_id("provider_id", &provider_id)?;
-        validate_webhook_url(&self.webhook_url_guard, &webhook_url)?;
+        validate_outbound_url(&self.webhook_url_guard, "webhook_url", &webhook_url)?;
         let protocol_version = match protocol_version.as_deref().map(str::trim) {
             None | Some("") | Some("1.0") => "1.0",
             Some("2.0") => "2.0",
@@ -621,7 +630,9 @@ impl ProviderCoreService for ProviderCore {
             .credentials
             .get_credential_by_secret("provider_admin", token)
             .await?
-            .ok_or_else(|| ServiceError::Unauthorized("invalid provider admin token".to_string()))?;
+            .ok_or_else(|| {
+                ServiceError::Unauthorized("invalid provider admin token".to_string())
+            })?;
         if credential.disabled {
             return Err(ServiceError::Unauthorized(
                 "provider admin token is disabled".to_string(),
@@ -636,7 +647,10 @@ impl ProviderCoreService for ProviderCore {
             })
     }
 
-    async fn get_downlink_credential(&self, provider_id: &str) -> ServiceResult<ProviderCredential> {
+    async fn get_downlink_credential(
+        &self,
+        provider_id: &str,
+    ) -> ServiceResult<ProviderCredential> {
         let credential = self
             .credentials
             .get_credential_by_kind(provider_id, "downlink_bcs_to_provider")
@@ -680,7 +694,7 @@ impl ProviderCoreService for ProviderCore {
         ensure_provider_owner(&current, authenticated_staff_id)?;
         let mut config = match webhook_url {
             Some(webhook_url) => {
-                validate_webhook_url(&self.webhook_url_guard, &webhook_url)?;
+                validate_outbound_url(&self.webhook_url_guard, "webhook_url", &webhook_url)?;
                 Some(replace_webhook_url(&current.config, &webhook_url)?)
             }
             None => None,
@@ -700,13 +714,15 @@ impl ProviderCoreService for ProviderCore {
             organization_management
                 .authorized_manager_provider_ids
                 .retain(|manager_provider_id| manager_provider_id != provider_id);
-            organization_management.authorized_manager_provider_ids.sort();
-            organization_management.authorized_manager_provider_ids.dedup();
+            organization_management
+                .authorized_manager_provider_ids
+                .sort();
+            organization_management
+                .authorized_manager_provider_ids
+                .dedup();
             let manager_providers = self
                 .providers
-                .list_providers_by_ids(
-                    &organization_management.authorized_manager_provider_ids,
-                )
+                .list_providers_by_ids(&organization_management.authorized_manager_provider_ids)
                 .await?;
             if let Some(unknown_provider_id) = organization_management
                 .authorized_manager_provider_ids
@@ -729,12 +745,33 @@ impl ProviderCoreService for ProviderCore {
             )?);
         }
         self.providers
-            .update_provider_metadata(
-                provider_id,
-                name.as_deref(),
-                config.as_deref(),
-                now_ms(),
-            )
+            .update_provider_metadata(provider_id, name.as_deref(), config.as_deref(), now_ms())
+            .await?
+            .ok_or_else(|| ServiceError::InvalidOperation {
+                message: format!("provider '{}' not found", provider_id),
+                request_id: None,
+            })
+    }
+
+    async fn update_provider_admin_callback_url(
+        &self,
+        provider_id: &str,
+        provider_admin_token: &str,
+        authenticated_staff_id: &str,
+        admin_callback_url: String,
+    ) -> ServiceResult<ProviderRecord> {
+        let current = self
+            .provider_admin_for_path(provider_id, provider_admin_token)
+            .await?;
+        ensure_provider_owner(&current, authenticated_staff_id)?;
+        validate_outbound_url(
+            &self.webhook_url_guard,
+            "admin_callback_url",
+            &admin_callback_url,
+        )?;
+        let config = replace_admin_callback_url(&current.config, &admin_callback_url)?;
+        self.providers
+            .update_provider_metadata(provider_id, None, Some(&config), now_ms())
             .await?
             .ok_or_else(|| ServiceError::InvalidOperation {
                 message: format!("provider '{}' not found", provider_id),
@@ -869,7 +906,9 @@ impl ProviderBotCoreService for ProviderCore {
             .credentials
             .get_credential_by_secret("provider_admin", provider_admin_token)
             .await?
-            .ok_or_else(|| ServiceError::Unauthorized("invalid provider admin token".to_string()))?;
+            .ok_or_else(|| {
+                ServiceError::Unauthorized("invalid provider admin token".to_string())
+            })?;
         if credential.disabled {
             return Err(ServiceError::Unauthorized(
                 "provider admin token is disabled".to_string(),
@@ -901,10 +940,7 @@ impl ProviderBotCoreService for ProviderCore {
             .get_binding_by_provider_ref(&provider.provider_id, provider_bot_ref)
             .await?
             .ok_or_else(|| {
-                ServiceError::BotNotFound(format!(
-                    "provider bot '{}' not found",
-                    provider_bot_ref
-                ))
+                ServiceError::BotNotFound(format!("provider bot '{}' not found", provider_bot_ref))
             })?;
         if binding.disabled {
             return Err(ServiceError::InvalidOperation {

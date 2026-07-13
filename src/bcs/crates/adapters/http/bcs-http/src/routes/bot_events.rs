@@ -244,6 +244,9 @@ pub async fn post_bot_event(
         "provider callback: received bot event"
     );
     let credential = credential_from_headers(&state, &headers, &provider_id).await?;
+    let callback_run_id = req.run_id.clone();
+    let callback_state = effective_state.clone();
+    let callback_message_text = req.message.text.clone();
 
     let outcome = match state
         .services
@@ -274,6 +277,18 @@ pub async fn post_bot_event(
         delivered_count = %outcome.delivered_count,
         failed_count = %outcome.failed_count,
         "provider callback: bot event processed"
+    );
+
+    crate::routes::admin_invocations::notify_terminal_callback(
+        &state,
+        &callback_run_id,
+        match callback_state {
+            ChatEventState::Final => "final",
+            ChatEventState::Error => "error",
+            ChatEventState::Aborted => "aborted",
+            _ => "non_terminal",
+        },
+        &callback_message_text,
     );
 
     Ok(Json(json!({
@@ -339,9 +354,8 @@ fn header_required(headers: &HeaderMap, name: &'static str) -> Result<String, Bo
 }
 
 fn bearer_token(headers: &HeaderMap) -> Result<String, BotEventRouteError> {
-    crate::headers::extract_bearer_token(headers).ok_or_else(|| {
-        BotEventRouteError::unauthorized("valid bot runtime token is required")
-    })
+    crate::headers::extract_bearer_token(headers)
+        .ok_or_else(|| BotEventRouteError::unauthorized("valid bot runtime token is required"))
 }
 
 async fn credential_from_headers(
@@ -381,9 +395,7 @@ fn coordination_kind_from_wire(
     kind: ProviderCoordinationEventKindDto,
 ) -> ProviderCoordinationEventKind {
     match kind {
-        ProviderCoordinationEventKindDto::ToolResult => {
-            ProviderCoordinationEventKind::ToolResult
-        }
+        ProviderCoordinationEventKindDto::ToolResult => ProviderCoordinationEventKind::ToolResult,
         ProviderCoordinationEventKindDto::CoordinationIntent => {
             ProviderCoordinationEventKind::CoordinationIntent
         }
@@ -395,25 +407,19 @@ fn bot_event_error(error: ProviderBotEventError) -> BotEventRouteError {
         ProviderBotEventError::Unauthorized(message) if message == "auth_mode_mismatch" => {
             BotEventRouteError::auth_mode_mismatch(message)
         }
-        ProviderBotEventError::Unauthorized(message) => {
-            BotEventRouteError::unauthorized(message)
-        }
+        ProviderBotEventError::Unauthorized(message) => BotEventRouteError::unauthorized(message),
         ProviderBotEventError::Forbidden(message) if message == "provider_id_mismatch" => {
             BotEventRouteError::provider_id_mismatch()
         }
         ProviderBotEventError::Forbidden(message) => BotEventRouteError::forbidden(message),
-        ProviderBotEventError::InvalidRequest(message) => {
-            BotEventRouteError::bad_request(message)
-        }
+        ProviderBotEventError::InvalidRequest(message) => BotEventRouteError::bad_request(message),
         ProviderBotEventError::RunNotFound(message) => BotEventRouteError::not_found(message),
         ProviderBotEventError::RunTerminated(message) => BotEventRouteError::gone(message),
         ProviderBotEventError::BotNotFound(bot_id) => {
             BotEventRouteError::bot_not_found(format!("bot not found: {bot_id}"))
         }
-        ProviderBotEventError::Internal(message) => BotEventRouteError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
-            message,
-        ),
+        ProviderBotEventError::Internal(message) => {
+            BotEventRouteError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", message)
+        }
     }
 }

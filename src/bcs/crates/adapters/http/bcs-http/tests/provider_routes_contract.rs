@@ -1258,6 +1258,92 @@ async fn patch_provider_updates_name_and_webhook_url() {
 }
 
 #[tokio::test]
+async fn patch_provider_updates_and_returns_admin_callback_url() {
+    let TestApp { app, _temp_dir, .. } = test_app();
+    let provider = register_provider(
+        &app,
+        json!({
+            "mode": "static_bearer"
+        }),
+    )
+    .await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+    let callback_url = "https://provider.example.com/bcs/admin-callback";
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/providers/{provider_id}"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "admin_callback_url": callback_url
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["admin_callback_url"], callback_url);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/providers/{provider_id}"))
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["admin_callback_url"], callback_url);
+}
+
+#[tokio::test]
+async fn organization_admin_run_requires_provider_admin_token_in_unified_envelope() {
+    let app = test_app();
+    let response = app
+        .app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/organizations/engineering/admin-runs")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "target_bot_uuid": "bot_target",
+                        "message": {
+                            "role": "user",
+                            "content": [{ "type": "text", "text": "please review" }]
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let body = response_json(response).await;
+    assert_eq!(body["code"], 40101);
+    assert_eq!(body["message"], "valid provider admin token is required");
+    assert!(body["request_id"].as_str().is_some());
+}
+
+#[tokio::test]
 async fn patch_and_get_provider_use_typed_organization_management_config() {
     let TestApp { app, _temp_dir, .. } = test_app();
     let provider_a = register_provider_as(&app, "11111111").await;

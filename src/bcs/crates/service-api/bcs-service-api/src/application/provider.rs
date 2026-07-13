@@ -12,7 +12,9 @@ use super::message_flow::ChatEventState;
 #[derive(Clone)]
 pub enum ProviderBotEventCredential {
     StaticBearer(String),
-    AgentPass { agent_code: String },
+    AgentPass {
+        agent_code: String,
+    },
     ProviderAdmin {
         provider_admin_token: String,
         provider_bot_ref: String,
@@ -24,7 +26,9 @@ impl std::fmt::Debug for ProviderBotEventCredential {
         match self {
             Self::StaticBearer(_) => f.write_str("StaticBearer(***)"),
             Self::AgentPass { .. } => f.write_str("AgentPass(***)"),
-            Self::ProviderAdmin { provider_bot_ref, .. } => f
+            Self::ProviderAdmin {
+                provider_bot_ref, ..
+            } => f
                 .debug_struct("ProviderAdmin")
                 .field("provider_admin_token", &"***")
                 .field("provider_bot_ref", provider_bot_ref)
@@ -37,6 +41,7 @@ impl std::fmt::Debug for ProviderBotEventCredential {
 pub struct RegisterProviderCommand {
     pub name: String,
     pub webhook_url: String,
+    pub admin_callback_url: Option<String>,
     pub auth_mode: ProviderAuthMode,
     pub created_by: String,
     /// Downlink protocol version ("1.0" | "2.0"); None = "1.0".
@@ -58,6 +63,7 @@ pub struct UpdateProviderCommand {
     pub authenticated_staff_id: String,
     pub name: Option<String>,
     pub webhook_url: Option<String>,
+    pub admin_callback_url: Option<String>,
     pub protocol_version: Option<String>,
     pub coordination: Option<ProviderCoordinationConfig>,
     pub organization_management: Option<ProviderOrganizationManagementConfig>,

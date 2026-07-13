@@ -101,6 +101,14 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/providers/{provider_id}/organization-candidate-bots",
             get(routes::organizations::candidate_bots),
         )
+        .route(
+            "/organizations/{organization_code}/admin-runs",
+            post(routes::admin_invocations::create_admin_run),
+        )
+        .route(
+            "/organizations/{organization_code}/admin-runs/{run_id}",
+            get(routes::admin_invocations::get_admin_run),
+        )
         .route("/bot/events", post(routes::bot_events::post_bot_event))
         .route(
             "/bot/events/coordination",

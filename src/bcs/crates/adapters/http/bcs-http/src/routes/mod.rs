@@ -1,4 +1,5 @@
 pub mod actors;
+pub mod admin_invocations;
 pub mod assets;
 pub mod bot_chat;
 pub mod bot_events;

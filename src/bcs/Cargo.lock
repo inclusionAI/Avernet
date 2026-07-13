@@ -916,6 +916,7 @@ dependencies = [
  "bcs-user-directory-api",
  "futures",
  "hex",
+ "reqwest",
  "serde",
  "serde_json",
  "serde_yaml",

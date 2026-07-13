@@ -1,13 +1,17 @@
-use bcs_domain::BotCapabilities;
-use bcs_channel_api::ChannelHttpIngressRegistry;
-use bcs_config_api::ManifestConfig;
 use crate::service_key::ApiKeyRegistry;
 use bcs_auth_api::{AuthError, UserIdentityInfo};
+use bcs_channel_api::ChannelHttpIngressRegistry;
+use bcs_config_api::ManifestConfig;
+use bcs_domain::BotCapabilities;
 use bcs_route_security::OutboundUrlGuard;
-use bcs_service_api::{ProviderCredentialRepoPort, ProviderStreamGrayList};
 pub use bcs_service_api::{ChatRunCleanupPort, ChatRunEventPort};
+use bcs_service_api::{ProviderCredentialRepoPort, ProviderStreamGrayList};
 use bcs_services_container::Services;
 use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 #[async_trait::async_trait]
 pub trait HealthPort: Send + Sync {
@@ -89,10 +93,7 @@ impl ChainUserIdentityPort {
         Self { chain, inner: None }
     }
 
-    pub fn with_inner(
-        mut self,
-        inner: Arc<dyn bcs_auth_api::UserIdentityPort>,
-    ) -> Self {
+    pub fn with_inner(mut self, inner: Arc<dyn bcs_auth_api::UserIdentityPort>) -> Self {
         self.inner = Some(inner);
         self
     }
@@ -122,9 +123,16 @@ impl UserIdentityPort for ChainUserIdentityPort {
         env: &str,
     ) -> Result<String, AuthError> {
         match &self.inner {
-            Some(port) => port
-                .ensure_identity(auth_source, external_user_id, external_user_name, avatar, env)
-                .await,
+            Some(port) => {
+                port.ensure_identity(
+                    auth_source,
+                    external_user_id,
+                    external_user_name,
+                    avatar,
+                    env,
+                )
+                .await
+            }
             None => Err(AuthError::LookupFailed(
                 "no identity port configured".to_string(),
             )),
@@ -181,10 +189,7 @@ pub struct BcsHttpAuthBotRuntimeTokenResolver {
 }
 
 impl BcsHttpAuthBotRuntimeTokenResolver {
-    pub fn with_credentials(
-        mut self,
-        credentials: Arc<dyn ProviderCredentialRepoPort>,
-    ) -> Self {
+    pub fn with_credentials(mut self, credentials: Arc<dyn ProviderCredentialRepoPort>) -> Self {
         self.credentials = Some(credentials);
         self
     }
@@ -284,6 +289,96 @@ impl VisibilitySyncPort for NoopVisibilitySyncPort {
     async fn sync_visibility(&self, _request: VisibilitySyncRequest) {}
 }
 
+/// Process-local best-effort association for organization-admin invocations.
+/// It intentionally has no persistence or retry semantics; a process restart
+/// makes old runs unavailable to this management surface.
+#[derive(Debug, Clone)]
+pub struct AdminInvocationRun {
+    pub provider_id: String,
+    pub organization_code: String,
+    pub target_bot_uuid: String,
+    pub session_id: String,
+    pub detach: bool,
+    pub expires_at_ms: u64,
+    pub delivery_error: Option<String>,
+    pub callback: Option<AdminInvocationCallback>,
+    pub callback_claimed: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct AdminInvocationCallback {
+    pub url: String,
+    pub bearer_token: String,
+}
+
+#[derive(Debug, Default)]
+pub struct AdminInvocationStore {
+    runs: std::sync::Mutex<HashMap<String, AdminInvocationRun>>,
+}
+
+impl AdminInvocationStore {
+    pub fn insert(&self, run_id: String, run: AdminInvocationRun) {
+        let mut runs = self
+            .runs
+            .lock()
+            .expect("admin invocation store lock poisoned");
+        purge_expired(&mut runs);
+        runs.insert(run_id, run);
+    }
+
+    pub fn get_for_provider(&self, run_id: &str, provider_id: &str) -> Option<AdminInvocationRun> {
+        let mut runs = self
+            .runs
+            .lock()
+            .expect("admin invocation store lock poisoned");
+        purge_expired(&mut runs);
+        runs.get(run_id)
+            .filter(|run| run.provider_id == provider_id)
+            .cloned()
+    }
+
+    pub fn get(&self, run_id: &str) -> Option<AdminInvocationRun> {
+        let mut runs = self
+            .runs
+            .lock()
+            .expect("admin invocation store lock poisoned");
+        purge_expired(&mut runs);
+        runs.get(run_id).cloned()
+    }
+
+    pub fn claim_callback(&self, run_id: &str) -> Option<AdminInvocationRun> {
+        let mut runs = self
+            .runs
+            .lock()
+            .expect("admin invocation store lock poisoned");
+        purge_expired(&mut runs);
+        let run = runs.get_mut(run_id)?;
+        if run.detach || run.callback.is_none() || run.callback_claimed {
+            return None;
+        }
+        run.callback_claimed = true;
+        Some(run.clone())
+    }
+
+    pub fn set_delivery_error(&self, run_id: &str, error: String) {
+        let mut runs = self
+            .runs
+            .lock()
+            .expect("admin invocation store lock poisoned");
+        if let Some(run) = runs.get_mut(run_id) {
+            run.delivery_error = Some(error);
+        }
+    }
+}
+
+fn purge_expired(runs: &mut HashMap<String, AdminInvocationRun>) {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    runs.retain(|_, run| run.expires_at_ms > now);
+}
+
 #[derive(Clone)]
 pub struct HttpAppState {
     pub services: Services,
@@ -326,6 +421,7 @@ pub struct HttpAppState {
     pub auth_chain: Option<Arc<bcs_auth_api::AuthPluginChain>>,
     pub auth_config: bcs_auth_api::AuthConfig,
     pub outbound_url_guard: OutboundUrlGuard,
+    pub admin_invocation_runs: Arc<AdminInvocationStore>,
 }
 
 impl HttpAppState {
@@ -373,6 +469,7 @@ impl HttpAppState {
             auth_chain: None,
             auth_config: bcs_auth_api::AuthConfig::default(),
             outbound_url_guard: OutboundUrlGuard::strict(),
+            admin_invocation_runs: Arc::new(AdminInvocationStore::default()),
         }
     }
 
@@ -564,10 +661,7 @@ impl HttpAppState {
     /// default to `["local"]`), resolve a non-JWT session token directly via the
     /// registry — mirroring the legacy `SessionTokenPlugin` non-JWT branch. JWT
     /// tokens without a chain are not resolvable (production always has a chain).
-    pub async fn bot_uuid_from_headers(
-        &self,
-        headers: &axum::http::HeaderMap,
-    ) -> Option<String> {
+    pub async fn bot_uuid_from_headers(&self, headers: &axum::http::HeaderMap) -> Option<String> {
         if let Some(chain) = self.auth_chain.as_ref() {
             if let Ok(result) = chain.authenticate(headers).await {
                 if let Some(bot_uuid) = result.principal.and_then(|p| p.bot_uuid) {
@@ -616,7 +710,10 @@ impl std::fmt::Debug for HttpAppState {
             .field("chat_run_events", &"<ChatRunEventPort>")
             .field("bot_request", &"<BotRequestPort>")
             .field("user_identity", &"<UserIdentityPort>")
-            .field("bot_runtime_token_resolver", &"<BotRuntimeTokenResolverPort>")
+            .field(
+                "bot_runtime_token_resolver",
+                &"<BotRuntimeTokenResolverPort>",
+            )
             .field("visibility_sync", &"<VisibilitySyncPort>")
             .field(
                 "strict_container_validation",
@@ -636,7 +733,10 @@ impl std::fmt::Debug for HttpAppState {
             .field("group_chat_delay_max_ms", &self.group_chat_delay_max_ms)
             .field("async_chat_run_timeout_ms", &self.async_chat_run_timeout_ms)
             .field("invite_token_secret", &"<redacted>")
-            .field("invite_default_ttl_seconds", &self.invite_default_ttl_seconds)
+            .field(
+                "invite_default_ttl_seconds",
+                &self.invite_default_ttl_seconds,
+            )
             .field("invite_base_url", &self.invite_base_url)
             .field("invite_group_link_url", &self.invite_group_link_url)
             .field("invite_session_link_url", &self.invite_session_link_url)

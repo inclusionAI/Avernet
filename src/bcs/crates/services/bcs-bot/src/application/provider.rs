@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_user_directory_api::UserDirectoryPlugin;
 use bcs_service_api::{
-    BotRegistryCoreService, DeleteProviderBotCommand, DeleteProviderBotOutcome,
-    ProviderBotBinding, ProviderBotCoreService, ProviderCoreService, ProviderManagementService,
-    ProviderRecord, RegisterProviderBotCommand, RegisterProviderBotOutcome,
-    RegisterProviderBotParams, RegisterProviderCommand, RegisterProviderOutcome,
-    RelationCoreService, ServiceError, ServiceResult, UpdateProviderCommand,
+    BotRegistryCoreService, DeleteProviderBotCommand, DeleteProviderBotOutcome, ProviderBotBinding,
+    ProviderBotCoreService, ProviderCoreService, ProviderManagementService, ProviderRecord,
+    RegisterProviderBotCommand, RegisterProviderBotOutcome, RegisterProviderBotParams,
+    RegisterProviderCommand, RegisterProviderOutcome, RelationCoreService, ServiceError,
+    ServiceResult, UpdateProviderCommand,
 };
+use bcs_user_directory_api::UserDirectoryPlugin;
 
 #[derive(Clone)]
 pub struct ProviderManagement {
@@ -42,7 +42,9 @@ impl ProviderManagement {
 
     async fn ensure_owner_binding(&self, bot_uuid: &str, staff_no: &str) -> ServiceResult<()> {
         let nick_name = self.resolve_owner_nick_name(staff_no).await;
-        self.registry.ensure_human_actor(staff_no, &nick_name).await?;
+        self.registry
+            .ensure_human_actor(staff_no, &nick_name)
+            .await?;
         let human_id = format!("human_{}", staff_no);
         let env = bcs_config::resolve_env_str();
         self.relation
@@ -130,6 +132,7 @@ impl ProviderManagementService for ProviderManagement {
         &self,
         command: RegisterProviderCommand,
     ) -> ServiceResult<RegisterProviderOutcome> {
+        let admin_callback_url = command.admin_callback_url;
         let registered = self
             .provider_core
             .register_provider(
@@ -141,6 +144,16 @@ impl ProviderManagementService for ProviderManagement {
                 command.coordination,
             )
             .await?;
+        if let Some(admin_callback_url) = admin_callback_url {
+            self.provider_core
+                .update_provider_admin_callback_url(
+                    &registered.provider.provider_id,
+                    &registered.provider_admin_token,
+                    &registered.provider.created_by,
+                    admin_callback_url,
+                )
+                .await?;
+        }
         Ok(RegisterProviderOutcome {
             provider_id: registered.provider.provider_id,
             provider_admin_token: registered.provider_admin_token,
@@ -162,7 +175,9 @@ impl ProviderManagementService for ProviderManagement {
         &self,
         command: UpdateProviderCommand,
     ) -> ServiceResult<ProviderRecord> {
-        self.provider_core
+        let admin_callback_url = command.admin_callback_url;
+        let provider = self
+            .provider_core
             .update_provider(
                 &command.provider_id,
                 &command.provider_admin_token,
@@ -173,7 +188,20 @@ impl ProviderManagementService for ProviderManagement {
                 command.coordination,
                 command.organization_management,
             )
-            .await
+            .await?;
+        match admin_callback_url {
+            Some(admin_callback_url) => {
+                self.provider_core
+                    .update_provider_admin_callback_url(
+                        &provider.provider_id,
+                        &command.provider_admin_token,
+                        &command.authenticated_staff_id,
+                        admin_callback_url,
+                    )
+                    .await
+            }
+            None => Ok(provider),
+        }
     }
 
     async fn register_provider_bot(
