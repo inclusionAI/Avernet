@@ -310,8 +310,9 @@ class ProgressSyncMixin:
         current_status = PublishStatus(publish_record.status)
 
         # These early-status guards ARE reachable: besides the durable poll task
-        # (which only fires in the *_PUB wait states), /sync is a public endpoint
-        # the frontend polls throughout the flow, so any status can arrive here.
+        # (which only fires in the *_PUB wait states), this is exposed as the
+        # user-invokable POST /publish/{id}/sync endpoint, so any status can
+        # arrive here.
         # If in a failed state, return publish failure directly
         if current_status == PublishStatus.FAILED:
             return PublishFlowResult(
