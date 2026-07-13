@@ -230,6 +230,27 @@ class GovernanceAdminService:
             "[GovernanceEmergency] Resumed by %s: %s", operator, reason,
         )
 
+    def write_brake_skip_audit(self, *, run_id: str, reason: str) -> None:
+        """记录"自动定时 tick 因制动被跳过"的审计(best-effort)。
+
+        Args:
+            run_id: 调度层当次 run 标识(用 scan_date 即可)。
+            reason: 跳过原因(制动生效)。
+        """
+        try:
+            self._audit_repo.add_audit(
+                run_id,
+                action_taken=AuditAction.SCAN_SKIPPED_BRAKE,
+                source="scheduled_lifecycle",
+                error_msg=reason,
+                dry_run=0,
+            )
+        except Exception:
+            log.warning(
+                "[GovernanceEmergency] Failed to write brake-skip audit, run_id=%s",
+                run_id,
+            )
+
     def bulk_whitelist(
         self,
         bot_ids: list[str],

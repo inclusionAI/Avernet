@@ -58,6 +58,7 @@ class AuditAction(str, Enum):
     ADMIN_PAUSE = "admin_pause"                     # Emergency pause (was: emergency_paused)
     ADMIN_RESUME = "admin_resume"                   # Emergency resume (was: emergency_resumed)
     ADMIN_WHITELIST = "admin_whitelisted"           # Emergency whitelist (was: emergency_whitelisted)
+    SCAN_SKIPPED_BRAKE = "scan_skipped_brake"       # 自动定时 tick 因制动被跳过 (调度层判定)
 
     # ── Whitelist management (new) ──────────────────
     WHITELIST_REMOVED = "whitelist_removed"             # 管理员删除白名单条目
