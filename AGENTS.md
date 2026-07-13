@@ -153,6 +153,31 @@ and `.github/workflows/singlebox-coverage.yml` pointed at this same entrypoint,
 then run `verify_singlebox_coverage_artifacts.py` against the generated report
 directory so local pushes and GitHub PRs enforce the same artifact baseline.
 
+### Singlebox Coverage Details
+
+`scripts/ci/singlebox_coverage.sh` reads
+`scripts/ci/singlebox_coverage_modules.yaml`. With no `--module` arguments it
+runs every registered module; focused diagnosis can select one or more modules
+with repeated `--module <name>` arguments. The runner starts one standalone
+product stack, shares it across Backend acceptance stories and BCS user-story
+E2E, then calculates the Core, Router API, and Plugin API denominators declared
+by each module.
+
+The per-module non-regression results and the shared-stack evidence are written
+to `scripts/.dependencies/coverage/singlebox/reports/`: `summary.json`,
+`summary.md`, `dashboard.html`, acceptance JUnit/logs, Backend and BaaS
+coverage reports, plus the copied BCS reports under `bcs/`. GitHub's
+`singlebox-coverage-artifacts` artifact uploads that same directory. The
+artifact verifier must run against this report directory after the coverage
+runner, so local pre-push and PR CI enforce the same result.
+
+When adding a module, add meaningful live acceptance stories, declare the
+complete Core/Router/Plugin denominators in
+`scripts/ci/singlebox_coverage_modules.yaml`, establish thresholds from a
+fresh focused run, then run the default all-module gate to catch shared-stack
+interference. Do not inflate a result by excluding production Core paths or by
+adding test-only calls to domain logic.
+
 ## Development Guidelines
 
 Start from the requirement and the existing contract. Keep changes small and
