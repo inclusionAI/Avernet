@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Callable
 
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
@@ -17,6 +17,15 @@ from agentclaw.community.core.task_queue.types import (
 )
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.bot_management.repository.protocol import (
+        BotRepository,
+    )
+    from agentclaw.community.core.devices.repository.protocol import (
+        DeviceBindingRepository,
+    )
+    from agentclaw.community.core.service_bot.services.baas_service import BaasService
 
 TECLAW_CREATE_PUBLISH_POLL_TASK = "teclaw.create.publish_poll"
 TECLAW_PUBLISH_TASK_DEADLINE_SECONDS = 86400
@@ -83,9 +92,9 @@ class TeclawPublishTaskHandler:
     def __init__(
         self,
         *,
-        baas_service: Any,
-        bot_repository: Any,
-        device_binding_repo: Any,
+        baas_service: BaasService,
+        bot_repository: BotRepository,
+        device_binding_repo: DeviceBindingRepository,
         poll_delay_seconds: float = 5.0,
         clock: Callable[[], float] = time.time,
     ) -> None:
@@ -189,9 +198,9 @@ class TeclawPublishTaskLifecycle(LifecycleBase):
         self,
         *,
         registry: HandlerRegistry,
-        baas_service: Any,
-        bot_repository: Any,
-        device_binding_repo: Any,
+        baas_service: BaasService,
+        bot_repository: BotRepository,
+        device_binding_repo: DeviceBindingRepository,
     ) -> None:
         self._registry = registry
         self._baas_service = baas_service
