@@ -184,3 +184,20 @@ class TestSaveNotification:
         # 投递态确已改
         assert after.notify_status == "sent"
         assert before.notify_status == "sending"
+
+    def test_save_persists_notify_channel(self, engine, tables):
+        """apply_to 必须把领域模型的 channel 写回 notify_channel 列。
+
+        channel 是可变投递态字段(例如 tc_card 构建失败降级 markdown 时模型
+        channel 可能被改写);apply_to 漏写该列会导致 save_notification 静默丢失
+        渠道变更。此处锁死该写回契约。
+        """
+        _insert_row(engine, notify_status="sending")  # 行里 notify_channel 默认 None
+        repo = _build_repo(engine)
+        notify = _build_domain_notify("sent")  # 领域模型 channel="markdown"
+
+        with patch(_ENV_PATCH, return_value=ENV):
+            repo.save_notification(notify)
+        row = _fetch_row(engine)
+
+        assert row.notify_channel == "markdown"

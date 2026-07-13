@@ -431,8 +431,9 @@ class NotifyLogRepository:
 
         通知发送状态机领域往返的写回原语(对齐 ``save_ticket`` 范式):
         按 ``notification_id`` + env 查出 ORM 行 → ``apply_to`` 只写可变投递态
-        (notify_status / send_attempt_count / last_send_at / last_send_error /
-        external_message_id / sent_at)→ commit。冻结快照/sealed 列不动。
+        (notify_status / notify_channel / send_attempt_count / last_send_at /
+        last_send_error / external_message_id / sent_at)→ commit。冻结快照/sealed
+        列不动。
 
         调用方(``NotifyLifecycleService``)在调本原语前已 invoke 领域守卫方法
         (``mark_claimed`` / ``mark_sent`` / ``mark_failed``);本原语只写回,

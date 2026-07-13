@@ -368,6 +368,7 @@ class GovernanceNotification:
             row: 已有 ORM 行(从 session 查出)。
         """
         row.notify_status = self.delivery_status.value
+        row.notify_channel = self.channel
         row.send_attempt_count = self.send_attempt_count
         row.last_send_at = self.last_send_at
         row.last_send_error = self.last_send_error
