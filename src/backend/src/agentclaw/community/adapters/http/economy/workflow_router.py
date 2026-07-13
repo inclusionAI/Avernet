@@ -78,15 +78,17 @@ def _raise_on_admin_error(result: object) -> None:
 
 
 def _validate_status_filter(statuses: list[str] | None) -> list[str] | None:
-    """校验 ``statuses`` query 取值,返回归一化后的列表(空 list → None)。
+    """校验 ``statuses`` query 取值,返回归一化后的列表。
 
-    允许 None(缺省=全部活跃态);任一非法值 → 400。空 list 视为缺省,
-    由 service 层填默认活跃态。
+    语义守恒(与 service 层 ``list_review_tickets`` 契约一致):
+      - None  = 缺省 → service 填默认活跃态
+      - []    = 显式空过滤 → service 走空结果路径(不得在此回落默认)
+      - 非空  = 任一非法值 → 400
     """
     if statuses is None:
         return None
     if len(statuses) == 0:
-        return None
+        return []
     invalid = [s for s in statuses if s not in _ALLOWED_REVIEW_STATUSES]
     if invalid:
         raise HTTPException(
