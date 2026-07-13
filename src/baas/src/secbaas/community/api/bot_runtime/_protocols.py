@@ -13,6 +13,11 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from ..bot_manage import BotStartProgressResponse
 from ..device_manage import CommandResult
 from ._http_connection_info import HttpConnectionInfo
+from ._file_transfer_models import (
+    GetDownloadUrlResponse,
+    GetTransferStatusResponse,
+    GetUploadUrlResponse,
+)
 from ._models import (
     BotChatContext,
     MessageInfo,
@@ -109,6 +114,36 @@ class BotFetchStartProgressDispatcher(Protocol):
         tenant: str,
         device_affinity: str | None = None,
     ) -> BotStartProgressResponse: ...
+
+
+@runtime_checkable
+class BotFileTransferDispatcher(Protocol):
+    """文件传输调度器协议"""
+
+    async def dispatch_get_upload_url(
+        self,
+        bot_uuid: str,
+        tenant: str,
+        device_path: str,
+        filename: str | None = None,
+        expire_seconds: int = 3600,
+        staging_subdir: str | None = None,
+        device_affinity: str | None = None,
+    ) -> GetUploadUrlResponse: ...
+
+    async def dispatch_get_download_url(
+        self,
+        bot_uuid: str,
+        tenant: str,
+        device_path: str,
+        expire_seconds: int = 3600,
+        device_affinity: str | None = None,
+    ) -> GetDownloadUrlResponse: ...
+
+    async def dispatch_get_transfer_status(
+        self,
+        transfer_id: str,
+    ) -> GetTransferStatusResponse: ...
 
 
 @runtime_checkable
