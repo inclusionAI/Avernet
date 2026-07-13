@@ -1466,7 +1466,9 @@ def _make_runner_with_config(
 class TestSelectDispatcherConfig:
     """Tests for system_config-driven dispatcher routing."""
 
-    def test_no_config_service_defaults_to_task(self, mock_selector, mock_run_repo, mock_bot_service_plugin):
+    def test_no_config_service_defaults_to_task(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
         """Without system_config_service, defaults to TaskMessageDispatcher."""
         task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
         queue_d = MagicMock(spec=MessageDispatcher)
@@ -1480,20 +1482,32 @@ class TestSelectDispatcherConfig:
         result = runner._select_dispatcher("bot-1")
         assert result is task_d
 
-    def test_config_returns_queue_dispatcher(self, mock_selector, mock_run_repo, mock_bot_service_plugin):
+    def test_config_returns_queue_dispatcher(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
         """When config value is 'QueueTaskMessageDispatcher', selects queue dispatcher."""
         task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
         queue_d = MagicMock(spec=MessageDispatcher)
         queue_d.__class__.__name__ = "QueueTaskMessageDispatcher"
 
         config_service = MagicMock()
-        config_service.get_config.return_value = _config_response("QueueTaskMessageDispatcher")
+        config_service.get_config.return_value = _config_response(
+            "QueueTaskMessageDispatcher"
+        )
 
-        runner = _make_runner_with_config(mock_selector, mock_run_repo, mock_bot_service_plugin, config_service, [queue_d, task_d])
+        runner = _make_runner_with_config(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
+        )
         result = runner._select_dispatcher("bot-1")
         assert result is queue_d
 
-    def test_config_method_stream_overrides(self, mock_selector, mock_run_repo, mock_bot_service_plugin):
+    def test_config_method_stream_overrides(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
         """:stream suffix key takes priority over base key."""
         task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
         queue_d = MagicMock(spec=MessageDispatcher)
@@ -1508,12 +1522,20 @@ class TestSelectDispatcherConfig:
         config_service = MagicMock()
         config_service.get_config.side_effect = get_config
 
-        runner = _make_runner_with_config(mock_selector, mock_run_repo, mock_bot_service_plugin, config_service, [queue_d, task_d])
+        runner = _make_runner_with_config(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
+        )
 
         assert runner._select_dispatcher("bot-1") is queue_d
         assert runner._select_dispatcher("bot-1", method="stream") is task_d
 
-    def test_config_fallback_to_wildcard(self, mock_selector, mock_run_repo, mock_bot_service_plugin):
+    def test_config_fallback_to_wildcard(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
         """When bot_id key is not found, falls back to * wildcard."""
         task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
         queue_d = MagicMock(spec=MessageDispatcher)
@@ -1527,11 +1549,19 @@ class TestSelectDispatcherConfig:
         config_service = MagicMock()
         config_service.get_config.side_effect = get_config
 
-        runner = _make_runner_with_config(mock_selector, mock_run_repo, mock_bot_service_plugin, config_service, [queue_d, task_d])
+        runner = _make_runner_with_config(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
+        )
         result = runner._select_dispatcher("bot-1")
         assert result is queue_d
 
-    def test_config_get_config_exception_falls_through(self, mock_selector, mock_run_repo, mock_bot_service_plugin):
+    def test_config_get_config_exception_falls_through(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
         """When get_config raises, continues to next key."""
         task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
         queue_d = MagicMock(spec=MessageDispatcher)
@@ -1548,11 +1578,19 @@ class TestSelectDispatcherConfig:
         config_service = MagicMock()
         config_service.get_config.side_effect = get_config
 
-        runner = _make_runner_with_config(mock_selector, mock_run_repo, mock_bot_service_plugin, config_service, [queue_d, task_d])
+        runner = _make_runner_with_config(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
+        )
         result = runner._select_dispatcher("bot-1")
         assert result is queue_d
 
-    def test_config_empty_value_falls_through(self, mock_selector, mock_run_repo, mock_bot_service_plugin):
+    def test_config_empty_value_falls_through(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
         """Empty conf_value is treated as unconfigured, falls through to next key."""
         task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
         queue_d = MagicMock(spec=MessageDispatcher)
@@ -1566,16 +1604,32 @@ class TestSelectDispatcherConfig:
         config_service = MagicMock()
         config_service.get_config.side_effect = get_config
 
-        runner = _make_runner_with_config(mock_selector, mock_run_repo, mock_bot_service_plugin, config_service, [queue_d, task_d])
+        runner = _make_runner_with_config(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
+        )
         result = runner._select_dispatcher("bot-1")
         assert result is queue_d
 
-    def test_config_unknown_dispatcher_name_falls_back(self, mock_selector, mock_run_repo, mock_bot_service_plugin):
+    def test_config_unknown_dispatcher_name_falls_back(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
         """When config value is not in dispatcher_map, falls back to last dispatcher."""
         task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
         config_service = MagicMock()
-        config_service.get_config.return_value = _config_response("NonExistentDispatcher")
+        config_service.get_config.return_value = _config_response(
+            "NonExistentDispatcher"
+        )
 
-        runner = _make_runner_with_config(mock_selector, mock_run_repo, mock_bot_service_plugin, config_service, [task_d])
+        runner = _make_runner_with_config(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [task_d],
+        )
         result = runner._select_dispatcher("bot-1")
         assert result is task_d
