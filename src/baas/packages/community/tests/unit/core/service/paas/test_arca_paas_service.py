@@ -72,12 +72,12 @@ class TestDestroyDeviceWithStorage:
         mock_sandbox.destroy.assert_called_once()
 
     def test__destroy_device_sync__without_storage(
-        self, arca_credentials, mock_plugin, mock_sandbox
+        self, arca_credentials, mock_plugin, mock_sandbox, caplog
     ):
         """TST-02: When sandbox has no storage, delete_storage is NOT called."""
         # Setup: sandbox info has NO storage attribute
         mock_info = MagicMock()
-        # Do NOT set mock_info.storage — so getattr(info, "storage", None) returns None
+        del mock_info.storage  # Ensure getattr(info, "storage", None) returns None
         mock_sandbox.get_info.return_value = mock_info
         mock_sandbox.destroy.return_value = True
 
@@ -85,14 +85,17 @@ class TestDestroyDeviceWithStorage:
             credentials=arca_credentials, arca_sandbox_plugin=mock_plugin
         )
 
-        result = service._destroy_device_sync("test-device-id")
+        with caplog.at_level(logging.WARNING):
+            result = service._destroy_device_sync("test-device-id")
 
         assert result is True
         mock_plugin.delete_storage.assert_not_called()
         mock_sandbox.destroy.assert_called_once()
+        assert "Storage cleanup skipped: storage attribute missing" in caplog.text
+        assert "paas_device_id=test-device-id" in caplog.text
 
     def test__destroy_device_sync__get_info_fails(
-        self, arca_credentials, mock_plugin, mock_sandbox
+        self, arca_credentials, mock_plugin, mock_sandbox, caplog
     ):
         """TST-03: When get_info fails, destroy still succeeds and delete_storage NOT called."""
         # Setup: get_info raises an exception
@@ -103,11 +106,14 @@ class TestDestroyDeviceWithStorage:
             credentials=arca_credentials, arca_sandbox_plugin=mock_plugin
         )
 
-        result = service._destroy_device_sync("test-device-id")
+        with caplog.at_level(logging.WARNING):
+            result = service._destroy_device_sync("test-device-id")
 
         assert result is True
         mock_plugin.delete_storage.assert_not_called()
         mock_sandbox.destroy.assert_called_once()
+        assert "Storage cleanup skipped: get_info failed" in caplog.text
+        assert "paas_device_id=test-device-id" in caplog.text
 
     def test__destroy_device_sync__delete_storage_fails(
         self, arca_credentials, mock_plugin, mock_sandbox, caplog
@@ -131,6 +137,8 @@ class TestDestroyDeviceWithStorage:
         mock_plugin.delete_storage.assert_called_once_with("storage-abc", "test-tenant")
         mock_sandbox.destroy.assert_called_once()
         assert "Storage deletion failed" in caplog.text
+
+    # ── Idempotent destroy tests (from github/dev) ──
 
     def test__destroy_device_sync__already_missing_is_idempotent(
         self, arca_credentials, mock_plugin
@@ -199,3 +207,75 @@ class TestDestroyDeviceWithStorage:
 
         with pytest.raises(PaasError, match="connection refused"):
             service._destroy_device_sync("test-device-id")
+
+    # ── Storage edge-case tests (from phase 01.1) ──
+
+    def test__destroy_device_sync__storage_not_dict(
+        self, arca_credentials, mock_plugin, mock_sandbox, caplog
+    ):
+        """Scenario C: When sandbox storage is not a dict, WARNING is logged."""
+        mock_info = MagicMock()
+        mock_info.storage = "not-a-dict"
+        mock_sandbox.get_info.return_value = mock_info
+        mock_sandbox.destroy.return_value = True
+
+        service = ArcaPaasService(
+            credentials=arca_credentials, arca_sandbox_plugin=mock_plugin
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = service._destroy_device_sync("test-device-id")
+
+        assert result is True
+        mock_plugin.delete_storage.assert_not_called()
+        mock_sandbox.destroy.assert_called_once()
+        assert "Storage cleanup skipped: storage is not a dict" in caplog.text
+        assert "paas_device_id=test-device-id" in caplog.text
+
+    def test__destroy_device_sync__storage_id_missing(
+        self, arca_credentials, mock_plugin, mock_sandbox, caplog
+    ):
+        """Scenario D: When storage_id key is missing, WARNING is logged."""
+        mock_info = MagicMock()
+        mock_info.storage = {}  # dict but no "storage_id" key
+        mock_sandbox.get_info.return_value = mock_info
+        mock_sandbox.destroy.return_value = True
+
+        service = ArcaPaasService(
+            credentials=arca_credentials, arca_sandbox_plugin=mock_plugin
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = service._destroy_device_sync("test-device-id")
+
+        assert result is True
+        mock_plugin.delete_storage.assert_not_called()
+        mock_sandbox.destroy.assert_called_once()
+        assert "Storage cleanup skipped: storage_id key missing" in caplog.text
+        assert "paas_device_id=test-device-id" in caplog.text
+
+
+# ── _safe_repr helper tests (from phase 01.1) ──
+
+def test__safe_repr__truncates():
+    """_safe_repr truncates output to max_len with ellipsis indicator."""
+    from secbaas.core.service.paas._arca_paas_service import _safe_repr
+
+    result = _safe_repr("x" * 5000, max_len=10)
+    assert len(result) == 10
+    # Truncated at max_len with "..." appended as truncation indicator
+    assert result.endswith("...")
+    assert result.startswith("'")
+
+
+def test__safe_repr__repr_fails():
+    """_safe_repr returns error marker when repr() raises."""
+    from secbaas.core.service.paas._arca_paas_service import _safe_repr
+
+    class BadRepr:
+        def __repr__(self):
+            raise RuntimeError("boom")
+
+    result = _safe_repr(BadRepr())
+    assert "<repr failed:" in result
+    assert "boom" in result
