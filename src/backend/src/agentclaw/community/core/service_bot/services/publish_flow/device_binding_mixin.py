@@ -16,7 +16,7 @@ logger = get_logger()
 class DeviceBindingMixin:
     """Device-binding table writes for the publish flow."""
 
-    def _create_release_binding(
+    def create_release_binding(
         self,
         *,
         bot: dict,

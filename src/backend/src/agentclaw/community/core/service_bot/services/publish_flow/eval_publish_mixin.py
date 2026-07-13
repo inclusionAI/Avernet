@@ -104,7 +104,7 @@ class EvalPublishMixin:
         )
         # Best-effort approve; skip when BaaS returned no publish workflow id.
         if baas_publish_id:
-            self._approve_baas_publish(
+            self.approve_baas_publish(
                 baas_publish_id=baas_publish_id,
                 operator=operator,
                 stage=publish_stage,
@@ -153,7 +153,7 @@ class EvalPublishMixin:
         destroy_publish_id = destroy_result.get("publish_id")
         # Best-effort approve; skip when BaaS returned no publish workflow id.
         if destroy_publish_id:
-            self._approve_baas_publish(
+            self.approve_baas_publish(
                 baas_publish_id=destroy_publish_id,
                 operator=operator,
                 stage=PublishStage.EVAL,

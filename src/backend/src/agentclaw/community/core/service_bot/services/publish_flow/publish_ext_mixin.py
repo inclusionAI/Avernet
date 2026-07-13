@@ -18,7 +18,7 @@ logger = get_logger()
 class PublishExtMixin:
     """Release-time publish-record ext + status writes."""
 
-    def _record_release_ext(
+    def record_release_ext(
         self,
         *,
         publish_id: int,

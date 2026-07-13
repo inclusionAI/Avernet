@@ -7,30 +7,69 @@ by a handful of stage-keyed values. They collapse here into one
 selected by a :class:`StageSpec`. Behavior is preserved verbatim, including the
 verify-first-release quirk of not sending a ``version`` to ``release_async``.
 
-The runner operates through the ``PublishFlowService`` facade (``flow``) for the
-shared helpers (``_record_and_approve_release`` / ``_approve_baas_publish`` /
-``_refresh_publish_handle`` / ext helpers / provider seam), so those remain a
-single implementation and stay interceptable by tests.
+The runner takes its real dependencies explicitly (ext/state helpers, the build
+service, provider resolution) instead of reaching into ``PublishFlowService``
+private members. The release-record writes that live on the facade's mixins
+(create the device binding, record the publish ext, approve the BaaS workflow,
+refresh the read handle) are consumed through the narrow public
+:class:`ReleaseRecordOps` protocol — the facade satisfies it.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
+from agentclaw.community.core.service_bot.services.baas_service import BaasService
+from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
+)
+from agentclaw.community.core.service_bot.services.publish_flow.ext_state import (
+    PublishExtState,
+)
+from agentclaw.community.core.service_bot.services.publish_flow.provider_behavior import (
+    ProviderBehavior,
+    ProviderBehaviorRouter,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 
-if TYPE_CHECKING:
-    from agentclaw.community.core.service_bot.services.publish_flow_service import (
-        PublishFlowService,
-    )
-
 logger = get_logger()
+
+
+class ReleaseRecordOps(Protocol):
+    """The release-record operations the runner needs from the flow facade.
+
+    These are public, multi-consumer domain ops that live on the facade's mixins
+    (device-binding insert, publish-ext write, BaaS approve, read-handle
+    refresh); the runner consumes them through this narrow protocol instead of
+    holding the whole facade.
+    """
+
+    def create_release_binding(
+        self, *, bot: dict, bot_uuid: str, baas_publish_id: int, operator: str
+    ) -> int: ...
+
+    def record_release_ext(
+        self,
+        *,
+        publish_id: int,
+        bot: dict,
+        stage: PublishStage,
+        binding_id: int,
+        baas_publish_id: int,
+        source_status: PublishStatus,
+        target_status: PublishStatus,
+        engine_overrides: dict | None = None,
+    ) -> dict: ...
+
+    def approve_baas_publish(
+        self, baas_publish_id: int, operator: str, stage: PublishStage, request_id: str
+    ) -> bool: ...
+
+    def refresh_publish_handle(self, binding_id, publish_id) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -75,10 +114,28 @@ ONLINE_SPEC = StageSpec(
 
 
 class ReleaseStageRunner:
-    """Run a release for one stage — first-release or upgrade — via the facade."""
+    """Run a release for one stage — first-release or upgrade."""
 
-    def __init__(self, flow: "PublishFlowService") -> None:
-        self._flow = flow
+    def __init__(
+        self,
+        *,
+        ext_state: PublishExtState,
+        build_service: BotBuildService,
+        baas_service: BaasService,
+        provider_behaviors: ProviderBehaviorRouter,
+        ops: ReleaseRecordOps,
+    ) -> None:
+        self._ext_state = ext_state
+        self._build_service = build_service
+        self._baas_service = baas_service
+        self._provider_behaviors = provider_behaviors
+        self._ops = ops
+
+    def _provider_behavior(self, bot: dict) -> ProviderBehavior:
+        """The :class:`ProviderBehavior` for ``bot``'s container."""
+        return self._provider_behaviors.resolve(
+            self._baas_service.resolve_container_provider(bot)
+        )
 
     async def first_release(
         self,
@@ -94,10 +151,10 @@ class ReleaseStageRunner:
         stage's DingTalk channel engine_overrides; both are no-ops for ARCA when there
         is no config_artifact."""
         publish_id = publish_record.id
-        owner_id = self._flow._get_owner_id(publish_record)
+        owner_id = self._ext_state.owner_id(publish_record)
 
-        overrides = self._flow._stage_overrides(publish_record, spec.stage)
-        config_artifact = self._flow._artifact_for_stage(
+        overrides = self._ext_state.stage_overrides(publish_record, spec.stage)
+        config_artifact = PublishExtState.artifact_for_stage(
             (publish_record.ext or {}).get("config_artifact"),
             spec.stage,
             overrides,
@@ -116,7 +173,7 @@ class ReleaseStageRunner:
         )
         if spec.first_release_passes_version:
             release_kwargs["version"] = f"{publish_record.version}"
-        release_result = await self._flow._build_service.release_async(**release_kwargs)
+        release_result = await self._build_service.release_async(**release_kwargs)
 
         bot_uuid = release_result.get("bot_uuid")
         baas_publish_id = release_result.get("publish_id")
@@ -128,13 +185,13 @@ class ReleaseStageRunner:
         # Three distinct steps invoked in sequence: (1) create the device binding,
         # (2) record the binding/publish refs + provider promotion + status into
         # ext, (3) approve the BaaS workflow.
-        binding_id = self._flow._create_release_binding(
+        binding_id = self._ops.create_release_binding(
             bot=bot,
             bot_uuid=bot_uuid,
             baas_publish_id=baas_publish_id,
             operator=operator,
         )
-        self._flow._record_release_ext(
+        self._ops.record_release_ext(
             publish_id=publish_id,
             bot=bot,
             stage=spec.stage,
@@ -144,11 +201,11 @@ class ReleaseStageRunner:
             target_status=spec.target_status,
             engine_overrides=overrides,
         )
-        request_id = self._flow._build_service.generate_request_id(
+        request_id = self._build_service.generate_request_id(
             bot=bot,
             publish_stage=spec.stage.value,
         )
-        self._flow._approve_baas_publish(
+        self._ops.approve_baas_publish(
             baas_publish_id=baas_publish_id,
             operator=operator,
             stage=spec.stage,
@@ -187,15 +244,15 @@ class ReleaseStageRunner:
         the corresponding stage)."""
         publish_id = publish_record.id
         version = f"{publish_record.version}"
-        owner_id = self._flow._get_owner_id(publish_record)
+        owner_id = self._ext_state.owner_id(publish_record)
 
-        overrides = self._flow._stage_overrides(publish_record, spec.stage)
-        config_artifact = self._flow._artifact_for_stage(
+        overrides = self._ext_state.stage_overrides(publish_record, spec.stage)
+        config_artifact = PublishExtState.artifact_for_stage(
             (publish_record.ext or {}).get("config_artifact"),
             spec.stage,
             overrides,
         )
-        upgrade_result = await self._flow._build_service.upgrade_async(
+        upgrade_result = await self._build_service.upgrade_async(
             bot_uuid=bot_uuid,
             bot=bot,
             user_id=owner_id,
@@ -228,25 +285,25 @@ class ReleaseStageRunner:
 
         # Reuse the existing binding; update ext (binding/publish refs, provider
         # per-stage promotion state, refresh the teclaw read handle).
-        ext = self._flow._get_latest_ext(publish_id)
+        ext = self._ext_state.get_latest_ext(publish_id)
         ext.setdefault("binding", {})[spec.stage.value] = existing_binding_id
         ext.setdefault("publish", {})[spec.stage.value] = baas_publish_id
-        self._flow._provider_behavior(bot).persist_stage_promotion(
+        self._provider_behavior(bot).persist_stage_promotion(
             ext=ext, stage=spec.stage, engine_overrides=overrides
         )
-        self._flow._refresh_publish_handle(existing_binding_id, baas_publish_id)
-        self._flow._update_publish_status(
+        self._ops.refresh_publish_handle(existing_binding_id, baas_publish_id)
+        self._ext_state.update_status(
             publish_id=publish_id,
             target_status=spec.target_status,
             source_status=spec.source_status,
             ext=ext,
         )
 
-        request_id = self._flow._build_service.generate_request_id(
+        request_id = self._build_service.generate_request_id(
             bot=bot,
             publish_stage=spec.upgrade_request_label,
         )
-        approved = self._flow._approve_baas_publish(
+        approved = self._ops.approve_baas_publish(
             baas_publish_id=baas_publish_id,
             operator=operator,
             stage=spec.stage,
@@ -255,7 +312,7 @@ class ReleaseStageRunner:
         if approved is True:
             # Provider-specific post-upgrade refresh (teclaw re-pushes the MCP
             # outbound rule; ARCA/baas refresh via the startup callback → no-op).
-            self._flow._provider_behavior(bot).refresh_after_upgrade(
+            self._provider_behavior(bot).refresh_after_upgrade(
                 bot_uuid=bot_uuid,
                 bot=bot,
             )

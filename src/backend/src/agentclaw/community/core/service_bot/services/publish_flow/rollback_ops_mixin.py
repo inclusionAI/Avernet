@@ -133,7 +133,7 @@ class RollbackOpsMixin:
             bot=bot,
             publish_stage="rollback",
         )
-        self._approve_baas_publish(
+        self.approve_baas_publish(
             baas_publish_id=baas_publish_id,
             operator=operator,
             stage=PublishStage.ONLINE,
@@ -223,7 +223,7 @@ class RollbackOpsMixin:
 
             # Approve the destroy workflow record
             if destroy_publish_id:
-                self._approve_baas_publish(
+                self.approve_baas_publish(
                     baas_publish_id=destroy_publish_id,
                     operator="system",
                     stage=stage,

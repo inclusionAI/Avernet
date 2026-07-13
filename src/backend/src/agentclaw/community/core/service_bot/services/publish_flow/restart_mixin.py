@@ -281,7 +281,7 @@ class RestartMixin:
 
             # Refresh the reused binding's teclaw status read handle to the
             # restart's publish workflow (no-op for non-teclaw; best-effort).
-            self._refresh_publish_handle(
+            self.refresh_publish_handle(
                 binding_id, restart_publish_id
             )
 
@@ -315,7 +315,7 @@ class RestartMixin:
                 )
 
             # Approve the BaaS-layer restart publish record
-            self._approve_baas_publish(
+            self.approve_baas_publish(
                 baas_publish_id=restart_publish_id,
                 operator=operator,
                 stage=stage,

@@ -249,7 +249,7 @@ def test_approve_baas_publish_returns_false_when_baas_raises():
     baas_service.approve_publish.side_effect = RuntimeError("down")
     svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
 
-    result = svc._approve_baas_publish(
+    result = svc.approve_baas_publish(
         baas_publish_id=9,
         operator="op",
         stage=PublishStage.VERIFY,
@@ -400,9 +400,9 @@ def _build_svc_with_router(router, bot, provider="baas"):
         producer_router=router, teclaw_file_promotion=promo,
     )
     # Avoid touching real status/ext plumbing — isolate the build phase.
-    svc._get_latest_ext = Mock(return_value={})
-    svc._update_publish_status = Mock()
-    svc._get_owner_id = Mock(return_value="u1")
+    svc._ext_state.get_latest_ext = Mock(return_value={})
+    svc._ext_state.update_status = Mock()
+    svc._ext_state.owner_id = Mock(return_value="u1")
     publish_service.update_publish_status = Mock()
     return svc, publish_service
 
@@ -423,7 +423,7 @@ async def test_build_phase_routes_arca_and_merges_mount_ext():
     assert arca.calls == [({"bot_id": "b1", "active_engine": "openclaw"}, 3)]
     assert teclaw.calls == []
     # ARCA ext carries the mount chain unchanged (the durable record).
-    ext_written = svc._update_publish_status.call_args.kwargs["ext"]
+    ext_written = svc._ext_state.update_status.call_args.kwargs["ext"]
     assert ext_written["migration_path"] == "/m/3"
     assert ext_written["build_target_path"] == "/t/3"
 
@@ -450,7 +450,7 @@ async def test_build_phase_routes_external_and_merges_artifact_ext():
     # external pins the refs-only artifact onto ext (no mount chain). The teclaw
     # file-promotion gather merges its (here empty) snapshot into the artifact,
     # so the resources/identity_files keys are present (empty).
-    ext_written = svc._update_publish_status.call_args.kwargs["ext"]
+    ext_written = svc._ext_state.update_status.call_args.kwargs["ext"]
     assert ext_written["config_artifact"] == {
         "schema_version": 2, "resources": [], "identity_files": [],
     }
@@ -484,7 +484,7 @@ def test_create_release_binding_uses_resolved_provider_for_external():
     # baas reports a TECLAW container for this bot.
     svc._baas_service.resolve_container_provider = Mock(return_value="teclaw")
 
-    binding_id = svc._create_release_binding(
+    binding_id = svc.create_release_binding(
         bot={"bot_id": "b", "entity_id": "u", "active_engine": "teclaw"},
         bot_uuid="BOT-1",
         baas_publish_id=9,
@@ -503,7 +503,7 @@ def test_create_release_binding_defaults_provider_to_baas():
     # baas does not report a teclaw container → default baas.
     svc._baas_service.resolve_container_provider = Mock(return_value="baas")
 
-    binding_id = svc._create_release_binding(
+    binding_id = svc.create_release_binding(
         bot={"bot_id": "b", "active_engine": "openclaw"},
         bot_uuid="BOT-1",
         baas_publish_id=9,
@@ -529,8 +529,8 @@ async def test_restart_fallback_threads_config_artifact():
     svc = _pf(
         publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
     )
-    svc._update_publish_status = Mock()
-    svc._get_latest_ext = Mock(return_value={})
+    svc._ext_state.update_status = Mock()
+    svc._ext_state.get_latest_ext = Mock(return_value={})
 
     artifact = {"schema_version": 2, "skills": []}
     record = _make_publish_record(ext={"config_artifact": artifact})
@@ -573,9 +573,9 @@ async def test_restart_verify_delivers_stored_verify_overrides_not_online():
     build_service.generate_request_id = Mock(return_value="rid")
     build_service.upgrade_async = AsyncMock(return_value={"publish_id": 9})
     svc = _pf(Mock(), build_service, Mock(), Mock(), _arca_router(build_service))
-    svc._refresh_publish_handle = Mock()
+    svc.refresh_publish_handle = Mock()
     svc._mutate_and_update_ext = Mock()
-    svc._approve_baas_publish = Mock()
+    svc.approve_baas_publish = Mock()
 
     record = _make_publish_record(
         ext={
@@ -605,9 +605,9 @@ async def test_restart_no_stored_overrides_delivers_restamped_base():
     build_service.generate_request_id = Mock(return_value="rid")
     build_service.upgrade_async = AsyncMock(return_value={"publish_id": 9})
     svc = _pf(Mock(), build_service, Mock(), Mock(), _arca_router(build_service))
-    svc._refresh_publish_handle = Mock()
+    svc.refresh_publish_handle = Mock()
     svc._mutate_and_update_ext = Mock()
-    svc._approve_baas_publish = Mock()
+    svc.approve_baas_publish = Mock()
 
     record = _make_publish_record(
         ext={"config_artifact": _enriched_artifact("release", base_channels)}
@@ -631,9 +631,9 @@ async def test_restart_tolerates_null_engine_overrides_by_stage():
     build_service.generate_request_id = Mock(return_value="rid")
     build_service.upgrade_async = AsyncMock(return_value={"publish_id": 9})
     svc = _pf(Mock(), build_service, Mock(), Mock(), _arca_router(build_service))
-    svc._refresh_publish_handle = Mock()
+    svc.refresh_publish_handle = Mock()
     svc._mutate_and_update_ext = Mock()
-    svc._approve_baas_publish = Mock()
+    svc.approve_baas_publish = Mock()
 
     record = _make_publish_record(
         ext={"config_artifact": _enriched_artifact("release"), "engine_overrides_by_stage": None}
@@ -656,7 +656,7 @@ def test_refresh_publish_handle_merges_publish_id():
     svc = _pf(
         Mock(), Mock(), Mock(), Mock(), _arca_router(), device_binding_repo=repo
     )
-    svc._refresh_publish_handle(42, "pub-9")
+    svc.refresh_publish_handle(42, "pub-9")
     repo.update_device_props.assert_called_once_with(
         binding_id=42, props={"publish_id": "pub-9"}
     )
@@ -665,7 +665,7 @@ def test_refresh_publish_handle_merges_publish_id():
 def test_refresh_publish_handle_noop_without_repo():
     # Positional construction (no repo) — the unit-test shape; must not raise.
     svc = _pf(Mock(), Mock(), Mock(), Mock(), _arca_router())
-    svc._refresh_publish_handle(42, "pub-9")
+    svc.refresh_publish_handle(42, "pub-9")
 
 
 def test_refresh_publish_handle_noop_on_missing_ids():
@@ -673,8 +673,8 @@ def test_refresh_publish_handle_noop_on_missing_ids():
     svc = _pf(
         Mock(), Mock(), Mock(), Mock(), _arca_router(), device_binding_repo=repo
     )
-    svc._refresh_publish_handle(None, "pub-9")
-    svc._refresh_publish_handle(42, None)
+    svc.refresh_publish_handle(None, "pub-9")
+    svc.refresh_publish_handle(42, None)
     repo.update_device_props.assert_not_called()
 
 
@@ -684,7 +684,7 @@ def test_refresh_publish_handle_swallows_repo_error():
     svc = _pf(
         Mock(), Mock(), Mock(), Mock(), _arca_router(), device_binding_repo=repo
     )
-    svc._refresh_publish_handle(42, "pub-9")  # best-effort → must not raise
+    svc.refresh_publish_handle(42, "pub-9")  # best-effort → must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -878,9 +878,9 @@ async def test_verify_first_release_stamps_canary_delivered_and_persisted():
         publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
     )
     # _record_release_ext re-reads ext from DB (a fresh draft snapshot).
-    svc._get_latest_ext = Mock(return_value=_artifact_ext("draft"))
-    svc._update_publish_status = Mock()
-    svc._approve_baas_publish = Mock()
+    svc._ext_state.get_latest_ext = Mock(return_value=_artifact_ext("draft"))
+    svc._ext_state.update_status = Mock()
+    svc.approve_baas_publish = Mock()
 
     record = _make_publish_record(
         status=PublishStatus.BUILT.value, ext=_artifact_ext("draft")
@@ -898,7 +898,7 @@ async def test_verify_first_release_stamps_canary_delivered_and_persisted():
     assert delivered["engine_ext"]["bot_id"] == "b2"
     assert delivered["engine_ext"]["owner_id"] == "u1"
 
-    persisted = svc._update_publish_status.call_args.kwargs["ext"]["config_artifact"]
+    persisted = svc._ext_state.update_status.call_args.kwargs["ext"]["config_artifact"]
     assert persisted["engine_ext"]["stage"] == "canary"
     assert persisted["engine_ext"]["bot_id"] == "b2"
 
@@ -914,10 +914,10 @@ async def test_verify_upgrade_stamps_canary_delivered_and_persisted():
     svc = _pf(
         publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
     )
-    svc._get_latest_ext = Mock(return_value=_artifact_ext("draft"))
-    svc._update_publish_status = Mock()
-    svc._approve_baas_publish = Mock()
-    svc._refresh_publish_handle = Mock()
+    svc._ext_state.get_latest_ext = Mock(return_value=_artifact_ext("draft"))
+    svc._ext_state.update_status = Mock()
+    svc.approve_baas_publish = Mock()
+    svc.refresh_publish_handle = Mock()
 
     record = _make_publish_record(
         status=PublishStatus.BUILT.value, ext=_artifact_ext("draft")
@@ -933,7 +933,7 @@ async def test_verify_upgrade_stamps_canary_delivered_and_persisted():
 
     delivered = build_service.upgrade_async.await_args.kwargs["config_artifact"]
     assert delivered["engine_ext"]["stage"] == "canary"
-    persisted = svc._update_publish_status.call_args.kwargs["ext"]["config_artifact"]
+    persisted = svc._ext_state.update_status.call_args.kwargs["ext"]["config_artifact"]
     assert persisted["engine_ext"]["stage"] == "canary"
 
 
@@ -949,10 +949,10 @@ async def test_verify_upgrade_refreshes_teclaw_rule_after_baas_approve():
     svc = _pf(
         publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
     )
-    svc._get_latest_ext = Mock(return_value=_artifact_ext("draft"))
-    svc._update_publish_status = Mock()
-    svc._approve_baas_publish = Mock(return_value=True)
-    svc._refresh_publish_handle = Mock()
+    svc._ext_state.get_latest_ext = Mock(return_value=_artifact_ext("draft"))
+    svc._ext_state.update_status = Mock()
+    svc.approve_baas_publish = Mock(return_value=True)
+    svc.refresh_publish_handle = Mock()
 
     record = _make_publish_record(
         status=PublishStatus.BUILT.value, ext=_artifact_ext("draft")
@@ -1001,9 +1001,9 @@ async def test_verify_first_release_overlays_and_stores_stage_channels():
         publish_service, build_service, baas_service, Mock(), _arca_router(build_service),
         channel_overrides_reader=reader,
     )
-    svc._get_latest_ext = Mock(return_value=_artifact_ext("draft"))
-    svc._update_publish_status = Mock()
-    svc._approve_baas_publish = Mock()
+    svc._ext_state.get_latest_ext = Mock(return_value=_artifact_ext("draft"))
+    svc._ext_state.update_status = Mock()
+    svc.approve_baas_publish = Mock()
 
     record = _make_publish_record(
         status=PublishStatus.BUILT.value, ext=_artifact_ext("draft")
@@ -1020,7 +1020,7 @@ async def test_verify_first_release_overlays_and_stores_stage_channels():
     assert delivered["engine_overrides"] == _VERIFY_CH
     assert delivered["engine_ext"]["stage"] == "canary"
     # persisted per-stage map
-    persisted_ext = svc._update_publish_status.call_args.kwargs["ext"]
+    persisted_ext = svc._ext_state.update_status.call_args.kwargs["ext"]
     assert persisted_ext["engine_overrides_by_stage"]["verify"] == _VERIFY_CH
 
 
@@ -1037,10 +1037,10 @@ async def test_verify_upgrade_overlays_and_stores_stage_channels():
         publish_service, build_service, baas_service, Mock(), _arca_router(build_service),
         channel_overrides_reader=reader,
     )
-    svc._get_latest_ext = Mock(return_value=_artifact_ext("draft"))
-    svc._update_publish_status = Mock()
-    svc._approve_baas_publish = Mock()
-    svc._refresh_publish_handle = Mock()
+    svc._ext_state.get_latest_ext = Mock(return_value=_artifact_ext("draft"))
+    svc._ext_state.update_status = Mock()
+    svc.approve_baas_publish = Mock()
+    svc.refresh_publish_handle = Mock()
 
     record = _make_publish_record(
         status=PublishStatus.BUILT.value, ext=_artifact_ext("draft")
@@ -1053,7 +1053,7 @@ async def test_verify_upgrade_overlays_and_stores_stage_channels():
     delivered = build_service.upgrade_async.await_args.kwargs["config_artifact"]
     assert delivered["engine_overrides"] == _VERIFY_CH
     assert delivered["engine_ext"]["stage"] == "canary"
-    persisted_ext = svc._update_publish_status.call_args.kwargs["ext"]
+    persisted_ext = svc._ext_state.update_status.call_args.kwargs["ext"]
     assert persisted_ext["engine_overrides_by_stage"]["verify"] == _VERIFY_CH
 
 
@@ -1068,7 +1068,7 @@ async def test_verify_first_release_raises_when_baas_returns_no_publish_id():
     svc = _pf(
         publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
     )
-    svc._get_latest_ext = Mock(return_value=_artifact_ext("draft"))
+    svc._ext_state.get_latest_ext = Mock(return_value=_artifact_ext("draft"))
 
     record = _make_publish_record(
         status=PublishStatus.BUILT.value, ext=_artifact_ext("draft")
@@ -1099,9 +1099,9 @@ async def test_verify_first_release_arca_skips_channel_fetch_and_store():
         publish_service, build_service, baas_service, Mock(), _arca_router(build_service),
         channel_overrides_reader=reader,
     )
-    svc._get_latest_ext = Mock(return_value={"migration_path": "/m"})
-    svc._update_publish_status = Mock()
-    svc._approve_baas_publish = Mock()
+    svc._ext_state.get_latest_ext = Mock(return_value={"migration_path": "/m"})
+    svc._ext_state.update_status = Mock()
+    svc.approve_baas_publish = Mock()
 
     record = _make_publish_record(
         status=PublishStatus.BUILT.value, ext={"migration_path": "/m"}
@@ -1113,7 +1113,7 @@ async def test_verify_first_release_arca_skips_channel_fetch_and_store():
 
     reader.overrides_for_stage.assert_not_called()
     assert build_service.release_async.await_args.kwargs["config_artifact"] is None
-    persisted_ext = svc._update_publish_status.call_args.kwargs["ext"]
+    persisted_ext = svc._ext_state.update_status.call_args.kwargs["ext"]
     assert "engine_overrides_by_stage" not in persisted_ext
 
 
@@ -1131,9 +1131,9 @@ async def test_online_first_release_stamps_release_delivered_and_persisted():
     svc = _pf(
         publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
     )
-    svc._get_latest_ext = Mock(return_value=_artifact_ext("canary"))
-    svc._update_publish_status = Mock()
-    svc._approve_baas_publish = Mock()
+    svc._ext_state.get_latest_ext = Mock(return_value=_artifact_ext("canary"))
+    svc._ext_state.update_status = Mock()
+    svc.approve_baas_publish = Mock()
 
     record = _make_publish_record(
         status=PublishStatus.VALIDATING.value, ext=_artifact_ext("canary")
@@ -1147,7 +1147,7 @@ async def test_online_first_release_stamps_release_delivered_and_persisted():
 
     delivered = build_service.release_async.await_args.kwargs["config_artifact"]
     assert delivered["engine_ext"]["stage"] == "release"
-    persisted = svc._update_publish_status.call_args.kwargs["ext"]["config_artifact"]
+    persisted = svc._ext_state.update_status.call_args.kwargs["ext"]["config_artifact"]
     assert persisted["engine_ext"]["stage"] == "release"
     assert persisted["engine_ext"]["bot_id"] == "b2"
 
@@ -1168,10 +1168,10 @@ async def test_online_upgrade_stamps_release_delivered_and_persisted():
     )
     publish_service.get_publish_by_id.return_value = last_publish
     publish_service.get_device_binding_by_id.return_value = Mock(device_id="BOT-old")
-    svc._get_latest_ext = Mock(return_value=_artifact_ext("canary"))
-    svc._update_publish_status = Mock()
-    svc._approve_baas_publish = Mock()
-    svc._refresh_publish_handle = Mock()
+    svc._ext_state.get_latest_ext = Mock(return_value=_artifact_ext("canary"))
+    svc._ext_state.update_status = Mock()
+    svc.approve_baas_publish = Mock()
+    svc.refresh_publish_handle = Mock()
 
     record = _make_publish_record(
         status=PublishStatus.VALIDATING.value,
@@ -1187,7 +1187,7 @@ async def test_online_upgrade_stamps_release_delivered_and_persisted():
 
     delivered = build_service.upgrade_async.await_args.kwargs["config_artifact"]
     assert delivered["engine_ext"]["stage"] == "release"
-    persisted = svc._update_publish_status.call_args.kwargs["ext"]["config_artifact"]
+    persisted = svc._ext_state.update_status.call_args.kwargs["ext"]["config_artifact"]
     assert persisted["engine_ext"]["stage"] == "release"
 
 
@@ -1208,10 +1208,10 @@ async def test_online_upgrade_refreshes_teclaw_rule_after_baas_approve():
     )
     publish_service.get_publish_by_id.return_value = last_publish
     publish_service.get_device_binding_by_id.return_value = Mock(device_id="BOT-old")
-    svc._get_latest_ext = Mock(return_value=_artifact_ext("canary"))
-    svc._update_publish_status = Mock()
-    svc._approve_baas_publish = Mock(return_value=True)
-    svc._refresh_publish_handle = Mock()
+    svc._ext_state.get_latest_ext = Mock(return_value=_artifact_ext("canary"))
+    svc._ext_state.update_status = Mock()
+    svc.approve_baas_publish = Mock(return_value=True)
+    svc.refresh_publish_handle = Mock()
 
     record = _make_publish_record(
         status=PublishStatus.VALIDATING.value,
@@ -1254,9 +1254,9 @@ async def test_online_first_release_overlays_and_stores_stage_channels():
         publish_service, build_service, baas_service, Mock(), _arca_router(build_service),
         channel_overrides_reader=reader,
     )
-    svc._get_latest_ext = Mock(return_value=_artifact_ext("canary"))
-    svc._update_publish_status = Mock()
-    svc._approve_baas_publish = Mock()
+    svc._ext_state.get_latest_ext = Mock(return_value=_artifact_ext("canary"))
+    svc._ext_state.update_status = Mock()
+    svc.approve_baas_publish = Mock()
 
     record = _make_publish_record(
         status=PublishStatus.VALIDATING.value, ext=_artifact_ext("canary")
@@ -1270,7 +1270,7 @@ async def test_online_first_release_overlays_and_stores_stage_channels():
     delivered = build_service.release_async.await_args.kwargs["config_artifact"]
     assert delivered["engine_overrides"] == _ONLINE_CH
     assert delivered["engine_ext"]["stage"] == "release"
-    persisted_ext = svc._update_publish_status.call_args.kwargs["ext"]
+    persisted_ext = svc._ext_state.update_status.call_args.kwargs["ext"]
     assert persisted_ext["engine_overrides_by_stage"]["online"] == _ONLINE_CH
 
 
@@ -1292,10 +1292,10 @@ async def test_online_upgrade_overlays_and_stores_stage_channels():
     )
     publish_service.get_publish_by_id.return_value = last_publish
     publish_service.get_device_binding_by_id.return_value = Mock(device_id="BOT-old")
-    svc._get_latest_ext = Mock(return_value=_artifact_ext("canary"))
-    svc._update_publish_status = Mock()
-    svc._approve_baas_publish = Mock()
-    svc._refresh_publish_handle = Mock()
+    svc._ext_state.get_latest_ext = Mock(return_value=_artifact_ext("canary"))
+    svc._ext_state.update_status = Mock()
+    svc.approve_baas_publish = Mock()
+    svc.refresh_publish_handle = Mock()
 
     record = _make_publish_record(
         status=PublishStatus.VALIDATING.value, last_pub_id=10, ext=_artifact_ext("canary")
@@ -1308,7 +1308,7 @@ async def test_online_upgrade_overlays_and_stores_stage_channels():
     delivered = build_service.upgrade_async.await_args.kwargs["config_artifact"]
     assert delivered["engine_overrides"] == _ONLINE_CH
     assert delivered["engine_ext"]["stage"] == "release"
-    persisted_ext = svc._update_publish_status.call_args.kwargs["ext"]
+    persisted_ext = svc._ext_state.update_status.call_args.kwargs["ext"]
     assert persisted_ext["engine_overrides_by_stage"]["online"] == _ONLINE_CH
 
 
@@ -1328,9 +1328,9 @@ async def test_arca_path_has_no_config_artifact_and_is_not_restamped():
     svc = _pf(
         publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
     )
-    svc._get_latest_ext = Mock(return_value={"migration_path": "/m"})
-    svc._update_publish_status = Mock()
-    svc._approve_baas_publish = Mock()
+    svc._ext_state.get_latest_ext = Mock(return_value={"migration_path": "/m"})
+    svc._ext_state.update_status = Mock()
+    svc.approve_baas_publish = Mock()
 
     record = _make_publish_record(
         status=PublishStatus.BUILT.value, ext={"migration_path": "/m"}
@@ -1343,7 +1343,7 @@ async def test_arca_path_has_no_config_artifact_and_is_not_restamped():
     )
 
     assert build_service.release_async.await_args.kwargs["config_artifact"] is None
-    persisted = svc._update_publish_status.call_args.kwargs["ext"]
+    persisted = svc._ext_state.update_status.call_args.kwargs["ext"]
     assert "config_artifact" not in persisted
 
 
@@ -2033,7 +2033,7 @@ async def test_eval_publish_success():
     }
 
     svc = _pf(publish_service, build_service, baas_service, bot_service, _arca_router(build_service))
-    svc._approve_baas_publish = Mock(return_value=True)
+    svc.approve_baas_publish = Mock(return_value=True)
     publish_service.get_publish_by_id.return_value = _make_publish_record(
         id=301,
         version=3,
@@ -2052,7 +2052,7 @@ async def test_eval_publish_success():
     assert build_service.release_async.await_args.kwargs["bot"] == bot_service.get_bot.return_value
     assert build_service.release_async.await_args.kwargs["ext_info"] == {"biz_id": "biz-001"}
     assert bot_service.get_bot.return_value["ext"] == {}
-    svc._approve_baas_publish.assert_called_once_with(
+    svc.approve_baas_publish.assert_called_once_with(
         baas_publish_id=901,
         operator="u1",
         stage=PublishStage.EVAL,
@@ -2066,7 +2066,7 @@ def test_eval_teardown_success():
     baas_service = Mock()
     baas_service.destroy_bot.return_value = {"publish_id": 902}
     svc = _pf(Mock(), build_service, baas_service, Mock(), _arca_router(build_service))
-    svc._approve_baas_publish = Mock(return_value=True)
+    svc.approve_baas_publish = Mock(return_value=True)
 
     result = svc.eval_teardown(
         "BOT-EVAL-2",
@@ -2085,7 +2085,7 @@ def test_eval_teardown_success():
         operator="u1",
         request_id="rid-destroy-eval",
     )
-    svc._approve_baas_publish.assert_called_once_with(
+    svc.approve_baas_publish.assert_called_once_with(
         baas_publish_id=902,
         operator="u1",
         stage=PublishStage.EVAL,

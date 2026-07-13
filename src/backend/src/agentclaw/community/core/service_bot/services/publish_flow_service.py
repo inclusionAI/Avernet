@@ -222,9 +222,22 @@ class PublishFlowService(
 
         # Stage-parameterized release runner: one first-release + one upgrade
         # implementation for both verify and online (was four near-duplicate
-        # methods). Operates through this facade for the shared helpers.
-        self._release_runner = ReleaseStageRunner(self)
-        self._build_stage_runner = BuildStageRunner(self)
+        # methods). The runners take their real dependencies explicitly; the
+        # facade satisfies ReleaseRecordOps (the four public release-record ops).
+        self._release_runner = ReleaseStageRunner(
+            ext_state=self._ext_state,
+            build_service=bot_build_service,
+            baas_service=baas_service,
+            provider_behaviors=self._provider_behaviors,
+            ops=self,
+        )
+        self._build_stage_runner = BuildStageRunner(
+            ext_state=self._ext_state,
+            bot_service=bot_service,
+            baas_service=baas_service,
+            producer_router=producer_router,
+            provider_behaviors=self._provider_behaviors,
+        )
 
         # Durable task queue: backend-driven advances (build+verify release, online
         # release) are enqueued as persisted, crash-safe tasks instead of
@@ -244,7 +257,7 @@ class PublishFlowService(
     ) -> dict | None:
         return PublishExtState.artifact_for_stage(config_artifact, stage, overrides)
 
-    def _refresh_publish_handle(self, binding_id, publish_id) -> None:
+    def refresh_publish_handle(self, binding_id, publish_id) -> None:
         """Refresh the baas ``publish_id`` stashed in a reused binding's
         ``device_props`` — the teclaw status read handle. Merge-preserving and
         best-effort; no-op without ids. Never breaks publish/restart (the read
@@ -257,7 +270,7 @@ class PublishFlowService(
             )
         except Exception as e:
             logger.warning(
-                "[PublishFlowService._refresh_publish_handle] failed for "
+                "[PublishFlowService.refresh_publish_handle] failed for "
                 "binding_id=%s publish_id=%s: %s",
                 binding_id,
                 publish_id,
@@ -904,7 +917,12 @@ class PublishFlowService(
         source_status: PublishStatus,
         ext: dict,
     ) -> None:
-        self._ext_state.update_status(publish_id, target_status, source_status, ext)
+        self._ext_state.update_status(
+            publish_id=publish_id,
+            target_status=target_status,
+            source_status=source_status,
+            ext=ext,
+        )
 
     # ── public accessors for the durable task handlers ───────────────────────
     # The task handlers (publish_flow/tasks.py) orchestrate this facade; expose the
