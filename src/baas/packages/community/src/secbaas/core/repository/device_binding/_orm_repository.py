@@ -1453,15 +1453,19 @@ class OrmDeviceBindingRepository(OrmConnectionMixin, DeviceBindingRepository):
         *,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        """查询 baas_device 中 ACTIVE 且有 sandbox_id 的记录，
+        """查询 baas_device 中 ACTIVE 且有 sandbox_id 的 ARCA 记录，
         按 TTL 过期时间 ASC 排序，取前 limit 条。
 
         用于 DeviceTtlTimer 定时任务：优先处理即将过期的服务 bot 设备。
+        限 provider_type='ARCA'（对齐 list_baas_devices_active_paginated）——
+        teclaw 的 update_device_ttl 是 NotImplementedError，k8s/docker 等沙箱
+        生命周期不由本任务续期，混入会触发无效续期 + 探活噪声。
         """
         rows = (
             self._session.query(DeviceModel)
             .filter(
                 DeviceModel.status == "ACTIVE",
+                DeviceModel.provider_type == "ARCA",
                 DeviceModel.provider_device_props.op("->>")("$.sandbox_id").isnot(None),
             )
             .order_by(
