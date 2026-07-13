@@ -1,0 +1,1063 @@
+openapi: 3.1.0
+info:
+  title: BCS Fuse API
+  version: 0.1.0
+  description: "\nBCS Fuse - 协作控制平面 API\n\n## 核心功能\n\n### Worker Management (M1)\n\
+    - Worker 注册与管理\n- Worker 能力与技能管理\n- Worker 筛选与查询\n\n### Fusion System (G1)\n-\
+    \ 多视角融合与决策建议\n- Conflict Alignment (G2)\n- Expert Diagnosis (G5)\n\n### Vector-aware\
+    \ Recommendation (新增)\n- 基于 Vector Store 的智能推荐\n- 候选者匹配与排序\n\n## 认证\n\n⚠️ **注意:\
+    \ 当前版本无认证机制，仅用于开发测试**\n\n生产环境部署前需要添加:\n- JWT/API Key 认证\n- 速率限制\n- 访问控制\n\n##\
+    \ 相关文档\n\n- [架构设计文档](./docs/ARCHITECTURE_DECISIONS.md)\n- [Vector Store Adapter\
+    \ Baseline](./docs/VECTOR_STORE_ADAPTER_BASELINE.md)\n- [生产化差距报告](./docs/PRODUCTION_READINESS_GAP_REPORT.md)\n\
+    \        "
+  contact:
+    name: BCS Team
+    email: bcs-team@example.com
+  license:
+    name: Apache-2.0
+paths:
+  /v1/workers:
+    post:
+      tags:
+      - Workers
+      summary: Create Worker
+      description: "创建或注册一个 Worker\n\nArgs:\n    worker: Worker 数据\n\nReturns:\n \
+        \   创建的 Worker\n\nRaises:\n    422: 数据校验失败\n    409: Worker 已存在"
+      operationId: create_worker_v1_workers_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Worker
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Workers
+      summary: List Workers
+      description: "列出 Worker\n\n筛选语义：\n- 不同筛选维度之间使用 AND 语义\n- 同一筛选维度内，如果传入多个值，使用\
+        \ OR 语义\n- 未传该筛选条件时，不对该维度做过滤\n\nArgs:\n    type: 筛选类型 (human/bot)\n    domain:\
+        \ 筛选领域\n    capability: 筛选能力列表（OR 语义）\n    skill: 筛选技能列表（OR 语义）\n    resource:\
+        \ 筛选资源 ID 列表（OR 语义）\n\nReturns:\n    Worker 列表"
+      operationId: list_workers_v1_workers_get
+      parameters:
+      - name: type
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 筛选类型 (human/bot)
+          title: Type
+        description: 筛选类型 (human/bot)
+      - name: domain
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 筛选领域
+          title: Domain
+        description: 筛选领域
+      - name: capability
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          description: 筛选能力（可多个，OR 语义）
+          title: Capability
+        description: 筛选能力（可多个，OR 语义）
+      - name: skill
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          description: 筛选技能（可多个，OR 语义）
+          title: Skill
+        description: 筛选技能（可多个，OR 语义）
+      - name: resource
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          description: 筛选资源 ID（可多个，OR 语义）
+          title: Resource
+        description: 筛选资源 ID（可多个，OR 语义）
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/workers/{worker_id}:
+    get:
+      tags:
+      - Workers
+      summary: Get Worker
+      description: "获取单个 Worker\n\nArgs:\n    worker_id: Worker ID\n\nReturns:\n \
+        \   Worker 明细\n\nRaises:\n    404: Worker 不存在"
+      operationId: get_worker_v1_workers__worker_id__get
+      parameters:
+      - name: worker_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Worker Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Workers
+      summary: Update Worker
+      description: "局部更新 Worker\n\nArgs:\n    worker_id: Worker ID\n    update_data:\
+        \ 更新数据\n\nReturns:\n    更新后的 Worker\n\nRaises:\n    404: Worker 不存在"
+      operationId: update_worker_v1_workers__worker_id__patch
+      parameters:
+      - name: worker_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Worker Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Update Data
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/groups/{group_id}/fuse:
+    post:
+      tags:
+      - Fusion
+      summary: Create Group Fusion
+      description: "发起融合操作\n\n在指定 group 上对一个明确问题发起多参与者视角融合。\n\nArgs:\n    group_id:\
+        \ Group 标识符\n    request: 融合请求\n\nReturns:\n    FuseResponse: 融合结果"
+      operationId: create_group_fusion_api_v1_groups__group_id__fuse_post
+      parameters:
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^grp-[A-Za-z0-9_-]+$
+          description: Existing group/session identifier
+          title: Group Id
+        description: Existing group/session identifier
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FusionRequest'
+      responses:
+        '200':
+          description: Fusion completed successfully or partially successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FuseResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Group or participant not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /health:
+    get:
+      summary: Health Check
+      description: 健康检查端点
+      operationId: health_check_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+components:
+  schemas:
+    AlignmentPointResponse:
+      properties:
+        summary:
+          type: string
+          title: Summary
+        participants:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Participants
+      additionalProperties: false
+      type: object
+      required:
+      - summary
+      title: AlignmentPointResponse
+      description: 对齐点响应模型（G2）
+    ConflictResponse:
+      properties:
+        parties:
+          items:
+            type: string
+          type: array
+          title: Parties
+        issue:
+          type: string
+          title: Issue
+        positions:
+          items:
+            type: string
+          type: array
+          title: Positions
+        severity:
+          type: string
+          enum:
+          - low
+          - medium
+          - high
+          - critical
+          title: Severity
+      additionalProperties: false
+      type: object
+      required:
+      - parties
+      - issue
+      - positions
+      - severity
+      title: ConflictResponse
+      description: 冲突响应模型（G2）
+    CriticalIssueResponse:
+      properties:
+        issue:
+          type: string
+          title: Issue
+        severity:
+          type: string
+          enum:
+          - low
+          - medium
+          - high
+          - critical
+          title: Severity
+        domain:
+          type: string
+          title: Domain
+        source:
+          type: string
+          title: Source
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+      additionalProperties: false
+      type: object
+      required:
+      - issue
+      - severity
+      - domain
+      - source
+      title: CriticalIssueResponse
+      description: 关键问题响应模型（G5）
+    RiskFactor:
+      properties:
+        factor_id:
+          type: string
+          title: Factor Id
+        description:
+          type: string
+          title: Description
+        category:
+          type: string
+          title: Category
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+          title: Severity
+        likelihood:
+          type: string
+          enum: [low, medium, high]
+          title: Likelihood
+        impact:
+          type: string
+          enum: [low, medium, high, critical]
+          title: Impact
+      additionalProperties: false
+      type: object
+      required: [factor_id, description, category, severity]
+      title: RiskFactor
+      description: 风险因子
+    ScenarioPriorRisk:
+      properties:
+        scenario_type:
+          type: string
+          title: Scenario Type
+        matched_keywords:
+          items:
+            type: string
+          type: array
+          title: Matched Keywords
+        baseline_risk:
+          type: string
+          enum: [none, low, medium, high, critical]
+          title: Baseline Risk
+        confidence:
+          type: number
+          title: Confidence
+      additionalProperties: false
+      type: object
+      title: ScenarioPriorRisk
+      description: 场景先验风险
+    StructuredRiskAssessment:
+      properties:
+        risk_level:
+          type: string
+          enum: [none, low, medium, high, critical]
+          title: Risk Level
+        baseline_risk:
+          type: string
+          enum: [none, low, medium, high, critical]
+          title: Baseline Risk
+        risk_factors:
+          items:
+            $ref: '#/components/schemas/RiskFactor'
+          type: array
+          title: Risk Factors
+        blocking_conditions:
+          items:
+            type: string
+          type: array
+          title: Blocking Conditions
+        decision_rationale:
+          type: string
+          title: Decision Rationale
+        scenario_prior_risk:
+          anyOf:
+          - $ref: '#/components/schemas/ScenarioPriorRisk'
+          - type: 'null'
+          title: Scenario Prior Risk
+      additionalProperties: false
+      type: object
+      required: [risk_level, baseline_risk, risk_factors, blocking_conditions, decision_rationale]
+      title: StructuredRiskAssessment
+      description: 结构化风险评估（G5 V2）
+    StanceSignal:
+      properties:
+        participant_id:
+          type: string
+          title: Participant Id
+        dimension_id:
+          type: string
+          title: Dimension Id
+        stance_type:
+          type: string
+          enum: [support, oppose, neutral, flexible]
+          title: Stance Type
+        position:
+          type: string
+          title: Position
+        confidence:
+          type: number
+          title: Confidence
+      additionalProperties: false
+      type: object
+      required: [participant_id, dimension_id, stance_type, position]
+      title: StanceSignal
+      description: 立场信号
+    PairwiseAnalysis:
+      properties:
+        participant_a:
+          type: string
+          title: Participant A
+        participant_b:
+          type: string
+          title: Participant B
+        dimension_id:
+          type: string
+          title: Dimension Id
+        conflict_type:
+          type: string
+          enum: [conflict, alignment, neutral]
+          title: Conflict Type
+        stance_a:
+          $ref: '#/components/schemas/StanceSignal'
+        stance_b:
+          $ref: '#/components/schemas/StanceSignal'
+        severity:
+          type: string
+          enum: [none, low, medium, high, critical]
+          title: Severity
+        confidence:
+          type: number
+          title: Confidence
+      additionalProperties: false
+      type: object
+      required: [participant_a, participant_b, dimension_id, conflict_type]
+      title: PairwiseAnalysis
+      description: 两两分析
+    DimensionSummary:
+      properties:
+        dimension_id:
+          type: string
+          title: Dimension Id
+        dimension_name:
+          type: string
+          title: Dimension Name
+        conflict_count:
+          type: integer
+          title: Conflict Count
+        alignment_count:
+          type: integer
+          title: Alignment Count
+      additionalProperties: false
+      type: object
+      required: [dimension_id, dimension_name, conflict_count, alignment_count]
+      title: DimensionSummary
+      description: 维度汇总
+    StructuredConflictAnalysis:
+      properties:
+        pairwise_analyses:
+          items:
+            $ref: '#/components/schemas/PairwiseAnalysis'
+          type: array
+          title: Pairwise Analyses
+        dimension_summaries:
+          items:
+            $ref: '#/components/schemas/DimensionSummary'
+          type: array
+          title: Dimension Summaries
+        stance_signals:
+          items:
+            $ref: '#/components/schemas/StanceSignal'
+          type: array
+          title: Stance Signals
+        overall_conflict_level:
+          type: string
+          enum: [none, low, medium, high, critical]
+          title: Overall Conflict Level
+        overall_alignment_level:
+          type: string
+          enum: [none, low, medium, high]
+          title: Overall Alignment Level
+      additionalProperties: false
+      type: object
+      required: [pairwise_analyses, dimension_summaries, stance_signals, overall_conflict_level, overall_alignment_level]
+      title: StructuredConflictAnalysis
+      description: 结构化冲突分析（G2 V2）
+    ErrorObjectResponse:
+      properties:
+        code:
+          type: string
+          title: Code
+        message:
+          type: string
+          title: Message
+        details:
+          items:
+            type: string
+          type: array
+          title: Details
+      additionalProperties: false
+      type: object
+      required:
+      - code
+      - message
+      title: ErrorObjectResponse
+      description: 错误对象响应模型
+    ErrorResponse:
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorObjectResponse'
+      additionalProperties: false
+      type: object
+      required:
+      - error
+      title: ErrorResponse
+      description: 错误响应模型
+    ExpertRecommendationResponse:
+      properties:
+        priority:
+          type: string
+          enum:
+          - P0
+          - P1
+          - P2
+          title: Priority
+        action:
+          type: string
+          title: Action
+        owner:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Owner
+        domain:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Domain
+        deadline:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deadline
+      additionalProperties: false
+      type: object
+      required:
+      - priority
+      - action
+      title: ExpertRecommendationResponse
+      description: 专家建议响应模型（G5）
+    FuseMetadata:
+      properties:
+        request_id:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Request Id
+          description: 请求 ID
+        source:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Source
+          description: 请求来源
+        operator:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Operator
+          description: 操作者
+        trace_id:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Trace Id
+          description: 追踪 ID
+      additionalProperties: false
+      type: object
+      title: FuseMetadata
+      description: '融合元数据
+
+
+        请求的追踪和来源信息。'
+    FuseOptions:
+      properties:
+        timeout_ms:
+          type: integer
+          maximum: 120000.0
+          minimum: 1000.0
+          title: Timeout Ms
+          description: 融合操作超时时间（毫秒）
+          default: 15000
+        parallel:
+          type: boolean
+          title: Parallel
+          description: 是否并行收集 participant 视角
+          default: true
+        include_recommendation:
+          type: boolean
+          title: Include Recommendation
+          description: 是否生成 recommendation
+          default: true
+        include_transcript:
+          type: boolean
+          title: Include Transcript
+          description: 是否包含完整 transcript
+          default: false
+        strict_participants:
+          type: boolean
+          title: Strict Participants
+          description: participant 解析失败时是否硬失败
+          default: true
+        fail_fast:
+          type: boolean
+          title: Fail Fast
+          description: 是否在第一个失败时立即返回
+          default: false
+        detect_conflicts:
+          type: boolean
+          title: Detect Conflicts
+          description: 是否启用冲突检测（G2）
+          default: false
+        extract_alignment_points:
+          type: boolean
+          title: Extract Alignment Points
+          description: 是否提取对齐点（G2）
+          default: false
+        enable_risk_assessment:
+          type: boolean
+          title: Enable Risk Assessment
+          description: 是否启用风险评估（G5）
+          default: true
+        enable_expert_recommendations:
+          type: boolean
+          title: Enable Expert Recommendations
+          description: 是否生成专家建议列表（G5）
+          default: true
+        enable_go_live_conditions:
+          type: boolean
+          title: Enable Go Live Conditions
+          description: 是否生成上线条件（G5）
+          default: true
+      additionalProperties: false
+      type: object
+      title: FuseOptions
+      description: '融合选项
+
+
+        控制融合行为的配置选项。'
+    FuseResponse:
+      properties:
+        group_id:
+          type: string
+          title: Group Id
+        fusion_id:
+          type: string
+          title: Fusion Id
+        question:
+          type: string
+          title: Question
+        driver_bot_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Driver Bot Id
+        perspectives:
+          items:
+            $ref: '#/components/schemas/PerspectiveResponse'
+          type: array
+          title: Perspectives
+        recommendation:
+          anyOf:
+          - $ref: '#/components/schemas/RecommendationResponse'
+          - type: 'null'
+        partial_success:
+          type: boolean
+          title: Partial Success
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+        errors:
+          items:
+            type: string
+          type: array
+          title: Errors
+        timing:
+          $ref: '#/components/schemas/TimingResponse'
+        fusion_mode:
+          type: string
+          enum:
+          - agent
+          - conflict_alignment
+          - expert_diagnosis
+          title: Fusion Mode
+          default: agent
+        conflicts:
+          items:
+            $ref: '#/components/schemas/ConflictResponse'
+          type: array
+          title: Conflicts
+        alignment_points:
+          items:
+            $ref: '#/components/schemas/AlignmentPointResponse'
+          type: array
+          title: Alignment Points
+        key_insights:
+          items:
+            type: string
+          type: array
+          title: Key Insights
+        risk_assessment:
+          anyOf:
+          - $ref: '#/components/schemas/RiskAssessmentResponse'
+          - type: 'null'
+        critical_issues:
+          items:
+            $ref: '#/components/schemas/CriticalIssueResponse'
+          type: array
+          title: Critical Issues
+        recommendations:
+          items:
+            $ref: '#/components/schemas/ExpertRecommendationResponse'
+          type: array
+          title: Recommendations
+        go_live_conditions:
+          items:
+            type: string
+          type: array
+          title: Go Live Conditions
+        summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Summary
+        structured_risk:
+          anyOf:
+          - $ref: '#/components/schemas/StructuredRiskAssessment'
+          - type: 'null'
+          title: Structured Risk
+          description: 结构化风险评估（G5 V2）
+        structured_conflict_analysis:
+          anyOf:
+          - $ref: '#/components/schemas/StructuredConflictAnalysis'
+          - type: 'null'
+          title: Structured Conflict Analysis
+          description: 结构化冲突分析（G2 V2）
+      additionalProperties: false
+      type: object
+      required:
+      - group_id
+      - fusion_id
+      - question
+      - perspectives
+      - partial_success
+      - warnings
+      - errors
+      - timing
+      title: FuseResponse
+      description: 融合响应模型
+    FusionRequest:
+      properties:
+        question:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Question
+          description: 需要多方协作评估的问题
+        participants:
+          items:
+            type: string
+          type: array
+          maxItems: 20
+          minItems: 1
+          title: Participants
+          description: 参与者标识符列表
+        driver_bot_id:
+          anyOf:
+          - type: string
+            maxLength: 128
+            minLength: 1
+          - type: 'null'
+          title: Driver Bot Id
+          description: 显式指定的 driver bot ID
+        mode:
+          type: string
+          const: agent
+          title: Mode
+          description: 融合模式（保留，向后兼容）
+          default: agent
+        fusion_mode:
+          type: string
+          enum:
+          - agent
+          - conflict_alignment
+          - expert_diagnosis
+          title: Fusion Mode
+          description: 融合模式：agent（G1）、conflict_alignment（G2）或 expert_diagnosis（G5）
+          default: agent
+        options:
+          $ref: '#/components/schemas/FuseOptions'
+          description: 融合选项
+        metadata:
+          anyOf:
+          - $ref: '#/components/schemas/FuseMetadata'
+          - type: 'null'
+          description: 请求元数据
+      additionalProperties: false
+      type: object
+      required:
+      - question
+      - participants
+      title: FusionRequest
+      description: '融合请求
+
+
+        在指定 group 上对一个问题发起多参与者视角融合。
+
+
+        字段说明：
+
+        - mode: 保留字段，固定为 "agent"，用于 G1 向后兼容
+
+        - fusion_mode: 新增字段，支持 "agent"（G1）或 "conflict_alignment"（G2）'
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    PerspectiveResponse:
+      properties:
+        participant_id:
+          type: string
+          title: Participant Id
+        participant_type:
+          type: string
+          enum:
+          - bot
+          - human
+          - system
+          title: Participant Type
+        role:
+          type: string
+          enum:
+          - driver
+          - consultant
+          - observer
+          - expert
+          title: Role
+        summary:
+          type: string
+          title: Summary
+        confidence:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Confidence
+        evidence:
+          items:
+            type: string
+          type: array
+          title: Evidence
+        status:
+          type: string
+          enum:
+          - completed
+          - timed_out
+          - failed
+          - skipped
+          title: Status
+        key_points:
+          items:
+            type: string
+          type: array
+          title: Key Points
+        concerns:
+          items:
+            type: string
+          type: array
+          title: Concerns
+        flexibility:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Flexibility
+      additionalProperties: false
+      type: object
+      required:
+      - participant_id
+      - participant_type
+      - role
+      - summary
+      - status
+      title: PerspectiveResponse
+      description: 视角响应模型
+    RecommendationResponse:
+      properties:
+        summary:
+          type: string
+          title: Summary
+        decision:
+          type: string
+          enum:
+          - 'yes'
+          - 'no'
+          - conditional_yes
+          - needs_more_information
+          title: Decision
+        risks:
+          items:
+            type: string
+          type: array
+          title: Risks
+        next_actions:
+          items:
+            type: string
+          type: array
+          title: Next Actions
+      additionalProperties: false
+      type: object
+      required:
+      - summary
+      - decision
+      title: RecommendationResponse
+      description: 建议响应模型
+    RiskAssessmentResponse:
+      properties:
+        overall:
+          type: string
+          enum:
+          - low
+          - medium
+          - high
+          - critical
+          title: Overall
+        categories:
+          additionalProperties:
+            type: string
+            enum:
+            - low
+            - medium
+            - high
+            - critical
+          type: object
+          title: Categories
+      additionalProperties: false
+      type: object
+      required:
+      - overall
+      title: RiskAssessmentResponse
+      description: 风险评估响应模型（G5）
+    TimingResponse:
+      properties:
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        finished_at:
+          type: string
+          format: date-time
+          title: Finished At
+        duration_ms:
+          type: integer
+          title: Duration Ms
+      additionalProperties: false
+      type: object
+      required:
+      - started_at
+      - finished_at
+      - duration_ms
+      title: TimingResponse
+      description: 计时响应模型
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    WorkerListResponse:
+      properties:
+        items:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: WorkerListResponse
+      description: Worker 列表响应
+servers:
+- url: http://localhost:8765
+  description: 本地开发服务器
+- url: http://staging.example.com
+  description: Staging 环境
+- url: https://api.example.com
+  description: 生产环境

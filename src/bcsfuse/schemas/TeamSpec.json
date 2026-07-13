@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/TeamSpec.json",
+  "title": "TeamSpec",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "team_id",
+    "members",
+    "role_assignments",
+    "selected_skills",
+    "selected_resources",
+    "composition_rationale",
+    "gaps"
+  ],
+  "properties": {
+    "team_id": {
+      "type": "string",
+      "pattern": "^team_[a-zA-Z0-9_-]+$"
+    },
+    "members": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "role_assignments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "worker_id",
+          "role",
+          "objective"
+        ],
+        "properties": {
+          "worker_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "selected_skills": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "selected_resources": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "composition_rationale": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    }
+  }
+}

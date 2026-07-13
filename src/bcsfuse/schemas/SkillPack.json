@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/SkillPack.json",
+  "title": "SkillPack",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "skills",
+    "allowlist",
+    "sandbox_required"
+  ],
+  "properties": {
+    "skills": {
+      "type": "array",
+      "items": {
+        "$ref": "SkillRef.json"
+      },
+      "default": []
+    },
+    "allowlist": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "sandbox_required": {
+      "type": "boolean"
+    }
+  }
+}

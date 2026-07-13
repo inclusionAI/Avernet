@@ -1,0 +1,222 @@
+# Risk Signals Configuration
+# 风险信号配置
+#
+# 从 expert_diagnosis_service.py 迁移的硬编码关键词
+# 覆盖 G5 专家诊断场景的风险评估
+
+version: "1.0"
+
+# =====================================
+# Critical 场景定义
+# =====================================
+critical_scenarios:
+  data_leakage:
+    name: 数据泄露事件
+    description: 用户数据或敏感信息泄露事件
+    keywords:
+      - "数据泄露"
+      - "信息泄露"
+      - "隐私泄露"
+      - "用户数据泄露"
+      - "用户泄露"
+      - "信息外泄"
+      - "数据被盗"
+      - "数据外泄"
+      - "数据暴露"
+      - "敏感数据泄露"
+      - "用户信息泄露"
+    weight: 1.0
+
+  security_incident:
+    name: 安全事件
+    description: 系统安全漏洞或遭受攻击事件
+    keywords:
+      - "安全事件"
+      - "安全事故"
+      - "安全漏洞"
+      - "被攻击"
+      - "系统被入侵"
+      - "数据被盗取"
+      - "遭受攻击"
+    weight: 1.0
+
+  regulatory_penalty:
+    name: 监管处罚
+    description: 监管机构下达的处罚或整改要求
+    keywords:
+      - "监管函"
+      - "整改通知"
+      - "处罚"
+      - "立案调查"
+    weight: 1.0
+
+  fund_safety:
+    name: 资金安全
+    description: 涉及资金损失或资金安全风险
+    keywords:
+      - "资金损失"
+      - "资金风险"
+      - "资金安全"
+    weight: 1.0
+
+# =====================================
+# High 场景定义
+# =====================================
+high_scenarios:
+  core_system:
+    name: 核心系统
+    description: 核心交易、支付、资金流转等关键系统
+    keywords:
+      - "核心系统"
+      - "核心交易"
+      - "支付系统"
+      - "资金流转"
+    weight: 0.95
+
+  system_migration:
+    name: 系统变更
+    description: 架构升级、技术栈迁移等重大变更
+    keywords:
+      - "架构升级"
+      - "系统迁移"
+      - "技术升级"
+      - "数据库迁移"
+      - "java升级"
+      - "版本升级"
+      - "数据库切换"
+      - "技术栈升级"
+    weight: 0.9
+
+  regulatory_access:
+    name: 监管准入
+    description: 跨境支付、牌照申请、合规准入场景
+    keywords:
+      - "跨境支付"
+      - "牌照申请"
+      - "监管准入"
+      - "合规准入"
+      - "跨境业务"
+      - "境外支付"
+      - "外汇支付"
+      - "国际支付"
+      - "金融牌照"
+      - "支付牌照"
+      - "准入评估"
+    weight: 0.95
+
+  compliance_remediation:
+    name: 合规整改
+    description: 反洗钱、合规风险整改场景
+    keywords:
+      - "反洗钱"
+      - "整改"
+      - "合规风险"
+    weight: 0.9
+
+  large_scale_impact:
+    name: 大规模影响
+    description: 影响大量用户的场景
+    keywords:
+      - "100万"
+      - "百万用户"
+      - "千万用户"
+      - "大规模"
+    weight: 0.85
+
+  organization_change:
+    name: 组织变革
+    description: 组织架构调整、人员优化场景
+    keywords:
+      - "组织架构调整"
+      - "人员优化"
+      - "大规模裁员"
+    weight: 0.9
+
+  investment_finance:
+    name: 投融资交易
+    description: 股权融资、并购等投融资场景
+    keywords:
+      - "股权融资"
+      - "并购"
+      - "投融资"
+    weight: 0.9
+
+  large_promotion:
+    name: 大型活动
+    description: 大促活动风险评审场景
+    keywords:
+      - "大促活动"
+      - "营销活动风险"
+      - "活动风险评审"
+    weight: 0.85
+
+# =====================================
+# Medium 场景定义
+# =====================================
+medium_scenarios:
+  new_business:
+    name: 新业务
+    description: 新业务、新产品拓展场景
+    keywords:
+      - "新业务"
+      - "新产品"
+      - "业务拓展"
+    weight: 0.6
+
+  promotion_activity:
+    name: 大促活动
+    description: 常规大促、营销活动场景
+    keywords:
+      - "大促"
+      - "双11"
+      - "618"
+      - "活动"
+    weight: 0.55
+
+  tech_improvement:
+    name: 技术改造
+    description: 性能优化、功能开发等技术改造场景
+    keywords:
+      - "性能优化"
+      - "功能开发"
+      - "系统改造"
+    weight: 0.5
+
+# =====================================
+# 风险等级推断关键词
+# =====================================
+risk_level_keywords:
+  critical:
+    - "严重"
+    - "critical"
+    - "高危"
+    - "紧急"
+    - "必须立即"
+    - "需要立即"
+    - "禁止上线"
+
+  high:
+    - "注入"
+    - "漏洞"
+    - "缺失"
+    - "泄露"
+    - "攻击"
+    - "违规"
+    - "高"
+    - "high"
+    - "不通过"
+    - "不可行"
+    - "反对"
+    - "风险"
+    - "隐患"
+    - "威胁"
+    - "安全隐患"
+
+  medium:
+    - "中等"
+    - "medium"
+    - "需要关注"
+    - "有条件"
+    - "待确认"
+    - "建议"
+    - "关注"

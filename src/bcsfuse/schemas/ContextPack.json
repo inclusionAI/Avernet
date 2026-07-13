@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/ContextPack.json",
+  "title": "ContextPack",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "knowledge_items",
+    "memory_injections",
+    "citations"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "knowledge_items": {
+      "type": "array",
+      "items": {
+        "$ref": "KnowledgeItem.json"
+      },
+      "default": []
+    },
+    "memory_injections": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "citations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    }
+  }
+}

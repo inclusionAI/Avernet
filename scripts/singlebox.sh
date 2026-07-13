@@ -17,7 +17,7 @@ set -e
 # Compatibility:
 #
 # Groups:
-#   all             Full local product stack (BAAS + Backend + BCS + 5 OpenClaw bots + demo bot + Frontend)
+#   all             Full local product stack (BAAS + Backend + BCS + BCSFuse + 5 OpenClaw bots + demo bot + Frontend)
 #   bcs_bots        BCS + 5 local OpenClaw bots
 #   bcs_frontend    BCS + Frontend (E2E)
 #
@@ -146,6 +146,7 @@ source "${SCRIPT_DIR}/modules/baas.sh"
 source "${SCRIPT_DIR}/modules/backend.sh"
 source "${SCRIPT_DIR}/modules/frontend.sh"
 source "${SCRIPT_DIR}/modules/bcs.sh"
+source "${SCRIPT_DIR}/modules/bcsfuse.sh"
 source "${SCRIPT_DIR}/modules/bots.sh"
 source "${SCRIPT_DIR}/modules/demo_bot.sh"
 source "${SCRIPT_DIR}/modules/bcs_bots.sh"
@@ -334,6 +335,8 @@ apply_singlebox_mode_defaults() {
     BCS_BOTS_STACK_LOG="${STANDALONE_RUNTIME_DIR}/bcs_bots_stack.log"
     BCS_BOT_PORTS_FILE="${STANDALONE_RUNTIME_DIR}/bcs_bot_ports.env"
 
+    BCSFUSE_RUNTIME_DIR="${STANDALONE_RUNTIME_DIR}/bcsfuse"
+
     OPENCLAW_PROFILE_ROOT="${STANDALONE_OPENCLAW_ROOT}/profiles"
     OPENCLAW_PROFILE_PREFIX=""
     OPENCLAW_WORKSPACE_ROOT="${STANDALONE_OPENCLAW_ROOT}/workspaces"
@@ -343,6 +346,7 @@ apply_singlebox_mode_defaults() {
     OPENCLAW_LOG_ROOT="${STANDALONE_OPENCLAW_ROOT}/logs"
 
     export BCS_DATA_DIR BCS_RUNTIME_CONFIG_DIR BCS_BOTS_STACK_PID_FILE BCS_BOTS_STACK_LOG BCS_BOT_PORTS_FILE
+    export BCSFUSE_RUNTIME_DIR
     export OPENCLAW_PROFILE_ROOT OPENCLAW_PROFILE_PREFIX OPENCLAW_WORKSPACE_ROOT OPENCLAW_WORKSPACE_LAYOUT
     export OPENCLAW_EXTENSIONS_ROOT OPENCLAW_EXTENSIONS_REPLACE_LINKS OPENCLAW_LOG_ROOT
 }
@@ -358,6 +362,7 @@ show_standalone_mode_info() {
     log_warn "  - Bot workspaces: ${OPENCLAW_WORKSPACE_ROOT}/<bot-profile>"
     log_warn "  - Plugin link: ${OPENCLAW_EXTENSIONS_ROOT}/openclaw-channel-bcn"
     log_warn "  - BCS runtime: ${STANDALONE_RUNTIME_DIR}"
+    log_warn "  - BCSFuse runtime: ${BCSFUSE_RUNTIME_DIR}"
     log_warn "========================================="
     echo ""
 }
@@ -370,7 +375,7 @@ show_help() {
     echo ""
     echo "Mode:"
     echo "  (default)       Isolated standalone BCS + OpenClaw paths"
-    echo "                  - Starts BAAS + Backend + BCS + 5 bots + demo bot + frontend"
+    echo "                  - Starts BAAS + Backend + BCS + BCSFuse + 5 bots + demo bot + frontend"
     echo "                  - Writes BCS runtime under scripts/.dependencies/standalone"
     echo "                  - Writes OpenClaw profiles, workspaces, and plugin link under .standalone-openclaw"
     echo "  --standalone, -s Compatibility alias for the default mode"
@@ -404,7 +409,7 @@ show_help() {
     echo ""
     echo "Services:"
     # 从各模块收集帮助信息
-    for svc in baas backend bcs frontend engine bots; do
+    for svc in baas backend bcs bcsfuse frontend engine bots; do
         if type -t "${svc}_help" &>/dev/null; then
             echo "  $( "${svc}_help" )"
         fi
@@ -703,7 +708,7 @@ main() {
                 LOCAL_MODE=true
                 shift
                 ;;
-            baas|backend|bcs|frontend|engine|bots|bcs_bots|bcs_frontend|all)
+            baas|backend|bcs|bcsfuse|frontend|engine|bots|bcs_bots|bcs_frontend|all)
                 # Legacy: service name without command defaults to start
                 services+=("$1")
                 if [ -z "$command" ]; then
