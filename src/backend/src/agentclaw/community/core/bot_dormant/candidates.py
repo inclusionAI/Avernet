@@ -31,11 +31,11 @@ class Candidate:
 
 
 def owner_is_protected(
-    owner_id: str | None,
+    owner_id: str,
     protected_owner_ids: frozenset[str],
 ) -> bool:
-    """Return whether a present owner ID belongs to the protected set."""
-    return owner_id is not None and str(owner_id) in protected_owner_ids
+    """Return whether an owner ID belongs to the protected set."""
+    return owner_id in protected_owner_ids
 
 
 def partition_by_protected_owner(

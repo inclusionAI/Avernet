@@ -35,7 +35,7 @@ def _now() -> datetime:
 
 
 @pytest.mark.unit
-def test_partition_by_protected_owner_is_single_pass_and_none_safe():
+def test_partition_by_protected_owner_splits_candidates_in_one_pass():
     created_at = _now() - timedelta(days=60)
     protected_candidate = Candidate(
         bot_id="protected",
@@ -44,28 +44,21 @@ def test_partition_by_protected_owner_is_single_pass_and_none_safe():
         bot_name="Protected",
         gmt_create=created_at,
     )
-    none_owner_candidate = Candidate(
-        bot_id="none-owner",
-        entity_id="222",
-        owner_id=None,  # type: ignore[arg-type]
-        bot_name="No owner",
-        gmt_create=created_at,
-    )
     normal_candidate = Candidate(
         bot_id="normal",
-        entity_id="333",
+        entity_id="222",
         owner_id="owner2",
         bot_name="Normal",
         gmt_create=created_at,
     )
 
     protected, unprotected = partition_by_protected_owner(
-        [protected_candidate, none_owner_candidate, normal_candidate],
-        frozenset({"owner1", "None"}),
+        [protected_candidate, normal_candidate],
+        frozenset({"owner1"}),
     )
 
     assert protected == [protected_candidate]
-    assert unprotected == [none_owner_candidate, normal_candidate]
+    assert unprotected == [normal_candidate]
 
 
 @pytest.mark.integration
