@@ -38,6 +38,20 @@ if TYPE_CHECKING:
     from secbaas.spi.sandbox.arca import ArcaSandbox
 
 
+def _safe_repr(obj: object, max_len: int = 4096) -> str:
+    """Safely repr() an object, truncating to max_len bytes.
+
+    Returns "<repr failed: {error}>" if repr() raises an exception.
+    """
+    try:
+        s = repr(obj)
+        if len(s) > max_len:
+            s = s[:max_len]
+        return s
+    except Exception as e:
+        return f"<repr failed: {e}>"
+
+
 class ArcaPaasService(PaasService):
     """Arca platform PaaS adapter using direct SDK calls.
 
@@ -409,12 +423,30 @@ class ArcaPaasService(PaasService):
             try:
                 info = sandbox.get_info()
                 storage = getattr(info, "storage", None)
-                if storage and isinstance(storage, dict):
-                    storage_id = storage.get("storage_id")
-            except Exception:
+                if storage is None:
+                    self._logger.warning(
+                        f"Storage cleanup skipped: storage attribute missing, "
+                        f"paas_device_id={paas_device_id}"
+                    )
+                elif not isinstance(storage, dict):
+                    self._logger.warning(
+                        f"Storage cleanup skipped: storage is not a dict, "
+                        f"paas_device_id={paas_device_id}, "
+                        f"get_info={_safe_repr(info)}"
+                    )
+                elif storage.get("storage_id") is None:
+                    self._logger.warning(
+                        f"Storage cleanup skipped: storage_id key missing, "
+                        f"paas_device_id={paas_device_id}, "
+                        f"get_info={_safe_repr(info)}"
+                    )
+                else:
+                    storage_id = storage["storage_id"]
+            except Exception as e:
                 self._logger.warning(
-                    "Failed to get storage info before destroy for %s",
-                    paas_device_id,
+                    f"Storage cleanup skipped: get_info failed, "
+                    f"paas_device_id={paas_device_id}, "
+                    f"get_info unavailable due to exception: {e}",
                     exc_info=True,
                 )
         except ArcaSandboxNotFoundError:
