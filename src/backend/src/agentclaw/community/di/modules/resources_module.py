@@ -55,9 +55,6 @@ class ResourcesModule(Module):
             ResourceFileService,
         )
         binder.bind(ResourceFileService, to=ResourceFileService, scope=singleton)
-        # Unified ORM repo (one body, ZDAS + SQLite). @inject ctor takes
-        # the bound DatabasePlugin; prod vs test differ only by which
-        # DatabasePlugin is bound (ZdasDB / SqliteDB).
         # Teclaw workspace-file metadata (ac_file): same unified-ORM pattern.
         binder.bind(
             FileRepositoryProtocol, to=FileRepository, scope=singleton
