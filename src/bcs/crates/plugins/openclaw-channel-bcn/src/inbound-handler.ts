@@ -36,6 +36,7 @@ import type {
 const CHANNEL_ID = 'bcs';
 const OPENCLAW_GATEWAY_MIN_PROTOCOL = 3;
 const OPENCLAW_GATEWAY_MAX_PROTOCOL = 4;
+const NO_REPLY_TEXT = 'NO_REPLY';
 
 /** Extract sender name from [from:botName] prefix. Returns stripped text and sender name. */
 function extractFromPrefix(raw: string): { senderName: string; text: string } {
@@ -51,8 +52,26 @@ function extractFromPrefix(raw: string): { senderName: string; text: string } {
 /** Active streams: run_id -> AbortController */
 const activeStreams = new Map<string, AbortController>();
 
-/** Run context for agent event routing: run_id -> { groupId, client } */
-const runContexts = new Map<string, { groupId: string; client: BcsWsClient }>();
+type RunContext = {
+  groupId: string;
+  client: BcsWsClient;
+  sessionKey?: string;
+  finalSent?: boolean;
+};
+
+/** Run context for agent event routing: run_id -> context used for BCS event emission. */
+const runContexts = new Map<string, RunContext>();
+
+interface VisibleReplyState {
+  text: string;
+  flushedOffset: number;
+  segmentOffset: number;
+  deltaCount: number;
+  sawAssistantText: boolean;
+}
+
+/** Visible assistant reply accumulated from OpenClaw agent events. */
+const visibleReplyByRunId = new Map<string, VisibleReplyState>();
 
 /** Pending routing intents: run_id -> PendingRouteIntent (populated by bcs_route tool). */
 const pendingRouteByRunId = new Map<string, PendingRouteIntent>();
@@ -197,6 +216,209 @@ function extractText(content: ContentBlock[]): string {
   return parts.join('\n');
 }
 
+function buildChatEventPayload(
+  runId: string,
+  bcsGroupId: string,
+  state: ChatEventPayload['state'],
+  text: string,
+  routeIntent?: PendingRouteIntent,
+): ChatEventPayload {
+  return {
+    run_id: runId,
+    bcs_group_id: bcsGroupId,
+    state,
+    message: {
+      role: 'assistant',
+      content: [{ type: 'text', text }],
+      timestamp: Date.now(),
+    },
+    ...(routeIntent ? {
+      routing: {
+        responders: routeIntent.responders,
+        mode: routeIntent.mode,
+        reason: routeIntent.reason,
+        include_self: routeIntent.includeSelf,
+        dedupe_key: routeIntent.dedupeKey,
+      } satisfies ChatEventRouting,
+    } : {}),
+  };
+}
+
+function ensureVisibleReplyState(runId: string): VisibleReplyState {
+  let state = visibleReplyByRunId.get(runId);
+  if (!state) {
+    state = {
+      text: '',
+      flushedOffset: 0,
+      segmentOffset: 0,
+      deltaCount: 0,
+      sawAssistantText: false,
+    };
+    visibleReplyByRunId.set(runId, state);
+  }
+  return state;
+}
+
+function stringField(record: unknown, key: string): string | undefined {
+  if (!record || typeof record !== 'object') return undefined;
+  const value = (record as Record<string, unknown>)[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function textFromUnknownContent(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return undefined;
+
+  const parts = value
+    .map(item => {
+      if (!item || typeof item !== 'object') return undefined;
+      const record = item as Record<string, unknown>;
+      return typeof record.text === 'string' ? record.text : undefined;
+    })
+    .filter((text): text is string => typeof text === 'string');
+
+  return parts.length > 0 ? parts.join('\n') : undefined;
+}
+
+function assistantSnapshotText(data: unknown): string | undefined {
+  if (typeof data === 'string') return data;
+  if (!data || typeof data !== 'object') return undefined;
+
+  const record = data as Record<string, unknown>;
+  const direct = stringField(record, 'text') ?? stringField(record, 'body');
+  if (direct !== undefined) return direct;
+
+  const content = textFromUnknownContent(record.content);
+  if (content !== undefined) return content;
+
+  const message = record.message;
+  if (message && typeof message === 'object') {
+    return textFromUnknownContent((message as Record<string, unknown>).content);
+  }
+
+  return undefined;
+}
+
+function assistantDeltaText(data: unknown): string | undefined {
+  if (!data || typeof data !== 'object') return undefined;
+  return stringField(data as Record<string, unknown>, 'delta');
+}
+
+function assistantReplacesCurrentSegment(data: unknown): boolean {
+  if (!data || typeof data !== 'object') return false;
+  return (data as Record<string, unknown>).replace === true;
+}
+
+function recordAssistantAgentText(runId: string, data: unknown): void {
+  const state = ensureVisibleReplyState(runId);
+  if (assistantReplacesCurrentSegment(data)) {
+    const snapshot = assistantSnapshotText(data);
+    if (snapshot === undefined) return;
+
+    state.text = state.text.slice(0, state.segmentOffset) + snapshot;
+    state.sawAssistantText = Boolean(state.text.trim());
+    return;
+  }
+
+  const delta = assistantDeltaText(data);
+  if (delta !== undefined && delta.length > 0) {
+    state.text += delta;
+    if (delta.trim()) {
+      state.sawAssistantText = true;
+    }
+  }
+}
+
+function markVisibleReplySegmentBoundary(runId: string): void {
+  const state = visibleReplyByRunId.get(runId);
+  if (state) {
+    state.segmentOffset = state.text.length;
+  }
+}
+
+function sendVisibleReplyDelta(
+  runId: string,
+  log?: { info: (...args: unknown[]) => void },
+): void {
+  const state = visibleReplyByRunId.get(runId);
+  const context = runContexts.get(runId);
+  if (!state || !context) return;
+
+  const deltaText = state.text.slice(state.flushedOffset);
+  if (!deltaText.trim()) return;
+
+  context.client.sendEvent(
+    'chat.event',
+    buildChatEventPayload(runId, context.groupId, 'delta', deltaText) as unknown as Record<string, unknown>,
+    nextSeq(context.client),
+  );
+  state.flushedOffset = state.text.length;
+  state.deltaCount += 1;
+  log?.info?.(`[BCS] Sent chat.event delta from agent event (part ${state.deltaCount}) for run_id=${runId}, len=${deltaText.length}`);
+}
+
+function finishVisibleReply(runId: string, log?: { info: (...args: unknown[]) => void }): string | undefined {
+  const state = visibleReplyByRunId.get(runId);
+  if (!state?.sawAssistantText || !state.text.trim()) return undefined;
+
+  sendVisibleReplyDelta(runId, log);
+  return state.text.trim();
+}
+
+function consumeRouteIntent(runId: string, sessionKey?: string): PendingRouteIntent | undefined {
+  const routeIntent = pendingRouteByRunId.get(runId);
+  if (routeIntent) {
+    pendingRouteByRunId.delete(runId);
+    return routeIntent;
+  }
+
+  if (!sessionKey) return undefined;
+  const sessionRouteIntent = pendingRouteBySessionKey.get(sessionKey);
+  if (sessionRouteIntent) {
+    pendingRouteBySessionKey.delete(sessionKey);
+  }
+  return sessionRouteIntent;
+}
+
+function sendFinalVisibleReplyOnce(
+  runId: string,
+  log?: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void },
+  options?: {
+    source?: string;
+    deliveredText?: string;
+    finalDeliveredPartsCount?: number;
+    noReplyDetail?: string;
+  },
+): boolean {
+  const context = runContexts.get(runId);
+  if (!context || context.finalSent) return false;
+
+  const visibleText = finishVisibleReply(runId, log);
+  const combinedText = visibleText ?? NO_REPLY_TEXT;
+
+  if (!visibleText) {
+    log?.warn?.(`[BCS] No assistant agent text for run_id=${runId}, sending ${NO_REPLY_TEXT} final${options?.noReplyDetail ? ` ${options.noReplyDetail}` : ''}`);
+  } else if (options?.deliveredText && options.deliveredText !== visibleText) {
+    log?.warn?.(`[BCS] Agent-event final differs from dispatcher deliver buffer for run_id=${runId}; using agent-event text`);
+  } else if ((options?.finalDeliveredPartsCount ?? 0) > 1) {
+    log?.info?.(`[BCS] Combined ${options?.finalDeliveredPartsCount} final deliver parts for diagnostics for run_id=${runId}`);
+  }
+
+  const routeIntent = consumeRouteIntent(runId, context.sessionKey);
+  const chatPayload = buildChatEventPayload(runId, context.groupId, 'final', combinedText, routeIntent);
+  context.client.sendEvent('chat.event', chatPayload as unknown as Record<string, unknown>, nextSeq(context.client));
+  context.finalSent = true;
+
+  const source = options?.source ? ` (source=${options.source})` : '';
+  if (routeIntent) {
+    log?.info?.(`[BCS] Sent chat.event final with routing intent for run_id=${runId}${source}`);
+  } else {
+    log?.info?.(`[BCS] Sent chat.event final for run_id=${runId}${source}`);
+  }
+
+  return true;
+}
+
 /** Extract GroupContext from params for logging/context. */
 function extractGroupContext(sessionContext: GroupContext): Record<string, unknown> {
   return {
@@ -251,6 +473,7 @@ export async function handleChatSend(
 
   // Track run context for agent event routing
   runContexts.set(runId, { groupId: bcsGroupId, client });
+  ensureVisibleReplyState(runId);
 
   try {
     const rt = getBcsRuntime();
@@ -268,6 +491,10 @@ export async function handleChatSend(
     });
 
     log?.info?.(`[DEBUG] Resolved agent route: agentId=${route.agentId}, sessionKey=${route.sessionKey}`);
+    const runContext = runContexts.get(runId);
+    if (runContext) {
+      runContext.sessionKey = route.sessionKey;
+    }
 
     // Record bidirectional mapping: sessionKey <-> bcsGroupId
     if (bcsGroupId) {
@@ -342,34 +569,10 @@ export async function handleChatSend(
     // DEBUG: Send test message to verify plugin is loaded
     log?.info?.('[BCN PLUGIN LOADED] test message from inbound-handler');
 
-    // Stream block replies as chat deltas, while keeping terminal/non-block
-    // deliveries buffered for one final chat.event after dispatch completes.
+    // Keep SDK deliver parts only for diagnostics; chat delta/final are built
+    // from assistant agent events so BCS sees the same visible reply stream.
     const finalDeliveredParts: string[] = [];
     const blockDeliveredParts: string[] = [];
-    let streamedDeltaCount = 0;
-    const buildChatPayload = (
-      state: ChatEventPayload['state'],
-      text: string,
-      routeIntent?: PendingRouteIntent,
-    ): ChatEventPayload => ({
-      run_id: runId,
-      bcs_group_id: bcsGroupId,
-      state,
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text }],
-        timestamp: Date.now(),
-      },
-      ...(routeIntent ? {
-        routing: {
-          responders: routeIntent.responders,
-          mode: routeIntent.mode,
-          reason: routeIntent.reason,
-          include_self: routeIntent.includeSelf,
-          dedupe_key: routeIntent.dedupeKey,
-        } satisfies ChatEventRouting,
-      } : {}),
-    });
 
     // Dispatch via SDK's buffered block dispatcher
     await rt.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
@@ -387,13 +590,7 @@ export async function handleChatSend(
           if (kind === 'block') {
             if (!replyText.trim()) return;
             blockDeliveredParts.push(replyText);
-            client.sendEvent(
-              'chat.event',
-              buildChatPayload('delta', replyText) as unknown as Record<string, unknown>,
-              nextSeq(client),
-            );
-            streamedDeltaCount += 1;
-            log?.info?.(`[BCS] Sent chat.event delta (part ${streamedDeltaCount}) for run_id=${runId}, len=${replyText.length}`);
+            log?.info?.(`[BCS] buffered block deliver for run_id=${runId}, len=${replyText.length}`);
             return;
           }
 
@@ -417,32 +614,15 @@ export async function handleChatSend(
     if (!abortController.signal.aborted) {
       const combinedFinalText = combineDeliveredReplyParts(finalDeliveredParts);
       const combinedBlockText = combineDeliveredReplyParts(blockDeliveredParts);
-      const combinedText = combinedFinalText ?? combinedBlockText;
-
-      if (!combinedText) {
-        log?.info?.(`[BCS] Empty final text for run_id=${runId}, sending empty final event`);
-      } else if (!combinedFinalText && combinedBlockText) {
-        log?.info?.(`[BCS] Built final chat snapshot from ${blockDeliveredParts.length} block deliver parts for run_id=${runId}`);
-      } else if (finalDeliveredParts.length > 1) {
-        log?.info?.(`[BCS] Combined ${finalDeliveredParts.length} final deliver parts into one final for run_id=${runId}`);
-      }
-
-      // Read and consume pending routing intent for this run (or session-level fallback)
-      let routeIntent = pendingRouteByRunId.get(runId);
-      if (routeIntent) {
-        pendingRouteByRunId.delete(runId);
-      } else {
-        routeIntent = pendingRouteBySessionKey.get(route.sessionKey);
-        if (routeIntent) pendingRouteBySessionKey.delete(route.sessionKey);
-      }
-
-      const chatPayload = buildChatPayload('final', combinedText ?? '', routeIntent);
-      client.sendEvent('chat.event', chatPayload as unknown as Record<string, unknown>, nextSeq(client));
-
-      if (routeIntent) {
-        log?.info?.(`[BCS] Sent chat.event final with routing intent for run_id=${runId}`);
-      } else {
-        log?.info?.(`[BCS] Sent chat.event final for run_id=${runId}`);
+      const deliveredText = combinedFinalText ?? combinedBlockText;
+      const sent = sendFinalVisibleReplyOnce(runId, log, {
+        source: 'dispatcher',
+        deliveredText,
+        finalDeliveredPartsCount: finalDeliveredParts.length,
+        noReplyDetail: `(block deliver parts=${blockDeliveredParts.length}, final deliver parts=${finalDeliveredParts.length})`,
+      });
+      if (!sent) {
+        log?.info?.(`[BCS] Skipped duplicate chat.event final for run_id=${runId} (source=dispatcher)`);
       }
     }
   } catch (err: any) {
@@ -454,21 +634,26 @@ export async function handleChatSend(
       log?.error?.(`[DEBUG] Error cause for run_id=${runId}:`, err.cause);
     }
 
-    // Send error event to BCS
-    const errorPayload: ChatEventPayload = {
-      run_id: runId,
-      bcs_group_id: bcsGroupId,
-      state: 'error',
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text: 'An error occurred while processing your message.' }],
-        timestamp: Date.now(),
-      },
-    };
-    client.sendEvent('chat.event', errorPayload as unknown as Record<string, unknown>, nextSeq(client));
+    if (runContexts.get(runId)?.finalSent) {
+      log?.warn?.(`[BCS] Dispatcher failed after final was already sent for run_id=${runId}; suppressing duplicate error event`);
+    } else {
+      // Send error event to BCS
+      const errorPayload: ChatEventPayload = {
+        run_id: runId,
+        bcs_group_id: bcsGroupId,
+        state: 'error',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'An error occurred while processing your message.' }],
+          timestamp: Date.now(),
+        },
+      };
+      client.sendEvent('chat.event', errorPayload as unknown as Record<string, unknown>, nextSeq(client));
+    }
   } finally {
     activeStreams.delete(runId);
     runContexts.delete(runId);
+    visibleReplyByRunId.delete(runId);
     pendingRouteByRunId.delete(runId);
     // Clean up sessionKey → runId mapping (find by value)
     for (const [ sk, rid ] of activeRunIdForSession) {
@@ -1102,6 +1287,7 @@ export function abortAllStreams(): void {
   }
   activeStreams.clear();
   runContexts.clear();
+  visibleReplyByRunId.clear();
   pendingRouteByRunId.clear();
   pendingRouteBySessionKey.clear();
   activeRunIdForSession.clear();
@@ -1433,6 +1619,29 @@ type SdkAgentEventPayload = {
   sessionKey?: string;
 };
 
+const TERMINAL_LIFECYCLE_VALUES = new Set([
+  'end',
+  'done',
+  'complete',
+  'completed',
+  'final',
+  'finished',
+  'success',
+  'succeeded',
+]);
+
+function isTerminalLifecycleEvent(evt: SdkAgentEventPayload): boolean {
+  if (evt.stream !== 'lifecycle') return false;
+
+  const value =
+    stringField(evt.data, 'phase') ??
+    stringField(evt.data, 'status') ??
+    stringField(evt.data, 'state') ??
+    stringField(evt.data, 'type');
+
+  return value ? TERMINAL_LIFECYCLE_VALUES.has(value.toLowerCase()) : false;
+}
+
 /** Unsubscribe function for agent events */
 let agentEventUnsubscribe: (() => boolean) | null = null;
 
@@ -1475,6 +1684,19 @@ export function initAgentEventsSubscription(log?: {
     }
 
     const { groupId, client } = context;
+
+    if (!context.finalSent) {
+      if (evt.stream === 'assistant') {
+        recordAssistantAgentText(resolvedRunId, evt.data);
+      } else {
+        sendVisibleReplyDelta(resolvedRunId, log);
+        markVisibleReplySegmentBoundary(resolvedRunId);
+      }
+
+      if (isTerminalLifecycleEvent(evt)) {
+        sendFinalVisibleReplyOnce(resolvedRunId, log, { source: 'agent_lifecycle' });
+      }
+    }
 
     // Build the agent event payload for BCS — always use the original runId
     // so that all events for one user message share the same run_id

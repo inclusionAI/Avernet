@@ -11,6 +11,7 @@
 
 import WebSocket from 'ws';
 import * as fs from 'node:fs';
+import type { IncomingMessage } from 'node:http';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import type {
@@ -230,18 +231,76 @@ export class BcsWsClient {
   private _openWebSocket(url: string): Promise<WebSocket> {
     return new Promise((resolve, reject) => {
       const logUrl = sanitizeBcsUrlForLog(url);
+      const log = this._log;
       let ws: WebSocket | null = null;
-      const timeout = setTimeout(() => {
+      let settled = false;
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+
+      function cleanupInitialListeners() {
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = null;
+        }
+        if (!ws) return;
+        ws.off('unexpected-response', handleUnexpectedResponse);
+        ws.off('open', handleOpen);
+        ws.off('error', handleInitialError);
+      }
+
+      function failInitialConnection(err: Error) {
+        if (settled) return;
+        settled = true;
+        cleanupInitialListeners();
+        reject(err);
+      }
+
+      function handleUnexpectedResponse(_req: unknown, res: IncomingMessage) {
+        let body = '';
+        res.once('error', (err: Error) => {
+          log?.error?.(`Error reading unexpected BCS response body: ${err.message}`);
+          failInitialConnection(
+            new Error(`Failed to read unexpected BCS response: ${err.message}`),
+          );
+        });
+        res.on('data', (chunk: Buffer) => (body += chunk));
+        res.on('end', () => {
+          log?.error?.(
+            `BCS returned HTTP ${res.statusCode} ${res.statusMessage}\n` +
+              `Headers: ${JSON.stringify(res.headers)}\n` +
+              `Body: ${body.slice(0, 500)}`,
+          );
+          failInitialConnection(
+            new Error(
+              `Unexpected server response: ${res.statusCode} ${res.statusMessage}`,
+            ),
+          );
+        });
+      }
+
+      function handleOpen() {
+        if (!ws) return;
+        settled = true;
+        cleanupInitialListeners();
+        log?.info?.(`WebSocket TCP handshake succeeded: ${logUrl}`);
+        resolve(ws);
+      }
+
+      function handleInitialError(err: Error) {
+        log?.error?.(`WebSocket connection error: ${err.message}`);
+        failInitialConnection(new Error(`Failed to connect to BCS: ${err.message}`));
+      }
+
+      timeout = setTimeout(() => {
         if (!ws) {
-          reject(new Error(`BCS connection timeout: ${logUrl}`));
+          failInitialConnection(new Error(`BCS connection timeout: ${logUrl}`));
           return;
         }
-        ws.removeAllListeners();
+        cleanupInitialListeners();
         ws.on('error', err => {
-          this._log?.warn?.(`WebSocket error during timeout cleanup: ${err.message}`);
+          log?.warn?.(`WebSocket error during timeout cleanup: ${err.message}`);
         });
         ws.terminate();
-        reject(new Error(`BCS connection timeout: ${logUrl}`));
+        failInitialConnection(new Error(`BCS connection timeout: ${logUrl}`));
       }, this._account.connectionTimeoutMs);
 
       const wsOptions: WebSocket.ClientOptions = {
@@ -254,37 +313,11 @@ export class BcsWsClient {
 
       ws = new WebSocket(url, wsOptions);
 
-      // Handle HTTP responses other than 101 Switching Protocols
-      ws.on('unexpected-response', (_req, res) => {
-        clearTimeout(timeout);
-        let body = '';
-        res.on('data', chunk => (body += chunk));
-        res.on('end', () => {
-          this._log?.error?.(
-            `BCS returned HTTP ${res.statusCode} ${res.statusMessage}\n` +
-              `Headers: ${JSON.stringify(res.headers)}\n` +
-              `Body: ${body.slice(0, 500)}`,
-          );
-          reject(
-            new Error(
-              `Unexpected server response: ${res.statusCode} ${res.statusMessage}`,
-            ),
-          );
-        });
-      });
-
-      ws.on('open', () => {
-        clearTimeout(timeout);
-        this._log?.info?.(`WebSocket TCP handshake succeeded: ${logUrl}`);
-        resolve(ws);
-      });
-
-      ws.on('error', err => {
-        clearTimeout(timeout);
-        ws.removeAllListeners();
-        this._log?.error?.(`WebSocket connection error: ${err.message}`);
-        reject(new Error(`Failed to connect to BCS: ${err.message}`));
-      });
+      // These listeners only govern the initial handshake. Runtime error/close
+      // listeners are installed after this promise resolves and must survive.
+      ws.on('unexpected-response', handleUnexpectedResponse);
+      ws.on('open', handleOpen);
+      ws.on('error', handleInitialError);
     });
   }
 
