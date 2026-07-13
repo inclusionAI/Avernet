@@ -11,10 +11,12 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch, PropertyMock
 
+from injector import Injector, InstanceProvider, singleton
+
 import pytest
 
-from agentclaw.community.core.bot_management.services.workspace_hosting_client import WorkspaceHostingClient
-from agentclaw.community.core.bot_management.services.workspace_hosting_service import (
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client import WorkspaceHostingClient
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import (
     WorkspaceHostingService,
     _DEFAULT_DEPARTMENT_ID,
 )
@@ -24,10 +26,22 @@ from agentclaw.community.di.config import WorkspaceHostingConfig
 # ── Helpers ─────────────────────────────────────────────────────────────
 
 
+# Test-only synthetic admin staff IDs — NOT real employee numbers (placeholder
+# ids only). They mirror the *shape* of the corp list supplied at runtime via
+# application-prod.yaml -> dima.admin_member_staff_ids, so tests can assert the
+# wiring without leaking real staff ids. Real ids never live in this repo's
+# source or tests.
+_TEST_ADMIN_MEMBER_STAFF_IDS = (
+    "100001", "100002", "100003", "100004", "100005",
+    "100006", "100007", "100008", "100009", "100010", "100011",
+)
+
+
 def _make_config(
     *,
     aixcore_base_url: str = "https://aixcore.teamclaw.com",
     aixcore_base_url_pre: str = "https://aixcore-pre.teamclaw.com",
+    admin_member_staff_ids: tuple[str, ...] = _TEST_ADMIN_MEMBER_STAFF_IDS,
 ) -> WorkspaceHostingConfig:
     """Build a WorkspaceHostingConfig with sensible test defaults."""
     return WorkspaceHostingConfig(
@@ -38,32 +52,46 @@ def _make_config(
         timeout=10,
         aixcore_base_url=aixcore_base_url,
         aixcore_base_url_pre=aixcore_base_url_pre,
+        admin_member_staff_ids=admin_member_staff_ids,
     )
 
 
 def _make_dima_client(config: WorkspaceHostingConfig | None = None) -> WorkspaceHostingClient:
-    """Build a WorkspaceHostingClient bypassing @inject (direct construction)."""
+    """Build a WorkspaceHostingClient through its real DI constructor.
+
+    Wires ``WorkspaceHostingConfig`` into an ``Injector`` so the client's
+    ``@inject __init__`` runs normally (no ``object.__new__``). After
+    construction the real ``requests.Session`` is swapped for a ``MagicMock``
+    purely as offline isolation for client-side unit tests (this does not
+    bypass DI — the constructor already executed via the injector).
+    """
     cfg = config or _make_config()
-    client = object.__new__(WorkspaceHostingClient)
-    client._config = cfg
-    client.base_url = cfg.base_url.rstrip("/")
-    client.access_key = cfg.access_key
-    client.access_secret = cfg.access_secret
-    client.tenant = cfg.tenant
-    client.timeout = cfg.timeout
-    # 默认用 pre 环境
-    client.aixcore_base_url = cfg.aixcore_base_url_pre.rstrip("/")
+    injector = Injector()
+    injector.binder.bind(WorkspaceHostingConfig, InstanceProvider(cfg), scope=singleton)
+    injector.binder.bind(WorkspaceHostingClient, to=WorkspaceHostingClient, scope=singleton)
+    client = injector.get(WorkspaceHostingClient)
     client.session = MagicMock()
     return client
 
 
-def _make_workspace_service(client: WorkspaceHostingClient | None = None) -> WorkspaceHostingService:
-    """Build a WorkspaceHostingService bypassing @inject."""
-    hosting_client = client or _make_dima_client()
-    svc = object.__new__(WorkspaceHostingService)
-    svc._client = hosting_client
-    return svc
+def _make_workspace_service(
+    client: WorkspaceHostingClient | None = None,
+    config: WorkspaceHostingConfig | None = None,
+) -> WorkspaceHostingService:
+    """Build a WorkspaceHostingService through its real DI constructor.
 
+    The ``@inject __init__`` is driven by an ``Injector`` so the service is
+    wired to ``client`` + ``config`` via proper DI instead of ``object.__new__``.
+    """
+    hosting_config = config or _make_config()
+    # Keep the client config consistent with the service config when no explicit
+    # client is given: build a client from the same config.
+    hosting_client = client or _make_dima_client(hosting_config)
+    injector = Injector()
+    injector.binder.bind(WorkspaceHostingConfig, InstanceProvider(hosting_config), scope=singleton)
+    injector.binder.bind(WorkspaceHostingClient, InstanceProvider(hosting_client), scope=singleton)
+    injector.binder.bind(WorkspaceHostingService, to=WorkspaceHostingService, scope=singleton)
+    return injector.get(WorkspaceHostingService)
 
 # ── WorkspaceHostingClient.__init__ 环境区分 ────────────────────────────────────────
 
@@ -71,7 +99,7 @@ def _make_workspace_service(client: WorkspaceHostingClient | None = None) -> Wor
 class TestWorkspaceHostingClientInitEnvRouting:
     """WorkspaceHostingClient.__init__ 根据环境选择 aixcore_base_url。"""
 
-    @patch("agentclaw.community.core.bot_management.services.workspace_hosting_client.get_current_env", return_value="prod")
+    @patch("agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client.get_current_env", return_value="prod")
     def test_prod_env_uses_aixcore_base_url(self, mock_env):
         cfg = _make_config(
             aixcore_base_url="https://aixcore.teamclaw.com",
@@ -80,7 +108,7 @@ class TestWorkspaceHostingClientInitEnvRouting:
         client = WorkspaceHostingClient(cfg)
         assert client.aixcore_base_url == "https://aixcore.teamclaw.com"
 
-    @patch("agentclaw.community.core.bot_management.services.workspace_hosting_client.get_current_env", return_value="pre")
+    @patch("agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client.get_current_env", return_value="pre")
     def test_pre_env_uses_aixcore_base_url_pre(self, mock_env):
         cfg = _make_config(
             aixcore_base_url="https://aixcore.teamclaw.com",
@@ -89,7 +117,7 @@ class TestWorkspaceHostingClientInitEnvRouting:
         client = WorkspaceHostingClient(cfg)
         assert client.aixcore_base_url == "https://aixcore-pre.teamclaw.com"
 
-    @patch("agentclaw.community.core.bot_management.services.workspace_hosting_client.get_current_env", return_value="dev")
+    @patch("agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client.get_current_env", return_value="dev")
     def test_dev_env_uses_aixcore_base_url_pre(self, mock_env):
         cfg = _make_config(
             aixcore_base_url="https://aixcore.teamclaw.com",
@@ -98,7 +126,7 @@ class TestWorkspaceHostingClientInitEnvRouting:
         client = WorkspaceHostingClient(cfg)
         assert client.aixcore_base_url == "https://aixcore-pre.teamclaw.com"
 
-    @patch("agentclaw.community.core.bot_management.services.workspace_hosting_client.get_current_env", return_value="prod")
+    @patch("agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client.get_current_env", return_value="prod")
     def test_strips_trailing_slash(self, mock_env):
         cfg = _make_config(
             aixcore_base_url="https://aixcore.teamclaw.com/",
@@ -407,3 +435,205 @@ class TestCreateWorkspaceForBot:
 
         assert "ARK_RS_530013001" in str(exc_info.value)
         assert "已经被占用" in str(exc_info.value)
+
+
+
+# ── addMembers（临时本地改动）：新增管理员调用 ────────────────────────────
+
+
+class TestAddAdminMembersClient:
+    """WorkspaceHostingClient.add_admin_members：透传 addMembers 接口。"""
+
+    def test_add_admin_members_builds_admin_payload(self):
+        """verify body: targetType=WORKSPACE / targetId / roleId=ADMIN / memberStaffIds。
+        走 _make_request(POST)，固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定"""
+        client = _make_dima_client()
+        client._make_request = MagicMock(return_value={"success": True})
+
+        result = client.add_admin_members(
+            staff_id="100000",
+            workspace_id="WS001",
+            member_staff_ids=["100001", "100002"],
+        )
+
+        assert result == {"success": True}
+        client._make_request.assert_called_once()
+        args, kwargs = client._make_request.call_args
+        assert args[0] == "POST"
+        assert args[1] == "/arkcooprod/openapi/role/member/addMembers"
+        assert args[2] == "100000"  # staff_id
+        assert kwargs["params"] == {"staffId": "100000"}
+        assert kwargs["data"] == {
+            "targetType": "WORKSPACE",
+            "targetId": "WS001",
+            "roleId": "ADMIN",
+            "memberStaffIds": ["100001", "100002"],
+        }
+        assert kwargs["allow_empty_data"] is True
+
+    def test_add_admin_members_returns_make_request_result(self):
+        """透传 _make_request 返回值，不额外解析。"""
+        client = _make_dima_client()
+        client._make_request = MagicMock(return_value={"success": True, "code": "ARK_RS_100000200"})
+
+        result = client.add_admin_members(
+            staff_id="200001", workspace_id="W23001000283", member_staff_ids=["100001"],
+        )
+
+        assert result == {"success": True, "code": "ARK_RS_100000200"}
+
+    def test_add_admin_members_propagates_make_request_error(self):
+        """_make_request 抛异常时透传（由 service 层吞/抛）。"""
+        client = _make_dima_client()
+        client._make_request = MagicMock(side_effect=Exception("DIMA API error [ARK_RS_310011405]"))
+
+        with pytest.raises(Exception) as exc_info:
+            client.add_admin_members(
+                staff_id="100000", workspace_id="WS001", member_staff_ids=["100001"],
+            )
+
+        assert "ARK_RS_310011405" in str(exc_info.value)
+
+
+# ── create_workspace_for_bot：新增 add_admin_members 联动分支 ────────────────
+
+
+class TestCreateWorkspaceThenAddAdmins:
+    """workspace 创建成功后自动加管理员（工号来源于注入配置，源码不内置）。"""
+
+    def test_calls_add_admin_members_with_config_members_after_creation(self):
+        """创建成功 → 用配置 admin_member_staff_ids 调 add_admin_members，返回 workspace_id。"""
+        config = _make_config()
+        client = _make_dima_client(config)
+        client.query_staff_department = MagicMock(return_value="D9999")
+        client.create_workspace = MagicMock(return_value={
+            "success": True, "data": {"workspaceId": "WS001"},
+        })
+        client.add_admin_members = MagicMock(return_value={"success": True})
+        svc = _make_workspace_service(client, config)
+
+        template_config = {}
+        result = svc.create_workspace_for_bot(
+            staff_id="100000", bot_id="bot_001", bot_name="TestBot",
+            template_config=template_config,
+        )
+
+        assert result == "WS001"
+        assert template_config["dima_space_id"] == "WS001"
+        client.add_admin_members.assert_called_once_with(
+            staff_id="100000",
+            workspace_id="WS001",
+            member_staff_ids=list(_TEST_ADMIN_MEMBER_STAFF_IDS),
+        )
+
+    def test_uses_config_admin_member_staff_ids_not_hardcoded(self):
+        """service 不再内置工号常量；管理员列表完全取自注入的 config。"""
+        custom_ids = ("000001", "000002", "000003")
+        config = _make_config(admin_member_staff_ids=custom_ids)
+        client = _make_dima_client(config)
+        client.query_staff_department = MagicMock(return_value="D9999")
+        client.create_workspace = MagicMock(return_value={
+            "success": True, "data": {"workspaceId": "WS001"},
+        })
+        client.add_admin_members = MagicMock(return_value={"success": True})
+        svc = _make_workspace_service(client, config)
+
+        svc.create_workspace_for_bot(
+            staff_id="100000", bot_id="bot_001", bot_name="TestBot",
+            template_config={},
+        )
+
+        client.add_admin_members.assert_called_once_with(
+            staff_id="100000",
+            workspace_id="WS001",
+            member_staff_ids=list(custom_ids),
+        )
+
+    def test_no_admin_ids_skips_add_admins(self):
+        """配置 admin_member_staff_ids 为空（community/默认构建）时不调 add_admin_members。"""
+        config = _make_config(admin_member_staff_ids=())
+        client = _make_dima_client(config)
+        client.query_staff_department = MagicMock(return_value="D9999")
+        client.create_workspace = MagicMock(return_value={
+            "success": True, "data": {"workspaceId": "WS001"},
+        })
+        client.add_admin_members = MagicMock()
+        svc = _make_workspace_service(client, config)
+
+        result = svc.create_workspace_for_bot(
+            staff_id="100000", bot_id="bot_001", bot_name="TestBot",
+            template_config={},
+        )
+
+        assert result == "WS001"
+        client.add_admin_members.assert_not_called()
+
+    def test_service_module_has_no_hardcoded_admin_constant(self):
+        """安全约束：workspace_hosting_service 源码不得内置员工工号常量。"""
+        import inspect
+
+        from agentclaw.community.core.bot_management.services.aicoding import (
+            workspace_hosting_service as svc_mod,
+        )
+
+        src = inspect.getsource(svc_mod)
+        # service 源码不得出现任何工号常量。这里用合成工号自检：合成工号不应
+        # 出现在 service 源码中；若出现，说明 service 又内置了工号常量（数据泄露）。
+        for leaked in _TEST_ADMIN_MEMBER_STAFF_IDS:
+            assert leaked not in src, f"工号 {leaked} 仍被硬编码在 service 源码中"
+        # 变量名也不再存在（避免遗留引用残留敏感数据）。
+        assert not hasattr(svc_mod, "_FIXED_ADMIN_MEMBERS")
+
+    def test_add_admin_members_failure_does_not_block_bot_creation(self):
+        """add_admin_members 失败（ADMIN 无权场景 ARK_RS_310011405）只记 warning，
+        仍正常返回 workspace_id（不加管理员不应让创建 bot 失败）。"""
+        client = _make_dima_client()
+        client.query_staff_department = MagicMock(return_value="D9999")
+        client.create_workspace = MagicMock(return_value={
+            "success": True, "data": {"workspaceId": "WS001"},
+        })
+        client.add_admin_members = MagicMock(side_effect=Exception(
+            "DIMA API error [ARK_RS_310011405]: 本操作【添加管理员】需要【空间管理员】方可进行"
+        ))
+        svc = _make_workspace_service(client)
+
+        template_config = {}
+        result = svc.create_workspace_for_bot(
+            staff_id="100000", bot_id="bot_001", bot_name="TestBot",
+            template_config=template_config,
+        )
+
+        # workspace 创建成功，dima_space_id 已落，加管理员失败不影响结果
+        assert result == "WS001"
+        assert template_config["dima_space_id"] == "WS001"
+        client.add_admin_members.assert_called_once()
+
+    def test_skips_add_admins_when_dima_space_id_already_exists(self):
+        """已有 dima_space_id 跳过创建时，也不调 add_admin_members。"""
+        client = _make_dima_client()
+        client.query_staff_department = MagicMock()
+        client.create_workspace = MagicMock()
+        client.add_admin_members = MagicMock()
+        svc = _make_workspace_service(client)
+
+        result = svc.create_workspace_for_bot(
+            staff_id="100000", bot_id="bot_004", bot_name="TestBot",
+            template_config={"dima_space_id": "EXISTING_WS"},
+        )
+
+        assert result == "EXISTING_WS"
+        client.add_admin_members.assert_not_called()
+
+    def test_skips_add_admins_when_no_workspace_id(self):
+        """create_workspace 未返回 workspace_id 时不调 add_admin_members。"""
+        client = _make_dima_client()
+        client.query_staff_department = MagicMock(return_value="D9999")
+        client.create_workspace = MagicMock(return_value={"success": True, "data": {}})
+        client.add_admin_members = MagicMock()
+        svc = _make_workspace_service(client)
+
+        svc.create_workspace_for_bot(
+            staff_id="100000", bot_id="bot_005", bot_name="TestBot",
+        )
+
+        client.add_admin_members.assert_not_called()

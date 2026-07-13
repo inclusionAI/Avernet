@@ -1133,7 +1133,7 @@ show_local_mode_info() {
 
 # ============ BCN plugin source mode ============
 # openclaw-channel-bcn can be provided two ways, selected by BCN_PLUGIN_SOURCE:
-#   source (default) - build from the in-repo src/plugin tree
+#   source (default) - build from the in-repo BCS plugins tree
 #   npm              - install @avernet-plugin/openclaw-channel-bcn via openclaw
 BCN_PLUGIN_NPM_PACKAGE="@avernet-plugin/openclaw-channel-bcn"
 

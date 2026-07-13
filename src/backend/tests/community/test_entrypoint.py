@@ -9,7 +9,9 @@ boot.
 from __future__ import annotations
 
 import logging
+import runpy
 import sys
+import types
 
 import pytest
 
@@ -69,3 +71,51 @@ def test_require_local_profile_rejects_corp():
 
     with pytest.raises(RuntimeError, match="agentclaw/corp/main.py"):
         main._require_local_profile(DeployProfile.CORP)
+
+
+def test_main_registers_profile_provider_before_reading_sofa_config(monkeypatch):
+    from agentclaw.community import _entry, local, main
+    from agentclaw.community.core.config import provider as config_provider
+    from agentclaw.community.core.config.yaml_provider import YamlConfigProvider
+
+    monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
+    monkeypatch.setenv("SERVER_ENV", "prod")
+    monkeypatch.setattr(sys, "argv", [main.__file__])
+    monkeypatch.setattr(_entry, "ensure_stdin_fd", lambda: None)
+    monkeypatch.setattr(local, "patch_sofapy_for_local", lambda: None)
+    monkeypatch.setattr(config_provider, "_provider", None)
+    monkeypatch.setattr(config_provider, "_cached", None)
+
+    events: list[str] = []
+
+    class ConfigProbe:
+        def model_dump(self):
+            provider = config_provider._provider
+            assert isinstance(provider, YamlConfigProvider)
+            assert provider.overlay_name == "application-singlebox.yaml"
+            events.append("config-read")
+            return {"app_name": "agentclaw"}
+
+    sofa_module = types.ModuleType("agentclaw.community.core.config.sofa")
+    sofa_module.sofa_config = ConfigProbe()
+    monkeypatch.setitem(
+        sys.modules,
+        "agentclaw.community.core.config.sofa",
+        sofa_module,
+    )
+
+    app_module = types.ModuleType("agentclaw.community.adapters.http.app")
+    app_module.app = object()
+    monkeypatch.setitem(
+        sys.modules,
+        "agentclaw.community.adapters.http.app",
+        app_module,
+    )
+
+    uvicorn_module = types.ModuleType("uvicorn")
+    uvicorn_module.run = lambda *args, **kwargs: events.append("uvicorn-run")
+    monkeypatch.setitem(sys.modules, "uvicorn", uvicorn_module)
+
+    runpy.run_path(main.__file__, run_name="__main__")
+
+    assert events == ["config-read", "uvicorn-run"]

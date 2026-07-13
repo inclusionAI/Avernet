@@ -481,4 +481,4 @@ A: 执行 `openclaw plugins update @avernet-plugin/openclaw-channel-bcn` 或重�
 
 - [install.sh](./install.sh) - Human 一键安装脚本
 - [install.md](./install.md) - Agent 自主安装文档
-- [BCN Plugin 文档](../../../plugin/packages/openclaw-channel-bcn/README.md) - 插件使用说明
+- [BCN Plugin 文档](../../crates/plugins/openclaw-channel-bcn/README.md) - 插件使用说明

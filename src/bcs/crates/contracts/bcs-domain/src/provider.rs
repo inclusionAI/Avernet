@@ -62,6 +62,22 @@ pub struct ProviderCoordinationConfig {
     pub mcporter_command: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderOrganizationManagementConfig {
+    #[serde(default)]
+    pub authorized_manager_provider_ids: Vec<String>,
+}
+
+impl ProviderOrganizationManagementConfig {
+    pub fn from_provider_config(config: &str) -> Result<Self, serde_json::Error> {
+        let value: serde_json::Value = serde_json::from_str(config)?;
+        match value.get("organization_management") {
+            Some(raw) => serde_json::from_value(raw.clone()),
+            None => Ok(Self::default()),
+        }
+    }
+}
+
 impl ProviderCoordinationConfig {
     pub fn disabled() -> Self {
         Self {

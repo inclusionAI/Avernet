@@ -1,9 +1,20 @@
 """Pydantic schemas for economy/governance endpoints."""
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
+
+from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.economy.governance.domain.ticket import (
+        GovernanceTicket,
+    )
+    from agentclaw.community.core.economy.governance.services.admin_service import (
+        TicketActionOutcome,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -16,33 +27,6 @@ class ApiResponse(BaseModel):
     data: Any = None
     message: str = ""
     error_code: str = ""
-
-
-# ---------------------------------------------------------------------------
-# Resolve (task_record based, §7.4)
-# ---------------------------------------------------------------------------
-
-class GovernanceNotifyResolveRequest(BaseModel):
-    """Request body for resolving a governance notification."""
-    response: str = Field(..., description="optimized / need_time / dispute / whitelist")
-    remark: str | None = Field(None, description="Optional remark (required for dispute)")
-    repair_deadline: str | None = Field(
-        None,
-        description="ISO date, required for need_time",
-    )
-    feedback_payload: dict | None = Field(
-        None,
-        description="Structured feedback JSON (validated as JSON only)",
-    )
-
-
-class GovernanceNotifyResolveResponse(BaseModel):
-    """Response for resolve endpoint — now ticket-based (§7.4)."""
-    notification_id: str = ""
-    ticket_id: str = ""
-    governance_status: str = ""
-    close_reason: str | None = None
-    mute_until: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -63,9 +47,54 @@ class RecordProcessResultItem(BaseModel):
 # Offline batch (§7.2, upgraded)
 # ---------------------------------------------------------------------------
 
+class GovernanceRecordInput(BaseModel):
+    """单条离线批治理记录(分层必填) — 边界校验后转 GovernanceRecord 领域模型。
+
+    必填(身份/路由/数据版本):owner_id / bot_id / governance_decision / dt_version。
+    其余可选,缺则 None,由下游 refresh_snapshot/add_ticket 接受 None。
+    """
+
+    # 必填:身份/路由/数据版本
+    owner_id: str = Field(..., min_length=1, description="负责人工号")
+    bot_id: str = Field(..., min_length=1, description="Bot ID")
+    governance_decision: str = Field(..., min_length=1, description="治理判决 actionable/normal")
+    dt_version: str = Field(..., min_length=1, description="数据版本 YYYYMMDD")
+    # 可选:身份补充
+    worker_id: str | None = Field(None, description="生产者优先的 worker_id(owner_id:bot_id);缺则合成")
+    bot_name: str | None = Field(None, description="Bot 名称")
+    # 可选:数据字段,缺则默认 None,传给 refresh_snapshot/add_ticket
+    hit_dimensions: str | None = Field(None, description="命中维度")
+    hit_dimensions_count: int | None = Field(None, description="命中维度数")
+    governance_max_priority: str | None = Field(None, description="治理优先级")
+    expected_token_saving: int | None = Field(None, description="预期 token 节省")
+    saving_ratio: float | None = Field(None, description="节省率 0-1")
+    task_summary: str | None = Field(None, description="任务摘要")
+    notification_structured: str | None = Field(None, description="结构化通知 JSON")
+    analysis_status: str | None = Field(None, description="分析状态")
+
+    def to_record(self) -> GovernanceRecord:
+        """边界转领域模型:Pydantic 校验后由 endpoint 调用,service 接 GovernanceRecord。"""
+        return GovernanceRecord(
+            owner_id=self.owner_id,
+            bot_id=self.bot_id,
+            governance_decision=self.governance_decision,
+            dt_version=self.dt_version,
+            worker_id=self.worker_id,
+            bot_name=self.bot_name,
+            hit_dimensions=self.hit_dimensions,
+            hit_dimensions_count=self.hit_dimensions_count,
+            governance_max_priority=self.governance_max_priority,
+            expected_token_saving=self.expected_token_saving,
+            saving_ratio=self.saving_ratio,
+            task_summary=self.task_summary,
+            notification_structured=self.notification_structured,
+            analysis_status=self.analysis_status,
+        )
+
+
 class OfflineBatchRequest(BaseModel):
     """Request body for offline-batch upsert (§7.2)."""
-    records: list[dict] = Field(..., min_length=1)
+    records: list[GovernanceRecordInput] = Field(..., min_length=1)
     batch_id: str = Field("", description="Batch unique ID from producer")
     dt_version: str = Field("", description="Data version (YYYYMMDD)")
     total_count: int = Field(0, description="Expected record count for quality check")
@@ -83,38 +112,194 @@ class OfflineBatchResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Admin: review (§7.5.2) / pause (§7.5.1) / emergency-close
+# Workflow: review (§7.5.2) — 正常业务流程面,ticket_id 走 body/query(零 path 参数)
 # ---------------------------------------------------------------------------
 
-class AdminReviewRequest(BaseModel):
-    """Request body for admin review (§7.5.2)."""
+class WorkflowReviewRequest(BaseModel):
+    """Request body for workflow ticket review (§7.5.2).
+
+    审计操作人不在 body(取自鉴权上下文 ``ctx.user_id``,防 body 顶替)。
+    """
     ticket_id: str = Field(..., description="Ticket to review")
     action: str = Field(..., description="approve_close / approve_whitelist / reject_for_reopen")
-    admin_id: str = Field("", description="Admin who triggered the review")
     remark: str = Field("", description="Review remark")
 
 
-class AdminReviewResponse(BaseModel):
-    """Response for admin review."""
+class WorkflowReviewResponse(BaseModel):
+    """Response for workflow ticket review."""
+
     ticket_id: str = ""
     governance_status: str = ""
     close_reason: str | None = None
 
+    @classmethod
+    def from_outcome(cls, outcome: TicketActionOutcome) -> WorkflowReviewResponse:
+        """从 TicketActionOutcome 领域返回值构造响应(显式序列化,非裸 dict)。
 
-class AdminPauseRequest(BaseModel):
-    """Request body for admin pause (§7.5.1)."""
-    ticket_id: str = Field(..., description="Ticket to pause")
-    admin_id: str = Field("", description="Admin who triggered the pause")
-    reason: str = Field("", description="Pause reason")
+        Args:
+            outcome: review_ticket / emergency_close 返回的领域 I/O 对象。
+
+        Returns:
+            审批响应,status 取 enum 的 value 字符串。
+        """
+        status = outcome.status.value if hasattr(outcome.status, "value") else str(outcome.status or "")
+        return cls(
+            ticket_id=outcome.ticket_id,
+            governance_status=status,
+            close_reason=outcome.close_reason,
+        )
 
 
-class AdminEmergencyCloseRequest(BaseModel):
-    """Request body for emergency close (§6.3)."""
-    ticket_id: str = Field(..., description="Ticket to close")
-    admin_id: str = Field("", description="Admin who triggered the close")
-    reason: str = Field("", description="Close reason")
+# ---------------------------------------------------------------------------
+# Review router — 评审工单列表/详情响应(从领域模型 GovernanceTicket 显式构造)
+# ---------------------------------------------------------------------------
 
 
+def _iso(value: datetime | None) -> str | None:
+    """datetime → ISO 字符串(None 透传),供 schema 序列化复用。"""
+    return value.isoformat() if value is not None else None
+
+
+class ReviewTicketItem(BaseModel):
+    """评审工单列表单行 — 字段贴合 governance-admin.html 三栏展示。"""
+
+    ticket_id: str | None = None
+    bot_name: str | None = None
+    owner_id: str | None = None
+    governance_status: str = ""
+    latest_decision: str | None = None
+    hit_dimensions: str | None = None
+    saving_ratio: float | None = None
+    response: str | None = None
+    review_reason: str | None = None
+    gmt_create: str | None = None
+
+    @classmethod
+    def from_ticket(cls, ticket: GovernanceTicket) -> ReviewTicketItem:
+        """从 GovernanceTicket 领域模型构造列表行(读 snapshot 委托属性 + 实体字段)。"""
+        s = ticket.snapshot
+        status = ticket.governance_status
+        return cls(
+            ticket_id=ticket.ticket_id,
+            bot_name=ticket.bot_name,
+            owner_id=ticket.owner_id,
+            governance_status=status.value if hasattr(status, "value") else str(status or ""),
+            latest_decision=s.current_decision,
+            hit_dimensions=s.triggered_dimensions,
+            saving_ratio=s.saving_ratio,
+            response=ticket.user_feedback,
+            review_reason=ticket.review_reason,
+            gmt_create=_iso(ticket.gmt_create),
+        )
+
+
+class ReviewTicketListResponse(BaseModel):
+    """评审工单列表响应 — items + 分页元信息。"""
+
+    items: list[ReviewTicketItem] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 50
+    offset: int = 0
+    status_filter: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_tickets(
+        cls,
+        tickets: list[GovernanceTicket],
+        *,
+        total: int,
+        limit: int,
+        offset: int,
+        status_filter: list[str],
+    ) -> ReviewTicketListResponse:
+        """从领域工单列表构造响应(逐条 from_ticket,显式序列化)。"""
+        return cls(
+            items=[ReviewTicketItem.from_ticket(t) for t in tickets],
+            total=total,
+            limit=limit,
+            offset=offset,
+            status_filter=status_filter,
+        )
+
+
+class ReviewTicketDetailResponse(BaseModel):
+    """评审工单详情 — 列表字段外加详情面板所需全部字段。"""
+
+    # 基础信息
+    ticket_id: str | None = None
+    worker_id: str | None = None
+    bot_id: str | None = None
+    owner_id: str | None = None
+    bot_name: str | None = None
+    dt_version: str | None = None
+    task_summary: str | None = None
+    governance_max_priority: str | None = None
+    # 治理态
+    governance_status: str = ""
+    latest_decision: str | None = None
+    hit_dimensions: str | None = None
+    saving_ratio: float | None = None
+    consecutive_normal_days: int = 0
+    # 用户反馈
+    response: str | None = None
+    response_remark: str | None = None
+    response_at: str | None = None
+    response_source: str | None = None
+    feedback_payload: str | None = None
+    # 评审 / 生命周期
+    review_reason: str | None = None
+    review_decision: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: str | None = None
+    review_remark: str | None = None
+    close_reason: str | None = None
+    closed_at: str | None = None
+    cooldown_until: str | None = None
+    mute_until: str | None = None
+    remind_at: str | None = None
+    remind_count: int = 0
+    # 元信息
+    gmt_create: str | None = None
+    gmt_modified: str | None = None
+
+    @classmethod
+    def from_ticket(cls, ticket: GovernanceTicket) -> ReviewTicketDetailResponse:
+        """从 GovernanceTicket 领域模型构造详情(读 snapshot 委托 + 实体字段,datetime→ISO)。"""
+        s = ticket.snapshot
+        status = ticket.governance_status
+        return cls(
+            ticket_id=ticket.ticket_id,
+            worker_id=ticket.worker_id,
+            bot_id=ticket.bot_id,
+            owner_id=ticket.owner_id,
+            bot_name=ticket.bot_name,
+            dt_version=s.dt_version,
+            task_summary=s.task_summary,
+            governance_max_priority=s.severity,
+            governance_status=status.value if hasattr(status, "value") else str(status or ""),
+            latest_decision=s.current_decision,
+            hit_dimensions=s.triggered_dimensions,
+            saving_ratio=s.saving_ratio,
+            consecutive_normal_days=s.consecutive_normal_days,
+            response=ticket.user_feedback,
+            response_remark=ticket.feedback_remark,
+            response_at=_iso(ticket.feedback_at),
+            response_source=ticket.feedback_source,
+            feedback_payload=ticket.feedback_payload,
+            review_reason=ticket.review_reason,
+            review_decision=ticket.review_decision,
+            reviewed_by=ticket.reviewed_by,
+            reviewed_at=_iso(ticket.reviewed_at),
+            review_remark=ticket.review_remark,
+            close_reason=ticket.close_reason,
+            closed_at=_iso(ticket.closed_at),
+            cooldown_until=_iso(ticket.cooldown_until),
+            mute_until=_iso(ticket.resume_at),
+            remind_at=_iso(ticket.remind_at),
+            remind_count=ticket.remind_count,
+            gmt_create=_iso(ticket.gmt_create),
+            gmt_modified=_iso(ticket.gmt_modified),
+        )
 # ---------------------------------------------------------------------------
 # Whitelist
 # ---------------------------------------------------------------------------
@@ -125,20 +310,6 @@ class WhitelistEntry(BaseModel):
     owner_id: str
     reason: str | None = None
     expires_at: str | None = None
-
-
-class WhitelistBatchRequest(BaseModel):
-    """Request body for batch whitelist add."""
-    entries: list[WhitelistEntry] = Field(..., min_length=1)
-    source: str = Field("manual", description="manual / owner / admin / system")
-
-
-class WhitelistBatchResponse(BaseModel):
-    """Response for batch whitelist add."""
-    inserted: int = 0
-    skipped: int = 0
-
-
 class WhitelistDeletePair(BaseModel):
     """A single (bot_id, owner_id) pair for whitelist deletion."""
     bot_id: str
@@ -147,28 +318,74 @@ class WhitelistDeletePair(BaseModel):
 
 class WhitelistDeleteRequest(BaseModel):
     """Request body for whitelist deletion."""
-    ids: list[int] | None = Field(None, description="按主键 ID 删除")
-    bot_owner_pairs: list[WhitelistDeletePair] | None = Field(
-        None, description="按 (bot_id, owner_id) 对删除",
+    bot_owner_pairs: list[WhitelistDeletePair] = Field(
+        ..., min_length=1, description="按 (bot_id, owner_id) 对删除",
     )
-    dry_run: bool = Field(True, description="true=只统计不删除")
     reason: str = Field(..., description="操作原因，写入 audit")
 
 
 # ---------------------------------------------------------------------------
-# Emergency
+# Admin: 制动 (brake) / 工单批量管理 / 白名单批量 / 按 worker 投递
+# 拆自原 5-action EmergencyRequest(action 开关分发多资源),全 body 驱动。
 # ---------------------------------------------------------------------------
 
-class EmergencyRequest(BaseModel):
-    """Request body for emergency brake / admin actions."""
-    action: str = Field(..., description="pause / resume / bulk-whitelist / cancel-pending / close-all-open")
-    reason: str = Field(..., description="Required: reason for the action")
-    operator: str = Field("", description="Who triggered the action")
-    bot_ids: list[str] | None = Field(None, description="Required for bulk-whitelist")
+class BrakeToggleRequest(BaseModel):
+    """Request body for global governance brake toggle (pause/resume).
+
+    审计操作人不在 body(取自鉴权上下文 ``ctx.user_id``,防 body 顶替)。
+    """
+    enabled: bool = Field(..., description="true=pause(暂停治理流程), false=resume(恢复)")
+    reason: str = Field("", description="Optional reason for audit")
 
 
-class EmergencyStateResponse(BaseModel):
-    """Response for emergency state query."""
+class TicketsCloseRequest(BaseModel):
+    """Request body for closing one or more governance tickets.
+
+    单条/批量统一入参:把要关的 ticket_id 放进列表,handler 循环调
+    ``admin_svc.emergency_close``(已委托 ``lifecycle_svc``,关工单+cancel_pending
+    由 driver 编排)。禁止直调 repo。
+    """
+    reason: str = Field(..., description="Close reason for audit")
+    ticket_ids: list[str] = Field(..., min_length=1, description="Ticket IDs to close")
+
+
+class TicketsCloseAllRequest(BaseModel):
+    """Request body for closing all active governance tickets (emergency bulk).
+
+    handler dispatch 复用状态机收口后的两方法:
+    ``only_unresponded=true`` → ``admin_svc.cancel_pending``(仅未响应,EMERGENCY_CLOSED);
+    否则 → ``admin_svc.close_all_open``(全量含已响应,ADMIN_CLOSED)。两方法已联合编排
+    task_record 工单主体 + notify_log 通知 + audit(状态机 Task 8 口径对齐)。
+   cooldown_days 走 config.cool_down_days,无入参。
+    """
+    reason: str = Field(..., description="Close reason for audit")
+    only_unresponded: bool = Field(False, description="true=仅关未响应(cancel_pending),false=全量(close_all_open)")
+
+
+class WhitelistBulkAddRequest(BaseModel):
+    """Request body for bulk whitelist add (admin 代加白).
+
+    审计操作人不在 body(取自鉴权上下文 ``ctx.user_id``,防 body 顶替)。
+    """
+    bot_ids: list[str] = Field(..., min_length=1, description="Bot IDs to whitelist")
+    reason: str = Field(..., description="Required: reason for audit")
+
+
+class TicketsDeliverRequest(BaseModel):
+    """Request body for delivering pending notifications by worker_id.
+
+    按 worker 精准取该工单 pending 通知投递,**不重跑状态机**(治理决策进入时
+    已跑过,pending 已躺 notify_log)。前一档 scan-and-deliver 是随机批量兜底,
+    本端点是精准单 worker。
+    """
+    worker_id: str = Field(..., description="owner_id:bot_id")
+    override_recipient: str | None = Field(None, description="覆盖收件人工号(纯数字 4~10 位)")
+    dry_run: bool = Field(True, description="true=只构建不发钉钉")
+    channel: str = Field("auto", description="auto(跟随DB)|markdown|tc_card")
+
+
+class BrakeStateResponse(BaseModel):
+    """Response for brake state query."""
     paused: bool = False
     reason: str | None = None
     operator: str | None = None
@@ -176,8 +393,6 @@ class EmergencyStateResponse(BaseModel):
     pending_count: int = 0
     open_count: int = 0
     whitelist_count: int = 0
-
-
 # ---------------------------------------------------------------------------
 # Records / Notifications delete
 # ---------------------------------------------------------------------------

@@ -64,22 +64,22 @@ class FakeWorkspaceService:
     get_file_diff_raise: Optional[BaseException] = None
     calls: list[tuple[str, dict]] = field(default_factory=list)
 
-    async def list_file_tree(self, session_id: str):
-        self.calls.append(("list_file_tree", {"session_id": session_id}))
+    async def list_file_tree(self, session_id: str, cwd: str | None = None):
+        self.calls.append(("list_file_tree", {"session_id": session_id, "cwd": cwd}))
         if self.list_file_tree_raise:
             raise self.list_file_tree_raise
         return self.list_file_tree_return or []
 
-    async def preview_file(self, session_id: str, path: str):
+    async def preview_file(self, session_id: str, path: str, cwd: str | None = None):
         self.calls.append(
-            ("preview_file", {"session_id": session_id, "path": path})
+            ("preview_file", {"session_id": session_id, "path": path, "cwd": cwd})
         )
         if self.preview_file_raise:
             raise self.preview_file_raise
         return self.preview_file_return
 
-    async def list_git_diff(self, session_id: str):
-        self.calls.append(("list_git_diff", {"session_id": session_id}))
+    async def list_git_diff(self, session_id: str, cwd: str | None = None):
+        self.calls.append(("list_git_diff", {"session_id": session_id, "cwd": cwd}))
         if self.list_git_diff_raise:
             raise self.list_git_diff_raise
         return self.list_git_diff_return
@@ -114,23 +114,25 @@ class FakeRunStatusService:
             return self.enrich_return
         return [{**s, "run_status": "idle"} for s in sessions]
 
-    async def get_session_runs(self, session_id: str):
-        self.calls.append(("get_session_runs", {"session_id": session_id}))
+    async def get_session_runs(self, session_id: str, cwd: str | None = None):
+        self.calls.append(("get_session_runs", {"session_id": session_id, "cwd": cwd}))
         if self.runs_raise:
             raise self.runs_raise
         return self.runs_return or []
 
-    async def get_run_phase_status(self, session_id: str, run_id: str):
+    async def get_run_phase_status(
+        self, session_id: str, run_id: str, cwd: str | None = None
+    ):
         self.calls.append(
-            ("get_run_phase_status", {"session_id": session_id, "run_id": run_id})
+            ("get_run_phase_status", {"session_id": session_id, "run_id": run_id, "cwd": cwd})
         )
         if self.phase_raise:
             raise self.phase_raise
         return self.phase_return
 
-    async def get_session_pull_requests(self, session_id: str):
+    async def get_session_pull_requests(self, session_id: str, cwd: str | None = None):
         self.calls.append(
-            ("get_session_pull_requests", {"session_id": session_id})
+            ("get_session_pull_requests", {"session_id": session_id, "cwd": cwd})
         )
         if self.pr_raise:
             raise self.pr_raise
@@ -712,7 +714,7 @@ def test_worktree_status_file_not_exists(client, tmp_path, monkeypatch):
     from engine.community.core.aicoding import workspace_service as ws_mod
 
     monkeypatch.setattr(
-        ws_mod.WorkspaceService, "resolve_workspace", staticmethod(lambda sid: str(tmp_path))
+        ws_mod.WorkspaceService, "resolve_workspace", staticmethod(lambda sid, cwd=None: str(tmp_path))
     )
     resp = client.get(
         "/api/aicoding/sessions/worktree-status", params={"session_id": "s1"},
@@ -735,7 +737,7 @@ def test_worktree_status_completed(client, tmp_path, monkeypatch):
     worktree_file.write_text(json.dumps({"schemaVersion": 1, "status": "completed"}))
 
     monkeypatch.setattr(
-        ws_mod.WorkspaceService, "resolve_workspace", staticmethod(lambda sid: str(tmp_path))
+        ws_mod.WorkspaceService, "resolve_workspace", staticmethod(lambda sid, cwd=None: str(tmp_path))
     )
     resp = client.get(
         "/api/aicoding/sessions/worktree-status", params={"session_id": "s1"},
@@ -756,7 +758,7 @@ def test_worktree_status_running(client, tmp_path, monkeypatch):
     worktree_file.write_text(json.dumps({"schemaVersion": 1, "status": "running"}))
 
     monkeypatch.setattr(
-        ws_mod.WorkspaceService, "resolve_workspace", staticmethod(lambda sid: str(tmp_path))
+        ws_mod.WorkspaceService, "resolve_workspace", staticmethod(lambda sid, cwd=None: str(tmp_path))
     )
     resp = client.get(
         "/api/aicoding/sessions/worktree-status", params={"session_id": "s1"},
@@ -775,7 +777,7 @@ def test_worktree_status_invalid_json(client, tmp_path, monkeypatch):
     worktree_file.write_text("not valid json {{{")
 
     monkeypatch.setattr(
-        ws_mod.WorkspaceService, "resolve_workspace", staticmethod(lambda sid: str(tmp_path))
+        ws_mod.WorkspaceService, "resolve_workspace", staticmethod(lambda sid, cwd=None: str(tmp_path))
     )
     resp = client.get(
         "/api/aicoding/sessions/worktree-status", params={"session_id": "s1"},
@@ -796,7 +798,7 @@ def test_worktree_status_missing_status_field(client, tmp_path, monkeypatch):
     worktree_file.write_text(json.dumps({"schemaVersion": 1}))
 
     monkeypatch.setattr(
-        ws_mod.WorkspaceService, "resolve_workspace", staticmethod(lambda sid: str(tmp_path))
+        ws_mod.WorkspaceService, "resolve_workspace", staticmethod(lambda sid, cwd=None: str(tmp_path))
     )
     resp = client.get(
         "/api/aicoding/sessions/worktree-status", params={"session_id": "s1"},
@@ -804,4 +806,208 @@ def test_worktree_status_missing_status_field(client, tmp_path, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["exists"] is True
+    assert body["status"] == "idle"
+
+
+# ── cwd 直传（新增可选参数）─────────────────────────────────────────────────
+
+
+def test_file_tree_forwards_cwd_to_service(client, workspace_svc):
+    """cwd 直传必须透传到 ``service.list_file_tree(session_id, cwd)``。"""
+    workspace_svc.list_file_tree_return = []
+    resp = client.get(
+        "/api/aicoding/sessions/file-tree",
+        params={"session_id": "s1", "cwd": "/home/admin/.aicoding/workspace/s1"},
+    )
+    assert resp.status_code == 200
+    assert workspace_svc.calls[-1][1]["cwd"] == "/home/admin/.aicoding/workspace/s1"
+
+
+def test_file_tree_cwd_missing_falls_back_to_none_cwd(client, workspace_svc):
+    """不传 cwd → service 收到 cwd=None（旧逻辑兜底，完全向后兼容）。"""
+    workspace_svc.list_file_tree_return = []
+    resp = client.get(
+        "/api/aicoding/sessions/file-tree", params={"session_id": "s1"},
+    )
+    assert resp.status_code == 200
+    assert workspace_svc.calls[-1][1]["cwd"] is None
+
+
+@pytest.mark.parametrize(
+    "exc, status",
+    [
+        (ValueError("cwd not allowed"), 400),
+        (NotADirectoryError("cwd not a directory"), 400),
+        (FileNotFoundError("cwd not found"), 404),
+    ],
+)
+def test_file_tree_cwd_validation_errors_mapped(client, workspace_svc, exc, status):
+    """cwd 校验失败三类异常 → 400/404（file-tree 端点，覆盖 §2.2）。"""
+    workspace_svc.list_file_tree_raise = exc
+    resp = client.get(
+        "/api/aicoding/sessions/file-tree",
+        params={"session_id": "s1", "cwd": "/whatever"},
+    )
+    assert resp.status_code == status
+
+
+def test_files_preview_forwards_cwd(client, workspace_svc):
+    workspace_svc.preview_file_return = FileContent(content="hi", size=2)
+    resp = client.get(
+        "/api/aicoding/sessions/files/preview",
+        params={
+            "session_id": "s1",
+            "path": "a.txt",
+            "cwd": "/home/admin/.aicoding/workspace/s1",
+        },
+    )
+    assert resp.status_code == 200
+    assert workspace_svc.calls[-1][1]["cwd"] == "/home/admin/.aicoding/workspace/s1"
+
+
+@pytest.mark.parametrize(
+    "exc, status",
+    [
+        (NotADirectoryError("cwd not a directory"), 400),
+        (PermissionError("denied"), 403),
+    ],
+)
+def test_git_diff_cwd_new_branches(client, workspace_svc, exc, status):
+    """git-diff 新增的 except 分支（设计 §2.3.3 标「新增」）。"""
+    workspace_svc.list_git_diff_raise = exc
+    resp = client.get(
+        "/api/aicoding/sessions/git-diff",
+        params={"session_id": "s1", "cwd": "/x"},
+    )
+    assert resp.status_code == status
+
+
+def test_files_diff_cwd_new_branches(client, workspace_svc):
+    """files/diff 新增 NotADirectoryError→400 / PermissionError→403。"""
+    workspace_svc.get_file_diff_raise = NotADirectoryError("cwd not a dir")
+    resp = client.get(
+        "/api/aicoding/sessions/files/diff",
+        params={"session_id": "s1", "project": "p", "path": "x", "cwd": "/x"},
+    )
+    assert resp.status_code == 400
+
+
+def test_runs_forwards_cwd(client, runstatus_svc):
+    runstatus_svc.runs_return = []
+    resp = client.get(
+        "/api/aicoding/sessions/runs",
+        params={"session_id": "s1", "cwd": "/home/admin/.aicoding/workspace/s1"},
+    )
+    assert resp.status_code == 200
+    assert runstatus_svc.calls[-1][1]["cwd"] == "/home/admin/.aicoding/workspace/s1"
+
+
+@pytest.mark.parametrize(
+    "exc, status",
+    [
+        (ValueError("cwd not allowed"), 400),
+        (NotADirectoryError("cwd not a directory"), 400),
+    ],
+)
+def test_runs_cwd_validation_errors(client, runstatus_svc, exc, status):
+    runstatus_svc.runs_raise = exc
+    resp = client.get(
+        "/api/aicoding/sessions/runs", params={"session_id": "s1", "cwd": "/x"},
+    )
+    assert resp.status_code == status
+
+
+def test_phases_forwards_cwd(client, runstatus_svc):
+    runstatus_svc.phase_return = {
+        "runId": "r-1",
+        "workflow": "spec-to-pr",
+        "currentPhase": "summarize",
+    }
+    resp = client.get(
+        "/api/aicoding/sessions/phases",
+        params={
+            "session_id": "s1",
+            "run_id": "r-1",
+            "cwd": "/home/admin/.aicoding/workspace/s1",
+        },
+    )
+    assert resp.status_code == 200
+    assert runstatus_svc.calls[-1][1]["cwd"] == "/home/admin/.aicoding/workspace/s1"
+
+
+def test_phases_cwd_validation_400(client, runstatus_svc):
+    runstatus_svc.phase_raise = ValueError("cwd not allowed")
+    resp = client.get(
+        "/api/aicoding/sessions/phases",
+        params={"session_id": "s1", "run_id": "r-1", "cwd": "/x"},
+    )
+    assert resp.status_code == 400
+
+
+def test_pull_requests_forwards_cwd(client, runstatus_svc):
+    runstatus_svc.pr_return = []
+    resp = client.get(
+        "/api/aicoding/sessions/runs/pull-requests",
+        params={"session_id": "s1", "cwd": "/home/admin/.aicoding/workspace/s1"},
+    )
+    assert resp.status_code == 200
+    assert runstatus_svc.calls[-1][1]["cwd"] == "/home/admin/.aicoding/workspace/s1"
+
+
+def test_pull_requests_cwd_validation_400(client, runstatus_svc):
+    """pull-requests 走 resolve_workspace（仅前缀校验）→ ValueError→400；
+    不抛 NotADirectoryError/FileNotFoundError（§2.3.4）。"""
+    runstatus_svc.pr_raise = ValueError("cwd not allowed")
+    resp = client.get(
+        "/api/aicoding/sessions/runs/pull-requests",
+        params={"session_id": "s1", "cwd": "/x"},
+    )
+    assert resp.status_code == 400
+
+
+def test_worktree_status_forwards_cwd_to_resolve_workspace(
+    client, tmp_path, monkeypatch
+):
+    """cwd 直传必须透传到 resolve_workspace(session_id, cwd)。"""
+    from engine.community.core.aicoding import workspace_service as ws_mod
+
+    captured: dict = {}
+
+    def _capture(sid, cwd=None):
+        captured["sid"] = sid
+        captured["cwd"] = cwd
+        return str(tmp_path)
+
+    monkeypatch.setattr(
+        ws_mod.WorkspaceService, "resolve_workspace", staticmethod(_capture)
+    )
+    # tmp_path 下无 .worktree.json → exists:false，但仍 200
+    resp = client.get(
+        "/api/aicoding/sessions/worktree-status",
+        params={"session_id": "s1", "cwd": "/home/admin/.aicoding/workspace/s1"},
+    )
+    assert resp.status_code == 200
+    assert captured["sid"] == "s1"
+    assert captured["cwd"] == "/home/admin/.aicoding/workspace/s1"
+
+
+def test_worktree_status_invalid_cwd_returns_exists_false(
+    client, monkeypatch
+):
+    """cwd 越界 → resolve_workspace 抛 ValueError → 兜成 exists:false/200（§2.3.3）。"""
+    from engine.community.core.aicoding import workspace_service as ws_mod
+
+    def _raise(sid, cwd=None):
+        raise ValueError("cwd not allowed")
+
+    monkeypatch.setattr(
+        ws_mod.WorkspaceService, "resolve_workspace", staticmethod(_raise)
+    )
+    resp = client.get(
+        "/api/aicoding/sessions/worktree-status",
+        params={"session_id": "s1", "cwd": "/etc"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["exists"] is False
     assert body["status"] == "idle"

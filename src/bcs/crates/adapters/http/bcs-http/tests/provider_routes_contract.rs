@@ -1258,6 +1258,132 @@ async fn patch_provider_updates_name_and_webhook_url() {
 }
 
 #[tokio::test]
+async fn patch_and_get_provider_use_typed_organization_management_config() {
+    let TestApp { app, _temp_dir, .. } = test_app();
+    let provider_a = register_provider_as(&app, "11111111").await;
+    let provider_b = register_provider_as(&app, "11111111").await;
+    let provider_a_id = provider_a["provider_id"].as_str().unwrap();
+    let provider_b_id = provider_b["provider_id"].as_str().unwrap();
+    let admin_token_b = provider_b["provider_admin_token"].as_str().unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/providers/{provider_b_id}"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token_b}"))
+                .header("x-test-staff-no", "11111111")
+                .body(Body::from(
+                    json!({
+                        "organization_management": {
+                            "authorized_manager_provider_ids": [provider_a_id, provider_a_id]
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(
+        body["organization_management"]["authorized_manager_provider_ids"],
+        json!([provider_a_id])
+    );
+    assert!(body.get("config").is_none());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/providers/{provider_b_id}"))
+                .header("authorization", format!("Bearer {admin_token_b}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(
+        body["organization_management"]["authorized_manager_provider_ids"],
+        json!([provider_a_id])
+    );
+    assert!(body.get("config").is_none());
+}
+
+#[tokio::test]
+async fn patch_provider_preserves_absent_and_clears_empty_organization_management_config() {
+    let TestApp { app, _temp_dir, .. } = test_app();
+    let provider_a = register_provider_as(&app, "11111111").await;
+    let provider_b = register_provider_as(&app, "11111111").await;
+    let provider_a_id = provider_a["provider_id"].as_str().unwrap();
+    let provider_b_id = provider_b["provider_id"].as_str().unwrap();
+    let admin_token_b = provider_b["provider_admin_token"].as_str().unwrap();
+
+    for body in [
+        json!({
+            "organization_management": {
+                "authorized_manager_provider_ids": [provider_a_id]
+            }
+        }),
+        json!({"name": "Renamed Provider"}),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/providers/{provider_b_id}"))
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {admin_token_b}"))
+                    .header("x-test-staff-no", "11111111")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(
+            body["organization_management"]["authorized_manager_provider_ids"],
+            json!([provider_a_id])
+        );
+    }
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/providers/{provider_b_id}"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token_b}"))
+                .header("x-test-staff-no", "11111111")
+                .body(Body::from(
+                    json!({
+                        "organization_management": {
+                            "authorized_manager_provider_ids": []
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(
+        body["organization_management"]["authorized_manager_provider_ids"],
+        json!([])
+    );
+}
+
+#[tokio::test]
 async fn patch_provider_requires_owner_identity() {
     let TestApp { app, _temp_dir, .. } =
         test_app_with_user_identity(Arc::new(HeaderUserIdentity));

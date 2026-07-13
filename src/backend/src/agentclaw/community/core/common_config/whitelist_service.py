@@ -11,6 +11,10 @@ from typing import Any
 from injector import inject
 
 from agentclaw.community.core.common_config.service import CommonConfigService
+from agentclaw.community.log import get_logger
+
+logger = get_logger()
+_MISSING_OWNER_IDS = object()
 
 
 class CommonWhiteListService:
@@ -64,6 +68,68 @@ class CommonWhiteListService:
             owner_id=owner_id,
             bot_id=bot_id,
         )
+
+    def get_owner_ids(
+        self,
+        *,
+        business_code: str,
+        param_code: str,
+        env: str,
+    ) -> frozenset[str]:
+        """Read and normalize an enabled owner-ID list from common config."""
+        try:
+            value = self._common_config_service.get_value(
+                business_code=business_code,
+                param_code=param_code,
+                env=env,
+                default=_MISSING_OWNER_IDS,
+                only_enabled=True,
+            )
+        except Exception:
+            logger.exception(
+                "[common_whitelist] owner list read failed "
+                "business_code=%s param_code=%s env=%s",
+                business_code,
+                param_code,
+                env,
+            )
+            raise
+        if value is _MISSING_OWNER_IDS:
+            return frozenset()
+        if not isinstance(value, list):
+            logger.error(
+                "[common_whitelist] owner list invalid "
+                "business_code=%s param_code=%s env=%s value_type=%s",
+                business_code,
+                param_code,
+                env,
+                type(value).__name__,
+            )
+            raise ValueError(
+                "protected owner IDs must be a list: "
+                f"business_code={business_code} param_code={param_code} env={env}"
+            )
+        owner_ids: set[str] = set()
+        for item in value:
+            if item is None:
+                continue
+            if isinstance(item, bool) or not isinstance(item, (str, int)):
+                logger.error(
+                    "[common_whitelist] owner list item invalid "
+                    "business_code=%s param_code=%s env=%s item_type=%s",
+                    business_code,
+                    param_code,
+                    env,
+                    type(item).__name__,
+                )
+                raise ValueError(
+                    "protected owner IDs must contain only strings or integers: "
+                    f"business_code={business_code} param_code={param_code} env={env}"
+                )
+            normalized = str(item).strip()
+            if normalized:
+                owner_ids.add(normalized)
+        return frozenset(owner_ids)
 
     @staticmethod
     def _match_bot_whitelist(

@@ -12,9 +12,9 @@ from datetime import datetime
 
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceNotifyLog,
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    GovernanceNotificationOrm,
+    GovernanceTicketOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.audit_repo import (
     GovernanceAuditRepository,
@@ -28,23 +28,26 @@ from agentclaw.community.core.economy.governance.repositories.task_record_repo i
 from agentclaw.community.core.economy.governance.services.feedback_service import (
     GovernanceFeedbackService,
 )
+from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+    GovernanceLifecycleService,
+)
 
 from .conftest import FakeDB, FakeGovernanceConfig, FakeWhitelistService
 
 
 class _RaisingWhitelistService:
-    """Whitelist service whose batch_add always raises — exercises except path."""
+    """Whitelist service whose add always raises — exercises except path."""
 
     def bulk_whitelist(self, bot_ids, reason, operator):
         raise RuntimeError("boom")
 
-    def delete_whitelist_entries(self, body, operator):
+    def delete_whitelist_entry(self, *, bot_id, owner_id, reason, operator):
         raise RuntimeError("boom")
 
     def count_by_type(self, **kwargs):
         return 0
 
-    def batch_add(self, entries, created_by, **kwargs):
+    def add(self, *, bot_id, owner_id, created_by, **kwargs):
         raise RuntimeError("boom")
 
 
@@ -64,7 +67,7 @@ def _make_notification(session, **overrides):
     worker_id = overrides.pop("worker_id", f"{owner_id}:{bot_id}:{nid}")
 
     # Create task_record (lifecycle entity)
-    task_rec = GovernanceTaskRecordDaily(
+    task_rec = GovernanceTicketOrm(
         ticket_id=ticket_id,
         worker_id=f"{owner_id}:{bot_id}",
         active_worker=f"{owner_id}:{bot_id}"
@@ -83,7 +86,7 @@ def _make_notification(session, **overrides):
     session.add(task_rec)
 
     # Create notify_log (event log) linked by ticket_id
-    row = GovernanceNotifyLog(
+    row = GovernanceNotificationOrm(
         notification_id=nid,
         ticket_id=ticket_id,
         bot_id=bot_id,
@@ -109,13 +112,26 @@ def _make_notification(session, **overrides):
 def _make_svc(engine, whitelist_service=None):
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     db = FakeDB(lambda: Session(bind=engine))
+    notify_repo = NotifyLogRepository(db=db)
+    task_repo = TaskRecordRepository(db=db)
+    audit_repo = GovernanceAuditRepository(db=db)
+    wl_svc = whitelist_service or FakeWhitelistService()
+    # whitelist-add side effect is owned by feedback_service (not the driver)
+    # to keep lifecycle_service free of a whitelist_service dependency. Wire
+    # the same wl_svc into the feedback_service — keeps the raise-failure
+    # test exercising feedback_service's whitelist-add swallow path.
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     return GovernanceFeedbackService(
-        db=db,
-        whitelist_service=whitelist_service or FakeWhitelistService(),
-        notify_repo=NotifyLogRepository(db=db),
-        task_repo=TaskRecordRepository(db=db),
-        audit_repo=GovernanceAuditRepository(db=db),
+        whitelist_service=wl_svc,
+        notify_repo=notify_repo,
+        task_repo=task_repo,
+        audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
+        lifecycle_svc=lifecycle_svc,
     )
 
 
@@ -156,7 +172,7 @@ class TestResolveEdgeBranches:
         assert result.error_code == "INVALID_FEEDBACK_PAYLOAD"
 
     def test_whitelist_add_failure_is_swallowed(self, session, engine):
-        """batch_add raising must not fail the resolve (lines 200-201)."""
+        """add raising must not fail the resolve (lines 200-201)."""
         svc = _make_svc(engine, whitelist_service=_RaisingWhitelistService())
         _make_notification(session)
 
@@ -171,66 +187,3 @@ class TestResolveEdgeBranches:
 # failure is now an internal implementation detail of self-managed
 # orm_session contexts and cannot be cleanly tested from the outside.
 
-
-class TestListAndGetHelpers:
-    """list_pending / list_history / get_notification (lines 246-280)."""
-
-    def test_list_pending_returns_open_and_scheduled(self, session, engine):
-        svc = _make_svc(engine)
-        _make_notification(session, notification_id="p-open", bot_id="bot-open", governance_status="open")
-        _make_notification(session, notification_id="p-scheduled", bot_id="bot-scheduled", governance_status="scheduled")
-        _make_notification(session, notification_id="p-closed", bot_id="bot-closed", governance_status="closed")
-
-        rows = svc.list_pending("user-1")
-        ticket_ids = {r["ticket_id"] for r in rows}
-        assert "t-p-open" in ticket_ids
-        assert "t-p-scheduled" in ticket_ids
-        assert "t-p-closed" not in ticket_ids
-        # _row_to_dict shape sanity
-        assert rows[0]["owner_id"] == "user-1"
-
-    def test_list_pending_empty(self, session, engine):
-        svc = _make_svc(engine)
-        assert svc.list_pending("nobody") == []
-
-    def test_list_pending_pagination(self, session, engine):
-        svc = _make_svc(engine)
-        for i in range(3):
-            _make_notification(
-                session, notification_id=f"pg-{i}", bot_id=f"bot-pg-{i}",
-                governance_status="open",
-            )
-        page = svc.list_pending("user-1", limit=1, offset=1)
-        assert len(page) == 1
-
-    def test_list_history_returns_closed(self, session, engine):
-        svc = _make_svc(engine)
-        _make_notification(session, notification_id="h-closed", bot_id="bot-h-closed", governance_status="closed")
-        _make_notification(session, notification_id="h-open", bot_id="bot-h-open", governance_status="open")
-
-        rows = svc.list_history("user-1")
-        ticket_ids = {r["ticket_id"] for r in rows}
-        assert "t-h-closed" in ticket_ids
-        assert "t-h-open" not in ticket_ids
-
-    def test_list_history_empty(self, session, engine):
-        svc = _make_svc(engine)
-        assert svc.list_history("nobody") == []
-
-    def test_get_notification_found(self, session, engine):
-        svc = _make_svc(engine)
-        _make_notification(session, notification_id="g-1")
-
-        got = svc.get_notification("g-1", "user-1")
-        assert got is not None
-        assert got["ticket_id"] == "t-g-1"
-
-    def test_get_notification_wrong_owner_returns_none(self, session, engine):
-        svc = _make_svc(engine)
-        _make_notification(session, notification_id="g-2")
-
-        assert svc.get_notification("g-2", "other-user") is None
-
-    def test_get_notification_missing_returns_none(self, session, engine):
-        svc = _make_svc(engine)
-        assert svc.get_notification("does-not-exist", "user-1") is None

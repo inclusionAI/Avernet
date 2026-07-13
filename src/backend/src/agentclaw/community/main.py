@@ -14,7 +14,7 @@ import logging
 import os
 import sys
 
-from agentclaw.community.di import DeployProfile
+from agentclaw.community.di import DeployProfile, validate_deploy_environment
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -50,14 +50,18 @@ if __name__ == "__main__":  # pragma: no cover - entrypoint wiring; profile gate
 
     args = parser.parse_args()
 
-    env = os.getenv('SERVER_ENV') or os.getenv('REAL_SERVER_ENV') or os.getenv('ALIPAY_APP_ENV') or ""
-    env = env.lower()
-
     # NOTE(totalfrank): the profile is read here to choose the boot path and
     # again in adapters/http/app.py to wire the injector. ``detect()`` is a pure
     # env read so the duplication is harmless; app.py is the composition root the
     # uvicorn ``app`` object goes through.
     _profile = DeployProfile.detect()
+    validate_deploy_environment()
+    env = (
+        os.getenv("SERVER_ENV")
+        or os.getenv("REAL_SERVER_ENV")
+        or os.getenv("ALIPAY_APP_ENV")
+        or ""
+    ).lower()
     if _profile in _LOCAL_PROFILES:
         # =====================================================================
         # 本地 / 社区模式：直接启动 FastAPI（无 MOSN）
@@ -98,11 +102,17 @@ if __name__ == "__main__":  # pragma: no cover - entrypoint wiring; profile gate
         from agentclaw.community.local import patch_sofapy_for_local
         patch_sofapy_for_local()
 
+        # 2. Select the Profile-owned YAML overlay before the first config read.
+        # The HTTP composition root repeats this registration when it is imported
+        # so direct ASGI imports keep the same bootstrap contract.
+        from agentclaw.community.di.config_bootstrap import register_config_provider
+        register_config_provider(_profile)
+
         from agentclaw.community.core.config.sofa import sofa_config as config
         logger.info("runtime config (local)")
         logger.info(json.dumps(config.model_dump(), ensure_ascii=False, indent=2))
 
-        # 2. Start uvicorn directly.
+        # 3. Start uvicorn directly.
         # Schema bootstrap, event-listener subscription, and every other
         # startup hook run through the Lifecycle Protocol dispatched by
         # ``_app_lifespan`` in adapters/http/app.py (R11). Nothing to

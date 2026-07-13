@@ -109,6 +109,37 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_providers_env ON bcs_providers(env, provider_id)",
 
+    // ── organizations ─────────────────────────────────────
+    "CREATE TABLE IF NOT EXISTS bcs_organizations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        env TEXT NOT NULL,
+        code TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT DEFAULT NULL,
+        managing_provider_id TEXT NOT NULL,
+        disabled INTEGER NOT NULL DEFAULT 0
+    )",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uk_org_env_code ON bcs_organizations(env, code)",
+    "CREATE INDEX IF NOT EXISTS idx_org_env_disabled ON bcs_organizations(env, disabled)",
+    "CREATE INDEX IF NOT EXISTS idx_org_env_provider ON bcs_organizations(env, managing_provider_id)",
+
+    // ── organization_members ──────────────────────────────
+    "CREATE TABLE IF NOT EXISTS bcs_organization_members (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        env TEXT NOT NULL,
+        organization_code TEXT NOT NULL,
+        bot_uuid TEXT NOT NULL,
+        role TEXT DEFAULT NULL,
+        disabled INTEGER NOT NULL DEFAULT 0
+    )",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uk_org_member ON bcs_organization_members(env, organization_code, bot_uuid)",
+    "CREATE INDEX IF NOT EXISTS idx_member_bot ON bcs_organization_members(env, bot_uuid)",
+    "CREATE INDEX IF NOT EXISTS idx_member_org_disabled_role ON bcs_organization_members(env, organization_code, disabled, role)",
+
     // ── provider_bot_bindings ─────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_provider_bot_bindings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -639,6 +670,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 2,
         name: "channel_binding_audit_timestamps",
     },
+    SqliteMigration {
+        version: 3,
+        name: "add_organizations",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -814,6 +849,8 @@ async fn apply_sqlite_migration_body(
 ) -> DbResult<()> {
     match migration.version {
         2 => repair_sqlite_channel_bindings_audit_schema(db).await,
+        // Startup creates any missing organization tables before recording version 3.
+        3 => Ok(()),
         _ => Ok(()),
     }
 }
@@ -1032,7 +1069,8 @@ mod tests {
                     2,
                     "channel_binding_audit_timestamps".to_string(),
                     "sqlite".to_string()
-                )
+                ),
+                (3, "add_organizations".to_string(), "sqlite".to_string())
             ]
         );
         Ok(())
@@ -1044,7 +1082,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 2);
+        assert_eq!(report.pending_versions.len(), 3);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1054,6 +1092,8 @@ mod tests {
             report.pending_versions[1].name,
             "channel_binding_audit_timestamps"
         );
+        assert_eq!(report.pending_versions[2].version, 3);
+        assert_eq!(report.pending_versions[2].name, "add_organizations");
         Ok(())
     }
 
@@ -1072,7 +1112,8 @@ mod tests {
                     2,
                     "channel_binding_audit_timestamps".to_string(),
                     "sqlite".to_string()
-                )
+                ),
+                (3, "add_organizations".to_string(), "sqlite".to_string())
             ]
         );
         Ok(())

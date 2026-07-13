@@ -1,10 +1,10 @@
 """``modules_for(profile)`` — the concern × profile matrix selector.
 
 The single place that maps a ``DeployProfile`` to its infrastructure
-module column. ``build_injector`` installs exactly one column on top of
-the profile-independent business modules; there is no "prod base +
-overrides". Keeping the mapping here (one function) makes the composition
-root and the test fixtures impossible to drift apart.
+module column. ``build_injector`` installs exactly one column after the
+profile-independent base modules. The later column may intentionally override
+specific shared/default keys, such as HTTP clients under test or policy under
+singlebox. Keeping the mapping here makes that installation order explicit.
 
 Imports are function-local per branch so a profile only imports its own
 column — the ``corp`` and ``community`` columns are import-disjoint.
@@ -27,9 +27,6 @@ def _common_test_doubles() -> list[Module]:
     """
     from agentclaw.community.di.modules.infrastructure.test.cache import TestCacheModule
     from agentclaw.community.di.modules.infrastructure.test.health import TestHealthModule
-    from agentclaw.community.di.modules.infrastructure.test.http_client import (
-        TestHttpClientModule,
-    )
     from agentclaw.community.di.modules.infrastructure.test.identity import TestIdentityModule
     from agentclaw.community.di.modules.infrastructure.test.secret import TestSecretModule
     from agentclaw.community.di.modules.infrastructure.test.skill_center import (
@@ -46,7 +43,6 @@ def _common_test_doubles() -> list[Module]:
     from agentclaw.community.di.modules.infrastructure.test.bot_publish_approval import (
         TestBotPublishApprovalModule,
     )
-    from agentclaw.community.di.modules.testing_access_module import TestingAccessModule
     from agentclaw.community.di.modules.testing_aicoding_module import TestingAicodingModule
     from agentclaw.community.di.modules.testing_database_module import TestingDatabaseModule
     from agentclaw.community.di.modules.testing_mcp_module import TestingMcpModule
@@ -56,9 +52,6 @@ def _common_test_doubles() -> list[Module]:
 
     return [  # noqa: FLA002 — a fixed module list, not many distinct return values
         # Per-concern overrides for non-infrastructure concerns.
-        # TestingAccessModule overrides PolicyServiceProtocol: singlebox →
-        # LocalPolicyService (all-open), pytest → real PolicyService.
-        TestingAccessModule(),
         TestApprovalWorkflowModule(),
         TestBotPublishApprovalModule(),
         # WorkspaceHostingService stub (offline DIMA) — corp-free.
@@ -76,9 +69,6 @@ def _common_test_doubles() -> list[Module]:
         TestTracerModule(),
         TestDRMModule(),
         TestSandboxRuntimeModule(),
-        # HTTP clients — corp-free (LocalHttpClient under pytest; community HttpxClient
-        # under singlebox).
-        TestHttpClientModule(),
         TestSkillCenterClientModule(),
     ]
 
@@ -86,10 +76,11 @@ def _common_test_doubles() -> list[Module]:
 def modules_for(profile: DeployProfile) -> list[Module]:
     """Return the infrastructure module column for ``profile``.
 
-    This is the concern × profile matrix selector: each profile installs
-    exactly one variant per concern — no "prod base + overrides". Imports
-    are function-local per branch so a profile only imports its own column
-    (the ``corp`` and ``community`` columns are import-disjoint).
+    This is the concern × profile matrix selector. Exactly one profile column is
+    installed after the shared base list; modules later in that order may replace
+    selected base binding keys. Imports are function-local per branch so a profile
+    only imports its own column (the ``corp`` and ``community`` columns are
+    import-disjoint).
 
     The former ``InfrastructureModule`` / ``TestingInfrastructureModule``
     monoliths are fully decomposed (B1 Group C) into the per-concern modules
@@ -129,34 +120,44 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.device_sync import (
             CommunityDeviceSyncModule,
         )
-        from agentclaw.community.di.modules.infrastructure.community.governance import (
-            CommunityGovernanceModule,
+        from agentclaw.community.di.modules.infrastructure.community.notify import (
+            CommunityNotifyModule,
         )
         from agentclaw.community.di.modules.infrastructure.community.outbound_rules import (
             CommunityOutboundRulesModule,
         )
 
-        return _common_test_doubles() + [
+        column = _common_test_doubles() + [
             # Token vault — empty-key (encrypt = passthrough); no SecretResolver dep.
             TestTokenVaultModule(),
             # The reuse column's concerns, now community:
             CommunityAICodingModule(),      # empty workflow catalog (no AntCode)
-            CommunityGovernanceModule(),    # no-op notify sender (no DingTalk)
+            CommunityNotifyModule(),    # no-op notify sender (no DingTalk)
             # Outbound rules + device-sync — community (empty rules / no-op dispatch).
             CommunityOutboundRulesModule(),
             CommunityDeviceSyncModule(),
             # App services — corp-free test module: real BotChatService, local_sql
             # router, dummy Dima config, community no-op code-platform (AntCode).
             TestAppServicesModule(),
-            # Devices — corp-free local/SQLite doubles (no ARCA factory / corp config).
-            # Installed LAST on purpose: ``CommunityDeviceSyncModule`` also binds
-            # ``DeviceAdapterTransport`` to the community no-op, but the test column
-            # needs the stateful ``InMemoryDeviceAdapterTransport`` (cron gateway
-            # contract tests). Injector is last-wins, so ``TestDevicesModule`` must
-            # come after ``CommunityDeviceSyncModule`` to reinstate the in-memory
-            # transport.
-            TestDevicesModule(),
         ]
+
+        if profile is DeployProfile.TEST:
+            from agentclaw.community.di.modules.infrastructure.test.http_client import (
+                TestHttpClientModule,
+            )
+
+            column.extend([TestDevicesModule(), TestHttpClientModule()])
+        else:
+            from agentclaw.community.di.modules.singlebox_access_module import (
+                SingleboxAccessModule,
+            )
+            from agentclaw.community.di.modules.infrastructure.singlebox.devices import (
+                SingleboxDevicesModule,
+            )
+
+            column.extend([SingleboxDevicesModule(), SingleboxAccessModule()])
+
+        return column
 
     if profile is DeployProfile.CORP_TEST:
         # The monorepo-only corp test column: the same corp-free common doubles plus
@@ -176,6 +177,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         )
         from agentclaw.community.di.modules.infrastructure.test.device_sync import (
             TestDeviceSyncModule,
+        )
+        from agentclaw.community.di.modules.infrastructure.test.http_client import (
+            TestHttpClientModule,
         )
         from agentclaw.community.di.modules.testing_devices_module import (
             TestingDevicesModule,
@@ -198,10 +202,11 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             # rebinds ``CodePlatformServiceProtocol`` to ``AntCodeService`` here.
             TestAppServicesModule(),
         ]
-        # Corp modules the test column reuses (config providers + profile-blind
+        # Corp modules the corp_test column reuses (config providers + profile-blind
         # codefuse vault + corp AICoding services + DingTalk governance) — supplied
         # via the registry so this file names no infrastructure.corp module.
         column.extend(get_test_corp_modules())
+        column.append(TestHttpClientModule())
         return column
 
     if profile is DeployProfile.COMMUNITY:
@@ -259,8 +264,8 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.bot_publish_approval import (
             CommunityBotPublishApprovalModule,
         )
-        from agentclaw.community.di.modules.infrastructure.community.governance import (
-            CommunityGovernanceModule,
+        from agentclaw.community.di.modules.infrastructure.community.notify import (
+            CommunityNotifyModule,
         )
 
         column: list[Module] = [
@@ -289,8 +294,8 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             # Approval workflow + publish-approval strategy (B7).
             CommunityApprovalWorkflowModule(),
             CommunityBotPublishApprovalModule(),
-            # Governance notify sender — no-op (no DingTalk in community; B11 Phase A).
-            CommunityGovernanceModule(),
+            # Notify sender — no-op (no DingTalk in community; B11 Phase A).
+            CommunityNotifyModule(),
         ]
         return column
 

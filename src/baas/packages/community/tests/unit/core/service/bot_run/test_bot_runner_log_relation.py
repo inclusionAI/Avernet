@@ -106,7 +106,7 @@ def _make_runner(
         bot_service_selector=mock_selector,
         run_repository=mock_run_repo,
         bot_service_plugin=mock_bot_service_plugin,
-        dispatcher=dispatcher,
+        dispatchers=[dispatcher],
     )
 
 

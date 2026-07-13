@@ -30,14 +30,19 @@ governance/
     whitelist_repo.py           GovernanceWhitelistRepository  (ac_bot_whitelist)
   services/                    Domain logic layer — orchestration + business rules
     __init__.py
-    scan_service.py            GovernanceBotService  (scan orchestrator, Steps 1-10)
+    scan_service.py            GovernanceBotService  (cron tick orchestrator)
+    record_process_service.py  GovernanceRecordService  (offline-batch ingest)
     feedback_service.py        GovernanceFeedbackService  (user resolve actions)
-    admin_service.py           GovernanceAdminService  (pause/resume/bulk-whitelist/cancel)
-    notify_builder_service.py  Markdown + TC card rendering (pure computation, no IO)
+    admin_service.py           GovernanceAdminService  (pause/resume/bulk/cancel/emergency/deliver)
+    workflow_service.py        GovernanceWorkflowService  (review list/detail/action)
+    lifecycle_service.py       GovernanceLifecycleService  (ticket state-machine driver)
+    notify_lifecycle_service.py NotifyLifecycleService  (notify send state-machine driver)
+    notify_render_service.py   NotifyRenderService  (rendering outlet + builder pure-fns)
+    whitelist_service.py       GovernanceWhitelistService  (whitelist add/delete/list)
   contracts/                   ORM models + Protocol interfaces
     __init__.py
     models.py                  4 ORM table definitions
-    protocols.py               GovernanceNotifySender Protocol
+    protocols.py               Repository Protocols (NotifySenderPlugin → plugin_api/)
   lifecycle.py                 GovernanceBotLifecycle (cron participant)
   __init__.py
 ```

@@ -578,9 +578,9 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         QueueTaskMessageDispatcher,
         run_repository=bot_run_repository,
         queue_repository=bot_run_queue_repository,
-        qpm_manager=bot_qpm_manager,
         chunk_repository=bot_run_queue_chunk_repository,
         cache_plugin=cache_plugin,
+        system_config_service=system_config_service,
     )
 
     bot_runner = providers.Singleton(
@@ -588,10 +588,11 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         bot_service_selector=bot_service_selector,
         run_repository=bot_run_repository,
         bot_service_plugin=bot_service_plugin,
-        dispatcher=providers.List(
+        dispatchers=providers.List(
             queue_task_message_dispatcher,
             task_message_dispatcher,
         ),
+        system_config_service=system_config_service,
     )
 
     bcn_downlink_service = providers.Singleton(

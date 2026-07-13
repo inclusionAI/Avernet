@@ -158,6 +158,11 @@ user_config:
 
   # NOTE: dima (applicationCoding 7x24 hosting API + credentials) is corp-only —
   # carried by the corp env overlays; the community build has no DIMA hosting.
+  #
+  # admin_member_staff_ids: 创建 bot 空间后自动加为空间管理员的工号列表。
+  # 中性默认为空——源码/社区发布物不可内置真实工号（数据泄露防护，由
+  # test_shipped_config_no_corp_identifiers 守卫）。实际工号由各部署环境的
+  # overlay 配置提供（见对应环境覆盖配置），不进入社区源码。
 
   # 操作员白名单（控制 /api/v1/access/allow、/disallow 等管理接口的调用权限）
   # 中性默认为空（无特权操作员）；corp env overlay 提供工号列表，community 在

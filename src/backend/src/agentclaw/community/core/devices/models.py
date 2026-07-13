@@ -37,36 +37,12 @@ class Env(StrEnum):
 
     @classmethod
     def from_string(cls, value: str) -> "Env":
-        """Create Env from string.
-
-        Args:
-            value: Environment string ("dev", "pre", "prod", "singlebox")
-
-        Returns:
-            Env enum value (singlebox → DEV)
-
-        Raises:
-            ValueError: If invalid value provided
-
-        Note:
-            ``singlebox`` 是本地单机模式（完全无外网，CI 友好），逻辑上
-            等同于 dev 环境（同样的 plugin 装配 / DI 行为）。这里在 enum
-            映射层把它收口成 DEV，业务代码不需要为 singlebox 加特殊分支。
-            真正区分 singlebox vs dev 的地方：
-            - sofapy_base.get_config_file_name() 看原始 SERVER_ENV 选 yaml
-            - env_utils.is_singlebox() / get_current_env() == "singlebox"
-        """
-        value = value.lower()
-        if value in ("dev", "singlebox"):
-            return cls.DEV
-        elif value == "pre":
-            return cls.PRE
-        elif value == "prod":
-            return cls.PROD
-        else:
+        try:
+            return cls(value.lower())
+        except ValueError:
             raise ValueError(
-                f"Invalid env value: {value!r}. Expected one of: dev, pre, prod, singlebox"
-            )
+                f"Invalid env value: {value!r}. Expected one of: dev, pre, prod"
+            ) from None
 
 
 class DeviceBindingStatus(StrEnum):
@@ -195,7 +171,7 @@ class DeviceBindingContext:
     """user / team / proj 标识 —— 传给 BaaS get_http_info 的 device_affinity。"""
 
     adapter_port: int = 20003
-    """容器 adapter 端口。dev 固定 20003，singlebox 动态 20010-20099；plan-02
+    """容器 adapter 端口。dev 固定 20003，local standalone 动态 20010-20099；plan-02
     起的 plugin 业务调用会以此为 port 参数。"""
 
     tenant: str = ""

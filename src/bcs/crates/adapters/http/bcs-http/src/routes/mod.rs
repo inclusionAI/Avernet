@@ -17,6 +17,7 @@ pub mod manifest;
 pub mod me;
 pub mod messages;
 pub mod onboard;
+pub mod organizations;
 pub mod providers;
 pub mod register;
 pub mod secret;

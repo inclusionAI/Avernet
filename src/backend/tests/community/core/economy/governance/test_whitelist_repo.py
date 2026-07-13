@@ -1,4 +1,4 @@
-"""Tests for GovernanceWhitelistRepository — batch_add, count, list, lookup, env."""
+"""Tests for GovernanceWhitelistRepository — add, is_whitelisted, list_by_owner, count, env."""
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 from .conftest import FakeDB
 
-from agentclaw.community.core.economy.governance.contracts.models import BotWhitelist
+from agentclaw.community.core.economy.governance.repositories.orm import WhitelistEntryOrm
 from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
     GovernanceWhitelistRepository,
 )
@@ -28,116 +28,92 @@ def _build_repo(engine):
     return repo, db
 
 
-# ── batch_add ───────────────────────────────────────────────────
+# ── add ────────────────────────────────────────────────────
 
 
-class TestBatchAdd:
-    """GovernanceWhitelistRepository.batch_add()."""
+class TestAdd:
+    """GovernanceWhitelistRepository.add() — single-point, idempotent."""
 
-    def test_empty_input_short_circuits(self, engine, tables):
-        repo, _ = _build_repo(engine)
-        result = repo.batch_add([], created_by="admin")
-        assert result == {"inserted": 0, "skipped": 0}
-
-    def test_inserts_new_entries(self, engine, tables):
+    def test_inserts_new_entry(self, engine, tables):
         repo, db = _build_repo(engine)
-        entries = [
-            {"bot_id": "bot-1", "owner_id": "user-1", "reason": "spam"},
-            {"bot_id": "bot-2", "owner_id": "user-1"},
-        ]
-        result = repo.batch_add(entries, created_by="admin", source="admin")
-        assert result == {"inserted": 2, "skipped": 0}
+        entry = repo.add(
+            bot_id="bot-1", owner_id="user-1",
+            created_by="admin", source="admin", reason="spam",
+        )
+        assert entry.bot_id == "bot-1"
+        assert entry.owner_id == "user-1"
+        assert entry.source == "admin"
+        assert entry.created_by == "admin"
+        assert entry.whitelist_type == "governance"
+        assert entry.reason == "spam"
 
         with db.orm_session() as s:
-            rows = s.query(BotWhitelist).all()
-            assert len(rows) == 2
-            by_bot = {r.bot_id: r for r in rows}
-            assert by_bot["bot-1"].owner_id == "user-1"
-            assert by_bot["bot-1"].reason == "spam"
-            assert by_bot["bot-1"].source == "admin"
-            assert by_bot["bot-1"].created_by == "admin"
-            assert by_bot["bot-1"].whitelist_type == "governance"
-            assert by_bot["bot-1"].env == "dev"
-            # Missing optional reason defaults to ""
-            assert by_bot["bot-2"].reason == ""
-
-    def test_skips_entries_missing_bot_id_or_owner_id(self, engine, tables):
-        repo, db = _build_repo(engine)
-        entries = [
-            {"owner_id": "user-1"},            # missing bot_id
-            {"bot_id": "bot-x"},               # missing owner_id
-            {"bot_id": "", "owner_id": "u"},   # falsy bot_id
-            {"bot_id": "bot-ok", "owner_id": "user-ok"},
-        ]
-        result = repo.batch_add(entries, created_by="admin")
-        assert result == {"inserted": 1, "skipped": 3}
-
-        with db.orm_session() as s:
-            rows = s.query(BotWhitelist).all()
+            rows = s.query(WhitelistEntryOrm).all()
             assert len(rows) == 1
-            assert rows[0].bot_id == "bot-ok"
+            assert rows[0].bot_id == "bot-1"
+            assert rows[0].env == "dev"
 
-    def test_skips_existing_duplicate(self, engine, tables):
+    def test_idempotent_returns_existing(self, engine, tables):
         repo, db = _build_repo(engine)
-        repo.batch_add(
-            [{"bot_id": "bot-1", "owner_id": "user-1"}], created_by="admin"
+        repo.add(
+            bot_id="bot-1", owner_id="user-1", created_by="admin",
         )
-        # Re-adding the same (bot_id, owner_id, type, env) → skipped.
-        result = repo.batch_add(
-            [
-                {"bot_id": "bot-1", "owner_id": "user-1"},
-                {"bot_id": "bot-2", "owner_id": "user-1"},
-            ],
-            created_by="admin",
+        second = repo.add(
+            bot_id="bot-1", owner_id="user-1", created_by="other",
         )
-        assert result == {"inserted": 1, "skipped": 1}
+        # Second call returns the existing entry (not modified)
+        assert second.bot_id == "bot-1"
+        assert second.created_by == "admin"  # unchanged
 
         with db.orm_session() as s:
-            assert s.query(BotWhitelist).count() == 2
+            assert s.query(WhitelistEntryOrm).count() == 1
+
+    def test_default_reason_empty(self, engine, tables):
+        repo, db = _build_repo(engine)
+        entry = repo.add(bot_id="bot-2", owner_id="user-1", created_by="admin")
+        assert entry.reason == ""
 
     def test_reason_truncated_to_500_chars(self, engine, tables):
         repo, db = _build_repo(engine)
         long_reason = "x" * 600
-        repo.batch_add(
-            [{"bot_id": "bot-1", "owner_id": "user-1", "reason": long_reason}],
-            created_by="admin",
+        entry = repo.add(
+            bot_id="bot-1", owner_id="user-1",
+            created_by="admin", reason=long_reason,
         )
+        assert len(entry.reason) == 500
+
         with db.orm_session() as s:
-            row = s.query(BotWhitelist).one()
+            row = s.query(WhitelistEntryOrm).one()
             assert len(row.reason) == 500
 
-    def test_expires_at_parsed_from_string(self, engine, tables):
+    def test_expires_at_from_datetime(self, engine, tables):
         repo, db = _build_repo(engine)
-        repo.batch_add(
-            [
-                {
-                    "bot_id": "bot-1",
-                    "owner_id": "user-1",
-                    "expires_at": "2026-08-01 12:00:00",
-                }
-            ],
-            created_by="admin",
+        future = datetime(2026, 8, 1, 12, 0, 0)
+        entry = repo.add(
+            bot_id="bot-1", owner_id="user-1",
+            created_by="admin", expires_at=future,
         )
-        with db.orm_session() as s:
-            row = s.query(BotWhitelist).one()
-            assert row.expires_at == datetime(2026, 8, 1, 12, 0, 0)
+        assert entry.expires_at == future
 
-    def test_env_isolation_allows_same_pair_in_other_type(self, engine, tables):
+        with db.orm_session() as s:
+            row = s.query(WhitelistEntryOrm).one()
+            assert row.expires_at == future
+
+    def test_different_whitelist_type_not_duplicate(self, engine, tables):
         """Different whitelist_type → not a duplicate."""
         repo, db = _build_repo(engine)
-        repo.batch_add(
-            [{"bot_id": "bot-1", "owner_id": "user-1"}],
-            created_by="admin",
-            whitelist_type="governance",
+        repo.add(
+            bot_id="bot-1", owner_id="user-1",
+            created_by="admin", whitelist_type="governance",
         )
-        result = repo.batch_add(
-            [{"bot_id": "bot-1", "owner_id": "user-1"}],
-            created_by="admin",
-            whitelist_type="dormant",
+        entry2 = repo.add(
+            bot_id="bot-1", owner_id="user-1",
+            created_by="admin", whitelist_type="dormant",
         )
-        assert result == {"inserted": 1, "skipped": 0}
+        assert entry2.whitelist_type == "dormant"
+
         with db.orm_session() as s:
-            assert s.query(BotWhitelist).count() == 2
+            assert s.query(WhitelistEntryOrm).count() == 2
 
     def test_commit_failure_rolls_back_and_raises(self, engine, tables):
         """Commit exception → rollback + re-raise."""
@@ -179,117 +155,124 @@ class TestBatchAdd:
 
         repo_boom = GovernanceWhitelistRepository(db=_DB())
         with pytest.raises(RuntimeError, match="boom"):
-            repo_boom.batch_add(
-                [{"bot_id": "b", "owner_id": "o"}], created_by="admin"
-            )
+            repo_boom.add(bot_id="b", owner_id="o", created_by="admin")
         assert boom.rolled_back is True
 
 
-# ── count_by_type / get_whitelist_set ───────────────────────────
+# ── is_whitelisted ───────────────────────────────────────
 
 
-class TestCountAndSet:
+class TestIsWhitelisted:
+    def test_returns_true_for_active_entry(self, engine, tables):
+        repo, _ = _build_repo(engine)
+        repo.add(bot_id="bot-1", owner_id="user-1", created_by="admin")
+        assert repo.is_whitelisted("bot-1", "user-1") is True
+
+    def test_returns_false_for_missing(self, engine, tables):
+        repo, _ = _build_repo(engine)
+        assert repo.is_whitelisted("bot-x", "user-x") is False
+
+    def test_excludes_expired(self, engine, tables):
+        repo, _ = _build_repo(engine)
+        past = datetime.now() - timedelta(days=1)
+        future = datetime.now() + timedelta(days=1)
+        repo.add(
+            bot_id="bot-perm", owner_id="user-1",
+            created_by="admin",  # no expiry
+        )
+        repo.add(
+            bot_id="bot-future", owner_id="user-1",
+            created_by="admin", expires_at=future,
+        )
+        repo.add(
+            bot_id="bot-past", owner_id="user-1",
+            created_by="admin", expires_at=past,
+        )
+        assert repo.is_whitelisted("bot-perm", "user-1") is True
+        assert repo.is_whitelisted("bot-future", "user-1") is True
+        assert repo.is_whitelisted("bot-past", "user-1") is False
+
+
+# ── count_by_type ────────────────────────────────────────
+
+
+class TestCountByType:
     def test_count_by_type(self, engine, tables, session):
         repo, _ = _build_repo(engine)
-        repo.batch_add(
-            [
-                {"bot_id": "bot-1", "owner_id": "user-1"},
-                {"bot_id": "bot-2", "owner_id": "user-1"},
-            ],
-            created_by="admin",
-        )
-        repo.batch_add(
-            [{"bot_id": "bot-3", "owner_id": "user-2"}],
-            created_by="admin",
-            whitelist_type="dormant",
+        repo.add(bot_id="bot-1", owner_id="user-1", created_by="admin")
+        repo.add(bot_id="bot-2", owner_id="user-1", created_by="admin")
+        repo.add(
+            bot_id="bot-3", owner_id="user-2",
+            created_by="admin", whitelist_type="dormant",
         )
         assert repo.count_by_type(whitelist_type="governance") == 2
         assert repo.count_by_type(whitelist_type="dormant") == 1
         assert repo.count_by_type(whitelist_type="none") == 0
 
-    def test_get_whitelist_set_excludes_expired(self, engine, tables, session):
+
+# ── list_by_owner ────────────────────────────────────────
+
+
+class TestListByOwner:
+    def test_returns_domain_models(self, engine, tables):
         repo, _ = _build_repo(engine)
-        past = datetime.now() - timedelta(days=1)
-        future = datetime.now() + timedelta(days=1)
-        repo.batch_add(
-            [
-                {"bot_id": "bot-perm", "owner_id": "user-1"},  # no expiry
-                {"bot_id": "bot-future", "owner_id": "user-1", "expires_at": future},
-                {"bot_id": "bot-past", "owner_id": "user-1", "expires_at": past},
-            ],
-            created_by="admin",
+        repo.add(
+            bot_id="bot-1", owner_id="user-1",
+            created_by="admin", reason="r1",
+            expires_at=datetime(2026, 9, 1, 0, 0),
         )
-        result = repo.get_whitelist_set()
-        assert ("bot-perm", "user-1") in result
-        assert ("bot-future", "user-1") in result
-        assert ("bot-past", "user-1") not in result
-
-
-# ── list_all ────────────────────────────────────────────────────
-
-
-class TestListAll:
-    def test_list_all_returns_dicts(self, engine, tables):
-        repo, _ = _build_repo(engine)
-        repo.batch_add(
-            [
-                {
-                    "bot_id": "bot-1",
-                    "owner_id": "user-1",
-                    "reason": "r1",
-                    "expires_at": "2026-09-01 00:00:00",
-                }
-            ],
-            created_by="admin",
-        )
-        rows = repo.list_all()
+        rows = repo.list_by_owner("user-1")
         assert len(rows) == 1
         entry = rows[0]
-        assert entry["bot_id"] == "bot-1"
-        assert entry["owner_id"] == "user-1"
-        assert entry["reason"] == "r1"
-        assert entry["whitelist_type"] == "governance"
-        assert entry["created_by"] == "admin"
-        assert entry["expires_at"] == datetime(2026, 9, 1, 0, 0)
-        assert entry["gmt_create"] is not None
-        assert entry["id"] is not None
+        assert entry.bot_id == "bot-1"
+        assert entry.owner_id == "user-1"
+        assert entry.reason == "r1"
+        assert entry.whitelist_type == "governance"
+        assert entry.created_by == "admin"
+        assert entry.expires_at == datetime(2026, 9, 1, 0, 0)
 
-    def test_list_all_filters_by_owner(self, engine, tables):
+    def test_filters_by_owner(self, engine, tables):
         repo, _ = _build_repo(engine)
-        repo.batch_add(
-            [
-                {"bot_id": "bot-1", "owner_id": "user-1"},
-                {"bot_id": "bot-2", "owner_id": "user-2"},
-            ],
-            created_by="admin",
-        )
-        rows = repo.list_all(owner_id="user-1")
+        repo.add(bot_id="bot-1", owner_id="user-1", created_by="admin")
+        repo.add(bot_id="bot-2", owner_id="user-2", created_by="admin")
+        rows = repo.list_by_owner("user-1")
         assert len(rows) == 1
-        assert rows[0]["owner_id"] == "user-1"
+        assert rows[0].owner_id == "user-1"
 
-    def test_list_all_respects_limit_and_offset(self, engine, tables):
+    def test_respects_limit_and_offset(self, engine, tables):
         repo, _ = _build_repo(engine)
-        repo.batch_add(
-            [{"bot_id": f"bot-{i}", "owner_id": "user-1"} for i in range(5)],
-            created_by="admin",
-        )
-        page = repo.list_all(limit=2, offset=0)
+        for i in range(5):
+            repo.add(bot_id=f"bot-{i}", owner_id="user-1", created_by="admin")
+        page = repo.list_by_owner("user-1", limit=2, offset=0)
         assert len(page) == 2
-        page2 = repo.list_all(limit=2, offset=2)
+        page2 = repo.list_by_owner("user-1", limit=2, offset=2)
         assert len(page2) == 2
-        # Non-overlapping ids across pages.
-        assert {r["id"] for r in page}.isdisjoint({r["id"] for r in page2})
 
-    def test_list_all_empty_expires_null(self, engine, tables):
+    def test_empty_expires_null(self, engine, tables):
         repo, _ = _build_repo(engine)
-        repo.batch_add(
-            [{"bot_id": "bot-1", "owner_id": "user-1"}], created_by="admin"
-        )
-        rows = repo.list_all()
-        assert rows[0]["expires_at"] is None
+        repo.add(bot_id="bot-1", owner_id="user-1", created_by="admin")
+        rows = repo.list_by_owner("user-1")
+        assert rows[0].expires_at is None
 
 
-# ── _parse_expires_at ───────────────────────────────────────────
+# ── remove ────────────────────────────────────────────────
+
+
+class TestRemove:
+    def test_remove_existing(self, engine, tables):
+        repo, db = _build_repo(engine)
+        repo.add(bot_id="bot-1", owner_id="user-1", created_by="admin")
+        assert repo.remove(bot_id="bot-1", owner_id="user-1") is True
+
+        with db.orm_session() as s:
+            assert s.query(WhitelistEntryOrm).count() == 0
+
+    def test_remove_nonexistent(self, engine, tables):
+        repo, _ = _build_repo(engine)
+        assert repo.remove(bot_id="bot-x", owner_id="user-x") is False
+
+
+# ── _parse_expires_at ───────────────────────────────────────
 
 
 class TestParseExpiresAt:

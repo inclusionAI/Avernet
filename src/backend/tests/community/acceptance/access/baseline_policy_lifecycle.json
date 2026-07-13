@@ -1,14 +1,14 @@
 {
   "check_after_disallow": {
-    "label": 0,
+    "label": 1,
     "staffNo": "e2e_user"
   },
-  "quota_no_seed": {
+  "quota_local_unlimited": {
     "activeCount": 0,
-    "effectiveQuota": 0,
-    "quota": 0,
-    "totalLimit": 0,
-    "updateTime": ""
+    "effectiveQuota": 9999,
+    "quota": 9999,
+    "totalLimit": 9999,
+    "updateTime": "00:00"
   },
   "users_compete": [
     {

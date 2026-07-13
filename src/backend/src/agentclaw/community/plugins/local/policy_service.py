@@ -8,12 +8,10 @@ singlebox 是单用户本机环境,没有 "白名单 + 配额 + 抢名额" 的�
 - 真 prod 上这些表由运维种,有真实数据,``PolicyService`` (走 DB 查询的实现)
   是对的。
 
-为何不在 ``PolicyService.check`` 里 ``if env == 'singlebox': return True``
-旁路: 那是 ``is_local_mode()`` 散落分支,违反 arch Rule 14 (config-driven
-wiring 在 DI 层一次决定,下游不读 env)。RuntimeMode 体系本就是为此而设,
-按 ``RuntimeMode.LOCAL`` 选 ``LocalPolicyService``、``RuntimeMode.PROD``
-选 ``PolicyService`` 才是干净姿势——同 ``SecretResolver`` /
-``PassportPlugin`` 等 Local/Prod 双实现样板。
+为何不在 ``PolicyService.check`` 里按 Env 增加 singlebox 旁路: 那会把
+实现选择散落到业务代码。composition root 改由 ``DeployProfile.SINGLEBOX``
+安装 ``LocalPolicyService``，其它 Profile 使用各自的 Policy 绑定；下游不再
+读取 Env 来决定实现。
 """
 from __future__ import annotations
 
@@ -23,19 +21,19 @@ logger = get_logger()
 
 
 class LocalPolicyService:
-    """singlebox 全开放: ``check`` 始终 True; 写方法 no-op; ``get_quota`` 返空 dict。
+    """singlebox 全开放: ``check`` 始终 True，写方法 no-op，配额近似无限。
 
     Structural 实现 ``api.policy_service.PolicyServiceProtocol`` —— **故意不显式继承**,
     跟 ``core.access.services.policy_service.PolicyService`` (真实现) 同款 duck-typing
     姿势。原因: arch test ``test_plugins_layer_does_not_import_api`` 禁止 plugins/
     import api/;显式继承会引入 ``from agentclaw.community.api.policy_service import
     PolicyServiceProtocol`` 触发 violation。Structural 实现满足 Protocol runtime check
-    (``isinstance(x, PolicyServiceProtocol)`` 仍 True),DI 层在 ``TestingAccessModule``
-    用 ``-> PolicyServiceProtocol`` 标注返回类型让 type-checker 验证契约,plugins/ 这层
+    (``isinstance(x, PolicyServiceProtocol)`` 仍 True),DI 层在 ``SingleboxAccessModule``
+    的 provider 上用 ``-> PolicyServiceProtocol`` 标注返回类型,plugins/ 这层
     保持对 api/ 零依赖。
 
     不继承 ``MockSeam``: PolicyServiceProtocol 不是 ``Plugin``,无 impl_registry
-    可识别。直接 ``binder.bind`` 即可 (见 ``TestingAccessModule``)。
+    可识别。由 ``SingleboxAccessModule`` 的 typed provider 直接提供实例。
     """
 
     def check(self, *, entity_id: str, entity_type: str) -> bool:
@@ -69,9 +67,11 @@ class LocalPolicyService:
         )
 
     def get_quota(self) -> dict:
-        """返回一个 "无限配额" 的占位 dict,前端如果显示配额时不会出错。"""
+        """Return the API-facing unlimited quota shape used by the router."""
         return {
-            "daily_container_quota": 9999,
-            "total_container_limit": 9999,
-            "daily_container_update_time": "00:00",
+            "quota": 9999,
+            "totalLimit": 9999,
+            "activeCount": 0,
+            "effectiveQuota": 9999,
+            "updateTime": "00:00",
         }

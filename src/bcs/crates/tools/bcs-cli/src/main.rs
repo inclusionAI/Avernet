@@ -863,6 +863,14 @@ enum Commands {
         /// Pass a bot_uuid to filter by collaboration eligibility.
         #[arg(long)]
         collaborate_bot: Option<String>,
+
+        /// Organization code for scoped discovery.
+        #[arg(long)]
+        organization_code: Option<String>,
+
+        /// Organization member role filter. Requires --organization-code.
+        #[arg(long)]
+        role: Option<String>,
     },
 
     /// Update bot status
@@ -1049,6 +1057,10 @@ enum Commands {
         /// waiting for the full response.
         #[arg(long, default_value_t = false)]
         detach: bool,
+
+        /// Organization code for scoped A2A chat. This is request metadata only.
+        #[arg(long)]
+        organization_code: Option<String>,
     },
 
     /// Update group status (coordinator/originator only)
@@ -2242,6 +2254,8 @@ async fn main() -> Result<()> {
             skills: _,
             visibility,
             collaborate_bot,
+            organization_code,
+            role,
         } => {
             let token = get_token(token.as_deref())?;
             let client = create_client(
@@ -2259,6 +2273,8 @@ async fn main() -> Result<()> {
                     "q": &query,
                     "visibility": &visibility,
                     "collaborate_bot": &collaborate_bot,
+                    "organization_code": &organization_code,
+                    "role": &role,
                 })
             );
 
@@ -2267,6 +2283,8 @@ async fn main() -> Result<()> {
                     query.as_deref(),
                     visibility.as_deref(),
                     collaborate_bot.as_deref(),
+                    organization_code.as_deref(),
+                    role.as_deref(),
                 )
                 .await?;
 
@@ -2730,6 +2748,7 @@ async fn main() -> Result<()> {
             response_mode,
             poll_wait_ms,
             detach,
+            organization_code,
         } => {
             let token = get_token(token.as_deref())?;
             let client = create_client(
@@ -2758,6 +2777,7 @@ async fn main() -> Result<()> {
                     "response_mode": &response_mode,
                     "poll_wait_ms": poll_wait_ms,
                     "detach": detach,
+                    "organization_code": &organization_code,
                 })
             );
             let result = if detach {
@@ -2771,6 +2791,7 @@ async fn main() -> Result<()> {
                         response_mode.as_deref(),
                         Some(effective_timeout_ms),
                         Some(poll_wait_ms),
+                        organization_code.as_deref(),
                     )
                     .await?
             } else {
@@ -2784,6 +2805,7 @@ async fn main() -> Result<()> {
                         response_mode.as_deref(),
                         Some(effective_timeout_ms),
                         Some(poll_wait_ms),
+                        organization_code.as_deref(),
                     )
                     .await?
             };
@@ -4565,6 +4587,53 @@ mod tests {
         match cli.command {
             Commands::Chat { response_mode, .. } => {
                 assert_eq!(response_mode.as_deref(), Some("after-last-tool-call"));
+            }
+            _ => panic!("expected chat command"),
+        }
+    }
+
+    #[test]
+    fn test_discover_command_accepts_organization_scope() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "discover",
+            "--organization-code",
+            "promo-2026",
+            "--role",
+            "traffic_analyst",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Discover {
+                organization_code,
+                role,
+                ..
+            } => {
+                assert_eq!(organization_code.as_deref(), Some("promo-2026"));
+                assert_eq!(role.as_deref(), Some("traffic_analyst"));
+            }
+            _ => panic!("expected discover command"),
+        }
+    }
+
+    #[test]
+    fn test_chat_command_accepts_organization_code() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "chat",
+            "--bot-uuid",
+            "bot-b",
+            "--message",
+            "hello",
+            "--organization-code",
+            "promo-2026",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Chat { organization_code, .. } => {
+                assert_eq!(organization_code.as_deref(), Some("promo-2026"));
             }
             _ => panic!("expected chat command"),
         }

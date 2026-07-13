@@ -19,7 +19,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentclaw.community.di.config import DormantInternalToken, SecretNamesConfig
+from agentclaw.community.core.common_config import CommonWhiteListService
+from agentclaw.community.di.config import (
+    DormantConfig,
+    DormantInternalToken,
+    DormantNotifyConfig,
+    SecretNamesConfig,
+)
 from agentclaw.community.di.modules.bot_dormant_module import (
     BotDormantModule,
     _SINGLEBOX_FALLBACK_TOKEN,
@@ -96,3 +102,22 @@ def test_resolver_exception_yields_empty_token_failure_closed():
     result = _resolve(resolver)
 
     assert result.value == ""
+
+
+@pytest.mark.unit
+def test_dormant_service_provider_passes_common_whitelist_service():
+    module = BotDormantModule()
+    common_whitelist_service = MagicMock(spec=CommonWhiteListService)
+
+    service = module._dormant_bot_service(
+        db=MagicMock(),
+        baas_client=MagicMock(),
+        bot_service=MagicMock(),
+        passport_plugin=MagicMock(),
+        scan_policy=MagicMock(),
+        common_whitelist_service=common_whitelist_service,
+        config=DormantConfig(),
+        notify_config=DormantNotifyConfig(),
+    )
+
+    assert service._common_whitelist_service is common_whitelist_service

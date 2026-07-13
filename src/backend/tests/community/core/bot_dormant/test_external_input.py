@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from agentclaw.community.core.bot_dormant.baas_client import AliveResult, BaasDormantClient
+from agentclaw.community.core.common_config import CommonWhiteListService
 from agentclaw.community.core.bot_dormant.service import DormantBotService
 from agentclaw.community.core.bot_dormant.sqlite_models import (
     DormantCheckAudit,
@@ -71,7 +72,7 @@ def _insert_external(session, *, bot_id="bot1", owner_id="ow", dt_str=None,
     return row.id
 
 
-def _make_service(session, *, dry_run=False):
+def _make_service(session, *, dry_run=False, protected_owner_ids=frozenset()):
     baas = AsyncMock(spec=BaasDormantClient)
     baas.check_alive = AsyncMock(
         return_value=AliveResult(result="unknown", last_session_time=None)
@@ -81,9 +82,12 @@ def _make_service(session, *, dry_run=False):
     bot_svc.update_status = MagicMock()
     scan_policy = MagicMock()
     scan_policy.dry_run.return_value = dry_run
+    common_whitelist = MagicMock(spec=CommonWhiteListService)
+    common_whitelist.get_owner_ids.return_value = frozenset(protected_owner_ids)
     return DormantBotService(
         db=FakeDB(session), baas_client=baas, bot_service=bot_svc,
         passport_plugin=MagicMock(), scan_policy=scan_policy,
+        common_whitelist_service=common_whitelist,
         N=N, M=M,
     )
 
@@ -258,6 +262,36 @@ def test_whitelist_bot_skipped_even_in_external_input():
         DormantNotifyLog.notify_source == "external_input"
     ).all()
     assert len(logs) == 0
+
+
+@pytest.mark.unit
+def test_external_input_skips_protected_owner_and_leaves_row_unprocessed():
+    session = _make_session()
+    _insert_bot(session, bot_id="bot1", owner_id="protected_owner")
+    row_id = _insert_external(
+        session,
+        bot_id="bot1",
+        owner_id="protected_owner",
+        dt_str=(date.today() - timedelta(days=M)).strftime("%Y%m%d"),
+    )
+    service = _make_service(
+        session,
+        protected_owner_ids=frozenset({"protected_owner"}),
+    )
+
+    _run(service.process_run(dry_run=False))
+
+    row = session.query(DormantExternalInput).filter_by(id=row_id).one()
+    audit = session.query(DormantCheckAudit).filter_by(
+        source="external_input",
+        bot_id="bot1",
+        owner_id="protected_owner",
+    ).one()
+    assert row.processed == 0
+    assert audit.check_result == "whitelisted"
+    assert audit.action_taken == "skipped"
+    assert session.query(DormantNotifyLog).count() == 0
+    service._bot_service.stop_bot.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

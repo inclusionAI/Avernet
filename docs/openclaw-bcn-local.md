@@ -74,7 +74,7 @@ If it is not installed, follow [Dependencies](dependencies.md).
 
 This is the recommended path. `singlebox.sh` completes these steps automatically:
 
-1. Build `src/plugin/packages/openclaw-channel-bcn`.
+1. Build `src/bcs/crates/plugins/openclaw-channel-bcn`.
 2. Symlink the plugin into the OpenClaw extensions directory.
 3. Generate an OpenClaw profile for each demo bot.
 4. Write `channels.bcs.bcsUrl`, bot metadata, and the plugin load path into each profile.
@@ -96,7 +96,7 @@ For the default 5-bot stack, `<bot-profile>` follows the
 
 `scripts/singlebox.sh` can load the `openclaw-channel-bcn` plugin two ways:
 
-- **source** (default): builds `src/plugin/packages/openclaw-channel-bcn` from the repo.
+- **source** (default): builds `src/bcs/crates/plugins/openclaw-channel-bcn` from the repo.
 - **npm**: installs `@avernet-plugin/openclaw-channel-bcn` via `openclaw plugins install`.
 
 Select with the flag or env var (flag wins):
@@ -117,17 +117,17 @@ The example below uses an isolated repository-local directory, `.openclaw-host-b
 ### 1. Build the BCN Plugin
 
 ```bash
-cd src/plugin
-corepack enable
-pnpm install --filter @avernet-plugin/openclaw-channel-bcn...
-pnpm --filter @avernet-plugin/openclaw-channel-bcn build
-cd ../..
+(
+  cd src/bcs/crates/plugins/openclaw-channel-bcn
+  npm install
+  npm run build
+)
 ```
 
 Check that the plugin build output exists:
 
 ```bash
-test -f src/plugin/packages/openclaw-channel-bcn/dist/esm/index.js
+test -f src/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
 ```
 
 This is equivalent to the Dockerfile flow: run `npm install` and `npm run build` during image build, then symlink the plugin directory into OpenClaw extensions.
@@ -138,7 +138,7 @@ Use both an explicit load path and an extension symlink. The explicit load path 
 
 ```bash
 mkdir -p ~/.openclaw/extensions
-ln -sfn "$(pwd)/src/plugin/packages/openclaw-channel-bcn" \
+ln -sfn "$(pwd)/src/bcs/crates/plugins/openclaw-channel-bcn" \
   ~/.openclaw/extensions/openclaw-channel-bcn
 ```
 
@@ -161,7 +161,7 @@ BCS_PORT="${BCS_PORT:-21000}"
 OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
 HOST_BOT_DIR="$(pwd)/.openclaw-host-bcn"
 HOST_BOT_WORKSPACE="${HOST_BOT_DIR}/workspace"
-PLUGIN_PATH="$(pwd)/src/plugin/packages/openclaw-channel-bcn"
+PLUGIN_PATH="$(pwd)/src/bcs/crates/plugins/openclaw-channel-bcn"
 
 mkdir -p "${HOST_BOT_WORKSPACE}"
 
@@ -346,7 +346,7 @@ fi
 
 BCS_PORT="${BCS_PORT:-21000}"
 
-test -f src/plugin/packages/openclaw-channel-bcn/dist/esm/index.js
+test -f src/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
 test -L ~/.openclaw/extensions/openclaw-channel-bcn
 curl --noproxy '*' -fsS "http://127.0.0.1:${BCS_PORT}/health"
 ```

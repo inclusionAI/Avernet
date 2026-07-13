@@ -9,9 +9,21 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 coverage_root="${SINGLEBOX_COVERAGE_ROOT:-$repo_root/scripts/.dependencies/coverage/singlebox}"
 report_dir="$coverage_root/reports"
 mode="${SINGLEBOX_COVERAGE_MODE:-real}"
-acceptance_target="${SINGLEBOX_COVERAGE_ACCEPTANCE_TARGET:-tests/community/acceptance/cron/test_cron_query_lifecycle.py}"
+module_manifest="$script_dir/singlebox_coverage_modules.yaml"
 coverage_standalone_root=""
 coverage_standalone_runtime=""
+requested_modules=()
+acceptance_targets=()
+explicit_acceptance_targets=()
+coverage_modules=()
+reporter_command=()
+
+if [[ -n "${SINGLEBOX_COVERAGE_MODULE:-}" ]]; then
+  requested_modules+=("$SINGLEBOX_COVERAGE_MODULE")
+fi
+if [[ -n "${SINGLEBOX_COVERAGE_ACCEPTANCE_TARGET:-}" ]]; then
+  explicit_acceptance_targets+=("$SINGLEBOX_COVERAGE_ACCEPTANCE_TARGET")
+fi
 
 usage() {
   cat <<USAGE
@@ -24,6 +36,10 @@ The default mode is real: pre-push starts the local singlebox coverage stack.
 Options:
   --coverage-root DIR     Coverage output root, default: $coverage_root
   --mode real             Override SINGLEBOX_COVERAGE_MODE
+  --acceptance-target PATH
+                          Override manifest targets; may be repeated
+  --module NAME           Run and gate one manifest module; may be repeated
+                          Default: every enabled module in the manifest
   -h, --help              Show this help
 USAGE
 }
@@ -47,6 +63,22 @@ while [[ "$#" -gt 0 ]]; do
       mode="$2"
       shift 2
       ;;
+    --acceptance-target)
+      if [[ "$#" -lt 2 ]]; then
+        echo "error: --acceptance-target requires an argument" >&2
+        exit 2
+      fi
+      explicit_acceptance_targets+=("$2")
+      shift 2
+      ;;
+    --module)
+      if [[ "$#" -lt 2 ]]; then
+        echo "error: --module requires an argument" >&2
+        exit 2
+      fi
+      requested_modules+=("$2")
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -59,6 +91,61 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
+if [[ ! -s "$module_manifest" ]]; then
+  echo "missing singlebox coverage module manifest: $module_manifest" >&2
+  exit 2
+fi
+
+resolve_reporter_command() {
+  if [[ -n "${PYTHON:-}" ]]; then
+    reporter_command=("$PYTHON")
+  elif [[ -x "$repo_root/src/backend/.venv/bin/python" ]]; then
+    reporter_command=("$repo_root/src/backend/.venv/bin/python")
+  else
+    reporter_command=(uv run --project "$repo_root/src/backend" python)
+  fi
+}
+
+resolve_coverage_scope() {
+  local selection_args=(--manifest "$module_manifest")
+  local module_name target modules_output targets_output
+  if [[ "${#requested_modules[@]}" -gt 0 ]]; then
+    for module_name in "${requested_modules[@]}"; do
+      selection_args+=(--module "$module_name")
+    done
+  fi
+
+  if ! modules_output="$("${reporter_command[@]}" \
+    "$script_dir/singlebox_coverage_report.py" \
+    "${selection_args[@]}" --list-modules)"; then
+    return 2
+  fi
+  while IFS= read -r module_name; do
+    [[ -n "$module_name" ]] && coverage_modules+=("$module_name")
+  done <<< "$modules_output"
+  if [[ "${#coverage_modules[@]}" -eq 0 ]]; then
+    echo "singlebox coverage manifest selected no modules" >&2
+    return 2
+  fi
+
+  if [[ "${#explicit_acceptance_targets[@]}" -gt 0 ]]; then
+    acceptance_targets=("${explicit_acceptance_targets[@]}")
+  else
+    if ! targets_output="$("${reporter_command[@]}" \
+      "$script_dir/singlebox_coverage_report.py" \
+      "${selection_args[@]}" --list-acceptance-targets)"; then
+      return 2
+    fi
+    while IFS= read -r target; do
+      [[ -n "$target" ]] && acceptance_targets+=("$target")
+    done <<< "$targets_output"
+  fi
+  if [[ "${#acceptance_targets[@]}" -eq 0 ]]; then
+    echo "selected coverage modules have no acceptance targets" >&2
+    return 2
+  fi
+}
+
 run_real_singlebox() {
   rm -rf "$coverage_root/raw" "$report_dir"
   mkdir -p "$coverage_root/raw" "$report_dir"
@@ -68,7 +155,8 @@ run_real_singlebox() {
   echo "coverage_root: $coverage_root"
   echo "standalone_openclaw_root: $coverage_standalone_root"
   echo "standalone_runtime_dir: $coverage_standalone_runtime"
-  echo "acceptance_target: $acceptance_target"
+  echo "coverage_modules: ${coverage_modules[*]}"
+  echo "acceptance_targets: ${acceptance_targets[*]}"
   cleanup_real_singlebox() {
     flush_coverage_processes || true
     env OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE=mock \
@@ -93,6 +181,7 @@ run_real_singlebox() {
   combine_python_coverage "backend" "$repo_root/src/backend" "$coverage_root/raw/backend"
   combine_python_coverage "baas" "$repo_root/src/baas/packages/community" "$coverage_root/raw/baas"
   write_summary_artifacts
+  write_module_artifacts
   verify_required_artifacts
 }
 
@@ -118,7 +207,7 @@ run_acceptance_smoke() {
     RUN_ACCEPTANCE=1 \
       SINGLEBOX_ACCEPTANCE_REUSE_LIVE=1 \
       SINGLEBOX_ACCEPTANCE_KEEP_ARTIFACTS=1 \
-      uv run pytest "$acceptance_target" -q --junitxml "$junit_report"
+      uv run pytest "${acceptance_targets[@]}" -q --junitxml "$junit_report"
   ) > "$acceptance_log" 2>&1 || rc=$?
   cat "$acceptance_log"
   [ "$rc" -eq 0 ] || return "$rc"
@@ -172,16 +261,16 @@ write_summary_artifacts() {
   backend_plugin_hits="$(jsonl_count "$coverage_root/raw/backend/plugin_hits.jsonl")"
   baas_router_hits="$(jsonl_count "$coverage_root/raw/baas/router_hits.jsonl")"
 
-  "${PYTHON:-python3}" - "$report_dir" "$acceptance_target" "$backend_router_hits" "$backend_plugin_hits" "$baas_router_hits" <<'PY'
+  "${reporter_command[@]}" - "$report_dir" "$backend_router_hits" "$backend_plugin_hits" "$baas_router_hits" "${acceptance_targets[@]}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 report_dir = Path(sys.argv[1])
-acceptance_target = sys.argv[2]
-backend_router_hits = int(sys.argv[3])
-backend_plugin_hits = int(sys.argv[4])
-baas_router_hits = int(sys.argv[5])
+backend_router_hits = int(sys.argv[2])
+backend_plugin_hits = int(sys.argv[3])
+baas_router_hits = int(sys.argv[4])
+acceptance_targets = sys.argv[5:]
 
 summary = {
     "mode": "real",
@@ -189,7 +278,7 @@ summary = {
     "stack": "standalone start all",
     "model_config_mode": "mock",
     "acceptance": {
-        "target": acceptance_target,
+        "targets": acceptance_targets,
         "junit": "acceptance-junit.xml",
     },
     "coverage": {
@@ -209,7 +298,7 @@ summary = {
 
 report_dir.mkdir(parents=True, exist_ok=True)
 (report_dir / "summary.json").write_text(
-    json.dumps(summary, indent=2, sort_keys=True) + "\n",
+    json.dumps(summary, indent=2) + "\n",
     encoding="utf-8",
 )
 (report_dir / "summary.md").write_text(
@@ -220,7 +309,7 @@ report_dir.mkdir(parents=True, exist_ok=True)
             "- mode: real",
             "- stack: standalone start all",
             "- model config: mock",
-            f"- acceptance: {acceptance_target}",
+            f"- acceptance: {', '.join(acceptance_targets)}",
             f"- backend router hits: {backend_router_hits}",
             f"- backend plugin hits: {backend_plugin_hits}",
             f"- baas router hits: {baas_router_hits}",
@@ -232,13 +321,28 @@ report_dir.mkdir(parents=True, exist_ok=True)
 (report_dir / "dashboard.html").write_text(
     "<!doctype html><meta charset='utf-8'><title>Singlebox Coverage</title>"
     "<h1>Singlebox Coverage</h1>"
-    f"<p>Acceptance: {acceptance_target}</p>"
+    f"<p>Acceptance: {', '.join(acceptance_targets)}</p>"
     f"<p>Backend router hits: {backend_router_hits}</p>"
     f"<p>Backend plugin hits: {backend_plugin_hits}</p>"
     f"<p>BaaS router hits: {baas_router_hits}</p>",
     encoding="utf-8",
 )
 PY
+}
+
+write_module_artifacts() {
+  local module_args=()
+  local module_name
+  for module_name in "${coverage_modules[@]}"; do
+    module_args+=(--module "$module_name")
+  done
+  "${reporter_command[@]}" "$script_dir/singlebox_coverage_report.py" \
+    --manifest "$module_manifest" \
+    "${module_args[@]}" \
+    --coverage-json "$report_dir/backend-coverage.json" \
+    --router-hits "$coverage_root/raw/backend/router_hits.jsonl" \
+    --plugin-hits "$coverage_root/raw/backend/plugin_hits.jsonl" \
+    --report-dir "$report_dir"
 }
 
 verify_required_artifacts() {
@@ -266,6 +370,8 @@ verify_required_artifacts() {
 
 case "$mode" in
   real)
+    resolve_reporter_command
+    resolve_coverage_scope
     run_real_singlebox
     ;;
   *)

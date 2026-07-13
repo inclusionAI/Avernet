@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from agentclaw.community.core.cron.services.cron_auto_setup import (
+from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import (
     CronAutoSetupService,
     _is_hosted_24x7,
     _get_trigger_frequency,
@@ -363,6 +363,102 @@ class TestCronAutoSetupService:
         assert result is not None
         body = mock_relay.forward_request.call_args.kwargs["body"]
         assert body["schedule"] == "0 * * * *"
+
+    @pytest.mark.asyncio
+    async def test_create_cron_with_runtime(self):
+        """template ext 带 runtime → adapter_body 透传 runtime。"""
+        service, mock_repo, mock_relay = self._create_service(
+            template_data={
+                "name": "TestBot",
+                "ext": {
+                    "is_hosted_24x7": 1,
+                    "dima_space_id": "W123",
+                    "runtime": "antd",
+                },
+            }
+        )
+        result = await service.auto_setup_cron_for_bot("bot1", "user1", "nick1")
+
+        assert result is not None
+        body = mock_relay.forward_request.call_args.kwargs["body"]
+        assert body["runtime"] == "antd"
+
+    @pytest.mark.asyncio
+    async def test_create_cron_without_runtime(self):
+        """template ext 不带 runtime → adapter_body 不包含 runtime 字段。"""
+        service, mock_repo, mock_relay = self._create_service(
+            template_data={
+                "name": "TestBot",
+                "ext": {"is_hosted_24x7": 1, "dima_space_id": "W123"},
+            }
+        )
+        result = await service.auto_setup_cron_for_bot("bot1", "user1", "nick1")
+
+        assert result is not None
+        body = mock_relay.forward_request.call_args.kwargs["body"]
+        assert "runtime" not in body
+
+    @pytest.mark.asyncio
+    async def test_create_cron_with_empty_runtime_ignored(self):
+        """runtime 为空字符串 → 忽略，不写入 adapter_body。"""
+        service, mock_repo, mock_relay = self._create_service(
+            template_data={
+                "name": "TestBot",
+                "ext": {"is_hosted_24x7": 1, "dima_space_id": "W123", "runtime": ""},
+            }
+        )
+        result = await service.auto_setup_cron_for_bot("bot1", "user1", "nick1")
+
+        assert result is not None
+        body = mock_relay.forward_request.call_args.kwargs["body"]
+        assert "runtime" not in body
+
+    @pytest.mark.asyncio
+    async def test_create_cron_with_model_from_config(self):
+        """template ext 带 model → adapter_body 透传外部配置的 model。"""
+        service, mock_repo, mock_relay = self._create_service(
+            template_data={
+                "name": "TestBot",
+                "ext": {"is_hosted_24x7": 1, "dima_space_id": "W123", "model": "gpt-4o"},
+            }
+        )
+        result = await service.auto_setup_cron_for_bot("bot1", "user1", "nick1")
+
+        assert result is not None
+        body = mock_relay.forward_request.call_args.kwargs["body"]
+        assert body["model"] == "gpt-4o"
+
+    @pytest.mark.asyncio
+    async def test_create_cron_model_fallback_to_default(self, monkeypatch):
+        """ext 未配置 model 且 runtime 已配置 → model 走 DEFAULT_CRON_MODEL 兜底。"""
+        import agentclaw.community.core.cron.services.aicoding.cron_auto_setup as mod
+        monkeypatch.setattr(mod, "DEFAULT_CRON_MODEL", "claude-sonnet")
+        service, mock_repo, mock_relay = self._create_service(
+            template_data={
+                "name": "TestBot",
+                "ext": {"is_hosted_24x7": 1, "dima_space_id": "W123"},
+            }
+        )
+        result = await service.auto_setup_cron_for_bot("bot1", "user1", "nick1")
+
+        assert result is not None
+        body = mock_relay.forward_request.call_args.kwargs["body"]
+        assert body["model"] == "claude-sonnet"
+
+    @pytest.mark.asyncio
+    async def test_create_cron_no_model_when_no_config_no_default(self):
+        """ext 无 model 且 DEFAULT_CRON_MODEL 为 None → adapter_body 不含 model。"""
+        service, mock_repo, mock_relay = self._create_service(
+            template_data={
+                "name": "TestBot",
+                "ext": {"is_hosted_24x7": 1, "dima_space_id": "W123"},
+            }
+        )
+        result = await service.auto_setup_cron_for_bot("bot1", "user1", "nick1")
+
+        assert result is not None
+        body = mock_relay.forward_request.call_args.kwargs["body"]
+        assert "model" not in body
 
     @pytest.mark.asyncio
     async def test_idempotent_when_cron_exists(self):

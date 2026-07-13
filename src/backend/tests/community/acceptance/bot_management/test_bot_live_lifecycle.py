@@ -72,7 +72,7 @@ def _seed_provider_bot(
                 "entity_id, entity_type, device_id, device_provider, env, device_props, "
                 "status, apply_reason, applied_by, gmt_create, gmt_modified"
                 ") VALUES ("
-                ":entity_id, 'staff', :device_id, :device_provider, 'singlebox', :device_props, "
+                ":entity_id, 'staff', :device_id, :device_provider, :env, :device_props, "
                 "'ACTIVE', 'singlebox provider branch seed', :owner_id, "
                 "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
             ),
@@ -81,6 +81,7 @@ def _seed_provider_bot(
                 "device_id": device_id,
                 "device_provider": provider,
                 "device_props": json.dumps(device_props),
+                "env": "dev",
                 "owner_id": owner_id,
             },
         },
@@ -94,7 +95,7 @@ def _seed_provider_bot(
                 ":bot_id, :bot_name, :bot_desc, :owner_id, 'staff', :owner_id, :owner_id, "
                 ":owner_id, :engine_types, :active_engine, 'ACTIVE', "
                 "(SELECT id FROM ac_entity_device_binding WHERE device_id = :device_id), "
-                ":device_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, '0', :ext, 'singlebox', 'personal'"
+                ":device_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, '0', :ext, :env, 'personal'"
                 ")"
             ),
             "params": {
@@ -106,6 +107,7 @@ def _seed_provider_bot(
                 "active_engine": active_engine,
                 "device_id": device_id,
                 "ext": json.dumps({"singlebox_provider_branch": provider}),
+                "env": "dev",
             },
         },
     ]
@@ -138,7 +140,7 @@ def _seed_plain_bot(
                     ") VALUES ("
                     ":bot_id, :bot_name, :bot_desc, :owner_id, 'staff', :owner_id, :owner_id, "
                     ":owner_id, :engine_types, :active_engine, :status, :binding_id, :device_id, "
-                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, '0', :ext, 'singlebox', "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, '0', :ext, :env, "
                     ":bot_type, :template_type"
                     ")"
                 ),
@@ -151,6 +153,7 @@ def _seed_plain_bot(
                     "active_engine": active_engine,
                     "status": status,
                     "ext": json.dumps(ext or {}),
+                    "env": "dev",
                     "bot_type": bot_type,
                     "template_type": template_type,
                     "binding_id": binding_id,
@@ -195,13 +198,14 @@ def _seed_desktop_binding(
                     "entity_id, entity_type, device_id, device_provider, env, device_props, "
                     "status, apply_reason, applied_by, gmt_create, gmt_modified"
                     ") VALUES ("
-                    ":owner_id, 'staff', :device_id, 'baas', 'singlebox', :device_props, "
+                    ":owner_id, 'staff', :device_id, 'baas', :env, :device_props, "
                     "'ACTIVE', 'singlebox desktop merge seed', :owner_id, "
                     "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
                 ),
                 "params": {
                     "owner_id": owner_id,
                     "device_id": device_id,
+                    "env": "dev",
                     "device_props": json.dumps(
                         {
                             "provider": "baas",
@@ -397,8 +401,8 @@ def test_bot_management_active_data_init_attempt(live_backend):
 
 
 @pytest.mark.acceptance
-def test_bot_management_super_admin_for_others_lifecycle(live_backend):
-    """Super-admin can create, update ext, and release another user's default bot."""
+def test_bot_management_unconfigured_admin_for_others_fails_closed(live_backend):
+    """Unconfigured singlebox admin IDs fail closed without creating a bot."""
     admin_id = "100000"
     target_user_id = fresh_id("bot_mgmt_target")
     target_nick_name = fresh_id("BotMgmtTarget")
@@ -418,54 +422,27 @@ def test_bot_management_super_admin_for_others_lifecycle(live_backend):
         )
         assert created.status_code == 200, created.text
         created_body = created.json()
-        assert created_body["success"] is True, created_body
-        assert created_body["data"]["action"] == "created", created_body
-        assert created_body["data"]["bot"]["bot_id"] == "default", created_body
-
-        repeated = admin_client.post(
-            "/api/bots/create-for-others",
-            json={
-                "target_user_id": target_user_id,
-                "target_nick_name": target_nick_name,
-            },
-        )
-        assert repeated.status_code == 200, repeated.text
-        repeated_body = repeated.json()
-        assert repeated_body["success"] is True, repeated_body
-        assert repeated_body["data"]["action"] in {"skipped", "restarted"}, repeated_body
-
-        ext_update = {"singlebox_for_others": "covered"}
-        ext_response = admin_client.post(
-            "/api/bots/update-bot-ext-for-others",
-            json={
-                "target_user_id": target_user_id,
-                "target_bot_id": "default",
-                "ext_update": ext_update,
-            },
-        )
-        assert ext_response.status_code == 200, ext_response.text
-        assert ext_response.json()["success"] is True
-
-        release = admin_client.post(
-            "/api/bots/release-for-others",
-            json={"target_user_id": target_user_id, "target_bot_id": "default"},
-        )
-        assert release.status_code == 200, release.text
-        release_body = release.json()
-        assert release_body["success"] is True, release_body
-        assert release_body["data"]["status"] == "FAILED", release_body
+        assert created_body["success"] is False, created_body
+        assert created_body["error_code"] == 403, created_body
 
     with httpx.Client(
         base_url=live_backend,
         headers={"x-user-id": target_user_id},
         timeout=60.0,
     ) as target_client:
-        detail = target_client.get("/api/bots/default")
-        assert detail.status_code == 200, detail.text
-        detail_body = detail.json()
-        assert detail_body["success"] is True, detail_body
-        assert detail_body["data"]["status"] == "FAILED", detail_body
-        assert detail_body["data"].get("ext", {}).get("singlebox_for_others") == "covered"
+        bots = target_client.get(
+            "/api/bots",
+            params={
+                "entity_id": target_user_id,
+                "entity_type": "staff",
+                "page": 1,
+                "page_size": 20,
+            },
+        )
+        assert bots.status_code == 200, bots.text
+        bots_body = bots.json()
+        assert bots_body["success"] is True, bots_body
+        assert bots_body["data"] == {"total": 0, "items": []}, bots_body
 
 
 @pytest.mark.acceptance
@@ -473,6 +450,7 @@ def test_bot_management_application_coding_template_update(live_backend):
     """An existing applicationCoding bot can update template config and read it back."""
     owner_id = fresh_id("bot_mgmt_appcoding")
     bot_id = fresh_id("bot_appcoding")
+    admin_bot_name = fresh_id("BotMgmtAppcoding")
     old_template = {
         "devflow_workflow": "old-flow",
         "yuque_kb_repos": [],
@@ -551,7 +529,7 @@ def test_bot_management_application_coding_template_update(live_backend):
             f"/api/bots/{bot_id}/admin",
             json={
                 "owner_id": owner_id,
-                "bot_name": "BotMgmt appcoding admin",
+                "bot_name": admin_bot_name,
                 "bot_desc": "admin updated sandbox template in singlebox coverage",
                 "template_config": {
                     "image": "registry.example.com/singlebox:v1",

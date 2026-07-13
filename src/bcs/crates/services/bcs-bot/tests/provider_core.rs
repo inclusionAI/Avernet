@@ -7,7 +7,8 @@ use bcs_service_api::{
     ActorStatus, BotDeliveryTarget, BotRegistryCoreService, CoordinationMode,
     ProviderAuthMode, ProviderBotBindingRepoPort, ProviderBotCoreService,
     ProviderCoordinationConfig, ProviderCoreService, ProviderCredentialRepoPort,
-    ProviderRepoPort, RegisterProviderBotParams, ServiceError,
+    ProviderOrganizationManagementConfig, ProviderRepoPort, RegisterProviderBotParams,
+    ServiceError,
 };
 
 struct TestContext {
@@ -252,11 +253,127 @@ async fn update_provider_rejects_private_webhook_url() {
             Some("http://127.0.0.1:8080/hook".to_string()),
             None,
             None,
+            None,
         )
         .await
         .expect_err("private webhook URL update should be rejected");
 
     assert!(matches!(err, ServiceError::InvalidOperation { .. }));
+}
+
+#[test]
+fn organization_management_config_rejects_malformed_stored_subtree() {
+    let error = ProviderOrganizationManagementConfig::from_provider_config(
+        r#"{"organization_management":{"authorized_manager_provider_ids":"provider-a"}}"#,
+    )
+    .expect_err("malformed organization management config must fail closed");
+
+    assert!(error.is_data());
+}
+
+#[tokio::test]
+async fn update_provider_normalizes_organization_management_and_preserves_other_config() {
+    let ctx = test_context();
+    let provider_a = register_provider(&ctx, ProviderAuthMode::StaticBearer).await;
+    let provider_c = register_provider(&ctx, ProviderAuthMode::StaticBearer).await;
+    let provider_b = register_provider_with_coordination(
+        &ctx,
+        ProviderAuthMode::StaticBearer,
+        ProviderCoordinationConfig {
+            mode: CoordinationMode::NativeMcp,
+            mcp_server: Some("bcs".to_string()),
+            mcporter_command: None,
+        },
+    )
+    .await;
+
+    let updated = ctx
+        .core
+        .update_provider(
+            &provider_b.provider_id,
+            &provider_b.admin_token,
+            "197262",
+            None,
+            None,
+            None,
+            None,
+            Some(ProviderOrganizationManagementConfig {
+                authorized_manager_provider_ids: vec![
+                    provider_c.provider_id.clone(),
+                    provider_b.provider_id.clone(),
+                    provider_a.provider_id.clone(),
+                    provider_a.provider_id.clone(),
+                ],
+            }),
+        )
+        .await
+        .expect("update organization management config");
+
+    let organization_management =
+        ProviderOrganizationManagementConfig::from_provider_config(&updated.config)
+            .expect("parse config");
+    let mut expected_manager_provider_ids = vec![provider_a.provider_id, provider_c.provider_id];
+    expected_manager_provider_ids.sort();
+    assert_eq!(
+        organization_management.authorized_manager_provider_ids,
+        expected_manager_provider_ids,
+    );
+    let config: serde_json::Value = serde_json::from_str(&updated.config).expect("provider config");
+    assert_eq!(
+        config["downlink"]["webhook_url"],
+        "https://provider.example.com/bcs/webhook"
+    );
+    assert_eq!(config["coordination"]["mode"], "native_mcp");
+}
+
+#[tokio::test]
+async fn update_provider_rejects_invalid_organization_management_provider_id() {
+    let ctx = test_context();
+    let provider = register_provider(&ctx, ProviderAuthMode::StaticBearer).await;
+
+    let error = ctx
+        .core
+        .update_provider(
+            &provider.provider_id,
+            &provider.admin_token,
+            "11111111",
+            None,
+            None,
+            None,
+            None,
+            Some(ProviderOrganizationManagementConfig {
+                authorized_manager_provider_ids: vec!["invalid provider id".to_string()],
+            }),
+        )
+        .await
+        .expect_err("invalid manager provider ID must fail");
+
+    assert!(matches!(error, ServiceError::InvalidOperation { message, .. } if message.contains("invalid authorized_manager_provider_id")));
+}
+
+#[tokio::test]
+async fn update_provider_rejects_unknown_organization_management_provider() {
+    let ctx = test_context();
+    let provider = register_provider(&ctx, ProviderAuthMode::StaticBearer).await;
+
+    let error = ctx
+        .core
+        .update_provider(
+            &provider.provider_id,
+            &provider.admin_token,
+            "11111111",
+            None,
+            None,
+            None,
+            None,
+            Some(ProviderOrganizationManagementConfig {
+                authorized_manager_provider_ids: vec!["provider-missing".to_string()],
+            }),
+        )
+        .await
+        .expect_err("unknown manager provider must fail");
+
+    assert!(matches!(error, ServiceError::InvalidOperation { message, .. } if message.contains("provider-missing") && message.contains("not found")));
 }
 
 #[tokio::test]

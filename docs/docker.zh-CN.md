@@ -185,15 +185,15 @@ npm install -g "openclaw@>=2026.3.28"
 
 ```bash
 # 仓库根目录下执行
-cd src/plugin
-corepack enable
-pnpm install --filter @avernet-plugin/openclaw-channel-bcn...
-pnpm --filter @avernet-plugin/openclaw-channel-bcn build
-cd ../..
+(
+  cd src/bcs/crates/plugins/openclaw-channel-bcn
+  npm install
+  npm run build
+)
 
 # 软链到 OpenClaw 扩展目录
 mkdir -p ~/.openclaw/extensions
-ln -sfn "$(pwd)/src/plugin/packages/openclaw-channel-bcn" \
+ln -sfn "$(pwd)/src/bcs/crates/plugins/openclaw-channel-bcn" \
   ~/.openclaw/extensions/openclaw-channel-bcn
 
 # 验证软链指向源码
@@ -208,7 +208,7 @@ ls -l ~/.openclaw/extensions/openclaw-channel-bcn
 
 ```bash
 mkdir -p ~/.openclaw/extensions
-docker cp ocb-local:/opt/ocb/src/plugin/packages/openclaw-channel-bcn \
+docker cp ocb-local:/opt/ocb/src/bcs/crates/plugins/openclaw-channel-bcn \
   ~/.openclaw/extensions/openclaw-channel-bcn
 ```
 

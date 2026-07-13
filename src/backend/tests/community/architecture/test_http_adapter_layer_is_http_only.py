@@ -152,6 +152,11 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     # Pure-function helpers / generators:
     "generate_bot_id", "validate_bot_name", "resolve_engine_for_bot",
     "filter_passport_mcp_codes",
+    # Pure functions in core/mcp/services/_defaults that build the passport
+    # resource scope (default MCP server codes / default CLI items) from
+    # engine-scoped module constants. Read-only helpers, not service instances;
+    # parallel to filter_passport_mcp_codes above.
+    "get_default_cli_items",
     "generate_report",
     # ContentScanner static helpers used directly by harness router:
     "ContentScanner",
@@ -178,12 +183,6 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     # would require a request-scoped factory; tracked as separate
     # cleanup, allowed for now.
     "SkillSymlinkVerifyService",
-    # Governance notification builder helpers — pure functions that construct
-    # card/notification payloads. Not service classes; called inline in
-    # scan-and-deliver endpoint to build TC card data before sending.
-    "build_card_notification_data",
-    "build_governance_reason",
-    "build_tc_card_detail_link",
 })
 
 # Legacy api/ subpackages still present in the current codebase.

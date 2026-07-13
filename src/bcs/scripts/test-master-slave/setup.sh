@@ -96,12 +96,12 @@ BCS_WS_URL="ws://127.0.0.1:${BCS_PORT}/ws/bot"
 
 # ── Step 5: Link BCN plugin ───────────────────────────────────────────────
 
-OPENCLAW_PLUGINS_BCN="/Users/ray/ant/projects/openclaw-plugins/packages/openclaw-channel-bcn"
-MONOREPO_BCN="$PROJECT_ROOT/../plugin/packages/openclaw-channel-bcn"
-if [ -d "$OPENCLAW_PLUGINS_BCN" ]; then
-    BCN_SOURCE="$(cd "$OPENCLAW_PLUGINS_BCN" && pwd)"
-elif [ -d "$MONOREPO_BCN" ]; then
+OPENCLAW_PLUGINS_BCN="${OPENCLAW_PLUGINS_BCN:-}"
+MONOREPO_BCN="$PROJECT_ROOT/crates/plugins/openclaw-channel-bcn"
+if [ -d "$MONOREPO_BCN" ]; then
     BCN_SOURCE="$(cd "$MONOREPO_BCN" && pwd)"
+elif [ -n "$OPENCLAW_PLUGINS_BCN" ] && [ -d "$OPENCLAW_PLUGINS_BCN" ]; then
+    BCN_SOURCE="$(cd "$OPENCLAW_PLUGINS_BCN" && pwd)"
 else
     BCN_SOURCE="$PROJECT_ROOT/submodules/openclaw-channel-bcn"
 fi

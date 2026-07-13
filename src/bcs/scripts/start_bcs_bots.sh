@@ -46,7 +46,7 @@ BCS_BIN="${BCS_BIN:-$PROJECT_ROOT/target/debug/bcs}"
 # BCN plugin: source (build monorepo tree) or npm (consume installed package)
 BCN_PLUGIN_SOURCE="${BCN_PLUGIN_SOURCE:-source}"
 BCN_PLUGIN_VERSION="${BCN_PLUGIN_VERSION:-latest}"
-BCN_PLUGIN_SRC_DIR="$PROJECT_ROOT/../../src/plugin/packages/openclaw-channel-bcn"
+BCN_PLUGIN_SRC_DIR="$PROJECT_ROOT/crates/plugins/openclaw-channel-bcn"
 BCN_PLUGIN_PACKAGE_DIR="$BCN_PLUGIN_SRC_DIR/package"
 if [ "$BCN_PLUGIN_SOURCE" = "npm" ]; then
     BCN_PLUGIN_LOAD_DIR=""

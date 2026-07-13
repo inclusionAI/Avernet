@@ -89,6 +89,7 @@ from agentclaw.community.adapters.http.bot_dormant.schemas import (  # noqa: E40
     MarkSentResponse,
     OpsActivateOneRequest,
     OpsRecycleOneRequest,
+    OpsUnfreezePassportOneRequest,
     PendingNotification,
     PendingNotificationsResponse,
 )
@@ -181,6 +182,38 @@ async def recycle_one(
         logger.exception(
             "[dormant.ops.recycle_one] failed bot_id=%s owner_id=%s",
             body.bot_id, body.owner_id,
+        )
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@internal_router.post("/unfreeze-passport-one")
+async def unfreeze_passport_one(
+    body: OpsUnfreezePassportOneRequest,
+    _: None = Depends(verify_dormant_internal_token),
+    service: DormantOpsService = Injected(DormantOpsService),
+) -> dict:
+    """Ops-only helper: bring one Bot passport online without activation."""
+    logger.info(
+        "[dormant.ops.unfreeze_passport_one] request "
+        "bot_id=%s owner_id=%s reason=%s",
+        body.bot_id,
+        body.owner_id,
+        body.reason,
+    )
+    try:
+        data = service.unfreeze_passport_one(
+            bot_id=body.bot_id,
+            owner_id=body.owner_id,
+            reason=body.reason,
+        )
+        return {"ok": True, "data": data}
+    except Exception as e:
+        logger.exception(
+            "[dormant.ops.unfreeze_passport_one] failed "
+            "bot_id=%s owner_id=%s reason=%s",
+            body.bot_id,
+            body.owner_id,
+            body.reason,
         )
         raise HTTPException(status_code=500, detail=str(e)) from e
 

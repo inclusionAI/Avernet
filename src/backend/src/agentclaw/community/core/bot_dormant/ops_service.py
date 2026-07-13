@@ -9,6 +9,7 @@ from injector import inject
 from agentclaw.community.core.bot_dormant.service import Candidate, DormantBotService
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.models import BotModel
+from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
 logger = get_logger()
@@ -18,8 +19,56 @@ class DormantOpsService:
     """Small operations facade that reuses the production dormant recycle path."""
 
     @inject
-    def __init__(self, dormant_service: DormantBotService) -> None:
+    def __init__(
+        self,
+        dormant_service: DormantBotService,
+        passport_plugin: PassportPlugin,
+    ) -> None:
         self._dormant_service = dormant_service
+        self._passport = passport_plugin
+
+    def unfreeze_passport_one(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        reason: str,
+    ) -> dict:
+        """Bring one Bot passport online without changing Bot lifecycle state."""
+        logger.info(
+            "[dormant.ops.unfreeze_passport_one] event=start "
+            "bot_id=%s owner_id=%s reason=%s",
+            bot_id,
+            owner_id,
+            reason,
+        )
+        try:
+            self._passport.unfreeze_agent_passport(
+                bot_id=bot_id,
+                owner_workno=owner_id,
+                reason=reason,
+            )
+        except Exception:
+            logger.exception(
+                "[dormant.ops.unfreeze_passport_one] event=failed "
+                "bot_id=%s owner_id=%s reason=%s",
+                bot_id,
+                owner_id,
+                reason,
+            )
+            raise
+        logger.info(
+            "[dormant.ops.unfreeze_passport_one] event=done "
+            "bot_id=%s owner_id=%s reason=%s",
+            bot_id,
+            owner_id,
+            reason,
+        )
+        return {
+            "bot_id": bot_id,
+            "owner_id": owner_id,
+            "status": "passport_online",
+        }
 
     def recycle_one(
         self,

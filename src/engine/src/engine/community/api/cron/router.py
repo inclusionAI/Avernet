@@ -165,6 +165,8 @@ async def create_task(request: CreateTaskRequest):
         }
         if request.model:
             payload["model"] = request.model  # 指定AI模型
+        if request.runtime:
+            payload["runtime"] = request.runtime  # aicoding 创建会话时使用的 runtime
         if request.append_message:
             payload["append_message"] = request.append_message  # autoInitiate 补充说明
 
@@ -216,7 +218,7 @@ async def update_task(task_id: str, request: UpdateTaskRequest):
                 update_data["schedule"]["expr"] = request.schedule
             if request.timezone is not None:
                 update_data["schedule"]["tz"] = request.timezone
-        if request.command is not None or request.timeout_secs is not None or request.model is not None:
+        if request.command is not None or request.timeout_secs is not None or request.model is not None or request.runtime is not None:
             # 先获取现有任务，保留其他 payload 字段
             existing_job = await cron_api.get_job(task_id)
             if existing_job:
@@ -228,6 +230,8 @@ async def update_task(task_id: str, request: UpdateTaskRequest):
                     update_data["payload"]["timeout_secs"] = request.timeout_secs
                 if request.model is not None:
                     update_data["payload"]["model"] = request.model
+                if request.runtime is not None:
+                    update_data["payload"]["runtime"] = request.runtime
             else:
                 raise HTTPException(status_code=404, detail="Task not found")
 

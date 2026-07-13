@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List, Tuple, TYPE_CHECKING
 
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
-from agentclaw.community.core.bot_management.services.workspace_hosting_service import WorkspaceHostingService
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import WorkspaceHostingService
 from agentclaw.community.core.desktop_bot.device_status_client import DeviceStatusClient
 from agentclaw.community.core.desktop_bot.status_mapping import map_baas_to_display
 
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.baas_template_resolver import (
         BaasTemplateResolverProtocol,
     )
-    from agentclaw.community.core.cron.services.cron_auto_setup import CronAutoSetupService
+    from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
     # Type-only: importing ``agentclaw.community.di`` at runtime would form a cycle
     # (di/__init__ -> container -> aicoding_module -> workspace_service ->

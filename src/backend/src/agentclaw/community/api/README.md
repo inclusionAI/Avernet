@@ -54,6 +54,11 @@ internal_dependencies:
   - agentclaw.community.core.access.repository       # UserInfoRecord — typed in user_service.py
   - agentclaw.community.core.bot_chat.schemas        # ConversationDetail, HealthCheckData — typed in bot_chat_service.py
   - agentclaw.community.core.channel.services.repositories  # ChannelRecord — typed in channel_service.py
+  - agentclaw.community.core.economy.governance.domain.enums     # GovernanceStatus — typed in governance_service.py LifecycleServiceProtocol
+  - agentclaw.community.core.economy.governance.domain.record    # GovernanceRecord — typed in governance_service.py Protocol
+  - agentclaw.community.core.economy.governance.domain.ticket    # GovernanceTicket — typed in governance_service.py Protocol
+  - agentclaw.community.core.economy.governance.services.admin_service  # TicketActionOutcome — typed in governance_service.py Protocol
+  - agentclaw.community.core.economy.governance.services.service_protocols  # Admin/Whitelist/Lifecycle Protocol — 定义在 core,api re-export 供 router 注入
   - agentclaw.community.core.quality.repositories    # QualityTaskRecord — typed in quality_service.py and task_processor_service.py
   - agentclaw.community.core.service_bot.services.baas_service  # BotWsConnectionInfoResponse / HttpConnectionInfo — typed in baas_service.py (BaasService is a plain core service)
   - agentclaw.community.core.service_bot.types       # PublishStage enum — typed in baas_service.py

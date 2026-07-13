@@ -6,10 +6,10 @@ Every qualifier binds the real ``HttpxClient`` (the neutral shared impl at
 env-aware ``pre``/``prod`` selection.
 
 This module carries no profile-specific dependency, so corp and community share
-it verbatim — it is installed in the profile-independent base list. The test
-column's ``TestHttpClientModule`` installs *after* it and overrides these keys
-with ``LocalHttpClient`` under pytest (and real httpx under singlebox), so it is
-the one genuine profile-specific HTTP-client variant.
+it verbatim — it is installed in the profile-independent base list. Only the
+``test`` and ``corp_test`` columns install ``TestHttpClientModule`` after it to
+override these keys with no-network ``LocalHttpClient`` doubles. ``singlebox``
+deliberately consumes these real HTTP clients to reach its local services.
 """
 from __future__ import annotations
 

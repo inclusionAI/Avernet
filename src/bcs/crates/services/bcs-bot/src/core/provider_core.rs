@@ -8,8 +8,9 @@ use tracing::{info, warn};
 use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, CoordinationMode, ProviderAuthMode, ProviderBotBinding,
     ProviderBotBindingRepoPort, ProviderCoordinationConfig, ProviderBotCoreService, ProviderCoreService,
-    ProviderCredential, ProviderCredentialRepoPort, ProviderRecord, ProviderRepoPort,
-    RegisterProviderBotParams, RegisteredProvider, RuntimeBotIdentity, ServiceError, ServiceResult,
+    ProviderCredential, ProviderCredentialRepoPort, ProviderOrganizationManagementConfig,
+    ProviderRecord, ProviderRepoPort, RegisterProviderBotParams, RegisteredProvider,
+    RuntimeBotIdentity, ServiceError, ServiceResult,
 };
 
 use super::ids::{new_bot_uuid, new_provider_id, new_session_token};
@@ -305,6 +306,13 @@ pub(crate) fn parse_coordination_config(
     Ok(parsed)
 }
 
+pub(crate) fn parse_organization_management_config(
+    config: &str,
+) -> ServiceResult<ProviderOrganizationManagementConfig> {
+    ProviderOrganizationManagementConfig::from_provider_config(config)
+        .map_err(ServiceError::from)
+}
+
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -473,6 +481,16 @@ fn replace_coordination_config(
     validate_provider_coordination_config(&coordination)?;
     let mut value: Value = serde_json::from_str(config)?;
     value["coordination"] = serde_json::to_value(coordination)?;
+    Ok(value.to_string())
+}
+
+fn replace_organization_management_config(
+    config: &str,
+    organization_management: ProviderOrganizationManagementConfig,
+) -> ServiceResult<String> {
+    parse_organization_management_config(config)?;
+    let mut value: Value = serde_json::from_str(config)?;
+    value["organization_management"] = serde_json::to_value(organization_management)?;
     Ok(value.to_string())
 }
 
@@ -654,6 +672,7 @@ impl ProviderCoreService for ProviderCore {
         webhook_url: Option<String>,
         protocol_version: Option<String>,
         coordination: Option<ProviderCoordinationConfig>,
+        organization_management: Option<ProviderOrganizationManagementConfig>,
     ) -> ServiceResult<ProviderRecord> {
         let current = self
             .provider_admin_for_path(provider_id, provider_admin_token)
@@ -673,6 +692,41 @@ impl ProviderCoreService for ProviderCore {
         if let Some(coordination) = coordination {
             let source = config.as_deref().unwrap_or(&current.config);
             config = Some(replace_coordination_config(source, coordination)?);
+        }
+        if let Some(mut organization_management) = organization_management {
+            for manager_provider_id in &organization_management.authorized_manager_provider_ids {
+                validate_external_id("authorized_manager_provider_id", manager_provider_id)?;
+            }
+            organization_management
+                .authorized_manager_provider_ids
+                .retain(|manager_provider_id| manager_provider_id != provider_id);
+            organization_management.authorized_manager_provider_ids.sort();
+            organization_management.authorized_manager_provider_ids.dedup();
+            let manager_providers = self
+                .providers
+                .list_providers_by_ids(
+                    &organization_management.authorized_manager_provider_ids,
+                )
+                .await?;
+            if let Some(unknown_provider_id) = organization_management
+                .authorized_manager_provider_ids
+                .iter()
+                .find(|manager_provider_id| {
+                    !manager_providers.iter().any(|provider| {
+                        provider.provider_id.as_str() == manager_provider_id.as_str()
+                    })
+                })
+            {
+                return Err(ServiceError::InvalidOperation {
+                    message: format!("provider '{}' not found", unknown_provider_id),
+                    request_id: None,
+                });
+            }
+            let source = config.as_deref().unwrap_or(&current.config);
+            config = Some(replace_organization_management_config(
+                source,
+                organization_management,
+            )?);
         }
         self.providers
             .update_provider_metadata(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.singlebox_coverage import (
@@ -129,3 +129,26 @@ def test_http_middleware_records_fastapi_route_hits(monkeypatch, tmp_path):
     hits = _jsonl(tmp_path / "backend" / "router_hits.jsonl")
     assert hits[0]["key"] == "GET /api/demo/{item_id}"
     assert hits[0]["path"] == "/api/demo/42"
+
+
+def test_http_middleware_restores_nested_router_prefix(monkeypatch, tmp_path):
+    monkeypatch.setenv("SINGLEBOX_COVERAGE", "1")
+    monkeypatch.setenv("SINGLEBOX_COVERAGE_DIR", str(tmp_path))
+    app = FastAPI()
+    install_singlebox_coverage_middleware(app)
+    child = APIRouter(prefix="/files")
+    parent = APIRouter(prefix="/api/resources")
+
+    @child.get("/{file_id}")
+    def get_file(file_id: str):
+        return {"file_id": file_id}
+
+    parent.include_router(child)
+    app.include_router(parent)
+
+    response = TestClient(app).get("/api/resources/files/report.txt")
+
+    assert response.status_code == 200
+    hits = _jsonl(tmp_path / "backend" / "router_hits.jsonl")
+    assert hits[0]["key"] == "GET /api/resources/files/{file_id}"
+    assert hits[0]["path"] == "/api/resources/files/report.txt"

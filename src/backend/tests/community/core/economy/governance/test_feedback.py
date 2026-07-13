@@ -8,10 +8,10 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceAudit,
-    GovernanceNotifyLog,
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    AuditLogOrm,
+    GovernanceNotificationOrm,
+    GovernanceTicketOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.audit_repo import (
     GovernanceAuditRepository,
@@ -25,6 +25,9 @@ from agentclaw.community.core.economy.governance.repositories.task_record_repo i
 from agentclaw.community.core.economy.governance.services.feedback_service import (
     GovernanceFeedbackService,
 )
+from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+    GovernanceLifecycleService,
+)
 
 from .conftest import FakeDB, FakeGovernanceConfig, FakeWhitelistService
 
@@ -35,13 +38,18 @@ def _build_svc(engine):
     notify_repo = NotifyLogRepository(db=db)
     task_repo = TaskRecordRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     svc = GovernanceFeedbackService(
-        db=db,
         whitelist_service=FakeWhitelistService(),
         notify_repo=notify_repo,
         task_repo=task_repo,
         audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
+        lifecycle_svc=lifecycle_svc,
     )
     return svc, db
 
@@ -58,7 +66,7 @@ def _make_notification(session, **overrides):
     governance_status = overrides.pop("governance_status", "open")
 
     # --- notify_log row ---
-    notify_row = GovernanceNotifyLog(
+    notify_row = GovernanceNotificationOrm(
         notification_id=overrides.pop("notification_id", "n-001"),
         ticket_id=ticket_id,
         bot_id=overrides.pop("bot_id", "bot-1"),
@@ -79,7 +87,7 @@ def _make_notification(session, **overrides):
     session.add(notify_row)
 
     # --- task_record row (the actual ticket) ---
-    task_row = GovernanceTaskRecordDaily(
+    task_row = GovernanceTicketOrm(
         ticket_id=ticket_id,
         worker_id="user-1:bot-1",
         bot_id=notify_row.bot_id,
@@ -106,7 +114,7 @@ def _make_linked_rows(
     response: str | None = None,
     latest_decision: str = "actionable",
     env: str = "dev",
-) -> tuple[GovernanceTaskRecordDaily, GovernanceNotifyLog]:
+) -> tuple[GovernanceTicketOrm, GovernanceNotificationOrm]:
     """Create a linked ticket + notify_log pair (for §7.4.1 tests)."""
     if notification_id is None:
         notification_id = uuid.uuid4().hex
@@ -114,7 +122,7 @@ def _make_linked_rows(
         ticket_id = uuid.uuid4().hex
     worker_key = f"{owner_id}:{bot_id}"
 
-    ticket = GovernanceTaskRecordDaily(
+    ticket = GovernanceTicketOrm(
         ticket_id=ticket_id,
         worker_id=worker_key,
         active_worker=worker_key if governance_status != "closed" else None,
@@ -133,7 +141,7 @@ def _make_linked_rows(
     )
     session.add(ticket)
 
-    notify = GovernanceNotifyLog(
+    notify = GovernanceNotificationOrm(
         notification_id=notification_id,
         ticket_id=ticket_id,
         bot_id=bot_id,
@@ -165,9 +173,9 @@ def engine():
     from sqlalchemy import create_engine
 
     eng = create_engine("sqlite:///:memory:")
-    GovernanceTaskRecordDaily.__table__.create(eng, checkfirst=True)
-    GovernanceNotifyLog.__table__.create(eng, checkfirst=True)
-    GovernanceAudit.__table__.create(eng, checkfirst=True)
+    GovernanceTicketOrm.__table__.create(eng, checkfirst=True)
+    GovernanceNotificationOrm.__table__.create(eng, checkfirst=True)
+    AuditLogOrm.__table__.create(eng, checkfirst=True)
     return eng
 
 
@@ -490,46 +498,3 @@ class TestStateTransitions:
         assert result.success is True
         assert result.governance_status == "scheduled"
         assert result.mute_until is not None
-
-
-# ── Listing ────────────────────────────────────────────────────
-
-
-class TestListing:
-    def test_list_pending_returns_open_and_scheduled(self, session, engine):
-        svc, db = _build_svc(engine)
-
-        with db.orm_session() as s:
-            _make_linked_rows(
-                s, notification_id="n-p1", ticket_id="t-p1",
-                governance_status="open", owner_id="staff-list",
-                bot_id="bot-p1",
-            )
-            _make_linked_rows(
-                s, notification_id="n-p2", ticket_id="t-p2",
-                governance_status="scheduled", owner_id="staff-list",
-                bot_id="bot-p2",
-            )
-            _make_linked_rows(
-                s, notification_id="n-p3", ticket_id="t-p3",
-                governance_status="closed", owner_id="staff-list",
-                bot_id="bot-p3",
-            )
-            s.commit()
-
-        items = svc.list_pending("staff-list", limit=50, offset=0)
-        assert len(items) == 2
-
-    def test_list_history_returns_closed(self, session, engine):
-        svc, db = _build_svc(engine)
-
-        with db.orm_session() as s:
-            _make_linked_rows(
-                s, notification_id="n-h1", ticket_id="t-h1",
-                governance_status="closed", owner_id="staff-hist",
-                bot_id="bot-h1",
-            )
-            s.commit()
-
-        items = svc.list_history("staff-hist", limit=50, offset=0)
-        assert len(items) == 1

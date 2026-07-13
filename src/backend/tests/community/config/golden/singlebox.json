@@ -121,6 +121,7 @@
       "notify_channel": "tc_card",
       "scan_hour": 14,
       "scan_minute": 0,
+      "skip_weekends": false,
       "tc_card_id": "card_cb190863",
       "tc_card_preview_url": "https://teamclaw.com/preview",
       "tc_card_template_id": "7f1e01ed-194a-4c25-916c-0388f67e3517.schema"
@@ -175,6 +176,11 @@
       ],
       "storage_dir": "./data/skills_scan"
     },
+    "task_queue_worker": {
+      "enabled": true,
+      "poll_interval_seconds": 0.2,
+      "poll_jitter_seconds": 0.0
+    },
     "token_exchange": {
       "agent_id": "singlebox_AGENT_LOCAL",
       "api_path": "/api/v1/login/token/exchange",
@@ -187,6 +193,7 @@
     },
     "workspace": {
       "claude_code_root": "~/.claude_code",
+      "env_folder": "aidesktop_singlebox",
       "openclaw_root": "~/.openclaw"
     }
   },
@@ -301,11 +308,11 @@
     },
     "task_queue_worker": {
       "batch_size": 10,
-      "enabled": false,
+      "enabled": true,
       "lease_seconds": 60,
       "max_concurrency": 10,
-      "poll_interval_seconds": 2.0,
-      "poll_jitter_seconds": 0.5,
+      "poll_interval_seconds": 0.2,
+      "poll_jitter_seconds": 0.0,
       "retry_backoff_max_seconds": 60.0,
       "retry_backoff_min_seconds": 1.0
     },
@@ -320,6 +327,7 @@
     "workspace_hosting": {
       "access_key": "dummy-access-key",
       "access_secret": "dummy-secret-16b",
+      "admin_member_staff_ids": [],
       "aixcore_base_url": "https://aixcore.teamclaw.com",
       "aixcore_base_url_pre": "https://aixcore-pre.teamclaw.com",
       "base_url": "https://devapi.teamclaw.com",

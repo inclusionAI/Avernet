@@ -30,6 +30,29 @@ class Candidate:
     gmt_create: datetime
 
 
+def owner_is_protected(
+    owner_id: str,
+    protected_owner_ids: frozenset[str],
+) -> bool:
+    """Return whether an owner ID belongs to the protected set."""
+    return owner_id in protected_owner_ids
+
+
+def partition_by_protected_owner(
+    candidates: list[Candidate],
+    protected_owner_ids: frozenset[str],
+) -> tuple[list[Candidate], list[Candidate]]:
+    """Split candidates into protected and unprotected lists in one pass."""
+    protected: list[Candidate] = []
+    unprotected: list[Candidate] = []
+    for candidate in candidates:
+        target = protected if owner_is_protected(
+            candidate.owner_id, protected_owner_ids
+        ) else unprotected
+        target.append(candidate)
+    return protected, unprotected
+
+
 def filter_candidates(session: Session, N: int) -> list[Candidate]:
     """Return bots eligible for dormancy governance.
 

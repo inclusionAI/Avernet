@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use bcs_domain::{
     ProviderAuthMode, ProviderBotBinding, ProviderCoordinationConfig, ProviderCredential,
-    ProviderRecord, Skill,
+    ProviderOrganizationManagementConfig, ProviderRecord, Skill,
 };
 
 use crate::{ServiceError, ServiceResult};
@@ -63,6 +63,7 @@ pub trait ProviderCoreService: Send + Sync {
         webhook_url: Option<String>,
         protocol_version: Option<String>,
         coordination: Option<ProviderCoordinationConfig>,
+        organization_management: Option<ProviderOrganizationManagementConfig>,
     ) -> ServiceResult<ProviderRecord>;
     async fn set_provider_disabled(
         &self,

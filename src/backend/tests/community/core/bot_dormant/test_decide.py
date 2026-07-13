@@ -30,6 +30,9 @@ from agentclaw.community.core.bot_dormant.baas_client import (
     AliveResult,
     BaasDormantClient,
 )
+from agentclaw.community.core.common_config import CommonWhiteListService
+from agentclaw.community.core.common_config.models import CommonConfigRecord
+from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.bot_dormant.ops_service import DormantOpsService
 from agentclaw.community.core.bot_dormant.service import (
     Candidate,
@@ -90,6 +93,28 @@ class FakeDB:
         return self.orm_session()
 
 
+class OwnerConfigRepository:
+    """Return one enabled owner-protection record with its raw stored value."""
+
+    def __init__(self, param_value: str | None) -> None:
+        self._record = CommonConfigRecord(
+            id=1,
+            business_code="bot_dormant",
+            business_name="沉寂 bot",
+            param_code="protected_owner_ids",
+            param_name="受保护 owner",
+            param_value=param_value,
+            enable="1",
+            ext_info=None,
+            env="prod",
+            gmt_create=None,
+            gmt_modified=None,
+        )
+
+    def get_by_biz_param(self, **_):
+        return self._record
+
+
 def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
@@ -115,6 +140,8 @@ def _make_service(
     baas_client: BaasDormantClient | None = None,
     bot_service=None,
     passport_plugin=None,
+    protected_owner_ids: frozenset[str] = frozenset(),
+    common_whitelist_service=None,
 ) -> DormantBotService:
     """Build a DormantBotService with all dependencies injected as mocks."""
     if baas_client is None:
@@ -127,12 +154,16 @@ def _make_service(
         passport_plugin = MagicMock()
     scan_policy = MagicMock()
     scan_policy.dry_run.return_value = False
+    if common_whitelist_service is None:
+        common_whitelist_service = MagicMock(spec=CommonWhiteListService)
+        common_whitelist_service.get_owner_ids.return_value = protected_owner_ids
     return DormantBotService(
         db=FakeDB(session),
         baas_client=baas_client,
         bot_service=bot_service,
         passport_plugin=passport_plugin,
         scan_policy=scan_policy,
+        common_whitelist_service=common_whitelist_service,
         N=N,
         M=M,
     )
@@ -205,6 +236,136 @@ def _insert_bot_record(
 
 
 @pytest.mark.unit
+def test_internal_scan_filters_protected_owner_before_alive_check(caplog, monkeypatch):
+    caplog.set_level("INFO")
+    session = _make_session()
+    _insert_bot_record(
+        session,
+        bot_id="protected_bot",
+        owner_id="protected_owner",
+        entity_id="100001",
+    )
+    _insert_bot_record(
+        session,
+        bot_id="normal_bot",
+        owner_id="normal_owner",
+        entity_id="100002",
+    )
+    baas = AsyncMock(spec=BaasDormantClient)
+    baas.check_alive = AsyncMock(
+        return_value=AliveResult(result="true", last_session_time=None)
+    )
+    common_whitelist = MagicMock(spec=CommonWhiteListService)
+    common_whitelist.get_owner_ids.return_value = frozenset({"protected_owner"})
+    monkeypatch.setattr(
+        "agentclaw.community.core.bot_dormant.service.get_current_env",
+        lambda: "prod",
+    )
+    service = _make_service(
+        session,
+        baas_client=baas,
+        common_whitelist_service=common_whitelist,
+    )
+
+    summary = _run(service.process_run(dry_run=True, run_id="owner-protection-run"))
+
+    assert summary.scanned == 1
+    baas.check_alive.assert_awaited_once()
+    assert baas.check_alive.await_args.kwargs["bot_id"] == "normal_bot"
+    common_whitelist.get_owner_ids.assert_called_once_with(
+        business_code="bot_dormant",
+        param_code="protected_owner_ids",
+        env="prod",
+    )
+    assert "event=protected_owners_loaded" in caplog.text
+    assert "event=protected_owners_filtered" in caplog.text
+    assert "protected_bot@protected_owner" in caplog.text
+
+
+@pytest.mark.unit
+def test_owner_config_error_aborts_before_downstream_calls():
+    session = _make_session()
+    _insert_bot_record(session, bot_id="bot1", owner_id="owner1")
+    baas = AsyncMock(spec=BaasDormantClient)
+    common_whitelist = MagicMock(spec=CommonWhiteListService)
+    common_whitelist.get_owner_ids.side_effect = RuntimeError("db unavailable")
+    bot_service = MagicMock()
+    service = _make_service(
+        session,
+        baas_client=baas,
+        bot_service=bot_service,
+        common_whitelist_service=common_whitelist,
+    )
+
+    with pytest.raises(RuntimeError, match="db unavailable"):
+        _run(service.process_run(dry_run=False))
+
+    baas.check_alive.assert_not_awaited()
+    bot_service.stop_bot.assert_not_called()
+    assert session.query(DormantCheckAudit).count() == 0
+    assert session.query(DormantNotifyLog).count() == 0
+
+
+@pytest.mark.unit
+def test_malformed_owner_config_aborts_before_downstream_calls():
+    session = _make_session()
+    _insert_bot_record(session, bot_id="bot1", owner_id="owner1")
+    baas = AsyncMock(spec=BaasDormantClient)
+    config_service = MagicMock()
+    config_service.get_value.return_value = ["owner1", {}]
+    common_whitelist = CommonWhiteListService(config_service)
+    bot_service = MagicMock()
+    passport = MagicMock()
+    service = _make_service(
+        session,
+        baas_client=baas,
+        bot_service=bot_service,
+        passport_plugin=passport,
+        common_whitelist_service=common_whitelist,
+    )
+
+    with pytest.raises(ValueError, match="strings or integers"):
+        _run(service.process_run(dry_run=False))
+
+    baas.check_alive.assert_not_awaited()
+    bot_service.stop_bot.assert_not_called()
+    bot_service.update_status.assert_not_called()
+    passport.freeze_agent_passport.assert_not_called()
+    assert session.query(DormantCheckAudit).count() == 0
+    assert session.query(DormantNotifyLog).count() == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("raw_value", [None, "null"], ids=["sql_null", "json_null"])
+def test_top_level_null_owner_config_aborts_before_downstream_calls(raw_value):
+    session = _make_session()
+    _insert_bot_record(session, bot_id="bot1", owner_id="owner1")
+    baas = AsyncMock(spec=BaasDormantClient)
+    bot_service = MagicMock()
+    passport = MagicMock()
+    common_whitelist = CommonWhiteListService(
+        CommonConfigService(OwnerConfigRepository(raw_value))
+    )
+    service = _make_service(
+        session,
+        baas_client=baas,
+        bot_service=bot_service,
+        passport_plugin=passport,
+        common_whitelist_service=common_whitelist,
+    )
+
+    with pytest.raises(ValueError, match="protected owner IDs must be a list"):
+        _run(service.process_run(dry_run=False))
+
+    baas.check_alive.assert_not_awaited()
+    bot_service.stop_bot.assert_not_called()
+    bot_service.update_status.assert_not_called()
+    passport.freeze_agent_passport.assert_not_called()
+    assert session.query(DormantCheckAudit).count() == 0
+    assert session.query(DormantNotifyLog).count() == 0
+
+
+@pytest.mark.unit
 def test_manual_recycle_one_reuses_recycle_side_effects_and_writes_audit():
     """Manual ops recycle should execute the same stop/update/freeze chain."""
     session = _make_session()
@@ -217,18 +378,20 @@ def test_manual_recycle_one_reuses_recycle_side_effects_and_writes_audit():
         session,
         bot_service=bot_service,
         passport_plugin=passport,
+        protected_owner_ids=frozenset({"owner1"}),
     )
-    ops_service = DormantOpsService(service)
+    ops_service = DormantOpsService(service, passport)
 
     result = ops_service.recycle_one(
         bot_id="ops_bot",
         owner_id="owner1",
         dry_run=False,
-        reason="prepub regression",
+        reason="explicit protected-owner override",
     )
 
     assert result["status"] == "recycled"
     assert result["dry_run"] is False
+    service._common_whitelist_service.get_owner_ids.assert_not_called()
     bot_service.stop_bot.assert_called_once_with(
         bot_id="ops_bot",
         user_id="owner1",
@@ -266,7 +429,7 @@ def test_manual_recycle_one_dry_run_skips_side_effects_but_records_intent():
         bot_service=bot_service,
         passport_plugin=passport,
     )
-    ops_service = DormantOpsService(service)
+    ops_service = DormantOpsService(service, passport)
 
     result = ops_service.recycle_one(
         bot_id="ops_bot",
@@ -288,7 +451,7 @@ def test_manual_recycle_one_dry_run_skips_side_effects_but_records_intent():
 def test_manual_recycle_one_rejects_missing_bot():
     """Manual ops recycle should fail clearly when bot_id + owner_id misses."""
     session = _make_session()
-    ops_service = DormantOpsService(_make_service(session))
+    ops_service = DormantOpsService(_make_service(session), MagicMock())
 
     with pytest.raises(ValueError, match="bot not found"):
         ops_service.recycle_one(
@@ -308,7 +471,7 @@ def test_manual_recycle_one_rejects_non_active_bot():
         owner_id="owner1",
         status="RECYCLED",
     )
-    ops_service = DormantOpsService(_make_service(session))
+    ops_service = DormantOpsService(_make_service(session), MagicMock())
 
     with pytest.raises(ValueError, match="only ACTIVE bot"):
         ops_service.recycle_one(
@@ -328,7 +491,7 @@ def test_manual_recycle_one_rejects_non_personal_bot():
         owner_id="owner1",
         bot_type="team",
     )
-    ops_service = DormantOpsService(_make_service(session))
+    ops_service = DormantOpsService(_make_service(session), MagicMock())
 
     with pytest.raises(ValueError, match="only personal bot"):
         ops_service.recycle_one(

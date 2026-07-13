@@ -12,6 +12,9 @@ module_config:
     app_name: "secbaas"
 
 user_config:
+  workspace:
+    env_folder: "aidesktop_singlebox"
+
   # 插件配置
   plugins:
     auth: "stub"

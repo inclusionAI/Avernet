@@ -34,6 +34,7 @@ from fastapi import FastAPI, Request
 from agentclaw.community.di import (
     DeployProfile,
     build_injector,
+    validate_deploy_environment,
 )
 from agentclaw.community.di.config_bootstrap import register_config_provider
 from agentclaw.community.di.modules_bootstrap import register_corp_modules
@@ -42,6 +43,7 @@ from agentclaw.community.di.modules_bootstrap import register_corp_modules
 # composition root. ``detect()`` errors out if ``DEPLOY_PROFILE`` is unset
 # or unknown — every launch site sets it (see scripts/ and conf/docker).
 _deploy_profile = DeployProfile.detect()
+validate_deploy_environment()
 
 # Select the configuration source before anything reads config: under ``corp``
 # this installs the sofapy-backed provider; other profiles stay on the YAML
@@ -121,8 +123,9 @@ from agentclaw.community.adapters.http.oss_to_nas.router import router as oss_to
 from agentclaw.community.adapters.http.system import system_health_router, system_readiness_router, system_disk_usage_router  # noqa: E402
 from agentclaw.community.adapters.http.desktop.router import bot_router as desktop_bot_router, device_router as desktop_device_router  # noqa: E402
 from agentclaw.community.adapters.http.harness.router import router as harness_router  # noqa: E402
-from agentclaw.community.adapters.http.economy.router import router as economy_governance_router, internal_router as economy_governance_internal_router  # noqa: E402
+from agentclaw.community.adapters.http.economy.router import router as economy_governance_router  # noqa: E402
 from agentclaw.community.adapters.http.economy.admin_router import admin_router as economy_governance_admin_router  # noqa: E402
+from agentclaw.community.adapters.http.economy.workflow_router import workflow_router as economy_governance_workflow_router  # noqa: E402
 from agentclaw.community.adapters.http.approvals.router import router as approvals_router  # noqa: E402
 from agentclaw.community.adapters.http.identity.router import router as identity_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding.router import router as aicoding_router  # noqa: E402
@@ -450,8 +453,8 @@ app.include_router(notify_router)
 app.include_router(harness_router)
 # Economy Governance: notification & audit
 app.include_router(economy_governance_router)
-app.include_router(economy_governance_internal_router)
 app.include_router(economy_governance_admin_router)
+app.include_router(economy_governance_workflow_router)
 app.include_router(enums_router)
 
 # Runtime-mode-conditional routers (bound by DI: empty in prod, populated

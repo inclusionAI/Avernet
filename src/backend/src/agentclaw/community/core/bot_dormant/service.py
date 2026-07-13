@@ -26,13 +26,14 @@ from sqlalchemy import func
 from agentclaw.community.core.bot_dormant.baas_client import (
     BaasDormantClient,
 )
+from agentclaw.community.core.common_config import CommonWhiteListService
 from agentclaw.community.core.bot_dormant.datetime_utils import max_datetime, parse_dt
 from agentclaw.community.core.bot_dormant.notify_log import commit_notify_log_idempotent
 from agentclaw.community.core.bot_dormant.scan_policy import (
     DEFAULT_INACTIVE_THRESHOLD_DAYS,
     DEFAULT_RECYCLE_GRACE_DAYS,
     DormantScanPolicyService,
-    positive_int_or_default,
+    resolve_scan_window,
 )
 from agentclaw.community.core.bot_dormant.sqlite_models import (
     DormantCheckAudit,
@@ -42,6 +43,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 if TYPE_CHECKING:
@@ -49,10 +51,14 @@ if TYPE_CHECKING:
     from agentclaw.community.core.bot_dormant.sqlite_models import DormantExternalInput
 
 # Re-export so existing callers importing from this module continue to work.
-from agentclaw.community.core.bot_dormant.candidates import Candidate, filter_candidates  # noqa: F401
+from agentclaw.community.core.bot_dormant.candidates import (
+    Candidate, filter_candidates, owner_is_protected, partition_by_protected_owner,
+)
 
 
 logger = get_logger()
+OWNER_PROTECTION_BUSINESS_CODE = "bot_dormant"
+OWNER_PROTECTION_PARAM_CODE = "protected_owner_ids"
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +117,7 @@ class DormantBotService:
         bot_service: BotServiceProtocol,
         passport_plugin: PassportPlugin,
         scan_policy: DormantScanPolicyService,
+        common_whitelist_service: CommonWhiteListService,
         N: int = DEFAULT_INACTIVE_THRESHOLD_DAYS,
         M: int = DEFAULT_RECYCLE_GRACE_DAYS,
         dry_run: bool | None = None,
@@ -131,6 +138,7 @@ class DormantBotService:
         self._passport_plugin = passport_plugin
         self._dry_run_override = dry_run
         self._scan_policy = scan_policy
+        self._common_whitelist_service = common_whitelist_service
         self._action_link_pattern = action_link_pattern
 
     # ------------------------------------------------------------------
@@ -147,30 +155,6 @@ class DormantBotService:
         if self._dry_run_override is not None:
             return self._dry_run_override
         return self._scan_policy.dry_run()
-
-    def _refresh_scan_window_from_policy(self) -> None:
-        """Refresh N/M from ac_common_config-backed policy for this scan run."""
-        try:
-            policy = self._scan_policy.get_policy()
-        except Exception:
-            logger.exception(
-                "[DormantBotService] failed to read dormant scan window policy; "
-                "using defaults N=%d M=%d",
-                self._default_N,
-                self._default_M,
-            )
-            self._N = self._default_N
-            self._M = self._default_M
-            return
-
-        self._N = positive_int_or_default(
-            getattr(policy, "inactive_threshold_days", None),
-            self._default_N,
-        )
-        self._M = positive_int_or_default(
-            getattr(policy, "recycle_grace_days", None),
-            self._default_M,
-        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -480,9 +464,8 @@ class DormantBotService:
             row.bot_id, owner_id, dry_run,
         )
 
-    def _process_external_inputs(
-        self, session, dry_run: bool, summary: RunSummary, run_id: str,
-    ) -> None:
+    def _process_external_inputs(self, session, dry_run: bool, summary: RunSummary,
+                                 run_id: str, protected_owner_ids: frozenset[str]) -> None:
         """Two-stage governance for external_input rows.
 
         Each row triggers warns daily until days_since_input >= M, then a final
@@ -522,11 +505,16 @@ class DormantBotService:
         today = _date.today()
         for row in rows:
             try:
-                if (row.bot_id, row.owner_id) in whitelist:
+                owner_protected = owner_is_protected(row.owner_id, protected_owner_ids)
+                is_bot_whitelisted = (row.bot_id, row.owner_id) in whitelist
+                if owner_protected or is_bot_whitelisted:
+                    reason = (
+                        "protected_owner" if owner_protected else "whitelisted"
+                    )
                     logger.info(
-                        "[dormant.run=%s] event=external_skip reason=whitelisted "
+                        "[dormant.run=%s] event=external_skip reason=%s "
                         "bot_id=%s owner_id=%s",
-                        run_id, row.bot_id, row.owner_id,
+                        run_id, reason, row.bot_id, row.owner_id,
                     )
                     self._write_audit(
                         session,
@@ -756,7 +744,18 @@ class DormantBotService:
         if run_id is None:
             run_id = str(uuid.uuid4())
         summary = RunSummary()
-        self._refresh_scan_window_from_policy()
+        self._N, self._M = resolve_scan_window(
+            self._scan_policy,
+            default_inactive_threshold_days=self._default_N,
+            default_recycle_grace_days=self._default_M,
+        )
+        env = get_current_env()
+        protected_owner_ids = self._common_whitelist_service.get_owner_ids(
+            business_code=OWNER_PROTECTION_BUSINESS_CODE,
+            param_code=OWNER_PROTECTION_PARAM_CODE, env=env,
+        )
+        logger.info("[dormant.run=%s] event=protected_owners_loaded env=%s owner_count=%d",
+                    run_id, env, len(protected_owner_ids))
 
         logger.info(
             "[dormant.run=%s] event=run_start dry_run=%s N=%d M=%d",
@@ -765,7 +764,13 @@ class DormantBotService:
 
         # Step 1: gather candidates
         candidates = filter_candidates(session, self._N)
+        protected_candidates, candidates = partition_by_protected_owner(
+            candidates, protected_owner_ids
+        )
         summary.scanned = len(candidates)
+        logger.info("[dormant.run=%s] event=protected_owners_filtered skipped=%d sample=%s",
+                    run_id, len(protected_candidates),
+                    [f"{c.bot_id}@{c.owner_id}" for c in protected_candidates[:5]])
 
         # Sample a few candidate bot_ids so operators can verify filtering
         # without dumping the whole list.
@@ -833,7 +838,9 @@ class DormantBotService:
 
         # After internal-scan loop completes, also process external_input rows.
         try:
-            self._process_external_inputs(session, dry_run, summary, run_id)
+            self._process_external_inputs(
+                session, dry_run, summary, run_id, protected_owner_ids
+            )
         except Exception:
             logger.exception(
                 "[DormantBotService.process_run] external_inputs sweep failed — "

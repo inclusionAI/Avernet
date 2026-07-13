@@ -34,6 +34,14 @@ user_config:
     description: "Single Box mode — no external network."
     local_debug: true
 
+  # BaaS publish/create completion is delivered through the durable task queue.
+  # Singlebox runs one Backend process, so a short, jitter-free poll keeps local
+  # bot creation deterministic without changing the neutral default (disabled).
+  task_queue_worker:
+    enabled: true
+    poll_interval_seconds: 0.2
+    poll_jitter_seconds: 0.0
+
   # token_exchange — 外网替换为本地 mock
   token_exchange:
     buc_url: "http://127.0.0.1:9999"
@@ -61,6 +69,7 @@ user_config:
   device_provider: "daas"
 
   workspace:
+    env_folder: "aidesktop_singlebox"
     openclaw_root: "~/.openclaw"
     claude_code_root: "~/.claude_code"
 
@@ -159,6 +168,11 @@ user_config:
     iframe_callback_url: "http://localhost:8888/api/economy/governance/card-callback"
     scan_hour: 14
     scan_minute: 0
+    # Singlebox 是本机/CI 测试环境,周末也需跑通知状态机的 claim/mark_sent round-trip
+    # (process_cron_tick → _send_pending_notifies,受 skip_weekends 门控)。关闭后
+    # complex_flow C11/C14-C17 在周末也能验证 domain round-trip 与重试计数累积;
+    # corp 生产侧不受影响(各自 yaml 独立,sender 仍 log-only 不真发)。
+    skip_weekends: false
 
   # 沉寂 Bot 回收 — singlebox 本地联调
   # internal_token 不放 yaml；singlebox 走 LocalSecretResolver 返 None

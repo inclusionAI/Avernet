@@ -370,6 +370,17 @@ class ConfigModule(Module):
         """
         block = _block("dima")
         defaults = cfg.WorkspaceHostingConfig()
+        # admin_member_staff_ids: employee IDs granted workspace-admin on
+        # creation. Environment overlays supply the real list via
+        # ``admin_member_staff_ids``; neutral empty default keeps community
+        # source free of employee IDs (data-leak guard). Normalised to a tuple
+        # to satisfy the frozen dataclass + immutability invariant.
+        admin_ids = block.get("admin_member_staff_ids", defaults.admin_member_staff_ids)
+        if isinstance(admin_ids, (list, tuple)):
+            admin_ids = tuple(str(i) for i in admin_ids)
+        else:
+            admin_ids = defaults.admin_member_staff_ids
+
         return cfg.WorkspaceHostingConfig(
             base_url=block.get("base_url", defaults.base_url),
             access_key=block.get("access_key", defaults.access_key),
@@ -380,6 +391,7 @@ class ConfigModule(Module):
             aixcore_base_url_pre=block.get(
                 "aixcore_base_url_pre", defaults.aixcore_base_url_pre
             ),
+            admin_member_staff_ids=admin_ids,
         )
 
     @singleton

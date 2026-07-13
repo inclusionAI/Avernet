@@ -51,7 +51,10 @@ def test_set_bots_ceiling_is_noop():
 def test_get_quota_returns_high_limits():
     svc = LocalPolicyService()
     q = svc.get_quota()
-    assert q["daily_container_quota"] == 9999
-    assert q["total_container_limit"] == 9999
-    # 占位时间字段存在,前端展示不报 KeyError
-    assert "daily_container_update_time" in q
+    assert q == {
+        "quota": 9999,
+        "totalLimit": 9999,
+        "activeCount": 0,
+        "effectiveQuota": 9999,
+        "updateTime": "00:00",
+    }

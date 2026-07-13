@@ -14,7 +14,6 @@ Design principles (from coverage-supplement-principles.md):
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from datetime import datetime, timedelta
@@ -25,11 +24,11 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.base import Base
-from agentclaw.community.core.economy.governance.contracts.enums import AuditAction
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceAudit,
-    GovernanceNotifyLog,
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.domain.enums import AuditAction
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    AuditLogOrm,
+    GovernanceNotificationOrm,
+    GovernanceTicketOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.audit_repo import (
     GovernanceAuditRepository,
@@ -48,12 +47,22 @@ from agentclaw.community.core.economy.governance.services.admin_service import (
 )
 from agentclaw.community.core.economy.governance.services.record_process_service import (
     GovernanceRecordService,
-    RecordProcessResult,
+)
+from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
+from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+    GovernanceLifecycleService,
 )
 from agentclaw.community.core.economy.governance.services.scan_service import (
-    CronTickSummary,
     GovernanceBotService,
 )
+from agentclaw.community.core.economy.governance.services.notify_render_service import (
+    NotifyRenderService,
+)
+from agentclaw.community.core.economy.governance.services.notify_lifecycle_service import (
+    NotifyLifecycleService,
+)
+
+
 from agentclaw.community.core.economy.governance.services.whitelist_service import (
     GovernanceWhitelistService,
 )
@@ -61,7 +70,6 @@ from agentclaw.community.core.economy.governance.services.whitelist_service impo
 from .conftest import (
     FakeCache,
     FakeDB,
-    FakeDingTalkConfig,
     FakeGovernanceConfig,
     FakeNotifySender,
 )
@@ -85,7 +93,7 @@ def engine():
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    import agentclaw.community.core.economy.governance.contracts.models  # noqa: F401
+    import agentclaw.community.core.economy.governance.repositories.orm  # noqa: F401
     Base.metadata.create_all(eng)
     return eng
 
@@ -117,12 +125,12 @@ def _seed_pending_notify(
     governance_status: str = "open",
     notify_status: str = "pending",
 ) -> str:
-    """Insert a pending GovernanceNotifyLog row for delivery testing."""
+    """Insert a pending GovernanceNotificationOrm row for delivery testing."""
     if notification_id is None:
         notification_id = f"n-{uuid.uuid4().hex[:8]}"
     if ticket_id is None:
         ticket_id = f"t-{uuid.uuid4().hex[:8]}"
-    row = GovernanceNotifyLog(
+    row = GovernanceNotificationOrm(
         notification_id=notification_id,
         ticket_id=ticket_id,
         bot_id=bot_id,
@@ -174,15 +182,22 @@ def _build_admin_svc(engine):
     task_repo = TaskRecordRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
     whitelist_repo = GovernanceWhitelistRepository(db=db)
+    # Driver first — lifecycle_service has no whitelist dependency (the
+    # accept_feedback whitelist-add is owned by feedback_service), so build
+    # it directly, then whitelist_service (which calls back into the driver).
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     whitelist_service = GovernanceWhitelistService(
-        db=db,
         whitelist_repo=whitelist_repo,
         notify_repo=notify_repo,
         audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
+        lifecycle_svc=lifecycle_svc,
     )
     svc = GovernanceAdminService(
-        db=db,
         cache=cache,
         whitelist_service=whitelist_service,
         notify_repo=notify_repo,
@@ -190,7 +205,8 @@ def _build_admin_svc(engine):
         task_repo=task_repo,
         config=FakeGovernanceConfig(),
         notify_sender=FakeNotifySender(),
-        dingtalk_config=FakeDingTalkConfig(),
+        lifecycle_svc=lifecycle_svc,
+        render_svc=NotifyRenderService(),
     )
     svc._scan_svc = _FakeScanSvc()
     return svc, db
@@ -205,7 +221,7 @@ class TestDeliverPendingTcCard:
         svc, db = _build_admin_svc(engine)
         nid = _seed_pending_notify(session, notify_channel="tc_card")
 
-        result = await svc.deliver_pending(
+        result = svc.deliver_pending(
             scan_svc=_FakeScanSvc(),
             override_recipient="user-1",
             dry_run=False,
@@ -221,14 +237,14 @@ class TestDeliverPendingTcCard:
 
         # DB: notify_status flipped to "sent"
         with db.orm_session() as s:
-            row = s.query(GovernanceNotifyLog).filter_by(notification_id=nid).one()
+            row = s.query(GovernanceNotificationOrm).filter_by(notification_id=nid).one()
             assert row.notify_status == "sent"
             assert row.sent_at is not None
             assert row.external_message_id is not None
 
         # Audit: NOTIFICATION_SENT written
         with db.orm_session() as s:
-            audits = s.query(GovernanceAudit).all()
+            audits = s.query(AuditLogOrm).all()
             assert any(a.action_taken == AuditAction.NOTIFICATION_SENT for a in audits)
 
     @pytest.mark.asyncio
@@ -236,7 +252,7 @@ class TestDeliverPendingTcCard:
         """No pending rows → total=0, sent_count=0."""
         svc, _ = _build_admin_svc(engine)
 
-        result = await svc.deliver_pending(
+        result = svc.deliver_pending(
             scan_svc=_FakeScanSvc(),
             override_recipient="user-1",
             dry_run=False,
@@ -256,7 +272,7 @@ class TestDeliverPendingTcCard:
         _seed_pending_notify(session, notification_id="n-a", bot_id="bot-a")
         _seed_pending_notify(session, notification_id="n-b", bot_id="bot-b")
 
-        result = await svc.deliver_pending(
+        result = svc.deliver_pending(
             scan_svc=_FakeScanSvc(),
             override_recipient="user-1",
             dry_run=False,
@@ -278,7 +294,7 @@ class TestDeliverPendingDryRun:
         svc, db = _build_admin_svc(engine)
         nid = _seed_pending_notify(session, notify_channel="tc_card")
 
-        result = await svc.deliver_pending(
+        result = svc.deliver_pending(
             scan_svc=_FakeScanSvc(),
             override_recipient="user-1",
             dry_run=True,
@@ -296,7 +312,7 @@ class TestDeliverPendingDryRun:
 
         # DB unchanged
         with db.orm_session() as s:
-            row = s.query(GovernanceNotifyLog).filter_by(notification_id=nid).one()
+            row = s.query(GovernanceNotificationOrm).filter_by(notification_id=nid).one()
             assert row.notify_status == "pending"
 
 
@@ -309,7 +325,7 @@ class TestDeliverPendingMarkdown:
         svc, db = _build_admin_svc(engine)
         nid = _seed_pending_notify(session, notify_channel="markdown")
 
-        result = await svc.deliver_pending(
+        result = svc.deliver_pending(
             scan_svc=_FakeScanSvc(),
             override_recipient="user-1",
             dry_run=False,
@@ -322,7 +338,7 @@ class TestDeliverPendingMarkdown:
         assert result["sent_count"] == 1
 
         with db.orm_session() as s:
-            row = s.query(GovernanceNotifyLog).filter_by(notification_id=nid).one()
+            row = s.query(GovernanceNotificationOrm).filter_by(notification_id=nid).one()
             assert row.notify_status == "sent"
 
 
@@ -337,12 +353,14 @@ class TestDeliverPendingDegradation:
 
         # Replace sender with one that fails tc_card but succeeds markdown
         class _FailingTcCardSender(FakeNotifySender):
-            def send_tc_card(self, **kwargs):
-                return None  # tc_card fails
+            def send(self, message, *, channel="markdown"):
+                if channel == "tc_card":
+                    return None  # tc_card fails
+                return f"fake-msg-{message.recipient}"
 
         svc._notify_sender = _FailingTcCardSender()
 
-        result = await svc.deliver_pending(
+        result = svc.deliver_pending(
             scan_svc=_FakeScanSvc(),
             override_recipient="user-1",
             dry_run=False,
@@ -356,7 +374,7 @@ class TestDeliverPendingDegradation:
         assert result["results"][0].get("channel") == "markdown"
 
         with db.orm_session() as s:
-            row = s.query(GovernanceNotifyLog).filter_by(notification_id=nid).one()
+            row = s.query(GovernanceNotificationOrm).filter_by(notification_id=nid).one()
             assert row.notify_status == "sent"
             # Channel updated on DB row (degradation recorded)
             assert row.notify_channel == "markdown"
@@ -370,17 +388,14 @@ class TestDeliverPendingFailedSend:
         """Both tc_card and markdown fail → failed audit written, sent_count=0."""
 
         class _AlwaysFailSender(FakeNotifySender):
-            def send_tc_card(self, **kwargs):
-                return None
-
-            def send_markdown(self, **kwargs):
+            def send(self, message, *, channel="markdown"):
                 return None
 
         svc, db = _build_admin_svc(engine)
         _seed_pending_notify(session, notification_id="n-fail", notify_channel="tc_card")
         svc._notify_sender = _AlwaysFailSender()
 
-        result = await svc.deliver_pending(
+        result = svc.deliver_pending(
             scan_svc=_FakeScanSvc(),
             override_recipient="user-1",
             dry_run=False,
@@ -393,7 +408,7 @@ class TestDeliverPendingFailedSend:
         assert result["sent_count"] == 0
 
         with db.orm_session() as s:
-            audits = s.query(GovernanceAudit).all()
+            audits = s.query(AuditLogOrm).all()
             assert any(a.action_taken == AuditAction.NOTIFICATION_SEND_FAILED for a in audits)
 
 
@@ -409,13 +424,19 @@ def _build_record_svc(engine):
     whitelist_repo = GovernanceWhitelistRepository(db=db)
     notify_repo = NotifyLogRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     svc = GovernanceRecordService(
-        db=db,
         task_repo=task_repo,
         whitelist_repo=whitelist_repo,
         notify_repo=notify_repo,
         audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
+        lifecycle_svc=lifecycle_svc,
+        render_svc=NotifyRenderService(),
     )
     return svc, db
 
@@ -425,23 +446,23 @@ def _sample_record(
     bot_id: str = "bot-001",
     governance_decision: str = "actionable",
     dt_version: str = "20260705",
-) -> dict:
-    """Build a minimal record dict for process_record."""
-    return {
-        "owner_id": owner_id,
-        "bot_id": bot_id,
-        "bot_name": "TestBot",
-        "governance_decision": governance_decision,
-        "dt_version": dt_version,
-        "hit_dimensions": "token_usage",
-        "hit_dimensions_count": "3",
-        "governance_max_priority": "high",
-        "expected_token_saving": 1000.0,
-        "saving_ratio": 0.5,
-        "task_summary": "Token saving opportunity",
-        "notification_structured": None,
-        "analysis_status": "completed",
-    }
+) -> GovernanceRecord:
+    """Build a minimal GovernanceRecord for process_record."""
+    return GovernanceRecord(
+        owner_id=owner_id,
+        bot_id=bot_id,
+        bot_name="TestBot",
+        governance_decision=governance_decision,
+        dt_version=dt_version,
+        hit_dimensions="token_usage",
+        hit_dimensions_count=3,
+        governance_max_priority="high",
+        expected_token_saving=1000,
+        saving_ratio=0.5,
+        task_summary="Token saving opportunity",
+        notification_structured=None,
+        analysis_status="completed",
+    )
 
 
 def _make_ticket(
@@ -456,10 +477,10 @@ def _make_ticket(
     response: str | None = None,
     remind_at=None,
     env: str = "dev",
-) -> GovernanceTaskRecordDaily:
+) -> GovernanceTicketOrm:
     """Create a test ticket row (live ORM — caller is inside session)."""
     owner_id, bot_id = worker_key.split(":", 1)
-    row = GovernanceTaskRecordDaily(
+    row = GovernanceTicketOrm(
         ticket_id=ticket_id,
         worker_id=worker_key,
         active_worker=worker_key if governance_status != "closed" else None,
@@ -510,7 +531,7 @@ class TestActiveTicketRefresh:
 
         # Verify snapshot fields were updated
         with db.orm_session() as s:
-            ticket = s.query(GovernanceTaskRecordDaily).filter_by(
+            ticket = s.query(GovernanceTicketOrm).filter_by(
                 ticket_id="t-refresh-1",
             ).one()
             assert ticket.dt_version == "20260705"
@@ -545,7 +566,7 @@ class TestActiveTicketRefresh:
 
         # dt_version should NOT change
         with db.orm_session() as s:
-            ticket = s.query(GovernanceTaskRecordDaily).filter_by(
+            ticket = s.query(GovernanceTicketOrm).filter_by(
                 ticket_id="t-stale-1",
             ).one()
             assert ticket.dt_version == "20260710"
@@ -576,7 +597,7 @@ class TestActiveTicketRefresh:
         assert result.action == "still_actionable"
 
         with db.orm_session() as s:
-            ticket = s.query(GovernanceTaskRecordDaily).filter_by(
+            ticket = s.query(GovernanceTicketOrm).filter_by(
                 ticket_id="t-normal-1",
             ).one()
             assert ticket.latest_decision == "normal"
@@ -602,16 +623,15 @@ class TestWhitelistHitWithActiveTicket:
 
         # Add to whitelist
         whitelist_repo = GovernanceWhitelistRepository(db=db)
-        whitelist_repo.batch_add(
-            entries=[{"bot_id": "bot-004", "owner_id": "staff-004"}],
+        whitelist_repo.add(
+            bot_id="bot-004", owner_id="staff-004",
             created_by="admin",
             whitelist_type="governance",
         )
 
         # Create pending notify for this ticket
-        notify_repo = NotifyLogRepository(db=db)
         with db.orm_session() as s:
-            notify_row = GovernanceNotifyLog(
+            notify_row = GovernanceNotificationOrm(
                 notification_id="n-wl-1",
                 ticket_id="t-whitelist-1",
                 bot_id="bot-004",
@@ -640,7 +660,7 @@ class TestWhitelistHitWithActiveTicket:
 
         # Verify ticket closed
         with db.orm_session() as s:
-            ticket = s.query(GovernanceTaskRecordDaily).filter_by(
+            ticket = s.query(GovernanceTicketOrm).filter_by(
                 ticket_id="t-whitelist-1",
             ).one()
             assert ticket.governance_status == "closed"
@@ -648,14 +668,14 @@ class TestWhitelistHitWithActiveTicket:
 
         # Verify notify cancelled
         with db.orm_session() as s:
-            notify = s.query(GovernanceNotifyLog).filter_by(
+            notify = s.query(GovernanceNotificationOrm).filter_by(
                 notification_id="n-wl-1",
             ).one()
             assert notify.notify_status == "cancelled"
 
         # Verify audit
         with db.orm_session() as s:
-            audits = s.query(GovernanceAudit).all()
+            audits = s.query(AuditLogOrm).all()
             assert any(a.action_taken == AuditAction.WHITELIST_CLOSED for a in audits)
 
 
@@ -664,27 +684,28 @@ class TestWhitelistHitWithActiveTicket:
 # ══════════════════════════════════════════════════════════════════
 
 
-class _FakeAdminSvc:
-    def is_paused(self) -> bool:
-        return False
-
-
 def _build_scan_svc(engine, *, config=None):
     """Build GovernanceBotService with in-memory DB."""
     db = _db_from_engine(engine)
     notify_repo = NotifyLogRepository(db=db)
     task_repo = TaskRecordRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     if config is None:
         config = FakeGovernanceConfig()
     svc = GovernanceBotService(
-        db=db,
         task_repo=task_repo,
-        admin_svc=_FakeAdminSvc(),
         notify_repo=notify_repo,
         audit_repo=audit_repo,
         config=config,
         notify_sender=FakeNotifySender(),
+        lifecycle_svc=lifecycle_svc,
+        render_svc=NotifyRenderService(),
+        notify_lifecycle_svc=NotifyLifecycleService(notify_repo=notify_repo),
     )
     return svc, db
 
@@ -699,7 +720,7 @@ class TestScheduleDue:
 
         # Create a scheduled ticket with expired mute_until
         with db.orm_session() as s:
-            ticket = GovernanceTaskRecordDaily(
+            ticket = GovernanceTicketOrm(
                 ticket_id="t-sched-1",
                 worker_id="staff-001:bot-001",
                 active_worker="staff-001:bot-001",
@@ -719,7 +740,7 @@ class TestScheduleDue:
 
         # Create pending notify for this ticket (should be cancelled)
         with db.orm_session() as s:
-            notify = GovernanceNotifyLog(
+            notify = GovernanceNotificationOrm(
                 notification_id="n-sched-1",
                 ticket_id="t-sched-1",
                 bot_id="bot-001",
@@ -739,12 +760,12 @@ class TestScheduleDue:
             s.add(notify)
             s.commit()
 
-        result = await svc.process_cron_tick(run_id="run-sched-1")
+        result = svc.process_cron_tick(run_id="run-sched-1")
 
         assert result.schedule_due_count >= 1
 
         with db.orm_session() as s:
-            ticket = s.query(GovernanceTaskRecordDaily).filter_by(
+            ticket = s.query(GovernanceTicketOrm).filter_by(
                 ticket_id="t-sched-1",
             ).one()
             assert ticket.governance_status == "waiting_review"
@@ -760,7 +781,7 @@ class TestAutoSilenceConverge:
         svc, db = _build_scan_svc(engine, config=config)
 
         with db.orm_session() as s:
-            ticket = GovernanceTaskRecordDaily(
+            ticket = GovernanceTicketOrm(
                 ticket_id="t-auto-1",
                 worker_id="staff-002:bot-002",
                 active_worker="staff-002:bot-002",
@@ -778,12 +799,12 @@ class TestAutoSilenceConverge:
             s.add(ticket)
             s.commit()
 
-        result = await svc.process_cron_tick(run_id="run-auto-1")
+        result = svc.process_cron_tick(run_id="run-auto-1")
 
         assert result.auto_silence_closed >= 1
 
         with db.orm_session() as s:
-            ticket = s.query(GovernanceTaskRecordDaily).filter_by(
+            ticket = s.query(GovernanceTicketOrm).filter_by(
                 ticket_id="t-auto-1",
             ).one()
             assert ticket.governance_status == "closed"
@@ -801,16 +822,22 @@ def _build_scan_svc(engine, *, config=None):
     notify_repo = NotifyLogRepository(db=db)
     task_repo = TaskRecordRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     if config is None:
         config = FakeGovernanceConfig()
     svc = GovernanceBotService(
-        db=db,
         task_repo=task_repo,
-        admin_svc=_FakeAdminSvc(),
         notify_repo=notify_repo,
         audit_repo=audit_repo,
         config=config,
         notify_sender=FakeNotifySender(),
+        lifecycle_svc=lifecycle_svc,
+        render_svc=NotifyRenderService(),
+        notify_lifecycle_svc=NotifyLifecycleService(notify_repo=notify_repo),
     )
     return svc, db
 
@@ -829,10 +856,10 @@ def _scan_seed_ticket(
     remind_count: int = 0,
     response=None,
     mute_until=None,
-) -> GovernanceTaskRecordDaily:
-    """Insert a GovernanceTaskRecordDaily ticket row."""
+) -> GovernanceTicketOrm:
+    """Insert a GovernanceTicketOrm ticket row."""
     now = datetime.now()
-    row = GovernanceTaskRecordDaily(
+    row = GovernanceTicketOrm(
         ticket_id=ticket_id,
         worker_id=worker_id,
         bot_id=bot_id,
@@ -866,9 +893,9 @@ def _scan_seed_pending_notify(
     owner_id: str = "user-1",
     worker_id: str = "user-1:bot-1",
     remind_count: int = 0,
-) -> GovernanceNotifyLog:
-    """Insert a pending GovernanceNotifyLog linked to a ticket."""
-    row = GovernanceNotifyLog(
+) -> GovernanceNotificationOrm:
+    """Insert a pending GovernanceNotificationOrm linked to a ticket."""
+    row = GovernanceNotificationOrm(
         notification_id=notification_id,
         ticket_id=ticket_id,
         worker_id=worker_id,
@@ -915,11 +942,11 @@ class TestAdvanceReminderChain:
             notify_type="first_send",
         )
 
-        summary = await svc.process_cron_tick(dry_run=False)
+        summary = svc.process_cron_tick(dry_run=False)
 
         assert summary.sent_count >= 1
         with db.orm_session() as s:
-            ticket = s.query(GovernanceTaskRecordDaily).filter_by(
+            ticket = s.query(GovernanceTicketOrm).filter_by(
                 ticket_id="t-chain-1",
             ).one()
             # first_send sets remind_at = now + delays[0]
@@ -944,11 +971,11 @@ class TestAdvanceReminderChain:
 
         # The cron tick will: Step 2 — send the pending reminder
         # (it won't create a *new* reminder because the existing one is still pending)
-        summary = await svc.process_cron_tick(dry_run=False)
+        summary = svc.process_cron_tick(dry_run=False)
 
         assert summary.sent_count >= 1
         with db.orm_session() as s:
-            ticket = s.query(GovernanceTaskRecordDaily).filter_by(
+            ticket = s.query(GovernanceTicketOrm).filter_by(
                 ticket_id="t-chain-2",
             ).one()
             # After reminder sends, remind_count increments

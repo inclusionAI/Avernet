@@ -94,7 +94,7 @@ bots_bcn_plugin_load_dir() {
         return 0
     fi
 
-    local plugin_src="${PROJECT_ROOT}/src/plugin/packages/openclaw-channel-bcn"
+    local plugin_src="${PROJECT_ROOT}/src/bcs/crates/plugins/openclaw-channel-bcn"
     local plugin_package="${plugin_src}/package"
     if [ -f "${plugin_src}/openclaw.plugin.json" ] && [ -f "${plugin_src}/dist/esm/index.js" ]; then
         printf '%s\n' "$plugin_src"

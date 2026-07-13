@@ -397,7 +397,7 @@ setup_bcn_plugin() {
     fi
 
     # ---- source mode (build from the in-repo tree) ----
-    local plugin_src="${PROJECT_ROOT}/src/plugin/packages/openclaw-channel-bcn"
+    local plugin_src="${PROJECT_ROOT}/src/bcs/crates/plugins/openclaw-channel-bcn"
 
     if [ -d "${plugin_src}" ]; then
         if [ -f "${plugin_src}/dist/esm/index.js" ] && [ -d "${plugin_src}/node_modules" ]; then
@@ -841,7 +841,7 @@ bcs_stop() {
 
 remove_owned_bcn_plugin_symlink() {
     local plugin_link="${OPENCLAW_EXTENSIONS_ROOT:-${HOME}/.openclaw/extensions}/openclaw-channel-bcn"
-    local plugin_src="${PROJECT_ROOT}/src/plugin/packages/openclaw-channel-bcn"
+    local plugin_src="${PROJECT_ROOT}/src/bcs/crates/plugins/openclaw-channel-bcn"
     local npm_dir
     npm_dir="$(bcn_plugin_resolve_npm_dir 2>/dev/null || true)"
 

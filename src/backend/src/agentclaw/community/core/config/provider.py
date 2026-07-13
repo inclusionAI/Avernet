@@ -16,9 +16,8 @@ deploy profile without core importing the internal package:
 - :class:`ConfigProvider` — the ``load() -> AppConfig`` Protocol.
 - :func:`set_config_provider` / :func:`load_config` — a tiny pre-DI registry.
   Config is read before the injector exists, so this is a bootstrap registry,
-  not a Rule-20 DI plugin. The default provider is the community-safe
-  :class:`~agentclaw.community.core.config.yaml_provider.YamlConfigProvider`; the
-  composition root registers the corporate provider under the ``corp`` profile.
+  not a Rule-20 DI plugin. The composition root must register the provider before
+  the first read for every deploy profile.
 
 This module imports nothing internal (no ``sofapy_base``, no plugins).
 """
@@ -96,17 +95,17 @@ def set_config_provider(provider: ConfigProvider) -> None:
 def load_config() -> AppConfig:
     """Return the active provider's :class:`AppConfig`, cached after first load.
 
-    When no provider has been registered (community / test / local), defaults to
-    the YAML provider — imported lazily to avoid an import cycle with
-    ``yaml_provider`` (which imports :class:`AppConfig` from here).
+    Configuration-source selection belongs to the composition root. Failing
+    explicitly prevents an import path from silently choosing an overlay that
+    disagrees with the active deploy profile.
     """
     global _cached
     if _cached is None:
         provider = _provider
         if provider is None:
-            from agentclaw.community.core.config.yaml_provider import YamlConfigProvider
-
-            provider = YamlConfigProvider()
+            raise RuntimeError(
+                "ConfigProvider has not been registered by the composition root"
+            )
         _cached = provider.load()
     return _cached
 
@@ -114,9 +113,9 @@ def load_config() -> AppConfig:
 def reset_config_provider() -> None:
     """FOR TESTS ONLY — not called on any production path.
 
-    Restores the registry to its default state by clearing both the registered
-    provider and the cached config, so the next :func:`load_config` falls back to
-    the YAML default. Tests that register a provider call this to isolate.
+    Clears both the registered provider and cached config. The next
+    :func:`load_config` fails until a composition root registers a provider.
+    Tests that register a provider call this to isolate.
     """
     global _provider, _cached
     _provider = None

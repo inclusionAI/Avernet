@@ -730,6 +730,8 @@ impl BcsClient {
         query: Option<&str>,
         visibility: Option<&str>,
         collaborate_bot: Option<&str>,
+        organization_code: Option<&str>,
+        role: Option<&str>,
     ) -> Result<DiscoverBotsExtendedResponse> {
         let mut params: Vec<String> = Vec::new();
         if let Some(q) = query {
@@ -740,6 +742,12 @@ impl BcsClient {
         }
         if let Some(collab) = collaborate_bot {
             params.push(format!("collaborate_bot={}", urlencoding::encode(collab)));
+        }
+        if let Some(code) = organization_code.map(str::trim).filter(|code| !code.is_empty()) {
+            params.push(format!("organization_code={}", urlencoding::encode(code)));
+        }
+        if let Some(role) = role.map(str::trim).filter(|role| !role.is_empty()) {
+            params.push(format!("role={}", urlencoding::encode(role)));
         }
 
         let mut url = format!("{}/bots/discover", self.base_url);
@@ -1071,6 +1079,7 @@ impl BcsClient {
         response_mode: Option<&str>,
         caller_wait_mode: Option<&str>,
         run_timeout_ms: Option<u64>,
+        organization_code: Option<&str>,
     ) -> Result<ChatRunSubmitResponse> {
         let url = format!("{}/bots/{}/chat-async", self.base_url, bot_id);
         let payload = Self::chat_async_payload(
@@ -1081,6 +1090,7 @@ impl BcsClient {
             response_mode,
             caller_wait_mode,
             run_timeout_ms,
+            organization_code,
         );
 
         let response = self
@@ -1115,6 +1125,7 @@ impl BcsClient {
         response_mode: Option<&str>,
         caller_wait_mode: Option<&str>,
         run_timeout_ms: Option<u64>,
+        organization_code: Option<&str>,
     ) -> serde_json::Value {
         let mut payload = serde_json::json!({
             "message": message,
@@ -1146,10 +1157,20 @@ impl BcsClient {
             );
         }
         if let Some(mode) = caller_wait_mode.map(str::trim).filter(|mode| !mode.is_empty()) {
-            payload.as_object_mut().unwrap().insert(
-                "caller_wait_mode".to_string(),
-                serde_json::Value::String(mode.to_string()),
-            );
+            if let Some(object) = payload.as_object_mut() {
+                object.insert(
+                    "caller_wait_mode".to_string(),
+                    serde_json::Value::String(mode.to_string()),
+                );
+            }
+        }
+        if let Some(code) = organization_code.map(str::trim).filter(|code| !code.is_empty()) {
+            if let Some(object) = payload.as_object_mut() {
+                object.insert(
+                    "organization_code".to_string(),
+                    serde_json::Value::String(code.to_string()),
+                );
+            }
         }
         payload
     }
@@ -1227,6 +1248,7 @@ impl BcsClient {
         response_mode: Option<&str>,
         overall_timeout_ms: Option<u64>,
         poll_wait_ms: Option<u64>,
+        organization_code: Option<&str>,
     ) -> Result<serde_json::Value> {
         let overall_timeout = Duration::from_millis(overall_timeout_ms.unwrap_or(30 * 60 * 1_000));
         let poll_wait_ms = poll_wait_ms.unwrap_or(15_000);
@@ -1241,6 +1263,7 @@ impl BcsClient {
                 response_mode,
                 None,
                 overall_timeout_ms,
+                organization_code,
             )
             .await?;
         let run_id = submit.run_id.clone();
@@ -1315,6 +1338,7 @@ impl BcsClient {
         response_mode: Option<&str>,
         overall_timeout_ms: Option<u64>,
         poll_wait_ms: Option<u64>,
+        organization_code: Option<&str>,
     ) -> Result<serde_json::Value> {
         let overall_timeout = Duration::from_millis(overall_timeout_ms.unwrap_or(30 * 60 * 1_000));
         let poll_wait_ms = poll_wait_ms.unwrap_or(15_000);
@@ -1329,6 +1353,7 @@ impl BcsClient {
                 response_mode,
                 Some("detached"),
                 overall_timeout_ms,
+                organization_code,
             )
             .await?;
         let run_id = submit.run_id.clone();
@@ -2780,6 +2805,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_discover_bots_extended_includes_organization_scope_query() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let request_line = Arc::new(Mutex::new(String::new()));
+        let server_request_line = request_line.clone();
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0_u8; 4096];
+            let size = stream.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..size]);
+            let first_line = request.lines().next().unwrap_or_default().to_string();
+            *server_request_line.lock().unwrap() = first_line;
+
+            let body = serde_json::json!({"bots": [], "count": 0}).to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.flush().unwrap();
+        });
+
+        let client = BcsClient::new(format!("http://{}", addr));
+        let result = client
+            .discover_bots_extended(
+                None,
+                None,
+                None,
+                Some("promo 2026"),
+                Some("traffic/analyst"),
+            )
+            .await
+            .unwrap();
+
+        server.join().unwrap();
+        assert_eq!(result.count, 0);
+        let line = request_line.lock().unwrap();
+        assert!(line.contains("GET /bots/discover?"), "{line}");
+        assert!(line.contains("organization_code=promo%202026"), "{line}");
+        assert!(line.contains("role=traffic%2Fanalyst"), "{line}");
+    }
+
+    #[tokio::test]
     async fn test_chat_polling_detach_waits_through_submitted_until_running() {
         use std::io::{Read, Write};
         use std::net::TcpListener;
@@ -2887,6 +2961,7 @@ mod tests {
                 None,
                 Some(2_000),
                 Some(10),
+                None,
             )
             .await;
         // Signal the worker to exit whether or not the call succeeded so the
@@ -2963,6 +3038,7 @@ mod tests {
             Some("after-last-tool-call"),
             Some("detached"),
             Some(60_000),
+            None,
         );
 
         assert_eq!(payload["caller_wait_mode"], serde_json::json!("detached"));
@@ -2978,9 +3054,42 @@ mod tests {
             None,
             Some("  "),
             None,
+            None,
         );
 
         assert!(payload.get("caller_wait_mode").is_none());
+    }
+
+    #[test]
+    fn test_chat_async_payload_includes_organization_code_when_present() {
+        let payload = BcsClient::chat_async_payload(
+            "hi",
+            None,
+            None,
+            &[],
+            None,
+            None,
+            None,
+            Some(" promo-2026 "),
+        );
+
+        assert_eq!(payload["organization_code"], serde_json::json!("promo-2026"));
+    }
+
+    #[test]
+    fn test_chat_async_payload_omits_blank_organization_code() {
+        let payload = BcsClient::chat_async_payload(
+            "hi",
+            None,
+            None,
+            &[],
+            None,
+            None,
+            None,
+            Some("  "),
+        );
+
+        assert!(payload.get("organization_code").is_none());
     }
 
     #[test]

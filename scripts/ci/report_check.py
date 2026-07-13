@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
-import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -32,10 +32,38 @@ def parse_coverage(path: Path) -> tuple[float, dict[str, dict[int, int]]]:
     return line_rate, hits_by_file
 
 
+def repository_relative_path(path: Path, repository_root: Path) -> Path:
+    try:
+        return path.resolve().relative_to(repository_root.resolve())
+    except ValueError:
+        return path
+
+
+def find_repository_root(path: Path) -> Path:
+    current = path.resolve()
+    if current.is_file():
+        current = current.parent
+    for candidate in (current, *current.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    raise RuntimeError(f"could not find repository root from {path}")
+
+
+def clean_git_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_PREFIX", "GIT_INDEX_FILE"):
+        environment.pop(name, None)
+    return environment
+
+
 def changed_lines(base: str, head: str, source_root: Path) -> dict[str, set[int]]:
+    repository_root = find_repository_root(source_root)
+    source_pathspec = repository_relative_path(source_root, repository_root)
     diff = subprocess.run(
-        ["git", "diff", "--unified=0", base, head, "--", str(source_root)],
+        ["git", "diff", "--unified=0", base, head, "--", str(source_pathspec)],
         check=True,
+        cwd=repository_root,
+        env=clean_git_environment(),
         stdout=subprocess.PIPE,
         text=True,
     ).stdout
@@ -59,15 +87,40 @@ def changed_lines(base: str, head: str, source_root: Path) -> dict[str, set[int]
     return result
 
 
-def coverage_candidates(diff_file: str, source_root: Path) -> list[str]:
+def coverage_candidates(
+    diff_file: str, source_root: Path, repository_root: Path
+) -> list[str]:
     path = Path(diff_file)
     candidates = [diff_file]
     try:
-        candidates.append(str(path.relative_to(source_root)))
+        source_root_relative = repository_relative_path(source_root, repository_root)
+        candidates.append(str(path.relative_to(source_root_relative)))
     except ValueError:
         pass
-    candidates.append(path.name)
     return candidates
+
+
+def find_coverage_hits(
+    diff_file: str,
+    coverage_hits: dict[str, dict[int, int]],
+    source_root: Path,
+    repository_root: Path,
+) -> dict[int, int] | None:
+    candidates = coverage_candidates(diff_file, source_root, repository_root)
+    for candidate in candidates:
+        for name, hits in coverage_hits.items():
+            if name == candidate or name.endswith("/" + candidate):
+                return hits
+
+    # Some coverage producers report only basenames. Keep that compatibility
+    # only when the basename identifies exactly one file in the report.
+    basename = Path(diff_file).name
+    basename_matches = [
+        hits for name, hits in coverage_hits.items() if Path(name).name == basename
+    ]
+    if len(basename_matches) == 1:
+        return basename_matches[0]
+    return None
 
 
 def check_change_coverage(
@@ -76,29 +129,41 @@ def check_change_coverage(
     source_root: Path,
     minimum: float,
 ) -> None:
+    repository_root = find_repository_root(source_root)
     total = 0
     covered = 0
+    uncovered_by_file: dict[str, list[int]] = {}
     for diff_file, lines in changed.items():
-      matched_hits = None
-      candidates = coverage_candidates(diff_file, source_root)
-      for name, hits in coverage_hits.items():
-          if name in candidates or any(name.endswith("/" + candidate) for candidate in candidates):
-              matched_hits = hits
-              break
-      if matched_hits is None:
-          continue
-      for line in lines:
-          if line in matched_hits:
-              total += 1
-              covered += 1 if matched_hits[line] > 0 else 0
+        matched_hits = find_coverage_hits(
+            diff_file, coverage_hits, source_root, repository_root
+        )
+        if matched_hits is None:
+            continue
+        uncovered: list[int] = []
+        for line in lines:
+            if line in matched_hits:
+                total += 1
+                if matched_hits[line] > 0:
+                    covered += 1
+                else:
+                    uncovered.append(line)
+        if uncovered:
+            uncovered_by_file[diff_file] = sorted(uncovered)
 
     if total == 0:
-        print("change line coverage: no changed executable lines found; treated as pass")
+        print(
+            "change line coverage: no changed executable lines found; treated as pass"
+        )
         return
 
     rate = covered / total * 100
-    print(f"change line coverage: {rate:.2f}% ({covered}/{total}, required >= {minimum:.2f}%)")
+    print(
+        f"change line coverage: {rate:.2f}% ({covered}/{total}, required >= {minimum:.2f}%)"
+    )
     if rate + 1e-9 < minimum:
+        print("uncovered changed executable lines:")
+        for filename, lines in uncovered_by_file.items():
+            print(f"  {filename}: {','.join(str(line) for line in lines)}")
         raise SystemExit(1)
 
 
@@ -117,19 +182,25 @@ def main() -> int:
     tests, failures, errors = parse_junit(args.junit)
     passed = tests - failures - errors
     case_rate = 100.0 if tests == 0 else passed / tests * 100
-    print(f"case pass rate: {case_rate:.2f}% ({passed}/{tests}, required >= {args.min_case_pass_rate:.2f}%)")
+    print(
+        f"case pass rate: {case_rate:.2f}% ({passed}/{tests}, required >= {args.min_case_pass_rate:.2f}%)"
+    )
     if case_rate + 1e-9 < args.min_case_pass_rate:
         return 1
 
     line_rate, hits = parse_coverage(args.coverage)
     if args.min_line_coverage is not None:
-        print(f"line coverage: {line_rate:.2f}% (required >= {args.min_line_coverage:.2f}%)")
+        print(
+            f"line coverage: {line_rate:.2f}% (required >= {args.min_line_coverage:.2f}%)"
+        )
         if line_rate + 1e-9 < args.min_line_coverage:
             return 1
 
     if args.min_change_line_coverage is not None and args.base:
         changed = changed_lines(args.base, args.head, args.source_root)
-        check_change_coverage(hits, changed, args.source_root, args.min_change_line_coverage)
+        check_change_coverage(
+            hits, changed, args.source_root, args.min_change_line_coverage
+        )
 
     return 0
 

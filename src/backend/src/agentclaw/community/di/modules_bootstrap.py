@@ -45,22 +45,21 @@ def register_corp_modules_provider(provider: Callable[[], list[Module]]) -> None
     _corp_modules_provider = provider
 
 
-# The ``test`` / ``singlebox`` columns reuse a small set of corp modules (the
-# corp config providers + the profile-blind codefuse-vault + the corp AICoding
-# services): the test profile is a corp-code CI profile, bundled with corp deps.
-# Supplied through this second registry so ``profile_modules.py`` names NO
-# ``infrastructure.corp`` module in the test branch either (B8 review, pt 1).
+# The monorepo-only ``corp_test`` column reuses a small set of corp modules
+# supplied through this second registry. The community ``test`` and ``singlebox``
+# columns are corp-free and never read this provider. Keeping the registry here
+# lets ``profile_modules.py`` name no ``infrastructure.corp`` module.
 _test_corp_reuse_provider: Callable[[], list[Module]] | None = None
 
 
 def register_test_corp_reuse_provider(provider: Callable[[], list[Module]]) -> None:
-    """Register the thunk supplying the corp modules the test column reuses."""
+    """Register the thunk supplying the corp modules ``corp_test`` reuses."""
     global _test_corp_reuse_provider
     _test_corp_reuse_provider = provider
 
 
 def register_corp_modules(profile: DeployProfile) -> None:
-    """Install the corp-module provider for ``profile`` (no-op for community).
+    """Install the corp-module provider for ``profile`` (no-op when corp-free).
 
     - ``corp`` registers the full corp infrastructure column.
     - ``corp_test`` registers the corp-reuse subset the corp test column installs
@@ -119,16 +118,16 @@ def get_eager_check_keys() -> list[type]:
 
 
 def get_test_corp_modules() -> list[Module]:
-    """Return the corp modules the test / singlebox column reuses.
+    """Return the corp modules the monorepo-only ``corp_test`` column reuses.
 
-    Raises if unregistered — the test profile is corp-code CI; a community build
-    must never select it. (In a community distribution these corp modules don't
-    exist, and this profile is never chosen.)
+    Raises if unregistered — ``corp_test`` requires the corp package and its
+    bootstrap registration. Community ``test`` and ``singlebox`` never call this
+    function.
     """
     if _test_corp_reuse_provider is None:
         raise RuntimeError(
             "Test corp-reuse column not registered. Call "
-            "register_corp_modules(TEST|SINGLEBOX) at the composition root "
+            "register_corp_modules(CORP_TEST) at the composition root "
             "before build_injector (see di/modules_bootstrap.py)."
         )
     return _test_corp_reuse_provider()

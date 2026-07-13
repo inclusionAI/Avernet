@@ -211,7 +211,6 @@ impl RegisteredBotInner {
     fn to_registered_bot(&self) -> RegisteredBot {
         // 清除敏感字段，防止通过常规接口泄露
         let mut capabilities = self.capabilities.clone();
-        capabilities.agent_code = None;
         capabilities.agent_token = None;
 
         RegisteredBot {

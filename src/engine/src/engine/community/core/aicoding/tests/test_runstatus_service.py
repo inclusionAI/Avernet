@@ -1269,3 +1269,154 @@ async def test_safe_exec_logs_warning_on_unexpected_exception(caplog) -> None:
     assert result is None
     assert any("bash exec unexpected error" in rec.message for rec in caplog.records)
     assert any("surprise" in rec.message for rec in caplog.records)
+
+
+# ── cwd 直传（前端直传工作目录，优先于 base/{session_id}）────────────────
+
+
+# ``_bypass_workspace_exists`` autouse fixture 把 ensure_workspace_exists 替换为
+# resolve_workspace；后者对 cwd 直传走 _validate_cwd_prefix（只校验格式 + 允许根
+# 前缀，不校验存在性）。下面的 cwd 都落在 CONTAINER_WORKSPACE_BASE 下，天然放行。
+
+
+async def test_get_session_runs_forwards_cwd_to_aix_filter() -> None:
+    """cwd 直传 → ``aix run list --filter <cwd>`` 与执行 cwd 跟随 cwd。"""
+    custom_cwd = f"{CONTAINER_WORKSPACE_BASE}/custom-session"
+    plugin = FakeBashPlugin()
+    plugin.add(
+        "aix run list",
+        custom_cwd,
+        BashExecResult(stdout=_runs_payload([]), stderr="", exit_code=0),
+    )
+    service = _make_service(plugin)
+    runs = await service.get_session_runs(SESSION_ID, cwd=custom_cwd)
+    assert runs == []
+    # exec 的 cwd 必须是 custom_cwd（而非 base/{SESSION_ID}）
+    assert plugin.calls[0][1] == custom_cwd
+
+
+async def test_get_run_phase_status_forwards_cwd() -> None:
+    """cwd 直传 → _find_aix_project_dirs 的 root 与 aix 执行 cwd 跟随 cwd。"""
+    custom_cwd = f"{CONTAINER_WORKSPACE_BASE}/custom-session"
+    project_dir = f"{custom_cwd}/project-fe"
+    plugin = FakeBashPlugin()
+    plugin.add(
+        "find",
+        custom_cwd,
+        BashExecResult(stdout=f"{project_dir}/.aix\n", stderr="", exit_code=0),
+    )
+    plugin.add(
+        "aix run phase status --run-id r-xyz",
+        project_dir,
+        BashExecResult(stdout=json.dumps(PHASE_PAYLOAD), stderr="", exit_code=0),
+    )
+    service = _make_service(plugin)
+    got = await service.get_run_phase_status(SESSION_ID, "r-xyz", cwd=custom_cwd)
+    assert got["runId"] == "r-xyz"
+    # find 的 cwd 是 custom_cwd（说明 ensure_workspace_exists 返回 custom_cwd）
+    find_call = next(c for c in plugin.calls if c[0].startswith("find"))
+    assert find_call[1] == custom_cwd
+
+
+async def test_get_session_pull_requests_forwards_cwd() -> None:
+    """cwd 直传 → ``aix run output list --filter <cwd>`` 执行 cwd 跟随 cwd。"""
+    custom_cwd = f"{CONTAINER_WORKSPACE_BASE}/custom-session"
+    plugin = FakeBashPlugin()
+    plugin.add(
+        "aix run output list",
+        custom_cwd,
+        BashExecResult(stdout=_pr_outputs_payload([]), stderr="", exit_code=0),
+    )
+    service = _make_service(plugin)
+    items = await service.get_session_pull_requests(SESSION_ID, cwd=custom_cwd)
+    assert items == []
+    assert plugin.calls[0][1] == custom_cwd
+
+
+async def test_get_session_runs_cwd_outrange_raises_value_error() -> None:
+    """cwd 越界（不在允许根下）→ resolve_workspace 抛 ValueError（router 转 400）。"""
+    plugin = FakeBashPlugin()
+    service = _make_service(plugin)
+    with pytest.raises(ValueError, match="cwd not allowed"):
+        await service.get_session_runs(SESSION_ID, cwd="/etc")
+
+
+# ── get_session_runs 复用 ensure_workspace_exists 返回值（gemini PR#132 #3/#4/#5）─
+
+
+async def test_get_session_runs_reuses_workspace_from_ensure(monkeypatch) -> None:
+    """``get_session_runs`` 复用 ``ensure_workspace_exists`` 的返回值作为
+    ``workspace_root`` 透传给 aix，不再让 ``_collect_runs_for_session`` 内部二次
+    ``resolve_workspace``。钉法：stub ensure 返回哨兵路径，断言 resolve 零调用、
+    aix 收到哨兵。"""
+    sentinel = "/ws/sentinel-from-ensure"
+    ensure_calls: list[tuple] = []
+
+    def _ensure_stub(session_id, cwd=None):
+        ensure_calls.append((session_id, cwd))
+        return sentinel
+
+    resolve_calls: list[tuple] = []
+
+    def _resolve_stub(session_id, cwd=None):
+        resolve_calls.append((session_id, cwd))
+        return sentinel
+
+    monkeypatch.setattr(
+        WorkspaceService, "ensure_workspace_exists", staticmethod(_ensure_stub)
+    )
+    monkeypatch.setattr(
+        WorkspaceService, "resolve_workspace", staticmethod(_resolve_stub)
+    )
+
+    aix_calls: list[str] = []
+    service = _make_service(FakeBashPlugin())
+
+    async def _aix_stub(workspace_root):
+        aix_calls.append(workspace_root)
+        return []
+
+    service._aix_run_list = _aix_stub  # type: ignore[assignment]
+
+    runs = await service.get_session_runs("sid-reuse", cwd=None)
+    assert runs == []
+    assert ensure_calls == [("sid-reuse", None)]
+    assert resolve_calls == []          # 关键：不再二次 resolve
+    assert aix_calls == [sentinel]      # 复用的 workspace 透传到 aix
+
+
+async def test_collect_runs_for_session_workspace_root_takes_precedence(
+    monkeypatch,
+) -> None:
+    """显式 ``workspace_root`` 时跳过 ``resolve_workspace``；不传时回退
+    ``resolve_workspace``（保持 :meth:`get_active_run_status` 旧行为）。"""
+    resolve_calls: list[tuple] = []
+
+    def _resolve_stub(session_id, cwd=None):
+        resolve_calls.append((session_id, cwd))
+        return f"/resolved/{session_id}"
+
+    monkeypatch.setattr(
+        WorkspaceService, "resolve_workspace", staticmethod(_resolve_stub)
+    )
+
+    aix_calls: list[str] = []
+    service = _make_service(FakeBashPlugin())
+
+    async def _aix_stub(workspace_root):
+        aix_calls.append(workspace_root)
+        return []
+
+    service._aix_run_list = _aix_stub  # type: ignore[assignment]
+
+    # 显式 workspace_root -> 直接用，不 resolve
+    await service._collect_runs_for_session(
+        "sid-a", cwd=None, workspace_root="/explicit-ws"
+    )
+    assert resolve_calls == []
+    assert aix_calls == ["/explicit-ws"]
+
+    # 不传 workspace_root -> 回退 resolve_workspace（旧行为）
+    await service._collect_runs_for_session("sid-b", cwd=None)
+    assert resolve_calls == [("sid-b", None)]
+    assert aix_calls == ["/explicit-ws", "/resolved/sid-b"]

@@ -83,6 +83,9 @@ class ConfigPath(StrEnum):
     # user_config → env (deployment env detection)
     DEPLOY_ENV_VAR = "user_config.env.deploy_env_var"
 
+    # Physical workspace partition selected by the active deployment profile.
+    WORKSPACE_ENV_FOLDER = "user_config.workspace.env_folder"
+
 
 # ---------------------------------------------------------------------------
 # Dot-path resolution
