@@ -100,7 +100,7 @@ class TestBaasLoggerPlugin:
         mock_tracer = MagicMock()
         mock_tracer.get_trace_id.return_value = "abc123"
         with patch(
-            "secbaas.community.spi.tracer.get_tracer_plugin", return_value=mock_tracer
+            "secbaas.community.tracer.get_tracer_plugin", return_value=mock_tracer
         ):
             from secbaas.community.plugins.logger.bare import _TraceIdFilter
 

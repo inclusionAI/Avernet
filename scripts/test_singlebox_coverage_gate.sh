@@ -14,7 +14,7 @@ fail() {
 make_fake_repo() {
   local tmp="$1"
   mkdir -p "${tmp}/scripts/ci"
-  mkdir -p "${tmp}/src/backend" "${tmp}/src/baas/packages/community"
+  mkdir -p "${tmp}/src/backend" "${tmp}/src/baas"
   cp "$SCRIPT" "${tmp}/scripts/ci/singlebox_coverage.sh"
   cp "$REPORTER" "${tmp}/scripts/ci/singlebox_coverage_report.py"
   cat > "${tmp}/scripts/ci/singlebox_coverage_modules.yaml" <<'YAML'

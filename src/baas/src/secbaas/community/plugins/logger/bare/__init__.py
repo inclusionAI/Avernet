@@ -38,7 +38,7 @@ class _TraceIdFilter(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        from secbaas.community.spi.tracer import get_tracer_plugin
+        from secbaas.community.tracer import get_tracer_plugin
 
         record.traceid = get_tracer_plugin().get_trace_id()
         return True

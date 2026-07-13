@@ -179,7 +179,7 @@ run_real_singlebox() {
   cleanup_real_singlebox
   trap - EXIT
   combine_python_coverage "backend" "$repo_root/src/backend" "$coverage_root/raw/backend"
-  combine_python_coverage "baas" "$repo_root/src/baas/packages/community" "$coverage_root/raw/baas"
+  combine_python_coverage "baas" "$repo_root/src/baas" "$coverage_root/raw/baas"
   write_summary_artifacts
   write_module_artifacts
   verify_required_artifacts

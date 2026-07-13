@@ -1,5 +1,6 @@
 """FastAPI Web application entry point."""
 
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -73,7 +74,7 @@ from secbaas.community.bootstrap import (
 )
 from secbaas.community.config import Config, ConfigLoader
 from secbaas.community.logger import get_logger, get_logger_plugin
-from secbaas.community.spi.tracer import get_tracer_plugin, set_tracer_plugin
+from secbaas.community.tracer import get_tracer_plugin
 
 logger = get_logger("webserver")
 
@@ -162,22 +163,6 @@ def create_app() -> FastAPI:
     )
 
     # ── tracer plugin selection ────────────────────────────────────────────────
-    import os as _os
-    from importlib.metadata import entry_points
-
-    _is_sofa_mode = _os.getenv("SECBAAS_RUN_MODE", "bare").lower() == "sofa"
-    _tracer = None
-    if _is_sofa_mode:
-        for ep in entry_points(group="secbaas.tracer"):
-            if ep.name == "sofa":
-                _tracer = ep.load()()
-                break
-    if _tracer is None:
-        from secbaas.community.plugins.tracer.bare import BareTracerPlugin
-
-        _tracer = BareTracerPlugin()
-    set_tracer_plugin(_tracer)
-
     tracer_plugin = get_tracer_plugin()
     tracer_plugin.setup("secbaas")
     tracer_plugin.install_middleware(app)
@@ -289,7 +274,7 @@ def create_app() -> FastAPI:
     app.include_router(internal_health_router)
 
     # ── Mount extra routers registered by extensions (enterprise, etc.) ──────
-    from ._router_registry import get_extra_routers
+    from .router_registry import get_extra_routers
 
     for extra_router in get_extra_routers():
         app.include_router(extra_router)
@@ -303,7 +288,7 @@ def create_app() -> FastAPI:
     async def health_check() -> dict[str, str]:
         return {"status": "healthy"}
 
-    if _os.getenv("SINGLEBOX_COVERAGE") == "1":
+    if os.getenv("SINGLEBOX_COVERAGE") == "1":
         from secbaas.community.adapters.web.singlebox_coverage import (
             install_singlebox_coverage_middleware,
         )

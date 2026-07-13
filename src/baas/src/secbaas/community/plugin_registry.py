@@ -1,11 +1,13 @@
 """Plugin registry — allows enterprise package to register additional plugin options.
 
-Community's PluginContainer reads from this registry to augment its Selector
-options. Enterprise calls register_plugin_option() at import time.
+Enterprise calls register_plugin_option() at import time.
+inject_into_plugin_container() merges the registered options into each
+PluginContainer instance's Selectors at container creation time.
 
 The registry stores deferred factory callables (not providers) so that
 enterprise module imports only happen when the factory is actually called.
-PluginContainer wraps them in providers.Singleton or providers.Callable.
+inject_into_plugin_container wraps them in providers.Singleton or
+providers.Callable.
 """
 
 from __future__ import annotations
@@ -38,44 +40,30 @@ def register_plugin_option(
     _extra_options[plugin_name][option_name] = (factory, provider_type, provider_kwargs)
 
 
-def get_extra_options(plugin_name: str) -> dict[str, Any]:
-    """Get registered extra options as dependency_injector providers.
+def inject_into_plugin_container(container: Any) -> None:
+    """Inject registered extra options into a PluginContainer instance's Selectors.
 
-    Returns a dict mapping option_name → provider, suitable for
-    splatting into a providers.Selector() call.
-    """
-    from dependency_injector import providers
-
-    result: dict[str, Any] = {}
-    for option_name, (factory, provider_type, kwargs) in _extra_options.get(
-        plugin_name, {}
-    ).items():
-        if provider_type == "callable":
-            result[option_name] = providers.Callable(factory, **kwargs)
-        else:
-            result[option_name] = providers.Singleton(factory, **kwargs)
-    return result
-
-
-def inject_into_plugin_container() -> None:
-    """Inject registered extra options into PluginContainer's Selectors.
-
-    PluginContainer calls get_extra_options() at class-definition time,
-    but enterprise registers options *after* that (because importing
-    ``secbaas.community.bootstrap`` triggers the full
+    Enterprise registers options *after* PluginContainer is defined (because
+    importing ``secbaas.community.bootstrap`` triggers the full
     bootstrap.__init__ → _container → _plugin_core import chain, which
     defines PluginContainer before enterprise's register calls run).
 
-    This function patches the already-defined Selectors by merging the
-    extra options via ``set_providers()``.  It must be called after all
-    ``register_plugin_option()`` calls have completed.
+    This function merges the extra options into the **instance-level**
+    Selectors via ``set_providers()``, leaving the class-level Selectors
+    untouched so that other container instances are not affected.
+
+    Args:
+        container: An ``ApplicationContainer`` whose ``plugins()`` returns
+            the ``PluginContainer`` instance to patch.
     """
     from dependency_injector import providers
 
-    from secbaas.community.bootstrap.plugins._plugin_core import PluginContainer
+    plugin_container = container.plugins()
 
     for plugin_name, options in _extra_options.items():
-        selector = getattr(PluginContainer, plugin_name, None)
+        selector: providers.Selector | None = getattr(
+            plugin_container, plugin_name, None
+        )
         if selector is None:
             continue
         existing = dict(selector.providers)

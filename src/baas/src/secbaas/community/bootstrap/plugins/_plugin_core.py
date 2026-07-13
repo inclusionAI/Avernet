@@ -9,14 +9,15 @@ Plugin selector strategy:
 - Enterprise-only options are injected via ``plugin_registry`` at runtime
 
 Enterprise registers extra selector options (e.g. cache.real, auth.buservice)
-by calling ``register_plugin_option()`` at import time. The PluginContainer
-merges them into its Selectors, so no enterprise import is needed here.
+by calling ``register_plugin_option()`` at import time.
+``inject_into_plugin_container()`` merges them into each container instance's
+Selectors via the public ``set_providers()`` API, so no enterprise import is
+needed here and class-level Selectors stay untouched.
 """
 
 from dependency_injector import containers, providers
 
 from secbaas.community.api.device_manage import K8sCredentials
-from secbaas.community.plugin_registry import get_extra_options
 from secbaas.community.plugins.auth.oauth import OAuthPlugin
 from secbaas.community.plugins.auth.stub import StubAuthPlugin
 from secbaas.community.plugins.bot_service import (
@@ -56,33 +57,28 @@ class PluginContainer(containers.DeclarativeContainer):
     cache_plugin = providers.Selector(
         config.plugins.cache,
         stub=providers.Singleton(StubCachePlugin),
-        **get_extra_options("cache_plugin"),
     )
 
     plugin_database = providers.Selector(
         config.plugins.database.plugin_database,
         SQLITE_ORM=providers.Singleton(SqliteOrmPlugin),
-        **get_extra_options("plugin_database"),
     )
 
     secret_plugin = providers.Selector(
         config.plugins.secret,
         stub=providers.Singleton(StubSecretStorePlugin),
-        **get_extra_options("secret_plugin"),
     )
 
     auth_plugin = providers.Selector(
         config.plugins.auth,
         oauth=providers.Singleton(OAuthPlugin),
         stub=providers.Singleton(StubAuthPlugin),
-        **get_extra_options("auth_plugin"),
     )
 
     arca_sandbox_plugin_factory = providers.Selector(
         config.plugins.sandbox.arca,
         stub=providers.Object(StubArcaSandboxPlugin),
         local_proc=providers.Object(LocalProcessArcaSandboxPlugin),
-        **get_extra_options("arca_sandbox_plugin_factory"),
     )
 
     desktop_sandbox_plugin = providers.Selector(
@@ -97,7 +93,6 @@ class PluginContainer(containers.DeclarativeContainer):
     teclaw_bot_plugin_factory = providers.Selector(
         config.plugins.sandbox.teclaw,
         stub=providers.Object(StubTeClawBotPlugin),
-        **get_extra_options("teclaw_bot_plugin_factory"),
     )
 
     k8s_client_manager = providers.Singleton(K8sClientManager)
@@ -121,7 +116,6 @@ class PluginContainer(containers.DeclarativeContainer):
     poolab_sandbox_plugin_factory = providers.Selector(
         config.plugins.sandbox.poolab,
         stub=providers.Object(StubPoolabSandboxPlugin),
-        **get_extra_options("poolab_sandbox_plugin_factory"),
     )
 
     bot_service_plugin = providers.Selector(
