@@ -8,13 +8,14 @@ selected by a :class:`StageSpec`. Behavior is preserved verbatim, including the
 verify-first-release quirk of not sending a ``version`` to ``release_async``.
 
 The runner operates through the ``PublishFlowService`` facade (``flow``) for the
-shared helpers (``_record_release_result`` / ``_approve_baas_publish`` /
+shared helpers (``_record_and_approve_release`` / ``_approve_baas_publish`` /
 ``_refresh_publish_handle`` / ext helpers / provider seam), so those remain a
 single implementation and stay interceptable by tests.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
@@ -23,6 +24,11 @@ from agentclaw.community.core.service_bot.services.publish_flow.errors import (
 )
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.service_bot.services.publish_flow_service import (
+        PublishFlowService,
+    )
 
 logger = get_logger()
 
@@ -47,18 +53,23 @@ VERIFY_SPEC = StageSpec(
     source_status=PublishStatus.BUILT,
     target_status=PublishStatus.VALIDATE_PUB,
     upgrade_request_label="upgrade_verify",
-    first_release_message="已发布到验证环境",
-    upgrade_message="已升级发布到验证环境",
+    first_release_message="Released to the verify environment",
+    upgrade_message="Upgraded and released to the verify environment",
     first_release_passes_version=False,
 )
 
+# The online release runs *within* ONLINE_PUB: the user-driven ``process`` owns the
+# VALIDATING → ONLINE_PUB advance, so the runner records the release into ext under
+# a same-status (ONLINE_PUB → ONLINE_PUB) optimistic-locked write rather than
+# advancing the status itself. The verify release, by contrast, still owns its
+# BUILT → VALIDATE_PUB advance (that transition is the whole verify flow's infra).
 ONLINE_SPEC = StageSpec(
     stage=PublishStage.ONLINE,
-    source_status=PublishStatus.VALIDATING,
+    source_status=PublishStatus.ONLINE_PUB,
     target_status=PublishStatus.ONLINE_PUB,
     upgrade_request_label="upgrade_online",
-    first_release_message="发布已提交",
-    upgrade_message="升级发布已提交",
+    first_release_message="Publish submitted",
+    upgrade_message="Upgrade publish submitted",
     first_release_passes_version=True,
 )
 
@@ -66,7 +77,7 @@ ONLINE_SPEC = StageSpec(
 class ReleaseStageRunner:
     """Run a release for one stage — first-release or upgrade — via the facade."""
 
-    def __init__(self, flow) -> None:
+    def __init__(self, flow: "PublishFlowService") -> None:
         self._flow = flow
 
     async def first_release(
@@ -77,15 +88,16 @@ class ReleaseStageRunner:
         migration_path: str,
         bot: dict,
     ) -> PublishFlowResult:
-        """首次发布（创建新 Bot）。teclaw 走非挂载投递冻结产物，由 release_async 按
-        容器 provider 路由。投递前把 engine_ext.stage 重盖为该阶段并叠加本阶段的
-        DingTalk 渠道 engine_overrides；ARCA 无 config_artifact 时均 no-op。"""
-        flow = self._flow
+        """First release (create a new Bot). teclaw uses non-mounted delivery of the
+        frozen artifact, routed by release_async according to the container provider.
+        Before delivery, overwrite engine_ext.stage with this stage and overlay this
+        stage's DingTalk channel engine_overrides; both are no-ops for ARCA when there
+        is no config_artifact."""
         publish_id = publish_record.id
-        owner_id = flow._get_owner_id(publish_record)
+        owner_id = self._flow._get_owner_id(publish_record)
 
-        overrides = flow._stage_overrides(publish_record, spec.stage)
-        config_artifact = flow._artifact_for_stage(
+        overrides = self._flow._stage_overrides(publish_record, spec.stage)
+        config_artifact = self._flow._artifact_for_stage(
             (publish_record.ext or {}).get("config_artifact"),
             spec.stage,
             overrides,
@@ -96,29 +108,51 @@ class ReleaseStageRunner:
             migration_path=migration_path,
             device_count=1,
             publish_stage=spec.stage,
+            # TODO(totalfrank): this still isn't fully provider-agnostic — the
+            # downstream (release_async / build service) branches on the container
+            # provider to interpret config_artifact. Push that decision behind the
+            # provider seam in a follow-up; tracked separately.
             config_artifact=config_artifact,
         )
         if spec.first_release_passes_version:
             release_kwargs["version"] = f"{publish_record.version}"
-        release_result = await flow._build_service.release_async(**release_kwargs)
+        release_result = await self._flow._build_service.release_async(**release_kwargs)
 
         bot_uuid = release_result.get("bot_uuid")
         baas_publish_id = release_result.get("publish_id")
         if not bot_uuid:
-            raise PublishFlowServiceError("BaaS 层未返回 bot_uuid")
+            raise PublishFlowServiceError("BaaS layer did not return bot_uuid")
+        if not baas_publish_id:
+            raise PublishFlowServiceError("BaaS layer did not return publish_id")
 
-        ext = publish_record.ext or {}
-        binding_id, ext = flow._record_release_result(
-            publish_id=publish_id,
+        # Three distinct steps invoked in sequence: (1) create the device binding,
+        # (2) record the binding/publish refs + provider promotion + status into
+        # ext, (3) approve the BaaS workflow.
+        binding_id = self._flow._create_release_binding(
             bot=bot,
             bot_uuid=bot_uuid,
             baas_publish_id=baas_publish_id,
             operator=operator,
-            ext=ext,
+        )
+        self._flow._record_release_ext(
+            publish_id=publish_id,
+            bot=bot,
             stage=spec.stage,
+            binding_id=binding_id,
+            baas_publish_id=baas_publish_id,
             source_status=spec.source_status,
             target_status=spec.target_status,
             engine_overrides=overrides,
+        )
+        request_id = self._flow._build_service.generate_request_id(
+            bot=bot,
+            publish_stage=spec.stage.value,
+        )
+        self._flow._approve_baas_publish(
+            baas_publish_id=baas_publish_id,
+            operator=operator,
+            stage=spec.stage,
+            request_id=request_id,
         )
 
         logger.info(
@@ -148,20 +182,20 @@ class ReleaseStageRunner:
         existing_binding_id: int,
         fallback,
     ) -> PublishFlowResult:
-        """升级发布（复用已有 Bot ``bot_uuid`` / ``existing_binding_id``）。BaaS 返回
-        BOT_NOT_FOUND 时回退到 ``fallback``（对应阶段的首次发布）。"""
-        flow = self._flow
+        """Upgrade release (reuse an existing Bot ``bot_uuid`` / ``existing_binding_id``).
+        When BaaS returns BOT_NOT_FOUND, fall back to ``fallback`` (the first release for
+        the corresponding stage)."""
         publish_id = publish_record.id
         version = f"{publish_record.version}"
-        owner_id = flow._get_owner_id(publish_record)
+        owner_id = self._flow._get_owner_id(publish_record)
 
-        overrides = flow._stage_overrides(publish_record, spec.stage)
-        config_artifact = flow._artifact_for_stage(
+        overrides = self._flow._stage_overrides(publish_record, spec.stage)
+        config_artifact = self._flow._artifact_for_stage(
             (publish_record.ext or {}).get("config_artifact"),
             spec.stage,
             overrides,
         )
-        upgrade_result = await flow._build_service.upgrade_async(
+        upgrade_result = await self._flow._build_service.upgrade_async(
             bot_uuid=bot_uuid,
             bot=bot,
             user_id=owner_id,
@@ -190,27 +224,29 @@ class ReleaseStageRunner:
 
         baas_publish_id = upgrade_result.get("publish_id")
         if not baas_publish_id:
-            raise PublishFlowServiceError("BaaS 层升级未返回 publish_id")
+            raise PublishFlowServiceError("BaaS layer upgrade did not return publish_id")
 
-        # 复用已有 binding，更新 ext（stamp stage、存储渠道、刷新 teclaw 读句柄）。
-        ext = flow._get_latest_ext(publish_id)
+        # Reuse the existing binding; update ext (binding/publish refs, provider
+        # per-stage promotion state, refresh the teclaw read handle).
+        ext = self._flow._get_latest_ext(publish_id)
         ext.setdefault("binding", {})[spec.stage.value] = existing_binding_id
         ext.setdefault("publish", {})[spec.stage.value] = baas_publish_id
-        flow._restamp_ext_artifact(ext, spec.stage)
-        flow._store_stage_overrides(ext, spec.stage, overrides)
-        flow._refresh_publish_handle(existing_binding_id, baas_publish_id)
-        flow._update_publish_status(
+        self._flow._provider_behavior(bot).persist_stage_promotion(
+            ext=ext, stage=spec.stage, engine_overrides=overrides
+        )
+        self._flow._refresh_publish_handle(existing_binding_id, baas_publish_id)
+        self._flow._update_publish_status(
             publish_id=publish_id,
             target_status=spec.target_status,
             source_status=spec.source_status,
             ext=ext,
         )
 
-        request_id = flow._build_service.generate_request_id(
+        request_id = self._flow._build_service.generate_request_id(
             bot=bot,
             publish_stage=spec.upgrade_request_label,
         )
-        approved = flow._approve_baas_publish(
+        approved = self._flow._approve_baas_publish(
             baas_publish_id=baas_publish_id,
             operator=operator,
             stage=spec.stage,
@@ -219,7 +255,7 @@ class ReleaseStageRunner:
         if approved is True:
             # Provider-specific post-upgrade refresh (teclaw re-pushes the MCP
             # outbound rule; ARCA/baas refresh via the startup callback → no-op).
-            flow._provider_behavior(bot).refresh_after_upgrade(
+            self._flow._provider_behavior(bot).refresh_after_upgrade(
                 bot_uuid=bot_uuid,
                 bot=bot,
             )

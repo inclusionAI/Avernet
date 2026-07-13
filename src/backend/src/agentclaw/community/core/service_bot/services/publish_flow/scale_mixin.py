@@ -36,10 +36,10 @@ class ScaleMixin:
         publish_id: int,
         operator: str = "system",
     ) -> dict:
-        """对已发布的 service bot 发起扩缩容。
+        """Initiate a scale operation for a published service bot.
 
-        当前仅支持线上阶段（SUCCESS / ONLINE_PUB）的 service bot。
-        通过发布单线上 binding 获取 bot_uuid，然后调用 BaaS scale 接口。
+        Currently only supports service bots in the online stage (SUCCESS / ONLINE_PUB).
+        Obtains bot_uuid from the publish record's online binding, then calls the BaaS scale API.
         """
         logger.info(
             f"[PublishFlowService.scale_bot] called: publish_id={publish_id}, "
@@ -56,13 +56,13 @@ class ScaleMixin:
             user_id=owner_id,
         )
         if not bot:
-            raise PublishFlowServiceError(f"Bot不存在: {publish_record.source_bot_id}")
+            raise PublishFlowServiceError(f"Bot does not exist: {publish_record.source_bot_id}")
 
         active_engine = (bot.get("active_engine") or "").strip().lower()
         if not self._provider_behavior(bot).supports_scale:
             return {
                 "success": True,
-                "message": "teclaw引擎的服务bot不支持扩容",
+                "message": "Service bots on the teclaw engine do not support scaling",
                 "publish_id": publish_id,
                 "engine": active_engine,
                 "supported": True,
@@ -71,20 +71,20 @@ class ScaleMixin:
         current_status = PublishStatus(publish_record.status)
         if current_status != PublishStatus.SUCCESS:
             raise PublishStatusInvalidError(
-                f"当前状态 {current_status} 不支持扩容操作"
+                f"The current status {current_status} does not support scale operations"
             )
 
         ext = self._get_latest_ext(publish_id)
         online_binding_id = (ext.get("binding") or {}).get(PublishStage.ONLINE.value)
         if not online_binding_id:
             raise PublishFlowServiceError(
-                f"未找到 online 阶段的绑定信息: publish_id={publish_id}"
+                f"Binding info for the online stage not found: publish_id={publish_id}"
             )
 
         binding = self._publish_service.get_device_binding_by_id(online_binding_id)
         if not binding or not binding.device_id:
             raise PublishFlowServiceError(
-                f"设备绑定记录不存在或缺少 device_id: binding_id={online_binding_id}"
+                f"Device binding record does not exist or is missing device_id: binding_id={online_binding_id}"
             )
 
         bot_uuid = binding.device_id
@@ -104,7 +104,7 @@ class ScaleMixin:
             def _mutate(latest_ext: dict) -> None:
                 latest_ext.setdefault("scale", {})["publish_id"] = scale_publish_id
 
-            self._merge_and_update_ext(
+            self._mutate_and_update_ext(
                 publish_id=publish_id,
                 mutator=_mutate,
             )
@@ -116,7 +116,7 @@ class ScaleMixin:
 
         return {
             "success": True,
-            "message": "扩容任务已提交",
+            "message": "Scale task submitted",
             "publish_id": publish_id,
             "bot_uuid": bot_uuid,
             "target_count": target_count,
@@ -125,14 +125,14 @@ class ScaleMixin:
         }
 
     def _resolve_scale_target_count(self, publish_record: BotPublishRecord) -> int:
-        """解析服务 Bot 扩缩容目标设备数。"""
+        """Resolve the target device count for scaling a service Bot."""
         owner_id = self._get_owner_id(publish_record)
         bot = self._bot_service.get_bot(
             bot_id=publish_record.source_bot_id,
             user_id=owner_id,
         )
         if not bot:
-            raise PublishFlowServiceError(f"Bot不存在: {publish_record.source_bot_id}")
+            raise PublishFlowServiceError(f"Bot does not exist: {publish_record.source_bot_id}")
 
         ext_count = self._read_device_count_from_bot_ext(bot.get("ext"))
         if ext_count is not None:
@@ -153,7 +153,7 @@ class ScaleMixin:
             return default_count
 
         raise PublishFlowServiceError(
-            f"未找到 service_bot_config.device_count，且未配置默认 device_count: bot_id={publish_record.source_bot_id}"
+            f"service_bot_config.device_count not found, and no default device_count is configured: bot_id={publish_record.source_bot_id}"
         )
 
     def _read_device_count_from_bot_ext(self, bot_ext: dict[str, Any] | None) -> int | None:

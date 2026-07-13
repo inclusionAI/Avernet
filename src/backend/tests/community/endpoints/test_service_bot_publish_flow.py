@@ -549,13 +549,13 @@ def verify_sync_pending():
     method="POST", path=_PROCESS, scenario="online_release",
     input=CaseInput(json_body={"publish_id": _V1}, headers=_HEADERS),
     seed=_seed_validating,
-    expect=ExpectSuccess(status=200, json_contains={"success": True, "data": {"status": "validating"}}),
+    expect=ExpectSuccess(status=200, json_contains={"success": True, "data": {"status": "online_pub"}}),
     extra_assertions=(_expect_status(_V1, PublishStatus.ONLINE_PUB),),
 )
 def online_release():
-    """Seeded at VALIDATING, /process enqueues the online_release task (async-submit
-    returns 'validating'); the drained task does the online create+approve →
-    ONLINE_PUB."""
+    """Seeded at VALIDATING, /process advances VALIDATING → ONLINE_PUB synchronously
+    (the go-live gate) and enqueues the online_release task; the drained task does
+    the online create+approve within ONLINE_PUB."""
 
 
 @endpoint_test(
@@ -621,7 +621,7 @@ def retry_restarts_after_verify_failure():
     method="POST", path=_SCALE, scenario="scale_success",
     input=CaseInput(path_params={"publish_id": _V1}, headers=_HEADERS),
     seed=_seed_scale_success,
-    expect=ExpectSuccess(status=200, json_contains={"success": True, "message": "teclaw引擎的服务bot不支持扩容"}),
+    expect=ExpectSuccess(status=200, json_contains={"success": True, "message": "Service bots on the teclaw engine do not support scaling"}),
 )
 def scale_success():
     """A SUCCESS publish can be scaled: /scale resolves the online binding and
@@ -642,7 +642,7 @@ def scale_baas_rejected():
     method="POST", path=_SCALE_STATUS, scenario="scale_status_success",
     input=CaseInput(path_params={"publish_id": _V1}, headers=_HEADERS),
     seed=_seed_scale_status,
-    expect=ExpectSuccess(status=200, json_contains={"success": True, "message": "BaaS 扩容状态: SUCCESS"}),
+    expect=ExpectSuccess(status=200, json_contains={"success": True, "message": "BaaS scale status: SUCCESS"}),
 )
 def scale_status_success():
     """A publish with ext.scale.publish_id can query BaaS scale progress."""

@@ -69,9 +69,10 @@ async def test_draft_process_drives_to_validating_via_worker(
 
     resp = await _post_process(app_with_testing_modules)
     assert resp.status_code == 200
-    # async-submit: /process enqueues and returns "in progress", no inline advance.
+    # /process advances DRAFT -> BUILDING synchronously (the double-submit guard),
+    # then enqueues the durable verify_flow task for the remainder.
     assert resp.json()["data"]["status"] == "building"
-    assert _status(world, _V1) == PublishStatus.DRAFT.value
+    assert _status(world, _V1) == PublishStatus.BUILDING.value
 
     await _drive_worker(world)
 

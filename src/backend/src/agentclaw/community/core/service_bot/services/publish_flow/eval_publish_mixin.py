@@ -31,22 +31,25 @@ DEVICE_COUNT_DEFAULT_PARAM_CODE = "default"
 class EvalPublishMixin:
     """Eval-environment publish/teardown + status query, mixed in."""
 
-    async def general_publish(
+    async def eval_publish(
         self,
         publish_id: int,
         operator: str,
-        publish_stage: PublishStage = PublishStage.EVAL,
         biz_id: str = "",
     ) -> dict:
-        """发布评估环境。
+        """Publish to the eval environment.
 
-        评估环境是主发布流程之外的旁支能力：
-        - 不推进主发布单状态机
-        - 不写入 publish.ext / binding
-        - 仅复用发布单上的构建产物与 bot 基础信息
+        The eval environment is a side branch outside the main publish flow:
+        - it does not advance the main publish-record state machine
+        - it does not write publish.ext / binding
+        - it only reuses the publish record's build artifact + bot base info
+
+        This path always targets the EVAL stage, so the stage is not a parameter.
         """
+        # This flow is EVAL-only; the stage is fixed here rather than taken as an arg.
+        publish_stage = PublishStage.EVAL
         logger.info(
-            f"[PublishFlowService.general_publish] Start release: "
+            f"[PublishFlowService.eval_publish] Start release: "
             f"publish_id={publish_id}, operator={operator}"
         )
 
@@ -58,14 +61,14 @@ class EvalPublishMixin:
         migration_path = (publish_record.ext or {}).get("migration_path", "")
         config_artifact = (publish_record.ext or {}).get("config_artifact")
         if not migration_path and not config_artifact:
-            raise PublishFlowServiceError("构建产物路径不存在，请先执行构建")
+            raise PublishFlowServiceError("Build artifact path not found; run the build first")
 
         bot = self._bot_service.get_bot(
             bot_id=publish_record.source_bot_id,
             user_id=owner_id,
         )
         if not bot:
-            raise PublishFlowServiceError(f"Bot不存在: {publish_record.source_bot_id}")
+            raise PublishFlowServiceError(f"Bot not found: {publish_record.source_bot_id}")
 
         eval_overrides = self._stage_overrides(publish_record, publish_stage)
         eval_artifact = self._artifact_for_stage(
@@ -78,7 +81,7 @@ class EvalPublishMixin:
         if biz_id:
             ext_info["biz_id"] = biz_id
 
-        # 发布评估环境
+        # Release to the eval environment.
         release_result = await self._build_service.release_async(
             bot=bot,
             user_id=owner_id,
@@ -93,18 +96,20 @@ class EvalPublishMixin:
         bot_uuid = release_result.get("bot_uuid")
         baas_publish_id = release_result.get("publish_id")
         if not bot_uuid:
-            raise PublishFlowServiceError("评估环境发布失败: BaaS 未返回 bot_uuid")
+            raise PublishFlowServiceError("Eval-environment release failed: BaaS returned no bot_uuid")
 
         request_id = self._build_service.generate_request_id(
             bot=bot,
             publish_stage=publish_stage.value,
         )
-        self._approve_baas_publish(
-            baas_publish_id=baas_publish_id,
-            operator=operator,
-            stage=publish_stage,
-            request_id=request_id,
-        )
+        # Best-effort approve; skip when BaaS returned no publish workflow id.
+        if baas_publish_id:
+            self._approve_baas_publish(
+                baas_publish_id=baas_publish_id,
+                operator=operator,
+                stage=publish_stage,
+                request_id=request_id,
+            )
 
         result = {
             "success": True,
@@ -115,24 +120,25 @@ class EvalPublishMixin:
             "baas_bot_status": release_result.get("status"),
         }
         logger.info(
-            f"[PublishFlowService.general_publish] Release success: {result}"
+            f"[PublishFlowService.eval_publish] Release success: {result}"
         )
         return result
 
-    def general_teardown(
+    def eval_teardown(
         self,
         bot_uuid: str,
         *,
         operator: str = "system",
         request_bot: dict | None = None,
     ) -> dict:
-        """销毁评估环境。
+        """Tear down the eval environment.
 
-        仅依赖评估环境自身 bot_uuid；调用方后续可改为从独立评估任务表读取并传入。
-        不触碰主发布单 ext/binding。
+        Depends only on the eval environment's own bot_uuid; a caller may later
+        read/pass it from a dedicated eval-task table. Does not touch the main
+        publish record's ext/binding.
         """
         if not bot_uuid:
-            raise PublishFlowServiceError("bot_uuid 不能为空")
+            raise PublishFlowServiceError("bot_uuid must not be empty")
 
         request_bot = request_bot or {"bot_id": bot_uuid}
         request_id = self._build_service.generate_request_id(
@@ -145,20 +151,22 @@ class EvalPublishMixin:
             request_id=request_id,
         )
         destroy_publish_id = destroy_result.get("publish_id")
-        self._approve_baas_publish(
-            baas_publish_id=destroy_publish_id,
-            operator=operator,
-            stage=PublishStage.EVAL,
-            request_id=request_id,
-        )
+        # Best-effort approve; skip when BaaS returned no publish workflow id.
+        if destroy_publish_id:
+            self._approve_baas_publish(
+                baas_publish_id=destroy_publish_id,
+                operator=operator,
+                stage=PublishStage.EVAL,
+                request_id=request_id,
+            )
         result = {
             "success": True,
             "bot_uuid": bot_uuid,
             "baas_publish_id": destroy_publish_id,
-            "message": "评估环境销毁已提交",
+            "message": "Eval environment teardown submitted",
         }
         logger.info(
-            f"[PublishFlowService.general_teardown] Destroy success: {result}"
+            f"[PublishFlowService.eval_teardown] Destroy success: {result}"
         )
         return result
 
@@ -167,7 +175,7 @@ class EvalPublishMixin:
         publish_id: int,
         stage: PublishStage,
     ) -> Dict[str, Any]:
-        """查询指定发布单阶段对应的 BaaS bot 状态 / 详情。"""
+        """Query the BaaS bot status / detail for the given publish-record stage."""
         logger.info(
             f"[PublishFlowService.get_publish_bot_status] Start query: publish_id={publish_id}, stage={stage.value}"
         )
@@ -180,15 +188,15 @@ class EvalPublishMixin:
         binding_info = ext.get("binding", {})
         binding_id = binding_info.get(stage.value)
         if not binding_id:
-            raise PublishFlowServiceError(f"未找到 {stage.value} 阶段的绑定信息")
+            raise PublishFlowServiceError(f"No binding found for the {stage.value} stage")
 
         binding = self._publish_service.get_device_binding_by_id(binding_id)
         if not binding:
-            raise PublishFlowServiceError(f"未找到绑定记录: binding_id={binding_id}")
+            raise PublishFlowServiceError(f"Binding record not found: binding_id={binding_id}")
 
         bot_uuid = getattr(binding, "device_id", "")
         if not bot_uuid:
-            raise PublishFlowServiceError(f"绑定记录缺少 bot_uuid: binding_id={binding_id}")
+            raise PublishFlowServiceError(f"Binding record missing bot_uuid: binding_id={binding_id}")
 
         baas_bot = self._baas_service.get_bot(bot_uuid=bot_uuid)
         result = {
@@ -208,45 +216,45 @@ class EvalPublishMixin:
         publish_id: int,
         stage: PublishStage,
     ) -> dict:
-        """销毁发布历史。
+        """Destroy publish history.
 
-        注意：调用此方法前需先将 bot 推进到相应状态：
-        - 验证阶段 (VERIFY): 需先回退到草稿状态 (DRAFT)
-        - 线上阶段 (ONLINE): 需先推进到下线状态 (RELEASED)
+        Note: before calling this, advance the bot to the appropriate status:
+        - verify stage (VERIFY): first roll back to draft (DRAFT)
+        - online stage (ONLINE): first advance to offline (RELEASED)
 
-        销毁流程：
-        1. 通过 publish_id 查询 BotPublishRecord 记录
-        2. 调用 _destroy_bot_by_stage 方法销毁指定阶段的 BaaS 层 bot
+        Destroy flow:
+        1. Look up the BotPublishRecord by publish_id
+        2. Call _destroy_bot_by_stage to destroy the BaaS-layer bot for the stage
 
         Args:
-            publish_id: AgentClaw 层发布单 ID
-            stage: 发布阶段（VERIFY/ONLINE）
+            publish_id: AgentClaw-layer publish record id
+            stage: Publish stage (VERIFY/ONLINE)
 
         Returns:
-            dict: 销毁结果，包含:
-                - success: 是否成功
-                - bot_destroyed: 是否销毁了 bot
-                - message: 结果消息
+            dict: Destroy result, containing:
+                - success: whether it succeeded
+                - bot_destroyed: whether a bot was destroyed
+                - message: result message
 
         Raises:
-            PublishNotFoundError: 发布单不存在
-            PublishFlowServiceError: 销毁失败
+            PublishNotFoundError: publish record not found
+            PublishFlowServiceError: destroy failed
         """
         logger.info(f"[PublishFlowService.destroy_publish_history] Starting destroy: publish_id={publish_id}, stage={stage.value}")
 
-        # Step 1: 查询发布单
+        # Step 1: look up the publish record
         publish_record = self._publish_service.get_publish_by_id(publish_id)
         if not publish_record:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
 
         current_status = PublishStatus(publish_record.status)
 
-        # 检查状态：只有 DRAFT 和 RELEASED 状态才能销毁
+        # Check status: only DRAFT and RELEASED can be destroyed.
         allowed_statuses = [PublishStatus.DRAFT, PublishStatus.RELEASED]
         if current_status not in allowed_statuses:
             raise PublishFlowServiceError(
-                f"发布单状态不允许销毁: 当前状态={current_status}, "
-                f"仅允许状态: {[s.value for s in allowed_statuses]}"
+                f"Publish record status does not allow destroy: current status={current_status}, "
+                f"allowed statuses: {[s.value for s in allowed_statuses]}"
             )
 
         result = {
@@ -255,7 +263,7 @@ class EvalPublishMixin:
             "message": "",
         }
 
-        # Step 2: 销毁 BaaS 层的 bot
+        # Step 2: destroy the BaaS-layer bot
         try:
             self._destroy_bot_by_stage(publish_record, stage)
             result["bot_destroyed"] = True
@@ -269,9 +277,9 @@ class EvalPublishMixin:
                 f"[PublishFlowService.destroy_publish_history]"
                 f"Failed to destroy BaaS bots: publish_id={publish_id}, stage={stage.value}, error={e}"
             )
-            # 销毁 bot 失败不阻塞整体流程
+            # A failed bot destroy does not block the overall flow.
 
-        result["message"] = f"发布历史销毁完成: publish_id={publish_id}, stage={stage.value}"
+        result["message"] = f"Publish history destroy completed: publish_id={publish_id}, stage={stage.value}"
 
         logger.info(f"[PublishFlowService.destroy_publish_history] Destroy completed: {result}")
 

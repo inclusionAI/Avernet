@@ -115,7 +115,7 @@ class TaskProcessor:
     async def to_env_preparing(self, id: int) -> QualityTaskRecord:
         """Advance task from 'init' to 'env_preparing'.
 
-        Calls PublishFlowService.general_publish to prepare the evaluation environment.
+        Calls PublishFlowService.eval_publish to prepare the evaluation environment.
         """
         logger.info("[to_env_preparing] id=%s", id)
 
@@ -137,17 +137,17 @@ class TaskProcessor:
         operator = task.operator_id or ""
 
         logger.info(
-            "[to_env_preparing] Calling general_publish: publish_id=%s, biz_id=%s, operator=%s",
+            "[to_env_preparing] Calling eval_publish: publish_id=%s, biz_id=%s, operator=%s",
             publish_id, biz_id, operator
         )
 
-        result = await self._publish_flow_service.general_publish(
+        result = await self._publish_flow_service.eval_publish(
             publish_id=int(publish_id),
             operator=operator,
             biz_id=biz_id,
         )
 
-        logger.info("[to_env_preparing] general_publish completed: result=%s", result)
+        logger.info("[to_env_preparing] eval_publish completed: result=%s", result)
 
         # Save bot_uuid and baas_publish_id to ext
         if result:
@@ -290,14 +290,14 @@ class TaskProcessor:
         bot_uuid = ext.get("bot_uuid")
         if bot_uuid:
             operator = task.operator_id or "system"
-            logger.info("[to_env_released] Calling general_teardown: bot_uuid=%s, operator=%s", bot_uuid, operator)
+            logger.info("[to_env_released] Calling eval_teardown: bot_uuid=%s, operator=%s", bot_uuid, operator)
             try:
-                teardown_result = self._publish_flow_service.general_teardown(bot_uuid, operator=operator)
-                logger.info("[to_env_released] general_teardown completed: result=%s", teardown_result)
+                teardown_result = self._publish_flow_service.eval_teardown(bot_uuid, operator=operator)
+                logger.info("[to_env_released] eval_teardown completed: result=%s", teardown_result)
                 if teardown_result and "destroy_publish_id" in teardown_result:
                     ext["destroy_publish_id"] = teardown_result["destroy_publish_id"]
             except Exception as e:
-                logger.warning("[to_env_released] general_teardown failed: %s", e)
+                logger.warning("[to_env_released] eval_teardown failed: %s", e)
         else:
             logger.warning("[to_env_released] No bot_uuid in ext, skipping teardown")
 

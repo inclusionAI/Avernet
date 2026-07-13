@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
+    BotPublishService,
     PublishNotFoundError,
 )
 from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
@@ -37,7 +38,7 @@ class PublishExtState:
 
     def __init__(
         self,
-        publish_service,
+        publish_service: BotPublishService,
         channel_overrides_reader: "ChannelEngineOverridesReader",
     ) -> None:
         self._publish_service = publish_service
@@ -46,33 +47,37 @@ class PublishExtState:
     # ── owner / retry ────────────────────────────────────────────────────
     @staticmethod
     def owner_id(publish_record: BotPublishRecord) -> str:
-        """发布单 owner_id，协作者操作时执行链路必须使用 owner 身份。"""
+        """The publish record's owner_id; a collaborator's action must run the
+        execution chain under the owner's identity."""
         owner_id = publish_record.owner_id
         if not owner_id:
             raise PublishFlowServiceError(
-                f"发布单缺少 owner_id: publish_id={publish_record.id}"
+                f"Publish record missing owner_id: publish_id={publish_record.id}"
             )
         return owner_id
 
     @staticmethod
     def clear_retry_flag(ext: dict) -> None:
-        """清理发布单重试中的临时标记。"""
+        """Clear the publish record's transient retry marker."""
         ext.pop("retry", None)
 
     # ── ext read / write ─────────────────────────────────────────────────
     def get_latest_ext(self, publish_id: int) -> dict:
-        """获取发布单最新 ext，避免基于旧快照回写。"""
+        """Fetch the publish record's latest ext, avoiding write-back from a stale snapshot."""
         latest_record = self._publish_service.get_publish_by_id(publish_id)
         if not latest_record:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
         return copy.deepcopy(latest_record.ext or {})
 
-    def merge_and_update_ext(
+    def mutate_and_update_ext(
         self,
         publish_id: int,
         mutator: Callable[[dict], None],
     ) -> dict:
-        """基于最新 ext 执行变更后写回，减少覆盖历史数据风险。"""
+        """Read-modify-write the ext: fetch the latest ext, apply ``mutator`` to it
+        in place, then persist it. The mutator may make any change (not just a
+        merge); reading the latest snapshot first reduces the risk of clobbering
+        concurrent writes. Returns the persisted ext."""
         ext = self.get_latest_ext(publish_id)
         mutator(ext)
         self._publish_service.update_publish_ext(publish_id=publish_id, ext=ext)
@@ -83,13 +88,19 @@ class PublishExtState:
         publish_id: int,
         target_status: PublishStatus,
         source_status: PublishStatus,
-        ext: dict | None = None,
+        ext: dict,
     ) -> None:
-        """原子更新发布单状态与扩展字段。"""
+        """Atomically update the publish record's status and ext fields.
+
+        ``ext`` is required and written as-is: the downstream repository does a
+        blind overwrite of the record's ext column, so the caller must pass the
+        full ext it wants persisted (read-modify-write), never a partial or empty
+        dict expecting a merge. Every call site already does this.
+        """
         self._publish_service.update_publish_status_with_ext(
             publish_id=publish_id,
             target_status=target_status,
-            ext=ext or {},
+            ext=ext,
             source_status=source_status,
         )
 

@@ -242,23 +242,6 @@ def test_should_upgrade_online_requires_last_publish_success():
     assert svc._should_upgrade_online(publish_record) is False
 
 
-def test_approve_baas_publish_returns_false_without_publish_id():
-    publish_service = Mock()
-    build_service = Mock()
-    baas_service = Mock()
-    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
-
-    result = svc._approve_baas_publish(
-        baas_publish_id="",
-        operator="op",
-        stage=PublishStage.VERIFY,
-        request_id="rid",
-    )
-
-    assert result is False
-    baas_service.approve_publish.assert_not_called()
-
-
 def test_approve_baas_publish_returns_false_when_baas_raises():
     publish_service = Mock()
     build_service = Mock()
@@ -304,7 +287,7 @@ async def test_execute_release_phase_falls_back_to_first_release_when_last_publi
     svc._execute_first_release = AsyncMock(return_value='FIRST')
     svc._execute_upgrade_release = AsyncMock(return_value='UPGRADE')
 
-    result = await svc._execute_release_phase(publish_record, operator='u1')
+    result = await svc.execute_release_phase(publish_record, operator='u1')
 
     assert result == 'FIRST'
     svc._execute_first_release.assert_awaited_once()
@@ -337,7 +320,7 @@ async def test_retry_clears_retry_flag_when_restart_submit_fails():
 
     result = await svc.retry(publish_id=1, operator='u1')
 
-    assert result.message == '重试失败: submit failed'
+    assert result.message == 'Retry failed: submit failed'
     rollback_ext = publish_service.update_publish_status_with_ext.call_args.kwargs['ext']
     assert rollback_ext['retry'] is True
     publish_service.update_publish_ext.assert_called_once()
@@ -370,7 +353,7 @@ def test_handle_sync_failure_clears_retry_flag_and_stores_source_status_value():
     updated_ext = publish_service.update_publish_status_with_ext.call_args.kwargs['ext']
     assert 'retry' not in updated_ext
     assert updated_ext['source_status'] == PublishStatus.ONLINE_PUB.value
-    assert updated_ext['error_message'] == 'BaaS 发布失败: 1 个设备失败'
+    assert updated_ext['error_message'] == 'BaaS publish failed: 1 device(s) failed'
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +417,7 @@ async def test_build_phase_routes_arca_and_merges_mount_ext():
     svc, _ = _build_svc_with_router(router, {"bot_id": "b1", "active_engine": "openclaw"})
 
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=3)
-    await svc._execute_build_phase(record, "op")
+    await svc.execute_build_phase(record, "op")
 
     # openclaw → baas → ARCA producer; teclaw stub untouched.
     assert arca.calls == [({"bot_id": "b1", "active_engine": "openclaw"}, 3)]
@@ -459,7 +442,7 @@ async def test_build_phase_routes_external_and_merges_artifact_ext():
     )
 
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=2)
-    await svc._execute_build_phase(record, "op")
+    await svc.execute_build_phase(record, "op")
 
     # baas reports a TECLAW container → teclaw producer.
     assert teclaw.calls == [({"bot_id": "b2", "active_engine": "teclaw"}, 2)]
@@ -489,67 +472,45 @@ async def test_build_phase_failed_artifact_returns_failed_result():
 
     # The build phase catches failures and returns a FAILED result (not raises),
     # surfacing the producer's message.
-    result = await svc._execute_build_phase(record, "op")
+    result = await svc.execute_build_phase(record, "op")
     assert result.status == PublishStatus.FAILED
     assert "boom" in result.message
 
 
-def test_record_release_result_uses_resolved_provider_for_external():
+def test_create_release_binding_uses_resolved_provider_for_external():
     publish_service = Mock()
     publish_service.create_device_binding.return_value = 77
     svc = _pf(publish_service, Mock(), Mock(), Mock(), _arca_router())
-    svc._get_latest_ext = Mock(return_value={})
-    svc._update_publish_status = Mock()
-    svc._build_service.generate_request_id = Mock(return_value="rid")
-    svc._baas_service.approve_publish = Mock(return_value={"success": True})
     # baas reports a TECLAW container for this bot.
     svc._baas_service.resolve_container_provider = Mock(return_value="teclaw")
 
-    try:
-        svc._record_release_result(
-            publish_id=1,
-            bot={"bot_id": "b", "entity_id": "u", "active_engine": "teclaw"},
-            bot_uuid="BOT-1",
-            baas_publish_id=9,
-            operator="op",
-            ext={},
-            stage=PublishStage.VERIFY,
-            source_status=PublishStatus.BUILT,
-            target_status=PublishStatus.VALIDATE_PUB,
-        )
-    except Exception:
-        pass  # downstream approve flow not under test
+    binding_id = svc._create_release_binding(
+        bot={"bot_id": "b", "entity_id": "u", "active_engine": "teclaw"},
+        bot_uuid="BOT-1",
+        baas_publish_id=9,
+        operator="op",
+    )
 
+    assert binding_id == 77
     # The binding records the resolved provider, not the old hardcoded "baas".
     assert publish_service.create_device_binding.call_args.kwargs["device_provider"] == "teclaw"
 
 
-def test_record_release_result_defaults_provider_to_baas():
+def test_create_release_binding_defaults_provider_to_baas():
     publish_service = Mock()
     publish_service.create_device_binding.return_value = 1
     svc = _pf(publish_service, Mock(), Mock(), Mock(), _arca_router())
-    svc._get_latest_ext = Mock(return_value={})
-    svc._update_publish_status = Mock()
-    svc._build_service.generate_request_id = Mock(return_value="rid")
-    svc._baas_service.approve_publish = Mock(return_value={"success": True})
     # baas does not report a teclaw container → default baas.
     svc._baas_service.resolve_container_provider = Mock(return_value="baas")
 
-    try:
-        svc._record_release_result(
-            publish_id=1,
-            bot={"bot_id": "b", "active_engine": "openclaw"},
-            bot_uuid="BOT-1",
-            baas_publish_id=9,
-            operator="op",
-            ext={},
-            stage=PublishStage.VERIFY,
-            source_status=PublishStatus.BUILT,
-            target_status=PublishStatus.VALIDATE_PUB,
-        )
-    except Exception:
-        pass
+    binding_id = svc._create_release_binding(
+        bot={"bot_id": "b", "active_engine": "openclaw"},
+        bot_uuid="BOT-1",
+        baas_publish_id=9,
+        operator="op",
+    )
 
+    assert binding_id == 1
     assert publish_service.create_device_binding.call_args.kwargs["device_provider"] == "baas"
 
 
@@ -613,7 +574,7 @@ async def test_restart_verify_delivers_stored_verify_overrides_not_online():
     build_service.upgrade_async = AsyncMock(return_value={"publish_id": 9})
     svc = _pf(Mock(), build_service, Mock(), Mock(), _arca_router(build_service))
     svc._refresh_publish_handle = Mock()
-    svc._merge_and_update_ext = Mock()
+    svc._mutate_and_update_ext = Mock()
     svc._approve_baas_publish = Mock()
 
     record = _make_publish_record(
@@ -645,7 +606,7 @@ async def test_restart_no_stored_overrides_delivers_restamped_base():
     build_service.upgrade_async = AsyncMock(return_value={"publish_id": 9})
     svc = _pf(Mock(), build_service, Mock(), Mock(), _arca_router(build_service))
     svc._refresh_publish_handle = Mock()
-    svc._merge_and_update_ext = Mock()
+    svc._mutate_and_update_ext = Mock()
     svc._approve_baas_publish = Mock()
 
     record = _make_publish_record(
@@ -671,7 +632,7 @@ async def test_restart_tolerates_null_engine_overrides_by_stage():
     build_service.upgrade_async = AsyncMock(return_value={"publish_id": 9})
     svc = _pf(Mock(), build_service, Mock(), Mock(), _arca_router(build_service))
     svc._refresh_publish_handle = Mock()
-    svc._merge_and_update_ext = Mock()
+    svc._mutate_and_update_ext = Mock()
     svc._approve_baas_publish = Mock()
 
     record = _make_publish_record(
@@ -732,20 +693,20 @@ def test_refresh_publish_handle_swallows_repo_error():
 
 
 def test_mark_previous_publish_superseded_clears_rollback_restored_from_marker():
-    """_mark_previous_publish_superseded 应清除目标版本的 rollback_restored_from 标记。"""
+    """_mark_previous_publish_superseded should clear the target version's rollback_restored_from marker."""
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
     svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
 
-    # 当前版本 v3 发布成功，有 last_pub_id=2
+    # Current version v3 published successfully, with last_pub_id=2
     current_record = _make_publish_record(
         id=3,
         status=PublishStatus.SUCCESS.value,
         last_pub_id=2,
         version=3,
     )
-    # 目标版本 v2 是通过回滚恢复的，有 rollback_restored_from 标记
+    # Target version v2 was restored via rollback, carrying the rollback_restored_from marker
     last_publish = _make_publish_record(
         id=2,
         status=PublishStatus.SUCCESS.value,
@@ -756,29 +717,29 @@ def test_mark_previous_publish_superseded_clears_rollback_restored_from_marker()
     publish_service.get_publish_by_id.return_value = last_publish
     publish_service.update_publish_status_with_ext.return_value = last_publish
 
-    # 调用 _mark_previous_publish_superseded
+    # Call _mark_previous_publish_superseded
     svc._mark_previous_publish_superseded(
         publish_record=current_record,
         stage=PublishStage.ONLINE,
         target_status=PublishStatus.SUCCESS,
     )
 
-    # 验证 update_publish_status_with_ext 被调用
+    # Verify update_publish_status_with_ext was called
     assert publish_service.update_publish_status_with_ext.called
     call_kwargs = publish_service.update_publish_status_with_ext.call_args.kwargs
 
-    # 验证状态变更为 UPGRADED
+    # Verify the status changed to UPGRADED
     assert call_kwargs["target_status"] == PublishStatus.UPGRADED.value
     assert call_kwargs["source_status"] == PublishStatus.SUCCESS.value
 
-    # 验证 rollback_restored_from 标记被清除
+    # Verify the rollback_restored_from marker was cleared
     assert "rollback_restored_from" not in call_kwargs["ext"]
-    # 验证其他 ext 字段保留
+    # Verify other ext fields are preserved
     assert call_kwargs["ext"]["migration_path"] == "/tmp/build"
 
 
 def test_mark_previous_publish_superseded_preserves_ext_without_rollback_marker():
-    """目标版本没有 rollback_restored_from 标记时，ext 保持不变。"""
+    """When the target version has no rollback_restored_from marker, ext stays unchanged."""
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -808,13 +769,13 @@ def test_mark_previous_publish_superseded_preserves_ext_without_rollback_marker(
 
     call_kwargs = publish_service.update_publish_status_with_ext.call_args.kwargs
 
-    # 验证 ext 完整保留
+    # Verify ext is preserved in full
     assert call_kwargs["ext"]["migration_path"] == "/tmp/build"
     assert call_kwargs["ext"]["other_key"] == "other_value"
 
 
 def test_mark_previous_publish_superseded_no_op_for_verify_stage():
-    """VERIFY 阶段不调用 _mark_previous_publish_superseded 逻辑。"""
+    """The VERIFY stage does not invoke the _mark_previous_publish_superseded logic."""
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -829,17 +790,17 @@ def test_mark_previous_publish_superseded_no_op_for_verify_stage():
 
     svc._mark_previous_publish_superseded(
         publish_record=current_record,
-        stage=PublishStage.VERIFY,  # 非 ONLINE 阶段
+        stage=PublishStage.VERIFY,  # non-ONLINE stage
         target_status=PublishStatus.SUCCESS,
     )
 
-    # 验证没有调用 get_publish_by_id（因为 VERIFY 阶段不升级上一版本）
+    # Verify get_publish_by_id was not called (the VERIFY stage does not upgrade the previous version)
     publish_service.get_publish_by_id.assert_not_called()
     publish_service.update_publish_status_with_ext.assert_not_called()
 
 
 def test_mark_previous_publish_superseded_no_op_for_non_success_status():
-    """目标状态非 SUCCESS 时，不调用 _mark_previous_publish_superseded 逻辑。"""
+    """When the target status is not SUCCESS, the _mark_previous_publish_superseded logic is not invoked."""
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -855,7 +816,7 @@ def test_mark_previous_publish_superseded_no_op_for_non_success_status():
     svc._mark_previous_publish_superseded(
         publish_record=current_record,
         stage=PublishStage.ONLINE,
-        target_status=PublishStatus.VALIDATING,  # 非 SUCCESS
+        target_status=PublishStatus.VALIDATING,  # not SUCCESS
     )
 
     publish_service.get_publish_by_id.assert_not_called()
@@ -863,7 +824,7 @@ def test_mark_previous_publish_superseded_no_op_for_non_success_status():
 
 
 def test_mark_previous_publish_superseded_no_op_when_last_pub_id_is_zero():
-    """last_pub_id 为 0 时，不调用升级逻辑。"""
+    """When last_pub_id is 0, the upgrade logic is not invoked."""
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -872,7 +833,7 @@ def test_mark_previous_publish_superseded_no_op_when_last_pub_id_is_zero():
     current_record = _make_publish_record(
         id=1,
         status=PublishStatus.SUCCESS.value,
-        last_pub_id=0,  # 无上一版本
+        last_pub_id=0,  # no previous version
         version=1,
     )
 
@@ -916,7 +877,7 @@ async def test_verify_first_release_stamps_canary_delivered_and_persisted():
     svc = _pf(
         publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
     )
-    # _record_release_result re-reads ext from DB (a fresh draft snapshot).
+    # _record_release_ext re-reads ext from DB (a fresh draft snapshot).
     svc._get_latest_ext = Mock(return_value=_artifact_ext("draft"))
     svc._update_publish_status = Mock()
     svc._approve_baas_publish = Mock()
@@ -948,8 +909,10 @@ async def test_verify_upgrade_stamps_canary_delivered_and_persisted():
     build_service = Mock()
     build_service.upgrade_async = AsyncMock(return_value={"publish_id": 9})
     build_service.generate_request_id = Mock(return_value="rid")
+    baas_service = Mock()
+    baas_service.resolve_container_provider.return_value = "teclaw"
     svc = _pf(
-        publish_service, build_service, Mock(), Mock(), _arca_router(build_service)
+        publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
     )
     svc._get_latest_ext = Mock(return_value=_artifact_ext("draft"))
     svc._update_publish_status = Mock()
@@ -1068,8 +1031,10 @@ async def test_verify_upgrade_overlays_and_stores_stage_channels():
     build_service.upgrade_async = AsyncMock(return_value={"publish_id": 9})
     build_service.generate_request_id = Mock(return_value="rid")
     reader = _reader_returning(_VERIFY_CH)
+    baas_service = Mock()
+    baas_service.resolve_container_provider.return_value = "teclaw"
     svc = _pf(
-        publish_service, build_service, Mock(), Mock(), _arca_router(build_service),
+        publish_service, build_service, baas_service, Mock(), _arca_router(build_service),
         channel_overrides_reader=reader,
     )
     svc._get_latest_ext = Mock(return_value=_artifact_ext("draft"))
@@ -1090,6 +1055,30 @@ async def test_verify_upgrade_overlays_and_stores_stage_channels():
     assert delivered["engine_ext"]["stage"] == "canary"
     persisted_ext = svc._update_publish_status.call_args.kwargs["ext"]
     assert persisted_ext["engine_overrides_by_stage"]["verify"] == _VERIFY_CH
+
+
+@pytest.mark.asyncio
+async def test_verify_first_release_raises_when_baas_returns_no_publish_id():
+    # BaaS returned a bot_uuid but no publish_id → first_release raises before
+    # recording, so the release path always gets a real int id.
+    publish_service = Mock()
+    build_service = Mock()
+    build_service.release_async = AsyncMock(return_value={"bot_uuid": "BOT-1"})
+    baas_service = Mock()
+    svc = _pf(
+        publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
+    )
+    svc._get_latest_ext = Mock(return_value=_artifact_ext("draft"))
+
+    record = _make_publish_record(
+        status=PublishStatus.BUILT.value, ext=_artifact_ext("draft")
+    )
+    with pytest.raises(PublishFlowServiceError, match="publish_id"):
+        await svc._execute_verify_first_release(
+            publish_record=record, operator="op", migration_path="",
+            bot={"bot_id": "b2", "owner_id": "u1"},
+        )
+    publish_service.create_device_binding.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1169,8 +1158,10 @@ async def test_online_upgrade_stamps_release_delivered_and_persisted():
     build_service = Mock()
     build_service.upgrade_async = AsyncMock(return_value={"publish_id": 9})
     build_service.generate_request_id = Mock(return_value="rid")
+    baas_service = Mock()
+    baas_service.resolve_container_provider.return_value = "teclaw"
     svc = _pf(
-        publish_service, build_service, Mock(), Mock(), _arca_router(build_service)
+        publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
     )
     last_publish = _make_publish_record(
         id=10, status=PublishStatus.SUCCESS.value, ext={"binding": {"online": 88}}
@@ -1290,8 +1281,10 @@ async def test_online_upgrade_overlays_and_stores_stage_channels():
     build_service.upgrade_async = AsyncMock(return_value={"publish_id": 9})
     build_service.generate_request_id = Mock(return_value="rid")
     reader = _reader_returning(_ONLINE_CH)
+    baas_service = Mock()
+    baas_service.resolve_container_provider.return_value = "teclaw"
     svc = _pf(
-        publish_service, build_service, Mock(), Mock(), _arca_router(build_service),
+        publish_service, build_service, baas_service, Mock(), _arca_router(build_service),
         channel_overrides_reader=reader,
     )
     last_publish = _make_publish_record(
@@ -1355,7 +1348,7 @@ async def test_arca_path_has_no_config_artifact_and_is_not_restamped():
 
 
 def test_mark_previous_publish_superseded_warns_when_last_publish_not_found():
-    """上一版本不存在时，记录警告但不抛出异常。"""
+    """When the previous version does not exist, log a warning but do not raise."""
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -1364,20 +1357,20 @@ def test_mark_previous_publish_superseded_warns_when_last_publish_not_found():
     current_record = _make_publish_record(
         id=3,
         status=PublishStatus.SUCCESS.value,
-        last_pub_id=999,  # 不存在的上一版本
+        last_pub_id=999,  # nonexistent previous version
         version=3,
     )
 
     publish_service.get_publish_by_id.return_value = None
 
-    # 不应抛出异常
+    # Should not raise
     svc._mark_previous_publish_superseded(
         publish_record=current_record,
         stage=PublishStage.ONLINE,
         target_status=PublishStatus.SUCCESS,
     )
 
-    # 验证调用了 get_publish_by_id 但没有调用 update
+    # Verify get_publish_by_id was called but update was not
     publish_service.get_publish_by_id.assert_called_once_with(999)
     publish_service.update_publish_status_with_ext.assert_not_called()
 
@@ -1389,7 +1382,7 @@ def test_mark_previous_publish_superseded_warns_when_last_publish_not_found():
 
 @pytest.mark.asyncio
 async def test_execute_rollback_uses_fixed_device_count_one():
-    """execute_rollback 应该固定使用 device_count=1。"""
+    """execute_rollback should always use a fixed device_count=1."""
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -1402,7 +1395,7 @@ async def test_execute_rollback_uses_fixed_device_count_one():
 
     svc = _pf(publish_service, build_service, baas_service, bot_service, _arca_router(build_service))
 
-    # 当前版本 (v3, DRAFT)
+    # Current version (v3, DRAFT)
     current_record = _make_publish_record(
         id=3,
         status=PublishStatus.DRAFT.value,
@@ -1410,7 +1403,7 @@ async def test_execute_rollback_uses_fixed_device_count_one():
         source_bot_id="bot-123",
     )
 
-    # 目标版本 (v2, SUCCESS) - 有构建产物和 binding
+    # Target version (v2, SUCCESS) - has a build artifact and binding
     target_record = _make_publish_record(
         id=2,
         status=PublishStatus.SUCCESS.value,
@@ -1427,10 +1420,10 @@ async def test_execute_rollback_uses_fixed_device_count_one():
 
     publish_service.get_publish_by_id.side_effect = [target_record, current_record]
     publish_service.get_device_binding_by_id.return_value = mock_binding
-    publish_service.get_publish_by_id.return_value = target_record  # 后续调用返回 target
+    publish_service.get_publish_by_id.return_value = target_record  # subsequent calls return target
     bot_service.get_bot.return_value = {"bot_id": "bot-123", "entity_id": "e1", "entity_type": "staff"}
 
-    # 需要重新 setup get_publish_by_id 因为会被多次调用
+    # get_publish_by_id needs re-setup because it is called multiple times
     def get_publish_side_effect(pk):
         if pk == 2:
             return target_record
@@ -1440,25 +1433,25 @@ async def test_execute_rollback_uses_fixed_device_count_one():
 
     publish_service.get_publish_by_id = Mock(side_effect=get_publish_side_effect)
 
-    # 调用 execute_rollback - 由于需要让 get_latest_ext 工作，需要先设置 get_publish_by_id
+    # Call execute_rollback - get_publish_by_id must be set up first so get_latest_ext works
     result = await svc.execute_rollback(
         current_publish_id=3,
         target_publish_id=2,
         operator="user1",
     )
 
-    # 验证 upgrade_async 使用固定的 device_count
+    # Verify upgrade_async uses the fixed device_count
     upgrade_call = build_service.upgrade_async.call_args
     assert upgrade_call.kwargs["device_count"] == 1
 
-    # 验证返回值
-    assert result.publish_id == 2  # 返回 target_publish_id
+    # Verify the return value
+    assert result.publish_id == 2  # returns target_publish_id
     assert result.status == PublishStatus.ONLINE_PUB
 
 
 @pytest.mark.asyncio
 async def test_execute_rollback_missing_build_artifact():
-    """execute_rollback 缺少构建产物时应该抛出异常。"""
+    """execute_rollback should raise when the build artifact is missing."""
     from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowServiceError
 
     publish_service = Mock()
@@ -1470,13 +1463,13 @@ async def test_execute_rollback_missing_build_artifact():
 
     current_record = _make_publish_record(id=3, status=PublishStatus.DRAFT.value, owner_id="user1")
 
-    # 目标版本没有构建产物
+    # Target version has no build artifact
     target_record = _make_publish_record(
         id=2,
         status=PublishStatus.SUCCESS.value,
         ext={
             "binding": {"online": 100},
-            # 缺少 migration_path 和 config_artifact
+            # missing migration_path and config_artifact
         },
     )
 
@@ -1489,7 +1482,7 @@ async def test_execute_rollback_missing_build_artifact():
 
     publish_service.get_publish_by_id = Mock(side_effect=get_publish_side_effect)
 
-    with pytest.raises(PublishFlowServiceError, match="目标版本缺少构建产物"):
+    with pytest.raises(PublishFlowServiceError, match="Target version is missing build artifact"):
         await svc.execute_rollback(
             current_publish_id=3,
             target_publish_id=2,
@@ -1499,7 +1492,7 @@ async def test_execute_rollback_missing_build_artifact():
 
 @pytest.mark.asyncio
 async def test_execute_rollback_missing_binding():
-    """execute_rollback 缺少 binding 时应该抛出异常。"""
+    """execute_rollback should raise when the binding is missing."""
     from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowServiceError
 
     publish_service = Mock()
@@ -1511,13 +1504,13 @@ async def test_execute_rollback_missing_binding():
 
     current_record = _make_publish_record(id=3, status=PublishStatus.DRAFT.value, owner_id="user1")
 
-    # 目标版本有构建产物但没有 binding
+    # Target version has a build artifact but no binding
     target_record = _make_publish_record(
         id=2,
         status=PublishStatus.SUCCESS.value,
         ext={
             "migration_path": "/tmp/build/v2",
-            # 缺少 binding
+            # missing binding
         },
     )
 
@@ -1530,7 +1523,7 @@ async def test_execute_rollback_missing_binding():
 
     publish_service.get_publish_by_id = Mock(side_effect=get_publish_side_effect)
 
-    with pytest.raises(PublishFlowServiceError, match="目标版本缺少线上 binding"):
+    with pytest.raises(PublishFlowServiceError, match="Target version is missing online binding"):
         await svc.execute_rollback(
             current_publish_id=3,
             target_publish_id=2,
@@ -1540,7 +1533,7 @@ async def test_execute_rollback_missing_binding():
 
 @pytest.mark.asyncio
 async def test_execute_rollback_with_config_artifact():
-    """execute_rollback 使用 config_artifact（teclaw 场景）。"""
+    """execute_rollback uses config_artifact (the teclaw scenario)."""
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -1559,7 +1552,7 @@ async def test_execute_rollback_with_config_artifact():
         source_bot_id="bot-456",
     )
 
-    # 目标版本只有 config_artifact（没有 migration_path）
+    # Target version has only config_artifact (no migration_path)
     target_record = _make_publish_record(
         id=2,
         status=PublishStatus.SUCCESS.value,
@@ -1590,7 +1583,7 @@ async def test_execute_rollback_with_config_artifact():
         operator="user1",
     )
 
-    # 验证 upgrade_async 使用了 config_artifact
+    # Verify upgrade_async used config_artifact
     upgrade_call = build_service.upgrade_async.call_args
     assert upgrade_call.kwargs["config_artifact"] == "s3://bucket/artifact/v2.json"
     assert upgrade_call.kwargs["migration_path"] is None
@@ -1718,7 +1711,7 @@ def test_scale_bot_teclaw_returns_supported_message_without_baas_call():
 
     assert result == {
         "success": True,
-        "message": "teclaw引擎的服务bot不支持扩容",
+        "message": "Service bots on the teclaw engine do not support scaling",
         "publish_id": 15,
         "engine": "teclaw",
         "supported": True,
@@ -1738,7 +1731,7 @@ def test_scale_bot_invalid_status():
     svc = _pf(publish_service, build_service, baas_service, bot_service, _arca_router(build_service))
     publish_service.get_publish_by_id = Mock(return_value=_make_publish_record(id=11, status=PublishStatus.DRAFT.value))
 
-    with pytest.raises(PublishStatusInvalidError, match="不支持扩容操作"):
+    with pytest.raises(PublishStatusInvalidError, match="does not support scale operations"):
         svc.scale_bot(publish_id=11, operator="u1")
 
 
@@ -1753,7 +1746,7 @@ def test_scale_bot_missing_online_binding():
     svc = _pf(publish_service, build_service, baas_service, bot_service, _arca_router(build_service))
     publish_service.get_publish_by_id = Mock(return_value=_make_publish_record(id=12, status=PublishStatus.SUCCESS.value, ext={}))
 
-    with pytest.raises(PublishFlowServiceError, match="未找到 online 阶段的绑定信息"):
+    with pytest.raises(PublishFlowServiceError, match="Binding info for the online stage not found"):
         svc.scale_bot(publish_id=12, operator="u1")
 
 
@@ -1787,7 +1780,7 @@ def test_scale_bot_raises_when_ext_and_common_config_both_missing():
     bot_service.get_bot = Mock(return_value={"bot_id": "bot-source", "ext": {"service_bot_config": {"device_count": 0}}})
     common_config_service.get_value = Mock(return_value=None)
 
-    with pytest.raises(PublishFlowServiceError, match="未找到 service_bot_config.device_count"):
+    with pytest.raises(PublishFlowServiceError, match="service_bot_config\\.device_count not found"):
         svc.scale_bot(publish_id=14, operator="u1")
 
 
@@ -1824,7 +1817,7 @@ def test_sync_scale_progress_returns_message_when_scale_publish_id_missing(ext):
 
     assert result.publish_id == 102
     assert result.status == PublishStatus.SUCCESS
-    assert result.message == "未找到扩容发布单 ID"
+    assert result.message == "Scale publish record ID not found"
     baas_service.get_publish_progress.assert_not_called()
 
 
@@ -1849,7 +1842,7 @@ def test_sync_scale_progress_returns_error_when_baas_progress_query_fails():
 
     assert result.publish_id == 103
     assert result.status == PublishStatus.SUCCESS
-    assert result.message == "获取 BaaS 扩容发布进度失败: boom"
+    assert result.message == "Failed to get BaaS scale publish progress: boom"
     baas_service.get_publish_progress.assert_called_once_with(
         publish_id=777,
         include_devices=True,
@@ -1878,7 +1871,7 @@ def test_sync_scale_progress_returns_baas_status_and_progress_payload():
 
     assert result.publish_id == 104
     assert result.status == PublishStatus.ONLINE_PUB
-    assert result.message == "BaaS 扩容状态: APPROVING"
+    assert result.message == "BaaS scale status: APPROVING"
     assert result.data == progress
     baas_service.get_publish_progress.assert_called_once_with(
         publish_id=888,
@@ -1929,7 +1922,7 @@ def test_get_publish_bot_status_missing_binding():
         return_value=_make_publish_record(id=202, status=PublishStatus.SUCCESS.value, ext={})
     )
 
-    with pytest.raises(PublishFlowServiceError, match="未找到 online 阶段的绑定信息"):
+    with pytest.raises(PublishFlowServiceError, match="No binding found for the online stage"):
         svc.get_publish_bot_status(202, PublishStage.ONLINE)
 
 
@@ -1968,7 +1961,7 @@ def test_get_publish_bot_status_binding_record_not_found():
     )
     publish_service.get_device_binding_by_id = Mock(return_value=None)
 
-    with pytest.raises(PublishFlowServiceError, match="未找到绑定记录: binding_id=789"):
+    with pytest.raises(PublishFlowServiceError, match="Binding record not found: binding_id=789"):
         svc.get_publish_bot_status(204, PublishStage.ONLINE)
 
 
@@ -2018,12 +2011,12 @@ def test_get_publish_bot_status_binding_missing_bot_uuid():
     binding.device_id = ""
     publish_service.get_device_binding_by_id = Mock(return_value=binding)
 
-    with pytest.raises(PublishFlowServiceError, match="绑定记录缺少 bot_uuid: binding_id=790"):
+    with pytest.raises(PublishFlowServiceError, match="Binding record missing bot_uuid: binding_id=790"):
         svc.get_publish_bot_status(205, PublishStage.ONLINE)
 
 
 @pytest.mark.asyncio
-async def test_general_publish_success():
+async def test_eval_publish_success():
     publish_service = Mock()
     build_service = Mock()
     build_service.release_async = AsyncMock(
@@ -2047,7 +2040,7 @@ async def test_general_publish_success():
         ext={"migration_path": "/tmp/m301", "config_artifact": {"engine_ext": {}}},
     )
 
-    result = await svc.general_publish(301, "u1", publish_stage=PublishStage.EVAL, biz_id="biz-001")
+    result = await svc.eval_publish(301, "u1", biz_id="biz-001")
 
     assert result["success"] is True
     assert result["stage"] == "eval"
@@ -2067,7 +2060,7 @@ async def test_general_publish_success():
     )
 
 
-def test_general_teardown_success():
+def test_eval_teardown_success():
     build_service = Mock()
     build_service.generate_request_id = Mock(return_value="rid-destroy-eval")
     baas_service = Mock()
@@ -2075,7 +2068,7 @@ def test_general_teardown_success():
     svc = _pf(Mock(), build_service, baas_service, Mock(), _arca_router(build_service))
     svc._approve_baas_publish = Mock(return_value=True)
 
-    result = svc.general_teardown(
+    result = svc.eval_teardown(
         "BOT-EVAL-2",
         operator="u1",
         request_bot={"entity_id": "u1", "entity_type": "staff", "bot_id": "bot-source"},
@@ -2085,7 +2078,7 @@ def test_general_teardown_success():
         "success": True,
         "bot_uuid": "BOT-EVAL-2",
         "baas_publish_id": 902,
-        "message": "评估环境销毁已提交",
+        "message": "Eval environment teardown submitted",
     }
     baas_service.destroy_bot.assert_called_once_with(
         bot_uuid="BOT-EVAL-2",
@@ -2164,7 +2157,6 @@ def test_handle_sync_success_skips_destroy_verify_bot_for_teclaw_online_publish(
         publish_id=21,
         publish_record=publish_record,
         stage=PublishStage.ONLINE,
-        current_status=PublishStatus.ONLINE_PUB.value,
         ext=ext,
         baas_publish_id=123,
         progress=progress,
@@ -2203,7 +2195,6 @@ def test_handle_sync_success_destroys_verify_bot_for_non_teclaw_online_publish()
         publish_id=22,
         publish_record=publish_record,
         stage=PublishStage.ONLINE,
-        current_status=PublishStatus.ONLINE_PUB.value,
         ext=ext,
         baas_publish_id=123,
         progress=progress,
@@ -2239,14 +2230,13 @@ def test_handle_sync_success_verify_stage_updates_validating_and_clears_retry():
         publish_id=23,
         publish_record=publish_record,
         stage=PublishStage.VERIFY,
-        current_status=PublishStatus.VALIDATE_PUB,
         ext=ext,
         baas_publish_id=456,
         progress=progress,
     )
 
     assert result.status == PublishStatus.VALIDATING
-    assert result.message == "发布进度同步成功，状态: SUCCESS"
+    assert result.message == "Publish progress synced successfully, status: SUCCESS"
     assert result.data == progress
     assert "retry" not in ext
     publish_service.update_publish_status_with_ext.assert_called_once_with(
@@ -2294,12 +2284,11 @@ def test_handle_sync_success_online_publish_raises_when_bot_missing():
 
     from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowServiceError
 
-    with pytest.raises(PublishFlowServiceError, match="Bot不存在: bot-source"):
+    with pytest.raises(PublishFlowServiceError, match="Bot does not exist: bot-source"):
         svc._handle_sync_success(
             publish_id=24,
             publish_record=publish_record,
             stage=PublishStage.ONLINE,
-            current_status=PublishStatus.ONLINE_PUB.value,
             ext=ext,
             baas_publish_id=789,
             progress=progress,
@@ -2342,7 +2331,6 @@ def test_handle_sync_success_online_publish_logs_warning_when_destroy_verify_fai
             publish_id=25,
             publish_record=publish_record,
             stage=PublishStage.ONLINE,
-            current_status=PublishStatus.ONLINE_PUB.value,
             ext=ext,
             baas_publish_id=790,
             progress=progress,
@@ -2393,30 +2381,54 @@ _CREATE_TASK = (
 # ---- process() dispatch ----------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_process_draft_enqueues_verify_flow_and_returns_building():
+async def test_process_draft_advances_to_building_and_enqueues_verify_flow():
     record = _make_publish_record(status=PublishStatus.DRAFT.value)
     tq = Mock()
-    svc, _ = _svc_with_record(record, task_queue_service=tq)
+    svc, publish_service = _svc_with_record(record, task_queue_service=tq)
     result = await svc.process(publish_id=1, operator="op")
-    # async-submit: enqueue the durable verify_flow task, no inline advance
+    # User-driven advance: move DRAFT -> BUILDING synchronously under the lock,
+    # then enqueue the durable verify_flow task for the remainder.
+    publish_service.update_publish_status.assert_called_once_with(
+        1, PublishStatus.BUILDING.value, PublishStatus.DRAFT.value
+    )
     tq.enqueue.assert_called_once()
     assert tq.enqueue.call_args.args[0] == "service_bot.publish.verify_flow"
     assert result.status == PublishStatus.BUILDING
     assert result.action == "process"
-    assert "构建已启动" in result.message
+    assert "Build started" in result.message
 
 
 @pytest.mark.asyncio
-async def test_process_validating_enqueues_online_release_in_progress():
+async def test_process_draft_lost_race_describes_without_enqueue():
+    # A concurrent submit already advanced DRAFT -> BUILDING: the CAS raises, so
+    # this call reports progress instead of enqueuing a second build.
+    record = _make_publish_record(status=PublishStatus.DRAFT.value)
+    tq = Mock()
+    svc, publish_service = _svc_with_record(record, task_queue_service=tq)
+    publish_service.update_publish_status.side_effect = PublishNotFoundError("lost")
+    publish_service.get_publish_by_id.return_value = _make_publish_record(
+        status=PublishStatus.BUILDING.value
+    )
+    result = await svc.process(publish_id=1, operator="op")
+    tq.enqueue.assert_not_called()
+    assert result.status == PublishStatus.BUILDING
+    assert "Build in progress" in result.message
+
+
+@pytest.mark.asyncio
+async def test_process_validating_advances_to_online_pub_and_enqueues_release():
     record = _make_publish_record(status=PublishStatus.VALIDATING.value)
     tq = Mock()
-    svc, _ = _svc_with_record(record, task_queue_service=tq)
+    svc, publish_service = _svc_with_record(record, task_queue_service=tq)
     result = await svc.process(publish_id=1, operator="op")
+    publish_service.update_publish_status.assert_called_once_with(
+        1, PublishStatus.ONLINE_PUB.value, PublishStatus.VALIDATING.value
+    )
     tq.enqueue.assert_called_once()
     assert tq.enqueue.call_args.args[0] == "service_bot.publish.online_release"
-    assert result.status == PublishStatus.VALIDATING
+    assert result.status == PublishStatus.ONLINE_PUB
     assert result.bot_uuid is None  # no synchronous ids in the async-submit response
-    assert "已提交" in result.message
+    assert "submitted" in result.message
 
 
 @pytest.mark.asyncio
@@ -2433,10 +2445,10 @@ async def test_process_built_is_describe_only_no_enqueue():
 @pytest.mark.parametrize(
     "status,fragment",
     [
-        (PublishStatus.BUILDING, "构建进行中"),
-        (PublishStatus.VALIDATE_PUB, "验证环境发布进行中"),
-        (PublishStatus.ONLINE_PUB, "线上发布进行中"),
-        (PublishStatus.SUCCESS, "发布已完成"),
+        (PublishStatus.BUILDING, "Build in progress"),
+        (PublishStatus.VALIDATE_PUB, "Verify environment publish in progress"),
+        (PublishStatus.ONLINE_PUB, "Online publish in progress"),
+        (PublishStatus.SUCCESS, "Publish complete"),
     ],
 )
 async def test_process_describe_only_states_do_not_mutate(status, fragment):
@@ -2494,14 +2506,14 @@ def test_sync_publish_progress_failed_status_asks_retry():
     svc, _ = _svc_with_record(record)
     result = svc.sync_publish_progress(publish_id=1)
     assert result.status == PublishStatus.FAILED
-    assert "请重试" in result.message
+    assert "please retry" in result.message
 
 
 def test_sync_publish_progress_no_baas_publish_id_returns_guard():
     record = _make_publish_record(status=PublishStatus.VALIDATE_PUB.value, ext={})
     svc, _ = _svc_with_record(record)
     result = svc.sync_publish_progress(publish_id=1)
-    assert "未找到" in result.message
+    assert "not found" in result.message
 
 
 def test_sync_publish_progress_success_dispatches_handle_success():
@@ -2551,14 +2563,14 @@ def test_sync_restart_progress_unsupported_status_returns_guard():
     record = _make_publish_record(status=PublishStatus.BUILT.value)
     svc, _ = _svc_with_record(record)
     result = svc.sync_restart_progress(publish_id=1)
-    assert "不支持查询重启进度" in result.message
+    assert "does not support querying restart progress" in result.message
 
 
 def test_sync_restart_progress_no_handle_returns_guard():
     record = _make_publish_record(status=PublishStatus.ONLINE_PUB.value, ext={})
     svc, _ = _svc_with_record(record)
     result = svc.sync_restart_progress(publish_id=1)
-    assert "未找到" in result.message
+    assert "not found" in result.message
 
 
 def test_sync_restart_progress_success_dispatches_handle_success():
@@ -2600,7 +2612,7 @@ def test_restart_bot_unsupported_status_returns_failure():
     svc, _ = _svc_with_record(record)
     result = svc.restart_bot(publish_id=1, operator="op")
     assert result["success"] is False
-    assert "不支持重启" in result["message"]
+    assert "does not support restart operation" in result["message"]
 
 
 def test_restart_bot_missing_binding_returns_failure():
@@ -2646,16 +2658,39 @@ async def test_retry_missing_source_status_raises():
 
 
 @pytest.mark.asyncio
-async def test_retry_from_online_pub_source_calls_restart():
+async def test_retry_from_online_pub_recorded_calls_restart():
+    # Online release already recorded (ext.publish.online) → a BaaS-wait failure →
+    # retry restarts the BaaS publish.
     record = _make_publish_record(
         status=PublishStatus.FAILED.value,
-        ext={"source_status": PublishStatus.ONLINE_PUB.value},
+        ext={
+            "source_status": PublishStatus.ONLINE_PUB.value,
+            "publish": {"online": 9},
+        },
     )
     svc, _ = _svc_with_record(record)
     svc.restart_bot = Mock(return_value={"success": True})
     result = await svc.retry(publish_id=1, operator="op")
     svc.restart_bot.assert_called_once()
     assert result.action == "restart"
+
+
+@pytest.mark.asyncio
+async def test_retry_from_online_pub_not_recorded_reenqueues_online_release():
+    # Online release NOT recorded → the release work itself failed → retry re-runs
+    # the online_release task rather than restarting a bot that was never created.
+    record = _make_publish_record(
+        status=PublishStatus.FAILED.value,
+        ext={"source_status": PublishStatus.ONLINE_PUB.value},
+    )
+    tq = Mock()
+    svc, _ = _svc_with_record(record, task_queue_service=tq)
+    svc.restart_bot = Mock()
+    result = await svc.retry(publish_id=1, operator="op")
+    svc.restart_bot.assert_not_called()
+    tq.enqueue.assert_called_once()
+    assert tq.enqueue.call_args.args[0] == "service_bot.publish.online_release"
+    assert result.action == "process"
 
 
 @pytest.mark.asyncio

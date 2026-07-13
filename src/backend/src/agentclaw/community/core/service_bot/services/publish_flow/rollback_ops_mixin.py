@@ -37,18 +37,19 @@ class RollbackOpsMixin:
         target_publish_id: int,
         operator: str,
     ) -> "PublishFlowResult":
-        """执行回滚部署。
+        """Execute the rollback deployment.
 
-        使用目标版本的配置（migration_path/config_artifact/binding）重新部署到线上。
-        回滚部署在目标版本上进行，前端应同步 target_publish_id 的部署进度。
+        Re-deploys to online using the target version's configuration
+        (migration_path/config_artifact/binding). The rollback deployment is performed
+        on the target version; the frontend should track the deployment progress of target_publish_id.
 
         Args:
-            current_publish_id: 当前版本 ID（已变为 DRAFT，仅用于获取 owner_id 和 bot_id）
-            target_publish_id: 目标版本 ID（回滚目标，已变为 SUCCESS，部署在此版本上）
-            operator: 操作者
+            current_publish_id: Current version ID (already changed to DRAFT, used only to obtain owner_id and bot_id)
+            target_publish_id: Target version ID (rollback target, already changed to SUCCESS, deployed on this version)
+            operator: Operator
 
         Returns:
-            PublishFlowResult: 部署结果，publish_id 为 target_publish_id
+            PublishFlowResult: Deployment result, with publish_id being target_publish_id
         """
         from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 
@@ -58,7 +59,7 @@ class RollbackOpsMixin:
             f"operator={operator}"
         )
 
-        # 1. 获取目标版本记录
+        # 1. Get the target version record
         target_record = self._publish_service.get_publish_by_id(target_publish_id)
         if not target_record:
             raise PublishNotFoundError(f"Target publish record not found: {target_publish_id}")
@@ -67,38 +68,38 @@ class RollbackOpsMixin:
         if not current_record:
             raise PublishNotFoundError(f"Current publish record not found: {current_publish_id}")
 
-        # 2. 获取目标版本的构建产物
+        # 2. Get the target version's build artifact
         target_ext = self._get_latest_ext(target_publish_id)
         migration_path = target_ext.get("migration_path")
         config_artifact = target_ext.get("config_artifact")
 
         if not migration_path and not config_artifact:
             raise PublishFlowServiceError(
-                f"目标版本缺少构建产物: target_publish_id={target_publish_id}"
+                f"Target version is missing build artifact: target_publish_id={target_publish_id}"
             )
 
-        # 3. 从目标版本获取线上 binding
+        # 3. Get the online binding from the target version
         online_binding_id = target_ext.get("binding", {}).get(PublishStage.ONLINE.value)
         if not online_binding_id:
             raise PublishFlowServiceError(
-                f"目标版本缺少线上 binding: target_publish_id={target_publish_id}"
+                f"Target version is missing online binding: target_publish_id={target_publish_id}"
             )
 
         binding = self._publish_service.get_device_binding_by_id(online_binding_id)
         if not binding or not binding.device_id:
             raise PublishFlowServiceError(
-                f"设备绑定记录不存在或缺少 device_id: binding_id={online_binding_id}"
+                f"Device binding record not found or missing device_id: binding_id={online_binding_id}"
             )
 
         bot_uuid = binding.device_id
 
-        # 4. 获取 Bot 信息（从 current_record 获取，因为它是原始发布单）
+        # 4. Get Bot info (obtained from current_record, since it is the original publish record)
         owner_id = current_record.owner_id
         bot = self._bot_service.get_bot(bot_id=current_record.source_bot_id, user_id=owner_id)
         if not bot:
-            raise PublishFlowServiceError(f"Bot不存在: {current_record.source_bot_id}")
+            raise PublishFlowServiceError(f"Bot not found: {current_record.source_bot_id}")
 
-        # 5. 调用 BaaS upgrade 接口重新部署
+        # 5. Call the BaaS upgrade interface to re-deploy
         version = f"{target_record.version}"
         upgrade_result = await self._build_service.upgrade_async(
             bot_uuid=bot_uuid,
@@ -113,9 +114,9 @@ class RollbackOpsMixin:
 
         baas_publish_id = upgrade_result.get("publish_id")
         if not baas_publish_id:
-            raise PublishFlowServiceError("BaaS 层升级未返回 publish_id")
+            raise PublishFlowServiceError("BaaS-layer upgrade did not return publish_id")
 
-        # 6. 更新目标版本记录新的 BaaS 发布单 ID（回滚部署在目标版本上进行）
+        # 6. Update the target version record with the new BaaS publish record ID (rollback deployment is performed on the target version)
         if "publish" not in target_ext:
             target_ext["publish"] = {}
         target_ext["publish"][PublishStage.ONLINE.value] = baas_publish_id
@@ -127,7 +128,7 @@ class RollbackOpsMixin:
             ext=target_ext,
         )
 
-        # 7. 审批 BaaS 发布单
+        # 7. Approve the BaaS publish record
         request_id = self._build_service.generate_request_id(
             bot=bot,
             publish_stage="rollback",
@@ -148,7 +149,7 @@ class RollbackOpsMixin:
         return PublishFlowResult(
             publish_id=target_publish_id,
             status=PublishStatus.ONLINE_PUB,
-            message="回滚发布已提交",
+            message="Rollback publish submitted",
             action="rollback",
             target_publish_id=target_publish_id,
             bot_uuid=bot_uuid,
@@ -161,11 +162,11 @@ class RollbackOpsMixin:
         publish_record: BotPublishRecord,
         stage: PublishStage,
     ) -> None:
-        """销毁指定阶段的 bot 实例。
+        """Destroy the bot instance for the specified stage.
 
         Args:
-            publish_record: 发布单记录
-            stage: 发布阶段（VERIFY/ONLINE）
+            publish_record: Publish record
+            stage: Publish stage (VERIFY/ONLINE)
         """
         ext = publish_record.ext or {}
         binding_info = ext.get("binding", {})
@@ -179,7 +180,7 @@ class RollbackOpsMixin:
             return
 
         try:
-            # 查询 device_binding 获取 bot_uuid
+            # Query device_binding to obtain bot_uuid
             binding = self._publish_service.get_device_binding_by_id(binding_id)
             if not binding:
                 logger.warning(
@@ -201,13 +202,13 @@ class RollbackOpsMixin:
                 f"Destroying bot: bot_uuid={bot_uuid}, stage={stage.value}"
             )
 
-            # 生成 request_id（销毁场景使用特殊标识）
+            # Generate request_id (uses a special marker for the destroy scenario)
             request_id = self._build_service.generate_request_id(
                 bot={"entity_id": binding.entity_id, "entity_type": binding.entity_type, "bot_id": publish_record.source_bot_id},
                 publish_stage=f"destroy_{stage.value}",
             )
 
-            # 调用 BaaS 销毁 bot
+            # Call BaaS to destroy the bot
             destroy_result = self._baas_service.stop_bot(
                 bot_uuid=bot_uuid,
                 operator="system",
@@ -220,7 +221,7 @@ class RollbackOpsMixin:
                 f"Bot destroy initiated: bot_uuid={bot_uuid}, stage={stage.value}, destroy_publish_id={destroy_publish_id}"
             )
 
-            # 审批销毁流程单
+            # Approve the destroy workflow record
             if destroy_publish_id:
                 self._approve_baas_publish(
                     baas_publish_id=destroy_publish_id,
@@ -233,7 +234,7 @@ class RollbackOpsMixin:
                     f"Bot destroy approved: bot_uuid={bot_uuid}, stage={stage.value}, destroy_publish_id={destroy_publish_id}"
                 )
 
-            # 更新 device_binding 状态为 RELEASED
+            # Update device_binding status to RELEASED
             self._publish_service.update_device_binding_with_props(
                 binding_id=binding_id,
                 status=DeviceBindingStatus.RELEASED,

@@ -36,33 +36,34 @@ class RestartMixin:
         publish_id: int,
         operator: str = "system",
     ) -> dict:
-        """重启 Bot（异步执行）。
+        """Restart the Bot (executed asynchronously).
 
-        根据发布单状态确定当前阶段，从 binding 信息获取 bot_uuid，调用 BaaS 层 upgrade 接口重新部署。
-        该方法使用 asyncio.create_task 异步执行，不等待结果。
+        Determines the current stage from the publish record status, obtains the bot_uuid
+        from the binding info, and calls the BaaS-layer upgrade interface to re-deploy.
+        This method runs asynchronously via asyncio.create_task and does not wait for the result.
 
-        流程：
-        1. 根据 publish_id 查询发布单记录
-        2. 根据发布单状态确定当前阶段（VERIFY/ONLINE）
-        3. 从 ext 获取对应阶段的 binding_id
-        4. 根据 binding_id 查询 device_binding 记录，获取 device_id（即 bot_uuid）
-        5. 调用 BotBuildService.upgrade_async() 重新部署 Bot
+        Flow:
+        1. Query the publish record by publish_id
+        2. Determine the current stage from the publish record status (VERIFY/ONLINE)
+        3. Get the binding_id for the corresponding stage from ext
+        4. Query the device_binding record by binding_id to obtain device_id (i.e. bot_uuid)
+        5. Call BotBuildService.upgrade_async() to re-deploy the Bot
 
         Args:
-            publish_id: 发布单 ID
-            operator: 操作者，默认为 "system"
+            publish_id: Publish record ID
+            operator: Operator, defaults to "system"
 
         Returns:
-            dict: 重启结果，包含:
-                - success: 是否成功提交重启请求
-                - message: 结果消息
-                - stage: 发布阶段（成功时返回）
+            dict: Restart result, containing:
+                - success: Whether the restart request was submitted successfully
+                - message: Result message
+                - stage: Publish stage (returned on success)
         """
         logger.info(
             f"[PublishFlowService.restart_bot] called: publish_id={publish_id}, operator={operator}"
         )
 
-        # Step 1: 查询发布单记录
+        # Step 1: Query the publish record
         publish_record = self._publish_service.get_publish_by_id(publish_id)
         if not publish_record:
             logger.warning(
@@ -70,10 +71,10 @@ class RestartMixin:
             )
             return {
                 "success": False,
-                "message": f"发布单不存在: publish_id={publish_id}",
+                "message": f"Publish record not found: publish_id={publish_id}",
             }
 
-        # Step 2: 根据状态确定当前阶段
+        # Step 2: Determine the current stage from the status
         current_status = PublishStatus(publish_record.status)
         stage = self._determine_restart_stage(current_status)
         if not stage:
@@ -83,11 +84,11 @@ class RestartMixin:
             )
             return {
                 "success": False,
-                "message": f"当前状态 {current_status} 不支持重启操作",
+                "message": f"Current status {current_status} does not support restart operation",
                 "status": current_status,
             }
 
-        # Step 3: 重置当前阶段的BaaS重启发布单
+        # Step 3: Reset the BaaS restart publish record for the current stage
         ext = self._get_latest_ext(publish_id)
         if "restart" in ext and stage.value in ext.get("restart", {}):
             try:
@@ -100,7 +101,7 @@ class RestartMixin:
                     else:
                         latest_ext.pop("restart", None)
 
-                ext = self._merge_and_update_ext(
+                ext = self._mutate_and_update_ext(
                     publish_id=publish_id,
                     mutator=_mutate,
                 )
@@ -111,7 +112,7 @@ class RestartMixin:
                 )
                 ext = self._get_latest_ext(publish_id)
 
-        # Step 4: 从 ext 获取对应阶段的 binding_id
+        # Step 4: Get the binding_id for the corresponding stage from ext
         binding_info = ext.get("binding", {})
         binding_id = binding_info.get(stage.value)
 
@@ -122,11 +123,11 @@ class RestartMixin:
             )
             return {
                 "success": False,
-                "message": f"未找到 {stage.value} 阶段的绑定信息",
+                "message": f"No binding info found for stage {stage.value}",
                 "stage": stage.value,
             }
 
-        # Step 5: 根据 binding_id 查询 device_binding 记录
+        # Step 5: Query the device_binding record by binding_id
         binding = self._publish_service.get_device_binding_by_id(binding_id)
         if not binding:
             logger.warning(
@@ -134,7 +135,7 @@ class RestartMixin:
             )
             return {
                 "success": False,
-                "message": f"设备绑定记录不存在: binding_id={binding_id}",
+                "message": f"Device binding record not found: binding_id={binding_id}",
             }
 
         bot_uuid = binding.device_id
@@ -144,7 +145,7 @@ class RestartMixin:
             )
             return {
                 "success": False,
-                "message": f"设备绑定记录中没有 device_id: binding_id={binding_id}",
+                "message": f"Device binding record has no device_id: binding_id={binding_id}",
             }
 
         bot_service = self._bot_service
@@ -155,7 +156,7 @@ class RestartMixin:
             )
             return {
                 "success": False,
-                "message": f"Bot不存在: {publish_record.source_bot_id}",
+                "message": f"Bot not found: {publish_record.source_bot_id}",
             }
 
         migration_path = ext.get("migration_path")
@@ -166,10 +167,10 @@ class RestartMixin:
             )
             return {
                 "success": False,
-                "message": f"发布单缺少构建产物: publish_id={publish_id}",
+                "message": f"Publish record is missing build artifact: publish_id={publish_id}",
             }
 
-        # Step 6: 异步执行重启
+        # Step 6: Execute the restart asynchronously
         asyncio.create_task(
             self._restart_bot_async(
                 publish_id=publish_id,
@@ -191,7 +192,7 @@ class RestartMixin:
 
         return {
             "success": True,
-            "message": f"重启任务已提交，阶段: {stage.value}",
+            "message": f"Restart task submitted, stage: {stage.value}",
             "stage": stage.value,
             "bot_uuid": bot_uuid,
         }
@@ -207,16 +208,16 @@ class RestartMixin:
         stage: PublishStage,
         operator: str,
     ) -> None:
-        """异步执行 Bot 重启（通过 upgrade 接口重新部署）。
+        """Execute the Bot restart asynchronously (re-deploy via the upgrade interface).
 
         Args:
-            publish_id: 发布单 ID
-            publish_record: 发布单记录
-            migration_path: Bot 实例迁移后的目录路径
+            publish_id: Publish record ID
+            publish_record: Publish record
+            migration_path: Directory path after the Bot instance migration
             bot_uuid: Bot UUID
-            bot: Bot 信息字典
-            stage: 发布阶段
-            operator: 操作者
+            bot: Bot info dictionary
+            stage: Publish stage
+            operator: Operator
         """
         logger.info(
             f"[PublishFlowService._restart_bot_async] Starting restart: "
@@ -225,7 +226,7 @@ class RestartMixin:
         )
 
         try:
-            # 生成 request_id（用于后续审批 BaaS 发布单）
+            # Generate request_id (used for the later BaaS publish record approval)
             request_id = self._build_service.generate_request_id(
                 bot=bot,
                 publish_stage=f"restart_{stage.value}",
@@ -276,7 +277,7 @@ class RestartMixin:
 
             restart_publish_id = restart_result.get("publish_id")
             if not restart_publish_id:
-                raise PublishFlowServiceError("BaaS 层重启未返回 publish_id")
+                raise PublishFlowServiceError("BaaS-layer restart did not return publish_id")
 
             # Refresh the reused binding's teclaw status read handle to the
             # restart's publish workflow (no-op for non-teclaw; best-effort).
@@ -290,14 +291,14 @@ class RestartMixin:
                 f"publish_id={publish_id}, restart_publish_id={restart_publish_id}"
             )
 
-            # 将 restart_publish_id 存入 ext: {"restart": {"<stage>": restart_publish_id}}
+            # Store restart_publish_id into ext: {"restart": {"<stage>": restart_publish_id}}
             try:
                 def _mutate(ext: dict) -> None:
                     if "restart" not in ext:
                         ext["restart"] = {}
                     ext["restart"][stage.value] = restart_publish_id
 
-                self._merge_and_update_ext(
+                self._mutate_and_update_ext(
                     publish_id=publish_id,
                     mutator=_mutate,
                 )
@@ -313,7 +314,7 @@ class RestartMixin:
                     f"error={save_error}"
                 )
 
-            # 审批 BaaS 层重启发布单
+            # Approve the BaaS-layer restart publish record
             self._approve_baas_publish(
                 baas_publish_id=restart_publish_id,
                 operator=operator,

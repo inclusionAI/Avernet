@@ -9,7 +9,7 @@ from __future__ import annotations
 
 
 class PublishFlowServiceError(Exception):
-    """发布流程服务错误."""
+    """Publish-flow service error."""
 
     pass
 

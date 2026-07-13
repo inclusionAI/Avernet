@@ -1,6 +1,6 @@
-"""Bot 发布流程处理服务。
+"""Bot publish flow processing service.
 
-根据发布单状态推进发布流程的不同阶段。
+Advances the different stages of the publish flow based on the publish record status.
 """
 
 from __future__ import annotations
@@ -60,8 +60,17 @@ from agentclaw.community.core.service_bot.services.publish_flow.rollback_ops_mix
 from agentclaw.community.core.service_bot.services.publish_flow.baas_publish_ops_mixin import (
     BaasPublishOpsMixin,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.device_binding_mixin import (
+    DeviceBindingMixin,
+)
+from agentclaw.community.core.service_bot.services.publish_flow.publish_ext_mixin import (
+    PublishExtMixin,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.eval_publish_mixin import (
     EvalPublishMixin,
+)
+from agentclaw.community.core.service_bot.services.publish_flow.upgrade_resolution_mixin import (
+    UpgradeResolutionMixin,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.release_stage import (
     ONLINE_SPEC,
@@ -95,6 +104,18 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
+# Describe-only messages for the non-user-driven statuses that ``process()`` just
+# reports back (no side effects). DRAFT and VALIDATING are handled separately —
+# they are the only user-driven advance points. FAILED is special-cased (it needs
+# the ext error message) and any status absent here is an invalid/unknown state.
+_DESCRIBE_STATUS_MESSAGES = {
+    PublishStatus.BUILT: "Build complete, publish in progress, please check progress later",
+    PublishStatus.BUILDING: "Build in progress, please wait",
+    PublishStatus.VALIDATE_PUB: "Verify environment publish in progress, please wait",
+    PublishStatus.ONLINE_PUB: "Online publish in progress, please wait",
+    PublishStatus.SUCCESS: "Publish complete",
+}
+
 
 class PublishFlowService(
     ProgressSyncMixin,
@@ -103,20 +124,23 @@ class PublishFlowService(
     StageStatusMixin,
     RollbackOpsMixin,
     BaasPublishOpsMixin,
+    DeviceBindingMixin,
+    PublishExtMixin,
     EvalPublishMixin,
+    UpgradeResolutionMixin,
 ):
-    """Bot 发布流程处理服务.
+    """Bot publish flow processing service.
 
-    职责：
-    - 根据发布单状态判断当前阶段
-    - 协调 BotBuildService 和 BotPublishService 完成发布流程
-    - 管理状态流转
+    Responsibilities:
+    - Determine the current stage based on the publish record status
+    - Coordinate BotBuildService and BotPublishService to complete the publish flow
+    - Manage status transitions
 
-    状态流转：
-    - DRAFT -> BUILDING -> BUILT (构建阶段)
-    - BUILT -> VALIDATE_PUB -> VALIDATING (验证环境发布阶段)
-    - VALIDATING -> ONLINE_PUB -> SUCCESS (线上发布阶段)
-    - 任意状态 -> FAILED (失败)
+    Status transitions:
+    - DRAFT -> BUILDING -> BUILT (build stage)
+    - BUILT -> VALIDATE_PUB -> VALIDATING (verify environment publish stage)
+    - VALIDATING -> ONLINE_PUB -> SUCCESS (online publish stage)
+    - Any status -> FAILED (failure)
     """
 
     @inject
@@ -136,17 +160,17 @@ class PublishFlowService(
         channel_overrides_reader: "ChannelEngineOverridesReader",
         task_queue_service: TaskQueueService,
     ):
-        """初始化流程处理服务.
+        """Initialize the flow processing service.
 
         Args:
-            bot_publish_service: 发布单管理服务
-            bot_build_service: Bot 构建服务
-            baas_service: BaaS 层 API 服务
-            bot_service: Bot 管理服务（用于构建/发布阶段获取 bot 信息）
-            producer_router: 按 ``device_provider`` 选择 build 产物生产者的路由。
-                由 DI 根装配（`service_bot_module`）——当前仅含 ARCA（arca/baas →
-                既有 ``build()``，行为等价），external/teclaw 生产者随 ConfigComposer
-                collector 的 DI 落地后注册（Group C/D 后续）。
+            bot_publish_service: Publish record management service
+            bot_build_service: Bot build service
+            baas_service: BaaS layer API service
+            bot_service: Bot management service (used to fetch bot info during the build/publish stages)
+            producer_router: Router that selects the build artifact producer by ``device_provider``.
+                Assembled by the DI root (`service_bot_module`) — currently only includes ARCA (arca/baas →
+                existing ``build()``, behaviorally equivalent); external/teclaw producers are registered once the
+                ConfigComposer collector's DI lands (Group C/D follow-up).
         """
         self._publish_service = bot_publish_service
         self._build_service = bot_build_service
@@ -220,12 +244,6 @@ class PublishFlowService(
     ) -> dict | None:
         return PublishExtState.artifact_for_stage(config_artifact, stage, overrides)
 
-    @staticmethod
-    def _store_stage_overrides(
-        ext: dict, stage: PublishStage, overrides: dict | None
-    ) -> None:
-        PublishExtState.store_stage_overrides(ext, stage, overrides)
-
     def _refresh_publish_handle(self, binding_id, publish_id) -> None:
         """Refresh the baas ``publish_id`` stashed in a reused binding's
         ``device_props`` — the teclaw status read handle. Merge-preserving and
@@ -251,30 +269,32 @@ class PublishFlowService(
         publish_id: int,
         operator: str,
     ) -> PublishFlowResult:
-        """推进发布流程.
+        """Advance the publish flow.
 
-        根据发布单当前状态执行对应的阶段逻辑：
-        - DRAFT: 执行完整验证环境发布流程 (_execute_full_verify_flow: 构建 + 发布)
-        - BUILT: 执行验证环境发布阶段 (_execute_verify_release_phase)
-        - VALIDATING: 执行线上发布阶段 (_execute_release_phase)
-        - BUILDING: 返回构建进行中
-        - VALIDATE_PUB: 返回验证发布进行中
-        - ONLINE_PUB: 返回线上发布进行中
-        - SUCCESS: 返回发布完成
-        - FAILED: 返回失败信息
+        Only two statuses are user-driven advance points; both move the status
+        forward synchronously under the optimistic lock (so a concurrent
+        double-submit loses the CAS) and then enqueue the durable task that owns
+        the remainder:
+        - DRAFT: advance DRAFT → BUILDING, enqueue verify_flow (build + verify release)
+        - VALIDATING: advance VALIDATING → ONLINE_PUB, enqueue online_release
+
+        Every other status is a side-effect-free status report (the task chain
+        drives it forward on its own): BUILDING / BUILT / VALIDATE_PUB / ONLINE_PUB
+        / SUCCESS return an "in progress" (or "complete") message, and FAILED
+        returns the recorded error.
 
         Args:
-            publish_id: 发布单 ID
-            operator: 操作者 ID
+            publish_id: Publish record ID
+            operator: Operator ID
 
         Returns:
-            PublishFlowResult: 发布结果
+            PublishFlowResult: Publish result
         """
         logger.info(
             f"[PublishFlowService.process] called: publish_id={publish_id}, operator={operator}"
         )
 
-        # Step 1: 查询发布单
+        # Step 1: Query the publish record
         publish_record = self._publish_service.get_publish_by_id(publish_id)
         if not publish_record:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
@@ -283,87 +303,104 @@ class PublishFlowService(
 
         logger.info(f"[PublishFlowService] Current status: {current_status}")
 
-        # Step 2: 根据状态分派。两个用户驱动的推进点（DRAFT 起构建、VALIDATING 上线
-        # 闸门）改为投递持久化任务后立即返回“进行中”（uniform async-submit）；其余状态
-        # 为只读查询（describe-only），不产生副作用。
+        # Step 2: The two user-driven advance points move the status forward
+        # synchronously under the optimistic lock *before* enqueuing the durable
+        # task, so a concurrent double-submit loses the CAS (only the winner
+        # advances and enqueues — no double build / double online release). The
+        # infra task then owns only the remainder: the verify_flow task drives
+        # BUILDING -> BUILT -> VALIDATE_PUB; the online_release task drives the
+        # release within ONLINE_PUB and the poll drives ONLINE_PUB -> SUCCESS.
+        # Every other status is a side-effect-free status query.
         if current_status == PublishStatus.DRAFT:
-            # 投递 verify_flow 任务（构建 + 验证发布），由 worker 持久驱动至 VALIDATE_PUB。
+            if not self._advance_status(
+                publish_id, PublishStatus.BUILDING, PublishStatus.DRAFT
+            ):
+                # Lost the race to a concurrent submit → report current progress.
+                return self._describe_current_status(publish_id)
             enqueue_verify_flow(
                 self._task_queue_service, publish_id=publish_id, operator=operator
             )
             return PublishFlowResult(
                 publish_id=publish_id,
                 status=PublishStatus.BUILDING,
-                message="构建已启动，请稍后查询进度",
+                message="Build started, please check progress later",
                 action="process",
             )
 
-        elif current_status == PublishStatus.VALIDATING:
-            # 上线闸门：仅用户 /process 会投递 online_release 任务。
+        if current_status == PublishStatus.VALIDATING:
+            # Online gate: only the user's /process opens ONLINE_PUB.
+            if not self._advance_status(
+                publish_id, PublishStatus.ONLINE_PUB, PublishStatus.VALIDATING
+            ):
+                return self._describe_current_status(publish_id)
             enqueue_online_release(
                 self._task_queue_service, publish_id=publish_id, operator=operator
             )
             return PublishFlowResult(
                 publish_id=publish_id,
-                status=current_status,
-                message="上线发布已提交，请稍后查询进度",
+                status=PublishStatus.ONLINE_PUB,
+                message="Online publish submitted, please check progress later",
                 action="process",
             )
 
-        elif current_status == PublishStatus.BUILT:
-            # 不再是用户推进点：verify_flow 任务链自动承接 BUILT → VALIDATE_PUB。
+        # Not a user advance point → describe-only (the task chain drives these).
+        return self._describe_publish_status(publish_record, current_status)
+
+    def _advance_status(
+        self,
+        publish_id: int,
+        target_status: PublishStatus,
+        source_status: PublishStatus,
+    ) -> bool:
+        """Atomically advance a publish record's status under the optimistic lock.
+
+        Status-only (no ext write). Returns ``True`` if this call won the
+        transition (the record was still at ``source_status``); ``False`` if it
+        lost — a concurrent submit already moved it (the double-submit guard)."""
+        try:
+            self._publish_service.update_publish_status(
+                publish_id, target_status.value, source_status.value
+            )
+            return True
+        except PublishNotFoundError:
+            return False
+
+    def _describe_current_status(self, publish_id: int) -> PublishFlowResult:
+        """Re-read the record and describe its (now concurrently-advanced) status."""
+        publish_record = self._publish_service.get_publish_by_id(publish_id)
+        if not publish_record:
+            raise PublishNotFoundError(f"Publish order not found: {publish_id}")
+        return self._describe_publish_status(
+            publish_record, PublishStatus(publish_record.status)
+        )
+
+    def _describe_publish_status(
+        self,
+        publish_record: BotPublishRecord,
+        current_status: PublishStatus,
+    ) -> PublishFlowResult:
+        """Report a publish record's current status without side effects.
+
+        Used by ``process()`` for every status that is not a user-driven advance
+        point (the durable task chain drives those forward on its own)."""
+        if current_status == PublishStatus.FAILED:
+            error_message = (publish_record.ext or {}).get("error_message")
             return PublishFlowResult(
-                publish_id=publish_id,
+                publish_id=publish_record.id,
                 status=current_status,
-                message="构建完成，发布进行中，请稍后查询进度",
+                message=f"Publish failed: {error_message or 'Unknown error'}",
                 action="process",
             )
 
-        elif current_status == PublishStatus.BUILDING:
-            return PublishFlowResult(
-                publish_id=publish_id,
-                status=current_status,
-                message="构建进行中，请等待",
-                action="process",
-            )
-
-        elif current_status == PublishStatus.VALIDATE_PUB:
-            return PublishFlowResult(
-                publish_id=publish_id,
-                status=current_status,
-                message="验证环境发布进行中，请等待",
-                action="process",
-            )
-
-        elif current_status == PublishStatus.ONLINE_PUB:
-            return PublishFlowResult(
-                publish_id=publish_id,
-                status=current_status,
-                message="线上发布进行中，请等待",
-                action="process",
-            )
-
-        elif current_status == PublishStatus.SUCCESS:
-            return PublishFlowResult(
-                publish_id=publish_id,
-                status=current_status,
-                message="发布已完成",
-                action="process",
-            )
-
-        elif current_status == PublishStatus.FAILED:
-            error_message = None
-            if publish_record.ext:
-                error_message = publish_record.ext.get("error_message")
-            return PublishFlowResult(
-                publish_id=publish_id,
-                status=current_status,
-                message=f"发布失败: {error_message or '未知错误'}",
-                action="process",
-            )
-
-        else:
+        message = _DESCRIBE_STATUS_MESSAGES.get(current_status)
+        if message is None:
             raise PublishStatusInvalidError(f"Unknown publish status: {current_status}")
+        return PublishFlowResult(
+            publish_id=publish_record.id,
+            status=current_status,
+            message=message,
+            action="process",
+        )
 
     def _provider_behavior(self, bot: dict):
         """The :class:`ProviderBehavior` for ``bot``'s container, resolved via the
@@ -372,38 +409,44 @@ class PublishFlowService(
             self._baas_service.resolve_container_provider(bot)
         )
 
-    async def _execute_build_phase(
+    # ── phase entry points for the durable task handlers ─────────────────────
+    # Public: the task handlers (publish_flow/tasks.py) are an external consumer
+    # (queue-adapter layer, own lifecycle) — these three phase methods ARE the
+    # facade's contract for them. The finer-grained helpers each phase dispatches
+    # to (_execute_verify_upgrade / _execute_first_release / …) stay private:
+    # nothing outside this class calls them.
+    async def execute_build_phase(
         self,
         publish_record: BotPublishRecord,
         operator: str,
     ) -> PublishFlowResult:
-        """执行构建阶段（DRAFT → BUILDING → BUILT）。委托给 BuildStageRunner。"""
+        """Run the build stage (BUILDING → BUILT). Delegates to BuildStageRunner."""
         return await self._build_stage_runner.build(publish_record, operator)
 
-    async def _execute_verify_release_phase(
+    async def execute_verify_release_phase(
         self,
         publish_record: BotPublishRecord,
         operator: str,
     ) -> PublishFlowResult:
-        """执行验证环境发布阶段。
+        """Run the verify environment publish stage.
 
-        根据验证环境是否已有 Bot 判断走升级还是首次发布：
-        - 已有 Bot（ext.binding.verify 存在且 binding 记录有效）：调用 _execute_verify_upgrade
-        - 无已有 Bot：调用 _execute_verify_first_release
+        Chooses upgrade vs. first release based on whether the verify environment already has a Bot:
+        - Existing Bot (ext.binding.verify present and the binding record is valid): call _execute_verify_upgrade
+        - No existing Bot: call _execute_verify_first_release
 
         Args:
-            publish_record: 发布单
-            operator: 操作者
+            publish_record: Publish record
+            operator: Operator
 
         Returns:
-            PublishFlowResult: 发布结果
+            PublishFlowResult: Publish result
         """
         publish_id = publish_record.id
         bot_id = publish_record.source_bot_id
         owner_id = self._get_owner_id(publish_record)
 
-        # 从扩展字段获取构建产物。ARCA = migration_path（挂载）；teclaw = 冻结的
-        # config_artifact（非挂载投递）。二者皆无 → 尚未构建。
+        # Fetch the build artifact from the ext field. ARCA = migration_path (mounted); teclaw = frozen
+        # config_artifact (non-mounted delivery). Neither present → not yet built.
         migration_path = None
         config_artifact = None
         if publish_record.ext:
@@ -411,8 +454,8 @@ class PublishFlowService(
             config_artifact = publish_record.ext.get("config_artifact")
 
         if not migration_path and not config_artifact:
-            error_msg = "构建产物路径不存在，请先执行构建"
-            logger.error(f"[PublishFlowService._execute_verify_release_phase] publish_id={publish_id}, {error_msg}")
+            error_msg = "Build artifact path does not exist, please run the build first"
+            logger.error(f"[PublishFlowService.execute_verify_release_phase] publish_id={publish_id}, {error_msg}")
             ext = self._get_latest_ext(publish_id)
             self._clear_retry_flag(ext)
             ext["error_message"] = error_msg
@@ -431,19 +474,19 @@ class PublishFlowService(
 
         try:
             logger.info(
-                f"[PublishFlowService._execute_verify_release_phase] "
+                f"[PublishFlowService.execute_verify_release_phase] "
                 f"Starting release to verify environment: publish_id={publish_id}, "
                 f"bot_id={bot_id}, operator={operator}, owner_id={owner_id}"
             )
 
-            # 获取 Bot 信息
+            # Fetch Bot info
             bot = self._bot_service.get_bot(bot_id=bot_id, user_id=owner_id)
             if not bot:
-                raise PublishFlowServiceError(f"Bot不存在: {bot_id}")
+                raise PublishFlowServiceError(f"Bot does not exist: {bot_id}")
 
             ext = self._get_latest_ext(publish_id)
 
-            # ========== 判断验证环境是否已有 Bot ==========
+            # ========== Determine whether the verify environment already has a Bot ==========
             verify_binding_id, bot_uuid = self._resolve_verify_binding(
                 publish_record=publish_record,
                 ext=ext,
@@ -468,9 +511,9 @@ class PublishFlowService(
                 )
 
         except Exception as e:
-            logger.error(f"[PublishFlowService._execute_verify_release_phase] Release failed: {e}")
+            logger.error(f"[PublishFlowService.execute_verify_release_phase] Release failed: {e}")
 
-            # 发布失败，更新状态和错误信息
+            # Publish failed; update the status and error info
             ext = self._get_latest_ext(publish_id)
             self._clear_retry_flag(ext)
             ext["error_message"] = str(e)
@@ -485,84 +528,9 @@ class PublishFlowService(
             return PublishFlowResult(
                 publish_id=publish_id,
                 status=PublishStatus.FAILED,
-                message=f"发布到验证环境失败: {str(e)}",
+                message=f"Publish to verify environment failed: {str(e)}",
                 action="process",
             )
-
-    def _resolve_verify_binding(
-        self,
-        publish_record: BotPublishRecord,
-        ext: dict,
-    ) -> tuple[int | None, str | None]:
-        """解析验证环境的 binding 信息，判断是否需要走升级路径。
-
-        按优先级查找验证环境已有的 Bot binding：
-        1. 当前发布单的 ext.binding.verify
-        2. 上一个发布单（last_pub_id）的 ext.binding.verify
-
-        Args:
-            publish_record: 当前发布单
-            ext: 当前发布单的扩展字段
-
-        Returns:
-            tuple[int | None, str | None]: (verify_binding_id, bot_uuid)
-                - 如果找到有效 binding，返回 (binding_id, bot_uuid)
-                - 如果未找到，返回 (None, None)，表示需要走首次发布
-        """
-        publish_id = publish_record.id
-
-        # 优先级1：当前发布单的 ext.binding.verify
-        current_verify_binding_id = ext.get("binding", {}).get(PublishStage.VERIFY.value)
-        if current_verify_binding_id:
-            binding = self._publish_service.get_device_binding_by_id(current_verify_binding_id)
-            if binding and binding.device_id:
-                logger.info(
-                    f"[PublishFlowService._resolve_verify_binding] "
-                    f"Verify Bot exists in current record: publish_id={publish_id}, "
-                    f"bot_uuid={binding.device_id}, binding_id={current_verify_binding_id}"
-                )
-                return current_verify_binding_id, binding.device_id
-
-        # 优先级2：从上一个发布单的 ext.binding.verify 获取（升级发布场景）
-        if not publish_record.last_pub_id or publish_record.last_pub_id <= 0:
-            logger.info(
-                f"[PublishFlowService._resolve_verify_binding] "
-                f"No verify binding found, will do first release: publish_id={publish_id}"
-            )
-            return None, None
-
-        last_publish = self._publish_service.get_publish_by_id(publish_record.last_pub_id)
-        if not last_publish:
-            logger.info(
-                f"[PublishFlowService._resolve_verify_binding] "
-                f"No verify binding found, will do first release: publish_id={publish_id}"
-            )
-            return None, None
-
-        last_ext = last_publish.ext or {}
-        last_verify_binding_id = last_ext.get("binding", {}).get(PublishStage.VERIFY.value)
-        if not last_verify_binding_id:
-            logger.info(
-                f"[PublishFlowService._resolve_verify_binding] "
-                f"No verify binding found, will do first release: publish_id={publish_id}"
-            )
-            return None, None
-
-        binding = self._publish_service.get_device_binding_by_id(last_verify_binding_id)
-        if not binding or not binding.device_id:
-            logger.info(
-                f"[PublishFlowService._resolve_verify_binding] "
-                f"No verify binding found, will do first release: publish_id={publish_id}"
-            )
-            return None, None
-
-        logger.info(
-            f"[PublishFlowService._resolve_verify_binding] "
-            f"Verify Bot exists in last record (last_pub_id={publish_record.last_pub_id}): "
-            f"publish_id={publish_id}, bot_uuid={binding.device_id}, "
-            f"binding_id={last_verify_binding_id}"
-        )
-        return last_verify_binding_id, binding.device_id
 
     async def _execute_verify_first_release(
             self,
@@ -571,7 +539,7 @@ class PublishFlowService(
             migration_path: str,
             bot: dict,
     ) -> PublishFlowResult:
-        """执行验证环境首次发布（创建新 Bot）。委托给统一的 ReleaseStageRunner。"""
+        """Run the verify environment first release (create a new Bot). Delegates to the unified ReleaseStageRunner."""
         return await self._release_runner.first_release(
             VERIFY_SPEC, publish_record, operator, migration_path, bot
         )
@@ -585,7 +553,7 @@ class PublishFlowService(
             bot_uuid: str,
             verify_binding_id: int,
     ) -> PublishFlowResult:
-        """执行验证环境升级发布（复用已有 Bot）。委托给统一的 ReleaseStageRunner。"""
+        """Run the verify environment upgrade release (reuse an existing Bot). Delegates to the unified ReleaseStageRunner."""
         return await self._release_runner.upgrade_release(
             VERIFY_SPEC,
             publish_record,
@@ -597,30 +565,30 @@ class PublishFlowService(
             fallback=self._execute_verify_first_release,
         )
 
-    async def _execute_release_phase(
+    async def execute_release_phase(
         self,
         publish_record: BotPublishRecord,
         operator: str,
     ) -> PublishFlowResult:
-        """执行发布阶段.
+        """Run the publish stage.
 
-        根据 last_pub_id 判断是首次发布还是升级发布：
-        - 首次发布：调用 BotBuildService.release_async() 创建新 Bot
-        - 升级发布：调用 BotBuildService.upgrade_async() 更新现有 Bot
+        Determines first release vs. upgrade release based on last_pub_id:
+        - First release: call BotBuildService.release_async() to create a new Bot
+        - Upgrade release: call BotBuildService.upgrade_async() to update the existing Bot
 
         Args:
-            publish_record: 发布单
-            operator: 操作者
+            publish_record: Publish record
+            operator: Operator
 
         Returns:
-            PublishFlowResult: 发布结果
+            PublishFlowResult: Publish result
         """
         publish_id = publish_record.id
         bot_id = publish_record.source_bot_id
         owner_id = self._get_owner_id(publish_record)
 
-        # 从扩展字段获取构建产物。ARCA = migration_path（挂载）；teclaw = 冻结的
-        # config_artifact（非挂载投递）。二者皆无 → 尚未构建。
+        # Fetch the build artifact from the ext field. ARCA = migration_path (mounted); teclaw = frozen
+        # config_artifact (non-mounted delivery). Neither present → not yet built.
         migration_path = None
         config_artifact = None
         if publish_record.ext:
@@ -628,16 +596,18 @@ class PublishFlowService(
             config_artifact = publish_record.ext.get("config_artifact")
 
         if not migration_path and not config_artifact:
-            error_msg = "构建产物路径不存在，请先执行构建"
+            error_msg = "Build artifact path does not exist, please run the build first"
             logger.error(f"[PublishFlowService]{publish_id}, publish_record={publish_record},  {error_msg}")
             ext = self._get_latest_ext(publish_id)
             self._clear_retry_flag(ext)
             ext["error_message"] = error_msg
-            ext["source_status"] = PublishStatus.VALIDATING.value
+            # The online release runs within ONLINE_PUB (process owns the
+            # VALIDATING -> ONLINE_PUB advance), so failures roll back to ONLINE_PUB.
+            ext["source_status"] = PublishStatus.ONLINE_PUB.value
             self._update_publish_status(
                 publish_id=publish_id,
                 target_status=PublishStatus.FAILED,
-                source_status=PublishStatus.VALIDATING,
+                source_status=PublishStatus.ONLINE_PUB,
                 ext=ext,
             )
             return PublishFlowResult(
@@ -652,14 +622,14 @@ class PublishFlowService(
                 f"publish_id={publish_id}, bot_id={bot_id}, operator={operator}, owner_id={owner_id}"
             )
 
-            # 获取 Bot 信息
+            # Fetch Bot info
             bot = self._bot_service.get_bot(bot_id=bot_id, user_id=owner_id)
             if not bot:
-                raise PublishFlowServiceError(f"Bot不存在: {bot_id}")
+                raise PublishFlowServiceError(f"Bot does not exist: {bot_id}")
 
-            # ========== 核心逻辑：判断是否升级场景 ==========
+            # ========== Core logic: determine whether this is an upgrade scenario ==========
             if self._should_upgrade_online(publish_record):
-                # 升级发布：复用现有 Bot
+                # Upgrade release: reuse the existing Bot
                 return await self._execute_upgrade_release(
                     publish_record=publish_record,
                     operator=operator,
@@ -667,7 +637,7 @@ class PublishFlowService(
                     bot=bot,
                 )
             else:
-                # 首次发布：创建新 Bot
+                # First release: create a new Bot
                 return await self._execute_first_release(
                     publish_record=publish_record,
                     operator=operator,
@@ -678,71 +648,25 @@ class PublishFlowService(
         except Exception as e:
             logger.error(f"[PublishFlowService] Release failed: {e}")
 
-            # 发布失败，更新状态和错误信息
+            # Publish failed; update the status and error info
             ext = self._get_latest_ext(publish_id)
             self._clear_retry_flag(ext)
             ext["error_message"] = str(e)
-            ext["source_status"] = PublishStatus.VALIDATING.value
+            # Roll back to ONLINE_PUB (the state the release runs within).
+            ext["source_status"] = PublishStatus.ONLINE_PUB.value
             self._update_publish_status(
                 publish_id=publish_id,
                 target_status=PublishStatus.FAILED,
-                source_status=PublishStatus.VALIDATING,
+                source_status=PublishStatus.ONLINE_PUB,
                 ext=ext,
             )
 
             return PublishFlowResult(
                 publish_id=publish_id,
                 status=PublishStatus.FAILED,
-                message=f"发布失败: {str(e)}",
+                message=f"Publish failed: {str(e)}",
                 action="process",
             )
-
-    def _should_upgrade_online(self, publish_record: BotPublishRecord) -> bool:
-        """判断线上发布阶段是否应走升级发布。
-
-        升级场景需要同时满足：
-        1. 当前发布单存在有效的 last_pub_id
-        2. 上一个发布单存在
-        3. 上一个发布单状态为 released（即 PublishStatus.SUCCESS）
-
-        否则统一按首次发布处理，创建新的线上 Bot。
-        """
-        last_pub_id = publish_record.last_pub_id
-        if not last_pub_id or last_pub_id <= 0:
-            return False
-
-        last_publish = self._publish_service.get_publish_by_id(last_pub_id)
-        if not last_publish:
-            logger.warning(
-                f"[PublishFlowService._should_upgrade_online] "
-                f"Last publish record not found, fallback to first release: last_pub_id={last_pub_id}"
-            )
-            return False
-
-        try:
-            last_status = PublishStatus(last_publish.status)
-        except ValueError:
-            logger.warning(
-                f"[PublishFlowService._should_upgrade_online] "
-                f"Invalid last publish status, fallback to first release: "
-                f"last_pub_id={last_pub_id}, status={last_publish.status}"
-            )
-            return False
-
-        if last_status != PublishStatus.SUCCESS and last_status != PublishStatus.RELEASED:
-            logger.info(
-                f"[PublishFlowService._should_upgrade_online] "
-                f"Last publish is not released, fallback to first release: "
-                f"last_pub_id={last_pub_id}, status={last_status}"
-            )
-            return False
-
-        baas_status_result = self.get_publish_bot_status(last_pub_id, PublishStage.ONLINE)
-        baas_status = baas_status_result.get("baas_bot_status")
-        if baas_status == "RELEASED":
-            return False
-
-        return True
 
     async def _execute_first_release(
             self,
@@ -751,7 +675,7 @@ class PublishFlowService(
             migration_path: str,
             bot: dict,
     ) -> PublishFlowResult:
-        """执行线上首次发布（创建新 Bot）。委托给统一的 ReleaseStageRunner。"""
+        """Run the online first release (create a new Bot). Delegates to the unified ReleaseStageRunner."""
         return await self._release_runner.first_release(
             ONLINE_SPEC, publish_record, operator, migration_path, bot
         )
@@ -763,34 +687,34 @@ class PublishFlowService(
             migration_path: str,
             bot: dict,
     ) -> PublishFlowResult:
-        """执行线上升级发布（复用现有 BaaS Bot）。
+        """Run the online upgrade release (reuse the existing BaaS Bot).
 
-        先从 last_pub_id 解析线上 binding / bot_uuid（线上专有），再委托给统一的
-        ReleaseStageRunner.upgrade_release。
+        First resolves the online binding / bot_uuid (online-specific) from last_pub_id, then delegates to the
+        unified ReleaseStageRunner.upgrade_release.
         """
         publish_id = publish_record.id
         last_pub_id = publish_record.last_pub_id
 
-        # 解析上一个发布单的线上 binding → bot_uuid（复用现有 Bot，不新建记录）。
+        # Resolve the previous publish record's online binding → bot_uuid (reuse the existing Bot, no new record).
         last_publish = self._publish_service.get_publish_by_id(last_pub_id)
         if not last_publish:
-            raise PublishFlowServiceError(f"上一个发布单不存在: last_pub_id={last_pub_id}")
+            raise PublishFlowServiceError(f"Previous publish record does not exist: last_pub_id={last_pub_id}")
 
         last_binding_info = (last_publish.ext or {}).get("binding", {})
         online_binding_id = last_binding_info.get(PublishStage.ONLINE.value)
         if not online_binding_id:
             raise PublishFlowServiceError(
-                f"上一个发布单没有线上环境的绑定信息: last_pub_id={last_pub_id}"
+                f"Previous publish record has no online environment binding info: last_pub_id={last_pub_id}"
             )
 
         binding = self._publish_service.get_device_binding_by_id(online_binding_id)
         if not binding:
-            raise PublishFlowServiceError(f"设备绑定记录不存在: binding_id={online_binding_id}")
+            raise PublishFlowServiceError(f"Device binding record does not exist: binding_id={online_binding_id}")
 
         bot_uuid = binding.device_id
         if not bot_uuid:
             raise PublishFlowServiceError(
-                f"设备绑定记录中没有 device_id: binding_id={online_binding_id}"
+                f"Device binding record has no device_id: binding_id={online_binding_id}"
             )
 
         logger.info(
@@ -815,54 +739,59 @@ class PublishFlowService(
         publish_id: int,
         operator: str,
     ) -> PublishFlowResult:
-        """重试失败的发布流程。
+        """Retry a failed publish flow.
 
-        根据失败前的状态（ext.source_status）回退到对应状态，并重新推进流程：
-        - building → 回退到 DRAFT，重新构建+验证发布
-        - built → 回退到 BUILT，重新验证发布
-        - validate_pub → 回退到 VALIDATE_PUB，调用 BaaS 重启重试
-        - validating → 回退到 VALIDATING，重新执行线上发布
-        - online_pub → 回退到 ONLINE_PUB，调用 BaaS 重启重试
+        Based on the pre-failure status (ext.source_status), roll back to the corresponding status and
+        re-advance the flow:
+        - building → roll back to BUILDING, rebuild + verify publish
+        - built → roll back to BUILT, re-run verify publish
+        - validate_pub → roll back to VALIDATE_PUB, call BaaS restart to retry
+        - online_pub → roll back to ONLINE_PUB; if the online release was already
+          recorded (BaaS-wait failure) call BaaS restart, otherwise re-run the
+          online release work via the online_release task
 
         Args:
-            publish_id: 发布单 ID
-            operator: 操作者
+            publish_id: Publish record ID
+            operator: Operator
 
         Returns:
-            PublishFlowResult: 重试结果
+            PublishFlowResult: Retry result
 
         Raises:
-            PublishNotFoundError: 发布单不存在
-            PublishFlowServiceError: 状态不支持重试或回退失败
+            PublishNotFoundError: Publish record does not exist
+            PublishFlowServiceError: Status does not support retry or rollback failed
         """
         logger.info(
             f"[PublishFlowService.retry] called: publish_id={publish_id}, operator={operator}"
         )
 
-        # Step 1: 查询发布单
+        # Step 1: Query the publish record
         publish_record = self._publish_service.get_publish_by_id(publish_id)
         if not publish_record:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
 
         current_status = PublishStatus(publish_record.status)
 
-        # Step 2: 校验状态为 FAILED
+        # Step 2: Verify the status is FAILED
         if current_status != PublishStatus.FAILED:
             raise PublishFlowServiceError(
-                f"当前状态 {current_status} 不支持重试，仅 FAILED 状态可重试"
+                f"Current status {current_status} does not support retry; only FAILED status can be retried"
             )
 
-        # Step 3: 从 ext 获取失败前状态
+        # Step 3: Get the pre-failure status from ext
         ext = self._get_latest_ext(publish_id)
         source_status = ext.get("source_status")
         if not source_status:
             raise PublishFlowServiceError(
-                f"发布单缺少失败前状态信息(source_status)，无法重试: publish_id={publish_id}"
+                f"Publish record is missing pre-failure status info (source_status); cannot retry: publish_id={publish_id}"
             )
 
-        # Step 4: 根据 source_status 确定回退目标状态和重试动作
+        # Step 4: Determine the rollback target status and retry action based on
+        # source_status. A build failure rolls back to BUILDING (not DRAFT): the
+        # user-driven DRAFT -> BUILDING advance already happened, and the verify_flow
+        # task rebuilds from BUILDING.
         retry_map = {
-            PublishStatus.BUILDING.value: PublishStatus.DRAFT,
+            PublishStatus.BUILDING.value: PublishStatus.BUILDING,
             PublishStatus.BUILT.value: PublishStatus.BUILT,
             PublishStatus.VALIDATE_PUB.value: PublishStatus.VALIDATE_PUB,
             PublishStatus.VALIDATING.value: PublishStatus.VALIDATING,
@@ -873,21 +802,21 @@ class PublishFlowService(
         rollback_status = retry_map.get(source_status)
         if not rollback_status:
             raise PublishFlowServiceError(
-                f"不支持的重试场景: source_status={source_status}, publish_id={publish_id}"
+                f"Unsupported retry scenario: source_status={source_status}, publish_id={publish_id}"
             )
 
-        # Step 5: 回退状态（FAILED -> rollback_status） 并设置重试标记
+        # Step 5: Roll back the status (FAILED -> rollback_status) and set the retry flag
         ext["retry"] = True
         try:
             self._publish_service.update_publish_status_with_ext(
-                publish_id = publish_id,
-                target_status=rollback_status,
-                ext = ext,
-                source_status=PublishStatus.FAILED,
+                publish_id=publish_id,
+                target_status=rollback_status.value,
+                ext=ext,
+                source_status=PublishStatus.FAILED.value,
             )
         except Exception as e:
             raise PublishFlowServiceError(
-                f"状态回退失败: {rollback_status.value}, error={e}"
+                f"Status rollback failed: {rollback_status.value}, error={e}"
             )
 
         logger.info(
@@ -895,17 +824,31 @@ class PublishFlowService(
             f"publish_id={publish_id}, FAILED -> {rollback_status.value}"
         )
 
-        # Step 6: 执行重试动作。直接投递对应任务（不再走 process()，因为 /process 对
-        # BUILT 已是只读；BUILT 重试必须重新驱动 verify_flow）。
-        if rollback_status in (PublishStatus.VALIDATE_PUB, PublishStatus.ONLINE_PUB, PublishStatus.SUCCESS):
-            # BaaS 发布失败，调用 restart_bot 重试
+        # Step 6: Execute the retry action. Directly enqueue the corresponding task
+        # (no longer via process(), because /process is already read-only for BUILT;
+        # a BUILT retry must re-drive verify_flow).
+        #
+        # A BaaS-level restart applies when the release already reached the BaaS
+        # layer and *it* failed: the *_PUB wait states, SUCCESS, and an ONLINE_PUB
+        # whose online release was already recorded (poll failure). An ONLINE_PUB
+        # whose release was never recorded means the release *work* itself failed,
+        # so re-run it via the online_release task instead.
+        restart = rollback_status in (
+            PublishStatus.VALIDATE_PUB,
+            PublishStatus.SUCCESS,
+        ) or (
+            rollback_status == PublishStatus.ONLINE_PUB
+            and self.is_online_release_recorded(publish_id)
+        )
+        if restart:
+            # BaaS publish failed; call restart_bot to retry
             restart_result = self.restart_bot(
                 publish_id=publish_id,
                 operator=operator,
             )
             success = restart_result.get("success", False)
             if not success:
-                self._merge_and_update_ext(
+                self._mutate_and_update_ext(
                     publish_id=publish_id,
                     mutator=self._clear_retry_flag,
                 )
@@ -913,15 +856,20 @@ class PublishFlowService(
                 publish_id=publish_id,
                 status=rollback_status,
                 action="restart",
-                message="重试已提交（BaaS 重启）" if success else f"重试失败: {restart_result.get('message', '未知错误')}",
+                message="Retry submitted (BaaS restart)" if success else f"Retry failed: {restart_result.get('message', 'Unknown error')}",
             )
-        elif rollback_status == PublishStatus.VALIDATING:
-            # 线上发布失败重试：重新投递 online_release 任务。
+        elif rollback_status in (PublishStatus.VALIDATING, PublishStatus.ONLINE_PUB):
+            # Online release retry: re-open ONLINE_PUB (idempotent if already there)
+            # and re-enqueue the online_release task, which re-runs the release work.
+            self._advance_status(
+                publish_id, PublishStatus.ONLINE_PUB, PublishStatus.VALIDATING
+            )
             enqueue_online_release(
                 self._task_queue_service, publish_id=publish_id, operator=operator
             )
         else:
-            # DRAFT / BUILT：重新投递 verify_flow 任务（BUILT 时构建子步会被跳过）。
+            # BUILDING / BUILT: re-enqueue the verify_flow task (the build sub-step
+            # is skipped when already BUILT).
             enqueue_verify_flow(
                 self._task_queue_service, publish_id=publish_id, operator=operator
             )
@@ -929,12 +877,8 @@ class PublishFlowService(
             publish_id=publish_id,
             status=rollback_status,
             action="process",
-            message="重试已提交，请稍后查询进度",
+            message="Retry submitted, please check progress later",
         )
-
-    @staticmethod
-    def _restamp_ext_artifact(ext: dict, stage: PublishStage) -> None:
-        PublishExtState.stamp_stage_on_stored_artifact(ext, stage)
 
     def _get_owner_id(self, publish_record: BotPublishRecord) -> str:
         return self._ext_state.owner_id(publish_record)
@@ -946,19 +890,40 @@ class PublishFlowService(
     def _get_latest_ext(self, publish_id: int) -> dict:
         return self._ext_state.get_latest_ext(publish_id)
 
-    def _merge_and_update_ext(
+    def _mutate_and_update_ext(
         self,
         publish_id: int,
         mutator: Callable[[dict], None],
     ) -> dict:
-        return self._ext_state.merge_and_update_ext(publish_id, mutator)
+        return self._ext_state.mutate_and_update_ext(publish_id, mutator)
 
     def _update_publish_status(
         self,
         publish_id: int,
         target_status: PublishStatus,
         source_status: PublishStatus,
-        ext: dict | None = None,
+        ext: dict,
     ) -> None:
         self._ext_state.update_status(publish_id, target_status, source_status, ext)
+
+    # ── public accessors for the durable task handlers ───────────────────────
+    # The task handlers (publish_flow/tasks.py) orchestrate this facade; expose the
+    # publish-record reads/writes they need as public methods so they don't reach
+    # into the private ``_publish_service`` collaborator.
+    def get_publish_record(self, publish_id: int) -> BotPublishRecord | None:
+        """Fetch a publish record by id (``None`` if absent)."""
+        return self._publish_service.get_publish_by_id(publish_id)
+
+    def is_online_release_recorded(self, publish_id: int) -> bool:
+        """True once this record's online BaaS publish is recorded in ext.
+
+        The online release runs *within* ONLINE_PUB (``process`` owns the
+        VALIDATING → ONLINE_PUB advance), so the live status alone can't tell a
+        not-yet-run release from a completed one. The presence of
+        ``ext.publish.online`` is the idempotency marker: a re-run of the
+        online_release task (crash-resume) skips a second BaaS create, and retry
+        uses it to choose BaaS-restart vs. re-running the release work."""
+        record = self.get_publish_record(publish_id)
+        ext = (record.ext or {}) if record else {}
+        return bool(ext.get("publish", {}).get(PublishStage.ONLINE.value))
 

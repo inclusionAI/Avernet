@@ -12,6 +12,7 @@ import pytest
 from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion import (
     PromotedRefs,
 )
+from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
@@ -73,12 +74,47 @@ async def test_default_behavior_members():
     assert default.refresh_after_upgrade(bot_uuid="BOT-x", bot={}) is None
 
 
+def test_default_persist_stage_promotion_is_noop():
+    # ARCA/baas keep no frozen artifact snapshot → ext is left untouched even when
+    # a config_artifact + overrides are present.
+    default = DefaultProviderBehavior()
+    ext = {"config_artifact": {"engine_ext": {"stage": "draft"}}}
+    default.persist_stage_promotion(
+        ext=ext, stage=PublishStage.VERIFY, engine_overrides={"channels": {}}
+    )
+    assert ext["config_artifact"]["engine_ext"]["stage"] == "draft"  # not restamped
+    assert "engine_overrides_by_stage" not in ext  # not stored
+
+
 # ── teclaw behavior: the provider-specific steps ────────────────────────────
 
 def test_teclaw_behavior_flags():
     teclaw = _teclaw_behavior()
     assert teclaw.supports_scale is False
     assert teclaw.destroys_verify_bot_on_online is False
+
+
+def test_teclaw_persist_stage_promotion_stamps_and_stores():
+    # teclaw stamps the promoted stage into the stored config_artifact snapshot and
+    # stores this stage's channel overrides for restart/redeliver reproduction.
+    teclaw = _teclaw_behavior()
+    channels = {"channels": {"dingding": {"enabled": True}}}
+    ext = {"config_artifact": {"engine_ext": {"stage": "draft"}}}
+    teclaw.persist_stage_promotion(
+        ext=ext, stage=PublishStage.ONLINE, engine_overrides=channels
+    )
+    assert ext["config_artifact"]["engine_ext"]["stage"] == "release"
+    assert ext["engine_overrides_by_stage"]["online"] == channels
+
+
+def test_teclaw_persist_stage_promotion_noops_missing_pieces():
+    # No config_artifact → nothing to stamp; None overrides → nothing to store.
+    teclaw = _teclaw_behavior()
+    ext: dict = {}
+    teclaw.persist_stage_promotion(
+        ext=ext, stage=PublishStage.VERIFY, engine_overrides=None
+    )
+    assert ext == {}
 
 
 def test_teclaw_refresh_after_upgrade_calls_build_service():

@@ -32,30 +32,30 @@ class StageStatusMixin:
     """Stage-from-status helpers + previous-publish supersede, mixed in."""
 
     def _determine_restart_stage(self, current_status: PublishStatus) -> PublishStage | None:
-        """根据当前状态确定重启阶段。
+        """Determine the restart stage based on the current status.
 
         Args:
-            current_status: 当前发布单状态
+            current_status: Current publish record status
 
         Returns:
-            发布阶段（VERIFY/ONLINE），如果不支持重启则返回 None
+            Publish stage (VERIFY/ONLINE), or None if restart is not supported
         """
-        # VALIDATING / VALIDATE_PUB: 验证环境，重启验证环境的 bot
+        # VALIDATING / VALIDATE_PUB: verify environment, restart the bot in the verify environment
         if current_status in (PublishStatus.VALIDATING, PublishStatus.VALIDATE_PUB):
             return PublishStage.VERIFY
-        # SUCCESS / ONLINE_PUB: 线上环境，重启线上的 bot
+        # SUCCESS / ONLINE_PUB: online environment, restart the online bot
         elif current_status in (PublishStatus.SUCCESS, PublishStatus.ONLINE_PUB):
             return PublishStage.ONLINE
         return None
 
     def _determine_sync_stage(self, current_status: PublishStatus) -> PublishStage | None:
-        """根据当前状态确定同步阶段。
+        """Determine the sync stage based on the current status.
 
         Args:
-            current_status: 当前发布单状态
+            current_status: Current publish record status
 
         Returns:
-            发布阶段（VERIFY/ONLINE），如果不支持同步则返回 None
+            Publish stage (VERIFY/ONLINE), or None if sync is not supported
         """
         if current_status == PublishStatus.VALIDATE_PUB:
             return PublishStage.VERIFY
@@ -69,14 +69,14 @@ class StageStatusMixin:
         stage: PublishStage,
         target_status: PublishStatus,
     ) -> None:
-        """更新上一个发布单状态为 UPGRADED（仅当 online 阶段成功时）。
+        """Update the previous publish record status to UPGRADED (only when the online stage succeeds).
 
         Args:
-            publish_record: 当前发布单记录
-            stage: 发布阶段（VERIFY/ONLINE）
-            target_status: 目标状态
+            publish_record: Current publish record
+            stage: Publish stage (VERIFY/ONLINE)
+            target_status: Target status
         """
-        # 只有 online 阶段成功时才需要更新上一个发布单
+        # Only update the previous publish record when the online stage succeeds
         if stage != PublishStage.ONLINE or target_status != PublishStatus.SUCCESS:
             return
 
@@ -84,7 +84,7 @@ class StageStatusMixin:
         if not last_pub_id or last_pub_id <= 0:
             return
 
-        # 查询上一个发布单记录
+        # Query the previous publish record
         last_publish = self._publish_service.get_publish_by_id(last_pub_id)
         if not last_publish:
             logger.warning(
@@ -93,7 +93,7 @@ class StageStatusMixin:
             )
             return
 
-        # 清除 rollback_restored_from 标记（如果存在）
+        # Clear the rollback_restored_from marker (if present)
         last_ext = last_publish.ext or {}
         if last_ext.pop("rollback_restored_from", None):
             logger.info(
@@ -101,7 +101,7 @@ class StageStatusMixin:
                 f"Clearing rollback_restored_from for publish {last_pub_id}"
             )
 
-        # 更新上一个发布单状态为 UPGRADED，同时更新 ext
+        # Update the previous publish record status to UPGRADED, and update ext at the same time
         try:
             self._publish_service.update_publish_status_with_ext(
                 publish_id=last_pub_id,

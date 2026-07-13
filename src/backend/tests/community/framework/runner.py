@@ -226,12 +226,14 @@ async def _drain_publish_stage_task(world: World) -> None:
     """Run the enqueued durable publish *stage* task (verify_flow / online_release)
     once, reproducing what the old inline ``/process`` did synchronously.
 
-    Since the durability refactor, ``/process`` enqueues a persisted task instead
-    of running the stage inline; the test worker is disabled, so nothing would run
-    it. One ``run_once()`` claims and runs that single stage task (which advances
-    DRAFT→VALIDATE_PUB or VALIDATING→ONLINE_PUB and enqueues a progress poll — the
-    poll is left un-run, matching the old inline end state). Best-effort: silently
-    skips when the task-queue graph isn't wired for this app.
+    Since the durability refactor, ``/process`` advances the status forward
+    synchronously (DRAFT→BUILDING, VALIDATING→ONLINE_PUB) and enqueues a persisted
+    task instead of running the stage inline; the test worker is disabled, so
+    nothing would run it. One ``run_once()`` claims and runs that single stage task
+    (which drives BUILDING→VALIDATE_PUB or runs the online release within ONLINE_PUB
+    and enqueues a progress poll — the poll is left un-run, matching the old inline
+    end state). Best-effort: silently skips when the task-queue graph isn't wired
+    for this app.
     """
     try:
         from agentclaw.community.core.service_bot.services.publish_flow.tasks import (

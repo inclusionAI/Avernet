@@ -14,22 +14,44 @@ scale is supported, and whether the verify bot is destroyed on online success.
 """
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
+)
+from agentclaw.community.core.service_bot.services.publish_flow.ext_state import (
+    PublishExtState,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
+if TYPE_CHECKING:
+    from agentclaw.community.core.service_bot.services.bot_build_service import (
+        BotBuildService,
+    )
+    from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion import (
+        TeclawFilePromotion,
+    )
+    from agentclaw.community.core.devices.services.device_context_resolver import (
+        DeviceContextResolver,
+    )
+    from agentclaw.community.di.modules.skill_center_module import (
+        DeviceFilesystemDispatcher,
+    )
+
 logger = get_logger()
 
 
-@runtime_checkable
-class ProviderBehavior(Protocol):
-    """Deploy-time steps that vary by container provider."""
+class ProviderBehavior(ABC):
+    """Deploy-time steps that vary by container provider.
 
+    Concrete providers (:class:`DefaultProviderBehavior`, :class:`TeclawProviderBehavior`)
+    inherit explicitly and implement every abstract member.
+    """
+
+    @abstractmethod
     async def stage_build_files(
         self, *, artifact: Any, bot: dict, bot_id: str, owner_id: str, publish_id: int
     ) -> None:
@@ -37,23 +59,36 @@ class ProviderBehavior(Protocol):
         (teclaw); a no-op for providers whose files already mirror to storage."""
         ...
 
+    @abstractmethod
     def refresh_after_upgrade(self, *, bot_uuid: str, bot: dict) -> None:
         """Re-establish anything a rebuild-less upgrade does not (teclaw MCP
         outbound rule); a no-op for providers that refresh via a startup callback."""
         ...
 
+    @abstractmethod
+    def persist_stage_promotion(
+        self, *, ext: dict, stage: PublishStage, engine_overrides: dict | None
+    ) -> None:
+        """Persist this provider's per-stage promotion state into the record's
+        ``ext`` when a release for ``stage`` is recorded (teclaw stamps the frozen
+        artifact snapshot + stores the stage's channel overrides so a restart
+        reproduces them); a no-op for providers that carry no such snapshot."""
+        ...
+
     @property
+    @abstractmethod
     def supports_scale(self) -> bool:
         """Whether this provider's service bots support scale."""
         ...
 
     @property
+    @abstractmethod
     def destroys_verify_bot_on_online(self) -> bool:
         """Whether the verify-stage BaaS bot is torn down after online success."""
         ...
 
 
-class DefaultProviderBehavior:
+class DefaultProviderBehavior(ProviderBehavior):
     """ARCA / baas container behavior — the historical default (no teclaw steps).
 
     Files already mirror to storage (no snapshot needed), an ARCA upgrade rebuilds
@@ -69,6 +104,13 @@ class DefaultProviderBehavior:
     def refresh_after_upgrade(self, *, bot_uuid: str, bot: dict) -> None:
         return None
 
+    def persist_stage_promotion(
+        self, *, ext: dict, stage: PublishStage, engine_overrides: dict | None
+    ) -> None:
+        # ARCA/baas keep no frozen artifact snapshot and route per-stage channels
+        # out of band → nothing to persist here.
+        return None
+
     @property
     def supports_scale(self) -> bool:
         return True
@@ -78,7 +120,7 @@ class DefaultProviderBehavior:
         return True
 
 
-class TeclawProviderBehavior:
+class TeclawProviderBehavior(ProviderBehavior):
     """Pull-based teclaw container behavior.
 
     The running source container owns its live files (no ``ac_file`` mirror), so a
@@ -91,10 +133,10 @@ class TeclawProviderBehavior:
     def __init__(
         self,
         *,
-        build_service,
-        resolver,
-        device_fs_dispatcher,
-        teclaw_file_promotion,
+        build_service: "BotBuildService",
+        resolver: "DeviceContextResolver",
+        device_fs_dispatcher: "DeviceFilesystemDispatcher",
+        teclaw_file_promotion: "TeclawFilePromotion",
     ) -> None:
         self._build_service = build_service
         self._resolver = resolver
@@ -133,6 +175,16 @@ class TeclawProviderBehavior:
 
     def refresh_after_upgrade(self, *, bot_uuid: str, bot: dict) -> None:
         self._build_service.refresh_teclaw_mcp_outbound_rule(bot_uuid=bot_uuid, bot=bot)
+
+    def persist_stage_promotion(
+        self, *, ext: dict, stage: PublishStage, engine_overrides: dict | None
+    ) -> None:
+        # Stamp the promoted stage into the stored config_artifact snapshot and
+        # store this stage's channel overrides next to the binding/publish refs, so
+        # a restart/redeliver reproduces the promoted channels. Both no-op when the
+        # respective key is absent.
+        PublishExtState.stamp_stage_on_stored_artifact(ext, stage)
+        PublishExtState.store_stage_overrides(ext, stage, engine_overrides)
 
     @property
     def supports_scale(self) -> bool:
