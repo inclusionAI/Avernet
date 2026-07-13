@@ -11,6 +11,7 @@
 
 import WebSocket from 'ws';
 import * as fs from 'node:fs';
+import type { IncomingMessage } from 'node:http';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import type {
@@ -253,8 +254,14 @@ export class BcsWsClient {
         reject(err);
       }
 
-      function handleUnexpectedResponse(_req: unknown, res: any) {
+      function handleUnexpectedResponse(_req: unknown, res: IncomingMessage) {
         let body = '';
+        res.once('error', (err: Error) => {
+          log?.error?.(`Error reading unexpected BCS response body: ${err.message}`);
+          failInitialConnection(
+            new Error(`Failed to read unexpected BCS response: ${err.message}`),
+          );
+        });
         res.on('data', (chunk: Buffer) => (body += chunk));
         res.on('end', () => {
           log?.error?.(

@@ -634,6 +634,12 @@ describe('openclaw-channel-bcn', () => {
               runId,
               stream: 'lifecycle',
               ts: 2,
+              data: null,
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'lifecycle',
+              ts: 3,
               data: { phase: 'end' },
             });
             await new Promise<void>(resolve => {

@@ -259,8 +259,9 @@ function ensureVisibleReplyState(runId: string): VisibleReplyState {
   return state;
 }
 
-function stringField(record: Record<string, unknown>, key: string): string | undefined {
-  const value = record[key];
+function stringField(record: unknown, key: string): string | undefined {
+  if (!record || typeof record !== 'object') return undefined;
+  const value = (record as Record<string, unknown>)[key];
   return typeof value === 'string' ? value : undefined;
 }
 

@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { once } from 'node:events';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
-import type { AddressInfo } from 'node:net';
+import { createServer, type AddressInfo, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocketServer } from 'ws';
@@ -62,6 +62,42 @@ async function startBcsStub(responseBotUuid?: string) {
       }
     },
     async close() {
+      await new Promise<void>((resolve, reject) => {
+        server.close(err => (err ? reject(err) : resolve()));
+      });
+    },
+  };
+}
+
+async function startBrokenHttpResponseStub() {
+  const sockets = new Set<Socket>();
+  const server = createServer(socket => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    socket.once('data', () => {
+      socket.write(
+        'HTTP/1.1 502 Bad Gateway\r\n' +
+          'Content-Type: text/plain\r\n' +
+          'Content-Length: 100\r\n' +
+          'Connection: close\r\n\r\n' +
+          'partial body',
+        () => socket.destroy(),
+      );
+    });
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+
+  const address = server.address() as AddressInfo | null;
+  assert.equal(typeof address, 'object');
+  assert.ok(address);
+
+  return {
+    port: address.port,
+    async close() {
+      for (const socket of sockets) {
+        socket.destroy();
+      }
       await new Promise<void>((resolve, reject) => {
         server.close(err => (err ? reject(err) : resolve()));
       });
@@ -319,6 +355,52 @@ describe('BcsWsClient security behavior', () => {
       () => client.connect(null),
       /Invalid BCS WebSocket URL/,
     );
+  });
+
+  it('rejects when an unexpected HTTP response stream errors', async () => {
+    const bcs = await startBrokenHttpResponseStub();
+    const dataDir = await mkdtemp(join(tmpdir(), 'bcn-broken-http-response-'));
+    const logs: string[] = [];
+    const account: ResolvedBcsAccount = {
+      accountId: 'default',
+      enabled: true,
+      bcsUrl: `ws://127.0.0.1:${bcs.port}/ws/bot`,
+      botId: 'bot-1',
+      botName: 'Bot 1',
+      capabilities: {
+        summary: 'test bot',
+        domains: [],
+        skills: [],
+        scopes: [],
+      },
+      heartbeatIntervalMs: 60_000,
+      reconnectIntervalMs: 5_000,
+      connectionTimeoutMs: 1_000,
+    };
+    const client = new BcsWsClient({
+      account,
+      dataDir,
+      log: {
+        info: () => undefined,
+        warn: () => undefined,
+        error: (...args: unknown[]) => logs.push(args.join(' ')),
+      },
+    });
+
+    try {
+      await assert.rejects(
+        () => client.connect(null),
+        /Failed to read unexpected BCS response/,
+      );
+      assert.equal(
+        logs.some(line => line.includes('Error reading unexpected BCS response body')),
+        true,
+      );
+    } finally {
+      await client.disconnect();
+      await bcs.close();
+      await rm(dataDir, { recursive: true, force: true });
+    }
   });
 
   it('saves session files with owner-only permissions', async () => {
