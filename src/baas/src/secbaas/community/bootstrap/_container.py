@@ -130,6 +130,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         distributed_lock_repository=repository.distributed_lock_repository,
         cache_plugin=plugins.cache_plugin,
         ws_relay_session_repo=repository.ws_relay_session_repository,
+        ticket_repository=repository.ticket_repository,
     )
 
     tasks = providers.Container(
