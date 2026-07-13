@@ -29,6 +29,7 @@ from agentclaw.community.core.bot_dormant.protocols import (
 from agentclaw.community.core.bot_dormant.scan_policy import DormantScanPolicyService
 from agentclaw.community.core.bot_dormant.service import DormantBotService
 from agentclaw.community.core.bot_dormant.whitelist_service import WhitelistService
+from agentclaw.community.core.common_config import CommonWhiteListService
 from agentclaw.community.di.config import (
     DormantConfig,
     DormantInternalToken,
@@ -110,6 +111,7 @@ class BotDormantModule(Module):
         bot_service: _DormantBotServiceProtocol,
         passport_plugin: PassportPlugin,
         scan_policy: DormantScanPolicyService,
+        common_whitelist_service: CommonWhiteListService,
         config: DormantConfig,
         notify_config: DormantNotifyConfig,
     ) -> DormantBotService:
@@ -124,6 +126,7 @@ class BotDormantModule(Module):
             bot_service=bot_service,
             passport_plugin=passport_plugin,
             scan_policy=scan_policy,
+            common_whitelist_service=common_whitelist_service,
             dry_run=config.dry_run,
             action_link_pattern=notify_config.action_link_pattern,
         )

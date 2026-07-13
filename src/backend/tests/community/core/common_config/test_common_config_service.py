@@ -125,6 +125,62 @@ def test_common_config_service_serializes_value_and_hides_disabled_by_default():
     ) == ["10001", "10002"]
 
 
+@pytest.mark.parametrize("param_value", [None, "null"], ids=["sql_null", "json_null"])
+def test_common_config_service_preserves_enabled_top_level_null(param_value):
+    repo = FakeCommonConfigRepository()
+    service = CommonConfigService(repo)
+    sentinel = object()
+
+    service.create_config(
+        business_code="bot_dormant",
+        business_name="沉寂 bot",
+        param_code="protected_owner_ids",
+        param_name="受保护 owner",
+        param_value=param_value,
+        enable="1",
+        env="prod",
+    )
+
+    assert service.get_value(
+        business_code="bot_dormant",
+        param_code="protected_owner_ids",
+        env="prod",
+        default=sentinel,
+    ) is None
+
+
+def test_common_config_service_returns_default_for_missing_and_disabled_config():
+    repo = FakeCommonConfigRepository()
+    service = CommonConfigService(repo)
+    missing_sentinel = object()
+    disabled_sentinel = object()
+
+    assert service.get_value(
+        business_code="bot_dormant",
+        param_code="protected_owner_ids",
+        env="prod",
+        default=missing_sentinel,
+    ) is missing_sentinel
+
+    config_id = service.create_config(
+        business_code="bot_dormant",
+        business_name="沉寂 bot",
+        param_code="protected_owner_ids",
+        param_name="受保护 owner",
+        param_value=["100001"],
+        enable="1",
+        env="prod",
+    )
+    service.disable_config(config_id=config_id)
+
+    assert service.get_value(
+        business_code="bot_dormant",
+        param_code="protected_owner_ids",
+        env="prod",
+        default=disabled_sentinel,
+    ) is disabled_sentinel
+
+
 def test_common_config_service_lists_with_pagination_and_delete_by_key():
     repo = FakeCommonConfigRepository()
     service = CommonConfigService(repo)

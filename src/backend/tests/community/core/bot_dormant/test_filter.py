@@ -14,7 +14,11 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.bot_dormant.candidates import Candidate, filter_candidates
+from agentclaw.community.core.bot_dormant.candidates import (
+    Candidate,
+    filter_candidates,
+    partition_by_protected_owner,
+)
 from agentclaw.community.core.bot_dormant.sqlite_models import DormantWhitelist
 from agentclaw.community.plugin_api.models import Base, BotModel
 
@@ -28,6 +32,33 @@ def _make_session():
 
 def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+@pytest.mark.unit
+def test_partition_by_protected_owner_splits_candidates_in_one_pass():
+    created_at = _now() - timedelta(days=60)
+    protected_candidate = Candidate(
+        bot_id="protected",
+        entity_id="111",
+        owner_id="owner1",
+        bot_name="Protected",
+        gmt_create=created_at,
+    )
+    normal_candidate = Candidate(
+        bot_id="normal",
+        entity_id="222",
+        owner_id="owner2",
+        bot_name="Normal",
+        gmt_create=created_at,
+    )
+
+    protected, unprotected = partition_by_protected_owner(
+        [protected_candidate, normal_candidate],
+        frozenset({"owner1"}),
+    )
+
+    assert protected == [protected_candidate]
+    assert unprotected == [normal_candidate]
 
 
 @pytest.mark.integration

@@ -7,7 +7,9 @@ import pytest
 from agentclaw.community.core.bot_dormant.scan_policy import (
     DormantScanPolicyService,
     positive_int_or_default,
+    resolve_scan_window,
 )
+from agentclaw.community.core.common_config import CommonWhiteListService
 from agentclaw.community.core.bot_dormant.service import DormantBotService
 
 
@@ -159,6 +161,7 @@ def test_dormant_bot_service_reads_dry_run_from_scan_policy():
         bot_service=MagicMock(),
         passport_plugin=MagicMock(),
         scan_policy=scan_policy,
+        common_whitelist_service=MagicMock(spec=CommonWhiteListService),
     )
 
     assert service.is_dry_run() is False
@@ -166,22 +169,40 @@ def test_dormant_bot_service_reads_dry_run_from_scan_policy():
 
 
 @pytest.mark.unit
-def test_dormant_bot_service_refreshes_scan_window_from_policy():
+def test_resolve_scan_window_uses_policy_values():
     scan_policy = MagicMock()
     scan_policy.get_policy.return_value.inactive_threshold_days = 11
     scan_policy.get_policy.return_value.recycle_grace_days = 4
-    service = DormantBotService(
-        db=MagicMock(),
-        baas_client=MagicMock(),
-        bot_service=MagicMock(),
-        passport_plugin=MagicMock(),
-        scan_policy=scan_policy,
-    )
 
-    service._refresh_scan_window_from_policy()
+    assert resolve_scan_window(
+        scan_policy,
+        default_inactive_threshold_days=7,
+        default_recycle_grace_days=3,
+    ) == (11, 4)
 
-    assert service._N == 11
-    assert service._M == 4
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("value", "enable"),
+    [
+        (None, None),
+        ({"scheduled_scan_enabled": True, "dry_run": True}, "1"),
+    ],
+)
+def test_resolve_scan_window_uses_caller_defaults_when_thresholds_missing(
+    value, enable,
+):
+    scan_policy = _svc(value, enable=enable)
+
+    with patch(
+        "agentclaw.community.core.bot_dormant.scan_policy.get_current_env",
+        return_value="prod",
+    ):
+        assert resolve_scan_window(
+            scan_policy,
+            default_inactive_threshold_days=90,
+            default_recycle_grace_days=6,
+        ) == (90, 6)
 
 
 @pytest.mark.unit
@@ -194,22 +215,12 @@ def test_dormant_bot_service_scan_window_parser_falls_back_for_invalid_values():
 
 
 @pytest.mark.unit
-def test_dormant_bot_service_refresh_scan_window_falls_back_on_policy_error():
+def test_resolve_scan_window_falls_back_on_policy_error():
     scan_policy = MagicMock()
     scan_policy.get_policy.side_effect = RuntimeError("db unavailable")
-    service = DormantBotService(
-        db=MagicMock(),
-        baas_client=MagicMock(),
-        bot_service=MagicMock(),
-        passport_plugin=MagicMock(),
-        scan_policy=scan_policy,
-        N=10,
-        M=6,
-    )
-    service._N = 1
-    service._M = 1
 
-    service._refresh_scan_window_from_policy()
-
-    assert service._N == 10
-    assert service._M == 6
+    assert resolve_scan_window(
+        scan_policy,
+        default_inactive_threshold_days=10,
+        default_recycle_grace_days=6,
+    ) == (10, 6)
