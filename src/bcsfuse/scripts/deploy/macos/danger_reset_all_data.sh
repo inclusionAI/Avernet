@@ -86,6 +86,12 @@ main() {
   echo "- bcsfuse_root: $BCSFUSE_ROOT"
   cd "$BCSFUSE_ROOT"
 
+  # Resolve Python interpreter (venv preferred if bootstrap_local.sh was run)
+  local PYTHON_CMD="python3"
+  if [ -x "${BCSFUSE_ROOT}/.venv/bin/python" ]; then
+    PYTHON_CMD="${BCSFUSE_ROOT}/.venv/bin/python"
+  fi
+
   # Load environment
   local env_file="$BCSFUSE_ROOT/.runtime/env/.env.local"
 
@@ -135,14 +141,14 @@ main() {
     echo "[DANGER] Dropping and recreating MySQL tables..."
 
     # Drop tables
-    if python3 "$schema_script" cleanup 2>&1; then
+    if "$PYTHON_CMD" "$schema_script" cleanup 2>&1; then
       echo "✓ tables_dropped: YES"
     else
       echo "⚠ tables_dropped: FAILED (some tables may not exist)"
     fi
 
     # Recreate tables
-    if python3 "$schema_script" setup 2>&1; then
+    if "$PYTHON_CMD" "$schema_script" setup 2>&1; then
       echo "✓ tables_recreated: YES"
     else
       echo "✗ tables_recreated: FAILED"

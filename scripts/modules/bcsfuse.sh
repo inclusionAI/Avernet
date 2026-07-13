@@ -56,8 +56,8 @@ bcsfuse_check_mysql() {
         return $?
     fi
 
-    # Fallback: Python check
-    python3 -c "
+    # Fallback: Python check (use venv python so mysql.connector is resolvable)
+    (cd "${BCSFUSE_DIR}" && uv run python -c "
 import mysql.connector, os
 conn = mysql.connector.connect(
     host='$host', port=$port,
@@ -65,7 +65,7 @@ conn = mysql.connector.connect(
     database='$db', connect_timeout=3
 )
 conn.close()
-" >/dev/null 2>&1
+") >/dev/null 2>&1
     return $?
 }
 
@@ -300,11 +300,23 @@ bcsfuse_restart() {
 bcsfuse_clean() {
     log_info "Cleaning bcsfuse runtime data..."
 
+    # Safety guard: never clean with an empty BCSFUSE_DIR
+    if [ -z "${BCSFUSE_DIR:-}" ]; then
+        log_error "BCSFUSE_DIR is not set. Aborting cleanup to prevent accidental data loss."
+        return 1
+    fi
+
     # Stop first
     bcsfuse_stop || true
 
     # Resolve paths (same as bcsfuse_load_env)
     BCSFUSE_RUNTIME_DIR="${BCSFUSE_RUNTIME_DIR:-${BCSFUSE_DIR}/.runtime}"
+
+    # Safety guard: never clean with an empty BCSFUSE_RUNTIME_DIR
+    if [ -z "${BCSFUSE_RUNTIME_DIR:-}" ]; then
+        log_error "BCSFUSE_RUNTIME_DIR is empty. Aborting cleanup."
+        return 1
+    fi
 
     # Clean runtime data (SQLite DBs, Faiss index, Qdrant — all under .runtime/data/)
     local runtime_data_dir="${BCSFUSE_RUNTIME_DIR}/data"

@@ -88,6 +88,12 @@ main() {
   echo "- bcsfuse_root: $BCSFUSE_ROOT"
   cd "$BCSFUSE_ROOT"
 
+  # Resolve Python interpreter (venv preferred if bootstrap_local.sh was run)
+  local PYTHON_CMD="python3"
+  if [ -x "${BCSFUSE_ROOT}/.venv/bin/python" ]; then
+    PYTHON_CMD="${BCSFUSE_ROOT}/.venv/bin/python"
+  fi
+
   # Initialize deploy log
   local deploy_log="$BCSFUSE_ROOT/.runtime/logs/deploy.log"
   mkdir -p "$(dirname "$deploy_log")"
@@ -165,7 +171,7 @@ main() {
   echo "[INFO] Checking MySQL connection via Python..."
 
   local mysql_check_result
-  mysql_check_result=$(python3 - 2>&1 <<'PY'
+  mysql_check_result=$("$PYTHON_CMD" - 2>&1 <<'PY'
 import os
 import sys
 
@@ -261,7 +267,7 @@ PY
   echo "- schema_script: $schema_script"
   echo "[INFO] Running schema setup (idempotent, no data loss)..."
 
-  if python3 "$schema_script" setup 2>&1 | tee -a "$deploy_log"; then
+  if "$PYTHON_CMD" "$schema_script" setup 2>&1 | tee -a "$deploy_log"; then
     echo "✓ schema_init: PASS"
     log_deploy "MYSQL_SCHEMA_INIT_PASS"
   else

@@ -88,6 +88,12 @@ main() {
   echo "- bcsfuse_root: $BCSFUSE_ROOT"
   cd "$BCSFUSE_ROOT"
 
+  # Resolve Python interpreter (venv preferred if bootstrap_local.sh was run)
+  local PYTHON_CMD="python3"
+  if [ -x "${BCSFUSE_ROOT}/.venv/bin/python" ]; then
+    PYTHON_CMD="${BCSFUSE_ROOT}/.venv/bin/python"
+  fi
+
   # Initialize runtime directories
   local runtime_dir="$BCSFUSE_ROOT/.runtime"
   local logs_dir="$runtime_dir/logs"
@@ -312,8 +318,8 @@ main() {
   # Clear old log
   : > "$log_file"
 
-  # Start runtime
-  nohup python3 main.py >> "$log_file" 2>&1 &
+  # Start runtime (prefer venv python so dependencies are resolvable)
+  nohup "$PYTHON_CMD" main.py >> "$log_file" 2>&1 &
   local runtime_pid=$!
 
   echo "$runtime_pid" > "$pid_file"
