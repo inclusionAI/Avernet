@@ -113,9 +113,8 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         update_kwargs = {
             "status": new_status,
             "gmt_modified": func.now(),
+            "error_message": error_message,
         }
-        if error_message is not None:
-            update_kwargs["error_message"] = error_message
         result = (
             self._session.query(FileTransferTicketModel)
             .filter(
@@ -168,3 +167,61 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
                 f"Invalid state transition: {current} -> {target} is not allowed."
             ),
         )
+
+    @with_orm_session
+    def get_by_transfer_id(self, transfer_id: str) -> TicketRecord | None:
+        log.info("get_by_transfer_id: transfer_id=%s", transfer_id)
+        env = get_current_env()
+        row = (
+            self._session.query(FileTransferTicketModel)
+            .filter(
+                FileTransferTicketModel.transfer_id == transfer_id,
+                FileTransferTicketModel.env == env,
+            )
+            .first()
+        )
+        if row is None:
+            log.info("[file-transfer:get_by_transfer_id] result: not found")
+            return None
+        record = row.to_record()
+        log.info("[file-transfer:get_by_transfer_id] result: id=%s", record.id)
+        return record
+
+    @with_orm_session
+    def update_urls(
+        self,
+        transfer_id: str,
+        *,
+        download_url: str | None = None,
+        upload_url: str | None = None,
+    ) -> None:
+        log.info(
+            "update_urls: transfer_id=%s, download_url=%s, upload_url=%s",
+            transfer_id, bool(download_url), bool(upload_url),
+        )
+        from sqlalchemy import func
+
+        env = get_current_env()
+        update_kwargs: dict = {"gmt_modified": func.now()}
+        if download_url is not None:
+            update_kwargs["download_url"] = download_url
+        if upload_url is not None:
+            update_kwargs["upload_url"] = upload_url
+
+        if "download_url" not in update_kwargs and "upload_url" not in update_kwargs:
+            return  # no-op: both None
+
+        result = (
+            self._session.query(FileTransferTicketModel)
+            .filter(
+                FileTransferTicketModel.transfer_id == transfer_id,
+                FileTransferTicketModel.env == env,
+            )
+            .update(update_kwargs, synchronize_session=False)
+        )
+        if result == 0:
+            raise DeviceCreationError(
+                error_code="FILE_TRANSFER_NOT_FOUND",
+                message=f"Transfer ticket {transfer_id} not found",
+            )
+        log.info("[file-transfer:update_urls] result: done")
