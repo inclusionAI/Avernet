@@ -214,10 +214,11 @@ def test_singlebox_profile_resolves_baas_only_device_runtime():
     injector = build_injector(profile=DeployProfile.SINGLEBOX)
 
     service = injector.get(DeviceService)
+    baas_device_accessor = injector.get(BaasDeviceAccessor)
     assert isinstance(service, DeviceServiceRouter)
     assert set(service._providers) == {"baas"}
     assert isinstance(service._providers["baas"], BaasDeviceService)
-    assert isinstance(injector.get(DeviceAccessor), BaasDeviceAccessor)
+    assert injector.get(DeviceAccessor) is baas_device_accessor
     participant_names = {
         type(participant).__name__
         for participant in discover_lifecycle_participants(injector)

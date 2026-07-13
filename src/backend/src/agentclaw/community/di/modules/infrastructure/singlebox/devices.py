@@ -87,7 +87,14 @@ class SingleboxDevicesModule(Module):
             to=NoopDeviceConnectionManagerPlugin,
             scope=singleton,
         )
-        binder.bind(DeviceAccessor, to=BaasDeviceAccessor, scope=singleton)
+        binder.bind(BaasDeviceAccessor, to=BaasDeviceAccessor, scope=singleton)
+
+    @singleton
+    @provider
+    @inject
+    def device_accessor(self, accessor: BaasDeviceAccessor) -> DeviceAccessor:
+        """Expose the concrete singleton through the device-access boundary."""
+        return accessor
 
     @singleton
     @provider
