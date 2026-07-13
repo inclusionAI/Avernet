@@ -2343,7 +2343,7 @@ def test_handle_sync_success_online_publish_logs_warning_when_destroy_verify_fai
 
 # ===========================================================================
 # Characterization tests (Task 1) — pin CURRENT behavior of the thin-coverage
-# public entry points (process / sync_publish_progress / sync_restart_progress /
+# public entry points (process / describe_publish / advance_publish_progress /
 # restart_bot / retry) before the publish-flow refactor, so the restructure can
 # be shown to preserve behavior. Deliberately dispatch-level (collaborators
 # mocked): they assert which branch/handler current code takes, not deep effects
@@ -2481,15 +2481,62 @@ async def test_process_not_found_raises():
         await svc.process(publish_id=999, operator="op")
 
 
-# ---- sync_publish_progress() dispatch --------------------------------------
+# ---- describe_publish() / advance_publish_progress() dispatch --------------
 
-def test_sync_publish_progress_not_found_raises():
+# The user-facing /sync endpoint talks to describe_publish (read-only status
+# report); advance_publish_progress is the poll task's engine.
+
+def test_describe_publish_not_found_raises():
     svc, _ = _svc_with_record(None)
     with pytest.raises(PublishNotFoundError):
-        svc.sync_publish_progress(publish_id=999)
+        svc.describe_publish(publish_id=999)
 
 
-def test_sync_publish_progress_retry_flag_redirects_to_restart_sync():
+@pytest.mark.parametrize(
+    "status,fragment",
+    [
+        (PublishStatus.DRAFT, "not started"),
+        (PublishStatus.BUILDING, "Build in progress"),
+        (PublishStatus.VALIDATE_PUB, "Verify environment publish in progress"),
+        (PublishStatus.VALIDATING, "awaiting online publish"),
+        (PublishStatus.ONLINE_PUB, "Online publish in progress"),
+        (PublishStatus.SUCCESS, "Publish complete"),
+        (PublishStatus.UPGRADED, "Superseded"),
+        (PublishStatus.RELEASED, "Taken offline"),
+    ],
+)
+def test_describe_publish_is_read_only(status, fragment):
+    record = _make_publish_record(
+        status=status.value, ext={"publish": {"verify": 500}}
+    )
+    svc, publish_service = _svc_with_record(record)
+    svc.get_baas_publish_progress = Mock()
+    result = svc.describe_publish(publish_id=1)
+    assert result.status == status
+    assert fragment in result.message
+    # Read-only: no BaaS query, no status/ext writes.
+    svc.get_baas_publish_progress.assert_not_called()
+    publish_service.update_publish_status_with_ext.assert_not_called()
+    publish_service.update_publish_status.assert_not_called()
+
+
+def test_describe_publish_failed_reports_error_message():
+    record = _make_publish_record(
+        status=PublishStatus.FAILED.value, ext={"error_message": "boom"}
+    )
+    svc, _ = _svc_with_record(record)
+    result = svc.describe_publish(publish_id=1)
+    assert result.status == PublishStatus.FAILED
+    assert "boom" in result.message
+
+
+def test_advance_publish_progress_not_found_raises():
+    svc, _ = _svc_with_record(None)
+    with pytest.raises(PublishNotFoundError):
+        svc.advance_publish_progress(publish_id=999)
+
+
+def test_advance_publish_progress_retry_flag_redirects_to_restart_sync():
     record = _make_publish_record(
         status=PublishStatus.VALIDATE_PUB.value,
         ext={"retry": True, "source_status": PublishStatus.VALIDATE_PUB.value},
@@ -2497,26 +2544,30 @@ def test_sync_publish_progress_retry_flag_redirects_to_restart_sync():
     svc, _ = _svc_with_record(record)
     sentinel = Mock()
     svc.sync_restart_progress = Mock(return_value=sentinel)
-    assert svc.sync_publish_progress(publish_id=1) is sentinel
+    assert svc.advance_publish_progress(publish_id=1) is sentinel
     svc.sync_restart_progress.assert_called_once_with(1)
 
 
-def test_sync_publish_progress_failed_status_asks_retry():
+def test_advance_publish_progress_non_wait_state_is_noop_report():
+    # TOCTOU catch-all: the record left the *_PUB wait state between the poll's
+    # status check and the engine's re-read → nothing to drive.
     record = _make_publish_record(status=PublishStatus.FAILED.value)
-    svc, _ = _svc_with_record(record)
-    result = svc.sync_publish_progress(publish_id=1)
-    assert result.status == PublishStatus.FAILED
-    assert "please retry" in result.message
+    svc, publish_service = _svc_with_record(record)
+    svc.get_baas_publish_progress = Mock()
+    result = svc.advance_publish_progress(publish_id=1)
+    assert "does not support progress sync" in result.message
+    svc.get_baas_publish_progress.assert_not_called()
+    publish_service.update_publish_status_with_ext.assert_not_called()
 
 
-def test_sync_publish_progress_no_baas_publish_id_returns_guard():
+def test_advance_publish_progress_no_baas_publish_id_returns_guard():
     record = _make_publish_record(status=PublishStatus.VALIDATE_PUB.value, ext={})
     svc, _ = _svc_with_record(record)
-    result = svc.sync_publish_progress(publish_id=1)
+    result = svc.advance_publish_progress(publish_id=1)
     assert "not found" in result.message
 
 
-def test_sync_publish_progress_success_dispatches_handle_success():
+def test_advance_publish_progress_success_dispatches_handle_success():
     record = _make_publish_record(
         status=PublishStatus.VALIDATE_PUB.value, ext={"publish": {"verify": 500}}
     )
@@ -2524,11 +2575,11 @@ def test_sync_publish_progress_success_dispatches_handle_success():
     svc.get_baas_publish_progress = Mock(return_value={"status": "SUCCESS"})
     sentinel = Mock()
     svc._handle_sync_success = Mock(return_value=sentinel)
-    assert svc.sync_publish_progress(publish_id=1) is sentinel
+    assert svc.advance_publish_progress(publish_id=1) is sentinel
     svc._handle_sync_success.assert_called_once()
 
 
-def test_sync_publish_progress_failed_baas_dispatches_handle_failure():
+def test_advance_publish_progress_failed_baas_dispatches_handle_failure():
     record = _make_publish_record(
         status=PublishStatus.VALIDATE_PUB.value, ext={"publish": {"verify": 500}}
     )
@@ -2536,17 +2587,17 @@ def test_sync_publish_progress_failed_baas_dispatches_handle_failure():
     svc.get_baas_publish_progress = Mock(return_value={"status": "FAILED"})
     sentinel = Mock()
     svc._handle_sync_failure = Mock(return_value=sentinel)
-    assert svc.sync_publish_progress(publish_id=1) is sentinel
+    assert svc.advance_publish_progress(publish_id=1) is sentinel
     svc._handle_sync_failure.assert_called_once()
 
 
-def test_sync_publish_progress_other_status_reports_without_mutation():
+def test_advance_publish_progress_other_status_reports_without_mutation():
     record = _make_publish_record(
         status=PublishStatus.VALIDATE_PUB.value, ext={"publish": {"verify": 500}}
     )
     svc, publish_service = _svc_with_record(record)
     svc.get_baas_publish_progress = Mock(return_value={"status": "PENDING"})
-    result = svc.sync_publish_progress(publish_id=1)
+    result = svc.advance_publish_progress(publish_id=1)
     assert "PENDING" in result.message
     publish_service.update_publish_status_with_ext.assert_not_called()
 

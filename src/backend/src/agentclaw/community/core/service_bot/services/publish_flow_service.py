@@ -116,6 +116,16 @@ _DESCRIBE_STATUS_MESSAGES = {
     PublishStatus.SUCCESS: "Publish complete",
 }
 
+# The read-only /sync status report covers every status, including the ones
+# process() handles as advance points or rejects — keep these out of
+# _DESCRIBE_STATUS_MESSAGES so process() behavior stays unchanged.
+_SYNC_ONLY_STATUS_MESSAGES = {
+    PublishStatus.DRAFT: "Draft, publish not started",
+    PublishStatus.VALIDATING: "Verify environment ready, awaiting online publish confirmation",
+    PublishStatus.UPGRADED: "Superseded by a newer published version",
+    PublishStatus.RELEASED: "Taken offline",
+}
+
 
 class PublishFlowService(
     ProgressSyncMixin,
@@ -379,6 +389,40 @@ class PublishFlowService(
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
         return self._describe_publish_status(
             publish_record, PublishStatus(publish_record.status)
+        )
+
+    def describe_publish(self, publish_id: int) -> PublishFlowResult:
+        """Report the publish record's current status. Read-only.
+
+        Backs the user-invokable ``POST /publish/{id}/sync`` endpoint. Since the
+        durable task pipeline owns all status advancement (the poll task drives
+        ``advance_publish_progress``), an external status query must not mutate —
+        it just reads the record and describes it, covering every status.
+        """
+        publish_record = self.get_publish_record(publish_id)
+        if not publish_record:
+            raise PublishNotFoundError(f"Publish order not found: {publish_id}")
+
+        current_status = PublishStatus(publish_record.status)
+        if current_status == PublishStatus.FAILED:
+            error_message = (publish_record.ext or {}).get("error_message")
+            return PublishFlowResult(
+                publish_id=publish_id,
+                status=current_status,
+                message=f"Publish failed: {error_message or 'Unknown error'}",
+                action="sync",
+            )
+
+        message = _DESCRIBE_STATUS_MESSAGES.get(
+            current_status
+        ) or _SYNC_ONLY_STATUS_MESSAGES.get(current_status)
+        if message is None:
+            raise PublishStatusInvalidError(f"Unknown publish status: {current_status}")
+        return PublishFlowResult(
+            publish_id=publish_id,
+            status=current_status,
+            message=message,
+            action="sync",
         )
 
     def _describe_publish_status(

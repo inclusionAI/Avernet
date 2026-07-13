@@ -1,11 +1,12 @@
 """Progress-sync mixin for the publish flow.
 
-The BaaS-publish progress polling and status advancement — the ``/sync``,
-``/scale/status`` and ``/restart_status`` entry points plus their SUCCESS/FAILURE
-handlers and device-binding updates — split out of ``PublishFlowService`` as a
-mixin. It shares ``self`` with the facade (same instance, same collaborators), so
-the bodies are unchanged and stay interceptable by tests. Mixin composition keeps
-each concern in its own file without threading a context object.
+The BaaS-publish progress polling and status advancement — the durable poll
+task's engine (``advance_publish_progress``), the ``/scale/status`` and
+``/restart_status`` entry points, and their SUCCESS/FAILURE handlers — split out
+of ``PublishFlowService`` as a mixin. The user-facing ``/sync`` endpoint is a
+read-only status report on the facade; only the poll task drives advancement
+through this mixin. It shares ``self`` with the facade (same instance, same
+collaborators), so the bodies stay interceptable by tests.
 """
 from __future__ import annotations
 
@@ -271,14 +272,16 @@ class ProgressSyncMixin:
             data=progress,
         )
 
-    def sync_publish_progress(
+    def advance_publish_progress(
         self,
         publish_id: int,
     ) -> PublishFlowResult:
-        """Sync the BaaS-layer publish progress and advance the AgentClaw-layer publish record status.
+        """Query the BaaS-layer publish progress and advance the publish record.
 
-        Advance the AgentClaw publish record status based on the BaaS-layer publish record status.
-        When the BaaS-layer status is ACTIVE/SUCCESS, update the device_binding status and device_props.
+        The engine behind the durable progress-poll task (its only caller — the
+        user-facing ``/sync`` endpoint is a read-only status report on the
+        facade). When the BaaS-layer status is SUCCESS, advance the record and
+        update the device_binding; when FAILED, mark the record FAILED.
 
         The stage is determined automatically from the publish record status:
         - VALIDATE_PUB -> verify
@@ -290,7 +293,7 @@ class ProgressSyncMixin:
         Returns:
             PublishFlowResult: Sync result
         """
-        logger.info(f"[PublishFlowService.sync_publish_progress] Syncing: publish_id={publish_id}")
+        logger.info(f"[PublishFlowService.advance_publish_progress] Syncing: publish_id={publish_id}")
 
         # Step 1: Query the publish record
         publish_record = self.get_publish_record(publish_id)
@@ -304,39 +307,20 @@ class ProgressSyncMixin:
         if ext.get("retry"):
             source_status = ext.get("source_status")
             if source_status in (PublishStatus.VALIDATE_PUB.value, PublishStatus.ONLINE_PUB.value):
-                logger.info(f"[PublishFlowService.sync_publish_progress] Detected retry flag with source_status={source_status}, redirecting to sync_restart_progress: publish_id={publish_id}")
+                logger.info(f"[PublishFlowService.advance_publish_progress] Detected retry flag with source_status={source_status}, redirecting to sync_restart_progress: publish_id={publish_id}")
                 return self.sync_restart_progress(publish_id)
 
         current_status = PublishStatus(publish_record.status)
 
-        # These early-status guards ARE reachable: besides the durable poll task
-        # (which only fires in the *_PUB wait states), this is exposed as the
-        # user-invokable POST /publish/{id}/sync endpoint, so any status can
-        # arrive here.
-        # If in a failed state, return publish failure directly
-        if current_status == PublishStatus.FAILED:
-            return PublishFlowResult(
-                publish_id=publish_id,
-                status=current_status,
-                message=f"Current status {current_status}, please retry!",
-            )
-
-        # If in a status such as building or built, return directly
-        if current_status in [PublishStatus.BUILDING, PublishStatus.BUILT]:
-            return PublishFlowResult(
-                publish_id=publish_id,
-                status=current_status,
-                message=f"Current status {current_status}, please wait!",
-            )
-
-        # Step 2: Determine the stage based on the current status. None for every
-        # remaining non-wait status (DRAFT / VALIDATING / SUCCESS / UPGRADED / …)
-        # — e.g. a /sync that lands after the poll already advanced the record.
+        # Step 2: Determine the stage based on the current status. The poll task
+        # only fires in the *_PUB wait states, so a None stage is the TOCTOU
+        # catch-all: the record moved (advanced/failed) between the poll's status
+        # check and this re-read — nothing to drive, report and stop.
         stage = self._determine_sync_stage(current_status)
         if not stage:
             logger.warning(
-                f"[PublishFlowService.sync_publish_progress] "
-                f"Invalid status for sync: {current_status}, publish_id={publish_id}"
+                f"[PublishFlowService.advance_publish_progress] "
+                f"Not in a BaaS wait state: {current_status}, publish_id={publish_id}"
             )
             return PublishFlowResult(
                 publish_id=publish_id,
@@ -349,7 +333,7 @@ class ProgressSyncMixin:
         baas_publish_id = publish_info.get(stage.value)
         if not baas_publish_id:
             logger.warning(
-                f"[PublishFlowService.sync_publish_progress] "
+                f"[PublishFlowService.advance_publish_progress] "
                 f"No baas_publish_id found for stage={stage.value}, publish_id={publish_id}"
             )
             return PublishFlowResult(
@@ -364,7 +348,7 @@ class ProgressSyncMixin:
                 baas_publish_id=baas_publish_id,
             )
         except Exception as e:
-            logger.error(f"[PublishFlowService.sync_publish_progress] Failed to get progress: {e}")
+            logger.error(f"[PublishFlowService.advance_publish_progress] Failed to get progress: {e}")
             return PublishFlowResult(
                 publish_id=publish_id,
                 status=current_status,
@@ -373,7 +357,7 @@ class ProgressSyncMixin:
 
         baas_status = progress.get("status", "")
         logger.info(
-            f"[PublishFlowService.sync_publish_progress] "
+            f"[PublishFlowService.advance_publish_progress] "
             f"BaaS status: {baas_status}, publish_id={publish_id}"
         )
 

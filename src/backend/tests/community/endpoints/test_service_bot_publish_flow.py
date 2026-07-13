@@ -504,42 +504,31 @@ def process_publish_not_found():
 
 
 @endpoint_test(
-    method="POST", path=_SYNC, scenario="verify_sync_success",
+    method="POST", path=_SYNC, scenario="sync_reports_validate_pub_read_only",
     input=CaseInput(path_params={"publish_id": _V1}, headers=_HEADERS),
     seed=lambda w: _seed_validate_pub(w, progress_status="SUCCESS"),
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"success": True, "data": {"status": "validate_pub"}}),
     extra_assertions=(
-        _expect_status(_V1, PublishStatus.VALIDATING),
-        _expect_binding_status(_V1, "verify", "ACTIVE"),
+        _expect_status(_V1, PublishStatus.VALIDATE_PUB),        # unchanged
+        _expect_binding_status(_V1, "verify", "PENDING"),        # not flipped
     ),
 )
-def verify_sync_success():
-    """Seeded at VALIDATE_PUB, /sync sees BaaS SUCCESS → VALIDATING, binding ACTIVE."""
+def sync_reports_validate_pub_read_only():
+    """/sync is a read-only status report: even with BaaS already at SUCCESS, it
+    does not advance the record or touch the binding — the durable poll task owns
+    advancement (covered by test_publish_durable_pipeline)."""
 
 
 @endpoint_test(
-    method="POST", path=_SYNC, scenario="verify_sync_failed",
+    method="POST", path=_SYNC, scenario="sync_on_failed_publish_reports_error",
     input=CaseInput(path_params={"publish_id": _V1}, headers=_HEADERS),
-    seed=lambda w: _seed_validate_pub(w, progress_status="FAILED"),
+    seed=_seed_failed_verify,
     expect=ExpectError(status=200, json_contains={"success": False}),
     extra_assertions=(_expect_status(_V1, PublishStatus.FAILED),),
 )
-def verify_sync_failed():
-    """BaaS reports the verify container FAILED → /sync lands the publish in FAILED."""
-
-
-@endpoint_test(
-    method="POST", path=_SYNC, scenario="verify_sync_pending",
-    input=CaseInput(path_params={"publish_id": _V1}, headers=_HEADERS),
-    seed=lambda w: _seed_validate_pub(w, progress_status="PENDING"),
-    expect=ExpectSuccess(status=200),
-    extra_assertions=(
-        _expect_status(_V1, PublishStatus.VALIDATE_PUB),       # unchanged
-        _expect_binding_status(_V1, "verify", "PENDING"),       # not flipped
-    ),
-)
-def verify_sync_pending():
-    """BaaS still PENDING → the poller does not advance; stays VALIDATE_PUB."""
+def sync_on_failed_publish_reports_error():
+    """/sync on a FAILED record reports the recorded error (success=false) and
+    leaves the record untouched."""
 
 
 # ── online stage: VALIDATING → ONLINE_PUB → SUCCESS ──────────────────────────
@@ -559,17 +548,18 @@ def online_release():
 
 
 @endpoint_test(
-    method="POST", path=_SYNC, scenario="online_sync_success",
+    method="POST", path=_SYNC, scenario="sync_reports_online_pub_read_only",
     input=CaseInput(path_params={"publish_id": _V1}, headers=_HEADERS),
     seed=_seed_online_pub,
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"success": True, "data": {"status": "online_pub"}}),
     extra_assertions=(
-        _expect_status(_V1, PublishStatus.SUCCESS),
-        _expect_binding_status(_V1, "online", "ACTIVE"),
+        _expect_status(_V1, PublishStatus.ONLINE_PUB),           # unchanged
+        _expect_binding_status(_V1, "online", "PENDING"),         # not flipped
     ),
 )
-def online_sync_success():
-    """Seeded at ONLINE_PUB, /sync sees SUCCESS → SUCCESS, online binding ACTIVE."""
+def sync_reports_online_pub_read_only():
+    """/sync at ONLINE_PUB reports "in progress" without advancing; the poll task
+    drives ONLINE_PUB → SUCCESS (covered end-to-end in test_publish_durable_pipeline)."""
 
 
 # ── branch lifecycle: re-publish / offline / retry ───────────────────────────

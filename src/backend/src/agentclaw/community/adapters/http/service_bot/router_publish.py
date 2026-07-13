@@ -481,29 +481,26 @@ async def upgrade_publish(
 @router.post(
     "/{publish_id}/sync",
     response_model=ApiResponse,
-    summary="同步发布进度",
+    summary="Get publish status (read-only)",
 )
-async def sync_publish_progress(
+async def describe_publish(
     publish_id: int,
     user: AuthenticatedUser = Depends(get_current_user),
     flow_service: PublishFlowServiceProtocol = Injected(PublishFlowServiceProtocol),
 ) -> ApiResponse:
-    """同步 BaaS 层发布进度并推进 AgentClaw 层发布单状态.
+    """Report the publish record's current status. Read-only.
 
     POST /api/service-bot/publish/{publish_id}/sync
 
-    publish_id 从 URL 路径参数获取。
-
-    根据发布单状态自动确定发布阶段：
-    - VALIDATE_PUB -> verify 阶段
-    - ONLINE_PUB -> release 阶段
-
-    然后获取对应的 BaaS 发布单进度，并同步状态：
-    - 当 BaaS 状态为 ACTIVE/SUCCESS 时，更新发布单状态和 device_binding
-    - 当 BaaS 状态为 FAILED 时，标记发布单为失败
+    Historically this endpoint drove the BaaS-progress sync itself; the durable
+    task pipeline now owns all status advancement (the progress-poll task drives
+    ``advance_publish_progress``), so this query just reads the record and
+    describes its status — it never mutates. The route path stays ``/sync`` for
+    API compatibility.
 
     Returns:
-        ApiResponse: 包含同步结果
+        ApiResponse: the current status and a human-readable message
+        (``success=false`` when the publish is FAILED).
     """
     try:
         user_id = user.staffId
@@ -512,11 +509,10 @@ async def sync_publish_progress(
             return ApiResponse(success=False, message="无法获取用户信息", error_code=400, data=None)
 
         logger.info(
-            f"[sync_publish_progress] Syncing: publish_id={publish_id}, user_id={user_id}"
+            f"[describe_publish] Reporting status: publish_id={publish_id}, user_id={user_id}"
         )
 
-        # 执行同步
-        result = flow_service.sync_publish_progress(
+        result = flow_service.describe_publish(
             publish_id=publish_id,
         )
 
@@ -527,19 +523,19 @@ async def sync_publish_progress(
         )
 
     except PublishNotFoundError as e:
-        logger.error(f"[sync_publish_progress] Order not found: {e}")
+        logger.error(f"[describe_publish] Order not found: {e}")
         return ApiResponse(success=False, message=str(e), error_code=404, data=None)
 
     except PublishStatusInvalidError as e:
-        logger.error(f"[sync_publish_progress] Invalid status: {e}")
+        logger.error(f"[describe_publish] Invalid status: {e}")
         return ApiResponse(success=False, message=str(e), error_code=400, data=None)
 
     except PublishFlowServiceError as e:
-        logger.error(f"[sync_publish_progress] Flow error: {e}")
+        logger.error(f"[describe_publish] Flow error: {e}")
         return ApiResponse(success=False, message=str(e), error_code=500, data=None)
 
     except Exception as e:
-        logger.error(f"[sync_publish_progress] Unexpected error: {e}")
+        logger.error(f"[describe_publish] Unexpected error: {e}")
         return ApiResponse(success=False, message=f"同步发布进度失败: {str(e)}", error_code=500, data=None)
 
 

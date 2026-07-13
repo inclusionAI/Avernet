@@ -35,7 +35,7 @@ class _FakeFlow:
         self._build_fails = build_fails
         self._verify_release_fails = verify_release_fails
         self._online_release_fails = online_release_fails
-        self._sync_to = sync_to  # status to move to when sync_publish_progress runs
+        self._sync_to = sync_to  # status to move to when advance_publish_progress runs
         # Whether ext.publish.online is already recorded (the online-release
         # idempotency marker the online_release task guards on).
         self._online_recorded = online_recorded
@@ -76,7 +76,7 @@ class _FakeFlow:
         self._online_recorded = True
         return SimpleNamespace(status=PublishStatus.ONLINE_PUB, message="Publish submitted")
 
-    def sync_publish_progress(self, publish_id):
+    def advance_publish_progress(self, publish_id):
         self.calls.append("sync")
         if self._sync_to is not None:
             self.status = self._sync_to.value

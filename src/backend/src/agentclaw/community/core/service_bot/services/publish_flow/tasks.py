@@ -18,7 +18,7 @@ status-guarded checkpoint:
   advance); ``ext.publish.online`` presence guards a re-run from creating a second
   bot. On success enqueues the poll.
 * ``progress_poll`` — drives the BaaS-publish wait to terminal (VALIDATE_PUB→
-  VALIDATING, ONLINE_PUB→SUCCESS) by reusing ``sync_publish_progress``;
+  VALIDATING, ONLINE_PUB→SUCCESS) by reusing ``advance_publish_progress``;
   reschedules until the record leaves the ``*_PUB`` state.
 
 The create sub-step's rare "crash between BaaS create and status/ext persist"
@@ -232,7 +232,7 @@ class PublishOnlineReleaseHandler(_PublishTaskBase):
 
 
 class PublishProgressPollHandler(_PublishTaskBase):
-    """Drive a BaaS-publish wait to terminal by reusing ``sync_publish_progress``."""
+    """Drive a BaaS-publish wait to terminal by reusing ``advance_publish_progress``."""
 
     def __init__(
         self,
@@ -256,9 +256,9 @@ class PublishProgressPollHandler(_PublishTaskBase):
         if status not in _POLL_ACTIVE_STATES:
             return Complete()  # already advanced / terminal / not a wait state
 
-        # sync_publish_progress advances on BaaS SUCCESS/FAILED (and internally
+        # advance_publish_progress advances on BaaS SUCCESS/FAILED (and internally
         # redirects a retry record to restart-sync); a no-op on PENDING.
-        sync_result = self._flow.sync_publish_progress(publish_id)
+        sync_result = self._flow.advance_publish_progress(publish_id)
 
         _record, status = self._status(publish_id)
         if status in _POLL_ACTIVE_STATES:

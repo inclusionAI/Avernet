@@ -22,14 +22,17 @@ from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
 from agentclaw.community.core.task_queue.services.worker import TaskWorker
+from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
 from tests.community.endpoints.test_service_bot_publish_flow import (
     _HEADERS,
     _PROCESS,
     _V1,
+    _ext,
     _install_baas,
     _install_engine,
     _posts,
     _seed_draft,
+    _seed_validating,
     _status,
 )
 
@@ -83,6 +86,32 @@ async def test_draft_process_drives_to_validating_via_worker(
     assert _status(world, _V1) != PublishStatus.ONLINE_PUB.value
     # Exactly one BaaS bot create.
     assert _create_count(world) == 1
+
+
+@pytest.mark.asyncio
+async def test_validating_process_drives_online_leg_to_success_via_worker(
+    app_with_testing_modules, world
+):
+    """The go-live leg end-to-end through the durable queue: /process advances
+    VALIDATING → ONLINE_PUB synchronously and enqueues online_release; the worker
+    runs the release within ONLINE_PUB, then the poll sees BaaS SUCCESS and lands
+    the record at SUCCESS with the online binding ACTIVE. (This coverage moved
+    here from the endpoint /sync cases when /sync became a read-only report.)"""
+    _seed_validating(world)
+    _install_baas(world, progress_status="SUCCESS")
+    _install_engine(world)
+
+    resp = await _post_process(app_with_testing_modules)
+    assert resp.status_code == 200
+    assert resp.json()["data"]["status"] == "online_pub"
+    assert _status(world, _V1) == PublishStatus.ONLINE_PUB.value
+
+    await _drive_worker(world)
+
+    assert _status(world, _V1) == PublishStatus.SUCCESS.value
+    online_binding_id = _ext(world, _V1)["binding"]["online"]
+    binding = world.get(DeviceBindingRepository).get_by_id(online_binding_id)
+    assert binding.status == "ACTIVE", binding.status
 
 
 @pytest.mark.asyncio
