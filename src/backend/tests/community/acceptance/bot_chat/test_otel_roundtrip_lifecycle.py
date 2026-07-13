@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import uuid
 
 import httpx
 import pytest
@@ -77,7 +78,7 @@ def _otlp_payload(trace_id: str, start_ns: int) -> dict:
 
 @pytest.mark.acceptance
 def test_bot_chat_otel_ingest_query_and_relation_roundtrip(live_backend):
-    trace_id = f"trace_singlebox_{time.time_ns()}"
+    trace_id = uuid.uuid4().hex
     payload = _otlp_payload(trace_id, time.time_ns())
 
     with httpx.Client(base_url=live_backend, headers=HEADERS, timeout=30.0) as client:
