@@ -4,8 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use bcs_domain::{Organization, OrganizationMember};
 use bcs_service_api::port::repo::{
-    CreateOrganizationRecord, ListOrganizationMembersQuery, ListOrganizationsQuery,
-    OrganizationRepoPort, UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
+    CreateOrganizationRecord, ListOrganizationMembersPageQuery, ListOrganizationMembersQuery,
+    ListOrganizationsQuery, OrganizationMemberPage, OrganizationRepoPort,
+    UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
 };
 use bcs_service_api::{ServiceError, ServiceResult};
 use tokio::sync::RwLock;
@@ -186,5 +187,39 @@ impl OrganizationRepoPort for MemoryOrganizationRepo {
             })
             .cloned()
             .collect())
+    }
+
+    async fn list_members_page(
+        &self,
+        query: ListOrganizationMembersPageQuery,
+    ) -> ServiceResult<OrganizationMemberPage> {
+        let members = self.members.read().await;
+        let mut members = members
+            .values()
+            .filter(|member| {
+                member.env == query.env
+                    && member.organization_code == query.organization_code
+                    && (query.include_disabled || !member.disabled)
+                    && query
+                        .role
+                        .as_ref()
+                        .map(|role| member.role.as_ref() == Some(role))
+                        .unwrap_or(true)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        members.sort_by(|left, right| left.bot_uuid.cmp(&right.bot_uuid));
+
+        let total = members.len() as u64;
+        let start = usize::try_from(query.offset).unwrap_or(members.len());
+        let page_len = usize::try_from(query.limit).unwrap_or(usize::MAX);
+        let members = members.into_iter().skip(start).take(page_len).collect();
+
+        Ok(OrganizationMemberPage {
+            members,
+            total,
+            offset: query.offset,
+            limit: query.limit,
+        })
     }
 }

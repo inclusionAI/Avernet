@@ -4,8 +4,9 @@ use async_trait::async_trait;
 use bcs_db_api::{DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
 use bcs_domain::{Organization, OrganizationMember};
 use bcs_service_api::port::repo::{
-    CreateOrganizationRecord, ListOrganizationMembersQuery, ListOrganizationsQuery,
-    OrganizationRepoPort, UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
+    CreateOrganizationRecord, ListOrganizationMembersPageQuery, ListOrganizationMembersQuery,
+    ListOrganizationsQuery, OrganizationMemberPage, OrganizationRepoPort,
+    UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
 };
 use bcs_service_api::{ServiceError, ServiceResult};
 
@@ -301,6 +302,70 @@ impl OrganizationRepoPort for DbOrganizationStore {
             .map_err(|error| service_db_error("list_members", error))?;
         rows.into_iter().map(row_to_member).collect()
     }
+
+    async fn list_members_page(
+        &self,
+        query: ListOrganizationMembersPageQuery,
+    ) -> ServiceResult<OrganizationMemberPage> {
+        let mut filter_sql = " WHERE env = ? AND organization_code = ?".to_string();
+        let mut params = vec![
+            DbValue::from(query.env),
+            DbValue::from(query.organization_code),
+        ];
+        if !query.include_disabled {
+            filter_sql.push_str(" AND disabled = 0");
+        }
+        if let Some(role) = query.role {
+            filter_sql.push_str(" AND role = ?");
+            params.push(DbValue::from(role));
+        }
+
+        let count_rows = self
+            .db
+            .query(DbStatement::with_params(
+                format!("SELECT COUNT(*) AS total FROM bcs_organization_members{}", filter_sql),
+                params.clone(),
+            ))
+            .await
+            .map_err(|error| service_db_error("count_members_page", error))?;
+        let total = count_rows
+            .into_iter()
+            .next()
+            .ok_or_else(|| ServiceError::InternalError(
+                "organization db count_members_page: count row not found".to_string(),
+            ))?
+            .get_i64("total")
+            .map_err(|error| service_db_error("total", error))?
+            .ok_or_else(|| ServiceError::InternalError(
+                "organization db count_members_page: total column not found".to_string(),
+            ))?
+            .max(0) as u64;
+
+        params.push(DbValue::from(query.limit));
+        params.push(DbValue::from(query.offset));
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                format!(
+                    "{}{} ORDER BY bot_uuid ASC LIMIT ? OFFSET ?",
+                    self.member_select(),
+                    filter_sql
+                ),
+                params,
+            ))
+            .await
+            .map_err(|error| service_db_error("list_members_page", error))?;
+
+        Ok(OrganizationMemberPage {
+            members: rows
+                .into_iter()
+                .map(row_to_member)
+                .collect::<ServiceResult<Vec<_>>>()?,
+            total,
+            offset: query.offset,
+            limit: query.limit,
+        })
+    }
 }
 
 fn row_to_organization(row: DbRow) -> ServiceResult<Organization> {
@@ -368,7 +433,7 @@ fn service_db_error(operation: &'static str, error: DbError) -> ServiceError {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, VecDeque};
     use std::sync::Mutex;
 
     use bcs_db_api::{
@@ -380,7 +445,8 @@ mod tests {
     struct RecordingDbPlugin {
         execute_error: Mutex<Option<DbError>>,
         executed: Mutex<Vec<DbStatement>>,
-        query_rows: Vec<DbRow>,
+        queried: Mutex<Vec<DbStatement>>,
+        query_rows: Mutex<VecDeque<Vec<DbRow>>>,
     }
 
     impl RecordingDbPlugin {
@@ -388,7 +454,17 @@ mod tests {
             Self {
                 execute_error: Mutex::new(None),
                 executed: Mutex::new(Vec::new()),
-                query_rows,
+                queried: Mutex::new(Vec::new()),
+                query_rows: Mutex::new(VecDeque::from([query_rows])),
+            }
+        }
+
+        fn with_query_rows(query_rows: Vec<Vec<DbRow>>) -> Self {
+            Self {
+                execute_error: Mutex::new(None),
+                executed: Mutex::new(Vec::new()),
+                queried: Mutex::new(Vec::new()),
+                query_rows: Mutex::new(VecDeque::from(query_rows)),
             }
         }
 
@@ -396,15 +472,25 @@ mod tests {
             Self {
                 execute_error: Mutex::new(Some(error)),
                 executed: Mutex::new(Vec::new()),
-                query_rows: Vec::new(),
+                queried: Mutex::new(Vec::new()),
+                query_rows: Mutex::new(VecDeque::new()),
             }
         }
     }
 
     #[async_trait]
     impl DbPlugin for RecordingDbPlugin {
-        async fn query(&self, _statement: DbStatement) -> DbResult<Vec<DbRow>> {
-            Ok(self.query_rows.clone())
+        async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
+            self.queried
+                .lock()
+                .expect("recording db queried lock")
+                .push(statement);
+            Ok(self
+                .query_rows
+                .lock()
+                .expect("recording db query rows lock")
+                .pop_front()
+                .unwrap_or_default())
         }
 
         async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
@@ -453,6 +539,10 @@ mod tests {
             ("created_at".to_string(), DbValue::from(1_i64)),
             ("updated_at".to_string(), DbValue::from(2_i64)),
         ]))
+    }
+
+    fn count_row(total: i64) -> DbRow {
+        DbRow::new(BTreeMap::from([("total".to_string(), DbValue::from(total))]))
     }
 
     fn create_record() -> CreateOrganizationRecord {
@@ -526,5 +616,53 @@ mod tests {
                 if message.contains("organization db set_member_disabled")
                     && message.contains("write unavailable")
         ));
+    }
+
+    #[tokio::test]
+    async fn member_page_uses_bound_filter_paging_values_and_stable_ordering() {
+        let db = Arc::new(RecordingDbPlugin::with_query_rows(vec![
+            vec![count_row(3)],
+            vec![member_row()],
+        ]));
+        let repo = DbOrganizationStore::sqlite(db.clone());
+
+        let page = repo
+            .list_members_page(ListOrganizationMembersPageQuery {
+                env: "contract".to_string(),
+                organization_code: "promo-2026".to_string(),
+                include_disabled: false,
+                role: Some("traffic_analyst".to_string()),
+                offset: 20,
+                limit: 10,
+            })
+            .await
+            .expect("list member page");
+
+        assert_eq!(page.total, 3);
+        assert_eq!(page.members.len(), 1);
+        let statements = db.queried.lock().expect("recorded query statements lock");
+        assert_eq!(statements.len(), 2);
+        assert!(statements[0].sql().contains("SELECT COUNT(*) AS total"));
+        assert_eq!(
+            statements[0].params(),
+            &[
+                DbValue::from("contract"),
+                DbValue::from("promo-2026"),
+                DbValue::from("traffic_analyst"),
+            ]
+        );
+        assert!(statements[1]
+            .sql()
+            .contains("ORDER BY bot_uuid ASC LIMIT ? OFFSET ?"));
+        assert_eq!(
+            statements[1].params(),
+            &[
+                DbValue::from("contract"),
+                DbValue::from("promo-2026"),
+                DbValue::from("traffic_analyst"),
+                DbValue::from(10_u64),
+                DbValue::from(20_u64),
+            ]
+        );
     }
 }
