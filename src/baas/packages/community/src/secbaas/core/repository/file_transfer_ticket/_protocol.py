@@ -52,3 +52,20 @@ class TicketRepository(Protocol):
     def _validate_transition(self, current: str, target: str) -> None:
         """Validate state transition. Raises DeviceCreationError on conflict."""
         ...
+
+    def get_by_transfer_id(self, transfer_id: str) -> TicketRecord | None:
+        """Look up a ticket by its transfer_id. Returns None if not found."""
+        ...
+
+    def update_urls(
+        self,
+        transfer_id: str,
+        *,
+        download_url: str | None = None,
+        upload_url: str | None = None,
+    ) -> None:
+        """Update download_url and/or upload_url on a ticket.
+
+        Updates only the fields that are not None. Both None is a no-op.
+        """
+        ...
