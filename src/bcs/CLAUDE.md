@@ -258,7 +258,8 @@ crates/
 │   └── bcs-db-api/             - (empty, pending Demo Owner follow-up)
 ├── plugins/
 │   ├── bcs-cache-local/        - InMemoryCachePlugin
-│   └── bcs-db-local/           - SQLite-backed DB plugin
+│   ├── bcs-db-local/           - SQLite-backed DB plugin
+│   └── openclaw-channel-bcn/   - TypeScript OpenClaw channel plugin for BCS
 ├── external-clients/
 │   └── bcs-fuse-client/            - Runtime context fusion HTTP client
 ├── tools/
@@ -275,7 +276,6 @@ mix/
 └── README.md
 
 submodules/
-├── moltis/crates/bcn/          - BCN plugin (WebSocket client for bots)
 └── OpenClawEnterprise/         - OpenClaw Enterprise integration
 ```
 

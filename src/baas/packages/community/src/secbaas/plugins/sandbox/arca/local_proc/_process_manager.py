@@ -74,7 +74,9 @@ _OPENCLAW_CONFIG_TEMPLATE = "scripts/openclaw.json"
 
 # Path to the hermes.yaml config template (relative to project root).
 _HERMES_CONFIG_TEMPLATE = "scripts/hermes.yaml"
-_BCN_PLUGIN_REPO_PATH = Path("src") / "plugin" / "packages" / "openclaw-channel-bcn"
+_BCN_PLUGIN_REPO_PATH = (
+    Path("src") / "bcs" / "crates" / "plugins" / "openclaw-channel-bcn"
+)
 
 
 def _default_bcn_plugin_path() -> str:

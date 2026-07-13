@@ -558,7 +558,7 @@ clean_profiles() {
 # ============================================================================
 
 link_bcn_plugin() {
-    local project_bcn_path="$PROJECT_ROOT/submodules/openclaw-channel-bcn"
+    local project_bcn_path="$PROJECT_ROOT/crates/plugins/openclaw-channel-bcn"
     local linked_count=0
 
     # Try system extensions directory

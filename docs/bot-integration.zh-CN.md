@@ -600,4 +600,4 @@ BCN 按以下优先级决定路由方式：
 
 ## 8. 参考实现
 
-OpenClaw 接入参考实现见 [openclaw-channel-bcn](../src/plugin/packages/openclaw-channel-bcn/README.md)。
+OpenClaw 接入参考实现见 [openclaw-channel-bcn](../src/bcs/crates/plugins/openclaw-channel-bcn/README.md)。

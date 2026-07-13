@@ -158,7 +158,7 @@ require_dir() {
 
 preflight_setup_visibility() {
   local ext_dir="${HOME}/.openclaw/extensions"
-  local plugin_src="${PROJECT_ROOT}/src/plugin/packages/openclaw-channel-bcn"
+  local plugin_src="${PROJECT_ROOT}/src/bcs/crates/plugins/openclaw-channel-bcn"
 
   [[ "${DRY_RUN}" == "1" ]] && return 0
 
@@ -299,7 +299,7 @@ setup_bcs_and_plugin() {
 setup_bcn_plugin() {
   local extensions_dir="${HOME}/.openclaw/extensions"
   local plugin_link="${extensions_dir}/openclaw-channel-bcn"
-  local plugin_src="${PROJECT_ROOT}/src/plugin/packages/openclaw-channel-bcn"
+  local plugin_src="${PROJECT_ROOT}/src/bcs/crates/plugins/openclaw-channel-bcn"
   local tshy_self_link="${plugin_src}/src/node_modules/@alipay/openclaw-channel-bcn"
   local needs_build=0
 
@@ -350,7 +350,7 @@ start_clean_bcs() {
 }
 
 bcn_plugin_load_dir() {
-  local src="${PROJECT_ROOT}/src/plugin/packages/openclaw-channel-bcn"
+  local src="${PROJECT_ROOT}/src/bcs/crates/plugins/openclaw-channel-bcn"
   local package="${src}/package"
   if [[ -f "${package}/openclaw.plugin.json" && -f "${package}/dist/esm/index.js" ]]; then
     printf '%s\n' "${package}"

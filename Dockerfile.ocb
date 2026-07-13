@@ -90,15 +90,15 @@ RUN cargo build --manifest-path src/bcs/Cargo.toml --package bcs --package bcs-c
         -exec rm -rf {} +
 
 RUN mkdir -p /tmp/openclaw-channel-bcn \
-    && cp -R src/plugin/packages/openclaw-channel-bcn/. /tmp/openclaw-channel-bcn/ \
+    && cp -R src/bcs/crates/plugins/openclaw-channel-bcn/. /tmp/openclaw-channel-bcn/ \
     && cd /tmp/openclaw-channel-bcn \
     && npm install \
     && npm run build \
     && npm prune --omit=dev \
-    && rm -rf /opt/ocb/src/plugin/packages/openclaw-channel-bcn/dist /opt/ocb/src/plugin/packages/openclaw-channel-bcn/node_modules \
-    && cp -R dist node_modules /opt/ocb/src/plugin/packages/openclaw-channel-bcn/ \
+    && rm -rf /opt/ocb/src/bcs/crates/plugins/openclaw-channel-bcn/dist /opt/ocb/src/bcs/crates/plugins/openclaw-channel-bcn/node_modules \
+    && cp -R dist node_modules /opt/ocb/src/bcs/crates/plugins/openclaw-channel-bcn/ \
     && mkdir -p /root/.openclaw/extensions \
-    && ln -sfn /opt/ocb/src/plugin/packages/openclaw-channel-bcn /root/.openclaw/extensions/openclaw-channel-bcn
+    && ln -sfn /opt/ocb/src/bcs/crates/plugins/openclaw-channel-bcn /root/.openclaw/extensions/openclaw-channel-bcn
 
 RUN cd src/frontend \
     && HUSKY=0 npm ci \
@@ -142,7 +142,7 @@ COPY --from=builder /opt/ocb /opt/ocb
 RUN mkdir -p /opt/ocb/scripts/.dependencies/logs /opt/ocb/scripts/.dependencies/data
 
 RUN mkdir -p /root/.openclaw/extensions \
-    && ln -sfn /opt/ocb/src/plugin/packages/openclaw-channel-bcn /root/.openclaw/extensions/openclaw-channel-bcn
+    && ln -sfn /opt/ocb/src/bcs/crates/plugins/openclaw-channel-bcn /root/.openclaw/extensions/openclaw-channel-bcn
 
 COPY docker/ocb-frontend-server.js /usr/local/bin/ocb-frontend-server
 COPY docker/ocb-entrypoint.sh /usr/local/bin/ocb-entrypoint

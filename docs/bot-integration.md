@@ -652,4 +652,4 @@ a rule engine or configuration table. They do not need to implement this tool.
 ## 8. Reference Implementation
 
 The OpenClaw integration reference implementation is
-[openclaw-channel-bcn](../src/plugin/packages/openclaw-channel-bcn/README.md).
+[openclaw-channel-bcn](../src/bcs/crates/plugins/openclaw-channel-bcn/README.md).

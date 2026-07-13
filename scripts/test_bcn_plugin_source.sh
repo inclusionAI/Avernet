@@ -196,7 +196,7 @@ test_load_dir_source_mode() {
       BCN_PLUGIN_SOURCE=source bots_bcn_plugin_load_dir
     '
   )"
-  assert_contains "$out" "src/plugin/packages/openclaw-channel-bcn"
+  assert_contains "$out" "src/bcs/crates/plugins/openclaw-channel-bcn"
 }
 test_load_dir_npm_mode() {
   local tmp; tmp="$(mktemp -d)"; mkdir -p "${tmp}/openclaw-channel-bcn"
@@ -237,7 +237,7 @@ test_stack_config_allows_plugin_path_refresh() {
 
   local profile_root="${tmp}/profiles"
   local workspace_root="${tmp}/workspaces"
-  local source_plugin="${PROJECT_ROOT}/src/plugin/packages/openclaw-channel-bcn"
+  local source_plugin="${PROJECT_ROOT}/src/bcs/crates/plugins/openclaw-channel-bcn"
   local npm_plugin="${tmp}/extensions/openclaw-channel-bcn"
   mkdir -p "${profile_root}/.openclaw-ceo" "${workspace_root}/ceo/workspace" "$npm_plugin"
   cat > "${profile_root}/.openclaw-ceo/openclaw.json" <<JSON
@@ -297,7 +297,7 @@ test_dynamic_config_refreshes_plugin_path() {
   local profile_root="${tmp}/profiles"
   local workspace_root="${tmp}/workspaces"
   local profile_source="${tmp}/profile-source"
-  local source_plugin="${PROJECT_ROOT}/src/plugin/packages/openclaw-channel-bcn"
+  local source_plugin="${PROJECT_ROOT}/src/bcs/crates/plugins/openclaw-channel-bcn"
   local npm_plugin="${tmp}/extensions/openclaw-channel-bcn"
   local profile_dir="${profile_root}/.openclaw-ceo"
   local workspace_dir="${workspace_root}/ceo/workspace"

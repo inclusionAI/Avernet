@@ -3,7 +3,7 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::time::Duration;
-use wiremock::{matchers::*, Mock, MockServer, ResponseTemplate};
+use wiremock::{Mock, MockServer, ResponseTemplate, matchers::*};
 
 #[tokio::test]
 async fn test_health_ok_json() {
@@ -46,8 +46,7 @@ async fn test_health_timeout() {
         .timeout(Duration::from_secs(2));
 
     // Command timed out and was interrupted - this is expected failure
-    cmd.assert()
-        .failure();
+    cmd.assert().failure();
 }
 
 #[tokio::test]
@@ -129,17 +128,14 @@ async fn test_health_server_error_human() {
 // the Err arm of the structured_mode health fork in main.rs.
 #[tokio::test]
 async fn test_health_unreachable_json() {
-    // Bind a TCP socket then drop it so the port is guaranteed free -> the
-    // bcs-cli health request gets a connection-refused Err (no server there).
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
-    let unreachable_url = format!("http://127.0.0.1:{}", port);
+    // Use a valid IPv6 loopback URL to trigger a connection failure without
+    // depending on local port allocation or host-level localhost proxies.
+    let unreachable_url = "http://[::1]:1";
 
     let mut cmd = Command::cargo_bin("bcs-cli").unwrap();
     cmd.arg("--json")
         .arg("--url")
-        .arg(&unreachable_url)
+        .arg(unreachable_url)
         .arg("health");
     cmd.assert()
         .failure()

@@ -217,15 +217,15 @@ OpenClaw immediately** after the plugin has been built into `dist/`.
 
 ```bash
 # Run from the repository root.
-cd src/plugin
-corepack enable
-pnpm install --filter @avernet-plugin/openclaw-channel-bcn...
-pnpm --filter @avernet-plugin/openclaw-channel-bcn build
-cd ../..
+(
+  cd src/bcs/crates/plugins/openclaw-channel-bcn
+  npm install
+  npm run build
+)
 
 # Symlink to the OpenClaw extensions directory.
 mkdir -p ~/.openclaw/extensions
-ln -sfn "$(pwd)/src/plugin/packages/openclaw-channel-bcn" \
+ln -sfn "$(pwd)/src/bcs/crates/plugins/openclaw-channel-bcn" \
   ~/.openclaw/extensions/openclaw-channel-bcn
 
 # Verify the symlink points to the source checkout.
@@ -242,7 +242,7 @@ the already built `dist/` from the container:
 
 ```bash
 mkdir -p ~/.openclaw/extensions
-docker cp ocb-local:/opt/ocb/src/plugin/packages/openclaw-channel-bcn \
+docker cp ocb-local:/opt/ocb/src/bcs/crates/plugins/openclaw-channel-bcn \
   ~/.openclaw/extensions/openclaw-channel-bcn
 ```
 
