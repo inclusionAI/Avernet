@@ -69,26 +69,15 @@ from agentclaw.community.core.economy.governance.services.whitelist_service impo
     GovernanceWhitelistService,
 )
 from agentclaw.community.di.config import EconomyGovernanceConfig
-from agentclaw.community.di.config import EconomyInternalToken
-from agentclaw.community.di.config import SecretNamesConfig
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
-from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.utils.env_utils import get_current_env
 from injector import Binder, Module, inject, provider, singleton
 
 
 logger = get_logger()
-
-# Fallback token used when SecretResolver returns None (singlebox / CI /
-# no Mist). Matches the client preset in upload_governance_data.py
-# ("singlebox-economy-governance-token-local") so local 联调 runs without
-# provisioning a real Mist secret. Publicly visible — only gates singlebox
-# where no real authority decision is at stake. Mirrors dormant's
-# _SINGLEBOX_FALLBACK_TOKEN pattern.
-_SINGLEBOX_FALLBACK_ECONOMY_TOKEN = "singlebox-economy-governance-token-local"
 
 
 # ---------------------------------------------------------------------------
@@ -636,63 +625,3 @@ class EconomyGovernanceModule(Module):
         return GovernanceBotLifecycle(
             service=service, cache=cache, config=config, admin_svc=admin_svc,
         )
-
-    @singleton
-    @provider
-    @inject
-    def _resolved_economy_token(
-        self,
-        secret_resolver: SecretResolver,
-        secret_names: SecretNamesConfig,
-    ) -> EconomyInternalToken:
-        """Resolve the offline-batch Bearer token via SecretResolver.
-
-        Secret name comes from ``SecretNamesConfig.economy_internal_token``
-        (the ``secret_names`` yaml block; Mist via layotto in prod / pre).
-        Resolution rules (mirror ``BotDormantModule._resolved_dormant_token``):
-
-          - name empty (community / singlebox / test — no corp secret name)
-              → ``.value = _SINGLEBOX_FALLBACK_ECONOMY_TOKEN`` (本地可调)
-          - Mist returns a secret with non-empty ``secret_value``
-              → ``.value = secret_value`` (prod / pre normal path)
-          - Mist returns ``None`` or empty ``secret_value``
-              → ``.value = _SINGLEBOX_FALLBACK_ECONOMY_TOKEN``
-          - resolver raises (transient Mist outage / network)
-              → ``.value = ""`` (failure-closed: 401 all requests)
-        """
-        secret_name = secret_names.economy_internal_token
-        if not secret_name:
-            logger.info(
-                "[economy_governance_module] no economy token secret name "
-                "configured — local fallback token in use"
-            )
-            return EconomyInternalToken(value=_SINGLEBOX_FALLBACK_ECONOMY_TOKEN)
-
-        try:
-            secret = secret_resolver.get_secret(secret_name=secret_name)
-        except Exception:
-            logger.exception(
-                "[economy_governance_module] SecretResolver.get_secret failed "
-                "for %r — returning empty token (failure-closed)",
-                secret_name,
-            )
-            return EconomyInternalToken(value="")
-
-        if secret is None:
-            logger.info(
-                "[economy_governance_module] SecretResolver returned None for "
-                "%r — singlebox/local fallback token in use",
-                secret_name,
-            )
-            return EconomyInternalToken(value=_SINGLEBOX_FALLBACK_ECONOMY_TOKEN)
-
-        value = getattr(secret, "secret_value", None)
-        if not value:
-            logger.warning(
-                "[economy_governance_module] secret %r resolved but "
-                "secret_value empty — falling back to singlebox token",
-                secret_name,
-            )
-            return EconomyInternalToken(value=_SINGLEBOX_FALLBACK_ECONOMY_TOKEN)
-
-        return EconomyInternalToken(value=str(value))

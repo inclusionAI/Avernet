@@ -121,6 +121,7 @@
       "notify_channel": "tc_card",
       "scan_hour": 14,
       "scan_minute": 0,
+      "skip_weekends": false,
       "tc_card_id": "card_cb190863",
       "tc_card_preview_url": "https://teamclaw.com/preview",
       "tc_card_template_id": "7f1e01ed-194a-4c25-916c-0388f67e3517.schema"

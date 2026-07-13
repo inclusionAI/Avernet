@@ -1,14 +1,11 @@
 """Open + business-data router for economy/governance endpoints.
 
-两个端点鉴权方式不同(经核实线上能力 + 调用方可达性):
-  - /card-callback            钉钉卡片回调(iframe fetch POST,治理反馈真入口)—
-                              cookie/SSO(RequestContext,card iframe 线上已能拿 cookie)
-  - /records/offline-batch    ODPS 离线批量写入(§7.2, 增量幂等)— 静态 Bearer
-                              token(ODPS pipeline 无用户会话,token 经 SecretResolver:
-                              singlebox fallback / prod Mist)
+已开放接口(免鉴权,有外部调用约定,不动):
+  - /card-callback            钉钉卡片回调(iframe fetch POST,治理反馈真入口)
+  - /records/offline-batch    ODPS 离线批量写入(§7.2, 增量幂等)
 
 用户自助端点(/notifications*、用户 /whitelist)已删除:无真实用户主动调用场景,
-治理反馈真入口是 card-callback。
+治理反馈真入口是 card-callback(靠 notification_id 不可猜保证安全)。
 
 Admin 端点在 :mod:`agentclaw.community.adapters.http.economy.admin_router`
 (/admin/tickets:* / /admin/whitelist:* / /admin/brake / /admin/records:delete /
@@ -21,15 +18,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 
-from agentclaw.community.adapters.http.dependencies import (
-    RequestContext,
-    get_request_context,
-)
-from agentclaw.community.adapters.http.economy.auth import (
-    verify_economy_internal_token,
-)
 from agentclaw.community.adapters.http.economy.schemas import (
     ApiResponse,
     CardCallbackIFrameRequest,
@@ -61,15 +51,13 @@ _OfflineBatchSvc = GovernanceRecordProcessProtocol
 @router.post("/card-callback", summary="卡片回调 (iframe fetch POST)")
 async def card_callback(
     body: CardCallbackIFrameRequest,
-    ctx: RequestContext = Depends(get_request_context),
     feedback_svc: _FeedbackService = Injected(_FeedbackService),
 ) -> ApiResponse:
     """Card iframe fetch POST callback.
 
-    Auth: cookie/SSO via ``RequestContext`` (card iframe now carries the
-    browser session cookie — verified online). The authenticated user
-    (``ctx.user_id``) is the feedback actor; owner is still resolved from
-    notify_log inside ``resolve()`` when needed.
+    No RequestContext auth: DingTalk card iframe has no SSO cookie.
+    Owner identity is resolved from the notification record in DB
+    (notification_id is an unguessable UUID, providing sufficient security).
     """
     # Parse repair_deadline
     repair_deadline_dt = None
@@ -84,7 +72,7 @@ async def card_callback(
         feedback_svc.resolve,
         notification_id=body.notification_id,
         response=body.response,
-        user_id=ctx.user_id,  # authenticated feedback actor
+        user_id="",  # empty → resolve() reads owner_id from notify_log
         remark=body.remark,
         source="card_callback",
         repair_deadline=repair_deadline_dt,
@@ -120,7 +108,6 @@ async def card_callback(
 async def offline_batch(
     body: OfflineBatchRequest,
     partial_svc: _OfflineBatchSvc = Injected(_OfflineBatchSvc),
-    _: None = Depends(verify_economy_internal_token),
 ) -> ApiResponse:
     """Upsert ODPS pipeline results via process_offline_batch (§7.2).
 
@@ -134,9 +121,7 @@ async def offline_batch(
     单条记录失败不阻断整批(续跑),失败记录在 upsert_results 中以 action="error"
     + worker_key + reason 回传,errors 计数同步累加。
 
-    Auth: static Bearer token (``verify_economy_internal_token``) — called by
-    offline ODPS pipeline with no user session (cookie/SSO unreachable). Token
-    resolved via SecretResolver (singlebox fallback / prod Mist secret).
+    No auth: called by offline ODPS pipeline (no user session).
 
     ``process_offline_batch`` is synchronous (loop over records doing
     per-record DB upserts); running it inline in an ``async def`` would
