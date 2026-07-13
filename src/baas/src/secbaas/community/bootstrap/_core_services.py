@@ -39,6 +39,7 @@ from secbaas.community.core.service.bot_run import (
 from secbaas.community.core.service.bot_runtime.dispatcher import (
     DefaultBotCmdDispatcher,
     DefaultBotFetchStartProgressDispatcher,
+    DefaultBotFileTransferDispatcher,
     DefaultBotHttpConnInfoDispatcher,
     DefaultBotHttpDispatcher,
     DefaultBotOpenFolderDispatcher,
@@ -194,6 +195,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     distributed_lock_repository = providers.Dependency()
     cache_plugin = providers.Dependency()
     ws_relay_session_repo = providers.Dependency()
+    ticket_repository = providers.Dependency()
 
     # ── Auth service ──────────────────────────────────────────────────────────
 
@@ -363,6 +365,15 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         bot_repo=bot_repo,
         device_repo=device_repo,
         paas_facade=paas_facade,
+    )
+
+    bot_file_transfer_dispatcher = providers.Singleton(
+        DefaultBotFileTransferDispatcher,
+        bot_repo=bot_repo,
+        device_repo=device_repo,
+        paas_facade=paas_facade,
+        file_transfer_backend=file_transfer_backend,
+        ticket_repo=ticket_repository,
     )
 
     bot_binding_resolver = providers.Singleton(

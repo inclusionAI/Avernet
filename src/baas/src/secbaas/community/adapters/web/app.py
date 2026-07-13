@@ -18,10 +18,12 @@ from secbaas.community.adapters.web.routers.bcn_downlink import (
 )
 from secbaas.community.adapters.web.routers.bot_service import (
     bot_cmd_router,
+    bot_file_transfer_router,
     bot_http_conn_router,
     bot_http_router,
     bot_management_router,
     bot_open_folder_router,
+    bot_transfer_query_router,
     bot_wss_router,
     callback_router,
     publish_router,
@@ -255,6 +257,8 @@ def create_app() -> FastAPI:
     app.include_router(bot_http_router)
     app.include_router(bot_cmd_router)
     app.include_router(bot_open_folder_router)
+    app.include_router(bot_file_transfer_router)
+    app.include_router(bot_transfer_query_router)
     app.include_router(bot_qpm_router)
     app.include_router(tenant_router)
     app.include_router(paas_facade_router)
