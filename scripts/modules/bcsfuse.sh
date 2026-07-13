@@ -184,6 +184,14 @@ bcsfuse_start() {
     # Ensure runtime dirs exist
     mkdir -p "${BCSFUSE_RUNTIME_DIR}"/{logs,pids,data}
 
+    # Point dev-mode SQLite/Faiss data paths into .runtime/data/ so all
+    # runtime state lives under one directory tree (easy to clean/reset).
+    # When these env vars are set, resolve_data_path() and config defaults
+    # are overridden.
+    export BCSFUSE_DATABASE_SQLITE_PATH="${BCSFUSE_RUNTIME_DIR}/data/bcsfuse.db"
+    export BCSFUSE_FAISS_SQLITE_PATH="${BCSFUSE_RUNTIME_DIR}/data/faiss_index.db"
+    export QDRANT_LOCAL_PATH="${BCSFUSE_RUNTIME_DIR}/data/qdrant"
+
     # Clear old log
     : > "${BCSFUSE_LOG}"
 
