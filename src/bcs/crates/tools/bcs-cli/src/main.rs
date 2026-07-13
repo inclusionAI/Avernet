@@ -2670,14 +2670,18 @@ async fn main() -> Result<()> {
             for group in groups {
                 let id = group
                     .get("id")
+                    .or_else(|| group.get("group_id"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown");
                 let mode = group
                     .get("mode")
+                    .or_else(|| group.get("group_strategy"))
+                    .or_else(|| group.get("group_kind"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown");
                 let driver = group
                     .get("driver_bot")
+                    .or_else(|| group.get("coordinator_bot"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown");
                 println!("  - {} [{}] driver={}", id, mode, driver);
