@@ -109,6 +109,18 @@ traceable.
 - Keep public-local development free of company-only services, registries,
   domains, credentials, and runtime state.
 
+### Python Type Contracts
+
+- Use `T | None` only when `None` is an intentional, valid state in the domain
+  contract or at an external input boundary.
+- Keep required configuration values, request fields, constructor arguments,
+  and service method parameters non-optional end to end.
+- Do not widen a required type to `T | None` merely for defensive programming,
+  uncertain call sites, test convenience, or a fallback that hides missing
+  input. Validate at the boundary and fail clearly instead.
+- Before introducing an optional type, verify that a real caller can omit the
+  value and that the receiving code defines meaningful behavior for `None`.
+
 ## Testing Rules
 
 Choose tests based on risk:

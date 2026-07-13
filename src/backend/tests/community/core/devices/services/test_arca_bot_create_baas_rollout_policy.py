@@ -60,6 +60,7 @@ def test_disabled_rollout_fails_closed_to_arca():
         user_id="u001",
         bot_type="personal",
         engine_type="openclaw",
+        template_type="",
     )
 
     assert decision.target_provider == ARCA_DEVICE_PROVIDER
@@ -83,6 +84,7 @@ def test_matching_user_bot_type_and_engine_routes_to_baas():
         user_id="u001",
         bot_type="personal",
         engine_type="openclaw",
+        template_type="",
     )
 
     assert decision.target_provider == BAAS_DEVICE_PROVIDER
@@ -110,6 +112,7 @@ def test_rollout_decision_is_logged_with_context():
             user_id="u001",
             bot_type="personal",
             engine_type="openclaw",
+            template_type="",
         )
 
     messages = [str(call.args[0]) for call in log_info.call_args_list if call.args]
@@ -144,6 +147,7 @@ def test_matching_user_group_routes_to_baas():
         user_id="u002",
         bot_type="personal",
         engine_type="openclaw",
+        template_type="",
     )
 
     assert decision.target_provider == BAAS_DEVICE_PROVIDER
@@ -172,6 +176,7 @@ def test_rule_user_ids_and_user_groups_are_union():
             user_id=user_id,
             bot_type="personal",
             engine_type="openclaw",
+            template_type="",
         )
 
         assert decision.target_provider == BAAS_DEVICE_PROVIDER
@@ -195,6 +200,7 @@ def test_allow_all_users_routes_matching_combination_to_baas():
         user_id="any-user",
         bot_type="service",
         engine_type="openclaw",
+        template_type="",
     )
 
     assert decision.target_provider == BAAS_DEVICE_PROVIDER
@@ -217,6 +223,7 @@ def test_same_user_wrong_bot_type_fails_closed_to_arca():
         user_id="u001",
         bot_type="service",
         engine_type="openclaw",
+        template_type="",
     )
 
     assert decision.target_provider == ARCA_DEVICE_PROVIDER
@@ -239,13 +246,14 @@ def test_matching_rule_but_user_not_allowed_fails_closed_to_arca():
         user_id="u002",
         bot_type="personal",
         engine_type="openclaw",
+        template_type="",
     )
 
     assert decision.target_provider == ARCA_DEVICE_PROVIDER
     assert decision.reason == "user_not_allowed"
 
 
-def test_missing_bot_type_falls_back_to_arca():
+def test_blank_bot_type_falls_back_to_arca():
     policy = _policy(
         ArcaBotCreateBaasRolloutConfig(
             enabled=True,
@@ -260,17 +268,17 @@ def test_missing_bot_type_falls_back_to_arca():
     )
 
     with patch("agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_policy.logger.warning") as log_warning:
-        for bot_type in (None, ""):
-            decision = policy.decide(
-                user_id="u001",
-                bot_type=bot_type,
-                engine_type="openclaw",
-            )
+        decision = policy.decide(
+            user_id="u001",
+            bot_type="",
+            engine_type="openclaw",
+            template_type="",
+        )
 
-            assert decision.target_provider == ARCA_DEVICE_PROVIDER
-            assert decision.reason == "unclassified_branch_fallback"
+        assert decision.target_provider == ARCA_DEVICE_PROVIDER
+        assert decision.reason == "unclassified_branch_fallback"
 
-    assert log_warning.call_count == 2
+    log_warning.assert_called_once()
 
 
 def test_personal_hermes_is_legacy_arca_branch():
@@ -281,6 +289,7 @@ def test_personal_hermes_is_legacy_arca_branch():
             user_id="u001",
             bot_type="personal",
             engine_type="hermes",
+            template_type="",
         )
 
     assert decision.target_provider == ARCA_DEVICE_PROVIDER
@@ -305,6 +314,7 @@ def test_unclassified_branch_falls_back_to_arca_with_warning(bot_type, engine_ty
             user_id="u001",
             bot_type=bot_type,
             engine_type=engine_type,
+            template_type="",
         )
 
     assert decision.target_provider == ARCA_DEVICE_PROVIDER
@@ -329,6 +339,7 @@ def test_claude_code_requires_explicit_engine_bucket():
         user_id="u001",
         bot_type="personal",
         engine_type="claude_code",
+        template_type="",
     )
 
     assert decision.target_provider == ARCA_DEVICE_PROVIDER
@@ -602,6 +613,7 @@ def test_default_scope_can_route_matching_user_to_baas():
         user_id="u001",
         bot_type="personal",
         engine_type="openclaw",
+        template_type="",
     )
 
     assert decision.target_provider == BAAS_DEVICE_PROVIDER
@@ -627,6 +639,7 @@ def test_personal_hermes_drm_rule_can_route_matching_user_to_baas():
         user_id="u001",
         bot_type="personal",
         engine_type="hermes",
+        template_type="",
     )
 
     assert decision.target_provider == BAAS_DEVICE_PROVIDER
@@ -793,4 +806,3 @@ def test_drm_payload_parser_rejects_duplicate_combination():
     )
 
     assert config.enabled is False
-

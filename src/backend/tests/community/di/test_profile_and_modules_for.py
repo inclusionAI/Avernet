@@ -3,6 +3,7 @@
 Asserts the additive mechanism reproduces today's per-profile module sets
 and that the mandatory switch errors out on unset / unknown values.
 """
+
 from __future__ import annotations
 
 from typing import Annotated
@@ -11,6 +12,22 @@ import pytest
 from injector import Injector
 
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
+from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.bot_management.services.teclaw_status_reconciler import (
+    TeclawStatusReconciler,
+)
+from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.devices.services.baas_device_accessor import (
+    BaasDeviceAccessor,
+)
+from agentclaw.community.core.devices.services.baas_device_service import (
+    BaasDeviceService,
+)
+from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
+from agentclaw.community.core.devices.services.device_service import DeviceService
+from agentclaw.community.core.devices.services.device_service_router import (
+    DeviceServiceRouter,
+)
 from agentclaw.community.core.access.services.policy_service import PolicyService
 from agentclaw.community.di.container import build_injector
 from agentclaw.community.di.modules.http_client_module import HttpClientModule
@@ -19,6 +36,8 @@ from agentclaw.community.di.modules.infrastructure.test.http_client import (
 )
 from agentclaw.community.di.profile import DeployProfile, validate_deploy_environment
 from agentclaw.community.di.profile_modules import modules_for
+from agentclaw.community.core.service_bot.services.baas_service import BaasService
+from agentclaw.community.kernel.lifecycle import discover_lifecycle_participants
 from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_BAAS,
     QUALIFIER_BCN,
@@ -86,9 +105,7 @@ def test_detect_parses_value(monkeypatch, raw, expected):
     ["SERVER_ENV", "REAL_SERVER_ENV", "ALIPAY_APP_ENV"],
 )
 def test_legacy_singlebox_env_is_rejected(key):
-    with pytest.raises(
-        RuntimeError, match="DEPLOY_PROFILE=singlebox SERVER_ENV=dev"
-    ):
+    with pytest.raises(RuntimeError, match="DEPLOY_PROFILE=singlebox SERVER_ENV=dev"):
         validate_deploy_environment({key: "singlebox"})
 
 
@@ -158,15 +175,19 @@ def test_test_and_singlebox_have_explicit_access_and_http_bindings():
     legacy_access_module = "Testing" + "AccessModule"
 
     assert "TestHttpClientModule" in test_names
+    assert "TestDevicesModule" in test_names
+    assert "SingleboxDevicesModule" not in test_names
     assert "SingleboxAccessModule" not in test_names
     assert legacy_access_module not in test_names
 
     assert "SingleboxAccessModule" in singlebox_names
     assert "TestHttpClientModule" not in singlebox_names
+    assert "SingleboxDevicesModule" in singlebox_names
+    assert "TestDevicesModule" not in singlebox_names
     assert legacy_access_module not in singlebox_names
 
-    assert test_names - {"TestHttpClientModule"} == (
-        singlebox_names - {"SingleboxAccessModule"}
+    assert test_names - {"TestHttpClientModule", "TestDevicesModule"} == (
+        singlebox_names - {"SingleboxAccessModule", "SingleboxDevicesModule"}
     )
 
 
@@ -185,9 +206,50 @@ def test_singlebox_profile_resolves_local_policy_and_real_http_clients():
 
     assert isinstance(injector.get(PolicyServiceProtocol), LocalPolicyService)
     assert all(
-        isinstance(client, HttpxClient)
-        for client in _resolve_http_clients(injector)
+        isinstance(client, HttpxClient) for client in _resolve_http_clients(injector)
     )
+
+
+def test_singlebox_profile_resolves_baas_only_device_runtime():
+    injector = build_injector(profile=DeployProfile.SINGLEBOX)
+
+    service = injector.get(DeviceService)
+    baas_device_accessor = injector.get(BaasDeviceAccessor)
+    assert isinstance(service, DeviceServiceRouter)
+    assert set(service._providers) == {"baas"}
+    assert isinstance(service._providers["baas"], BaasDeviceService)
+    assert injector.get(DeviceAccessor) is baas_device_accessor
+    participant_names = {
+        type(participant).__name__
+        for participant in discover_lifecycle_participants(injector)
+    }
+    assert "SingleboxBaasTemplateConfigLifecycle" in participant_names
+    assert "LocalDeviceLifecycle" not in participant_names
+
+
+def test_singlebox_rollout_policy_preserves_normalized_engine_bucket():
+    injector = build_injector(profile=DeployProfile.SINGLEBOX)
+    service = injector.get(DeviceService)
+
+    decision = service._arca_baas_rollout_policy.decide(
+        user_id="owner",
+        bot_type="personal",
+        engine_type="claude-code",
+        template_type="personalCoding",
+    )
+
+    assert decision.target_provider == "baas"
+    assert decision.engine_bucket == "aicoding"
+
+
+def test_singlebox_reconciler_uses_real_dependencies_with_noop_scheduler():
+    injector = build_injector(profile=DeployProfile.SINGLEBOX)
+
+    reconciler = injector.get(TeclawStatusReconciler)
+
+    assert reconciler._baas is injector.get(BaasService)
+    assert reconciler._bot_repository is injector.get(BotRepository)
+    assert reconciler._device_binding_repo is injector.get(DeviceBindingRepository)
 
 
 def test_test_http_override_wins_when_installed_after_base():

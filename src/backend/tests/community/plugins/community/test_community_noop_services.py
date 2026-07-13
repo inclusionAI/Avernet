@@ -64,10 +64,13 @@ def test_all_baas_rollout_policy_always_decides_baas():
     for bot_type, engine in [
         ("personal", "openclaw"),
         ("service", "claude_code"),
-        ("desktop", None),
+        ("desktop", ""),
         ("anything", "xyz"),
     ]:
         decision = policy.decide(
-            user_id="staff-1", bot_type=bot_type, engine_type=engine
+            user_id="staff-1",
+            bot_type=bot_type,
+            engine_type=engine,
+            template_type="",
         )
         assert decision.target_provider == BAAS_DEVICE_PROVIDER
