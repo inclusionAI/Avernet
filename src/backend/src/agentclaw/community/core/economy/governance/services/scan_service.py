@@ -393,8 +393,11 @@ class GovernanceBotService:
                 else:
                     # Failed → revert or terminal failure
                     max_attempts = _MAX_SEND_ATTEMPTS
-                    # Read actual attempt count from the row after claim
-                    attempt_count = notify_row.send_attempt_count or 1
+                    # Read the post-claim attempt count: claim_pending atomically
+                    # increments send_attempt_count in the DB, so notify_row (fetched
+                    # before claim) is stale (one behind). claimed_notify is re-read
+                    # after the increment and carries the true count.
+                    attempt_count = claimed_notify.send_attempt_count or 1
                     is_terminal = attempt_count >= max_attempts
                     self._notify_lifecycle_svc.mark_failed(
                         notify_row.notification_id,

@@ -34,6 +34,7 @@ from agentclaw.community.core.economy.governance.services.lifecycle_service impo
 from agentclaw.community.core.economy.governance.services.scan_service import (
     CronTickSummary,
     GovernanceBotService,
+    _MAX_SEND_ATTEMPTS,
 )
 from agentclaw.community.core.economy.governance.services.notify_render_service import (
     NotifyRenderService,
@@ -132,6 +133,7 @@ def _seed_pending_notify(
     worker_id="user-1:bot-1",
     bot_id="bot-1",
     owner_id="user-1",
+    send_attempt_count=0,
 ):
     """Insert a pending GovernanceNotificationOrm linked to a ticket."""
     if notification_id is None:
@@ -152,7 +154,7 @@ def _seed_pending_notify(
         notify_source="offline_batch",
         notify_channel=notify_channel,
         notification_md="**test**",
-        send_attempt_count=0,
+        send_attempt_count=send_attempt_count,
     )
     session.add(row)
     session.commit()
@@ -290,6 +292,40 @@ class TestProcessCronTick:
             row = s2.query(GovernanceNotificationOrm).filter_by(notification_id=notif_id).one()
             # First attempt (count < MAX_SEND_ATTEMPTS) → reverts to pending
             assert row.notify_status in ("pending", "failed")
+            assert row.last_send_error is not None
+
+    @pytest.mark.asyncio
+    async def test_send_failure_at_max_attempts_is_terminal(self, engine):
+        """Send failure when the post-claim attempt count reaches the cap → terminal.
+
+        Regression: claim_pending atomically increments send_attempt_count, so the
+        count must be read from the re-read claimed_notify (post-increment), not the
+        stale notify_row (pre-increment). Seed count = MAX-1; claim bumps to MAX; the
+        failure must be flagged terminal (FAILED), not reverted to pending for retry.
+        """
+        svc, db, Sess = _build_service(
+            engine,
+            config=FakeGovernanceConfig(notify_channel="markdown"),
+            notify_sender=_ConfigurableSender(tc_card=None, markdown=None),
+        )
+        s = Sess()
+        ticket_id = _seed_ticket(s)
+        notif_id = _seed_pending_notify(
+            s,
+            ticket_id=ticket_id,
+            notify_channel="markdown",
+            send_attempt_count=_MAX_SEND_ATTEMPTS - 1,
+        )
+        s.close()
+
+        summary = svc.process_cron_tick(dry_run=False)
+
+        assert summary.failed_count >= 1
+        with db.orm_session() as s2:
+            row = s2.query(GovernanceNotificationOrm).filter_by(notification_id=notif_id).one()
+            # claim incremented to _MAX_SEND_ATTEMPTS → terminal failure (not pending retry)
+            assert row.send_attempt_count == _MAX_SEND_ATTEMPTS
+            assert row.notify_status == "failed"
             assert row.last_send_error is not None
 
     @pytest.mark.asyncio
