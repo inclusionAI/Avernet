@@ -1533,16 +1533,16 @@ class TestSelectDispatcherConfig:
         assert runner._select_dispatcher("bot-1") is queue_d
         assert runner._select_dispatcher("bot-1", method="stream") is task_d
 
-    def test_config_fallback_to_wildcard(
+    def test_config_fallback_to_default(
         self, mock_selector, mock_run_repo, mock_bot_service_plugin
     ):
-        """When bot_id key is not found, falls back to * wildcard."""
+        """When bot_id key is not found, falls back to default route."""
         task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
         queue_d = MagicMock(spec=MessageDispatcher)
         queue_d.__class__.__name__ = "QueueTaskMessageDispatcher"
 
         def get_config(key):
-            if key == "bot_run.dispatcher_route.*":
+            if key == "bot_run.dispatcher_route.default":
                 return _config_response("QueueTaskMessageDispatcher")
             return None
 
@@ -1597,7 +1597,7 @@ class TestSelectDispatcherConfig:
         queue_d.__class__.__name__ = "QueueTaskMessageDispatcher"
 
         def get_config(key):
-            if key == "bot_run.dispatcher_route.*":
+            if key == "bot_run.dispatcher_route.default":
                 return _config_response("QueueTaskMessageDispatcher")
             return _config_response("   ")
 
