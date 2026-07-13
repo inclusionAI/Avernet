@@ -44,6 +44,9 @@ class ArcaDeviceInfo(DeviceInfo):
         default=None, description="挂载点信息"
     )
     envs: dict[str, str] | None = Field(default=None, description="环境变量")
+    storage: dict[str, Any] | None = Field(
+        default=None, description="NAS 持久化存储信息"
+    )
 
 
 class SigmaDeviceInfo(DeviceInfo):

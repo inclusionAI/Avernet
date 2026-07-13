@@ -479,3 +479,11 @@ class LocalProcessArcaSandboxPlugin(ArcaSandboxPlugin):
             http_url=f"http://localhost:{adapter_port}{norm_path}",
             token="local",
         )
+
+    def delete_storage(self, storage_id: str, tenant_name: str) -> bool:
+        logger.info(
+            "[local-proc] delete_storage storage_id=%s tenant_name=%s (local process mode, no-op)",
+            storage_id,
+            tenant_name,
+        )
+        return True

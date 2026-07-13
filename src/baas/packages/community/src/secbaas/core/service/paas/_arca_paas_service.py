@@ -277,6 +277,7 @@ class ArcaPaasService(PaasService):
     ) -> ArcaCreationResult:
         """Synchronous implementation of create_device for use in to_thread()."""
         sandbox = None
+        template_id = None
         try:
             # Log detailed config parameters at info level
             self._logger.info(
@@ -392,37 +393,110 @@ class ArcaPaasService(PaasService):
         return await asyncio.to_thread(self._destroy_device_sync, paas_device_id)
 
     def _destroy_device_sync(self, paas_device_id: str) -> bool:
-        """Synchronous implementation of destroy_device for use in to_thread()."""
+        """Synchronous implementation of destroy_device for use in to_thread().
+
+        Extracts storage_id from sandbox info before destroying, then
+        attempts best-effort storage cleanup regardless of whether the
+        sandbox was already destroyed (idempotent destroy must still
+        clean up any associated NAS storage).
+        """
+        # Step 0: Extract storage_id BEFORE destroy
+        # sandbox.get_info() is unavailable after sandbox.destroy()
+        sandbox = None
+        storage_id = None
         try:
-            self._logger.info(
-                f"Destroying sandbox with paas_device_id: {paas_device_id}"
-            )
             sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(paas_device_id)
-            result = sandbox.destroy()
-            if isinstance(result, bool):
-                return result
-            return getattr(result, "success", True)
+            try:
+                info = sandbox.get_info()
+                storage = getattr(info, "storage", None)
+                if storage and isinstance(storage, dict):
+                    storage_id = storage.get("storage_id")
+            except Exception:
+                self._logger.warning(
+                    "Failed to get storage info before destroy for %s",
+                    paas_device_id,
+                    exc_info=True,
+                )
         except ArcaSandboxNotFoundError:
-            # Already destroyed - idempotent destroy
-            return True
+            # Sandbox already gone — normal idempotent destroy.
+            # No traceback needed; Step 1 will confirm and fall through
+            # to storage cleanup.
+            pass
+        except Exception:
+            self._logger.warning(
+                "Failed to connect to sandbox before destroy for %s",
+                paas_device_id,
+                exc_info=True,
+            )
+
+        # Step 1: Destroy (or confirm already destroyed)
+        # Default to True — if sandbox is already gone that's a successful
+        # idempotent destroy.  Only set to False when destroy() explicitly fails.
+        success = True
+        try:
+            if sandbox is None:
+                self._logger.info(
+                    f"Destroying sandbox with paas_device_id: {paas_device_id}"
+                )
+                sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(
+                    paas_device_id
+                )
+            result = sandbox.destroy()
+            success = (
+                result if isinstance(result, bool)
+                else getattr(result, "success", True)
+            )
+        except ArcaSandboxNotFoundError:
+            # Already destroyed — idempotent.  Fall through to storage cleanup.
+            self._logger.warning(
+                "Sandbox %s not found during destroy, "
+                "treating as successful (already destroyed)",
+                paas_device_id,
+            )
         except ArcaSandboxError as e:
             error_str = str(e).lower()
-            # If sandbox does not exist or cannot be connected, treat as success
-            # (idempotent destroy - sandbox may already be destroyed)
+            # Only "not found" / "does not exist" are idempotent.
+            # "failed to connect" is NOT idempotent — it may be a transient
+            # network error and the sandbox is still running.
             if "sandbox" in error_str and (
                 "not found" in error_str
                 or "does not exist" in error_str
-                or "failed to connect" in error_str
             ):
                 self._logger.warning(
-                    f"Sandbox {paas_device_id} not found during destroy, "
-                    "treating as successful (already destroyed)"
+                    "Sandbox %s not found during destroy, "
+                    "treating as successful (already destroyed)",
+                    paas_device_id,
                 )
-                return True
-            # Otherwise, translate to PaasError
-            raise self._translate_error(e, ErrorCode.DEVICE_DESTROY_FAILED)
+                # Fall through to storage cleanup below
+            else:
+                raise self._translate_error(e, ErrorCode.DEVICE_DESTROY_FAILED)
         except Exception as e:
             raise self._translate_error(e, ErrorCode.DEVICE_DESTROY_FAILED)
+
+        # Step 2: Best-effort storage cleanup (always reached, even on
+        # idempotent destroy paths — NAS volumes must be cleaned up
+        # regardless of whether the sandbox was already gone).
+        if storage_id:
+            tenant_name = self._credentials.tenant_name
+            if tenant_name:
+                try:
+                    deleted = self._arca_sandbox_plugin.delete_storage(
+                        storage_id, tenant_name
+                    )
+                    if deleted:
+                        self._logger.info("Storage deleted: %s", storage_id)
+                    else:
+                        self._logger.warning(
+                            "Storage deletion failed: %s", storage_id
+                        )
+                except Exception:
+                    self._logger.warning(
+                        "Storage deletion exception for %s",
+                        storage_id,
+                        exc_info=True,
+                    )
+
+        return success
 
     async def execute_command(
         self,
@@ -519,6 +593,7 @@ class ArcaPaasService(PaasService):
                 resource_spec=getattr(info, "resource_spec", None),
                 mount_points=getattr(info, "mount_points", None),
                 envs=getattr(info, "envs", None),
+                storage=getattr(info, "storage", None),
             )
         except ArcaSandboxNotFoundError:
             raise PaasError(
