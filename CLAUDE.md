@@ -13,3 +13,8 @@ target is `origin/dev`; set `avernet.prePush.mergeTarget` for a persistent
 override or `AVERNET_PRE_PUSH_MERGE_TARGET` for one `git push`. The hook must
 fetch that target and use its merge base rather than a direct target-to-head
 diff.
+
+Before changing Git hooks, module CI entrypoints, Singlebox orchestration,
+acceptance E2E tests, coverage manifests, or coverage reporting, read the
+`Pre-push Module Selection` section in `AGENTS.md` and treat it together with
+the referenced scripts as one contract.
