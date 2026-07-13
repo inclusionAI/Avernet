@@ -1,4 +1,4 @@
-"""Governance feedback service — task_record based (§7.4).
+"""[编排] Governance feedback service — task_record based (§7.4).
 
 Handles 4 formal responses (optimized / need_time / dispute / whitelist)
 via the **one-time feedback rule** (§7.4.1): one task_record gets at most
@@ -13,7 +13,7 @@ admin-driven (§7.5).
 from __future__ import annotations
 
 import json
-import logging
+from agentclaw.community.log import get_logger
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -21,9 +21,14 @@ from typing import TYPE_CHECKING, Any
 
 from injector import inject
 
-from agentclaw.community.core.economy.governance.contracts.enums import AuditAction
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.domain.enums import (
+    AuditAction,
+    GovernanceStatus,
+    Response,
+)
+from agentclaw.community.core.economy.governance.services.service_protocols import (
+    GovernanceLifecycleServiceProtocol,
+    GovernanceWhitelistServiceProtocol,
 )
 
 
@@ -37,24 +42,20 @@ if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
         TaskRecordRepository,
     )
-    from agentclaw.community.core.economy.governance.services.whitelist_service import (
-        GovernanceWhitelistService,
-    )
-    from agentclaw.community.plugin_api.database_protocol import DatabasePlugin
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # Valid formal responses
-_FORMAL_RESPONSES = {"optimized", "need_time", "dispute", "whitelist"}
+_FORMAL_RESPONSES = {e.value for e in Response}
 
 # Statuses that block user feedback (§7.4.1 step 3)
-_BLOCKED_STATUSES = {"scheduled", "waiting_review", "closed"}
+_BLOCKED_STATUSES = {GovernanceStatus.SCHEDULED, GovernanceStatus.WAITING_REVIEW, GovernanceStatus.CLOSED}
 
 # response → (target_status, review_reason) — all go to waiting_review (§7.4.2)
 _RESPONSE_TRANSITION_MAP: dict[str, tuple[str, str]] = {
-    "optimized": ("waiting_review", "user_optimized"),
-    "dispute": ("waiting_review", "user_disputed"),
-    "whitelist": ("waiting_review", "user_whitelisted"),
+    Response.OPTIMIZED: (GovernanceStatus.WAITING_REVIEW, "user_optimized"),
+    Response.DISPUTE: (GovernanceStatus.WAITING_REVIEW, "user_disputed"),
+    Response.WHITELIST: (GovernanceStatus.WAITING_REVIEW, "user_whitelisted"),
     # need_time → scheduled, handled separately
 }
 
@@ -80,21 +81,21 @@ class ResolveResult:
 
 
 def _result_from_ticket(
-    ticket: dict,
+    ticket: Any,
     *,
     notification_id: str = "",
     message: str | None = None,
 ) -> ResolveResult:
-    """Build a ResolveResult from a ticket row for idempotent returns."""
+    """Build a ResolveResult from a GovernanceTicket for idempotent returns."""
     return ResolveResult(
         success=True,
-        ticket_id=ticket.get("ticket_id") or "",
+        ticket_id=(ticket.ticket_id or ""),
         notification_id=notification_id,
-        governance_status=ticket.get("governance_status") or "",
-        close_reason=ticket.get("close_reason"),
-        mute_until=ticket.get("mute_until"),
-        response=ticket.get("response") or "",
-        response_source=ticket.get("response_source") or "",
+        governance_status=(ticket.governance_status or ""),
+        close_reason=ticket.close_reason,
+        mute_until=ticket.resume_at,
+        response=(ticket.user_feedback or ""),
+        response_source=(ticket.feedback_source or ""),
         message=message,
     )
 
@@ -105,19 +106,24 @@ class GovernanceFeedbackService:
     @inject
     def __init__(
         self,
-        db: DatabasePlugin,
-        whitelist_service: GovernanceWhitelistService,
+        whitelist_service: GovernanceWhitelistServiceProtocol,
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         task_repo: TaskRecordRepository,
         config: Any,  # EconomyGovernanceConfig
+        lifecycle_svc: GovernanceLifecycleServiceProtocol,
     ) -> None:
-        self._db = db
+        # ``whitelist_service`` / ``notify_repo`` retained as injected deps
+        # (constructor signature stable across migration); the resolve path
+        # now delegates whitelist-add + cancel-pending to lifecycle_svc, so
+        # these are read only by future admin/review paths. Group C cleanup
+        # may drop them if confirmed unused.
         self._whitelist_service = whitelist_service
         self._notify_repo = notify_repo
         self._audit_repo = audit_repo
         self._task_repo = task_repo
         self._config = config
+        self._lifecycle_svc = lifecycle_svc
 
     def resolve(
         self,
@@ -171,15 +177,15 @@ class GovernanceFeedbackService:
             )
 
         # Resolve effective user ID from DB if empty (card_callback)
-        effective_user_id = user_id or ticket.get("owner_id") or ""
+        effective_user_id = user_id or ticket.owner_id or ""
         effective_actor = actor_id or effective_user_id
 
         # §7.4.1 step 2: response not empty → duplicate ignored
-        if ticket.get("response") is not None and ticket.get("response") != "":
+        if ticket.user_feedback is not None and ticket.user_feedback != "":
             self._audit_repo.add_audit(
                 f"feedback-{uuid.uuid4().hex[:8]}",
-                ticket.get("bot_id"),
-                ticket.get("owner_id"),
+                ticket.bot_id,
+                ticket.owner_id,
                 notification_id=notification_id,
                 actor_id=effective_user_id,
                 action_taken=AuditAction.FEEDBACK_DUPLICATE_IGNORED,
@@ -193,34 +199,34 @@ class GovernanceFeedbackService:
             )
 
         # §7.4.1 step 3: terminal status → rejected
-        if ticket.get("governance_status") in _BLOCKED_STATUSES:
+        if ticket.governance_status in _BLOCKED_STATUSES:
             self._audit_repo.add_audit(
                 f"feedback-{uuid.uuid4().hex[:8]}",
-                ticket.get("bot_id"),
-                ticket.get("owner_id"),
+                ticket.bot_id,
+                ticket.owner_id,
                 notification_id=notification_id,
                 actor_id=effective_user_id,
                 action_taken=AuditAction.FEEDBACK_TERMINAL_IGNORED,
                 source=source,
-                error_msg=f"status={ticket.get('governance_status')}",
+                error_msg=f"status={ticket.governance_status}",
                 dry_run=0,
             )
             return ResolveResult(
                 success=False,
                 error="该治理工单状态不允许反馈",
                 error_code="INVALID_STATUS",
-                ticket_id=ticket.get("ticket_id") or "",
+                ticket_id=(ticket.ticket_id or ""),
                 notification_id=notification_id,
             )
 
         # §7.4.1 step 4: must be open + response empty
         # (scheduled/waiting_review already filtered above)
-        if ticket.get("governance_status") != "open":
+        if ticket.governance_status != GovernanceStatus.OPEN:
             return ResolveResult(
                 success=False,
-                error=f"Unexpected status: {ticket.get('governance_status')}",
+                error=f"Unexpected status: {ticket.governance_status}",
                 error_code="INVALID_STATUS",
-                ticket_id=ticket.get("ticket_id") or "",
+                ticket_id=(ticket.ticket_id or ""),
                 notification_id=notification_id,
             )
 
@@ -234,7 +240,7 @@ class GovernanceFeedbackService:
             )
 
         # Dispute/whitelist require remark
-        if response in ("dispute", "whitelist") and not remark:
+        if response in (Response.DISPUTE, Response.WHITELIST) and not remark:
             return ResolveResult(
                 success=False,
                 error="Remark is required for dispute/whitelist",
@@ -243,7 +249,7 @@ class GovernanceFeedbackService:
             )
 
         # Need_time requires repair_deadline
-        if response == "need_time" and not repair_deadline:
+        if response == Response.NEED_TIME and not repair_deadline:
             return ResolveResult(
                 success=False,
                 error="repair_deadline is required for need_time",
@@ -257,8 +263,8 @@ class GovernanceFeedbackService:
         review_reason: str | None = None
         mute_until: datetime | None = None
 
-        if response == "need_time":
-            target_status = "scheduled"
+        if response == Response.NEED_TIME:
+            target_status = GovernanceStatus.SCHEDULED
             mute_until = repair_deadline + timedelta(
                 days=self._config.cooldown_days,
             )
@@ -279,63 +285,41 @@ class GovernanceFeedbackService:
                     notification_id=notification_id,
                 )
 
-        # Update ticket via managed session
-        with self._db.orm_session() as s:
-            db_ticket = (
-                s.query(GovernanceTaskRecordDaily)
-                .filter(
-                    GovernanceTaskRecordDaily.ticket_id == ticket.get("ticket_id"),
-                )
-                .one_or_none()
-            )
-            if db_ticket is None:
-                return ResolveResult(
-                    success=False,
-                    error="该治理工单不存在或已失效",
-                    error_code="NOT_FOUND",
-                    notification_id=notification_id,
-                )
-
-            db_ticket.response = response
-            db_ticket.response_at = now
-            db_ticket.response_remark = remark
-            db_ticket.response_source = source
-            db_ticket.actor_id = effective_actor
-            db_ticket.remind_at = None  # Stop reminder chain on any feedback
-            db_ticket.governance_status = target_status
-
-            if feedback_payload_json is not None:
-                db_ticket.feedback_payload = feedback_payload_json
-
-            if response == "need_time":
-                db_ticket.repair_deadline = repair_deadline
-                db_ticket.mute_until = mute_until
-            else:
-                db_ticket.review_reason = review_reason
-
-            try:
-                s.commit()
-            except Exception:
-                log.exception("[GovernanceFeedback] Resolve commit failed")
-                s.rollback()
-                return ResolveResult(
-                    success=False,
-                    error="Database error",
-                    error_code="DB_ERROR",
-                    notification_id=notification_id,
-                )
-
-        # Cancel pending notifies (§7.4.2 footnote) — self-managed session
-        if ticket.get("ticket_id"):
-            self._notify_repo.cancel_pending_by_ticket(
-                ticket.get("ticket_id"),
+        # Advance ticket state via the driver service (sole driver). The
+        # driver orchestrates: state transition (guard-activated) + cancel
+        # pending notifies. Pre-business checks (one-time rule, response
+        # validity, remark/deadline requirements) stay here in feedback_service.
+        updated = self._lifecycle_svc.accept_feedback(
+            ticket.ticket_id,
+            user_feedback=response,
+            feedback_at=now,
+            feedback_source=source,
+            target_status=target_status,
+            feedback_remark=remark,
+            repair_deadline=repair_deadline if response == Response.NEED_TIME else None,
+            resume_at=mute_until if response == Response.NEED_TIME else None,
+            review_reason=review_reason if response != Response.NEED_TIME else None,
+            actor_id=effective_actor,
+            feedback_payload=feedback_payload_json,
+        )
+        if not updated:
+            return ResolveResult(
+                success=False,
+                error="该治理工单不存在或已失效",
+                error_code="NOT_FOUND",
+                notification_id=notification_id,
             )
 
-        # Whitelist → also add to whitelist table
-        if response == "whitelist":
+        # Whitelist feedback → add to the whitelist table. Owned by
+        # feedback_service (not the driver) to keep lifecycle_service free of
+        # a whitelist_service dependency (breaks the whitelist↔lifecycle DI
+        # cycle). Source & created_by carry the rich feedback semantics
+        # (effective_user_id = owner; original source e.g. card_callback).
+        if response == Response.WHITELIST:
             try:
-                self._whitelist_service.batch_add(
-                    entries=[{"bot_id": ticket.get("bot_id"), "owner_id": ticket.get("owner_id")}],
+                self._whitelist_service.add(
+                    bot_id=ticket.bot_id,
+                    owner_id=ticket.owner_id,
                     created_by=effective_user_id,
                     whitelist_type="governance",
                     source=source,
@@ -343,21 +327,23 @@ class GovernanceFeedbackService:
             except Exception:
                 log.exception(
                     "[GovernanceFeedback] Failed to add whitelist for bot_id=%s",
-                    ticket.get("bot_id"),
+                    ticket.bot_id,
                 )
 
-        # Audit (§7.4.3)
+        # Audit (§7.4.3) — feedback_service keeps its per-response audit
+        # (USER_OPTIMIZED / USER_NEED_TIME / USER_DISPUTE / USER_WHITELIST),
+        # which the driver does not duplicate.
         _RESPONSE_AUDIT_MAP: dict[str, str] = {
-            "optimized": AuditAction.USER_OPTIMIZED,
-            "need_time": AuditAction.USER_NEED_TIME,
-            "dispute": AuditAction.USER_DISPUTE,
-            "whitelist": AuditAction.USER_WHITELIST,
+            Response.OPTIMIZED: AuditAction.USER_OPTIMIZED,
+            Response.NEED_TIME: AuditAction.USER_NEED_TIME,
+            Response.DISPUTE: AuditAction.USER_DISPUTE,
+            Response.WHITELIST: AuditAction.USER_WHITELIST,
         }
         audit_action = _RESPONSE_AUDIT_MAP.get(response, response)
         self._audit_repo.add_audit(
             f"feedback-{uuid.uuid4().hex[:8]}",
-            ticket.get("bot_id"),
-            ticket.get("owner_id"),
+            ticket.bot_id,
+            ticket.owner_id,
             notification_id=notification_id,
             actor_id=effective_user_id,
             check_result="actionable",
@@ -368,54 +354,19 @@ class GovernanceFeedbackService:
 
         return ResolveResult(
             success=True,
-            ticket_id=ticket.get("ticket_id") or "",
+            ticket_id=(ticket.ticket_id or ""),
             notification_id=notification_id,
             governance_status=target_status,
-            close_reason=ticket.get("close_reason"),
-            mute_until=mute_until if response == "need_time" else None,
+            close_reason=ticket.close_reason,
+            mute_until=mute_until if response == Response.NEED_TIME else None,
             response=response,
             response_source=source,
         )
 
     # ------------------------------------------------------------------
-    # List queries (task_record based)
+    # List queries (list_pending/list_history/get_notification) 已删除:
+    # 无真实用户主动调用,    治理反馈真入口是 card-callback(经 resolve)。完整移除于
+    # admin-router-regroup Task 7。仅保留 resolve。
     # ------------------------------------------------------------------
-
-    def list_pending(
-        self,
-        owner_id: str,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[dict]:
-        """List pending (open/scheduled) tickets for a user."""
-        return self._task_repo.list_tickets_by_owner_and_statuses(
-            owner_id, ["open", "scheduled"],
-            offset=offset, limit=limit,
-        )
-
-    def list_history(
-        self,
-        owner_id: str,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[dict]:
-        """List closed tickets for a user."""
-        return self._task_repo.list_tickets_by_owner_and_statuses(
-            owner_id, ["closed"],
-            offset=offset, limit=limit,
-        )
-
-    def get_notification(
-        self,
-        notification_id: str,
-        owner_id: str,
-    ) -> dict | None:
-        """Get a single ticket by notification_id (owner check)."""
-        ticket = self._task_repo.find_ticket_by_notification_id(
-            notification_id,
-        )
-        if ticket is None or ticket.get("owner_id") != owner_id:
-            return None
-        return ticket
 
     

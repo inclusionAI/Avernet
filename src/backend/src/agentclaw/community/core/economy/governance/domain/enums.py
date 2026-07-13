@@ -1,22 +1,27 @@
-"""Canonical action_taken values for ac_governance_audit.
+"""Canonical enumerations for the economy/governance module.
 
-Naming convention: ``{subject}_{verb}`` — who did what.
+All enums inherit ``(str, Enum)`` so that:
+  - comparison with raw strings works (``GovernanceStatus.OPEN == "open"`` → True)
+  - ORM columns storing ``str`` values accept enum members directly
+  - ``str(member)`` returns the value string (via ``__str__``)
 
-- notification_*  — System lifecycle actions on notifications
-- user_*          — User feedback actions
-- system_*        — System auto-resolution actions
-- scan_skip_*     — Scan-stage skip / filter actions
-- admin_*         — Admin emergency actions
+Naming convention for AuditAction: ``{subject}_{verb}`` — who did what.
 """
 from __future__ import annotations
 
+from enum import Enum
 
-class AuditAction:
+
+class AuditAction(str, Enum):
     """Canonical action_taken values for ac_governance_audit.
 
-    Designed as a class constant set (not ``enum.Enum``) for compatibility
-    with the existing ``action_taken: str`` column type.
+    Converted from plain class constants to ``str, Enum`` for type safety
+    while maintaining full backward compatibility with the existing
+    ``action_taken: str`` column type.
     """
+
+    def __str__(self) -> str:
+        return self.value
 
     # ── Notification lifecycle ────────────────────────
     NOTIFICATION_CREATED = "notification_created"           # Notification row created (was: enqueued)
@@ -53,6 +58,7 @@ class AuditAction:
     ADMIN_PAUSE = "admin_pause"                     # Emergency pause (was: emergency_paused)
     ADMIN_RESUME = "admin_resume"                   # Emergency resume (was: emergency_resumed)
     ADMIN_WHITELIST = "admin_whitelisted"           # Emergency whitelist (was: emergency_whitelisted)
+    SCAN_SKIPPED_BRAKE = "scan_skipped_brake"       # 自动定时 tick 因制动被跳过 (调度层判定)
 
     # ── Whitelist management (new) ──────────────────
     WHITELIST_REMOVED = "whitelist_removed"             # 管理员删除白名单条目
@@ -92,27 +98,68 @@ class AuditAction:
     POINT_TO_POINT_NOT_ACTIONABLE = "point_to_point_not_actionable"       # p2p 工单 latest_decision 非 actionable
 
 
-# Backward-compatible mapping: old action_taken values that may still appear
-# in queries (e.g. ``get_last_scan_time``). During transition, queries must
-# accept both old and new values.
-LEGACY_ACTION_MAP: dict[str, str] = {
-    "enqueued": AuditAction.NOTIFICATION_CREATED,
-    "first_delivered": AuditAction.NOTIFICATION_SENT,
-    "first_delivery_failed": AuditAction.NOTIFICATION_SEND_FAILED,
-    "reminded": AuditAction.REMIND_SENT,
-    "feedback_optimized": AuditAction.USER_OPTIMIZED,
-    "feedback_need_time": AuditAction.USER_NEED_TIME,
-    "feedback_dispute": AuditAction.USER_DISPUTE,
-    "feedback_whitelist": AuditAction.USER_WHITELIST,
-    "auto_resolved": AuditAction.SYSTEM_RESOLVED,
-    "expired_unresolved": AuditAction.EXPIRED,
-    "data_not_ready": AuditAction.SCAN_SKIP_NOT_READY,
-    "whitelist_filtered": AuditAction.SCAN_SKIP_WHITELIST,
-    "muted": AuditAction.SCAN_SKIP_MUTED,
-    "cooldown_filtered": AuditAction.SCAN_SKIP_COOLDOWN,
-    "emergency_cancelled": AuditAction.ADMIN_CANCEL_PENDING,
-    "admin_closed_all": AuditAction.ADMIN_CLOSE_ALL,
-    "emergency_paused": AuditAction.ADMIN_PAUSE,
-    "emergency_resumed": AuditAction.ADMIN_RESUME,
-    "emergency_whitelisted": AuditAction.ADMIN_WHITELIST,
-}
+class GovernanceStatus(str, Enum):
+    """工单/治理状态 — 用于 GovernanceTicket.governance_status."""
+
+    OPEN = "open"
+    SCHEDULED = "scheduled"
+    WAITING_REVIEW = "waiting_review"
+    CLOSED = "closed"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class NotifyStatus(str, Enum):
+    """通知投递状态 — 用于 GovernanceNotification.notify_status."""
+
+    PENDING = "pending"
+    SENDING = "sending"
+    SENT = "sent"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class NotifyType(str, Enum):
+    """通知类型 — 用于 GovernanceNotification.notify_type."""
+
+    FIRST_SEND = "first_send"
+    REMINDER = "reminder"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class CloseReason(str, Enum):
+    """工单关闭原因 — 用于 GovernanceTicket.close_reason."""
+
+    EMERGENCY_CLOSED = "emergency_closed"
+    ADMIN_CLOSED = "admin_closed"
+    AUTO_SILENCED_NORMAL = "auto_silenced_normal"
+    WHITELIST_FILTERED = "whitelist_filtered"
+    USER_OPTIMIZED_APPROVED = "user_optimized_approved"
+    REVIEW_REJECTED = "review_rejected"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class Response(str, Enum):
+    """用户反馈类型 — 用于 GovernanceTicket.response."""
+
+    OPTIMIZED = "optimized"
+    NEED_TIME = "need_time"
+    DISPUTE = "dispute"
+    WHITELIST = "whitelist"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+# Convenience sets for common status checks
+ACTIVE_STATUSES: frozenset[GovernanceStatus] = frozenset({
+    GovernanceStatus.OPEN, GovernanceStatus.SCHEDULED, GovernanceStatus.WAITING_REVIEW,
+})

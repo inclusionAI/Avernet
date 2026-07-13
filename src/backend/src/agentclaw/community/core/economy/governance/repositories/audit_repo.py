@@ -10,20 +10,16 @@ Env is resolved internally via ``get_current_env()``.
 """
 from __future__ import annotations
 
-import logging
-from datetime import datetime
-
 from injector import inject
-from sqlalchemy import func
 
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceAudit,
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    AuditLogOrm,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env, get_server_host
 
-log = get_logger()
+log = get_logger(__name__)
 
 
 class GovernanceAuditRepository:
@@ -61,7 +57,8 @@ class GovernanceAuditRepository:
         server_host = get_server_host()
         try:
             with self._db.orm_session() as s:
-                s.add(GovernanceAudit(
+                s.expire_on_commit = False
+                s.add(AuditLogOrm(
                     run_id=run_id,
                     notification_id=notification_id,
                     bot_id=bot_id,
@@ -83,29 +80,4 @@ class GovernanceAuditRepository:
             log.exception(
                 "[AuditRepo] best-effort write failed for run_id=%s, bot_id=%s",
                 run_id, bot_id,
-            )
-
-    def get_last_scan_time(self) -> datetime | None:
-        """MAX(audit.gmt_create) for data-dependent scan actions (self-managed session).
-
-        Used by the data-readiness heuristic: the newest audit time for an
-        ``enqueued`` / ``notification_created`` or ``auto_resolved`` /
-        ``system_resolved`` action marks the last successful data-dependent
-        scan. Accepts both legacy and new AuditAction values for transition
-        compat.
-        """
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            return (
-                s.query(func.max(GovernanceAudit.gmt_create))
-                .filter(
-                    GovernanceAudit.action_taken.in_([
-                        # Legacy values (may exist in rows written before enum migration)
-                        "enqueued", "auto_resolved",
-                        # New AuditAction values
-                        "notification_created", "system_resolved",
-                    ]),
-                    GovernanceAudit.env == _env,
-                )
-                .scalar()
             )

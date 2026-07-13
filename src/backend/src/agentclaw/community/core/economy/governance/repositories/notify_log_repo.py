@@ -14,18 +14,24 @@ Env is resolved internally via ``get_current_env()``.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from injector import inject
 
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceNotifyLog,
+from agentclaw.community.core.economy.governance.domain.enums import (
+    GovernanceStatus,
+    NotifyStatus,
+    NotifyType,
+)
+from agentclaw.community.core.economy.governance.domain.notification import GovernanceNotification
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    GovernanceNotificationOrm,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
 
-log = get_logger()
+log = get_logger(__name__)
 
 
 class NotifyLogRepository:
@@ -39,113 +45,44 @@ class NotifyLogRepository:
     # notify_log — single-row lookups (candidate filtering, cycle, feedback)
     # ------------------------------------------------------------------
 
-    def find_by_status(
-        self, bot_id: str, owner_id: str, status: str,
-    ) -> dict | None:
-        """First notify_log for (bot_id, owner_id) at a given governance_status."""
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            obj = (
-                s.query(GovernanceNotifyLog)
-                .filter(
-                    GovernanceNotifyLog.bot_id == bot_id,
-                    GovernanceNotifyLog.owner_id == owner_id,
-                    GovernanceNotifyLog.governance_status == status,
-                    GovernanceNotifyLog.env == _env,
-                )
-                .first()
-            )
-            return obj.to_dict() if obj else None
-
-    def find_latest_closed(
-        self, bot_id: str, owner_id: str,
-    ) -> dict | None:
-        """Latest closed notify_log for (bot_id, owner_id) — cooldown check."""
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            obj = (
-                s.query(GovernanceNotifyLog)
-                .filter(
-                    GovernanceNotifyLog.bot_id == bot_id,
-                    GovernanceNotifyLog.owner_id == owner_id,
-                    GovernanceNotifyLog.governance_status == "closed",
-                    GovernanceNotifyLog.env == _env,
-                )
-                .order_by(GovernanceNotifyLog.closed_at.desc())
-                .first()
-            )
-            return obj.to_dict() if obj else None
-
-    def find_latest(
-        self, bot_id: str, owner_id: str,
-    ) -> dict | None:
-        """Latest notify_log (any status) for (bot_id, owner_id) — cycle inheritance."""
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            obj = (
-                s.query(GovernanceNotifyLog)
-                .filter(
-                    GovernanceNotifyLog.bot_id == bot_id,
-                    GovernanceNotifyLog.owner_id == owner_id,
-                    GovernanceNotifyLog.env == _env,
-                )
-                .order_by(GovernanceNotifyLog.gmt_create.desc())
-                .first()
-            )
-            return obj.to_dict() if obj else None
-
     def get_by_notification_id(
         self, notification_id: str,
-    ) -> dict | None:
-        """Fetch a notify_log by notification_id."""
+    ) -> GovernanceNotification | None:
+        """Fetch a notify_log by notification_id — returns domain model."""
         _env = get_current_env()
         with self._db.orm_session() as s:
+            s.expire_on_commit = False
             obj = (
-                s.query(GovernanceNotifyLog)
+                s.query(GovernanceNotificationOrm)
                 .filter(
-                    GovernanceNotifyLog.notification_id == notification_id,
-                    GovernanceNotifyLog.env == _env,
+                    GovernanceNotificationOrm.notification_id == notification_id,
+                    GovernanceNotificationOrm.env == _env,
                 )
                 .first()
             )
-            return obj.to_dict() if obj else None
+            return GovernanceNotification.from_orm(obj) if obj else None
 
     def get_by_notification_id_and_owner(
         self, notification_id: str, owner_id: str,
-    ) -> dict | None:
-        """Fetch a notify_log by notification_id scoped to an owner."""
+    ) -> GovernanceNotification | None:
+        """Fetch a notify_log by notification_id scoped to an owner — returns domain model."""
         _env = get_current_env()
         with self._db.orm_session() as s:
+            s.expire_on_commit = False
             obj = (
-                s.query(GovernanceNotifyLog)
+                s.query(GovernanceNotificationOrm)
                 .filter(
-                    GovernanceNotifyLog.notification_id == notification_id,
-                    GovernanceNotifyLog.owner_id == owner_id,
-                    GovernanceNotifyLog.env == _env,
+                    GovernanceNotificationOrm.notification_id == notification_id,
+                    GovernanceNotificationOrm.owner_id == owner_id,
+                    GovernanceNotificationOrm.env == _env,
                 )
                 .first()
             )
-            return obj.to_dict() if obj else None
+            return GovernanceNotification.from_orm(obj) if obj else None
 
     # ------------------------------------------------------------------
     # notify_log — list queries (scan steps 7-10, feedback lists)
     # ------------------------------------------------------------------
-
-    def list_by_status(
-        self, status: str,
-    ) -> list[dict]:
-        """All notify_log rows at a single governance_status."""
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            rows = (
-                s.query(GovernanceNotifyLog)
-                .filter(
-                    GovernanceNotifyLog.governance_status == status,
-                    GovernanceNotifyLog.env == _env,
-                )
-                .all()
-            )
-            return [r.to_dict() for r in rows]
 
     def list_by_owner_and_statuses(
         self,
@@ -154,94 +91,24 @@ class NotifyLogRepository:
         *,
         offset: int = 0,
         limit: int = 50,
-    ) -> list[dict]:
-        """Owner's notify_log rows in the given statuses, newest first, paged."""
+    ) -> list[GovernanceNotification]:
+        """Owner's notify_log rows in the given statuses, newest first, paged — domain models."""
         _env = get_current_env()
         with self._db.orm_session() as s:
+            s.expire_on_commit = False
             rows = (
-                s.query(GovernanceNotifyLog)
+                s.query(GovernanceNotificationOrm)
                 .filter(
-                    GovernanceNotifyLog.owner_id == owner_id,
-                    GovernanceNotifyLog.governance_status.in_(statuses),
-                    GovernanceNotifyLog.env == _env,
+                    GovernanceNotificationOrm.owner_id == owner_id,
+                    GovernanceNotificationOrm.governance_status.in_(statuses),
+                    GovernanceNotificationOrm.env == _env,
                 )
-                .order_by(GovernanceNotifyLog.gmt_create.desc())
+                .order_by(GovernanceNotificationOrm.gmt_create.desc())
                 .offset(offset)
                 .limit(limit)
                 .all()
             )
-            return [r.to_dict() for r in rows]
-
-    def list_remindable(
-        self, now: datetime,
-    ) -> list[dict]:
-        """Open+sent notifications whose remind_at is due (Step 8)."""
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            rows = (
-                s.query(GovernanceNotifyLog)
-                .filter(
-                    GovernanceNotifyLog.governance_status == "open",
-                    GovernanceNotifyLog.notify_status == "sent",
-                    GovernanceNotifyLog.remind_at <= now,
-                    GovernanceNotifyLog.remind_at.isnot(None),
-                    GovernanceNotifyLog.env == _env,
-                )
-                .all()
-            )
-            return [r.to_dict() for r in rows]
-
-    def list_expired(
-        self, now: datetime,
-    ) -> list[dict]:
-        """Open notifications past expire_at that were reminded at least once (Step 9)."""
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            rows = (
-                s.query(GovernanceNotifyLog)
-                .filter(
-                    GovernanceNotifyLog.governance_status == "open",
-                    GovernanceNotifyLog.expire_at <= now,
-                    GovernanceNotifyLog.remind_count >= 1,
-                    GovernanceNotifyLog.env == _env,
-                )
-                .all()
-            )
-            return [r.to_dict() for r in rows]
-
-    def list_pending_to_cancel(
-        self,
-    ) -> list[dict]:
-        """Pending notifications on closed/expired records — auto-cancel (Step 10a)."""
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            rows = (
-                s.query(GovernanceNotifyLog)
-                .filter(
-                    GovernanceNotifyLog.governance_status.in_(["closed", "expired"]),
-                    GovernanceNotifyLog.notify_status == "pending",
-                    GovernanceNotifyLog.env == _env,
-                )
-                .all()
-            )
-            return [r.to_dict() for r in rows]
-
-    def list_pending_open(
-        self,
-    ) -> list[dict]:
-        """Pending open notifications to send (Step 10b)."""
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            rows = (
-                s.query(GovernanceNotifyLog)
-                .filter(
-                    GovernanceNotifyLog.governance_status == "open",
-                    GovernanceNotifyLog.notify_status == "pending",
-                    GovernanceNotifyLog.env == _env,
-                )
-                .all()
-            )
-            return [r.to_dict() for r in rows]
+            return [GovernanceNotification.from_orm(r) for r in rows]
 
     # ------------------------------------------------------------------
     # notify_log — emergency-scope queries
@@ -253,12 +120,13 @@ class NotifyLogRepository:
         """Count open/muted notifications awaiting a response (no response yet)."""
         _env = get_current_env()
         with self._db.orm_session() as s:
+            s.expire_on_commit = False
             return (
-                s.query(GovernanceNotifyLog)
+                s.query(GovernanceNotificationOrm)
                 .filter(
-                    GovernanceNotifyLog.governance_status.in_(["open", "muted"]),
-                    GovernanceNotifyLog.response.is_(None),
-                    GovernanceNotifyLog.env == _env,
+                    GovernanceNotificationOrm.governance_status.in_([GovernanceStatus.OPEN, "muted"]),
+                    GovernanceNotificationOrm.response.is_(None),
+                    GovernanceNotificationOrm.env == _env,
                 )
                 .count()
             )
@@ -269,67 +137,75 @@ class NotifyLogRepository:
         """Distinct (bot_id, owner_id) pairs seen for the given bot_ids."""
         _env = get_current_env()
         with self._db.orm_session() as s:
+            s.expire_on_commit = False
             rows = (
-                s.query(GovernanceNotifyLog.bot_id, GovernanceNotifyLog.owner_id)
+                s.query(GovernanceNotificationOrm.bot_id, GovernanceNotificationOrm.owner_id)
                 .filter(
-                    GovernanceNotifyLog.bot_id.in_(bot_ids),
-                    GovernanceNotifyLog.env == _env,
+                    GovernanceNotificationOrm.bot_id.in_(bot_ids),
+                    GovernanceNotificationOrm.env == _env,
                 )
                 .distinct()
                 .all()
             )
             return [(r.bot_id, r.owner_id) for r in rows]
 
-    def list_pending_by_bot_ids(
+    def list_ticket_ids_open_muted(
+        self, *, only_unresponded: bool = False,
+    ) -> list[str]:
+        """Distinct non-None ``ticket_id`` set for open/muted notifications.
+
+        Mirrors the filter of :meth:`bulk_close_open_muted` so the caller can
+        pre-collect the affected ticket set (Task 8 aligns ticket/notify sets).
+        ``only_unresponded=True`` adds ``response IS NULL`` (cancel_pending
+        scope); ``False`` is the close_all_open scope. Duplicates de-duped;
+        ``None`` ticket_ids (nullable at ORM level but non-None at creation)
+        filtered out.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            q = (
+                s.query(GovernanceNotificationOrm.ticket_id)
+                .filter(
+                    GovernanceNotificationOrm.governance_status.in_(
+                        [GovernanceStatus.OPEN, "muted"],
+                    ),
+                    GovernanceNotificationOrm.env == _env,
+                    GovernanceNotificationOrm.ticket_id.isnot(None),
+                )
+            )
+            if only_unresponded:
+                q = q.filter(GovernanceNotificationOrm.response.is_(None))
+            rows = q.distinct().all()
+            return [r.ticket_id for r in rows]
+
+    def list_ticket_ids_by_bots(
         self, bot_ids: list[str],
-    ) -> list[dict]:
-        """Un-responded open/muted notifications for the given bot_ids."""
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            rows = (
-                s.query(GovernanceNotifyLog)
-                .filter(
-                    GovernanceNotifyLog.bot_id.in_(bot_ids),
-                    GovernanceNotifyLog.response.is_(None),
-                    GovernanceNotifyLog.governance_status.in_(["open", "muted"]),
-                    GovernanceNotifyLog.env == _env,
-                )
-                .all()
-            )
-            return [r.to_dict() for r in rows]
+    ) -> list[str]:
+        """Distinct non-None ``ticket_id`` set for the given bots (unresponded).
 
-    def list_all_pending(
-        self,
-    ) -> list[dict]:
-        """All un-responded open/muted notifications (emergency cancel-all)."""
+        Mirrors the filter of :meth:`bulk_cancel_by_bots` (``bot_id IN (...)``
+        + ``response IS NULL`` + open/muted) so bulk_whitelist can pre-collect
+        the affected ticket set. ``None`` ticket_ids filtered out.
+        """
         _env = get_current_env()
         with self._db.orm_session() as s:
+            s.expire_on_commit = False
             rows = (
-                s.query(GovernanceNotifyLog)
+                s.query(GovernanceNotificationOrm.ticket_id)
                 .filter(
-                    GovernanceNotifyLog.response.is_(None),
-                    GovernanceNotifyLog.governance_status.in_(["open", "muted"]),
-                    GovernanceNotifyLog.env == _env,
+                    GovernanceNotificationOrm.bot_id.in_(bot_ids),
+                    GovernanceNotificationOrm.response.is_(None),
+                    GovernanceNotificationOrm.governance_status.in_(
+                        [GovernanceStatus.OPEN, "muted"],
+                    ),
+                    GovernanceNotificationOrm.env == _env,
+                    GovernanceNotificationOrm.ticket_id.isnot(None),
                 )
+                .distinct()
                 .all()
             )
-            return [r.to_dict() for r in rows]
-
-    def list_open_muted(
-        self,
-    ) -> list[dict]:
-        """All open/muted records regardless of response status (admin close-all)."""
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            rows = (
-                s.query(GovernanceNotifyLog)
-                .filter(
-                    GovernanceNotifyLog.governance_status.in_(["open", "muted"]),
-                    GovernanceNotifyLog.env == _env,
-                )
-                .all()
-            )
-            return [r.to_dict() for r in rows]
+            return [r.ticket_id for r in rows]
 
     def count_open_muted(
         self,
@@ -337,11 +213,12 @@ class NotifyLogRepository:
         """Count all open/muted records (regardless of response)."""
         _env = get_current_env()
         with self._db.orm_session() as s:
+            s.expire_on_commit = False
             return (
-                s.query(GovernanceNotifyLog)
+                s.query(GovernanceNotificationOrm)
                 .filter(
-                    GovernanceNotifyLog.governance_status.in_(["open", "muted"]),
-                    GovernanceNotifyLog.env == _env,
+                    GovernanceNotificationOrm.governance_status.in_([GovernanceStatus.OPEN, "muted"]),
+                    GovernanceNotificationOrm.env == _env,
                 )
                 .count()
             )
@@ -350,47 +227,52 @@ class NotifyLogRepository:
     # Bulk WRITE (self-managed session)
     # ------------------------------------------------------------------
 
-    def recover_sending_timeout(
-        self, timeout_minutes: int = 30,
-    ) -> int:
-        """Revert stale ``sending`` notifies back to ``pending``.
-
-        Called by cron: if a consumer crashed mid-send, the notify stays
-        in ``sending``. After ``timeout_minutes``, revert to ``pending``
-        so another consumer can pick it up.
-        """
-        _env = get_current_env()
-        cutoff = datetime.now() - timedelta(minutes=timeout_minutes)
-        with self._db.orm_session() as s:
-            count = (
-                s.query(GovernanceNotifyLog)
-                .filter(
-                    GovernanceNotifyLog.notify_status == "sending",
-                    GovernanceNotifyLog.last_send_at < cutoff,
-                    GovernanceNotifyLog.env == _env,
-                )
-                .update(
-                    {GovernanceNotifyLog.notify_status: "pending"},
-                    synchronize_session="fetch",
-                )
-            )
-            return count
-
     def list_pending_for_cron(
         self,
-    ) -> list[dict]:
-        """All pending notifies for cron to pick up and send."""
+    ) -> list[GovernanceNotification]:
+        """All pending notifies for cron to pick up and send — returns domain models."""
         _env = get_current_env()
         with self._db.orm_session() as s:
+            s.expire_on_commit = False
             rows = (
-                s.query(GovernanceNotifyLog)
+                s.query(GovernanceNotificationOrm)
                 .filter(
-                    GovernanceNotifyLog.notify_status == "pending",
-                    GovernanceNotifyLog.env == _env,
+                    GovernanceNotificationOrm.notify_status == NotifyStatus.PENDING,
+                    GovernanceNotificationOrm.env == _env,
                 )
                 .all()
             )
-            return [r.to_dict() for r in rows]
+            return [GovernanceNotification.from_orm(r) for r in rows]
+
+    def list_pending_by_worker(
+        self,
+        worker_id: str,
+    ) -> list[GovernanceNotification]:
+        """Pending notifies scoped to one worker (owner_id:bot_id) — for deliver_by_worker.
+
+        Unlike :meth:`list_pending_for_cron` (全量),本方法按 worker 精准过滤,
+        供 admin ``tickets:deliver`` 端点用(不重跑状态机,pending 已躺 notify_log)。
+
+        Args:
+            worker_id: ``owner_id:bot_id`` 复合键,与 GovernanceNotification.worker_id 对齐。
+
+        Returns:
+            该 worker 的 pending 通知领域模型列表(按 gmt_create 升序,与 cron 一致)。
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            rows = (
+                s.query(GovernanceNotificationOrm)
+                .filter(
+                    GovernanceNotificationOrm.worker_id == worker_id,
+                    GovernanceNotificationOrm.notify_status == NotifyStatus.PENDING,
+                    GovernanceNotificationOrm.env == _env,
+                )
+                .order_by(GovernanceNotificationOrm.gmt_create.asc())
+                .all()
+            )
+            return [GovernanceNotification.from_orm(r) for r in rows]
 
     def cancel_pending_by_ticket(
         self, ticket_id: str,
@@ -402,15 +284,16 @@ class NotifyLogRepository:
         """
         _env = get_current_env()
         with self._db.orm_session() as s:
+            s.expire_on_commit = False
             count = (
-                s.query(GovernanceNotifyLog)
+                s.query(GovernanceNotificationOrm)
                 .filter(
-                    GovernanceNotifyLog.ticket_id == ticket_id,
-                    GovernanceNotifyLog.notify_status == "pending",
-                    GovernanceNotifyLog.env == _env,
+                    GovernanceNotificationOrm.ticket_id == ticket_id,
+                    GovernanceNotificationOrm.notify_status == NotifyStatus.PENDING,
+                    GovernanceNotificationOrm.env == _env,
                 )
                 .update(
-                    {GovernanceNotifyLog.notify_status: "cancelled"},
+                    {GovernanceNotificationOrm.notify_status: NotifyStatus.CANCELLED},
                     synchronize_session="fetch",
                 )
             )
@@ -425,13 +308,14 @@ class NotifyLogRepository:
         """
         _env = get_current_env()
         with self._db.orm_session() as s:
+            s.expire_on_commit = False
             return (
-                s.query(GovernanceNotifyLog)
+                s.query(GovernanceNotificationOrm)
                 .filter(
-                    GovernanceNotifyLog.ticket_id == ticket_id,
-                    GovernanceNotifyLog.notify_type == "reminder",
-                    GovernanceNotifyLog.notify_status.in_(("pending", "sending")),
-                    GovernanceNotifyLog.env == _env,
+                    GovernanceNotificationOrm.ticket_id == ticket_id,
+                    GovernanceNotificationOrm.notify_type == NotifyType.REMINDER,
+                    GovernanceNotificationOrm.notify_status.in_((NotifyStatus.PENDING, NotifyStatus.SENDING)),
+                    GovernanceNotificationOrm.env == _env,
                 )
                 .first()
                 is not None
@@ -446,19 +330,20 @@ class NotifyLogRepository:
         Returns True if the claim succeeded (1 row affected).
         """
         with self._db.orm_session() as s:
+            s.expire_on_commit = False
             result = (
-                s.query(GovernanceNotifyLog)
+                s.query(GovernanceNotificationOrm)
                 .filter(
-                    GovernanceNotifyLog.notification_id == notification_id,
-                    GovernanceNotifyLog.notify_status == "pending",
+                    GovernanceNotificationOrm.notification_id == notification_id,
+                    GovernanceNotificationOrm.notify_status == NotifyStatus.PENDING,
                 )
                 .update(
                     {
-                        GovernanceNotifyLog.notify_status: "sending",
-                        GovernanceNotifyLog.send_attempt_count: (
-                            GovernanceNotifyLog.send_attempt_count + 1
+                        GovernanceNotificationOrm.notify_status: NotifyStatus.SENDING,
+                        GovernanceNotificationOrm.send_attempt_count: (
+                            GovernanceNotificationOrm.send_attempt_count + 1
                         ),
-                        GovernanceNotifyLog.last_send_at: now,
+                        GovernanceNotificationOrm.last_send_at: now,
                     },
                     synchronize_session="fetch",
                 )
@@ -473,18 +358,19 @@ class NotifyLogRepository:
     ) -> bool:
         """Mark a sending notify as sent after successful delivery."""
         with self._db.orm_session() as s:
+            s.expire_on_commit = False
             result = (
-                s.query(GovernanceNotifyLog)
+                s.query(GovernanceNotificationOrm)
                 .filter(
-                    GovernanceNotifyLog.notification_id == notification_id,
-                    GovernanceNotifyLog.notify_status == "sending",
+                    GovernanceNotificationOrm.notification_id == notification_id,
+                    GovernanceNotificationOrm.notify_status == NotifyStatus.SENDING,
                 )
                 .update(
                     {
-                        GovernanceNotifyLog.notify_status: "sent",
-                        GovernanceNotifyLog.sent_at: sent_at,
-                        GovernanceNotifyLog.external_message_id: external_message_id,
-                        GovernanceNotifyLog.last_send_error: None,
+                        GovernanceNotificationOrm.notify_status: NotifyStatus.SENT,
+                        GovernanceNotificationOrm.sent_at: sent_at,
+                        GovernanceNotificationOrm.external_message_id: external_message_id,
+                        GovernanceNotificationOrm.last_send_error: None,
                     },
                     synchronize_session="fetch",
                 )
@@ -502,18 +388,19 @@ class NotifyLogRepository:
         If ``is_terminal`` (max_send_attempts reached) → ``failed``.
         Otherwise → revert to ``pending`` for retry.
         """
-        new_status = "failed" if is_terminal else "pending"
+        new_status = NotifyStatus.FAILED if is_terminal else NotifyStatus.PENDING
         with self._db.orm_session() as s:
+            s.expire_on_commit = False
             result = (
-                s.query(GovernanceNotifyLog)
+                s.query(GovernanceNotificationOrm)
                 .filter(
-                    GovernanceNotifyLog.notification_id == notification_id,
-                    GovernanceNotifyLog.notify_status == "sending",
+                    GovernanceNotificationOrm.notification_id == notification_id,
+                    GovernanceNotificationOrm.notify_status == NotifyStatus.SENDING,
                 )
                 .update(
                     {
-                        GovernanceNotifyLog.notify_status: new_status,
-                        GovernanceNotifyLog.last_send_error: error_msg,
+                        GovernanceNotificationOrm.notify_status: new_status,
+                        GovernanceNotificationOrm.last_send_error: error_msg,
                     },
                     synchronize_session="fetch",
                 )
@@ -524,26 +411,60 @@ class NotifyLogRepository:
     # Writes — insert (self-managed session)
     # ------------------------------------------------------------------
 
-    def add_notification(self, row: GovernanceNotifyLog) -> str:
+    def add_notification(self, notification: GovernanceNotification) -> str:
         """Insert a new notify_log row (self-managed session).
 
+        Accepts domain model, translates to ORM via ``to_orm()``.
         ``env`` is auto-filled by the ORM ``default=get_current_env``.
 
-        Flush ensures the row lands in the DB immediately. Without it
-        a subsequent query's autoflush could re-INSERT the same pending
-        object → ``Duplicate entry`` on UK.
         Returns the notification_id of the inserted row.
         """
         with self._db.orm_session() as s:
-            s.add(row)
+            s.expire_on_commit = False
+            orm_row = notification.to_orm()
+            s.add(orm_row)
             s.flush()
-            return row.notification_id
+            return orm_row.notification_id
+
+    def save_notification(self, notification: GovernanceNotification) -> bool:
+        """Persist a (mutated) domain notification back to its row.
+
+        通知发送状态机领域往返的写回原语(对齐 ``save_ticket`` 范式):
+        按 ``notification_id`` + env 查出 ORM 行 → ``apply_to`` 只写可变投递态
+        (notify_status / notify_channel / send_attempt_count / last_send_at /
+        last_send_error / external_message_id / sent_at)→ commit。冻结快照/sealed
+        列不动。
+
+        调用方(``NotifyLifecycleService``)在调本原语前已 invoke 领域守卫方法
+        (``mark_claimed`` / ``mark_sent`` / ``mark_failed``);本原语只写回,
+        repo 持无状态转移语义命令。Returns True if found+updated, False if not found.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            db_row = (
+                s.query(GovernanceNotificationOrm)
+                .filter(
+                    GovernanceNotificationOrm.notification_id == notification.notification_id,
+                    GovernanceNotificationOrm.env == _env,
+                )
+                .one_or_none()
+            )
+            if db_row is None:
+                return False
+            notification.apply_to(db_row)
+            try:
+                s.commit()
+            except Exception:
+                s.rollback()
+                raise
+            return True
 
     # ------------------------------------------------------------------
     # Test seeding (self-managed session + commit)
     # ------------------------------------------------------------------
 
-    def insert_notification(self, row: GovernanceNotifyLog) -> None:
+    def insert_notification(self, row: GovernanceNotificationOrm) -> None:
         """Insert a full-featured notify_log row (self-managed session).
 
         Unlike ``add_notification`` (also self-managed but returns id),
@@ -551,6 +472,7 @@ class NotifyLogRepository:
         that seed realistic states through the repo layer.
         """
         with self._db.orm_session() as session:
+            session.expire_on_commit = False
             session.add(row)
             session.flush()
 
@@ -567,11 +489,12 @@ class NotifyLogRepository:
         """
         _env = get_current_env()
         with self._db.orm_session() as s:
+            s.expire_on_commit = False
             existing = (
-                s.query(GovernanceNotifyLog.notification_id)
+                s.query(GovernanceNotificationOrm.notification_id)
                 .filter(
-                    GovernanceNotifyLog.notification_id.in_(notification_ids),
-                    GovernanceNotifyLog.env == _env,
+                    GovernanceNotificationOrm.notification_id.in_(notification_ids),
+                    GovernanceNotificationOrm.env == _env,
                 )
                 .all()
             )
@@ -580,8 +503,8 @@ class NotifyLogRepository:
 
             if existing_ids:
                 deleted = (
-                    s.query(GovernanceNotifyLog)
-                    .filter(GovernanceNotifyLog.notification_id.in_(existing_ids))
+                    s.query(GovernanceNotificationOrm)
+                    .filter(GovernanceNotificationOrm.notification_id.in_(existing_ids))
                     .delete(synchronize_session="fetch")
                 )
             else:
@@ -598,14 +521,143 @@ class NotifyLogRepository:
         """
         _env = get_current_env()
         with self._db.orm_session() as s:
+            s.expire_on_commit = False
             existing = (
-                s.query(GovernanceNotifyLog.notification_id)
+                s.query(GovernanceNotificationOrm.notification_id)
                 .filter(
-                    GovernanceNotifyLog.notification_id.in_(notification_ids),
-                    GovernanceNotifyLog.env == _env,
+                    GovernanceNotificationOrm.notification_id.in_(notification_ids),
+                    GovernanceNotificationOrm.env == _env,
                 )
                 .all()
             )
             existing_ids = {r.notification_id for r in existing}
             not_found = [i for i in notification_ids if i not in existing_ids]
             return len(existing_ids), not_found
+
+    # ------------------------------------------------------------------
+    # Command methods (P4 — Service→Repo ORM relocation)
+    # ------------------------------------------------------------------
+
+    def bulk_close_open_muted(
+        self,
+        *,
+        close_reason: str,
+        closed_at: datetime,
+        cooldown_until: datetime | None = None,
+        only_unresponded: bool = False,
+    ) -> int:
+        """批量关闭 open/muted 通知 — admin cancel_pending / close_all_open。
+
+        Args:
+            close_reason: Business close reason (CloseReason value).
+            closed_at: Close timestamp.
+            cooldown_until: Cooldown expiry.
+            only_unresponded: True = only where response IS NULL (cancel_pending);
+                False = all open/muted (close_all_open).
+
+        Returns:
+            Number of rows updated.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            q = s.query(GovernanceNotificationOrm).filter(
+                GovernanceNotificationOrm.governance_status.in_(
+                    [GovernanceStatus.OPEN, "muted"],
+                ),
+                GovernanceNotificationOrm.env == _env,
+            )
+            if only_unresponded:
+                q = q.filter(GovernanceNotificationOrm.response.is_(None))
+
+            affected = q.all()
+            updated = 0
+            for row in affected:
+                if only_unresponded or row.notify_status == NotifyStatus.PENDING:
+                    row.notify_status = NotifyStatus.CANCELLED
+                row.governance_status = GovernanceStatus.CLOSED
+                row.close_reason = close_reason
+                row.closed_at = closed_at
+                row.cooldown_until = cooldown_until
+                updated += 1
+            return updated
+
+    def bulk_cancel_by_bots(
+        self,
+        bot_ids: list[str],
+        *,
+        close_reason: str,
+        closed_at: datetime,
+        cooldown_until: datetime | None = None,
+    ) -> int:
+        """批量取消指定 bot 的 open/muted 通知 — whitelist bulk_whitelist。
+
+        Returns the number of rows updated.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            affected = (
+                s.query(GovernanceNotificationOrm)
+                .filter(
+                    GovernanceNotificationOrm.bot_id.in_(bot_ids),
+                    GovernanceNotificationOrm.response.is_(None),
+                    GovernanceNotificationOrm.governance_status.in_(
+                        [GovernanceStatus.OPEN, "muted"],
+                    ),
+                    # 状态守卫:只取消待发通知,不动已投递(sent/failed/sending)。
+                    GovernanceNotificationOrm.notify_status == NotifyStatus.PENDING,
+                    GovernanceNotificationOrm.env == _env,
+                )
+                .all()
+            )
+            for row in affected:
+                row.notify_status = NotifyStatus.CANCELLED
+                row.governance_status = GovernanceStatus.CLOSED
+                row.close_reason = close_reason
+                row.closed_at = closed_at
+                row.cooldown_until = cooldown_until
+            return len(affected)
+
+    def update_delivery_status(
+        self,
+        notification_id: str,
+        *,
+        status: NotifyStatus,
+        external_id: str | None = None,
+        error: str | None = None,
+        at: datetime | None = None,
+        increment_attempt: bool = False,
+        channel: str | None = None,
+    ) -> bool:
+        """投递状态变更 — 合并 claim / mark_sent / mark_failed。
+
+        claim:       update_delivery_status(id, status=SENDING, at=now, increment_attempt=True)
+        mark_sent:   update_delivery_status(id, status=SENT, external_id=ext_id, at=now)
+        mark_failed: update_delivery_status(id, status=FAILED, error=msg)
+                     update_delivery_status(id, status=PENDING, error=msg)  # non-terminal
+        """
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            update_values: dict = {
+                GovernanceNotificationOrm.notify_status: status,
+            }
+            if external_id is not None:
+                update_values[GovernanceNotificationOrm.external_message_id] = external_id
+            if error is not None:
+                update_values[GovernanceNotificationOrm.last_send_error] = error
+            if at is not None:
+                update_values[GovernanceNotificationOrm.last_send_at] = at
+                if status == NotifyStatus.SENT:
+                    update_values[GovernanceNotificationOrm.sent_at] = at
+            if increment_attempt:
+                update_values[GovernanceNotificationOrm.send_attempt_count] = (
+                    GovernanceNotificationOrm.send_attempt_count + 1
+                )
+            if channel is not None:
+                update_values[GovernanceNotificationOrm.notify_channel] = channel
+
+            count = s.query(GovernanceNotificationOrm).filter(
+                GovernanceNotificationOrm.notification_id == notification_id,
+            ).update(update_values, synchronize_session="fetch")
+            return count > 0

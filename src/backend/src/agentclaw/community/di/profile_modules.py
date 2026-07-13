@@ -120,8 +120,8 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.device_sync import (
             CommunityDeviceSyncModule,
         )
-        from agentclaw.community.di.modules.infrastructure.community.governance import (
-            CommunityGovernanceModule,
+        from agentclaw.community.di.modules.infrastructure.community.notify import (
+            CommunityNotifyModule,
         )
         from agentclaw.community.di.modules.infrastructure.community.outbound_rules import (
             CommunityOutboundRulesModule,
@@ -132,7 +132,7 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             TestTokenVaultModule(),
             # The reuse column's concerns, now community:
             CommunityAICodingModule(),      # empty workflow catalog (no AntCode)
-            CommunityGovernanceModule(),    # no-op notify sender (no DingTalk)
+            CommunityNotifyModule(),    # no-op notify sender (no DingTalk)
             # Outbound rules + device-sync — community (empty rules / no-op dispatch).
             CommunityOutboundRulesModule(),
             CommunityDeviceSyncModule(),
@@ -264,8 +264,8 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.bot_publish_approval import (
             CommunityBotPublishApprovalModule,
         )
-        from agentclaw.community.di.modules.infrastructure.community.governance import (
-            CommunityGovernanceModule,
+        from agentclaw.community.di.modules.infrastructure.community.notify import (
+            CommunityNotifyModule,
         )
 
         column: list[Module] = [
@@ -294,8 +294,8 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             # Approval workflow + publish-approval strategy (B7).
             CommunityApprovalWorkflowModule(),
             CommunityBotPublishApprovalModule(),
-            # Governance notify sender — no-op (no DingTalk in community; B11 Phase A).
-            CommunityGovernanceModule(),
+            # Notify sender — no-op (no DingTalk in community; B11 Phase A).
+            CommunityNotifyModule(),
         ]
         return column
 

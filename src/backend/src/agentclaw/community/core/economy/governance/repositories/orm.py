@@ -1,10 +1,12 @@
 """ORM models for the economy/governance module.
 
-4 tables:
-  - GovernanceNotifyLog       (ac_governance_notify_log)     — 通知 + 反馈 + 工单生命周期
-  - GovernanceAudit           (ac_governance_audit)          — 审计日志 (append-only)
-  - BotWhitelist              (ac_bot_whitelist)             — 统一白名单
-  - GovernanceTaskRecordDaily (ac_governance_task_record_daily) — 离线任务记录 (ODPS → 在线)
+4 tables (class names carry ``Orm`` suffix to distinguish from domain models):
+  - GovernanceNotificationOrm  (ac_governance_notify_log)     — 通知 + 反馈 + 工单生命周期
+  - AuditLogOrm                (ac_governance_audit)          — 审计日志 (append-only)
+  - WhitelistEntryOrm          (ac_bot_whitelist)             — 统一白名单
+  - GovernanceTicketOrm        (ac_governance_task_record_daily) — 离线任务记录
+
+领域模型见 domain.py; repo 用 from_orm/to_orm/apply_to 做翻译边界。
 
 Note: ``ac_governance_analysis_daily`` is NOT stored online.  ODPS pipeline
 analysis_daily is a process-level intermediate; only task_record_daily (the
@@ -47,8 +49,13 @@ from sqlalchemy import (
 from agentclaw.community.plugin_api.models import AutoIncrementBigInteger, Base
 from agentclaw.community.utils.env_utils import get_current_env
 
+from agentclaw.community.core.economy.governance.domain.enums import (
+    GovernanceStatus,
+    NotifyStatus,
+)
 
-class GovernanceNotifyLog(Base):
+
+class GovernanceNotificationOrm(Base):
     """通知事件流水 — 一次通知事件一行。
 
     角色: 创建时冻结当时的工单快照和实际发送正文; 创建后快照不可变;
@@ -139,33 +146,48 @@ class GovernanceNotifyLog(Base):
     gmt_create = Column(TIMESTAMP, nullable=False, default=func.now())
     gmt_modified = Column(TIMESTAMP, nullable=False, default=func.now(), onupdate=func.now())
 
-    def to_delivery_dict(self) -> dict:
-        """Serialize to the dict shape used by scan-and-deliver pipeline.
+    # ── 业务 property (设计文档 §2.3 定义的重命名) ──
 
-        Centralizes field mapping so router code never spells out
-        individual column names — add/remove a field here, not in the router.
-        """
-        return {
-            "notification_id": self.notification_id,
-            "bot_id": self.bot_id,
-            "bot_name": self.bot_name or "N/A",
-            "owner_id": self.owner_id,
-            "dt_version": self.dt_version,
-            "hit_dimensions": self.hit_dimensions,
-            "governance_max_priority": self.governance_max_priority,
-            "expected_token_saving": self.expected_token_saving,
-            "saving_ratio": self.saving_ratio,
-            "notification_md": self.notification_md or "",
-            "notification_structured": getattr(self, "notification_structured", None),
-            "notify_channel": getattr(self, "notify_channel", "markdown") or "markdown",
-            "send_attempt_count": self.send_attempt_count,
-        }
+    @property
+    def decision_at_create(self) -> str:
+        """governance_decision 的业务名 — 创建时冻结的决策。"""
+        return self.governance_decision or "actionable"
+
+    @property
+    def triggered_dimensions(self) -> str | None:
+        """hit_dimensions 的业务名。"""
+        return self.hit_dimensions
+
+    @property
+    def severity(self) -> str | None:
+        """governance_max_priority 的业务名。"""
+        return self.governance_max_priority
+
+    @property
+    def estimated_saving_tokens(self) -> int | None:
+        """expected_token_saving 的业务名。"""
+        return self.expected_token_saving
+
+    @property
+    def delivery_status(self) -> str:
+        """notify_status 的业务名。"""
+        return self.notify_status or "pending"
+
+    @property
+    def channel(self) -> str:
+        """notify_channel 的业务名。"""
+        return self.notify_channel or "markdown"
+
+    @property
+    def is_pending(self) -> bool:
+        """通知是否待发送。"""
+        return self.notify_status == NotifyStatus.PENDING
 
     def to_dict(self) -> dict:
         """Convert to plain dict — safe to use after session closes.
 
         Time fields keep ``datetime`` type; see
-        :meth:`GovernanceTaskRecordDaily.to_dict` for rationale.
+        :meth:`GovernanceTicket.to_dict` for rationale.
         """
         return {
             "id": self.id,
@@ -218,7 +240,7 @@ class GovernanceNotifyLog(Base):
     )
 
 
-class GovernanceAudit(Base):
+class AuditLogOrm(Base):
     """Append-only audit trail for governance operations.
 
     Every scan run, user feedback, and emergency action writes
@@ -226,7 +248,7 @@ class GovernanceAudit(Base):
     scan together (UUID4).
 
     ``notification_id`` links audit rows back to the specific
-    GovernanceNotifyLog row — essential for card callback traceability
+    GovernanceNotification row — essential for card callback traceability
     (which notification was clicked / responded to).
     """
 
@@ -276,6 +298,18 @@ class GovernanceAudit(Base):
             "gmt_modified": self.gmt_modified,
         }
 
+    # ── 业务 property ──
+
+    @property
+    def action(self) -> str:
+        """action_taken 的业务名 — 审计动作。"""
+        return self.action_taken or "unknown"
+
+    @property
+    def created_at(self):
+        """gmt_create 的业务名。"""
+        return self.gmt_create
+
     __table_args__ = (
         # data-readiness check runs MAX(gmt_create) WHERE action_taken IN(...)
         # every scan; run_id groups a scan's audit rows for ops queries.
@@ -288,7 +322,7 @@ class GovernanceAudit(Base):
     )
 
 
-class BotWhitelist(Base):
+class WhitelistEntryOrm(Base):
     """Unified whitelist table — ``whitelist_type`` discriminates usage.
 
     Governance uses ``whitelist_type='governance'``; dormant can use
@@ -326,6 +360,14 @@ class BotWhitelist(Base):
             "gmt_modified": self.gmt_modified,
         }
 
+    # ── 业务 property ──
+
+    @property
+    def is_expired(self) -> bool:
+        """白名单是否已过期 (None = 永久)。"""
+        from datetime import datetime
+        return self.expires_at is not None and self.expires_at < datetime.now()
+
     __table_args__ = (
         UniqueConstraint(
             "bot_id", "owner_id", "whitelist_type", "env",
@@ -335,7 +377,7 @@ class BotWhitelist(Base):
     )
 
 
-class GovernanceTaskRecordDaily(Base):
+class GovernanceTicketOrm(Base):
     """治理工单 — 一个 owner-bot 对最多一条 active 工单, 生命周期跨天稳定。
 
     角色: 工单身份 + 最新快照 + 生命周期状态 + 用户反馈 + 管理员审核 + 提醒调度。
@@ -442,6 +484,10 @@ class GovernanceTaskRecordDaily(Base):
         governance service layer does datetime comparisons
         (``cooldown_until > now`` etc.); API-layer serialization
         is the router's responsibility.
+
+        NOTE: This method is retained for diagnostics/debug only.
+        The hot path (Repo → Service → Router) passes ORM objects
+        directly; ``to_dict()`` is NOT called on the hot path.
         """
         return {
             "id": self.id,
@@ -489,6 +535,101 @@ class GovernanceTaskRecordDaily(Base):
             "gmt_create": self.gmt_create,
             "gmt_modified": self.gmt_modified,
         }
+
+    # ── 业务 property (设计文档 §2.3 定义的重命名) ──
+
+    @property
+    def initial_decision(self) -> str:
+        """governance_decision 的业务名 — 永远 = 'actionable' (§5.6)。"""
+        return self.governance_decision or "actionable"
+
+    @property
+    def current_decision(self) -> str | None:
+        """latest_decision 的业务名 — 最新决策。"""
+        return self.latest_decision
+
+    @property
+    def assignee(self) -> str | None:
+        """active_worker 的业务名 — 谁持有这个工单。"""
+        return self.active_worker
+
+    @property
+    def severity(self) -> str | None:
+        """governance_max_priority 的业务名 — 严重等级。"""
+        return self.governance_max_priority
+
+    @property
+    def triggered_dimensions(self) -> str | None:
+        """hit_dimensions 的业务名 — 触发了哪些治理维度。"""
+        return self.hit_dimensions
+
+    @property
+    def estimated_saving_tokens(self) -> int | None:
+        """expected_token_saving 的业务名。"""
+        return self.expected_token_saving
+
+    @property
+    def user_feedback(self) -> str | None:
+        """response 的业务名 — 用户反馈类型。"""
+        return self.response
+
+    @property
+    def feedback_at(self):
+        """response_at 的业务名 — 反馈时间。"""
+        return self.response_at
+
+    @property
+    def feedback_remark(self) -> str | None:
+        """response_remark 的业务名 — 反馈备注。"""
+        return self.response_remark
+
+    @property
+    def feedback_source(self) -> str | None:
+        """response_source 的业务名 — 反馈来源。"""
+        return self.response_source
+
+    @property
+    def resume_at(self):
+        """mute_until 的业务名 — 何时恢复。"""
+        return self.mute_until
+
+    # ── 业务方法 ──
+
+    @property
+    def is_open(self) -> bool:
+        """工单是否处于 open 状态。"""
+        return self.governance_status == GovernanceStatus.OPEN
+
+    @property
+    def is_active(self) -> bool:
+        """工单是否活跃（尚未关闭）。"""
+        return self.governance_status in (
+            GovernanceStatus.OPEN, GovernanceStatus.SCHEDULED, GovernanceStatus.WAITING_REVIEW,
+        )
+
+    @property
+    def is_actionable(self) -> bool:
+        """当前决策是否仍需处理 — 决定是否发送/提醒。"""
+        return self.latest_decision == "actionable"
+
+    @property
+    def has_feedback(self) -> bool:
+        """用户是否已反馈。"""
+        return self.response is not None
+
+    def can_accept_feedback(self) -> bool:
+        """§7.4.1: 仅 open + 未反馈 才接受。"""
+        return self.governance_status == GovernanceStatus.OPEN and self.response is None
+
+    def compute_cooldown_until(self, cooldown_days: int):
+        """计算冷却截止时间。"""
+        from datetime import datetime, timedelta
+        return datetime.now() + timedelta(days=cooldown_days)
+
+    def compute_resume_at(self, repair_deadline, cooldown_days: int):
+        """need_time 反馈: 修复截止 + 冷却天数 = 恢复时间。"""
+        from datetime import timedelta
+        return repair_deadline + timedelta(days=cooldown_days)
 
     __table_args__ = (
         # 旧 UK 降级为普通索引 (一个 worker 可有多条历史工单)

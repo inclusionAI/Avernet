@@ -12,11 +12,11 @@ from datetime import datetime
 
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.contracts.enums import AuditAction
-from agentclaw.community.core.economy.governance.contracts.models import (
-    GovernanceAudit,
-    GovernanceNotifyLog,
-    GovernanceTaskRecordDaily,
+from agentclaw.community.core.economy.governance.domain.enums import AuditAction
+from agentclaw.community.core.economy.governance.repositories.orm import (
+    AuditLogOrm,
+    GovernanceNotificationOrm,
+    GovernanceTicketOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.audit_repo import (
     GovernanceAuditRepository,
@@ -30,6 +30,9 @@ from agentclaw.community.core.economy.governance.repositories.task_record_repo i
 from agentclaw.community.core.economy.governance.services.feedback_service import (
     GovernanceFeedbackService,
     ResolveResult,
+)
+from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+    GovernanceLifecycleService,
 )
 
 from .conftest import FakeDB, FakeGovernanceConfig, FakeWhitelistService
@@ -45,7 +48,7 @@ def _make_notification(session, **overrides):
     governance_status = overrides.pop("governance_status", "open")
 
     # Create task_record (lifecycle entity)
-    task_rec = GovernanceTaskRecordDaily(
+    task_rec = GovernanceTicketOrm(
         ticket_id=ticket_id,
         worker_id=f"{owner_id}:{bot_id}",
         active_worker=f"{owner_id}:{bot_id}"
@@ -64,7 +67,7 @@ def _make_notification(session, **overrides):
     session.add(task_rec)
 
     # Create notify_log (event log) linked by ticket_id
-    row = GovernanceNotifyLog(
+    row = GovernanceNotificationOrm(
         notification_id=nid,
         ticket_id=ticket_id,
         bot_id=bot_id,
@@ -91,12 +94,22 @@ def _build_svc(engine):
     """Build feedback service with in-memory DB."""
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     db = FakeDB(lambda: Session(bind=engine))
+    notify_repo = NotifyLogRepository(db=db)
+    task_repo = TaskRecordRepository(db=db)
+    audit_repo = GovernanceAuditRepository(db=db)
+    wl_svc = FakeWhitelistService()
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
     feedback_svc = GovernanceFeedbackService(
-        db=db, whitelist_service=FakeWhitelistService(),
-        notify_repo=NotifyLogRepository(db=db),
-        task_repo=TaskRecordRepository(db=db),
-        audit_repo=GovernanceAuditRepository(db=db),
+        whitelist_service=wl_svc,
+        notify_repo=notify_repo,
+        task_repo=task_repo,
+        audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
+        lifecycle_svc=lifecycle_svc,
     )
     return feedback_svc
 
@@ -136,7 +149,7 @@ class TestCardCallbackResolve:
         assert result.response == "optimized"
         assert result.response_source == "card_callback"
 
-        row = session.query(GovernanceTaskRecordDaily).filter_by(ticket_id="t-n-001").one()
+        row = session.query(GovernanceTicketOrm).filter_by(ticket_id="t-n-001").one()
         assert row.response == "optimized"
         assert row.response_source == "card_callback"
         assert row.governance_status == "waiting_review"
@@ -155,7 +168,7 @@ class TestCardCallbackResolve:
         assert result.close_reason is None
         assert result.response == "dispute"
 
-        row = session.query(GovernanceTaskRecordDaily).filter_by(ticket_id="t-n-001").one()
+        row = session.query(GovernanceTicketOrm).filter_by(ticket_id="t-n-001").one()
         assert row.response_remark == "This is wrong"
 
     def test_need_time_writes_to_db(self, session, engine):
@@ -170,7 +183,7 @@ class TestCardCallbackResolve:
         assert result.success
         assert result.governance_status == "scheduled"
 
-        row = session.query(GovernanceTaskRecordDaily).filter_by(ticket_id="t-n-001").one()
+        row = session.query(GovernanceTicketOrm).filter_by(ticket_id="t-n-001").one()
         assert row.repair_deadline is not None
         assert row.mute_until is not None
 
@@ -206,7 +219,7 @@ class TestCardCallbackResolve:
         )
         assert result.success
 
-        row = session.query(GovernanceTaskRecordDaily).filter_by(ticket_id="t-n-001").one()
+        row = session.query(GovernanceTicketOrm).filter_by(ticket_id="t-n-001").one()
         stored = json.loads(row.feedback_payload)
         assert stored["overall_action"] == "partial"
 
@@ -289,13 +302,13 @@ class TestCardCallbackAudit:
     """Audit trail written by card callback."""
 
     def test_resolve_writes_audit(self, session, engine):
-        """Formal resolve writes GovernanceAudit with run_id=feedback-*."""
+        """Formal resolve writes AuditLogOrm with run_id=feedback-*."""
         svc = _build_svc(engine)
         _make_notification(session)
 
         svc.resolve("n-001", "optimized", "user-1", source="card_callback")
 
-        audits = session.query(GovernanceAudit).all()
+        audits = session.query(AuditLogOrm).all()
         card_audits = [a for a in audits if a.run_id.startswith("feedback-")]
         assert len(card_audits) >= 1
         assert card_audits[-1].source == "card_callback"
@@ -313,13 +326,15 @@ class TestResultFromTicket:
         from agentclaw.community.core.economy.governance.services.feedback_service import (
             _result_from_ticket,
         )
+        from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
 
         svc = _build_svc(engine)
         _make_notification(session)
 
         svc.resolve("n-001", "optimized", "user-1", source="card_callback")
 
-        ticket = session.query(GovernanceTaskRecordDaily).filter_by(ticket_id="t-n-001").one().to_dict()
+        orm_row = session.query(GovernanceTicketOrm).filter_by(ticket_id="t-n-001").one()
+        ticket = GovernanceTicket.from_orm(orm_row)
         result = _result_from_ticket(ticket, notification_id="n-001", message="test hint")
         assert result.success
         assert result.notification_id == "n-001"
@@ -349,7 +364,7 @@ class TestCardCallbackNoAuth:
         assert result.success
         assert result.governance_status == "waiting_review"
 
-        row = session.query(GovernanceTaskRecordDaily).filter_by(ticket_id="t-n-001").one()
+        row = session.query(GovernanceTicketOrm).filter_by(ticket_id="t-n-001").one()
         assert row.response == "optimized"
         assert row.actor_id == "staff-273250"  # from ticket.owner_id
 
@@ -360,37 +375,57 @@ class TestCardCallbackNoAuth:
 
         svc.resolve("n-001", "optimized", "", source="card_callback")
 
-        audits = session.query(GovernanceAudit).all()
+        audits = session.query(AuditLogOrm).all()
         card_audits = [a for a in audits if a.run_id.startswith("feedback-")]
         assert len(card_audits) >= 1
         assert card_audits[-1].actor_id == "staff-339245"
 
     def test_empty_user_id_whitelist_uses_owner(self, session, engine):
-        """user_id="" → whitelist batch_add created_by = log_row.owner_id."""
+        """user_id="" → whitelist add created_by = log_row.owner_id."""
         wl_calls: list[dict] = []
 
         class _TrackingWhitelistService:
             def bulk_whitelist(self, bot_ids, reason, operator):
                 return {"whitelisted": len(bot_ids), "cancelled": 0}
 
-            def delete_whitelist_entries(self, body, operator):
-                return {"dry_run": True, "would_delete": 0, "deleted": 0}
+            def delete_whitelist_entry(self, *, bot_id, owner_id, reason, operator):
+                return {"deleted": False, "bot_id": bot_id, "owner_id": owner_id}
 
             def count_by_type(self, **kwargs):
                 return 0
 
-            def batch_add(self, entries, created_by, **kwargs):
-                wl_calls.append({"entries": entries, "created_by": created_by})
-                return {"inserted": len(entries), "skipped": 0}
+            def add(self, *, bot_id, owner_id, created_by, **kwargs):
+                wl_calls.append({"bot_id": bot_id, "owner_id": owner_id, "created_by": created_by})
+                from agentclaw.community.core.economy.governance.domain.whitelist import WhitelistEntry
+                return WhitelistEntry(
+                    bot_id=bot_id, owner_id=owner_id,
+                    whitelist_type=kwargs.get("whitelist_type", "governance"),
+                    source=kwargs.get("source", "manual"),
+                    reason=kwargs.get("reason", ""),
+                    created_by=created_by, expires_at=None,
+                )
 
         Session = sessionmaker(bind=engine, expire_on_commit=False)
         db = FakeDB(lambda: Session(bind=engine))
+        wl_svc = _TrackingWhitelistService()
+        notify_repo = NotifyLogRepository(db=db)
+        task_repo = TaskRecordRepository(db=db)
+        audit_repo = GovernanceAuditRepository(db=db)
+        # whitelist-add is owned by feedback_service (lifecycle_service has no
+        # whitelist dep), so wire the tracker into the feedback_service so the
+        # created_by assertion sees feedback_service's add.
+        lifecycle_svc = GovernanceLifecycleService(
+            task_repo=task_repo,
+            notify_repo=notify_repo,
+            audit_repo=audit_repo,
+        )
         svc = GovernanceFeedbackService(
-            db=db, whitelist_service=_TrackingWhitelistService(),
-            notify_repo=NotifyLogRepository(db=db),
-            task_repo=TaskRecordRepository(db=db),
-            audit_repo=GovernanceAuditRepository(db=db),
+            whitelist_service=wl_svc,
+            notify_repo=notify_repo,
+            task_repo=task_repo,
+            audit_repo=audit_repo,
             config=FakeGovernanceConfig(),
+            lifecycle_svc=lifecycle_svc,
         )
         _make_notification(session, owner_id="staff-350361", notification_id="wl-1")
 
@@ -409,7 +444,7 @@ class TestCardCallbackNoAuth:
         )
         assert result.success
 
-        row = session.query(GovernanceTaskRecordDaily).filter_by(ticket_id="t-n-001").one()
+        row = session.query(GovernanceTicketOrm).filter_by(ticket_id="t-n-001").one()
         assert row.actor_id == "admin-007"  # actor_id overrides
 
     def test_explicit_user_id_still_works(self, session, engine):
@@ -420,7 +455,7 @@ class TestCardCallbackNoAuth:
         result = svc.resolve("n-001", "optimized", "user-explicit", source="http_api")
         assert result.success
 
-        row = session.query(GovernanceTaskRecordDaily).filter_by(ticket_id="t-n-001").one()
+        row = session.query(GovernanceTicketOrm).filter_by(ticket_id="t-n-001").one()
         assert row.actor_id == "user-explicit"  # explicit user_id used
 
     def test_empty_user_id_need_time_resolves_owner(self, session, engine):
@@ -435,7 +470,7 @@ class TestCardCallbackNoAuth:
         assert result.success
         assert result.governance_status == "scheduled"
 
-        row = session.query(GovernanceTaskRecordDaily).filter_by(ticket_id="t-n-001").one()
+        row = session.query(GovernanceTicketOrm).filter_by(ticket_id="t-n-001").one()
         assert row.actor_id == "staff-999888"
         assert row.mute_until is not None
 
@@ -451,5 +486,5 @@ class TestCardCallbackNoAuth:
         assert result.success
         assert result.close_reason is None
 
-        row = session.query(GovernanceTaskRecordDaily).filter_by(ticket_id="t-n-001").one()
+        row = session.query(GovernanceTicketOrm).filter_by(ticket_id="t-n-001").one()
         assert row.actor_id == "staff-111222"

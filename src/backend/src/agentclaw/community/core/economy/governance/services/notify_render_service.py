@@ -1,92 +1,221 @@
-"""Markdown notification templates for governance notifications.
+"""[内核类] 通知渲染服务 — 收口所有"领域模型 → 可投递内容"的纯计算。
 
-Phase 1 supports two interchangeable notification channels:
-  - **Markdown** (sampleMarkdown batchSend): simple notification with deep-link.
-  - **TC Card** (createAndDeliver): card shell with Markdown reason + detailLink
-    deep-link that opens a teamclaw preview iframe.
+类别:**内核**(Kernel)。services 三类职责(编排/内核/能力)中,本服务是内核:
+把 governance 领域状态翻译成可投递的通知正文 / TC 卡片 payload / 详情链接。
+不碰状态机推进、不碰持久化、不碰投递本身。
 
-When ``notification_structured`` JSON is available (from ODPS pipeline),
-the rich template is rendered with full detail (owner, department,
-problem summary, action items). Otherwise, a simple fallback template
-is used with the basic fields from task_record_daily.
+依赖边界:
+  - 上行(web):无(不经 router 直接调用,由编排服务 scan/record_process 调用)。
+  - 下行(repo):**无** ── 只读领域模型属性,不 import `repositories/`、
+    不 import `domain/protocols`、不调 `transition_*`。
+  - 横向(service):无(底层 builder 函数已内聚到本文件模块级,见下)。
+
+设计说明(领域模型设计方法 — 渲染收口):
+  - 渲染逻辑此前散落三处:scan `_render_reminder_md` / `_build_tc_card_payload`、
+    record_process `_render_notification_md`,各内联一份"组装字段→调 builder"。
+  - 本服务是唯一对外出口,三处编排服务一律改调这里,达成"渲染口径唯一"(spec A4)。
+  - **不给 domain 实体挂 render 方法**(spec 约束):实体仅暴露属性,渲染在外部
+    服务完成 ── 实体文件零改动。
+  - TC 卡片构建失败时 `build_send_payload` 返回 None,调用方据此降级 markdown
+    (与原 scan `_build_tc_card_payload` 返回 None 语义一致)。
 """
 from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 import base64
 import json
 import urllib.parse
-from typing import Any
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.economy.governance.domain.notification import (
+        GovernanceNotification,
+    )
+    from agentclaw.community.core.economy.governance.domain.record import (
+        GovernanceRecord,
+    )
+    from agentclaw.community.core.economy.governance.domain.ticket import (
+        GovernanceTicket,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SendPayload:
+    """单条通知 TC 卡片投递产物(channel=tc_card,正文已渲染)。
+
+    `build_send_payload` 成功时返回本对象;TC 卡片构建失败返回 None(调用方降级
+    markdown)。非 domain 实体,仅 render 模块内部流转用。
+
+    title 不在此产物内 ── 标题取值依 `notify.notify_type`(FIRST_SEND 首通 /
+    REMINDER 提醒),是调用方编排逻辑,不归渲染。
+    """
+
+    body: str                  # TC 卡片正文(简化 reason)
+    deep_link: str             # TC 卡片详情链接
+    extra: dict[str, Any]      # TC 卡片 extra(bot_id/card_id/notification_data/...)
+
+
+class NotifyRenderService:
+    """通知渲染内核服务 ── 无状态、无 IO。
+
+    经 DI 注入(`di/modules/economy_governance_module`);构造不依赖 repo /
+    notify_sender,仅复用 `notify_builder_service` 模块函数。可单测(Mock 不需要)。
+    """
+
+    def render_first_notification_md(
+        self,
+        record: GovernanceRecord,
+        *,
+        dt_version: str,
+        use_reopen_template: bool = False,
+        reopen_ref_time: datetime | None = None,
+    ) -> str:
+        """渲染离线批首通知 Markdown(收口 record_process `_render_notification_md`)。
+
+        Args:
+            record: 上层输入的治理记录领域模型(领域校验后载体,非 DB 行)。
+            dt_version: 数据版本日期(如 "20260623")。
+            use_reopen_template: True → 走"重新治理"模板(§7.1.4 Step 6)。
+            reopen_ref_time: 重开模板里"曾在 X 处理过"的参考时间。
+
+        Returns:
+            通知正文 Markdown 字符串。
+        """
+        if use_reopen_template:
+            # "重新治理" template (§7.1.4 Step 6)
+            time_str = (
+                reopen_ref_time.strftime("%Y-%m-%d %H:%M")
+                if reopen_ref_time
+                else "之前"
+            )
+            return (
+                f"#### 🔄 重新治理通知 — {record.bot_name or '未知Bot'}\n\n"
+                f"该治理项曾在 {time_str} 处理过反馈。"
+                f"基于最新数据复核，当前仍需要继续跟进。\n\n"
+                f"请参考以下建议处理；如有补充说明，也可以继续反馈。\n\n"
+                f"**命中维度**: {record.hit_dimensions or '—'}\n"
+                f"**数据日期**: {dt_version}\n"
+            )
+
+        # Standard first notification template — use simplified reason builder
+        return build_governance_reason(
+            bot_name=record.bot_name or "",
+            dt_version=dt_version,
+            hit_dimensions=record.hit_dimensions,
+            governance_max_priority=record.governance_max_priority,
+            expected_token_saving=record.expected_token_saving,
+            saving_ratio=record.saving_ratio,
+            task_summary=record.task_summary,
+            notification_structured=record.notification_structured,
+        )
+
+    def render_reminder_md(
+        self,
+        ticket: GovernanceTicket,
+        *,
+        now: datetime,
+    ) -> str:
+        """渲染提醒通知 Markdown(收口 scan `_render_reminder_md`)。
+
+        Args:
+            ticket: 治理工单领域模型(读取其快照 + 节流元信息)。
+            now: cron tick 当前时刻(用于计算 overdue_days)。
+
+        Returns:
+            提醒正文 Markdown 字符串。
+        """
+        days_since = (now - ticket.last_sync_at).days if ticket.last_sync_at else 0
+        return build_governance_reason(
+            bot_name=ticket.bot_name,
+            dt_version=ticket.dt_version,
+            hit_dimensions=ticket.triggered_dimensions,
+            governance_max_priority=ticket.severity,
+            overdue_days=days_since,
+        )
+
+    def build_send_payload(
+        self,
+        notify: GovernanceNotification,
+        *,
+        user_id: str,
+        config: Any,  # EconomyGovernanceConfig
+    ) -> SendPayload | None:
+        """构建 TC 卡片投递产物(收口 scan `_build_tc_card_payload`)。
+
+        Args:
+            notify: 通知领域模型。
+            user_id: 收件人 staff_id(用于详情链接 staff_id 参数)。
+            config: EconomyGovernanceConfig ── 取 tc_card_id / tc_card_preview_url /
+                iframe_callback_url。
+
+        Returns:
+            SendPayload(channel=tc_card) 成功;**TC 卡片构建失败返 None** →
+            调用方应降级为 markdown 频道(与原 `_build_tc_card_payload` 返回
+            None 语义一致)。
+        """
+        try:
+            reason = build_governance_reason(
+                notification_structured=notify.notification_structured,
+                bot_name=notify.bot_name,
+                dt_version=notify.dt_version,
+                hit_dimensions=notify.triggered_dimensions,
+                governance_max_priority=notify.severity,
+                expected_token_saving=notify.estimated_saving_tokens,
+                saving_ratio=notify.saving_ratio,
+                task_summary=None,
+            )
+
+            notification_data = build_card_notification_data(
+                notification_structured=notify.notification_structured,
+                notification_id=notify.notification_id,
+                bot_id=notify.bot_id,
+                bot_name=notify.bot_name,
+                owner_id=notify.owner_id,
+                dt_version=notify.dt_version,
+                expected_token_saving=notify.estimated_saving_tokens,
+                saving_ratio=notify.saving_ratio,
+                governance_max_priority=notify.severity,
+            )
+
+            detail_link = build_tc_card_detail_link(
+                bot_id=notify.bot_id,
+                card_id=config.tc_card_id,
+                notification_data=notification_data,
+                base_url=config.tc_card_preview_url,
+                iframe_callback_url=config.iframe_callback_url,
+                staff_id=user_id,
+            )
+
+            extra = {
+                "bot_id": notify.bot_id,
+                "card_id": config.tc_card_id,
+                "notification_data": notification_data,
+                "out_track_id_prefix": "gov-notify",
+            }
+            return SendPayload(
+                body=reason,
+                deep_link=detail_link,
+                extra=extra,
+            )
+        except Exception:
+            from agentclaw.community.log import get_logger
+            get_logger(__name__).exception(
+                "[NotifyRender] TC card build failed for notification_id=%s",
+                notify.notification_id,
+            )
+            return None
+
+# ===========================================================================
+# 底层渲染纯计算函数(原 notify_builder_service,内聚进本文件作模块级公开。
+# 保原公开名,可直接单测;不再有独立 builder 模块,渲染出口唯一。)
+# ===========================================================================
 
 
 # ---------------------------------------------------------------------------
-# Rich template (notification_structured available)
+# Helpers
 # ---------------------------------------------------------------------------
-
-_RICH_NOTIFY_TEMPLATE = """#### 🏷️ Bot 治理通知 — {bot_name}
-
-**Bot**: {bot_name}　**Owner**: {owner}
-**命中维度**: {hit_dimensions_display}
-**严重级别**: {urgency}
-{daily_tokens_line}
-**预计节省**: {saving_display}
-
----
-
-**📋 问题摘要**
-
-{problem_summary}
-
-**🔧 优化建议**
-
-{action_items_formatted}
-
----
-
-> {disclaimer}
-> 📎 [查看详情 / 反馈]({action_link})"""
-
-_RICH_REMIND_TEMPLATE = """#### ⚠️ 治理通知提醒 — {bot_name}
-
-{overdue_prefix}
-
-**Bot**: {bot_name}　**Owner**: {owner}
-**命中维度**: {hit_dimensions_display}
-**严重级别**: {urgency}
-
-> 此通知已发送 {days_since_create} 天，请尽快处理。
-
-> 📎 [查看详情 / 反馈]({action_link})"""
-
-
-# ---------------------------------------------------------------------------
-# Simple template (fallback, no notification_structured)
-# ---------------------------------------------------------------------------
-
-_SIMPLE_NOTIFY_TEMPLATE = """## 🔔 Bot 治理通知
-
-**Bot 名称**: {bot_name}
-**数据日期**: {dt_version}
-**命中维度**: {hit_dimensions}
-**最高优先级**: {governance_max_priority}
-**预估节省**: {expected_token_saving} tokens ({saving_ratio})
-**摘要**: {task_summary}
-
-> 请在收到通知后 7 天内处理，否则工单将自动过期。
-
-[📌 点击处理]({action_link})"""
-
-_SIMPLE_REMIND_TEMPLATE = """## ⚠️ 治理通知提醒
-
-{overdue_prefix}
-
-**Bot 名称**: {bot_name}
-**数据日期**: {dt_version}
-**命中维度**: {hit_dimensions}
-**最高优先级**: {governance_max_priority}
-
-> 此通知已发送 {days_since_create} 天，请尽快处理。
-
-[📌 点击处理]({action_link})"""
 
 
 # ---------------------------------------------------------------------------
@@ -100,21 +229,6 @@ def _safe_float(val: Any) -> float | None:
         return float(val)
     except (ValueError, TypeError):
         return None
-
-def _resolve_action_link(
-    *,
-    bot_id: str | None = None,
-    notification_id: str | None = None,
-) -> str:
-    """Resolve the deep link for governance notification action.
-
-    Currently returns "" — the frontend routes for direct bot/notify
-    detail pages do not exist yet.  When the routes are added, this
-    function should accept the base URL from config rather than
-    hardcoding it.
-    """
-    return ""
-
 
 def _parse_notification_structured(
     raw: str | None,
@@ -133,30 +247,6 @@ def _parse_notification_structured(
     if not isinstance(data, dict) or "meta" not in data:
         return None
     return data
-
-
-def _format_action_items(action_items: list[dict]) -> str:
-    """Format action_items list into numbered Markdown lines.
-
-    Each item has ``index``, ``action``, ``what_to_change``, ``why``,
-    ``expected_effect``, and optional ``needs_owner_confirm``.
-    """
-    if not action_items:
-        return "（暂无具体建议）"
-    lines: list[str] = []
-    for item in action_items:
-        idx = item.get("index", item.get("id", "?"))
-        action = item.get("action", "")
-        effect = item.get("expected_effect", "")
-        needs_confirm = item.get("needs_owner_confirm", False)
-        marker = "⚠️ " if needs_confirm else ""
-        line = f"{idx}. {marker}{action}"
-        if effect:
-            line += f" ↓ {effect}"
-        if needs_confirm:
-            line += "（需确认）"
-        lines.append(line)
-    return "\n".join(lines)
 
 
 # Dimension key → Chinese display name.
@@ -209,165 +299,6 @@ def _format_hit_dimensions(hit_dimensions: Any) -> str:
     # Translate each key to its Chinese display name
     translated = [_DIMENSION_DISPLAY_NAMES.get(d, d) for d in filtered]
     return " · ".join(translated)
-
-
-def _urgency_from_structured(meta: dict) -> str:
-    """Extract urgency/severity label from notification_structured meta.
-
-    Falls back to ``optimization_summary`` or "HIGH".
-    """
-    # governance_urgency is not in meta but in the parent;
-    # the template caller should pass it if available.
-    return meta.get("optimization_summary", "HIGH")
-
-
-# ---------------------------------------------------------------------------
-# Public render functions
-# ---------------------------------------------------------------------------
-
-
-def render_governance_notify(
-    *,
-    bot_name: str,
-    dt_version: str,
-    hit_dimensions: str | None = None,
-    governance_max_priority: str | None = None,
-    expected_token_saving: int | None = None,
-    saving_ratio: float | None = None,
-    task_summary: str | None = None,
-    bot_id: str | None = None,
-    notification_id: str | None = None,
-    notification_structured: str | None = None,
-) -> str:
-    """Render the primary governance notification Markdown.
-
-    When ``notification_structured`` JSON is present, renders the rich
-    template (owner, department, problem summary, action items).
-    Otherwise, falls back to the simple template with basic fields.
-    """
-    action_link = _resolve_action_link(
-        bot_id=bot_id, notification_id=notification_id,
-    )
-
-    structured = _parse_notification_structured(notification_structured)
-
-    if structured:
-        meta = structured.get("meta", {})
-        owner = meta.get("owner", "N/A")
-        dimensions_display = _format_hit_dimensions(
-            meta.get("hit_dimensions", hit_dimensions),
-        )
-        urgency = _urgency_from_structured(meta)
-
-        daily_tokens_line = ""
-        daily_tokens = meta.get("daily_tokens", "")
-        if daily_tokens:
-            daily_tokens_line = f"**日均Token**: {daily_tokens}"
-
-        saving_str = str(expected_token_saving) if expected_token_saving is not None else "N/A"
-        try:
-            ratio_val = float(saving_ratio) if saving_ratio is not None else None
-            ratio_str = f"{ratio_val:.1%}" if ratio_val is not None else "N/A"
-        except (ValueError, TypeError):
-            ratio_str = str(saving_ratio)
-        saving_display = f"{saving_str} tokens ({ratio_str})"
-
-        problem_summary = structured.get("problem_summary", task_summary or "N/A")
-        action_items_formatted = _format_action_items(
-            structured.get("action_items", []),
-        )
-        disclaimer = structured.get(
-            "disclaimer",
-            "以上为基于采样的优化建议，具体改造请结合业务 SLA 确认。",
-        )
-
-        return _RICH_NOTIFY_TEMPLATE.format(
-            bot_name=bot_name or "N/A",
-            owner=owner,
-            hit_dimensions_display=dimensions_display,
-            urgency=urgency,
-            daily_tokens_line=daily_tokens_line,
-            saving_display=saving_display,
-            problem_summary=problem_summary,
-            action_items_formatted=action_items_formatted,
-            disclaimer=disclaimer,
-            action_link=action_link,
-        )
-
-    # Fallback: simple template
-    saving_str = str(expected_token_saving) if expected_token_saving is not None else "N/A"
-    try:
-        ratio_val = float(saving_ratio) if saving_ratio is not None else None
-        ratio_str = f"{ratio_val:.1%}" if ratio_val is not None else "N/A"
-    except (ValueError, TypeError):
-        ratio_str = str(saving_ratio)
-
-    return _SIMPLE_NOTIFY_TEMPLATE.format(
-        bot_name=bot_name or "N/A",
-        dt_version=dt_version,
-        hit_dimensions=hit_dimensions or "N/A",
-        governance_max_priority=governance_max_priority or "N/A",
-        expected_token_saving=saving_str,
-        saving_ratio=ratio_str,
-        task_summary=task_summary or "N/A",
-        action_link=action_link,
-    )
-
-
-def render_governance_remind(
-    *,
-    bot_name: str,
-    dt_version: str,
-    hit_dimensions: str | None = None,
-    governance_max_priority: str | None = None,
-    remind_count: int = 0,
-    days_since_create: int = 0,
-    bot_id: str | None = None,
-    notification_id: str | None = None,
-    notification_structured: str | None = None,
-) -> str:
-    """Render the reminder Markdown for overdue notifications.
-
-    When ``notification_structured`` is available, uses the rich remind
-    template. Otherwise, falls back to the simple version.
-    """
-    action_link = _resolve_action_link(
-        bot_id=bot_id, notification_id=notification_id,
-    )
-
-    overdue_prefix = ""
-    if days_since_create > 5:
-        overdue_prefix = f"⚠️ 此通知已超期 {days_since_create} 天未处理"
-
-    structured = _parse_notification_structured(notification_structured)
-
-    if structured:
-        meta = structured.get("meta", {})
-        owner = meta.get("owner", "N/A")
-        dimensions_display = _format_hit_dimensions(
-            meta.get("hit_dimensions", hit_dimensions),
-        )
-        urgency = _urgency_from_structured(meta)
-
-        return _RICH_REMIND_TEMPLATE.format(
-            bot_name=bot_name or "N/A",
-            owner=owner,
-            hit_dimensions_display=dimensions_display,
-            urgency=urgency,
-            overdue_prefix=overdue_prefix,
-            days_since_create=days_since_create,
-            action_link=action_link,
-        )
-
-    return _SIMPLE_REMIND_TEMPLATE.format(
-        overdue_prefix=overdue_prefix,
-        bot_name=bot_name or "N/A",
-        dt_version=dt_version,
-        hit_dimensions=hit_dimensions or "N/A",
-        governance_max_priority=governance_max_priority or "N/A",
-        days_since_create=days_since_create,
-        action_link=action_link,
-    )
 
 
 # ---------------------------------------------------------------------------

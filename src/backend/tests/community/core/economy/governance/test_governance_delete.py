@@ -22,6 +22,9 @@ from agentclaw.community.adapters.http.economy import admin_router
 from agentclaw.community.adapters.http.economy.schemas import (
     RecordsDeleteRequest,
 )
+from agentclaw.community.core.economy.governance.services.notify_render_service import (
+    NotifyRenderService,
+)
 
 
 def _run(coro):
@@ -140,65 +143,35 @@ class FakeWhitelistRepo:
     def seed(self, rows: list[dict]) -> None:
         self._rows = rows
 
-    def batch_remove(
-        self,
-        *,
-        ids: list[int] | None = None,
-        bot_owner_pairs: list[dict] | None = None,
-        whitelist_type: str = "governance",
-        dry_run: bool = False,
-    ) -> dict:
-        matched: list[dict] = []
-        not_found: list[dict] = []
-        affected_pairs: list[dict] = []
+    def is_whitelisted(self, bot_id, owner_id, **kwargs):
+        return any(
+            r.get("bot_id") == bot_id and r.get("owner_id") == owner_id
+            for r in self._rows
+        )
 
-        if ids:
-            for pk in ids:
-                row = next((r for r in self._rows if r.get("id") == pk), None)
-                if row:
-                    matched.append(row)
-                else:
-                    not_found.append({"id": pk, "hint": "id not found"})
+    def add(self, *, bot_id, owner_id, created_by, **kwargs):
+        from agentclaw.community.core.economy.governance.domain.whitelist import WhitelistEntry
+        self._rows.append({"bot_id": bot_id, "owner_id": owner_id})
+        return WhitelistEntry(
+            bot_id=bot_id, owner_id=owner_id,
+            whitelist_type=kwargs.get("whitelist_type", "governance"),
+            source=kwargs.get("source", "manual"),
+            reason=kwargs.get("reason", ""),
+            created_by=created_by, expires_at=None,
+        )
 
-        if bot_owner_pairs:
-            for pair in bot_owner_pairs:
-                bid = pair.get("bot_id", "")
-                oid = pair.get("owner_id", "")
-                row = next(
-                    (r for r in self._rows
-                     if r.get("bot_id") == bid and r.get("owner_id") == oid),
-                    None,
-                )
-                if row:
-                    matched.append(row)
-                else:
-                    not_found.append({
-                        "bot_id": bid, "owner_id": oid, "hint": "pair not found",
-                    })
+    def remove(self, *, bot_id, owner_id, whitelist_type="governance"):
+        for i, row in enumerate(self._rows):
+            if row.get("bot_id") == bot_id and row.get("owner_id") == owner_id:
+                self._rows.pop(i)
+                return True
+        return False
 
-        # Deduplicate by id
-        seen: set[int] = set()
-        unique: list[dict] = []
-        for row in matched:
-            rid = row.get("id", id(row))
-            if rid not in seen:
-                seen.add(rid)
-                unique.append(row)
-                affected_pairs.append({
-                    "bot_id": row.get("bot_id", ""),
-                    "owner_id": row.get("owner_id", ""),
-                })
+    def list_by_owner(self, owner_id, **kwargs):
+        return []
 
-        deleted = len(unique)
-        if not dry_run:
-            for row in unique:
-                self._rows.remove(row)
-
-        return {
-            "deleted": deleted,
-            "not_found": not_found,
-            "affected_pairs": affected_pairs,
-        }
+    def count_by_type(self, **kwargs):
+        return 0
 
 
 class FakeGovernanceConfig:
@@ -213,7 +186,7 @@ class FakeGovernanceConfig:
 
 
 class FakeAdminService:
-    """Delegates delete_records / delete_whitelist_entries to real
+    """Delegates delete_records / delete_whitelist_entry to real
     GovernanceAdminService logic backed by in-memory fakes.
 
     This lets the router-level tests exercise the full service path
@@ -229,6 +202,10 @@ class FakeAdminService:
         from agentclaw.community.core.economy.governance.services.admin_service import (
             GovernanceAdminService,
         )
+
+        from agentclaw.community.core.economy.governance.services.lifecycle_service import (
+            GovernanceLifecycleService,
+        )
         from agentclaw.community.core.economy.governance.services.whitelist_service import (
             GovernanceWhitelistService,
         )
@@ -239,17 +216,28 @@ class FakeAdminService:
         self._whitelist_repo = whitelist_repo or FakeWhitelistRepo()
         self._db = FakeDatabasePlugin()
 
-        # Build whitelist_service with proper in-memory fake whitelist_repo
+        # Build the driver — lifecycle_service has no whitelist dependency
+        # (accept_feedback whitelist-add is owned by feedback_service), so no
+        # stub needed. delete_records / delete_whitelist_entry do not
+        # exercise the timer state machine or bulk_whitelist.
+        self._lifecycle_svc = GovernanceLifecycleService(
+            task_repo=self._task_repo,  # type: ignore[arg-type]
+            notify_repo=self._notify_repo,  # type: ignore[arg-type]
+            audit_repo=self._audit_repo,
+        )
+
+        # Build whitelist_service with proper in-memory fake whitelist_repo.
+        # It needs lifecycle_svc (Task 8 bulk_whitelist closes task_record);
+        # not invoked by delete tests, so the driver above suffices.
         self._whitelist_service = GovernanceWhitelistService(
-            db=self._db,
             whitelist_repo=self._whitelist_repo,  # type: ignore[arg-type]
             notify_repo=self._notify_repo,  # type: ignore[arg-type]
             audit_repo=self._audit_repo,
             config=FakeGovernanceConfig(),  # type: ignore[arg-type]
+            lifecycle_svc=self._lifecycle_svc,
         )
 
         self._real_svc = GovernanceAdminService(
-            db=self._db,
             cache=None,  # type: ignore[arg-type]
             whitelist_service=self._whitelist_service,
             notify_repo=self._notify_repo,  # type: ignore[arg-type]
@@ -257,14 +245,19 @@ class FakeAdminService:
             task_repo=self._task_repo,  # type: ignore[arg-type]
             config=FakeGovernanceConfig(),  # type: ignore[arg-type]
             notify_sender=None,  # type: ignore[arg-type]
-            dingtalk_config=None,  # type: ignore[arg-type]
+            lifecycle_svc=self._lifecycle_svc,
+        render_svc=NotifyRenderService(),
         )
 
     def delete_records(self, body: dict, operator: str) -> dict:
         return self._real_svc.delete_records(body, operator)
 
-    def delete_whitelist_entries(self, body: dict, operator: str) -> dict:
-        return self._real_svc.delete_whitelist_entries(body, operator)
+    def delete_whitelist_entry(
+        self, *, bot_id: str, owner_id: str, reason: str, operator: str,
+    ) -> dict:
+        return self._real_svc.delete_whitelist_entry(
+            bot_id=bot_id, owner_id=owner_id, reason=reason, operator=operator,
+        )
 
 
 # ===========================================================================
