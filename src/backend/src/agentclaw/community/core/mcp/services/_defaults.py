@@ -184,6 +184,7 @@ def get_default_cli_items(
         key = "aicoding"
     elif (
         engine_type == "claude_code"
+        and isinstance(template_type, str)
         and template_type in _CLAUDE_CODE_CLI_TEMPLATE_TYPES
     ):
         key = "aicoding"

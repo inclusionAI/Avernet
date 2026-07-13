@@ -198,11 +198,16 @@ def test_claude_code_application_coding_uses_aicoding_link():
 
 
 def test_claude_code_without_template_or_unknown_template_returns_empty():
-    # claude_code 不带 template_type → 走 aicoding 链路
+    # claude_code 不带 template_type → 不走 aicoding 链路（返回空）
     assert get_default_cli_items("claude_code") == []
     # 非 personalCoding/applicationCoding 的 template_type → 空（fail-closed）
     assert get_default_cli_items("claude_code", "service") == []
     assert get_default_cli_items("claude_code", "other") == []
+    # 非字符串且不可哈希的 template_type（来自用户 JSON）→ 不抛 TypeError，空（fail-closed）
+    assert get_default_cli_items("claude_code", []) == []
+    assert get_default_cli_items("claude_code", {}) == []
+    # aicoding 引擎不依赖 template_type，始终返回 9 项
+    assert len(get_default_cli_items("aicoding", [])) == 9
 
 
 def test_non_aicoding_engines_return_empty_regardless_of_template():
