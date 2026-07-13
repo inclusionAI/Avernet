@@ -93,6 +93,55 @@ Changes should preserve or improve the gates described in
 Do not weaken these checks to make a change pass. If a check is wrong, fix the
 check and document why.
 
+## Pre-push Module Selection
+
+Install the repository hooks separately in every Git worktree:
+
+```bash
+scripts/install_git_hooks.sh
+```
+
+The pre-push hook models the change set of a pull request. Its merge target
+defaults to the remote branch `origin/dev`. Override it persistently for the
+current worktree or repository when the eventual PR targets another branch:
+
+```bash
+git config --worktree avernet.prePush.mergeTarget upstream/release/2026-07
+```
+
+Use `AVERNET_PRE_PUSH_MERGE_TARGET` for a one-command override; it has higher
+priority than Git config:
+
+```bash
+AVERNET_PRE_PUSH_MERGE_TARGET=origin/main git push
+```
+
+Target values must use `<remote>/<branch>` form. Before selecting modules, the
+hook fetches the target branch, resolves its latest commit SHA, calculates
+`git merge-base <target-sha> <local-sha>`, and diffs that merge base against
+the local SHA. Do not replace this with a direct `git diff origin/dev HEAD`:
+when `dev` has advanced but the feature has not rebased, a direct tree diff
+incorrectly includes target-only paths.
+
+The hook fails the push if the configured remote branch cannot be fetched or
+resolved, or if it has no merge base with the pushed commit. It must not fall
+back to a stale target, the pushed branch's old remote SHA, or the root commit,
+because those ranges can run unrelated module tests.
+
+Module gates are selected from the committed files in the resulting diff:
+
+| Changed path | Pre-push gate |
+| --- | --- |
+| `src/backend/` | Backend SAST, unit tests, changed-line coverage, and singlebox coverage |
+| `src/baas/` | BaaS SAST, unit tests, changed-line coverage, and singlebox coverage |
+| `src/engine/` | Engine SAST, unit tests, and changed-line coverage |
+| `src/bcs/` | BCS/BCN unit tests in fast-fail mode |
+| `src/frontend/` | Frontend CI |
+| singlebox scripts and Backend/BaaS acceptance or E2E paths | singlebox coverage |
+
+The hook only checks committed changes in the pushed ref. Uncommitted working
+tree changes are outside the natural boundary of a pre-push hook.
+
 ## Development Guidelines
 
 Start from the requirement and the existing contract. Keep changes small and
