@@ -3,11 +3,10 @@
 [[ -n "${_BCSFUSE_SH_LOADED:-}" ]] && return 0
 _BCSFUSE_SH_LOADED=1
 
-# Service-specific constants (BCSFUSE_RUNTIME_DIR is overridden in standalone
-# mode by apply_singlebox_mode_defaults in singlebox.sh)
-BCSFUSE_LOG="${LOG_DIR}/bcsfuse.log"
-# BCSFUSE_RUNTIME_DIR default is resolved lazily in bcsfuse_load_env()
-# so that standalone mode can override it before any function runs.
+# Service-specific constants — resolved lazily in bcsfuse_load_env()
+# so that standalone mode (apply_singlebox_mode_defaults) can override
+# BCSFUSE_RUNTIME_DIR before any function runs.
+BCSFUSE_LOG=""
 BCSFUSE_RUNTIME_DIR="${BCSFUSE_RUNTIME_DIR:-}"  # set in bcsfuse_load_env()
 BCSFUSE_ENV_FILE=""
 BCSFUSE_PID_FILE=""
@@ -15,12 +14,13 @@ BCSFUSE_PID_FILE=""
 # ============ Environment ============
 
 bcsfuse_load_env() {
-    # Resolve BCSFUSE_RUNTIME_DIR lazily so standalone mode can override it
+    # Resolve paths lazily so standalone mode can override them
     # via apply_singlebox_mode_defaults (called after source but before any
     # bcsfuse_* function runs).
     BCSFUSE_RUNTIME_DIR="${BCSFUSE_RUNTIME_DIR:-${BCSFUSE_DIR}/.runtime}"
     BCSFUSE_ENV_FILE="${BCSFUSE_RUNTIME_DIR}/env/.env.local"
     BCSFUSE_PID_FILE="${BCSFUSE_RUNTIME_DIR}/pids/open_core.pid"
+    BCSFUSE_LOG="${BCSFUSE_RUNTIME_DIR}/logs/bcsfuse.log"
 
     # Layer 1: Project-level .env.local (shared with other modules)
     load_repo_env_file "${PROJECT_ROOT}/.env.local"
