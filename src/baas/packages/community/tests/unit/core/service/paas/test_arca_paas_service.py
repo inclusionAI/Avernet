@@ -13,8 +13,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from secbaas.api.device_manage import ArcaCredentials
+from secbaas.api.device_manage import ArcaCredentials, PaasError
 from secbaas.core.service.paas import ArcaPaasService
+from secbaas.spi.sandbox.arca import ArcaSandboxError, ArcaSandboxNotFoundError
 
 
 @pytest.fixture
@@ -130,3 +131,71 @@ class TestDestroyDeviceWithStorage:
         mock_plugin.delete_storage.assert_called_once_with("storage-abc", "test-tenant")
         mock_sandbox.destroy.assert_called_once()
         assert "Storage deletion failed" in caplog.text
+
+    def test__destroy_device_sync__already_missing_is_idempotent(
+        self, arca_credentials, mock_plugin
+    ):
+        """A missing sandbox remains a successful idempotent destroy."""
+        mock_plugin.connect_sync_sandbox.side_effect = ArcaSandboxNotFoundError(
+            "sandbox not found"
+        )
+        service = ArcaPaasService(
+            credentials=arca_credentials, arca_sandbox_plugin=mock_plugin
+        )
+
+        result = service._destroy_device_sync("missing-device-id")
+
+        assert result is True
+        assert mock_plugin.connect_sync_sandbox.call_count == 2
+        mock_plugin.delete_storage.assert_not_called()
+
+    def test__destroy_device_sync__initial_connect_failure_then_missing_is_idempotent(
+        self, arca_credentials, mock_plugin
+    ):
+        """A transient lookup failure must not break a later not-found destroy."""
+        mock_plugin.connect_sync_sandbox.side_effect = [
+            RuntimeError("lookup unavailable"),
+            ArcaSandboxNotFoundError("sandbox not found"),
+        ]
+        service = ArcaPaasService(
+            credentials=arca_credentials, arca_sandbox_plugin=mock_plugin
+        )
+
+        result = service._destroy_device_sync("missing-device-id")
+
+        assert result is True
+        assert mock_plugin.connect_sync_sandbox.call_count == 2
+        mock_plugin.delete_storage.assert_not_called()
+
+    def test__destroy_device_sync__delete_storage_exception_is_best_effort(
+        self, arca_credentials, mock_plugin, mock_sandbox, caplog
+    ):
+        """A storage API exception must not turn a successful destroy into failure."""
+        mock_info = MagicMock()
+        mock_info.storage = {"storage_id": "storage-abc"}
+        mock_sandbox.get_info.return_value = mock_info
+        mock_sandbox.destroy.return_value = True
+        mock_plugin.delete_storage.side_effect = RuntimeError("storage unavailable")
+        service = ArcaPaasService(
+            credentials=arca_credentials, arca_sandbox_plugin=mock_plugin
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = service._destroy_device_sync("test-device-id")
+
+        assert result is True
+        mock_plugin.delete_storage.assert_called_once_with("storage-abc", "test-tenant")
+        assert "Storage deletion exception" in caplog.text
+
+    def test__destroy_device_sync__non_idempotent_arca_error_is_translated(
+        self, arca_credentials, mock_plugin, mock_sandbox
+    ):
+        """A real Arca destroy failure must still surface as a PaasError."""
+        mock_sandbox.get_info.return_value = MagicMock(storage=None)
+        mock_sandbox.destroy.side_effect = ArcaSandboxError("connection refused")
+        service = ArcaPaasService(
+            credentials=arca_credentials, arca_sandbox_plugin=mock_plugin
+        )
+
+        with pytest.raises(PaasError, match="connection refused"):
+            service._destroy_device_sync("test-device-id")
