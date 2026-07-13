@@ -18,7 +18,7 @@ from injector import Binder, Module, inject, provider, singleton
 from agentclaw.community.api.code_platform_service import CodePlatformServiceProtocol
 from agentclaw.community.api.bot_chat_service import BotChatServiceProtocol
 from agentclaw.community.core.bot_chat.service import BotChatService
-from agentclaw.community.core.bot_management.services.workspace_hosting_client import WorkspaceHostingClient
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client import WorkspaceHostingClient
 from agentclaw.community.di import config as cfg
 from agentclaw.community.di.optional_routers import OptionalRouters
 from agentclaw.community.log import get_logger
@@ -66,6 +66,8 @@ class TestAppServicesModule(Module):
         block = user_cfg.get("dima", {})
         if block and block.get("base_url") and block.get("access_key"):
             logger.info("WorkspaceHostingConfig: using YAML config (test)")
+            admin_ids = block.get("admin_member_staff_ids", ()) or []
+            admin_ids = tuple(str(i) for i in admin_ids)
             return cfg.WorkspaceHostingConfig(
                 base_url=block["base_url"],
                 access_key=block["access_key"],
@@ -76,6 +78,7 @@ class TestAppServicesModule(Module):
                 # block (corp env overlays set them) — OSS-0 #3.
                 aixcore_base_url=block.get("aixcore_base_url", ""),
                 aixcore_base_url_pre=block.get("aixcore_base_url_pre", ""),
+                admin_member_staff_ids=admin_ids,
             )
 
         logger.warning("WorkspaceHostingConfig: using dummy config (test, no YAML)")

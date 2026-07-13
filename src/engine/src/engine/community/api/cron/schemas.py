@@ -27,6 +27,7 @@ class CreateTaskRequest(BaseModel):
     enabled: bool = Field(default=True, description="是否启用")
     timeout_secs: Optional[int] = Field(default=86400, description="任务执行超时时间（秒），默认86400")
     model: Optional[str] = Field(default=None, description="执行任务的AI模型，如gpt-4、claude-sonnet等")
+    runtime: Optional[str] = Field(default=None, description="执行运行的 runtime，透传给 aicoding 创建会话时使用")
     kind: Optional[str] = Field(default=None, description="任务类型，如autoInitiate、agentTurn等，不指定时由引擎根据命令内容自动检测")
     append_message: Optional[str] = Field(default=None, description="autoInitiate任务的补充说明，执行时拼接在发起消息末尾")
     notify: Optional[NotifyRequest] = Field(default=None, description="通知配置")
@@ -47,6 +48,7 @@ class UpdateTaskRequest(BaseModel):
     command: Optional[str] = Field(default=None, description="要执行的命令")
     timeout_secs: Optional[int] = Field(default=None, description="任务执行超时时间（秒）")
     model: Optional[str] = Field(default=None, description="执行任务的AI模型")
+    runtime: Optional[str] = Field(default=None, description="执行运行的 runtime")
     notify: Optional[NotifyUpdateRequest] = Field(default=None, description="通知配置（支持部分更新）")
 
 

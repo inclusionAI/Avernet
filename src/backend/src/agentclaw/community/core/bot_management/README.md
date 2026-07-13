@@ -26,7 +26,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.config
   - agentclaw.community.core.config_compose
-  - agentclaw.community.core.cron.services.cron_auto_setup
+  - agentclaw.community.core.cron.services.aicoding.cron_auto_setup
   - agentclaw.community.core.desktop_bot
   - agentclaw.community.core.devices
   - agentclaw.community.core.resources

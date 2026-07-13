@@ -350,6 +350,14 @@ class WorkspaceHostingConfig:
     # ``dima`` yaml block (OSS-0 #3).
     aixcore_base_url: str = ""
     aixcore_base_url_pre: str = ""
+    # Staff IDs auto-added as workspace admins after a bot workspace is created.
+    # Neutral empty default — no employee IDs ship in community source (data-
+    # leak guard, enforced by test_shipped_config_no_corp_identifiers). The real
+    # list is supplied via the hosting backend yaml block
+    # (``admin_member_staff_ids``) by each environment overlay. Tuple so the
+    # frozen dataclass stays immutable; the service normalises to a list when
+    # calling the hosting addMembers API.
+    admin_member_staff_ids: tuple[str, ...] = ()
 
 
 # NOTE: AntCodeConfig moved to ``di/config_corp.py`` (B8) — corp-only (AntCode git).

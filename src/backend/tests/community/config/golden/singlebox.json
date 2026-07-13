@@ -321,6 +321,7 @@
     "workspace_hosting": {
       "access_key": "dummy-access-key",
       "access_secret": "dummy-secret-16b",
+      "admin_member_staff_ids": [],
       "aixcore_base_url": "https://aixcore.teamclaw.com",
       "aixcore_base_url_pre": "https://aixcore-pre.teamclaw.com",
       "base_url": "https://devapi.teamclaw.com",

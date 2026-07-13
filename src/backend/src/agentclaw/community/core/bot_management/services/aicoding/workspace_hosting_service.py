@@ -7,7 +7,8 @@ import json
 from typing import Dict, Any, Optional
 from injector import inject
 
-from agentclaw.community.core.bot_management.services.workspace_hosting_client import WorkspaceHostingClient
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client import WorkspaceHostingClient
+from agentclaw.community.di.config import WorkspaceHostingConfig
 
 # 默认部门 ID，当接口查询失败时作为兜底值
 _DEFAULT_DEPARTMENT_ID = "52146"
@@ -20,11 +21,24 @@ class WorkspaceHostingService:
 
     Dependencies are injected via constructor:
         - WorkspaceHostingClient: DIMA API client
+        - WorkspaceHostingConfig: workspace hosting config; carries
+          ``admin_member_staff_ids`` (the staff IDs auto-granted workspace-admin
+          after a workspace is created). No employee IDs are hardcoded here —
+          the real list comes from the environment overlay; community/default
+          builds carry an empty list (no admins added).
     """
 
     @inject
-    def __init__(self, client: WorkspaceHostingClient) -> None:
+    def __init__(
+        self,
+        client: WorkspaceHostingClient,
+        config: WorkspaceHostingConfig,
+    ) -> None:
         self._client = client
+        # Normalise the immutable tuple to a list for the DIMA addMembers API.
+        self._admin_member_staff_ids = list(
+            getattr(config, "admin_member_staff_ids", ()) or ()
+        )
 
     def create_workspace_for_bot(
         self,
@@ -103,6 +117,28 @@ class WorkspaceHostingService:
                     "[dima_workspace] Created DIMA workspace %s for bot %s",
                     workspace_id, bot_id
                 )
+
+            # workspace 创建成功后，把配置里的 admin_member_staff_ids 加为空间管理员
+            # （实际工号由各环境 overlay 提供，源码不内置工号，避免数据泄露）。失败只记日志，
+            # 不影响 bot 创建主流程（不加管理员不应让创建 bot 失败）。列表为空（community/
+            # 默认构建）时跳过调用。
+            if workspace_id and self._admin_member_staff_ids:
+                try:
+                    self._client.add_admin_members(
+                        staff_id=staff_id,
+                        workspace_id=workspace_id,
+                        member_staff_ids=list(self._admin_member_staff_ids),
+                    )
+                    logger.info(
+                        "[dima_workspace] Added admin members %s to workspace %s for bot %s",
+                        self._admin_member_staff_ids, workspace_id, bot_id,
+                    )
+                except Exception as admin_err:
+                    logger.warning(
+                        "[dima_workspace] Failed to add admin members to workspace %s for bot %s: %s",
+                        workspace_id, bot_id, admin_err,
+                        exc_info=True,
+                    )
 
             return workspace_id
         except Exception as e:

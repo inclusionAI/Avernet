@@ -50,7 +50,7 @@ from agentclaw.community.core.bot_management.services.bcn_service import BcnServ
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.cleanup_service import BotCleanupService
 from agentclaw.community.core.bot_management.services.data_init_service import DataInitService
-from agentclaw.community.core.bot_management.services.workspace_hosting_service import WorkspaceHostingService
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import WorkspaceHostingService
 from agentclaw.community.core.bot_management.services.teclaw_provision_service import (
     TeclawProvisionService,
 )
@@ -58,7 +58,7 @@ from agentclaw.community.core.bot_management.services.teclaw_status_reconciler i
     TeclawStatusReconciler,
 )
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
-from agentclaw.community.core.cron.services.cron_auto_setup import CronAutoSetupService
+from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
 from agentclaw.community.core.desktop_bot.device_status_client import DeviceStatusClient
 from agentclaw.community.core.devices.repository.protocol import (
     DeviceBindingRepository,

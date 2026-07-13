@@ -210,6 +210,18 @@ class CronAutoSetupService:
         elif isinstance(devflow_workflow, str):
             workflow_name = devflow_workflow
 
+        # 提取 model（applicationCoding 时由前端通过 template_config 下发，未配置则走兜底）
+        model = ext.get("model")
+        if not isinstance(model, str) or not model.strip():
+            model = None
+        # 未显式指定 model 时使用兜底默认模型
+        model = model or DEFAULT_CRON_MODEL
+
+        # 提取 runtime（applicationCoding 时由前端通过 template_config 下发）
+        runtime = ext.get("runtime")
+        if not isinstance(runtime, str) or not runtime.strip():
+            runtime = None
+
         # 提取补充说明
         append_message = ext.get("append_message", "")
 
@@ -249,8 +261,10 @@ class CronAutoSetupService:
             "timeout_secs": DEFAULT_CRON_TIMEOUT_SECS,
             "kind": "autoInitiate",  # 显式传递 kind，供引擎设置 payload.kind
         }
-        if DEFAULT_CRON_MODEL:
-            adapter_body["model"] = DEFAULT_CRON_MODEL
+        if model:
+            adapter_body["model"] = model  # 指定AI模型（取自 template_config，否则兜底 DEFAULT_CRON_MODEL）
+        if runtime:
+            adapter_body["runtime"] = runtime  # aicoding 创建会话时使用的 runtime
 
         try:
             result = await self._cron_relay.forward_request(

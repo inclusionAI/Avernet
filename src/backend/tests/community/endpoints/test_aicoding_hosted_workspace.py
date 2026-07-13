@@ -1,10 +1,8 @@
 """Endpoint tests for POST /api/aicoding/bot/{bot_id}/dima-workspace.
 
-Covers happy path (workspace created via stub WorkspaceHostingService)
-and error path (non-applicationCoding bot → 400 in app envelope).
-
-The ``TestingAicodingModule`` binds ``_StubWorkspaceHostingService`` which
-returns ``W_STUB_{bot_id}`` without hitting the real DIMA OpenAPI.
+Covers happy path (workspace created via the stub WorkspaceHostingService that
+DI binds under the test/singlebox profile → synthetic ``W_STUB_<bot_id>``) and
+error path (non-applicationCoding bot → 400 in app envelope).
 """
 from __future__ import annotations
 
@@ -23,7 +21,12 @@ from tests.community.framework import (
 
 
 def _seed_app_coding_bot_without_dima(world):
-    """applicationCoding bot with no dima_space_id."""
+    """applicationCoding bot with no dima_space_id (pure data seed).
+
+    The bound ``WorkspaceHostingService`` is the test stub, which synthesises a
+    deterministic ``W_STUB_<bot_id>`` workspace id, so no DIMA client is
+    touched. Seed only writes data through the real repo/template service.
+    """
     make_staff_user(world, user_id="u_owner")
     bot_repo = world.get(BotRepository)
     bot_repo.insert({
@@ -81,7 +84,7 @@ def _seed_non_app_coding_bot(world):
     ),
 )
 def create_dima_workspace_ok():
-    """Happy path: applicationCoding bot without dima_space_id → stub creates one."""
+    """Happy path: applicationCoding bot without dima_space_id → stub creates W_STUB_bot_app_coding."""
 
 
 @endpoint_test(

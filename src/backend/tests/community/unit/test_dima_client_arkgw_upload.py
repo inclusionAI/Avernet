@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from agentclaw.community.core.bot_management.services.workspace_hosting_client import WorkspaceHostingClient
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client import WorkspaceHostingClient
 
 
 def _make_client() -> WorkspaceHostingClient:
