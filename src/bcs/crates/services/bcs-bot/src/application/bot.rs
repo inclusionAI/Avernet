@@ -793,6 +793,8 @@ impl Bot {
             .map(|member| member.bot_uuid.clone())
             .collect::<Vec<_>>();
         let bots = self.registry.get_by_ids(&bot_ids).await;
+        let friend_ids = self.friend.list_friends(requester).await;
+        let friend_ids = friend_ids.into_iter().collect::<std::collections::HashSet<_>>();
         let mut entries = Vec::new();
         for bot in bots {
             if bot.actor_kind != ActorKind::Bot || bot.capabilities.name.is_none() {
@@ -807,19 +809,20 @@ impl Bot {
                     continue;
                 }
             }
-            let is_friend = self.friend.are_friends(requester, &bot.bot_uuid).await;
+            let is_friend = friend_ids.contains(&bot.bot_uuid);
             if !is_organization_discover_visible(&visibility) && !is_friend {
                 continue;
             }
             let Some(member) = member_by_bot.get(&bot.bot_uuid) else {
                 continue;
             };
+            let agent_code = bot.capabilities.agent_code.clone();
             entries.push(BotDiscoveryEntry {
                 bot_uuid: bot.bot_uuid,
                 capabilities: bot.capabilities,
                 visibility,
                 is_friend: Some(is_friend),
-                agent_code: None,
+                agent_code,
                 provider_info: None,
                 organization_member: Some(OrganizationMemberSummary {
                     organization_code: organization_code.to_string(),
@@ -827,18 +830,9 @@ impl Bot {
                 }),
             });
         }
-        let mut entries_with_agent_code = Vec::with_capacity(entries.len());
-        for mut entry in entries {
-            entry.agent_code = self
-                .registry
-                .get_agent_credentials(&entry.bot_uuid)
-                .await
-                .and_then(|credentials| credentials.agent_code);
-            entries_with_agent_code.push(entry);
-        }
         Ok(BotDiscoveryResult {
-            count: entries_with_agent_code.len(),
-            bots: entries_with_agent_code,
+            count: entries.len(),
+            bots: entries,
         })
     }
 
