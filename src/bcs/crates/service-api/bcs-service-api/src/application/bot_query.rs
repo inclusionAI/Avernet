@@ -92,6 +92,15 @@ pub struct BotDiscoveryCommand {
     pub scopes: Option<String>,
     pub visibility: Option<String>,
     pub collaborate_bot: Option<String>,
+    pub requester_bot_id: Option<String>,
+    pub organization_code: Option<String>,
+    pub role: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OrganizationMemberSummary {
+    pub organization_code: String,
+    pub role: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +113,8 @@ pub struct BotDiscoveryEntry {
     pub agent_code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_info: Option<BotDiscoveryProviderInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization_member: Option<OrganizationMemberSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

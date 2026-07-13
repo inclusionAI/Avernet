@@ -4,6 +4,7 @@ pub mod friends;
 pub mod groups;
 pub mod messages;
 pub mod onboard;
+pub mod organizations;
 pub mod provider;
 
 pub use bots::{
@@ -28,13 +29,20 @@ pub use messages::{
     ParticipantPerspective,
 };
 pub use onboard::{AdminOnboardRequest, OnboardRequest, OnboardResponse};
+pub use organizations::{
+    CreateOrganizationRequest, OrganizationCandidateBotListResponse,
+    OrganizationCandidateBotResponse, OrganizationListResponse, OrganizationMemberListResponse,
+    OrganizationMemberResponse, OrganizationResponse, PatchOrganizationRequest,
+    PutOrganizationMemberRequest,
+};
 pub use provider::{
     BCN_EVENT_ID_HEADER, BCN_MESSAGE_ID_HEADER, BCN_PROTOCOL_VERSION_HEADER, BCN_TRANSPORT_HEADER,
     BCN_PROVIDER_BOT_REF_HEADER, BCN_PROVIDER_ID_HEADER, BCN_TIMESTAMP_HEADER,
     PatchProviderBotRequest, PatchProviderRequest, ProviderAckResponse, ProviderAuthDto,
     ProviderAuthModeDto, ProviderCoordinationConfigDto, ProviderCoordinationEventKindDto,
     ProviderCoordinationEventRequest, ProviderCoordinationIntentDto, ProviderCoordinationModeDto,
-    ProviderHistoryResponse, ProviderInfoResponse, ProviderWebhookBotRef, ProviderWebhookRequest,
-    ProviderWebhookSender, RegisterProviderBotRequest, RegisterProviderBotResponse,
-    RegisterProviderRequest, RegisterProviderResponse,
+    ProviderHistoryResponse, ProviderInfoResponse, ProviderOrganizationManagementConfigDto,
+    ProviderWebhookBotRef, ProviderWebhookRequest, ProviderWebhookSender,
+    RegisterProviderBotRequest, RegisterProviderBotResponse, RegisterProviderRequest,
+    RegisterProviderResponse,
 };

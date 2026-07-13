@@ -73,6 +73,30 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/providers/{provider_id}",
             get(routes::providers::get_provider).patch(routes::providers::patch_provider),
         )
+        .route(
+            "/providers/{provider_id}/organizations",
+            get(routes::organizations::list_organizations)
+                .post(routes::organizations::create_organization),
+        )
+        .route(
+            "/providers/{provider_id}/organizations/{organization_code}",
+            get(routes::organizations::get_organization)
+                .patch(routes::organizations::patch_organization),
+        )
+        .route(
+            "/providers/{provider_id}/organizations/{organization_code}/members",
+            get(routes::organizations::list_members),
+        )
+        .route(
+            "/providers/{provider_id}/organizations/{organization_code}/members/{bot_uuid}",
+            get(routes::organizations::get_member)
+                .put(routes::organizations::put_member)
+                .delete(routes::organizations::delete_member),
+        )
+        .route(
+            "/providers/{provider_id}/organization-candidate-bots",
+            get(routes::organizations::candidate_bots),
+        )
         .route("/bot/events", post(routes::bot_events::post_bot_event))
         .route(
             "/bot/events/coordination",

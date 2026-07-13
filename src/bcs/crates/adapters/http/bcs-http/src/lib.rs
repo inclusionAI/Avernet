@@ -2,6 +2,7 @@
 
 mod chat_digest;
 pub mod error;
+pub mod headers;
 pub mod mapping;
 pub mod oauth;
 pub mod router;

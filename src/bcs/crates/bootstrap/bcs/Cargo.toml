@@ -110,6 +110,8 @@ bcs-channel = { workspace = true }
 bcs-channel-store = { workspace = true }
 bcs-group    = { workspace = true }
 bcs-message-flow = { workspace = true }
+bcs-organization = { workspace = true }
+bcs-organization-store = { workspace = true }
 bcs-routing  = { workspace = true }
 bcs-security-gateway-api = { workspace = true }
 bcs-security-gateway-local = { workspace = true }

@@ -7,6 +7,8 @@ The open-source v1 baseline starts from a single MySQL/OceanBase init schema:
 | Version | File | Purpose |
 | --- | --- | --- |
 | 001 | `mysql/001_init_schema.sql` | Create the full BCS schema for a fresh MySQL/OceanBase database |
+| 002 | `mysql/002_add_owner_bot_id.sql` | Add message ownership metadata and its lookup index |
+| 003 | `mysql/003_add_organizations.sql` | Add organizations and organization membership tables |
 
 The previous internal incremental SQL files were removed from the public
 migration path and replaced by the v1 baseline. New public migrations should be
@@ -74,10 +76,12 @@ The startup runner executes SQLite schema work in this order:
 Each migration is recorded only after all of its steps succeed. Re-running
 startup must be idempotent, and checksum mismatches fail startup.
 
-The current SQLite versioned migration is `001_init_schema`, which records the
-open-source v1 baseline. Future schema changes should add `002_`, `003_`, and
-later migrations. Do not add pre-open-source local schema repairs to the
-baseline migration.
+The current SQLite migrations are `001_init_schema`,
+`002_channel_binding_audit_timestamps`, and `003_add_organizations`. The
+version-3 body is a no-op because startup creates missing organization tables
+before recording the version. Future schema changes should add later migration
+versions. Do not add pre-open-source local schema repairs to the baseline
+migration.
 Pre-baseline local SQLite files are not a compatibility target; recreate them
 from the current bootstrap schema if needed.
 

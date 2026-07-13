@@ -188,6 +188,15 @@ pub struct DiscoverBotEntry {
     /// Provider metadata for provider-managed bots.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_info: Option<DiscoverBotProviderInfo>,
+    /// Organization membership metadata when discovery is organization-scoped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization_member: Option<DiscoverBotOrganizationMember>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DiscoverBotOrganizationMember {
+    pub organization_code: String,
+    pub role: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

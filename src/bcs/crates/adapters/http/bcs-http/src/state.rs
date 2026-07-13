@@ -585,8 +585,10 @@ impl HttpAppState {
 }
 
 /// Extract a bot session token from headers: `X-BCS-Bot-Token` wins, else a
-/// `Bearer` token. Kept private to `state` to avoid a routes -> state module
-/// cycle; mirrors `routes::caller::bot_token_from_headers`.
+/// `Bearer` token. The `Bearer` extraction is shared via
+/// [`crate::headers::extract_bearer_token`]; kept private to `state` only to
+/// preserve the `X-BCS-Bot-Token` precedence and mirror
+/// `routes::caller::bot_token_from_headers`.
 fn bot_token_from_headers(headers: &axum::http::HeaderMap) -> Option<String> {
     if let Some(token) = headers
         .get("X-BCS-Bot-Token")
@@ -596,11 +598,7 @@ fn bot_token_from_headers(headers: &axum::http::HeaderMap) -> Option<String> {
         return Some(token.to_string());
     }
 
-    headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .map(str::to_string)
+    crate::headers::extract_bearer_token(headers)
 }
 
 impl std::fmt::Debug for HttpAppState {

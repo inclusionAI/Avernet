@@ -1,7 +1,10 @@
 //! No-op service implementations for tests and explicit test containers.
 
 use async_trait::async_trait;
-use bcs_domain::{ChannelBinding, SystemGroupMessage, SystemMessageEvent, SystemMessageEventKind};
+use bcs_domain::{
+    ChannelBinding, Organization, OrganizationMember, SystemGroupMessage, SystemMessageEvent,
+    SystemMessageEventKind,
+};
 use bcs_service_api::core::{
     SystemMessageDispatchOutcome, SystemMessageDispatcherService, SystemMessageProducerService,
 };
@@ -356,6 +359,7 @@ impl ProviderCoreService for NoopProviderCoreService {
         _webhook_url: Option<String>,
         _protocol_version: Option<String>,
         _coordination: Option<ProviderCoordinationConfig>,
+        _organization_management: Option<ProviderOrganizationManagementConfig>,
     ) -> ServiceResult<ProviderRecord> {
         Err(service_not_configured("provider core service"))
     }
@@ -517,6 +521,205 @@ impl ProviderBotEventService for NoopProviderBotEventService {
         Err(ProviderBotEventError::Internal(
             service_not_configured("provider bot event service").to_string(),
         ))
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct NoopOrganizationCoreService;
+
+#[async_trait]
+impl OrganizationCoreService for NoopOrganizationCoreService {
+    async fn create(
+        &self,
+        _managing_provider_id: &str,
+        _code: &str,
+        _name: &str,
+        _description: Option<&str>,
+    ) -> ServiceResult<Organization> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn get_for_manager(
+        &self,
+        _managing_provider_id: &str,
+        _code: &str,
+    ) -> ServiceResult<Organization> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn list_for_manager(
+        &self,
+        _managing_provider_id: &str,
+        _include_disabled: bool,
+    ) -> ServiceResult<Vec<Organization>> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn update_for_manager(
+        &self,
+        _managing_provider_id: &str,
+        _code: &str,
+        _name: Option<&str>,
+        _description: Option<Option<&str>>,
+        _disabled: Option<bool>,
+    ) -> ServiceResult<Organization> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn put_member(
+        &self,
+        _managing_provider_id: &str,
+        _organization_code: &str,
+        _bot_uuid: &str,
+        _role: Option<&str>,
+    ) -> ServiceResult<OrganizationMember> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn delete_member(
+        &self,
+        _managing_provider_id: &str,
+        _organization_code: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<()> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn get_member_for_manager(
+        &self,
+        _managing_provider_id: &str,
+        _organization_code: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationMember>> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn list_members_for_manager(
+        &self,
+        _managing_provider_id: &str,
+        _organization_code: &str,
+        _include_disabled: bool,
+        _role: Option<&str>,
+    ) -> ServiceResult<Vec<OrganizationMember>> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn candidate_bots(
+        &self,
+        _managing_provider_id: &str,
+        _query: OrganizationCandidateQuery,
+    ) -> ServiceResult<Vec<OrganizationCandidateBot>> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn require_effective_member(
+        &self,
+        _organization_code: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<OrganizationMember> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn list_effective_members(
+        &self,
+        _organization_code: &str,
+        _role: Option<&str>,
+    ) -> ServiceResult<Vec<OrganizationMember>> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn require_runtime_member(
+        &self,
+        _organization_code: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<OrganizationMember> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn list_runtime_members(
+        &self,
+        _organization_code: &str,
+        _role: Option<&str>,
+    ) -> ServiceResult<Vec<OrganizationMember>> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn authorize_pair(
+        &self,
+        _organization_code: &str,
+        _sender_bot_uuid: &str,
+        _target_bot_uuid: &str,
+    ) -> ServiceResult<AuthorizedOrganizationPair> {
+        Err(service_not_configured("organization service"))
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct NoopOrganizationManagementService;
+
+#[async_trait]
+impl OrganizationManagementService for NoopOrganizationManagementService {
+    async fn create(&self, _command: CreateOrganizationCommand) -> ServiceResult<Organization> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn get(&self, _auth: OrganizationAuth, _code: &str) -> ServiceResult<Organization> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn list(
+        &self,
+        _auth: OrganizationAuth,
+        _include_disabled: bool,
+    ) -> ServiceResult<Vec<Organization>> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn update(&self, _command: UpdateOrganizationCommand) -> ServiceResult<Organization> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn put_member(
+        &self,
+        _command: PutOrganizationMemberCommand,
+    ) -> ServiceResult<OrganizationMember> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn delete_member(
+        &self,
+        _auth: OrganizationAuth,
+        _organization_code: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<()> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn get_member(
+        &self,
+        _auth: OrganizationAuth,
+        _organization_code: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationMember>> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn list_members(
+        &self,
+        _auth: OrganizationAuth,
+        _organization_code: &str,
+        _include_disabled: bool,
+        _role: Option<&str>,
+    ) -> ServiceResult<Vec<OrganizationMember>> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn candidate_bots(
+        &self,
+        _auth: OrganizationAuth,
+        _query: OrganizationCandidateQuery,
+    ) -> ServiceResult<Vec<OrganizationCandidateBot>> {
+        Err(service_not_configured("organization service"))
     }
 }
 

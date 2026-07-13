@@ -4,7 +4,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use bcs_auth_api::{AuthPluginChain, AuthPrincipal};
+use bcs_auth_api::{AuthConfig, AuthPluginChain, AuthPrincipal};
 use bcs_auth_local::StaticAuthPlugin;
 use bcs_http::{
     router::build_router,
@@ -13,6 +13,7 @@ use bcs_http::{
 use bcs_service_api::{
     ActorKind, ActorStatus, BotDetailCommand, BotDetailResult, BotDiscoveryCommand,
     BotDiscoveryEntry, BotDiscoveryProviderInfo, BotDiscoveryResult, BotDiscoveryService, BotListCommand, BotListEntry,
+    OrganizationMemberSummary,
     BotListResult, BotQueryService, DynamicStatusResponse, Skill,
 };
 use bcs_services_container::Services;
@@ -33,6 +34,16 @@ fn static_auth_chain(staff_no: &str, nick_name: &str) -> Arc<AuthPluginChain> {
     )]))
 }
 
+fn static_bot_auth_chain(bot_uuid: &str) -> Arc<AuthPluginChain> {
+    let principal = AuthPrincipal {
+        bot_uuid: Some(bot_uuid.to_string()),
+        ..Default::default()
+    };
+    Arc::new(AuthPluginChain::new(vec![Box::new(
+        StaticAuthPlugin::with_principal(principal),
+    )]))
+}
+
 #[derive(Default)]
 struct RecordingBotDiscoveryService {
     commands: Mutex<Vec<BotDiscoveryCommand>>,
@@ -44,6 +55,10 @@ impl BotDiscoveryService for RecordingBotDiscoveryService {
         &self,
         command: BotDiscoveryCommand,
     ) -> Result<BotDiscoveryResult, bcs_service_api::BotUseCaseError> {
+        let organization_member = command.organization_code.as_ref().map(|code| OrganizationMemberSummary {
+            organization_code: code.clone(),
+            role: command.role.clone(),
+        });
         self.commands.lock().await.push(command);
         Ok(BotDiscoveryResult {
             bots: vec![BotDiscoveryEntry {
@@ -62,6 +77,7 @@ impl BotDiscoveryService for RecordingBotDiscoveryService {
                     provider_id: "provider-1".to_string(),
                     provider_name: "Provider One".to_string(),
                 }),
+                organization_member,
             }],
             count: 1,
         })
@@ -107,6 +123,63 @@ async fn discover_route_delegates_filters_to_bot_discovery_service() {
     assert_eq!(commands[0].q.as_deref(), Some("planner"));
     assert_eq!(commands[0].name, None);
     assert_eq!(commands[0].skills, None);
+}
+
+
+#[tokio::test]
+async fn discover_route_forwards_organization_scope_for_bot_callers() {
+    let discovery = Arc::new(RecordingBotDiscoveryService::default());
+    let services = Services::builder()
+        .bot_discovery(discovery.clone())
+        .build_for_test();
+    let app = build_router(HttpAppState::new(services).with_auth_chain(static_bot_auth_chain("bot-a"), AuthConfig::default()));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/discover?organization_code=promo-2026&role=traffic_analyst&q=planner")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["bots"][0]["organization_member"]["organization_code"], "promo-2026");
+    assert_eq!(json["bots"][0]["organization_member"]["role"], "traffic_analyst");
+
+    let commands = discovery.commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].requester_bot_id.as_deref(), Some("bot-a"));
+    assert_eq!(commands[0].organization_code.as_deref(), Some("promo-2026"));
+    assert_eq!(commands[0].role.as_deref(), Some("traffic_analyst"));
+}
+
+#[tokio::test]
+async fn discover_route_rejects_organization_scope_for_human_callers() {
+    let discovery = Arc::new(RecordingBotDiscoveryService::default());
+    let services = Services::builder()
+        .bot_discovery(discovery.clone())
+        .build_for_test();
+    let chain = static_auth_chain("alice", "Alice");
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
+        ChainUserIdentityPort::new(chain),
+    )));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/discover?organization_code=promo-2026&q=planner")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(discovery.commands.lock().await.is_empty());
 }
 
 #[tokio::test]

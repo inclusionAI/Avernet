@@ -32,6 +32,8 @@ pub struct ChatRequest {
     pub response_mode: ChatResponseMode,
     #[serde(default, alias = "callerWaitMode")]
     pub caller_wait_mode: Option<String>,
+    #[serde(default)]
+    pub organization_code: Option<String>,
 }
 
 #[derive(Debug)]
@@ -190,6 +192,7 @@ pub async fn bot_chat(
         err
     })?;
     let run_channel_from = req.from.clone();
+    let organization_code = normalize_optional_string(req.organization_code);
     let chat_from_actor_id = Some(req.from.unwrap_or_else(|| "user".to_string()));
     let tags = normalize_tags(req.tags);
     let digest_client = client_identity.clone();
@@ -212,6 +215,7 @@ pub async fn bot_chat(
             client: client_identity,
             tags,
             response_mode: req.response_mode,
+            organization_code,
         })
         .await
         .map_err(map_service_error)
@@ -328,6 +332,7 @@ pub async fn bot_chat_async(
         err
     })?;
     let run_channel_from = req.from.clone();
+    let organization_code = normalize_optional_string(req.organization_code);
     let chat_from_actor_id = Some(req.from.unwrap_or_else(|| "user".to_string()));
     let tags = normalize_tags(req.tags);
     let caller_wait_mode = normalize_optional_string(req.caller_wait_mode);
@@ -351,6 +356,7 @@ pub async fn bot_chat_async(
             tags,
             response_mode: req.response_mode,
             caller_wait_mode,
+            organization_code,
         })
         .await
         .map_err(map_service_error)
