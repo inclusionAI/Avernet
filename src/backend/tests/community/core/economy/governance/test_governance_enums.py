@@ -56,6 +56,6 @@ def test_all_action_values_are_unique_strings():
         for k, v in vars(AuditAction).items()
         if not k.startswith("_") and isinstance(v, str)
     ]
-    assert len(values) == 51
+    assert len(values) == 52
     assert all(isinstance(v, str) for v in values)
     assert len(set(values)) == len(values)

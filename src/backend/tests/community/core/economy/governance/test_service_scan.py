@@ -50,16 +50,6 @@ from .conftest import FakeDB, FakeGovernanceConfig, FakeNotifySender
 # --- Scan-specific fakes (not shared with other test files) ---
 
 
-class _FakeAdminSvc:
-    """Admin service stub — configurable paused state."""
-
-    def __init__(self, paused: bool = False):
-        self._paused = paused
-
-    def is_paused(self) -> bool:
-        return self._paused
-
-
 class _ConfigurableSender:
     """Sender whose tc_card/markdown return values are configurable.
 
@@ -169,7 +159,7 @@ def _seed_pending_notify(
     return notification_id
 
 
-def _build_service(engine, *, config=None, admin_svc=None, notify_sender=None):
+def _build_service(engine, *, config=None, notify_sender=None):
     """Build GovernanceBotService with real repos against in-memory SQLite."""
     Sess = _make_tables(engine)
     db = FakeDB(Sess)
@@ -183,13 +173,10 @@ def _build_service(engine, *, config=None, admin_svc=None, notify_sender=None):
     )
     if config is None:
         config = FakeGovernanceConfig()
-    if admin_svc is None:
-        admin_svc = _FakeAdminSvc()
     if notify_sender is None:
         notify_sender = FakeNotifySender()
     svc = GovernanceBotService(
         task_repo=task_repo,
-        admin_svc=admin_svc,
         notify_repo=notify_repo,
         audit_repo=audit_repo,
         config=config,
@@ -338,18 +325,25 @@ class TestProcessCronTick:
             assert row.notify_status == "cancelled"
 
     @pytest.mark.asyncio
-    async def test_emergency_paused_skips_tick(self, engine):
-        """Emergency brake active → tick returns with all counts zero."""
-        svc, _, _ = _build_service(engine, admin_svc=_FakeAdminSvc(paused=True))
+    async def test_brake_does_not_block_manual_tick(self, engine):
+        """制动生效时直调 process_cron_tick 仍执行(手动路径不被拦)。
+
+        制动拦截已移交调度层 GovernanceBotLifecycle._run_scan(见
+        test_governance_lifecycle)。process_cron_tick 自身不查制动——
+        手动接口(trigger-scan/scan-and-deliver)在制动期间照常可用。
+        这里 seed 一条 pending 通知,断言手动 tick 照常投递而非被跳过。
+        """
+        svc, db, Sess = _build_service(engine)
+        s = Sess()
+        ticket_id = _seed_ticket(s)
+        _seed_pending_notify(s, ticket_id=ticket_id, notify_channel="markdown")
+        s.close()
 
         summary = svc.process_cron_tick()
 
         assert isinstance(summary, CronTickSummary)
-        assert summary.sent_count == 0
-        assert summary.failed_count == 0
-        assert summary.cancelled_count == 0
-        assert summary.reminders_created == 0
-        assert summary.schedule_due_count == 0
+        # 制动不拦手动 tick:pending 通知被正常处理(发送),非全零跳过
+        assert summary.sent_count >= 1
 
     @pytest.mark.asyncio
     async def test_dry_run_skips_sending_and_reminders(self, engine):

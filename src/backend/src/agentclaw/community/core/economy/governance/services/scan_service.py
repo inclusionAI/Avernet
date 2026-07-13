@@ -30,7 +30,6 @@ from agentclaw.community.core.economy.governance.domain.enums import (
 from agentclaw.community.core.economy.governance.domain.notification import FrozenSnapshot, GovernanceNotification
 from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
 from agentclaw.community.core.economy.governance.services.service_protocols import (
-    GovernanceAdminServiceProtocol,
     GovernanceLifecycleServiceProtocol,
     NotifyLifecycleServiceProtocol,
 )
@@ -129,7 +128,6 @@ class GovernanceBotService:
     def __init__(
         self,
         task_repo: TaskRecordRepository,
-        admin_svc: GovernanceAdminServiceProtocol,
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         config: Any,  # EconomyGovernanceConfig
@@ -139,7 +137,6 @@ class GovernanceBotService:
         notify_lifecycle_svc: NotifyLifecycleServiceProtocol,
     ) -> None:
         self._task_repo = task_repo
-        self._admin_svc = admin_svc
         self._notify_repo = notify_repo
         self._audit_repo = audit_repo
         self._config = config
@@ -175,6 +172,11 @@ class GovernanceBotService:
           4. Cancel non-sendable pending
           5. Schedule due → waiting_review
           6. Auto-silence convergence (§7.2.6)
+
+        Note: 本函数**不自查制动**(brake)。制动拦截由自动调度入口
+        ``GovernanceBotLifecycle._run_scan``(锁后判定)负责——自动定时触发
+        受制动跳过。手动接口(``trigger-scan`` / ``scan-and-deliver`` /
+        ``tickets:deliver``)直接调本函数,制动不影响手动排障/补投。
         """
         started_at = datetime.now()
         if dry_run is None:
@@ -183,11 +185,6 @@ class GovernanceBotService:
             run_id = uuid.uuid4().hex
 
         summary = CronTickSummary(run_id=run_id, dry_run=dry_run)
-
-        # Emergency brake check
-        if self._admin_svc.is_paused():
-            log.info("[GovernanceCron] Emergency brake active — skipping tick, run_id=%s", run_id)
-            return summary
 
         # Step 1: Sending timeout recovery removed (best-effort: failure has
         # mark_failed 回退 + _MAX_SEND_ATTEMPTS 封顶兜底;极端崩溃窗口个别
@@ -288,11 +285,6 @@ class GovernanceBotService:
 
         for notify_row in pending:
             try:
-                # Check emergency brake
-                if self._admin_svc.is_paused():
-                    log.info("[GovernanceCron] Emergency brake — stopping send")
-                    break
-
                 # Check task_record eligibility (§7.3.1 Step 2)
                 ticket = self._find_ticket_for_notify(notify_row)
                 if ticket is None:
@@ -477,9 +469,6 @@ class GovernanceBotService:
 
         for ticket in remindable:
             try:
-                if self._admin_svc.is_paused():
-                    break
-
                 # Dedup check (§7.3.2)
                 if ticket.ticket_id and self._notify_repo.has_pending_or_sending_reminder(
                     ticket.ticket_id,

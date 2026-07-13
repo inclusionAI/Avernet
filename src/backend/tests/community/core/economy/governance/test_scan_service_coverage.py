@@ -64,14 +64,6 @@ from .conftest import FakeDB, FakeGovernanceConfig, FakeNotifySender
 # ── Scan-specific fakes ──────────────────────────────────────────
 
 
-class _FakeAdminSvc:
-    def __init__(self, paused: bool = False):
-        self._paused = paused
-
-    def is_paused(self) -> bool:
-        return self._paused
-
-
 class _FailSender:
     """Sender that always returns None (send failure)."""
 
@@ -213,7 +205,7 @@ def _seed_pending_notify(
     return notification_id
 
 
-def _build_service(engine, *, config=None, admin_svc=None, notify_sender=None):
+def _build_service(engine, *, config=None, notify_sender=None):
     """Build GovernanceBotService with real repos against in-memory SQLite."""
     Sess = _make_tables(engine)
     db = FakeDB(Sess)
@@ -227,13 +219,10 @@ def _build_service(engine, *, config=None, admin_svc=None, notify_sender=None):
     )
     if config is None:
         config = FakeGovernanceConfig()
-    if admin_svc is None:
-        admin_svc = _FakeAdminSvc()
     if notify_sender is None:
         notify_sender = FakeNotifySender()
     svc = GovernanceBotService(
         task_repo=task_repo,
-        admin_svc=admin_svc,
         notify_repo=notify_repo,
         audit_repo=audit_repo,
         config=config,
@@ -248,10 +237,14 @@ def _build_service(engine, *, config=None, admin_svc=None, notify_sender=None):
 # ── Tests ─────────────────────────────────────────────────────────
 
 
-class TestEmergencyBrakeMidSend:
-    """process_cron_tick: emergency brake stops send loop (line 296-300)."""
+class TestBrakeDoesNotBlockManualTick:
+    """process_cron_tick: 制动不再拦手动 tick(制动拦截已移交调度层)。
 
-    def test_brake_stops_processing(self, engine):
+    循环级 is_paused() 检查已删——制动生效时直调 process_cron_tick(手动
+    接口路径)仍照常发送。制动跳过自动 tick 的语义见 test_governance_lifecycle。
+    """
+
+    def test_brake_does_not_stop_processing(self, engine):
         Sess = _make_tables(engine)
         db = FakeDB(Sess)
         s = Sess()
@@ -259,9 +252,10 @@ class TestEmergencyBrakeMidSend:
         _seed_pending_notify(s, ticket_id=ticket_id, notify_channel="markdown")
         s.close()
 
-        svc, db, _ = _build_service(engine, admin_svc=_FakeAdminSvc(paused=True))
+        svc, db, _ = _build_service(engine)
         summary = svc.process_cron_tick()
-        assert summary.sent_count == 0
+        # 制动不拦手动 tick:通知被正常发送,非零跳过
+        assert summary.sent_count >= 1
 
 
 class TestDryRunSkip:
@@ -410,10 +404,13 @@ class TestReminderCreation:
         assert summary.reminders_created >= 1
 
 
-class TestReminderSkipsOnPaused:
-    """_process_reminders: paused admin stops reminders (line 481)."""
+class TestReminderCreatedOnManualTick:
+    """_create_reminder_notifies: 循环级 is_paused() 已删,手动 tick 照常创建提醒。
 
-    def test_paused_skips_reminders(self, engine):
+    制动拦截已移交调度层。手动 process_cron_tick 遇 remindable 工单仍创建提醒。
+    """
+
+    def test_reminder_created_on_manual_tick(self, engine):
         Sess = _make_tables(engine)
         db = FakeDB(Sess)
         s = Sess()
@@ -426,9 +423,10 @@ class TestReminderSkipsOnPaused:
         )
         s.close()
 
-        svc, db, _ = _build_service(engine, admin_svc=_FakeAdminSvc(paused=True))
+        svc, db, _ = _build_service(engine)
         summary = svc.process_cron_tick()
-        assert summary.reminders_created == 0
+        # 制动不拦手动 tick 的提醒创建(原循环级检查已删)
+        assert summary.reminders_created >= 1
 
 
 class TestTcCardSendPath:
