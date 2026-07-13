@@ -1513,9 +1513,9 @@ class BotService:
                 logger.warning(f"[bot_service.get_bot] Failed to get device binding {binding_id}: {e}")
 
             # NOTE: teclaw bots no longer read status through to baas here — the
-            # TeclawStatusReconciler persists the resolved status onto the stored
+            # TeclawPublishTaskHandler persists the resolved status onto the stored
             # column post-provision, so the bot row is authoritative for all
-            # engines (see teclaw-status-reconciler spec).
+            # engines (see the durable Teclaw publish task lifecycle).
 
         # Fetch template info if exists
         try:
