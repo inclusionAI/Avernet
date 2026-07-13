@@ -10,6 +10,8 @@ coverage_root="${SINGLEBOX_COVERAGE_ROOT:-$repo_root/scripts/.dependencies/cover
 report_dir="$coverage_root/reports"
 mode="${SINGLEBOX_COVERAGE_MODE:-real}"
 acceptance_target="${SINGLEBOX_COVERAGE_ACCEPTANCE_TARGET:-tests/community/acceptance/cron/test_cron_query_lifecycle.py}"
+coverage_module="${SINGLEBOX_COVERAGE_MODULE:-}"
+module_manifest="$script_dir/singlebox_coverage_modules.yaml"
 coverage_standalone_root=""
 coverage_standalone_runtime=""
 
@@ -24,6 +26,9 @@ The default mode is real: pre-push starts the local singlebox coverage stack.
 Options:
   --coverage-root DIR     Coverage output root, default: $coverage_root
   --mode real             Override SINGLEBOX_COVERAGE_MODE
+  --acceptance-target PATH
+                          Pytest target executed against the live stack
+  --module NAME           Add module metrics and enforce its thresholds
   -h, --help              Show this help
 USAGE
 }
@@ -47,6 +52,22 @@ while [[ "$#" -gt 0 ]]; do
       mode="$2"
       shift 2
       ;;
+    --acceptance-target)
+      if [[ "$#" -lt 2 ]]; then
+        echo "error: --acceptance-target requires an argument" >&2
+        exit 2
+      fi
+      acceptance_target="$2"
+      shift 2
+      ;;
+    --module)
+      if [[ "$#" -lt 2 ]]; then
+        echo "error: --module requires an argument" >&2
+        exit 2
+      fi
+      coverage_module="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -58,6 +79,11 @@ while [[ "$#" -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -n "$coverage_module" && ! -s "$module_manifest" ]]; then
+  echo "missing singlebox coverage module manifest: $module_manifest" >&2
+  exit 2
+fi
 
 run_real_singlebox() {
   rm -rf "$coverage_root/raw" "$report_dir"
@@ -93,6 +119,7 @@ run_real_singlebox() {
   combine_python_coverage "backend" "$repo_root/src/backend" "$coverage_root/raw/backend"
   combine_python_coverage "baas" "$repo_root/src/baas/packages/community" "$coverage_root/raw/baas"
   write_summary_artifacts
+  write_module_artifacts
   verify_required_artifacts
 }
 
@@ -239,6 +266,23 @@ report_dir.mkdir(parents=True, exist_ok=True)
     encoding="utf-8",
 )
 PY
+}
+
+write_module_artifacts() {
+  local reporter_python
+  [[ -n "$coverage_module" ]] || return 0
+  reporter_python="${PYTHON:-$repo_root/src/backend/.venv/bin/python}"
+  if [[ ! -x "$reporter_python" ]]; then
+    echo "singlebox coverage reporter Python is not executable: $reporter_python" >&2
+    return 1
+  fi
+  "$reporter_python" "$script_dir/singlebox_coverage_report.py" \
+    --manifest "$module_manifest" \
+    --module "$coverage_module" \
+    --coverage-json "$report_dir/backend-coverage.json" \
+    --router-hits "$coverage_root/raw/backend/router_hits.jsonl" \
+    --plugin-hits "$coverage_root/raw/backend/plugin_hits.jsonl" \
+    --report-dir "$report_dir"
 }
 
 verify_required_artifacts() {
