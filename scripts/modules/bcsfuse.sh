@@ -200,6 +200,7 @@ bcsfuse_start() {
     export BCSFUSE_DATABASE_SQLITE_PATH="${BCSFUSE_RUNTIME_DIR}/data/bcsfuse.db"
     export BCSFUSE_FAISS_SQLITE_PATH="${BCSFUSE_RUNTIME_DIR}/data/faiss_index.db"
     export QDRANT_LOCAL_PATH="${BCSFUSE_RUNTIME_DIR}/data/qdrant"
+    export BCSFUSE_OBJECT_STORAGE_DIR="${BCSFUSE_RUNTIME_DIR}/data/object_storage"
 
     # Clear old log
     : > "${BCSFUSE_LOG}"
