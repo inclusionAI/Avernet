@@ -620,7 +620,10 @@ class EconomyGovernanceModule(Module):
         service: GovernanceBotService,
         cache: CachePlugin,
         config: EconomyGovernanceConfig,
+        admin_svc: GovernanceAdminService,
     ) -> GovernanceBotLifecycle:
         """Construct GovernanceBotLifecycle — picked up by
         discover_lifecycle_participants."""
-        return GovernanceBotLifecycle(service=service, cache=cache, config=config)
+        return GovernanceBotLifecycle(
+            service=service, cache=cache, config=config, admin_svc=admin_svc,
+        )

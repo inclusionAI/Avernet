@@ -119,6 +119,15 @@ class GovernanceAdminServiceProtocol(Protocol):
         """按 worker_id 精准投递该工单 pending 通知(不重跑状态机)。"""
         ...
 
+    def write_brake_skip_audit(self, *, run_id: str, reason: str) -> None:
+        """记录"自动定时 tick 因制动被跳过"的 best-effort 审计。
+
+        Args:
+            run_id: 调度层当次 run 标识。
+            reason: 跳过原因(制动生效)。
+        """
+        ...
+
 
 @runtime_checkable
 class GovernanceWhitelistServiceProtocol(Protocol):

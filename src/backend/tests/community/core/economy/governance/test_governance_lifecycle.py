@@ -75,11 +75,26 @@ class _FakeCache:
         return self._acquire_lock_result
 
 
-def _build(service=None, cache=None, config=None):
+class _FakeAdminSvc:
+    """GovernanceAdminServiceProtocol stand-in — 制动状态可控 + 审计记录。"""
+
+    def __init__(self, paused: bool = False):
+        self._paused = paused
+        self.write_brake_skip_audit_calls: list[tuple[str, str]] = []
+
+    def is_paused(self) -> bool:
+        return self._paused
+
+    def write_brake_skip_audit(self, *, run_id: str, reason: str) -> None:
+        self.write_brake_skip_audit_calls.append((run_id, reason))
+
+
+def _build(service=None, cache=None, config=None, admin_svc=None):
     return GovernanceBotLifecycle(
         service=service or _FakeService(),
         cache=cache or _FakeCache(),
         config=config or _FakeConfig(),
+        admin_svc=admin_svc or _FakeAdminSvc(),
     )
 
 
@@ -87,15 +102,19 @@ def _build(service=None, cache=None, config=None):
 
 
 def test_init_stores_deps():
-    """Constructor stores service, cache, config, creates stop_event."""
+    """Constructor stores service, cache, config, admin_svc, creates stop_event."""
     svc = _FakeService()
     cache = _FakeCache()
     cfg = _FakeConfig(scan_hour=10, scan_minute=30)
-    lc = GovernanceBotLifecycle(service=svc, cache=cache, config=cfg)
+    admin_svc = _FakeAdminSvc()
+    lc = GovernanceBotLifecycle(
+        service=svc, cache=cache, config=cfg, admin_svc=admin_svc,
+    )
 
     assert lc._service is svc
     assert lc._cache is cache
     assert lc._config is cfg
+    assert lc._admin_svc is admin_svc
     assert lc._scan_thread is None
     assert isinstance(lc._stop_event, threading.Event)
     assert not lc._stop_event.is_set()
@@ -311,6 +330,43 @@ def test_run_scan_logs_summary():
     assert len(scan_log_calls) == 1
     logged_msg = str(scan_log_calls[0])
     assert "tick-42" in logged_msg
+
+
+def test_run_scan_skips_tick_when_brake_active_and_writes_audit():
+    """制动生效:抢锁后跳过 process_cron_tick,写 SCAN_SKIPPED_BRAKE 审计。
+
+    制动判定在 acquire_lock 之后——锁已抢下,当日执行权消耗,不补跑
+    (决定①:制动是风险信号,尽快回退后次日恢复)。
+    """
+    svc = _FakeService(summary=_FakeCronTickSummary())
+    cache = _FakeCache(acquire_lock_result="win-token")
+    admin_svc = _FakeAdminSvc(paused=True)
+    lc = _build(service=svc, cache=cache, admin_svc=admin_svc)
+
+    lc._run_scan()
+
+    # 锁已抢(制动跳过仍占当日执行权)
+    assert len(cache.acquire_lock_calls) == 1
+    # process_cron_tick 未被调
+    assert len(svc.process_cron_tick_calls) == 0
+    # 写了制动跳过审计
+    assert len(admin_svc.write_brake_skip_audit_calls) == 1
+    run_id, reason = admin_svc.write_brake_skip_audit_calls[0]
+    assert "brake" in reason
+
+
+def test_run_scan_runs_tick_when_brake_inactive():
+    """制动未生效:照常抢锁 + 调 process_cron_tick,不写制动跳过审计。"""
+    svc = _FakeService(summary=_FakeCronTickSummary(sent_count=3))
+    cache = _FakeCache(acquire_lock_result="win-token")
+    admin_svc = _FakeAdminSvc(paused=False)
+    lc = _build(service=svc, cache=cache, admin_svc=admin_svc)
+
+    lc._run_scan()
+
+    assert len(cache.acquire_lock_calls) == 1
+    assert len(svc.process_cron_tick_calls) == 1
+    assert len(admin_svc.write_brake_skip_audit_calls) == 0
 
 
 # --- _seconds_until ---
