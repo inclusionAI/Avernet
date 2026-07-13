@@ -11,8 +11,8 @@ from ._record import TicketRecord
 
 log = get_logger("orm-repository")
 
-# Valid state transitions per CONTEXT.md status machine
 # Upload path: CREATED->UPLOADING->UPLOAD_COMPLETED->PULLING->DONE
+# Retention path: CREATED->UPLOADING->UPLOAD_COMPLETED->DONE (device_path IS NULL)  [Phase 69]
 # Download path: CREATED->PUSHING->DONE
 # Failure: any non-terminal state -> FAILED
 # Same-state: idempotent no-op
@@ -20,6 +20,7 @@ VALID_TRANSITIONS = frozenset({
     ("CREATED", "UPLOADING"),
     ("UPLOADING", "UPLOAD_COMPLETED"),
     ("UPLOAD_COMPLETED", "PULLING"),
+    ("UPLOAD_COMPLETED", "DONE"),  # Phase 69: retention mode shortcut (device_path IS NULL)
     ("PULLING", "DONE"),
     ("CREATED", "PUSHING"),
     ("PUSHING", "DONE"),
