@@ -221,3 +221,45 @@ def test_caller_connection_anonymous():
 )
 def test_caller_connection_non_admin():
     """Non-super-admin user is forbidden from accessing the endpoint."""
+
+
+# ---------------------------------------------------------------------------
+# Error path: unexpected exception returns generic error
+# Lines 265-268 in router.py
+# ---------------------------------------------------------------------------
+
+def _seed_with_baas_error(world):
+    """Seed with a BaaS that raises unexpected exception."""
+    _seed_published_service_bot(world)
+    # Override BaaS to raise an unexpected exception
+    def _post_with_error(path: str, **_kw):
+        raise RuntimeError("Unexpected internal error")
+    _baas(world).set_override("post", _post_with_error)
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/expert-chats/caller-connection",
+    scenario="unexpected_exception_handled",
+    input=CaseInput(
+        query_params={
+            "bot_id": _BOT_ID,
+            "owner_id": _OWNER_ID,
+            "user_id": _USER_ID,
+        },
+        headers={"x-user-id": _ADMIN_USER_ID},
+    ),
+    seed=_seed_with_baas_error,
+    expect=ExpectError(
+        status=200,
+        json_contains={
+            "success": False,
+            "error_code": 5999,
+        },
+    ),
+)
+def test_caller_connection_unexpected_exception():
+    """Unexpected exception in get_caller_connection_for_other returns error 5999.
+
+    This test covers lines 265-268 in router.py: the catch-all exception handler.
+    """

@@ -169,3 +169,98 @@ def test_update_instance_neither_field_is_noop(repo):
     got = repo.get_instance("u1", "b1", "o1")
     assert got["status"] == "init"
     assert got["ext"] == {"k": "v"}
+
+
+# ---------------------------------------------------------------------------
+# MySQL dialect coverage (lines 142, 144, 145, 151)
+# ---------------------------------------------------------------------------
+
+def test_upsert_instance_mysql_dialect_with_mock():
+    """Test MySQL dialect path in upsert_instance (lines 142, 144, 145, 151).
+
+    This test mocks the session to report MySQL dialect, covering the
+    on_duplicate_key_update branch which uses mysql insert.
+    """
+    from unittest.mock import MagicMock, patch
+
+    # Create a fully mocked session that simulates MySQL dialect
+    mock_db = MagicMock()
+    mock_session = MagicMock()
+
+    # Mock the context manager
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
+
+    # Mock get_bind to return MySQL dialect
+    mock_bind = MagicMock()
+    mock_bind.dialect.name = "mysql"
+    mock_session.get_bind.return_value = mock_bind
+
+    # Mock execute to return a result with lastrowid for MySQL
+    mock_result = MagicMock()
+    mock_result.lastrowid = 42
+    mock_session.execute.return_value = mock_result
+
+    # Mock query for final row fetch
+    mock_row = MagicMock()
+    mock_row.to_dict.return_value = {
+        "id": 42,
+        "user_id": "u_mysql",
+        "bot_id": "b_mysql",
+        "owner_id": "o_mysql",
+        "status": "active",
+        "ext": {"mysql": "test"},
+        "env": "test",
+    }
+    mock_query = MagicMock()
+    mock_query.filter.return_value = mock_query
+    mock_query.first.return_value = mock_row
+    mock_session.query.return_value = mock_query
+
+    mock_db.orm_session.return_value = mock_session
+
+    # Create repository with mocked DB
+    repo = ExpertChatInstanceRepository(mock_db)
+
+    # Execute upsert - this should go through the MySQL dialect branch
+    result = repo.upsert_instance(
+        "u_mysql", "b_mysql", "o_mysql",
+        status="active",
+        ext={"mysql": "test"}
+    )
+
+    # Verify the MySQL branch was taken (execute was called)
+    assert mock_session.execute.called
+    assert mock_session.query.called
+    assert result["id"] == 42
+    assert result["status"] == "active"
+
+
+def test_update_instance_with_both_fields_mysql():
+    """Test update_instance works correctly with mocked session."""
+    # update_instance uses raw query, not dialect-specific
+    # This test ensures update_instance works with mocked session
+    from unittest.mock import MagicMock
+
+    mock_db = MagicMock()
+    mock_session = MagicMock()
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
+
+    # Mock query for update
+    mock_query = MagicMock()
+    mock_query.filter.return_value = mock_query
+    mock_query.update.return_value = 1  # 1 row updated
+    mock_session.query.return_value = mock_query
+
+    mock_db.orm_session.return_value = mock_session
+
+    repo = ExpertChatInstanceRepository(mock_db)
+    result = repo.update_instance(
+        "u1", "b1", "o1",
+        status="success",
+        ext={"new": "value"}
+    )
+
+    assert result is True
+    mock_session.query.assert_called_once()
