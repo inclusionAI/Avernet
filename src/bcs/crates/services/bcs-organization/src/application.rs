@@ -3,8 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_domain::{Organization, OrganizationMember};
 use bcs_service_api::{
-    CreateOrganizationCommand, OrganizationAuth, OrganizationCandidateBot,
-    OrganizationCandidateQuery, OrganizationCoreService, OrganizationManagementService,
+    CreateOrganizationCommand, OrganizationAuth, OrganizationCandidateBot, OrganizationCandidateBotPage,
+    OrganizationCandidatePageQuery, OrganizationCandidateQuery, OrganizationCoreService, OrganizationManagementService,
     OrganizationMemberPage, OrganizationMemberPageQuery, ProviderCoreService,
     PutOrganizationMemberCommand, ServiceResult, UpdateOrganizationCommand,
 };
@@ -153,5 +153,14 @@ impl OrganizationManagementService for OrganizationManagement {
     ) -> ServiceResult<Vec<OrganizationCandidateBot>> {
         self.authenticate(&auth).await?;
         self.core.candidate_bots(&auth.provider_id, query).await
+    }
+
+    async fn candidate_bots_page(
+        &self,
+        auth: OrganizationAuth,
+        query: OrganizationCandidatePageQuery,
+    ) -> ServiceResult<OrganizationCandidateBotPage> {
+        self.authenticate(&auth).await?;
+        self.core.candidate_bots_page(&auth.provider_id, query).await
     }
 }

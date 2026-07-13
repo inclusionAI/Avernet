@@ -64,4 +64,7 @@ pub struct OrganizationCandidateBotResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrganizationCandidateBotListResponse {
     pub bots: Vec<OrganizationCandidateBotResponse>,
+    pub offset: u64,
+    pub limit: u64,
+    pub total: u64,
 }

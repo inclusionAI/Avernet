@@ -24,6 +24,21 @@ pub struct OrganizationCandidateQuery {
 }
 
 #[derive(Debug, Clone)]
+pub struct OrganizationCandidatePageQuery {
+    pub candidate: OrganizationCandidateQuery,
+    pub offset: u64,
+    pub limit: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct OrganizationCandidateBotPage {
+    pub bots: Vec<OrganizationCandidateBot>,
+    pub total: u64,
+    pub offset: u64,
+    pub limit: u64,
+}
+
+#[derive(Debug, Clone)]
 pub struct OrganizationMemberPageQuery {
     pub include_disabled: bool,
     pub role: Option<String>,
@@ -116,6 +131,20 @@ pub trait OrganizationCoreService: Send + Sync {
         managing_provider_id: &str,
         query: OrganizationCandidateQuery,
     ) -> ServiceResult<Vec<OrganizationCandidateBot>>;
+    async fn candidate_bots_page(
+        &self,
+        managing_provider_id: &str,
+        query: OrganizationCandidatePageQuery,
+    ) -> ServiceResult<OrganizationCandidateBotPage> {
+        let bots = self.candidate_bots(managing_provider_id, query.candidate).await?;
+        let total = bots.len() as u64;
+        let bots = usize::try_from(query.offset)
+            .ok()
+            .and_then(|offset| usize::try_from(query.limit).ok().map(|limit| (offset, limit)))
+            .map(|(offset, limit)| bots.into_iter().skip(offset).take(limit).collect())
+            .unwrap_or_default();
+        Ok(OrganizationCandidateBotPage { bots, total, offset: query.offset, limit: query.limit })
+    }
     async fn require_effective_member(
         &self,
         organization_code: &str,

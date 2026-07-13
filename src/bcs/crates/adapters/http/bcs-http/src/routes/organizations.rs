@@ -12,7 +12,7 @@ use bcs_protocol::{
 };
 use bcs_service_api::{
     CreateOrganizationCommand, OrganizationAuth, OrganizationCandidateBot,
-    OrganizationCandidateQuery, OrganizationMemberPageQuery, PutOrganizationMemberCommand,
+    OrganizationCandidatePageQuery, OrganizationCandidateQuery, OrganizationMemberPageQuery, PutOrganizationMemberCommand,
     ServiceError, UpdateOrganizationCommand,
 };
 use serde::Deserialize;
@@ -40,6 +40,10 @@ pub struct ListMembersQuery {
 pub struct CandidateBotsQuery {
     q: Option<String>,
     provider_id: Option<String>,
+    #[serde(default)]
+    offset: Option<u64>,
+    #[serde(default)]
+    limit: Option<u64>,
 }
 
 pub async fn create_organization(
@@ -214,20 +218,29 @@ pub async fn candidate_bots(
     Query(query): Query<CandidateBotsQuery>,
 ) -> Result<Json<OrganizationCandidateBotListResponse>, HttpAdapterError> {
     let auth = organization_auth(provider_id, &headers)?;
-    let bots = state
+    let offset = query.offset.unwrap_or(0);
+    let limit = query.limit.unwrap_or(50);
+    if !(1..=200).contains(&limit) {
+        return Err(HttpAdapterError::BadRequest("limit must be between 1 and 200".to_string()));
+    }
+    let page = state
         .services
         .organization_management
-        .candidate_bots(
+        .candidate_bots_page(
             auth,
-            OrganizationCandidateQuery {
-                q: query.q,
-                provider_id: query.provider_id,
+            OrganizationCandidatePageQuery {
+                candidate: OrganizationCandidateQuery { q: query.q, provider_id: query.provider_id },
+                offset,
+                limit,
             },
         )
         .await
         .map_err(organization_error)?;
     Ok(Json(OrganizationCandidateBotListResponse {
-        bots: bots.into_iter().map(candidate_to_response).collect(),
+        bots: page.bots.into_iter().map(candidate_to_response).collect(),
+        offset: page.offset,
+        limit: page.limit,
+        total: page.total,
     }))
 }
 

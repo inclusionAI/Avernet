@@ -212,6 +212,26 @@ async fn provider_scoped_organization_routes_call_application_service() {
 }
 
 #[tokio::test]
+async fn candidate_bots_returns_requested_page_metadata() {
+    let app = test_app();
+    let response = request(
+        &app.app,
+        "GET",
+        "/providers/provider-a/organization-candidate-bots?q=traffic&offset=10&limit=25",
+        Some("provider-token"),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    assert_eq!(json["offset"], 10);
+    assert_eq!(json["limit"], 25);
+    assert_eq!(json["total"], 1);
+    assert_eq!(json["bots"], json!([]));
+}
+
+#[tokio::test]
 async fn pagination_returns_requested_page_metadata() {
     let app = test_app();
     let response = request(

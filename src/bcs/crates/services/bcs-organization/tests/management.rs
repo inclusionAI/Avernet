@@ -7,7 +7,7 @@ use bcs_organization::{OrganizationCore, OrganizationManagement};
 use bcs_organization_store::MemoryOrganizationRepo;
 use bcs_service_api::{
     BotRegistryCoreService, CreateOrganizationCommand, OrganizationAuth,
-    OrganizationCandidateQuery, OrganizationCoreService, OrganizationManagementService,
+    OrganizationCandidatePageQuery, OrganizationCandidateQuery, OrganizationCoreService, OrganizationManagementService,
     OrganizationMemberPageQuery, ProviderAuthMode,
     ProviderBotBindingRepoPort, ProviderBotCoreService, ProviderCoreService,
     ProviderCredentialRepoPort, ProviderOrganizationManagementConfig, ProviderRepoPort,
@@ -446,6 +446,33 @@ async fn candidate_bots_include_manager_and_granted_bots_without_leaking_ungrant
             "unauthorized provider_id should be rejected with 403, got {other:?}"
         ),
     }
+}
+
+#[tokio::test]
+async fn candidate_bot_page_is_sorted_and_counts_before_paging() {
+    let ctx = test_context().await;
+    let provider_a = register_provider(&ctx, "Provider A").await;
+    let provider_b = register_provider(&ctx, "Provider B").await;
+    grant_manager(&ctx, &provider_b, &provider_a).await;
+    register_bot(&ctx, &provider_b, "bot-z").await;
+    register_bot(&ctx, &provider_a, "bot-a").await;
+
+    let page = ctx
+        .service
+        .candidate_bots_page(
+            provider_auth(&provider_a),
+            OrganizationCandidatePageQuery {
+                candidate: OrganizationCandidateQuery::default(),
+                offset: 1,
+                limit: 1,
+            },
+        )
+        .await
+        .expect("candidate bot page");
+
+    assert_eq!(page.total, 2);
+    assert_eq!(page.bots.len(), 1);
+    assert_eq!(page.bots[0].bot_uuid, "bot-z");
 }
 
 

@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use bcs_domain::{Organization, OrganizationMember};
 
 use crate::{
-    OrganizationCandidateBot, OrganizationCandidateQuery, OrganizationMemberPage, ServiceResult,
+    OrganizationCandidateBot, OrganizationCandidateBotPage, OrganizationCandidatePageQuery,
+    OrganizationCandidateQuery, OrganizationMemberPage, ServiceResult,
 };
 use crate::core::OrganizationMemberPageQuery;
 
@@ -102,4 +103,18 @@ pub trait OrganizationManagementService: Send + Sync {
         auth: OrganizationAuth,
         query: OrganizationCandidateQuery,
     ) -> ServiceResult<Vec<OrganizationCandidateBot>>;
+    async fn candidate_bots_page(
+        &self,
+        auth: OrganizationAuth,
+        query: OrganizationCandidatePageQuery,
+    ) -> ServiceResult<OrganizationCandidateBotPage> {
+        let bots = self.candidate_bots(auth, query.candidate).await?;
+        let total = bots.len() as u64;
+        let bots = usize::try_from(query.offset)
+            .ok()
+            .and_then(|offset| usize::try_from(query.limit).ok().map(|limit| (offset, limit)))
+            .map(|(offset, limit)| bots.into_iter().skip(offset).take(limit).collect())
+            .unwrap_or_default();
+        Ok(OrganizationCandidateBotPage { bots, total, offset: query.offset, limit: query.limit })
+    }
 }

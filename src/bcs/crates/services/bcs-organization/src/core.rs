@@ -6,7 +6,8 @@ use bcs_domain::{Organization, OrganizationMember, ProviderOrganizationManagemen
 use bcs_service_api::{
     AuthorizedOrganizationPair, BotCapabilities, BotRegistryCoreService, CreateOrganizationRecord,
     ListOrganizationMembersPageQuery, ListOrganizationMembersQuery, ListOrganizationsQuery,
-    OrganizationCandidateBot, OrganizationCandidateQuery, OrganizationCoreService,
+    OrganizationCandidateBot, OrganizationCandidateBotPage, OrganizationCandidatePageQuery,
+    OrganizationCandidateQuery, OrganizationCoreService,
     OrganizationMemberPage, OrganizationMemberPageQuery, OrganizationRepoPort,
     ProviderBotBindingRepoPort, ProviderRecord, ProviderRepoPort, ServiceError, ServiceResult,
     UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
@@ -570,6 +571,22 @@ impl OrganizationCoreService for OrganizationCore {
         candidates.sort_by(|left, right| left.bot_uuid.cmp(&right.bot_uuid));
         candidates.dedup_by(|left, right| left.bot_uuid == right.bot_uuid);
         Ok(candidates)
+    }
+
+    async fn candidate_bots_page(
+        &self,
+        managing_provider_id: &str,
+        query: OrganizationCandidatePageQuery,
+    ) -> ServiceResult<OrganizationCandidateBotPage> {
+        let offset = usize::try_from(query.offset).ok();
+        let limit = usize::try_from(query.limit).ok();
+        let candidates = self.candidate_bots(managing_provider_id, query.candidate).await?;
+        let total = candidates.len() as u64;
+        let bots = match (offset, limit) {
+            (Some(offset), Some(limit)) => candidates.into_iter().skip(offset).take(limit).collect(),
+            _ => Vec::new(),
+        };
+        Ok(OrganizationCandidateBotPage { bots, total, offset: query.offset, limit: query.limit })
     }
 }
 
