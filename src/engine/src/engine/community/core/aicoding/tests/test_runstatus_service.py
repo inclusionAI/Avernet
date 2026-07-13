@@ -1269,3 +1269,73 @@ async def test_safe_exec_logs_warning_on_unexpected_exception(caplog) -> None:
     assert result is None
     assert any("bash exec unexpected error" in rec.message for rec in caplog.records)
     assert any("surprise" in rec.message for rec in caplog.records)
+
+
+# ── cwd 直传（前端直传工作目录，优先于 base/{session_id}）────────────────
+
+
+# ``_bypass_workspace_exists`` autouse fixture 把 ensure_workspace_exists 替换为
+# resolve_workspace；后者对 cwd 直传走 _validate_cwd_prefix（只校验格式 + 允许根
+# 前缀，不校验存在性）。下面的 cwd 都落在 CONTAINER_WORKSPACE_BASE 下，天然放行。
+
+
+async def test_get_session_runs_forwards_cwd_to_aix_filter() -> None:
+    """cwd 直传 → ``aix run list --filter <cwd>`` 与执行 cwd 跟随 cwd。"""
+    custom_cwd = f"{CONTAINER_WORKSPACE_BASE}/custom-session"
+    plugin = FakeBashPlugin()
+    plugin.add(
+        "aix run list",
+        custom_cwd,
+        BashExecResult(stdout=_runs_payload([]), stderr="", exit_code=0),
+    )
+    service = _make_service(plugin)
+    runs = await service.get_session_runs(SESSION_ID, cwd=custom_cwd)
+    assert runs == []
+    # exec 的 cwd 必须是 custom_cwd（而非 base/{SESSION_ID}）
+    assert plugin.calls[0][1] == custom_cwd
+
+
+async def test_get_run_phase_status_forwards_cwd() -> None:
+    """cwd 直传 → _find_aix_project_dirs 的 root 与 aix 执行 cwd 跟随 cwd。"""
+    custom_cwd = f"{CONTAINER_WORKSPACE_BASE}/custom-session"
+    project_dir = f"{custom_cwd}/project-fe"
+    plugin = FakeBashPlugin()
+    plugin.add(
+        "find",
+        custom_cwd,
+        BashExecResult(stdout=f"{project_dir}/.aix\n", stderr="", exit_code=0),
+    )
+    plugin.add(
+        "aix run phase status --run-id r-xyz",
+        project_dir,
+        BashExecResult(stdout=json.dumps(PHASE_PAYLOAD), stderr="", exit_code=0),
+    )
+    service = _make_service(plugin)
+    got = await service.get_run_phase_status(SESSION_ID, "r-xyz", cwd=custom_cwd)
+    assert got["runId"] == "r-xyz"
+    # find 的 cwd 是 custom_cwd（说明 ensure_workspace_exists 返回 custom_cwd）
+    find_call = next(c for c in plugin.calls if c[0].startswith("find"))
+    assert find_call[1] == custom_cwd
+
+
+async def test_get_session_pull_requests_forwards_cwd() -> None:
+    """cwd 直传 → ``aix run output list --filter <cwd>`` 执行 cwd 跟随 cwd。"""
+    custom_cwd = f"{CONTAINER_WORKSPACE_BASE}/custom-session"
+    plugin = FakeBashPlugin()
+    plugin.add(
+        "aix run output list",
+        custom_cwd,
+        BashExecResult(stdout=_pr_outputs_payload([]), stderr="", exit_code=0),
+    )
+    service = _make_service(plugin)
+    items = await service.get_session_pull_requests(SESSION_ID, cwd=custom_cwd)
+    assert items == []
+    assert plugin.calls[0][1] == custom_cwd
+
+
+async def test_get_session_runs_cwd_outrange_raises_value_error() -> None:
+    """cwd 越界（不在允许根下）→ resolve_workspace 抛 ValueError（router 转 400）。"""
+    plugin = FakeBashPlugin()
+    service = _make_service(plugin)
+    with pytest.raises(ValueError, match="cwd not allowed"):
+        await service.get_session_runs(SESSION_ID, cwd="/etc")

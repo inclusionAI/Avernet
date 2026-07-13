@@ -193,23 +193,29 @@ class RunStatusService:
         self._status_cache[session_id] = (now, active)
         return active
 
-    async def get_session_runs(self, session_id: str) -> list[dict]:
+    async def get_session_runs(
+        self, session_id: str, cwd: str | None = None
+    ) -> list[dict]:
         """API 4.2：返回该 session 工作空间下的所有 runs，倒序。
 
-        若 session workspace 不存在，抛 ``FileNotFoundError`` 让 router
-        层转 404；这与 API 4.1（列表+enrich）的"静默兜底为 idle"区分开。
+        ``cwd`` 直传优先（经 :meth:`WorkspaceService.validate_cwd` 校验含存在性），
+        缺省回退 ``resolve_workspace(session_id)``。若 workspace 不存在，抛
+        ``FileNotFoundError`` 让 router 层转 404；这与 API 4.1（列表+enrich）
+        的"静默兜底为 idle"区分开。
         """
-        WorkspaceService.ensure_workspace_exists(session_id)
-        runs = await self._collect_runs_for_session(session_id)
+        WorkspaceService.ensure_workspace_exists(session_id, cwd)
+        runs = await self._collect_runs_for_session(session_id, cwd)
         return runs or []
 
-    async def get_run_phase_status(self, session_id: str, run_id: str) -> dict:
+    async def get_run_phase_status(
+        self, session_id: str, run_id: str, cwd: str | None = None
+    ) -> dict:
         """API 4.3：在 session 工作空间的 project 子目录中查找该 run_id 的 phase 详情。"""
         if not _RUN_ID_RE.match(run_id):
             raise HTTPException(status_code=400, detail=f"Invalid run_id: {run_id!r}")
 
-        cwd = WorkspaceService.ensure_workspace_exists(session_id)
-        candidates = await self._find_aix_project_dirs(cwd)
+        workspace = WorkspaceService.ensure_workspace_exists(session_id, cwd)
+        candidates = await self._find_aix_project_dirs(workspace)
         if not candidates:
             raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
 
@@ -240,32 +246,38 @@ class RunStatusService:
             detail=f"aix run phase status failed: {last_stderr or 'no stderr'}",
         )
 
-    async def get_session_pull_requests(self, session_id: str) -> list[dict]:
+    async def get_session_pull_requests(
+        self, session_id: str, cwd: str | None = None
+    ) -> list[dict]:
         """API 4.4：返回 session 工作空间下所有 run 产出的 pull-request outputs，按 at 倒序。
 
-        执行 ``aix run output list --kind pull-request --json --filter <workspace_root>``，
-        由 aix 自己向下递归找 ``.aix/``，service 不再需要预先 find + 多目录串行调用。
+        ``cwd`` 直传优先（经 ``resolve_workspace`` 前缀校验，不含存在性），缺省回退
+        ``resolve_workspace(session_id)``。执行 ``aix run output list --kind pull-request
+        --json --filter <workspace_root>``，由 aix 自己向下递归找 ``.aix/``。
 
         错误语义：
 
-        - workspace 不存在 → ``FileNotFoundError``，router 转 404；
+        - cwd 越界 / 非绝对 → ``ValueError``，router 转 400；
         - 命令执行失败 / exit_code != 0 → 抛 500，带 stderr；
         - JSON 解析失败 → 抛 500。
         """
-        workspace_root = WorkspaceService.resolve_workspace(session_id)
+        workspace_root = WorkspaceService.resolve_workspace(session_id, cwd)
         return await self._aix_run_output_list(workspace_root)
 
     # ── internal ──────────────────────────────────────────────────────────────
 
-    async def _collect_runs_for_session(self, session_id: str) -> Optional[list[dict]]:
+    async def _collect_runs_for_session(
+        self, session_id: str, cwd: str | None = None
+    ) -> Optional[list[dict]]:
         """在 session workspace root 上执行 ``aix run list --filter <root> --json``，
         由 aix 自己向下递归找 ``.aix/`` 并返回所有 run（含 ``projectDir``）。
 
+        ``cwd`` 直传优先（经 ``resolve_workspace`` 前缀校验），缺省回退旧拼接。
         新命令一次返回所有 run，因此不再需要旧实现的 ``find -name .aix`` 预扫 +
         多 project 串行调用 + 合并步骤。排序仍按 ``updatedAtUnixMs`` 兜底，因为
         aix 返回顺序未约定。
         """
-        workspace_root = WorkspaceService.resolve_workspace(session_id)
+        workspace_root = WorkspaceService.resolve_workspace(session_id, cwd)
         runs = await self._aix_run_list(workspace_root)
         if not runs:
             return None

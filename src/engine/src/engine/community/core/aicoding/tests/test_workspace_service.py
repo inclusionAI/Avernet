@@ -760,3 +760,197 @@ async def test_get_file_diff_accepts_worktree_pointer_file(
         session_id=SESSION_ID, project="project-fe", file_path="README.md",
     )
     assert result.diff == "worktree-diff\n"
+
+
+# ── validate_cwd / _validate_cwd_prefix（cwd 直传校验）─────────────────────
+
+
+def test_validate_cwd_accepts_existing_dir_under_allowed_root(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
+    target = tmp_path / "session-1"
+    target.mkdir()
+    got = WorkspaceService.validate_cwd(str(target))
+    assert got == os.path.normpath(str(target))
+
+
+def test_validate_cwd_normalizes_path(tmp_path: Path, monkeypatch) -> None:
+    """返回规范化绝对路径（吃掉 trailing slash）。"""
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
+    target = tmp_path / "s"
+    target.mkdir()
+    got = WorkspaceService.validate_cwd(f"{target}/")
+    assert got == str(target)
+
+
+def test_validate_cwd_rejects_file_path(tmp_path: Path, monkeypatch) -> None:
+    """cwd 指向文件 → NotADirectoryError（router 转 400）。"""
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
+    f = tmp_path / "a.txt"
+    f.write_text("x")
+    with pytest.raises(NotADirectoryError):
+        WorkspaceService.validate_cwd(str(f))
+
+
+def test_validate_cwd_rejects_missing_path(tmp_path: Path, monkeypatch) -> None:
+    """cwd 不存在 → FileNotFoundError（router 转 404）。"""
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
+    with pytest.raises(FileNotFoundError):
+        WorkspaceService.validate_cwd(str(tmp_path / "no-such"))
+
+
+def test_validate_cwd_rejects_outside_allowed_root(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
+    with pytest.raises(ValueError, match="cwd not allowed"):
+        WorkspaceService.validate_cwd("/etc")
+
+
+def test_validate_cwd_rejects_relative_path(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
+    with pytest.raises(ValueError, match="cwd must be absolute"):
+        WorkspaceService.validate_cwd("relative/path")
+
+
+def test_validate_cwd_rejects_blank(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
+    with pytest.raises(ValueError, match="cwd is required"):
+        WorkspaceService.validate_cwd("   ")
+
+
+def test_validate_cwd_rejects_traversal(tmp_path: Path, monkeypatch) -> None:
+    """``..`` 穿越出允许根 → normpath 后越界 → ValueError。"""
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
+    with pytest.raises(ValueError, match="cwd not allowed"):
+        WorkspaceService.validate_cwd(f"{tmp_path}/../etc")
+
+
+def test_validate_cwd_accepts_root_itself(tmp_path: Path, monkeypatch) -> None:
+    """cwd 等于允许根本身应放行（不必是其子目录）。"""
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
+    got = WorkspaceService.validate_cwd(str(tmp_path))
+    assert got == str(tmp_path)
+
+
+def test_validate_cwd_default_root_only(tmp_path: Path, monkeypatch) -> None:
+    """未设 AICODING_CWD_ALLOW_ROOTS 时只允许 CONTAINER_WORKSPACE_BASE。"""
+    monkeypatch.delenv("AICODING_CWD_ALLOW_ROOTS", raising=False)
+    with pytest.raises(ValueError, match="cwd not allowed"):
+        WorkspaceService.validate_cwd(str(tmp_path))
+
+
+def test_validate_cwd_prefix_skips_existence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """_validate_cwd_prefix 只校验格式 + 前缀，不校验存在性（供 worktree-status）。"""
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
+    got = WorkspaceService._validate_cwd_prefix(str(tmp_path / "no-such"))
+    assert got == os.path.normpath(str(tmp_path / "no-such"))
+
+
+def test_allowed_cwd_roots_reads_env(tmp_path: Path, monkeypatch) -> None:
+    """env 扩展允许根（Rule 14 配置驱动）；重复 / trailing slash 规范化。"""
+    from engine.community.core.aicoding.workspace_service import _allowed_cwd_roots
+
+    monkeypatch.setenv(
+        "AICODING_CWD_ALLOW_ROOTS", f"{tmp_path}, /workspace/extra,"
+    )
+    roots = _allowed_cwd_roots()
+    assert roots[0] == CONTAINER_WORKSPACE_BASE
+    assert str(tmp_path) in roots
+    assert "/workspace/extra" in roots
+
+
+# ── resolve_workspace / ensure_workspace_exists 的 cwd 优先 ─────────────────
+
+
+def test_resolve_workspace_cwd_direct_takes_precedence(monkeypatch) -> None:
+    """cwd 直传优先于 base/{session_id} 拼接。"""
+    monkeypatch.delenv("RELAY_DEFAULT_CWD", raising=False)
+    monkeypatch.delenv("AICODING_CWD_ALLOW_ROOTS", raising=False)
+    custom = f"{CONTAINER_WORKSPACE_BASE}/custom-session"
+    got = WorkspaceService.resolve_workspace("sid", cwd=custom)
+    assert got == custom
+
+
+def test_resolve_workspace_cwd_none_falls_back_to_base(monkeypatch) -> None:
+    monkeypatch.delenv("RELAY_DEFAULT_CWD", raising=False)
+    got = WorkspaceService.resolve_workspace("sid", cwd=None)
+    assert got == f"{CONTAINER_WORKSPACE_BASE}/sid"
+
+
+def test_resolve_workspace_cwd_invalid_raises(monkeypatch) -> None:
+    """resolve_workspace 的 cwd 直传仍走前缀校验（越界 → ValueError）。"""
+    monkeypatch.delenv("AICODING_CWD_ALLOW_ROOTS", raising=False)
+    with pytest.raises(ValueError, match="cwd not allowed"):
+        WorkspaceService.resolve_workspace("sid", cwd="/etc")
+
+
+def test_ensure_workspace_exists_cwd_direct_validates_existence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
+    target = tmp_path / "s"
+    target.mkdir()
+    got = WorkspaceService.ensure_workspace_exists("ignored-sid", cwd=str(target))
+    assert got == str(target)
+
+
+def test_ensure_workspace_exists_cwd_file_raises_not_a_dir(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
+    f = tmp_path / "a.txt"
+    f.write_text("x")
+    with pytest.raises(NotADirectoryError):
+        WorkspaceService.ensure_workspace_exists("sid", cwd=str(f))
+
+
+def test_ensure_workspace_exists_cwd_none_falls_back(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """cwd=None → 旧逻辑：resolve_workspace(session_id) + isdir 检查。"""
+    monkeypatch.setenv("RELAY_DEFAULT_CWD", str(tmp_path))
+    sid = "sess-1"
+    (tmp_path / sid).mkdir()
+    got = WorkspaceService.ensure_workspace_exists(sid, cwd=None)
+    assert got == str(tmp_path / sid)
+
+
+# ── 业务方法 cwd 直传透传 ─────────────────────────────────────────────────
+
+
+async def test_list_file_tree_forwards_cwd_as_workspace_root(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """cwd 直传时以 cwd 为 workspace 根列文件树（跳过 base/{sid} 拼接）。"""
+    custom = tmp_path / "custom-cwd"
+    custom.mkdir()
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
+    file_plugin = FakeFilePlugin(
+        list_result=ListDirResult(
+            dir_path=str(custom), recursive=True, files=[],
+        )
+    )
+    service = _make_service(file_plugin=file_plugin)
+    await service.list_file_tree("sid", cwd=str(custom))
+    assert file_plugin.calls[0][1]["dir_path"] == str(custom)
+
+
+async def test_preview_file_forwards_cwd_as_workspace_root(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """cwd 直传时 preview 的 workspace 根切换到 cwd，path 相对 cwd 解析。"""
+    custom = tmp_path / "custom-cwd"
+    custom.mkdir()
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
+    target = str(custom / "a.txt")
+    file_plugin = FakeFilePlugin(read_map={target: b"hi"})
+    service = _make_service(file_plugin=file_plugin)
+    out = await service.preview_file("sid", "a.txt", cwd=str(custom))
+    assert out.content == "hi"
+    assert file_plugin.calls[0][1]["file_path"] == target
