@@ -46,7 +46,7 @@ class DeviceBindingMixin:
             status=DeviceBindingStatus.PENDING,
         )
 
-    def _update_binding_on_success(
+    def _activate_binding(
         self,
         ext: dict,
         stage: PublishStage,
@@ -94,7 +94,7 @@ class DeviceBindingMixin:
         )
 
         logger.info(
-            f"[PublishFlowService._update_binding_on_success] "
+            f"[PublishFlowService._activate_binding] "
             f"Device binding updated: binding_id={binding_id}, status=ACTIVE"
         )
 

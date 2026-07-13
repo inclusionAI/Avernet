@@ -59,7 +59,7 @@ class ProgressSyncMixin:
     Persistence goes through the shared seams: publish-record status/ext writes
     via ``_update_publish_status`` (the ``PublishExtState`` plumbing),
     device-binding writes via ``DeviceBindingMixin``
-    (``_update_binding_on_success``), and the BaaS progress query via
+    (``_activate_binding``), and the BaaS progress query via
     ``BaasPublishOpsMixin`` (``get_baas_publish_progress``).
     """
 
@@ -112,7 +112,7 @@ class ProgressSyncMixin:
         self._mark_previous_publish_superseded(publish_record, stage, target_status)
 
         # Update the device_binding status to ACTIVE
-        self._update_binding_on_success(
+        self._activate_binding(
             ext=ext,
             stage=stage,
             progress=progress,
@@ -309,6 +309,9 @@ class ProgressSyncMixin:
 
         current_status = PublishStatus(publish_record.status)
 
+        # These early-status guards ARE reachable: besides the durable poll task
+        # (which only fires in the *_PUB wait states), /sync is a public endpoint
+        # the frontend polls throughout the flow, so any status can arrive here.
         # If in a failed state, return publish failure directly
         if current_status == PublishStatus.FAILED:
             return PublishFlowResult(
@@ -325,7 +328,9 @@ class ProgressSyncMixin:
                 message=f"Current status {current_status}, please wait!",
             )
 
-        # Step 2: Determine the stage based on the current status
+        # Step 2: Determine the stage based on the current status. None for every
+        # remaining non-wait status (DRAFT / VALIDATING / SUCCESS / UPGRADED / …)
+        # — e.g. a /sync that lands after the poll already advanced the record.
         stage = self._determine_sync_stage(current_status)
         if not stage:
             logger.warning(

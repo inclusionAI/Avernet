@@ -2150,7 +2150,7 @@ def test_handle_sync_success_skips_destroy_verify_bot_for_teclaw_online_publish(
     # teclaw → TeclawProviderBehavior (destroys_verify_bot_on_online=False).
     baas_service.resolve_container_provider.return_value = "teclaw"
     svc._mark_previous_publish_superseded = Mock()
-    svc._update_binding_on_success = Mock()
+    svc._activate_binding = Mock()
     svc._destroy_bot_by_stage = Mock()
 
     result = svc._handle_sync_success(
@@ -2188,7 +2188,7 @@ def test_handle_sync_success_destroys_verify_bot_for_non_teclaw_online_publish()
         return_value={"bot_id": "bot-source", "active_engine": "openclaw", "ext": {}}
     )
     svc._mark_previous_publish_superseded = Mock()
-    svc._update_binding_on_success = Mock()
+    svc._activate_binding = Mock()
     svc._destroy_bot_by_stage = Mock()
 
     result = svc._handle_sync_success(
@@ -2223,7 +2223,7 @@ def test_handle_sync_success_verify_stage_updates_validating_and_clears_retry():
     progress = {"status": "SUCCESS", "device_details": []}
 
     svc._mark_previous_publish_superseded = Mock()
-    svc._update_binding_on_success = Mock()
+    svc._activate_binding = Mock()
     svc._destroy_bot_by_stage = Mock()
 
     result = svc._handle_sync_success(
@@ -2248,7 +2248,7 @@ def test_handle_sync_success_verify_stage_updates_validating_and_clears_retry():
     svc._mark_previous_publish_superseded.assert_called_once_with(
         publish_record, PublishStage.VERIFY, PublishStatus.VALIDATING
     )
-    svc._update_binding_on_success.assert_called_once_with(
+    svc._activate_binding.assert_called_once_with(
         ext=ext,
         stage=PublishStage.VERIFY,
         progress=progress,
@@ -2279,7 +2279,7 @@ def test_handle_sync_success_online_publish_raises_when_bot_missing():
 
     bot_service.get_bot = Mock(return_value=None)
     svc._mark_previous_publish_superseded = Mock()
-    svc._update_binding_on_success = Mock()
+    svc._activate_binding = Mock()
     svc._destroy_bot_by_stage = Mock()
 
     from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowServiceError
@@ -2298,7 +2298,7 @@ def test_handle_sync_success_online_publish_raises_when_bot_missing():
     svc._mark_previous_publish_superseded.assert_called_once_with(
         publish_record, PublishStage.ONLINE, PublishStatus.SUCCESS
     )
-    svc._update_binding_on_success.assert_called_once()
+    svc._activate_binding.assert_called_once()
     svc._destroy_bot_by_stage.assert_not_called()
 
 
@@ -2323,7 +2323,7 @@ def test_handle_sync_success_online_publish_logs_warning_when_destroy_verify_fai
         return_value={"bot_id": "bot-source", "active_engine": "openclaw", "ext": {}}
     )
     svc._mark_previous_publish_superseded = Mock()
-    svc._update_binding_on_success = Mock()
+    svc._activate_binding = Mock()
     svc._destroy_bot_by_stage = Mock(side_effect=RuntimeError("destroy failed"))
 
     with caplog.at_level("WARNING"):
