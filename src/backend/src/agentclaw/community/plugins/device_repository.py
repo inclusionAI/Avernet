@@ -58,9 +58,11 @@ PR + DDL-parity doc):
    to the caller, matching prod. The old local twin's
    ``"Failed (local mode):"`` warn-and-swallow is dropped.
 
-The Teclaw terminal transition additionally locks and guards its binding, then
-updates the expected live bot and binding in one ``orm_session`` transaction.
-It is intentionally separate from the three legacy adopt-prod helpers above.
+The Teclaw terminal transition additionally upgrades its fresh ORM Session out
+of prod ``AUTOCOMMIT`` before the first SELECT, then explicitly commits or
+rolls back the guarded bot + binding transaction. SQLite uses
+``BEGIN IMMEDIATE`` because it ignores ``FOR UPDATE``. This path is
+intentionally separate from the three legacy adopt-prod helpers above.
 
 All queries that filter by ``bot_id`` / ``owner_id`` / ``device_id`` are env-scoped via
 ``self._binding_env()`` (EntityDeviceBinding.env) or ``self._bot_env()`` (BotModel.env),
@@ -73,10 +75,12 @@ Zero genuine upserts → zero dialect branches in S5.
 from __future__ import annotations
 
 import json
+import warnings
 from typing import Any
 
 from injector import inject
 from sqlalchemy import func
+from sqlalchemy.exc import SAWarning
 
 from agentclaw.community.core.devices.repository.protocol import (
     DeviceBindingRepository as _DeviceBindingRepositoryProtocol,
@@ -451,59 +455,88 @@ class DeviceRepository(_DeviceBindingRepositoryProtocol):
     ) -> bool:
         """Guard and persist a Teclaw terminal result in one transaction."""
         with self._db.orm_session() as db:
-            binding = (
-                db.query(EntityDeviceBinding)
-                .filter(EntityDeviceBinding.id == binding_id)
-                .with_for_update()
-                .one_or_none()
-            )
-            if binding is None:
-                return False
             try:
-                props = (
-                    json.loads(binding.device_props)
-                    if isinstance(binding.device_props, str)
-                    else (binding.device_props or {})
+                dialect_name = db.get_bind().dialect.name
+                isolation_level = (
+                    "SERIALIZABLE"
+                    if dialect_name == "sqlite"
+                    else "READ COMMITTED"
                 )
-            except (json.JSONDecodeError, TypeError):
-                props = {}
-            current_publish_id = (
-                props.get("publish_id") if isinstance(props, dict) else None
-            )
-            if (
-                binding.status != _DeviceBindingStatus.PENDING
-                or binding.device_provider != "teclaw"
-                or current_publish_id is None
-                or str(current_publish_id) != str(publish_id)
-            ):
-                return False
+                # This must be the Session's first connection acquisition:
+                # SQLAlchemy ignores an isolation override once a transaction
+                # has already begun. Promote that warning to an exception so
+                # an unsafe AUTOCOMMIT fallback becomes a retry, never a write.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error", SAWarning)
+                    connection = db.connection(
+                        execution_options={
+                            "isolation_level": isolation_level
+                        }
+                    )
+                if dialect_name == "sqlite":
+                    connection.exec_driver_sql("BEGIN IMMEDIATE")
 
-            bot_rowcount = (
-                db.query(BotModel)
-                .filter(
-                    BotModel.bot_id == bot_id,
-                    BotModel.owner_id == owner_id,
-                    BotModel.binding_id == binding_id,
-                    BotModel.is_delete == 0,
-                    self._bot_env(),
+                binding = (
+                    db.query(EntityDeviceBinding)
+                    .filter(EntityDeviceBinding.id == binding_id)
+                    .with_for_update()
+                    .one_or_none()
                 )
-                .update(
-                    {
-                        BotModel.status: status,
-                        BotModel.gmt_modified: func.now(),
-                    },
-                    synchronize_session=False,
+                if binding is None:
+                    db.rollback()
+                    return False
+                try:
+                    props = (
+                        json.loads(binding.device_props)
+                        if isinstance(binding.device_props, str)
+                        else (binding.device_props or {})
+                    )
+                except (json.JSONDecodeError, TypeError):
+                    props = {}
+                current_publish_id = (
+                    props.get("publish_id")
+                    if isinstance(props, dict)
+                    else None
                 )
-            )
-            if bot_rowcount != 1:
-                raise RuntimeError(
-                    "Teclaw terminal bot status update expected exactly one "
-                    f"record, matched {bot_rowcount}"
-                )
+                if (
+                    binding.status != _DeviceBindingStatus.PENDING
+                    or binding.device_provider != "teclaw"
+                    or current_publish_id is None
+                    or str(current_publish_id) != str(publish_id)
+                ):
+                    db.rollback()
+                    return False
 
-            binding.status = status
-            binding.gmt_modified = func.now()
-            return True
+                bot_rowcount = (
+                    db.query(BotModel)
+                    .filter(
+                        BotModel.bot_id == bot_id,
+                        BotModel.owner_id == owner_id,
+                        BotModel.binding_id == binding_id,
+                        BotModel.is_delete == 0,
+                        self._bot_env(),
+                    )
+                    .update(
+                        {
+                            BotModel.status: status,
+                            BotModel.gmt_modified: func.now(),
+                        },
+                        synchronize_session=False,
+                    )
+                )
+                if bot_rowcount != 1:
+                    raise RuntimeError(
+                        "Teclaw terminal bot status update expected exactly "
+                        f"one record, matched {bot_rowcount}"
+                    )
+
+                binding.status = status
+                binding.gmt_modified = func.now()
+                db.commit()
+                return True
+            except Exception:
+                db.rollback()
+                raise
 
     def reuse_binding(
         self,

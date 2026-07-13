@@ -12,10 +12,12 @@ The last DB-repo twin in the unification program (S5). Covers all
 import json
 import time
 from contextlib import contextmanager
+from threading import Event, Thread, current_thread
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.exc import SAWarning
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
@@ -47,6 +49,23 @@ class _FileSqliteDB:
     session = orm_session
 
 
+class _PreconnectedFileSqliteDB(_FileSqliteDB):
+    @contextmanager
+    def orm_session(self):
+        db = self._factory()
+        db.connection()
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    session = orm_session
+
+
 @pytest.fixture
 def db(tmp_path):
     engine = create_engine(
@@ -61,6 +80,30 @@ def db(tmp_path):
 @pytest.fixture
 def repo(db):
     return DeviceRepository(db)
+
+
+@pytest.fixture
+def autocommit_db(tmp_path):
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'devbind-autocommit.db'}",
+        connect_args={"check_same_thread": False},
+        isolation_level="AUTOCOMMIT",
+    )
+    EntityDeviceBinding.__table__.create(engine)
+    BotModel.__table__.create(engine)
+    return _FileSqliteDB(engine), engine
+
+
+@pytest.fixture
+def preconnected_autocommit_db(tmp_path):
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'devbind-preconnected.db'}",
+        connect_args={"check_same_thread": False},
+        isolation_level="AUTOCOMMIT",
+    )
+    EntityDeviceBinding.__table__.create(engine)
+    BotModel.__table__.create(engine)
+    return _PreconnectedFileSqliteDB(engine)
 
 
 def _binding(**ov):
@@ -403,6 +446,237 @@ def test_transition_teclaw_publish_terminal_updates_bot_and_binding(repo, db):
     with db.orm_session() as s:
         assert (
             s.query(BotModel).filter_by(bot_id="bot-teclaw").one().status
+            == "ACTIVE"
+        )
+
+
+def test_transition_teclaw_publish_terminal_rolls_back_bot_on_binding_failure(
+    autocommit_db,
+):
+    db, engine = autocommit_db
+    repo = DeviceRepository(db)
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="teclaw",
+            device_props={"publish_id": 9},
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-teclaw",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+    )
+
+    def fail_binding_update(
+        _conn, _cursor, statement, _parameters, _context, _executemany
+    ):
+        if statement.lstrip().lower().startswith(
+            "update ac_entity_device_binding"
+        ):
+            raise RuntimeError("injected binding write failure")
+
+    event.listen(engine, "before_cursor_execute", fail_binding_update)
+    try:
+        with patch(_ENV_MOD, return_value="dev"):
+            with pytest.raises(
+                RuntimeError, match="injected binding write failure"
+            ):
+                repo.transition_teclaw_publish_terminal(
+                    binding_id=bid,
+                    bot_id="bot-teclaw",
+                    owner_id="emp-1",
+                    publish_id=9,
+                    status="ACTIVE",
+                )
+    finally:
+        event.remove(engine, "before_cursor_execute", fail_binding_update)
+
+    assert repo.get_by_id(bid).status == "PENDING"
+    with db.orm_session() as session:
+        assert (
+            session.query(BotModel).filter_by(bot_id="bot-teclaw").one().status
+            == "PENDING"
+        )
+
+
+def test_transition_teclaw_publish_terminal_commits_both_under_autocommit(
+    autocommit_db,
+):
+    db, _engine = autocommit_db
+    repo = DeviceRepository(db)
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="teclaw",
+            device_props={"publish_id": 9},
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-teclaw",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+    )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        transitioned = repo.transition_teclaw_publish_terminal(
+            binding_id=bid,
+            bot_id="bot-teclaw",
+            owner_id="emp-1",
+            publish_id=9,
+            status="ACTIVE",
+        )
+
+    assert transitioned is True
+    assert repo.get_by_id(bid).status == "ACTIVE"
+    with db.orm_session() as session:
+        assert (
+            session.query(BotModel).filter_by(bot_id="bot-teclaw").one().status
+            == "ACTIVE"
+        )
+
+
+def test_transition_teclaw_publish_terminal_rejects_ignored_isolation_override(
+    preconnected_autocommit_db,
+):
+    db = preconnected_autocommit_db
+    repo = DeviceRepository(db)
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="teclaw",
+            device_props={"publish_id": 9},
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-teclaw",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+    )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        with pytest.raises(SAWarning, match="execution_options ignored"):
+            repo.transition_teclaw_publish_terminal(
+                binding_id=bid,
+                bot_id="bot-teclaw",
+                owner_id="emp-1",
+                publish_id=9,
+                status="ACTIVE",
+            )
+
+    assert repo.get_by_id(bid).status == "PENDING"
+    with db.orm_session() as session:
+        assert (
+            session.query(BotModel).filter_by(bot_id="bot-teclaw").one().status
+            == "PENDING"
+        )
+
+
+def test_transition_teclaw_publish_terminal_serializes_concurrent_release(
+    autocommit_db,
+):
+    db, engine = autocommit_db
+    repo = DeviceRepository(db)
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="teclaw",
+            device_props={"publish_id": 9},
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-teclaw",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+    )
+
+    guard_read = Event()
+    allow_transition = Event()
+    release_update_started = Event()
+    release_finished = Event()
+    errors = []
+
+    def coordinate_statements(
+        _conn, _cursor, statement, _parameters, _context, _executemany
+    ):
+        normalized = statement.lstrip().lower()
+        if (
+            current_thread().name == "terminal-transition"
+            and normalized.startswith("select")
+            and "from ac_entity_device_binding" in normalized
+        ):
+            guard_read.set()
+            if not allow_transition.wait(timeout=5):
+                raise RuntimeError("terminal transition coordination timed out")
+        if (
+            current_thread().name == "release-writer"
+            and normalized.startswith("update ac_entity_device_binding")
+        ):
+            release_update_started.set()
+
+    def run_transition():
+        try:
+            with patch(_ENV_MOD, return_value="dev"):
+                repo.transition_teclaw_publish_terminal(
+                    binding_id=bid,
+                    bot_id="bot-teclaw",
+                    owner_id="emp-1",
+                    publish_id=9,
+                    status="ACTIVE",
+                )
+        except Exception as exc:  # noqa: BLE001 - re-raised in test thread
+            errors.append(exc)
+
+    def release_binding():
+        try:
+            repo.release_binding(
+                binding_id=bid,
+                release_reason="concurrent release",
+                released_by="emp-1",
+            )
+        except Exception as exc:  # noqa: BLE001 - re-raised in test thread
+            errors.append(exc)
+        finally:
+            release_finished.set()
+
+    event.listen(engine, "before_cursor_execute", coordinate_statements)
+    terminal_thread = Thread(
+        target=run_transition,
+        name="terminal-transition",
+    )
+    release_thread = Thread(
+        target=release_binding,
+        name="release-writer",
+    )
+    try:
+        terminal_thread.start()
+        assert guard_read.wait(timeout=5)
+        release_thread.start()
+        assert release_update_started.wait(timeout=5)
+        release_finished_before_transition = release_finished.wait(timeout=0.25)
+        allow_transition.set()
+        terminal_thread.join(timeout=5)
+        release_thread.join(timeout=5)
+    finally:
+        allow_transition.set()
+        terminal_thread.join(timeout=5)
+        release_thread.join(timeout=5)
+        event.remove(engine, "before_cursor_execute", coordinate_statements)
+
+    assert not terminal_thread.is_alive()
+    assert not release_thread.is_alive()
+    assert errors == []
+    assert release_finished_before_transition is False
+    binding = repo.get_by_id(bid)
+    assert binding.status == "RELEASED"
+    assert binding.release_reason == "concurrent release"
+    with db.orm_session() as session:
+        assert (
+            session.query(BotModel).filter_by(bot_id="bot-teclaw").one().status
             == "ACTIVE"
         )
 

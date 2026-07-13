@@ -94,11 +94,18 @@ incomplete payloads are permanent task failures rather than retryable work.
 Because the BaaS request can overlap another binding transition, a normal
 second read after the poll would still leave a race before persistence. For a
 terminal result, the handler therefore delegates to a repository operation
-that opens one ORM transaction, locks and reloads the binding, and repeats the
-guard against the task's exact ``binding_id`` and ``publish_id``. Only a
-PENDING Teclaw binding may proceed. A stale, released, terminal, non-Teclaw,
-or superseded binding returns ``False`` without mutating either row, and the
-handler completes the obsolete task.
+that explicitly establishes a real database transaction before its first
+query. This is required because the corp ORM Session is bound to an
+``AUTOCOMMIT`` engine; merely entering ``orm_session()`` is not a transaction.
+The repository overrides that fresh Session connection to a transactional
+isolation level, locks and reloads the binding, and repeats the guard against
+the task's exact ``binding_id`` and ``publish_id``. Only a PENDING Teclaw
+binding may proceed. A stale, released, terminal, non-Teclaw, or superseded
+binding rolls back and returns ``False`` without mutating either row, and the
+handler completes the obsolete task. If a runtime has already acquired the
+Session connection, SQLAlchemy ignores a later isolation override and emits a
+warning; the repository promotes that warning to an exception so the handler
+retries instead of silently falling back to AUTOCOMMIT.
 
 ### Poll result mapping
 
@@ -125,12 +132,20 @@ work durable; it does not introduce a new timeout failure policy.
 
 ### Terminal persistence
 
-Terminal state is one guarded transaction. After locking and validating the
-binding, the repository updates the expected bot first, requiring the task's
-``bot_id``, ``owner_id``, and ``binding_id`` together with the current
-environment and ``is_delete = 0``. The update must affect exactly one row;
-otherwise the repository raises and the transaction rolls back. It then
-updates the locked binding and commits both writes atomically.
+Terminal state is one guarded, explicitly managed transaction. On
+MySQL/OceanBase/Postgres-style dialects, the connection uses a non-autocommit
+isolation level so ``SELECT ... FOR UPDATE`` holds the binding lock until the
+explicit commit or rollback. SQLite ignores ``FOR UPDATE``, so the repository
+starts ``BEGIN IMMEDIATE`` before the guarded read; a concurrent writer cannot
+slip between the guard and the two writes.
+
+After locking and validating the binding, the repository updates the expected
+bot first, requiring the task's ``bot_id``, ``owner_id``, and ``binding_id``
+together with the current environment and ``is_delete = 0``. The update must
+affect exactly one row; otherwise the repository raises and explicitly rolls
+back. It then updates the locked binding and explicitly commits both writes
+atomically instead of relying on the outer ``orm_session()`` clean-exit
+semantics.
 
 The handler returns `Complete` for either a committed transition or a `False`
 stale-task result. Any repository exception returns `Retry`; a failed bot or
