@@ -291,7 +291,6 @@ class EconomyGovernanceModule(Module):
     def _governance_bot_service(
         self,
         task_repo: TaskRecordRepository,
-        admin_svc: GovernanceAdminService,
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         config: EconomyGovernanceConfig,
@@ -303,7 +302,6 @@ class EconomyGovernanceModule(Module):
         """Construct GovernanceBotService."""
         return GovernanceBotService(
             task_repo=task_repo,
-            admin_svc=admin_svc,
             notify_repo=notify_repo,
             audit_repo=audit_repo,
             config=config,

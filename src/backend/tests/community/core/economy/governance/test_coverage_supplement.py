@@ -684,11 +684,6 @@ class TestWhitelistHitWithActiveTicket:
 # ══════════════════════════════════════════════════════════════════
 
 
-class _FakeAdminSvc:
-    def is_paused(self) -> bool:
-        return False
-
-
 def _build_scan_svc(engine, *, config=None):
     """Build GovernanceBotService with in-memory DB."""
     db = _db_from_engine(engine)
@@ -704,7 +699,6 @@ def _build_scan_svc(engine, *, config=None):
         config = FakeGovernanceConfig()
     svc = GovernanceBotService(
         task_repo=task_repo,
-        admin_svc=_FakeAdminSvc(),
         notify_repo=notify_repo,
         audit_repo=audit_repo,
         config=config,
@@ -837,7 +831,6 @@ def _build_scan_svc(engine, *, config=None):
         config = FakeGovernanceConfig()
     svc = GovernanceBotService(
         task_repo=task_repo,
-        admin_svc=_FakeAdminSvc(),
         notify_repo=notify_repo,
         audit_repo=audit_repo,
         config=config,
