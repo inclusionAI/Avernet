@@ -12,7 +12,6 @@ use bcs_service_api::{
     ProviderBotBindingRepoPort, ProviderRecord, ProviderRepoPort, ServiceError, ServiceResult,
     UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
 };
-use futures::future::try_join_all;
 
 #[derive(Clone)]
 pub struct OrganizationCore {
@@ -608,45 +607,31 @@ impl OrganizationCoreService for OrganizationCore {
             None => allowed.iter().cloned().collect(),
         };
 
-        // Fetch each (scoped) provider's bindings concurrently rather than
-        // one sequential await per provider (review comment 2B). try_join_all
-        // short-circuits on the first Err, matching the original `?` semantics.
-        let per_provider = try_join_all(
-            scoped
-                .iter()
-                .map(|pid| self.provider_bindings.list_bindings_by_provider(pid)),
-        )
-        .await?;
-        let bindings = per_provider
-            .into_iter()
-            .flatten()
-            .filter(|binding| !binding.disabled)
-            .collect::<Vec<_>>();
-
-        let bot_ids = bindings
-            .iter()
-            .map(|binding| binding.bot_uuid.clone())
-            .collect::<Vec<_>>();
-        let bots = self
-            .registry
-            .get_by_ids(&bot_ids)
-            .await
-            .into_iter()
-            .map(|bot| (bot.bot_uuid.clone(), bot))
-            .collect::<HashMap<_, _>>();
-
         let mut candidates = Vec::new();
-        for binding in bindings {
-            let Some(bot) = bots.get(&binding.bot_uuid) else {
+        let records = self
+            .provider_bindings
+            .list_discoverable_provider_bot_records(
+                &bcs_service_api::ProviderBotDiscoverySelector::ProviderIds(scoped.clone()),
+            )
+            .await?;
+        for record in records {
+            if !scoped.contains(&record.provider_id) {
                 continue;
+            }
+            let capabilities = match record.capabilities {
+                Some(capabilities) => capabilities,
+                None => match self.registry.get(&record.bot_uuid).await {
+                    Some(bot) => bot.capabilities,
+                    None => continue,
+                },
             };
-            if !matches_query(&bot.bot_uuid, &bot.capabilities, &query) {
+            if !matches_query(&record.bot_uuid, &capabilities, &query) {
                 continue;
             }
             candidates.push(OrganizationCandidateBot {
-                bot_uuid: bot.bot_uuid.clone(),
-                provider_id: binding.provider_id,
-                capabilities: bot.capabilities.clone(),
+                bot_uuid: record.bot_uuid,
+                provider_id: record.provider_id,
+                capabilities,
             });
         }
         candidates.sort_by(|left, right| left.bot_uuid.cmp(&right.bot_uuid));

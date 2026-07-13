@@ -1,18 +1,21 @@
 use async_trait::async_trait;
-use bcs_domain::{ProviderBotBinding, ProviderCredential, ProviderRecord};
+use bcs_domain::{BotCapabilities, ProviderBotBinding, ProviderCredential, ProviderRecord};
 
 use crate::ServiceResult;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ProviderBotDiscoveryRecord {
     pub bot_uuid: String,
     pub provider_id: String,
     pub provider_name: String,
+    /// Present when the store can join the registry table in the same query.
+    pub capabilities: Option<BotCapabilities>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderBotDiscoverySelector {
     All,
+    ProviderIds(Vec<String>),
     Query(String),
     Name(String),
     Skills(Vec<String>),
