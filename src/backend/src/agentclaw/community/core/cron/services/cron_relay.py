@@ -528,6 +528,48 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
             logger.error(f"[_fetch_bot_crons] Adapter request failed for bot {bot_id}: {e}")
             return {"success": False, "error": str(e)}
 
+    def _get_retained_verify_publish_record(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+    ) -> Any | None:
+        """返回生产发布单中仍可使用的 verify 运行态。
+
+        当 Vn+1 处于 VALIDATING 时，调用方优先使用 Vn+1 的 verify binding。
+        只有不存在 VALIDATING 发布单时，才检查 Vn 的 SUCCESS 发布单；其中的
+        verify binding 仍为 ACTIVE，表示该预发运行态在生产发布后仍被保留。
+        """
+        publish_record = (
+            self._publish_repo.get_latest_by_source_bot_id_and_owner_and_status(
+                source_bot_id=bot_id,
+                owner_id=owner_id,
+                status=PublishStatus.SUCCESS.value,
+                env=get_current_env(),
+            )
+        )
+        if publish_record is None:
+            return None
+
+        binding_info = (publish_record.ext or {}).get("binding") or {}
+        verify_binding_id = binding_info.get("verify")
+        if not verify_binding_id:
+            return None
+
+        try:
+            device = self._device_provider.get_device(binding_id=verify_binding_id)
+        except Exception as e:
+            logger.warning(
+                "Failed to read retained verify binding for bot %s: %s",
+                bot_id,
+                e,
+            )
+            return None
+
+        if self._read_field(device, "status") != DeviceBindingStatus.ACTIVE:
+            return None
+        return publish_record
+
     def _build_runtime_targets(
         self,
         bot: dict,
@@ -580,7 +622,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         if bot_type != "service":
             return targets, failed_targets
 
-        # 服务 Bot 的 verify/online 分别由验证中和发布成功记录提供 binding。
+        # verify 优先使用验证中版本；online 使用发布成功版本。
         for runtime_stage, publish_status, binding_key in (
             (RUNTIME_STAGE_VERIFY, PublishStatus.VALIDATING.value, "verify"),
             (RUNTIME_STAGE_ONLINE, PublishStatus.SUCCESS.value, "online"),
@@ -594,6 +636,13 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
                         env=get_current_env(),
                     )
                 )
+                # 没有验证中版本时，生产发布单里仍为 ACTIVE 的 verify binding
+                # 继续代表可用的预发运行态。
+                if publish_record is None and runtime_stage == RUNTIME_STAGE_VERIFY:
+                    publish_record = self._get_retained_verify_publish_record(
+                        bot_id=bot_id,
+                        owner_id=owner_id,
+                    )
             except Exception as e:
                 failed_targets.append(
                     self._failed_target_from_values(
@@ -669,6 +718,12 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
             status=publish_status,
             env=get_current_env(),
         )
+        # 指定 verify 时遵循与列表相同的版本优先级，避免列表可见但操作无法路由。
+        if publish_record is None and runtime_stage == RUNTIME_STAGE_VERIFY:
+            publish_record = self._get_retained_verify_publish_record(
+                bot_id=bot_id,
+                owner_id=owner_id,
+            )
         if publish_record is None:
             raise CronRelayError(
                 f"runtime_stage={runtime_stage} publish record not found",
