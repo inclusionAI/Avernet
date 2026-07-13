@@ -234,7 +234,12 @@ class PassportPlugin(Plugin, Protocol):
         owner_workno: str,
         reason: str,
     ) -> None:
-        """Set the bot's agent identity credential online."""
+        """Bring the credential online and make a runtime token queryable.
+
+        Implementations must return only after ``query_token`` can provide the
+        token required by device bootstrap, or raise when that postcondition
+        cannot be established.
+        """
         ...
 
     def offline_agent_identity_credential(

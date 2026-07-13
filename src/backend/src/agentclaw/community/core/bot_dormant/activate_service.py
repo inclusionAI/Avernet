@@ -5,7 +5,8 @@ Flow:
   2. REACTIVATING → friendly early return (idempotent).
   3. non-RECYCLED  → InvalidBotStateError.
   4. RECYCLED      → update_status(REACTIVATING) + spawn background thread
-                      that calls passport unfreeze then start_bot;
+                      that calls passport unfreeze, verifies the runtime token,
+                      then starts the bot;
                       on failure rolls back: passport freeze + RECYCLED.
 """
 from __future__ import annotations
@@ -121,6 +122,22 @@ class ActivateBotService:
             return
 
         try:
+            logger.info(
+                "[activate] passport token verify start bot_id=%s user_id=%s",
+                bot_id,
+                user_id,
+            )
+            token = self._passport.query_token(
+                bot_id=bot_id,
+                owner_workno=user_id,
+            )
+            if not token:
+                raise RuntimeError("passport token is unavailable after unfreeze")
+            logger.info(
+                "[activate] passport token verify success bot_id=%s user_id=%s",
+                bot_id,
+                user_id,
+            )
             # start_bot internally calls apply_device; on success sets status=ACTIVE.
             logger.info(
                 "[activate] start_bot start bot_id=%s user_id=%s nick_name=%s",
