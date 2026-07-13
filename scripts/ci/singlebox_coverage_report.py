@@ -17,6 +17,41 @@ def _percent(covered: int, total: int) -> float:
     return round((covered * 100.0 / total) if total else 0.0, 2)
 
 
+def select_module_names(
+    manifest: dict[str, Any], requested_modules: list[str]
+) -> list[str]:
+    modules = manifest.get("modules") or {}
+    if requested_modules:
+        selected: list[str] = []
+        for module_name in requested_modules:
+            if module_name not in modules:
+                raise ValueError(f"unknown coverage module: {module_name}")
+            if module_name not in selected:
+                selected.append(module_name)
+        return selected
+    return [
+        module_name
+        for module_name, config in modules.items()
+        if config.get("enabled", True)
+    ]
+
+
+def acceptance_targets_for(
+    manifest: dict[str, Any], module_names: list[str]
+) -> list[str]:
+    modules = manifest.get("modules") or {}
+    targets: list[str] = []
+    for module_name in module_names:
+        module = modules.get(module_name)
+        if module is None:
+            raise ValueError(f"unknown coverage module: {module_name}")
+        for target in module.get("acceptance_targets") or []:
+            target = str(target)
+            if target not in targets:
+                targets.append(target)
+    return targets
+
+
 def _matches_core_path(filename: str, prefixes: list[str]) -> bool:
     normalized = f"/{filename.replace('\\', '/').strip('./')}/"
     return any(
@@ -133,7 +168,10 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         f"- status: {summary.get('status', 'unknown')}",
     ]
     acceptance = summary.get("acceptance") or {}
-    if acceptance.get("target"):
+    targets = acceptance.get("targets") or []
+    if targets:
+        lines.append(f"- acceptance: {', '.join(targets)}")
+    elif acceptance.get("target"):
         lines.append(f"- acceptance: {acceptance['target']}")
     for report in (summary.get("modules") or {}).values():
         lines.extend(
@@ -192,20 +230,24 @@ section{background:#fff;border:1px solid #dce2e8;border-radius:8px;padding:20px}
 
 def update_report_artifacts(
     report_dir: Path,
-    report: dict[str, Any],
+    reports: dict[str, Any] | list[dict[str, Any]],
     *,
     threshold_errors: list[str] | None = None,
 ) -> None:
+    if isinstance(reports, dict):
+        reports = [reports]
     summary_path = report_dir / "summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    summary.setdefault("modules", {})[report["name"]] = report
+    modules = summary.setdefault("modules", {})
+    for report in reports:
+        modules[report["name"]] = report
     if threshold_errors:
         summary["status"] = "failed"
         summary["threshold_errors"] = threshold_errors
     else:
         summary.pop("threshold_errors", None)
     summary_path.write_text(
-        json.dumps(summary, indent=2, sort_keys=True) + "\n",
+        json.dumps(summary, indent=2) + "\n",
         encoding="utf-8",
     )
     (report_dir / "summary.md").write_text(
@@ -243,27 +285,55 @@ def _load_jsonl_keys(path: Path) -> list[str]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True, type=Path)
-    parser.add_argument("--module", required=True)
-    parser.add_argument("--coverage-json", required=True, type=Path)
-    parser.add_argument("--router-hits", required=True, type=Path)
-    parser.add_argument("--plugin-hits", required=True, type=Path)
-    parser.add_argument("--report-dir", required=True, type=Path)
+    parser.add_argument("--module", action="append", default=[])
+    parser.add_argument("--list-modules", action="store_true")
+    parser.add_argument("--list-acceptance-targets", action="store_true")
+    parser.add_argument("--coverage-json", type=Path)
+    parser.add_argument("--router-hits", type=Path)
+    parser.add_argument("--plugin-hits", type=Path)
+    parser.add_argument("--report-dir", type=Path)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     manifest = yaml.safe_load(args.manifest.read_text(encoding="utf-8")) or {}
+    try:
+        module_names = select_module_names(manifest, args.module)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    if args.list_modules:
+        print("\n".join(module_names))
+        return 0
+    if args.list_acceptance_targets:
+        print("\n".join(acceptance_targets_for(manifest, module_names)))
+        return 0
+    required = {
+        "--coverage-json": args.coverage_json,
+        "--router-hits": args.router_hits,
+        "--plugin-hits": args.plugin_hits,
+        "--report-dir": args.report_dir,
+    }
+    missing = [flag for flag, value in required.items() if value is None]
+    if missing:
+        print(f"missing required reporting arguments: {', '.join(missing)}", file=sys.stderr)
+        return 2
     coverage = json.loads(args.coverage_json.read_text(encoding="utf-8"))
-    report = build_module_report(
-        manifest=manifest,
-        module_name=args.module,
-        coverage=coverage,
-        router_hits=_load_jsonl_keys(args.router_hits),
-        plugin_hits=_load_jsonl_keys(args.plugin_hits),
-    )
-    errors = validate_thresholds(report)
-    update_report_artifacts(args.report_dir, report, threshold_errors=errors)
+    router_hits = _load_jsonl_keys(args.router_hits)
+    plugin_hits = _load_jsonl_keys(args.plugin_hits)
+    reports = [
+        build_module_report(
+            manifest=manifest,
+            module_name=module_name,
+            coverage=coverage,
+            router_hits=router_hits,
+            plugin_hits=plugin_hits,
+        )
+        for module_name in module_names
+    ]
+    errors = [error for report in reports for error in validate_thresholds(report)]
+    update_report_artifacts(args.report_dir, reports, threshold_errors=errors)
     if errors:
         print("singlebox module coverage threshold failed:", file=sys.stderr)
         for error in errors:
@@ -275,11 +345,12 @@ def main() -> int:
             return "N/A"
         return f"{metric['percent']:.2f}%"
 
-    print(
-        f"{args.module} coverage: core={report['core']['percent']:.2f}% "
-        f"router={display(report['router_api'])} "
-        f"plugin={display(report['plugin_api'])}"
-    )
+    for report in reports:
+        print(
+            f"{report['name']} coverage: core={report['core']['percent']:.2f}% "
+            f"router={display(report['router_api'])} "
+            f"plugin={display(report['plugin_api'])}"
+        )
     return 0
 
 
