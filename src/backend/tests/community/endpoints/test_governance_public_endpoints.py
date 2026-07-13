@@ -1,8 +1,10 @@
 """Endpoint coverage for governance open + business-data router.
 
-Covers the two 已开放接口(card-callback / offline-batch,免鉴权,有外部调用约定):
-  - POST /card-callback            钉钉卡片回调(iframe fetch POST,治理反馈真入口)
-  - POST /records/offline-batch    ODPS 离线批量写入(§7.2)
+Covers the two 端点(鉴权方式不同):
+  - POST /card-callback            钉钉卡片回调 — cookie/SSO(RequestContext,
+                                   需 x-user-id header)
+  - POST /records/offline-batch    ODPS 离线批量写入 — 静态 Bearer token
+                                   (需 Authorization: Bearer <token>)
 
 用户自助端点(/notifications*、用户 /whitelist)已从 router 删除:无真实用户主动
 调用场景,治理反馈真入口是 card-callback。相关用例同步移除。
@@ -32,6 +34,13 @@ from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, end
 
 
 _USER_ID = "staff-001"
+# card-callback 走 cookie/SSO(RequestContext),Local AuthPlugin 读 x-user-id header
+_USER_HEADER = {"x-user-id": _USER_ID}
+# offline-batch 走静态 Bearer token(ODPS pipeline 无 cookie);singlebox fallback 值
+# 与 EconomyGovernanceModule._SINGLEBOX_FALLBACK_ECONOMY_TOKEN 对齐
+_OFFLINE_TOKEN = "singlebox-economy-governance-token-local"
+_OFFLINE_TOKEN_HEADER = {"Authorization": f"Bearer {_OFFLINE_TOKEN}"}
+_BAD_TOKEN_HEADER = {"Authorization": "Bearer wrong-token"}
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +139,7 @@ def _assert_offline_batch_succeeded(response, world) -> None:
 
 
 # ===========================================================================
-# 1. POST /card-callback — DingTalk card iframe callback (no auth)
+# 1. POST /card-callback — DingTalk card iframe callback (cookie/SSO auth)
 # ===========================================================================
 
 
@@ -139,6 +148,7 @@ def _assert_offline_batch_succeeded(response, world) -> None:
     path="/api/economy/governance/card-callback",
     scenario="ok",
     input=CaseInput(
+        headers=_USER_HEADER,
         json_body={
             "notification_id": "n-uuid-card",
             "response": "optimized",
@@ -158,6 +168,7 @@ def card_callback_ok():
     path="/api/economy/governance/card-callback",
     scenario="not_found",
     input=CaseInput(
+        headers=_USER_HEADER,
         json_body={
             "notification_id": "n-nonexistent-card",
             "response": "optimized",
@@ -170,8 +181,26 @@ def card_callback_not_found():
     """Error path: card-callback for missing notification -> 404."""
 
 
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/card-callback",
+    scenario="unauthenticated",
+    input=CaseInput(
+        # 无身份头 → RequestContext 401
+        json_body={
+            "notification_id": "n-uuid-card",
+            "response": "optimized",
+            "remark": "test",
+        },
+    ),
+    expect=ExpectError(status=401),
+)
+def card_callback_unauthenticated():
+    """No cookie/identity → 401 (card-callback now requires SSO auth)."""
+
+
 # ===========================================================================
-# 2. POST /records/offline-batch — ODPS batch ingestion (no auth)
+# 2. POST /records/offline-batch — ODPS batch ingestion (Bearer token auth)
 # ===========================================================================
 
 
@@ -180,6 +209,7 @@ def card_callback_not_found():
     path="/api/economy/governance/records/offline-batch",
     scenario="ok",
     input=CaseInput(
+        headers=_OFFLINE_TOKEN_HEADER,
         json_body={
             "records": [
                 {
@@ -205,7 +235,7 @@ def card_callback_not_found():
     extra_assertions=(_assert_offline_batch_succeeded,),
 )
 def offline_batch_ok():
-    """Happy path: offline batch ingestion."""
+    """Happy path: offline batch ingestion with valid Bearer token."""
 
 
 @endpoint_test(
@@ -213,6 +243,7 @@ def offline_batch_ok():
     path="/api/economy/governance/records/offline-batch",
     scenario="validation_error",
     input=CaseInput(
+        headers=_OFFLINE_TOKEN_HEADER,
         json_body={
             "records": [],
             "batch_id": "b-empty",
@@ -224,3 +255,47 @@ def offline_batch_ok():
 )
 def offline_batch_validation_error():
     """Error path: empty records array -> 422 validation error."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/records/offline-batch",
+    scenario="no_token",
+    input=CaseInput(
+        # 无 Authorization 头 → 401
+        json_body={
+            "records": [
+                {"owner_id": _USER_ID, "bot_id": "bot-x", "dt_version": "20260705",
+                 "governance_decision": "actionable", "hit_dimensions": "cost_high"},
+            ],
+            "batch_id": "b-no-token",
+            "dt_version": "20260705",
+            "total_count": 1,
+        },
+    ),
+    expect=ExpectError(status=401),
+)
+def offline_batch_no_token():
+    """No Bearer token → 401 (offline-batch now requires token auth)."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/records/offline-batch",
+    scenario="bad_token",
+    input=CaseInput(
+        headers=_BAD_TOKEN_HEADER,
+        json_body={
+            "records": [
+                {"owner_id": _USER_ID, "bot_id": "bot-x", "dt_version": "20260705",
+                 "governance_decision": "actionable", "hit_dimensions": "cost_high"},
+            ],
+            "batch_id": "b-bad-token",
+            "dt_version": "20260705",
+            "total_count": 1,
+        },
+    ),
+    expect=ExpectError(status=401),
+)
+def offline_batch_bad_token():
+    """Wrong Bearer token → 401."""
