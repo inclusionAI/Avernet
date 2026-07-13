@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 
 
 def _safe_repr(obj: object, max_len: int = 4096) -> str:
-    """Safely repr() an object, truncating to max_len bytes.
+    """Safely repr() an object, truncating to max_len characters.
 
     Returns "<repr failed: {error}>" if repr() raises an exception.
     """
@@ -442,6 +442,13 @@ class ArcaPaasService(PaasService):
                     )
                 else:
                     storage_id = storage["storage_id"]
+                    if not isinstance(storage_id, str):
+                        self._logger.warning(
+                            f"Storage cleanup skipped: storage_id is not a string, "
+                            f"paas_device_id={paas_device_id}, "
+                            f"storage_id={_safe_repr(storage_id)}"
+                        )
+                        storage_id = None
             except Exception as e:
                 self._logger.warning(
                     f"Storage cleanup skipped: get_info failed, "
@@ -504,7 +511,7 @@ class ArcaPaasService(PaasService):
         # Step 2: Best-effort storage cleanup (always reached, even on
         # idempotent destroy paths — NAS volumes must be cleaned up
         # regardless of whether the sandbox was already gone).
-        if storage_id:
+        if storage_id is not None:
             tenant_name = self._credentials.tenant_name
             if tenant_name:
                 try:
