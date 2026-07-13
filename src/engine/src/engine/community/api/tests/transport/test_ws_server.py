@@ -1314,6 +1314,104 @@ class TestChatSubscribeFanout:
         assert server._session_subscribers == {}
         assert server._conn_sessions == {}
 
+    @pytest.mark.asyncio
+    async def test_unsubscribe_conn_tolerates_missing_subscriber_entry(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        # _conn_sessions references a session already removed from
+        # _session_subscribers (race / partial cleanup). _unsubscribe_conn
+        # must `continue` past the None entry instead of crashing.
+        server._conn_sessions = {"conn-1": {"sk-1"}}
+        server._session_subscribers = {}  # sk-1 already gone
+
+        server._unsubscribe_conn("conn-1")
+
+        assert server._conn_sessions == {}
+        assert server._session_subscribers == {}
+
+    @pytest.mark.asyncio
+    async def test_unsubscribe_session_purges_conn_when_last_session_removed(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        EngineManager.get_instance()._engine = "openclaw"
+        client = MagicMock(name="OpenClawClient")
+        client.on_event = MagicMock()
+        client.off_event = MagicMock()
+        fake_engine.token_pool.get = AsyncMock(return_value=client)
+
+        # only one session -> removing it must pop the conn from _conn_sessions
+        await server._handle_request(
+            websocket=MagicMock(),
+            conn_id="conn-1",
+            request=_req("chat.subscribe", {"sessionKey": "sk-1"}),
+            auth_gate_service=auth_gate_service,
+        )
+        await server._handle_request(
+            websocket=MagicMock(),
+            conn_id="conn-1",
+            request=_req("chat.unsubscribe", {"sessionKey": "sk-1"}),
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert server._conn_sessions == {}
+        assert server._session_subscribers == {}
+
+    @pytest.mark.asyncio
+    async def test_fanout_injected_event_no_subscribers_returns_early(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        EngineManager.get_instance()._engine = "openclaw"
+        client = MagicMock(name="OpenClawClient")
+        client.on_event = MagicMock()
+        fake_engine.token_pool.get = AsyncMock(return_value=client)
+        ws = MagicMock()
+        ws.send_text = AsyncMock()
+        server._connections["conn-1"] = ws
+
+        # subscribe sk-1, bind listener, then drop subscribers so the listener
+        # callback hits an empty subscriber set.
+        await server._handle_request(
+            websocket=ws,
+            conn_id="conn-1",
+            request=_req("chat.subscribe", {"sessionKey": "sk-1"}),
+            auth_gate_service=auth_gate_service,
+        )
+        listener = client.on_event.call_args_list[0].args[1]
+        server._session_subscribers.clear()
+
+        await listener(
+            EventFrame(
+                event="chat",
+                payload={"sessionKey": "sk-1", "runId": "inject-abc"},
+            ),
+        )
+
+        ws.send_text.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_drop_idle_inject_listeners_tolerates_off_event_failure(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        EngineManager.get_instance()._engine = "openclaw"
+        client = MagicMock(name="OpenClawClient")
+        client.on_event = MagicMock()
+        client.off_event = MagicMock(side_effect=RuntimeError("off boom"))
+        fake_engine.token_pool.get = AsyncMock(return_value=client)
+
+        await server._handle_request(
+            websocket=MagicMock(),
+            conn_id="conn-1",
+            request=_req("chat.subscribe", {"sessionKey": "sk-1"}),
+            auth_gate_service=auth_gate_service,
+        )
+
+        # Releasing the conn triggers _drop_idle_inject_listeners, which must
+        # swallow the off_event exception and still clear the refs.
+        await server._release_conn("conn-1")
+
+        assert server._inject_listener_refs == {}
+        assert server._session_subscribers == {}
+
 
 class _FakeChatServiceWithInject:
     """Stand-in chat service whose class explicitly declares ``inject``.
