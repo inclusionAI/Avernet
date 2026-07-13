@@ -129,7 +129,6 @@ class SecretNamesConfig:
     """
 
     dormant_internal_token: str = ""
-    economy_internal_token: str = ""
     aiworkbench_repo_url: str = ""
 
 
@@ -456,27 +455,6 @@ class DormantInternalToken:
 
     Empty ``value`` makes the auth Depends 401 all requests
     (feature-off failure mode).
-    """
-
-    value: str = ""
-
-
-@dataclass(frozen=True)
-class EconomyInternalToken:
-    """Resolved bearer token for ``/api/economy/governance/records/offline-batch``.
-
-    Produced by ``EconomyGovernanceModule._resolved_economy_token``. Resolution
-    rules mirror :class:`DormantInternalToken` (see above):
-
-      - name empty (community / singlebox / test) → ``.value = <fallback constant>``
-        (so singlebox 联调可调接口)
-      - Mist returns a secret with non-empty ``secret_value`` → ``.value = secret_value``
-      - Mist returns ``None`` / empty value → fallback constant
-      - resolver raises → ``.value = ""`` (failure-closed: 401 all requests)
-
-    Empty ``value`` makes the auth Depends 401 all requests (feature-off
-    failure mode). Token value is NEVER in YAML (would leak) — only the
-    secret *name* lives in ``SecretNamesConfig.economy_internal_token``.
     """
 
     value: str = ""
