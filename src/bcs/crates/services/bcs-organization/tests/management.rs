@@ -477,7 +477,7 @@ async fn candidate_bot_page_is_sorted_and_counts_before_paging() {
 
 
 #[tokio::test]
-async fn effective_membership_authorizes_pair_and_fails_after_grant_revocation() {
+async fn scoped_a2a_authorizes_pair_after_cross_provider_grant_revocation() {
     let ctx = test_context().await;
     let provider_a = register_provider(&ctx, "Provider A").await;
     let provider_b = register_provider(&ctx, "Provider B").await;
@@ -529,11 +529,10 @@ async fn effective_membership_authorizes_pair_and_fails_after_grant_revocation()
         .await
         .expect("revoke organization manager");
 
-    assert!(matches!(
-        ctx.core.authorize_pair("promo-2026", "bot-a", "bot-b").await,
-        Err(ServiceError::Forbidden(message))
-            if message == "organization_provider_grant_required"
-    ));
+    ctx.core
+        .authorize_pair("promo-2026", "bot-a", "bot-b")
+        .await
+        .expect("grant revocation must not remove active scoped A2A members");
 }
 
 #[tokio::test]
@@ -585,7 +584,7 @@ async fn effective_membership_rejects_disabled_org_disabled_member_and_nonmember
         .expect("disable organization");
     let disabled_org = ctx
         .core
-        .require_effective_member("promo-2026", "bot-a")
+        .authorize_pair("promo-2026", "bot-a", "bot-b")
         .await
         .expect_err("disabled organization must be rejected");
     assert!(matches!(disabled_org, ServiceError::Forbidden(reason) if reason == "organization_disabled"));
@@ -663,7 +662,7 @@ async fn runtime_member_list_keeps_active_members_after_provider_grant_revocatio
 }
 
 #[tokio::test]
-async fn effective_membership_rejects_disabled_resource_provider_and_missing_org() {
+async fn scoped_a2a_ignores_disabled_binding_and_rejects_missing_org() {
     let ctx = test_context().await;
     let provider_a = register_provider(&ctx, "Provider A").await;
     let provider_b = register_provider(&ctx, "Provider B").await;
@@ -691,15 +690,40 @@ async fn effective_membership_rejects_disabled_resource_provider_and_missing_org
     assert!(matches!(missing_org, ServiceError::InvalidOperation { message, .. } if message.contains("organization 'missing-org' not found")));
 
     ctx.provider_core
-        .set_provider_disabled(&provider_b.provider_id, &provider_b.admin_token, "11111111", true)
+        .set_provider_bot_disabled(
+            &provider_b.provider_id,
+            "bot-b",
+            &provider_b.admin_token,
+            true,
+        )
         .await
-        .expect("disable provider b");
-    let disabled_provider = ctx
-        .core
+        .expect("disable provider b binding");
+    ctx.core
         .authorize_pair("promo-2026", "bot-a", "bot-b")
         .await
-        .expect_err("disabled resource provider must be rejected");
-    assert!(matches!(disabled_provider, ServiceError::Forbidden(reason) if reason == "organization_provider_grant_required"));
+        .expect("disabled provider binding must not remove active scoped A2A members");
+}
+
+#[tokio::test]
+async fn scoped_a2a_allows_sender_to_target_itself_with_one_member_record() {
+    let ctx = test_context().await;
+    let provider_a = register_provider(&ctx, "Provider A").await;
+    register_bot(&ctx, &provider_a, "bot-a").await;
+    create_org(&ctx, &provider_a).await;
+    ctx.service
+        .put_member(PutOrganizationMemberCommand {
+            auth: provider_auth(&provider_a),
+            organization_code: "promo-2026".to_string(),
+            bot_uuid: "bot-a".to_string(),
+            role: None,
+        })
+        .await
+        .expect("add member");
+
+    ctx.core
+        .authorize_pair("promo-2026", "bot-a", "bot-a")
+        .await
+        .expect("sender and target may be the same active member");
 }
 
 #[tokio::test]

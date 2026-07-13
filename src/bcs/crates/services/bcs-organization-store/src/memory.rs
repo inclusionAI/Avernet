@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use bcs_domain::{Organization, OrganizationMember};
 use bcs_service_api::port::repo::{
     CreateOrganizationRecord, ListOrganizationMembersPageQuery, ListOrganizationMembersQuery,
-    ListOrganizationsQuery, OrganizationMemberPage, OrganizationRepoPort,
+    ListOrganizationsQuery, OrganizationMemberPage, OrganizationMemberStatus, OrganizationRepoPort,
     UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
 };
 use bcs_service_api::{ServiceError, ServiceResult};
@@ -146,6 +146,27 @@ impl OrganizationRepoPort for MemoryOrganizationRepo {
                 bot_uuid.to_string(),
             ))
             .cloned())
+    }
+
+    async fn get_member_statuses(
+        &self,
+        env: &str,
+        organization_code: &str,
+        first_bot_uuid: &str,
+        second_bot_uuid: &str,
+    ) -> ServiceResult<Vec<OrganizationMemberStatus>> {
+        let members = self.members.read().await;
+        Ok([first_bot_uuid, second_bot_uuid]
+            .into_iter()
+            .filter_map(|bot_uuid| {
+                members
+                    .get(&(env.to_string(), organization_code.to_string(), bot_uuid.to_string()))
+                    .map(|member| OrganizationMemberStatus {
+                        bot_uuid: member.bot_uuid.clone(),
+                        disabled: member.disabled,
+                    })
+            })
+            .collect())
     }
 
     async fn set_member_disabled(

@@ -5,7 +5,7 @@ use bcs_db_api::{DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
 use bcs_domain::{Organization, OrganizationMember};
 use bcs_service_api::port::repo::{
     CreateOrganizationRecord, ListOrganizationMembersPageQuery, ListOrganizationMembersQuery,
-    ListOrganizationsQuery, OrganizationMemberPage, OrganizationRepoPort,
+    ListOrganizationsQuery, OrganizationMemberPage, OrganizationMemberStatus, OrganizationRepoPort,
     UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
 };
 use bcs_service_api::{ServiceError, ServiceResult};
@@ -247,6 +247,37 @@ impl OrganizationRepoPort for DbOrganizationStore {
             .await
             .map_err(|error| service_db_error("get_member", error))?;
         rows.into_iter().next().map(row_to_member).transpose()
+    }
+
+    async fn get_member_statuses(
+        &self,
+        env: &str,
+        organization_code: &str,
+        first_bot_uuid: &str,
+        second_bot_uuid: &str,
+    ) -> ServiceResult<Vec<OrganizationMemberStatus>> {
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                "SELECT bot_uuid, disabled FROM bcs_organization_members \
+                 WHERE env = ? AND organization_code = ? AND bot_uuid IN (?, ?)",
+                vec![
+                    DbValue::from(env),
+                    DbValue::from(organization_code),
+                    DbValue::from(first_bot_uuid),
+                    DbValue::from(second_bot_uuid),
+                ],
+            ))
+            .await
+            .map_err(|error| service_db_error("get_member_statuses", error))?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(OrganizationMemberStatus {
+                    bot_uuid: required_string(&row, "bot_uuid")?,
+                    disabled: bool_column(&row, "disabled")?,
+                })
+            })
+            .collect()
     }
 
     async fn set_member_disabled(
@@ -662,6 +693,44 @@ mod tests {
                 DbValue::from("traffic_analyst"),
                 DbValue::from(10_u64),
                 DbValue::from(20_u64),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn member_statuses_fetches_both_scoped_a2a_members_in_one_query() {
+        let db = Arc::new(RecordingDbPlugin::with_rows(vec![
+            DbRow::new(BTreeMap::from([
+                ("bot_uuid".to_string(), DbValue::from("bot-a")),
+                ("disabled".to_string(), DbValue::from(0_i64)),
+            ])),
+            DbRow::new(BTreeMap::from([
+                ("bot_uuid".to_string(), DbValue::from("bot-b")),
+                ("disabled".to_string(), DbValue::from(1_i64)),
+            ])),
+        ]));
+        let repo = DbOrganizationStore::mysql(db.clone());
+
+        let statuses = repo
+            .get_member_statuses("contract", "promo-2026", "bot-a", "bot-b")
+            .await
+            .expect("member statuses");
+
+        assert_eq!(statuses.len(), 2);
+        assert!(statuses[1].disabled);
+        let statements = db.queried.lock().expect("recorded query statements lock");
+        assert_eq!(statements.len(), 1);
+        assert_eq!(
+            statements[0].sql(),
+            "SELECT bot_uuid, disabled FROM bcs_organization_members WHERE env = ? AND organization_code = ? AND bot_uuid IN (?, ?)"
+        );
+        assert_eq!(
+            statements[0].params(),
+            &[
+                DbValue::from("contract"),
+                DbValue::from("promo-2026"),
+                DbValue::from("bot-a"),
+                DbValue::from("bot-b"),
             ]
         );
     }

@@ -62,6 +62,12 @@ pub struct OrganizationMemberPage {
     pub limit: u64,
 }
 
+#[derive(Debug, Clone)]
+pub struct OrganizationMemberStatus {
+    pub bot_uuid: String,
+    pub disabled: bool,
+}
+
 #[async_trait]
 pub trait OrganizationRepoPort: Send + Sync {
     async fn create_organization(
@@ -91,6 +97,13 @@ pub trait OrganizationRepoPort: Send + Sync {
         organization_code: &str,
         bot_uuid: &str,
     ) -> ServiceResult<Option<OrganizationMember>>;
+    async fn get_member_statuses(
+        &self,
+        env: &str,
+        organization_code: &str,
+        first_bot_uuid: &str,
+        second_bot_uuid: &str,
+    ) -> ServiceResult<Vec<OrganizationMemberStatus>>;
     async fn set_member_disabled(
         &self,
         env: &str,

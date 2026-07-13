@@ -546,8 +546,38 @@ impl OrganizationCoreService for OrganizationCore {
         target_bot_uuid: &str,
     ) -> ServiceResult<AuthorizedOrganizationPair> {
         let organization = self.require_organization_for_runtime(organization_code).await?;
-        let sender = self.effective_member_in(&organization, sender_bot_uuid).await?;
-        let target = self.effective_member_in(&organization, target_bot_uuid).await?;
+        validate_external_id("bot_uuid", sender_bot_uuid)?;
+        validate_external_id("bot_uuid", target_bot_uuid)?;
+        let statuses = self
+            .organizations
+            .get_member_statuses(
+                &self.env,
+                &organization.code,
+                sender_bot_uuid,
+                target_bot_uuid,
+            )
+            .await?;
+        let statuses = statuses
+            .into_iter()
+            .map(|status| (status.bot_uuid, status.disabled))
+            .collect::<HashMap<_, _>>();
+        let member_for = |bot_uuid: &str| -> ServiceResult<OrganizationMember> {
+            match statuses.get(bot_uuid) {
+                None => Err(ServiceError::Forbidden("organization_member_required".to_string())),
+                Some(true) => Err(ServiceError::Forbidden("organization_member_disabled".to_string())),
+                Some(false) => Ok(OrganizationMember {
+                    env: self.env.clone(),
+                    organization_code: organization.code.clone(),
+                    bot_uuid: bot_uuid.to_string(),
+                    role: None,
+                    disabled: false,
+                    created_at: 0,
+                    updated_at: 0,
+                }),
+            }
+        };
+        let sender = member_for(sender_bot_uuid)?;
+        let target = member_for(target_bot_uuid)?;
         Ok(AuthorizedOrganizationPair {
             organization,
             sender,
