@@ -14,7 +14,16 @@ from tests.community.acceptance._fixtures.live_personal_bot import (
     fresh_id,
 )
 
-TEST_BOTS_ROOT = Path(__file__).resolve().parents[6] / "test-bots"
+
+def _resolve_repo_root() -> Path:
+    """Locate the checkout that owns the singlebox runtime directories."""
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "scripts" / "singlebox.sh").is_file():
+            return parent
+    raise RuntimeError("could not locate repository root from acceptance test path")
+
+
+TEST_BOTS_ROOT = _resolve_repo_root() / "test-bots"
 
 
 @pytest.mark.acceptance
