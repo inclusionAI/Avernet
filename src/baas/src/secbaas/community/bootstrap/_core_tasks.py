@@ -11,6 +11,8 @@ from secbaas.community.core.service.scheduler import (
     BotRunRecoveryTaskConfig,
     DeviceTtlTimerTask,
     DeviceTtlTimerTaskConfig,
+    FileTransferPoller,
+    FileTransferPollerConfig,
 )
 
 
@@ -22,6 +24,9 @@ class CoreTaskContainer(containers.DeclarativeContainer):
     device_binding_repo = providers.Dependency()
     sandbox_device_router = providers.Dependency()
     bot_run_queue_repository = providers.Dependency()
+    ticket_repository = providers.Dependency()
+    paas_service_facade = providers.Dependency()
+    file_transfer_backend = providers.Dependency()
 
     # ── DeviceTtlTimer task ──────────────────────────────────────────────────
 
@@ -60,4 +65,26 @@ class CoreTaskContainer(containers.DeclarativeContainer):
         config=bot_run_recovery_config,
         lock_service=distributed_lock_service,
         queue_repo=bot_run_queue_repository,
+    )
+
+    # ── FileTransferPoller task ────────────────────────────────────────────────
+
+    file_transfer_poller_config = providers.Singleton(
+        FileTransferPollerConfig,
+        enabled=config.file_transfer_poller.enabled,
+        lock_name=config.file_transfer_poller.lock_name,
+        lock_expire_seconds=config.file_transfer_poller.lock_expire_seconds,
+        cron_interval_seconds=config.file_transfer_poller.cron_interval_seconds,
+        upload_timeout_seconds=config.file_transfer_poller.upload_timeout_seconds,
+        max_concurrent_tickets=config.file_transfer_poller.max_concurrent_tickets,
+        dry_run=config.file_transfer_poller.dry_run,
+    )
+
+    file_transfer_poller_task = providers.Singleton(
+        FileTransferPoller,
+        config=file_transfer_poller_config,
+        lock_service=distributed_lock_service,
+        ticket_repo=ticket_repository,
+        file_backend=file_transfer_backend,
+        paas_facade=paas_service_facade,
     )
