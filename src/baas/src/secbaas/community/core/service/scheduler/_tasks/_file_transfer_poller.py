@@ -31,7 +31,6 @@ class FileTransferPollerConfig:
     """文件传输轮询器配置"""
 
     enabled: bool = True
-    lock_name: str = "file_transfer_poller_lock"
     lock_expire_seconds: int = 300
     cron_interval_seconds: int = 10
     upload_timeout_seconds: int = 3600
@@ -87,14 +86,20 @@ class FileTransferPoller:
             return
 
         try:
-            tickets = self._ticket_repo.list_pending_uploads(
+            all_tickets = self._ticket_repo.list_pending_uploads(
                 statuses=["CREATED", "UPLOADING"], limit=10000
             )
+            # UPLOAD direction: CREATED/UPLOADING (existing logic)
+            tickets = [t for t in all_tickets if t.direction == "UPLOAD"]
+            # DOWNLOAD direction: CREATED only (D-19)
+            download_tickets = [
+                t for t in all_tickets if t.direction == "DOWNLOAD" and t.status == "CREATED"
+            ]
         except Exception:
             log.exception("[FileTransferPoller] Failed to query pending uploads")
             return
 
-        if not tickets:
+        if not tickets and not download_tickets:
             log.info("[FileTransferPoller] No pending tickets found")
             return
 
@@ -105,25 +110,29 @@ class FileTransferPoller:
 
         async def _process_with_semaphore(ticket: TicketRecord) -> str:
             async with semaphore:
+                if ticket.direction == "DOWNLOAD":
+                    return await self._process_download_ticket(ticket)
                 return await self._process_single_ticket(ticket)
 
+        all_tickets_for_processing = tickets + download_tickets
         results = await asyncio.gather(
-            *[_process_with_semaphore(t) for t in tickets]
+            *[_process_with_semaphore(t) for t in all_tickets_for_processing]
         )
 
         # Aggregate counters
-        processed = len(tickets)
+        processed = len(all_tickets_for_processing)
         oss_detected = sum(1 for r in results if r == "oss_detected")
         pull_success = sum(1 for r in results if r == "pull_success")
         failed = sum(1 for r in results if r == "failed")
         timed_out = sum(1 for r in results if r == "timed_out")
         retention_done = sum(1 for r in results if r == "retention_done")
+        download_ready = sum(1 for r in results if r == "download_ready")
 
         duration = time.monotonic() - start_time
         log.info(
             "[FileTransferPoller] Completed: "
             "processed=%d oss_detected=%d pull_success=%d "
-            "failed=%d timed_out=%d retention_done=%d "
+            "failed=%d timed_out=%d retention_done=%d download_ready=%d "
             "duration=%.2fs",
             processed,
             oss_detected,
@@ -131,6 +140,7 @@ class FileTransferPoller:
             failed,
             timed_out,
             retention_done,
+            download_ready,
             duration,
         )
 
@@ -164,63 +174,97 @@ class FileTransferPoller:
                 )
                 return "timed_out"
 
-            # Per-ticket distributed lock
-            lock_acquired = await self._acquire_per_ticket_lock(transfer_id)
-            if not lock_acquired:
+            # Per-ticket distributed lock (held through entire processing scope).
+            # Uses acquire_lock directly (not the try_lock context manager) so the
+            # lock stays held until we explicitly release it below.
+            lock_name = f"file_transfer_poller:{transfer_id}"
+
+            def _acquire():
+                return self._lock_service.acquire_lock(
+                    lock_name=lock_name,
+                    expire_seconds=self._config.lock_expire_seconds,
+                    block=False,
+                )
+
+            lock_ctx = await asyncio.to_thread(_acquire)
+            if not lock_ctx.acquired:
+                log.info(
+                    "[FileTransferPoller] Lock %s not acquired, skipping ticket %s",
+                    lock_name,
+                    transfer_id,
+                )
                 return "skipped"
 
-            # OSS object existence check
-            if not self._file_backend.check_object_exists(
-                ticket.fileservice_staging_path
-            ):
+            try:
+                # OSS object existence check (offloaded to thread to avoid
+                # blocking the async event loop with synchronous network I/O).
+                exists = await asyncio.to_thread(
+                    self._file_backend.check_object_exists,
+                    ticket.fileservice_staging_path,
+                )
+                if not exists:
+                    log.info(
+                        "[FileTransferPoller] OSS object not ready for ticket %s",
+                        transfer_id,
+                    )
+                    return "oss_not_ready"
+
                 log.info(
-                    "[FileTransferPoller] OSS object not ready for ticket %s",
+                    "[FileTransferPoller] OSS object detected for ticket %s",
                     transfer_id,
                 )
-                return "oss_not_ready"
 
-            log.info(
-                "[FileTransferPoller] OSS object detected for ticket %s", transfer_id
-            )
+                # Retention mode: device_path IS NULL -> skip pull_file, go directly to DONE
+                if ticket.device_path is None:
+                    log.info(
+                        "[FileTransferPoller] Ticket %s is retention mode "
+                        "(device_path IS NULL) - skipping pull_file, "
+                        "transitioning to DONE",
+                        transfer_id,
+                    )
+                    self._ticket_repo.update_status(
+                        transfer_id, "UPLOAD_COMPLETED", None
+                    )
+                    self._ticket_repo.update_status(transfer_id, "DONE", None)
+                    return "retention_done"
 
-            # Retention mode: device_path IS NULL -> skip pull_file, go directly to DONE
-            if ticket.device_path is None:
-                log.info(
-                    "[FileTransferPoller] Ticket %s is retention mode "
-                    "(device_path IS NULL) - skipping pull_file, "
-                    "transitioning to DONE",
-                    transfer_id,
+                # Normal path: UPLOAD_COMPLETED -> pull_file -> DONE
+                self._ticket_repo.update_status(
+                    transfer_id, "UPLOAD_COMPLETED", None
                 )
-                self._ticket_repo.update_status(transfer_id, "UPLOAD_COMPLETED", None)
+
+                download_url = self._file_backend.generate_download_url(
+                    ticket.fileservice_staging_path,
+                    expire_seconds=_DOWNLOAD_URL_EXPIRE_SECONDS,
+                )
+
+                log.info(
+                    "[FileTransferPoller] Triggering pull_file for ticket %s "
+                    "(device_path=%s)",
+                    transfer_id,
+                    ticket.device_path,
+                )
+
+                await self._paas_facade.pull_file(
+                    paas_device_id=ticket.paas_device_id,
+                    source_url=download_url,
+                    device_path=ticket.device_path,
+                )
+
                 self._ticket_repo.update_status(transfer_id, "DONE", None)
-                return "retention_done"
+                log.info(
+                    "[FileTransferPoller] pull_file succeeded for ticket %s",
+                    transfer_id,
+                )
+                return "pull_success"
 
-            # Normal path: UPLOAD_COMPLETED -> pull_file -> DONE
-            self._ticket_repo.update_status(transfer_id, "UPLOAD_COMPLETED", None)
-
-            download_url = self._file_backend.generate_download_url(
-                ticket.fileservice_staging_path,
-                expire_seconds=_DOWNLOAD_URL_EXPIRE_SECONDS,
-            )
-
-            log.info(
-                "[FileTransferPoller] Triggering pull_file for ticket %s "
-                "(device_path=%s)",
-                transfer_id,
-                ticket.device_path,
-            )
-
-            await self._paas_facade.pull_file(
-                paas_device_id=ticket.paas_device_id,
-                source_url=download_url,
-                device_path=ticket.device_path,
-            )
-
-            self._ticket_repo.update_status(transfer_id, "DONE", None)
-            log.info(
-                "[FileTransferPoller] pull_file succeeded for ticket %s", transfer_id
-            )
-            return "pull_success"
+            finally:
+                # Release the per-ticket lock even if processing raised.
+                await asyncio.to_thread(
+                    self._lock_service.release_lock,
+                    lock_name,
+                    lock_ctx.lock_holder,
+                )
 
         except Exception as e:
             error_msg = str(e)[:500]
@@ -239,32 +283,121 @@ class FileTransferPoller:
                 )
             return "failed"
 
-    async def _acquire_per_ticket_lock(self, transfer_id: str) -> bool:
-        """Acquire a per-ticket distributed lock for cluster isolation.
-
-        Wraps the synchronous try_lock context manager in asyncio.to_thread().
-
-        Args:
-            transfer_id: The ticket's unique transfer ID.
+    async def _process_download_ticket(self, ticket: TicketRecord) -> str:
+        """Process a DOWNLOAD direction ticket.
 
         Returns:
-            True if the lock was acquired, False otherwise.
+            "timed_out", "skipped", "oss_not_ready", or "download_ready".
         """
-        lock_name = f"file_transfer_poller:{transfer_id}"
+        transfer_id = ticket.transfer_id
+        log.info(
+            "[FileTransferPoller] Processing DOWNLOAD ticket %s (status=%s)",
+            transfer_id,
+            ticket.status,
+        )
 
-        def _try_acquire() -> bool:
-            with self._lock_service.try_lock(
-                lock_name=lock_name,
-                expire_seconds=self._config.lock_expire_seconds,
-                block=False,
-            ) as lock_ctx:
-                return lock_ctx.acquired
+        try:
+            # Timeout check (D-18: same upload_timeout_seconds)
+            if ticket.gmt_create + timedelta(
+                seconds=self._config.upload_timeout_seconds
+            ) < datetime.now():
+                log.warning(
+                    "[FileTransferPoller] DOWNLOAD ticket %s timed out "
+                    "(created=%s, timeout=%ss)",
+                    transfer_id,
+                    ticket.gmt_create,
+                    self._config.upload_timeout_seconds,
+                )
+                self._ticket_repo.update_status(
+                    transfer_id, "FAILED", "Download timed out"
+                )
+                return "timed_out"
 
-        acquired = await asyncio.to_thread(_try_acquire)
-        if not acquired:
-            log.info(
-                "[FileTransferPoller] Lock %s not acquired, skipping ticket %s",
-                lock_name,
+            # Per-ticket distributed lock (same pattern as upload)
+            lock_name = f"file_transfer_poller:{transfer_id}"
+
+            def _acquire():
+                return self._lock_service.acquire_lock(
+                    lock_name=lock_name,
+                    expire_seconds=self._config.lock_expire_seconds,
+                    block=False,
+                )
+
+            lock_ctx = await asyncio.to_thread(_acquire)
+            if not lock_ctx.acquired:
+                log.info(
+                    "[FileTransferPoller] Lock %s not acquired, "
+                    "skipping DOWNLOAD ticket %s",
+                    lock_name,
+                    transfer_id,
+                )
+                return "skipped"
+
+            try:
+                # Check OSS object existence (D-17 step 1)
+                exists = await asyncio.to_thread(
+                    self._file_backend.check_object_exists,
+                    ticket.fileservice_staging_path,
+                )
+                if not exists:
+                    log.info(
+                        "[FileTransferPoller] OSS object not ready "
+                        "for DOWNLOAD ticket %s",
+                        transfer_id,
+                    )
+                    return "oss_not_ready"
+
+                log.info(
+                    "[FileTransferPoller] OSS object detected for "
+                    "DOWNLOAD ticket %s",
+                    transfer_id,
+                )
+
+                # Transition CREATED → PUSHING on first OSS detection
+                # (VALID_TRANSITIONS: ("CREATED", "PUSHING") already exists)
+                self._ticket_repo.update_status(transfer_id, "PUSHING", None)
+
+                # Generate download URL (D-17 step 2)
+                download_url = self._file_backend.generate_download_url(
+                    ticket.fileservice_staging_path,
+                    expire_seconds=_DOWNLOAD_URL_EXPIRE_SECONDS,
+                )
+
+                # Write download_url to ticket (D-17 step 3)
+                self._ticket_repo.update_urls(
+                    transfer_id, download_url=download_url
+                )
+
+                # Transition PUSHING → DONE (D-17 step 4)
+                self._ticket_repo.update_status(transfer_id, "DONE", None)
+
+                log.info(
+                    "[FileTransferPoller] DOWNLOAD ticket %s completed "
+                    "(download_url written)",
+                    transfer_id,
+                )
+                return "download_ready"
+
+            finally:
+                await asyncio.to_thread(
+                    self._lock_service.release_lock,
+                    lock_name,
+                    lock_ctx.lock_holder,
+                )
+
+        except Exception as e:
+            error_msg = str(e)[:500]
+            log.error(
+                "[FileTransferPoller] DOWNLOAD ticket %s failed: %s",
                 transfer_id,
+                error_msg,
+                exc_info=True,
             )
-        return acquired
+            try:
+                self._ticket_repo.update_status(transfer_id, "FAILED", error_msg)
+            except Exception:
+                log.exception(
+                    "[FileTransferPoller] Failed to mark DOWNLOAD ticket %s as FAILED",
+                    transfer_id,
+                )
+            return "failed"
