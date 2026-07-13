@@ -679,7 +679,7 @@ class TestListServiceBotRuntimeStages:
         resolver.resolve_for_bot.return_value = _make_ctx(
             binding_id=10, bot_id="service-bot", user_id="owner-1"
         )
-        resolver.resolve_for_binding.side_effect = (
+        resolver.resolve_for_binding_invoke.side_effect = (
             lambda binding_id, operator_id, *, bot_id, device_uuid=None: _make_ctx(
                 binding_id=binding_id,
                 bot_id=bot_id,
@@ -727,9 +727,10 @@ class TestListServiceBotRuntimeStages:
         assert result["failed_targets"] == []
         device_provider.get_instances.assert_not_called()
         device_provider.list_devices_by_runtime_binding.assert_not_called()
-        resolver.resolve_for_binding.assert_called_once_with(
+        resolver.resolve_for_binding_invoke.assert_called_once_with(
             30, "owner-1", bot_id="service-bot"
         )
+        resolver.resolve_for_binding.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_service_bot_list_does_not_query_instances(self):
@@ -767,7 +768,7 @@ class TestListServiceBotRuntimeStages:
         resolver.resolve_for_bot.return_value = _make_ctx(
             binding_id=10, bot_id="service-bot", user_id="owner-1"
         )
-        resolver.resolve_for_binding.side_effect = (
+        resolver.resolve_for_binding_invoke.side_effect = (
             lambda binding_id, operator_id, *, bot_id: _make_ctx(
                 binding_id=binding_id,
                 bot_id=bot_id,
@@ -1398,7 +1399,7 @@ class TestListRunningCronsOwnerId:
         resolver.resolve_for_bot.return_value = _make_ctx(
             binding_id=10, bot_id="service-bot", user_id="owner-1"
         )
-        resolver.resolve_for_binding.side_effect = (
+        resolver.resolve_for_binding_invoke.side_effect = (
             lambda binding_id, operator_id, *, bot_id, device_uuid=None: _make_ctx(
                 binding_id=binding_id,
                 bot_id=bot_id,
@@ -1487,7 +1488,7 @@ class TestListRunningCronsOwnerId:
         ]
 
         resolver = MagicMock()
-        resolver.resolve_for_binding.side_effect = (
+        resolver.resolve_for_binding_invoke.side_effect = (
             lambda binding_id, operator_id, *, bot_id, device_uuid=None: _make_ctx(
                 binding_id=binding_id,
                 bot_id=bot_id,
@@ -1533,10 +1534,10 @@ class TestListRunningCronsOwnerId:
             "DEVICE-001",
             "DEVICE-002",
         }
-        resolver.resolve_for_binding.assert_any_call(
+        resolver.resolve_for_binding_invoke.assert_any_call(
             30, "owner-1", bot_id="service-bot", device_uuid="DEVICE-001"
         )
-        resolver.resolve_for_binding.assert_any_call(
+        resolver.resolve_for_binding_invoke.assert_any_call(
             30, "owner-1", bot_id="service-bot", device_uuid="DEVICE-002"
         )
         resolver.resolve_for_bot.assert_not_called()
@@ -1573,7 +1574,7 @@ class TestListRunningCronsOwnerId:
         ]
 
         resolver = MagicMock()
-        resolver.resolve_for_binding.side_effect = (
+        resolver.resolve_for_binding_invoke.side_effect = (
             lambda binding_id, operator_id, *, bot_id, device_uuid=None: _make_ctx(
                 binding_id=binding_id,
                 bot_id=bot_id,
@@ -1606,7 +1607,7 @@ class TestListRunningCronsOwnerId:
 
         assert len(result["data"]) == 1
         assert result["data"][0]["device_uuid"] == "DEVICE-002"
-        resolver.resolve_for_binding.assert_called_once_with(
+        resolver.resolve_for_binding_invoke.assert_called_once_with(
             30, "owner-1", bot_id="service-bot", device_uuid="DEVICE-002"
         )
         transport.invoke.assert_awaited_once()

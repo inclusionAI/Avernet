@@ -28,6 +28,11 @@ from agentclaw.community.core.devices.services.device_context import (
 )
 
 
+_BINDING_ROUTED_PROVIDERS = frozenset({"baas", "teclaw"})
+_DEFAULT_ENGINE_PORT = 20003
+_DEFAULT_ENGINE_TYPE = "openclaw"
+
+
 class DeviceContextResolver:
     """resolve bot → DeviceContext。
 
@@ -148,6 +153,76 @@ class DeviceContextResolver:
         return DeviceContext(
             provider=provider,
             conn_info=conn_info,
+            binding_id=binding.id,
+            bot_id=bot_id,
+            user_id=operator_id,
+            bot_type=bot_type,
+        )
+
+    def resolve_for_binding_invoke(
+        self,
+        binding_id: int,
+        operator_id: str,
+        *,
+        bot_id: str,
+        device_uuid: str | None = None,
+    ) -> DeviceContext:
+        """构造按 binding 调用 adapter 的连接上下文。
+
+        BaaS/Teclaw 的实际地址和令牌由 transport 在调用时按 binding 获取，
+        因此这里只提供调用所需的路由字段。Desktop 和其他 provider 仍使用
+        完整连接解析。
+        """
+        binding = self._binding_repository.get_by_id(binding_id)
+        if binding is None:
+            raise DeviceNotBoundError(
+                f"DeviceContextResolver: binding_id={binding_id} not found"
+            )
+
+        provider = binding.device_provider
+        if provider not in self._builders:
+            raise UnknownProviderError(
+                f"DeviceContextResolver: unknown provider={provider!r} "
+                f"for binding_id={binding_id}"
+            )
+
+        # 发布态 service binding 不挂在 Bot 主记录上，按业务 Bot 和 owner
+        # 获取 bot_type 与 active_engine。
+        bot = self._bot_repository.get_by_id_and_owner(bot_id, operator_id)
+        bot_type = (bot or {}).get("bot_type") or ""
+
+        # Desktop 需要完整代理地址；Arca/local 也由各自 builder 生成连接信息。
+        if provider not in _BINDING_ROUTED_PROVIDERS or bot_type == "desktop":
+            return self.resolve_for_binding(
+                binding_id,
+                operator_id,
+                bot_id=bot_id,
+                device_uuid=device_uuid,
+            )
+
+        # Transport 使用 binding_id 调 /http-info，以下字段用于选择端口、
+        # 引擎协议和运行实例，不需要预先获取实际地址或令牌。
+        conn_info: dict[str, Any] = {
+            "bind_id": binding.id,
+            "bot_uuid": binding.device_id,
+            "engine_port": _DEFAULT_ENGINE_PORT,
+            "engine_type": (
+                "teclaw"
+                if provider == "teclaw"
+                else (bot or {}).get("active_engine") or _DEFAULT_ENGINE_TYPE
+            ),
+            "bot_type": bot_type,
+            "type": "baas",
+            "headers": {},
+            "device_affinity": operator_id,
+        }
+        # running 查询传 UUID 锁定实例；列表不传时由 BaaS 选择在线实例。
+        if device_uuid:
+            conn_info["device_uuid"] = device_uuid
+
+        return DeviceContext(
+            provider=provider,
+            conn_info=self._normalize_schema(conn_info, provider),
             binding_id=binding.id,
             bot_id=bot_id,
             user_id=operator_id,
