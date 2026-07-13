@@ -370,13 +370,7 @@ class PublishFlowService(
         Status-only (no ext write). Returns ``True`` if this call won the
         transition (the record was still at ``source_status``); ``False`` if it
         lost — a concurrent submit already moved it (the double-submit guard)."""
-        try:
-            self._publish_service.update_publish_status(
-                publish_id, target_status.value, source_status.value
-            )
-            return True
-        except PublishNotFoundError:
-            return False
+        return self._ext_state.advance_status(publish_id, target_status, source_status)
 
     def _describe_current_status(self, publish_id: int) -> PublishFlowResult:
         """Re-read the record and describe its (now concurrently-advanced) status."""
@@ -821,11 +815,11 @@ class PublishFlowService(
         # Step 5: Roll back the status (FAILED -> rollback_status) and set the retry flag
         ext["retry"] = True
         try:
-            self._publish_service.update_publish_status_with_ext(
+            self._update_publish_status(
                 publish_id=publish_id,
-                target_status=rollback_status.value,
+                target_status=rollback_status,
+                source_status=PublishStatus.FAILED,
                 ext=ext,
-                source_status=PublishStatus.FAILED.value,
             )
         except Exception as e:
             raise PublishFlowServiceError(

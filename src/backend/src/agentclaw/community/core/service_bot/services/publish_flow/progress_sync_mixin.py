@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, Literal
 
-from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
     PublishStatus,
@@ -55,59 +54,13 @@ _FailureSourceStatus = Literal[
 
 
 class ProgressSyncMixin:
-    """BaaS progress sync + status advancement (mixed into PublishFlowService)."""
+    """BaaS progress sync + status advancement (mixed into PublishFlowService).
 
-    def _update_binding_on_success(
-        self,
-        ext: dict,
-        stage: PublishStage,
-        progress: dict,
-        baas_status: str,
-        baas_publish_id: int,
-        bot_id: str,
-    ) -> None:
-        """Update device_binding to the success status.
-
-        Args:
-            ext: Extension fields
-            stage: Publish stage (VERIFY/ONLINE)
-            progress: BaaS publish progress information
-            baas_status: BaaS publish status
-            baas_publish_id: BaaS publish record ID
-            bot_id: Bot ID
-        """
-        # Get binding_id from the extension fields
-        binding_info = ext.get("binding", {})
-        binding_id = binding_info.get(stage.value)
-
-        if not binding_id:
-            # A record that reached sync-success for this stage must have a binding
-            # recorded; a missing one is an inconsistent state, not something to
-            # silently skip.
-            raise PublishFlowServiceError(
-                f"No binding_id found for stage={stage.value} while recording sync success "
-                f"(bot_id={bot_id})"
-            )
-
-        device_details = progress.get("device_details", [])
-        device_props = {
-            "bolt_id":bot_id,
-            "device_details": device_details,
-            "baas_status": baas_status,
-            "baas_publish_id": baas_publish_id,
-            "overall_progress": progress.get("overall_progress", {}),
-        }
-
-        self._publish_service.update_device_binding_with_props(
-            binding_id=binding_id,
-            status=DeviceBindingStatus.ACTIVE,
-            device_props=device_props,
-        )
-
-        logger.info(
-            f"[PublishFlowService._update_binding_on_success] "
-            f"Device binding updated: binding_id={binding_id}, status=ACTIVE"
-        )
+    This mixin orchestrates only: the persistence it triggers lives on the
+    resource mixins — publish-record writes on ``PublishExtMixin``
+    (``_record_sync_success`` / ``_mark_previous_publish_superseded``), device-
+    binding writes on ``DeviceBindingMixin`` (``_update_binding_on_success``).
+    """
 
     def _handle_sync_success(
         self,
@@ -139,22 +92,13 @@ class ProgressSyncMixin:
         source_status = _SUCCESS_SOURCE_STATUS[stage]
         target_status = _SUCCESS_TARGET_STATUS[stage]
 
-        # Remove the retry flag before persisting.
-        ext.pop("retry", None)
-
-        # Atomic update: write status and extension fields together under the
-        # source_status optimistic lock, avoiding the TOCTOU race of a separate
-        # status-then-ext write (the status could be changed concurrently between).
-        self._publish_service.update_publish_status_with_ext(
-            publish_id=publish_id,
+        # Persist the success into the publish record (clears the retry flag and
+        # atomically advances the status together with ext).
+        self._record_sync_success(
+            publish_id,
+            source_status=source_status,
             target_status=target_status,
             ext=ext,
-            source_status=source_status,
-        )
-
-        logger.info(
-            f"[PublishFlowService._handle_sync_success] "
-            f"Publish status updated: {source_status} -> {target_status}"
         )
 
         # If the online stage succeeded, update the previous publish record status to UPGRADED

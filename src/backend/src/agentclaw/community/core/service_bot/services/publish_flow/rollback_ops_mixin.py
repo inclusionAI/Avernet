@@ -5,7 +5,6 @@ import asyncio
 import time
 from typing import Any, Dict
 
-from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
     PublishStatus,
@@ -234,16 +233,9 @@ class RollbackOpsMixin:
                     f"Bot destroy approved: bot_uuid={bot_uuid}, stage={stage.value}, destroy_publish_id={destroy_publish_id}"
                 )
 
-            # Update device_binding status to RELEASED
-            self._publish_service.update_device_binding_with_props(
-                binding_id=binding_id,
-                status=DeviceBindingStatus.RELEASED,
-                device_props={"destroy_publish_id": destroy_publish_id} if destroy_publish_id else {},
-            )
-            logger.info(
-                f"[PublishFlowService._destroy_bot_by_stage] "
-                f"Device binding status updated to RELEASED: binding_id={binding_id}"
-            )
+            # Update device_binding status to RELEASED (DeviceBindingMixin owns
+            # the binding write).
+            self._release_binding(binding_id, destroy_publish_id=destroy_publish_id)
 
         except Exception as e:
             logger.warning(

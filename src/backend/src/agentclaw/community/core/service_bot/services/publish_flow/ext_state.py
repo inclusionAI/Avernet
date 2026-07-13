@@ -83,6 +83,24 @@ class PublishExtState:
         self._publish_service.update_publish_ext(publish_id=publish_id, ext=ext)
         return ext
 
+    def advance_status(
+        self,
+        publish_id: int,
+        target_status: PublishStatus,
+        source_status: PublishStatus,
+    ) -> bool:
+        """Atomically advance the status (no ext write) under the optimistic lock.
+
+        Returns ``True`` if this call won the transition (the record was still at
+        ``source_status``); ``False`` if a concurrent writer already moved it."""
+        try:
+            self._publish_service.update_publish_status(
+                publish_id, target_status.value, source_status.value
+            )
+            return True
+        except PublishNotFoundError:
+            return False
+
     def update_status(
         self,
         publish_id: int,
