@@ -10,6 +10,14 @@ from ._exceptions import (
     SessionNotFoundError,
     TooManyRequestsError,
 )
+from ._file_transfer_models import (
+    GetDownloadUrlRequest,
+    GetDownloadUrlResponse,
+    GetTransferStatusResponse,
+    GetUploadUrlRequest,
+    GetUploadUrlResponse,
+    TransferNotFoundError,
+)
 from ._http_connection_info import HttpConnectionInfo
 from ._models import (
     BotBindingInfo,
@@ -23,6 +31,7 @@ from ._models import (
 from ._protocols import (
     BotCmdDispatcher,
     BotFetchStartProgressDispatcher,
+    BotFileTransferDispatcher,
     BotHttpConnInfoDispatcher,
     BotHttpDispatcher,
     BotOpenFolderDispatcher,
@@ -56,9 +65,17 @@ __all__ = [
     # Protocols
     "BotCmdDispatcher",
     "BotFetchStartProgressDispatcher",
+    "BotFileTransferDispatcher",
     "BotHttpConnInfoDispatcher",
     "BotHttpDispatcher",
     "BotWssDispatcher",
     "BotOpenFolderDispatcher",
     "BotRunner",
+    # File Transfer Models
+    "GetDownloadUrlRequest",
+    "GetDownloadUrlResponse",
+    "GetTransferStatusResponse",
+    "GetUploadUrlRequest",
+    "GetUploadUrlResponse",
+    "TransferNotFoundError",
 ]
