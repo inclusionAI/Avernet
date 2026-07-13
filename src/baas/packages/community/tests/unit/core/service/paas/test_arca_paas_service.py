@@ -258,12 +258,13 @@ class TestDestroyDeviceWithStorage:
 # ── _safe_repr helper tests (from phase 01.1) ──
 
 def test__safe_repr__truncates():
-    """_safe_repr truncates output to max_len."""
+    """_safe_repr truncates output to max_len with ellipsis indicator."""
     from secbaas.core.service.paas._arca_paas_service import _safe_repr
 
     result = _safe_repr("x" * 5000, max_len=10)
     assert len(result) == 10
-    # repr() wraps strings in quotes, so result is 'xxxxxxxxx (9 x's + quote)
+    # Truncated at max_len with "..." appended as truncation indicator
+    assert result.endswith("...")
     assert result.startswith("'")
 
 

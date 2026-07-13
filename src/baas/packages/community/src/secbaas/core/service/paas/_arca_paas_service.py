@@ -46,7 +46,7 @@ def _safe_repr(obj: object, max_len: int = 4096) -> str:
     try:
         s = repr(obj)
         if len(s) > max_len:
-            s = s[:max_len]
+            s = s[:max_len - 3] + "..."
         return s
     except Exception as e:
         return f"<repr failed: {e}>"
@@ -452,8 +452,7 @@ class ArcaPaasService(PaasService):
             except Exception as e:
                 self._logger.warning(
                     f"Storage cleanup skipped: get_info failed, "
-                    f"paas_device_id={paas_device_id}, "
-                    f"get_info unavailable due to exception: {e}",
+                    f"paas_device_id={paas_device_id}",
                     exc_info=True,
                 )
         except ArcaSandboxNotFoundError:
