@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from secbaas.config import ConfigPath, get_config, get_config_by_path
 from secbaas.logger import get_logger
 
 logger = get_logger("plugin-sandbox-arca-local-proc")
@@ -49,9 +50,9 @@ def resolve_workspace_dir(metadata: dict[str, str], bot_id: str) -> Path:
     entity_type = metadata.get("entity_type")
     engine = metadata.get("engine")
 
-    # WORKSPACE_ENV_FOLDER 显式覆盖 (singlebox 模式由 app.sh 注入
-    # "aidesktop_singlebox",让 baas 和 backend 路径对齐); 否则按 SERVER_ENV 映射。
-    env_folder = os.environ.get("WORKSPACE_ENV_FOLDER")
+    # The active config overlay owns the physical workspace partition. This keeps
+    # profile-specific path selection out of process-launch environment wiring.
+    env_folder = get_config_by_path(get_config(), ConfigPath.WORKSPACE_ENV_FOLDER)
     if not env_folder:
         env = os.environ.get("SERVER_ENV", "dev")
         env_folder = {

@@ -22,7 +22,7 @@ Public surface:
 from fastapi_injector import Injected
 
 from agentclaw.community.di.container import build_injector, get_app_injector
-from agentclaw.community.di.profile import DeployProfile
+from agentclaw.community.di.profile import DeployProfile, validate_deploy_environment
 from agentclaw.community.di.scopes import RequestScope, request_scope
 from agentclaw.community.di.profile_modules import modules_for
 
@@ -35,4 +35,5 @@ __all__ = [
     "get_app_injector",
     "modules_for",
     "request_scope",
+    "validate_deploy_environment",
 ]

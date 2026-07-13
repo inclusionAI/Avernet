@@ -61,6 +61,7 @@ user_config:
   device_provider: "daas"
 
   workspace:
+    env_folder: "aidesktop_singlebox"
     openclaw_root: "~/.openclaw"
     claude_code_root: "~/.claude_code"
 

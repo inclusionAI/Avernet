@@ -74,7 +74,7 @@ class TestLoadYamlConfigs:
 
     def test_loads_configs_from_project(self):
         """Should be able to load the actual config files from this project."""
-        config = _load_yaml_configs()
+        config = _load_yaml_configs("application-test.yaml")
         # Must have user_config from the neutral base application.yaml.
         assert "user_config" in config
         assert "features" in config["user_config"]
@@ -82,7 +82,7 @@ class TestLoadYamlConfigs:
     def test_overlay_merged_onto_base(self):
         """The selected overlay is deep-merged onto the base (B11: the test suite
         runs DEPLOY_PROFILE=test, so the overlay is application-test.yaml)."""
-        config = _load_yaml_configs()
+        config = _load_yaml_configs("application-test.yaml")
         user_config = config.get("user_config", {})
         # application-test.yaml adds aidesktop_root (absent from the base) — its
         # presence proves the overlay was merged in.

@@ -89,7 +89,7 @@ backend_start() {
             rm -f "${RUNTIME_DATA_DIR}/backend.db"
         fi
 
-        SERVER_ENV=singlebox DEPLOY_PROFILE=singlebox \
+        SERVER_ENV=dev DEPLOY_PROFILE=singlebox \
             DATABASE_URL="sqlite:///${RUNTIME_DATA_DIR}/backend.db" \
             ENABLE_OSS_SYNC=false \
             CHAT_ENGINE="${CHAT_ENGINE}" \
@@ -99,7 +99,7 @@ backend_start() {
             nohup "${backend_cmd[@]}" < /dev/null >> "${BACKEND_LOG}" 2>&1 &
         backend_pid=$!
     else
-        SERVER_ENV=singlebox DEPLOY_PROFILE=corp CHAT_ENGINE="${CHAT_ENGINE}" \
+        SERVER_ENV=dev DEPLOY_PROFILE=corp CHAT_ENGINE="${CHAT_ENGINE}" \
             AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
             LOCAL_AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
             PYTHONPATH="${community_src}:${BACKEND_DIR}:${PYTHONPATH:-}" \

@@ -187,6 +187,7 @@
     },
     "workspace": {
       "claude_code_root": "~/.claude_code",
+      "env_folder": "aidesktop_singlebox",
       "openclaw_root": "~/.openclaw"
     }
   },

@@ -34,6 +34,7 @@ from fastapi import FastAPI, Request
 from agentclaw.community.di import (
     DeployProfile,
     build_injector,
+    validate_deploy_environment,
 )
 from agentclaw.community.di.config_bootstrap import register_config_provider
 from agentclaw.community.di.modules_bootstrap import register_corp_modules
@@ -42,6 +43,7 @@ from agentclaw.community.di.modules_bootstrap import register_corp_modules
 # composition root. ``detect()`` errors out if ``DEPLOY_PROFILE`` is unset
 # or unknown — every launch site sets it (see scripts/ and conf/docker).
 _deploy_profile = DeployProfile.detect()
+validate_deploy_environment()
 
 # Select the configuration source before anything reads config: under ``corp``
 # this installs the sofapy-backed provider; other profiles stay on the YAML

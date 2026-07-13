@@ -75,12 +75,11 @@ def build_injector(
 ) -> Injector:
     """Construct the application's ``Injector``.
 
-    The **base list** holds only profile-independent *business* modules
-    (``ConfigModule`` + the per-domain wiring). The profile-specific
-    *infrastructure* column — which DB / cache / auth / model / … plugin
-    answers each ``plugin_api`` Protocol — comes from
-    ``modules_for(profile)``. Exactly one column is installed; there is no
-    "always-prod base + override".
+    The **base list** holds profile-independent business modules plus shared
+    default bindings such as ``AccessModule`` and ``HttpClientModule``. Exactly
+    one profile-specific column from ``modules_for(profile)`` is installed
+    afterward. That column supplies profile-owned infrastructure and may
+    intentionally override selected base keys; Injector's last binding wins.
 
     ``profile`` (a ``DeployProfile``) is resolved once at the composition
     root from the mandatory ``DEPLOY_PROFILE`` switch. ``extra_modules``
@@ -112,9 +111,9 @@ def build_injector(
         BotDormantModule(),
         TaskQueueModule(),
         QualityModule(),
-# HTTP transport (real httpx) — shared by corp + community. The
-        # test/singlebox column's TestHttpClientModule installs after and
-        # overrides these keys (LocalHttpClient under pytest, real under singlebox).
+        # HTTP transport (real httpx) — shared by every base profile. Only the
+        # test/corp_test columns override these keys with LocalHttpClient;
+        # singlebox intentionally uses the real clients for local services.
         HttpClientModule(),
         EconomyGovernanceModule(),
     ]

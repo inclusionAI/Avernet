@@ -76,7 +76,7 @@ print("COMMUNITY_BOOT_OK")
 def test_community_profile_boots_without_corp_packages():
     env = dict(os.environ)
     env["DEPLOY_PROFILE"] = "community"
-    env.setdefault("SERVER_ENV", "singlebox")
+    env.setdefault("SERVER_ENV", "dev")
     proc = subprocess.run(
         [sys.executable, "-c", _PROOF],
         capture_output=True,

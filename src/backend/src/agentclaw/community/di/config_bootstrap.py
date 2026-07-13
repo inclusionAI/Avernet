@@ -16,16 +16,15 @@ from __future__ import annotations
 
 from agentclaw.community.di.profile import DeployProfile
 
-
 def register_config_provider(profile: DeployProfile) -> None:
-    """Install ``profile``'s corp-runtime ConfigProvider into the registry.
+    """Install ``profile``'s ConfigProvider into the registry.
 
     ``corp`` registers the sofapy-backed :class:`ConfigProvider` (so core reads
-    configuration the corporate way). Every other profile (``community`` /
-    ``test`` / ``singlebox``) leaves the registry on its YAML default. The corp
-    branch lives in the corp-only ``di.corp_bootstrap`` module, loaded here via
-    ``importlib`` (a string import, corp-profile only) so this shared file names
-    no ``plugins/prod`` — a community build (without ``corp``) imports it fine.
+    configuration the corporate way). Every other profile receives a YAML
+    provider that owns the profile-to-overlay mapping. The corp branch lives in the
+    corp-only ``di.corp_bootstrap`` module, loaded here via ``importlib`` (a
+    string import, corp-profile only) so this shared file names no
+    ``plugins/prod`` — a community build (without ``corp``) imports it fine.
 
     (DRM dynamic-config is a DI plugin — ``DRMReaderPlugin`` — injected into its
     consumers per profile, not a pre-DI registry; see ``plugin_api/drm.py``.)
@@ -34,3 +33,9 @@ def register_config_provider(profile: DeployProfile) -> None:
         from importlib import import_module
 
         import_module("agentclaw.corp.di.corp_bootstrap").install_corp_config_provider()
+        return
+
+    from agentclaw.community.core.config.provider import set_config_provider
+    from agentclaw.community.core.config.yaml_provider import YamlConfigProvider
+
+    set_config_provider(YamlConfigProvider(profile))

@@ -12,8 +12,10 @@ provides:
   - "EngineSandboxProvider Protocol + OpenClaw / ClaudeCode impls (mode-blind, take WorkspaceConfig)"
 consumes:
   - "SkillRepoSyncPlugin"
+  - "AppConfig through the central ConfigProvider registry"
   - "WorkspaceConfig (typed dataclass from agentclaw.community.di.config)"
 internal_dependencies:
+  - agentclaw.community.core.config.provider
   - agentclaw.community.di
   - agentclaw.community.log
   - agentclaw.community.plugin_api.skill_repo_sync

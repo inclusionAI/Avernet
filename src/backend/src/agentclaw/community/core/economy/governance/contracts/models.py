@@ -15,7 +15,7 @@ estimated_improvement_range, baseline_tokens) are NOT stored — they
 are ODPS internals that the online side never needs.
 
 Env isolation: all 4 tables carry an ``env`` column (default ``get_current_env``)
-so that pre / prod / singlebox sharing the same MySQL database do not read or
+so that dev / pre / prod sharing the same MySQL database do not read or
 clobber each other's data. Unique constraints include ``env``.
 
 Naming: ``dt_version`` (not ``dt``) — this is a data version marker,
@@ -135,7 +135,7 @@ class GovernanceNotifyLog(Base):
     dry_run = Column(SmallInteger, default=0)  # [SEALED]
 
     # ── 元信息 ─────────────────────────────────────
-    env = Column(String(20), nullable=False, default=get_current_env, comment="环境标识: prod/pre/dev/singlebox")
+    env = Column(String(20), nullable=False, default=get_current_env, comment="环境标识: dev/pre/prod")
     gmt_create = Column(TIMESTAMP, nullable=False, default=func.now())
     gmt_modified = Column(TIMESTAMP, nullable=False, default=func.now(), onupdate=func.now())
 
@@ -248,7 +248,7 @@ class GovernanceAudit(Base):
     actor_id = Column(String(64), nullable=True, comment="实际操作人ID — owner自操作=owner_id，admin代操作=admin_id，系统行为=NULL")
     server_host = Column(String(128), nullable=True, comment="处理服务器主机名")
     dry_run = Column(SmallInteger, default=0)
-    env = Column(String(20), nullable=False, default=get_current_env, comment="环境标识: prod/pre/dev/singlebox")
+    env = Column(String(20), nullable=False, default=get_current_env, comment="环境标识: dev/pre/prod")
     gmt_create = Column(TIMESTAMP, nullable=False, default=func.now())
     gmt_modified = Column(TIMESTAMP, nullable=False, default=func.now(), onupdate=func.now())
 
@@ -306,7 +306,7 @@ class BotWhitelist(Base):
     reason = Column(String(512))
     created_by = Column(String(64))
     expires_at = Column(TIMESTAMP, nullable=True)  # NULL = permanent
-    env = Column(String(20), nullable=False, default=get_current_env, comment="环境标识: prod/pre/dev/singlebox")
+    env = Column(String(20), nullable=False, default=get_current_env, comment="环境标识: dev/pre/prod")
     gmt_create = Column(TIMESTAMP, nullable=False, default=func.now())
     gmt_modified = Column(TIMESTAMP, nullable=False, default=func.now(), onupdate=func.now())
 
@@ -378,7 +378,7 @@ class GovernanceTaskRecordDaily(Base):
     notification_structured = Column(Text, nullable=True, comment="最新快照: 原始 JSON 结构")
     analysis_status = Column(String(32))
     last_sync_at = Column(TIMESTAMP, nullable=False, comment="最近一次离线驱动时间")
-    env = Column(String(20), nullable=False, default=get_current_env, comment="环境标识: prod/pre/dev/singlebox")
+    env = Column(String(20), nullable=False, default=get_current_env, comment="环境标识: dev/pre/prod")
     gmt_create = Column(TIMESTAMP, nullable=False, default=func.now())
     gmt_modified = Column(TIMESTAMP, nullable=False, default=func.now(), onupdate=func.now())
 
