@@ -285,18 +285,18 @@ bcsfuse_clean() {
     # Stop first
     bcsfuse_stop || true
 
-    # Clean Qdrant/Faiss data (dev uses Faiss, runtime uses Qdrant local)
-    local data_dir="${BCSFUSE_RUNTIME_DIR}/data"
-    if [ -d "$data_dir" ]; then
-        log_info "Removing bcsfuse vector data: ${data_dir}"
-        rm -rf "${data_dir:?}"/*
+    # Clean .runtime/data (Qdrant/Faiss data used by runtime mode)
+    local runtime_data_dir="${BCSFUSE_RUNTIME_DIR}/data"
+    if [ -d "$runtime_data_dir" ]; then
+        log_info "Removing bcsfuse runtime vector data: ${runtime_data_dir}"
+        rm -rf "${runtime_data_dir:?}"/*
     fi
 
-    # Clean SQLite db (dev mode)
-    local sqlite_db="${BCSFUSE_RUNTIME_DIR}/data/bcsfuse.db"
-    if [ -f "$sqlite_db" ]; then
-        log_info "Removing bcsfuse SQLite database: ${sqlite_db}"
-        rm -f "$sqlite_db"
+    # Clean project data/ directory (SQLite DBs, Faiss index — used by dev mode)
+    local project_data_dir="${BCSFUSE_DIR}/data"
+    if [ -d "$project_data_dir" ]; then
+        log_info "Removing bcsfuse project data: ${project_data_dir}"
+        rm -rf "${project_data_dir:?}"/*
     fi
 
     # Clean logs
