@@ -26,5 +26,6 @@ CREATE TABLE bcs_organization_members (
   PRIMARY KEY (id),
   UNIQUE KEY uk_org_member (env, organization_code, bot_uuid),
   KEY idx_member_bot (env, bot_uuid),
-  KEY idx_member_org_disabled_role (env, organization_code, disabled, role)
+  KEY idx_member_org_disabled_role (env, organization_code, disabled, role),
+  KEY idx_member_org_disabled_role_bot (env, organization_code, disabled, role, bot_uuid)
 );
