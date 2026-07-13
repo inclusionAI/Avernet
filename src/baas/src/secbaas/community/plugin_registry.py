@@ -57,6 +57,38 @@ def get_extra_options(plugin_name: str) -> dict[str, Any]:
     return result
 
 
+def inject_into_plugin_container() -> None:
+    """Inject registered extra options into PluginContainer's Selectors.
+
+    PluginContainer calls get_extra_options() at class-definition time,
+    but enterprise registers options *after* that (because importing
+    ``secbaas.community.bootstrap`` triggers the full
+    bootstrap.__init__ → _container → _plugin_core import chain, which
+    defines PluginContainer before enterprise's register calls run).
+
+    This function patches the already-defined Selectors by merging the
+    extra options via ``set_providers()``.  It must be called after all
+    ``register_plugin_option()`` calls have completed.
+    """
+    from dependency_injector import providers
+
+    from secbaas.community.bootstrap.plugins._plugin_core import PluginContainer
+
+    for plugin_name, options in _extra_options.items():
+        selector = getattr(PluginContainer, plugin_name, None)
+        if selector is None:
+            continue
+        existing = dict(selector.providers)
+        for option_name, (factory, provider_type, kwargs) in options.items():
+            if option_name in existing:
+                continue
+            if provider_type == "callable":
+                existing[option_name] = providers.Callable(factory, **kwargs)
+            else:
+                existing[option_name] = providers.Singleton(factory, **kwargs)
+        selector.set_providers(**existing)
+
+
 def has_enterprise_plugins() -> bool:
     """Check if any enterprise plugin options have been registered."""
     return bool(_extra_options)

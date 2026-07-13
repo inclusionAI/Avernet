@@ -31,7 +31,14 @@ def _load_logger_plugin() -> LoggerPlugin:
     return BareLoggerPlugin()
 
 
-_logger_plugin: LoggerPlugin = _load_logger_plugin()
+_logger_plugin: LoggerPlugin | None = None
+
+
+def _get_logger_plugin() -> LoggerPlugin:
+    global _logger_plugin
+    if _logger_plugin is None:
+        _logger_plugin = _load_logger_plugin()
+    return _logger_plugin
 
 
 def get_logger(name: str | None = None):
@@ -43,11 +50,11 @@ def get_logger(name: str | None = None):
     Returns:
         A standard Python ``logging.Logger`` instance.
     """
-    return _logger_plugin.get_logger(name)
+    return _get_logger_plugin().get_logger(name)
 
 
 def get_logger_plugin() -> LoggerPlugin:
-    return _logger_plugin
+    return _get_logger_plugin()
 
 
 __all__ = ["get_logger", "get_logger_plugin"]

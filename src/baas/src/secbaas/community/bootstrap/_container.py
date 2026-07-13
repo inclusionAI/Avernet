@@ -14,7 +14,7 @@ from ._lifecycle import (
     LocalProcessManagerLifecycle,
 )
 
-# Enterprise registers extra plugin options via _plugin_registry at import
+# Enterprise registers extra plugin options via plugin_registry at import
 # time. PluginContainer reads from the registry to build its Selectors, so
 # no enterprise import is needed here.
 from .plugins import PluginContainer as PluginContainer

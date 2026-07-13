@@ -6,7 +6,7 @@ Use this in the core ``ApplicationContainer`` so that importing
 Plugin selector strategy:
 - **stub** — always available (no external deps)
 - **real** — available for open-source backends (desktop, docker, k8s)
-- Enterprise-only options are injected via ``_plugin_registry`` at runtime
+- Enterprise-only options are injected via ``plugin_registry`` at runtime
 
 Enterprise registers extra selector options (e.g. cache.real, auth.buservice)
 by calling ``register_plugin_option()`` at import time. The PluginContainer
@@ -16,6 +16,7 @@ merges them into its Selectors, so no enterprise import is needed here.
 from dependency_injector import containers, providers
 
 from secbaas.community.api.device_manage import K8sCredentials
+from secbaas.community.plugin_registry import get_extra_options
 from secbaas.community.plugins.auth.oauth import OAuthPlugin
 from secbaas.community.plugins.auth.stub import StubAuthPlugin
 from secbaas.community.plugins.bot_service import (
@@ -45,8 +46,6 @@ from secbaas.community.plugins.sandbox.k8s.real import K8sClientManager
 from secbaas.community.plugins.sandbox.poolab import StubPoolabSandboxPlugin
 from secbaas.community.plugins.sandbox.teclaw import StubTeClawBotPlugin
 from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
-
-from .._plugin_registry import get_extra_options
 
 
 class PluginContainer(containers.DeclarativeContainer):

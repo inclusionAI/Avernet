@@ -29,6 +29,23 @@ from ._container import (
 # Module-level singleton: created once, reused by all _factory.py delegates
 _container: ApplicationContainer | None = None
 
+# Inject enterprise plugin options into PluginContainer's Selectors.
+# This must run after _plugin_core is fully loaded (which happens during
+# the _container import above) and after enterprise has registered its
+# options via register_plugin_option().  Enterprise registers at import
+# time (triggered by entry_points during logger init), so by the time
+# this module finishes loading, all options are in _extra_options.
+try:
+    from secbaas.community.plugin_registry import (
+        has_enterprise_plugins,
+        inject_into_plugin_container,
+    )
+
+    if has_enterprise_plugins():
+        inject_into_plugin_container()
+except ImportError:
+    pass
+
 
 def get_container() -> ApplicationContainer:
     global _container
