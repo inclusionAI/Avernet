@@ -25,9 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CARGO_TERM_COLOR: always
-      # PR: compare against the PR's base branch. push/dispatch: compare against dev
-      # (the repo default branch) so coverage-gated diff detection still has a base.
-      BCS_BASE_REF: origin/${{ github.base_ref || 'dev' }}
+      # PR: compare against the event's immutable base SHA so delayed/rerun runs
+      # are not affected by base-branch drift after the PR was created.
+      # push/dispatch: compare against dev (repo default branch) instead.
+      BCS_BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/dev' }}
     defaults:
       run:
         working-directory: src/bcs
@@ -125,9 +126,10 @@ jobs:
     name: Backend unit tests
     runs-on: ubuntu-latest
     env:
-      # PR: compare against the PR's base branch. push/dispatch: compare against dev
-      # (the repo default branch) so coverage-gated diff detection still has a base.
-      BACKEND_BASE_REF: origin/${{ github.base_ref || 'dev' }}
+      # PR: compare against the event's immutable base SHA so delayed/rerun runs
+      # are not affected by base-branch drift after the PR was created.
+      # push/dispatch: compare against dev (repo default branch) instead.
+      BACKEND_BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/dev' }}
     defaults:
       run:
         working-directory: src/backend
@@ -192,7 +194,7 @@ jobs:
     name: Engine unit tests
     runs-on: ubuntu-latest
     env:
-      ENGINE_BASE_REF: origin/${{ github.base_ref || 'dev' }}
+      ENGINE_BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/dev' }}
     defaults:
       run:
         working-directory: src/engine
@@ -251,7 +253,7 @@ jobs:
     env:
       # PR: compare against the PR's base branch. push/dispatch: compare against dev
       # (the repo default branch) so coverage-gated diff detection still has a base.
-      BAAS_BASE_REF: origin/${{ github.base_ref || 'dev' }}
+      BAAS_BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/dev' }}
     defaults:
       run:
         working-directory: src/baas/packages/community
