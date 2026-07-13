@@ -9,7 +9,7 @@ each concern in its own file without threading a context object.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Literal
+from typing import Dict, Literal
 
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
@@ -56,10 +56,11 @@ _FailureSourceStatus = Literal[
 class ProgressSyncMixin:
     """BaaS progress sync + status advancement (mixed into PublishFlowService).
 
-    This mixin orchestrates only: the persistence it triggers lives on the
-    resource mixins — publish-record writes on ``PublishExtMixin``
-    (``_record_sync_success`` / ``_mark_previous_publish_superseded``), device-
-    binding writes on ``DeviceBindingMixin`` (``_update_binding_on_success``).
+    Persistence goes through the shared seams: publish-record status/ext writes
+    via ``_update_publish_status`` (the ``PublishExtState`` plumbing),
+    device-binding writes via ``DeviceBindingMixin``
+    (``_update_binding_on_success``), and the BaaS progress query via
+    ``BaasPublishOpsMixin`` (``get_baas_publish_progress``).
     """
 
     def _handle_sync_success(
@@ -92,13 +93,19 @@ class ProgressSyncMixin:
         source_status = _SUCCESS_SOURCE_STATUS[stage]
         target_status = _SUCCESS_TARGET_STATUS[stage]
 
-        # Persist the success into the publish record (clears the retry flag and
-        # atomically advances the status together with ext).
-        self._record_sync_success(
-            publish_id,
-            source_status=source_status,
+        # Clear the transient retry marker, then atomically advance the status
+        # together with ext under the optimistic lock (a separate status-then-ext
+        # write would be a TOCTOU race against a concurrent transition).
+        ext.pop("retry", None)
+        self._update_publish_status(
+            publish_id=publish_id,
             target_status=target_status,
+            source_status=source_status,
             ext=ext,
+        )
+        logger.info(
+            f"[PublishFlowService._handle_sync_success] "
+            f"Publish status updated: {source_status} -> {target_status}"
         )
 
         # If the online stage succeeded, update the previous publish record status to UPGRADED
@@ -123,6 +130,65 @@ class ProgressSyncMixin:
             message=f"Publish progress synced successfully, status: {baas_status}",
             data=progress,
         )
+
+    def _mark_previous_publish_superseded(
+        self,
+        publish_record: BotPublishRecord,
+        stage: PublishStage,
+        target_status: PublishStatus,
+    ) -> None:
+        """Update the previous publish record status to UPGRADED (only when the online stage succeeds).
+
+        Part of the sync-success handling (its only caller); the actual write
+        goes through the ``_update_publish_status`` plumbing.
+
+        Args:
+            publish_record: Current publish record
+            stage: Publish stage (VERIFY/ONLINE)
+            target_status: Target status
+        """
+        # Only update the previous publish record when the online stage succeeds
+        if stage != PublishStage.ONLINE or target_status != PublishStatus.SUCCESS:
+            return
+
+        last_pub_id = publish_record.last_pub_id
+        if not last_pub_id or last_pub_id <= 0:
+            return
+
+        # Query the previous publish record
+        last_publish = self.get_publish_record(last_pub_id)
+        if not last_publish:
+            logger.warning(
+                f"[PublishFlowService._mark_previous_publish_superseded] "
+                f"Last publish record not found: last_pub_id={last_pub_id}"
+            )
+            return
+
+        # Clear the rollback_restored_from marker (if present)
+        last_ext = last_publish.ext or {}
+        if last_ext.pop("rollback_restored_from", None):
+            logger.info(
+                f"[PublishFlowService._mark_previous_publish_superseded] "
+                f"Clearing rollback_restored_from for publish {last_pub_id}"
+            )
+
+        # Update the previous publish record status to UPGRADED, and update ext at the same time
+        try:
+            self._update_publish_status(
+                publish_id=last_pub_id,
+                target_status=PublishStatus.UPGRADED,
+                source_status=PublishStatus.SUCCESS,
+                ext=last_ext,
+            )
+            logger.info(
+                f"[PublishFlowService._mark_previous_publish_superseded] "
+                f"Last publish status updated to UPGRADED: last_pub_id={last_pub_id}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[PublishFlowService._mark_previous_publish_superseded] "
+                f"Failed to update last publish status: last_pub_id={last_pub_id}, error={e}"
+            )
 
     def _destroy_verify_bot_after_online_success(
         self, publish_id: int, publish_record: BotPublishRecord
@@ -227,7 +293,7 @@ class ProgressSyncMixin:
         logger.info(f"[PublishFlowService.sync_publish_progress] Syncing: publish_id={publish_id}")
 
         # Step 1: Query the publish record
-        publish_record = self._publish_service.get_publish_by_id(publish_id)
+        publish_record = self.get_publish_record(publish_id)
         if not publish_record:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
 
@@ -350,7 +416,7 @@ class ProgressSyncMixin:
         """
         logger.info(f"[PublishFlowService.sync_scale_progress] Syncing scale progress: publish_id={publish_id}")
 
-        publish_record = self._publish_service.get_publish_by_id(publish_id)
+        publish_record = self.get_publish_record(publish_id)
         if not publish_record:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
 
@@ -414,7 +480,7 @@ class ProgressSyncMixin:
         logger.info(f"[PublishFlowService.sync_restart_progress] Syncing restart progress: publish_id={publish_id}")
 
         # Step 1: Query the publish record
-        publish_record = self._publish_service.get_publish_by_id(publish_id)
+        publish_record = self.get_publish_record(publish_id)
         if not publish_record:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
 
@@ -521,27 +587,3 @@ class ProgressSyncMixin:
                 action="sync_restart",
                 data=progress,
             )
-
-    def get_baas_publish_progress(
-        self,
-        *,
-        baas_publish_id: int,
-        include_devices: bool = True,
-    ) -> Dict[str, Any]:
-        """Query BaaS publish progress."""
-        logger.info(
-            f"[PublishFlowService.get_baas_publish_progress] Query BaaS progress: "
-            f"baas_publish_id={baas_publish_id}, include_devices={include_devices}"
-        )
-        try:
-            return self._baas_service.get_publish_progress(
-                publish_id=int(baas_publish_id),
-                include_devices=include_devices,
-            )
-        except Exception as e:
-            logger.error(
-                f"[PublishFlowService.get_baas_publish_progress] "
-                f"Failed to get BaaS publish progress: baas_publish_id={baas_publish_id}, "
-                f"error={e}"
-            )
-            raise
