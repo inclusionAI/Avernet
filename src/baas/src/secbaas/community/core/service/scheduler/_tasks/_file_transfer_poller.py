@@ -14,7 +14,12 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from secbaas.core.repository.file_transfer_ticket import TicketRecord, TicketRepository
+from secbaas.core.repository.file_transfer_ticket import (
+    TicketRecord,
+    TicketRepository,
+    TransferNotFoundError,
+    TransferStateConflictError,
+)
 from secbaas.core.service.distributed_lock import DistributedLockService
 from secbaas.core.service.paas import PaasServiceFacade
 from secbaas.logger import get_logger
@@ -103,8 +108,6 @@ class FileTransferPoller:
             log.info("[FileTransferPoller] No pending tickets found")
             return
 
-        log.info("[FileTransferPoller] Found %d pending tickets", len(tickets))
-
         # Process tickets concurrently with Semaphore-based concurrency control
         semaphore = asyncio.Semaphore(self._config.max_concurrent_tickets)
 
@@ -115,6 +118,7 @@ class FileTransferPoller:
                 return await self._process_single_ticket(ticket)
 
         all_tickets_for_processing = tickets + download_tickets
+        log.info("[FileTransferPoller] Found %d pending tickets", len(all_tickets_for_processing))
         results = await asyncio.gather(
             *[_process_with_semaphore(t) for t in all_tickets_for_processing]
         )
@@ -162,7 +166,7 @@ class FileTransferPoller:
             # Timeout check: gmt_create + upload_timeout_seconds < now
             if ticket.gmt_create + timedelta(
                 seconds=self._config.upload_timeout_seconds
-            ) < datetime.now():
+            ) < datetime.utcnow():
                 log.warning(
                     "[FileTransferPoller] Ticket %s timed out (created=%s, timeout=%ss)",
                     transfer_id,
@@ -233,9 +237,10 @@ class FileTransferPoller:
                     transfer_id, "UPLOAD_COMPLETED", None
                 )
 
-                download_url = self._file_backend.generate_download_url(
+                download_url = await asyncio.to_thread(
+                    self._file_backend.generate_download_url,
                     ticket.fileservice_staging_path,
-                    expire_seconds=_DOWNLOAD_URL_EXPIRE_SECONDS,
+                    _DOWNLOAD_URL_EXPIRE_SECONDS,
                 )
 
                 log.info(
@@ -276,6 +281,12 @@ class FileTransferPoller:
             )
             try:
                 self._ticket_repo.update_status(transfer_id, "FAILED", error_msg)
+            except (TransferNotFoundError, TransferStateConflictError):
+                log.info(
+                    "[FileTransferPoller] Ticket %s already in terminal state, "
+                    "skipping FAILED mark",
+                    transfer_id,
+                )
             except Exception:
                 log.exception(
                     "[FileTransferPoller] Failed to mark ticket %s as FAILED",
@@ -358,9 +369,10 @@ class FileTransferPoller:
                 self._ticket_repo.update_status(transfer_id, "PUSHING", None)
 
                 # Generate download URL (D-17 step 2)
-                download_url = self._file_backend.generate_download_url(
+                download_url = await asyncio.to_thread(
+                    self._file_backend.generate_download_url,
                     ticket.fileservice_staging_path,
-                    expire_seconds=_DOWNLOAD_URL_EXPIRE_SECONDS,
+                    _DOWNLOAD_URL_EXPIRE_SECONDS,
                 )
 
                 # Write download_url to ticket (D-17 step 3)
@@ -395,6 +407,12 @@ class FileTransferPoller:
             )
             try:
                 self._ticket_repo.update_status(transfer_id, "FAILED", error_msg)
+            except (TransferNotFoundError, TransferStateConflictError):
+                log.info(
+                    "[FileTransferPoller] DOWNLOAD ticket %s already in "
+                    "terminal state, skipping FAILED mark",
+                    transfer_id,
+                )
             except Exception:
                 log.exception(
                     "[FileTransferPoller] Failed to mark DOWNLOAD ticket %s as FAILED",

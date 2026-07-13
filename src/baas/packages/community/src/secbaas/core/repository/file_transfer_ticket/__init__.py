@@ -3,7 +3,11 @@
 from ._factory import get_ticket_repository
 from ._orm_model import FileTransferTicketModel
 from ._orm_repository import OrmTicketRepository
-from ._protocol import TicketRepository
+from ._protocol import (
+    TicketRepository,
+    TransferNotFoundError,
+    TransferStateConflictError,
+)
 from ._record import TicketRecord
 
 __all__ = [
@@ -12,4 +16,6 @@ __all__ = [
     "OrmTicketRepository",
     "FileTransferTicketModel",
     "get_ticket_repository",
+    "TransferNotFoundError",
+    "TransferStateConflictError",
 ]

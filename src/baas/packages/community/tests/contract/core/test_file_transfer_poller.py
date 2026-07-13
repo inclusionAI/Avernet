@@ -26,7 +26,6 @@ class TestFileTransferPollerContract:
     def _make_config(**overrides) -> FileTransferPollerConfig:
         defaults = dict(
             enabled=True,
-            lock_name="file_transfer_poller_lock",
             lock_expire_seconds=300,
             cron_interval_seconds=10,
             upload_timeout_seconds=3600,
@@ -66,7 +65,10 @@ class TestFileTransferPollerContract:
         """Create a FileTransferPoller with mocks or overridden mocks.
 
         Default mocks: lock acquired, OSS object exists, pull_file succeeds.
+        Caller overrides are applied via pop() — no locals() mutation.
         """
+        from unittest.mock import AsyncMock
+
         if config is None:
             config = TestFileTransferPollerContract._make_config()
 
@@ -78,7 +80,9 @@ class TestFileTransferPollerContract:
         # Default mock behavior: lock acquired
         lock_ctx = MagicMock()
         lock_ctx.acquired = True
-        lock_service.try_lock.return_value.__enter__.return_value = lock_ctx
+        lock_ctx.lock_holder = "test-holder-001"
+        lock_service.acquire_lock.return_value = lock_ctx
+        lock_service.release_lock.return_value = True
 
         # Default: OSS object exists
         file_backend.check_object_exists.return_value = True
@@ -86,9 +90,14 @@ class TestFileTransferPollerContract:
             "https://oss.example.com/download?token=abc"
         )
 
-        # Override with any caller-specific mocks
-        for name, value in mock_overrides.items():
-            locals()[name] = value
+        # Default: pull_file is an async no-op
+        paas_facade.pull_file = AsyncMock()
+
+        # Apply caller-specific overrides (pop avoids locals() mutation)
+        lock_service = mock_overrides.pop("lock_service", lock_service)
+        ticket_repo = mock_overrides.pop("ticket_repo", ticket_repo)
+        file_backend = mock_overrides.pop("file_backend", file_backend)
+        paas_facade = mock_overrides.pop("paas_facade", paas_facade)
 
         return FileTransferPoller(
             config=config,
@@ -102,9 +111,12 @@ class TestFileTransferPollerContract:
 
     def test_process_single_ticket_normal_path(self) -> None:
         """Normal path: ticket is CREATED, OSS object ready, pull_file succeeds."""
+        from unittest.mock import AsyncMock
+
         config = self._make_config()
         ticket = self._make_ticket_record(status="CREATED")
         paas_facade = MagicMock()
+        paas_facade.pull_file = AsyncMock()
         ticket_repo = MagicMock()
 
         poller = self._make_poller(
@@ -117,12 +129,7 @@ class TestFileTransferPollerContract:
         result = asyncio.run(poller._process_single_ticket(ticket))  # noqa: SLF001
 
         assert result == "pull_success"
-        # Verify status transitions
-        # update_status should be called: UPLOAD_COMPLETED, DONE
-        status_calls = [
-            c.args[0] for c in ticket_repo.update_status.call_args_list
-            if len(c.args) >= 1
-        ]
+        # Verify status transitions: UPLOAD_COMPLETED, DONE
         # First positional arg is transfer_id; second is new_status
         status_transitions = [
             (c.args[0], c.args[1])
