@@ -17,10 +17,20 @@ def _percent(covered: int, total: int) -> float:
     return round((covered * 100.0 / total) if total else 0.0, 2)
 
 
+def _module_configs(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    modules = manifest.get("modules") or {}
+    if not isinstance(modules, dict):
+        raise ValueError("coverage manifest modules must be a mapping")
+    for module_name, config in modules.items():
+        if not isinstance(config, dict):
+            raise ValueError(f"coverage module config must be a mapping: {module_name}")
+    return modules
+
+
 def select_module_names(
     manifest: dict[str, Any], requested_modules: list[str]
 ) -> list[str]:
-    modules = manifest.get("modules") or {}
+    modules = _module_configs(manifest)
     if requested_modules:
         selected: list[str] = []
         for module_name in requested_modules:
@@ -39,7 +49,7 @@ def select_module_names(
 def acceptance_targets_for(
     manifest: dict[str, Any], module_names: list[str]
 ) -> list[str]:
-    modules = manifest.get("modules") or {}
+    modules = _module_configs(manifest)
     targets: list[str] = []
     for module_name in module_names:
         module = modules.get(module_name)
@@ -101,7 +111,7 @@ def build_module_report(
     router_hits: list[str],
     plugin_hits: list[str],
 ) -> dict[str, Any]:
-    module = (manifest.get("modules") or {}).get(module_name)
+    module = _module_configs(manifest).get(module_name)
     if module is None:
         raise ValueError(f"unknown coverage module: {module_name}")
 
@@ -317,7 +327,10 @@ def main() -> int:
     }
     missing = [flag for flag, value in required.items() if value is None]
     if missing:
-        print(f"missing required reporting arguments: {', '.join(missing)}", file=sys.stderr)
+        print(
+            f"missing required reporting arguments: {', '.join(missing)}",
+            file=sys.stderr,
+        )
         return 2
     coverage = json.loads(args.coverage_json.read_text(encoding="utf-8"))
     router_hits = _load_jsonl_keys(args.router_hits)

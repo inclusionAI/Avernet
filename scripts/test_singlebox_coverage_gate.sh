@@ -261,8 +261,35 @@ assert devices["plugin_api"]["status"] == "not_applicable"
 PY
 }
 
+test_reporter_selection_failure_is_preserved() {
+  local tmp output rc
+  tmp="$(mktemp -d)"
+  make_fake_repo "$tmp"
+  cat > "${tmp}/scripts/ci/singlebox_coverage_modules.yaml" <<'YAML'
+modules:
+  empty:
+YAML
+
+  set +e
+  output="$(
+    cd "$tmp"
+    PYTHON="${ROOT}/src/backend/.venv/bin/python" \
+      "${tmp}/scripts/ci/singlebox_coverage.sh" 2>&1
+  )"
+  rc=$?
+  set -e
+
+  [ "$rc" -eq 2 ] || fail "invalid manifest should return reporter usage error"
+  grep -F "coverage module config must be a mapping: empty" <<<"$output" >/dev/null || \
+    fail "reporter selection error should be preserved"
+  if grep -F "singlebox coverage manifest selected no modules" <<<"$output" >/dev/null; then
+    fail "reporter failure should not be replaced by an empty-selection error"
+  fi
+}
+
 test_default_mode_runs_real_singlebox
 test_mock_mode_is_not_supported
 test_module_mode_reports_device_metrics
+test_reporter_selection_failure_is_preserved
 
 printf 'PASS: singlebox coverage gate tests\n'

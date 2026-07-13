@@ -75,6 +75,13 @@ def test_select_module_names_rejects_unknown_requested_module():
         select_module_names(_manifest(), ["missing"])
 
 
+def test_select_module_names_rejects_non_mapping_module_config():
+    with pytest.raises(
+        ValueError, match="coverage module config must be a mapping: empty"
+    ):
+        select_module_names({"modules": {"empty": None}}, [])
+
+
 def test_acceptance_targets_are_deduplicated_in_module_order():
     manifest = {
         "modules": {

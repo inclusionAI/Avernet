@@ -108,17 +108,21 @@ resolve_reporter_command() {
 
 resolve_coverage_scope() {
   local selection_args=(--manifest "$module_manifest")
-  local module_name target
+  local module_name target modules_output targets_output
   if [[ "${#requested_modules[@]}" -gt 0 ]]; then
     for module_name in "${requested_modules[@]}"; do
       selection_args+=(--module "$module_name")
     done
   fi
 
+  if ! modules_output="$("${reporter_command[@]}" \
+    "$script_dir/singlebox_coverage_report.py" \
+    "${selection_args[@]}" --list-modules)"; then
+    return 2
+  fi
   while IFS= read -r module_name; do
     [[ -n "$module_name" ]] && coverage_modules+=("$module_name")
-  done < <("${reporter_command[@]}" "$script_dir/singlebox_coverage_report.py" \
-    "${selection_args[@]}" --list-modules)
+  done <<< "$modules_output"
   if [[ "${#coverage_modules[@]}" -eq 0 ]]; then
     echo "singlebox coverage manifest selected no modules" >&2
     return 2
@@ -127,10 +131,14 @@ resolve_coverage_scope() {
   if [[ "${#explicit_acceptance_targets[@]}" -gt 0 ]]; then
     acceptance_targets=("${explicit_acceptance_targets[@]}")
   else
+    if ! targets_output="$("${reporter_command[@]}" \
+      "$script_dir/singlebox_coverage_report.py" \
+      "${selection_args[@]}" --list-acceptance-targets)"; then
+      return 2
+    fi
     while IFS= read -r target; do
       [[ -n "$target" ]] && acceptance_targets+=("$target")
-    done < <("${reporter_command[@]}" "$script_dir/singlebox_coverage_report.py" \
-      "${selection_args[@]}" --list-acceptance-targets)
+    done <<< "$targets_output"
   fi
   if [[ "${#acceptance_targets[@]}" -eq 0 ]]; then
     echo "selected coverage modules have no acceptance targets" >&2
