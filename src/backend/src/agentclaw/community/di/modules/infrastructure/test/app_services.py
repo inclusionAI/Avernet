@@ -67,7 +67,7 @@ class TestAppServicesModule(Module):
         if block and block.get("base_url") and block.get("access_key"):
             logger.info("WorkspaceHostingConfig: using YAML config (test)")
             admin_ids = block.get("admin_member_staff_ids", ()) or []
-            admin_ids = tuple(str(i) for i in admin_ids)
+            admin_ids = tuple(dict.fromkeys(str(i).strip() for i in admin_ids if str(i).strip()))
             return cfg.WorkspaceHostingConfig(
                 base_url=block["base_url"],
                 access_key=block["access_key"],

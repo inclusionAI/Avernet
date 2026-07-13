@@ -377,7 +377,7 @@ class ConfigModule(Module):
         # a tuple to satisfy the frozen dataclass + immutability invariant.
         admin_ids = block.get("admin_member_staff_ids", defaults.admin_member_staff_ids)
         if isinstance(admin_ids, (list, tuple)):
-            admin_ids = tuple(str(i) for i in admin_ids)
+            admin_ids = tuple(dict.fromkeys(str(i).strip() for i in admin_ids if str(i).strip()))
         else:
             admin_ids = defaults.admin_member_staff_ids
 

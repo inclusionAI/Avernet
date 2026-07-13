@@ -128,7 +128,7 @@ class WorkspaceHostingService:
                     self._client.add_admin_members(
                         staff_id=staff_id,
                         workspace_id=workspace_id,
-                        member_staff_ids=list(self._admin_member_staff_ids),
+                        member_staff_ids=self._admin_member_staff_ids,
                     )
                     logger.info(
                         "[dima_workspace] Added admin members %s to workspace %s for bot %s",

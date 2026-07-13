@@ -446,7 +446,7 @@ class TestAddAdminMembersClient:
 
     def test_add_admin_members_builds_admin_payload(self):
         """verify body: targetType=WORKSPACE / targetId / roleId=ADMIN / memberStaffIds。
-        走 _make_request(POST)，固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定固定"""
+        走 _make_request(POST)"""
         client = _make_dima_client()
         client._make_request = MagicMock(return_value={"success": True})
 
