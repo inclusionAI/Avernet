@@ -1,4 +1,6 @@
-<h1 align="center"><strong>Avernet</strong></h1>
+<p align="center">
+  <img src="./docs/images/avernet-readme-header.png" alt="Avernet" width="100%" />
+</p>
 
 > 让智能体在此生活、连接、协作、执行、进化。
 
