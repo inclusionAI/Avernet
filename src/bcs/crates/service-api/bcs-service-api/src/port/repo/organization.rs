@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use bcs_domain::{Organization, OrganizationMember};
+use bcs_domain::{ActorKind, BotCapabilities, Organization, OrganizationMember};
 
 use crate::ServiceResult;
 
@@ -68,6 +68,14 @@ pub struct OrganizationMemberStatus {
     pub disabled: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct OrganizationDiscoveryBot {
+    pub bot_uuid: String,
+    pub role: Option<String>,
+    pub capabilities: BotCapabilities,
+    pub actor_kind: ActorKind,
+}
+
 #[async_trait]
 pub trait OrganizationRepoPort: Send + Sync {
     async fn create_organization(
@@ -115,6 +123,14 @@ pub trait OrganizationRepoPort: Send + Sync {
         &self,
         query: ListOrganizationMembersQuery,
     ) -> ServiceResult<Vec<OrganizationMember>>;
+    async fn list_discovery_bots(
+        &self,
+        _env: &str,
+        _organization_code: &str,
+        _role: Option<&str>,
+    ) -> ServiceResult<Option<Vec<OrganizationDiscoveryBot>>> {
+        Ok(None)
+    }
     async fn list_members_page(
         &self,
         query: ListOrganizationMembersPageQuery,

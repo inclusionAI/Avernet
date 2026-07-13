@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_db_api::{DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
-use bcs_domain::{Organization, OrganizationMember};
+use bcs_domain::{ActorKind, BotCapabilities, Organization, OrganizationMember};
 use bcs_service_api::port::repo::{
     CreateOrganizationRecord, ListOrganizationMembersPageQuery, ListOrganizationMembersQuery,
-    ListOrganizationsQuery, OrganizationMemberPage, OrganizationMemberStatus, OrganizationRepoPort,
+    ListOrganizationsQuery, OrganizationDiscoveryBot, OrganizationMemberPage, OrganizationMemberStatus, OrganizationRepoPort,
     UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
 };
 use bcs_service_api::{ServiceError, ServiceResult};
@@ -334,6 +334,29 @@ impl OrganizationRepoPort for DbOrganizationStore {
         rows.into_iter().map(row_to_member).collect()
     }
 
+    async fn list_discovery_bots(
+        &self,
+        env: &str,
+        organization_code: &str,
+        role: Option<&str>,
+    ) -> ServiceResult<Option<Vec<OrganizationDiscoveryBot>>> {
+        let mut sql = "SELECT member.bot_uuid, member.role, bot.name AS bot_name, bot.bot_info, \
+            bot.visibility, bot.actor_kind, bot.agent_code \
+            FROM bcs_organization_members AS member \
+            JOIN bcs_bots AS bot ON bot.env = member.env AND bot.bot_uuid = member.bot_uuid \
+            WHERE member.env = ? AND member.organization_code = ? \
+              AND member.disabled = 0 AND bot.is_deleted = 0"
+            .to_string();
+        let mut params = vec![DbValue::from(env), DbValue::from(organization_code)];
+        if let Some(role) = role {
+            sql.push_str(" AND member.role = ?");
+            params.push(DbValue::from(role));
+        }
+        let rows = self.db.query(DbStatement::with_params(sql, params)).await
+            .map_err(|error| service_db_error("list_discovery_bots", error))?;
+        Ok(Some(rows.into_iter().filter_map(row_to_discovery_bot).collect()))
+    }
+
     async fn list_members_page(
         &self,
         query: ListOrganizationMembersPageQuery,
@@ -421,6 +444,34 @@ fn row_to_member(row: DbRow) -> ServiceResult<OrganizationMember> {
         disabled: bool_column(&row, "disabled")?,
         created_at: timestamp_millis(&row, "created_at")?,
         updated_at: timestamp_millis(&row, "updated_at")?,
+    })
+}
+
+fn row_to_discovery_bot(row: DbRow) -> Option<OrganizationDiscoveryBot> {
+    let bot_uuid = optional_string(&row, "bot_uuid").ok().flatten()?;
+    let mut capabilities = optional_string(&row, "bot_info")
+        .ok()
+        .flatten()
+        .and_then(|bot_info| serde_json::from_str::<BotCapabilities>(&bot_info).ok())
+        .unwrap_or_default();
+    capabilities.name = optional_string(&row, "bot_name").ok().flatten();
+    if let Some(visibility) = optional_string(&row, "visibility").ok().flatten() {
+        capabilities.visibility = visibility;
+    }
+    capabilities.agent_code = optional_string(&row, "agent_code")
+        .ok()
+        .flatten()
+        .or(capabilities.agent_code);
+    capabilities.agent_token = None;
+    let actor_kind = match optional_string(&row, "actor_kind").ok().flatten().as_deref() {
+        Some("human") => ActorKind::Human,
+        _ => ActorKind::Bot,
+    };
+    Some(OrganizationDiscoveryBot {
+        bot_uuid,
+        role: optional_string(&row, "role").ok().flatten(),
+        capabilities,
+        actor_kind,
     })
 }
 

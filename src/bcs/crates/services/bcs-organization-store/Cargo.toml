@@ -13,6 +13,7 @@ bcs-db-api = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-service-api = { workspace = true }
 tokio = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 bcs-db-local = { workspace = true }

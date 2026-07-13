@@ -14,7 +14,7 @@ use bcs_service_api::{
     BotRuntimeDisconnectCommand, BotRuntimeStatusCommand, BotRuntimeStatusOutcome,
     BotStatusUpdateCommand, BotStatusUpdateResult, BotUseCaseError, BotVisibilityCommand,
     BotVisibilityQueryCommand, BotVisibilityQueryResult, BotVisibilityResult, ConnectionKind,
-    DynamicStatusResponse, FriendCoreService, KickReason, ProviderBotBinding,
+    BotDynamicStatus, DynamicStatusResponse, FriendCoreService, KickReason, ProviderBotBinding,
     ProviderBotDiscoverySelector, RegisteredBot, RelationCoreService, ServiceError, ServiceResult,
     SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult,
 };
@@ -781,18 +781,41 @@ impl Bot {
         organization
             .require_runtime_member(organization_code, requester)
             .await?;
-        let members = organization
-            .list_runtime_members(organization_code, command.role.as_deref())
-            .await?;
-        let member_by_bot = members
-            .iter()
-            .map(|member| (member.bot_uuid.clone(), member.clone()))
-            .collect::<BTreeMap<_, _>>();
-        let bot_ids = members
-            .iter()
-            .map(|member| member.bot_uuid.clone())
-            .collect::<Vec<_>>();
-        let bots = self.registry.get_by_ids(&bot_ids).await;
+        let (member_by_bot, bots) = match organization
+            .list_runtime_discovery_bots(organization_code, command.role.as_deref())
+            .await?
+        {
+            Some(discovery_bots) => {
+                let member_by_bot = discovery_bots
+                    .iter()
+                    .map(|bot| (bot.bot_uuid.clone(), bot.role.clone()))
+                    .collect::<BTreeMap<_, _>>();
+                let bots = discovery_bots
+                    .into_iter()
+                    .map(|bot| RegisteredBot {
+                        bot_uuid: bot.bot_uuid,
+                        capabilities: bot.capabilities,
+                        dynamic_status: BotDynamicStatus::default(),
+                        env: None,
+                        created_by: None,
+                        actor_kind: bot.actor_kind,
+                        status: ActorStatus::Online,
+                    })
+                    .collect();
+                (member_by_bot, bots)
+            }
+            None => {
+                let members = organization
+                    .list_runtime_members(organization_code, command.role.as_deref())
+                    .await?;
+                let member_by_bot = members
+                    .iter()
+                    .map(|member| (member.bot_uuid.clone(), member.role.clone()))
+                    .collect::<BTreeMap<_, _>>();
+                let bot_ids = members.into_iter().map(|member| member.bot_uuid).collect::<Vec<_>>();
+                (member_by_bot, self.registry.get_by_ids(&bot_ids).await)
+            }
+        };
         let friend_ids = self.friend.list_friends(requester).await;
         let friend_ids = friend_ids.into_iter().collect::<std::collections::HashSet<_>>();
         let mut entries = Vec::new();
@@ -813,7 +836,7 @@ impl Bot {
             if !is_organization_discover_visible(&visibility) && !is_friend {
                 continue;
             }
-            let Some(member) = member_by_bot.get(&bot.bot_uuid) else {
+            let Some(role) = member_by_bot.get(&bot.bot_uuid) else {
                 continue;
             };
             let agent_code = bot.capabilities.agent_code.clone();
@@ -826,7 +849,7 @@ impl Bot {
                 provider_info: None,
                 organization_member: Some(OrganizationMemberSummary {
                     organization_code: organization_code.to_string(),
-                    role: member.role.clone(),
+                    role: role.clone(),
                 }),
             });
         }

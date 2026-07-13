@@ -23,7 +23,7 @@ pub use group::GroupRepoPort;
 pub use message::{MessageRepoError, MessageRepoPort};
 pub use organization::{
     CreateOrganizationRecord, ListOrganizationMembersPageQuery, ListOrganizationMembersQuery,
-    ListOrganizationsQuery, OrganizationMemberPage, OrganizationMemberStatus, OrganizationRepoPort, UpdateOrganizationRecord,
+    ListOrganizationsQuery, OrganizationDiscoveryBot, OrganizationMemberPage, OrganizationMemberStatus, OrganizationRepoPort, UpdateOrganizationRecord,
     UpsertOrganizationMemberRecord,
 };
 pub use provider::{

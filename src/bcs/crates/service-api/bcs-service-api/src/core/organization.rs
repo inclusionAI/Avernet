@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use bcs_domain::{Organization, OrganizationMember};
 
 use crate::{BotCapabilities, OrganizationMemberPage, ServiceResult};
+use crate::port::repo::OrganizationDiscoveryBot;
 
 #[derive(Debug, Clone)]
 pub struct AuthorizedOrganizationPair {
@@ -165,6 +166,13 @@ pub trait OrganizationCoreService: Send + Sync {
         organization_code: &str,
         role: Option<&str>,
     ) -> ServiceResult<Vec<OrganizationMember>>;
+    async fn list_runtime_discovery_bots(
+        &self,
+        _organization_code: &str,
+        _role: Option<&str>,
+    ) -> ServiceResult<Option<Vec<OrganizationDiscoveryBot>>> {
+        Ok(None)
+    }
     async fn authorize_pair(
         &self,
         organization_code: &str,

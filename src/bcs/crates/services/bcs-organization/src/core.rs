@@ -12,6 +12,7 @@ use bcs_service_api::{
     ProviderBotBindingRepoPort, ProviderRecord, ProviderRepoPort, ServiceError, ServiceResult,
     UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
 };
+use bcs_service_api::port::repo::OrganizationDiscoveryBot;
 
 #[derive(Clone)]
 pub struct OrganizationCore {
@@ -536,6 +537,20 @@ impl OrganizationCoreService for OrganizationCore {
             .collect::<Vec<_>>();
         members.sort_by(|left, right| left.bot_uuid.cmp(&right.bot_uuid));
         Ok(members)
+    }
+
+    async fn list_runtime_discovery_bots(
+        &self,
+        organization_code: &str,
+        role: Option<&str>,
+    ) -> ServiceResult<Option<Vec<OrganizationDiscoveryBot>>> {
+        if let Some(role) = role {
+            validate_external_id("role", role)?;
+        }
+        let organization = self.require_organization_for_runtime(organization_code).await?;
+        self.organizations
+            .list_discovery_bots(&self.env, &organization.code, role)
+            .await
     }
 
     async fn authorize_pair(
