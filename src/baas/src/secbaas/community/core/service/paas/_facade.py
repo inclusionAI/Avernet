@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse, urlunparse
 
 if TYPE_CHECKING:
     from secbaas.community.api.bot_manage import FetchStartProgressResult  # noqa: F401
@@ -1958,11 +1959,13 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
         """
         raw_paas_device_id, template_id = self._parse_device_id(paas_device_id)
 
-        truncated_url = source_url[:80] + "..." if len(source_url) > 80 else source_url
+        safe_source_url = urlunparse(
+            urlparse(source_url)._replace(query="", fragment="")
+        )
         self._logger.info(
             f"Pulling file: raw_id={paas_device_id}, "
             f"parsed_device_id={raw_paas_device_id}, template_id={template_id}, "
-            f"source_url={truncated_url}, device_path={device_path}, "
+            f"source_url={safe_source_url}, device_path={device_path}, "
             f"timeout={timeout_seconds}s"
         )
 
@@ -2023,6 +2026,20 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                 paas_device_id=paas_device_id,
                 original_error=e,
             ) from e
+        except Exception as e:
+            self._logger.error(f"pull_file failed for {paas_device_id}: {e}")
+            raise DeviceFacadeException(
+                operation="pull_file",
+                platform_type=await self._get_platform_type(service)
+                if service
+                else "UNKNOWN",
+                template_id=template_id,
+                paas_device_id=paas_device_id,
+                original_error=PaasError(
+                    ErrorCode.PLATFORM_ERROR,
+                    str(e),
+                ),
+            ) from e
 
     async def push_file(
         self, paas_device_id: str, device_path: str, target_url: str,
@@ -2048,11 +2065,13 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
         """
         raw_paas_device_id, template_id = self._parse_device_id(paas_device_id)
 
-        truncated_url = target_url[:80] + "..." if len(target_url) > 80 else target_url
+        safe_target_url = urlunparse(
+            urlparse(target_url)._replace(query="", fragment="")
+        )
         self._logger.info(
             f"Pushing file: raw_id={paas_device_id}, "
             f"parsed_device_id={raw_paas_device_id}, template_id={template_id}, "
-            f"device_path={device_path}, target_url={truncated_url}, "
+            f"device_path={device_path}, target_url={safe_target_url}, "
             f"timeout={timeout_seconds}s"
         )
 
@@ -2112,4 +2131,18 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                 template_id=template_id,
                 paas_device_id=paas_device_id,
                 original_error=e,
+            ) from e
+        except Exception as e:
+            self._logger.error(f"push_file failed for {paas_device_id}: {e}")
+            raise DeviceFacadeException(
+                operation="push_file",
+                platform_type=await self._get_platform_type(service)
+                if service
+                else "UNKNOWN",
+                template_id=template_id,
+                paas_device_id=paas_device_id,
+                original_error=PaasError(
+                    ErrorCode.PLATFORM_ERROR,
+                    str(e),
+                ),
             ) from e

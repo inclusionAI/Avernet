@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shlex
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse, urlunparse
 
 from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionInfo
 from secbaas.community.api.device_manage import (
@@ -1001,7 +1003,10 @@ class ArcaPaasService(PaasService):
         """Synchronous implementation of pull_file_from_url for use in to_thread()."""
         try:
             sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(paas_device_id)
-            cmd = f"curl -fSL -o {device_path} '{source_url}'"
+            cmd = (
+                f"curl -fSL -o {shlex.quote(device_path)} "
+                f"{shlex.quote(source_url)}"
+            )
             result = sandbox.exec_command(
                 cmd=cmd,
                 timeout_in_millis=timeout_seconds * 1000,
@@ -1012,8 +1017,11 @@ class ArcaPaasService(PaasService):
                     ErrorCode.FILE_TRANSFER_FAILED,
                     f"curl pull failed with exit code {result.exit_code}: {result.stderr}",
                 )
+            safe_url = urlunparse(
+                urlparse(source_url)._replace(query="", fragment="")
+            )
             self._logger.info(
-                f"File pulled: {source_url} -> {device_path} (sandbox={paas_device_id})"
+                f"File pulled: {safe_url} -> {device_path} (sandbox={paas_device_id})"
             )
         except ArcaSandboxTimeoutError as e:
             raise PaasError(
@@ -1056,7 +1064,10 @@ class ArcaPaasService(PaasService):
         """Synchronous implementation of push_file_to_url for use in to_thread()."""
         try:
             sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(paas_device_id)
-            cmd = f"curl -fSL -X PUT -T {device_path} '{target_url}'"
+            cmd = (
+                f"curl -fSL -X PUT -T {shlex.quote(device_path)} "
+                f"{shlex.quote(target_url)}"
+            )
             result = sandbox.exec_command(
                 cmd=cmd,
                 timeout_in_millis=timeout_seconds * 1000,
@@ -1067,8 +1078,11 @@ class ArcaPaasService(PaasService):
                     ErrorCode.FILE_TRANSFER_FAILED,
                     f"curl push failed with exit code {result.exit_code}: {result.stderr}",
                 )
+            safe_url = urlunparse(
+                urlparse(target_url)._replace(query="", fragment="")
+            )
             self._logger.info(
-                f"File pushed: {device_path} -> {target_url} (sandbox={paas_device_id})"
+                f"File pushed: {device_path} -> {safe_url} (sandbox={paas_device_id})"
             )
         except ArcaSandboxTimeoutError as e:
             raise PaasError(
