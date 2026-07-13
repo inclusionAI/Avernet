@@ -80,7 +80,12 @@ def test_dormant_recycle_notification_and_reactivate_live(live_backend):
         )
         assert pending.status_code == 200, pending.text
         rows = pending.json()["data"]
-        notification = next(row for row in rows if row["bot_id"] == bot_id)
+        notifications = [row for row in rows if row["bot_id"] == bot_id]
+        assert len(notifications) == 1, (
+            f"expected one notification for bot {bot_id}, got {notifications}; "
+            f"all rows={rows}"
+        )
+        notification = notifications[0]
         assert notification["notify_type"] == "recycle"
 
         marked = client.post(
