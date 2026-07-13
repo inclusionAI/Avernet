@@ -62,6 +62,7 @@ def _mock_binding(bid: int, provider: str):
     b = MagicMock()
     b.id = bid
     b.device_provider = provider
+    b.device_id = f"device-{bid}"
     return b
 
 
@@ -190,6 +191,73 @@ def test_resolve_for_binding_raises_on_unknown_provider(
 
     with pytest.raises(UnknownProviderError):
         resolver.resolve_for_binding(103, "user-1", bot_id="bot-103")
+
+
+# ── resolve_for_binding_invoke(binding 路由入口) ──
+
+def test_resolve_for_binding_invoke_builds_baas_routing_context_without_builder(
+    resolver, fake_binding_repo, fake_bot_repo, builders
+):
+    fake_binding_repo.get_by_id.return_value = _mock_binding(201, "baas")
+    fake_bot_repo.get_by_id_and_owner.return_value = {
+        "bot_type": "service",
+        "active_engine": "openclaw",
+    }
+
+    ctx = resolver.resolve_for_binding_invoke(
+        201,
+        "owner-1",
+        bot_id="service-bot",
+    )
+
+    assert ctx.provider == "baas"
+    assert ctx.conn_info == {
+        "bind_id": 201,
+        "binding_id": 201,
+        "bot_uuid": "device-201",
+        "engine_port": 20003,
+        "engine_type": "openclaw",
+        "bot_type": "service",
+        "type": "baas",
+        "headers": {},
+        "device_affinity": "owner-1",
+    }
+    builders["baas"].build.assert_not_called()
+
+
+def test_resolve_for_binding_invoke_preserves_teclaw_device_uuid(
+    resolver, fake_binding_repo, fake_bot_repo, builders
+):
+    fake_binding_repo.get_by_id.return_value = _mock_binding(202, "teclaw")
+    fake_bot_repo.get_by_id_and_owner.return_value = {"bot_type": "service"}
+
+    ctx = resolver.resolve_for_binding_invoke(
+        202,
+        "owner-1",
+        bot_id="teclaw-service-bot",
+        device_uuid="DEVICE-002",
+    )
+
+    assert ctx.provider == "teclaw"
+    assert ctx.conn_info["engine_type"] == "teclaw"
+    assert ctx.conn_info["device_uuid"] == "DEVICE-002"
+    builders["teclaw"].build.assert_not_called()
+
+
+def test_resolve_for_binding_invoke_keeps_desktop_full_resolution(
+    resolver, fake_binding_repo, fake_bot_repo, builders
+):
+    fake_binding_repo.get_by_id.return_value = _mock_binding(203, "baas")
+    fake_bot_repo.get_by_id_and_owner.return_value = {"bot_type": "desktop"}
+
+    ctx = resolver.resolve_for_binding_invoke(
+        203,
+        "owner-1",
+        bot_id="desktop-bot",
+    )
+
+    assert ctx.conn_info["_provider_mark"] == "baas-built"
+    builders["baas"].build.assert_called_once()
 
 
 # ── bot_type 注入(本 PR 新增) ──

@@ -270,6 +270,27 @@ class CronRuntimeTargetMixin:
             }
 
         try:
+            device_provider = self._read_field(device, "device_provider")
+            if isinstance(device_provider, str):
+                device_provider = device_provider.lower()
+
+            # 发布态 BaaS/Teclaw 由 transport 按 binding 获取实际调用地址。
+            # 列表和 running 查询只需准备路由字段，不需要提前解析实例地址。
+            if (
+                target.bot_type == "service"
+                and target.runtime_stage != RUNTIME_STAGE_DRAFT
+                and device_provider in MULTI_INSTANCE_DEVICE_PROVIDERS
+            ):
+                kwargs: dict[str, Any] = {}
+                if target.device_uuid:
+                    kwargs["device_uuid"] = target.device_uuid
+                return self._resolver.resolve_for_binding_invoke(
+                    target.binding_id,
+                    target.owner_id,
+                    bot_id=target.bot_id,
+                    **kwargs,
+                ), None
+
             return self._resolve_runtime_context(target), None
         except Exception as e:
             return None, {
