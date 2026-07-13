@@ -25,10 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CARGO_TERM_COLOR: always
-      # PR: compare against the event's immutable base SHA so delayed/rerun runs
-      # are not affected by base-branch drift after the PR was created.
+      # PR: actions/checkout checks out the synthetic merge commit, so compare
+      # against its first parent (the exact base tree used for that merge).
       # push/dispatch: compare against dev (repo default branch) instead.
-      BCS_BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/dev' }}
+      BCS_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
     defaults:
       run:
         working-directory: src/bcs
@@ -37,6 +37,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Validate unit-test diff behavior
+        working-directory: ${{ github.workspace }}
+        run: python3 scripts/ci/tests/test_unit_test_workflow_diff.py
 
       - name: Detect BCS changes vs base
         id: changes
@@ -126,10 +130,9 @@ jobs:
     name: Backend unit tests
     runs-on: ubuntu-latest
     env:
-      # PR: compare against the event's immutable base SHA so delayed/rerun runs
-      # are not affected by base-branch drift after the PR was created.
+      # PR: compare against the checked-out merge commit's exact base tree.
       # push/dispatch: compare against dev (repo default branch) instead.
-      BACKEND_BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/dev' }}
+      BACKEND_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
     defaults:
       run:
         working-directory: src/backend
@@ -194,7 +197,7 @@ jobs:
     name: Engine unit tests
     runs-on: ubuntu-latest
     env:
-      ENGINE_BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/dev' }}
+      ENGINE_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
     defaults:
       run:
         working-directory: src/engine
@@ -251,9 +254,9 @@ jobs:
     name: BaaS unit tests
     runs-on: ubuntu-latest
     env:
-      # PR: compare against the PR's base branch. push/dispatch: compare against dev
-      # (the repo default branch) so coverage-gated diff detection still has a base.
-      BAAS_BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/dev' }}
+      # PR: compare against the checked-out merge commit's exact base tree.
+      # push/dispatch: compare against dev (repo default branch) instead.
+      BAAS_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
     defaults:
       run:
         working-directory: src/baas/packages/community
@@ -313,4 +316,3 @@ jobs:
           name: baas-testresult
           path: src/baas/packages/community/pytest_report/
           if-no-files-found: ignore
-

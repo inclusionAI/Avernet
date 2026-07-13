@@ -6,16 +6,55 @@ cd "$repo_root"
 
 remote_name="${1:-origin}"
 remote_url="${2:-}"
+configured_merge_target="$(git config --get avernet.prePush.mergeTarget 2>/dev/null || true)"
+merge_target="${AVERNET_PRE_PUSH_MERGE_TARGET:-$configured_merge_target}"
+merge_target="${merge_target:-origin/dev}"
 
 echo "== OCB pre-push gate =="
 echo "remote: ${remote_name} ${remote_url}"
+echo "merge target: $merge_target"
 
 seen_ref=0
 status=0
+target_sha=""
+
+resolve_merge_target() {
+  local target_remote=""
+  local target_branch=""
+  local target_ref=""
+
+  if [[ -n "$target_sha" ]]; then
+    return 0
+  fi
+
+  if [[ "$merge_target" != */* ]]; then
+    echo "error: pre-push merge target must use <remote>/<branch>: $merge_target" >&2
+    return 1
+  fi
+  target_remote="${merge_target%%/*}"
+  target_branch="${merge_target#*/}"
+  if [[ -z "$target_remote" || -z "$target_branch" ]] \
+    || ! git remote get-url "$target_remote" >/dev/null 2>&1 \
+    || ! git check-ref-format "refs/heads/$target_branch" >/dev/null 2>&1; then
+    echo "error: invalid pre-push merge target: $merge_target" >&2
+    return 1
+  fi
+
+  target_ref="refs/remotes/$target_remote/$target_branch"
+  if ! git fetch --quiet --no-tags "$target_remote" \
+    "+refs/heads/$target_branch:$target_ref"; then
+    echo "error: failed to refresh pre-push merge target $merge_target" >&2
+    return 1
+  fi
+  if ! target_sha="$(git rev-parse --verify "${target_ref}^{commit}")"; then
+    echo "error: pre-push merge target $merge_target is not a commit" >&2
+    return 1
+  fi
+  echo "merge target sha: $target_sha"
+}
 
 run_for_ref() {
   local local_sha="$1"
-  local remote_sha="$2"
   local base=""
 
   # local_sha 全 0 表示删除远端分支,没有代码需要检查。
@@ -23,17 +62,15 @@ run_for_ref() {
     return 0
   fi
 
-  # base 是“本地模拟 PR CI 的检查起点”:
-  # - 优先和 origin/dev 取 merge-base,即检查“当前分支整体相对 dev 引入的变化”
-  # - 这比 remote_sha -> local_sha 更接近线上 PR CI 的 pullRequest.changes 口径
-  # - 如果本地没有 origin/dev,已有远端分支则退回 remote_sha,新分支退回仓库初始提交
-  if git rev-parse --verify origin/dev >/dev/null 2>&1; then
-    base="$(git merge-base "$local_sha" origin/dev)"
-  elif [[ "$remote_sha" != "0000000000000000000000000000000000000000" ]]; then
-    base="$remote_sha"
-  else
-    base="$(git rev-list --max-parents=0 "$local_sha" | tail -1)"
+  if ! resolve_merge_target; then
+    return 1
   fi
+  if ! base="$(git merge-base "$local_sha" "$target_sha")"; then
+    echo "error: no merge base between $local_sha and $merge_target ($target_sha)" >&2
+    return 1
+  fi
+  echo "merge base: $base"
+  echo "head: $local_sha"
 
   "$repo_root/scripts/ci/pre_push.sh" --base "$base" --head "$local_sha"
 }
@@ -45,17 +82,13 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
   #   refs/heads/dev_xxx abc123 refs/heads/dev_xxx def456
   [[ -n "${local_ref:-}" ]] || continue
   seen_ref=1
-  run_for_ref "$local_sha" "$remote_sha" || status=$?
+  run_for_ref "$local_sha" || status=$?
 done
 
 if [[ "$seen_ref" -eq 0 ]]; then
   # 有些手动调用场景没有 stdin,这里用 HEAD 做一次兜底检查,
   # 方便本地直接执行 .githooks/pre-push 来验证 hook 行为。
-  if git rev-parse --verify origin/dev >/dev/null 2>&1; then
-    run_for_ref HEAD "$(git merge-base HEAD origin/dev)" || status=$?
-  else
-    "$repo_root/scripts/ci/pre_push.sh" --base "$(git rev-list --max-parents=0 HEAD | tail -1)" --head HEAD || status=$?
-  fi
+  run_for_ref HEAD || status=$?
 fi
 
 exit "$status"
