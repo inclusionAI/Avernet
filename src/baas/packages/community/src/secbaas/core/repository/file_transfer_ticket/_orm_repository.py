@@ -1,12 +1,15 @@
 """ORM implementation of TicketRepository using SQLAlchemy."""
 
-from secbaas.api.device_manage import DeviceCreationError
 from secbaas.core.repository import OrmConnectionMixin, with_orm_session
 from secbaas.core.utils.env_utils import get_current_env
 from secbaas.logger import get_logger
 
 from ._orm_model import FileTransferTicketModel
-from ._protocol import TicketRepository
+from ._protocol import (
+    TicketRepository,
+    TransferNotFoundError,
+    TransferStateConflictError,
+)
 from ._record import TicketRecord
 
 log = get_logger("orm-repository")
@@ -136,48 +139,29 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
                 .first()
             )
             if row is None:
-                raise DeviceCreationError(
-                    error_code="FILE_TRANSFER_NOT_FOUND",
-                    message=f"Transfer ticket {transfer_id} not found",
-                )
+                raise TransferNotFoundError(transfer_id)
             else:
-                raise DeviceCreationError(
-                    error_code="FILE_TRANSFER_STATE_CONFLICT",
-                    message=(
-                        f"Cannot transition from {row.status} to {new_status}: "
-                        "ticket is in a conflicting or terminal state."
-                    ),
+                raise TransferStateConflictError(
+                    f"Cannot transition from {row.status} to {new_status}: "
+                    "ticket is in a conflicting or terminal state."
                 )
         log.info("[file-transfer:update_status] result: done")
 
-    def _validate_transition(self, current: str, target: str) -> None:
-        """Validate state transition. Raises DeviceCreationError on conflict.
-
-        Same-state transitions are idempotent (no-op).
-        """
-        if current == target:
-            return  # Idempotent: same status is a no-op
-
-        if (current, target) in VALID_TRANSITIONS:
-            return
-
-        raise DeviceCreationError(
-            error_code="FILE_TRANSFER_STATE_CONFLICT",
-            message=(
-                f"Invalid state transition: {current} -> {target} is not allowed."
-            ),
-        )
-
     @with_orm_session
-    def get_by_transfer_id(self, transfer_id: str) -> TicketRecord | None:
-        log.info("get_by_transfer_id: transfer_id=%s", transfer_id)
+    def get_by_transfer_id(
+        self, transfer_id: str, tenant: str | None = None,
+    ) -> TicketRecord | None:
+        log.info("get_by_transfer_id: transfer_id=%s, tenant=%s", transfer_id, tenant)
         env = get_current_env()
+        filters = [
+            FileTransferTicketModel.transfer_id == transfer_id,
+            FileTransferTicketModel.env == env,
+        ]
+        if tenant is not None:
+            filters.append(FileTransferTicketModel.tenant == tenant)
         row = (
             self._session.query(FileTransferTicketModel)
-            .filter(
-                FileTransferTicketModel.transfer_id == transfer_id,
-                FileTransferTicketModel.env == env,
-            )
+            .filter(*filters)
             .first()
         )
         if row is None:
@@ -220,8 +204,5 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
             .update(update_kwargs, synchronize_session=False)
         )
         if result == 0:
-            raise DeviceCreationError(
-                error_code="FILE_TRANSFER_NOT_FOUND",
-                message=f"Transfer ticket {transfer_id} not found",
-            )
+            raise TransferNotFoundError(transfer_id)
         log.info("[file-transfer:update_urls] result: done")

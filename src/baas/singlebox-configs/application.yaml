@@ -99,8 +99,7 @@ user_config:
     enabled: true  # 是否启用定时任务
     cron_interval_seconds: 10  # 执行间隔（秒），默认: 10
     upload_timeout_seconds: 3600  # 上传超时（秒），超时未完成写入的 ticket 标记 FAILED
-    lock_name: "file_transfer_poller_lock"  # 分布式锁名称（未使用，per-ticket 锁用 transfer_id 构造）
-    lock_expire_seconds: 300  # per-ticket 锁过期时间（秒），默认: 300
+    lock_expire_seconds: 300  # per-ticket 分布式锁过期时间（秒），默认: 300
     max_concurrent_tickets: 5  # 单次扫描并发处理的 ticket 数上限
     dry_run: false  # 测试模式：只打印日志
 

@@ -227,23 +227,24 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
     async def dispatch_get_transfer_status(
         self,
         transfer_id: str,
+        tenant: str | None = None,
     ) -> GetTransferStatusResponse:
         """Query a transfer ticket by transfer_id (D-12 query flow).
 
         Maps TicketRecord fields to GetTransferStatusResponse with
         conditional URL/error fields based on ticket status.
         """
-        record = self._ticket_repo.get_by_transfer_id(transfer_id)
+        record = self._ticket_repo.get_by_transfer_id(
+            transfer_id, tenant=tenant,
+        )
         if record is None:
             raise TransferNotFoundError(f"Transfer not found: {transfer_id}")
 
         # Conditional fields per status
         download_url = record.download_url if record.status == "DONE" else None
         upload_url = record.upload_url if record.status == "CREATED" else None
+        # OSS presigned URLs embed their own expiry — expires_at is null for transfer queries
         expires_at: str | None = None
-        # Expires at is only meaningful when a URL is present
-        if download_url or upload_url:
-            expires_at = None  # URLs carry their own embedded expiry
 
         error_message = record.error_message if record.status == "FAILED" else None
 

@@ -5,6 +5,31 @@ from typing import Protocol, runtime_checkable
 from ._record import TicketRecord
 
 
+class FileTransferRepositoryError(RuntimeError):
+    """Base error for file transfer ticket repository operations."""
+
+    def __init__(self, message: str, error_code: str | None = None) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
+
+class TransferNotFoundError(FileTransferRepositoryError):
+    """Raised when a transfer ticket is not found by transfer_id."""
+
+    def __init__(self, transfer_id: str) -> None:
+        super().__init__(
+            f"Transfer ticket {transfer_id} not found",
+            error_code="FILE_TRANSFER_NOT_FOUND",
+        )
+
+
+class TransferStateConflictError(FileTransferRepositoryError):
+    """Raised when an invalid state transition is attempted."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, error_code="FILE_TRANSFER_STATE_CONFLICT")
+
+
 @runtime_checkable
 class TicketRepository(Protocol):
     """Protocol for file transfer ticket persistence operations.
@@ -42,19 +67,22 @@ class TicketRepository(Protocol):
         new_status: str,
         error_message: str | None = None,
     ) -> None:
-        """Update ticket status with transition validation.
+        """Update ticket status with CAS-style atomic transition validation.
 
-        Two-phase: query current status -> _validate_transition -> UPDATE.
-        Raises DeviceCreationError on invalid transition.
+        Uses a CAS (Compare-And-Swap) SQL UPDATE: only modifies the row if
+        its current status is one of the allowed source states for new_status.
+        Same-state transitions are idempotent.
+        Raises DeviceCreationError on invalid transition or not found.
         """
         ...
 
-    def _validate_transition(self, current: str, target: str) -> None:
-        """Validate state transition. Raises DeviceCreationError on conflict."""
-        ...
+    def get_by_transfer_id(
+        self, transfer_id: str, tenant: str | None = None,
+    ) -> TicketRecord | None:
+        """Look up a ticket by its transfer_id, optionally scoped to tenant.
 
-    def get_by_transfer_id(self, transfer_id: str) -> TicketRecord | None:
-        """Look up a ticket by its transfer_id. Returns None if not found."""
+        Returns None if not found.
+        """
         ...
 
     def update_urls(

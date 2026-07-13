@@ -48,6 +48,7 @@ async def get_transfer_status(
     try:
         result = await dispatcher.dispatch_get_transfer_status(
             transfer_id=transfer_id,
+            tenant=tenant,
         )
         return ApiResponse(data=result)
 

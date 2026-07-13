@@ -143,6 +143,7 @@ class BotFileTransferDispatcher(Protocol):
     async def dispatch_get_transfer_status(
         self,
         transfer_id: str,
+        tenant: str | None = None,
     ) -> GetTransferStatusResponse: ...
 
 

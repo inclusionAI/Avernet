@@ -78,7 +78,8 @@ from secbaas.community.core.service.publish_manage import (
 )
 from secbaas.community.core.service.scheduler import AppScheduler
 from secbaas.community.core.service.sse import (
-    DefaultStreamConverter,
+    BcnStreamConverter,
+    DefaultStreamConverter,  # noqa: F401  triggers side-effect registration of default SSE converter
     SseConverterFactory,
 )
 from secbaas.community.core.service.template_manage import DefaultDeviceTemplateService

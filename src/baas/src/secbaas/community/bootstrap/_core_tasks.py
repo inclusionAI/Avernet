@@ -72,7 +72,6 @@ class CoreTaskContainer(containers.DeclarativeContainer):
     file_transfer_poller_config = providers.Singleton(
         FileTransferPollerConfig,
         enabled=config.file_transfer_poller.enabled,
-        lock_name=config.file_transfer_poller.lock_name,
         lock_expire_seconds=config.file_transfer_poller.lock_expire_seconds,
         cron_interval_seconds=config.file_transfer_poller.cron_interval_seconds,
         upload_timeout_seconds=config.file_transfer_poller.upload_timeout_seconds,
