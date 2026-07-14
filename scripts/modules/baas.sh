@@ -7,6 +7,102 @@ _BAAS_SH_LOADED=1
 BAAS_LOG="${LOG_DIR}/baas.log"
 BAAS_APP_DIR="${BAAS_APP_DIR:-${BAAS_DIR}/packages/community}"
 
+baas_normalize_dir_path() {
+    local path="$1"
+
+    while [[ "$path" != "/" && "$path" == */ ]]; do
+        path="${path%/}"
+    done
+    printf '%s\n' "$path"
+}
+
+baas_backup_bcs_sessions() {
+    local backup_dir="$1"
+    local session_file relative_path destination manifest
+    local bots_dir backup_dir_norm
+    bots_dir="$(baas_normalize_dir_path "${LOCAL_BOTS_DIR}")"
+    backup_dir_norm="$(baas_normalize_dir_path "$backup_dir")"
+
+    if [[ -e "$backup_dir_norm" ]]; then
+        log_error "Refusing to overwrite existing BCS session backup: ${backup_dir_norm}"
+        return 1
+    fi
+    [[ -d "$bots_dir" ]] || return 0
+
+    manifest="$(mktemp "${TMPDIR:-/tmp}/avernet-bcs-sessions.XXXXXX")" || return 1
+    if ! find "$bots_dir" -type f -path '*/.bcs/session.json' -print0 > "$manifest"; then
+        rm -f "$manifest"
+        return 1
+    fi
+
+    while IFS= read -r -d '' session_file; do
+        relative_path="${session_file#"${bots_dir}/"}"
+        destination="${backup_dir_norm}/${relative_path}"
+        (umask 077 && mkdir -p "$(dirname "$destination")") || {
+            rm -f "$manifest"
+            return 1
+        }
+        cp -p "$session_file" "$destination" || {
+            rm -f "$manifest"
+            return 1
+        }
+        chmod 600 "$destination" || {
+            rm -f "$manifest"
+            return 1
+        }
+    done < "$manifest"
+    rm -f "$manifest"
+}
+
+baas_restore_bcs_sessions() {
+    local backup_dir="$1"
+    local session_file relative_path destination manifest
+    local bots_dir backup_dir_norm
+    bots_dir="$(baas_normalize_dir_path "${LOCAL_BOTS_DIR}")"
+    backup_dir_norm="$(baas_normalize_dir_path "$backup_dir")"
+
+    [[ -d "$backup_dir_norm" ]] || return 0
+
+    manifest="$(mktemp "${TMPDIR:-/tmp}/avernet-bcs-sessions.XXXXXX")" || return 1
+    if ! find "$backup_dir_norm" -type f -path '*/.bcs/session.json' -print0 > "$manifest"; then
+        rm -f "$manifest"
+        return 1
+    fi
+
+    while IFS= read -r -d '' session_file; do
+        relative_path="${session_file#"${backup_dir_norm}/"}"
+        destination="${bots_dir}/${relative_path}"
+        if [[ -e "$destination" ]]; then
+            continue
+        fi
+        (umask 077 && mkdir -p "$(dirname "$destination")") || {
+            rm -f "$manifest"
+            return 1
+        }
+        cp -p "$session_file" "$destination" || {
+            rm -f "$manifest"
+            return 1
+        }
+        chmod 600 "$destination" || {
+            rm -f "$manifest"
+            return 1
+        }
+    done < "$manifest"
+
+    rm -f "$manifest"
+    rm -rf "$backup_dir_norm"
+}
+
+baas_prepare_bcs_session_backup() {
+    local backup_dir="$1"
+
+    if [[ -d "$backup_dir" ]]; then
+        log_warn "Recovering stale BCS session backup before cleanup: ${backup_dir}"
+        baas_restore_bcs_sessions "$backup_dir" || return 1
+    fi
+    baas_backup_bcs_sessions "$backup_dir"
+}
+
 baas_setup() {
     # Setup the underlying engine that baas spawns on demand
     local engine_svc=$(_resolve_engine_svc)
@@ -58,6 +154,15 @@ baas_start() {
     log_info "Starting BAAS with singlebox mode..."
 
     if [ "$LOCAL_MODE" = true ]; then
+      local bcs_session_backup="${RUNTIME_DATA_DIR}/.baas-bcs-sessions"
+      local bots_dir
+      bots_dir="$(baas_normalize_dir_path "${LOCAL_BOTS_DIR}")"
+
+      if [[ -z "$bots_dir" || "$bots_dir" == "/" ]]; then
+          log_error "Refusing to clean empty or root LOCAL_BOTS_DIR"
+          return 1
+      fi
+
       # Remove existing SQLite database to start fresh
       if [ -f "${RUNTIME_DATA_DIR}/baas.db" ]; then
           log_info "Removing existing SQLite database for fresh start..."
@@ -65,9 +170,17 @@ baas_start() {
       fi
 
       # Clean bots dir
-      if [[ -d "${LOCAL_BOTS_DIR}" ]]; then
-          log_info "Cleaning bots dir: ${LOCAL_BOTS_DIR} ..."
-          rm -rf "${LOCAL_BOTS_DIR:?}/"*
+      if [[ -d "$bots_dir" ]]; then
+          log_info "Cleaning bots dir: ${bots_dir} ..."
+          baas_prepare_bcs_session_backup "$bcs_session_backup" || {
+              log_error "Failed to back up BCS sessions before cleaning bots dir"
+              return 1
+          }
+          rm -rf "${bots_dir:?}/"*
+          baas_restore_bcs_sessions "$bcs_session_backup" || {
+              log_error "Failed to restore BCS sessions after cleaning bots dir"
+              return 1
+          }
       fi
     fi
 

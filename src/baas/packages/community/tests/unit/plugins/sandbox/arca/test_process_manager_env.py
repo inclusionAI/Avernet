@@ -8,11 +8,13 @@ from __future__ import annotations
 import inspect
 import json
 import stat
+import urllib.request
 from pathlib import Path
 
 import pytest
 
 from secbaas.plugins.sandbox.arca.local_proc import _process_manager as pm
+from secbaas.plugins.sandbox.arca.local_proc import _sandbox_plugin as sandbox_plugin
 
 
 def _repo_bcn_plugin_path() -> Path:
@@ -23,6 +25,43 @@ def _repo_bcn_plugin_path() -> Path:
         if candidate.is_dir():
             return candidate
     raise AssertionError("repo BCN plugin path not found")
+
+
+def test_resolve_engine_prefers_request_env_over_global_default(monkeypatch):
+    monkeypatch.setenv("CHAT_ENGINE", "openclaw")
+
+    assert (
+        sandbox_plugin._resolve_engine(
+            envs={"AGENTCLAW_ENGINE": "claude_code"},
+            metadata=None,
+        )
+        == "claude_code"
+    )
+
+
+def test_open_callback_request_bypasses_proxy_for_loopback(monkeypatch):
+    marker = object()
+    captured_handlers = []
+
+    class FakeOpener:
+        def open(self, request, *, timeout):
+            assert request.full_url == "http://localhost:8890/callback"
+            assert timeout == 5
+            return marker
+
+    def fake_build_opener(*handlers):
+        captured_handlers.extend(handlers)
+        return FakeOpener()
+
+    monkeypatch.setattr(urllib.request, "build_opener", fake_build_opener)
+    request = urllib.request.Request("http://localhost:8890/callback")
+
+    result = sandbox_plugin._open_callback_request(request, timeout=5)
+
+    assert result is marker
+    assert len(captured_handlers) == 1
+    assert isinstance(captured_handlers[0], urllib.request.ProxyHandler)
+    assert captured_handlers[0].proxies == {}
 
 
 @pytest.mark.skip(
@@ -41,6 +80,150 @@ def test_spawn_adapter_source_injects_workspace_dir_env():
         "_spawn_adapter 应该注入 OPENCLAW_WORKSPACE_DIR 给 adapter 进程"
     )
     assert "workspace_dir" in src, "注入值应该是 workspace_dir 参数"
+
+
+@pytest.mark.parametrize(
+    ("engine", "env_key", "expected_url"),
+    [
+        ("openclaw", "OPENCLAW_GATEWAY_URL", "ws://127.0.0.1:18888"),
+        ("hermes", "HERMES_URL", "http://127.0.0.1:18888"),
+        ("aicoding", "AICODING_RELAY_URL", "ws://127.0.0.1:18900"),
+        ("claude_code", "CLAUDE_CODE_RELAY_URL", "ws://127.0.0.1:18900"),
+    ],
+)
+def test_spawn_adapter_uses_numeric_loopback_for_local_engines(
+    monkeypatch, tmp_path, engine, env_key, expected_url
+):
+    manager = pm.LocalProcessManager()
+    captured = {}
+
+    class FakeProcess:
+        pid = 12345
+
+    def fake_popen(*args, **kwargs):
+        captured["env"] = kwargs["env"]
+        return FakeProcess()
+
+    monkeypatch.delenv(env_key, raising=False)
+    monkeypatch.setenv("NO_PROXY", "upper.example")
+    monkeypatch.setenv("no_proxy", "lower.example")
+    monkeypatch.setattr(manager, "_resolve_engine_src_dir", lambda: tmp_path)
+    monkeypatch.setattr(manager, "_resolve_engine_python", lambda _: "/usr/bin/python3")
+    monkeypatch.setattr(manager, "_wait_for_health", lambda *args, **kwargs: True)
+    monkeypatch.setattr(pm.subprocess, "Popen", fake_popen)
+
+    manager._spawn_adapter(
+        adapter_port=20010,
+        engine_port=18888,
+        config_dir=tmp_path,
+        workspace_dir=tmp_path / "workspace",
+        engine=engine,
+    )
+
+    assert captured["env"][env_key] == expected_url
+    expected_no_proxy = {
+        "upper.example",
+        "lower.example",
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }
+    assert set(captured["env"]["NO_PROXY"].split(",")) == expected_no_proxy
+    assert set(captured["env"]["no_proxy"].split(",")) == expected_no_proxy
+
+
+def test_spawn_adapter_tolerates_empty_proxy_values(monkeypatch, tmp_path):
+    manager = pm.LocalProcessManager()
+    captured = {}
+
+    class FakeProcess:
+        pid = 12345
+
+    def fake_popen(*args, **kwargs):
+        captured["env"] = kwargs["env"]
+        return FakeProcess()
+
+    monkeypatch.setattr(pm.os, "environ", {"NO_PROXY": None, "no_proxy": None})
+    monkeypatch.setattr(manager, "_resolve_engine_src_dir", lambda: tmp_path)
+    monkeypatch.setattr(manager, "_resolve_engine_python", lambda _: "/usr/bin/python3")
+    monkeypatch.setattr(manager, "_wait_for_health", lambda *args, **kwargs: True)
+    monkeypatch.setattr(pm.subprocess, "Popen", fake_popen)
+
+    manager._spawn_adapter(
+        adapter_port=20010,
+        engine_port=18888,
+        config_dir=tmp_path,
+        workspace_dir=tmp_path / "workspace",
+        engine="openclaw",
+    )
+
+    expected_no_proxy = {"localhost", "127.0.0.1", "::1"}
+    assert set(captured["env"]["NO_PROXY"].split(",")) == expected_no_proxy
+    assert set(captured["env"]["no_proxy"].split(",")) == expected_no_proxy
+
+
+def test_wait_for_hermes_health_disables_environment_proxies(monkeypatch):
+    manager = pm.LocalProcessManager()
+
+    class Response:
+        status_code = 200
+
+    class FakeSession:
+        trust_env = True
+        closed = False
+
+        def get(self, url, *, timeout):
+            assert self.trust_env is False
+            assert url == "http://127.0.0.1:18765/"
+            assert timeout == 2
+            return Response()
+
+        def close(self):
+            self.closed = True
+
+    session = FakeSession()
+    monkeypatch.setattr(pm.requests, "Session", lambda: session)
+    monkeypatch.setattr(
+        pm.requests,
+        "get",
+        lambda *args, **kwargs: pytest.fail(
+            "health check must use a proxy-free session"
+        ),
+    )
+
+    assert manager._wait_for_hermes_health(18765, timeout=0.1) is True
+    assert session.closed is True
+
+
+def test_wait_for_hermes_health_retries_after_request_failure(monkeypatch):
+    manager = pm.LocalProcessManager()
+    sleeps = []
+
+    class Response:
+        status_code = 200
+
+    class FakeSession:
+        trust_env = True
+        calls = 0
+        closed = False
+
+        def get(self, url, *, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                raise pm.requests.RequestException("not ready")
+            return Response()
+
+        def close(self):
+            self.closed = True
+
+    session = FakeSession()
+    monkeypatch.setattr(pm.requests, "Session", lambda: session)
+    monkeypatch.setattr(pm.time, "sleep", sleeps.append)
+
+    assert manager._wait_for_hermes_health(18765, timeout=1) is True
+    assert session.calls == 2
+    assert sleeps == [pm.HEALTH_CHECK_INTERVAL]
+    assert session.closed is True
 
 
 def test_resolve_engine_src_dir_prefers_configured_path(monkeypatch, tmp_path):

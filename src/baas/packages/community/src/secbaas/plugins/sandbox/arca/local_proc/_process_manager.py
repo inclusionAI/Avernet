@@ -766,16 +766,21 @@ class LocalProcessManager:
     def _wait_for_hermes_health(self, port: int, timeout: float = 30.0) -> bool:
         """Wait for Hermes Dashboard to become healthy via HTTP GET."""
         deadline = time.monotonic() + timeout
-        url = f"http://localhost:{port}/"
+        url = f"http://127.0.0.1:{port}/"
+        session = requests.Session()
+        session.trust_env = False
 
-        while time.monotonic() < deadline:
-            try:
-                resp = requests.get(url, timeout=2)
-                if resp.status_code == 200:
-                    return True
-            except requests.RequestException:
-                pass
-            time.sleep(HEALTH_CHECK_INTERVAL)
+        try:
+            while time.monotonic() < deadline:
+                try:
+                    resp = session.get(url, timeout=2)
+                    if resp.status_code == 200:
+                        return True
+                except requests.RequestException:
+                    pass
+                time.sleep(HEALTH_CHECK_INTERVAL)
+        finally:
+            session.close()
 
         return False
 
@@ -803,18 +808,27 @@ class LocalProcessManager:
         env["CREDENTIALS_PATH"] = str(config_dir / ".credentials")
         # Disable zero-check
         env["ZERO_CHECK_ENABLED"] = "false"
+        no_proxy_hosts = []
+        for key in ("NO_PROXY", "no_proxy"):
+            for host in (env.get(key) or "").split(","):
+                host = host.strip()
+                if host and host not in no_proxy_hosts:
+                    no_proxy_hosts.append(host)
+        for host in ("localhost", "127.0.0.1", "::1"):
+            if host not in no_proxy_hosts:
+                no_proxy_hosts.append(host)
+        no_proxy = ",".join(no_proxy_hosts)
+        env["NO_PROXY"] = no_proxy
+        env["no_proxy"] = no_proxy
         # Singlebox per-bot workspace 根目录;adapter 进程的 _convert_path
         # 和 skill 模块都读这个 env 决定路径根。详见
         # docs/superpowers/specs/2026-06-10-engine-per-bot-workspace-design.md §4.3.A3
         env["OPENCLAW_WORKSPACE_DIR"] = str(workspace_dir)
 
         if engine == "openclaw":
-            # Use `localhost`, not `127.0.0.1`: macOS ExcludeSimpleHostnames
-            # bypasses dotless hosts from the system HTTP/HTTPS proxy. The
-            # `websockets` lib passes `host:port` to urllib.proxy_bypass, which
-            # defeats wildcard rules like `*.stable.example.net` — `localhost`
-            # is the one form that survives the port suffix.
-            env["OPENCLAW_GATEWAY_URL"] = f"ws://localhost:{engine_port}"
+            # Numeric loopback avoids macOS system proxies intercepting local
+            # WebSocket handshakes when localhost is not in the bypass list.
+            env["OPENCLAW_GATEWAY_URL"] = f"ws://127.0.0.1:{engine_port}"
             env["OPENCLAW_GATEWAY_TOKEN"] = ""
 
             # Disable adapter's built-in engine process management.
@@ -827,18 +841,18 @@ class LocalProcessManager:
         elif engine == "hermes":
             # Set Hermes Dashboard URL for the adapter.
             # Engine adapter will connect to Hermes Dashboard via HTTP/WebSocket.
-            env["HERMES_URL"] = f"http://localhost:{engine_port}"
+            env["HERMES_URL"] = f"http://127.0.0.1:{engine_port}"
         elif engine == "aicoding":
             # teamclaw-aicoding-relay is managed externally (start_service.sh).
             # Respect an operator-provided AICODING_RELAY_URL; otherwise fall
             # back to the relay's default port 18900 (matches
             # engine.aicoding.config._DEFAULT_RELAY_URL).
-            env.setdefault("AICODING_RELAY_URL", "ws://localhost:18900")
+            env.setdefault("AICODING_RELAY_URL", "ws://127.0.0.1:18900")
         elif engine == "claude_code":
             # Claude Code engine uses the same relay pattern as aicoding.
             # Respect an operator-provided CLAUDE_CODE_RELAY_URL; otherwise
             # fall back to the relay's default port 18900.
-            env.setdefault("CLAUDE_CODE_RELAY_URL", "ws://localhost:18900")
+            env.setdefault("CLAUDE_CODE_RELAY_URL", "ws://127.0.0.1:18900")
             logger.info(
                 "Claude Code engine env: CLAUDE_CODE_RELAY_URL=%s",
                 env["CLAUDE_CODE_RELAY_URL"],
@@ -852,7 +866,7 @@ class LocalProcessManager:
 
         if engine == "openclaw":
             logger.info(
-                "Spawning engine adapter: engine=%s port=%s, openclaw_url=ws://localhost:%s, log=%s",
+                "Spawning engine adapter: engine=%s port=%s, openclaw_url=ws://127.0.0.1:%s, log=%s",
                 engine,
                 adapter_port,
                 engine_port,
@@ -860,7 +874,7 @@ class LocalProcessManager:
             )
         elif engine == "hermes":
             logger.info(
-                "Spawning engine adapter: engine=%s port=%s, hermes_url=http://localhost:%s, log=%s",
+                "Spawning engine adapter: engine=%s port=%s, hermes_url=http://127.0.0.1:%s, log=%s",
                 engine,
                 adapter_port,
                 engine_port,

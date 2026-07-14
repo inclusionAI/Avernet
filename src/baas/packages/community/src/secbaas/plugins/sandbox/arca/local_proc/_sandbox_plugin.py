@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -33,6 +35,34 @@ ENGINE_MAP = {
     "hermes-default": "hermes",
     "claude_code": "claude_code",
 }
+
+
+def _resolve_engine(
+    *,
+    envs: dict[str, str] | None,
+    metadata: dict[str, str] | None,
+) -> str:
+    """Resolve the per-sandbox engine before falling back to process defaults."""
+    requested = (
+        (envs or {}).get("AGENTCLAW_ENGINE")
+        or (metadata or {}).get("engine")
+        or os.environ.get("CHAT_ENGINE")
+        or "openclaw"
+    )
+    return ENGINE_MAP.get(requested, requested)
+
+
+def _open_callback_request(
+    request: urllib.request.Request,
+    *,
+    timeout: float,
+) -> Any:
+    """Open local callbacks directly so macOS system proxies cannot intercept them."""
+    hostname = urllib.parse.urlsplit(request.full_url).hostname
+    if hostname in {"localhost", "127.0.0.1", "::1"}:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        return opener.open(request, timeout=timeout)
+    return urllib.request.urlopen(request, timeout=timeout)
 
 
 class LocalProcessArcaSandboxPlugin(ArcaSandboxPlugin):
@@ -107,7 +137,7 @@ class LocalProcessArcaSandboxPlugin(ArcaSandboxPlugin):
         )
 
         # 确定引擎类型
-        engine = os.environ.get("CHAT_ENGINE", "openclaw")
+        engine = _resolve_engine(envs=envs, metadata=metadata)
 
         # 从 metadata 提取必要信息
         # Check required fields
@@ -265,7 +295,6 @@ class LocalProcessArcaSandboxPlugin(ArcaSandboxPlugin):
         """
         import json
         import urllib.error
-        import urllib.request
 
         callback_url = os.environ.get(
             "LOCAL_CALLBACK_URL", "http://localhost:8890"
@@ -317,7 +346,7 @@ class LocalProcessArcaSandboxPlugin(ArcaSandboxPlugin):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with _open_callback_request(req, timeout=5) as resp:
                 body = resp.read().decode("utf-8", errors="replace")
                 logger.info(
                     "Device callback response: url=%s, status=%s, body=%s",
