@@ -15,6 +15,19 @@ reported owners currently each have one active `bot_id=default`, `env=prod`,
 `bot_type=personal`, `active_engine=openclaw`, `device_provider=baas` record
 without Passport data in `ext`.
 
+The cross-environment Passport design relies on two confirmed deployment
+facts:
+
+- pre-production and production tcauthmng use the same physical database,
+  `tcauthmng#sec_gzcom4x#sec_tcauthmng0_17629`, and distinguish records by the
+  logical `env` field plus the `env|owner|bot` agent ID; and
+- Agent ACM is not data-isolated between pre-production and production. Calls
+  made through the pre-production ACM client can create and update the same
+  credential state used by production.
+
+Therefore `target_env` selects the tcauthmng logical namespace and persistence
+records. It does not select a different ACM client or endpoint.
+
 ## Decision: Two Separate Phases
 
 The workflow is deliberately split:
@@ -51,8 +64,8 @@ Add an administrator-only, synchronous, idempotent operation that:
 - Calling `apply_agent_passport`; it can require interactive authorization.
 - Creating, restarting, releasing, or hot-updating a Bot.
 - Calling BaaS/ARCA or writing container files from pre-production.
-- Pretending to pass `target_env` to an upstream protocol that has no such
-  field.
+- Adding a second ACM client, routing to production tcauthmng, or changing ACM
+  endpoint selection.
 - Bulk repair. Operators invoke one owner at a time for auditability.
 
 ## HTTP Contract
@@ -198,11 +211,68 @@ implementation selects the pre/prod URL per call and must not mutate a
 singleton's cached base URL. Community/local implementations preserve their
 existing no-op semantics while accepting and validating `target_env`.
 
-`PassportPlugin.apply_first_agent_passport` and downstream
-`ApplyAgentPassportRequestDTO` have no environment field. The repair calls the
-existing operation unchanged. `target_env` remains explicit through request,
-service, target selection, audit logs, MCP data reads, persistence, and
-AceAgent operations; no fake locally ignored Passport parameter is added.
+Passport operations evolve compatibly to accept an optional explicit target
+environment:
+
+```python
+def apply_first_agent_passport(
+    ...,
+    *,
+    target_env: str | None = None,
+) -> dict[str, Any] | None: ...
+
+def query_agent_passport(
+    bot_id: str,
+    owner_workno: str,
+    *,
+    target_env: str | None = None,
+) -> dict[str, Any] | None: ...
+```
+
+`query_auth_status` and `query_token` follow the same rule. Omitting
+`target_env` retains the existing current-deployment behavior for normal Bot
+creation and lifecycle callers. Supplying it requires `pre|prod`; invalid
+values fail before any external or persistence side effect.
+
+The production OCB adapter serializes `target_env` as the Java DTO field
+`env`. `ApplyAgentPassportRequestDTO` gains the field; `BotRequestDTO` already
+has it. The repair service supplies `target_env` to all initial queries, first
+apply, and verification queries. Local implementations and contract tests
+preserve the same fallback and validation semantics.
+
+### tcauthmng target-environment execution
+
+tcauthmng resolves the execution environment once at each facade entry:
+
+```text
+non-empty request.env -> normalized request.env
+empty request.env     -> current deployment environment
+```
+
+All recursive first-apply stages consume that resolved value. They must not
+re-read `EnvToolUtil` independently:
+
+- `getOrRefreshToken`;
+- `getOrRefreshUserPassport`;
+- `getOrRefreshAgentPassport`; and
+- `getOrRegisterAgentCode`.
+
+For a pre-production call with `env=prod`, every lookup and write uses
+`agentId=prod|<owner>|default`. New Agent Passport, User Passport, and Token
+records store `env=prod`; Agent Registry is isolated by the same prefixed
+agent ID. `queryToken`, `queryAgentPassport`, and `queryAuthStatus` use the
+same resolver so apply and verification cannot select different namespaces.
+
+AgentHub registration is part of the same logical environment selection.
+When a new agent code is needed, `HubService.registerAgentV2` receives the
+resolved environment and submits `AppEnv.PROD` for `prod` rather than deriving
+`AppEnv.PRE` from the pre-production process.
+
+ACM integration remains unchanged. `AcmClientServiceImpl`, its singleton
+client, configured domain, and the calls to `registerAgentPrincipal`,
+`issueDelegationCredential`, `issueExecutionCredential`, and
+`getDelegationCredentialStatus` are not made environment-aware. They operate
+on the confirmed shared ACM state using the target-scoped agent identity.
 
 ## Phase 1 Repair Workflow
 
@@ -211,16 +281,18 @@ AceAgent operations; no fake locally ignored Passport parameter is added.
 2. Load exact live target `(target_env, target_user_id, default)`.
 3. Derive owner/entity metadata, active engine, Bot name/description,
    workspace, target-env MCP codes, and default CLI items from stored state.
-4. Query the existing Agent Passport.
+4. Query the existing Agent Passport, authorization status, and token with
+   `target_env`.
    - If token, agent code, credential ID, and issued status are proven, reuse
      it.
-   - Otherwise call `apply_first_agent_passport` once using the same metadata
-     rules as normal default-Bot creation.
+   - Otherwise call `apply_first_agent_passport` once with `target_env` and the
+     same metadata rules as normal default-Bot creation.
    - Never call `apply_agent_passport`.
 5. Require a non-empty token and agent code. An iframe/redirect response with
    no token is a hard `PASSPORT_FIRST_APPLY_FAILED` error.
-6. Re-query `query_agent_passport`, `query_auth_status`, and `query_token`.
-   Require a credential ID, matching agent code, issued status, and token.
+6. Re-query `query_agent_passport`, `query_auth_status`, and `query_token` with
+   the same `target_env`. Require a credential ID, matching agent code, issued
+   status, and token.
 7. Merge `ext.passport.agent_code` into the latest stored `ext`, write through
    the exact-env method, then read it back and compare.
 8. Query the relationship by
@@ -279,6 +351,7 @@ Tests are written before implementation.
 - fails before external mutation for zero or duplicate target rows;
 - reuses a complete Passport without either apply call;
 - calls only `apply_first_agent_passport` when Passport is missing/incomplete;
+- passes `target_env` to every Passport query and first-apply call;
 - treats token-empty plus authorization URL as a hard failure;
 - rejects missing/mismatched agent code, credential ID, status, or token;
 - merges `ext.passport.agent_code` while preserving unrelated fields;
@@ -296,8 +369,14 @@ Tests are written before implementation.
 - exact-env `ext` update affects exactly one selected live row;
 - zero/multiple update matches fail;
 - target-env AuthRelationship calls select the requested endpoint per call;
-- existing current-env relationship callers retain their behavior; and
-- Passport contract remains unchanged.
+- existing current-env relationship callers retain their behavior;
+- Passport calls without `target_env` retain current-environment behavior;
+- Passport calls with `target_env=prod` serialize `env=prod` for tcauthmng;
+- tcauthmng first apply uses `prod|owner|bot` for every recursive stage;
+- tcauthmng query and apply paths resolve the same target environment;
+- tcauthmng writes target `env` rather than the process environment;
+- AgentHub receives the target `AppEnv`; and
+- invalid target environments fail before DB, AgentHub, or ACM calls.
 
 ### HTTP and architecture
 
@@ -322,9 +401,12 @@ Run one canary owner before the remaining owners.
    ID and non-secret response.
 3. Require Passport, relationship, and database verification fields to pass,
    and `runtime.restart_required=true`.
-4. Confirm through ODC that only the exact prod/default row changed and
+4. Confirm in tcauthmng that Agent Registry, Agent Passport, User Passport,
+   and Token state use `agentId=prod|<owner>|default`; all records with an
+   `env` column use `prod`, and no new `pre|<owner>|default` identity exists.
+5. Confirm through ODC that only the exact prod/default Bot row changed and
    unrelated `ext` fields were preserved.
-5. Invoke again and require `action=verified`, unchanged Passport identity,
+6. Invoke again and require `action=verified`, unchanged Passport identity,
    and no duplicate relationship.
 
 ### Phase 2 online
@@ -339,4 +421,3 @@ Run one canary owner before the remaining owners.
 
 After the canary passes both phases, repeat for owners `317312`, `136450`,
 `382425`, and `210231`.
-
