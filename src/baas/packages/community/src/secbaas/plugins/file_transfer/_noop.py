@@ -6,7 +6,13 @@ with a clear message — the caller is responsible for guarding with
 feature-flag checks before invoking transfer operations.
 """
 
-from secbaas.spi.file_transfer import FileTransferBackend
+from secbaas.spi.file_transfer import (
+    FileTransferBackend,
+    MultipartSession,
+    ObjectItem,
+    ObjectListing,
+    PartInfo,
+)
 
 
 class NoopFileTransferBackend(FileTransferBackend):
@@ -30,6 +36,48 @@ class NoopFileTransferBackend(FileTransferBackend):
         )
 
     def generate_download_url(self, staging_path: str, expire_seconds: int) -> str:
+        raise NotImplementedError(
+            "File transfer is not configured. "
+            "Set config.plugins.file_transfer to 'oss' to enable."
+        )
+
+    def initiate_multipart_upload(
+        self, staging_path: str, expire_seconds: int, part_count: int = 2
+    ) -> MultipartSession:
+        raise NotImplementedError(
+            "File transfer is not configured. "
+            "Set config.plugins.file_transfer to 'oss' to enable."
+        )
+
+    def list_parts(self, staging_path: str, session_id: str) -> list[PartInfo]:
+        raise NotImplementedError(
+            "File transfer is not configured. "
+            "Set config.plugins.file_transfer to 'oss' to enable."
+        )
+
+    def complete_multipart_upload(
+        self, staging_path: str, session_id: str, parts: list[PartInfo]
+    ) -> None:
+        raise NotImplementedError(
+            "File transfer is not configured. "
+            "Set config.plugins.file_transfer to 'oss' to enable."
+        )
+
+    def abort_multipart_upload(self, staging_path: str, session_id: str) -> None:
+        raise NotImplementedError(
+            "File transfer is not configured. "
+            "Set config.plugins.file_transfer to 'oss' to enable."
+        )
+
+    def list_objects(
+        self, prefix: str, limit: int, marker: str | None
+    ) -> ObjectListing:
+        raise NotImplementedError(
+            "File transfer is not configured. "
+            "Set config.plugins.file_transfer to 'oss' to enable."
+        )
+
+    def delete_object(self, key: str) -> None:
         raise NotImplementedError(
             "File transfer is not configured. "
             "Set config.plugins.file_transfer to 'oss' to enable."
