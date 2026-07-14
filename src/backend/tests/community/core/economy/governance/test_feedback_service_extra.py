@@ -8,6 +8,7 @@ Reuses the fakes from test_feedback.py (copied here to avoid editing it).
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from sqlalchemy.orm import sessionmaker
@@ -158,18 +159,30 @@ class TestResolveEdgeBranches:
         assert "Invalid response" in (result.error or "")
 
     def test_invalid_feedback_payload_json(self, session, engine):
-        """Non-serializable feedback_payload → INVALID_FEEDBACK_PAYLOAD (lines 174-175)."""
+        """Non-serializable junk in feedback_payload is sanitized by enrich.
+
+        v2 enrich extracts only items[].{index,action,remark} and rebuilds a
+        clean dict from ticket columns, so a non-serializable value in an
+        unrelated key no longer poisons the persisted payload — the user's
+        feedback is still recorded. (Previously: json.dumps(raw) → TypeError
+        → INVALID_FEEDBACK_PAYLOAD. Now: enrich sanitizes.)
+        """
         svc = _make_svc(engine)
         _make_notification(session)
 
-        # A set is not JSON-serializable → json.dumps raises TypeError.
+        # A set with an object is not JSON-serializable, but it's in an
+        # unrelated "bad" key enrich never reads.
         payload = {"bad": {object()}}
         result = svc.resolve(
             "n-001", "optimized", "user-1",
             feedback_payload=payload,
         )
-        assert not result.success
-        assert result.error_code == "INVALID_FEEDBACK_PAYLOAD"
+        assert result.success
+        # persisted payload is valid v2 JSON with no trace of the junk
+        row = session.query(GovernanceTicketOrm).filter_by(ticket_id="t-n-001").one()
+        stored = json.loads(row.feedback_payload)
+        assert stored["feedback_schema_version"] == 2
+        assert "bad" not in stored
 
     def test_whitelist_add_failure_is_swallowed(self, session, engine):
         """add raising must not fail the resolve (lines 200-201)."""
