@@ -53,3 +53,11 @@ class SystemConfigKey(StrEnum):
     # Example:
     # ARCA_DEFAULT_TIMEOUT = "arca.default_timeout"
     # ARCA_BASE_URL = "arca.base_url"
+
+    # Chunk cleanup configuration
+    CHUNK_CLEANUP_ENABLED = "bot_run.chunk_cleanup_enabled"
+    """Whether to clean up chunk records after stream ends.
+
+    Value: "true" or "false" (default: "true")
+    Usage: Read per environment by appending ".{env}" suffix to the key.
+    """

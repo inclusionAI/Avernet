@@ -12,9 +12,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from secbaas.community.adapters.web.dependencies import get_op_ctx
 from secbaas.community.adapters.web.routers.config_management.system_config_router import (
     router,
 )
+from secbaas.community.api import OperationContext
 from secbaas.community.api.config_manage import (
     SystemConfigListResponse,
     SystemConfigResponse,
@@ -80,6 +82,11 @@ def _install_mock_overrides(app, mock_svc):
         for dep in route.dependant.dependencies:
             if isinstance(dep.call, Provide):
                 app.dependency_overrides[dep.call] = lambda: mock_svc
+
+    # Override get_op_ctx so create/update/delete routes get a fake operator
+    app.dependency_overrides[get_op_ctx] = lambda: OperationContext(
+        operator="admin", env="dev"
+    )
 
 
 @pytest.fixture
@@ -411,8 +418,8 @@ class TestDeleteConfig:
         body = response.json()
         assert body["detail"]["error_code"] == "CONFIG_NOT_FOUND"
 
-    def test_delete_config_with_operator_param(self, client):
-        """Delete with optional operator query param."""
+    def test_delete_config_with_op_ctx(self, client):
+        """Delete uses operator from op_ctx (no query param)."""
         mock_svc = MagicMock()
         mock_svc.delete_config.return_value = True
 
@@ -421,10 +428,7 @@ class TestDeleteConfig:
             "secbaas.community.core.service.config_manage._system_config_service.get_current_env",
             return_value="prod",
         ):
-            response = client.delete(
-                "/api/v1/system-configs/removable.key",
-                params={"operator": "admin"},
-            )
+            response = client.delete("/api/v1/system-configs/removable.key")
 
         assert response.status_code == 200
         mock_svc.delete_config.assert_called_once_with(conf_key="removable.key")
