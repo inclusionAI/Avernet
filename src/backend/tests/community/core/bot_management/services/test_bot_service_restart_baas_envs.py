@@ -86,6 +86,9 @@ def _make_service(
     # _attach_template_uid_context 走真实方法会访问 _baas_template_resolver；
     # 这里只测透传，patch 成透传器即可。
     svc._baas_template_resolver = None
+    svc._drm_reader = MagicMock()
+    svc._drm_reader.read.return_value = None
+    svc._bcn_service = MagicMock()
 
     svc._task_queue_service = MagicMock()
     return svc, baas, device_service
