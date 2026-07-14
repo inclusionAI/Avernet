@@ -632,6 +632,10 @@ class TestRestartBot:
     def test_calls_stop_then_start(self):
         """restart_bot 先调 stop_bot 再调 start_bot。"""
         svc = _make_service()
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(
+            status="ACTIVE",
+            binding_id=None,
+        )
         call_order = []
 
         updated_bot = _make_bot(status="PENDING")
@@ -646,6 +650,10 @@ class TestRestartBot:
     def test_stop_failure_adds_restart_warning(self):
         """stop_bot 返回 False（设备释放失败）时，返回值含 restart_warning。"""
         svc = _make_service()
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(
+            status="ACTIVE",
+            binding_id=None,
+        )
         updated_bot = _make_bot(status="PENDING")
 
         with patch.object(svc, "stop_bot", return_value=False), \
@@ -659,6 +667,10 @@ class TestRestartBot:
         from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
 
         svc = _make_service()
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(
+            status="ACTIVE",
+            binding_id=None,
+        )
 
         with patch.object(svc, "stop_bot", side_effect=BotNotFoundError("not found")):
             with pytest.raises(BotNotFoundError):

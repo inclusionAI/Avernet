@@ -14,7 +14,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Query, Request, Depends, Path
+from fastapi import APIRouter, Query, Request, Response, Depends, Path
 from pydantic import BaseModel
 
 from agentclaw.community.adapters.http.auth.dependencies import require_operator, get_current_user
@@ -32,6 +32,7 @@ from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
+    BotInvalidLifecycleStateError,
     BotNotFoundError,
     BotPermissionError,
     DeviceAllocationError,
@@ -274,6 +275,7 @@ async def release_bot_for_others(
 @router.post("/restart-for-others", response_model=ApiResponse)
 async def restart_bot_for_others(
     request: Request,
+    response: Response,
     ctx: RequestContext = Depends(get_request_context),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> ApiResponse:
@@ -343,6 +345,9 @@ async def restart_bot_for_others(
             nick_name=target_user_id,  # Use user_id as nick_name for admin operations
         )
 
+        if result.get("restart_in_progress"):
+            response.status_code = 202
+
         logger.info(f"[bot_router.restart_bot_for_others] Successfully restarted bot {target_bot_id} for {target_user_id}")
 
         return ApiResponse(
@@ -361,6 +366,17 @@ async def restart_bot_for_others(
             success=False,
             message=f"{str(e)}",
             error_code=404,
+            data=None,
+        )
+    except BotInvalidLifecycleStateError as e:
+        logger.warning(
+            f"[bot_router.restart_bot_for_others] Invalid lifecycle state: {e}"
+        )
+        response.status_code = 409
+        return ApiResponse(
+            success=False,
+            message=f"当前状态不允许重启Bot: {str(e)}",
+            error_code=409,
             data=None,
         )
     except BotServiceError as e:
@@ -384,6 +400,7 @@ async def restart_bot_for_others(
 @router.post("/restart-scheduler", response_model=ApiResponse)
 async def restart_scheduler(
     request: Request,
+    response: Response,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> ApiResponse:
     """
@@ -407,6 +424,9 @@ async def restart_scheduler(
             nick_name=target_user_id,  # Use user_id as nick_name for admin operations
         )
 
+        if result.get("restart_in_progress"):
+            response.status_code = 202
+
         logger.info(f"[bot_router.restart_scheduler] Successfully restarted bot {target_bot_id} for {target_user_id}")
 
         return ApiResponse(
@@ -425,6 +445,17 @@ async def restart_scheduler(
             success=False,
             message=f"{str(e)}",
             error_code=404,
+            data=None,
+        )
+    except BotInvalidLifecycleStateError as e:
+        logger.warning(
+            f"[bot_router.restart_scheduler] Invalid lifecycle state: {e}"
+        )
+        response.status_code = 409
+        return ApiResponse(
+            success=False,
+            message=f"当前状态不允许重启Bot: {str(e)}",
+            error_code=409,
             data=None,
         )
     except BotServiceError as e:
@@ -2658,6 +2689,7 @@ async def get_bot_config_dir(
 async def restart_bot(
     bot_id: str,
     request: Request,
+    response: Response,
     owner_id: Optional[str] = Query(None, description="Bot owner ID"),
     ctx: RequestContext = Depends(get_request_context),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
@@ -2698,6 +2730,9 @@ async def restart_bot(
             nick_name=nick_name,
         )
 
+        if result.get("restart_in_progress"):
+            response.status_code = 202
+
         return ApiResponse(
             success=True,
             data=result,
@@ -2708,6 +2743,15 @@ async def restart_bot(
             success=False,
             message=f"Bot不存在: {bot_id}",
             error_code=404,
+            data=None,
+        )
+    except BotInvalidLifecycleStateError as e:
+        logger.warning(f"[bot_router.restart_bot] Invalid lifecycle state: {e}")
+        response.status_code = 409
+        return ApiResponse(
+            success=False,
+            message=f"当前状态不允许重启Bot: {str(e)}",
+            error_code=409,
             data=None,
         )
     except BotServiceError as e:
