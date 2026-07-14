@@ -40,6 +40,15 @@ class SystemConfigKey(StrEnum):
     Falls back to DEFAULT_CALLBACK_TIMEOUT_SECONDS (900).
     """
 
+    # SessionKey matching configuration
+    SESSION_KEY_IGNORE_CASE = "bot_run.session_key_ignore_case"
+    """Whether sessionKey fuzzy matching should ignore case.
+
+    Value: "true" or "false" (default: "false")
+    Usage: Read once at AsyncChatClient initialization; when enabled,
+    SessionKeyMatcher performs case-insensitive contains matching.
+    """
+
     # Add more system config keys here as needed
     # Example:
     # ARCA_DEFAULT_TIMEOUT = "arca.default_timeout"

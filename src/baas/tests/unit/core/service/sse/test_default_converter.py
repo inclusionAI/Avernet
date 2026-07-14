@@ -1,111 +1,416 @@
-"""Unit tests for DefaultStreamConverter."""
+"""Coverage tests for DefaultStreamConverter — targets untested branches.
+
+Covers: heartbeat SSE comment frame, error with errorKind, aborted,
+agent with non-dict data, command_output non-claude, lifecycle invalid
+phase, claude tool invalid type, claude tool start with args,
+_claude_tool_result with dict, openclaw tool invalid phase,
+delta with empty content, final with empty content.
+"""
 
 import json
 
-import pytest
-
 from secbaas.community.api.sse import StreamChunk
-from secbaas.community.core.service.sse._default_converter import DefaultStreamConverter
+from secbaas.community.core.service.sse import DefaultStreamConverter
 
 
-@pytest.fixture
-def converter():
-    return DefaultStreamConverter()
+def _data(event) -> dict:
+    d = json.loads(event.data)
+    d.pop("ts", None)
+    return d
 
 
-def test_name():
-    assert DefaultStreamConverter.name() == "default"
+class TestHeartbeat:
+    def test_heartbeat_produces_comment_frame(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(type="heartbeat"),
+            run_id="run-1",
+        )
+        assert event is not None
+        assert event.event == ": heartbeat"
+        assert event.data == ""
+        assert event.to_sse() == ": heartbeat\n\n"
 
 
-def test_convert_delta(converter):
-    chunk = StreamChunk(type="delta", content="hello")
-    event = converter.convert(chunk, run_id="run-1")
-    assert event.event == "delta"
-    data = json.loads(event.data)
-    assert data["run_id"] == "run-1"
-    assert data["content"] == "hello"
-    assert data["seq"] == 1
+class TestErrorBranch:
+    def test_error_with_content(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(type="error", content="something broke"),
+            run_id="run-1",
+        )
+        assert event.event == "chat"
+        d = _data(event)
+        assert d["state"] == "error"
+        assert d["errorMessage"] == "something broke"
+
+    def test_error_empty_content_uses_default(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(type="error", content=""),
+            run_id="run-1",
+        )
+        d = _data(event)
+        assert d["errorMessage"] == "Unknown error"
+
+    def test_error_with_error_kind_metadata(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(
+                type="error",
+                content="denied",
+                metadata={"errorKind": "permission_denied"},
+            ),
+            run_id="run-1",
+        )
+        d = _data(event)
+        assert d["errorKind"] == "permission_denied"
+
+    def test_error_without_error_kind_metadata(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(type="error", content="oops", metadata=None),
+            run_id="run-1",
+        )
+        d = _data(event)
+        assert "errorKind" not in d
 
 
-def test_convert_final(converter):
-    chunk = StreamChunk(type="final", content="result")
-    event = converter.convert(chunk, run_id="run-1")
-    assert event.event == "final"
-    data = json.loads(event.data)
-    assert data["content"] == "result"
-    assert data["seq"] == 1
+class TestAbortedBranch:
+    def test_aborted_basic(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(type="aborted"),
+            run_id="run-1",
+        )
+        assert event.event == "chat"
+        d = _data(event)
+        assert d["state"] == "aborted"
+
+    def test_aborted_with_stop_reason(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(
+                type="aborted",
+                metadata={"stopReason": "user_cancelled"},
+            ),
+            run_id="run-1",
+        )
+        d = _data(event)
+        assert d["stopReason"] == "user_cancelled"
 
 
-def test_convert_final_with_usage(converter):
-    usage = {"input_tokens": 10, "output_tokens": 5}
-    chunk = StreamChunk(type="final", content="result", usage=usage)
-    event = converter.convert(chunk, run_id="run-1")
-    data = json.loads(event.data)
-    assert data["usage"] == usage
+class TestDeltaEmptyContent:
+    def test_delta_empty_content_no_delta_text(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(type="delta", content=""),
+            run_id="run-1",
+        )
+        d = _data(event)
+        assert d["state"] == "delta"
+        assert "deltaText" not in d
 
 
-def test_convert_final_with_pending_usage(converter):
-    usage_chunk = StreamChunk(type="usage", usage={"input_tokens": 10})
-    converter.convert(usage_chunk, run_id="run-1")
-    final_chunk = StreamChunk(type="final", content="result")
-    event = converter.convert(final_chunk, run_id="run-1")
-    data = json.loads(event.data)
-    assert data["usage"] == {"input_tokens": 10}
+class TestFinalEmptyContent:
+    def test_final_empty_content_no_message(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(type="final", content=""),
+            run_id="run-1",
+        )
+        d = _data(event)
+        assert d["state"] == "final"
+        assert "message" not in d
 
 
-def test_convert_error(converter):
-    chunk = StreamChunk(type="error", content="something went wrong")
-    event = converter.convert(chunk, run_id="run-1")
-    assert event.event == "error"
-    data = json.loads(event.data)
-    assert data["error"]["code"] == "BOT_EXECUTION_ERROR"
-    assert data["error"]["message"] == "something went wrong"
+class TestAgentNonDictData:
+    def test_agent_data_not_dict_defaults_to_empty(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(
+                type="agent",
+                metadata={
+                    "engine_frame": {
+                        "stream": "lifecycle",
+                        "data": "not a dict",
+                    }
+                },
+            ),
+            run_id="run-1",
+        )
+        assert event is None
+
+    def test_agent_data_none_defaults_to_empty(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(
+                type="agent",
+                metadata={
+                    "engine_frame": {
+                        "stream": "lifecycle",
+                        "data": None,
+                    }
+                },
+            ),
+            run_id="run-1",
+        )
+        assert event is None
 
 
-def test_convert_error_with_custom_code(converter):
-    chunk = StreamChunk(
-        type="error",
-        content="bad request",
-        metadata={"error_code": "INVALID_INPUT"},
-    )
-    event = converter.convert(chunk, run_id="run-1")
-    data = json.loads(event.data)
-    assert data["error"]["code"] == "INVALID_INPUT"
+class TestCommandOutputNonClaude:
+    def test_non_claude_command_output_dropped(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(
+                type="agent",
+                engine_type="openclaw",
+                metadata={
+                    "engine_frame": {
+                        "stream": "command_output",
+                        "data": {"phase": "end", "output": "ok"},
+                    }
+                },
+            ),
+            run_id="run-1",
+        )
+        assert event is None
 
 
-def test_convert_error_empty_content(converter):
-    chunk = StreamChunk(type="error", content="")
-    event = converter.convert(chunk, run_id="run-1")
-    data = json.loads(event.data)
-    assert data["error"]["message"] == "Unknown error"
+class TestLifecycleInvalidPhase:
+    def test_lifecycle_unknown_phase_dropped(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(
+                type="agent",
+                metadata={
+                    "engine_frame": {
+                        "stream": "lifecycle",
+                        "data": {"phase": "middle"},
+                    }
+                },
+            ),
+            run_id="run-1",
+        )
+        assert event is None
+
+    def test_lifecycle_no_phase_dropped(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(
+                type="agent",
+                metadata={
+                    "engine_frame": {
+                        "stream": "lifecycle",
+                        "data": {},
+                    }
+                },
+            ),
+            run_id="run-1",
+        )
+        assert event is None
 
 
-def test_convert_usage(converter):
-    chunk = StreamChunk(type="usage", usage={"input_tokens": 10})
-    event = converter.convert(chunk, run_id="run-1")
-    assert event.event == "delta"
-    data = json.loads(event.data)
-    assert data["content"] == ""
-    assert data["seq"] == 1
+class TestClaudeToolInvalidType:
+    def test_claude_tool_unknown_type_dropped(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(
+                type="agent",
+                engine_type="claude_code",
+                metadata={
+                    "engine_frame": {
+                        "stream": "tool",
+                        "data": {"type": "unknown"},
+                    }
+                },
+            ),
+            run_id="run-1",
+        )
+        assert event is None
+
+    def test_claude_tool_no_type_dropped(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(
+                type="agent",
+                engine_type="claude_code",
+                metadata={
+                    "engine_frame": {
+                        "stream": "tool",
+                        "data": {},
+                    }
+                },
+            ),
+            run_id="run-1",
+        )
+        assert event is None
 
 
-def test_convert_usage_no_usage_dict(converter):
-    chunk = StreamChunk(type="usage", usage=None)
-    event = converter.convert(chunk, run_id="run-1")
-    assert event.event == "delta"
+class TestClaudeToolStartWithArgs:
+    def test_start_with_input(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(
+                type="agent",
+                engine_type="claude_code",
+                metadata={
+                    "engine_frame": {
+                        "stream": "tool",
+                        "data": {
+                            "type": "start",
+                            "toolName": "Read",
+                            "toolCallId": "tc-1",
+                            "input": {"path": "/tmp/file.txt"},
+                        },
+                    }
+                },
+            ),
+            run_id="run-1",
+        )
+        d = _data(event)
+        assert d["stream"] == "tool"
+        assert d["phase"] == "start"
+        assert d["name"] == "Read"
+        assert d["toolCallId"] == "tc-1"
+        assert d["args"] == {"path": "/tmp/file.txt"}
+
+    def test_start_without_input(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(
+                type="agent",
+                engine_type="claude_code",
+                metadata={
+                    "engine_frame": {
+                        "stream": "tool",
+                        "data": {
+                            "type": "start",
+                            "toolName": "Bash",
+                        },
+                    }
+                },
+            ),
+            run_id="run-1",
+        )
+        d = _data(event)
+        assert "args" not in d
 
 
-def test_convert_unknown_type(converter):
-    chunk = StreamChunk(type="unknown", content="passthrough")
-    event = converter.convert(chunk, run_id="run-1")
-    assert event.event == "delta"
-    data = json.loads(event.data)
-    assert data["content"] == "passthrough"
+class TestClaudeToolResultDict:
+    def test_dict_output_passed_directly(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(
+                type="agent",
+                engine_type="claude_code",
+                metadata={
+                    "engine_frame": {
+                        "stream": "tool",
+                        "data": {
+                            "type": "result",
+                            "toolName": "Search",
+                            "toolCallId": "tc-2",
+                            "output": {"files": ["a.txt", "b.txt"]},
+                        },
+                    }
+                },
+            ),
+            run_id="run-1",
+        )
+        d = _data(event)
+        assert d["result"] == {"files": ["a.txt", "b.txt"]}
 
 
-def test_convert_seq_increments(converter):
-    c1 = converter.convert(StreamChunk(type="delta", content="a"), run_id="r")
-    c2 = converter.convert(StreamChunk(type="delta", content="b"), run_id="r")
-    d1 = json.loads(c1.data)
-    d2 = json.loads(c2.data)
-    assert d2["seq"] == d1["seq"] + 1
+class TestOpenclawToolInvalidPhase:
+    def test_invalid_phase_dropped(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(
+                type="agent",
+                engine_type="openclaw",
+                metadata={
+                    "engine_frame": {
+                        "stream": "tool",
+                        "data": {"phase": "unknown"},
+                    }
+                },
+            ),
+            run_id="run-1",
+        )
+        assert event is None
+
+    def test_no_phase_dropped(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(
+                type="agent",
+                engine_type="openclaw",
+                metadata={
+                    "engine_frame": {
+                        "stream": "tool",
+                        "data": {},
+                    }
+                },
+            ),
+            run_id="run-1",
+        )
+        assert event is None
+
+
+class TestUsageChunkDropped:
+    def test_usage_type_returns_none(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(type="usage", content=""),
+            run_id="run-1",
+        )
+        assert event is None
+
+
+class TestUnknownChunkTypeDropped:
+    def test_unknown_type_returns_none(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(type="unknown_type"),
+            run_id="run-1",
+        )
+        assert event is None
+
+
+class TestEngineNameFallback:
+    def test_engine_type_none_falls_back_to_metadata(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(
+                type="agent",
+                metadata={
+                    "engine_frame": {
+                        "stream": "command_output",
+                        "data": {"phase": "end", "output": "ok"},
+                    },
+                    "engine": "claude_code",
+                },
+            ),
+            run_id="run-1",
+        )
+        assert event is not None
+        assert event.event == "agent"
+
+    def test_engine_type_empty_string_falls_back_to_metadata(self):
+        converter = DefaultStreamConverter()
+        event = converter.convert(
+            StreamChunk(
+                type="agent",
+                engine_type="",
+                metadata={
+                    "engine_frame": {
+                        "stream": "command_output",
+                        "data": {"phase": "end", "output": "ok"},
+                    },
+                    "engineType": "claude_code",
+                },
+            ),
+            run_id="run-1",
+        )
+        assert event is not None

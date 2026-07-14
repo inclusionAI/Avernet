@@ -5,11 +5,6 @@ module_config:
   web:
     # 本地模式，避免端口冲突，设置为 8890
     port: 8890
-  mist:
-    enabled: true
-    tenant: "dev-tenant"
-    mode: "dev"
-    app_name: "secbaas"
 
 user_config:
   workspace:

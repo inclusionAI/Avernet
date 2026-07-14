@@ -146,6 +146,7 @@ class AsyncChatClient:
         session_key_timeout: float = 30.0,
         max_retries: int = 1,
         retry_base_backoff: float = 0.5,
+        ignore_case: bool = False,
     ):
         """初始化客户端
 
@@ -159,6 +160,7 @@ class AsyncChatClient:
             session_key_timeout: 同一 sessionKey 并发等待超时（秒）
             max_retries: WS 断连后自动重连次数，0 表示不重试
             retry_base_backoff: 重连退避基数（秒）
+            ignore_case: sessionKey 模糊匹配是否忽略大小写
         """
         self.uri = uri
         self.headers = headers or {}
@@ -170,6 +172,7 @@ class AsyncChatClient:
         self._session_key_timeout = session_key_timeout
         self._max_retries = max_retries
         self._retry_base_backoff = retry_base_backoff
+        self._ignore_case = ignore_case
 
         # 并发信号量：限制单连接总并发会话数，提供背压
         self._concurrency_sem: asyncio.Semaphore | None = (
@@ -189,7 +192,9 @@ class AsyncChatClient:
 
         # sessionKey 模糊匹配器：服务端返回的 sessionKey 可能比客户端注册的长，
         # 通过 contains 匹配从 store 中回溯查找客户端注册的原始 key
-        self._session_matcher = SessionKeyMatcher(self._sessions)
+        self._session_matcher = SessionKeyMatcher(
+            self._sessions, ignore_case=ignore_case
+        )
 
         # send_message 的并发保护：同一 sessionKey 同一时刻只能有一个在等回复
         # dict[str, None] — 仅用于 "是否存在" 判断，值无意义
@@ -663,7 +668,7 @@ class AsyncChatClient:
         if state is None:
             logger.warning(
                 f"[chat] No session state for sessionKey={session_key}, "
-                f"state={chat_state}, text_len={len(text)}"
+                f"state={chat_state}, text_len={len(text)}, ignore_case={self._ignore_case}"
             )
             return
 
@@ -736,7 +741,11 @@ class AsyncChatClient:
         使日志的 traceid 能正确关联原始请求。
         """
         if state is None:
-            logger.warning("[agent] No session state for sessionKey=%s", session_key)
+            logger.warning(
+                "[agent] No session state for sessionKey=%s, ignore_case=%s",
+                session_key,
+                self._ignore_case,
+            )
             return
 
         stream = payload.get("stream", "")
@@ -801,7 +810,11 @@ class AsyncChatClient:
             state: 会话状态（由装饰器注入）
         """
         if state is None:
-            logger.warning("[error] No session state for sessionKey=%s", session_key)
+            logger.warning(
+                "[error] No session state for sessionKey=%s, ignore_case=%s",
+                session_key,
+                self._ignore_case,
+            )
             return
         agent_state = payload.get("state", "")
         if agent_state and agent_state == "error":

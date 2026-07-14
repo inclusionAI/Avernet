@@ -68,13 +68,16 @@ class SessionKeyMatcher:
         # -> None
     """
 
-    def __init__(self, store: dict[str, _SessionState]) -> None:
+    def __init__(
+        self, store: dict[str, _SessionState], ignore_case: bool = False
+    ) -> None:
         """初始化匹配器。
 
         Args:
             store: 被查找的 session store（key 为客户端注册的原始 session_key）
         """
         self._store = store
+        self.ignore_case = ignore_case
 
     def find(self, session_key: str) -> _MatchResult | None:
         """根据 sessionKey 查找对应的 session state。
@@ -99,8 +102,10 @@ class SessionKeyMatcher:
             return _MatchResult(key=session_key, state=state, matched_by="exact")
 
         # 2. contains 模糊匹配：遍历 store 中的 key，找到第一个被 session_key 包含的 key
+        target = session_key.lower() if self.ignore_case else session_key
         for stored_key, stored_state in self._store.items():
-            if stored_key in session_key:
+            candidate = stored_key.lower() if self.ignore_case else stored_key
+            if candidate in target:
                 logger.debug(
                     "[SessionKeyMatcher] sessionKey=%s not found in store, "
                     "matched via contains with stored_key=%s",

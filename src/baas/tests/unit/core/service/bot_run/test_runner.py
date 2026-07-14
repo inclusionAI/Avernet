@@ -18,7 +18,7 @@ Covers:
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -28,6 +28,7 @@ from secbaas.community.api.bot_runtime import (
     TooManyRequestsError,
 )
 from secbaas.community.api.device_manage import ErrorCode, PaasError
+from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.service.bot_run import (
     BotBindingNotFoundError,
     BotRunner,
@@ -1639,3 +1640,78 @@ class TestSelectDispatcherConfig:
         )
         result = runner._select_dispatcher("bot-1")
         assert result is task_d
+
+
+# ==================== Tests: _with_heartbeat ====================
+
+
+class TestWithHeartbeat:
+    """Cover _with_heartbeat: normal yield, timeout heartbeat, StopAsyncIteration."""
+
+    @pytest.mark.asyncio
+    async def test_yields_chunks(self):
+        from secbaas.community.core.service.bot_run._runner import _with_heartbeat
+
+        async def source():
+            yield StreamChunk(type="delta", content="a")
+            yield StreamChunk(type="final", content="done")
+
+        chunks = []
+        async for chunk in _with_heartbeat(source()):
+            chunks.append(chunk)
+
+        assert len(chunks) == 2
+        assert chunks[0].type == "delta"
+        assert chunks[1].type == "final"
+
+    @pytest.mark.asyncio
+    async def test_inserts_heartbeat_on_timeout(self):
+        from secbaas.community.core.service.bot_run._runner import _with_heartbeat
+
+        async def slow_source():
+            yield StreamChunk(type="delta", content="first")
+            await asyncio.sleep(0.15)
+            yield StreamChunk(type="final", content="late")
+
+        original_wait_for = asyncio.wait_for
+
+        with patch(
+            "secbaas.community.core.service.bot_run._runner.asyncio.wait_for",
+            lambda coro, timeout: original_wait_for(coro, 0.1),
+        ):
+            chunks = []
+            async for chunk in _with_heartbeat(slow_source()):
+                chunks.append(chunk)
+
+        assert len(chunks) == 3
+        assert chunks[0].type == "delta"
+        assert chunks[1].type == "heartbeat"
+        assert chunks[2].type == "final"
+
+    @pytest.mark.asyncio
+    async def test_empty_stream(self):
+        from secbaas.community.core.service.bot_run._runner import _with_heartbeat
+
+        async def empty():
+            return
+            yield  # make it an async generator
+
+        chunks = []
+        async for chunk in _with_heartbeat(empty()):
+            chunks.append(chunk)
+
+        assert chunks == []
+
+    @pytest.mark.asyncio
+    async def test_single_chunk(self):
+        from secbaas.community.core.service.bot_run._runner import _with_heartbeat
+
+        async def single():
+            yield StreamChunk(type="final", content="only")
+
+        chunks = []
+        async for chunk in _with_heartbeat(single()):
+            chunks.append(chunk)
+
+        assert len(chunks) == 1
+        assert chunks[0].content == "only"
