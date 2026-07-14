@@ -1,4 +1,7 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    net::IpAddr,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use axum::{
     Json,
@@ -8,6 +11,7 @@ use axum::{
 };
 use bcs_domain::ProviderRecord;
 use bcs_protocol::BCN_PROVIDER_ID_HEADER;
+use bcs_route_security::OutboundUrlError;
 use bcs_service_api::{
     AsyncA2aChatCommand, BotActor, CallerContext, ChatResponseMode, ChatRunQueryCommand,
     ServiceError,
@@ -366,9 +370,44 @@ pub fn notify_terminal_callback(
     };
     let provider_id = run.provider_id;
     let run_id = run_id.to_string();
+    let outbound_url_guard = state.outbound_url_guard.clone();
     tokio::spawn(async move {
-        let response = reqwest::Client::new()
-            .post(callback.url)
+        let callback_url = callback_url_for_log(&callback.url);
+        let guarded_url = match outbound_url_guard.resolve_request_http_url(&callback.url).await {
+            Ok(url) => url,
+            Err(error) => {
+                warn!(
+                    run_id = %run_id,
+                    provider_id = %provider_id,
+                    callback_url = %callback_url,
+                    resolved_ip = ?callback_blocked_ip(&error),
+                    reason = %error,
+                    "organization admin terminal callback blocked by outbound URL policy"
+                );
+                return;
+            }
+        };
+        let mut client_builder = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none());
+        if let Some((host, addresses)) = guarded_url.dns_override() {
+            client_builder = client_builder.resolve_to_addrs(host, addresses);
+        }
+        let client = match client_builder.build() {
+            Ok(client) => client,
+            Err(error) => {
+                warn!(
+                    run_id = %run_id,
+                    provider_id = %provider_id,
+                    callback_url = %callback_url,
+                    error = %error,
+                    "organization admin terminal callback client creation failed"
+                );
+                return;
+            }
+        };
+        let response = client
+            .post(guarded_url.as_str())
             .header("content-type", "application/json")
             .header(BCN_PROVIDER_ID_HEADER, provider_id)
             .bearer_auth(callback.bearer_token)
@@ -527,9 +566,34 @@ fn new_admin_run_id() -> String {
     format!("run-{}", Uuid::new_v4().simple())
 }
 
+fn callback_blocked_ip(error: &OutboundUrlError) -> Option<IpAddr> {
+    match error {
+        OutboundUrlError::UnsafeAddress(address) => Some(*address),
+        _ => None,
+    }
+}
+
+fn callback_url_for_log(callback_url: &str) -> String {
+    let Ok(mut url) = reqwest::Url::parse(callback_url) else {
+        return "<invalid callback URL>".to_string();
+    };
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    url.to_string()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{default_admin_session_id, new_admin_run_id, valid_session_id};
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use bcs_route_security::OutboundUrlError;
+
+    use super::{
+        callback_blocked_ip, callback_url_for_log, default_admin_session_id, new_admin_run_id,
+        valid_session_id,
+    };
 
     #[test]
     fn admin_run_id_uses_hyphenated_prefix() {
@@ -553,6 +617,20 @@ mod tests {
         assert!(valid_session_id("Session_name.1:part-a"));
         assert!(!valid_session_id(""));
         assert!(!valid_session_id("session/name"));
+    }
+
+    #[test]
+    fn callback_block_log_fields_include_rejected_ip_without_query() {
+        let blocked_ip = IpAddr::V4(Ipv4Addr::new(10, 24, 0, 8));
+        let error = OutboundUrlError::UnsafeAddress(blocked_ip);
+
+        assert_eq!(callback_blocked_ip(&error), Some(blocked_ip));
+        assert_eq!(
+            callback_url_for_log(
+                "https://bearer-token@provider.example.com/callback?token=secret#fragment",
+            ),
+            "https://provider.example.com/callback"
+        );
     }
 }
 
