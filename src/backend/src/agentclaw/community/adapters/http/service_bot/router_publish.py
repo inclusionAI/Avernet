@@ -984,7 +984,7 @@ async def retry_publish(
     POST /api/service-bot/publish/{publish_id}/retry
 
     根据失败前状态自动选择重试策略：
-    - building 失败 → 回退到 DRAFT，重新构建+验证发布
+    - building failed → roll back to BUILDING, rebuild + verify release
     - built 失败 → 回退到 BUILT，重新验证发布
     - validate_pub 失败 → 回退到 VALIDATE_PUB，调用 BaaS 重启重试
     - online_pub 失败 → 回退到 ONLINE_PUB，调用 BaaS 重启重试
@@ -1043,7 +1043,7 @@ async def retry_publish_for_others(
     用于管理员或系统代为执行重试操作的场景。
 
     根据失败前状态自动选择重试策略：
-    - building 失败 → 回退到 DRAFT，重新构建+验证发布
+    - building failed → roll back to BUILDING, rebuild + verify release
     - built 失败 → 回退到 BUILT，重新验证发布
     - validate_pub 失败 → 回退到 VALIDATE_PUB，调用 BaaS 重启重试
     - online_pub 失败 → 回退到 ONLINE_PUB，调用 BaaS 重启重试
