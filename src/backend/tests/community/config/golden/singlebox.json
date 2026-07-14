@@ -5,6 +5,26 @@
       "app_secret": "noop",
       "base_url": "http://127.0.0.1:9999"
     },
+    "admin": {
+      "collaborator_admin": [
+        "100000"
+      ],
+      "device_admin": [
+        "100000"
+      ],
+      "disk_usage_admin": [
+        "100000"
+      ],
+      "harness_admin": [
+        "100000"
+      ],
+      "skill_admin": [
+        "100000"
+      ],
+      "super_admin": [
+        "100000"
+      ]
+    },
     "agentclawproxy": {
       "base_url": "http://127.0.0.1:9999"
     },
