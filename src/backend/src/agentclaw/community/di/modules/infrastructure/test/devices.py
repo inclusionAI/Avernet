@@ -66,6 +66,31 @@ from agentclaw.community.plugins.local.local_device_lifecycle import LocalDevice
 logger = get_logger()
 
 
+def configure_local_device_test_runtime(binder: Binder) -> None:
+    """Bind the local device runtime shared by TEST and CORP_TEST.
+
+    Keep these bindings together so the corp-flavored test module cannot drift
+    from the corp-free module when device concerns move between DI modules.
+    SINGLEBOX does not call this helper; it uses ``SingleboxDevicesModule`` and
+    the real local BaaS device runtime instead.
+    """
+    from agentclaw.community.plugin_api.device_connection_manager import (
+        DeviceConnectionManagerPlugin,
+    )
+    from agentclaw.community.plugins.local.device_connection_manager import (
+        NoopDeviceConnectionManagerPlugin,
+    )
+
+    binder.bind(
+        DeviceConnectionManagerPlugin,
+        to=NoopDeviceConnectionManagerPlugin,
+        scope=singleton,
+    )
+    binder.bind(LocalDeviceAccessor, to=LocalDeviceAccessor, scope=singleton)
+    binder.bind(DeviceAccessor, to=LocalDeviceAccessor, scope=singleton)
+    binder.bind(LocalDeviceLifecycle, to=LocalDeviceLifecycle, scope=singleton)
+
+
 class TestDevicesModule(Module):
     """Corp-free SQLite + local-mode overrides for devices (test / singlebox)."""
 
@@ -76,21 +101,7 @@ class TestDevicesModule(Module):
         boots have no remote device gateway, so rebind to the Noop impl here (a
         binding in this module wins over the prod module's).
         """
-        from agentclaw.community.plugin_api.device_connection_manager import (
-            DeviceConnectionManagerPlugin,
-        )
-        from agentclaw.community.plugins.local.device_connection_manager import (
-            NoopDeviceConnectionManagerPlugin,
-        )
-
-        binder.bind(
-            DeviceConnectionManagerPlugin,
-            to=NoopDeviceConnectionManagerPlugin,
-            scope=singleton,
-        )
-        binder.bind(LocalDeviceAccessor, to=LocalDeviceAccessor, scope=singleton)
-        binder.bind(DeviceAccessor, to=LocalDeviceAccessor, scope=singleton)
-        binder.bind(LocalDeviceLifecycle, to=LocalDeviceLifecycle, scope=singleton)
+        configure_local_device_test_runtime(binder)
 
     @singleton
     @provider
