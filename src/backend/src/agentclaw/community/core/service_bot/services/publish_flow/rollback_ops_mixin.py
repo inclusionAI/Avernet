@@ -13,6 +13,9 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+    enqueue_progress_poll,
+)
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 
@@ -139,6 +142,15 @@ class RollbackOpsMixin:
             stage=PublishStage.ONLINE,
             request_id=request_id,
         )
+
+        # 8. Enqueue the durable progress poll on the TARGET record. Rollback parks
+        # the target at ONLINE_PUB with ext.publish.online set but never passes
+        # through verify_flow/online_release, so pre-#105 only user /sync polling
+        # ever finished it. The poll's advance_publish_progress reads
+        # ext.publish.online and drives ONLINE_PUB → SUCCESS (binding activation +
+        # supersede via _handle_sync_success), so the rollback self-completes with
+        # no user polling — and becomes crash-safe.
+        enqueue_progress_poll(self._task_queue_service, publish_id=target_publish_id)
 
         logger.info(
             f"[PublishFlowService.execute_rollback] Rollback deployment initiated: "
