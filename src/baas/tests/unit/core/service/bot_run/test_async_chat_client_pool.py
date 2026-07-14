@@ -429,3 +429,78 @@ class TestHighConcurrency:
         assert _FakeChatClient.get_create_count() == 2
 
         await pool.close_all()
+
+
+# ==================== _read_ignore_case tests ====================
+
+
+class TestReadIgnoreCase:
+    """Cover _read_ignore_case branches: resp None, conf_value true/false."""
+
+    def test_none_service_returns_false(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        result = AsyncChatClientPool._read_ignore_case(None)
+        assert result is False
+
+    def test_get_config_returns_none(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        svc = MagicMock()
+        svc.get_config.return_value = None
+        result = AsyncChatClientPool._read_ignore_case(svc)
+        assert result is False
+
+    def test_conf_value_true(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        svc = MagicMock()
+        svc.get_config.return_value = MagicMock(conf_value="true")
+        result = AsyncChatClientPool._read_ignore_case(svc)
+        assert result is True
+
+    def test_conf_value_true_with_whitespace(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        svc = MagicMock()
+        svc.get_config.return_value = MagicMock(conf_value="  True  ")
+        result = AsyncChatClientPool._read_ignore_case(svc)
+        assert result is True
+
+    def test_conf_value_false(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        svc = MagicMock()
+        svc.get_config.return_value = MagicMock(conf_value="false")
+        result = AsyncChatClientPool._read_ignore_case(svc)
+        assert result is False
+
+    def test_conf_value_none_in_response(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        svc = MagicMock()
+        svc.get_config.return_value = MagicMock(conf_value=None)
+        result = AsyncChatClientPool._read_ignore_case(svc)
+        assert result is False
+
+    def test_get_config_raises_returns_false(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        svc = MagicMock()
+        svc.get_config.side_effect = RuntimeError("db error")
+        result = AsyncChatClientPool._read_ignore_case(svc)
+        assert result is False
