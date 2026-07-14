@@ -156,6 +156,18 @@ class FileTransferPoller:
             "retention_done", "pull_success", or "failed".
         """
         transfer_id = ticket.transfer_id
+
+        # Defensive guard: terminal states should never reach the poller
+        # through list_pending_uploads(["CREATED", "UPLOADING"]), but check
+        # anyway to prevent accidental processing of stale tickets
+        # (e.g., race with cancel API).
+        if ticket.status in ("CANCELLED", "DELETED", "FAILED", "DONE"):
+            log.info(
+                "[FileTransferPoller] Skipping ticket %s — terminal state: %s",
+                transfer_id, ticket.status,
+            )
+            return "skipped"
+
         log.info(
             "[FileTransferPoller] Processing ticket %s (status=%s)",
             transfer_id,
@@ -166,7 +178,7 @@ class FileTransferPoller:
             # Timeout check: gmt_create + upload_timeout_seconds < now
             if ticket.gmt_create + timedelta(
                 seconds=self._config.upload_timeout_seconds
-            ) < datetime.utcnow():
+            ) < datetime.now():
                 log.warning(
                     "[FileTransferPoller] Ticket %s timed out (created=%s, timeout=%ss)",
                     transfer_id,
@@ -301,6 +313,17 @@ class FileTransferPoller:
             "timed_out", "skipped", "oss_not_ready", or "download_ready".
         """
         transfer_id = ticket.transfer_id
+
+        # Defensive guard: terminal states should never reach the poller
+        # through list_pending_uploads(["CREATED", "UPLOADING"]), but check
+        # anyway to prevent accidental processing of stale tickets.
+        if ticket.status in ("CANCELLED", "DELETED", "FAILED", "DONE"):
+            log.info(
+                "[FileTransferPoller] Skipping DOWNLOAD ticket %s — terminal state: %s",
+                transfer_id, ticket.status,
+            )
+            return "skipped"
+
         log.info(
             "[FileTransferPoller] Processing DOWNLOAD ticket %s (status=%s)",
             transfer_id,
