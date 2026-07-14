@@ -5,7 +5,6 @@ Advances the different stages of the publish flow based on the publish record st
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -253,19 +252,6 @@ class PublishFlowService(
         # release) are enqueued as persisted, crash-safe tasks instead of
         # fire-and-forget asyncio tasks. See publish_flow/tasks.py.
         self._task_queue_service = task_queue_service
-
-    def _stage_overrides(
-        self, publish_record: BotPublishRecord, stage: PublishStage
-    ) -> dict | None:
-        return self._ext_state.stage_overrides(publish_record, stage)
-
-    @staticmethod
-    def _artifact_for_stage(
-        config_artifact: dict | None,
-        stage: PublishStage,
-        overrides: dict | None,
-    ) -> dict | None:
-        return PublishExtState.artifact_for_stage(config_artifact, stage, overrides)
 
     def refresh_publish_handle(self, binding_id, publish_id) -> None:
         """Refresh the baas ``publish_id`` stashed in a reused binding's

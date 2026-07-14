@@ -131,7 +131,7 @@
 
 # Group C — Cleanup + verification
 
-## Task 5: Remove the now-dead composition helpers — [ ]
+## Task 5: Remove the now-dead composition helpers — [x]
 - **Goal:** Delete the per-path composition copies the seam replaced, so there is
   one composition path and no way back to the old inline style.
 - **Files:** `publish_flow/ext_state.py`, `publish_flow_service.py`.
@@ -143,7 +143,7 @@
   - [ ] Full suite green.
 - **Depends on:** Task 3
 
-## Review C: `/code-review` on the Group C diff — [ ]
+## Review C: `/code-review` on the Group C diff — [x]
 - **Goal:** Review the deletions (no dangling references, no behavior change).
 - **Done when:**
   - [ ] `/code-review` run on the Group C diff (Task 5); findings triaged and fixed.

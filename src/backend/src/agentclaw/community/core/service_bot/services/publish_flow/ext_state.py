@@ -20,7 +20,6 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
 )
 from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
     DeliveryArtifact,
-    apply_engine_overrides,
     restamp_stage,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
@@ -140,17 +139,6 @@ class PublishExtState:
             bot_id=publish_record.source_bot_id,
             accept_stages={stage.value},
         )
-
-    @staticmethod
-    def artifact_for_stage(
-        config_artifact: dict | None,
-        stage: PublishStage,
-        overrides: dict | None,
-    ) -> dict | None:
-        """The artifact to deliver for ``stage``: stamp ``engine_ext.stage`` and
-        overlay that stage's channel ``engine_overrides``. No-ops for the ARCA
-        mount path (no ``config_artifact``)."""
-        return apply_engine_overrides(restamp_stage(config_artifact, stage), overrides)
 
     # ── delivery-composition seam ────────────────────────────────────────
     # The single boundary between a stored build artifact and what BaaS receives.

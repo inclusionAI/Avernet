@@ -2447,7 +2447,7 @@ def _svc_with_record(
 
 
 _CREATE_TASK = (
-    "agentclaw.community.core.service_bot.services.publish_flow_service.asyncio.create_task"
+    "agentclaw.community.core.service_bot.services.publish_flow.restart_mixin.asyncio.create_task"
 )
 
 
