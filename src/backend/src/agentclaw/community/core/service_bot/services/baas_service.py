@@ -1737,16 +1737,50 @@ class BaasService:  # pragma: no cover
             BaasServiceError: 获取失败或绑定记录不存在
         """
         # 从 DeviceBindingRepository 获取 device_id
-        device_binding_repo = self._device_binding_repo
-        binding = device_binding_repo.get_by_id(bind_id)
+        binding = self._device_binding_repo.get_by_id(bind_id)
         if binding is None:
             raise BaasServiceError(f"Device binding not found: bind_id={bind_id}")
 
-        device_id = binding.device_id
+        return self.get_ws_info_by_bot_uuid(
+            bot_uuid=binding.device_id,
+            port=port,
+            path=path,
+            tenant=tenant,
+            device_affinity=device_affinity,
+            device_uuid=device_uuid,
+        )
+
+    def get_ws_info_by_bot_uuid(
+        self,
+        bot_uuid: str,
+        port: int = 20003,
+        path: str = "api/openclaw/ws",
+        tenant: str = "",
+        device_affinity: Optional[str] = None,
+        device_uuid: Optional[str] = None,
+    ) -> BotWsConnectionInfoResponse:
+        """获取 WebSocket 连接信息（通过 bot_uuid 直接查询）.
+
+        调用 GET /api/v1/bots/{bot_uuid}/ws-info?tenant={tenant}&port={port}&path={path}
+
+        Args:
+            bot_uuid: Bot UUID（= device_id）
+            port: 目标端口，默认 20003
+            path: WebSocket 路径，默认 api/openclaw/ws
+            tenant: 租户名称；空则回落到 self._tenant（BaasConfig.tenant，各部署配置）
+            device_affinity: 设备亲和性标识，用于指定目标设备（可选）
+            device_uuid: 多实例场景锁定特定实例（可选）；不传则 BaaS 自动选活跃实例
+
+        Returns:
+            BotWsConnectionInfoResponse: WebSocket 连接信息
+
+        Raises:
+            BaasServiceError: 获取失败
+        """
         effective_tenant = tenant or self._tenant
         logger.info(
-            f"[BaasService.get_ws_info] "
-            f"Getting ws info: bind_id={bind_id}, device_id={device_id}, tenant={effective_tenant}, "
+            f"[BaasService.get_ws_info_by_bot_uuid] "
+            f"Getting ws info: bot_uuid={bot_uuid}, tenant={effective_tenant}, "
             f"port={port}, path={path}, device_affinity={device_affinity}, device_uuid={device_uuid}"
         )
 
@@ -1762,7 +1796,7 @@ class BaasService:  # pragma: no cover
 
         try:
             response = self._http.get(
-                f"/api/v1/bots/{device_id}/ws-info",
+                f"/api/v1/bots/{bot_uuid}/ws-info",
                 params=params,
                 timeout=30.0,
             )
@@ -1782,16 +1816,16 @@ class BaasService:  # pragma: no cover
                 token=data["token"],
                 target=data["target"],
                 expires_at=data["expires_at"],
-                paas_device_id=device_id,
+                paas_device_id=bot_uuid,
                 baas_base_url=self._baas_api_base,
                 tenant=effective_tenant,
-                bot_uuid=device_id,
+                bot_uuid=bot_uuid,
                 engine_port=port,
             )
 
             logger.info(
-                f"[BaasService.get_ws_info] "
-                f"Got ws info: bind_id={bind_id}, device_id={device_id}, target={result.target}"
+                f"[BaasService.get_ws_info_by_bot_uuid] "
+                f"Got ws info: bot_uuid={bot_uuid}, target={result.target}"
             )
 
             return result
@@ -1807,7 +1841,7 @@ class BaasService:  # pragma: no cover
             # alarm-worthy is the caller's call, made where the business context
             # is known.
             logger.warning(
-                f"[BaasService.get_ws_info] "
+                f"[BaasService.get_ws_info_by_bot_uuid] "
                 f"HTTP error: {e.response.status_code} - {e.response.text}"
             )
             raise BaasServiceError(
@@ -1815,7 +1849,7 @@ class BaasService:  # pragma: no cover
             )
         except Exception as e:
             logger.error(
-                f"[BaasService.get_ws_info] "
+                f"[BaasService.get_ws_info_by_bot_uuid] "
                 f"Failed to get ws info: {e}"
             )
             raise BaasServiceError(f"Failed to get ws info: {e}")

@@ -29,6 +29,23 @@ module_config:
 
 # ─────────────────── user_config 覆盖 ───────────────────
 user_config:
+  # Privileged-user allow-lists (admin scopes) — SYNTHETIC ids, tests/ci only.
+  # Real employee ids never ship in community source. Acceptance tests authorize
+  # with "100000" (the doc-example placeholder).
+  admin:
+    super_admin:
+      - "100000"
+    disk_usage_admin:
+      - "100000"
+    harness_admin:
+      - "100000"
+    skill_admin:
+      - "100000"
+    collaborator_admin:
+      - "100000"
+    device_admin:
+      - "100000"
+
   app:
     title: "AgentClaw Single Box"
     description: "Single Box mode — no external network."
