@@ -37,7 +37,6 @@ class TestDownloadE2E:
         unique_id: str,
         stub_oss_backend,
         mock_ticket_repo,
-        mock_paas_service,
         poller,
     ) -> None:
         """Download full chain: API -> Dispatcher push -> stub OSS write ->

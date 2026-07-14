@@ -321,9 +321,9 @@ async def cancel_upload(
 async def list_staging(
     tenant: Annotated[str, Path(description="Tenant for isolation")],
     bot_uuid: Annotated[str, Path(description="Bot UUID")],
-    prefix: Annotated[str | None, Query(default=None, description="OSS key prefix filter")] = None,
-    limit: Annotated[int, Query(default=100, ge=1, le=1000, description="Page size")] = 100,
-    marker: Annotated[str | None, Query(default=None, description="Pagination marker from previous response")] = None,
+    prefix: Annotated[str | None, Query(description="OSS key prefix filter")] = None,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Page size")] = 100,
+    marker: Annotated[str | None, Query(description="Pagination marker from previous response")] = None,
     dispatcher: BotFileTransferDispatcher = Depends(
         Provide[ApplicationContainer.services.bot_file_transfer_dispatcher]
     ),
