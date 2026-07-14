@@ -347,7 +347,6 @@ class BotRunRequestExecutor:
             metadata_json = None
             if delta_engine_type:
                 metadata_json = json.dumps({"engine_type": delta_engine_type})
-                delta_engine_type = None
             seq += 1
             self._chunk_repository.insert_chunk(
                 run_id=run.run_id,
