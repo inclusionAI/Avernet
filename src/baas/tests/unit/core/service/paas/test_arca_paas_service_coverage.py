@@ -160,22 +160,36 @@ class TestInit:
             ArcaPaasService(credentials=None, arca_sandbox_plugin=mock_plugin)
 
     def test_init_missing_base_url_raises(self, mock_plugin):
-        creds = ArcaCredentials(api_key="key", base_url=None)
+        creds = ArcaCredentials(
+            api_key="key", base_url=None, template_id=1, template_uuid="tpl-test-001"
+        )
         with pytest.raises(ValueError, match="credentials.base_url is required"):
             ArcaPaasService(credentials=creds, arca_sandbox_plugin=mock_plugin)
 
     def test_init_empty_base_url_raises(self, mock_plugin):
-        creds = ArcaCredentials(api_key="key", base_url="")
+        creds = ArcaCredentials(
+            api_key="key", base_url="", template_id=1, template_uuid="tpl-test-001"
+        )
         with pytest.raises(ValueError, match="credentials.base_url is required"):
             ArcaPaasService(credentials=creds, arca_sandbox_plugin=mock_plugin)
 
     def test_init_missing_api_key_raises(self, mock_plugin):
-        creds = ArcaCredentials(base_url="http://test", api_key=None)
+        creds = ArcaCredentials(
+            base_url="http://test",
+            api_key=None,
+            template_id=1,
+            template_uuid="tpl-test-001",
+        )
         with pytest.raises(ValueError, match="credentials.api_key is required"):
             ArcaPaasService(credentials=creds, arca_sandbox_plugin=mock_plugin)
 
     def test_init_empty_api_key_raises(self, mock_plugin):
-        creds = ArcaCredentials(base_url="http://test", api_key="")
+        creds = ArcaCredentials(
+            base_url="http://test",
+            api_key="",
+            template_id=1,
+            template_uuid="tpl-test-001",
+        )
         with pytest.raises(ValueError, match="credentials.api_key is required"):
             ArcaPaasService(credentials=creds, arca_sandbox_plugin=mock_plugin)
 
@@ -500,6 +514,7 @@ class TestCreateDevice:
             base_url="http://test",
             api_key="key",
             template_id=1,
+            template_uuid="tpl-test-001",
             arca_template_id=None,
         )
         svc = ArcaPaasService(credentials=creds, arca_sandbox_plugin=mock_plugin)
@@ -732,6 +747,7 @@ class TestDestroyDevice:
             base_url="http://test",
             api_key="key",
             template_id=1,
+            template_uuid="tpl-test-001",
             tenant_name=None,
         )
         svc = ArcaPaasService(credentials=creds, arca_sandbox_plugin=mock_plugin)

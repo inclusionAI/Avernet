@@ -23,11 +23,9 @@ class PaasCredentials(BaseModel):
     """
 
     template_id: int = Field(
-        default=0,
         description="PaaS平台租户业务ID，来自 baas_device_template.template_id 字段",
     )
     template_uuid: str = Field(
-        default="",
         description="Device template UUID (business identifier)",
     )
     tenant_name: str | None = Field(
