@@ -13,15 +13,28 @@ from secbaas.api import ApiResponse
 from secbaas.api.bot_runtime import (
     BotFileTransferDispatcher,
     BotNotFoundError,
+    CancelUploadResponse,
+    CompleteUploadResponse,
     GetDownloadUrlRequest,
     GetDownloadUrlResponse,
     GetUploadUrlRequest,
     GetUploadUrlResponse,
     NoActiveDevicesError,
     NoDevicesFoundError,
+    ShareLinkRequest,
+    ShareLinkResponse,
+    StagingDeleteResponse,
+    StagingListResponse,
+    TransferNotFoundError,
+)
+from secbaas.api.bot_runtime._exceptions import (
+    DirectoryNotEmptyError,
+    OssObjectNotFoundError,
+    TransferNotTerminalError,
 )
 from secbaas.api.device_manage import DeviceFacadeException
 from secbaas.bootstrap import ApplicationContainer
+from secbaas.core.repository.file_transfer_ticket import TransferStateConflictError
 from secbaas.logger import get_logger
 
 logger = get_logger("router")
@@ -66,6 +79,8 @@ async def get_upload_url(
             expire_seconds=request.expire_seconds,
             staging_subdir=request.staging_subdir,
             device_affinity=device_affinity,
+            file_size=request.file_size,
+            part_size=request.part_size,
         )
         return ApiResponse(data=result)
 
@@ -184,4 +199,259 @@ async def get_download_url(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "INTERNAL_ERROR", "message": str(e), "bot_uuid": bot_uuid},
+        )
+
+
+# ── v1.5 endpoints ─────────────────────────────────────────────────────
+
+
+@router.post(
+    "/{tenant}/{bot_uuid}/files/upload-url/{transfer_id}/complete",
+    response_model=ApiResponse[CompleteUploadResponse],
+    summary="Complete an upload (SINGLE or MULTIPART)",
+)
+@inject
+async def complete_upload(
+    tenant: Annotated[str, Path(description="Tenant for isolation")],
+    bot_uuid: Annotated[str, Path(description="Bot UUID")],
+    transfer_id: Annotated[str, Path(description="Transfer ID from upload-url response")],
+    dispatcher: BotFileTransferDispatcher = Depends(
+        Provide[ApplicationContainer.services.bot_file_transfer_dispatcher]
+    ),
+) -> ApiResponse[CompleteUploadResponse]:
+    """Complete a previously initiated upload.
+
+    For SINGLE uploads: verifies the file exists in OSS staging.
+    For MULTIPART uploads: assembles uploaded parts into the final file.
+    Transitions the ticket to UPLOAD_COMPLETED on success.
+    """
+    logger.info(
+        f"complete_upload: tenant={tenant}, bot_uuid={bot_uuid}, "
+        f"transfer_id={transfer_id}"
+    )
+
+    try:
+        result = await dispatcher.dispatch_complete_upload(
+            transfer_id=transfer_id,
+            tenant=tenant,
+        )
+        return ApiResponse(data=result)
+
+    except TransferNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "TRANSFER_NOT_FOUND", "message": str(e)},
+        )
+    except TransferStateConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "TRANSFER_STATE_CONFLICT", "message": str(e)},
+        )
+    except NotImplementedError as e:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={"error": "NOT_IMPLEMENTED", "message": str(e)},
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "INTERNAL_ERROR", "message": str(e)},
+        )
+
+
+@router.delete(
+    "/{tenant}/{bot_uuid}/files/upload-url/{transfer_id}",
+    response_model=ApiResponse[CancelUploadResponse],
+    summary="Cancel an upload and abort any in-progress multipart session",
+)
+@inject
+async def cancel_upload(
+    tenant: Annotated[str, Path(description="Tenant for isolation")],
+    bot_uuid: Annotated[str, Path(description="Bot UUID")],
+    transfer_id: Annotated[str, Path(description="Transfer ID from upload-url response")],
+    dispatcher: BotFileTransferDispatcher = Depends(
+        Provide[ApplicationContainer.services.bot_file_transfer_dispatcher]
+    ),
+) -> ApiResponse[CancelUploadResponse]:
+    """Cancel an in-progress upload.
+
+    If the upload is multipart, the OSS multipart session is aborted.
+    The ticket transitions to CANCELLED terminal state.
+    """
+    logger.info(
+        f"cancel_upload: tenant={tenant}, bot_uuid={bot_uuid}, "
+        f"transfer_id={transfer_id}"
+    )
+
+    try:
+        result = await dispatcher.dispatch_cancel_upload(
+            transfer_id=transfer_id,
+            tenant=tenant,
+        )
+        return ApiResponse(data=result)
+
+    except TransferNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "TRANSFER_NOT_FOUND", "message": str(e)},
+        )
+    except TransferStateConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "TRANSFER_STATE_CONFLICT", "message": str(e)},
+        )
+    except NotImplementedError as e:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={"error": "NOT_IMPLEMENTED", "message": str(e)},
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "INTERNAL_ERROR", "message": str(e)},
+        )
+
+
+@router.get(
+    "/{tenant}/{bot_uuid}/files/staging",
+    response_model=ApiResponse[StagingListResponse],
+    summary="List staging area objects with marker-based pagination",
+)
+@inject
+async def list_staging(
+    tenant: Annotated[str, Path(description="Tenant for isolation")],
+    bot_uuid: Annotated[str, Path(description="Bot UUID")],
+    prefix: Annotated[str | None, Query(default=None, description="OSS key prefix filter")] = None,
+    limit: Annotated[int, Query(default=100, ge=1, le=1000, description="Page size")] = 100,
+    marker: Annotated[str | None, Query(default=None, description="Pagination marker from previous response")] = None,
+    dispatcher: BotFileTransferDispatcher = Depends(
+        Provide[ApplicationContainer.services.bot_file_transfer_dispatcher]
+    ),
+) -> ApiResponse[StagingListResponse]:
+    """List objects in the OSS staging area.
+
+    Supports marker-based pagination for traversing large result sets.
+    Each item includes key, size, and last_modified timestamp.
+    """
+    logger.info(
+        f"list_staging: tenant={tenant}, bot_uuid={bot_uuid}, "
+        f"prefix={prefix}, limit={limit}, marker={marker}"
+    )
+
+    try:
+        result = await dispatcher.dispatch_list_staging(
+            prefix=prefix or "",
+            limit=limit,
+            marker=marker,
+        )
+        return ApiResponse(data=result)
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "INTERNAL_ERROR", "message": str(e)},
+        )
+
+
+@router.delete(
+    "/{tenant}/{bot_uuid}/files/staging",
+    response_model=ApiResponse[StagingDeleteResponse],
+    summary="Delete a single staging object (terminal-state tickets only)",
+)
+@inject
+async def delete_staging(
+    tenant: Annotated[str, Path(description="Tenant for isolation")],
+    bot_uuid: Annotated[str, Path(description="Bot UUID")],
+    key: Annotated[str, Query(description="Full OSS object key to delete")],
+    dispatcher: BotFileTransferDispatcher = Depends(
+        Provide[ApplicationContainer.services.bot_file_transfer_dispatcher]
+    ),
+) -> ApiResponse[StagingDeleteResponse]:
+    """Delete a single file from the OSS staging area.
+
+    Only tickets in a terminal state (DONE/FAILED/CANCELLED/DELETED)
+    can be deleted.  The ticket transitions to DELETED on success.
+    """
+    logger.info(
+        f"delete_staging: tenant={tenant}, bot_uuid={bot_uuid}, key={key}"
+    )
+
+    try:
+        result = await dispatcher.dispatch_delete_staging(key=key)
+        return ApiResponse(data=result)
+
+    except TransferNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "TRANSFER_NOT_FOUND", "message": str(e)},
+        )
+    except TransferNotTerminalError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": e.error_code, "message": str(e.message)},
+        )
+    except NotImplementedError as e:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={"error": "NOT_IMPLEMENTED", "message": str(e)},
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "INTERNAL_ERROR", "message": str(e)},
+        )
+
+
+@router.post(
+    "/{tenant}/{bot_uuid}/files/transfers/{transfer_id}/share-link",
+    response_model=ApiResponse[ShareLinkResponse],
+    summary="Generate a shareable download link for a completed transfer",
+)
+@inject
+async def generate_share_link(
+    tenant: Annotated[str, Path(description="Tenant for isolation")],
+    bot_uuid: Annotated[str, Path(description="Bot UUID")],
+    transfer_id: Annotated[str, Path(description="Transfer ID from upload-url response")],
+    request: ShareLinkRequest,
+    dispatcher: BotFileTransferDispatcher = Depends(
+        Provide[ApplicationContainer.services.bot_file_transfer_dispatcher]
+    ),
+) -> ApiResponse[ShareLinkResponse]:
+    """Generate a shareable download link for a completed file transfer.
+
+    Only tickets in DONE status are eligible.  The share URL is a
+    pre-signed OSS GET URL with bounded expiry (default 24h, max 7d).
+    """
+    logger.info(
+        f"generate_share_link: tenant={tenant}, bot_uuid={bot_uuid}, "
+        f"transfer_id={transfer_id}, expire_seconds={request.expire_seconds}"
+    )
+
+    try:
+        result = await dispatcher.dispatch_generate_share_link(
+            transfer_id=transfer_id,
+            expire_seconds=request.expire_seconds,
+            tenant=tenant,
+        )
+        return ApiResponse(data=result)
+
+    except TransferNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "TRANSFER_NOT_FOUND", "message": str(e)},
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "INVALID_TRANSITION", "message": str(e)},
+        )
+    except NotImplementedError as e:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={"error": "NOT_IMPLEMENTED", "message": str(e)},
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "INTERNAL_ERROR", "message": str(e)},
         )
