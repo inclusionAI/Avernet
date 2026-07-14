@@ -1469,7 +1469,7 @@ class TestSpawnAdapter:
         kwargs = mock_popen.call_args[1]
         env = kwargs["env"]
         assert env["CHAT_ENGINE"] == "openclaw"
-        assert env["OPENCLAW_GATEWAY_URL"] == "ws://localhost:18800"
+        assert env["OPENCLAW_GATEWAY_URL"] == "ws://127.0.0.1:18800"
         assert env["ENGINE_OPENCLAW_PROCESS_START_CMD"] == ""
 
     def test_spawn_adapter_hermes(self, tmp_path, monkeypatch):
@@ -1506,7 +1506,7 @@ class TestSpawnAdapter:
         assert result is mock_proc
         env = mock_popen.call_args[1]["env"]
         assert env["CHAT_ENGINE"] == "hermes"
-        assert env["HERMES_URL"] == "http://localhost:18700"
+        assert env["HERMES_URL"] == "http://127.0.0.1:18700"
 
     def test_spawn_adapter_aicoding(self, tmp_path, monkeypatch):
         """_spawn_adapter for aicoding sets AICODING_RELAY_URL."""
@@ -1541,7 +1541,7 @@ class TestSpawnAdapter:
 
         env = mock_popen.call_args[1]["env"]
         assert env["CHAT_ENGINE"] == "aicoding"
-        assert env["AICODING_RELAY_URL"] == "ws://localhost:18900"
+        assert env["AICODING_RELAY_URL"] == "ws://127.0.0.1:18900"
 
     def test_spawn_adapter_claude_code(self, tmp_path, monkeypatch):
         """_spawn_adapter for claude_code sets CLAUDE_CODE_RELAY_URL."""
@@ -1576,7 +1576,7 @@ class TestSpawnAdapter:
 
         env = mock_popen.call_args[1]["env"]
         assert env["CHAT_ENGINE"] == "claude_code"
-        assert env["CLAUDE_CODE_RELAY_URL"] == "ws://localhost:18900"
+        assert env["CLAUDE_CODE_RELAY_URL"] == "ws://127.0.0.1:18900"
 
     def test_spawn_adapter_health_failure(self, tmp_path, monkeypatch):
         """_spawn_adapter raises RuntimeError when health check fails."""
