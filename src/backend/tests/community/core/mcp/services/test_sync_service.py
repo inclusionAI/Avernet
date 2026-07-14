@@ -215,23 +215,23 @@ class TestRefreshMcpScope:
         ]
         cli_codes = [item["cli_code"] for item in resource_scope["cli_items"]]
         assert cli_codes == [
-            "adev",
+            "adev-cli",
             "acli",
-            "antcode",
+            "antcode-cli",
             "linke",
             "linke-cli",
             "linkw-cli",
             "qmx-invoke-cli",
             "serverless",
-            "derisk",
+            "derisk-cli",
         ]
 
     @pytest.mark.asyncio
     async def test_merges_current_cli_items_before_default_cli_items(self):
-        """Existing AgentPass CLI metadata wins, defaults fill only missing codes."""
+        """Existing passport CLI metadata wins; defaults fill only missing codes."""
         passport_update = MagicMock()
         passport_update.query_passport_clis.return_value = [
-            {"cli_code": "adev", "cli_name": "Custom Adev", "cli_desc": "kept"},
+            {"cli_code": "adev-cli", "cli_name": "Custom Adev", "cli_desc": "kept"},
             {"cli_code": "custom-cli", "cli_name": "Custom", "cli_desc": None},
         ]
         bot_repository = MagicMock()
@@ -257,13 +257,13 @@ class TestRefreshMcpScope:
         ]
         cli_codes = [item["cli_code"] for item in cli_items]
         assert cli_items[0] == {
-            "cli_code": "adev",
+            "cli_code": "adev-cli",
             "cli_name": "Custom Adev",
             "cli_desc": "kept",
         }
         assert "custom-cli" in cli_codes
-        assert cli_codes.count("adev") == 1
-        assert "antcode" in cli_codes
+        assert cli_codes.count("adev-cli") == 1
+        assert "antcode-cli" in cli_codes
 
     @pytest.mark.asyncio
     async def test_bot_active_engine_wins_over_default_refresh_engine_for_cli_scope(
@@ -293,7 +293,7 @@ class TestRefreshMcpScope:
             "resource_scope"
         ]
         cli_codes = [item["cli_code"] for item in resource_scope["cli_items"]]
-        assert "antcode" in cli_codes
+        assert "antcode-cli" in cli_codes
         assert len(cli_codes) == 9
 
     @pytest.mark.asyncio

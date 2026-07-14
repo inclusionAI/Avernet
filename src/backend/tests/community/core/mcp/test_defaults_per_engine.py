@@ -165,8 +165,8 @@ from agentclaw.community.core.mcp.services._defaults import (
 )
 
 _EXPECTED_CLI_CODES = (
-    "adev", "acli", "antcode", "linke", "linke-cli",
-    "linkw-cli", "qmx-invoke-cli", "serverless", "derisk",
+    "adev-cli", "acli", "antcode-cli", "linke", "linke-cli",
+    "linkw-cli", "qmx-invoke-cli", "serverless", "derisk-cli",
 )
 
 
@@ -227,8 +227,8 @@ def test_default_cli_items_returns_copy():
     items = get_default_cli_items("aicoding")
     items[0]["cli_code"] = "mutated"
     # 再次取不应被污染
-    assert get_default_cli_items("aicoding")[0]["cli_code"] == "adev"
+    assert get_default_cli_items("aicoding")[0]["cli_code"] == "adev-cli"
     # claude_code 研发模板同样返还副本
     items2 = get_default_cli_items("claude_code", "personalCoding")
     items2[0]["cli_code"] = "mutated"
-    assert get_default_cli_items("claude_code", "personalCoding")[0]["cli_code"] == "adev"
+    assert get_default_cli_items("claude_code", "personalCoding")[0]["cli_code"] == "adev-cli"

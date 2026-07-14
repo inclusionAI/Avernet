@@ -39,14 +39,14 @@ def _merge_cli_items(
     current: list[CliItem] | None,
     defaults: list[CliItem] | None,
 ) -> list[CliItem]:
-    """Merge AgentPass CLI scope with default CLI items, de-duped by cli_code.
+    """Merge passport CLI scope with default CLI items, de-duped by cli_code.
 
-    AgentPass updatePassport treats resourceManifest as an overwrite. During MCP
-    sync we must send the complete CLI scope as well as MCPs. If AgentPass
-    returns a temporarily-empty CLI list right after bot creation, preserving the
-    engine defaults here prevents a later MCP sync from clearing them. Current
-    AgentPass values win on duplicate cli_code so user/provider metadata is not
-    overwritten by static defaults.
+    The passport update API treats resourceManifest as an overwrite. During MCP
+    sync we must send the complete CLI scope as well as MCPs. If the passport
+    service returns a temporarily-empty CLI list right after bot creation,
+    preserving the engine defaults here prevents a later MCP sync from clearing
+    them. Existing passport values win on duplicate cli_code so user/provider
+    metadata is not overwritten by static defaults.
     """
     merged: list[CliItem] = []
     seen: set[str] = set()
