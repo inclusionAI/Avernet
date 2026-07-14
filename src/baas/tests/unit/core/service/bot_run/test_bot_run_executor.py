@@ -460,6 +460,196 @@ async def test_executor_stream_error_flushes_agent_buffer():
     repo.update_error.assert_called_once_with("re", "stream execution failed")
 
 
+# ----------------------------- stream engine_type 透传 -----------------------------
+
+
+async def test_executor_stream_engine_type_in_delta():
+    """delta chunk 携带 engine_type 时，flush 写入 metadata JSON。"""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-et-d",
+        bot_id="bot-1:ent",
+        metadata={"request_type": "chat", "stream": "true"},
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    chunks = [
+        StreamChunk(type="delta", content="hi", engine_type="openclaw"),
+        StreamChunk(type="final", content="done"),
+    ]
+
+    async def _stream_gen(*a, **kw):
+        for c in chunks:
+            yield c
+
+    bot_svc = MagicMock()
+    bot_svc.send_message_stream = _stream_gen
+    selector.select.return_value = bot_svc
+
+    chunk_repo = MagicMock()
+    executor = BotRunRequestExecutor(
+        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo()
+    )
+    await executor.execute(
+        _queue_rec(run_id="r-et-d", bot_id="bot-1:ent", session_id="sess-d")
+    )
+
+    delta_calls = [
+        c for c in chunk_repo.insert_chunk.call_args_list
+        if c[1]["chunk_type"] == "delta"
+    ]
+    assert len(delta_calls) == 1
+    meta = json.loads(delta_calls[0][1]["metadata"])
+    assert meta["engine_type"] == "openclaw"
+
+
+async def test_executor_stream_engine_type_in_agent():
+    """agent chunk 携带 engine_type 时，flush 写入 metadata JSON。"""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-et-a",
+        bot_id="bot-1:ent",
+        metadata={"request_type": "chat", "stream": "true"},
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    chunks = [
+        StreamChunk(
+            type="agent",
+            content="",
+            metadata={"frame": 1},
+            engine_type="dify",
+        ),
+        StreamChunk(type="final", content="done"),
+    ]
+
+    async def _stream_gen(*a, **kw):
+        for c in chunks:
+            yield c
+
+    bot_svc = MagicMock()
+    bot_svc.send_message_stream = _stream_gen
+    selector.select.return_value = bot_svc
+
+    chunk_repo = MagicMock()
+    executor = BotRunRequestExecutor(
+        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo()
+    )
+    await executor.execute(
+        _queue_rec(run_id="r-et-a", bot_id="bot-1:ent", session_id="sess-a")
+    )
+
+    agent_calls = [
+        c for c in chunk_repo.insert_chunk.call_args_list
+        if c[1]["chunk_type"] == "agent"
+    ]
+    assert len(agent_calls) == 1
+    meta = json.loads(agent_calls[0][1]["metadata"])
+    assert meta["engine_type"] == "dify"
+
+
+async def test_executor_stream_engine_type_in_final_with_metadata():
+    """final chunk 同时携带 metadata 和 engine_type 时，合并写入 metadata。"""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-et-f",
+        bot_id="bot-1:ent",
+        metadata={"request_type": "chat", "stream": "true"},
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    chunks = [
+        StreamChunk(
+            type="final",
+            content="result",
+            metadata={"extra": "val"},
+            engine_type="openclaw",
+        ),
+    ]
+
+    async def _stream_gen(*a, **kw):
+        for c in chunks:
+            yield c
+
+    bot_svc = MagicMock()
+    bot_svc.send_message_stream = _stream_gen
+    selector.select.return_value = bot_svc
+
+    chunk_repo = MagicMock()
+    executor = BotRunRequestExecutor(
+        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo()
+    )
+    await executor.execute(
+        _queue_rec(run_id="r-et-f", bot_id="bot-1:ent", session_id="sess-f")
+    )
+
+    final_calls = [
+        c for c in chunk_repo.insert_chunk.call_args_list
+        if c[1]["chunk_type"] == "final"
+    ]
+    assert len(final_calls) == 1
+    meta = json.loads(final_calls[0][1]["metadata"])
+    assert meta["extra"] == "val"
+    assert meta["engine_type"] == "openclaw"
+
+
+async def test_executor_stream_engine_type_in_error_with_metadata():
+    """error chunk 携带 metadata + engine_type 时，合并写入 metadata。"""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-et-e",
+        bot_id="bot-1:ent",
+        metadata={"request_type": "chat", "stream": "true"},
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    chunks = [
+        StreamChunk(
+            type="error",
+            content="boom",
+            metadata={"code": 500},
+            engine_type="dify",
+        ),
+    ]
+
+    async def _stream_gen(*a, **kw):
+        for c in chunks:
+            yield c
+
+    bot_svc = MagicMock()
+    bot_svc.send_message_stream = _stream_gen
+    selector.select.return_value = bot_svc
+
+    chunk_repo = MagicMock()
+    executor = BotRunRequestExecutor(
+        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo()
+    )
+    await executor.execute(
+        _queue_rec(run_id="r-et-e", bot_id="bot-1:ent", session_id="sess-e")
+    )
+
+    error_calls = [
+        c for c in chunk_repo.insert_chunk.call_args_list
+        if c[1]["chunk_type"] == "error"
+    ]
+    assert len(error_calls) == 1
+    meta = json.loads(error_calls[0][1]["metadata"])
+    assert meta["code"] == 500
+    assert meta["engine_type"] == "dify"
+
+
 # ----------------------------- 背压（队列深度 → 429） -----------------------------
 
 
