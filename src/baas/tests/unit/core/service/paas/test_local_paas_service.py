@@ -2578,6 +2578,178 @@ class TestResolveWsConnInfoRelay:
         assert exc_info.value.error_code == "RELAY_TIMEOUT"
         assert "Plugin timeout" in str(exc_info.value)
 
+    @pytest.mark.asyncio
+    async def test_insert_init_generic_exception_converts_to_relay_db_error(
+        self,
+        local_paas_service_with_relay,
+        mock_repository,
+        mock_relay_repository,
+    ):
+        """insert_init() generic Exception converts to RELAY_DB_ERROR DeviceCreationError."""
+        mock_record = MagicMock()
+        mock_record.connected_server_instance = "test-instance"
+        mock_record.status = "ONLINE"
+        mock_repository.get_by_machine_id.return_value = mock_record
+
+        mock_relay_repository.insert_init.side_effect = RuntimeError(
+            "DB connection lost"
+        )
+
+        with pytest.raises(DeviceCreationError) as exc_info:
+            await local_paas_service_with_relay._resolve_ws_conn_info_relay(
+                paas_device_id="abc123--machine-001--user-001",
+                port=8080,
+                path="/ws",
+            )
+
+        assert exc_info.value.error_code == "RELAY_DB_ERROR"
+        assert "DB connection lost" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_route_command_generic_exception_converts_to_relay_setup_failed(
+        self,
+        local_paas_service_with_relay,
+        mock_repository,
+        mock_relay_repository,
+    ):
+        """_route_command generic Exception converts to RELAY_SETUP_FAILED."""
+        mock_record = MagicMock()
+        mock_record.connected_server_instance = "test-instance"
+        mock_record.status = "ONLINE"
+        mock_repository.get_by_machine_id.return_value = mock_record
+
+        # Plugin resolves successfully, but _route_command raises unexpected error
+        local_paas_service_with_relay._route_command = AsyncMock(
+            side_effect=RuntimeError("Unexpected routing error")
+        )
+
+        with pytest.raises(DeviceCreationError) as exc_info:
+            await local_paas_service_with_relay._resolve_ws_conn_info_relay(
+                paas_device_id="abc123--machine-001--user-001",
+                port=8080,
+                path="/ws",
+            )
+
+        assert exc_info.value.error_code == "RELAY_SETUP_FAILED"
+        assert "Unexpected routing error" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_relay_session_cleanup_update_closed_on_plugin_error(
+        self,
+        local_paas_service_with_relay,
+        mock_repository,
+        mock_relay_repository,
+        mock_desktop_sandbox_plugin,
+    ):
+        """update_closed() is called for cleanup when Plugin raises after insert_init."""
+        from secbaas.community.spi.sandbox.desktop._errors import SandboxPluginError
+
+        mock_record = MagicMock()
+        mock_record.connected_server_instance = "test-instance"
+        mock_record.status = "ONLINE"
+        mock_repository.get_by_machine_id.return_value = mock_record
+
+        mock_desktop_sandbox_plugin.resolve_ws_conn_info.side_effect = (
+            SandboxPluginError(
+                error_code="PLUGIN_FAIL",
+                message="Plugin crashed",
+            )
+        )
+
+        with pytest.raises(DeviceCreationError) as exc_info:
+            await local_paas_service_with_relay._resolve_ws_conn_info_relay(
+                paas_device_id="abc123--machine-001--user-001",
+                port=8080,
+                path="/ws",
+            )
+
+        assert exc_info.value.error_code == "PLUGIN_FAIL"
+        # Cleanup: update_closed must be called after insert_init succeeded
+        mock_relay_repository.update_closed.assert_called_once()
+        call_kwargs = mock_relay_repository.update_closed.call_args.kwargs
+        assert call_kwargs["session_id"] is not None
+
+    @pytest.mark.asyncio
+    async def test_relay_session_cleanup_swallows_update_closed_exception(
+        self,
+        local_paas_service_with_relay,
+        mock_repository,
+        mock_relay_repository,
+        mock_desktop_sandbox_plugin,
+    ):
+        """Exception in update_closed() during cleanup is silently swallowed."""
+        from secbaas.community.spi.sandbox.desktop._errors import SandboxPluginError
+
+        mock_record = MagicMock()
+        mock_record.connected_server_instance = "test-instance"
+        mock_record.status = "ONLINE"
+        mock_repository.get_by_machine_id.return_value = mock_record
+
+        mock_desktop_sandbox_plugin.resolve_ws_conn_info.side_effect = (
+            SandboxPluginError(
+                error_code="PLUGIN_FAIL",
+                message="Plugin crashed",
+            )
+        )
+        # update_closed itself also fails — should be silently swallowed
+        mock_relay_repository.update_closed.side_effect = RuntimeError(
+            "Cleanup also failed"
+        )
+
+        with pytest.raises(DeviceCreationError) as exc_info:
+            await local_paas_service_with_relay._resolve_ws_conn_info_relay(
+                paas_device_id="abc123--machine-001--user-001",
+                port=8080,
+                path="/ws",
+            )
+
+        # Original error propagates, not the cleanup error
+        assert exc_info.value.error_code == "PLUGIN_FAIL"
+        mock_relay_repository.update_closed.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_empty_ws_url_from_plugin_raises_plugin_error(
+        self,
+        local_paas_service,
+        mock_repository,
+        mock_desktop_sandbox_plugin,
+    ):
+        """Empty ws_url from Plugin raises PLUGIN_ERROR DeviceCreationError."""
+        from datetime import UTC, datetime, timedelta
+
+        from secbaas.community.api.bot_runtime._ws_connection_info import (
+            WsConnectionInfo,
+        )
+
+        mock_record = MagicMock()
+        mock_record.connected_server_instance = "test-instance"
+        mock_record.status = "ONLINE"
+        mock_repository.get_by_machine_id.return_value = mock_record
+
+        # Plugin returns a WsConnectionInfo with empty ws_url
+        mock_desktop_sandbox_plugin.resolve_ws_conn_info.return_value = (
+            WsConnectionInfo(
+                ws_url="",
+                token="mock-token",
+                target="LOCAL_ctr--mach--user@1:8080:test-session",
+                expires_at=datetime.now(UTC) + timedelta(seconds=120),
+            )
+        )
+        # _route_command must succeed to reach the ws_url check below
+        local_paas_service._route_command = AsyncMock(
+            return_value={"status": "success", "data": {}}
+        )
+
+        with pytest.raises(DeviceCreationError) as exc_info:
+            await local_paas_service._resolve_ws_conn_info_relay(
+                paas_device_id="abc123--machine-001--user-001",
+                port=8080,
+                path="/ws",
+            )
+
+        assert exc_info.value.error_code == "PLUGIN_ERROR"
+        assert "empty" in str(exc_info.value).lower()
+
     # ── Direct mode regression tests ───────────────────────────────────
 
     @pytest.mark.asyncio
