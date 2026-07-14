@@ -28,6 +28,7 @@ from secbaas.community.api.bot_runtime import (
 )
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.bot_run import BotRunRepository
+from secbaas.community.core.service.config import SystemConfigKey
 from secbaas.community.logger import get_logger
 
 if TYPE_CHECKING:
@@ -283,7 +284,7 @@ class QueueTaskMessageDispatcher:
             return True
         try:
             config = self._system_config_service.get_config(
-                "bot_run.chunk_cleanup_enabled"
+                SystemConfigKey.CHUNK_CLEANUP_ENABLED
             )
         except Exception:
             logger.warning(

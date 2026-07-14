@@ -22,11 +22,6 @@ class SystemConfigCreate(BaseModel):
         None,
         description="配置值，纯文本存储",
     )
-    env: str | None = Field(
-        default=None,
-        max_length=32,
-        description="baas部署环境",
-    )
     name: str = Field(
         ...,
         max_length=256,

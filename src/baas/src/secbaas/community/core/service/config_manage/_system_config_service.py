@@ -47,7 +47,7 @@ class DefaultSystemConfigManageService(SystemConfigManageService):
 
     def create_config(self, data: SystemConfigCreate) -> SystemConfigResponse:
         """Create a new system config."""
-        env = data.env if data.env is not None else get_current_env()
+        env = get_current_env()
         logger.info("Creating system config: conf_key=%s, env=%s", data.conf_key, env)
 
         repo = self._repository
