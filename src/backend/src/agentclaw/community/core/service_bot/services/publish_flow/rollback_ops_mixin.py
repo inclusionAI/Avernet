@@ -96,14 +96,23 @@ class RollbackOpsMixin:
         if not bot:
             raise PublishFlowServiceError(f"Bot not found: {current_record.source_bot_id}")
 
-        # 5. Call the BaaS upgrade interface to re-deploy. Compose the delivery
-        # artifact for the online stage through the single seam (STORED overrides
-        # slot: reproduce the target version's promoted online channels + release
-        # stamp). The raw config_artifact read above is only the build-artifact
-        # presence guard — what BaaS receives is composed here, so a rollback can no
-        # longer silently ship the raw artifact (the single-config-slot hazard).
+# Compose the delivery artifact for ONLINE: overlay the target version's
+        # STORED online channel engine_overrides (DingTalk config incl.
+        # card_template_id), reproducing what that version had when it was
+        # promoted — NOT a live re-fetch, which would deliver the very channel
+        # state the user is rolling away from. Same per-stage slot restart reads.
+        # No stored overrides (pre-feature record) or no config_artifact (ARCA)
+        # → no-ops, preserving prior behavior.
+        # `or {}` (not a get-default): the key may hold JSON null in a raw ext blob.
+        stored_overrides = (target_ext.get("engine_overrides_by_stage") or {}).get(
+            PublishStage.ONLINE.value
+        )
+        config_artifact = self._artifact_for_stage(
+            config_artifact, PublishStage.ONLINE, stored_overrides
+        )
+
+        # 5. Call the BaaS upgrade interface to re-deploy
         version = f"{target_record.version}"
-        delivery = self._ext_state.compose_stored(target_ext, PublishStage.ONLINE)
         upgrade_result = await self._build_service.upgrade_async(
             bot_uuid=bot_uuid,
             bot=bot,
@@ -112,7 +121,7 @@ class RollbackOpsMixin:
             migration_path=migration_path,
             publish_stage=PublishStage.ONLINE,
             version=version,
-            delivery=delivery,
+            config_artifact=config_artifact,
         )
 
         baas_publish_id = upgrade_result.get("publish_id")
