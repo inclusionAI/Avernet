@@ -53,6 +53,7 @@ from secbaas.community.core.service.paas.desktop.worker_router import (
 )
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.logger import get_logger
+from secbaas.community.spi.sandbox.desktop import SandboxPluginError
 
 from ._paas_service import PaasService
 
@@ -103,7 +104,9 @@ if TYPE_CHECKING:
         ConnectionManager,
         InstanceRouter,
     )
-    from secbaas.community.spi.sandbox.desktop import DesktopSandboxPlugin
+    from secbaas.community.spi.sandbox.desktop import (
+        DesktopSandboxPlugin,
+    )
 
 
 class LocalPaasService(PaasService, LocalPaasServiceProtocol):
@@ -126,6 +129,13 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
     - server_ip: This secbaas server's IP address for routing
     """
 
+    # Default WebSocket connection mode.
+    # "direct" = ws://localhost (same-machine only, original behaviour).
+    # "relay"  = agentclawproxy + open_ws_relay (same + cross-machine).
+    # Override per-instance via the ws_conn_mode constructor parameter or
+    # the _LOCAL_WS_CONN_MODE module constant in _factory.py.
+    _DEFAULT_WS_CONN_MODE: str = "relay"
+
     def __init__(
         self,
         credentials: LocalCredentials,
@@ -144,6 +154,8 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         worker_router: Any | None = None,  # Phase 31: New parameter
         relay_repository: WsRelaySessionRepository
         | None = None,  # Phase 65.1: for init-row pre-creation in relay flow
+        ws_conn_mode: str
+        | None = None,  # Phase 66: "direct" | "relay" (None → class default)
     ) -> None:
         """Initialize LocalPaasService with all required dependencies.
 
@@ -196,6 +208,12 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         # to delegate token/target/ws_url/expires_at construction to the
         # Plugin layer (per D-02 mixed mode).
         self._desktop_sandbox_plugin = desktop_sandbox_plugin
+        # Phase 66: ws_conn_mode — "direct" (localhost, same-machine only) or
+        # "relay" (agentclawproxy + open_ws_relay, same + cross-machine).
+        # Defaults to the class-level _DEFAULT_WS_CONN_MODE.
+        self._ws_conn_mode = (
+            ws_conn_mode if ws_conn_mode is not None else self._DEFAULT_WS_CONN_MODE
+        )
 
     async def get_credentials(self) -> LocalCredentials:
         """Get the credentials used by this service instance.
@@ -643,67 +661,42 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         port: int,
         path: str,
     ) -> WsConnectionInfo:
-        """Resolve WebSocket connection info for a local device (direct localhost).
+        """Resolve WebSocket connection info for a local device.
 
-        Queries mng daemon in real-time via ``get_device_info()`` for the device's
-        mapped port, then constructs a direct ``ws://localhost:{port}{path}`` URL
-        with empty token and 24-hour expiry.
+        Two modes, controlled by the ``ws_conn_mode`` constructor parameter
+        (default ``"direct"``, set via ``LOCAL_WS_CONN_MODE`` env var in the
+        factory):
 
-        LOCAL platform uses direct localhost connection (no gateway proxy) because
-        the device and BaaS run on the same machine. No authentication token is
-        required for local connections.
-
-        .. attention::
-
-           **TODO(v1.3-cross-machine):** This method is temporarily **short-circuited**
-           to the old direct-localhost logic. The v1.3 cross-machine relay
-           implementation (agentclawproxy + open_ws_relay + DesktopSandboxPlugin)
-           has been **replaced** below.
-
-           **Why short-circuited:** The mng daemon side has not completed the
-           ``open_ws_relay`` command support needed for cross-machine chat.
-           BaaS code is being merged early to avoid accumulation of merge
-           conflicts.
-
-           **Restoration steps** (when mng daemon relay is ready):
-           1. Restore this method to the v1.3 relay implementation (see git
-              history: ``git log -- src/secbaas/core/service/paas/_local_paas_service.py``,
-              look for the commit before this short-circuit change).
-           2. The v1.3 implementation uses:
-              - ``uuid.uuid4().hex`` for session_id generation
-              - ``LocalDeviceId.parse()`` for three-segment ID parsing
-              - ``self._relay_repository.insert_init()`` for relay pre-registration
-              - ``self._repository.get_by_machine_id()`` for DB lookup + TOCTOU
-              - ``self._desktop_sandbox_plugin.resolve_ws_conn_info()`` for
-                token/target/ws_url/expires_at construction (Plugin layer)
-              - ``self._route_command()`` for ``open_ws_relay`` command dispatch
-              - ``SandboxPluginError`` for structured error handling
-           3. Remove this old direct-localhost logic and the TODO block.
+        - **Direct**: ``ws://localhost:{port}{path}``, same-machine only.
+        - **Relay**: agentclawproxy + open_ws_relay + Plugin, same + cross-machine.
 
         Args:
             paas_device_id: Bare three-segment local device ID
                 (``container_id--machine_id--user_id``).
-            port: Target port on the device (unused in the old direct-localhost
-                logic — port is obtained from mng daemon via ``get_device_info()``).
+            port: Target port on the device.
             path: WebSocket path on the device (e.g., ``/api/openclaw/ws``).
 
         Returns:
-            WsConnectionInfo with direct ws:// URL, empty token, and 24h expiry.
-
-        Raises:
-            DeviceCreationError:
-                - ``MACHINE_NOT_FOUND`` — no database record for the machine.
-                - ``MACHINE_OFFLINE`` — mng daemon connection lost.
-                - ``INVALID_DEVICE_INFO`` — ``get_device_info()`` returned an
-                  unexpected type.
+            WsConnectionInfo with ws_url, token, target, and expires_at.
         """
-        # ═════════════════════════════════════════════════════════════════
-        # TODO(v1.3-cross-machine): SHORT-CIRCUITED — Old direct-localhost
-        # logic below. RESTORE the v1.3 relay implementation (agentclawproxy
-        # + open_ws_relay + Plugin) once mng daemon relay support is ready.
-        # See the docstring above for detailed restoration steps.
-        # ═════════════════════════════════════════════════════════════════
+        if self._ws_conn_mode == "relay":
+            return await self._resolve_ws_conn_info_relay(paas_device_id, port, path)
+        return await self._resolve_ws_conn_info_direct(paas_device_id, port, path)
 
+    async def _resolve_ws_conn_info_direct(
+        self,
+        paas_device_id: str,
+        port: int,
+        path: str,
+    ) -> WsConnectionInfo:
+        """Direct localhost WebSocket connection (original implementation).
+
+        Queries mng daemon in real-time via ``get_device_info()`` for the
+        device's mapped port, then constructs a direct
+        ``ws://localhost:{port}{path}`` URL with empty token and 24-hour expiry.
+
+        Active by default; see ``resolve_ws_conn_info()`` docstring for switching.
+        """
         # Step 1: Real-time query mng daemon to get the device's mapped port.
         # Per D-RO04: get_device_info always queries mng daemon (no caching).
         device_info = await self.get_device_info(paas_device_id)
@@ -722,10 +715,247 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         # The ``port`` parameter is intentionally unused: LOCAL platform gets
         # the actual port from mng daemon, not from the caller.
         actual_port = device_info.port
+        if port and port != actual_port:
+            logger.info(
+                "[PORT_MISMATCH] Caller requested port %d, "
+                "mng daemon returned port %d — using daemon value",
+                port,
+                actual_port,
+            )
         target = f"localhost:{actual_port}"
         ws_url = f"ws://localhost:{actual_port}{path}"
         token = ""
         expires_at = datetime.now(UTC) + timedelta(hours=24)
+
+        return WsConnectionInfo(
+            ws_url=ws_url,
+            token=token,
+            target=target,
+            expires_at=expires_at,
+        )
+
+    async def _resolve_ws_conn_info_relay(
+        self,
+        paas_device_id: str,
+        port: int,
+        path: str,
+    ) -> WsConnectionInfo:
+        """Cross-machine relay WebSocket connection (v1.3 implementation).
+
+        Resolves WebSocket connection info through the agentclawproxy relay
+        (agentclawproxy + open_ws_relay + DesktopSandboxPlugin). The same
+        architecture supports both same-machine and cross-machine chat —
+        same-machine traffic flows through the proxy just like cross-machine,
+        making the client-side connection uniform.
+
+        Flow:
+            1. Parse three-segment device ID (container_id--machine_id--user_id)
+            2. Generate a relay session_id (uuid4 hex)
+            3. DB lookup + TOCTOU: verify machine exists and is ONLINE
+            4. Pre-create relay session row (insert_init) for lifecycle tracking
+            5. Delegate to Plugin for token/target/ws_url/expires_at construction
+            6. Send ``open_ws_relay`` command to mng daemon via _route_command
+            7. Return WsConnectionInfo from Plugin
+
+        Inactive by default; see ``resolve_ws_conn_info()`` docstring for switching.
+
+        Raises:
+            DeviceCreationError:
+                - ``MACHINE_NOT_FOUND`` — no database record for the machine.
+                - ``MACHINE_OFFLINE`` — machine is not ONLINE.
+                - ``RELAY_SETUP_FAILED`` — open_ws_relay command failed.
+                - ``RELAY_TIMEOUT`` — mng daemon command timed out.
+                - ``RELAY_COMMAND_FAILED`` — mng daemon returned an error.
+                - Plugin error codes (via SandboxPluginError → DeviceCreationError).
+        """
+        # Step 1: Parse three-segment device ID.
+        device_id = LocalDeviceId.parse(paas_device_id)
+        container_id = device_id.container_id
+        machine_id = device_id.machine_id
+        user_id = device_id.user_id
+
+        # Step 2: Generate relay session_id.
+        session_id = uuid.uuid4().hex
+
+        # Step 3: DB lookup + TOCTOU — verify machine exists and is ONLINE.
+        record = self._repository.get_by_machine_id(machine_id, self._env)
+        if record is None:
+            raise DeviceCreationError(
+                error_code="MACHINE_NOT_FOUND",
+                message=f"Machine {machine_id} not found in database",
+                context={"machine_id": machine_id, "session_id": session_id},
+            )
+        if record.status != "ONLINE":
+            raise DeviceCreationError(
+                error_code="MACHINE_OFFLINE"
+                if record.status == "OFFLINE"
+                else "MACHINE_INVALID",
+                message=(
+                    f"Machine {machine_id} is OFFLINE"
+                    if record.status == "OFFLINE"
+                    else f"Machine {machine_id} has unexpected status: {record.status or 'unknown'}"
+                ),
+                context={
+                    "machine_id": machine_id,
+                    "session_id": session_id,
+                    "last_connected_instance": record.connected_server_instance,
+                },
+            )
+
+        # Step 4: Pre-create relay session row for lifecycle tracking.
+        relay_session_created = False
+        if self._relay_repository is not None:
+            try:
+                self._relay_repository.insert_init(
+                    session_id=session_id,
+                    machine_id=machine_id,
+                    operator=user_id,
+                )
+            except DeviceCreationError:
+                raise
+            except Exception as e:
+                raise DeviceCreationError(
+                    error_code="RELAY_DB_ERROR",
+                    message=(
+                        f"Failed to create relay session for machine {machine_id}: {e}"
+                    ),
+                    context={
+                        "machine_id": machine_id,
+                        "session_id": session_id,
+                        "error": str(e),
+                    },
+                ) from e
+            relay_session_created = True
+
+        try:
+            # Step 5: Delegate to Plugin for connection parameter construction.
+            # The Plugin returns ws_url, token, target, expires_at — no DB ops.
+            try:
+                conn_info = self._desktop_sandbox_plugin.resolve_ws_conn_info(
+                    session_id=session_id,
+                    container_id=container_id,
+                    machine_id=machine_id,
+                    user_id=user_id,
+                    port=port,
+                    path=path,
+                    template_id=self._credentials.template_id,
+                )
+            except SandboxPluginError as e:
+                raise DeviceCreationError(
+                    error_code=str(e.error_code),
+                    message=str(e),
+                    context={
+                        "machine_id": machine_id,
+                        "session_id": session_id,
+                        "plugin_error": str(e),
+                    },
+                ) from e
+
+            # Step 6: Send open_ws_relay command to mng daemon.
+            # The command params carry the Plugin-constructed token and target
+            # so mng daemon can set up the relay tunnel.
+            command: dict[str, Any] = {
+                "action": "open_ws_relay",
+                "params": {
+                    "session_id": session_id,
+                    "token": getattr(conn_info, "token", ""),
+                    "target": getattr(conn_info, "target", ""),
+                    "port": port,
+                },
+            }
+
+            try:
+                route_result = await self._route_command(
+                    machine_id, command, record.connected_server_instance
+                )
+                # Same-instance path: _route_command returns raw mng
+                # response verbatim (including status=error envelopes).
+                # Check and convert to DeviceCreationError so callers
+                # get a consistent exception surface regardless of the
+                # routing path taken.
+                if (
+                    isinstance(route_result, dict)
+                    and route_result.get("status") == "error"
+                ):
+                    error_code = route_result.get("error") or "RELAY_SETUP_FAILED"
+                    raise DeviceCreationError(
+                        error_code=error_code,
+                        message=route_result.get(
+                            "message",
+                            f"open_ws_relay failed for {machine_id}",
+                        ),
+                        context={
+                            "machine_id": machine_id,
+                            "session_id": session_id,
+                            "response": route_result,
+                        },
+                    )
+                logger.info(
+                    "[RELAY_OPENED] open_ws_relay response for session %s: %s",
+                    session_id,
+                    route_result,
+                )
+            except DeviceCreationError:
+                raise
+            except TimeoutError as e:
+                raise DeviceCreationError(
+                    error_code="RELAY_TIMEOUT",
+                    message=f"open_ws_relay command timed out for machine {machine_id}",
+                    context={
+                        "machine_id": machine_id,
+                        "session_id": session_id,
+                        "error": str(e),
+                    },
+                ) from e
+            except ConnectionError as e:
+                raise DeviceCreationError(
+                    error_code="RELAY_COMMAND_FAILED",
+                    message=f"open_ws_relay connection error for machine {machine_id}: {e}",
+                    context={
+                        "machine_id": machine_id,
+                        "session_id": session_id,
+                        "error": str(e),
+                    },
+                ) from e
+            except Exception as e:
+                raise DeviceCreationError(
+                    error_code="RELAY_SETUP_FAILED",
+                    message=f"Failed to open ws relay for machine {machine_id}: {e}",
+                    context={
+                        "machine_id": machine_id,
+                        "session_id": session_id,
+                        "error": str(e),
+                    },
+                ) from e
+        except Exception:
+            if relay_session_created:
+                try:
+                    self._relay_repository.update_closed(session_id=session_id)
+                except Exception:
+                    pass
+            raise
+
+        # Step 7: Return Plugin-constructed WsConnectionInfo.
+        # Use getattr for compatibility with Plugin returning a duck-typed object
+        # (e.g., dataclass or namedtuple) rather than requiring an exact
+        # WsConnectionInfo instance.
+        ws_url = getattr(conn_info, "ws_url", "")
+        if not ws_url:
+            raise DeviceCreationError(
+                error_code="PLUGIN_ERROR",
+                message="Plugin resolved an empty or invalid WebSocket URL",
+                context={
+                    "machine_id": machine_id,
+                    "session_id": session_id,
+                },
+            )
+        token = getattr(conn_info, "token", "")
+        target = getattr(conn_info, "target", "")
+        expires_at = getattr(
+            conn_info,
+            "expires_at",
+            datetime.now(UTC) + timedelta(hours=24),
+        )
 
         return WsConnectionInfo(
             ws_url=ws_url,

@@ -2123,13 +2123,6 @@ class TestResolveWsConnInfoRelay:
     - SandboxPluginError -> DeviceCreationError conversion (D-04)
     """
 
-    @pytest.mark.skip(
-        reason=(
-            "TODO(v1.3-cross-machine): Plugin delegate short-circuited — "
-            "resolve_ws_conn_info now uses old direct-localhost logic. "
-            "Re-enable when v1.3 relay implementation is restored."
-        )
-    )
     @pytest.mark.asyncio
     async def test_relay_success_returns_ws_connection_info(
         self,
@@ -2155,7 +2148,7 @@ class TestResolveWsConnInfoRelay:
             "data": {},
         }
 
-        result = await local_paas_service.resolve_ws_conn_info(
+        result = await local_paas_service._resolve_ws_conn_info_relay(
             paas_device_id="abc123--machine-001--user-001",
             port=8080,
             path="/api/openclaw/ws",
@@ -2175,13 +2168,6 @@ class TestResolveWsConnInfoRelay:
         # _route_command was called (Service routing preserved)
         mock_connection_manager.send_command.assert_called_once()
 
-    @pytest.mark.skip(
-        reason=(
-            "TODO(v1.3-cross-machine): Relay ws_url short-circuited — "
-            "resolve_ws_conn_info now uses old direct-localhost logic. "
-            "Re-enable when v1.3 relay implementation is restored."
-        )
-    )
     @pytest.mark.asyncio
     async def test_relay_success_ws_url_contains_session_id(
         self, local_paas_service, mock_repository, mock_connection_manager
@@ -2197,7 +2183,7 @@ class TestResolveWsConnInfoRelay:
             "data": {},
         }
 
-        result = await local_paas_service.resolve_ws_conn_info(
+        result = await local_paas_service._resolve_ws_conn_info_relay(
             paas_device_id="abc123--machine-001--user-001",
             port=8080,
             path="/api/openclaw/ws",
@@ -2206,13 +2192,6 @@ class TestResolveWsConnInfoRelay:
         assert "/wsrelay/" in result.ws_url
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(
-        reason=(
-            "TODO(v1.3-cross-machine): Plugin delegate short-circuited — "
-            "resolve_ws_conn_info now uses old direct-localhost logic. "
-            "Re-enable when v1.3 relay implementation is restored."
-        )
-    )
     async def test_plugin_resolve_ws_conn_info_params(
         self,
         local_paas_service,
@@ -2233,7 +2212,7 @@ class TestResolveWsConnInfoRelay:
             "data": {},
         }
 
-        await local_paas_service.resolve_ws_conn_info(
+        await local_paas_service._resolve_ws_conn_info_relay(
             paas_device_id="abc123--machine-001--user-001",
             port=3000,
             path="/api/openclaw/ws",
@@ -2252,13 +2231,6 @@ class TestResolveWsConnInfoRelay:
         assert len(call_kwargs["session_id"]) == 32
         assert re.match(r"^[0-9a-f]{32}$", call_kwargs["session_id"]) is not None
 
-    @pytest.mark.skip(
-        reason=(
-            "TODO(v1.3-cross-machine): RELAY_TIMEOUT short-circuited — "
-            "resolve_ws_conn_info now uses old direct-localhost logic. "
-            "Re-enable when v1.3 relay implementation is restored."
-        )
-    )
     @pytest.mark.asyncio
     async def test_timeout_raises_relay_timeout(
         self, local_paas_service, mock_repository, mock_connection_manager
@@ -2274,7 +2246,7 @@ class TestResolveWsConnInfoRelay:
         )
 
         with pytest.raises(DeviceCreationError) as exc_info:
-            await local_paas_service.resolve_ws_conn_info(
+            await local_paas_service._resolve_ws_conn_info_relay(
                 paas_device_id="abc123--machine-001--user-001",
                 port=8080,
                 path="/api/openclaw/ws",
@@ -2283,13 +2255,6 @@ class TestResolveWsConnInfoRelay:
         assert exc_info.value.error_code == "RELAY_TIMEOUT"
         assert "timed out" in str(exc_info.value.message).lower()
 
-    @pytest.mark.skip(
-        reason=(
-            "TODO(v1.3-cross-machine): RELAY_COMMAND_FAILED short-circuited — "
-            "resolve_ws_conn_info now uses old direct-localhost logic. "
-            "Re-enable when v1.3 relay implementation is restored."
-        )
-    )
     @pytest.mark.asyncio
     async def test_connection_error_raises_relay_command_failed(
         self, local_paas_service, mock_repository, mock_connection_manager
@@ -2305,7 +2270,7 @@ class TestResolveWsConnInfoRelay:
         )
 
         with pytest.raises(DeviceCreationError) as exc_info:
-            await local_paas_service.resolve_ws_conn_info(
+            await local_paas_service._resolve_ws_conn_info_relay(
                 paas_device_id="abc123--machine-001--user-001",
                 port=8080,
                 path="/api/openclaw/ws",
@@ -2330,7 +2295,7 @@ class TestResolveWsConnInfoRelay:
         }
 
         with pytest.raises(DeviceCreationError) as exc_info:
-            await local_paas_service.resolve_ws_conn_info(
+            await local_paas_service._resolve_ws_conn_info_relay(
                 paas_device_id="abc123--machine-001--user-001",
                 port=8080,
                 path="/api/openclaw/ws",
@@ -2339,13 +2304,6 @@ class TestResolveWsConnInfoRelay:
         assert exc_info.value.error_code == "INVALID_CONTAINER"
         assert "Container not found" in exc_info.value.message
 
-    @pytest.mark.skip(
-        reason=(
-            "TODO(v1.3-cross-machine): RELAY_SETUP_FAILED short-circuited — "
-            "resolve_ws_conn_info now uses old direct-localhost logic. "
-            "Re-enable when v1.3 relay implementation is restored."
-        )
-    )
     @pytest.mark.asyncio
     async def test_mng_error_fallback_to_relay_setup_failed(
         self, local_paas_service, mock_repository, mock_connection_manager
@@ -2361,7 +2319,7 @@ class TestResolveWsConnInfoRelay:
         }
 
         with pytest.raises(DeviceCreationError) as exc_info:
-            await local_paas_service.resolve_ws_conn_info(
+            await local_paas_service._resolve_ws_conn_info_relay(
                 paas_device_id="abc123--machine-001--user-001",
                 port=8080,
                 path="/api/openclaw/ws",
@@ -2423,18 +2381,11 @@ class TestResolveWsConnInfoRelay:
 
         assert result is not None
 
-    @pytest.mark.skip(
-        reason=(
-            "TODO(v1.3-cross-machine): open_ws_relay command short-circuited — "
-            "resolve_ws_conn_info now uses old direct-localhost logic. "
-            "Re-enable when v1.3 relay implementation is restored."
-        )
-    )
     @pytest.mark.asyncio
     async def test_open_ws_relay_command_params_exclude_port(
         self, local_paas_service, mock_repository, mock_connection_manager
     ):
-        """open_ws_relay command params include token/target from Plugin, exclude port."""
+        """open_ws_relay command params include token/target/port from Plugin, exclude container_id."""
         import re
 
         mock_record = MagicMock()
@@ -2447,7 +2398,7 @@ class TestResolveWsConnInfoRelay:
             "data": {},
         }
 
-        await local_paas_service.resolve_ws_conn_info(
+        await local_paas_service._resolve_ws_conn_info_relay(
             paas_device_id="abc123--machine-001--user-001",
             port=8080,
             path="/api/openclaw/ws",
@@ -2460,8 +2411,9 @@ class TestResolveWsConnInfoRelay:
         assert isinstance(command, dict)
         assert command["action"] == "open_ws_relay"
         assert "params" in command
-        assert "port" not in command["params"]
-        assert command["params"]["container_id"] == "abc123"
+        assert "port" in command["params"]
+        assert command["params"]["port"] == 8080
+        assert "container_id" not in command["params"]
         session_id = command["params"]["session_id"]
         assert len(session_id) == 32
         assert re.match(r"^[0-9a-f]{32}$", session_id) is not None
@@ -2474,13 +2426,6 @@ class TestResolveWsConnInfoRelay:
         assert isinstance(command["params"]["target"], str)
         assert command["params"]["target"].startswith("LOCAL_")
 
-    @pytest.mark.skip(
-        reason=(
-            "TODO(v1.3-cross-machine): relay insert_init short-circuited — "
-            "resolve_ws_conn_info now uses old direct-localhost logic. "
-            "Re-enable when v1.3 relay implementation is restored."
-        )
-    )
     @pytest.mark.asyncio
     async def test_insert_init_called_with_correct_params(
         self,
@@ -2502,7 +2447,7 @@ class TestResolveWsConnInfoRelay:
             "data": {},
         }
 
-        await local_paas_service_with_relay.resolve_ws_conn_info(
+        await local_paas_service_with_relay._resolve_ws_conn_info_relay(
             paas_device_id="abc123--machine-001--user-001",
             port=8080,
             path="/api/openclaw/ws",
@@ -2516,13 +2461,6 @@ class TestResolveWsConnInfoRelay:
         assert call_kwargs["machine_id"] == "machine-001"
         assert call_kwargs["operator"] == "user-001"
 
-    @pytest.mark.skip(
-        reason=(
-            "TODO(v1.3-cross-machine): relay insert_init ordering short-circuited — "
-            "resolve_ws_conn_info now uses old direct-localhost logic. "
-            "Re-enable when v1.3 relay implementation is restored."
-        )
-    )
     @pytest.mark.asyncio
     async def test_insert_init_called_before_send_command(
         self,
@@ -2542,7 +2480,7 @@ class TestResolveWsConnInfoRelay:
             "data": {},
         }
 
-        await local_paas_service_with_relay.resolve_ws_conn_info(
+        await local_paas_service_with_relay._resolve_ws_conn_info_relay(
             paas_device_id="abc123--machine-001--user-001",
             port=8080,
             path="/api/openclaw/ws",
@@ -2578,13 +2516,6 @@ class TestResolveWsConnInfoRelay:
 
         assert isinstance(result, WsConnectionInfo)
 
-    @pytest.mark.skip(
-        reason=(
-            "TODO(v1.3-cross-machine): relay insert_init failure short-circuited — "
-            "resolve_ws_conn_info now uses old direct-localhost logic. "
-            "Re-enable when v1.3 relay implementation is restored."
-        )
-    )
     @pytest.mark.asyncio
     async def test_insert_init_failure_propagates(
         self,
@@ -2605,7 +2536,7 @@ class TestResolveWsConnInfoRelay:
         )
 
         with pytest.raises(DeviceCreationError) as exc_info:
-            await local_paas_service_with_relay.resolve_ws_conn_info(
+            await local_paas_service_with_relay._resolve_ws_conn_info_relay(
                 paas_device_id="abc123--machine-001--user-001",
                 port=8080,
                 path="/api/openclaw/ws",
@@ -2615,13 +2546,6 @@ class TestResolveWsConnInfoRelay:
         # send_command must NOT be called after insert_init failure
         mock_connection_manager.send_command.assert_not_called()
 
-    @pytest.mark.skip(
-        reason=(
-            "TODO(v1.3-cross-machine): SandboxPluginError conversion short-circuited — "
-            "resolve_ws_conn_info now uses old direct-localhost logic. "
-            "Re-enable when v1.3 relay implementation is restored."
-        )
-    )
     @pytest.mark.asyncio
     async def test_sandbox_plugin_error_converted_to_device_creation_error(
         self,
@@ -2645,7 +2569,7 @@ class TestResolveWsConnInfoRelay:
         )
 
         with pytest.raises(DeviceCreationError) as exc_info:
-            await local_paas_service.resolve_ws_conn_info(
+            await local_paas_service._resolve_ws_conn_info_relay(
                 paas_device_id="abc123--machine-001--user-001",
                 port=8080,
                 path="/ws",
@@ -2653,6 +2577,270 @@ class TestResolveWsConnInfoRelay:
 
         assert exc_info.value.error_code == "RELAY_TIMEOUT"
         assert "Plugin timeout" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_insert_init_generic_exception_converts_to_relay_db_error(
+        self,
+        local_paas_service_with_relay,
+        mock_repository,
+        mock_relay_repository,
+    ):
+        """insert_init() generic Exception converts to RELAY_DB_ERROR DeviceCreationError."""
+        mock_record = MagicMock()
+        mock_record.connected_server_instance = "test-instance"
+        mock_record.status = "ONLINE"
+        mock_repository.get_by_machine_id.return_value = mock_record
+
+        mock_relay_repository.insert_init.side_effect = RuntimeError(
+            "DB connection lost"
+        )
+
+        with pytest.raises(DeviceCreationError) as exc_info:
+            await local_paas_service_with_relay._resolve_ws_conn_info_relay(
+                paas_device_id="abc123--machine-001--user-001",
+                port=8080,
+                path="/ws",
+            )
+
+        assert exc_info.value.error_code == "RELAY_DB_ERROR"
+        assert "DB connection lost" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_route_command_generic_exception_converts_to_relay_setup_failed(
+        self,
+        local_paas_service_with_relay,
+        mock_repository,
+        mock_relay_repository,
+    ):
+        """_route_command generic Exception converts to RELAY_SETUP_FAILED."""
+        mock_record = MagicMock()
+        mock_record.connected_server_instance = "test-instance"
+        mock_record.status = "ONLINE"
+        mock_repository.get_by_machine_id.return_value = mock_record
+
+        # Plugin resolves successfully, but _route_command raises unexpected error
+        local_paas_service_with_relay._route_command = AsyncMock(
+            side_effect=RuntimeError("Unexpected routing error")
+        )
+
+        with pytest.raises(DeviceCreationError) as exc_info:
+            await local_paas_service_with_relay._resolve_ws_conn_info_relay(
+                paas_device_id="abc123--machine-001--user-001",
+                port=8080,
+                path="/ws",
+            )
+
+        assert exc_info.value.error_code == "RELAY_SETUP_FAILED"
+        assert "Unexpected routing error" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_relay_session_cleanup_update_closed_on_plugin_error(
+        self,
+        local_paas_service_with_relay,
+        mock_repository,
+        mock_relay_repository,
+        mock_desktop_sandbox_plugin,
+    ):
+        """update_closed() is called for cleanup when Plugin raises after insert_init."""
+        from secbaas.community.spi.sandbox.desktop._errors import SandboxPluginError
+
+        mock_record = MagicMock()
+        mock_record.connected_server_instance = "test-instance"
+        mock_record.status = "ONLINE"
+        mock_repository.get_by_machine_id.return_value = mock_record
+
+        mock_desktop_sandbox_plugin.resolve_ws_conn_info.side_effect = (
+            SandboxPluginError(
+                error_code="PLUGIN_FAIL",
+                message="Plugin crashed",
+            )
+        )
+
+        with pytest.raises(DeviceCreationError) as exc_info:
+            await local_paas_service_with_relay._resolve_ws_conn_info_relay(
+                paas_device_id="abc123--machine-001--user-001",
+                port=8080,
+                path="/ws",
+            )
+
+        assert exc_info.value.error_code == "PLUGIN_FAIL"
+        # Cleanup: update_closed must be called after insert_init succeeded
+        mock_relay_repository.update_closed.assert_called_once()
+        call_kwargs = mock_relay_repository.update_closed.call_args.kwargs
+        assert call_kwargs["session_id"] is not None
+
+    @pytest.mark.asyncio
+    async def test_relay_session_cleanup_swallows_update_closed_exception(
+        self,
+        local_paas_service_with_relay,
+        mock_repository,
+        mock_relay_repository,
+        mock_desktop_sandbox_plugin,
+    ):
+        """Exception in update_closed() during cleanup is silently swallowed."""
+        from secbaas.community.spi.sandbox.desktop._errors import SandboxPluginError
+
+        mock_record = MagicMock()
+        mock_record.connected_server_instance = "test-instance"
+        mock_record.status = "ONLINE"
+        mock_repository.get_by_machine_id.return_value = mock_record
+
+        mock_desktop_sandbox_plugin.resolve_ws_conn_info.side_effect = (
+            SandboxPluginError(
+                error_code="PLUGIN_FAIL",
+                message="Plugin crashed",
+            )
+        )
+        # update_closed itself also fails — should be silently swallowed
+        mock_relay_repository.update_closed.side_effect = RuntimeError(
+            "Cleanup also failed"
+        )
+
+        with pytest.raises(DeviceCreationError) as exc_info:
+            await local_paas_service_with_relay._resolve_ws_conn_info_relay(
+                paas_device_id="abc123--machine-001--user-001",
+                port=8080,
+                path="/ws",
+            )
+
+        # Original error propagates, not the cleanup error
+        assert exc_info.value.error_code == "PLUGIN_FAIL"
+        mock_relay_repository.update_closed.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_empty_ws_url_from_plugin_raises_plugin_error(
+        self,
+        local_paas_service,
+        mock_repository,
+        mock_desktop_sandbox_plugin,
+    ):
+        """Empty ws_url from Plugin raises PLUGIN_ERROR DeviceCreationError."""
+        from datetime import UTC, datetime, timedelta
+
+        from secbaas.community.api.bot_runtime._ws_connection_info import (
+            WsConnectionInfo,
+        )
+
+        mock_record = MagicMock()
+        mock_record.connected_server_instance = "test-instance"
+        mock_record.status = "ONLINE"
+        mock_repository.get_by_machine_id.return_value = mock_record
+
+        # Plugin returns a WsConnectionInfo with empty ws_url
+        mock_desktop_sandbox_plugin.resolve_ws_conn_info.return_value = (
+            WsConnectionInfo(
+                ws_url="",
+                token="mock-token",
+                target="LOCAL_ctr--mach--user@1:8080:test-session",
+                expires_at=datetime.now(UTC) + timedelta(seconds=120),
+            )
+        )
+        # _route_command must succeed to reach the ws_url check below
+        local_paas_service._route_command = AsyncMock(
+            return_value={"status": "success", "data": {}}
+        )
+
+        with pytest.raises(DeviceCreationError) as exc_info:
+            await local_paas_service._resolve_ws_conn_info_relay(
+                paas_device_id="abc123--machine-001--user-001",
+                port=8080,
+                path="/ws",
+            )
+
+        assert exc_info.value.error_code == "PLUGIN_ERROR"
+        assert "empty" in str(exc_info.value).lower()
+
+    # ── Direct mode regression tests ───────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_direct_mode_returns_localhost_url(
+        self, local_paas_service, mock_connection_manager
+    ):
+        """Direct mode returns ws://localhost URL with empty token."""
+        from secbaas.community.api.bot_runtime._ws_connection_info import (
+            WsConnectionInfo,
+        )
+        from secbaas.community.api.device_manage import LocalDeviceInfo
+
+        local_paas_service._ws_conn_mode = "direct"
+
+        # Mock get_device_info → _route_command → send_command → device info
+        mock_connection_manager.send_command.return_value = {
+            "status": "success",
+            "data": {"port": 12345, "container_id": "abc123"},
+        }
+
+        local_paas_service._repository.get_by_machine_id.return_value = MagicMock(
+            connected_server_instance="test-instance",
+            status="ONLINE",
+        )
+
+        result = await local_paas_service.resolve_ws_conn_info(
+            paas_device_id="abc123--machine-001--user-001",
+            port=8080,
+            path="/api/openclaw/ws",
+        )
+
+        assert isinstance(result, WsConnectionInfo)
+        assert result.ws_url.startswith("ws://localhost:")
+        assert "/api/openclaw/ws" in result.ws_url
+        assert result.token == ""
+        assert result.target.startswith("localhost:")
+
+    @pytest.mark.asyncio
+    async def test_direct_mode_ignores_port_parameter(
+        self, local_paas_service, mock_connection_manager
+    ):
+        """Direct mode ignores the port parameter, uses mng-returned port."""
+        local_paas_service._ws_conn_mode = "direct"
+        mock_connection_manager.send_command.return_value = {
+            "status": "success",
+            "data": {"port": 99999, "container_id": "abc123"},
+        }
+
+        local_paas_service._repository.get_by_machine_id.return_value = MagicMock(
+            connected_server_instance="test-instance",
+            status="ONLINE",
+        )
+
+        result = await local_paas_service.resolve_ws_conn_info(
+            paas_device_id="abc123--machine-001--user-001",
+            port=1234,  # This is intentionally ignored
+            path="/ws",
+        )
+
+        # URL should use mng-returned port 99999, NOT 1234
+        assert ":99999" in result.ws_url
+        assert ":1234" not in result.ws_url
+
+    @pytest.mark.asyncio
+    async def test_direct_mode_24h_expiry(
+        self, local_paas_service, mock_connection_manager
+    ):
+        """Direct mode returns 24-hour expiry."""
+        from datetime import UTC, datetime, timedelta
+
+        local_paas_service._ws_conn_mode = "direct"
+
+        mock_connection_manager.send_command.return_value = {
+            "status": "success",
+            "data": {"port": 12345, "container_id": "abc123"},
+        }
+
+        local_paas_service._repository.get_by_machine_id.return_value = MagicMock(
+            connected_server_instance="test-instance",
+            status="ONLINE",
+        )
+
+        result = await local_paas_service.resolve_ws_conn_info(
+            paas_device_id="abc123--machine-001--user-001",
+            port=8080,
+            path="/ws",
+        )
+
+        expected_max = datetime.now(UTC) + timedelta(hours=25)
+        assert result.expires_at > datetime.now(UTC)
+        assert result.expires_at < expected_max
 
 
 class TestResolveInvokeHttpInfo:
@@ -3743,18 +3931,6 @@ class TestHandleContainerReady:
         )
 
         assert result is None
-
-    @pytest.mark.asyncio
-    async def test_machine_not_found_early_return(
-        self,
-        local_paas_service,
-        mock_repository,
-    ):
-        """Returns None early when machine is not found in repository."""
-        # local_paas_service has device_repository=None and publish_record_repository=None
-        # which causes _handle_container_ready to return early at repos check.
-        # We need to create a service with repos, but machine not found.
-        pass  # We'll test this with a properly configured service
 
     @pytest.mark.asyncio
     async def test_device_not_found_logs_warning_no_exception(

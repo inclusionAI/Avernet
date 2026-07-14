@@ -61,6 +61,9 @@ def is_paas_mock_mode() -> bool:
     return os.environ.get("PAAS_MOCK_MODE", "").lower() in ("true", "1", "yes")
 
 
+_LOCAL_WS_CONN_MODE = "relay"
+
+
 logger = get_logger("core-service")
 
 
@@ -229,6 +232,7 @@ class PaasServiceFactory(PaasServiceFactoryProtocol):
                 worker_router=self._worker_router,
                 desktop_sandbox_plugin=self._paas_sandbox_plugins.desktop_sandbox_plugin,
                 relay_repository=self._ws_relay_session_repository,
+                ws_conn_mode=_LOCAL_WS_CONN_MODE,
             )
 
         elif platform_upper == TenantType.POOLAB.value.upper():
@@ -641,4 +645,5 @@ class PaasServiceFactory(PaasServiceFactoryProtocol):
             publish_record_repository=self._publish_record_repository,
             worker_router=self._worker_router,
             relay_repository=self._ws_relay_session_repository,
+            ws_conn_mode=_LOCAL_WS_CONN_MODE,
         )
