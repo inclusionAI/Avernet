@@ -9,7 +9,7 @@ from secbaas.community.adapters.web.routers.bcn_downlink.bcn_router import (
     _dispatch_chat_send_stream,
 )
 from secbaas.community.api.sse import StreamChunk
-from secbaas.community.core.service.sse import BcnStreamConverter
+from secbaas.community.core.service.sse import DefaultStreamConverter
 
 
 class _StreamService:
@@ -33,8 +33,8 @@ class _StreamService:
 
 class _ConverterFactory:
     def create(self, name):
-        assert name == BcnStreamConverter.name()
-        return BcnStreamConverter()
+        assert name == "default"
+        return DefaultStreamConverter()
 
 
 def _chat_send_request() -> ChatSendRequest:

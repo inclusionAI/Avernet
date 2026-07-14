@@ -268,7 +268,7 @@ async def deliver_message_stream(
             detail={"code": 50001, "message": f"服务内部错误: {str(e)}"},
         )
 
-    converter = converter_factory.create("bcn")
+    converter = converter_factory.create("default")
 
     async def _sse_generator() -> AsyncIterator[str]:
         # 先发送一个 ready 事件，携带 message_id 和 session_id

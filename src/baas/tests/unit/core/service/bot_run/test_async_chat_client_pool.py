@@ -104,6 +104,7 @@ class TestParamPassthrough:
             session_key_timeout=15.0,
             max_retries=3,
             retry_base_backoff=2.0,
+            ignore_case=False,
         )
 
         await pool.close_all()

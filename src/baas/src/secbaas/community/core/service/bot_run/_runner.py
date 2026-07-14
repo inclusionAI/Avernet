@@ -375,7 +375,7 @@ class BotRunner:
             bot_id=bot_id,
         )
 
-        return message_id, actual_session_id, stream_iter
+        return message_id, actual_session_id, _with_heartbeat(stream_iter)
 
     async def get_messages(
         self,
@@ -714,3 +714,18 @@ class BotRunner:
                 return None
             raise
         return binding_data_to_info(data)
+
+
+async def _with_heartbeat(
+    stream: AsyncIterator[StreamChunk],
+) -> AsyncIterator[StreamChunk]:
+    """包装流式迭代器，每 30s 插入一个 heartbeat chunk。"""
+    while True:
+        try:
+            chunk = await asyncio.wait_for(stream.__anext__(), timeout=30.0)
+        except TimeoutError:
+            yield StreamChunk(type="heartbeat")
+            continue
+        except StopAsyncIteration:
+            return
+        yield chunk

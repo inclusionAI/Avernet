@@ -19,6 +19,8 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 
+from secbaas.community.api.config_manage import SystemConfigManageService
+from secbaas.community.core.service.config._constants import SystemConfigKey
 from secbaas.community.logger import get_logger
 
 from ._async_chat_client import AsyncChatClient
@@ -55,6 +57,7 @@ class AsyncChatClientPool:
         session_key_timeout: float = 30.0,
         max_retries: int = 1,
         retry_base_backoff: float = 0.5,
+        system_config_service: SystemConfigManageService | None = None,
     ) -> None:
         """初始化连接池
 
@@ -65,6 +68,7 @@ class AsyncChatClientPool:
             session_key_timeout: 同一 sessionKey 并发等待超时（秒）
             max_retries: WS 断连后自动重连次数，0 表示不重试
             retry_base_backoff: 重连退避基数（秒）
+            system_config_service: 系统配置服务，传递给 AsyncChatClient 用于读取开关
         """
         self._max_size = max_size
         self._max_conns_per_sandbox = max_conns_per_sandbox
@@ -72,6 +76,7 @@ class AsyncChatClientPool:
         self._session_key_timeout = session_key_timeout
         self._max_retries = max_retries
         self._retry_base_backoff = retry_base_backoff
+        self._ignore_case = self._read_ignore_case(system_config_service)
         # sandbox_id -> 连接列表
         self._clients: dict[str, list[_ConnEntry]] = {}
         # per-key lock，保护同一 sandbox_id 的并发创建
@@ -171,6 +176,7 @@ class AsyncChatClientPool:
                 session_key_timeout=self._session_key_timeout,
                 max_retries=self._max_retries,
                 retry_base_backoff=self._retry_base_backoff,
+                ignore_case=self._ignore_case,
             )
             await new_client.connect()
 
@@ -212,6 +218,27 @@ class AsyncChatClientPool:
             )
 
     # ── 内部实现 ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _read_ignore_case(
+        system_config_service: SystemConfigManageService | None,
+    ) -> bool:
+        """从 system_config 读取 sessionKey 匹配是否忽略大小写。"""
+        if system_config_service is None:
+            return False
+        try:
+            resp = system_config_service.get_config(
+                SystemConfigKey.SESSION_KEY_IGNORE_CASE
+            )
+        except Exception:
+            logger.warning(
+                "failed to read session_key_ignore_case config, defaulting to false",
+                exc_info=True,
+            )
+            return False
+        if resp is None:
+            return False
+        return (resp.conf_value or "").strip().lower() == "true"
 
     def _pick_idle(self, sandbox_id: str) -> AsyncChatClient | None:
         """从已有连接中复用空闲连接（无锁，快速路径）
