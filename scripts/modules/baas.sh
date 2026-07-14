@@ -5,7 +5,7 @@ _BAAS_SH_LOADED=1
 
 # Service-specific constants
 BAAS_LOG="${LOG_DIR}/baas.log"
-BAAS_APP_DIR="${BAAS_APP_DIR:-${BAAS_DIR}/packages/community}"
+BAAS_APP_DIR="${BAAS_APP_DIR:-${BAAS_DIR}}"
 
 baas_normalize_dir_path() {
     local path="$1"

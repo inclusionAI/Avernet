@@ -146,7 +146,7 @@ if matches_any '^src/frontend/'; then
   run_required "$repo_root/src/frontend/scripts/ci_test.sh" --base "$base" --head "$head"
 fi
 
-if matches_any '^(scripts/singlebox\.sh|scripts/modules/|scripts/ci/singlebox_coverage\.sh|src/backend/tests/community/acceptance/|src/baas/packages/community/tests/e2e/)'; then
+if matches_any '^(scripts/singlebox\.sh|scripts/modules/|scripts/ci/singlebox_coverage\.sh|src/backend/tests/community/acceptance/|src/baas/tests/e2e/)'; then
   # singlebox 自身脚本或 live E2E 用例变更时,即便没有 Backend/BaaS 源码变更,
   # 也要触发 singlebox coverage gate。
   run_singlebox_coverage_once

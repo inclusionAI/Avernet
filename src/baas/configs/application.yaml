@@ -1,0 +1,196 @@
+# 基础配置
+app_name: "secbaas"
+enable_sidecar: true
+workers: 8
+
+# Sidecar配置
+sidecar_config:
+  host: "localhost"
+  max_send_message_length: 4194304 # 4MB
+  max_receive_message_length: 4194304 # 4MB
+
+log_config:
+  trace_log_dir: ""
+  log_level: "INFO"
+  log_dir: ""
+
+# 中间件配置总览
+module_config:
+  web:
+    port: 8888 # 修改端口需要同步修改nginx.conf内配置
+    workers: 8
+    threads: 8
+    start: "secbaas.community.adapters.web.app:app"
+
+user_config:
+  # 插件配置
+  plugins:
+    auth: "stub"
+    crypto: "stub"          # stub | real
+    secret: "stub"          # stub | real
+    scheduler: "stub"       # stub | real
+    cache: "stub"           # stub | real
+    bot_service: "stub"  # real | local | stub
+    engine_adapter: "stub"  # stub | real (aicoding/hermes/claude_code engine adapter)
+    database:
+      plugin_database: "SQLITE_ORM"    # ZDAS_ORM (production ORM) | SQLITE_ORM (test only)
+      database_url: "sqlite:////tmp/secbaas.db"
+    sandbox:
+      arca: stub #  arca_sdk or stub
+      desktop: stub # real or stub
+      teclaw: stub # real or stub
+      k8s: stub # real or stub
+      docker: stub # real or stub
+      poolab: stub # real or stub
+  # K8s 模板配置示例（用于 K8s PaaS 平台设备创建）
+  # 实际配置从数据库 baas_device_template.config 字段读取，此处仅为环境级参考。
+  k8s_template_config:
+    # kubeconfig: |
+    #   apiVersion: v1
+    #   kind: Config
+    #   clusters: [...]
+    namespace: "default"
+    image: "registry.example.com/bot-runtime:latest"
+    cpu_request: "500m"
+    cpu_limit: "1"
+    memory_request: "512Mi"
+    memory_limit: "1Gi"
+  # Arca 沙箱配置（用于定时任务续期）
+  arca:
+    enabled: true  # 设置为 true 启用沙箱续期定时任务
+    base_url: "http://arca.example.com:8080"
+    template_id: "ARCA-TEMPLATE-000000"
+    oss_mount_id: "dummy_mount_id"
+    api_key: "@dummy_api_key"
+    default_ttl_minutes: 1440 # 分钟 => 1 天
+
+  bot_service:
+    proxy_base_url: "https://bot_service.example.com"
+    proxy_ws_base_url: "wss://bot_service.example.com"
+    adapter_port: 20003
+    ws_path: "/api/openclaw/ws"
+    connect_timeout: 10
+    request_timeout: 600
+
+  # Chat client pool 配置
+  chat_client_pool:
+    max_size: 100                    # 池中最大总连接数
+    max_conns_per_sandbox: 1         # 每个 sandbox_id 最多连接数
+    max_concurrent_per_conn: 0       # 每连接最大并发会话数（0=不限）
+    session_key_timeout: 30.0        # 同 sessionKey 等待超时（秒）
+    max_retries: 1                   # WS 断连重试次数（0=不重试）
+    retry_base_backoff: 0.5          # 重试退避基数（秒）
+
+  # BotRunner 任务并发池配置
+  bot_runner:
+    softmax: 1000                    # 全局最大并发任务数（0=不限）
+    per_key_max: 2                   # 每个 bot_id 最大并发任务数（0=不限）
+    queue_max: 0                     # 全局最大排队等待数（0=不限）
+    acquire_timeout: 0               # acquire 等待槽位超时秒数（0=不限）
+    task_timeout: 660.0              # 单任务最大执行秒数（0=不限，默认660=10分钟+1分钟缓冲）
+
+  # BotRun 队列 Worker 配置
+  bot_run_queue:
+    enabled: false                    # 是否启用队列 Worker
+    session_lock_expire_seconds: 300  # session 串行锁过期时间（秒）
+    session_lock_renew_seconds: 60    # session 串行锁自动续期间隔（秒）
+    qpm_refresh_seconds: 30.0         # QPM 配置刷新间隔（秒）
+    poll_interval_seconds: 0.1        # Worker 轮询间隔（秒）
+    discover_limit: 50                # 每轮发现的 bot 数上限
+    candidates_per_bot: 5             # 每个 bot 单次认领的候选数
+    max_concurrent: 50                # 单 Worker 最大并发执行数
+    heartbeat_interval_seconds: 30.0  # 心跳间隔（秒）
+    machine_count: 1                  # 在线 Worker 机器数（用于均分 QPM）
+    bucket_sweep_interval_seconds: 300.0  # 分桶扫描间隔（秒）
+    bucket_idle_ttl_seconds: 600.0        # 分桶空闲 TTL（秒）
+
+  teamclaw:
+    base_url: "https://teamclaw.example.com"
+    timeout: 30
+
+  # OAuth 客户端配置
+  oauth:
+    base_url: "https://oauth.example.com"
+
+  # 设备 TTL 定时器配置（每 5 分钟扫描 TTL 最小的设备并续期+探活）
+  device_ttl_timer:
+    enabled: true  # 是否启用定时任务
+    cron_interval_seconds: 300  # 执行间隔（秒），默认: 300（5分钟）
+    batch_size: 100  # 每类设备取 top N，默认: 100
+    lock_name: "device_ttl_timer_lock"  # 分布式锁名称
+    lock_expire_seconds: 300  # 分布式锁过期时间（秒），默认: 300（5分钟）
+    lock_renew_interval_seconds: 60  # 分布式锁自动续期间隔（秒），默认: 60（0 表示禁用续期）
+    dry_run: false  # 测试模式：只打印日志
+
+  # BotRun 队列恢复配置（周期性重置心跳过期的 RUNNING 请求回 PENDING）
+  bot_run_recovery:
+    enabled: false  # 是否启用定时任务
+    cron_interval_seconds: 60  # 执行间隔（秒），默认: 60
+    lock_name: "bot_run_recovery_lock"  # 分布式锁名称
+    lock_expire_seconds: 120  # 分布式锁过期时间（秒），默认: 120
+    lock_renew_interval_seconds: 30  # 分布式锁自动续期间隔（秒），默认: 30（0 表示禁用续期）
+    stale_seconds: 120  # RUNNING 超过此时长无心跳视为悬挂（秒），默认: 120
+    dry_run: false  # 测试模式：只打印日志
+
+  # BCN 下行协议配置
+  bcn:
+    api_key:
+      prefix: "dummy-prefix"
+    uplink:
+      base_url: "https://bcn.example.com"
+      provider_id: "dummy-provider"
+
+  # Bot Health Checker 配置
+  bot_health_checker:
+    health_check:
+      timeout_seconds: 10           # 单个健康检查超时时间
+      max_concurrent: 10            # 最大并发健康检查数
+    ttl:
+      extend_when_remaining_hours: 16  # 剩余时间 ≤ 16 小时才续期
+      target_ttl_hours: 24             # 续期目标 TTL（小时）
+
+  bot_chat_log_relation:
+    base_url: "https://backend.example.com"
+    timeout: 10
+    max_retries: 0
+
+  # agentclawproxy 代理服务主机名（按环境）
+  # 用于 proxypass URL 和 WS relay 构造。
+  agentclawproxy:
+    host:
+      dev: "agentclawproxy-dev.example.com"
+      pre: "agentclawproxy-pre.example.com"
+      prod: "agentclawproxy-prod.example.com"
+
+  # Poolab API 端点（按环境）
+  poolab:
+    endpoint:
+      dev: "https://poolab-dev.example.com"
+      pre: "https://poolab-pre.example.com"
+      prod: "https://poolab-prod.example.com"
+
+  # SecBaaS 回调服务器 URL（按环境）
+  # 设备 start hook 完成后通过此 URL 回调状态。
+  secbaas:
+    callback:
+      host:
+        dev: "https://secbaas-dev.example.com"
+        pre: "https://secbaas-pre.example.com"
+        prod: "https://secbaas-prod.example.com"
+
+  # API Gateway 配置
+  api_gateway:
+    admin_operators:
+      - "operator-001"
+      - "operator-002"
+      - "operator-003"
+
+  # 部署环境探测配置
+  env:
+    # 用于探测当前部署环境的环境变量名称
+    deploy_env_var: "DEPLOY_ENV"
+
+  # 应用级动态调试/展示标记
+  app:
+    local_debug: false
+    show_error_details: false
