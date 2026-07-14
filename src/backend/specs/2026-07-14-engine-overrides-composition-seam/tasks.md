@@ -10,6 +10,12 @@
 > asserts per-stage channel delivery on the **real BaaS HTTP payload** (not on
 > mocked kwargs). It must stay green and **unmodified** across every task — it is
 > the proof that the release/restart paths remain behavior-preserving.
+>
+> **Review cadence:** tasks are grouped; after each group's tasks are done and the
+> suite is green, run `/code-review` (the `code-review` skill) on that group's diff
+> and resolve findings before starting the next group.
+
+# Group A — Foundation (new type + seam, additive, no call sites changed)
 
 ## Task 1: Add `DeliveryArtifact` payload type + `compose` — [ ]
 - **Goal:** Introduce the pure delivery-payload wrapper and the single combiner
@@ -46,6 +52,16 @@
         pre-feature (no slot) → base restamped only.
   - [ ] Full suite green.
 - **Depends on:** Task 1
+
+## Review A: `/code-review` on the Group A diff — [ ]
+- **Goal:** Review the new `DeliveryArtifact` type + seam producers before anything
+  depends on them.
+- **Done when:**
+  - [ ] `/code-review` run on the Group A diff (Tasks 1–2); findings triaged.
+  - [ ] Real findings fixed (or consciously deferred with a note); suite still green.
+- **Depends on:** Tasks 1–2
+
+# Group B — Cutover (type-enforce the boundary, route all paths, rollback behavior)
 
 ## Task 3: Type-enforce the BaaS boundary + route all four paths through the seam — [ ]
 - **Goal:** Make `BotBuildService`'s delivery methods take `delivery: DeliveryArtifact`
@@ -103,6 +119,18 @@
   - [ ] Full suite green.
 - **Depends on:** Task 3
 
+## Review B: `/code-review` on the Group B diff — [ ]
+- **Goal:** Review the boundary retype + the four rewritten call sites + the
+  rollback behavior change — the highest-risk group.
+- **Done when:**
+  - [ ] `/code-review` (medium/high effort) run on the Group B diff (Tasks 3–4);
+        findings triaged.
+  - [ ] Real findings fixed; `test_publish_per_stage_channels.py` still green and
+        unmodified; suite green.
+- **Depends on:** Tasks 3–4
+
+# Group C — Cleanup + verification
+
 ## Task 5: Remove the now-dead composition helpers — [ ]
 - **Goal:** Delete the per-path composition copies the seam replaced, so there is
   one composition path and no way back to the old inline style.
@@ -115,6 +143,13 @@
   - [ ] Full suite green.
 - **Depends on:** Task 3
 
+## Review C: `/code-review` on the Group C diff — [ ]
+- **Goal:** Review the deletions (no dangling references, no behavior change).
+- **Done when:**
+  - [ ] `/code-review` run on the Group C diff (Task 5); findings triaged and fixed.
+  - [ ] Suite green.
+- **Depends on:** Task 5
+
 ## Task 6: Whole-suite verification, end-to-end check, draft PR — [ ]
 - **Goal:** Prove the change end-to-end and open the PR.
 - **Files:** — (verification + PR).
@@ -125,4 +160,4 @@
         stamp) reach the BaaS payload.
   - [ ] Draft PR opened linking `Fixes #173` (and `#168`), subscribed via
         `subscribe_pr_activity`.
-- **Depends on:** Tasks 3–5
+- **Depends on:** Reviews A–C (all group reviews resolved)

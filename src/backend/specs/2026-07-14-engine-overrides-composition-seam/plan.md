@@ -62,6 +62,14 @@ class DeliveryArtifact:
         return cls(apply_engine_overrides(restamp_stage(base, stage), overrides))
 ```
 
+**On `dict | None` (CLAUDE.md rule).** The field is *required* — no default, so a
+`DeliveryArtifact` can never be built without it. The value is nullable only because
+`None` is an intentional contract state: the **ARCA mount path has no composed
+artifact** (it delivers via `migration_path`; BaaS ignores `config_artifact` on the
+non-teclaw branch). That is the exact carve-out CLAUDE.md allows for `T | None`
+(`None` is a real state, not a missing-required-value). Making it non-optional would
+force ARCA to fabricate an empty dict or bypass the type — strictly worse.
+
 **Placement decision:** `services/deploy/engine_ext_stage.py`. That module already
 owns the delivery vocabulary this type belongs to (`restamp_stage`,
 `apply_engine_overrides`, the `PublishStage → engine stage-string` map), and
