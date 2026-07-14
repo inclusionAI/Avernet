@@ -97,6 +97,32 @@ def poller(
     )
 
 
+# ── Ticket fixtures for v1.5 E2E tests ───────────────────────────────
+
+
+@pytest.fixture
+def multipart_ticket() -> MagicMock:
+    """Ticket mock with multipart_session_id set for multipart E2E tests."""
+    return _make_ticket_record(
+        transfer_id="stub-mp-test-transfer",
+        direction="UPLOAD",
+        status="CREATED",
+        fileservice_staging_path="file-transfers/stub-mp-test-transfer/test.bin",
+        multipart_session_id="stub-mp-test-transfer",
+    )
+
+
+@pytest.fixture
+def done_ticket() -> MagicMock:
+    """Ticket mock with status DONE for share-link and staging delete tests."""
+    return _make_ticket_record(
+        transfer_id="stub-done-test-transfer",
+        direction="UPLOAD",
+        status="DONE",
+        fileservice_staging_path="file-transfers/stub-done-test-transfer/data.bin",
+    )
+
+
 # ── Helper functions ────────────────────────────────────────────────
 
 
@@ -107,6 +133,7 @@ def _make_ticket_record(*,
     device_path: str | None = "/home/bot/test.txt",
     gmt_create: datetime | None = None,
     fileservice_staging_path: str | None = None,
+    multipart_session_id: str | None = None,
     **overrides,
 ) -> MagicMock:
     """Create a MagicMock(spec=TicketRecord) with sensible defaults.
@@ -118,11 +145,12 @@ def _make_ticket_record(*,
         device_path: Absolute path on the device target.
         gmt_create: Creation timestamp (default: 30 s ago).
         fileservice_staging_path: OSS staging path (default: derived from transfer_id).
+        multipart_session_id: OSS multipart upload session ID (default: None).
         **overrides: Any TicketRecord field to override.
 
     Returns:
         A MagicMock that passes isinstance(..., TicketRecord) checks
-        and supports attribute access for all 16 TicketRecord fields.
+        and supports attribute access for all 17 TicketRecord fields.
     """
     now = datetime.now()
     return MagicMock(spec=TicketRecord, **{
@@ -142,6 +170,7 @@ def _make_ticket_record(*,
         "error_message": None,
         "download_url": None,
         "upload_url": None,
+        "multipart_session_id": multipart_session_id,
         "env": "test",
         **overrides,
     })
