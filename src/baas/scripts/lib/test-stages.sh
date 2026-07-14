@@ -16,7 +16,7 @@ _merge_e2e_coverage() {
     fi
     log_info "Found ${#group_reports[@]} group coverage reports"
     mkdir -p "$REPORT_DIR"
-    COVERAGE_FILE="$REPORT_DIR/.coverage" uv run coverage combine "${group_reports[@]}" >/dev/null 2>&1 || true
+    COVERAGE_FILE="$REPORT_DIR/.coverage" uv run coverage combine "${group_reports[@]}" || log_warn "Failed to combine coverage reports"
     COVERAGE_FILE="$REPORT_DIR/.coverage" uv run coverage html -i -d "$REPORT_DIR/htmlcov-e2e" >/dev/null 2>&1 || true
     COVERAGE_FILE="$REPORT_DIR/.coverage" uv run coverage xml -o "$REPORT_DIR/coverage-e2e.xml" >/dev/null 2>&1 || true
     COVERAGE_FILE="$REPORT_DIR/.coverage" uv run coverage json -o "$REPORT_DIR/coverage-e2e.json" >/dev/null 2>&1 || true
