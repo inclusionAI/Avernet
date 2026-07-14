@@ -89,10 +89,10 @@ def _seed_successful_publish(
                 "sql": (
                     "INSERT INTO ac_bot_publish ("
                     "source_bot_pk, source_bot_id, publish_bot_id, name, owner_id, "
-                    "permission_owner, status, version, env, gmt_create, gmt_modified, ext"
+                    "permission_owner, status, version, last_pub_id, env, gmt_create, gmt_modified, ext"
                     ") VALUES ("
                     "1, :source_bot_id, :publish_bot_id, :name, :owner_id, "
-                    "'owner', 'SUCCESS', :version, :env, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, :ext"
+                    "'owner', 'SUCCESS', :version, 0, :env, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, :ext"
                     ") RETURNING id"
                 ),
                 "params": {
