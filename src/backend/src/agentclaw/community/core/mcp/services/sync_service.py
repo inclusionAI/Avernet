@@ -17,12 +17,13 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
+from agentclaw.community.core.mcp.services._defaults import get_default_cli_items
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.mcp.services.passport_scope import passport_mcp_codes_from_entries
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider, UserMCPConfigRepository
 from agentclaw.community.plugin_api.device_sync import DeviceSyncPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
-from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.plugin_api.passport import CliItem, PassportPlugin
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
@@ -32,6 +33,32 @@ if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
 
 logger = get_logger()
+
+
+def _merge_cli_items(
+    current: list[CliItem] | None,
+    defaults: list[CliItem] | None,
+) -> list[CliItem]:
+    """Merge passport CLI scope with default CLI items, de-duped by cli_code.
+
+    The passport update API treats resourceManifest as an overwrite. During MCP
+    sync we must send the complete CLI scope as well as MCPs. If the passport
+    service returns a temporarily-empty CLI list right after bot creation,
+    preserving the engine defaults here prevents a later MCP sync from clearing
+    them. Existing passport values win on duplicate cli_code so user/provider
+    metadata is not overwritten by static defaults.
+    """
+    merged: list[CliItem] = []
+    seen: set[str] = set()
+    for item in (current or []) + (defaults or []):
+        if not isinstance(item, dict):
+            continue
+        cli_code = item.get("cli_code")
+        if not cli_code or cli_code in seen:
+            continue
+        seen.add(cli_code)
+        merged.append(dict(item))
+    return merged
 
 
 @dataclass
@@ -786,8 +813,9 @@ class MCPSyncService:
     ) -> dict[str, Any]:
         """通知 passport 系统更新 bot 当前可用的 MCP codes 列表。
 
-        passport 用该列表做前端权限校验等下游消费。若查询 bot 元数据
-        （名称、描述）失败，仍会尝试更新 passport，仅记录 warning。
+        passport 用该列表做前端权限校验等下游消费。bot 元数据同时用于
+        解析默认 CLI 授权范围；若查询失败，为避免写入不完整的 CLI 快照，
+        本次 passport 更新会中止并返回失败。
 
         Args:
             bot_id: 目标 bot ID。
@@ -800,28 +828,47 @@ class MCPSyncService:
         """
         bot_name: Optional[str] = None
         bot_desc: Optional[str] = None
+        template_type: Optional[str] = None
         try:
             bot = self.bot_repository.get_by_id_and_owner(bot_id, user_id)
             if bot:
                 bot_name = bot.get("bot_name")
                 bot_desc = bot.get("bot_desc")
+                template_type = bot.get("template_type")
+                engine_type = (
+                    bot.get("active_engine") or bot.get("engine_type") or engine_type
+                )
         except Exception as e:
-            # 查 bot 是 metadata 补全，失败不影响 passport 主调用。
-            logger.warning(
-                "[MCPSyncService] 获取 bot 信息供 passport 使用失败: bot_id=%s, error=%s",
-                bot_id, e,
-            )
+            error = f"获取 bot 信息失败，无法安全解析默认 CLI 范围: {e}"
+            logger.error("[MCPSyncService] %s, bot_id=%s", error, bot_id)
+            return {"success": False, "error": error}
 
         # MCP 同步触发 resourceManifest 更新时，要回填当前 CLI，避免覆盖式更新丢失 CLI 授权。
         try:
-            cli_items = self.passport_update.query_passport_clis(bot_id, user_id)
+            current_cli_items = self.passport_update.query_passport_clis(
+                bot_id, user_id
+            )
         except Exception as e:
             error = f"查询 CLI 范围失败: {e}"
             logger.error("[MCPSyncService] %s", error)
             return {"success": False, "error": error}
 
+        default_cli_items = get_default_cli_items(engine_type, template_type)
+        cli_items = _merge_cli_items(current_cli_items, default_cli_items)
+        if default_cli_items:
+            logger.info(
+                "[MCPSyncService] 合并默认 CLI 范围: bot_id=%s, current_clis=%s, "
+                "default_clis=%s, merged_clis=%s, engine_type=%s, template_type=%s",
+                bot_id,
+                current_cli_items,
+                default_cli_items,
+                cli_items,
+                engine_type,
+                template_type,
+            )
+
         try:
-            # resource_scope 是本次资源范围的完整快照：MCP 来自同步结果，CLI 来自当前许可证。
+            # resource_scope 是完整快照：MCP 来自同步结果，CLI 来自当前许可证 + 引擎默认 CLI。
             self.passport_update.update_passport(
                 bot_id=bot_id,
                 user_id=user_id,

@@ -128,8 +128,11 @@ class TestRefreshMcpScope:
         )
 
         result = await service.refresh_mcp_scope(
-            user_id="user1", entity_id="100", bot_id="bot1",
-            entity_type="staff", engine_type="openclaw",
+            user_id="user1",
+            entity_id="100",
+            bot_id="bot1",
+            entity_type="staff",
+            engine_type="openclaw",
         )
 
         assert result["success"] is True
@@ -168,14 +171,156 @@ class TestRefreshMcpScope:
         )
 
         result = await service.refresh_mcp_scope(
-            user_id="user1", entity_id="100", bot_id="bot1",
-            entity_type="staff", engine_type="openclaw",
+            user_id="user1",
+            entity_id="100",
+            bot_id="bot1",
+            entity_type="staff",
+            engine_type="openclaw",
         )
 
         assert result["success"] is True
         plugin.sync_all_mcp_servers.assert_called_once_with(mcps)
-        resource_scope = passport_update.update_passport.call_args.kwargs["resource_scope"]
+        resource_scope = passport_update.update_passport.call_args.kwargs[
+            "resource_scope"
+        ]
         assert resource_scope["mcp_codes"] == ["mcp.remote.1"]
+
+    @pytest.mark.asyncio
+    async def test_merges_default_cli_items_when_syncing_aicoding_scope(self):
+        """MCP scope refresh should not clear engine default CLI grants."""
+        passport_update = MagicMock()
+        passport_update.query_passport_clis.return_value = []
+        bot_repository = MagicMock()
+        bot_repository.get_by_id_and_owner.return_value = {
+            "bot_name": "AICoding Bot",
+            "bot_desc": "desc",
+            "active_engine": "aicoding",
+            "template_type": "personalCoding",
+        }
+
+        service = _make_sync_service(
+            mcp_provider=_make_mcp_provider(mcps=[{"server_code": "mcp.test.1"}]),
+            passport_update=passport_update,
+            bot_repository=bot_repository,
+        )
+
+        result = await service.refresh_mcp_scope(
+            user_id="user1", entity_id="100", bot_id="bot1",
+            entity_type="staff", engine_type="aicoding",
+        )
+
+        assert result["success"] is True
+        resource_scope = passport_update.update_passport.call_args.kwargs[
+            "resource_scope"
+        ]
+        cli_codes = [item["cli_code"] for item in resource_scope["cli_items"]]
+        assert cli_codes == [
+            "adev-cli",
+            "acli",
+            "antcode-cli",
+            "linke-cli",
+            "linkw-cli",
+            "qmx-invoke-cli",
+            "serverless",
+            "derisk-cli",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_merges_current_cli_items_before_default_cli_items(self):
+        """Existing passport CLI metadata wins; defaults fill only missing codes."""
+        passport_update = MagicMock()
+        passport_update.query_passport_clis.return_value = [
+            {"cli_code": "adev-cli", "cli_name": "Custom Adev", "cli_desc": "kept"},
+            {"cli_code": "custom-cli", "cli_name": "Custom", "cli_desc": None},
+        ]
+        bot_repository = MagicMock()
+        bot_repository.get_by_id_and_owner.return_value = {
+            "active_engine": "claude_code",
+            "template_type": "personalCoding",
+        }
+
+        service = _make_sync_service(
+            mcp_provider=_make_mcp_provider(mcps=[{"server_code": "mcp.test.1"}]),
+            passport_update=passport_update,
+            bot_repository=bot_repository,
+        )
+
+        result = await service.refresh_mcp_scope(
+            user_id="user1", entity_id="100", bot_id="bot1",
+            entity_type="staff", engine_type="claude_code",
+        )
+
+        assert result["success"] is True
+        cli_items = passport_update.update_passport.call_args.kwargs["resource_scope"][
+            "cli_items"
+        ]
+        cli_codes = [item["cli_code"] for item in cli_items]
+        assert cli_items[0] == {
+            "cli_code": "adev-cli",
+            "cli_name": "Custom Adev",
+            "cli_desc": "kept",
+        }
+        assert "custom-cli" in cli_codes
+        assert cli_codes.count("adev-cli") == 1
+        assert "antcode-cli" in cli_codes
+
+    @pytest.mark.asyncio
+    async def test_bot_active_engine_wins_over_default_refresh_engine_for_cli_scope(
+        self,
+    ):
+        """Background refresh defaults MCP routing but uses bot engine for CLI."""
+        passport_update = MagicMock()
+        passport_update.query_passport_clis.return_value = []
+        bot_repository = MagicMock()
+        bot_repository.get_by_id_and_owner.return_value = {
+            "active_engine": "aicoding",
+            "template_type": "personalCoding",
+        }
+
+        service = _make_sync_service(
+            mcp_provider=_make_mcp_provider(mcps=[{"server_code": "mcp.test.1"}]),
+            passport_update=passport_update,
+            bot_repository=bot_repository,
+        )
+
+        result = await service.refresh_mcp_scope(
+            user_id="user1", entity_id="100", bot_id="bot1", entity_type="staff"
+        )
+
+        assert result["success"] is True
+        resource_scope = passport_update.update_passport.call_args.kwargs[
+            "resource_scope"
+        ]
+        cli_codes = [item["cli_code"] for item in resource_scope["cli_items"]]
+        assert "antcode-cli" in cli_codes
+        assert len(cli_codes) == 8
+
+    @pytest.mark.asyncio
+    async def test_does_not_update_passport_when_bot_metadata_query_fails(self):
+        """Bot metadata is required to safely preserve default CLI scope."""
+        passport_update = MagicMock()
+        passport_update.query_passport_clis.return_value = []
+        bot_repository = MagicMock()
+        bot_repository.get_by_id_and_owner.side_effect = RuntimeError("db down")
+
+        service = _make_sync_service(
+            mcp_provider=_make_mcp_provider(mcps=[{"server_code": "mcp.test.1"}]),
+            passport_update=passport_update,
+            bot_repository=bot_repository,
+        )
+
+        result = await service.refresh_mcp_scope(
+            user_id="user1",
+            entity_id="100",
+            bot_id="bot1",
+            entity_type="staff",
+            engine_type="openclaw",
+        )
+
+        assert result["success"] is False
+        assert "获取 bot 信息失败" in result["error"]
+        passport_update.query_passport_clis.assert_not_called()
+        passport_update.update_passport.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_does_not_update_passport_when_cli_scope_query_fails(self):
@@ -188,8 +333,11 @@ class TestRefreshMcpScope:
         )
 
         result = await service.refresh_mcp_scope(
-            user_id="user1", entity_id="100", bot_id="bot1",
-            entity_type="staff", engine_type="openclaw",
+            user_id="user1",
+            entity_id="100",
+            bot_id="bot1",
+            entity_type="staff",
+            engine_type="openclaw",
         )
 
         assert result["success"] is False
@@ -212,8 +360,11 @@ class TestRefreshMcpScope:
         )
 
         result = await service.refresh_mcp_scope(
-            user_id="user1", entity_id="100", bot_id="bot1",
-            entity_type="staff", engine_type="openclaw",
+            user_id="user1",
+            entity_id="100",
+            bot_id="bot1",
+            entity_type="staff",
+            engine_type="openclaw",
         )
 
         assert result["success"] is False
@@ -251,8 +402,11 @@ class TestRefreshMcpScope:
         )
 
         result = await service.refresh_mcp_scope(
-            user_id="user1", entity_id="100", bot_id="bot1",
-            entity_type="staff", engine_type="openclaw",
+            user_id="user1",
+            entity_id="100",
+            bot_id="bot1",
+            entity_type="staff",
+            engine_type="openclaw",
         )
 
         assert result["success"] is True
