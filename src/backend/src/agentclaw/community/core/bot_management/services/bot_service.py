@@ -106,6 +106,17 @@ class BotServiceError(Exception):
     pass
 
 
+class BotInvalidLifecycleStateError(BotServiceError):
+    """The requested operation is not allowed in the bot's current state."""
+
+    def __init__(self, *, bot_id: str, current_status: str) -> None:
+        self.bot_id = bot_id
+        self.current_status = current_status
+        super().__init__(
+            f"Bot {bot_id} cannot be restarted while status is {current_status}"
+        )
+
+
 class BotNotFoundError(BotServiceError):
     """Bot not found error."""
     pass
@@ -3043,39 +3054,43 @@ class BotService:
             bot_id, user_id, status,
         )
 
-    def _resolve_current_device_provider(
+    def _resolve_current_device_restart_context(
         self,
         *,
         bot_id: str,
         binding_id: int,
-    ) -> str:
-        """Read the provider fact from the current binding before restart.
-
-        This is deliberately DB/binding based. Creation rollout only applies
-        to brand-new bots; restart must preserve the provider that created the
-        current container, otherwise an existing ARCA bot could be moved to
-        BaaS just because the owner later entered the whitelist.
-        """
+    ) -> tuple[str, str | None]:
+        """Return binding state while preserving its original provider."""
         try:
             service = self._device_service_provider()
             binding = service.get_device(binding_id=binding_id)
         except Exception as e:
             raise BotServiceError(
-                f"Bot {bot_id} binding {binding_id} cannot resolve device_provider: {e}"
+                f"Bot {bot_id} binding {binding_id} cannot resolve restart context: {e}"
             ) from e
 
-        provider = None
         if isinstance(binding, dict):
             provider = binding.get("device_provider")
+            binding_status = binding.get("status")
         else:
             provider = getattr(binding, "device_provider", None)
+            binding_status = getattr(binding, "status", None)
 
         if not provider:
             raise BotServiceError(
                 f"Bot {bot_id} binding {binding_id} missing device_provider; "
                 "restart aborted to avoid creation rollout migration"
             )
-        return str(provider)
+
+        return str(provider), str(binding_status) if binding_status else None
+
+    @staticmethod
+    def _activation_in_progress_result(bot: Dict[str, Any]) -> Dict[str, Any]:
+        """Return an idempotent response without mutating lifecycle state."""
+        current = dict(bot)
+        current["restart_in_progress"] = True
+        current["message"] = "Bot activation is in progress"
+        return current
 
     def is_teclaw_bot(self, active_engine: Optional[str]) -> bool:
         """Whether a bot with this engine runs in a teclaw container.
@@ -3239,6 +3254,36 @@ class BotService:
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
 
+        if bot.get("bot_type") == "desktop":
+            raise BotServiceError(
+                f"Desktop bot {bot_id} cannot be stopped via BotService.stop_bot, "
+                "use DesktopBotService instead"
+            )
+
+        bot_status = str(bot.get("status") or "").upper()
+        if bot_status in {"REACTIVATING", "PENDING"}:
+            logger.info(
+                "[bot_service.restart_bot] skip restart while activation is in progress: "
+                "bot_id=%s user_id=%s bot_status=%s",
+                bot_id,
+                user_id,
+                bot_status,
+            )
+            return self._activation_in_progress_result(bot)
+
+        if bot_status != "ACTIVE":
+            logger.warning(
+                "[bot_service.restart_bot] reject restart for invalid lifecycle state: "
+                "bot_id=%s user_id=%s bot_status=%s",
+                bot_id,
+                user_id,
+                bot_status,
+            )
+            raise BotInvalidLifecycleStateError(
+                bot_id=bot_id,
+                current_status=bot_status or "UNKNOWN",
+            )
+
         env = get_current_env()
         entity_id = bot.get("entity_id")
         if not entity_id:
@@ -3255,10 +3300,36 @@ class BotService:
         current_device_provider = None
         binding_id = bot.get("binding_id")
         if binding_id:
-            current_device_provider = self._resolve_current_device_provider(
-                bot_id=bot_id,
-                binding_id=binding_id,
+            current_device_provider, binding_status = (
+                self._resolve_current_device_restart_context(
+                    bot_id=bot_id,
+                    binding_id=binding_id,
+                )
             )
+            if binding_status == DeviceBindingStatus.PENDING.value:
+                logger.info(
+                    "[bot_service.restart_bot] skip restart while binding is pending: "
+                    "bot_id=%s user_id=%s binding_id=%s",
+                    bot_id,
+                    user_id,
+                    binding_id,
+                )
+                current = self._activation_in_progress_result(bot)
+                current["status"] = "PENDING"
+                return current
+            if binding_status and binding_status != DeviceBindingStatus.ACTIVE.value:
+                logger.warning(
+                    "[bot_service.restart_bot] reject restart for invalid binding state: "
+                    "bot_id=%s user_id=%s binding_id=%s binding_status=%s",
+                    bot_id,
+                    user_id,
+                    binding_id,
+                    binding_status,
+                )
+                raise BotInvalidLifecycleStateError(
+                    bot_id=bot_id,
+                    current_status=f"BINDING_{binding_status}",
+                )
             logger.info(
                 f"[bot_service.restart_bot] preserve device_provider before restart: "
                 f"bot_id={bot_id}, user_id={user_id}, binding_id={binding_id}, "

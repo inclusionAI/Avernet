@@ -25,6 +25,7 @@ import pytest
 
 from agentclaw.community.core.bot_management.services.bot_service import (
     RESTART_LOCK_TTL_SECONDS,
+    BotInvalidLifecycleStateError,
     BotNotFoundError,
     BotService,
     BotServiceError,
@@ -170,11 +171,107 @@ def _make_service(
 
 
 class TestRestartGuardOrchestration:
+    @pytest.mark.parametrize("status", ["REACTIVATING", "PENDING"])
+    def test_restart_during_activation_is_idempotent(self, status):
+        """Activation owns the lifecycle while the bot is starting."""
+        repo = FakeRestartLockRepo()
+        svc = _make_service(repo)
+        bot = _make_bot(status=status)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot") as start:
+            result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result["status"] == status
+        assert result["restart_in_progress"] is True
+        assert result["message"] == "Bot activation is in progress"
+        assert repo.acquire_calls == 0
+        stop.assert_not_called()
+        start.assert_not_called()
+
+    def test_recycled_bot_restart_is_rejected_without_side_effects(self):
+        """RECYCLED bots must only return through the explicit activate flow."""
+        repo = FakeRestartLockRepo()
+        device_service = MagicMock()
+        svc = _make_service(repo, device_provider=device_service)
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(
+            status="RECYCLED",
+            binding_id=42,
+        )
+
+        with patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot") as start:
+            with pytest.raises(BotInvalidLifecycleStateError) as exc_info:
+                svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert exc_info.value.current_status == "RECYCLED"
+        assert repo.acquire_calls == 0
+        device_service.get_device.assert_not_called()
+        stop.assert_not_called()
+        start.assert_not_called()
+
+    def test_pending_binding_restart_is_idempotent(self):
+        """A newly-created binding may not be ready for BaaS update yet."""
+        repo = FakeRestartLockRepo()
+        device_service = MagicMock()
+        device_service.get_device.return_value = {
+            "id": 42,
+            "device_provider": "baas",
+            "status": DeviceBindingStatus.PENDING,
+        }
+        baas = MagicMock()
+        svc = _make_service(
+            repo,
+            device_provider=device_service,
+            baas_service_provider=lambda: baas,
+        )
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(
+            status="ACTIVE",
+            binding_id=42,
+        )
+
+        with patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot") as start:
+            result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result["restart_in_progress"] is True
+        assert result["message"] == "Bot activation is in progress"
+        assert repo.acquire_calls == 0
+        baas.upgrade_bot.assert_not_called()
+        stop.assert_not_called()
+        start.assert_not_called()
+
+    def test_failed_binding_restart_is_rejected(self):
+        """A failed binding must not be released or replaced by restart."""
+        repo = FakeRestartLockRepo()
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="arca",
+            status=DeviceBindingStatus.FAILED,
+        )
+        svc = _make_service(repo, device_provider=device_service)
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(
+            status="ACTIVE",
+            binding_id=42,
+        )
+
+        with patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot") as start:
+            with pytest.raises(BotInvalidLifecycleStateError) as exc_info:
+                svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert exc_info.value.current_status == "BINDING_FAILED"
+        assert repo.acquire_calls == 0
+        stop.assert_not_called()
+        start.assert_not_called()
+
     def test_first_restart_acquires_and_runs_once(self):
         """First restart acquires the lock and triggers exactly one allocation."""
         repo = FakeRestartLockRepo()
         svc = _make_service(repo)
-        bot = _make_bot(status="PENDING")
+        bot = _make_bot(status="ACTIVE")
         svc._repository.get_by_id_and_owner.return_value = bot
 
         with patch.object(svc, "stop_bot", return_value=True) as stop, \
@@ -607,7 +704,7 @@ class TestRestartGuardOrchestration:
         """A second restart while one is in progress is suppressed (no rework)."""
         repo = FakeRestartLockRepo()
         svc = _make_service(repo)
-        bot = _make_bot(status="PENDING")
+        bot = _make_bot(status="ACTIVE")
         svc._repository.get_by_id_and_owner.return_value = bot
 
         # start_bot is mocked and never releases → lock stays held after #1.
@@ -645,6 +742,13 @@ class TestRestartGuardOrchestration:
         bot["binding_id"] = 42
         bot["device_id"] = "dev-1"
         svc._repository.get_by_id_and_owner.return_value = bot
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="arca",
+            status=DeviceBindingStatus.ACTIVE,
+        )
+        svc._device_service_provider = lambda: device_service
         # Another request already holds the lock; its stop_bot hasn't run, so
         # the DB still reads ACTIVE with a live binding.
         repo.acquire(get_current_env(), "staff_user001", "bot001", "other_user")
@@ -661,7 +765,7 @@ class TestRestartGuardOrchestration:
         """Once allocation completes (lock released), a later restart is accepted."""
         repo = FakeRestartLockRepo()
         svc = _make_service(repo)
-        bot = _make_bot(status="PENDING")
+        bot = _make_bot(status="ACTIVE")
         svc._repository.get_by_id_and_owner.return_value = bot
 
         # start_bot simulates completion: release the lock it was handed.
