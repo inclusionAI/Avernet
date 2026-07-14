@@ -917,7 +917,9 @@ class TestWaitForHermesHealth:
         """HTTP GET returns 200."""
         mock_response = MagicMock()
         mock_response.status_code = 200
-        with patch("requests.get", return_value=mock_response):
+        mock_session = MagicMock()
+        mock_session.get.return_value = mock_response
+        with patch("requests.Session", return_value=mock_session):
             result = pm.LocalProcessManager._wait_for_hermes_health(18700, 5.0)
         assert result is True
 
