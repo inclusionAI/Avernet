@@ -36,14 +36,23 @@ def _bind_bot_service(
     auth_rel=None,
     skill_set_factory=None,
     policy_service=None,
+    default_bot_passport_repair_service=None,
 ):
     from agentclaw.community.core.bot_management.repository.protocol import BotRepository
     from agentclaw.community.api.bot_service import BotServiceProtocol
+    from agentclaw.community.api.default_bot_passport_repair_service import (
+        DefaultBotPassportRepairServiceProtocol,
+    )
 
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotService, to=svc)
             binder.bind(BotServiceProtocol, to=svc)
+            if default_bot_passport_repair_service is not None:
+                binder.bind(
+                    DefaultBotPassportRepairServiceProtocol,
+                    to=default_bot_passport_repair_service,
+                )
             if bot_repo is not None:
                 binder.bind(BotRepository, to=bot_repo)
             if passport is not None:
@@ -159,6 +168,8 @@ def client(mock_bot_service, mock_passport):
             requested_entity_id, requested_entity_type,
         )
     )
+    repair_service = MagicMock()
+    app.state.default_bot_passport_repair_service = repair_service
     attach_injector(app, Injector([_bind_bot_service(
         mock_bot_service,
         bot_repo=MagicMock(),
@@ -166,6 +177,7 @@ def client(mock_bot_service, mock_passport):
         auth=mock_auth,
         auth_rel=MagicMock(),
         skill_set_factory=_stub_skill_set_factory(),
+        default_bot_passport_repair_service=repair_service,
     )]))
 
     with patch.object(router_module, "generate_bot_id", return_value="default"):
@@ -187,6 +199,8 @@ def admin_client(mock_bot_service, mock_passport):
     app.dependency_overrides[get_request_context] = lambda: _make_ctx(user_id=admin_id)
     mock_repo = MagicMock()
     mock_repo.exists_by_owner_and_bot_id.return_value = False
+    repair_service = MagicMock()
+    app.state.default_bot_passport_repair_service = repair_service
     attach_injector(app, Injector([_bind_bot_service(
         mock_bot_service,
         bot_repo=mock_repo,
@@ -194,6 +208,7 @@ def admin_client(mock_bot_service, mock_passport):
         auth=MagicMock(),
         auth_rel=MagicMock(),
         skill_set_factory=_stub_skill_set_factory(),
+        default_bot_passport_repair_service=repair_service,
     )]))
 
     with patch.object(router_module, "generate_bot_id", return_value="default"):
@@ -1024,6 +1039,121 @@ class TestCreateForOthers:
         svc.create_bot.side_effect = DeviceAllocationError("alloc fail")
         resp = tc.post("/api/bots/create-for-others", json={"target_user_id": "u1", "target_nick_name": "Alice"})
         assert resp.json()["error_code"] == 500
+
+
+# ---------------------------------------------------------------------------
+# POST /api/bots/repair-default-passport-for-others  (admin only)
+# ---------------------------------------------------------------------------
+
+class TestRepairDefaultPassportForOthers:
+    def test_permission_denied(self, client):
+        tc, _, _ = client
+        resp = tc.post(
+            "/api/bots/repair-default-passport-for-others",
+            json={"target_user_id": "172168", "target_env": "prod"},
+        )
+        assert resp.json()["error_code"] == 403
+
+    def test_success_forwards_trimmed_target_and_authenticated_operator(
+        self, admin_client
+    ):
+        tc, _, _, _ = admin_client
+        repair_service = tc.app.state.default_bot_passport_repair_service
+        repair_service.repair.return_value = {
+            "target_user_id": "172168",
+            "bot_id": "default",
+            "target_env": "prod",
+            "action": "repaired",
+            "runtime": {
+                "restart_required": True,
+                "restart_environment": "prod",
+            },
+        }
+
+        resp = tc.post(
+            "/api/bots/repair-default-passport-for-others",
+            json={"target_user_id": " 172168 ", "target_env": "prod"},
+        )
+
+        data = resp.json()
+        assert data["success"] is True
+        assert data["data"]["bot_id"] == "default"
+        assert data["data"]["runtime"]["restart_required"] is True
+        repair_service.repair.assert_called_once_with(
+            target_user_id="172168",
+            target_env="prod",
+            operator_user_id="100000",
+            operator_name="Test User",
+        )
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"target_user_id": "172168"},
+            {"target_user_id": "172168", "target_env": "gray"},
+            {"target_user_id": " ", "target_env": "prod"},
+            {
+                "target_user_id": "172168",
+                "target_env": "prod",
+                "bot_id": "another-bot",
+            },
+        ],
+    )
+    def test_invalid_request_returns_400_without_calling_service(
+        self, admin_client, payload
+    ):
+        tc, _, _, _ = admin_client
+        repair_service = tc.app.state.default_bot_passport_repair_service
+
+        resp = tc.post(
+            "/api/bots/repair-default-passport-for-others", json=payload
+        )
+
+        assert resp.json()["error_code"] == 400
+        repair_service.repair.assert_not_called()
+
+    def test_maps_typed_service_error(self, admin_client):
+        from agentclaw.community.core.bot_management.errors import (
+            DefaultBotPassportRepairError,
+        )
+
+        tc, _, _, _ = admin_client
+        repair_service = tc.app.state.default_bot_passport_repair_service
+        repair_service.repair.side_effect = DefaultBotPassportRepairError(
+            "owner relationship verification failed", error_code=5402
+        )
+
+        resp = tc.post(
+            "/api/bots/repair-default-passport-for-others",
+            json={"target_user_id": "172168", "target_env": "prod"},
+        )
+
+        assert resp.json() == {
+            "success": False,
+            "message": "owner relationship verification failed",
+            "error_code": 5402,
+            "data": None,
+        }
+
+    def test_operator_name_falls_back_to_authenticated_user_id(self, admin_client):
+        tc, _, _, _ = admin_client
+        tc.app.dependency_overrides[get_request_context] = lambda: RequestContext(
+            user_id="100000", nick_name=None
+        )
+        repair_service = tc.app.state.default_bot_passport_repair_service
+        repair_service.repair.return_value = {
+            "target_user_id": "172168",
+            "bot_id": "default",
+            "target_env": "prod",
+        }
+
+        resp = tc.post(
+            "/api/bots/repair-default-passport-for-others",
+            json={"target_user_id": "172168", "target_env": "prod"},
+        )
+
+        assert resp.json()["success"] is True
+        assert repair_service.repair.call_args.kwargs["operator_name"] == "100000"
 
 
 # ---------------------------------------------------------------------------

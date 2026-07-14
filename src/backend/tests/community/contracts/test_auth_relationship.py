@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 
+import pytest
+
 
 def test_local_auth_relationship_create_returns_mock_envelope(world) -> None:
     plugin = world.get(AuthRelationshipPlugin)
@@ -34,6 +36,32 @@ def test_local_auth_relationship_create_returns_mock_envelope(world) -> None:
 def test_local_auth_relationship_query_returns_empty(world) -> None:
     plugin = world.get(AuthRelationshipPlugin)
     assert plugin.query_relationships(agent_code="bot_x") == []
+
+
+def test_local_auth_relationship_explicit_env_operations_preserve_noop_contract(
+    world,
+) -> None:
+    plugin = world.get(AuthRelationshipPlugin)
+    assert plugin.create_relationship_for_env(
+        target_env="prod",
+        work_no="alice",
+        agent_code="bot_x",
+        operator_work_no="operator",
+        operator_name="Operator",
+    ) == {"auth_id": 0}
+    assert plugin.query_relationships_for_env(
+        target_env="pre", agent_code="bot_x", work_no="alice"
+    ) == []
+
+
+def test_local_auth_relationship_explicit_env_rejects_unknown_environment(
+    world,
+) -> None:
+    plugin = world.get(AuthRelationshipPlugin)
+    with pytest.raises(ValueError, match="target_env"):
+        plugin.query_relationships_for_env(
+            target_env="staging", agent_code="bot_x", work_no="alice"
+        )
 
 
 # ── community impl (B4) — no external registry, succeeds vacuously ──
