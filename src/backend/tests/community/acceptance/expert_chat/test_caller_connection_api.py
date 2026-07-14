@@ -11,6 +11,7 @@ import time
 import httpx
 import pytest
 
+from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from tests.community.acceptance._fixtures.live_personal_bot import fresh_id
 
 ADMIN_USER_ID = "100000"  # Configured as super_admin in test config
@@ -78,7 +79,7 @@ def _seed_successful_publish(
     version: int = 1,
     migration_path: str | None = None,
 ) -> int:
-    """Seed a SUCCESS publish record for a service bot."""
+    """Seed a successful publish record for a service bot."""
     import json
 
     ext = json.dumps({"migration_path": migration_path or "/nas/migration/test"})
@@ -92,7 +93,7 @@ def _seed_successful_publish(
                     "permission_owner, status, version, last_pub_id, env, gmt_create, gmt_modified, ext"
                     ") VALUES ("
                     "1, :source_bot_id, :publish_bot_id, :name, :owner_id, "
-                    "'owner', 'SUCCESS', :version, 0, :env, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, :ext"
+                    "'owner', :status, :version, 0, :env, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, :ext"
                     ") RETURNING id"
                 ),
                 "params": {
@@ -100,6 +101,7 @@ def _seed_successful_publish(
                     "publish_bot_id": bot_id,
                     "name": f"Publish v{version}",
                     "owner_id": owner_id,
+                    "status": PublishStatus.SUCCESS.value,
                     "version": version,
                     "env": "dev",
                     "ext": ext,
@@ -296,9 +298,7 @@ def test_expert_chat_caller_connection_success_first_call(live_backend):
         assert response.status_code == 200, response.text
         body = response.json()
 
-        # If BaaS is not fully configured or returns an error, skip the test
-        if body.get("success") is False:
-            pytest.skip(f"BaaS service not available for success path: {body.get('message')}")
+        assert body.get("success") is True, body
 
         # First call may return need_poll=True or success with connection
         # depending on BaaS workflow status
@@ -354,9 +354,7 @@ def test_expert_chat_caller_connection_force_upgrade_param(live_backend):
         assert response.status_code == 200, response.text
         body1 = response.json()
 
-        # If BaaS is not fully configured, skip the test
-        if body1.get("success") is False:
-            pytest.skip(f"BaaS service not available for success path: {body1.get('message')}")
+        assert body1.get("success") is True, body1
 
         # Second call without force_upgrade should return cached result
         response2 = admin_client.post(
@@ -432,9 +430,7 @@ def test_expert_chat_caller_connection_different_callers_separate(live_backend):
         assert response1.status_code == 200, response1.text
         body1 = response1.json()
 
-        # If BaaS is not fully configured, skip the test
-        if body1.get("success") is False:
-            pytest.skip(f"BaaS service not available for success path: {body1.get('message')}")
+        assert body1.get("success") is True, body1
 
         data1 = body1.get("data", {})
         assert "instance" in data1, body1
