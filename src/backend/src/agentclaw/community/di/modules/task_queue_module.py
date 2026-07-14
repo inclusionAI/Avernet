@@ -6,11 +6,12 @@ no ``@plugin_impl``), the handler registry, the enqueue service, and the
 ``discover_lifecycle_participants`` finds it at app startup and runs its
 ``startup()`` / ``shutdown()`` — no explicit lifecycle list to maintain.
 
-The ``HandlerRegistry`` singleton is created empty. Adopters register their
-handlers in their own ``Lifecycle.bootstrap()`` (which the lifespan runner
-completes before any ``startup()``), so the worker sees a populated registry
-before it claims. This iteration registers no handlers — an enabled worker
-simply idles; disabled (the default), it never starts.
+The ``HandlerRegistry`` singleton is created empty. BaaS and Teclaw register
+their production handlers in their own ``Lifecycle.bootstrap()`` methods
+(which the lifespan runner completes before any ``startup()``), so the worker
+sees a populated registry before it claims. The worker remains disabled by
+default until an environment provisions ``ac_task_queue`` and explicitly
+enables it.
 """
 from injector import Binder, Module, singleton
 

@@ -22,24 +22,29 @@ Flow (``provision``):
 The binding is recorded ``PENDING`` and the baas ``publish_id`` is stashed in
 ``device_props``. The container boots asynchronously, so the status isn't known
 yet — instead of reading through to baas on every status read, ``provision``
-hands the ``publish_id`` to a :class:`TeclawStatusReconciler`, which polls baas
-in the background and **persists** the resolved ``ACTIVE``/``FAILED`` onto the
-bot row + binding. The stored column is therefore the authoritative,
-eventually-consistent source of truth for a teclaw bot — list, detail, and
-search all read it directly (no per-read baas probe). See the
-``teclaw-status-reconciler`` spec.
+enqueues a durable publish-poll task. The task persists the resolved
+``ACTIVE``/``FAILED`` onto the bot row + binding, making the stored column the
+authoritative, eventually-consistent source of truth for list, detail, and
+search reads (no per-read baas probe).
 
 The container's *boot from artifact* and secbaas's ``start_device`` TECLAW arm
 are the teclaw owner's side (in parallel); this wiring is built against the
 contract and lights up end-to-end once the owner registers the teclaw template.
 """
+
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Iterable
 
 from agentclaw.community.core.devices.models import DeviceBindingStatus
+from agentclaw.community.core.bot_management.services.teclaw_publish_task_handler import (
+    TECLAW_CREATE_PUBLISH_POLL_TASK,
+    TECLAW_PUBLISH_TASK_DEADLINE_SECONDS,
+    build_teclaw_publish_poll_payload,
+)
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     TECLAW_DEVICE_PROVIDER,
 )
@@ -48,13 +53,18 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.bot_management.services.teclaw_status_reconciler import (
-        TeclawStatusReconciler,
+    from agentclaw.community.core.bot_management.repository.protocol import (
+        BotRepository,
     )
-    from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+    from agentclaw.community.core.devices.repository.protocol import (
+        DeviceBindingRepository,
+    )
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
     from agentclaw.community.core.service_bot.services.deploy.producer import (
         DeployArtifactProducerRouter,
+    )
+    from agentclaw.community.core.task_queue.services.task_queue_service import (
+        TaskQueueService,
     )
 
 logger = get_logger()
@@ -88,14 +98,16 @@ class TeclawProvisionService:
         baas_service: "BaasService",
         deploy_artifact_producer_router: "DeployArtifactProducerRouter",
         device_binding_repo: "DeviceBindingRepository",
-        status_reconciler: "TeclawStatusReconciler",
+        task_queue_service: "TaskQueueService",
+        bot_repository: "BotRepository",
         teclaw_template_uuid: str,
         teclaw_engine_types: Iterable[str] = DEFAULT_TECLAW_ENGINE_TYPES,
     ) -> None:
         self._baas = baas_service
         self._producer_router = deploy_artifact_producer_router
         self._device_binding_repo = device_binding_repo
-        self._status_reconciler = status_reconciler
+        self._task_queue_service = task_queue_service
+        self._bot_repository = bot_repository
         self._teclaw_template_uuid = teclaw_template_uuid
         self._teclaw_engine_types = {e.strip().lower() for e in teclaw_engine_types}
 
@@ -121,11 +133,15 @@ class TeclawProvisionService:
 
         Returns:
             :class:`TeclawProvisionResult` with the new binding id, the baas
-            ``bot_uuid`` (stored as binding ``device_id``), and PENDING status.
+            ``bot_uuid`` (stored as binding ``device_id``), and ``PENDING``
+            status after durable poll enqueue succeeds. If enqueue fails and
+            both failure-state writes succeed, returns ``FAILED``.
 
         Raises:
             BaasServiceError: provisioning failed (propagated to the caller, like
                 ``apply_device`` failures, so bot creation surfaces the error).
+            Exception: Persisting the bot or binding ``FAILED`` state after an
+                enqueue failure failed; the persistence error is propagated.
         """
         bot_id = str(bot.get("bot_id", ""))
         entity_id = bot.get("entity_id", "")
@@ -221,6 +237,39 @@ class TeclawProvisionService:
             raise
 
         try:
+            self._task_queue_service.enqueue(
+                TECLAW_CREATE_PUBLISH_POLL_TASK,
+                build_teclaw_publish_poll_payload(
+                    binding_id=binding_id,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    publish_id=int(publish_id),
+                    started_at_epoch_s=time.time(),
+                ),
+                deadline_seconds=TECLAW_PUBLISH_TASK_DEADLINE_SECONDS,
+            )
+        except Exception as exc:
+            logger.exception(
+                "[TeclawProvisionService.provision] enqueue publish poll failed: "
+                "bot_id=%s binding_id=%s publish_id=%s error=%s",
+                bot_id,
+                binding_id,
+                publish_id,
+                exc,
+            )
+            self._mark_enqueue_failed(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                binding_id=binding_id,
+            )
+            return TeclawProvisionResult(
+                binding_id=binding_id,
+                device_id=bot_uuid,
+                status=DeviceBindingStatus.FAILED.value,
+                config_artifact=config_artifact,
+            )
+
+        try:
             updated = self._baas.update_teclaw_outbound_rule_by_bot_uuid(
                 bot_uuid,
                 agent_pass_token=agent_pass_token,
@@ -251,22 +300,30 @@ class TeclawProvisionService:
             binding_id,
         )
 
-        # The container boots asynchronously — its status is PENDING until BaaS
-        # finishes. Kick off a background reconciler that polls the publish
-        # workflow and writes ACTIVE/FAILED back to the bot row + binding, so the
-        # stored status becomes authoritative (no per-read baas probe). Best-effort
-        # and fire-and-forget — a reconcile failure never blocks the create.
-        self._status_reconciler.start(
-            publish_id=publish_id,
-            bot_id=bot_id,
-            owner_id=owner_id,
-            binding_id=binding_id,
-        )
         return TeclawProvisionResult(
             binding_id=binding_id,
             device_id=bot_uuid,
             status=DeviceBindingStatus.PENDING,
             config_artifact=config_artifact,
+        )
+
+    def _mark_enqueue_failed(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        binding_id: int,
+    ) -> None:
+        updated = self._bot_repository.update_by_owner(
+            bot_id,
+            owner_id,
+            {"status": DeviceBindingStatus.FAILED.value},
+        )
+        if updated is None:
+            raise RuntimeError("bot status update matched no record")
+        self._device_binding_repo.update_status(
+            binding_id=binding_id,
+            status=DeviceBindingStatus.FAILED.value,
         )
 
     def _best_effort_destroy(

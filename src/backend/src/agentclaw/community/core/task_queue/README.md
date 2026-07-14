@@ -39,12 +39,11 @@ deadline.
 
 ## Status
 
-Disabled by default (`task_queue_worker.enabled=false`). This iteration ships
-the reusable component only — no production handler is registered. The prod
-`ac_task_queue` table is created manually (no migrations here); mirror
-`repository/models.py`, with `gmt_create`/`gmt_modified` as
-`DEFAULT CURRENT_TIMESTAMP [ON UPDATE CURRENT_TIMESTAMP]` so the DB manages
-them. Provision the table before enabling.
+The BaaS and Teclaw lifecycle components register production handlers during
+`bootstrap()` in every deployment profile. The worker processes them only when
+`task_queue_worker.enabled=true`. The production `ac_task_queue` table must be
+provisioned before enabling the worker; local and test SQLite schema bootstrap
+creates it from the shared ORM metadata.
 
 ## Context Boundary
 

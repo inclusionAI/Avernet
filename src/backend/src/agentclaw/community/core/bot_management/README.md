@@ -12,6 +12,8 @@ provides:
   - "EngineResolver"
   - "DataInitService"
   - "RenderScreenService"
+  - "TeclawProvisionService"
+  - "TeclawPublishTaskLifecycle"
 consumes:
   - "DeviceAccessor"
   - "PassportPlugin"
@@ -20,6 +22,8 @@ consumes:
   - "BotPublishService"
   - "SkillCenter factories"
   - "PolicyService"
+  - "TaskQueueService"
+  - "HandlerRegistry"
 internal_dependencies:
   - agentclaw.community.api.policy_service
   - agentclaw.community.core.base
@@ -36,6 +40,7 @@ internal_dependencies:
   - agentclaw.community.core.workspace
   - agentclaw.community.di
   - agentclaw.community.di.modules
+  - agentclaw.community.kernel.lifecycle
   - agentclaw.community.log
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.drm

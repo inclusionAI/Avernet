@@ -7,9 +7,6 @@ from typing import cast  # noqa: UP035 - injector binding key matches provider s
 from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.bot_management.services.teclaw_status_reconciler import (
-    TeclawStatusReconciler,
-)
 from agentclaw.community.core.devices.protocols import BotQueryProtocol
 from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
 from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_policy import (
@@ -36,7 +33,6 @@ from agentclaw.community.di import config as cfg
 from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
     BotPublishRepositoryProtocol,
 )
-from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
 )
@@ -143,23 +139,6 @@ class SingleboxDevicesModule(Module):
             sandbox_client=sandbox_client,
             publish_repo=bot_publish_repo,
             bot_repo=bot_repository,
-        )
-
-    @singleton
-    @provider
-    @inject
-    def teclaw_status_reconciler(
-        self,
-        baas_service: BaasService,
-        bot_repository: BotRepository,
-        device_binding_repo: DeviceBindingRepository,
-    ) -> TeclawStatusReconciler:
-        """Keep background reconciliation disabled in the local stack."""
-        return TeclawStatusReconciler(
-            baas_service=baas_service,
-            bot_repository=bot_repository,
-            device_binding_repo=device_binding_repo,
-            schedule=lambda _fn, _delay: None,
         )
 
     @singleton

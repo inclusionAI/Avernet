@@ -31,9 +31,6 @@ from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.data_init_service import DataInitService
-from agentclaw.community.core.bot_management.services.teclaw_status_reconciler import (
-    TeclawStatusReconciler,
-)
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
@@ -216,29 +213,6 @@ class TestingDevicesModule(Module):
                 )
 
         return _LocalArcaBotCreateBaasRolloutPolicy()
-
-    @singleton
-    @provider
-    def teclaw_status_reconciler(self) -> TeclawStatusReconciler:
-        """No-thread reconciler for test boots.
-
-        The real ``TeclawProvisionService.provision`` calls ``reconciler.start``,
-        which would schedule BaaS polls on the shared scheduler thread for up to
-        10 minutes — in tests those polls would race the per-case SQLite teardown
-        (and slow / spam the run). Wire a reconciler whose ``schedule`` seam is a
-        no-op so ``start`` records the intent but never starts the timer thread.
-        The reconciler's own poll / persist / map logic is unit-tested directly in
-        ``test_teclaw_status_reconciler.py``; its deps are unused here (``_poll_step``
-        is never invoked), so a ``MagicMock`` triple suffices.
-        """
-        from unittest.mock import MagicMock
-
-        return TeclawStatusReconciler(
-            baas_service=MagicMock(),
-            bot_repository=MagicMock(),
-            device_binding_repo=MagicMock(),
-            schedule=lambda _fn, _delay: None,
-        )
 
     @singleton
     @provider

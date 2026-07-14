@@ -38,7 +38,7 @@ PR + DDL-parity doc):
 
 1. ``gmt_modified=func.now()`` set DB-side on every UPDATE — in
    this body's values dicts for both ``EntityDeviceBinding`` AND
-   the three cross-table ``BotModel`` writes (``update_bot_*``).
+   the three legacy cross-table ``BotModel`` writes (``update_bot_*``).
    The old local twin stamped a Python ``datetime.utcnow()`` value
    only on ``EntityDeviceBinding``; the old prod twin omitted the
    column from every UPDATE SQL relying on the MySQL
@@ -52,11 +52,17 @@ PR + DDL-parity doc):
 2. ``get_active_engine_by_device_id`` fallback uses
    ``DEFAULT_ENGINE_TYPE`` (the project constant prod imports), not
    the local twin's hardcoded ``"openclaw"`` literal.
-3. Cross-table writes to ``ac_bots``
+3. Legacy cross-table writes to ``ac_bots``
    (``update_bot_start_status`` / ``update_bot_status_on_device_active``
    / ``update_bot_status_on_device_failed``) **propagate exceptions**
    to the caller, matching prod. The old local twin's
    ``"Failed (local mode):"`` warn-and-swallow is dropped.
+
+The Teclaw terminal transition additionally upgrades its fresh ORM Session out
+of prod ``AUTOCOMMIT`` before the first SELECT, then explicitly commits or
+rolls back the guarded bot + binding transaction. SQLite uses
+``BEGIN IMMEDIATE`` because it ignores ``FOR UPDATE``. This path is
+intentionally separate from the three legacy adopt-prod helpers above.
 
 All queries that filter by ``bot_id`` / ``owner_id`` / ``device_id`` are env-scoped via
 ``self._binding_env()`` (EntityDeviceBinding.env) or ``self._bot_env()`` (BotModel.env),
@@ -95,6 +101,13 @@ class _DeviceBindingStatus:
     ACTIVE = "ACTIVE"
     FAILED = "FAILED"
     RELEASED = "RELEASED"
+
+
+def _normalize_isolation_level(value: str) -> str:
+    """Normalize dialect spelling before comparing isolation levels."""
+    return " ".join(
+        value.replace("_", " ").replace("-", " ").upper().split()
+    )
 
 
 def _to_record(m: EntityDeviceBinding | None) -> DeviceBindingRecord | None:
@@ -435,6 +448,110 @@ class DeviceRepository(_DeviceBindingRepositoryProtocol):
                 },
                 synchronize_session=False,
             )
+
+    def transition_teclaw_publish_terminal(
+        self,
+        *,
+        binding_id: int,
+        bot_id: str,
+        owner_id: str,
+        publish_id: int,
+        status: str,
+    ) -> bool:
+        """Guard and persist a Teclaw terminal result in one transaction."""
+        with self._db.orm_session() as db:
+            try:
+                if db.in_transaction():
+                    raise RuntimeError(
+                        "Teclaw terminal transition requires a fresh ORM "
+                        "Session before selecting transaction isolation"
+                    )
+                dialect_name = db.get_bind().dialect.name
+                isolation_level = (
+                    "SERIALIZABLE"
+                    if dialect_name == "sqlite"
+                    else "READ COMMITTED"
+                )
+                connection = db.connection(
+                    execution_options={"isolation_level": isolation_level}
+                )
+                actual_isolation = _normalize_isolation_level(
+                    connection.get_isolation_level()
+                )
+                expected_isolation = _normalize_isolation_level(
+                    isolation_level
+                )
+                if actual_isolation != expected_isolation:
+                    db.rollback()
+                    raise RuntimeError(
+                        "Teclaw terminal transaction isolation mismatch: "
+                        f"expected {expected_isolation}, got "
+                        f"{actual_isolation}"
+                    )
+                if dialect_name == "sqlite":
+                    connection.exec_driver_sql("BEGIN IMMEDIATE")
+
+                binding = (
+                    db.query(EntityDeviceBinding)
+                    .filter(EntityDeviceBinding.id == binding_id)
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if binding is None:
+                    db.rollback()
+                    return False
+                try:
+                    props = (
+                        json.loads(binding.device_props)
+                        if isinstance(binding.device_props, str)
+                        else (binding.device_props or {})
+                    )
+                except (json.JSONDecodeError, TypeError):
+                    props = {}
+                current_publish_id = (
+                    props.get("publish_id")
+                    if isinstance(props, dict)
+                    else None
+                )
+                if (
+                    binding.status != _DeviceBindingStatus.PENDING
+                    or binding.device_provider != "teclaw"
+                    or current_publish_id is None
+                    or str(current_publish_id) != str(publish_id)
+                ):
+                    db.rollback()
+                    return False
+
+                bot_rowcount = (
+                    db.query(BotModel)
+                    .filter(
+                        BotModel.bot_id == bot_id,
+                        BotModel.owner_id == owner_id,
+                        BotModel.binding_id == binding_id,
+                        BotModel.is_delete == 0,
+                        self._bot_env(),
+                    )
+                    .update(
+                        {
+                            BotModel.status: status,
+                            BotModel.gmt_modified: func.now(),
+                        },
+                        synchronize_session=False,
+                    )
+                )
+                if bot_rowcount != 1:
+                    raise RuntimeError(
+                        "Teclaw terminal bot status update expected exactly "
+                        f"one record, matched {bot_rowcount}"
+                    )
+
+                binding.status = status
+                binding.gmt_modified = func.now()
+                db.commit()
+                return True
+            except Exception:
+                db.rollback()
+                raise
 
     def reuse_binding(
         self,

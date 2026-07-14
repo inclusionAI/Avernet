@@ -487,10 +487,9 @@ class TaskQueueWorkerConfig:
 
     Sourced from the ``task_queue_worker`` block of ``user_config``.
 
-    Disabled by default: with no adopter registering handlers and no prod
-    ``ac_task_queue`` table provisioned, a running loop would be pointless
-    (and could crash-loop on a missing table). Flip ``enabled: true`` per-env
-    only once a handler is wired and the table exists.
+    BaaS and Teclaw production handlers are registered. The worker remains
+    disabled by default until an environment provisions ``ac_task_queue`` and
+    explicitly sets ``enabled: true``.
 
     - ``poll_interval_seconds`` / ``poll_jitter_seconds`` — idle cadence when a
       poll returns a non-full batch (jitter avoids fleet lockstep stampedes).
