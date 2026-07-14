@@ -1,0 +1,45 @@
+# BCSFuse Open-Source Docker Compose
+# OPENCORE-P1-G8 Docker Deployment Gate
+#
+# Usage:
+#   docker-compose up -d
+#   docker-compose logs -f bcsfuse
+#   docker-compose down
+#
+# Test:
+#   curl http://localhost:8765/health
+#   curl http://localhost:8765/ready
+#
+# Run tests in container:
+#   docker-compose exec bcsfuse python -m pytest tests/ -v
+
+version: '3.8'
+
+services:
+  bcsfuse:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: bcsfuse-opencore:p1-g8
+    container_name: bcsfuse-opencore-g8
+    ports:
+      - "8765:8765"
+    environment:
+      - BCSFUSE_PROVIDER_MODE=dev_smoke
+      - BCSFUSE_PORT=8765
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    volumes:
+      # Mount tests for execution (read-only)
+      - ./tests:/app/tests:ro
+    restart: unless-stopped
+    networks:
+      - bcsfuse-network
+
+networks:
+  bcsfuse-network:
+    driver: bridge

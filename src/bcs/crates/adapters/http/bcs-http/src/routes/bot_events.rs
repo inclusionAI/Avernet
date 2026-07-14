@@ -339,14 +339,9 @@ fn header_required(headers: &HeaderMap, name: &'static str) -> Result<String, Bo
 }
 
 fn bearer_token(headers: &HeaderMap) -> Result<String, BotEventRouteError> {
-    headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| BotEventRouteError::unauthorized("valid bot runtime token is required"))
+    crate::headers::extract_bearer_token(headers).ok_or_else(|| {
+        BotEventRouteError::unauthorized("valid bot runtime token is required")
+    })
 }
 
 async fn credential_from_headers(

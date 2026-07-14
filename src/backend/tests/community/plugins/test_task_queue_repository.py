@@ -198,6 +198,27 @@ def test_fail_is_terminal(repo):
     assert stored.status == TaskStatus.FAILED and stored.last_error == "boom"
 
 
+def test_renew_lease_keeps_claim_alive_past_original_lease(repo):
+    rec = _enqueue(repo)
+    _claim(repo, "W", lease=1)
+    assert repo.renew_lease(task_id=rec.id, worker_id="W", lease_seconds=60) is True
+    time.sleep(2.1)  # past the original 1s lease
+    # Renewed to 60s → another worker still cannot reclaim it.
+    assert _claim(repo, "B", lease=60) == []
+    stored = repo.get_by_id(rec.id)
+    assert stored.status == TaskStatus.RUNNING and stored.claimed_by == "W"
+
+
+def test_renew_lease_false_for_stale_worker(repo):
+    rec = _enqueue(repo)
+    _claim(repo, "A", lease=1)
+    time.sleep(2.1)
+    _claim(repo, "B", lease=60)  # B takes over
+    assert repo.renew_lease(task_id=rec.id, worker_id="A", lease_seconds=60) is False
+    stored = repo.get_by_id(rec.id)
+    assert stored.status == TaskStatus.RUNNING and stored.claimed_by == "B"
+
+
 # ── deadline / timeout (DB-side) ────────────────────────────────────────────
 
 def test_claim_times_out_past_deadline_task_without_returning_it(repo):

@@ -2,35 +2,43 @@
 
 All admin/ops endpoints under ``/api/economy/governance/admin/*``:
 
-  - /admin/records/delete           应急删除 (record_daily / notify_log)
-  - /admin/whitelist/delete         删除白名单条目
-  - /admin/review                   审批审批单 (§7.5.2)
-  - /admin/pause                    暂停审批单 (§7.5.1)
-  - /admin/emergency-close          紧急关闭审批单 (§6.3)
-  - /admin/trigger-scan             手动触发 cron tick (§7.3)
-  - /admin/emergency (POST)         紧急制动 (pause/resume/bulk-whitelist/cancel-pending)
-  - /admin/emergency (GET)          查询紧急状态
-  - /admin/scan-and-deliver         扫描+投递 (指定收件人, 可 dry-run)
+  - /admin/tickets:close          关闭工单(单/多,body ticket_ids 循环 emergency_close)
+  - /admin/tickets:close-all      全部关单(dispatch:cancel_pending / close_all_open)
+  - /admin/tickets:deliver        按 worker_id 精准投递(不重跑状态机)
+  - /admin/whitelist:delete       删除白名单条目
+  - /admin/whitelist:bulk-add     批量加白名单
+  - /admin/brake (POST)           全局制动 toggle(pause/resume)
+  - /admin/brake (GET)            查询制动状态
+  - /admin/records:delete         数据维护/清理 (record_daily / notify_log)
+  - /admin/trigger-scan           手动触发 cron tick (§7.3)
+  - /admin/scan-and-deliver       扫描+投递 (指定收件人, 可 dry-run)
+
+审批能力(review)已迁出至 ``workflow_router``(见
+``/api/economy/governance/workflow/*``)。emergency 命名已退场:
+真正的制动只是 ``/admin/brake``,工单直关归 ``/admin/tickets:close``。
+
+路径风格:全 body/query 驱动,零 path 参数。
 
 DB logic is fully delegated to :class:`GovernanceAdminService` — this router
 never opens ORM sessions or queries models directly.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
 from agentclaw.community.adapters.http.economy.schemas import (
-    AdminEmergencyCloseRequest,
-    AdminPauseRequest,
-    AdminReviewRequest,
-    AdminReviewResponse,
     ApiResponse,
-    EmergencyRequest,
-    EmergencyStateResponse,
+    BrakeStateResponse,
+    BrakeToggleRequest,
     RecordsDeleteRequest,
+    TicketsCloseAllRequest,
+    TicketsCloseRequest,
+    TicketsDeliverRequest,
+    WhitelistBulkAddRequest,
     WhitelistDeleteRequest,
 )
 from agentclaw.community.api.governance_service import (
@@ -60,43 +68,226 @@ _ScanService = GovernanceBotServiceProtocol
 # ---------------------------------------------------------------------------
 
 
-def _cron_tick_to_dict(summary: object) -> dict:
-    """Serialize a CronTickSummary to the dict shape returned by API."""
-    return {
-        "run_id": summary.run_id,
-        "sent_count": summary.sent_count,
-        "failed_count": summary.failed_count,
-        "cancelled_count": summary.cancelled_count,
-        "reminders_created": summary.reminders_created,
-        "schedule_due_count": summary.schedule_due_count,
-        "timeout_recovered": summary.timeout_recovered,
-        "errors": summary.errors,
-        "dry_run": summary.dry_run,
-        "duration_seconds": summary.duration_seconds,
-    }
+def _raise_on_admin_error(result: dict | object) -> None:
+    """Raise HTTPException if the admin-service result contains an error.
+
+    Accepts both ``dict`` (legacy) and ``TicketActionOutcome`` dataclass.
+    """
+    if isinstance(result, dict):
+        if "error" in result:
+            error_code = result.get("error_code", "")
+            status_code = 404 if error_code == "NOT_FOUND" else 400
+            raise HTTPException(status_code=status_code, detail=result["error"])
+    else:
+        # TicketActionOutcome / EmergencyState / BulkOperationResult
+        error = getattr(result, "error", None)
+        if error:
+            error_code = getattr(result, "error_code", "")
+            status_code = 404 if error_code == "NOT_FOUND" else 400
+            raise HTTPException(status_code=status_code, detail=error)
 
 
-def _raise_on_admin_error(result: dict) -> None:
-    """Raise HTTPException if the admin-service result contains an error."""
-    if "error" in result:
-        error_code = result.get("error_code", "")
-        status_code = 404 if error_code == "NOT_FOUND" else 400
-        raise HTTPException(status_code=status_code, detail=result["error"])
-
-
-# ── Records delete (emergency) ────────────────────────────────────────────
+# ── Tickets: close (单/多) ────────────────────────────────────────────────
 
 
 @admin_router.post(
-    "/admin/records/delete",
-    summary="应急删除 (record_daily / notify_log)",
+    "/admin/tickets:close",
+    summary="关闭工单(单/多,body ticket_ids 循环 emergency_close)",
+)
+async def tickets_close(
+    body: TicketsCloseRequest,
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+) -> ApiResponse:
+    """Close one or more governance tickets (emergency_close 循环)。
+
+    单条/批量统一入参:handler 循环调 ``admin_svc.emergency_close``(已委托
+    ``lifecycle_svc``,关工单 + cancel_pending 由 driver 编排)。禁止直调 repo。
+    """
+    operator = ctx.user_id
+
+    def _close_all():
+        results = []
+        for ticket_id in body.ticket_ids:
+            result = admin_svc.emergency_close(
+                ticket_id=ticket_id,
+                admin_id=operator,
+                reason=body.reason,
+            )
+            results.append(result.to_dict())
+        return results
+
+    results = await asyncio.to_thread(_close_all)
+    return ApiResponse(success=True, data=results)
+
+
+# ── Tickets: close-all (dispatch 复用状态机收口后的两方法) ──────────────
+
+
+@admin_router.post(
+    "/admin/tickets:close-all",
+    summary="全部关单(dispatch:cancel_pending 仅未响应 / close_all_open 全量)",
+)
+async def tickets_close_all(
+    body: TicketsCloseAllRequest,
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+) -> ApiResponse:
+    """Close all active governance tickets (emergency bulk)。
+
+    ``only_unresponded=true`` → ``cancel_pending``(仅未响应,EMERGENCY_CLOSED,
+    label=cancelled);否则 → ``close_all_open``(全量含已响应,ADMIN_CLOSED,
+    label=closed)。两方法经状态机 Task 8 已联合编排 task_record 主体 +
+    notify_log 通知 + audit。cooldown_days 走 config(无入参)。
+    """
+    operator = ctx.user_id
+    if body.only_unresponded:
+        result = await asyncio.to_thread(
+            admin_svc.cancel_pending, reason=body.reason, operator=operator,
+        )
+    else:
+        result = await asyncio.to_thread(
+            admin_svc.close_all_open, reason=body.reason, operator=operator,
+        )
+    return ApiResponse(success=True, data=result.to_dict())
+
+
+# ── Tickets: deliver by worker (精准投递,不重跑状态机) ──────────────────
+
+
+@admin_router.post(
+    "/admin/tickets:deliver",
+    summary="按 worker_id 精准投递 pending 通知(不重跑状态机)",
+)
+async def tickets_deliver(
+    body: TicketsDeliverRequest,
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+) -> ApiResponse:
+    """Deliver pending notifications scoped to one worker_id。
+
+    与 scan-and-deliver(随机批量兜底)职责不同:本端点按 worker 精准取数,
+    不跑 cron tick、不重跑状态机(pending 已躺 notify_log)。
+    """
+    data = await asyncio.to_thread(
+        admin_svc.deliver_by_worker,
+        worker_id=body.worker_id,
+        override_recipient=body.override_recipient,
+        dry_run=body.dry_run,
+        channel=body.channel,
+    )
+    return ApiResponse(success=True, data=data)
+
+
+# ── Whitelist ──────────────────────────────────────────────────────────────
+
+
+@admin_router.post(
+    "/admin/whitelist:delete",
+    summary="删除白名单条目",
+)
+async def delete_whitelist(
+    body: WhitelistDeleteRequest,
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+) -> ApiResponse:
+    """Delete governance whitelist entries by (bot_id, owner_id) pairs."""
+    if not body.bot_owner_pairs or len(body.bot_owner_pairs) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="bot_owner_pairs is required",
+        )
+
+    def _delete_all():
+        results = []
+        for pair in body.bot_owner_pairs:
+            result = admin_svc.delete_whitelist_entry(
+                bot_id=pair.bot_id,
+                owner_id=pair.owner_id,
+                reason=body.reason,
+                operator=ctx.user_id,
+            )
+            results.append(result)
+        return results
+
+    results = await asyncio.to_thread(_delete_all)
+    return ApiResponse(success=True, data=results)
+
+
+@admin_router.post(
+    "/admin/whitelist:bulk-add",
+    summary="批量加白名单",
+)
+async def whitelist_bulk_add(
+    body: WhitelistBulkAddRequest,
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+) -> ApiResponse:
+    """Bulk whitelist bots — delegates to ``admin_svc.bulk_whitelist``."""
+    operator = ctx.user_id
+    result = await asyncio.to_thread(
+        admin_svc.bulk_whitelist,
+        bot_ids=body.bot_ids,
+        reason=body.reason,
+        operator=operator,
+    )
+    return ApiResponse(success=True, data=result)
+
+
+# ── Brake (全局制动) ──────────────────────────────────────────────────────
+
+
+@admin_router.post(
+    "/admin/brake",
+    summary="全局制动 toggle(pause/resume)",
+)
+async def brake_toggle(
+    body: BrakeToggleRequest,
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+) -> ApiResponse:
+    """Toggle global governance brake: ``enabled=true`` → pause, ``false`` → resume.
+
+    审计操作人取自鉴权上下文 ``ctx.user_id``(不允许 body 顶替)。
+    """
+    operator = ctx.user_id
+    if body.enabled:
+        await asyncio.to_thread(admin_svc.pause, reason=body.reason, operator=operator)
+        return ApiResponse(success=True, message="Paused")
+    await asyncio.to_thread(admin_svc.resume, reason=body.reason, operator=operator)
+    return ApiResponse(success=True, message="Resumed")
+
+
+@admin_router.get(
+    "/admin/brake",
+    summary="查询制动状态",
+)
+async def brake_state(
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+) -> ApiResponse:
+    """Query current governance brake state."""
+    del ctx  # RequestContext 仅用于走 AuthPlugin 鉴权链路
+    state = await asyncio.to_thread(admin_svc.get_state)
+    return ApiResponse(
+        success=True,
+        data=BrakeStateResponse(**state.to_dict()).model_dump(),
+    )
+
+
+# ── Records delete (数据维护/清理) ────────────────────────────────────────
+
+
+@admin_router.post(
+    "/admin/records:delete",
+    summary="数据维护/清理 (record_daily / notify_log)",
 )
 async def delete_records(
     body: RecordsDeleteRequest,
     ctx: RequestContext = Depends(get_request_context),
     admin_svc: _AdminSvc = Injected(_AdminSvc),
 ) -> ApiResponse:
-    """Emergency delete for record_daily or notify_log.
+    """Maintenance delete for record_daily or notify_log.
 
     ``dry_run`` defaults to True — only counts matches without deleting.
     Set ``dry_run=false`` to actually delete.
@@ -113,106 +304,8 @@ async def delete_records(
             detail=f"Unknown table: {body.table!r}. Use 'record_daily' or 'notify_log'",
         )
 
-    data = admin_svc.delete_records(body.model_dump(), operator=ctx.user_id)
+    data = await asyncio.to_thread(admin_svc.delete_records, body.model_dump(), operator=ctx.user_id)
     return ApiResponse(success=True, data=data)
-
-
-# ── Whitelist delete ───────────────────────────────────────────────────────
-
-
-@admin_router.post(
-    "/admin/whitelist/delete",
-    summary="删除白名单条目",
-)
-async def delete_whitelist(
-    body: WhitelistDeleteRequest,
-    ctx: RequestContext = Depends(get_request_context),
-    admin_svc: _AdminSvc = Injected(_AdminSvc),
-) -> ApiResponse:
-    """Delete governance whitelist entries by ID or (bot_id, owner_id) pair."""
-    has_ids = body.ids and len(body.ids) > 0
-    has_pairs = body.bot_owner_pairs and len(body.bot_owner_pairs) > 0
-    if not has_ids and not has_pairs:
-        raise HTTPException(
-            status_code=400,
-            detail="At least one of ids / bot_owner_pairs is required",
-        )
-
-    body_dump = body.model_dump()
-    # Convert Pydantic models in bot_owner_pairs to plain dicts
-    if has_pairs and body.bot_owner_pairs:
-        body_dump["bot_owner_pairs"] = [p.model_dump() for p in body.bot_owner_pairs]
-
-    data = admin_svc.delete_whitelist_entries(body_dump, operator=ctx.user_id)
-    return ApiResponse(success=True, data=data)
-
-
-# ── Admin: review / pause / emergency-close ───────────────────────────────
-
-
-@admin_router.post(
-    "/admin/review",
-    summary="审批审批单 (§7.5.2)",
-)
-async def admin_review(
-    body: AdminReviewRequest,
-    ctx: RequestContext = Depends(get_request_context),
-    admin_svc: _AdminSvc = Injected(_AdminSvc),
-) -> ApiResponse:
-    """Admin review: waiting_review → closed (§7.5.2)."""
-    result = admin_svc.review_ticket(
-        ticket_id=body.ticket_id,
-        action=body.action,
-        admin_id=body.admin_id or ctx.user_id,
-        remark=body.remark,
-    )
-    _raise_on_admin_error(result)
-    return ApiResponse(
-        success=True,
-        data=AdminReviewResponse(
-            ticket_id=result.get("ticket_id", ""),
-            governance_status=result.get("governance_status", ""),
-            close_reason=result.get("close_reason"),
-        ).model_dump(),
-    )
-
-
-@admin_router.post(
-    "/admin/pause",
-    summary="暂停审批单 (§7.5.1)",
-)
-async def admin_pause(
-    body: AdminPauseRequest,
-    ctx: RequestContext = Depends(get_request_context),
-    admin_svc: _AdminSvc = Injected(_AdminSvc),
-) -> ApiResponse:
-    """Admin pause: open/scheduled → waiting_review (§7.5.1)."""
-    result = admin_svc.pause_ticket(
-        ticket_id=body.ticket_id,
-        admin_id=body.admin_id or ctx.user_id,
-        reason=body.reason,
-    )
-    _raise_on_admin_error(result)
-    return ApiResponse(success=True, data=result)
-
-
-@admin_router.post(
-    "/admin/emergency-close",
-    summary="紧急关闭审批单 (§6.3)",
-)
-async def admin_emergency_close(
-    body: AdminEmergencyCloseRequest,
-    ctx: RequestContext = Depends(get_request_context),
-    admin_svc: _AdminSvc = Injected(_AdminSvc),
-) -> ApiResponse:
-    """Emergency close: any non-closed ticket → closed, no cooldown."""
-    result = admin_svc.emergency_close(
-        ticket_id=body.ticket_id,
-        admin_id=body.admin_id or ctx.user_id,
-        reason=body.reason,
-    )
-    _raise_on_admin_error(result)
-    return ApiResponse(success=True, data=result)
 
 
 # ── Trigger scan / cron tick ──────────────────────────────────────────────
@@ -229,75 +322,11 @@ async def trigger_scan(
 ) -> ApiResponse:
     """Manually trigger a governance cron tick (§7.3)."""
     try:
-        summary = await scan_svc.process_cron_tick(dry_run=dry_run)
-        return ApiResponse(success=True, data=_cron_tick_to_dict(summary))
+        summary = await asyncio.to_thread(scan_svc.process_cron_tick, dry_run=dry_run)
+        return ApiResponse(success=True, data=summary.to_dict())
     except Exception:
         log.exception("[EconomyGovernance] trigger-scan failed")
         return ApiResponse(success=False, message="Scan failed", error_code="SCAN_ERROR")
-
-
-# ── Emergency brake ───────────────────────────────────────────────────────
-
-
-@admin_router.post(
-    "/admin/emergency",
-    summary="紧急制动",
-)
-async def emergency_action(
-    body: EmergencyRequest,
-    ctx: RequestContext = Depends(get_request_context),
-    admin_svc: _AdminSvc = Injected(_AdminSvc),
-) -> ApiResponse:
-    """Emergency brake / admin actions: pause / resume / bulk-whitelist / cancel-pending / close-all-open."""
-    if body.action == "pause":
-        admin_svc.pause(reason=body.reason, operator=body.operator)
-        return ApiResponse(success=True, message="Paused")
-
-    if body.action == "resume":
-        admin_svc.resume(reason=body.reason, operator=body.operator)
-        return ApiResponse(success=True, message="Resumed")
-
-    if body.action == "bulk-whitelist":
-        if not body.bot_ids:
-            raise HTTPException(status_code=400, detail="bot_ids required for bulk-whitelist")
-        result = admin_svc.bulk_whitelist(
-            bot_ids=body.bot_ids,
-            reason=body.reason,
-            operator=body.operator,
-        )
-        return ApiResponse(success=True, data=result)
-
-    if body.action == "cancel-pending":
-        result = admin_svc.cancel_pending(
-            reason=body.reason,
-            operator=body.operator,
-        )
-        return ApiResponse(success=True, data=result)
-
-    if body.action == "close-all-open":
-        result = admin_svc.close_all_open(
-            reason=body.reason,
-            operator=body.operator,
-        )
-        return ApiResponse(success=True, data=result)
-
-    raise HTTPException(status_code=400, detail=f"Unknown action: {body.action}")
-
-
-@admin_router.get(
-    "/admin/emergency",
-    summary="查询紧急状态",
-)
-async def get_emergency_state(
-    ctx: RequestContext = Depends(get_request_context),
-    admin_svc: _AdminSvc = Injected(_AdminSvc),
-) -> ApiResponse:
-    """Query current emergency state."""
-    state = admin_svc.get_state()
-    return ApiResponse(
-        success=True,
-        data=EmergencyStateResponse(**state).model_dump(),
-    )
 
 
 # ── Scan and deliver (testing tool) ───────────────────────────────────────
@@ -348,14 +377,15 @@ async def scan_and_deliver(
     scan_summary: dict = {}
     if not skip_scan:
         try:
-            result = await scan_svc.process_cron_tick(dry_run=scan_dry_run)
-            scan_summary = _cron_tick_to_dict(result)
+            result = await asyncio.to_thread(scan_svc.process_cron_tick, dry_run=scan_dry_run)
+            scan_summary = result.to_dict()
         except Exception:
             log.exception("[scan-and-deliver] Cron tick phase failed")
             scan_summary = {"error": "Cron tick failed — see backend logs"}
 
     # ---- Phase 2-5: delegate to service ----
-    data = await admin_svc.deliver_pending(
+    data = await asyncio.to_thread(
+        admin_svc.deliver_pending,
         scan_svc=scan_svc,
         override_recipient=override_recipient,
         dry_run=dry_run,

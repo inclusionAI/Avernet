@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/ExecutionPacket.json",
+  "title": "ExecutionPacket",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_spec",
+    "plan_draft",
+    "team_spec",
+    "context_pack",
+    "resource_pack",
+    "skill_pack",
+    "guardrails",
+    "output_contract",
+    "launch_prompt"
+  ],
+  "properties": {
+    "task_spec": {
+      "$ref": "TaskSpec.json"
+    },
+    "plan_draft": {
+      "$ref": "PlanDraft.json"
+    },
+    "team_spec": {
+      "$ref": "TeamSpec.json"
+    },
+    "context_pack": {
+      "$ref": "ContextPack.json"
+    },
+    "resource_pack": {
+      "$ref": "ResourcePack.json"
+    },
+    "skill_pack": {
+      "$ref": "SkillPack.json"
+    },
+    "guardrails": {
+      "$ref": "Guardrails.json"
+    },
+    "output_contract": {
+      "$ref": "OutputContract.json"
+    },
+    "launch_prompt": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

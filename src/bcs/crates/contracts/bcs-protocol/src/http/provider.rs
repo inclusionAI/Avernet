@@ -43,6 +43,12 @@ pub struct ProviderCoordinationConfigDto {
     pub mcporter_command: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderOrganizationManagementConfigDto {
+    #[serde(default)]
+    pub authorized_manager_provider_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderCoordinationEventKindDto {
@@ -101,6 +107,8 @@ pub struct ProviderInfoResponse {
     pub auth_mode: ProviderAuthModeDto,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coordination: Option<ProviderCoordinationConfigDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization_management: Option<ProviderOrganizationManagementConfigDto>,
     pub disabled: bool,
     pub created_at: u64,
     pub updated_at: u64,
@@ -118,6 +126,8 @@ pub struct PatchProviderRequest {
     pub protocol_version: Option<String>,
     #[serde(default)]
     pub coordination: Option<ProviderCoordinationConfigDto>,
+    #[serde(default)]
+    pub organization_management: Option<ProviderOrganizationManagementConfigDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

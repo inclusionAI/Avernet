@@ -106,11 +106,11 @@ class TestTaskProcessor:
     def mock_publish_flow_service(self):
         """Create a mock PublishFlowService."""
         mock = MagicMock()
-        mock.general_publish = AsyncMock(return_value={
+        mock.eval_publish = AsyncMock(return_value={
             "bot_uuid": "test-bot-uuid-123",
             "baas_publish_id": "baas-publish-456",
         })
-        mock.general_teardown = MagicMock(return_value={})
+        mock.eval_teardown = MagicMock(return_value={})
         mock.get_baas_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
         return mock
 
@@ -172,7 +172,7 @@ class TestTaskProcessor:
             assert result.status == "env_preparing"
             # Verify log records task info after fetch
             assert "[process] task fetched: id=1, status=init, bot_id=test-bot-123" in caplog.text
-            mock_publish_flow_service.general_publish.assert_called_once_with(
+            mock_publish_flow_service.eval_publish.assert_called_once_with(
                 publish_id=100,
                 operator="operator-001",
                 biz_id="task-uuid-123",
@@ -329,7 +329,7 @@ class TestTaskProcessor:
         result = await processor.process(1)
 
         assert result.status == "success"
-        mock_publish_flow_service.general_teardown.assert_called_once_with(
+        mock_publish_flow_service.eval_teardown.assert_called_once_with(
             "bot-uuid-to-teardown", operator="operator-001"
         )
 
@@ -402,7 +402,7 @@ class TestTaskProcessor:
                 ext={"publish_id": "100"},
             )
             mock_repo.get_by_id.return_value = task_init
-            mock_publish_flow_service.general_publish.side_effect = RuntimeError("BaaS error")
+            mock_publish_flow_service.eval_publish.side_effect = RuntimeError("BaaS error")
             mock_repo.update_ext.return_value = True
             mock_tracer.current_trace_id.return_value = "trace-123"
 
@@ -433,7 +433,7 @@ class TestTaskProcessor:
                 ext={"publish_id": "100"},
             )
             mock_repo.get_by_id.return_value = task_init
-            mock_publish_flow_service.general_publish.side_effect = RuntimeError("BaaS error")
+            mock_publish_flow_service.eval_publish.side_effect = RuntimeError("BaaS error")
             mock_repo.update_ext.return_value = True
             mock_tracer.current_trace_id.return_value = None
 
@@ -464,7 +464,7 @@ class TestTaskProcessor:
                 ext={"publish_id": "100"},
             )
             mock_repo.get_by_id.return_value = task_init
-            mock_publish_flow_service.general_publish.side_effect = RuntimeError("BaaS error")
+            mock_publish_flow_service.eval_publish.side_effect = RuntimeError("BaaS error")
             mock_repo.update_ext.side_effect = ValueError("DB error")
 
             with pytest.raises(RuntimeError, match="BaaS error"):
@@ -512,7 +512,7 @@ class TestTaskProcessor:
     async def test_to_env_preparing_success(
         self, processor, mock_repo, mock_publish_flow_service
     ):
-        """to_env_preparing() calls general_publish and transitions init → env_preparing, then calls to_env_ready."""
+        """to_env_preparing() calls eval_publish and transitions init → env_preparing, then calls to_env_ready."""
         task_init = make_task(
             id=1,
             status="init",
@@ -544,7 +544,7 @@ class TestTaskProcessor:
 
         # When BaaS publish is RUNNING, to_env_ready returns env_preparing status
         assert result.status == "env_preparing"
-        mock_publish_flow_service.general_publish.assert_called_once_with(
+        mock_publish_flow_service.eval_publish.assert_called_once_with(
             publish_id=100,
             operator="operator-001",
             biz_id="task-uuid-123",
@@ -574,7 +574,7 @@ class TestTaskProcessor:
             await processor.to_env_preparing(1)
 
         assert "missing publish_id" in str(exc_info.value)
-        mock_publish_flow_service.general_publish.assert_not_called()
+        mock_publish_flow_service.eval_publish.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_to_env_preparing_missing_uuid_raises_error(
@@ -592,7 +592,7 @@ class TestTaskProcessor:
             await processor.to_env_preparing(1)
 
         assert "missing uuid" in str(exc_info.value)
-        mock_publish_flow_service.general_publish.assert_not_called()
+        mock_publish_flow_service.eval_publish.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_to_env_preparing_wrong_status_raises_error(
@@ -609,14 +609,14 @@ class TestTaskProcessor:
         with pytest.raises(ValueError) as exc_info:
             await processor.to_env_preparing(1)
 
-        # Note: general_publish is called before status check in _transition_to
+        # Note: eval_publish is called before status check in _transition_to
         assert "Expected status 'init'" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_to_env_preparing_general_publish_failure_raises_error(
+    async def test_to_env_preparing_eval_publish_failure_raises_error(
         self, processor, mock_repo, mock_publish_flow_service
     ):
-        """to_env_preparing() raises error if general_publish fails."""
+        """to_env_preparing() raises error if eval_publish fails."""
         mock_repo.get_by_id.return_value = make_task(
             id=1,
             status="init",
@@ -624,7 +624,7 @@ class TestTaskProcessor:
             operator_id="operator-001",
             ext={"publish_id": "100"},
         )
-        mock_publish_flow_service.general_publish.side_effect = Exception("Publish failed")
+        mock_publish_flow_service.eval_publish.side_effect = Exception("Publish failed")
 
         with pytest.raises(Exception) as exc_info:
             await processor.to_env_preparing(1)
@@ -665,7 +665,7 @@ class TestTaskProcessor:
         result = await processor.to_env_preparing(1)
 
         assert result.status == "env_preparing"
-        mock_publish_flow_service.general_publish.assert_called_once_with(
+        mock_publish_flow_service.eval_publish.assert_called_once_with(
             publish_id=100,
             operator="",  # Empty string when None
             biz_id="task-uuid-123",
@@ -699,7 +699,7 @@ class TestTaskProcessor:
             task_env_preparing,  # to_env_ready
         ]
         mock_repo.update_status.return_value = task_env_preparing
-        mock_publish_flow_service.general_publish.return_value = {}  # No bot_uuid/baas_publish_id
+        mock_publish_flow_service.eval_publish.return_value = {}  # No bot_uuid/baas_publish_id
 
         # to_env_ready will raise ValueError because baas_publish_id is missing
         with pytest.raises(ValueError) as exc_info:
@@ -809,14 +809,14 @@ class TestTaskProcessor:
             "status": "FAILED",
             "error": "BaaS error",
         }
-        mock_publish_flow_service.general_teardown.return_value = {
+        mock_publish_flow_service.eval_teardown.return_value = {
             "destroy_publish_id": "destroy-123"
         }
 
         result = processor.to_env_ready(1)
 
         # Verify teardown was called to release environment
-        mock_publish_flow_service.general_teardown.assert_called_once_with(
+        mock_publish_flow_service.eval_teardown.assert_called_once_with(
             "bot-uuid-456", operator="operator-001"
         )
         # Verify ext was updated with error before teardown
@@ -878,7 +878,7 @@ class TestTaskProcessor:
         result = processor.to_env_ready(1)
 
         # Verify teardown was NOT called since no bot_uuid
-        mock_publish_flow_service.general_teardown.assert_not_called()
+        mock_publish_flow_service.eval_teardown.assert_not_called()
         # Verify ext was still updated with error
         mock_repo.update_ext.assert_called_once()
         ext_call_arg = mock_repo.update_ext.call_args[0][1]
@@ -1198,8 +1198,8 @@ class TestTaskProcessor:
         assert result.status == "success"
         mock_masa_eval_http.get.assert_called_once()
         assert mock_repo.update_status.call_count == 2
-        # Verify general_teardown was called
-        mock_publish_flow_service.general_teardown.assert_called_once_with(
+        # Verify eval_teardown was called
+        mock_publish_flow_service.eval_teardown.assert_called_once_with(
             "bot-uuid-123", operator="operator-001"
         )
 
@@ -1252,8 +1252,8 @@ class TestTaskProcessor:
         mock_repo.update_ext.assert_called_once()
         ext_call_arg = mock_repo.update_ext.call_args[0][1]
         assert "set_task_uuid=test-task-uuid" in ext_call_arg["error_msg"]
-        # Verify general_teardown was called
-        mock_publish_flow_service.general_teardown.assert_called_once_with(
+        # Verify eval_teardown was called
+        mock_publish_flow_service.eval_teardown.assert_called_once_with(
             "bot-uuid-123", operator="operator-001"
         )
 
@@ -1300,7 +1300,7 @@ class TestTaskProcessor:
     def test_to_env_released_to_success_with_bot_uuid(
         self, processor, mock_repo, mock_publish_flow_service
     ):
-        """to_env_released() calls general_teardown when bot_uuid exists and saves destroy_publish_id."""
+        """to_env_released() calls eval_teardown when bot_uuid exists and saves destroy_publish_id."""
         mock_repo.get_by_id.return_value = make_task(
             id=1,
             status="task_executed",
@@ -1308,14 +1308,14 @@ class TestTaskProcessor:
             operator_id="operator-001",
         )
         mock_repo.update_status.return_value = make_task(id=1, status="success")
-        mock_publish_flow_service.general_teardown.return_value = {
+        mock_publish_flow_service.eval_teardown.return_value = {
             "destroy_publish_id": "destroy-456"
         }
 
         result = processor.to_env_released(1, "task_executed", "success")
 
         assert result.status == "success"
-        mock_publish_flow_service.general_teardown.assert_called_once_with(
+        mock_publish_flow_service.eval_teardown.assert_called_once_with(
             "bot-uuid-123", operator="operator-001"
         )
         mock_repo.update_status.assert_called_once_with(
@@ -1325,7 +1325,7 @@ class TestTaskProcessor:
     def test_to_env_released_to_success_without_bot_uuid(
         self, processor, mock_repo, mock_publish_flow_service
     ):
-        """to_env_released() skips general_teardown when bot_uuid is missing."""
+        """to_env_released() skips eval_teardown when bot_uuid is missing."""
         mock_repo.get_by_id.return_value = make_task(
             id=1,
             status="task_executed",
@@ -1337,7 +1337,7 @@ class TestTaskProcessor:
         result = processor.to_env_released(1, "task_executed", "success")
 
         assert result.status == "success"
-        mock_publish_flow_service.general_teardown.assert_not_called()
+        mock_publish_flow_service.eval_teardown.assert_not_called()
         # ext should only have source_status, no destroy_publish_id
         mock_repo.update_status.assert_called_once_with(
             1, "success", {"source_status": "task_executed"}
@@ -1346,7 +1346,7 @@ class TestTaskProcessor:
     def test_to_env_released_to_failed_with_bot_uuid(
         self, processor, mock_repo, mock_publish_flow_service
     ):
-        """to_env_released() transitions to failed and calls general_teardown."""
+        """to_env_released() transitions to failed and calls eval_teardown."""
         mock_repo.get_by_id.return_value = make_task(
             id=1,
             status="task_executed",
@@ -1354,24 +1354,24 @@ class TestTaskProcessor:
             operator_id="operator-001",
         )
         mock_repo.update_status.return_value = make_task(id=1, status="failed")
-        mock_publish_flow_service.general_teardown.return_value = {
+        mock_publish_flow_service.eval_teardown.return_value = {
             "destroy_publish_id": "destroy-789"
         }
 
         result = processor.to_env_released(1, "task_executed", "failed")
 
         assert result.status == "failed"
-        mock_publish_flow_service.general_teardown.assert_called_once_with(
+        mock_publish_flow_service.eval_teardown.assert_called_once_with(
             "bot-uuid-123", operator="operator-001"
         )
         # Verify destroy_publish_id is saved
         call_args = mock_repo.update_status.call_args
         assert call_args[0][2]["destroy_publish_id"] == "destroy-789"
 
-    def test_to_env_released_general_teardown_failure_logged(
+    def test_to_env_released_eval_teardown_failure_logged(
         self, processor, mock_repo, mock_publish_flow_service
     ):
-        """to_env_released() logs warning but continues when general_teardown fails."""
+        """to_env_released() logs warning but continues when eval_teardown fails."""
         mock_repo.get_by_id.return_value = make_task(
             id=1,
             status="task_executed",
@@ -1379,13 +1379,13 @@ class TestTaskProcessor:
             operator_id="operator-001",
         )
         mock_repo.update_status.return_value = make_task(id=1, status="success")
-        mock_publish_flow_service.general_teardown.side_effect = Exception("Teardown error")
+        mock_publish_flow_service.eval_teardown.side_effect = Exception("Teardown error")
 
         # Should not raise, just log warning
         result = processor.to_env_released(1, "task_executed", "success")
 
         assert result.status == "success"
-        mock_publish_flow_service.general_teardown.assert_called_once()
+        mock_publish_flow_service.eval_teardown.assert_called_once()
         # No destroy_publish_id since teardown failed
         call_args = mock_repo.update_status.call_args
         assert "destroy_publish_id" not in call_args[0][2]
@@ -1410,12 +1410,12 @@ class TestTaskProcessor:
             operator_id="operator-001",
         )
         mock_repo.update_status.return_value = make_task(id=1, status="success")
-        mock_publish_flow_service.general_teardown.return_value = None
+        mock_publish_flow_service.eval_teardown.return_value = None
 
         result = processor.to_env_released(1, "task_executed", "success")
 
         assert result.status == "success"
-        mock_publish_flow_service.general_teardown.assert_called_once()
+        mock_publish_flow_service.eval_teardown.assert_called_once()
         # No destroy_publish_id since teardown_result is None
         call_args = mock_repo.update_status.call_args
         assert "destroy_publish_id" not in call_args[0][2]
@@ -1431,12 +1431,12 @@ class TestTaskProcessor:
             operator_id="operator-001",
         )
         mock_repo.update_status.return_value = make_task(id=1, status="success")
-        mock_publish_flow_service.general_teardown.return_value = {}
+        mock_publish_flow_service.eval_teardown.return_value = {}
 
         result = processor.to_env_released(1, "task_executed", "success")
 
         assert result.status == "success"
-        mock_publish_flow_service.general_teardown.assert_called_once()
+        mock_publish_flow_service.eval_teardown.assert_called_once()
         # No destroy_publish_id since teardown_result is empty dict
         call_args = mock_repo.update_status.call_args
         assert "destroy_publish_id" not in call_args[0][2]

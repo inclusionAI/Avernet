@@ -1,0 +1,340 @@
+"""TaskRecord 查询 mixin — 工单读查询(find/list/count)。
+
+从 task_record_repo.py 拆出,使主文件低于 R9 1000 行门禁。
+mixin 不定义 ``__init__``;``self._db`` / env 由组合后的
+:class:`TaskRecordRepository` 主类提供。查询方法之间无 self 互调。
+"""
+from __future__ import annotations
+
+from datetime import datetime
+
+from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
+from agentclaw.community.core.economy.governance.repositories.orm import GovernanceTicketOrm
+from agentclaw.community.utils.env_utils import get_current_env
+
+
+class TaskRecordQueryMixin:
+    """工单读查询 — find_/list_/count_ 方法,self._db 由主类提供。"""
+
+    def find_active_ticket(
+        self, active_worker: str,
+    ) -> GovernanceTicket | None:
+        """Find the active ticket for an active_worker (owner_id:bot_id).
+
+        Active = governance_status IN ('open', 'scheduled', 'waiting_review').
+
+        Returns:
+            :class:`GovernanceTicket` or ``None`` if no active ticket exists.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            obj = (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.active_worker == active_worker,
+                    GovernanceTicketOrm.governance_status.in_(
+                        ("open", "scheduled", "waiting_review"),
+                    ),
+                    GovernanceTicketOrm.env == _env,
+                )
+                .one_or_none()
+            )
+            return GovernanceTicket.from_orm(obj) if obj else None
+
+    def find_by_ticket_id(
+        self, ticket_id: str,
+    ) -> GovernanceTicket | None:
+        """Find a ticket by its stable UUID (ticket_id).
+
+        Returns:
+            :class:`GovernanceTicket` or ``None``.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            obj = (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.ticket_id == ticket_id,
+                    GovernanceTicketOrm.env == _env,
+                )
+                .one_or_none()
+            )
+            return GovernanceTicket.from_orm(obj) if obj else None
+
+    def find_latest_closed_by_worker(
+        self, worker_id: str,
+    ) -> GovernanceTicket | None:
+        """Find most recently closed ticket for a worker (cooldown & review_rejected check).
+
+        Ordered by closed_at DESC.
+
+        Returns:
+            :class:`GovernanceTicket` or ``None`` if no closed ticket exists.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            obj = (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.worker_id == worker_id,
+                    GovernanceTicketOrm.governance_status == "closed",
+                    GovernanceTicketOrm.env == _env,
+                )
+                .order_by(
+                    GovernanceTicketOrm.closed_at.desc(),
+                    GovernanceTicketOrm.gmt_modified.desc(),
+                )
+                .first()
+            )
+            return GovernanceTicket.from_orm(obj) if obj else None
+
+    def list_active_open_tickets(
+        self,
+    ) -> list[GovernanceTicket]:
+        """List all open tickets with active_worker set (for auto_silence).
+
+        Used by offline-batch to find active open tickets not in current batch.
+
+        Returns:
+            List of :class:`GovernanceTicket`.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            rows = (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.governance_status == "open",
+                    GovernanceTicketOrm.active_worker.isnot(None),
+                    GovernanceTicketOrm.env == _env,
+                )
+                .all()
+            )
+            return [GovernanceTicket.from_orm(r) for r in rows]
+
+    def list_scheduled_due(
+        self, now: datetime,
+    ) -> list[GovernanceTicket]:
+        """Find scheduled tickets where mute_until <= now (schedule_due).
+
+        These tickets should transition from scheduled -> waiting_review.
+
+        Returns:
+            List of :class:`GovernanceTicket`.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            rows = (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.governance_status == "scheduled",
+                    GovernanceTicketOrm.mute_until <= now,
+                    GovernanceTicketOrm.mute_until.isnot(None),
+                    GovernanceTicketOrm.env == _env,
+                )
+                .all()
+            )
+            return [GovernanceTicket.from_orm(r) for r in rows]
+
+    def list_auto_silence_eligible(
+        self,
+        *,
+        min_consecutive_days: int,
+    ) -> list[GovernanceTicket]:
+        """Find open tickets eligible for auto-silence convergence (7.2.6).
+
+        Conditions: governance_status='open' + latest_decision='normal' +
+        consecutive_normal_days >= min_consecutive_days + active_worker set.
+
+        Args:
+            min_consecutive_days: ``auto_silence_close_days`` from config.
+
+        Returns:
+            List of :class:`GovernanceTicket` meeting the convergence threshold.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            rows = (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.governance_status == "open",
+                    GovernanceTicketOrm.latest_decision == "normal",
+                    GovernanceTicketOrm.consecutive_normal_days
+                    >= min_consecutive_days,
+                    GovernanceTicketOrm.active_worker.isnot(None),
+                    GovernanceTicketOrm.env == _env,
+                )
+                .all()
+            )
+            return [GovernanceTicket.from_orm(r) for r in rows]
+
+    def list_remindable_tickets(
+        self, now: datetime,
+    ) -> list[GovernanceTicket]:
+        """Find tickets eligible for reminder creation (7.3.2).
+
+        Conditions: open + latest_decision=actionable + remind_at <= now
+        + remind_at IS NOT NULL + response IS NULL + active_worker set.
+
+        Returns:
+            List of :class:`GovernanceTicket`.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            rows = (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.governance_status == "open",
+                    GovernanceTicketOrm.latest_decision == "actionable",
+                    GovernanceTicketOrm.remind_at <= now,
+                    GovernanceTicketOrm.remind_at.isnot(None),
+                    GovernanceTicketOrm.response.is_(None),
+                    GovernanceTicketOrm.active_worker.isnot(None),
+                    GovernanceTicketOrm.env == _env,
+                )
+                .all()
+            )
+            return [GovernanceTicket.from_orm(r) for r in rows]
+
+    def list_tickets_by_owner_and_statuses(
+        self,
+        owner_id: str,
+        statuses: list[str],
+        *,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> list[GovernanceTicket]:
+        """Owner's tickets in the given statuses, newest first, paged.
+
+        Returns:
+            List of :class:`GovernanceTicket`.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            rows = (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.owner_id == owner_id,
+                    GovernanceTicketOrm.governance_status.in_(statuses),
+                    GovernanceTicketOrm.env == _env,
+                )
+                .order_by(GovernanceTicketOrm.gmt_create.desc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+            return [GovernanceTicket.from_orm(r) for r in rows]
+
+    def list_tickets_by_statuses(
+        self,
+        statuses: list[str],
+        *,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> list[GovernanceTicket]:
+        """All tickets in the given statuses (cross-owner), newest first, paged.
+
+        评审场景:按治理状态过滤工单(活跃 / 待审阅 / 已关闭),跨 owner。
+
+        Args:
+            statuses: 治理状态白名单(open/scheduled/waiting_review/closed)。
+            offset: 分页偏移。
+            limit: 分页上限。
+
+        Returns:
+            List of :class:`GovernanceTicket` (gmt_create 由 from_orm 灌入)。
+        """
+        if not statuses:
+            return []
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            rows = (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.governance_status.in_(statuses),
+                    GovernanceTicketOrm.env == _env,
+                )
+                .order_by(GovernanceTicketOrm.gmt_create.desc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+            return [GovernanceTicket.from_orm(r) for r in rows]
+
+    def count_tickets_by_statuses(
+        self,
+        statuses: list[str],
+    ) -> int:
+        """Count all tickets in the given statuses (cross-owner, paged-list 配套)。
+
+        Args:
+            statuses: 治理状态白名单。
+
+        Returns:
+            满足条件的工单总数(与 list_tickets_by_statuses 同阶过滤)。
+        """
+        if not statuses:
+            return 0
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            return (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.governance_status.in_(statuses),
+                    GovernanceTicketOrm.env == _env,
+                )
+                .count()
+            )
+
+    def count_active_open(
+        self,
+    ) -> int:
+        """Count all active open tickets (for admin dashboard)."""
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            return (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.governance_status.in_(
+                        ("open", "scheduled", "waiting_review"),
+                    ),
+                    GovernanceTicketOrm.active_worker.isnot(None),
+                    GovernanceTicketOrm.env == _env,
+                )
+                .count()
+            )
+
+    def find_ticket_by_notification_id(
+        self, notification_id: str,
+    ) -> GovernanceTicket | None:
+        """Find a ticket via its notify_log's notification_id.
+
+        Used by feedback_service: notification_id -> notify_log.ticket_id -> task_record.
+
+        Returns:
+            :class:`GovernanceTicket` or ``None``.
+        """
+        from agentclaw.community.core.economy.governance.repositories.orm import (
+            GovernanceNotificationOrm,
+        )
+
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            notify_row = (
+                s.query(GovernanceNotificationOrm)
+                .filter(
+                    GovernanceNotificationOrm.notification_id == notification_id,
+                    GovernanceNotificationOrm.env == _env,
+                )
+                .first()
+            )
+            if notify_row is None or notify_row.ticket_id is None:
+                return None
+            obj = (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.ticket_id == notify_row.ticket_id,
+                    GovernanceTicketOrm.env == _env,
+                )
+                .one_or_none()
+            )
+            return GovernanceTicket.from_orm(obj) if obj else None

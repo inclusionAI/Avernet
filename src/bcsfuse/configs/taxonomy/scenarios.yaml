@@ -1,0 +1,160 @@
+# Scenarios Configuration
+# 场景定义配置
+#
+# 定义系统支持的业务场景分类
+
+version: "1.0"
+
+# =====================================
+# 业务场景定义
+# =====================================
+business_scenarios:
+  # 技术场景
+  tech_development:
+    name: 技术开发
+    description: 日常技术开发、功能迭代
+    category: technical
+    risk_weight: 0.3
+    keywords:
+      - "功能开发"
+      - "技术开发"
+      - "迭代开发"
+      - "日常开发"
+
+  tech_optimization:
+    name: 技术优化
+    description: 性能优化、代码重构、技术债清理
+    category: technical
+    risk_weight: 0.4
+    keywords:
+      - "性能优化"
+      - "代码重构"
+      - "技术债"
+      - "优化"
+
+  architecture_upgrade:
+    name: 架构升级
+    description: 系统架构升级、技术栈迁移
+    category: technical
+    risk_weight: 0.9
+    keywords:
+      - "架构升级"
+      - "系统迁移"
+      - "技术升级"
+      - "技术栈迁移"
+
+  # 业务场景
+  new_product:
+    name: 新产品发布
+    description: 新产品上线、新业务拓展
+    category: business
+    risk_weight: 0.6
+    keywords:
+      - "新产品"
+      - "新业务"
+      - "产品发布"
+      - "业务拓展"
+
+  marketing_campaign:
+    name: 营销活动
+    description: 大促活动、营销推广
+    category: business
+    risk_weight: 0.5
+    keywords:
+      - "大促"
+      - "营销"
+      - "活动"
+      - "推广"
+
+  large_promotion:
+    name: 大型活动
+    description: 双11、618等大型促销活动
+    category: business
+    risk_weight: 0.85
+    keywords:
+      - "双11"
+      - "618"
+      - "大型活动"
+      - "大促活动"
+
+  # 合规场景
+  regulatory_access:
+    name: 监管准入
+    description: 跨境支付、牌照申请、合规准入
+    category: compliance
+    risk_weight: 0.95
+    keywords:
+      - "跨境支付"
+      - "牌照申请"
+      - "监管准入"
+      - "合规准入"
+
+  compliance_remediation:
+    name: 合规整改
+    description: 反洗钱、合规风险整改
+    category: compliance
+    risk_weight: 0.9
+    keywords:
+      - "反洗钱"
+      - "整改"
+      - "合规风险"
+
+  # 运维场景
+  system_migration:
+    name: 系统变更
+    description: 系统迁移、数据库切换
+    category: ops
+    risk_weight: 0.9
+    keywords:
+      - "系统迁移"
+      - "数据库迁移"
+      - "数据库切换"
+      - "系统变更"
+
+  infrastructure_upgrade:
+    name: 基础设施升级
+    description: 硬件升级、网络改造
+    category: ops
+    risk_weight: 0.7
+    keywords:
+      - "硬件升级"
+      - "网络改造"
+      - "基础设施"
+
+# =====================================
+# 风险权重配置
+# =====================================
+risk_weights:
+  technical:
+    default: 0.3
+    high_threshold: 0.7
+  business:
+    default: 0.5
+    high_threshold: 0.7
+  compliance:
+    default: 0.8
+    high_threshold: 0.6
+  ops:
+    default: 0.6
+    high_threshold: 0.7
+
+# =====================================
+# 场景优先级配置
+# =====================================
+scenario_priorities:
+  critical:
+    - data_leakage
+    - security_incident
+    - regulatory_penalty
+    - fund_safety
+  high:
+    - architecture_upgrade
+    - regulatory_access
+    - compliance_remediation
+    - system_migration
+  medium:
+    - new_product
+    - marketing_campaign
+    - tech_optimization
+  low:
+    - tech_development

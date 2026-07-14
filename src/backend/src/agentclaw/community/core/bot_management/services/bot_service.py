@@ -3365,12 +3365,39 @@ class BotService:
         if not bot_uuid:
             raise BotServiceError(f"Bot {bot_id} binding {binding_id} missing bot_uuid; cannot baas restart")
 
+        active_engine = (bot.get("active_engine") or "").strip()
+        bot_type = bot.get("bot_type") or "personal"
+        bot_template_type = (bot.get("template_type") or "").strip()
+
+        # BaaS 原地重启不会经过 start_bot，这里补齐启动链路的 BCN Provider 注册。
+        # 注册接口幂等：已注册时直接返回，也能重试创建阶段失败的注册。
+        if self._should_register_bcn_provider(
+            active_engine=active_engine,
+            bot_type=bot_type,
+            template_type=bot_template_type,
+        ):
+            logger.info(
+                "[bot_service._restart_bot_baas] register bot to BCN as provider: "
+                "bot_id=%s active_engine=%s bot_type=%s template_type=%s",
+                bot_id,
+                active_engine,
+                bot_type,
+                bot_template_type,
+            )
+            self._register_bot_to_bcn_as_provider(
+                bot_id=bot_id,
+                user_id=user_id,
+                owner_workno=bot.get("owner_id") or user_id,
+                bot_name=bot.get("bot_name") or bot_id,
+                bot_summary=bot.get("bot_desc") or "",
+            )
+
         # 普通 restart 入口只重启当前 bot，不使用发布态 build 产物目录。
         # 发布态 verify/online 的重启由 PublishFlowService.restart_bot(publish_id) 处理。
         mig: Optional[str] = None
         restart_stage = (
             PublishStage.DRAFT.value
-            if bot.get("bot_type") == "service"
+            if bot_type == "service"
             else None
         )
 
@@ -3392,8 +3419,6 @@ class BotService:
         # BOT_TYPE=model/runtime 即便在 update_bot 改过也不生效。引擎口径与 create_bot
         # 对齐（claude_code + aicoding），门控不命中时 extra_envs/template_config 保持
         # None，upgrade 行为与改动前完全一致（envs 退化为 AGENTCLAW_ENGINE 单值）。
-        active_engine = (bot.get("active_engine") or "").strip()
-        bot_template_type = (bot.get("template_type") or "").strip()
         extra_envs: Optional[Dict[str, Any]] = None
         device_template_config: Optional[Dict[str, Any]] = None
         if active_engine in ("claude_code", "aicoding") and bot_template_type in ("applicationCoding", "personalCoding"):

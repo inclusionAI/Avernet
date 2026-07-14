@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/CandidateBundle.json",
+  "title": "CandidateBundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "workers",
+    "knowledge_items",
+    "skills",
+    "resources",
+    "evidence"
+  ],
+  "properties": {
+    "workers": {
+      "type": "array",
+      "items": {
+        "$ref": "Worker.json"
+      },
+      "default": []
+    },
+    "knowledge_items": {
+      "type": "array",
+      "items": {
+        "$ref": "KnowledgeItem.json"
+      },
+      "default": []
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "$ref": "SkillRef.json"
+      },
+      "default": []
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "$ref": "ResourceRef.json"
+      },
+      "default": []
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    }
+  }
+}

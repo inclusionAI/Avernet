@@ -266,10 +266,13 @@ def _seed_process_build_fail(world) -> None:
     _install_baas(world)
 
 
-def _seed_built_create_rejected(world) -> None:
+def _seed_draft_create_rejected(world) -> None:
+    # DRAFT: /process enqueues verify_flow → build succeeds, BaaS rejects the
+    # create in the verify-release sub-step → FAILED. (BUILT /process is now
+    # describe-only; the create runs inside the verify_flow task.)
     _seed_draft(world)
     _install_baas(world, create=http_envelope_response(code=1, message="create quota exceeded"))
-    _advance(world, _V1, PublishStatus.BUILT, {"config_artifact": _ARTIFACT})
+    _install_engine(world)
 
 
 def _seed_validate_pub(world, *, progress_status: str) -> None:
@@ -474,8 +477,8 @@ def build_failure_unresolvable_mcp():
 @endpoint_test(
     method="POST", path=_PROCESS, scenario="create_rejected_by_baas",
     input=CaseInput(json_body={"publish_id": _V1}, headers=_HEADERS),
-    seed=_seed_built_create_rejected,
-    expect=ExpectError(status=200, json_contains={"success": False}),
+    seed=_seed_draft_create_rejected, drain_background=True,
+    expect=ExpectSuccess(status=200, json_contains={"data": {"status": "building"}}),
     extra_assertions=(
         _expect_status(_V1, PublishStatus.FAILED),
         _expect_error_message("create quota exceeded"),
@@ -483,50 +486,49 @@ def build_failure_unresolvable_mcp():
     ),
 )
 def create_rejected_by_baas():
-    """Seeded at BUILT, /process runs verify-release inline; BaaS rejects the
-    create → FAILED, never approved. (BaaS-originated failure → boundary stub.)"""
+    """DRAFT /process enqueues verify_flow; the durable task builds then BaaS
+    rejects the create → FAILED, never approved. (BaaS-originated failure → stub.)"""
+
+
+@endpoint_test(
+    method="POST", path=_PROCESS, scenario="process_publish_not_found",
+    input=CaseInput(json_body={"publish_id": 9_999_999}, headers=_HEADERS),
+    expect=ExpectError(status=200, json_contains={"success": False, "error_code": 404}),
+)
+def process_publish_not_found():
+    """/process for a non-existent publish_id → PublishNotFoundError → 404 error
+    envelope (the endpoint's error path)."""
 
 
 # ── verify stage: VALIDATE_PUB → VALIDATING (the sync poll) ──────────────────
 
 
 @endpoint_test(
-    method="POST", path=_SYNC, scenario="verify_sync_success",
+    method="POST", path=_SYNC, scenario="sync_reports_validate_pub_read_only",
     input=CaseInput(path_params={"publish_id": _V1}, headers=_HEADERS),
     seed=lambda w: _seed_validate_pub(w, progress_status="SUCCESS"),
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"success": True, "data": {"status": "validate_pub"}}),
     extra_assertions=(
-        _expect_status(_V1, PublishStatus.VALIDATING),
-        _expect_binding_status(_V1, "verify", "ACTIVE"),
+        _expect_status(_V1, PublishStatus.VALIDATE_PUB),        # unchanged
+        _expect_binding_status(_V1, "verify", "PENDING"),        # not flipped
     ),
 )
-def verify_sync_success():
-    """Seeded at VALIDATE_PUB, /sync sees BaaS SUCCESS → VALIDATING, binding ACTIVE."""
+def sync_reports_validate_pub_read_only():
+    """/sync is a read-only status report: even with BaaS already at SUCCESS, it
+    does not advance the record or touch the binding — the durable poll task owns
+    advancement (covered by test_publish_durable_pipeline)."""
 
 
 @endpoint_test(
-    method="POST", path=_SYNC, scenario="verify_sync_failed",
+    method="POST", path=_SYNC, scenario="sync_on_failed_publish_reports_error",
     input=CaseInput(path_params={"publish_id": _V1}, headers=_HEADERS),
-    seed=lambda w: _seed_validate_pub(w, progress_status="FAILED"),
+    seed=_seed_failed_verify,
     expect=ExpectError(status=200, json_contains={"success": False}),
     extra_assertions=(_expect_status(_V1, PublishStatus.FAILED),),
 )
-def verify_sync_failed():
-    """BaaS reports the verify container FAILED → /sync lands the publish in FAILED."""
-
-
-@endpoint_test(
-    method="POST", path=_SYNC, scenario="verify_sync_pending",
-    input=CaseInput(path_params={"publish_id": _V1}, headers=_HEADERS),
-    seed=lambda w: _seed_validate_pub(w, progress_status="PENDING"),
-    expect=ExpectSuccess(status=200),
-    extra_assertions=(
-        _expect_status(_V1, PublishStatus.VALIDATE_PUB),       # unchanged
-        _expect_binding_status(_V1, "verify", "PENDING"),       # not flipped
-    ),
-)
-def verify_sync_pending():
-    """BaaS still PENDING → the poller does not advance; stays VALIDATE_PUB."""
+def sync_on_failed_publish_reports_error():
+    """/sync on a FAILED record reports the recorded error (success=false) and
+    leaves the record untouched."""
 
 
 # ── online stage: VALIDATING → ONLINE_PUB → SUCCESS ──────────────────────────
@@ -540,22 +542,24 @@ def verify_sync_pending():
     extra_assertions=(_expect_status(_V1, PublishStatus.ONLINE_PUB),),
 )
 def online_release():
-    """Seeded at VALIDATING, /process runs the online create+approve inline →
-    ONLINE_PUB (no background task)."""
+    """Seeded at VALIDATING, /process advances VALIDATING → ONLINE_PUB synchronously
+    (the go-live gate) and enqueues the online_release task; the drained task does
+    the online create+approve within ONLINE_PUB."""
 
 
 @endpoint_test(
-    method="POST", path=_SYNC, scenario="online_sync_success",
+    method="POST", path=_SYNC, scenario="sync_reports_online_pub_read_only",
     input=CaseInput(path_params={"publish_id": _V1}, headers=_HEADERS),
     seed=_seed_online_pub,
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(status=200, json_contains={"success": True, "data": {"status": "online_pub"}}),
     extra_assertions=(
-        _expect_status(_V1, PublishStatus.SUCCESS),
-        _expect_binding_status(_V1, "online", "ACTIVE"),
+        _expect_status(_V1, PublishStatus.ONLINE_PUB),           # unchanged
+        _expect_binding_status(_V1, "online", "PENDING"),         # not flipped
     ),
 )
-def online_sync_success():
-    """Seeded at ONLINE_PUB, /sync sees SUCCESS → SUCCESS, online binding ACTIVE."""
+def sync_reports_online_pub_read_only():
+    """/sync at ONLINE_PUB reports "in progress" without advancing; the poll task
+    drives ONLINE_PUB → SUCCESS (covered end-to-end in test_publish_durable_pipeline)."""
 
 
 # ── branch lifecycle: re-publish / offline / retry ───────────────────────────
@@ -607,7 +611,7 @@ def retry_restarts_after_verify_failure():
     method="POST", path=_SCALE, scenario="scale_success",
     input=CaseInput(path_params={"publish_id": _V1}, headers=_HEADERS),
     seed=_seed_scale_success,
-    expect=ExpectSuccess(status=200, json_contains={"success": True, "message": "teclaw引擎的服务bot不支持扩容"}),
+    expect=ExpectSuccess(status=200, json_contains={"success": True, "message": "Service bots on the teclaw engine do not support scaling"}),
 )
 def scale_success():
     """A SUCCESS publish can be scaled: /scale resolves the online binding and
@@ -628,7 +632,7 @@ def scale_baas_rejected():
     method="POST", path=_SCALE_STATUS, scenario="scale_status_success",
     input=CaseInput(path_params={"publish_id": _V1}, headers=_HEADERS),
     seed=_seed_scale_status,
-    expect=ExpectSuccess(status=200, json_contains={"success": True, "message": "BaaS 扩容状态: SUCCESS"}),
+    expect=ExpectSuccess(status=200, json_contains={"success": True, "message": "BaaS scale status: SUCCESS"}),
 )
 def scale_status_success():
     """A publish with ext.scale.publish_id can query BaaS scale progress."""

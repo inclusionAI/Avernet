@@ -530,7 +530,7 @@ class EconomyGovernanceConfig:
         auto-degrades to ``"markdown"`` (recorded in audit + notify_log).
 
     dry_run       True (default) → scan runs but does NOT create
-                  GovernanceNotifyLog rows; audit rows are written
+                  GovernanceNotification rows; audit rows are written
                   with dry_run=1. Flip to False to enable real
                   notifications in pre/prod.
     skip_weekends  True (default) → skip DingTalk delivery on Saturday/Sunday.
@@ -578,25 +578,9 @@ class EconomyGovernanceConfig:
     # supply the real endpoint via ``economy_governance.tc_card_preview_url``
     # (OSS-0 #3). Empty ⇒ the deep link carries no preview host (feature-off).
     tc_card_preview_url: str = ""
-
-
-@dataclass(frozen=True)
-class GovernanceDingTalkConfig:
-    """DingTalk application credentials for governance notification dispatch.
-
-    Produced by ``EconomyGovernanceModule._governance_dingtalk_config``.
-    Credentials are read from YAML ``user_config.dingtalk`` block
-    (matching BCS bcs-config-<env>.toml ``[[dingtalk_accounts]]`` pattern).
-    In pre+prod shared YAML, ``_pre`` suffix fields override for prepub env.
-
-    Resolution order:
-      1. YAML ``dingtalk`` block (app_key / app_secret / robot_code)
-      2. All empty → DingTalkMarkdownSender with empty config (send calls return None).
-
-    The dataclass is ``frozen`` so it can be safely shared across threads.
-    """
-
-    app_key: str = ""
-    app_secret: str = ""
-    robot_code: str = ""
+    # Backend card-callback URL for the TC-card React component's fetch POST.
+    # Env-aware: pre/prod point at different callback endpoints.
+    # Source: YAML ``economy_governance.iframe_callback_url`` (corp overlay) or
+    # ``economy_governance.iframe_callback_url_pre`` (pre-env).
+    # Empty ⇒ the detailLink carries no callbackUrl (feedback form non-functional).
     iframe_callback_url: str = ""

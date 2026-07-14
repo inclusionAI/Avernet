@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/ResourceRef.json",
+  "title": "ResourceRef",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "kind",
+    "name",
+    "access"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^res_[a-zA-Z0-9_-]+$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "file",
+        "folder",
+        "dataset",
+        "api",
+        "repo",
+        "dashboard",
+        "credential_handle"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "uri": {
+      "type": "string"
+    },
+    "access": {
+      "type": "string",
+      "enum": [
+        "read",
+        "write",
+        "execute",
+        "admin"
+      ]
+    },
+    "owner": {
+      "type": "string"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    }
+  }
+}

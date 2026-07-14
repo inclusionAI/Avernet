@@ -4,140 +4,39 @@ These Protocols decouple the HTTP adapter layer from concrete core service
 classes, following the project's adapter→api→core layering rule (Rule 14).
 Routers inject ``Injected(XProtocol)`` instead of importing service classes
 from ``core/`` directly.
+
+**Split (核心业务层化改造, 2026-07-12):**
+三个被 core 内部 service 消费的 Protocol(Admin/Whitelist/Lifecycle)的**定义**
+移到 ``core/economy/governance/services/service_protocols.py`` —— core 自家抽象,
+service↔service 不跨层依赖 ``api/``。本文件 **re-export** 同名 Protocol,供
+adapters/http router 注入(router 在 api 外圈,import core Protocol 合法)。
+其余 4 个 Protocol(Feedback/Bot/WhitelistRepo/RecordProcess)的消费者都在
+api 外圈,定义保留在本文件。
 """
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+from agentclaw.community.core.economy.governance.services.service_protocols import (
+    GovernanceAdminServiceProtocol,
+    GovernanceLifecycleServiceProtocol,
+    GovernanceWhitelistServiceProtocol,
+    GovernanceWorkflowServiceProtocol,
+    NotifyLifecycleServiceProtocol,
+)
 
 
-@runtime_checkable
-class GovernanceAdminServiceProtocol(Protocol):
-    """Protocol for governance admin operations (emergency brake + review)."""
-
-    def is_paused(self) -> bool:
-        ...
-
-    def get_state(self) -> dict:
-        ...
-
-    def pause(self, reason: str, operator: str) -> None:
-        ...
-
-    def resume(self, reason: str, operator: str) -> None:
-        ...
-
-    def bulk_whitelist(
-        self,
-        bot_ids: list[str],
-        reason: str,
-        operator: str,
-    ) -> dict:
-        ...
-
-    def cancel_pending(self, reason: str, operator: str) -> dict:
-        ...
-
-    def close_all_open(self, reason: str, operator: str) -> dict:
-        ...
-
-    def pause_ticket(
-        self, ticket_id: str, admin_id: str, reason: str = "",
-    ) -> dict:
-        ...
-
-    def review_ticket(
-        self, ticket_id: str, action: str, admin_id: str, remark: str = "",
-    ) -> dict:
-        ...
-
-    def emergency_close(
-        self, ticket_id: str, admin_id: str, reason: str = "",
-    ) -> dict:
-        ...
-
-    def delete_records(
-        self,
-        body: dict,
-        operator: str,
-    ) -> dict:
-        ...
-
-    def delete_whitelist_entries(
-        self,
-        body: dict,
-        operator: str,
-    ) -> dict:
-        ...
-
-    async def deliver_pending(
-        self,
-        *,
-        scan_svc: Any,
-        override_recipient: str,
-        dry_run: bool,
-        max_send: int,
-        channel: str,
-        skip_scan: bool,
-        scan_dry_run: bool,
-    ) -> dict:
-        ...
-
-
-@runtime_checkable
-class GovernanceWhitelistServiceProtocol(Protocol):
-    """Protocol for governance whitelist batch operations.
-
-    Decouples routers and other services from the concrete
-    ``GovernanceWhitelistService`` — following Rule 14 layering.
-    """
-
-    def bulk_whitelist(
-        self,
-        bot_ids: list[str],
-        reason: str,
-        operator: str,
-    ) -> dict:
-        ...
-
-    def delete_whitelist_entries(
-        self,
-        body: dict,
-        operator: str,
-    ) -> dict:
-        ...
-
-    def count_by_type(self, *, whitelist_type: str = "governance") -> int:
-        ...
-
-    def batch_add(
-        self,
-        entries: list[dict],
-        created_by: str,
-        *,
-        whitelist_type: str = "governance",
-        source: str = "manual",
-    ) -> dict:
-        ...
+if TYPE_CHECKING:
+    from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
 
 
 @runtime_checkable
 class GovernanceFeedbackServiceProtocol(Protocol):
-    """Protocol for user-facing governance feedback interactions."""
+    """Protocol for user-facing governance feedback interactions.
 
-    def list_pending(
-        self, owner_id: str, *, limit: int, offset: int,
-    ) -> list[dict]:
-        ...
-
-    def list_history(
-        self, owner_id: str, *, limit: int, offset: int,
-    ) -> list[dict]:
-        ...
-
-    def get_notification(
-        self, notification_id: str, owner_id: str,
-    ) -> dict | None:
-        ...
+    list_pending / list_history / get_notification 已删除:无真实用户主动调用,
+    治理反馈真入口是 card-callback(经 ``resolve``)。仅保留 ``resolve``。
+    """
 
     def resolve(
         self,
@@ -156,51 +55,59 @@ class GovernanceFeedbackServiceProtocol(Protocol):
 class GovernanceBotServiceProtocol(Protocol):
     """Protocol for governance cron tick orchestrator (§7.3)."""
 
-    async def process_cron_tick(
+    def process_cron_tick(
         self,
         *,
         dry_run: bool | None = None,
-    ) -> Any:
-        ...
-
-    async def process_run(
-        self,
-        *,
-        dry_run: bool | None = None,
-        skip_delivery: bool = False,
-        notify_source: str = "cron",
     ) -> Any:
         ...
 
 
 @runtime_checkable
 class GovernanceWhitelistProtocol(Protocol):
-    """Protocol for governance whitelist operations (batch_add + list_all).
+    """Protocol for governance whitelist operations (single-point add + list_by_owner).
 
     Decouples the public router from the concrete
     ``GovernanceWhitelistRepository`` in ``core/``, following Rule 14.
     """
 
-    def batch_add(
+    def add(
         self,
-        entries: list[dict],
-        created_by: str,
         *,
+        bot_id: str,
+        owner_id: str,
+        created_by: str,
         whitelist_type: str = "governance",
         source: str = "manual",
-        env: str | None = None,
-    ) -> dict:
+        reason: str = "",
+        expires_at: Any | None = None,
+    ) -> Any:
         ...
 
-    def list_all(
+    def list_by_owner(
         self,
-        owner_id: str | None = None,
+        owner_id: str,
         *,
         whitelist_type: str = "governance",
         limit: int = 100,
         offset: int = 0,
-        env: str | None = None,
-    ) -> list[dict]:
+    ) -> list[Any]:
+        ...
+
+    def is_whitelisted(
+        self,
+        bot_id: str,
+        owner_id: str,
+        *,
+        whitelist_type: str = "governance",
+    ) -> bool:
+        ...
+
+    def count_by_type(
+        self,
+        *,
+        whitelist_type: str = "governance",
+    ) -> int:
         ...
 
 
@@ -214,7 +121,7 @@ class GovernanceRecordProcessProtocol(Protocol):
 
     def process_offline_batch(
         self,
-        records: list[dict],
+        records: list[GovernanceRecord],
         *,
         batch_id: str,
         dt_version: str,

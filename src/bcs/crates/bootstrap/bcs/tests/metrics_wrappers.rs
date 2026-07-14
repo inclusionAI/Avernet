@@ -655,6 +655,7 @@ fn blocking_chat_cmd() -> BlockingA2aChatCommand {
         timeout_ms: 1,
         client: None,
         response_mode: ChatResponseMode::Full,
+        organization_code: None,
     }
 }
 

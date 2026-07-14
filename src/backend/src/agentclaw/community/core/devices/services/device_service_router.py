@@ -79,9 +79,9 @@ class _DisabledArcaBotCreateBaasRolloutPolicy:
         self,
         *,
         user_id: str,
-        bot_type: str | None = None,
-        engine_type: str | None = None,
-        template_type: str | None = None,
+        bot_type: str,
+        engine_type: str,
+        template_type: str,
     ) -> ArcaBotCreateBaasRolloutDecision:
         # 真实创建路由由 prod/local 组合根注入；占位策略不参与业务路由。
         logger.error("[ArcaBotCreateBaasRolloutPolicy] Missing injected policy")
@@ -261,9 +261,9 @@ class DeviceServiceRouter(DeviceService):
         # 未显式指定 provider 的创建请求，交给创建期灰度策略决定走 ARCA 还是 BaaS。
         decision = self._arca_baas_rollout_policy.decide(
             user_id=staff_id,
-            bot_type=bot_type,
-            engine_type=engine_type,
-            template_type=template_type,
+            bot_type=bot_type or "",
+            engine_type=engine_type or "openclaw",
+            template_type=template_type or "",
         )
         provider_name = decision.target_provider
 

@@ -76,6 +76,9 @@
       "scan_interval_hours": 1,
       "storage_dir": "./data/skills_scan"
     },
+    "task_queue_worker": {
+      "enabled": true
+    },
     "whitelist": {
       "operator_names": []
     },
@@ -196,7 +199,7 @@
     },
     "task_queue_worker": {
       "batch_size": 10,
-      "enabled": false,
+      "enabled": true,
       "lease_seconds": 60,
       "max_concurrency": 10,
       "poll_interval_seconds": 2.0,

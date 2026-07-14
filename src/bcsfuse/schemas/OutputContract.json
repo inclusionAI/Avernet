@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/OutputContract.json",
+  "title": "OutputContract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "required_artifacts",
+    "required_sections",
+    "must_include_validation"
+  ],
+  "properties": {
+    "required_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "required_sections": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "must_include_validation": {
+      "type": "boolean"
+    },
+    "format_hints": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    }
+  }
+}

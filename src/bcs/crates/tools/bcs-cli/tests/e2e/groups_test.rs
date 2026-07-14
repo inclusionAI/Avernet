@@ -17,9 +17,12 @@ async fn list_groups_mine_uses_current_bot_from_session() {
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "bot_uuid": ctx.session.bot_uuid,
             "items": [{
-                "id": "group-for-current-bot",
-                "mode": "agent",
-                "driver_bot": "current-bot"
+                "group_id": "group-for-current-bot",
+                "coordinator_bot": "current-bot",
+                "participants": [],
+                "group_kind": "normal",
+                "group_strategy": "chat",
+                "visibility": "private"
             }],
             "total": 1,
             "offset": 0,
@@ -37,5 +40,9 @@ async fn list_groups_mine_uses_current_bot_from_session() {
 
     assert_success(&output);
     assert_output_contains(&output, "Groups for current bot");
-    assert_output_contains(&output, "group-for-current-bot");
+    assert_output_contains(
+        &output,
+        "group-for-current-bot [chat] driver=current-bot",
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("unknown"));
 }

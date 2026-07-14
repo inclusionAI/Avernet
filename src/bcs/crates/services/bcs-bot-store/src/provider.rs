@@ -8,7 +8,7 @@ use tracing::warn;
 use bcs_config::resolve_env_str as resolve_env;
 use bcs_db_api::{DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
 use bcs_service_api::{
-    ProviderBotBinding, ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord,
+    BotCapabilities, ProviderBotBinding, ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord,
     ProviderBotDiscoverySelector, ProviderCredential, ProviderCredentialRepoPort, ProviderRecord,
     ProviderRepoPort, ServiceError, ServiceResult,
 };
@@ -324,6 +324,7 @@ impl ProviderBotBindingRepoPort for MemoryProviderStore {
                     bot_uuid: binding.bot_uuid.clone(),
                     provider_id: binding.provider_id.clone(),
                     provider_name: provider.name.clone(),
+                    capabilities: None,
                 })
             })
             .collect())
@@ -928,7 +929,7 @@ impl ProviderBotBindingRepoPort for DbProviderStore {
     ) -> ServiceResult<Vec<ProviderBotDiscoveryRecord>> {
         let env = resolve_env();
         let mut sql = "\
-            SELECT pb.bot_uuid, pb.provider_id, p.name AS provider_name \
+            SELECT pb.bot_uuid, pb.provider_id, p.name AS provider_name, b.name AS bot_name, b.bot_info \
             FROM bcs_provider_bot_bindings pb \
             JOIN bcs_providers p \
               ON p.provider_id = pb.provider_id \
@@ -937,9 +938,9 @@ impl ProviderBotBindingRepoPort for DbProviderStore {
               ON b.bot_uuid = pb.bot_uuid \
              AND b.env = pb.env \
             WHERE pb.env = ? \
-              AND COALESCE(pb.disabled, 0) = 0 \
-              AND COALESCE(p.disabled, 0) = 0 \
-              AND COALESCE(b.is_deleted, 0) = 0 \
+              AND pb.disabled = 0 \
+              AND p.disabled = 0 \
+              AND b.is_deleted = 0 \
               AND b.actor_kind = 'bot'"
             .to_string();
         let mut params = vec![DbValue::from(env.as_str())];
@@ -1022,7 +1023,18 @@ fn parse_provider_bot_record(row: &DbRow) -> Option<ProviderBotDiscoveryRecord> 
         bot_uuid: optional_string(row, "bot_uuid")?,
         provider_id: optional_string(row, "provider_id")?,
         provider_name: optional_string(row, "provider_name")?,
+        capabilities: parse_provider_bot_capabilities(row),
     })
+}
+
+fn parse_provider_bot_capabilities(row: &DbRow) -> Option<BotCapabilities> {
+    let mut capabilities = optional_string(row, "bot_info")
+        .and_then(|bot_info| serde_json::from_str::<BotCapabilities>(&bot_info).ok())
+        .unwrap_or_default();
+    if let Some(name) = optional_string(row, "bot_name") {
+        capabilities.name = Some(name);
+    }
+    Some(capabilities)
 }
 
 fn append_provider_discovery_selector_sql(
@@ -1032,6 +1044,16 @@ fn append_provider_discovery_selector_sql(
 ) {
     match selector {
         ProviderBotDiscoverySelector::All => {}
+        ProviderBotDiscoverySelector::ProviderIds(provider_ids) => {
+            if provider_ids.is_empty() {
+                sql.push_str(" AND 1 = 0");
+            } else {
+                sql.push_str(" AND pb.provider_id IN (");
+                sql.push_str(&provider_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", "));
+                sql.push(')');
+                params.extend(provider_ids.iter().map(|provider_id| DbValue::from(provider_id.as_str())));
+            }
+        }
         ProviderBotDiscoverySelector::Query(query) => {
             let pattern = like_pattern(query);
             sql.push_str(
@@ -1438,6 +1460,13 @@ mod tests {
         assert_eq!(records[0].bot_uuid, "bot-ok");
         assert_eq!(records[0].provider_id, "provider-ok");
         assert_eq!(records[0].provider_name, "Provider");
+        assert_eq!(
+            records[0]
+                .capabilities
+                .as_ref()
+                .and_then(|capabilities| capabilities.name.as_deref()),
+            Some("bot-ok")
+        );
     }
 
     #[tokio::test]

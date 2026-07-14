@@ -18,8 +18,7 @@ This combines two guarantees:
 """
 from __future__ import annotations
 
-import asyncio
-import logging
+from agentclaw.community.log import get_logger
 import threading
 import time
 from datetime import datetime
@@ -31,9 +30,12 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.services.scan_service import GovernanceBotService
+    from agentclaw.community.core.economy.governance.services.service_protocols import (
+        GovernanceAdminServiceProtocol,
+    )
     from agentclaw.community.plugin_api.cache import CachePlugin
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # TTL for the once-lock: 2 days — generous buffer over single-day scope.
 _ONCE_LOCK_TTL_SECONDS = 2 * 86400
@@ -58,10 +60,12 @@ class GovernanceBotLifecycle(LifecycleBase):
         service: GovernanceBotService,
         cache: CachePlugin,
         config: Any,  # EconomyGovernanceConfig
+        admin_svc: GovernanceAdminServiceProtocol,
     ) -> None:
         self._service = service
         self._cache = cache
         self._config = config
+        self._admin_svc = admin_svc
         self._stop_event = threading.Event()
         self._scan_thread: threading.Thread | None = None
         env = get_current_env()
@@ -147,14 +151,29 @@ class GovernanceBotLifecycle(LifecycleBase):
             lock_key, token[:8],
         )
 
+        # 制动判定(lock 之后):制动生效则跳过本次自动 tick。锁已抢下,
+        # 当日执行权消耗——制动是风险信号,应尽快回退后次日恢复,当日不补跑。
+        # 手动接口(trigger-scan / scan-and-deliver / tickets:deliver)不经此
+        # 路径,制动不影响手动排障/补投(见 process_cron_tick docstring)。
+        if self._admin_svc.is_paused():
+            self._admin_svc.write_brake_skip_audit(
+                run_id=scan_date,
+                reason="scheduled tick skipped: governance brake active",
+            )
+            log.info(
+                "[GovernanceLifecycle] Brake active — skip scheduled tick, "
+                "date=%s (lock held, no rerun today)", scan_date,
+            )
+            return
+
         started = datetime.now()
         try:
-            summary = asyncio.run(self._service.process_cron_tick())
+            summary = self._service.process_cron_tick()
             duration = (datetime.now() - started).total_seconds()
             log.info(
                 "[GovernanceLifecycle] Scan completed: run_id=%s, "
                 "sent=%d, failed=%d, cancelled=%d, reminders=%d, "
-                "schedule_due=%d, timeout_recovered=%d, "
+                "schedule_due=%d, "
                 "dry_run=%s, duration=%.1fs",
                 summary.run_id,
                 summary.sent_count,
@@ -162,7 +181,6 @@ class GovernanceBotLifecycle(LifecycleBase):
                 summary.cancelled_count,
                 summary.reminders_created,
                 summary.schedule_due_count,
-                summary.timeout_recovered,
                 summary.dry_run,
                 duration,
             )

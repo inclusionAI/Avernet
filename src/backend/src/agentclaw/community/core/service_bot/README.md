@@ -23,10 +23,12 @@ internal_dependencies:
   - agentclaw.community.core.devices
   - agentclaw.community.core.quality.services
   - agentclaw.community.core.system_config
+  - agentclaw.community.core.task_queue    # durable publish stage tasks (enqueue + handlers + worker)
   - agentclaw.community.core.workspace
   - agentclaw.community.di
   - agentclaw.community.kernel.bot_config
   - agentclaw.community.kernel.device_dto    # neutral OutBound / ResourceSpecification DTOs (B6)
+  - agentclaw.community.kernel.lifecycle    # PublishTaskLifecycle registers durable task handlers
   - agentclaw.community.log
   - agentclaw.community.plugin_api.approval_workflow           # antprocess approval workflow for publish approval
   - agentclaw.community.core.devices.services.device_filesystem    # teclaw build-time file promotion (TeclawFilePromotion)

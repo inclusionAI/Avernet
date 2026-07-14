@@ -240,19 +240,19 @@ async def test_upgrade_publish_success_and_errors():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_sync_publish_progress_success_and_errors():
+async def test_describe_publish_success_and_errors():
     flow = MagicMock()
-    flow.sync_publish_progress.return_value = ModelDumpResult(message="synced")
-    resp = await router_publish.sync_publish_progress(1, user=_USER, flow_service=flow)
+    flow.describe_publish.return_value = ModelDumpResult(message="status reported")
+    resp = await router_publish.describe_publish(1, user=_USER, flow_service=flow)
     assert resp.success is True
     assert resp.data["dumped"] is True
-    flow.sync_publish_progress.assert_called_once_with(publish_id=1)
+    flow.describe_publish.assert_called_once_with(publish_id=1)
 
-    flow.sync_publish_progress.return_value = DictOnlyResult(status=PublishStatus.FAILED, message="failed")
-    resp = await router_publish.sync_publish_progress(1, user=_USER, flow_service=flow)
+    flow.describe_publish.return_value = DictOnlyResult(status=PublishStatus.FAILED, message="failed")
+    resp = await router_publish.describe_publish(1, user=_USER, flow_service=flow)
     assert resp.success is False
 
-    resp = await router_publish.sync_publish_progress(1, user=_ANON, flow_service=flow)
+    resp = await router_publish.describe_publish(1, user=_ANON, flow_service=flow)
     assert_error(resp, 400, "无法获取用户信息")
 
     for exc, code in [
@@ -261,8 +261,8 @@ async def test_sync_publish_progress_success_and_errors():
         (PublishFlowServiceError("flow"), 500),
         (RuntimeError("boom"), 500),
     ]:
-        flow.sync_publish_progress.side_effect = exc
-        resp = await router_publish.sync_publish_progress(1, user=_USER, flow_service=flow)
+        flow.describe_publish.side_effect = exc
+        resp = await router_publish.describe_publish(1, user=_USER, flow_service=flow)
         assert resp.error_code == code
         assert resp.success is False
 

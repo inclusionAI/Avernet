@@ -76,6 +76,7 @@ pub use bot_runtime_use_cases::{
 pub use bot_use_cases::{
     BotConnectCommand, BotDetailCommand, BotDetailResult, BotDiscoveryCommand, BotDiscoveryEntry,
     BotDiscoveryProviderInfo, BotDiscoveryResult, BotDiscoveryService, BotLeaveCommand,
+    OrganizationMemberSummary,
     BotLeaveResult, BotListCommand, BotListEntry, BotListResult, BotManagementService,
     BotPagedListCommand, BotPagedListResult, BotQueryByIdsCommand, BotQueryByIdsResult,
     BotQueryEntry, BotQueryService,
@@ -132,7 +133,9 @@ pub use application::{
     ProviderBotEventError, ProviderBotEventOutcome, ProviderBotEventService,
     ProviderCoordinationEventKind, ProviderCoordinationIntent, ProviderManagementService,
     RegisterProviderBotCommand, RegisterProviderBotOutcome, RegisterProviderCommand,
-    RegisterProviderOutcome, UpdateProviderCommand,
+    RegisterProviderOutcome, UpdateProviderCommand, CreateOrganizationCommand,
+    OrganizationAuth, OrganizationManagementService, PutOrganizationMemberCommand,
+    UpdateOrganizationCommand,
 };
 pub use port::{
     BotConnectionControlPort, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
@@ -154,6 +157,9 @@ pub use port::{
     LeaderElectionPort, LeaderInfo, LeaderStatus, MetricsResult, NewSessionParams,
     ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector,
     ProviderCredentialRepoPort, ProviderRepoPort, ProviderStreamGrayList,
+    CreateOrganizationRecord, ListOrganizationMembersPageQuery, ListOrganizationMembersQuery,
+    ListOrganizationsQuery, OrganizationMemberPage, OrganizationRepoPort, UpdateOrganizationRecord,
+    UpsertOrganizationMemberRecord,
     ProviderTransportPreference, RelationRepoPort,
     RunFallbackDelivery, SessionCallbackDispatchPort, SessionRepoPort,
     StateMachineDefinitionRepoPort, StateMachineRunRepoPort,
@@ -171,7 +177,7 @@ pub use workbench_use_cases::{
 pub use types::{
     BotDeliveryTarget, CallbackChannelConfig, CallbackConfig, CoordinationMode,
     CoordinationSurface, ProviderAuthMode, ProviderBotBinding, ProviderCoordinationConfig,
-    ProviderCredential, ProviderRecord, RedactedToken,
+    ProviderCredential, ProviderOrganizationManagementConfig, ProviderRecord, RedactedToken,
     ChatRuntimeProfile, CollaborationDefinition,
     CollaborationDefinitionRef, CollaborationMetadata, CollaborationParticipantBinding,
     CollaborationRequirements, CollaborationRuntimeDefinition, GroupRuntimeBinding,
@@ -195,7 +201,9 @@ pub use core::{
     GroupMessage, GroupMessageType, GroupStatus, GroupStrategy, MessageRole, Participant,
     ParticipantKind, ParticipantMode, ParticipantRole, ProposalCoreService,
     ProviderBotCoreService, ProviderCoreService, RegisterProviderBotParams, RegisteredBot,
-    RegisteredProvider,
+    RegisteredProvider, AuthorizedOrganizationPair, OrganizationCandidateBot, OrganizationCandidateBotPage,
+    OrganizationCandidatePageQuery, OrganizationCandidateQuery,
+    OrganizationCoreService, OrganizationMemberPageQuery,
     RelationCoreService, BCS_SYSTEM_MESSAGE, RelationEdge, ResponseMode, RouteAndSendResult,
     RouteParticipantOverlay, RouteSelectorWire, RoutingCoreService, RoutingDecision,
     RoutingMode, RoutingPolicy, RoutingTarget, RuntimeBotIdentity, SenderRoutesValidationError,

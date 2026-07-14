@@ -2,7 +2,7 @@
 
 Each repository wraps ORM access to one governance table:
 
-- :class:`TaskRecordRepository` — ``ac_governance_task_record_daily`` (read + upsert)
+- :class:`TaskRecordRepository` — ``ac_governance_task_record_daily`` (ticket lifecycle)
 - :class:`NotifyLogRepository` — ``ac_governance_notify_log``
 - :class:`GovernanceAuditRepository` — ``ac_governance_audit``
 - :class:`GovernanceWhitelistRepository` — ``ac_bot_whitelist``

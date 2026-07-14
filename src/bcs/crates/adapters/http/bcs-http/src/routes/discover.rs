@@ -11,7 +11,7 @@ use crate::error::HttpAdapterError;
 use crate::mapping::capabilities::to_wire_capabilities;
 use crate::state::HttpAppState;
 
-use super::require_caller_actor_id_from_headers;
+use super::{bot_id_from_headers, require_caller_actor_id_from_headers};
 
 #[derive(Debug, Deserialize)]
 pub struct DiscoverBotsQuery {
@@ -29,6 +29,10 @@ pub struct DiscoverBotsQuery {
     pub visibility: Option<String>,
     #[serde(default)]
     pub collaborate_bot: Option<String>,
+    #[serde(default)]
+    pub organization_code: Option<String>,
+    #[serde(default)]
+    pub role: Option<String>,
 }
 
 pub async fn discover_bots(
@@ -39,6 +43,12 @@ pub async fn discover_bots(
 ) -> Result<Json<Value>, HttpAdapterError> {
     let _caller_actor_id =
         require_caller_actor_id_from_headers(&state, &headers, &uri).await?;
+    let requester_bot_id = bot_id_from_headers(&state, &headers).await;
+    if query.organization_code.is_some() && requester_bot_id.is_none() {
+        return Err(HttpAdapterError::Forbidden(
+            "organization discovery requires a bot caller".to_string(),
+        ));
+    }
     let result = state
         .services
         .bot_discovery
@@ -50,6 +60,9 @@ pub async fn discover_bots(
             scopes: query.scopes,
             visibility: query.visibility,
             collaborate_bot: query.collaborate_bot,
+            requester_bot_id,
+            organization_code: query.organization_code,
+            role: query.role,
         })
         .await
         .map_err(bot_use_case_error_to_http)?;
@@ -113,6 +126,17 @@ fn discover_bot_to_json(bot: BotDiscoveryEntry) -> Value {
                 serde_json::json!({
                     "provider_id": provider_info.provider_id,
                     "provider_name": provider_info.provider_name,
+                }),
+            )
+        });
+    }
+    if let Some(member) = bot.organization_member {
+        entry.as_object_mut().map(|object| {
+            object.insert(
+                "organization_member".to_string(),
+                serde_json::json!({
+                    "organization_code": member.organization_code,
+                    "role": member.role,
                 }),
             )
         });

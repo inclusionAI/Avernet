@@ -91,6 +91,16 @@ def _make_publish_record(*, publish_id: int, status: str, binding_key: str, bind
     )
 
 
+def _make_publish_record_with_bindings(
+    *, publish_id: int, status: str, bindings: dict[str, int]
+):
+    return SimpleNamespace(
+        id=publish_id,
+        status=status,
+        ext={"binding": bindings},
+    )
+
+
 def _make_binding(*, binding_id: int, device_provider: str):
     return SimpleNamespace(id=binding_id, device_provider=device_provider)
 
@@ -412,6 +422,137 @@ class TestListAllCronsOwnerId:
 
 
 class TestListServiceBotRuntimeStages:
+    @pytest.mark.parametrize(
+        ("verify_status", "expected_stages"),
+        [
+            (DeviceBindingStatus.ACTIVE, ["draft", "verify", "online"]),
+            (DeviceBindingStatus.RELEASED, ["draft", "online"]),
+        ],
+        ids=["active-verify", "released-verify"],
+    )
+    def test_success_record_only_exposes_active_retained_verify(
+        self,
+        verify_status,
+        expected_stages,
+    ):
+        publish_record = _make_publish_record_with_bindings(
+            publish_id=202,
+            status=PublishStatus.SUCCESS.value,
+            bindings={"verify": 20, "online": 30},
+        )
+        publish_repo = MagicMock()
+        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
+            lambda source_bot_id, owner_id, status, env: (
+                publish_record if status == PublishStatus.SUCCESS.value else None
+            )
+        )
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device(status=verify_status)
+        svc = _make_service(
+            device_provider=device_provider,
+            publish_repo=publish_repo,
+        )
+
+        targets, failed_targets = svc._build_runtime_targets(
+            {
+                "bot_id": "service-bot",
+                "owner_id": "owner-1",
+                "binding_id": 10,
+                "bot_name": "Service Bot",
+                "bot_type": "service",
+            },
+            "owner-1",
+        )
+
+        assert [target.runtime_stage for target in targets] == expected_stages
+        assert failed_targets == []
+        if verify_status == DeviceBindingStatus.ACTIVE:
+            verify_target = next(
+                target for target in targets if target.runtime_stage == "verify"
+            )
+            assert verify_target.binding_id == 20
+            assert verify_target.publish_id == 202
+            assert verify_target.publish_status == PublishStatus.SUCCESS.value
+
+    def test_validating_verify_takes_priority_over_success_verify(self):
+        validating_record = _make_publish_record(
+            publish_id=303,
+            status=PublishStatus.VALIDATING.value,
+            binding_key="verify",
+            binding_id=21,
+        )
+        success_record = _make_publish_record_with_bindings(
+            publish_id=202,
+            status=PublishStatus.SUCCESS.value,
+            bindings={"verify": 20, "online": 30},
+        )
+        publish_repo = MagicMock()
+        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
+            lambda source_bot_id, owner_id, status, env: {
+                PublishStatus.VALIDATING.value: validating_record,
+                PublishStatus.SUCCESS.value: success_record,
+            }.get(status)
+        )
+        device_provider = MagicMock()
+        svc = _make_service(
+            device_provider=device_provider,
+            publish_repo=publish_repo,
+        )
+
+        targets, failed_targets = svc._build_runtime_targets(
+            {
+                "bot_id": "service-bot",
+                "owner_id": "owner-1",
+                "binding_id": 10,
+                "bot_name": "Service Bot",
+                "bot_type": "service",
+            },
+            "owner-1",
+        )
+
+        by_stage = {target.runtime_stage: target for target in targets}
+        assert by_stage["verify"].binding_id == 21
+        assert by_stage["verify"].publish_id == 303
+        assert by_stage["online"].binding_id == 30
+        assert failed_targets == []
+        device_provider.get_device.assert_not_called()
+
+    def test_resolve_verify_uses_active_binding_from_success_record(self):
+        publish_record = _make_publish_record_with_bindings(
+            publish_id=202,
+            status=PublishStatus.SUCCESS.value,
+            bindings={"verify": 20, "online": 30},
+        )
+        publish_repo = MagicMock()
+        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
+            lambda source_bot_id, owner_id, status, env: (
+                publish_record if status == PublishStatus.SUCCESS.value else None
+            )
+        )
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device(
+            status=DeviceBindingStatus.ACTIVE
+        )
+        svc = _make_service(
+            device_provider=device_provider,
+            publish_repo=publish_repo,
+        )
+
+        target = svc._resolve_published_runtime_target(
+            {
+                "bot_id": "service-bot",
+                "owner_id": "owner-1",
+                "bot_name": "Service Bot",
+                "bot_type": "service",
+            },
+            "owner-1",
+            "verify",
+        )
+
+        assert target.binding_id == 20
+        assert target.publish_id == 202
+        assert target.publish_status == PublishStatus.SUCCESS.value
+
     @pytest.mark.asyncio
     async def test_service_bot_list_expands_draft_verify_online_targets(self):
         bot_provider = MagicMock()
@@ -538,7 +679,7 @@ class TestListServiceBotRuntimeStages:
         resolver.resolve_for_bot.return_value = _make_ctx(
             binding_id=10, bot_id="service-bot", user_id="owner-1"
         )
-        resolver.resolve_for_binding.side_effect = (
+        resolver.resolve_for_binding_invoke.side_effect = (
             lambda binding_id, operator_id, *, bot_id, device_uuid=None: _make_ctx(
                 binding_id=binding_id,
                 bot_id=bot_id,
@@ -586,9 +727,10 @@ class TestListServiceBotRuntimeStages:
         assert result["failed_targets"] == []
         device_provider.get_instances.assert_not_called()
         device_provider.list_devices_by_runtime_binding.assert_not_called()
-        resolver.resolve_for_binding.assert_called_once_with(
+        resolver.resolve_for_binding_invoke.assert_called_once_with(
             30, "owner-1", bot_id="service-bot"
         )
+        resolver.resolve_for_binding.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_service_bot_list_does_not_query_instances(self):
@@ -626,7 +768,7 @@ class TestListServiceBotRuntimeStages:
         resolver.resolve_for_bot.return_value = _make_ctx(
             binding_id=10, bot_id="service-bot", user_id="owner-1"
         )
-        resolver.resolve_for_binding.side_effect = (
+        resolver.resolve_for_binding_invoke.side_effect = (
             lambda binding_id, operator_id, *, bot_id: _make_ctx(
                 binding_id=binding_id,
                 bot_id=bot_id,
@@ -1257,7 +1399,7 @@ class TestListRunningCronsOwnerId:
         resolver.resolve_for_bot.return_value = _make_ctx(
             binding_id=10, bot_id="service-bot", user_id="owner-1"
         )
-        resolver.resolve_for_binding.side_effect = (
+        resolver.resolve_for_binding_invoke.side_effect = (
             lambda binding_id, operator_id, *, bot_id, device_uuid=None: _make_ctx(
                 binding_id=binding_id,
                 bot_id=bot_id,
@@ -1346,7 +1488,7 @@ class TestListRunningCronsOwnerId:
         ]
 
         resolver = MagicMock()
-        resolver.resolve_for_binding.side_effect = (
+        resolver.resolve_for_binding_invoke.side_effect = (
             lambda binding_id, operator_id, *, bot_id, device_uuid=None: _make_ctx(
                 binding_id=binding_id,
                 bot_id=bot_id,
@@ -1392,10 +1534,10 @@ class TestListRunningCronsOwnerId:
             "DEVICE-001",
             "DEVICE-002",
         }
-        resolver.resolve_for_binding.assert_any_call(
+        resolver.resolve_for_binding_invoke.assert_any_call(
             30, "owner-1", bot_id="service-bot", device_uuid="DEVICE-001"
         )
-        resolver.resolve_for_binding.assert_any_call(
+        resolver.resolve_for_binding_invoke.assert_any_call(
             30, "owner-1", bot_id="service-bot", device_uuid="DEVICE-002"
         )
         resolver.resolve_for_bot.assert_not_called()
@@ -1432,7 +1574,7 @@ class TestListRunningCronsOwnerId:
         ]
 
         resolver = MagicMock()
-        resolver.resolve_for_binding.side_effect = (
+        resolver.resolve_for_binding_invoke.side_effect = (
             lambda binding_id, operator_id, *, bot_id, device_uuid=None: _make_ctx(
                 binding_id=binding_id,
                 bot_id=bot_id,
@@ -1465,7 +1607,7 @@ class TestListRunningCronsOwnerId:
 
         assert len(result["data"]) == 1
         assert result["data"][0]["device_uuid"] == "DEVICE-002"
-        resolver.resolve_for_binding.assert_called_once_with(
+        resolver.resolve_for_binding_invoke.assert_called_once_with(
             30, "owner-1", bot_id="service-bot", device_uuid="DEVICE-002"
         )
         transport.invoke.assert_awaited_once()

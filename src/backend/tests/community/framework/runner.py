@@ -180,9 +180,14 @@ def _run_case(case: EndpointCase, app: FastAPI, world: World) -> None:
 
 
 def _drive_case(case: EndpointCase, app: FastAPI, world: World) -> None:
+    import asyncio
+
     url, request_kwargs = _prepare_request(case, world)
     client = TestClient(app)
     response = client.request(case.method, url, **request_kwargs)
+    # /process now enqueues a durable stage task instead of running inline; drive
+    # it once so the sync case sees the same end state (see _drain_publish_stage_task).
+    asyncio.run(_drain_publish_stage_task(world))
     _check(case, response, world)
 
 
@@ -213,7 +218,38 @@ async def _drive_case_async(case: EndpointCase, app: FastAPI, world: World) -> N
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.request(case.method, url, **request_kwargs)
         await drain_background_tasks()
+        await _drain_publish_stage_task(world)
         _check(case, response, world)
+
+
+async def _drain_publish_stage_task(world: World) -> None:
+    """Run the enqueued durable publish *stage* task (verify_flow / online_release)
+    once, reproducing what the old inline ``/process`` did synchronously.
+
+    Since the durability refactor, ``/process`` advances the status forward
+    synchronously (DRAFT→BUILDING, VALIDATING→ONLINE_PUB) and enqueues a persisted
+    task instead of running the stage inline; the test worker is disabled, so
+    nothing would run it. One ``run_once()`` claims and runs that single stage task
+    (which drives BUILDING→VALIDATE_PUB or runs the online release within ONLINE_PUB
+    and enqueues a progress poll — the poll is left un-run, matching the old inline
+    end state). Best-effort: silently skips when the task-queue graph isn't wired
+    for this app.
+    """
+    try:
+        from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+            PublishTaskLifecycle,
+            VERIFY_FLOW_TASK,
+        )
+        from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
+        from agentclaw.community.core.task_queue.services.worker import TaskWorker
+
+        injector = world.injector
+        registry = injector.get(HandlerRegistry)
+        if registry.get(VERIFY_FLOW_TASK) is None:
+            await injector.get(PublishTaskLifecycle).bootstrap()
+        await injector.get(TaskWorker).run_once()
+    except Exception:  # pragma: no cover - non-publish apps / unwired graphs
+        pass
 
 
 # Note: the parametrized ``test_endpoint_injection`` lives in

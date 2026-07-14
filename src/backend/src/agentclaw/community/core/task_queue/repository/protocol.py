@@ -108,6 +108,17 @@ class TaskQueueRepositoryProtocol(Protocol):
         ``False`` if this worker no longer holds it."""
         ...
 
+    def renew_lease(self, *, task_id: int, worker_id: str, lease_seconds: int) -> bool:
+        """Extend a held task's lease to ``now() + lease_seconds`` (DB clock).
+
+        CAS-guarded on ``claimed_by == worker_id AND status == RUNNING`` — the same
+        holder predicate as the outcome transitions — so a worker that already lost
+        its lease to another cannot extend it. Used by the worker's heartbeat to
+        keep a long-running handler's claim alive past the base ``lease_seconds``.
+        Returns ``False`` if this worker no longer holds the task (its lease
+        expired and another worker took over, or it is already terminal)."""
+        ...
+
     # ── diagnosis / tests ───────────────────────────────────────────────
     def get_by_id(self, task_id: int) -> Optional[TaskRecord]:
         """Return the task by id, or ``None``."""

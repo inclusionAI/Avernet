@@ -20,7 +20,7 @@ use bcs_service_api::{
     ChatRunMetricCount, DeliveryBlockContext, DeliveryBlockReason, DeliveryBlockSurface,
     DeliveryMetricKind, DeliveryMetricTarget, DirectChatClientKind, DirectChatRunEvent,
     DirectChatRunLifecycleHook, DirectChatRunReason, DirectChatRunSnapshotPort,
-    FriendCoreService, MetricsResult, RegisteredBot, ServiceError, ServiceResult,
+    FriendCoreService, MetricsResult, OrganizationCoreService, RegisteredBot, ServiceError, ServiceResult,
 };
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -52,6 +52,7 @@ pub struct A2aChat {
     /// existing callers/tests don't need to thread a chain. Bootstrap attaches
     /// the production chain via `with_interceptors`.
     interceptors: Arc<bcs_service_api::interceptor::InterceptorChain>,
+    organization: Option<Arc<dyn OrganizationCoreService>>,
 }
 
 impl A2aChat {
@@ -93,6 +94,7 @@ impl A2aChat {
             bot_run_context: None,
             default_timeout_ms,
             interceptors: Arc::new(bcs_service_api::interceptor::InterceptorChain::new()),
+            organization: None,
         }
     }
 
@@ -108,6 +110,14 @@ impl A2aChat {
 
     pub fn run_store(&self) -> Arc<ChatRunStore> {
         self.run_store.clone()
+    }
+
+    pub fn with_organization(
+        mut self,
+        organization: Arc<dyn OrganizationCoreService>,
+    ) -> Self {
+        self.organization = Some(organization);
+        self
     }
 
     pub fn with_run_lifecycle_hook(
@@ -295,6 +305,7 @@ impl A2aChatRunService for A2aChat {
                 tags: cmd.tags,
                 response_mode: cmd.response_mode,
                 caller_wait_mode: None,
+                organization_code: cmd.organization_code,
             })
             .await;
 
@@ -347,6 +358,7 @@ impl A2aChatRunService for A2aChat {
                 tags: cmd.tags,
                 response_mode: cmd.response_mode,
                 caller_wait_mode: cmd.caller_wait_mode,
+                organization_code: cmd.organization_code,
             })
             .await;
 
@@ -407,9 +419,22 @@ impl A2aChatService for A2aChat {
         let from_bot_id = bot_caller_id(&cmd.caller)?;
         self.ensure_source_owner(&from_bot_id, cmd.authenticated_staff_id.as_deref())
             .await?;
-        let target_bot = self
-            .ensure_target_reachable(&from_bot_id, &cmd.target_bot_id)
-            .await?;
+        let target_bot = if let Some(code) = cmd.organization_code.as_deref() {
+            let organization = self.organization.as_ref().ok_or_else(|| {
+                ServiceError::InvalidOperation {
+                    message: "organization service is not configured".to_string(),
+                    request_id: None,
+                }
+            })?;
+            organization
+                .authorize_pair(code, &from_bot_id, &cmd.target_bot_id)
+                .await?;
+            self.ensure_organization_target_reachable(&from_bot_id, &cmd.target_bot_id)
+                .await?
+        } else {
+            self.ensure_target_reachable(&from_bot_id, &cmd.target_bot_id)
+                .await?
+        };
         if target_bot.status == ActorStatus::Hidden {
             let name = target_bot
                 .capabilities
@@ -1058,6 +1083,24 @@ impl A2aChat {
             "protected" if self.friend.are_friends(from_bot_id, target_bot_id).await => Ok(target),
             "protected" => Err(ServiceError::NotFriends(vec![target_bot_id.to_string()])),
             // "private" or unknown: friends can still reach, strangers get 404
+            _ if self.friend.are_friends(from_bot_id, target_bot_id).await => Ok(target),
+            _ => Err(ServiceError::BotNotFound(target_bot_id.to_string())),
+        }
+    }
+
+    async fn ensure_organization_target_reachable(
+        &self,
+        from_bot_id: &str,
+        target_bot_id: &str,
+    ) -> ServiceResult<RegisteredBot> {
+        let target = self
+            .registry
+            .get(target_bot_id)
+            .await
+            .ok_or_else(|| ServiceError::BotNotFound(target_bot_id.to_string()))?;
+
+        match target.capabilities.visibility.as_str() {
+            "public" | "protected" => Ok(target),
             _ if self.friend.are_friends(from_bot_id, target_bot_id).await => Ok(target),
             _ => Err(ServiceError::BotNotFound(target_bot_id.to_string())),
         }

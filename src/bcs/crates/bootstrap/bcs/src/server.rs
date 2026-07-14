@@ -59,6 +59,8 @@ use bcs_message_flow::{
     A2aChat, BcsGroupFusion, BcsGroupMessageHistory, BcsMessageFlow,
 };
 use bcs_message_store::{MemoryMessageRepo, MySqlMessageStore};
+use bcs_organization::{OrganizationCore, OrganizationManagement};
+use bcs_organization_store::{DbOrganizationStore, MemoryOrganizationRepo};
 use bcs_collaboration_runtime::CollaborationRuntime;
 use bcs_collaboration_store::{
     DbCollaborationTemplateRepo, MemoryCollaborationStore, MySqlCollaborationStore,
@@ -85,6 +87,7 @@ use bcs_service_api::{
     GroupHistoryBotRequestPort, GroupManagementService, GroupMessageHistoryService,
     GroupMetricsSnapshotPort, GroupRepoPort, GroupSessionMetricsSnapshotPort,
     JudgeEvaluatorPort, LeaderElectionPort, MessageFlowService, MetricsResult,
+    OrganizationCoreService, OrganizationManagementService, OrganizationRepoPort,
     ProviderBotBindingRepoPort, ProviderBotCoreService, ProviderBotEventService, ProviderCoreService,
     ProviderCredentialRepoPort, ProviderManagementService, ProviderRepoPort, ProviderStreamGrayList,
     RoutingCoreService, SessionManagementService, WsCloseReason, WsErrorKind,
@@ -644,6 +647,71 @@ fn db_provider_repos(
     }
 }
 
+fn memory_organization_services(
+    provider_repos: &ProviderRepoBundle,
+    provider_core: Arc<dyn ProviderCoreService>,
+    bot_registry: Arc<dyn BotRegistryCoreService>,
+) -> (
+    Arc<dyn OrganizationCoreService>,
+    Arc<dyn OrganizationManagementService>,
+) {
+    let organization_repo: Arc<dyn OrganizationRepoPort> =
+        Arc::new(MemoryOrganizationRepo::new());
+    build_organization_services(
+        organization_repo,
+        provider_repos,
+        provider_core,
+        bot_registry,
+    )
+}
+
+fn db_organization_services(
+    db_plugin: Arc<dyn bcs_db_api::DbPlugin>,
+    db_kind: &DbPluginKind,
+    provider_repos: &ProviderRepoBundle,
+    provider_core: Arc<dyn ProviderCoreService>,
+    bot_registry: Arc<dyn BotRegistryCoreService>,
+) -> (
+    Arc<dyn OrganizationCoreService>,
+    Arc<dyn OrganizationManagementService>,
+) {
+    let organization_repo: Arc<dyn OrganizationRepoPort> = match db_kind {
+        DbPluginKind::LocalSqlite => Arc::new(DbOrganizationStore::sqlite(db_plugin.clone())),
+        DbPluginKind::Mysql => Arc::new(DbOrganizationStore::mysql(db_plugin.clone())),
+        DbPluginKind::External(provider) => {
+            panic!("external database plugin '{}' has no organization store wiring", provider)
+        }
+    };
+    build_organization_services(
+        organization_repo,
+        provider_repos,
+        provider_core,
+        bot_registry,
+    )
+}
+
+fn build_organization_services(
+    organization_repo: Arc<dyn OrganizationRepoPort>,
+    provider_repos: &ProviderRepoBundle,
+    provider_core: Arc<dyn ProviderCoreService>,
+    bot_registry: Arc<dyn BotRegistryCoreService>,
+) -> (
+    Arc<dyn OrganizationCoreService>,
+    Arc<dyn OrganizationManagementService>,
+) {
+    let organization_core: Arc<dyn OrganizationCoreService> = Arc::new(OrganizationCore::new(
+        crate::env::resolve_env(),
+        organization_repo,
+        provider_repos.provider_repo.clone(),
+        provider_repos.provider_bindings.clone(),
+        bot_registry,
+    ));
+    let organization_management: Arc<dyn OrganizationManagementService> = Arc::new(
+        OrganizationManagement::new(provider_core, organization_core.clone()),
+    );
+    (organization_core, organization_management)
+}
+
 fn build_provider_services_with_webhook_url_guard(
     repos: &ProviderRepoBundle,
     registry: Arc<dyn BotRegistryCoreService>,
@@ -748,6 +816,11 @@ impl Default for BcsServerState {
                 user_directory.clone(),
                 outbound_url_guard.clone(),
             );
+        let (organization_core, organization_management) = memory_organization_services(
+            &provider_repos,
+            provider_core.clone(),
+            bot_registry.clone(),
+        );
         let group_repo = Arc::new(MemoryGroupRepo::new());
         let group_metrics_snapshot: Arc<dyn GroupMetricsSnapshotPort> = group_repo.clone();
         let group_repo_for_session: Arc<dyn GroupRepoPort> = group_repo.clone();
@@ -763,6 +836,7 @@ impl Default for BcsServerState {
         let bot_connections = Arc::new(BotConnectionRegistry::new());
         let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend_store.clone())
             .with_bot_core(bot_core_arc.clone())
+            .with_organization(organization_core.clone())
             .with_relation(
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>
             )
@@ -846,6 +920,7 @@ impl Default for BcsServerState {
                 a2a_run_port.clone(),
                 a2a_run_port.clone(),
             )
+            .with_organization(organization_core.clone())
             .with_interceptors(interceptors.clone())
             .with_run_lifecycle_hook(direct_chat_run_lifecycle_hook(metrics.as_ref()))
             .with_bot_run_context(bot_run_context.clone()),
@@ -993,6 +1068,8 @@ impl Default for BcsServerState {
             .provider_core(provider_core)
             .provider_bot_core(provider_bot_core)
             .provider_management(provider_management)
+            .organization(organization_core)
+            .organization_management(organization_management)
             .provider_bot_events(provider_bot_events)
             .group_management(group_management.clone())
             .group_query(group_management_impl.clone())
@@ -1253,6 +1330,7 @@ fn build_use_case_bundle(
     config: &BcsConfig,
     bot_registry: Arc<dyn BotRegistryCoreService>,
     bot_core: Arc<BotCore>,
+    organization_core: Arc<dyn OrganizationCoreService>,
     bot_connection_control: Arc<dyn bcs_service_api::BotConnectionControlPort>,
     group: Arc<dyn GroupCoreService>,
     proposal: Arc<dyn bcs_service_api::ProposalCoreService>,
@@ -1281,6 +1359,7 @@ fn build_use_case_bundle(
 
     let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend.clone())
         .with_bot_core(bot_core.clone())
+        .with_organization(organization_core.clone())
         .with_relation(relation.clone())
         .with_connection_control(bot_connection_control.clone());
     if let Some(user_directory) = user_directory {
@@ -1880,6 +1959,11 @@ impl BcsServer {
                 user_directory.clone(),
                 provider_webhook_url_guard,
             );
+        let (organization_core, organization_management) = memory_organization_services(
+            &provider_repos,
+            provider_core.clone(),
+            bot_registry.clone(),
+        );
         let group_repo = Arc::new(MemoryGroupRepo::new());
         let group_metrics_snapshot: Arc<dyn GroupMetricsSnapshotPort> = group_repo.clone();
         let group_repo_for_session: Arc<dyn GroupRepoPort> = group_repo.clone();
@@ -1906,6 +1990,7 @@ impl BcsServer {
         let bot_connections = Arc::new(BotConnectionRegistry::new());
         let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend_store.clone())
             .with_bot_core(bot_core_arc.clone())
+            .with_organization(organization_core.clone())
             .with_relation(
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>
             )
@@ -1987,6 +2072,7 @@ impl BcsServer {
                 a2a_run_port.clone(),
                 a2a_run_port.clone(),
             )
+            .with_organization(organization_core.clone())
             .with_interceptors(interceptors.clone())
             .with_run_lifecycle_hook(direct_chat_run_lifecycle_hook(metrics.as_ref()))
             .with_bot_run_context(bot_run_context.clone()),
@@ -1999,6 +2085,7 @@ impl BcsServer {
             &config,
             bot_registry.clone(),
             bot_core_arc.clone(),
+            organization_core.clone(),
             bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>,
             sessions.clone(),
             proposals.clone(),
@@ -2109,6 +2196,8 @@ impl BcsServer {
             .provider_core(provider_core)
             .provider_bot_core(provider_bot_core)
             .provider_management(provider_management)
+            .organization(organization_core)
+            .organization_management(organization_management)
             .provider_bot_events(provider_bot_events)
             .group_management(maybe_wrap_group_management(&config, use_cases.group_management))
             .group_query(use_cases.group_query)
@@ -2323,6 +2412,13 @@ impl BcsServer {
                 user_directory.clone(),
                 outbound_url_guard.clone(),
             );
+        let (organization_core, organization_management) = db_organization_services(
+            db_plugin.clone(),
+            &db_kind,
+            &provider_repos,
+            provider_core.clone(),
+            bot_registry.clone(),
+        );
 
         // Create SQLite-backed friend services.
         let (friend_svc, friend_request_svc): (
@@ -2368,6 +2464,7 @@ impl BcsServer {
         let mut bot_runtime_for_session =
             Bot::new_with_friend(bot_registry.clone(), friend_svc.clone())
                 .with_bot_core(bot_core_arc.clone())
+                .with_organization(organization_core.clone())
                 .with_connection_control(
                     bot_connections.clone()
                         as Arc<dyn bcs_service_api::BotConnectionControlPort>,
@@ -2486,6 +2583,7 @@ impl BcsServer {
                 a2a_run_port.clone(),
                 a2a_run_port.clone(),
             )
+            .with_organization(organization_core.clone())
             .with_interceptors(interceptors.clone())
             .with_run_lifecycle_hook(direct_chat_run_lifecycle_hook(metrics.as_ref()))
             .with_bot_run_context(bot_run_context.clone()),
@@ -2498,6 +2596,7 @@ impl BcsServer {
             &config,
             bot_registry.clone(),
             bot_core_arc.clone(),
+            organization_core.clone(),
             bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>,
             sessions.clone(),
             proposals.clone(),
@@ -2629,6 +2728,8 @@ impl BcsServer {
             .provider_core(provider_core)
             .provider_bot_core(provider_bot_core)
             .provider_management(provider_management)
+            .organization(organization_core)
+            .organization_management(organization_management)
             .provider_bot_events(provider_bot_events)
             .group_management(maybe_wrap_group_management(&config, use_cases.group_management))
             .group_query(use_cases.group_query)

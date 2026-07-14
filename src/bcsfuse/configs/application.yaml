@@ -1,0 +1,144 @@
+# OpenSource Configuration
+# This is a placeholder configuration for open-source deployment.
+#
+# SECURITY CONTRACT:
+# - DO NOT put real credentials, tokens, or internal endpoints in this file
+# - All sensitive values MUST be provided via environment variables
+# - This file is safe to commit to public repositories
+# - No values below should contain production secrets
+#
+# CONFIGURATION CONTRACT:
+# - Required env keys are documented with _env suffix
+# - Optional env keys have default values
+# - Missing env keys will use sensible defaults for dev/test modes
+# - Runtime mode requires external services (MySQL, Qdrant, HTTP providers)
+# - Dev mode uses SQLite + Faiss + HTTP providers
+# - Dev_smoke mode uses SQLite + Faiss + Fake/Noop providers (offline)
+# - Test mode uses InMemory + Fake/Noop providers
+#
+# AUTHENTICATION CONTRACT:
+# - Auth is enforced on all business routes
+# - Token is read from BCSFUSE_AUTH_TOKEN env var
+# - Use dummy tokens for testing: test-token, dev-smoke-token
+# - NEVER use real production tokens in tests or examples
+
+startup:
+  profile: opensource
+
+provider:
+  mode_env: BCSFUSE_PROVIDER_MODE
+  default_mode: dev
+  modes:
+    runtime: mysql + qdrant_local + real_http
+    dev: sqlite + faiss_sqlite + real_http
+    dev_smoke: sqlite + faiss_sqlite + fake_noop
+    test: in_memory + fake_noop
+
+server:
+  host_env: BCSFUSE_SERVER_HOST
+  port_env: BCSFUSE_SERVER_PORT
+  default_host: 127.0.0.1
+  default_port: 8765
+
+auth:
+  provider: simple_token
+  token_env: BCSFUSE_AUTH_TOKEN
+  required_for_business_routes: true
+  # Token MUST be set via BCSFUSE_AUTH_TOKEN env var
+  # Example for testing: BCSFUSE_AUTH_TOKEN=test-token
+  # Example for dev: BCSFUSE_AUTH_TOKEN=dev-smoke-token
+
+config:
+  provider: yaml_env
+  yaml_path_env: BCSFUSE_CONFIG_PATH
+  env_prefix: BCSFUSE_
+
+storage:
+  mode_env: WORKER_REGISTRY_DATABASE_MODE
+  runtime_default: mysql
+  dev_fallback: sqlite
+  test_fallback: in_memory
+  mysql:
+    host_env: MYSQL_HOST
+    port_env: MYSQL_PORT
+    database_env: MYSQL_DATABASE
+    user_env: MYSQL_USER
+    password_env: MYSQL_PASSWORD
+    # All MySQL credentials MUST come from env vars
+    # DO NOT set default values for MySQL credentials
+  sqlite:
+    path_env: BCSFUSE_DATABASE_SQLITE_PATH
+    # Default SQLite path is set in opensource.py if env var not set
+
+worker_registry:
+  runtime_default: mysql
+  dev_fallback: sqlite
+  test_fallback: in_memory
+
+worker_runtime_state:
+  runtime_default: mysql
+  dev_fallback: sqlite
+  test_fallback: in_memory
+
+worker_profile_content:
+  runtime_default: mysql
+  dev_fallback: sqlite
+  test_fallback: in_memory
+
+audit_log:
+  runtime_default: mysql
+  dev_fallback: sqlite
+  test_fallback: in_memory
+
+vector:
+  backend_env: VECTOR_BACKEND
+  runtime_default: qdrant_local
+  dev_fallback: faiss_sqlite
+  test_fallback: in_memory
+  qdrant:
+    local_path_env: QDRANT_LOCAL_PATH
+    collection_name_env: QDRANT_COLLECTION_NAME
+  faiss_sqlite:
+    index_path_env: BCSFUSE_FAISS_INDEX_PATH
+    sqlite_path_env: BCSFUSE_FAISS_SQLITE_PATH
+
+embedding:
+  runtime_default: http
+  dev_fallback: http
+  test_fallback: deterministic
+  base_url_env: EMBEDDING_BASE_URL
+  token_env: EMBEDDING_AUTH_TOKEN
+  model_env: EMBEDDING_MODEL
+  dimension_env: EMBEDDING_DIMENSION
+  # All embedding service credentials MUST come from env vars
+
+reranker:
+  runtime_default: http
+  dev_fallback: http
+  test_fallback: noop
+  base_url_env: RERANKER_BASE_URL
+  token_env: RERANKER_API_KEY
+  model_env: RERANKER_MODEL
+  # All reranker service credentials MUST come from env vars
+
+llm:
+  runtime_default: anthropic_compatible_http
+  dev_fallback: anthropic_compatible_http
+  test_fallback: echo
+  base_url_env: LLM_BASE_URL
+  token_env: LLM_AUTH_TOKEN
+  enabled_env: LLM_ENABLED
+  fast_model_env: LLM_FAST_MODEL
+  reasoning_model_env: LLM_REASONING_MODEL
+  # All LLM service credentials MUST come from env vars
+
+cache:
+  runtime_default: in_memory
+  dev_fallback: in_memory
+  test_fallback: in_memory
+
+object_storage:
+  runtime_default: local_runtime
+  dev_fallback: local_runtime
+  test_fallback: temp_local_runtime
+  root_dir_env: BCSFUSE_OBJECT_STORAGE_DIR

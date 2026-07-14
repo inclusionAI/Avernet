@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/PlanDraft.json",
+  "title": "PlanDraft",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_id",
+    "strategy",
+    "steps",
+    "role_requirements",
+    "knowledge_requirements",
+    "resource_requirements",
+    "handoff_strategy",
+    "escalation_points"
+  ],
+  "properties": {
+    "task_id": {
+      "type": "string"
+    },
+    "strategy": {
+      "type": "string"
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "objective"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "required_capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "risk_notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "role_requirements": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "knowledge_requirements": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "resource_requirements": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "handoff_strategy": {
+      "type": "string"
+    },
+    "escalation_points": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    }
+  }
+}

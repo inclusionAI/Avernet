@@ -297,6 +297,8 @@ dependencies = [
  "bcs-message",
  "bcs-message-flow",
  "bcs-message-store",
+ "bcs-organization",
+ "bcs-organization-store",
  "bcs-proposal",
  "bcs-protocol",
  "bcs-provider-http",
@@ -509,6 +511,8 @@ dependencies = [
  "bcs-config",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-organization",
+ "bcs-organization-store",
  "bcs-route-security",
  "bcs-service-api",
  "bcs-test-support",
@@ -1041,6 +1045,37 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "bcs-organization"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-bot",
+ "bcs-bot-store",
+ "bcs-domain",
+ "bcs-organization-store",
+ "bcs-service-api",
+ "futures",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "bcs-organization-store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-db-api",
+ "bcs-db-local",
+ "bcs-domain",
+ "bcs-service-api",
+ "bcs-test-support",
+ "hex",
+ "serde_json",
+ "sha2",
+ "tokio",
 ]
 
 [[package]]

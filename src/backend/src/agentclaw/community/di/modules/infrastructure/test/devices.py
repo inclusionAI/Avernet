@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Callable, cast  # noqa: UP035 - injector binding key must match provider side
 
-from injector import Injector, Module, inject, provider, singleton
+from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.core.bot_management.token_vault import TokenVault
@@ -50,40 +50,58 @@ from agentclaw.community.core.devices.services.device_service import (
     DeviceService,
 )
 from agentclaw.community.core.devices.services.device_service_router import DeviceServiceRouter
+from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
+from agentclaw.community.core.devices.services.local_device_accessor import LocalDeviceAccessor
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.notify.protocol import NotifyBotLister
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.workspace.path_factory import _get_aidesktop_root
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
+from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
+from agentclaw.community.plugins.local.local_device_lifecycle import LocalDeviceLifecycle
 
 
 logger = get_logger()
 
 
+def configure_local_device_test_runtime(binder: Binder) -> None:
+    """Bind the local device runtime shared by TEST and CORP_TEST.
+
+    Keep these bindings together so the corp-flavored test module cannot drift
+    from the corp-free module when device concerns move between DI modules.
+    SINGLEBOX does not call this helper; it uses ``SingleboxDevicesModule`` and
+    the real local BaaS device runtime instead.
+    """
+    from agentclaw.community.plugin_api.device_connection_manager import (
+        DeviceConnectionManagerPlugin,
+    )
+    from agentclaw.community.plugins.local.device_connection_manager import (
+        NoopDeviceConnectionManagerPlugin,
+    )
+
+    binder.bind(
+        DeviceConnectionManagerPlugin,
+        to=NoopDeviceConnectionManagerPlugin,
+        scope=singleton,
+    )
+    binder.bind(LocalDeviceAccessor, to=LocalDeviceAccessor, scope=singleton)
+    binder.bind(DeviceAccessor, to=LocalDeviceAccessor, scope=singleton)
+    binder.bind(LocalDeviceLifecycle, to=LocalDeviceLifecycle, scope=singleton)
+
+
 class TestDevicesModule(Module):
     """Corp-free SQLite + local-mode overrides for devices (test / singlebox)."""
 
-    def configure(self, binder) -> None:
+    def configure(self, binder: Binder) -> None:
         """Rebind the prod Moltis ``DeviceConnectionManagerPlugin`` to the Noop.
 
         ``DevicesModule`` unconditionally binds the prod Moltis impl; local/SQLite
         boots have no remote device gateway, so rebind to the Noop impl here (a
         binding in this module wins over the prod module's).
         """
-        from agentclaw.community.plugin_api.device_connection_manager import (
-            DeviceConnectionManagerPlugin,
-        )
-        from agentclaw.community.plugins.local.device_connection_manager import (
-            NoopDeviceConnectionManagerPlugin,
-        )
-
-        binder.bind(
-            DeviceConnectionManagerPlugin,
-            to=NoopDeviceConnectionManagerPlugin,
-            scope=singleton,
-        )
+        configure_local_device_test_runtime(binder)
 
     @singleton
     @provider
@@ -100,6 +118,7 @@ class TestDevicesModule(Module):
         arca_baas_rollout_policy: ArcaBotCreateBaasRolloutPolicy,
         data_init_service_factory: Callable[[], DataInitService],
         token_vault: TokenVault,
+        passport_plugin: PassportPlugin,
         sandbox_client: SandboxRuntimeClient,
     ) -> DeviceService:
         """Local-only ``DeviceServiceRouter`` build (singlebox via BaaS)."""
@@ -138,6 +157,7 @@ class TestDevicesModule(Module):
             providers=providers,
             default_provider_key=LOCAL_DEVICE_PROVIDER,
             arca_baas_rollout_policy=arca_baas_rollout_policy,
+            passport_plugin=passport_plugin,
             sandbox_client=sandbox_client,
         )
 
@@ -154,9 +174,9 @@ class TestDevicesModule(Module):
                 self,
                 *,
                 user_id: str,
-                bot_type: str | None,
-                engine_type: str | None = None,
-                template_type: str | None = None,
+                bot_type: str,
+                engine_type: str,
+                template_type: str,
             ) -> ArcaBotCreateBaasRolloutDecision:
                 return ArcaBotCreateBaasRolloutDecision(
                     target_provider=LOCAL_DEVICE_PROVIDER,

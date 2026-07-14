@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use bcs_domain::{
-    ProviderAuthMode, ProviderBotBinding, ProviderCoordinationConfig, ProviderRecord, Skill,
+    ProviderAuthMode, ProviderBotBinding, ProviderCoordinationConfig,
+    ProviderOrganizationManagementConfig, ProviderRecord, Skill,
 };
 use serde_json::{Map, Value};
 
@@ -59,6 +60,7 @@ pub struct UpdateProviderCommand {
     pub webhook_url: Option<String>,
     pub protocol_version: Option<String>,
     pub coordination: Option<ProviderCoordinationConfig>,
+    pub organization_management: Option<ProviderOrganizationManagementConfig>,
 }
 
 #[derive(Debug, Clone)]

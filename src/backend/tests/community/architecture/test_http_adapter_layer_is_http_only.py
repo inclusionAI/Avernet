@@ -183,12 +183,6 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     # would require a request-scoped factory; tracked as separate
     # cleanup, allowed for now.
     "SkillSymlinkVerifyService",
-    # Governance notification builder helpers — pure functions that construct
-    # card/notification payloads. Not service classes; called inline in
-    # scan-and-deliver endpoint to build TC card data before sending.
-    "build_card_notification_data",
-    "build_governance_reason",
-    "build_tc_card_detail_link",
 })
 
 # Legacy api/ subpackages still present in the current codebase.
