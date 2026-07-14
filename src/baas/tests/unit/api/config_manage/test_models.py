@@ -25,7 +25,6 @@ class TestSystemConfigCreate:
         assert data.conf_key == "my.key"
         assert data.name == "My Config"
         assert data.conf_value is None
-        assert data.env is None
         assert data.description is None
         assert data.operator is None
 
@@ -73,23 +72,16 @@ class TestSystemConfigCreate:
         with pytest.raises(ValidationError):
             SystemConfigCreate(conf_key="k", name="t", operator="x" * 65)
 
-    def test_env_max_length(self):
-        """WHEN env exceeds 32 chars, THEN ValidationError."""
-        with pytest.raises(ValidationError):
-            SystemConfigCreate(conf_key="k", name="t", env="x" * 33)
-
     def test_all_optional_fields(self):
         """WHEN all optional fields provided, THEN they are stored."""
         data = SystemConfigCreate(
             conf_key="my.key",
             name="My Config",
             conf_value="value-123",
-            env="prod",
             description="A test config",
             operator="user-1",
         )
         assert data.conf_value == "value-123"
-        assert data.env == "prod"
         assert data.description == "A test config"
         assert data.operator == "user-1"
 

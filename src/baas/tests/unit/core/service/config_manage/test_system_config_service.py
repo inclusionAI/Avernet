@@ -81,7 +81,6 @@ class TestCreateConfig:
         data = SystemConfigCreate(
             conf_key="test.key",
             conf_value="value",
-            env="test",
             name="Test",
             operator="admin",
         )
@@ -91,30 +90,10 @@ class TestCreateConfig:
         assert result.conf_key == "test.key"
         mock_repo.insert_config.assert_called_once()
 
-    def test_auto_detects_env_when_missing(self, mock_env, mock_repo, service):
-        """Auto-detect env when not provided (env=None → get_current_env())."""
-        mock_repo.insert_config.return_value = 1
-        mock_repo.get_by_id.return_value = _make_record(record_id=1)
-
-        data = SystemConfigCreate(
-            conf_key="test.key",
-            conf_value="value",
-            env=None,
-            name="Test",
-            operator="admin",
-        )
-        result = service.create_config(data)
-        assert isinstance(result, SystemConfigResponse)
-        # insert_config should be called with auto-detected env ("test" from mock_env)
-        mock_repo.insert_config.assert_called_once()
-        call_kwargs = mock_repo.insert_config.call_args.kwargs
-        assert call_kwargs["env"] == "test"
-
     def test_raises_if_operator_missing(self, mock_env, mock_repo, service):
         data = SystemConfigCreate(
             conf_key="test.key",
             conf_value="value",
-            env="test",
             name="Test",
             operator=None,
         )
