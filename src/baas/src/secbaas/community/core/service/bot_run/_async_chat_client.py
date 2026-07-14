@@ -811,7 +811,7 @@ class AsyncChatClient:
         """
         if state is None:
             logger.warning(
-                "[error] No session state for sessionKey=%s, ignore_case",
+                "[error] No session state for sessionKey=%s, ignore_case=%s",
                 session_key,
                 self._ignore_case,
             )

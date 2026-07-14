@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass, field
 
 from secbaas.community.api.config_manage import SystemConfigManageService
-from secbaas.community.core.service.config._constants import SystemConfigKey
+from secbaas.community.core.service.config import SystemConfigKey
 from secbaas.community.logger import get_logger
 
 from ._async_chat_client import AsyncChatClient
