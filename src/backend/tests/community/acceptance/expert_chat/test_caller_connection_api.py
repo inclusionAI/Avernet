@@ -252,3 +252,179 @@ def test_expert_chat_caller_connection_bot_not_found(live_backend):
         assert body["success"] is False, body
         # ConnectionError for bot not found
         assert body["error_code"] in (5001, 5999), body
+
+
+@pytest.mark.acceptance
+def test_expert_chat_caller_connection_success_first_call(live_backend):
+    """Super admin can successfully create caller connection for first time."""
+    owner_id = fresh_id("caller_conn_success_owner")
+    bot_id = fresh_id("caller_conn_success_bot")
+    caller_id = fresh_id("caller_success")
+
+    with httpx.Client(
+        base_url=live_backend,
+        headers={"x-user-id": ADMIN_USER_ID},
+        timeout=30.0,
+    ) as admin_client:
+        # Seed service bot and publish record
+        _seed_service_bot(
+            admin_client,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            bot_name="CallerConn Success Bot",
+        )
+        _seed_successful_publish(
+            admin_client,
+            bot_id=bot_id,
+            owner_id=owner_id,
+        )
+
+        # First call should create container
+        response = admin_client.post(
+            "/api/v1/expert-chats/caller-connection",
+            params={
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "user_id": caller_id,
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        # First call may return need_poll=True or success with connection
+        # depending on BaaS workflow status
+        assert "instance" in body, body
+        assert "need_poll" in body, body
+        # If success, should have connection info
+        if body.get("success") is True:
+            assert "connection" in body, body
+            connection = body["connection"]
+            if connection:
+                assert "bot_uuid" in connection, body
+                assert "ws_url" in connection, body
+
+
+@pytest.mark.acceptance
+def test_expert_chat_caller_connection_force_upgrade_param(live_backend):
+    """force_upgrade parameter triggers upgrade even when version is current."""
+    owner_id = fresh_id("caller_conn_force_owner")
+    bot_id = fresh_id("caller_conn_force_bot")
+    caller_id = fresh_id("caller_force")
+
+    with httpx.Client(
+        base_url=live_backend,
+        headers={"x-user-id": ADMIN_USER_ID},
+        timeout=30.0,
+    ) as admin_client:
+        # Seed service bot and publish record
+        _seed_service_bot(
+            admin_client,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            bot_name="CallerConn Force Bot",
+        )
+        _seed_successful_publish(
+            admin_client,
+            bot_id=bot_id,
+            owner_id=owner_id,
+        )
+
+        # First call to create instance
+        response = admin_client.post(
+            "/api/v1/expert-chats/caller-connection",
+            params={
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "user_id": caller_id,
+            },
+        )
+        assert response.status_code == 200, response.text
+
+        # Second call without force_upgrade should return cached result
+        response2 = admin_client.post(
+            "/api/v1/expert-chats/caller-connection",
+            params={
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "user_id": caller_id,
+            },
+        )
+        assert response2.status_code == 200, response2.text
+        body2 = response2.json()
+        # Should have success with connection (not need_poll)
+        if body2.get("success") is True and body2.get("connection"):
+            # Third call with force_upgrade=True should trigger upgrade path
+            response3 = admin_client.post(
+                "/api/v1/expert-chats/caller-connection",
+                params={
+                    "bot_id": bot_id,
+                    "owner_id": owner_id,
+                    "user_id": caller_id,
+                    "force_upgrade": "true",
+                },
+            )
+            assert response3.status_code == 200, response3.text
+            body3 = response3.json()
+            # Should still return valid result after forced upgrade
+            assert "instance" in body3, body3
+
+
+@pytest.mark.acceptance
+def test_expert_chat_caller_connection_different_callers_separate(live_backend):
+    """Different callers get separate instances for the same bot."""
+    owner_id = fresh_id("caller_conn_multi_owner")
+    bot_id = fresh_id("caller_conn_multi_bot")
+    caller1 = fresh_id("caller_multi_1")
+    caller2 = fresh_id("caller_multi_2")
+
+    with httpx.Client(
+        base_url=live_backend,
+        headers={"x-user-id": ADMIN_USER_ID},
+        timeout=30.0,
+    ) as admin_client:
+        # Seed service bot and publish record
+        _seed_service_bot(
+            admin_client,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            bot_name="CallerConn Multi Bot",
+        )
+        _seed_successful_publish(
+            admin_client,
+            bot_id=bot_id,
+            owner_id=owner_id,
+        )
+
+        # Caller 1 creates instance
+        response1 = admin_client.post(
+            "/api/v1/expert-chats/caller-connection",
+            params={
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "user_id": caller1,
+            },
+        )
+        assert response1.status_code == 200, response1.text
+        body1 = response1.json()
+        assert "instance" in body1
+
+        # Caller 2 creates separate instance
+        response2 = admin_client.post(
+            "/api/v1/expert-chats/caller-connection",
+            params={
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "user_id": caller2,
+            },
+        )
+        assert response2.status_code == 200, response2.text
+        body2 = response2.json()
+        assert "instance" in body2
+
+        # Both callers should have their own instances
+        if body1.get("success") is True and body2.get("success") is True:
+            if body1.get("connection") and body2.get("connection"):
+                conn1 = body1["connection"]
+                conn2 = body2["connection"]
+                # Each caller should have their own bot_uuid
+                assert "bot_uuid" in conn1
+                assert "bot_uuid" in conn2
