@@ -1,9 +1,6 @@
 """Rollback deploy + BaaS bot teardown, mixed into PublishFlowService."""
 from __future__ import annotations
 
-import asyncio
-import time
-from typing import Any, Dict
 
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
@@ -12,13 +9,11 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
-    PublishStatusInvalidError,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
-from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -98,8 +93,14 @@ class RollbackOpsMixin:
         if not bot:
             raise PublishFlowServiceError(f"Bot not found: {current_record.source_bot_id}")
 
-        # 5. Call the BaaS upgrade interface to re-deploy
+        # 5. Call the BaaS upgrade interface to re-deploy. Compose the delivery
+        # artifact for the online stage through the single seam (STORED overrides
+        # slot: reproduce the target version's promoted online channels + release
+        # stamp). The raw config_artifact read above is only the build-artifact
+        # presence guard — what BaaS receives is composed here, so a rollback can no
+        # longer silently ship the raw artifact (the single-config-slot hazard).
         version = f"{target_record.version}"
+        delivery = self._ext_state.compose_stored(target_ext, PublishStage.ONLINE)
         upgrade_result = await self._build_service.upgrade_async(
             bot_uuid=bot_uuid,
             bot=bot,
@@ -108,7 +109,7 @@ class RollbackOpsMixin:
             migration_path=migration_path,
             publish_stage=PublishStage.ONLINE,
             version=version,
-            config_artifact=config_artifact,
+            delivery=delivery,
         )
 
         baas_publish_id = upgrade_result.get("publish_id")

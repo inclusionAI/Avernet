@@ -31,6 +31,9 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     ENGINE_DIR_MOUNT_WHITELIST_PARAM_CODE,
     BaasService,
 )
+from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
+    DeliveryArtifact,
+)
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     TECLAW_DEVICE_PROVIDER,
 )
@@ -425,7 +428,7 @@ class BotBuildService:
         device_count: int = 1,
         publish_stage: PublishStage = PublishStage.VERIFY,
         version: str = "1",
-        config_artifact: Optional[Dict[str, Any]] = None,
+        delivery: DeliveryArtifact = DeliveryArtifact(None),
         ext_info: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """发布 Bot 到 BaaS 层。
@@ -440,7 +443,9 @@ class BotBuildService:
             device_count: 设备数量，默认 1
             publish_stage: 发布推进阶段，默认验证阶段
             version: 迁移版本号（字符串），默认 "1"
-            config_artifact: 配置 Artifact
+            delivery: 组合后的交付 Artifact（DeliveryArtifact）。只能由
+                PublishExtState 的 compose seam 产生，流程层无法直接传原始
+                config_artifact；ARCA 挂载路径为 config_artifact=None。
             ext_info: Dict[str, Any] = None,
 
         Returns:
@@ -488,16 +493,16 @@ class BotBuildService:
                 # which forwards it to the external container. No migration_path.
                 # The artifact IS the delivery payload, so fail loudly if it is
                 # missing rather than provisioning a container with empty config.
-                if not config_artifact:
+                if not delivery.config_artifact:
                     raise BotBuildServiceError(
                         "teclaw release requires a composed config_artifact; "
-                        f"got {config_artifact!r}"
+                        f"got {delivery.config_artifact!r}"
                     )
                 new_bot = self._baas_service.create_teclaw_bot(
                     bot,
                     owner_id=user_id,
                     request_id=request_id,
-                    config_artifact=config_artifact,
+                    config_artifact=delivery.config_artifact,
                     template_uuid=self._teclaw_template_uuid,
                     device_count=1,
                 )
@@ -579,7 +584,7 @@ class BotBuildService:
         device_count: int = 1,
         publish_stage: PublishStage = PublishStage.VERIFY,
         version: str = "1",
-        config_artifact: Optional[Dict[str, Any]] = None,
+        delivery: DeliveryArtifact = DeliveryArtifact(None),
         ext_info: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """异步发布 Bot 到 BaaS 层。
@@ -594,7 +599,7 @@ class BotBuildService:
             device_count: 设备数量，默认 1
             publish_stage: 发布推进阶段，默认验证阶段
             version: str = "1",发布单版本
-            config_artifact: 配置 Artifact
+            delivery: 组合后的交付 Artifact（DeliveryArtifact）；见 release()。
             ext_info: Optional[Dict[str, Any]] = None,
 
         Returns:
@@ -610,7 +615,7 @@ class BotBuildService:
         # 使用 asyncio.to_thread 在线程池中执行同步方法
         return await asyncio.to_thread(
             self.release, bot, user_id, migration_path, device_count, publish_stage, version,
-            config_artifact, ext_info,
+            delivery, ext_info,
         )
 
     def _sync_skill_links(
@@ -1054,7 +1059,7 @@ class BotBuildService:
             device_count: int = 1,
             publish_stage: PublishStage = PublishStage.ONLINE,
             version: str = "1",
-            config_artifact: Optional[Dict[str, Any]] = None,
+            delivery: DeliveryArtifact = DeliveryArtifact(None),
     ) -> Dict[str, Any]:
         """升级 Bot 到 BaaS 层（复用现有 Bot）。
 
@@ -1070,6 +1075,7 @@ class BotBuildService:
             device_count: 设备数量，默认 1
             publish_stage: 发布推进阶段，默认 ONLINE
             version: str = "1", 发布版本
+            delivery: 组合后的交付 Artifact（DeliveryArtifact）；见 release()。
 
         Returns:
             dict: BaaS 层返回的 Bot 信息（包含 bot_uuid, publish_id）
@@ -1095,17 +1101,17 @@ class BotBuildService:
                 # existing container (non-mount). No migration_path. The artifact
                 # IS the delivery payload, so fail loudly if it is missing rather
                 # than re-delivering empty config to the existing container.
-                if not config_artifact:
+                if not delivery.config_artifact:
                     raise BotBuildServiceError(
                         "teclaw upgrade requires a composed config_artifact; "
-                        f"got {config_artifact!r}"
+                        f"got {delivery.config_artifact!r}"
                     )
                 upgrade_result = self._baas_service.update_teclaw_bot(
                     bot_uuid,
                     bot,
                     owner_id=user_id,
                     request_id=request_id,
-                    config_artifact=config_artifact,
+                    config_artifact=delivery.config_artifact,
                     template_uuid=self._teclaw_template_uuid,
                     device_count=1,
                 )
@@ -1224,7 +1230,7 @@ class BotBuildService:
         device_count: int = 1,
         publish_stage: PublishStage = PublishStage.ONLINE,
         version: str = "1",
-        config_artifact: Optional[Dict[str, Any]] = None,
+        delivery: DeliveryArtifact = DeliveryArtifact(None),
     ) -> Dict[str, Any]:
         """异步升级 Bot 到 BaaS 层。
 
@@ -1238,5 +1244,5 @@ class BotBuildService:
         # 使用 asyncio.to_thread 在线程池中执行同步方法
         return await asyncio.to_thread(
             self.upgrade, bot_uuid, bot, user_id, migration_path, device_count, publish_stage, version,
-            config_artifact,
+            delivery,
         )

@@ -53,7 +53,7 @@
   - [ ] Full suite green.
 - **Depends on:** Task 1
 
-## Review A: `/code-review` on the Group A diff — [ ]
+## Review A: `/code-review` on the Group A diff — [x]
 - **Goal:** Review the new `DeliveryArtifact` type + seam producers before anything
   depends on them.
 - **Done when:**
@@ -63,7 +63,7 @@
 
 # Group B — Cutover (type-enforce the boundary, route all paths, rollback behavior)
 
-## Task 3: Type-enforce the BaaS boundary + route all four paths through the seam — [ ]
+## Task 3: Type-enforce the BaaS boundary + route all four paths through the seam — [x]
 - **Goal:** Make `BotBuildService`'s delivery methods take `delivery: DeliveryArtifact`
   and rewrite every delivery call site to obtain it from the seam. Atomic: the
   signature change and all call-site migrations land together. Rollback begins
@@ -106,7 +106,7 @@
   - [ ] Full suite green.
 - **Depends on:** Task 2
 
-## Task 4: Rollback regression coverage (folds in #168) — [ ]
+## Task 4: Rollback regression coverage (folds in #168) — [x]
 - **Goal:** Lock in the newly-composed rollback behavior with unit tests mirroring
   #168, so the subsumed fix is regression-covered in this repo.
 - **Files:** `tests/.../services/test_publish_flow_service.py`.
@@ -119,7 +119,7 @@
   - [ ] Full suite green.
 - **Depends on:** Task 3
 
-## Review B: `/code-review` on the Group B diff — [ ]
+## Review B: `/code-review` on the Group B diff — [x]
 - **Goal:** Review the boundary retype + the four rewritten call sites + the
   rollback behavior change — the highest-risk group.
 - **Done when:**
