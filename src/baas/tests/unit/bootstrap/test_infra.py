@@ -60,14 +60,16 @@ class TestInfraContainerStandalone:
             assert hasattr(container, attr), f"Missing provider: {attr}"
 
     def test_chat_client_pool_resolves_without_deps(self):
-        """AsyncChatClientPool does not require any Dependency()."""
+        """AsyncChatClientPool resolves with system_config_repo mocked."""
         container = InfraContainer()
+        container.system_config_repo.override(MagicMock())
         pool = container.chat_client_pool()
         assert isinstance(pool, AsyncChatClientPool)
 
     def test_chat_client_pool_is_singleton(self):
         """AsyncChatClientPool is a singleton — same instance returned."""
         container = InfraContainer()
+        container.system_config_repo.override(MagicMock())
         pool1 = container.chat_client_pool()
         pool2 = container.chat_client_pool()
         assert pool1 is pool2
@@ -130,6 +132,7 @@ class TestInfraContainerStandalone:
         container.ac_bot_repo.override(mock_repo)
         container.ac_bot_publish_repo.override(mock_repo)
         container.device_binding_repo.override(mock_repo)
+        container.system_config_repo.override(mock_repo)
 
         store = container.chat_client_pool()
         assert isinstance(store, AsyncChatClientPool)

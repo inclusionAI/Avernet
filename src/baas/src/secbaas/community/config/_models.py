@@ -7,6 +7,8 @@ only the subset consumed by ``src/secbaas/``.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -36,7 +38,7 @@ class UserConfig(BaseModel, extra="allow"):
 
     model_config = {"extra": "allow"}
 
-    def get(self, key: str, default=None):
+    def get(self, key: str, default=None) -> Any:
         try:
             return getattr(self, key)
         except AttributeError:

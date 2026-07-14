@@ -1,7 +1,7 @@
 import json
 
 from secbaas.community.api.sse import StreamChunk
-from secbaas.community.core.service.sse import BcnStreamConverter
+from secbaas.community.core.service.sse import DefaultStreamConverter
 
 
 def _data(event) -> dict:
@@ -11,7 +11,7 @@ def _data(event) -> dict:
 
 
 def test_chat_delta_normalizes_claude_delta_to_bcn_delta_text():
-    converter = BcnStreamConverter()
+    converter = DefaultStreamConverter()
     event = converter.convert(
         StreamChunk(type="delta", content="你好", engine_type="claude_code"),
         run_id="run-1",
@@ -28,7 +28,7 @@ def test_chat_delta_normalizes_claude_delta_to_bcn_delta_text():
 
 
 def test_chat_final_keeps_message_and_stop_reason():
-    converter = BcnStreamConverter()
+    converter = DefaultStreamConverter()
     event = converter.convert(
         StreamChunk(
             type="final",
@@ -55,7 +55,7 @@ def test_chat_final_keeps_message_and_stop_reason():
 
 
 def test_openclaw_tool_preserves_flat_bcn_fields():
-    converter = BcnStreamConverter()
+    converter = DefaultStreamConverter()
     event = converter.convert(
         StreamChunk(
             type="agent",
@@ -92,7 +92,7 @@ def test_openclaw_tool_preserves_flat_bcn_fields():
 
 
 def test_claude_tool_result_wraps_string_output_as_text_content():
-    converter = BcnStreamConverter()
+    converter = DefaultStreamConverter()
     event = converter.convert(
         StreamChunk(
             type="agent",
@@ -127,7 +127,7 @@ def test_claude_tool_result_wraps_string_output_as_text_content():
 
 
 def test_thinking_and_lifecycle_are_forwarded_with_bcn_envelope():
-    converter = BcnStreamConverter()
+    converter = DefaultStreamConverter()
     thinking = converter.convert(
         StreamChunk(
             type="agent",
@@ -170,7 +170,7 @@ def test_thinking_and_lifecycle_are_forwarded_with_bcn_envelope():
 
 
 def test_command_output_end_converts_to_tool_result():
-    converter = BcnStreamConverter()
+    converter = DefaultStreamConverter()
     event = converter.convert(
         StreamChunk(
             type="agent",
@@ -208,7 +208,7 @@ def test_command_output_end_converts_to_tool_result():
 
 
 def test_command_output_non_end_phase_is_dropped():
-    converter = BcnStreamConverter()
+    converter = DefaultStreamConverter()
     event = converter.convert(
         StreamChunk(
             type="agent",
@@ -226,7 +226,7 @@ def test_command_output_non_end_phase_is_dropped():
 
 
 def test_command_output_nonzero_exit_sets_is_error():
-    converter = BcnStreamConverter()
+    converter = DefaultStreamConverter()
     event = converter.convert(
         StreamChunk(
             type="agent",
@@ -249,7 +249,7 @@ def test_command_output_nonzero_exit_sets_is_error():
 
 
 def test_noise_engine_events_are_dropped_without_advancing_seq():
-    converter = BcnStreamConverter()
+    converter = DefaultStreamConverter()
 
     dropped = converter.convert(
         StreamChunk(
@@ -274,7 +274,7 @@ def test_noise_engine_events_are_dropped_without_advancing_seq():
 
 
 def test_plain_stream_chunk_falls_back_to_bcn_chat_event():
-    converter = BcnStreamConverter()
+    converter = DefaultStreamConverter()
 
     delta = converter.convert(StreamChunk(type="delta", content="hi"), run_id="run-1")
     final = converter.convert(StreamChunk(type="final", content="done"), run_id="run-1")

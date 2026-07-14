@@ -17,7 +17,7 @@ class StreamChunk:
     （BaasBotService / ClawBotService 等）统一产出此模型。
     """
 
-    type: str  # "delta" | "final" | "error" | "usage"
+    type: str  # "delta" | "final" | "error" | "usage" | "heartbeat"
     content: str = ""
     usage: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
@@ -39,7 +39,12 @@ class SseEvent:
     retry: int | None = None
 
     def to_sse(self) -> str:
-        """序列化为 SSE 文本帧（以 \\n\\n 结尾）"""
+        """序列化为 SSE 文本帧（以 \\n\\n 结尾）
+
+        当 event 以 ":" 开头时输出 SSE 注释帧（如心跳），不设 event/data 行。
+        """
+        if self.event.startswith(":"):
+            return f"{self.event}\n\n"
         lines: list[str] = []
         if self.id is not None:
             lines.append(f"id: {self.id}")
