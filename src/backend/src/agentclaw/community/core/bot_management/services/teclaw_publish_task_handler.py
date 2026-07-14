@@ -118,9 +118,7 @@ class TeclawPublishTaskHandler:
         except Exception as exc:
             return Retry(f"load Teclaw binding failed: {exc}")
 
-        if binding is None:
-            return Complete()
-        if binding.status in {
+        if binding is None or binding.status in {
             DeviceBindingStatus.ACTIVE.value,
             DeviceBindingStatus.FAILED.value,
             DeviceBindingStatus.RELEASED.value,

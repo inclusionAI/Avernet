@@ -185,6 +185,14 @@ def test_pending_publish_reschedules_before_timeout():
     binding_repo.transition_teclaw_publish_terminal.assert_not_called()
 
 
+def test_missing_binding_completes_stale_task():
+    handler, baas, binding_repo = _handler()
+    binding_repo.get_by_id.return_value = None
+
+    assert handler.handle(_payload(binding_id=77)) == Complete()
+    baas.get_publish_progress.assert_not_called()
+
+
 def test_timeout_polls_once_then_preserves_pending():
     handler, baas, binding_repo = _handler(clock=lambda: 700.0)
     baas.get_publish_progress.return_value = {"status": "PENDING"}
