@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/SkillRef.json",
+  "title": "SkillRef",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "source",
+    "trust_level"
+  ],
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "workspace",
+        "managed",
+        "builtin",
+        "plugin",
+        "mcp"
+      ]
+    },
+    "description": {
+      "type": "string"
+    },
+    "trust_level": {
+      "type": "string",
+      "enum": [
+        "sandbox_only",
+        "guarded",
+        "trusted"
+      ]
+    },
+    "approval_required": {
+      "type": "boolean",
+      "default": false
+    },
+    "openclaw_skill_path": {
+      "type": "string"
+    },
+    "tool_names": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    }
+  }
+}

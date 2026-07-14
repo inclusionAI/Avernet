@@ -9,9 +9,9 @@ _ALL_SH_LOADED=1
 # Full singlebox stack: BAAS/backend create the developer runtime, BCS runs
 # collaboration, bots starts the 5 local profiles, demo_bot onboards the
 # backend-created developer bot, then frontend exposes the workbench.
-SETUP_ORDER=(baas backend bcs bots frontend)
-START_ORDER=(baas backend bcs bots demo_bot frontend)
-STOP_ORDER=(frontend demo_bot bots bcs backend baas)
+SETUP_ORDER=(baas backend bcs bcsfuse bots frontend)
+START_ORDER=(baas backend bcs bcsfuse bots demo_bot frontend)
+STOP_ORDER=(frontend demo_bot bots bcsfuse bcs backend baas)
 
 all_setup() {
     for svc in "${SETUP_ORDER[@]}"; do
@@ -127,6 +127,7 @@ all_status() {
         echo "Mode: STANDALONE (isolated BCS runtime + OpenClaw root)"
         echo "Logs: ${LOG_DIR}"
         echo "BCS runtime: ${STANDALONE_RUNTIME_DIR}"
+        echo "BCSFuse runtime: ${BCSFUSE_RUNTIME_DIR}"
         echo "OpenClaw root: ${STANDALONE_OPENCLAW_ROOT}"
         echo "Bot profiles: ${OPENCLAW_PROFILE_ROOT}"
         echo "Bot workspaces: ${OPENCLAW_WORKSPACE_ROOT}"
@@ -144,5 +145,5 @@ all_status() {
 }
 
 all_help() {
-    echo "all - BAAS + Backend + BCS + 5 local bots + demo bot + frontend stack"
+    echo "all - BAAS + Backend + BCS + BCSFuse + 5 local bots + demo bot + frontend stack"
 }

@@ -1,0 +1,16 @@
+{
+  "skill_sets": [
+    {
+      "name": "research_skills",
+      "is_current": true,
+      "skills": [
+        {
+          "name": "deep_research",
+          "description": "Perform comprehensive research on topics",
+          "skill": "research_deep_v1",
+          "path": "/skills/research/deep"
+        }
+      ]
+    }
+  ]
+}

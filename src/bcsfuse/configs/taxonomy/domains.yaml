@@ -1,0 +1,172 @@
+# Domains Configuration
+# 领域定义配置
+#
+# 定义系统支持的业务和技术领域
+
+version: "1.0"
+
+# =====================================
+# 技术领域
+# =====================================
+technical_domains:
+  security:
+    name: 安全
+    description: 安全防护、渗透测试、漏洞修复
+    keywords:
+      - "security"
+      - "anquan"
+      - "安全"
+      - "auth"
+      - "penetration"
+      - "漏洞"
+      - "渗透"
+    related_expert_types:
+      - "安全专家"
+      - "渗透测试工程师"
+
+  database:
+    name: 数据库
+    description: 数据库设计、优化、运维
+    keywords:
+      - "database"
+      - "dba"
+      - "db"
+      - "sql"
+      - "mysql"
+      - "postgresql"
+      - "数据库"
+    related_expert_types:
+      - "DBA"
+      - "数据库专家"
+
+  ops:
+    name: 运维
+    description: 系统运维、容器化、监控告警
+    keywords:
+      - "ops"
+      - "devops"
+      - "sre"
+      - "运维"
+      - "kubernetes"
+      - "docker"
+      - "deploy"
+    related_expert_types:
+      - "SRE"
+      - "运维工程师"
+      - "DevOps工程师"
+
+  architecture:
+    name: 架构
+    description: 系统架构设计、技术规划
+    keywords:
+      - "architect"
+      - "架构"
+      - "design"
+      - "系统设计"
+    related_expert_types:
+      - "系统架构师"
+      - "技术专家"
+
+  frontend:
+    name: 前端
+    description: 前端开发、UI交互
+    keywords:
+      - "frontend"
+      - "前端"
+      - "react"
+      - "vue"
+      - "css"
+      - "javascript"
+    related_expert_types:
+      - "前端工程师"
+      - "UI工程师"
+
+  backend:
+    name: 后端
+    description: 后端开发、API设计
+    keywords:
+      - "backend"
+      - "后端"
+      - "api"
+      - "server"
+      - "service"
+    related_expert_types:
+      - "后端工程师"
+      - "服务端开发"
+
+# =====================================
+# 业务领域
+# =====================================
+business_domains:
+  risk_management:
+    name: 风控
+    description: 风险控制、反欺诈、信用评估
+    keywords:
+      - "风控"
+      - "risk"
+      - "反欺诈"
+      - "credit"
+    related_expert_types:
+      - "风控专家"
+      - "反欺诈分析师"
+
+  compliance:
+    name: 合规
+    description: 监管合规、反洗钱、数据合规
+    keywords:
+      - "合规"
+      - "compliance"
+      - "反洗钱"
+      - "监管"
+      - "gdpr"
+      - "privacy"
+    related_expert_types:
+      - "合规专家"
+      - "法务"
+
+  legal:
+    name: 法务
+    description: 法律事务、合同审核、知识产权
+    keywords:
+      - "legal"
+      - "fawu"
+      - "法务"
+    related_expert_types:
+      - "法务专家"
+      - "律师"
+
+  finance:
+    name: 财务
+    description: 财务管理、预算、成本控制
+    keywords:
+      - "finance"
+      - "财务"
+      - "预算"
+      - "成本"
+    related_expert_types:
+      - "财务专家"
+      - "财务总监"
+
+  supply_chain:
+    name: 供应链
+    description: 供应链管理、采购、物流
+    keywords:
+      - "supply"
+      - "供应链"
+      - "采购"
+      - "物流"
+    related_expert_types:
+      - "供应链专家"
+      - "采购经理"
+
+  investment:
+    name: 投融资
+    description: 投融资、并购、估值
+    keywords:
+      - "investment"
+      - "投融资"
+      - "并购"
+      - "估值"
+    related_expert_types:
+      - "投资经理"
+      - "财务顾问"

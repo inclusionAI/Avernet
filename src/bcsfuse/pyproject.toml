@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bcsfuse-oss"
+version = "0.1.0"
+description = "Open-source BCSFuse runtime candidate - Worker management, task understanding, retrieval, team composition, and OpenClaw handoff"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "BCS Team" }
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    # Core Web Framework
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    # HTTP Client
+    "httpx>=0.24.0",
+    "httpx-sse>=0.4.0",
+    "requests",
+    # Vector Store (numpy must be installed before faiss-cpu)
+    "numpy==1.26.4",
+    "faiss-cpu==1.8.0",
+    "packaging>=21.0",  # faiss loader requires packaging.version
+    "qdrant-client>=1.12.0",
+    # Database
+    "mysql-connector-python>=8.0.0",
+    # Background task scheduling
+    "apscheduler>=3.10.0",
+    # Observability
+    "prometheus-client>=0.17.0",
+    # Configuration
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+    "jsonschema>=4.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "tests.smoke*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.json", "*.md"]

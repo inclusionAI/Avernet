@@ -1,0 +1,33 @@
+{
+  "skill_sets": [
+    {
+      "name": "default_search_skills",
+      "is_current": true,
+      "skills": [
+        {
+          "name": "web_search",
+          "description": "Search the web for information",
+          "skill": "search_web_v1",
+          "path": "/skills/search/web"
+        },
+        {
+          "name": "data_analysis",
+          "description": "Analyze structured and unstructured data",
+          "skill": "analyze_data_v1",
+          "path": "/skills/analysis/data"
+        }
+      ]
+    },
+    {
+      "name": "legacy_skills",
+      "is_current": false,
+      "skills": [
+        {
+          "name": "old_search",
+          "description": "Legacy search capability",
+          "skill": "old_search_v1"
+        }
+      ]
+    }
+  ]
+}

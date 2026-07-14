@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/Worker.json",
+  "title": "Worker",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "type",
+    "identity",
+    "responsibilities",
+    "capabilities",
+    "constraints",
+    "skills",
+    "resources",
+    "state"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^wrk_[a-zA-Z0-9_-]+$"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "human",
+        "bot"
+      ]
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "handle"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "handle": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "owner_team": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "responsibilities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "domains": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "level"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "novice",
+              "intermediate",
+              "advanced",
+              "expert"
+            ]
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "constraints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "rule"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "policy",
+              "approval",
+              "security",
+              "scope",
+              "cost"
+            ]
+          },
+          "rule": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "default": "medium"
+          }
+        }
+      },
+      "default": []
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "$ref": "SkillRef.json"
+      },
+      "default": []
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "$ref": "ResourceRef.json"
+      },
+      "default": []
+    },
+    "memory_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "availability",
+        "trust_level"
+      ],
+      "properties": {
+        "availability": {
+          "type": "string",
+          "enum": [
+            "available",
+            "busy",
+            "offline",
+            "degraded"
+          ]
+        },
+        "trust_level": {
+          "type": "string",
+          "enum": [
+            "sandbox_only",
+            "guarded",
+            "trusted"
+          ]
+        },
+        "current_load": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "last_seen_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "performance_stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "success_rate_30d": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "task_count_30d": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "default": {}
+    }
+  }
+}

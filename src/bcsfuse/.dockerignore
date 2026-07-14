@@ -1,0 +1,95 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment files (keep only .env.example)
+.env
+.env.*
+!.env.example
+.env.real_token
+.env.live.local
+
+# Runtime artifacts - NEVER include in image
+logs/
+data/
+qdrant_storage/
+*.sqlite
+*.sqlite3
+*.db
+*.faiss
+*.index
+*.log
+*.dump
+*.sql
+
+# Internal-only source code
+src/bcsfuse/
+src/ocb-ant/
+src/bcsfuse-internal/
+../../src/bcsfuse/
+../../src/bcsfuse-internal/
+
+# Test artifacts
+.pytest_cache/
+test-results/
+coverage.xml
+junit.xml
+
+# Documentation that shouldn't be in image
+docs/
+*.md
+!README-opensource.md
+!LEGAL.md
+!FUSE_API_LOGIC.md
+
+# Lock files (optional - can include if you want reproducible builds)
+# uv.lock
+
+# Development files
+.venv/
+.vscode/
+.idea/
+.gitattributes
+
+# Packaging
+oss_smoke_tests/
+f.yml
+requirements.txt
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
+.DS_Store

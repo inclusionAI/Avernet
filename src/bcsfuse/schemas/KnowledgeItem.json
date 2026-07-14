@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/KnowledgeItem.json",
+  "title": "KnowledgeItem",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "kind",
+    "title",
+    "summary",
+    "freshness",
+    "reliability"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^kno_[a-zA-Z0-9_-]+$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "doc",
+        "rule",
+        "case",
+        "memory",
+        "note",
+        "playbook"
+      ]
+    },
+    "title": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "source_uri": {
+      "type": "string"
+    },
+    "highlights": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "freshness": {
+      "type": "string",
+      "enum": [
+        "stale",
+        "usable",
+        "fresh"
+      ]
+    },
+    "reliability": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    }
+  }
+}

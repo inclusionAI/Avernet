@@ -1,0 +1,22 @@
+{
+  "skill_sets": [
+    {
+      "name": "code_review_skills",
+      "is_current": true,
+      "skills": [
+        {
+          "name": "code_review",
+          "description": "Review code for quality, security, and best practices",
+          "skill": "review_code_v1",
+          "path": "/skills/review/code"
+        },
+        {
+          "name": "static_analysis",
+          "description": "Run static code analysis",
+          "skill": "static_analysis_v1",
+          "path": "/skills/analysis/static"
+        }
+      ]
+    }
+  ]
+}
