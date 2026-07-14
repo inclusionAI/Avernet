@@ -56,6 +56,7 @@ dev = [
   "basedpyright>=1.39.8",
   "types-pyyaml>=6.0.12.20260508",
   "pytest-cov>=7.1.0",
+  "coverage>=7.6.0",
   "pytest-rerunfailures>=16.3",
   "pytestarch>=4.0.0,<5.0.0",
 ]
@@ -121,9 +122,7 @@ markers = [
   "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
   "e2e: marks tests as end-to-end API tests (requires running app)",
   "requires_app: marks tests that require a running application instance",
-  "crud: marks e2e tests for CRUD operations",
-  "sync: marks e2e tests for synchronous/device operations",
-  "async_hook: marks e2e tests for async hook operations",
+  "baseline: marks e2e tests for consolidated baseline test suite",
   "mock_paas_hook_failure: marks e2e tests for mock hook execution failure",
   "mock_paas_create_failure: marks e2e tests for mock device creation failure",
   "mock_paas_destroy_failure: marks e2e tests for mock device destroy failure",

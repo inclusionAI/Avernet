@@ -7,7 +7,7 @@ user_config:
     scheduler: stub
     cache: stub
     bot_service: stub
-    engine_adapter: stub  # stub | real
+    engine_adapter: stub
     sandbox:
       arca: stub
       desktop: stub

@@ -37,8 +37,8 @@ log_usage() {
     echo -e "${BLUE}Usage:${NC} $0 {start|stop|restart|status} [options]"
     echo ""
     echo "Commands:"
-    echo "  start              - 启动应用"
-    echo "  stop               - 停止应用"
+    echo "  start              - 启动应用（默认启用覆盖率收集，--debug 禁用）"
+    echo "  stop               - 停止应用（自动合并并输出覆盖率报告）"
     echo "  restart            - 重启应用"
     echo "  status             - 查看应用状态"
     echo ""
@@ -230,12 +230,21 @@ do_start() {
     if [[ -z "$APP_MODE" ]]; then
         APP_MODE="bare"
     fi
+    # 用于持久化覆盖率状态，供 stop 时检测
+    local coverage_marker="$WORK_DIR/tmp/.coverage_enabled"
+
+    # 默认启用覆盖率收集（除非使用 --debug）
+    if [[ -z "$debug_port" ]]; then
+        export SINGLEBOX_COVERAGE=1
+        : "${SINGLEBOX_COVERAGE_DIR:=$WORK_DIR/tmp/coverage}"
+        mkdir -p "$(dirname "$coverage_marker")"
+        : > "$coverage_marker"
+    fi
     start_cmd=("$VENV_DIR/bin/python" src/secbaas/community/main.py -c "$CONFIG_DIR" --mode "$APP_MODE")
-    if [[ "${SINGLEBOX_COVERAGE:-0}" == "1" && -z "$debug_port" ]]; then
+    if [[ -z "$debug_port" ]]; then
         coverage_dir="${SINGLEBOX_COVERAGE_DIR:-$WORK_DIR/tmp/coverage}/baas"
         mkdir -p "$coverage_dir"
         export COVERAGE_FILE="$coverage_dir/.coverage"
-        uv pip install --python "$VENV_DIR/bin/python" coverage >/dev/null
         start_cmd=(
             "$VENV_DIR/bin/python" -m coverage run
             --parallel-mode
@@ -335,6 +344,8 @@ do_stop() {
     local stopped=false
     local stop_port="$APP_PORT"
 
+    local coverage_marker="$WORK_DIR/tmp/.coverage_enabled"
+
     # 优先从端口文件读取启动时的端口
     if [[ -f "$PORT_FILE" ]]; then
         stop_port=$(cat "$PORT_FILE")
@@ -344,6 +355,13 @@ do_stop() {
     if is_running; then
         OLD_PID=$(cat "$PID_FILE")
         log_info "停止应用 (PID: $OLD_PID)..."
+
+        # 如果启用了覆盖率，先发送 USR1 信号刷新覆盖率数据
+        if [[ -f "$coverage_marker" ]]; then
+            kill -USR1 "$OLD_PID" 2>/dev/null || true
+            log_info "覆盖率数据已通过 SIGUSR1 刷新"
+            sleep 2
+        fi
 
         # 发送 SIGTERM 信号
         kill "$OLD_PID" 2>/dev/null
@@ -386,6 +404,33 @@ do_stop() {
     fi
 
     rm -f "$PORT_FILE"
+
+    # 如果启用了覆盖率，合并数据并生成报告
+    if [[ -f "$coverage_marker" ]]; then
+        local cov_dir="${SINGLEBOX_COVERAGE_DIR:-$WORK_DIR/tmp/coverage}/baas"
+        shopt -s nullglob
+        local cov_files=("$cov_dir"/.coverage.*)
+
+        if [[ ${#cov_files[@]} -gt 0 ]]; then
+            COVERAGE_FILE="$cov_dir/.coverage" uv run coverage combine "${cov_files[@]}" >/dev/null 2>&1 || true
+            COVERAGE_FILE="$cov_dir/.coverage" uv run coverage html -i -d "$cov_dir/htmlcov" >/dev/null 2>&1 || true
+            log_info "覆盖率报告: file://$cov_dir/htmlcov/index.html"
+
+            if [[ -n "${COVERAGE_E2E_DIR:-}" ]]; then
+                local session_label="${SESSION_LABEL:-session-$$}"
+                local session_dir="$COVERAGE_E2E_DIR/$session_label"
+                mkdir -p "$session_dir"
+                cp "$cov_dir/.coverage" "$session_dir/"
+                COVERAGE_FILE="$session_dir/.coverage" uv run coverage html -i -d "$session_dir/htmlcov" >/dev/null 2>&1 || true
+                local summary
+                summary=$(COVERAGE_FILE="$session_dir/.coverage" uv run coverage report --format=total 2>/dev/null | tail -1)
+                log_info "[COVERAGE] $session_label: $summary → file://$session_dir/htmlcov/index.html"
+            fi
+        fi
+
+        shopt -u nullglob
+        rm -f "$coverage_marker"
+    fi
 }
 
 # 查看状态

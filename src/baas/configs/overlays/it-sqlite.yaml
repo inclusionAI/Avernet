@@ -2,6 +2,7 @@
 # This overlay ensures the DI container can resolve ALL providers
 # (plugins, repositories, services) without external dependencies.
 # Uses :memory: SQLite — no filesystem or network needed.
+workers: 1
 user_config:
   plugins:
     auth: stub
