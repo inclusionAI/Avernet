@@ -372,7 +372,7 @@ class TestCreateBotEngineRouting:
 @pytest.mark.unit
 class TestGetBotStatusNoReadThrough:
     """get_bot returns the stored status as-is for every engine — the teclaw
-    read-through is gone (the TeclawStatusReconciler keeps the stored column
+    read-through is gone (the TeclawPublishTaskHandler keeps the stored column
     fresh post-provision), so the DB value is authoritative and baas is never
     probed on a detail read."""
 

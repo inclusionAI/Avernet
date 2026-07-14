@@ -7,12 +7,19 @@ and backoff config rather than injected clocks.
 import asyncio
 import time
 from contextlib import contextmanager
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from agentclaw.community.core.bot_management.services.teclaw_publish_task_handler import (
+    TECLAW_CREATE_PUBLISH_POLL_TASK,
+    TeclawPublishTaskHandler,
+    build_teclaw_publish_poll_payload,
+)
 from agentclaw.community.core.task_queue.examples import (
     NoopTaskHandler,
     PollUntilTerminalExampleHandler,
@@ -271,3 +278,49 @@ def test_heartbeat_renews_lease_during_long_handler(monkeypatch):
     # stayed with this worker the terminal Complete write succeeded.
     assert len(calls) >= 1
     assert w.status_of(rec.id) == TaskStatus.SUCCEEDED
+
+def test_teclaw_publish_task_is_reclaimed_after_worker_restart():
+    w = _world(lease_seconds=0)
+    baas = MagicMock()
+    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+    binding_repo = MagicMock()
+    binding_repo.get_by_id.return_value = SimpleNamespace(
+        status="PENDING",
+        device_provider="teclaw",
+        device_props={"publish_id": 9},
+    )
+    w.registry.register(
+        TeclawPublishTaskHandler(
+            baas_service=baas,
+            device_binding_repo=binding_repo,
+        )
+    )
+    record = w.enqueue(
+        TECLAW_CREATE_PUBLISH_POLL_TASK,
+        build_teclaw_publish_poll_payload(
+            binding_id=77,
+            bot_id="b1",
+            owner_id="u1",
+            publish_id=9,
+            started_at_epoch_s=time.time(),
+        ),
+    )
+    abandoned = w.repo.claim_batch(
+        worker_id="dead-worker",
+        env=ENV,
+        limit=1,
+        lease_seconds=0,
+    )
+    assert [task.id for task in abandoned] == [record.id]
+
+    restarted_worker = TaskWorker(w.repo, w.registry, w.config)
+    asyncio.run(restarted_worker.run_once())
+
+    assert w.status_of(record.id) == TaskStatus.SUCCEEDED
+    binding_repo.transition_teclaw_publish_terminal.assert_called_once_with(
+        binding_id=77,
+        bot_id="b1",
+        owner_id="u1",
+        publish_id=9,
+        status="ACTIVE",
+    )

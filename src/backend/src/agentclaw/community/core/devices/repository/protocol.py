@@ -104,6 +104,26 @@ class DeviceBindingRepository(Protocol):
         """
         ...
 
+    def transition_teclaw_publish_terminal(
+        self,
+        *,
+        binding_id: int,
+        bot_id: str,
+        owner_id: str,
+        publish_id: int,
+        status: str,
+    ) -> bool:
+        """Atomically persist a guarded Teclaw terminal transition.
+
+        The implementation reloads and locks ``binding_id`` in one
+        transaction. It returns ``False`` without writes unless the binding is
+        still PENDING, owned by Teclaw, and references ``publish_id``. On a
+        match it updates the expected live bot first, then the binding. A bot
+        update that does not match exactly one row raises and rolls back the
+        transaction.
+        """
+        ...
+
     def list_bindings(
         self,
         *,

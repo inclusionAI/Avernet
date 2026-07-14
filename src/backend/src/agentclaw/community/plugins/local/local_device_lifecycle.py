@@ -34,6 +34,7 @@ from agentclaw.community.core.skill_center.factories import SkillSetServiceFacto
 from agentclaw.community.core.skill_center.services.repositories import SkillSetRepository
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.database import DatabasePlugin
 
 logger = get_logger()
 
@@ -44,16 +45,19 @@ class LocalDeviceLifecycle(LifecycleBase):
     @inject
     def __init__(
         self,
+        database: DatabasePlugin,
         bot_repository: BotRepository,
         skill_set_repo: SkillSetRepository,
         skill_set_factory_provider: Callable[[], SkillSetServiceFactory],
         bot_service_provider: Callable[[], BotService],
     ) -> None:
+        # database: route lifecycle DB work through the locked local plugin.
         # bot_repository: resolve per-bot engine type during symlink restore.
         # skill_set_repo: walk active skill sets on startup.
         # skill_set_factory_provider / bot_service_provider: injected as lazy
         # ``Callable[[], …]`` because the eager type closes a construction cycle
         # through the skill-set service graph.
+        self._database = database
         self._bot_repository = bot_repository
         self._skill_set_repo = skill_set_repo
         self._skill_set_factory_provider = skill_set_factory_provider
@@ -77,8 +81,11 @@ class LocalDeviceLifecycle(LifecycleBase):
             release_all_stale_bindings,
         )
 
-        release_all_stale_bindings()
-        reallocate_orphaned_bots(self._bot_service_provider())
+        release_all_stale_bindings(self._database)
+        reallocate_orphaned_bots(
+            self._database,
+            self._bot_service_provider(),
+        )
         await self._restore_local_symlinks()
         logger.info("LocalDeviceLifecycle started via Lifecycle.startup()")
 
@@ -92,7 +99,7 @@ class LocalDeviceLifecycle(LifecycleBase):
         )
 
         LocalProcessManager.instance().stop_all()
-        release_all_stale_bindings()
+        release_all_stale_bindings(self._database)
         logger.info("LocalDeviceLifecycle shut down via Lifecycle.shutdown()")
 
     async def _restore_local_symlinks(self) -> None:

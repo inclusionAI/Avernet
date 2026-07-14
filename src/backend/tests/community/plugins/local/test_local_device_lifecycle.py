@@ -16,6 +16,7 @@ from agentclaw.community.plugins.local.local_device_lifecycle import LocalDevice
 
 def _life(**over) -> LocalDeviceLifecycle:
     return LocalDeviceLifecycle(
+        database=over.get("database", MagicMock()),
         bot_repository=over.get("bot_repository", MagicMock()),
         skill_set_repo=over.get("skill_set_repo", MagicMock()),
         skill_set_factory_provider=over.get(
@@ -27,7 +28,12 @@ def _life(**over) -> LocalDeviceLifecycle:
 
 @pytest.mark.asyncio
 async def test_startup_runs_release_reallocate_restore():
-    life = _life()
+    database = MagicMock()
+    bot_service = MagicMock()
+    life = _life(
+        database=database,
+        bot_service_provider=lambda: bot_service,
+    )
     with patch(
         "agentclaw.community.plugins.local.device_lifecycle.release_all_stale_bindings"
     ) as rel, patch(
@@ -37,14 +43,15 @@ async def test_startup_runs_release_reallocate_restore():
     ) as restore:
         await life.startup()
 
-    rel.assert_called_once_with()
-    realloc.assert_called_once()
+    rel.assert_called_once_with(database)
+    realloc.assert_called_once_with(database, bot_service)
     restore.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio
 async def test_shutdown_stops_processes_and_releases():
-    life = _life()
+    database = MagicMock()
+    life = _life(database=database)
     with patch(
         "agentclaw.community.plugins.local.device_lifecycle.release_all_stale_bindings"
     ) as rel, patch(
@@ -53,7 +60,17 @@ async def test_shutdown_stops_processes_and_releases():
         await life.shutdown()
 
     pm.instance.return_value.stop_all.assert_called_once_with()
-    rel.assert_called_once_with()
+    rel.assert_called_once_with(database)
+
+
+def test_database_dependency_is_required():
+    with pytest.raises(TypeError, match="database"):
+        LocalDeviceLifecycle(
+            bot_repository=MagicMock(),
+            skill_set_repo=MagicMock(),
+            skill_set_factory_provider=lambda: MagicMock(),
+            bot_service_provider=lambda: MagicMock(),
+        )
 
 
 @pytest.mark.asyncio

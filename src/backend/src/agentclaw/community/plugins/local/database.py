@@ -8,11 +8,18 @@ makes local mode side-effect free (no ``backend.db`` ever appears on
 disk) and gives tests true per-process isolation when paired with
 ``reset_for_tests()``.
 
+Because ``StaticPool`` exposes that one DBAPI connection to every local
+Session, the DatabasePlugin serializes the full ``session()`` and
+``orm_session()`` lifetimes with one process-wide reentrant lock. SQLite
+transaction locks only coordinate separate connections; they cannot protect
+two concurrent Sessions using this same connection.
+
 Trade-off: ``./scripts/local_setup.sh --local`` no longer persists DB
 state across backend restarts. Documented in the project ``CLAUDE.md``
 "Running Modes" table.
 """
 import os
+import threading
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine, event
@@ -62,6 +69,7 @@ def _make_engine_and_session():
 # Module-level lazy singleton (created on first use)
 _engine = None
 _session_factory = None
+_session_lock = threading.RLock()
 
 
 def _get_session_factory():
@@ -72,15 +80,15 @@ def _get_session_factory():
 
 
 def get_session():
-    """Return a new SQLAlchemy Session. Caller is responsible for closing it."""
+    """Return an unmanaged legacy/test Session; production must use the plugin."""
     factory = _get_session_factory()
     return factory()
 
 
-# SessionLocal is a callable that returns a new Session, matching the old db.py pattern.
-# It lazily initializes the factory on first call.
+# Unmanaged legacy/test callable matching the old db.py pattern. Production
+# code must use SqliteDB.session()/orm_session() so the shared lock is held.
 def SessionLocal():
-    """Create and return a new SQLAlchemy Session (compatible with old db.py usage)."""
+    """Return an unmanaged legacy/test Session; production must use the plugin."""
     return _get_session_factory()()
 
 
@@ -92,10 +100,11 @@ def reset_for_tests() -> None:
     including before the singletons have ever been initialised.
     """
     global _engine, _session_factory
-    if _engine is not None:
-        _engine.dispose()
-    _engine = None
-    _session_factory = None
+    with _session_lock:
+        if _engine is not None:
+            _engine.dispose()
+        _engine = None
+        _session_factory = None
 
 
 @plugin_impl(
@@ -171,15 +180,16 @@ class SqliteDB(MockSeam, DatabasePlugin, LifecycleBase):
     @contextmanager
     def session(self):
         """Yield a SQLAlchemy Session."""
-        factory = _get_session_factory()
-        db = factory()
-        try:
-            yield db
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        with _session_lock:
+            factory = _get_session_factory()
+            db = factory()
+            try:
+                yield db
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()
 
     @contextmanager
     def orm_session(self):
@@ -190,13 +200,14 @@ class SqliteDB(MockSeam, DatabasePlugin, LifecycleBase):
         ``AUTOCOMMIT``). ``session()`` is left unchanged for all other
         callers, so no other repository's persistence behaviour changes.
         """
-        factory = _get_session_factory()
-        db = factory()
-        try:
-            yield db
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        with _session_lock:
+            factory = _get_session_factory()
+            db = factory()
+            try:
+                yield db
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()
