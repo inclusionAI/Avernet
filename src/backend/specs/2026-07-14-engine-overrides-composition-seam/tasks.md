@@ -150,7 +150,7 @@
   - [ ] Suite green.
 - **Depends on:** Task 5
 
-## Task 6: Whole-suite verification, end-to-end check, draft PR — [ ]
+## Task 6: Whole-suite verification, end-to-end check, draft PR — [x]
 - **Goal:** Prove the change end-to-end and open the PR.
 - **Files:** — (verification + PR).
 - **Done when:**

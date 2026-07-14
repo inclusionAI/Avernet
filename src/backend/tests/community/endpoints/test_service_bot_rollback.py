@@ -93,7 +93,6 @@ def _seed_base(world) -> dict:
         SkillSetRepository,
     )
     from agentclaw.community.core.resources.repository.protocol import ResourceRepositoryProtocol
-    from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
     from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 
     world.get(SkillRepoSyncPlugin).set_override("get_local_skills_root", lambda: None)
@@ -373,3 +372,89 @@ def error_rollback_not_found():
 )
 def error_rollback_invalid_status():
     """Rollback a DRAFT publish → service error (invalid status)."""
+
+
+# ── per-stage channel restore on rollback (end-to-end #168 acceptance) ─────────
+
+# V1 (rollback target) frozen artifact, last stamped at verify (canary); rollback
+# must restamp it to the online (release) stage.
+_ENRICHED_V1 = {
+    **_ARTIFACT,
+    "engine_ext": {"bot_id": _BOT_ID, "owner_id": _OWNER, "stage": "canary"},
+}
+# The online channel config V1 promoted (card-A), stored in its per-stage slot.
+_STORED_ONLINE_CARD_A = {
+    "channels": {"dingding": {"enabled": True,
+                              "accounts": [{"client_id": "dt", "card_template_id": "card-A"}]}}
+}
+
+
+def _seed_rollback_stored_online_channel(world) -> None:
+    """V1 UPGRADED (rollback target) carries a stored online slot with card-A; the
+    LIVE channel table holds card-B (the post-change state being rolled away from).
+    V2 SUCCESS is the current version. Rolling back V2 must deliver card-A, not card-B."""
+    bot = _seed_base(world)
+    _install_baas_for_rollback(world)
+
+    from agentclaw.community.core.channel.services.repositories import ChannelRepository
+    # Live table now holds card-B — rollback must NOT consult it (compose_stored).
+    world.get(ChannelRepository).insert_channel(
+        type="dingding", description=None, identity_id=_OWNER, bind_bot_id=_BOT_ID,
+        config={"client_id": "dt", "card_template_id": "card-B"}, status="1", stage="online",
+    )
+
+    vbid1 = _binding(world, device_id=f"{_VERIFY_UUID}-1", status="ACTIVE")
+    obid1 = _binding(world, device_id=f"{_ONLINE_UUID}-1", status="RELEASED")
+    vbid2 = _binding(world, device_id=f"{_VERIFY_UUID}-2", status="ACTIVE")
+    obid2 = _binding(world, device_id=f"{_ONLINE_UUID}-2", status="ACTIVE")
+
+    repo = world.get(BotPublishRepositoryProtocol)
+    repo.insert({
+        "source_bot_pk": bot["id"], "source_bot_id": _BOT_ID, "publish_bot_id": _BOT_ID,
+        "name": "V1 Publish", "owner_id": _OWNER, "permission_owner": _OWNER,
+        "status": PublishStatus.UPGRADED, "version": 1, "env": "dev",
+        "ext": {
+            "binding": {"verify": vbid1, "online": obid1},
+            "publish": {"verify": _BAAS_PUB_ID, "online": _BAAS_PUB_ID},
+            "config_artifact": _ENRICHED_V1,
+            "engine_overrides_by_stage": {"online": _STORED_ONLINE_CARD_A},
+        },
+    })
+    repo.insert({
+        "source_bot_pk": bot["id"], "source_bot_id": _BOT_ID, "publish_bot_id": _BOT_ID,
+        "name": "V2 Publish", "owner_id": _OWNER, "permission_owner": _OWNER,
+        "status": PublishStatus.SUCCESS, "version": 2, "env": "dev", "last_pub_id": _V1,
+        "ext": {
+            "binding": {"verify": vbid2, "online": obid2},
+            "publish": {"verify": _BAAS_PUB_ID, "online": _BAAS_PUB_ID},
+            "config_artifact": _ENRICHED_V1,
+        },
+    })
+
+
+def _delivered_update_artifact(world) -> dict:
+    update = next(c for c in _baas(world).calls_to("post") if "/update" in c.args[0])
+    return update.kwargs["json"]["config"]["deploy_config"]["teclaw_bot_config"]
+
+
+def _expect_rollback_delivers_stored_card_a(response, world):  # noqa: ARG001
+    art = _delivered_update_artifact(world)
+    accounts = art["engine_overrides"]["channels"]["dingding"]["accounts"]
+    # Delivered the STORED online card-A, never the live table's card-B.
+    assert [a.get("card_template_id") for a in accounts] == ["card-A"], art["engine_overrides"]
+    # Restamped from the stored canary stamp to the online (release) stage.
+    assert art["engine_ext"]["stage"] == "release", art["engine_ext"]
+
+
+@endpoint_test(
+    method="POST", path=_ROLLBACK, scenario="rollback_restores_stored_online_channel",
+    input=CaseInput(path_params={"publish_id": _V2}, headers=_HEADERS),
+    seed=_seed_rollback_stored_online_channel, drain_background=True,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(_expect_rollback_delivers_stored_card_a,),
+)
+def rollback_restores_stored_online_channel():
+    """Rolling back V2 → V1 composes V1's STORED online channel overrides (card-A)
+    onto the delivered artifact and restamps engine_ext.stage=release; the live
+    channel table's post-change card-B is never consulted. End-to-end proof of the
+    #168 fix on the real BaaS /update payload."""

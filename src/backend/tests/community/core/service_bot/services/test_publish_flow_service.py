@@ -1795,7 +1795,6 @@ def test_scale_bot_teclaw_returns_supported_message_without_baas_call():
 
 @pytest.mark.unit
 def test_scale_bot_invalid_status():
-    from agentclaw.community.core.service_bot.services.bot_publish_service import PublishStatusInvalidError
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
