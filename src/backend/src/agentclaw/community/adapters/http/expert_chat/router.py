@@ -219,6 +219,7 @@ async def get_caller_connection_for_other(
     bot_id: str = Query(..., description="Bot ID"),
     owner_id: str = Query(..., description="Bot 所有者ID"),
     user_id: str = Query(..., description="调用者(Caller)用户ID"),
+    force_upgrade: bool = Query(False, description="强制升级，跳过版本检查"),
     user: AuthenticatedUser = Depends(get_current_user),
     instance_service: ExpertChatInstanceServiceProtocol = Injected(ExpertChatInstanceServiceProtocol)
 ):
@@ -232,6 +233,7 @@ async def get_caller_connection_for_other(
         - bot_id: Bot ID
         - owner_id: Bot 所有者ID
         - user_id: 调用者用户ID
+        - force_upgrade: 是否强制升级（跳过版本检查快速路径）
 
     返回:
         - instance: 实例记录
@@ -258,7 +260,8 @@ async def get_caller_connection_for_other(
         result = await instance_service.get_caller_connection(
             user_id=user_id,
             bot_id=bot_id,
-            owner_id=owner_id
+            owner_id=owner_id,
+            force_upgrade=force_upgrade,
         )
         return ApiResponse(success=True, message="获取成功", error_code=0, data=result)
 

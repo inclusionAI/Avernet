@@ -9,5 +9,5 @@ class ExpertChatInstanceServiceProtocol(Protocol):
     """Service API for per-caller BaaS container instance management."""
 
     async def get_caller_connection(
-        self, user_id: str, bot_id: str, owner_id: str
+        self, user_id: str, bot_id: str, owner_id: str, force_upgrade: bool = False
     ) -> Dict[str, Any]: ...

@@ -32,6 +32,8 @@ from typing import Any, Dict, Optional
 from injector import inject
 
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.devices.models import DeviceBindingStatus
+from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
 from agentclaw.community.core.expert_chat.errors import (
     BotNotPublishedError,
     ConnectionError,
@@ -58,7 +60,8 @@ class ExpertChatInstanceService:
     Dependencies are injected (see ``di/modules/expert_chat_module.py``):
     ``ExpertChatInstanceRepository`` (ledger), ``BaasService`` (container
     lifecycle), ``BotPublishRepositoryProtocol`` (success publish order /
-    migration_path reverse-lookup), ``BotRepository`` (bot info lookup).
+    migration_path reverse-lookup), ``BotRepository`` (bot info lookup),
+    ``DeviceBindingRepository`` (device binding for caller containers).
     """
 
     @inject
@@ -68,11 +71,13 @@ class ExpertChatInstanceService:
         baas_service: BaasService,
         bot_publish_repo: BotPublishRepositoryProtocol,
         bot_repo: BotRepository,
+        binding_repo: DeviceBindingRepository,
     ) -> None:
         self._instance_repo = instance_repo
         self._baas = baas_service
         self._publish_repo = bot_publish_repo
         self._bot_repo = bot_repo
+        self._binding_repo = binding_repo
 
     # ------------------------------------------------------------------
     # Public entry
@@ -82,12 +87,21 @@ class ExpertChatInstanceService:
         user_id: str,
         bot_id: str,
         owner_id: str,
+        force_upgrade: bool = False,
     ) -> Dict[str, Any]:
         """Return the caller's container ``connection``.
 
         Mirrors ``ExpertChatService.get_chat_session``'s ``connection``
         shape; ``session_key`` is NOT produced here (D3 — that stays with
         ``ExpertChatService``).
+
+        Args:
+            user_id: The caller's user ID.
+            bot_id: The bot ID.
+            owner_id: The bot owner's ID.
+            force_upgrade: If True, skip the version check fast path and
+                always execute create/upgrade flow, even when the instance
+                is in success state with the latest version.
 
         Raises:
             BotNotPublishedError: no success publish order for the service
@@ -114,7 +128,13 @@ class ExpertChatInstanceService:
             )
 
         # If instance is already success, check if version upgrade is needed
-        if instance.get("status") == "success":
+        # Skip this fast path when force_upgrade=True
+        if force_upgrade:
+            logger.info(
+                "[ExpertChatInstance] Force upgrade requested: bot=%s owner=%s user=%s, skipping fast path",
+                bot_id, owner_id, user_id,
+            )
+        if instance.get("status") == "success" and not force_upgrade:
             ext = instance.get("ext") or {}
             bot_uuid = ext.get("bot_uuid")
             instance_version = ext.get("version") or 0
@@ -143,6 +163,7 @@ class ExpertChatInstanceService:
         # container was provisioned/upgraded this round, i.e. reuse). The
         # progress poll runs once, here in the caller, after create/revive.
         baas_publish_id: Optional[Any] = None
+        binding_id: Optional[int] = None
 
         if not bot_uuid:
             # --- Step 3: never provisioned — raise a fresh container ---
@@ -155,6 +176,7 @@ class ExpertChatInstanceService:
             )
             bot_uuid = order["bot_uuid"]
             baas_publish_id = order.get("publish_id")
+            binding_id = order.get("binding_id")
             ext = {
                 "bot_uuid": bot_uuid,
                 "service_bot_publish_id": service_bot_publish_id,
@@ -194,9 +216,24 @@ class ExpertChatInstanceService:
                 include_devices=True,
             )
             status = progress.get("status")
-            instance_status = "success" if status == "SUCCESS" else "failed" if status == "FAILED" else instance.get("status")
+
+            # Update binding status based on progress (before instance update)
+            if binding_id:
+                if status == "SUCCESS":
+                    binding_status = DeviceBindingStatus.ACTIVE.value
+                elif status == "FAILED":
+                    binding_status = DeviceBindingStatus.FAILED.value
+                else:
+                    binding_status = DeviceBindingStatus.PENDING.value
+                self._binding_repo.update_status(binding_id=binding_id, status=binding_status)
+                logger.info(
+                    "[ExpertChatInstance] Updated binding status: binding_id=%s status=%s",
+                    binding_id, binding_status,
+                )
+
             ext = dict(ext)
             ext["baas_publish"] = progress
+            instance_status = "success" if status == "SUCCESS" else "failed" if status == "FAILED" else instance.get("status")
             self._instance_repo.update_instance(
                 user_id=user_id,
                 bot_id=bot_id,
@@ -290,9 +327,12 @@ class ExpertChatInstanceService:
 
         ``auto_approve_publish=True`` so the create workflow is self-
         approved (no explicit ``approve_publish`` call). Returns the baas
-        publish order — ``{bot_uuid, publish_id}`` — without querying the
-        workflow; the caller queries ``get_publish_progress`` once and
-        persists the trail (``baas_publish``) to the instance ext.
+        publish order — ``{bot_uuid, publish_id, binding_id}`` — without
+        querying the workflow; the caller queries ``get_publish_progress``
+        once and persists the trail (``baas_publish``) to the instance ext.
+
+        Also creates a device binding record for the caller's container,
+        linking the bot_uuid (device_id) to the caller (user_id as entity_id).
 
         Raises:
             ConnectionError: create_bot failed or returned no bot_uuid (D5).
@@ -336,7 +376,27 @@ class ExpertChatInstanceService:
                 original_error=str(result),
             )
 
-        return {"bot_uuid": bot_uuid, "publish_id": publish_id}
+        # Create device binding record for the caller's container
+        # bot_uuid serves as device_id, linking the BaaS container to the owner
+        env = get_current_env()
+        binding_id = self._binding_repo.insert_binding(
+            entity_id=owner_id,
+            entity_type="staff",
+            device_id=bot_uuid,
+            device_provider="baas",
+            env=env,
+            device_props={},
+            status=DeviceBindingStatus.PENDING.value,
+            apply_reason=f"caller_instance:{bot_id}",
+            applied_by=user_id,
+        )
+        logger.info(
+            "[ExpertChatInstance] Created binding for caller container: "
+            "bot=%s owner=%s user=%s bot_uuid=%s binding_id=%s",
+            bot_id, owner_id, user_id, bot_uuid, binding_id,
+        )
+
+        return {"bot_uuid": bot_uuid, "publish_id": publish_id, "binding_id": binding_id}
 
     # ------------------------------------------------------------------
     # Step 4.2: upgrade a recycled container

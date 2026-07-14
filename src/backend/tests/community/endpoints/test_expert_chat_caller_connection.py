@@ -377,3 +377,59 @@ def test_caller_connection_response_structure():
 
     # This test verifies the response structure is correct
     # The actual assertions are done by the framework via json_contains
+
+
+# ---------------------------------------------------------------------------
+# Happy path: force_upgrade parameter
+# ---------------------------------------------------------------------------
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/expert-chats/caller-connection",
+    scenario="force_upgrade_true",
+    input=CaseInput(
+        query_params={
+            "bot_id": _BOT_ID,
+            "owner_id": _OWNER_ID,
+            "user_id": _USER_ID,
+            "force_upgrade": "true",
+        },
+        headers={"x-user-id": _ADMIN_USER_ID},
+    ),
+    seed=_seed_happy,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "error_code": 0,
+        },
+    ),
+)
+def test_caller_connection_force_upgrade_true():
+    """force_upgrade=true triggers upgrade flow even when instance exists."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/expert-chats/caller-connection",
+    scenario="force_upgrade_false",
+    input=CaseInput(
+        query_params={
+            "bot_id": _BOT_ID,
+            "owner_id": _OWNER_ID,
+            "user_id": _USER_ID,
+            "force_upgrade": "false",
+        },
+        headers={"x-user-id": _ADMIN_USER_ID},
+    ),
+    seed=_seed_happy,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "error_code": 0,
+        },
+    ),
+)
+def test_caller_connection_force_upgrade_false():
+    """force_upgrade=false (default) uses fast path when version is current."""
