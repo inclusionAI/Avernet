@@ -19,6 +19,14 @@ from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlu
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
+class _TargetLockEntry:
+    """One keyed repair lock and the number of callers using or waiting on it."""
+
+    def __init__(self) -> None:
+        self.lock = Lock()
+        self.users = 0
+
+
 class DefaultBotPassportRepairService:
     """Repair Passport and owner authorization without touching bot runtime."""
 
@@ -35,7 +43,7 @@ class DefaultBotPassportRepairService:
         self._auth_relationship_plugin = auth_relationship_plugin
         self._skill_set_factory = skill_set_factory
         self._target_locks_guard = Lock()
-        self._target_locks: dict[tuple[str, str, str], Any] = {}
+        self._target_locks: dict[tuple[str, str, str], _TargetLockEntry] = {}
 
     def repair(
         self,
@@ -51,17 +59,24 @@ class DefaultBotPassportRepairService:
             )
         lock_key = (target_env, target_user_id, "default")
         with self._target_locks_guard:
-            target_lock = self._target_locks.get(lock_key)
-            if target_lock is None:
-                target_lock = Lock()
-                self._target_locks[lock_key] = target_lock
-        with target_lock:
-            return self._repair_target(
-                target_user_id=target_user_id,
-                target_env=target_env,
-                operator_user_id=operator_user_id,
-                operator_name=operator_name,
-            )
+            lock_entry = self._target_locks.get(lock_key)
+            if lock_entry is None:
+                lock_entry = _TargetLockEntry()
+                self._target_locks[lock_key] = lock_entry
+            lock_entry.users += 1
+        try:
+            with lock_entry.lock:
+                return self._repair_target(
+                    target_user_id=target_user_id,
+                    target_env=target_env,
+                    operator_user_id=operator_user_id,
+                    operator_name=operator_name,
+                )
+        finally:
+            with self._target_locks_guard:
+                lock_entry.users -= 1
+                if lock_entry.users == 0:
+                    self._target_locks.pop(lock_key, None)
 
     def _repair_target(
         self,

@@ -498,3 +498,4 @@ def test_repair_serializes_same_target_to_avoid_duplicate_first_apply():
     assert not failures
     assert len(results) == 2
     assert passport.apply_count == 1
+    assert service._target_locks == {}
