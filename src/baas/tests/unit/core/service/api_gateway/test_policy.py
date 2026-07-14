@@ -1,7 +1,7 @@
 """Unit tests for policy parsing module.
 
 Covers:
-- parse_policy normalization: legacy allow-all (None/empty/missing key),
+- parse_policy normalization: fail-closed (None/empty/missing key),
   explicit allow-all ("*"), deny-all (empty / NONE sentinel / mixed),
   whitelist parsing, fail-closed on bad input.
 - APIKeyPolicy: to_json round-trip, NONE/ALL sentinel constants
@@ -51,23 +51,23 @@ class TestParsePolicy:
         assert isinstance(result, APIKeyPolicy)
         assert result.allowed_bots == ["bot1:e1", "bot2:e2"]
 
-    # --- legacy allow-all compatibility (NULL / empty / missing key) ---
-    def test_none_input_legacy_allow_all(self):
+    # --- fail-closed: None / empty / missing key deny all ---
+    def test_none_input_denies_all(self):
         result = parse_policy(None)
-        assert result.allowed_bots == ["*"]
+        assert result.allowed_bots == []
 
-    def test_empty_string_legacy_allow_all(self):
+    def test_empty_string_denies_all(self):
         result = parse_policy("")
-        assert result.allowed_bots == ["*"]
+        assert result.allowed_bots == []
 
-    def test_whitespace_string_legacy_allow_all(self):
+    def test_whitespace_string_denies_all(self):
         result = parse_policy("   ")
-        assert result.allowed_bots == ["*"]
+        assert result.allowed_bots == []
 
-    def test_missing_allowed_bots_key_legacy_allow_all(self):
-        """dict without allowed_bots key → legacy allow-all."""
+    def test_missing_allowed_bots_key_denies_all(self):
+        """dict without allowed_bots key → deny all (fail-closed)."""
         result = parse_policy('{"other_key": "value"}')
-        assert result.allowed_bots == ["*"]
+        assert result.allowed_bots == []
 
     # --- explicit allow-all ---
     def test_explicit_allow_all(self):

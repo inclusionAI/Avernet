@@ -8,11 +8,10 @@ Policy semantics (read after :func:`parse_policy` normalization):
   therefore normalizes to empty = deny all).
 - otherwise → whitelist: only bots listed in ``allowed_bots`` are allowed.
 
-Historical compatibility: a key whose ``policy`` is ``NULL``/empty or whose
-JSON object lacks the ``allowed_bots`` key historically meant "allow all".
-This is preserved by normalizing those forms to ``["*"]`` on read, so legacy
-unchanged keys keep working. New code writes explicit, structured policies
-(empty list = deny all).
+A key whose ``policy`` is ``NULL``/empty or whose JSON object lacks the
+``allowed_bots`` key is treated as deny-all (fail-closed). The historical
+allow-all behavior for these forms has been removed — all keys must now
+carry an explicit, structured policy.
 """
 
 from __future__ import annotations
@@ -48,8 +47,8 @@ def parse_policy(policy: str | None) -> APIKeyPolicy:
 
     Normalization rules:
 
-    - ``None`` / empty string → ``allowed_bots=["*"]`` (legacy allow-all).
-    - dict without ``allowed_bots`` key → ``["*"]`` (legacy allow-all).
+    - ``None`` / empty string → ``allowed_bots=[]`` (deny all, fail-closed).
+    - dict without ``allowed_bots`` key → ``[]`` (deny all, fail-closed).
     - dict with ``allowed_bots`` containing the ``"NONE"`` sentinel → the
       sentinel is filtered out (a lone ``["NONE"]`` becomes empty = deny all;
       ``["NONE", "bot-1"]`` keeps ``["bot-1"]``).
@@ -63,7 +62,7 @@ def parse_policy(policy: str | None) -> APIKeyPolicy:
         Normalized :class:`APIKeyPolicy`.
     """
     if not policy or not policy.strip():
-        return APIKeyPolicy(allowed_bots=[APIKeyPolicy.ALL])
+        return APIKeyPolicy()  # fail-closed: deny all
     try:
         result = json.loads(policy)
     except (json.JSONDecodeError, TypeError):
@@ -71,7 +70,7 @@ def parse_policy(policy: str | None) -> APIKeyPolicy:
     if not isinstance(result, dict):
         return APIKeyPolicy()  # fail-closed: deny all
     if "allowed_bots" not in result:
-        return APIKeyPolicy(allowed_bots=[APIKeyPolicy.ALL])  # legacy allow-all
+        return APIKeyPolicy()  # fail-closed: deny all
     raw = result.get("allowed_bots")
     if not isinstance(raw, list):
         return APIKeyPolicy()  # fail-closed: deny all

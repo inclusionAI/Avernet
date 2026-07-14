@@ -185,8 +185,8 @@ def validate_policy(
     """根据 API Key 的 policy 校验对目标 bot 的访问权限
 
     policy 语义（parse_policy 归一化后）：
-    - allowed_bots 含 "*"：允许访问所有 bot（含历史未配置的存量 key）。
-    - allowed_bots 为空（含历史 ["NONE"] 哨兵）：拒绝所有 bot（fail-closed）。
+    - allowed_bots 含 "*"：允许访问所有 bot（显式配置）。
+    - allowed_bots 为空（含历史 ["NONE"] 哨兵 / 未配置 policy / 缺少 allowed_bots key）：拒绝所有 bot（fail-closed）。
     - 否则：白名单匹配，仅命中的 bot 放行。
 
     Args:
@@ -204,7 +204,7 @@ def validate_policy(
     policy = parse_policy(api_key_record.policy)
 
     if APIKeyPolicy.ALL in policy.allowed_bots:
-        # 显式 allow-all（含历史未配置存量 key 的归一结果）
+        # 显式 allow-all
         return target_bot_id
 
     matched = match_allowed_bots(target_bot_id, policy.allowed_bots)

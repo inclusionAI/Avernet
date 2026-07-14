@@ -372,16 +372,19 @@ class TestBotServiceSelector:
 
 
 class TestValidatePolicy:
-    def test_no_policy_returns_target_bot_id(self):
-        """None policy → 允许所有，返回原始 target_bot_id。"""
+    def test_no_policy_denies_all(self):
+        """None policy → deny all (fail-closed)，返回 403。"""
         record = _make_api_key_record(policy=None)
-        result = validate_policy(record, "bot-1:entity-1")
-        assert result == "bot-1:entity-1"
+        with pytest.raises(HTTPException) as exc:
+            validate_policy(record, "any-bot")
+        assert exc.value.status_code == status.HTTP_403_FORBIDDEN
 
-    def test_empty_policy_string_returns_target_bot_id(self):
+    def test_empty_policy_string_denies_all(self):
+        """空 policy → deny all (fail-closed)，返回 403。"""
         record = _make_api_key_record(policy="")
-        result = validate_policy(record, "bot-1:entity-1")
-        assert result == "bot-1:entity-1"
+        with pytest.raises(HTTPException) as exc:
+            validate_policy(record, "any-bot")
+        assert exc.value.status_code == status.HTTP_403_FORBIDDEN
 
     def test_empty_allowed_bots_list_denies_all(self):
         """Empty allowed_bots → deny all (fail-closed)，返回 403。"""
@@ -403,11 +406,12 @@ class TestValidatePolicy:
         result = validate_policy(record, "any-bot")
         assert result == "any-bot"
 
-    def test_no_allowed_bots_key_allows_all(self):
-        """Policy without allowed_bots key → legacy allow-all，返回原始 target_bot_id。"""
+    def test_no_allowed_bots_key_denies_all(self):
+        """Policy without allowed_bots key → deny all (fail-closed)，返回 403。"""
         record = _make_api_key_record(policy='{"other_key": "value"}')
-        result = validate_policy(record, "any-bot")
-        assert result == "any-bot"
+        with pytest.raises(HTTPException) as exc:
+            validate_policy(record, "any-bot")
+        assert exc.value.status_code == status.HTTP_403_FORBIDDEN
 
     def test_bot_id_in_allowed_list_returns_matched_bot_id(self):
         """匹配时返回 allowed_bots 中的权威 bot_id。"""
