@@ -1040,9 +1040,9 @@ class TestCreateBot:
         assert passport_kwargs["mcp_codes"] == ["mcp.remote.1"]
         cli_codes = [c["cli_code"] for c in passport_kwargs["cli_items"]]
         assert len(cli_codes) == 9
-        assert "antcode" in cli_codes
-        assert "adev" in cli_codes
-        assert "derisk" in cli_codes
+        assert "antcode-cli" in cli_codes
+        assert "adev-cli" in cli_codes
+        assert "derisk-cli" in cli_codes
 
     def test_create_passport_carries_default_cli_items_for_claude_code_coding_templates(
         self, mock_bot_service, mock_passport
@@ -1087,7 +1087,7 @@ class TestCreateBot:
         assert kwargs["engine_type"] == "claude_code"
         cli_codes = [c["cli_code"] for c in kwargs["cli_items"]]
         assert len(cli_codes) == 9
-        assert {"antcode", "adev", "derisk"} <= set(cli_codes)
+        assert {"antcode-cli", "adev-cli", "derisk-cli"} <= set(cli_codes)
 
         # applicationCoding → 同样走 aicoding CLI 链路。
         mock_passport.apply_first_agent_passport.reset_mock()
