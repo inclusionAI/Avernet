@@ -154,7 +154,8 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         worker_router: Any | None = None,  # Phase 31: New parameter
         relay_repository: WsRelaySessionRepository
         | None = None,  # Phase 65.1: for init-row pre-creation in relay flow
-        ws_conn_mode: str | None = None,  # Phase 66: "direct" | "relay" (None → class default)
+        ws_conn_mode: str
+        | None = None,  # Phase 66: "direct" | "relay" (None → class default)
     ) -> None:
         """Initialize LocalPaasService with all required dependencies.
 
@@ -211,9 +212,7 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         # "relay" (agentclawproxy + open_ws_relay, same + cross-machine).
         # Defaults to the class-level _DEFAULT_WS_CONN_MODE.
         self._ws_conn_mode = (
-            ws_conn_mode
-            if ws_conn_mode is not None
-            else self._DEFAULT_WS_CONN_MODE
+            ws_conn_mode if ws_conn_mode is not None else self._DEFAULT_WS_CONN_MODE
         )
 
     async def get_credentials(self) -> LocalCredentials:
@@ -788,7 +787,9 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
             )
         if record.status != "ONLINE":
             raise DeviceCreationError(
-                error_code="MACHINE_OFFLINE" if record.status == "OFFLINE" else "MACHINE_INVALID",
+                error_code="MACHINE_OFFLINE"
+                if record.status == "OFFLINE"
+                else "MACHINE_INVALID",
                 message=(
                     f"Machine {machine_id} is OFFLINE"
                     if record.status == "OFFLINE"
@@ -816,8 +817,7 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
                 raise DeviceCreationError(
                     error_code="RELAY_DB_ERROR",
                     message=(
-                        f"Failed to create relay session for machine "
-                        f"{machine_id}: {e}"
+                        f"Failed to create relay session for machine {machine_id}: {e}"
                     ),
                     context={
                         "machine_id": machine_id,
@@ -873,7 +873,10 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
                 # Check and convert to DeviceCreationError so callers
                 # get a consistent exception surface regardless of the
                 # routing path taken.
-                if isinstance(route_result, dict) and route_result.get("status") == "error":
+                if (
+                    isinstance(route_result, dict)
+                    and route_result.get("status") == "error"
+                ):
                     error_code = route_result.get("error") or "RELAY_SETUP_FAILED"
                     raise DeviceCreationError(
                         error_code=error_code,
