@@ -146,6 +146,57 @@ def test_get_env_scoped(repo, db):
     assert repo.exists_by_owner_and_bot_id("emp1", "bot-1") is False
 
 
+def test_explicit_env_default_bot_read_and_ext_update_are_isolated(repo, db):
+    pre = repo.insert(_data(bot_id="default", ext={"source": "pre"}))
+    prod = repo.insert(_data(bot_id="default", ext={"source": "prod"}))
+    with db.orm_session() as s:
+        s.query(BotModel).filter(BotModel.id == pre["id"]).update(
+            {BotModel.env: "pre"}
+        )
+        s.query(BotModel).filter(BotModel.id == prod["id"]).update(
+            {BotModel.env: "prod"}
+        )
+
+    matches = repo.get_live_by_id_owner_and_env(
+        bot_id="default", owner_id="emp1", env="prod"
+    )
+    assert [row["id"] for row in matches] == [prod["id"]]
+
+    updated = repo.update_ext_by_id_owner_and_env(
+        bot_id="default",
+        owner_id="emp1",
+        env="prod",
+        ext={"passport": {"agent_code": "agent-prod"}},
+    )
+    assert updated["id"] == prod["id"]
+    assert updated["ext"] == {"passport": {"agent_code": "agent-prod"}}
+    assert repo.get_live_by_id_owner_and_env(
+        bot_id="default", owner_id="emp1", env="pre"
+    )[0]["ext"] == {"source": "pre"}
+
+
+def test_explicit_env_ext_update_rolls_back_when_multiple_rows_match(repo, db):
+    first = repo.insert(_data(bot_id="default", ext={"row": 1}))
+    second = repo.insert(_data(bot_id="default", ext={"row": 2}))
+    with db.orm_session() as s:
+        s.query(BotModel).filter(BotModel.id.in_([first["id"], second["id"]])).update(
+            {BotModel.env: "prod"}, synchronize_session=False
+        )
+
+    with pytest.raises(RuntimeError, match="exactly one"):
+        repo.update_ext_by_id_owner_and_env(
+            bot_id="default",
+            owner_id="emp1",
+            env="prod",
+            ext={"passport": {"agent_code": "must-rollback"}},
+        )
+
+    rows = repo.get_live_by_id_owner_and_env(
+        bot_id="default", owner_id="emp1", env="prod"
+    )
+    assert [row["ext"] for row in rows] == [{"row": 1}, {"row": 2}]
+
+
 def test_list_and_count(repo):
     repo.insert(_data(bot_id="b1"))
     repo.insert(_data(bot_id="b2"))

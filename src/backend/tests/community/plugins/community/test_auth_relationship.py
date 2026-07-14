@@ -1,6 +1,8 @@
 """Unit tests for the community CommunityAuthRelationshipPlugin (B4 T8)."""
 from __future__ import annotations
 
+import pytest
+
 from agentclaw.community.plugins.community.auth_relationship import (
     CommunityAuthRelationshipPlugin,
 )
@@ -30,3 +32,24 @@ def test_not_a_mock_seam():
     from agentclaw.community.plugins.local._mock_seam import MockSeam
 
     assert not issubclass(CommunityAuthRelationshipPlugin, MockSeam)
+
+
+def test_explicit_env_operations_delegate_to_vacuous_contract():
+    plugin = CommunityAuthRelationshipPlugin()
+    assert plugin.create_relationship_for_env(
+        target_env="prod",
+        work_no="u1",
+        agent_code="a1",
+        operator_work_no="admin",
+        operator_name="Admin",
+    ) == {"auth_id": 0}
+    assert plugin.query_relationships_for_env(
+        target_env="pre", agent_code="a1", work_no="u1"
+    ) == []
+
+
+def test_explicit_env_operations_reject_unknown_environment():
+    with pytest.raises(ValueError, match="target_env"):
+        CommunityAuthRelationshipPlugin().query_relationships_for_env(
+            target_env="gray", agent_code="a1"
+        )

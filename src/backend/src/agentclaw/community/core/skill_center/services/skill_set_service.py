@@ -1688,6 +1688,48 @@ class SkillSetService:
         mcps = self.collect_bot_active_mcps(entity_id, bot_id, user_id, entity_type, engine_type)
         return [m.get("server_code") for m in mcps if m.get("server_code")]
 
+    def get_bot_mcp_codes_for_env(
+        self,
+        entity_id: str,
+        bot_id: str,
+        user_id: str,
+        entity_type: str,
+        engine_type: str | None,
+        target_env: str,
+    ) -> list[str]:
+        """Collect Passport MCP scope from explicitly env-scoped skill-set data."""
+        if target_env not in {"pre", "prod"}:
+            raise ValueError("target_env must be pre or prod")
+        effective_engine = engine_type if engine_type is not None else self.engine_type
+        active_skill_sets = self.skill_set_repo.get_all_active_skill_sets_for_env(
+            user_id=entity_id,
+            bolt_id=bot_id,
+            engine_type=effective_engine,
+            env=target_env,
+        )
+
+        codes: list[str] = []
+        seen: set[str] = set()
+        for skill_set in active_skill_sets:
+            associations = self.skill_set_repo.get_mcp_servers_in_set_for_env(
+                str(skill_set["id"]), env=target_env
+            )
+            for association in associations:
+                code = association.get("server_code")
+                if code and code not in seen:
+                    seen.add(code)
+                    codes.append(code)
+
+        excluded_codes = set(
+            self.skill_set_repo.get_all_excluded_mcps(user_id, bot_id)
+        )
+        for default_mcp in get_default_mcp_servers(effective_engine):
+            code = default_mcp["server_code"]
+            if code not in excluded_codes and code not in seen:
+                seen.add(code)
+                codes.append(code)
+        return codes
+
     def get_active_skill_sets_mcp_summary(
         self,
         entity_id: str,
