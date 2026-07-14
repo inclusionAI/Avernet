@@ -17,7 +17,7 @@
 
 # Group A — Foundation (new type + seam, additive, no call sites changed)
 
-## Task 1: Add `DeliveryArtifact` payload type + `compose` — [ ]
+## Task 1: Add `DeliveryArtifact` payload type + `compose` — [x]
 - **Goal:** Introduce the pure delivery-payload wrapper and the single combiner
   (restamp + overlay), with no callers yet. Additive, suite stays green.
 - **Files:** `core/service_bot/services/deploy/engine_ext_stage.py`;
@@ -34,7 +34,7 @@
   - [ ] Full suite green.
 - **Depends on:** —
 
-## Task 2: Add the seam producers on `PublishExtState` — [ ]
+## Task 2: Add the seam producers on `PublishExtState` — [x]
 - **Goal:** Add `compose_live` / `compose_stored` — the only place flow code reads
   `ext['config_artifact']` for delivery. Additive (old `artifact_for_stage` stays
   until Task 5), suite stays green.

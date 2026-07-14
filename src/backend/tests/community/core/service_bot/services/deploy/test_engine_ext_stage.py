@@ -5,6 +5,7 @@ import pytest
 
 from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
     STAGE_VALUE,
+    DeliveryArtifact,
     apply_engine_overrides,
     enrich_engine_ext,
     restamp_stage,
@@ -196,3 +197,43 @@ def test_apply_does_not_mutate_input() -> None:
     # output is a distinct object
     assert out is not artifact
     assert out["engine_overrides"] is not base_eo
+
+
+# ── DeliveryArtifact.compose (restamp + overlay, the single combiner) ────────
+
+
+@pytest.mark.unit
+def test_compose_restamps_stage_and_overlays_channels() -> None:
+    base = {
+        "engine_ext": {"bot_id": "b", "stage": "draft"},
+        "engine_overrides": {
+            "channels": {"dingding": {"enabled": True, "accounts": [{"client_id": "draft"}]}}
+        },
+    }
+    out = DeliveryArtifact.compose(base, PublishStage.VERIFY, _VERIFY_CHANNELS)
+    assert out.config_artifact["engine_ext"]["stage"] == "canary"  # restamped
+    assert out.config_artifact["engine_overrides"] == _VERIFY_CHANNELS  # overlaid
+
+
+@pytest.mark.unit
+def test_compose_none_overrides_restamps_only() -> None:
+    # Pre-feature record: no stored overrides → base channels kept, stage restamped.
+    base_channels = {"channels": {"dingding": {"accounts": [{"client_id": "base"}]}}}
+    base = {"engine_ext": {"stage": "draft"}, "engine_overrides": base_channels}
+    out = DeliveryArtifact.compose(base, PublishStage.ONLINE, None)
+    assert out.config_artifact["engine_ext"]["stage"] == "release"
+    assert out.config_artifact["engine_overrides"] == base_channels  # unchanged
+
+
+@pytest.mark.unit
+def test_compose_none_config_artifact_is_none() -> None:
+    # ARCA mount path: no composed artifact in, config_artifact None out.
+    assert DeliveryArtifact.compose(None, PublishStage.VERIFY, _VERIFY_CHANNELS).config_artifact is None
+
+
+@pytest.mark.unit
+def test_compose_does_not_mutate_input() -> None:
+    engine_ext = {"bot_id": "b", "stage": "draft"}
+    base = {"engine_ext": engine_ext, "engine_overrides": {}}
+    DeliveryArtifact.compose(base, PublishStage.VERIFY, _VERIFY_CHANNELS)
+    assert engine_ext == {"bot_id": "b", "stage": "draft"}  # input untouched
