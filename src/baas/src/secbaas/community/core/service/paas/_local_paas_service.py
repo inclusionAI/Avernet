@@ -858,8 +858,8 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
                 "action": "open_ws_relay",
                 "params": {
                     "session_id": session_id,
-                    "token": conn_info.token,
-                    "target": conn_info.target,
+                    "token": getattr(conn_info, "token", ""),
+                    "target": getattr(conn_info, "target", ""),
                     "port": port,
                 },
             }
