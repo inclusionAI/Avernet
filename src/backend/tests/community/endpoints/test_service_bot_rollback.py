@@ -53,15 +53,21 @@ def _baas(world):
     return world.get(Annotated[HttpClient, QUALIFIER_BAAS])
 
 
-def _install_baas_for_rollback(world, *, create_success: bool = True) -> None:
-    """Stub BaaS for rollback operations."""
+def _install_baas_for_rollback(
+    world, *, create_success: bool = True, progress_status: str = "SUCCESS"
+) -> None:
+    """Stub BaaS for rollback operations.
+
+    ``progress_status`` drives the durable progress-poll flip: ``SUCCESS`` lets the
+    enqueued poll land the rollback target at ``SUCCESS``; ``PENDING`` keeps the
+    target parked at ``ONLINE_PUB`` (the poll reschedules)."""
     def _get(path, **_kw):
         if "/devices" in path:
             return http_envelope_response([{"items": [
                 {"provider_type": "TECLAW", "device_uuid": _SRC_UUID}]}])
         if "/progress" in path:
             return http_envelope_response(
-                {"status": "SUCCESS", "device_details": [],
+                {"status": progress_status, "device_details": [],
                  "overall_progress": {}, "failed_devices": []})
         return http_envelope_response({})
 
@@ -164,10 +170,10 @@ def _seed_v1_success(world) -> None:
     })
 
 
-def _seed_v2_success_with_v1(world) -> None:
+def _seed_v2_success_with_v1(world, *, progress_status: str = "SUCCESS") -> None:
     """Seed V1 (UPGRADED) and V2 (SUCCESS) with version chain."""
     bot = _seed_base(world)
-    _install_baas_for_rollback(world)
+    _install_baas_for_rollback(world, progress_status=progress_status)
 
     vbid1 = _binding(world, device_id=f"{_VERIFY_UUID}-1", status="ACTIVE")
     obid1 = _binding(world, device_id=f"{_ONLINE_UUID}-1", status="RELEASED")
@@ -200,6 +206,12 @@ def _seed_v2_success_with_v1(world) -> None:
             "config_artifact": _ARTIFACT,
         },
     })
+
+
+def _seed_v2_success_with_v1_pending(world) -> None:
+    """Same as ``_seed_v2_success_with_v1`` but the BaaS progress stays PENDING, so
+    the durable poll enqueued by the rollback keeps the target parked at ONLINE_PUB."""
+    _seed_v2_success_with_v1(world, progress_status="PENDING")
 
 
 def _seed_v2_no_v1_artifact(world) -> None:
@@ -289,6 +301,20 @@ def _expect_v2_draft(response, world):  # noqa: ARG001
     assert v2.status == PublishStatus.DRAFT, f"V2 should be DRAFT, got {v2.status}"
 
 
+def _expect_online_binding_active(pid: int):
+    """The publish's online device_binding should be ACTIVE (rollback re-activated it)."""
+    def _check(response, world):  # noqa: ARG001
+        repo = world.get(BotPublishRepositoryProtocol)
+        record = repo.get_by_id(pid)
+        assert record is not None, f"publish {pid} not found"
+        online_binding_id = (record.ext or {}).get("binding", {}).get("online")
+        assert online_binding_id, f"publish {pid} has no online binding: {record.ext}"
+        binding = world.get(DeviceBindingRepository).get_by_id(online_binding_id)
+        assert binding is not None, f"binding {online_binding_id} not found"
+        assert binding.status == "ACTIVE", f"expected ACTIVE, got {binding.status}"
+    return _check
+
+
 # ── can-rollback tests ─────────────────────────────────────────────────────────
 
 
@@ -350,9 +376,36 @@ def error_can_rollback_not_found():
     input=CaseInput(path_params={"publish_id": _V2}, headers=_HEADERS),
     seed=_seed_v2_success_with_v1, drain_background=True,
     expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(
+        # Regression for #162: the rollback endpoint enqueues the durable progress
+        # poll on the TARGET, so the sync-case's single worker tick drives the
+        # target (V1) ONLINE_PUB → SUCCESS with its online binding ACTIVE — no user
+        # /sync polling. The rolled-back current version (V2) is left at DRAFT.
+        _expect_publish_status(_V1, PublishStatus.SUCCESS),
+        _expect_online_binding_active(_V1),
+        _expect_v2_draft,
+    ),
 )
 def happy_rollback():
-    """Rollback V2 → endpoint returns success."""
+    """Rollback V2 → target self-drives to SUCCESS via the durable queue."""
+
+
+@endpoint_test(
+    method="POST", path=_ROLLBACK, scenario="rollback_target_parks_at_online_pub_until_baas_terminal",
+    input=CaseInput(path_params={"publish_id": _V2}, headers=_HEADERS),
+    seed=_seed_v2_success_with_v1_pending, drain_background=True,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(
+        # BaaS still PENDING: the enqueued poll ran once and rescheduled, so the
+        # target stays at ONLINE_PUB (it will drain once BaaS reports terminal).
+        # This is the pre-#105 "stuck" shape — except now a durable driver exists,
+        # so it is transient rather than permanent.
+        _expect_publish_status(_V1, PublishStatus.ONLINE_PUB),
+        _expect_v2_draft,
+    ),
+)
+def rollback_target_parks_at_online_pub_until_baas_terminal():
+    """Rollback with BaaS not yet terminal → target parked at ONLINE_PUB, poll pending."""
 
 
 @endpoint_test(
