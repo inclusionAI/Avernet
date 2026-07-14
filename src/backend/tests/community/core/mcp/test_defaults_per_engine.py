@@ -23,28 +23,27 @@ def test_claude_code_has_its_own_list():
     assert isinstance(servers, list)
 
 
-def test_claude_code_merges_aicoding_research_mcps():
+def test_claude_code_keeps_trimmed_research_mcp_list():
     servers = get_default_mcp_servers("claude_code")
     codes = [s["server_code"] for s in servers]
-    # claude_code 原有 12 项全部保留（不丢能力）。
+    # claude_code 原有能力保留。
     assert "mcp.ant.antcodemcp.code.mcpserver" in codes
     assert "mcp.ant.brwithub.worksummaryserver" in codes
     assert "mcp.ant.homistudio.meetmcp" in codes
-    # aicoding 独有的 6 个研发 MCP 已补入（不重复添加，不靠 template_type 判定）。
-    aicoding_only = (
+    assert "mcp.ant.faas.aixjiter.AixCodingMemoryMCP" in codes
+    assert "mcp.ant.rgmcpserver.rgfastcheckmcpserver" in codes
+    trimmed_aicoding_only = (
         "mcp.ant.zlatan.yuntumcpserver",
         "mcp.ant.alipaybase-antlogsmcp.mcp-server",
         "mcp.ant.arkai.assistantmcpserver",
         "mcp.ant.agentix.112858.aixAicoding",
-        "mcp.ant.faas.aixjiter.AixCodingMemoryMCP",
-        "mcp.ant.rgmcpserver.rgfastcheckmcpserver",
     )
-    for code in aicoding_only:
-        assert code in codes, f"missing aicoding-only MCP in claude_code: {code}"
+    for code in trimmed_aicoding_only:
+        assert code not in codes, f"trimmed aicoding-only MCP should stay out of claude_code: {code}"
     # 无重复。
     assert len(codes) == len(set(codes))
-    # 12 原有 + 6 新增 = 18。
-    assert len(codes) == 18
+    # 12 原有 + 2 保留研发 MCP = 14。
+    assert len(codes) == 14
 
 
 def test_aicoding_has_its_own_list():
