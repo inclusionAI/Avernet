@@ -13,6 +13,9 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
     PublishStatusInvalidError,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+    PROGRESS_POLL_TASK,
+)
 from agentclaw.community.core.service_bot.types import PublishStage
 
 
@@ -327,6 +330,133 @@ async def test_retry_clears_retry_flag_when_restart_submit_fails():
     cleared_ext = publish_service.update_publish_ext.call_args.kwargs['ext']
     assert 'retry' not in cleared_ext
     assert cleared_ext['source_status'] == PublishStatus.VALIDATE_PUB.value
+
+
+@pytest.mark.asyncio
+async def test_retry_restart_enqueues_progress_poll_on_success():
+    """Regression for #162 (secondary orphan): a successful BaaS-restart retry must
+    enqueue the durable progress poll so the retried *_PUB record self-drives out of
+    its wait state without user /sync (or /restart_status) polling."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    ext = {
+        'source_status': PublishStatus.VALIDATE_PUB.value,
+        'retry': False,
+        'binding': {'verify': 123},
+    }
+    records = [
+        _make_publish_record(status=PublishStatus.FAILED.value, ext=ext.copy()),
+        _make_publish_record(status=PublishStatus.FAILED.value, ext=ext.copy()),
+        _make_publish_record(status=PublishStatus.VALIDATE_PUB.value, ext={**ext, 'retry': True}),
+    ]
+    publish_service.get_publish_by_id.side_effect = records
+    publish_service.update_publish_status_with_ext.return_value = _make_publish_record(
+        status=PublishStatus.VALIDATE_PUB.value,
+        ext={**ext, 'retry': True},
+    )
+    svc.restart_bot = Mock(return_value={'success': True, 'message': 'ok', 'stage': 'verify'})
+
+    result = await svc.retry(publish_id=1, operator='u1')
+
+    assert result.action == 'restart'
+    # The poll was enqueued for this record; the retry flag was NOT cleared.
+    svc._task_queue_service.enqueue.assert_called_once()
+    args = svc._task_queue_service.enqueue.call_args.args
+    assert args[0] == PROGRESS_POLL_TASK
+    assert args[1] == {'publish_id': 1}
+    publish_service.update_publish_ext.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_retry_restart_does_not_enqueue_poll_when_submit_fails():
+    """The poll must only be enqueued when the restart actually submitted; a failed
+    submit clears the retry flag and leaves the queue untouched."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    ext = {
+        'source_status': PublishStatus.VALIDATE_PUB.value,
+        'retry': False,
+        'binding': {'verify': 123},
+    }
+    records = [
+        _make_publish_record(status=PublishStatus.FAILED.value, ext=ext.copy()),
+        _make_publish_record(status=PublishStatus.FAILED.value, ext=ext.copy()),
+        _make_publish_record(status=PublishStatus.VALIDATE_PUB.value, ext={**ext, 'retry': True}),
+    ]
+    publish_service.get_publish_by_id.side_effect = records
+    publish_service.update_publish_status_with_ext.return_value = _make_publish_record(
+        status=PublishStatus.VALIDATE_PUB.value,
+        ext={**ext, 'retry': True},
+    )
+    svc.restart_bot = Mock(return_value={'success': False, 'message': 'submit failed'})
+
+    await svc.retry(publish_id=1, operator='u1')
+
+    svc._task_queue_service.enqueue.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_rollback_enqueues_progress_poll_for_target():
+    """Regression for #162: execute_rollback must enqueue the durable progress poll
+    on the TARGET record after approving the BaaS publish, so the rollback advances
+    ONLINE_PUB → SUCCESS through the durable queue instead of depending on user
+    /sync polling (which became read-only in #105)."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    bot_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, bot_service, _arca_router(build_service))
+
+    target_id = 5319
+    current_id = 42
+    online_binding_id = 77
+    baas_publish_id = 999
+
+    target_record = _make_publish_record(
+        id=target_id, status=PublishStatus.SUCCESS.value, version=7,
+    )
+    current_record = _make_publish_record(
+        id=current_id, status=PublishStatus.DRAFT.value, source_bot_id='bot-source',
+    )
+    publish_service.get_publish_by_id.side_effect = lambda pid: {
+        target_id: target_record, current_id: current_record,
+    }[pid]
+
+    target_ext = {
+        'migration_path': '/tmp/m',
+        'config_artifact': {'schema_version': 3},
+        'binding': {PublishStage.ONLINE.value: online_binding_id},
+        'publish': {},
+    }
+    svc._get_latest_ext = Mock(return_value=target_ext)
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-online')
+    bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
+    build_service.upgrade_async = AsyncMock(return_value={'publish_id': baas_publish_id})
+    build_service.generate_request_id.return_value = 'rid'
+    svc._update_publish_status = Mock()
+    svc.approve_baas_publish = Mock(return_value=True)
+
+    result = await svc.execute_rollback(
+        current_publish_id=current_id,
+        target_publish_id=target_id,
+        operator='u1',
+    )
+
+    assert result.publish_id == target_id
+    assert result.status == PublishStatus.ONLINE_PUB
+    # The poll targets the rollback TARGET (not the current) record and is enqueued
+    # after approve_baas_publish.
+    svc._task_queue_service.enqueue.assert_called_once()
+    args = svc._task_queue_service.enqueue.call_args.args
+    assert args[0] == PROGRESS_POLL_TASK
+    assert args[1] == {'publish_id': target_id}
+    svc.approve_baas_publish.assert_called_once()
 
 
 def test_handle_sync_failure_clears_retry_flag_and_stores_source_status_value():

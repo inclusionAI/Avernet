@@ -35,6 +35,16 @@ from tests.community.endpoints.test_service_bot_publish_flow import (
     _seed_validating,
     _status,
 )
+from tests.community.endpoints.test_service_bot_rollback import (
+    _HEADERS as _ROLLBACK_HEADERS,
+    _ROLLBACK,
+    _V1 as _RB_V1,
+    _V2 as _RB_V2,
+    _seed_v2_success_with_v1,
+)
+from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
+    BotPublishRepositoryProtocol,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -112,6 +122,49 @@ async def test_validating_process_drives_online_leg_to_success_via_worker(
     online_binding_id = _ext(world, _V1)["binding"]["online"]
     binding = world.get(DeviceBindingRepository).get_by_id(online_binding_id)
     assert binding.status == "ACTIVE", binding.status
+
+
+async def _post_rollback(app, publish_id: int) -> httpx.Response:
+    transport = ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        return await client.post(
+            _ROLLBACK.format(publish_id=publish_id), headers=_ROLLBACK_HEADERS
+        )
+
+
+@pytest.mark.asyncio
+async def test_rollback_leg_drives_target_to_success_via_worker(
+    app_with_testing_modules, world
+):
+    """Regression for #162: a rollback parks the TARGET version at ONLINE_PUB and
+    (post-#105, with /sync read-only) has no driver but the durable queue. The
+    rollback now enqueues the progress poll, so the worker drives the target
+    ONLINE_PUB → SUCCESS (online binding ACTIVE) autonomously — no user /sync
+    polling. (This coverage mirrors the release leg above but for the rollback
+    path, which never passes through verify_flow/online_release.)"""
+    # V1 UPGRADED (rollback target), V2 SUCCESS (current). BaaS progress = SUCCESS.
+    _seed_v2_success_with_v1(world)
+
+    resp = await _post_rollback(app_with_testing_modules, _RB_V2)
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+
+    repo = world.get(BotPublishRepositoryProtocol)
+    # The endpoint moved current V2 → DRAFT and parked target V1 at ONLINE_PUB; the
+    # poll is enqueued but the test worker loop is off, so nothing has advanced yet.
+    assert repo.get_by_id(_RB_V2).status == PublishStatus.DRAFT.value
+    assert repo.get_by_id(_RB_V1).status == PublishStatus.ONLINE_PUB.value
+
+    await _drive_worker(world)
+
+    # The durable poll drove the TARGET (V1) to SUCCESS, with its online binding
+    # ACTIVE — the rollback completed with no user polling.
+    assert repo.get_by_id(_RB_V1).status == PublishStatus.SUCCESS.value
+    online_binding_id = repo.get_by_id(_RB_V1).ext["binding"]["online"]
+    binding = world.get(DeviceBindingRepository).get_by_id(online_binding_id)
+    assert binding.status == "ACTIVE", binding.status
+    # The rolled-back current version (V2) remains DRAFT.
+    assert repo.get_by_id(_RB_V2).status == PublishStatus.DRAFT.value
 
 
 @pytest.mark.asyncio
