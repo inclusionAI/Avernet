@@ -15,7 +15,8 @@ from typing import Annotated
 from dependency_injector.wiring import inject
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
-from secbaas.community.api import ApiResponse, SuccessResponse
+from secbaas.community.adapters.web.dependencies import get_op_ctx
+from secbaas.community.api import ApiResponse, OperationContext, SuccessResponse
 from secbaas.community.api.config_manage import (
     SystemConfigCreate,
     SystemConfigListResponse,
@@ -82,6 +83,7 @@ async def create_config(
     service: SystemConfigManageService = Depends(
         Provide[ApplicationContainer.services.system_config_service]
     ),
+    op_ctx: OperationContext = Depends(get_op_ctx),
 ) -> ApiResponse[SystemConfigResponse]:
     """Create a new system config.
 
@@ -89,6 +91,7 @@ async def create_config(
     - env is derived from get_current_env()
     - creator uses the value from request (no fallback)
     """
+    request.operator = op_ctx.operator
     logger.info(
         "Creating system config: conf_key=%s, creator=%s",
         request.conf_key,
@@ -106,6 +109,7 @@ async def update_config(
     service: SystemConfigManageService = Depends(
         Provide[ApplicationContainer.services.system_config_service]
     ),
+    op_ctx: OperationContext = Depends(get_op_ctx),
 ) -> ApiResponse[SystemConfigResponse]:
     """Update system config.
 
@@ -115,6 +119,7 @@ async def update_config(
     """
 
     logger.info("Updating system config: conf_key=%s", conf_key)
+    request.operator = op_ctx.operator
 
     config = service.update_config(conf_key=conf_key, data=request)
     if not config:
@@ -132,10 +137,10 @@ async def update_config(
 @inject
 async def delete_config(
     conf_key: Annotated[str, Path(description="配置键")],
-    operator: Annotated[str | None, Query(description="操作人")] = None,
     service: SystemConfigManageService = Depends(
         Provide[ApplicationContainer.services.system_config_service]
     ),
+    op_ctx: OperationContext = Depends(get_op_ctx),
 ) -> ApiResponse[SuccessResponse]:
     """Delete system config.
 
@@ -143,6 +148,7 @@ async def delete_config(
     operator is optional and should be provided by caller.
     """
 
+    operator = op_ctx.operator
     logger.info(
         "Deleting system config: conf_key=%s, operator=%s",
         conf_key,

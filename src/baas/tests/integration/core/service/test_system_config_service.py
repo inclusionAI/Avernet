@@ -46,7 +46,6 @@ class TestDefaultSystemConfigManageServiceIntegration:
 
         # Test 1: Create config with valid data
         create_data = SystemConfigCreate(
-            env=TEST_ENV,
             conf_key=config_key,
             conf_value='{"setting": "value"}',
             name="Test Config",
