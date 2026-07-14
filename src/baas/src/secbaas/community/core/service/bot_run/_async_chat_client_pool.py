@@ -76,7 +76,7 @@ class AsyncChatClientPool:
         self._session_key_timeout = session_key_timeout
         self._max_retries = max_retries
         self._retry_base_backoff = retry_base_backoff
-        self._ignore_case = self._read_ignore_case(system_config_service)
+        self._system_config_service = system_config_service
         # sandbox_id -> 连接列表
         self._clients: dict[str, list[_ConnEntry]] = {}
         # per-key lock，保护同一 sandbox_id 的并发创建
@@ -176,7 +176,7 @@ class AsyncChatClientPool:
                 session_key_timeout=self._session_key_timeout,
                 max_retries=self._max_retries,
                 retry_base_backoff=self._retry_base_backoff,
-                ignore_case=self._ignore_case,
+                ignore_case=self._read_ignore_case(self._system_config_service),
             )
             await new_client.connect()
 

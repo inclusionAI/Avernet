@@ -719,13 +719,54 @@ class BotRunner:
 async def _with_heartbeat(
     stream: AsyncIterator[StreamChunk],
 ) -> AsyncIterator[StreamChunk]:
-    """包装流式迭代器，每 30s 插入一个 heartbeat chunk。"""
-    while True:
+    """包装流式迭代器，每 30s 插入一个 heartbeat chunk。
+
+    使用 producer-consumer 模式：后台 task 从原始 stream 取数据放入 Queue，
+    主循环从 Queue 取并设超时。这样超时只 cancel queue.get()，不会 kill
+    原始 async generator（直接 wait_for(stream.__anext__) 会在超时时 cancel
+    生成器，导致后续数据全部丢失）。
+    """
+    queue: asyncio.Queue[StreamChunk | _StreamEnd | Exception] = asyncio.Queue()
+    end = _StreamEnd()
+
+    async def producer() -> None:
         try:
-            chunk = await asyncio.wait_for(stream.__anext__(), timeout=30.0)
-        except TimeoutError:
-            yield StreamChunk(type="heartbeat")
-            continue
-        except StopAsyncIteration:
-            return
-        yield chunk
+            async for chunk in stream:
+                await queue.put(chunk)
+        except Exception as e:
+            await queue.put(e)
+        finally:
+            await queue.put(end)
+
+    producer_task = asyncio.create_task(producer())
+    try:
+        while True:
+            try:
+                item: StreamChunk | _StreamEnd | Exception = await asyncio.wait_for(
+                    queue.get(), timeout=30.0
+                )
+            except TimeoutError:
+                yield StreamChunk(type="heartbeat")
+                continue
+            if item is end:
+                return
+            if isinstance(item, Exception):
+                raise item
+            if isinstance(item, StreamChunk):
+                yield item
+            else:
+                logger.warning(
+                    "[heartbeat] Unexpected item type from queue: %s",
+                    type(item).__name__,
+                )
+    finally:
+        producer_task.cancel()
+        try:
+            await producer_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+
+@dataclass
+class _StreamEnd:
+    """哨兵对象，标记 stream 结束。"""

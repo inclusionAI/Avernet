@@ -1668,32 +1668,16 @@ class TestWithHeartbeat:
     async def test_inserts_heartbeat_on_timeout(self):
         from secbaas.community.core.service.bot_run._runner import _with_heartbeat
 
-        yielded = []
-
         async def slow_source():
-            yielded.append(StreamChunk(type="delta", content="first"))
-            yield yielded[-1]
-            # The wait_for timeout (30s) cancels __anext__; after the
-            # heartbeat is yielded, the generator is resumed again.
-            yielded.append(StreamChunk(type="final", content="late"))
-            yield yielded[-1]
-
-        call_count = 0
+            yield StreamChunk(type="delta", content="first")
+            await asyncio.sleep(0.15)
+            yield StreamChunk(type="final", content="late")
 
         original_wait_for = asyncio.wait_for
 
-        async def fake_wait_for(coro, timeout):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 2:
-                # Second __anext__ call: simulate timeout
-                coro.close()
-                raise TimeoutError
-            return await original_wait_for(coro, timeout)
-
         with patch(
             "secbaas.community.core.service.bot_run._runner.asyncio.wait_for",
-            fake_wait_for,
+            lambda coro, timeout: original_wait_for(coro, 0.1),
         ):
             chunks = []
             async for chunk in _with_heartbeat(slow_source()):
