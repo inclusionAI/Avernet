@@ -8,12 +8,14 @@ from datetime import datetime
 class TicketRecord:
     """Database record for baas_file_transfer_tickets table.
 
-    Columns per DDL schema (16 fields):
+    Columns per DDL schema (17 fields):
     id, gmt_create, gmt_modified, transfer_id, tenant, paas_device_id,
     direction, status, staging_subdir, filename, device_path,
-    fileservice_staging_path, error_message, download_url, upload_url, env
+    fileservice_staging_path, error_message, download_url, upload_url,
+    multipart_session_id, env
 
-    Nullable fields: staging_subdir, device_path, error_message, download_url, upload_url.
+    Nullable fields: staging_subdir, device_path, error_message, download_url,
+    upload_url, multipart_session_id.
     """
 
     id: int
@@ -31,4 +33,5 @@ class TicketRecord:
     error_message: str | None
     download_url: str | None
     upload_url: str | None
+    multipart_session_id: str | None
     env: str
