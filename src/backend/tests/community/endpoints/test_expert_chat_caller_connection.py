@@ -12,6 +12,7 @@ from agentclaw.community.core.service_bot.repository.bot_publish_repository impo
     BotPublishRepositoryProtocol,
 )
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
+from agentclaw.community.core.system_config import SystemConfigService
 from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_BAAS
 from agentclaw.community.utils.env_utils import get_current_env
 from tests.community.factories.access import make_staff_user
@@ -81,6 +82,45 @@ def _install_baas(world) -> None:
     _baas(world).set_override("post", _post)
 
 
+def _seed_baas_template_config(world) -> None:
+    """Seed BaaS template routing config required by BotBuildService."""
+    env = get_current_env()
+    service = world.get(SystemConfigService)
+    # Ensure category exists
+    try:
+        service.create_category(
+            category="system",
+            category_name="System",
+            description="endpoint test",
+            env=env,
+            operator="endpoint-test",
+        )
+    except Exception:
+        pass  # Category may already exist
+
+    # Create BaaS template routing config with minimal valid structure
+    service.set_config(
+        category="system",
+        config_key="baas_template_uid_routing_config",
+        config_value={
+            "version": "test-1",
+            "selectors": [
+                {
+                    "engine": "openclaw",
+                    "template_uid": "test_openclaw",
+                },
+            ],
+            "templates": {
+                "test_openclaw": {
+                    "template_uuid": "TEMPLATE-test-openclaw-001",
+                },
+            },
+        },
+        env=env,
+        operator="endpoint-test",
+    )
+
+
 def _seed_published_service_bot(world) -> None:
     """Seed a published service bot with SUCCESS status."""
     env = get_current_env()
@@ -92,7 +132,7 @@ def _seed_published_service_bot(world) -> None:
         entity_id=_OWNER_ID,
         entity_type="staff",
         device_id="SRC-UUID-EP",
-        device_provider="teclaw",
+        device_provider="openclaw",  # Use openclaw to avoid teclaw-specific path
         env=env,
         device_props={},
         status="ACTIVE",
@@ -100,7 +140,7 @@ def _seed_published_service_bot(world) -> None:
         applied_by=_OWNER_ID,
     )
 
-    # Create bot
+    # Create bot - use openclaw engine to use standard create_bot path
     bot_repo = world.get(BotRepository)
     bot_repo.insert({
         "bot_id": _BOT_ID,
@@ -112,7 +152,7 @@ def _seed_published_service_bot(world) -> None:
         "entity_id": _OWNER_ID,
         "entity_type": "staff",
         "creator_id": _OWNER_ID,
-        "active_engine": "teclaw",
+        "active_engine": "openclaw",  # Use openclaw to avoid teclaw config_artifact requirement
         "binding_id": src_binding_id,
     })
 
@@ -135,6 +175,7 @@ def _seed_published_service_bot(world) -> None:
 def _seed_happy(world) -> None:
     """Seed for happy path: published bot + BaaS stubs."""
     _seed_published_service_bot(world)
+    _seed_baas_template_config(world)
     _install_baas(world)
 
 
@@ -231,7 +272,8 @@ def test_caller_connection_non_admin():
 def _seed_with_baas_error(world):
     """Seed with a BaaS that raises unexpected exception."""
     _seed_published_service_bot(world)
-    # Override BaaS to raise an unexpected exception
+    _seed_baas_template_config(world)
+    # Override BaaS POST to raise an unexpected exception
     def _post_with_error(path: str, **_kw):
         raise RuntimeError("Unexpected internal error")
     _baas(world).set_override("post", _post_with_error)
@@ -348,6 +390,7 @@ def test_caller_connection_bot_not_published():
 def _seed_verify_structure(world):
     """Seed for verifying response structure."""
     _seed_published_service_bot(world)
+    _seed_baas_template_config(world)
     _install_baas(world)
 
 

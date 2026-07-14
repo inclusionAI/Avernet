@@ -27,6 +27,7 @@ stands alone and is wired into the DI graph for callers to inject.
 """
 from __future__ import annotations
 
+import traceback
 from typing import Any, Dict, Optional
 
 from injector import inject
@@ -47,6 +48,7 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,
     BaasServiceError,
 )
+from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
@@ -72,12 +74,14 @@ class ExpertChatInstanceService:
         bot_publish_repo: BotPublishRepositoryProtocol,
         bot_repo: BotRepository,
         binding_repo: DeviceBindingRepository,
+        bot_build_service: BotBuildService,
     ) -> None:
         self._instance_repo = instance_repo
         self._baas = baas_service
         self._publish_repo = bot_publish_repo
         self._bot_repo = bot_repo
         self._binding_repo = binding_repo
+        self._bot_build_service = bot_build_service
 
     # ------------------------------------------------------------------
     # Public entry
@@ -127,151 +131,178 @@ class ExpertChatInstanceService:
                 ext=None,
             )
 
-        # If instance is already success, check if version upgrade is needed
-        # Skip this fast path when force_upgrade=True
-        if force_upgrade:
-            logger.info(
-                "[ExpertChatInstance] Force upgrade requested: bot=%s owner=%s user=%s, skipping fast path",
-                bot_id, owner_id, user_id,
-            )
-        if instance.get("status") == "success" and not force_upgrade:
+        try:
+            # If instance is already success, check if version upgrade is needed
+            # Skip this fast path when force_upgrade=True
+            if force_upgrade:
+                logger.info(
+                    "[ExpertChatInstance] Force upgrade requested: bot=%s owner=%s user=%s, skipping fast path",
+                    bot_id, owner_id, user_id,
+                )
+            if instance.get("status") == "success" and not force_upgrade:
+                ext = instance.get("ext") or {}
+                bot_uuid = ext.get("bot_uuid")
+                instance_version = ext.get("version") or 0
+                if bot_uuid and version <= instance_version:
+                    connection = self._build_connection(
+                        bot_uuid=bot_uuid,
+                        bot_id=bot_id,
+                        user_id=user_id,
+                    )
+                    logger.info(
+                        "[ExpertChatInstance] Instance already success: bot=%s owner=%s user=%s bot_uuid=%s",
+                        bot_id, owner_id, user_id, bot_uuid,
+                    )
+                    return {
+                        "instance": instance,
+                        "connection": connection,
+                        "need_poll": False,
+                    }
+
             ext = instance.get("ext") or {}
             bot_uuid = ext.get("bot_uuid")
-            instance_version = ext.get("version") or 0
-            if bot_uuid and version <= instance_version:
-                connection = self._build_connection(
+
+            service_bot_publish_id = publish_record.id
+
+            # ``publish_id`` of the baas workflow just kicked off (None when no
+            # container was provisioned/upgraded this round, i.e. reuse). The
+            # progress poll runs once, here in the caller, after create/revive.
+            baas_publish_id: Optional[Any] = None
+            binding_id: Optional[int] = None
+
+            if not bot_uuid:
+                # --- Step 3: never provisioned — raise a fresh container ---
+                order = await self._create_container(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    user_id=user_id,
+                    migration_path=migration_path,
+                    version=version,
+                )
+                bot_uuid = order["bot_uuid"]
+                baas_publish_id = order.get("publish_id")
+                binding_id = order.get("binding_id")
+                ext = {
+                    "bot_uuid": bot_uuid,
+                    "service_bot_publish_id": service_bot_publish_id,
+                    "version": version,
+                    "baas_publish_id": baas_publish_id,
+                }
+            else:
+                # --- Step 4: provisioned before — upgrade container ---
+                # container recycled (RELEASED): upgrade with bot_uuid preserved;
+                # BOT_NOT_FOUND → fall back to a fresh create_bot.
+                upgraded = await self._upgrade_container(
                     bot_uuid=bot_uuid,
                     bot_id=bot_id,
+                    owner_id=owner_id,
                     user_id=user_id,
+                    migration_path=migration_path,
+                    version=version,
                 )
-                logger.info(
-                    "[ExpertChatInstance] Instance already success: bot=%s owner=%s user=%s bot_uuid=%s",
-                    bot_id, owner_id, user_id, bot_uuid,
-                )
-                return {
-                    "instance": instance,
-                    "connection": connection,
-                    "need_poll": False,
-                }
+                bot_uuid = upgraded["bot_uuid"]
+                baas_publish_id = upgraded.get("publish_id")
+                ext = dict(ext)
+                ext["baas_publish_id"] = baas_publish_id
+                if "bot_uuid" not in ext:
+                    ext["bot_uuid"] = bot_uuid
 
-        ext = instance.get("ext") or {}
-        bot_uuid = ext.get("bot_uuid")
-
-        service_bot_publish_id = publish_record.id
-
-        # ``publish_id`` of the baas workflow just kicked off (None when no
-        # container was provisioned/upgraded this round, i.e. reuse). The
-        # progress poll runs once, here in the caller, after create/revive.
-        baas_publish_id: Optional[Any] = None
-        binding_id: Optional[int] = None
-
-        if not bot_uuid:
-            # --- Step 3: never provisioned — raise a fresh container ---
-            order = self._create_container(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                user_id=user_id,
-                migration_path=migration_path,
-                version=version,
-            )
-            bot_uuid = order["bot_uuid"]
-            baas_publish_id = order.get("publish_id")
-            binding_id = order.get("binding_id")
-            ext = {
-                "bot_uuid": bot_uuid,
-                "service_bot_publish_id": service_bot_publish_id,
-                "version": version,
-                "baas_publish_id": baas_publish_id,
-            }
-        else:
-            # --- Step 4: provisioned before — upgrade container ---
-            # container recycled (RELEASED): upgrade with bot_uuid preserved;
-            # BOT_NOT_FOUND → fall back to a fresh create_bot.
-            upgraded = self._upgrade_container(
-                bot_uuid=bot_uuid,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                user_id=user_id,
-                migration_path=migration_path,
-                version=version,
-            )
-            bot_uuid = upgraded["bot_uuid"]
-            baas_publish_id = upgraded.get("publish_id")
-            ext = dict(ext)
-            ext["baas_publish_id"] = baas_publish_id
-            if "bot_uuid" not in ext:
-                ext["bot_uuid"] = bot_uuid
-
-        # Update instance with new ext
-        self._instance_repo.update_instance(
-            user_id=user_id,
-            bot_id=bot_id,
-            owner_id=owner_id,
-            ext=ext,
-        )
-
-        if baas_publish_id:
-            progress = self._baas.get_publish_progress(
-                publish_id=int(baas_publish_id),
-                include_devices=True,
-            )
-            status = progress.get("status")
-
-            # Update binding status based on progress (before instance update)
-            if binding_id:
-                if status == "SUCCESS":
-                    binding_status = DeviceBindingStatus.ACTIVE.value
-                elif status == "FAILED":
-                    binding_status = DeviceBindingStatus.FAILED.value
-                else:
-                    binding_status = DeviceBindingStatus.PENDING.value
-                self._binding_repo.update_status(binding_id=binding_id, status=binding_status)
-                logger.info(
-                    "[ExpertChatInstance] Updated binding status: binding_id=%s status=%s",
-                    binding_id, binding_status,
-                )
-
-            ext = dict(ext)
-            ext["baas_publish"] = progress
-            instance_status = "success" if status == "SUCCESS" else "failed" if status == "FAILED" else instance.get("status")
+            # Update instance with new ext
             self._instance_repo.update_instance(
                 user_id=user_id,
                 bot_id=bot_id,
                 owner_id=owner_id,
-                status=instance_status,
                 ext=ext,
             )
 
-        instance = self._instance_repo.get_instance(user_id, bot_id, owner_id)
-        if instance.get("status") != "success":
+            if baas_publish_id:
+                progress = self._baas.get_publish_progress(
+                    publish_id=int(baas_publish_id),
+                    include_devices=True,
+                )
+                status = progress.get("status")
+
+                # Update binding status based on progress (before instance update)
+                if binding_id:
+                    if status == "SUCCESS":
+                        binding_status = DeviceBindingStatus.ACTIVE.value
+                    elif status == "FAILED":
+                        binding_status = DeviceBindingStatus.FAILED.value
+                    else:
+                        binding_status = DeviceBindingStatus.PENDING.value
+                    self._binding_repo.update_status(binding_id=binding_id, status=binding_status)
+                    logger.info(
+                        "[ExpertChatInstance] Updated binding status: binding_id=%s status=%s",
+                        binding_id, binding_status,
+                    )
+
+                ext = dict(ext)
+                ext["baas_publish"] = progress
+                instance_status = "success" if status == "SUCCESS" else "failed" if status == "FAILED" else instance.get("status")
+                self._instance_repo.update_instance(
+                    user_id=user_id,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    status=instance_status,
+                    ext=ext,
+                )
+
+            instance = self._instance_repo.get_instance(user_id, bot_id, owner_id)
+            if instance.get("status") != "success":
+                logger.info(
+                    "[ExpertChatInstance] Instance not ready, need poll: bot=%s owner=%s user=%s status=%s",
+                    bot_id, owner_id, user_id, instance.get("status"),
+                )
+
+                return {
+                    "instance": instance,
+                    "connection": None,
+                    "need_poll": True,
+                }
+
+            connection = self._build_connection(
+                bot_uuid=bot_uuid,
+                bot_id=bot_id,
+                user_id=user_id,
+            )
+
             logger.info(
-                "[ExpertChatInstance] Instance not ready, need poll: bot=%s owner=%s user=%s status=%s",
-                bot_id, owner_id, user_id, instance.get("status"),
+                "[ExpertChatInstance] Caller connection ready: bot=%s owner=%s "
+                "user=%s bot_uuid=%s",
+                bot_id, owner_id, user_id, bot_uuid,
             )
 
             return {
                 "instance": instance,
-                "connection": None,
-                "need_poll": True,
+                "connection": connection,
+                "need_poll": False,
             }
-
-        connection = self._build_connection(
-            bot_uuid=bot_uuid,
-            bot_id=bot_id,
-            user_id=user_id,
-        )
-
-        logger.info(
-            "[ExpertChatInstance] Caller connection ready: bot=%s owner=%s "
-            "user=%s bot_uuid=%s",
-            bot_id, owner_id, user_id, bot_uuid,
-        )
-
-        return {
-            "instance": instance,
-            "connection": connection,
-            "need_poll": False,
-        }
+        except Exception as e:
+            # Record exception traceback to ext and update instance
+            error_traceback = traceback.format_exc()
+            logger.error(
+                "[ExpertChatInstance] get_caller_connection failed: bot=%s owner=%s user=%s: %s\n%s",
+                bot_id, owner_id, user_id, e, error_traceback,
+            )
+            ext = instance.get("ext") or {}
+            ext["error"] = {
+                "message": str(e),
+                "traceback": error_traceback,
+            }
+            try:
+                self._instance_repo.update_instance(
+                    user_id=user_id,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    status="failed",
+                    ext=ext,
+                )
+            except Exception as update_error:
+                logger.warning(
+                    "[ExpertChatInstance] Failed to update instance with error info: bot=%s owner=%s user=%s: %s",
+                    bot_id, owner_id, user_id, update_error,
+                )
+            raise
 
     # ------------------------------------------------------------------
     # Step 2: build-artifact reverse lookup
@@ -315,7 +346,7 @@ class ExpertChatInstanceService:
     # ------------------------------------------------------------------
     # Step 3 + fallback: create a fresh container
     # ------------------------------------------------------------------
-    def _create_container(
+    async def _create_container(
         self,
         bot_id: str,
         owner_id: str,
@@ -323,11 +354,9 @@ class ExpertChatInstanceService:
         migration_path: Optional[str],
         version: int = 1,
     ) -> Dict[str, Any]:
-        """Call ``create_bot`` (auto-approve) and return the publish order.
+        """Call ``release_async`` and return the publish order.
 
-        ``auto_approve_publish=True`` so the create workflow is self-
-        approved (no explicit ``approve_publish`` call). Returns the baas
-        publish order — ``{bot_uuid, publish_id, binding_id}`` — without
+        Returns the baas publish order — ``{bot_uuid, publish_id}`` — without
         querying the workflow; the caller queries ``get_publish_progress``
         once and persists the trail (``baas_publish``) to the instance ext.
 
@@ -335,7 +364,7 @@ class ExpertChatInstanceService:
         linking the bot_uuid (device_id) to the caller (user_id as entity_id).
 
         Raises:
-            ConnectionError: create_bot failed or returned no bot_uuid (D5).
+            ConnectionError: release_async failed or returned no bot_uuid (D5).
         """
         bot_info = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if not bot_info:
@@ -343,22 +372,18 @@ class ExpertChatInstanceService:
                 f"Bot not found: bot_id={bot_id} owner_id={owner_id}",
                 error_code="5001",
             )
-        request_id = self._request_id(bot_info, user_id, "caller_create")
         try:
-            result = self._baas.create_bot(
+            result = await self._bot_build_service.release_async(
                 bot=bot_info,
-                owner_id=user_id,
-                request_id=request_id,
+                user_id=user_id,
                 migration_path=migration_path,
-                stage=PublishStage.ONLINE.value,
+                device_count=1,
+                publish_stage=PublishStage.ONLINE,
                 version=str(version),
-                auto_approve_publish=True,
             )
-        except BaasServiceError:
-            raise
         except Exception as e:
             logger.error(
-                "[ExpertChatInstance] create_bot failed: bot=%s user=%s: %s",
+                "[ExpertChatInstance] release_async failed: bot=%s user=%s: %s",
                 bot_id, user_id, e,
             )
             raise ConnectionError(
@@ -371,7 +396,7 @@ class ExpertChatInstanceService:
         publish_id = result.get("publish_id")
         if not bot_uuid:
             raise ConnectionError(
-                "create_bot returned no bot_uuid",
+                "release_async returned no bot_uuid",
                 error_code="5001",
                 original_error=str(result),
             )
@@ -401,7 +426,7 @@ class ExpertChatInstanceService:
     # ------------------------------------------------------------------
     # Step 4.2: upgrade a recycled container
     # ------------------------------------------------------------------
-    def _upgrade_container(
+    async def _upgrade_container(
         self,
         bot_uuid: str,
         bot_id: str,
@@ -412,7 +437,7 @@ class ExpertChatInstanceService:
     ) -> Dict[str, Any]:
         """Upgrade a RELEASED container, preferring ``bot_uuid`` preservation.
 
-        ``upgrade_bot`` keeps ``bot_uuid``; on ``BOT_NOT_FOUND`` (container
+        ``upgrade_async`` keeps ``bot_uuid``; on ``BOT_NOT_FOUND`` (container
         fully aged out of baas) it falls back to ``create_bot`` and returns
         a new ``bot_uuid``. Returns the baas publish order —
         ``{bot_uuid, publish_id}`` — without querying the workflow; the
@@ -427,19 +452,18 @@ class ExpertChatInstanceService:
                 f"Bot not found: bot_id={bot_id} owner_id={owner_id}",
                 error_code="5001",
             )
-        request_id = self._request_id(bot_info, user_id, "caller_upgrade")
         try:
-            result = self._baas.upgrade_bot(
+            result = await self._bot_build_service.upgrade_async(
                 bot_uuid=bot_uuid,
                 bot=bot_info,
-                owner_id=user_id,
-                request_id=request_id,
+                user_id=user_id,
                 migration_path=migration_path,
-                stage=PublishStage.ONLINE.value,
+                device_count=1,
+                publish_stage=PublishStage.ONLINE,
                 version=str(version),
             )
             logger.info(
-                "[ExpertChatInstance] upgrade upgraded in place: bot_uuid=%s",
+                "[ExpertChatInstance] upgrade_async succeeded: bot_uuid=%s",
                 bot_uuid,
             )
             return {
@@ -448,7 +472,7 @@ class ExpertChatInstanceService:
             }
         except Exception as e:
             logger.error(
-                "[ExpertChatInstance] upgrade_bot failed: bot_uuid=%s: %s",
+                "[ExpertChatInstance] upgrade_async failed: bot_uuid=%s: %s",
                 bot_uuid, e,
             )
             raise ConnectionError(
@@ -509,29 +533,3 @@ class ExpertChatInstanceService:
             "tenant": ws_info.tenant,
             "bot_uuid": ws_info.bot_uuid,
         }
-
-    @staticmethod
-    def _request_id(bot: Dict[str, Any], user_id: str, stage: str) -> str:
-        """Best-effort request id (idempotency) for baas calls.
-
-        Baas wants 32–64 char [A-Za-z0-9_-] ids. We don't have the full
-        ``BotBuildService.generate_request_id`` hash here (would couple
-        this service to a sibling it doesn't otherwise need); a stable
-        md5 of the same-ish inputs is good enough and stays deterministic
-        per (caller, bot, env, stage) — ``user_id`` keeps each caller's
-        baas workflow id distinct so a second caller's create/upgrade is
-        not deduped against the first's.
-        """
-        import hashlib
-
-        entity_id = bot.get("entity_id", "")
-        bot_id = bot.get("bot_id", "")
-        env = get_current_env()
-        raw = f"{entity_id}_{bot_id}_{user_id}_{env}_{stage}"
-        request_id = hashlib.md5(raw.encode()).hexdigest()
-        logger.info(
-            "[ExpertChatInstance] _request_id: entity_id=%s bot_id=%s user=%s "
-            "stage=%s request_id=%s",
-            entity_id, bot_id, user_id, stage, request_id,
-        )
-        return request_id
