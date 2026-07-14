@@ -16,9 +16,14 @@ from typing import TYPE_CHECKING
 
 from secbaas.api.bot_runtime import BotFileTransferDispatcher
 from secbaas.api.bot_runtime._file_transfer_models import (
+    CancelUploadResponse,
+    CompleteUploadResponse,
     GetDownloadUrlResponse,
     GetTransferStatusResponse,
     GetUploadUrlResponse,
+    ShareLinkResponse,
+    StagingDeleteResponse,
+    StagingListResponse,
     TransferNotFoundError,
 )
 from secbaas.core.service.paas import PaasServiceFacade
@@ -35,12 +40,21 @@ from ._base_dispatcher import BotBaseDispatcher
 
 logger = get_logger("core-service")
 
+# v1.5 multipart routing thresholds
+MULTIPART_THRESHOLD = 104_857_600  # 100MB
+DEFAULT_PART_SIZE = 10_485_760     # 10MB
+
 
 class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatcher):
     """File transfer dispatcher for bot devices.
 
     Implements BotFileTransferDispatcher protocol.
     Inherits __init__ and _resolve_bot_device from BotBaseDispatcher.
+
+    Conventions:
+    - paas_device_id="" is the sentinel for retention-mode tickets
+      (device_path=None at upload time).  Downstream code must use
+      ``paas_device_id == ""`` rather than truthiness checks.
     """
 
     def __init__(
@@ -59,36 +73,49 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         self,
         bot_uuid: str,
         tenant: str,
-        device_path: str,
+        device_path: str | None = None,
         filename: str | None = None,
         expire_seconds: int = 3600,
         staging_subdir: str | None = None,
         device_affinity: str | None = None,
+        file_size: int = 0,
+        part_size: int | None = None,
     ) -> GetUploadUrlResponse:
-        """Orchestrate upload URL generation (D-04 flow).
+        """Orchestrate upload URL generation (v1.5: D-01/D-02/D-05 flow).
 
         Steps:
-        1. Resolve bot to active device
+        1. Resolve bot to active device (SKIP in retention mode, device_path=None)
         2. Validate staging_subdir (D-01: reject "..", strip "/")
         3. Construct OSS staging path
-        4. Generate pre-signed PUT URL via FileTransferBackend
+        4. Route to SINGLE or MULTIPART based on file_size vs threshold:
+           - MULTIPART (file_size >= 100MB): initiate multipart session, return parts list
+           - SINGLE: generate pre-signed PUT URL
         5. Create ticket record
-        6. Return response with upload_url + transfer_id
+        6. Return response with upload_url (SINGLE) or parts list (MULTIPART)
         """
         env = get_current_env()
         logger.info(
-            "Dispatching upload URL: bot_uuid=%s, device_path=%s, tenant=%s",
-            bot_uuid, device_path, tenant,
+            "Dispatching upload URL: bot_uuid=%s, device_path=%s, tenant=%s, "
+            "file_size=%d",
+            bot_uuid, device_path, tenant, file_size,
         )
 
-        _, _, paas_device_id = await self._resolve_bot_device(
-            bot_uuid=bot_uuid,
-            tenant=tenant,
-            env=env,
-            device_affinity=device_affinity,
-        )
-
-        logger.info("Resolved device for upload: paas_device_id=%s", paas_device_id)
+        # D-05: Retention mode — device_path is None, skip device resolution
+        if device_path is not None:
+            _, _, paas_device_id = await self._resolve_bot_device(
+                bot_uuid=bot_uuid,
+                tenant=tenant,
+                env=env,
+                device_affinity=device_affinity,
+            )
+            logger.info("Resolved device for upload: paas_device_id=%s", paas_device_id)
+        else:
+            # Retention mode: file stays in OSS only, no device involvement
+            paas_device_id = ""  # sentinel for "no device" (D-05)
+            logger.info(
+                "Retention mode upload: bot_uuid=%s (no device resolution)",
+                bot_uuid,
+            )
 
         # D-01: Validate staging_subdir
         if staging_subdir is not None:
@@ -97,46 +124,105 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             staging_subdir = staging_subdir.strip("/")
 
         transfer_id = uuid.uuid4().hex
-        resolved_filename = filename or Path(device_path).name
+        resolved_filename = filename or (Path(device_path).name if device_path else "untitled")
 
         # Construct staging path (Phase 67 formula)
         subdir_part = f"{staging_subdir}/" if staging_subdir else ""
         staging_path = f"file-transfers/{subdir_part}{transfer_id}/{resolved_filename}"
 
-        # Generate pre-signed PUT URL (Pitfall #3: backend is sync)
-        upload_url = await asyncio.to_thread(
-            self._file_transfer_backend.generate_upload_url,
-            staging_path,
-            expire_seconds,
-        )
-
-        logger.info(
-            "Upload URL generated: transfer_id=%s, staging_path=%s",
-            transfer_id, staging_path,
-        )
-
-        # Create ticket (Pitfall #6: keyword is fileservice_staging_path)
-        self._ticket_repo.create_ticket(
-            transfer_id=transfer_id,
-            tenant=tenant,
-            paas_device_id=paas_device_id,
-            direction="UPLOAD",
-            status="CREATED",
-            staging_subdir=staging_subdir,
-            filename=resolved_filename,
-            device_path=device_path,
-            fileservice_staging_path=staging_path,
-            error_message=None,
-        )
-
-        logger.info("Ticket created: transfer_id=%s, direction=UPLOAD", transfer_id)
-
         expires_at = (datetime.utcnow() + timedelta(seconds=expire_seconds)).isoformat()
-        return GetUploadUrlResponse(
-            upload_url=upload_url,
-            transfer_id=transfer_id,
-            expires_at=expires_at,
-        )
+
+        # D-01/D-02: SINGLE/MULTIPART routing
+        if file_size >= MULTIPART_THRESHOLD:
+            # MULTIPART path
+            effective_part_size = part_size if part_size else DEFAULT_PART_SIZE
+            part_count = -(-file_size // effective_part_size)  # ceil division
+
+            multipart_session = await asyncio.to_thread(
+                self._file_transfer_backend.initiate_multipart_upload,
+                staging_path,
+                expire_seconds,
+                part_count,
+            )
+
+            logger.info(
+                "Multipart upload initiated: transfer_id=%s, session_id=%s, "
+                "part_count=%d",
+                transfer_id, multipart_session.session_id, part_count,
+            )
+
+            parts_data = [
+                {
+                    "part_number": p.part_number,
+                    "upload_url": p.upload_url,
+                    "expires_at": expires_at,
+                }
+                for p in multipart_session.parts
+            ]
+
+            # Create ticket with multipart_session_id
+            self._ticket_repo.create_ticket(
+                transfer_id=transfer_id,
+                tenant=tenant,
+                paas_device_id=paas_device_id,
+                direction="UPLOAD",
+                status="CREATED",
+                staging_subdir=staging_subdir,
+                filename=resolved_filename,
+                device_path=device_path,
+                fileservice_staging_path=staging_path,
+                error_message=None,
+                multipart_session_id=multipart_session.session_id,
+            )
+
+            logger.info(
+                "Ticket created (MULTIPART): transfer_id=%s, direction=UPLOAD",
+                transfer_id,
+            )
+
+            return GetUploadUrlResponse(
+                type="MULTIPART",
+                upload_session_id=multipart_session.session_id,
+                part_size=effective_part_size,
+                part_count=part_count,
+                parts=parts_data,
+                transfer_id=transfer_id,
+                expires_at=expires_at,
+            )
+        else:
+            # SINGLE path (existing logic + retention mode)
+            upload_url = await asyncio.to_thread(
+                self._file_transfer_backend.generate_upload_url,
+                staging_path,
+                expire_seconds,
+            )
+
+            logger.info(
+                "Upload URL generated: transfer_id=%s, staging_path=%s",
+                transfer_id, staging_path,
+            )
+
+            self._ticket_repo.create_ticket(
+                transfer_id=transfer_id,
+                tenant=tenant,
+                paas_device_id=paas_device_id,
+                direction="UPLOAD",
+                status="CREATED",
+                staging_subdir=staging_subdir,
+                filename=resolved_filename,
+                device_path=device_path,
+                fileservice_staging_path=staging_path,
+                error_message=None,
+            )
+
+            logger.info("Ticket created (SINGLE): transfer_id=%s, direction=UPLOAD", transfer_id)
+
+            return GetUploadUrlResponse(
+                upload_url=upload_url,
+                transfer_id=transfer_id,
+                expires_at=expires_at,
+                type="SINGLE",
+            )
 
     async def dispatch_get_download_url(
         self,
@@ -260,4 +346,224 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             error_message=error_message,
             created_at=record.gmt_create.isoformat(),
             updated_at=record.gmt_modified.isoformat(),
+        )
+
+    # ------------------------------------------------------------------
+    # v1.5 new dispatch methods
+    # ------------------------------------------------------------------
+
+    async def dispatch_complete_upload(
+        self,
+        transfer_id: str,
+        tenant: str | None = None,
+    ) -> CompleteUploadResponse:
+        """Complete an upload (D-03): validate and finalize SINGLE or MULTIPART.
+
+        SINGLE:  check_object_exists + status -> UPLOAD_COMPLETED.
+        MULTIPART: list_parts + complete_multipart_upload -> UPLOAD_COMPLETED.
+
+        Idempotency guard: if the ticket has already transitioned past
+        UPLOAD_COMPLETED, return the current status instead of calling
+        OSS operations (which would fail on an already-completed multipart).
+        """
+        logger.info(
+            "dispatch_complete_upload: transfer_id=%s, tenant=%s",
+            transfer_id, tenant,
+        )
+
+        ticket = self._ticket_repo.get_by_transfer_id(transfer_id, tenant=tenant)
+        if ticket is None:
+            raise TransferNotFoundError(f"Transfer not found: {transfer_id}")
+
+        # Idempotency guard: already completed/pulling/done
+        if ticket.status in ("UPLOAD_COMPLETED", "PULLING", "DONE"):
+            return CompleteUploadResponse(
+                transfer_id=transfer_id, status=ticket.status,
+            )
+
+        if ticket.multipart_session_id:
+            # MULTIPART: list_parts -> complete -> UPLOAD_COMPLETED
+            parts = await asyncio.to_thread(
+                self._file_transfer_backend.list_parts,
+                ticket.fileservice_staging_path,
+                ticket.multipart_session_id,
+            )
+            await asyncio.to_thread(
+                self._file_transfer_backend.complete_multipart_upload,
+                ticket.fileservice_staging_path,
+                ticket.multipart_session_id,
+                parts,
+            )
+        else:
+            # SINGLE: check_object_exists
+            exists = await asyncio.to_thread(
+                self._file_transfer_backend.check_object_exists,
+                ticket.fileservice_staging_path,
+            )
+            if not exists:
+                raise TransferNotFoundError(
+                    f"File not found in OSS staging: {ticket.fileservice_staging_path}",
+                )
+
+        self._ticket_repo.update_status(transfer_id, "UPLOAD_COMPLETED")
+        return CompleteUploadResponse(
+            transfer_id=transfer_id, status="UPLOAD_COMPLETED",
+        )
+
+    async def dispatch_cancel_upload(
+        self,
+        transfer_id: str,
+        tenant: str | None = None,
+    ) -> CancelUploadResponse:
+        """Cancel an upload (D-04): abort multipart session, transition to CANCELLED.
+
+        If the ticket has an active multipart session, abort it on OSS.
+        Then transition the ticket to the CANCELLED terminal state.
+        """
+        logger.info(
+            "dispatch_cancel_upload: transfer_id=%s, tenant=%s",
+            transfer_id, tenant,
+        )
+
+        ticket = self._ticket_repo.get_by_transfer_id(transfer_id, tenant=tenant)
+        if ticket is None:
+            raise TransferNotFoundError(f"Transfer not found: {transfer_id}")
+
+        if ticket.multipart_session_id:
+            await asyncio.to_thread(
+                self._file_transfer_backend.abort_multipart_upload,
+                ticket.fileservice_staging_path,
+                ticket.multipart_session_id,
+            )
+
+        self._ticket_repo.update_status(transfer_id, "CANCELLED")
+        return CancelUploadResponse(transfer_id=transfer_id, status="CANCELLED")
+
+    async def dispatch_list_staging(
+        self,
+        prefix: str,
+        limit: int = 100,
+        marker: str | None = None,
+    ) -> StagingListResponse:
+        """List OSS staging objects with marker pagination (D-07/D-08).
+
+        Pure OSS operation — no device involvement, no PaaS layer.
+        Returns flat list of objects matching the prefix.
+        """
+        logger.info(
+            "dispatch_list_staging: prefix=%s, limit=%d, marker=%s",
+            prefix, limit, marker,
+        )
+
+        result = await asyncio.to_thread(
+            self._file_transfer_backend.list_objects,
+            prefix,
+            limit,
+            marker,
+        )
+
+        return StagingListResponse(
+            prefix=prefix,
+            items=[
+                {
+                    "key": item.key,
+                    "size": item.size,
+                    "last_modified": item.last_modified,
+                }
+                for item in result.items
+            ],
+            truncated=result.truncated,
+            next_marker=result.next_marker,
+        )
+
+    async def dispatch_delete_staging(
+        self,
+        key: str,
+    ) -> StagingDeleteResponse:
+        """Delete a staging object (D-09).
+
+        Validates the associated ticket is in a terminal state
+        (DONE/FAILED/CANCELLED/DELETED) before deleting.  Already-DELETED
+        tickets are handled idempotently.
+        """
+        logger.info("dispatch_delete_staging: key=%s", key)
+
+        ticket = self._ticket_repo.get_by_fileservice_staging_path(key)
+        if ticket is None:
+            raise TransferNotFoundError(
+                f"No ticket found for staging key: {key}",
+            )
+
+        # D-09: validate terminal state
+        terminal_states = {"DONE", "FAILED", "CANCELLED", "DELETED"}
+        if ticket.status not in terminal_states:
+            from secbaas.api.bot_runtime._exceptions import (
+                TransferNotTerminalError,
+            )
+            raise TransferNotTerminalError(
+                transfer_id=ticket.transfer_id, status=ticket.status,
+            )
+
+        if ticket.status == "DELETED":
+            # Already deleted — idempotent
+            return StagingDeleteResponse(
+                deleted_key=key,
+                transfer_id=ticket.transfer_id,
+                previous_status="DELETED",
+                new_status="DELETED",
+            )
+
+        previous_status = ticket.status
+        await asyncio.to_thread(
+            self._file_transfer_backend.delete_object, key,
+        )
+        self._ticket_repo.update_status(ticket.transfer_id, "DELETED")
+        return StagingDeleteResponse(
+            deleted_key=key,
+            transfer_id=ticket.transfer_id,
+            previous_status=previous_status,
+            new_status="DELETED",
+        )
+
+    async def dispatch_generate_share_link(
+        self,
+        transfer_id: str,
+        expire_seconds: int = 86400,
+        tenant: str | None = None,
+    ) -> ShareLinkResponse:
+        """Generate a shareable download URL for a DONE transfer (D-12/D-13).
+
+        Only DONE tickets are eligible.  The share URL is a pre-signed OSS
+        GET URL with bounded expiry (default 24h, max 7d).
+
+        generate_download_url produces the same pre-signed GET URL; the
+        distinction between "download" and "share" is semantic (explicit
+        POST vs implicit GET) rather than technical.
+        """
+        logger.info(
+            "dispatch_generate_share_link: transfer_id=%s, "
+            "expire_seconds=%d, tenant=%s",
+            transfer_id, expire_seconds, tenant,
+        )
+
+        ticket = self._ticket_repo.get_by_transfer_id(transfer_id, tenant=tenant)
+        if ticket is None:
+            raise TransferNotFoundError(f"Transfer not found: {transfer_id}")
+
+        if ticket.status != "DONE":
+            raise ValueError(
+                f"Share link requires ticket status DONE, got {ticket.status}",
+            )
+
+        share_url = await asyncio.to_thread(
+            self._file_transfer_backend.generate_download_url,
+            ticket.fileservice_staging_path,
+            expire_seconds,
+        )
+
+        expires_at = (datetime.utcnow() + timedelta(seconds=expire_seconds)).isoformat()
+        return ShareLinkResponse(
+            share_url=share_url,
+            transfer_id=transfer_id,
+            expires_at=expires_at,
         )
