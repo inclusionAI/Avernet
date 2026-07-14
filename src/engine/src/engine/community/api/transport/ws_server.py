@@ -152,6 +152,7 @@ class EngineWebSocketServer:
         self._inject_listener_refs: Dict[
             tuple[str | None, int], tuple[Any, Callable[[EventFrame], Any]]
         ] = {}
+        self._inject_listener_conns: Dict[tuple[str | None, int], set[str]] = {}
         self._seq = 0
         self._version = "1.0.0"
 
@@ -696,6 +697,7 @@ class EngineWebSocketServer:
             return False
 
         key = (token, id(client))
+        self._inject_listener_conns.setdefault(key, set()).add(conn_id)
         if key in self._inject_listener_refs:
             return True
 
@@ -707,6 +709,16 @@ class EngineWebSocketServer:
             client.on_event("agent", on_injected_event)
         except Exception as e:
             log.warning("chat.subscribe: client.on_event failed: %s", e)
+            for event_name in ("chat", "agent"):
+                try:
+                    client.off_event(event_name, on_injected_event)
+                except Exception:
+                    pass
+            conns = self._inject_listener_conns.get(key)
+            if conns is not None:
+                conns.discard(conn_id)
+                if not conns:
+                    self._inject_listener_conns.pop(key, None)
             return False
 
         self._inject_listener_refs[key] = (client, on_injected_event)
@@ -756,15 +768,22 @@ class EngineWebSocketServer:
             self._unsubscribe_conn(stale_conn_id)
 
     def _drop_idle_inject_listeners(self) -> None:
-        if self._session_subscribers:
-            return
-        for client, listener in list(self._inject_listener_refs.values()):
+        active_conns = set(self._conn_sessions.keys())
+        for key, conns in list(self._inject_listener_conns.items()):
+            conns.intersection_update(active_conns)
+            if conns:
+                continue
+
+            self._inject_listener_conns.pop(key, None)
+            ref = self._inject_listener_refs.pop(key, None)
+            if ref is None:
+                continue
+            client, listener = ref
             try:
                 client.off_event("chat", listener)
                 client.off_event("agent", listener)
             except Exception as e:
                 log.debug("chat.subscribe: off_event failed: %s", e)
-        self._inject_listener_refs.clear()
 
     # ── chat.send ──────────────────────────────────────────────────────────
 

@@ -1412,6 +1412,120 @@ class TestChatSubscribeFanout:
         assert server._inject_listener_refs == {}
         assert server._session_subscribers == {}
 
+    @pytest.mark.asyncio
+    async def test_drop_idle_inject_listeners_retains_active_listeners_and_drops_idle_ones(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        EngineManager.get_instance()._engine = "openclaw"
+        client1 = MagicMock(name="OpenClawClient1")
+        client1.on_event = MagicMock()
+        client1.off_event = MagicMock()
+        client2 = MagicMock(name="OpenClawClient2")
+        client2.on_event = MagicMock()
+        client2.off_event = MagicMock()
+
+        async def mock_get(token):
+            return client1 if token == "tok-a" else client2
+
+        fake_engine.token_pool.get = AsyncMock(side_effect=mock_get)
+        server._conn_auth["conn-1"] = AuthContext(token="tok-a")
+        server._conn_auth["conn-2"] = AuthContext(token="tok-b")
+
+        await server._handle_request(
+            websocket=MagicMock(),
+            conn_id="conn-1",
+            request=_req("chat.subscribe", {"sessionKey": "sk-1"}),
+            auth_gate_service=auth_gate_service,
+        )
+        await server._handle_request(
+            websocket=MagicMock(),
+            conn_id="conn-2",
+            request=_req("chat.subscribe", {"sessionKey": "sk-2"}),
+            auth_gate_service=auth_gate_service,
+        )
+
+        await server._release_conn("conn-1")
+
+        assert client1.off_event.call_count == 2
+        assert [call.args[0] for call in client1.off_event.call_args_list] == [
+            "chat",
+            "agent",
+        ]
+        client2.off_event.assert_not_called()
+        assert ("tok-a", id(client1)) not in server._inject_listener_refs
+        assert ("tok-a", id(client1)) not in server._inject_listener_conns
+        assert ("tok-b", id(client2)) in server._inject_listener_refs
+        assert server._inject_listener_conns[("tok-b", id(client2))] == {"conn-2"}
+        assert server._session_subscribers == {"sk-2": {"conn-2"}}
+
+    @pytest.mark.asyncio
+    async def test_subscribe_cleans_partial_listener_when_on_event_fails(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        EngineManager.get_instance()._engine = "openclaw"
+        client = MagicMock(name="OpenClawClient")
+        client.on_event = MagicMock(side_effect=[None, RuntimeError("on boom")])
+        client.off_event = MagicMock()
+        fake_engine.token_pool.get = AsyncMock(return_value=client)
+        server._conn_auth["conn-1"] = AuthContext(token="tok-a")
+
+        response, _events = await server._handle_request(
+            websocket=MagicMock(),
+            conn_id="conn-1",
+            request=_req("chat.subscribe", {"sessionKey": "sk-1"}),
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is True
+        assert response.payload == {
+            "subscribed": True,
+            "sessionKey": "sk-1",
+            "liveInject": False,
+        }
+        assert [call.args[0] for call in client.off_event.call_args_list] == [
+            "chat",
+            "agent",
+        ]
+        assert ("tok-a", id(client)) not in server._inject_listener_refs
+        assert ("tok-a", id(client)) not in server._inject_listener_conns
+        assert server._session_subscribers == {"sk-1": {"conn-1"}}
+        assert server._conn_sessions == {"conn-1": {"sk-1"}}
+
+    @pytest.mark.asyncio
+    async def test_subscribe_ignores_cleanup_error_after_partial_on_event_failure(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        EngineManager.get_instance()._engine = "openclaw"
+        client = MagicMock(name="OpenClawClient")
+        client.on_event = MagicMock(side_effect=[None, RuntimeError("on boom")])
+        client.off_event = MagicMock(side_effect=RuntimeError("off boom"))
+        fake_engine.token_pool.get = AsyncMock(return_value=client)
+        server._conn_auth["conn-1"] = AuthContext(token="tok-a")
+
+        response, _events = await server._handle_request(
+            websocket=MagicMock(),
+            conn_id="conn-1",
+            request=_req("chat.subscribe", {"sessionKey": "sk-1"}),
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is True
+        assert response.payload["liveInject"] is False
+        assert client.off_event.call_count == 2
+        assert ("tok-a", id(client)) not in server._inject_listener_refs
+        assert ("tok-a", id(client)) not in server._inject_listener_conns
+
+    def test_drop_idle_inject_listeners_removes_orphan_conn_mapping_without_ref(
+        self, server,
+    ):
+        server._inject_listener_conns[("tok-a", 123)] = {"conn-1"}
+        server._conn_sessions = {}
+
+        server._drop_idle_inject_listeners()
+
+        assert server._inject_listener_conns == {}
+        assert server._inject_listener_refs == {}
+
 
 class _FakeChatServiceWithInject:
     """Stand-in chat service whose class explicitly declares ``inject``.
