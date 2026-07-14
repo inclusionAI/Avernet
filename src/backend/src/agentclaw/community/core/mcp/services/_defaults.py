@@ -145,21 +145,20 @@ def get_default_mcp_server_codes(engine_type: Optional[str] = None) -> List[str]
 # CLI 无需 MCP Center 元信息拉取，其"执行内容"由 passport 授权侧据 cli_code 关联 Skill。
 _DEFAULT_CLI_ITEMS_BY_ENGINE: Dict[str, List[dict]] = {
     "aicoding": [
-        {"cli_code": "adev",           "cli_name": "adev",           "cli_desc": "Ant Adev 研发命令行工具"},
+        {"cli_code": "adev-cli",           "cli_name": "adev-cli",           "cli_desc": "Ant Adev 研发命令行工具"},
         {"cli_code": "acli",           "cli_name": "acli",           "cli_desc": "Ant Acli 命令行工具"},
-        {"cli_code": "antcode",        "cli_name": "antcode",        "cli_desc": "AntCode 代码托管平台命令行工具"},
-        {"cli_code": "linke",          "cli_name": "linke",          "cli_desc": "Linke 命令行工具"},
-        {"cli_code": "linke-cli",      "cli_name": "linke-cli",      "cli_desc": "Linke CLI 命令行工具"},
-        {"cli_code": "linkw-cli",      "cli_name": "linkw-cli",      "cli_desc": "Linkw CLI 命令行工具"},
-        {"cli_code": "qmx-invoke-cli", "cli_name": "qmx-invoke-cli", "cli_desc": "Qmx Invoke 命令行工具"},
-        {"cli_code": "serverless",     "cli_name": "serverless",     "cli_desc": "Serverless 命令行工具"},
-        {"cli_code": "derisk",         "cli_name": "derisk",         "cli_desc": "Derisk 风控命令行工具"},
+        {"cli_code": "antcode-cli",        "cli_name": "antcode-cli",        "cli_desc": "AntCode 代码托管平台命令行工具"},
+        {"cli_code": "linke-cli",          "cli_name": "linke-cli",          "cli_desc": "Linke CLI 命令行工具"},
+        {"cli_code": "linkw-cli",          "cli_name": "linkw-cli",          "cli_desc": "Linkw CLI 命令行工具"},
+        {"cli_code": "qmx-invoke-cli",     "cli_name": "qmx-invoke-cli",     "cli_desc": "QMX Invoke CLI 命令行工具"},
+        {"cli_code": "serverless",         "cli_name": "serverless",         "cli_desc": "Serverless 命令行工具"},
+        {"cli_code": "derisk-cli",         "cli_name": "derisk-cli",         "cli_desc": "Derisk 风控命令行工具"},
     ],
 }
 
 
 # template_type 白名单：claude_code 引擎下，仅 personalCoding / applicationCoding
-# 走 aicoding 默认 CLI 链路（研发类 bot 才需要这 9 个 CLI）。
+# 走 aicoding 默认 CLI 链路（研发类 bot 才需要这些 CLI）。
 _CLAUDE_CODE_CLI_TEMPLATE_TYPES = frozenset({"personalCoding", "applicationCoding"})
 
 
@@ -169,7 +168,7 @@ def get_default_cli_items(
 ) -> List[dict]:
     """返回默认 CLI 列表（CliItem dict 形式）。
 
-    走 aicoding 链路（返回 9 个默认 CLI）的判定：
+    走 aicoding 链路（返回默认 CLI）的判定：
       1. engine_type == "aicoding"；或
       2. engine_type == "claude_code" 且 template_type in
          {"personalCoding", "applicationCoding"}。
