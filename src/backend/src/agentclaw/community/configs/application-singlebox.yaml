@@ -29,6 +29,21 @@ module_config:
 
 # ─────────────────── user_config 覆盖 ───────────────────
 user_config:
+  # Admin scopes — singlebox acceptance tests use "100000" as super_admin
+  admin:
+    super_admin:
+      - "100000"
+    disk_usage_admin:
+      - "100000"
+    harness_admin:
+      - "100000"
+    skill_admin:
+      - "100000"
+    collaborator_admin:
+      - "100000"
+    device_admin:
+      - "100000"
+
   app:
     title: "AgentClaw Single Box"
     description: "Single Box mode — no external network."
