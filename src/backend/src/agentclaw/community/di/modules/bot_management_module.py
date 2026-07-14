@@ -31,6 +31,9 @@ from injector import (
 
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.data_init_service import DataInitServiceProtocol
+from agentclaw.community.api.default_bot_passport_repair_service import (
+    DefaultBotPassportRepairServiceProtocol,
+)
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.api.render_screen_service import RenderScreenServiceProtocol
 from agentclaw.community.core.bot_collaborator.protocols import (
@@ -50,6 +53,9 @@ from agentclaw.community.core.bot_management.services.bcn_service import BcnServ
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.cleanup_service import BotCleanupService
 from agentclaw.community.core.bot_management.services.data_init_service import DataInitService
+from agentclaw.community.core.bot_management.services.default_bot_passport_repair_service import (
+    DefaultBotPassportRepairService,
+)
 from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import WorkspaceHostingService
 from agentclaw.community.core.bot_management.services.teclaw_provision_service import (
     TeclawProvisionService,
@@ -91,6 +97,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.drm import DRMReaderPlugin
+from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.http_client import QUALIFIER_BCN, HttpClient
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
@@ -187,6 +194,8 @@ class BotManagementModule(Module):
             {
                 "insert": "BotRepository create/read/search/update/delete",
                 "get_by_id_and_owner": "BotRepository create/read/search/update/delete",
+                "get_live_by_id_owner_and_env": "BotRepository explicit-env passport repair",
+                "update_ext_by_id_owner_and_env": "BotRepository explicit-env passport repair",
                 "get_by_id": "BotRepository create/read/search/update/delete",
                 "list_by_owner": "BotRepository create/read/search/update/delete",
                 "list_by_owner_or_collaborator": "BotRepository create/read/search/update/delete",
@@ -205,6 +214,23 @@ class BotManagementModule(Module):
                 "get_device_provider_by_bot_id": "BotRepository create/read/search/update/delete",
                 "search_bots": "BotRepository create/read/search/update/delete",
             },
+        )
+
+    @singleton
+    @provider
+    @inject
+    def default_bot_passport_repair_service(
+        self,
+        repository: BotRepository,
+        passport_plugin: PassportPlugin,
+        auth_relationship_plugin: AuthRelationshipPlugin,
+        skill_set_factory: SkillSetServiceFactory,
+    ) -> DefaultBotPassportRepairServiceProtocol:
+        return DefaultBotPassportRepairService(
+            repository=repository,
+            passport_plugin=passport_plugin,
+            auth_relationship_plugin=auth_relationship_plugin,
+            skill_set_factory=skill_set_factory,
         )
 
     @singleton

@@ -1177,6 +1177,21 @@ class SkillSetRepository:
             )
             return [_mcp_assoc_to_dict(m) for m in rows]
 
+    def get_mcp_servers_in_set_for_env(
+        self, skill_set_id: str, *, env: str
+    ) -> list[dict]:
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self.SkillSetMCPServer)
+                .filter(
+                    self.SkillSetMCPServer.skill_set_id == int(skill_set_id),
+                    self.SkillSetMCPServer.env == env,
+                )
+                .order_by(self.SkillSetMCPServer.gmt_created)
+                .all()
+            )
+            return [_mcp_assoc_to_dict(m) for m in rows]
+
     def remove_mcp_from_set(
         self, skill_set_id: str, server_code: str
     ) -> bool:
@@ -1676,6 +1691,42 @@ class SkillSetRepository:
             )
             if enabled is None or enabled == 1:
                 active_sets.append(default_set)
+        return active_sets
+
+    def get_all_active_skill_sets_for_env(
+        self,
+        *,
+        user_id: Optional[str] = None,
+        bolt_id: Optional[str] = None,
+        engine_type: Optional[str] = None,
+        env: str,
+    ) -> List[dict]:
+        effective_bolt_id = bolt_id if bolt_id else "default"
+        parsed = _normalize_user_id(user_id)
+        active_sets: list[dict] = []
+        with self._db.orm_session() as db:
+            query = db.query(self.SkillSet).filter(
+                self.SkillSet.is_active == True,  # noqa: E712
+                self.SkillSet.is_default == False,  # noqa: E712
+                self.SkillSet.env == env,
+                self.SkillSet.bolt_id == effective_bolt_id,
+            )
+            if engine_type is not None:
+                query = query.filter(self.SkillSet.engine_type == engine_type)
+            if user_id:
+                query = query.filter(self.SkillSet.user_id == parsed)
+            else:
+                query = query.filter(self.SkillSet.user_id.is_(None))
+            active_sets.extend(_skill_set_to_dict(ss) for ss in query.all())
+
+        default_set = self.get_default(
+            user_id=None,
+            bolt_id=None,
+            engine_type=engine_type,
+            env=env,
+        )
+        if default_set:
+            active_sets.append(default_set)
         return active_sets
 
     def _get_user_default_enabled(

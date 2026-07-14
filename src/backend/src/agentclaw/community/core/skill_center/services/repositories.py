@@ -153,6 +153,12 @@ class SkillSetRepository(Protocol):
     def get_mcp_servers_in_set(self, skill_set_id: str) -> list[dict]:
         ...
 
+    def get_mcp_servers_in_set_for_env(
+        self, skill_set_id: str, *, env: str
+    ) -> list[dict]:
+        """Return associations belonging to one explicit environment."""
+        ...
+
     def remove_mcp_from_set(self, skill_set_id: str, server_code: str) -> bool:
         ...
 
@@ -187,6 +193,17 @@ class SkillSetRepository(Protocol):
         bolt_id: str | None = None,
         engine_type: str | None = None,
     ) -> list[dict]:
+        ...
+
+    def get_all_active_skill_sets_for_env(
+        self,
+        *,
+        user_id: str | None = None,
+        bolt_id: str | None = None,
+        engine_type: str | None = None,
+        env: str,
+    ) -> list[dict]:
+        """Return active sets using an explicit environment, never runtime env."""
         ...
 
     def activate_skill_set(

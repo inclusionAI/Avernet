@@ -477,6 +477,54 @@ class TestCollectBotActiveMcps:
         codes = {r["server_code"] for r in result}
         assert "mcp.ant.antprocessai.anttaskmcp" not in codes
 
+    def test_get_bot_mcp_codes_for_env_uses_only_explicit_env_repository_reads(self):
+        from agentclaw.community.core.skill_center.services.skill_set_service import (
+            SkillSetService,
+        )
+
+        mock_repo = MagicMock()
+        mock_repo.get_all_active_skill_sets_for_env.return_value = [
+            {"id": "2", "name": "Prod Set", "is_default": False}
+        ]
+        mock_repo.get_mcp_servers_in_set_for_env.return_value = [
+            {"id": "10", "server_code": "mcp.prod.only", "name": "prod"}
+        ]
+        mock_repo.get_all_excluded_mcps.return_value = []
+        with patch(
+            "agentclaw.community.core.skill_center.services.skill_set_service.WorkspacePathFactory"
+        ):
+            svc = SkillSetService(
+                skill_repo=MagicMock(),
+                skill_set_repo=mock_repo,
+                mcp_center=MagicMock(),
+                mcp_config_service=MagicMock(),
+                skill_service=MagicMock(),
+                bot_repo=MagicMock(),
+                path_factory=MagicMock(),
+            )
+
+        codes = svc.get_bot_mcp_codes_for_env(
+            entity_id="172168",
+            bot_id="default",
+            user_id="172168",
+            entity_type="staff",
+            engine_type="openclaw",
+            target_env="prod",
+        )
+
+        assert "mcp.prod.only" in codes
+        mock_repo.get_all_active_skill_sets_for_env.assert_called_once_with(
+            user_id="172168",
+            bolt_id="default",
+            engine_type="openclaw",
+            env="prod",
+        )
+        mock_repo.get_mcp_servers_in_set_for_env.assert_called_once_with(
+            "2", env="prod"
+        )
+        mock_repo.get_all_active_skill_sets.assert_not_called()
+        mock_repo.get_mcp_servers_in_set.assert_not_called()
+
 
 
 
