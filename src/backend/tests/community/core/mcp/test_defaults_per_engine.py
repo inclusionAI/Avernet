@@ -165,8 +165,8 @@ from agentclaw.community.core.mcp.services._defaults import (
 )
 
 _EXPECTED_CLI_CODES = (
-    "adev-cli", "acli", "antcode-cli",
-    "linkw-cli", "serverless", "derisk-cli",
+    "adev-cli", "acli", "antcode-cli", "linke-cli",
+    "linkw-cli", "qmx-invoke-cli", "serverless", "derisk-cli",
 )
 
 
