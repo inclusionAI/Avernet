@@ -599,12 +599,16 @@ def offline_destroys_online():
     expect=ExpectSuccess(status=200, json_contains={"success": True}),
     extra_assertions=(
         _expect_post("/update"),                               # re-delivered, not re-created
-        _expect_status(_V1, PublishStatus.VALIDATE_PUB),       # rolled back
+        # #162 secondary orphan fix: the retry-restart now enqueues the durable poll,
+        # so the one drain tick drives the retried record out of its VALIDATE_PUB wait
+        # state (→ VALIDATING via sync_restart_progress) with no user /sync polling.
+        _expect_status(_V1, PublishStatus.VALIDATING),
     ),
 )
 def retry_restarts_after_verify_failure():
     """A publish FAILED at the verify-progress gate is retried: retry rolls back to
-    VALIDATE_PUB and restarts the container via update_teclaw_bot (re-deliver)."""
+    VALIDATE_PUB and restarts the container via update_teclaw_bot (re-deliver); the
+    durable poll then self-drives it to VALIDATING without user polling."""
 
 
 @endpoint_test(
@@ -658,7 +662,9 @@ def scale_status_error():
     expect=ExpectSuccess(status=200, json_contains={"success": True}),
     extra_assertions=(
         _expect_post("/update"),
-        _expect_status(_V1, PublishStatus.VALIDATE_PUB),
+        # As in retry_restarts_after_verify_failure: the durable poll enqueued by the
+        # restart drives the retried record VALIDATE_PUB → VALIDATING (#162 fix).
+        _expect_status(_V1, PublishStatus.VALIDATING),
     ),
 )
 def retry_for_others_success():

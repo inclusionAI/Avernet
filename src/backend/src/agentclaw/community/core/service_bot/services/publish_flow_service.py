@@ -79,6 +79,7 @@ from agentclaw.community.core.service_bot.services.publish_flow.release_stage im
 )
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     enqueue_online_release,
+    enqueue_progress_poll,
     enqueue_verify_flow,
 )
 from agentclaw.community.core.task_queue.services.task_queue_service import (
@@ -898,7 +899,15 @@ class PublishFlowService(
                 operator=operator,
             )
             success = restart_result.get("success", False)
-            if not success:
+            if success:
+                # The BaaS-restart branch parks the record in its *_PUB wait state
+                # without passing through verify_flow/online_release, so pre-#105 it
+                # advanced only via user /sync polling (retry redirect) or an explicit
+                # /restart_status poll. Enqueue the durable poll so the retried
+                # restart self-drives: the poll's retry-flag redirect routes it
+                # through sync_restart_progress and leaves the *_PUB state.
+                enqueue_progress_poll(self._task_queue_service, publish_id=publish_id)
+            else:
                 self._mutate_and_update_ext(
                     publish_id=publish_id,
                     mutator=self._clear_retry_flag,
