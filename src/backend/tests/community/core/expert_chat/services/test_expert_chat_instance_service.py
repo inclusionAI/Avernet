@@ -501,6 +501,86 @@ class TestGetCallerConnection:
         assert result["instance"]["status"] == "init"
 
     @pytest.mark.asyncio
+    async def test_init_status_with_baas_publish_id_skips_upgrade(self):
+        """When status is 'init' and baas_publish_id exists, should skip upgrade and poll progress."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+            "baas_publish_id": 888,  # Has baas_publish_id
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "init", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo)
+        _wire_bot_repo(bot_repo)
+        baas.get_publish_progress = MagicMock(return_value={"status": "RUNNING"})
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        # Should NOT call upgrade_async since status is 'init' and baas_publish_id exists
+        bot_build_service.upgrade_async.assert_not_called()
+        bot_build_service.release_async.assert_not_called()
+        # Should poll progress
+        baas.get_publish_progress.assert_called_once()
+        assert result["need_poll"] is True
+        assert result["connection"] is None
+
+    @pytest.mark.asyncio
+    async def test_init_status_without_baas_publish_id_calls_upgrade(self):
+        """When status is 'init' but no baas_publish_id, should call upgrade."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+            # No baas_publish_id
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "init", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo)
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "RUNNING"})
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        # Should call upgrade_async since no baas_publish_id
+        bot_build_service.upgrade_async.assert_called_once()
+        assert result["need_poll"] is True
+        assert result["connection"] is None
+
+    @pytest.mark.asyncio
+    async def test_non_init_status_calls_upgrade(self):
+        """When status is not 'init' (e.g., 'failed'), should call upgrade."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+            "baas_publish_id": 888,  # Has baas_publish_id, but status is not 'init'
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "failed", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo)
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "RUNNING"})
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        # Should call upgrade_async since status is not 'init'
+        bot_build_service.upgrade_async.assert_called_once()
+        assert result["need_poll"] is True
+        assert result["connection"] is None
+
+    @pytest.mark.asyncio
     async def test_success_instance_without_bot_uuid_creates_container(self):
         """Success instance without bot_uuid triggers create."""
         svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
@@ -1035,8 +1115,8 @@ class TestRepositoryUpdateInstanceWithStatusOnly:
         assert result["connection"] is None
 
     @pytest.mark.asyncio
-    async def test_publish_status_running_keeps_instance_status(self):
-        """RUNNING status keeps original instance status."""
+    async def test_publish_status_running_sets_instance_status_to_init(self):
+        """RUNNING status sets instance status to 'init' (not original status)."""
         svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
 
         call_count = [0]
@@ -1059,6 +1139,12 @@ class TestRepositoryUpdateInstanceWithStatusOnly:
 
         result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
 
-        # RUNNING keeps original status (init)
+        # RUNNING sets status to "init" explicitly
+        update_calls = instance_repo.update_instance.call_args_list
+        assert any(
+            call[1].get("status") == "init"
+            for call in update_calls
+            if call[1].get("status")
+        )
         assert result["need_poll"] is True
         assert result["connection"] is None

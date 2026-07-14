@@ -188,7 +188,7 @@ class ExpertChatInstanceService:
                     "version": version,
                     "baas_publish_id": baas_publish_id,
                 }
-            else:
+            elif instance.get("status") != "init" or not ext.get("baas_publish_id"):
                 # --- Step 4: provisioned before — upgrade container ---
                 # container recycled (RELEASED): upgrade with bot_uuid preserved;
                 # BOT_NOT_FOUND → fall back to a fresh create_bot.
@@ -206,6 +206,9 @@ class ExpertChatInstanceService:
                 ext["baas_publish_id"] = baas_publish_id
                 if "bot_uuid" not in ext:
                     ext["bot_uuid"] = bot_uuid
+            else:
+                # --- Step 5: init status with baas_publish_id — poll progress ---
+                baas_publish_id = ext.get("baas_publish_id")
 
             # Update instance with new ext
             self._instance_repo.update_instance(
@@ -238,7 +241,7 @@ class ExpertChatInstanceService:
 
                 ext = dict(ext)
                 ext["baas_publish"] = progress
-                instance_status = "success" if status == "SUCCESS" else "failed" if status == "FAILED" else instance.get("status")
+                instance_status = "success" if status == "SUCCESS" else "failed" if status == "FAILED" else "init"
                 self._instance_repo.update_instance(
                     user_id=user_id,
                     bot_id=bot_id,
