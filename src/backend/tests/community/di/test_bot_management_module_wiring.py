@@ -36,3 +36,26 @@ def test_bot_service_provider_threads_task_queue_service() -> None:
         keyword.arg == "task_queue_service"
         for keyword in bot_service_calls[0].keywords
     ), "BotService must receive TaskQueueService for restart publish tasks"
+
+
+def test_default_bot_passport_repair_service_is_composed_without_device_service() -> None:
+    module_path = Path(bot_management_module.__file__)
+    tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    providers = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "default_bot_passport_repair_service"
+    ]
+    assert providers
+    provider = providers[0]
+    arg_names = [arg.arg for arg in provider.args.args]
+    assert arg_names == [
+        "self",
+        "repository",
+        "passport_plugin",
+        "auth_relationship_plugin",
+        "skill_set_factory",
+    ]
+    assert "device_service" not in arg_names
+    assert "baas_service" not in arg_names

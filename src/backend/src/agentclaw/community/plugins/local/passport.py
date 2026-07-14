@@ -12,6 +12,7 @@ from agentclaw.community.plugin_api.passport import (
     SubResourceItem,
     extract_cli_items,
     unpack_resource_scope,
+    validate_passport_target_env,
 )
 from agentclaw.community.plugins.local._mock_seam import MockSeam
 
@@ -71,7 +72,10 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
         workspace_path: str | None = None,
         admins: list[str] | None = None,
         cli_items: list[CliItem] | None = None,
+        *,
+        target_env: str | None = None,
     ) -> dict[str, Any] | None:
+        validate_passport_target_env(target_env)
         logger.info(
             "[LocalPassportUpdate] apply_first_agent_passport: bot_id=%s, "
             "owner_workno=%s, engine_type=%s, access_mode=%s, device_token=%s, "
@@ -134,7 +138,14 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
             owner_workno,
         )
 
-    def query_auth_status(self, bot_id: str, owner_workno: str) -> dict[str, Any] | None:
+    def query_auth_status(
+        self,
+        bot_id: str,
+        owner_workno: str,
+        *,
+        target_env: str | None = None,
+    ) -> dict[str, Any] | None:
+        validate_passport_target_env(target_env)
         logger.info(
             "[LocalPassportUpdate] query_auth_status: bot_id=%s, owner_workno=%s",
             bot_id,
@@ -145,7 +156,14 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
             "token": f"mock_token_status_{bot_id}",
         }
 
-    def query_token(self, bot_id: str, owner_workno: str) -> str | None:
+    def query_token(
+        self,
+        bot_id: str,
+        owner_workno: str,
+        *,
+        target_env: str | None = None,
+    ) -> str | None:
+        validate_passport_target_env(target_env)
         logger.info(
             "[LocalPassportUpdate] query_token: bot_id=%s, owner_workno=%s",
             bot_id,
@@ -153,7 +171,14 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
         )
         return f"mock_token_{bot_id}"
 
-    def query_agent_passport(self, bot_id: str, owner_workno: str) -> dict[str, Any] | None:
+    def query_agent_passport(
+        self,
+        bot_id: str,
+        owner_workno: str,
+        *,
+        target_env: str | None = None,
+    ) -> dict[str, Any] | None:
+        validate_passport_target_env(target_env)
         logger.info(
             "[LocalPassportUpdate] query_agent_passport: bot_id=%s, owner_workno=%s",
             bot_id,

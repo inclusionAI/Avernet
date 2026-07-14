@@ -50,6 +50,21 @@ def test_auth_status_always_issued(passport):
     assert status["token"] == "community-passport-bot-4"
 
 
+def test_explicit_target_env_keeps_self_issued_semantics(passport):
+    issued = passport.apply_first_agent_passport(
+        "bot-prod", "owner", [], target_env="prod"
+    )
+
+    assert passport.query_token(
+        "bot-prod", "owner", target_env="prod"
+    ) == issued["token"]
+
+
+def test_invalid_explicit_target_env_is_rejected(passport):
+    with pytest.raises(ValueError, match="target_env"):
+        passport.query_auth_status("bot-4", "owner", target_env="staging")
+
+
 def test_query_passport_clis_empty(passport):
     assert passport.query_passport_clis("bot-5", "owner") == []
 

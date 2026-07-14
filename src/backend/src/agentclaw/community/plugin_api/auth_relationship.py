@@ -14,6 +14,12 @@ class AuthRelationshipError(Exception):
     pass
 
 
+def validate_auth_relationship_target_env(target_env: str) -> None:
+    """Fail closed before routing an explicit-environment AceAgent call."""
+    if target_env not in {"pre", "prod"}:
+        raise ValueError("target_env must be pre or prod")
+
+
 @runtime_checkable
 class AuthRelationshipPlugin(Plugin, Protocol):
     """Plugin for user-agent authorization relationship management."""
@@ -33,6 +39,20 @@ class AuthRelationshipPlugin(Plugin, Protocol):
         """
         ...
 
+    def create_relationship_for_env(
+        self,
+        *,
+        target_env: str,
+        work_no: str,
+        agent_code: str,
+        operator_work_no: str,
+        operator_name: str,
+        source: str = "tcauthmng",
+        description: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Create a relationship through the explicitly selected environment."""
+        ...
+
     def query_relationships(
         self,
         agent_code: str,
@@ -45,6 +65,19 @@ class AuthRelationshipPlugin(Plugin, Protocol):
 
         Returns a list of AuthRelationshipResult dicts.
         """
+        ...
+
+    def query_relationships_for_env(
+        self,
+        *,
+        target_env: str,
+        agent_code: str,
+        source: str = "tcauthmng",
+        work_no: str | None = None,
+        page_num: int = 1,
+        page_size: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Query relationships through the explicitly selected environment."""
         ...
 
     def delete_relationship(

@@ -258,6 +258,52 @@ def test_mcp_in_set(sets):
     assert sets.get_mcp_servers_in_set(ss["id"]) == []
 
 
+def test_explicit_env_active_skill_sets_and_mcps_are_isolated(sets, db):
+    pre = sets.create(
+        {
+            "name": "pre-set",
+            "user_id": "172168",
+            "bolt_id": "default",
+            "engine_type": "openclaw",
+            "is_active": True,
+        }
+    )
+    prod = sets.create(
+        {
+            "name": "prod-set",
+            "user_id": "172168",
+            "bolt_id": "default",
+            "engine_type": "openclaw",
+            "is_active": True,
+        }
+    )
+    with db.orm_session() as s:
+        s.query(SkillSet).filter(SkillSet.id == int(pre["id"])).update(
+            {SkillSet.env: "pre"}
+        )
+        s.query(SkillSet).filter(SkillSet.id == int(prod["id"])).update(
+            {SkillSet.env: "prod"}
+        )
+    sets.add_mcp_to_set(pre["id"], "mcp.pre", "Pre", env="pre")
+    sets.add_mcp_to_set(prod["id"], "mcp.prod", "Prod", env="prod")
+
+    active = sets.get_all_active_skill_sets_for_env(
+        user_id="172168",
+        bolt_id="default",
+        engine_type="openclaw",
+        env="prod",
+    )
+
+    assert [row["id"] for row in active] == [prod["id"]]
+    assert sets.get_mcp_servers_in_set_for_env(prod["id"], env="prod") == [
+        {
+            **sets.get_mcp_servers_in_set(prod["id"])[0],
+            "env": "prod",
+        }
+    ]
+    assert sets.get_mcp_servers_in_set_for_env(pre["id"], env="prod") == []
+
+
 def test_add_default_mcp_exclusion_upsert_idempotent(sets, db):
     ok = sets.add_default_mcp_exclusion("u1", "bot1", 7, "mcp.z")
     assert ok is True

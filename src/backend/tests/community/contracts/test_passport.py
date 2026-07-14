@@ -17,6 +17,8 @@ plugin would not produce that exact string.
 """
 from __future__ import annotations
 
+import pytest
+
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
@@ -31,6 +33,31 @@ def test_apply_first_agent_passport_returns_local_mock_envelope(world) -> None:
     # Fingerprint only the local impl produces.
     assert result["token"] == "mock_token_first_bot_x"
     assert result["agent_code"] == "local_bot_x"
+
+
+def test_local_passport_accepts_explicit_target_env(world) -> None:
+    plugin = world.get(PassportPlugin)
+
+    result = plugin.apply_first_agent_passport(
+        bot_id="bot_prod",
+        owner_workno="alice",
+        mcp_codes=[],
+        target_env="prod",
+    )
+
+    assert result is not None
+    assert result["token"] == "mock_token_first_bot_prod"
+    assert (
+        plugin.query_token("bot_prod", "alice", target_env="prod")
+        == "mock_token_bot_prod"
+    )
+
+
+def test_local_passport_rejects_invalid_explicit_target_env(world) -> None:
+    plugin = world.get(PassportPlugin)
+
+    with pytest.raises(ValueError, match="target_env"):
+        plugin.query_agent_passport("bot_x", "alice", target_env="staging")
 
 
 def test_apply_agent_passport_returns_local_mock_envelope(world) -> None:

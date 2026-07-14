@@ -12,10 +12,10 @@ Each bot is associated with an entity (staff, proj, team) and has its own device
 """
 import asyncio
 from datetime import datetime, timedelta
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 
 from fastapi import APIRouter, Query, Request, Response, Depends, Path
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from agentclaw.community.adapters.http.auth.dependencies import require_operator, get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
@@ -23,6 +23,9 @@ from agentclaw.community.core.access.admin_scopes import super_admin
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.data_init_service import DataInitServiceProtocol
+from agentclaw.community.api.default_bot_passport_repair_service import (
+    DefaultBotPassportRepairServiceProtocol,
+)
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.core.bot_collaborator.interceptor import (
     CollaboratorPermissionInterceptor,
@@ -42,6 +45,9 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     DeviceLimitError,
     generate_bot_id,
     validate_bot_name,
+)
+from agentclaw.community.core.bot_management.errors import (
+    DefaultBotPassportRepairError,
 )
 from agentclaw.community.core.bot_management.utils import (
     clear_baas_publish_failure_ext as _clear_baas_publish_failure_ext,
@@ -161,6 +167,23 @@ class UpdateBotExtForOthersRequest(BaseModel):
     target_user_id: str
     target_bot_id: str
     ext_update: dict
+
+
+class RepairDefaultPassportForOthersRequest(BaseModel):
+    """Strict operations request; the bot ID is intentionally fixed in core."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_user_id: str
+    target_env: Literal["pre", "prod"]
+
+    @field_validator("target_user_id")
+    @classmethod
+    def validate_target_user_id(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("target_user_id must not be blank")
+        return trimmed
 
 
 @router.post("/release-for-others", response_model=ApiResponse)
@@ -471,6 +494,112 @@ async def restart_scheduler(
         return ApiResponse(
             success=False,
             message=f"重启Bot失败: {str(e)}",
+            error_code=500,
+            data=None,
+        )
+
+
+@router.post(
+    "/repair-default-passport-for-others",
+    response_model=ApiResponse,
+)
+async def repair_default_passport_for_others(
+    request: Request,
+    ctx: RequestContext = Depends(get_request_context),
+    repair_service: DefaultBotPassportRepairServiceProtocol = Injected(
+        DefaultBotPassportRepairServiceProtocol
+    ),
+) -> ApiResponse:
+    """Repair and verify control-plane identity for one default bot."""
+    if ctx.user_id not in super_admin():
+        return ApiResponse(
+            success=False,
+            message="权限不足：您没有权限调用此接口",
+            error_code=403,
+            data=None,
+        )
+
+    try:
+        payload = RepairDefaultPassportForOthersRequest.model_validate(
+            await request.json()
+        )
+    except (ValidationError, ValueError, TypeError):
+        return ApiResponse(
+            success=False,
+            message="参数错误：target_user_id 必填，target_env 仅支持 pre 或 prod",
+            error_code=400,
+            data=None,
+        )
+
+    request_id = request.headers.get("X-Request-ID")
+    trace_id = getattr(request.state, "trace_id", None)
+    logger.info(
+        "[bot_router.repair_default_passport_for_others] start "
+        "request_id=%s trace_id=%s operator=%s target=%s env=%s bot_id=default",
+        request_id,
+        trace_id,
+        ctx.user_id,
+        payload.target_user_id,
+        payload.target_env,
+    )
+    try:
+        result = repair_service.repair(
+            target_user_id=payload.target_user_id,
+            target_env=payload.target_env,
+            operator_user_id=ctx.user_id,
+            operator_name=ctx.nick_name or ctx.user_id,
+        )
+        logger.info(
+            "[bot_router.repair_default_passport_for_others] complete "
+            "request_id=%s trace_id=%s operator=%s target=%s env=%s "
+            "bot_id=default action=%s passport_source=%s "
+            "owner_relationship_verified=%s ext_agent_code_verified=%s",
+            request_id,
+            trace_id,
+            ctx.user_id,
+            payload.target_user_id,
+            payload.target_env,
+            result.get("action"),
+            (result.get("passport") or {}).get("source"),
+            (result.get("owner_relationship") or {}).get("verified"),
+            (result.get("database") or {}).get("ext_agent_code_verified"),
+        )
+        return ApiResponse(
+            success=True,
+            message="default bot Passport 修复并校验成功，需在目标环境重启",
+            data=result,
+        )
+    except DefaultBotPassportRepairError as exc:
+        logger.warning(
+            "[bot_router.repair_default_passport_for_others] request_id=%s "
+            "trace_id=%s operator=%s target=%s env=%s error_code=%s error=%s",
+            request_id,
+            trace_id,
+            ctx.user_id,
+            payload.target_user_id,
+            payload.target_env,
+            exc.error_code,
+            exc,
+        )
+        return ApiResponse(
+            success=False,
+            message=str(exc),
+            error_code=exc.error_code,
+            data=None,
+        )
+    except Exception:
+        logger.exception(
+            "[bot_router.repair_default_passport_for_others] unexpected failure: "
+            "request_id=%s trace_id=%s operator=%s target=%s env=%s",
+            request_id,
+            trace_id,
+            ctx.user_id,
+            payload.target_user_id,
+            payload.target_env,
+        )
+        return ApiResponse(
+            success=False,
+            message="default bot Passport 修复失败",
             error_code=500,
             data=None,
         )

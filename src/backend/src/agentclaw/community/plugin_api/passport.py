@@ -17,6 +17,12 @@ class PassportError(Exception):
     pass
 
 
+def validate_passport_target_env(target_env: str | None) -> None:
+    """Validate an explicitly selected Passport environment."""
+    if target_env is not None and target_env not in {"pre", "prod"}:
+        raise ValueError("target_env must be 'pre' or 'prod'")
+
+
 @dataclass
 class SubResourceItem:
     """Neutral second-level resource item for :meth:`PassportPlugin.save_sub_resources`.
@@ -124,6 +130,8 @@ class PassportPlugin(Plugin, Protocol):
         workspace_path: str | None = None,
         admins: list[str] | None = None,
         cli_items: list[CliItem] | None = None,
+        *,
+        target_env: str | None = None,
     ) -> dict[str, Any] | None:
         """Apply for an agent passport (first time)."""
         ...
@@ -150,15 +158,33 @@ class PassportPlugin(Plugin, Protocol):
         """Destroy the passport for a bot."""
         ...
 
-    def query_auth_status(self, bot_id: str, owner_workno: str) -> dict[str, Any] | None:
+    def query_auth_status(
+        self,
+        bot_id: str,
+        owner_workno: str,
+        *,
+        target_env: str | None = None,
+    ) -> dict[str, Any] | None:
         """Query the current passport auth status."""
         ...
 
-    def query_token(self, bot_id: str, owner_workno: str) -> str | None:
+    def query_token(
+        self,
+        bot_id: str,
+        owner_workno: str,
+        *,
+        target_env: str | None = None,
+    ) -> str | None:
         """Query the current passport token."""
         ...
 
-    def query_agent_passport(self, bot_id: str, owner_workno: str) -> dict[str, Any] | None:
+    def query_agent_passport(
+        self,
+        bot_id: str,
+        owner_workno: str,
+        *,
+        target_env: str | None = None,
+    ) -> dict[str, Any] | None:
         """Query the full agent passport details."""
         ...
 

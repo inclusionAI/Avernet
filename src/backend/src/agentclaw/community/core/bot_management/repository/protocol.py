@@ -25,6 +25,23 @@ class BotRepository(Protocol):
         """Get bot by bot_id and owner_id."""
         ...
 
+    def get_live_by_id_owner_and_env(
+        self, *, bot_id: str, owner_id: str, env: str
+    ) -> list[dict[str, Any]]:
+        """Get all live exact matches in an explicitly selected environment."""
+        ...
+
+    def update_ext_by_id_owner_and_env(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        env: str,
+        ext: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Update ``ext`` only when exactly one live explicit-env row matches."""
+        ...
+
     def get_by_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
         """Get bot by bot_id only (no owner check).
 
