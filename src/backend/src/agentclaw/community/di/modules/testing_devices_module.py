@@ -53,6 +53,8 @@ from agentclaw.community.core.devices.services.device_service import (
     DeviceService,
 )
 from agentclaw.community.core.devices.services.device_service_router import DeviceServiceRouter
+from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
+from agentclaw.community.core.devices.services.local_device_accessor import LocalDeviceAccessor
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.notify.protocol import NotifyBotLister
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
@@ -90,6 +92,8 @@ class TestingDevicesModule(Module):
             to=NoopDeviceConnectionManagerPlugin,
             scope=singleton,
         )
+        binder.bind(LocalDeviceAccessor, to=LocalDeviceAccessor, scope=singleton)
+        binder.bind(DeviceAccessor, to=LocalDeviceAccessor, scope=singleton)
         # The device-filesystem resolver is now a neutral ``core`` binding in the
         # base ``DevicesModule`` (B9); the per-provider filesystems are driven by
         # test doubles / real-HTTP seams via the injected deps. No binding here.
