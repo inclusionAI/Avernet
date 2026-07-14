@@ -15,7 +15,8 @@ use bcs_channel_api::{
 use bcs_domain::{
     ActorKind, BindingStatus, BindingTarget, ChannelBinding, ConversationSessionMap,
     Group, GroupChatScope, GroupStrategy, ImParticipantMap, Participant, ParticipantMode,
-    ParticipantRole, Session, SessionKind, SessionScope, SessionStatus, Visibility,
+    ParticipantRole, Session, SessionKind, SessionScope, SessionStatus, SystemMessageEvent,
+    Visibility,
 };
 use bcs_service_api::application::channel::{
     ChannelInboundError, ChannelInboundFailureKind, ChannelService, ChannelUseCaseError,
@@ -34,7 +35,7 @@ use bcs_service_api::port::repo::{
 };
 use bcs_service_api::{
     BotRegistryCoreService, ChannelOutboundEventKind, CollaborationRuntimeService,
-    GroupCoreService, MessageFlowService, ServiceError,
+    GroupCoreService, MessageFlowService, ServiceError, SystemMessageService,
 };
 
 pub use visibility::visibility_allows;
@@ -50,6 +51,7 @@ pub struct BcsChannelService {
     im_participants: Arc<dyn ImParticipantRepoPort>,
     sessions: Arc<dyn SessionRepoPort>,
     message_flow: Arc<dyn MessageFlowService>,
+    system_message: Arc<dyn SystemMessageService>,
     collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
     groups: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
@@ -79,6 +81,7 @@ impl BcsChannelService {
         im_participants: Arc<dyn ImParticipantRepoPort>,
         sessions: Arc<dyn SessionRepoPort>,
         message_flow: Arc<dyn MessageFlowService>,
+        system_message: Arc<dyn SystemMessageService>,
         collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
         groups: Arc<dyn GroupCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
@@ -94,6 +97,7 @@ impl BcsChannelService {
             im_participants,
             sessions,
             message_flow,
+            system_message,
             collaboration_runtime,
             groups,
             registry,
@@ -314,6 +318,43 @@ impl BcsChannelService {
                 },
             )
             .await?;
+        if ctx.context_projection == "group" {
+            let reason = group
+                .label
+                .clone()
+                .unwrap_or_else(|| "协作任务".to_string());
+            match self
+                .system_message
+                .notify(
+                    &ctx.group_id,
+                    SystemMessageEvent::SessionContext {
+                        group_id: ctx.group_id.clone(),
+                        session_id: session.id.clone(),
+                        reason,
+                        session_input: session.input.clone(),
+                        task_ledger: None,
+                    },
+                    &session.id,
+                    &session.participants,
+                )
+                .await
+            {
+                Ok(recipient_count) => info!(
+                    binding_id = %ctx.binding_id,
+                    group_id = %ctx.group_id,
+                    bcs_session_id = %session.id,
+                    recipient_count,
+                    "channel inbound: initial group context injected"
+                ),
+                Err(error) => warn!(
+                    binding_id = %ctx.binding_id,
+                    group_id = %ctx.group_id,
+                    bcs_session_id = %session.id,
+                    error = %error,
+                    "channel inbound: initial group context injection failed"
+                ),
+            }
+        }
         Ok(session.id)
     }
 
@@ -1195,7 +1236,8 @@ mod tests {
         ActorKind, BindingStatus, BindingTarget, BotCapabilities, BotDynamicStatus,
         ChannelBinding, ChannelConfig, ChannelType, Group, GroupChatScope, Participant,
         ParticipantMode, ParticipantRole, RegisteredBot, Session, SessionKind, SessionScope,
-        SessionStatus, Skill, StateMachineRun, StateMachineRunStatus, Visibility,
+        SessionStatus, Skill, StateMachineRun, StateMachineRunStatus, SystemMessageEvent,
+        Visibility,
     };
     use bcs_service_api::lifecycle::ServiceLifecycle;
     use bcs_service_api::application::channel::{
@@ -1219,7 +1261,7 @@ mod tests {
         AgentCredentials, BotDeliveryTarget, BotRegistryCoreService, EnsureHumanResult,
         GroupCoreService, ServiceError, ServiceResult,
     };
-    use bcs_service_api::CollaborationRuntimeService;
+    use bcs_service_api::{CollaborationRuntimeService, SystemMessageService};
     use bcs_service_api::port::channel_delivery::{
         ChannelBindingRef, ChannelDeliveryPort, ChannelDeliveryResult, ChannelOutboundEvent,
         ChannelOutboundEventKind, ChannelRenderHint,
@@ -1411,6 +1453,41 @@ mod tests {
         (output, logs)
     }
 
+    #[derive(Clone)]
+    struct RecordedSystemMessageNotification {
+        group_id: String,
+        event: SystemMessageEvent,
+        session_id: String,
+        participants: Vec<Participant>,
+    }
+
+    #[derive(Default)]
+    struct RecordingSystemMessage {
+        notifications: Mutex<Vec<RecordedSystemMessageNotification>>,
+    }
+
+    #[async_trait]
+    impl SystemMessageService for RecordingSystemMessage {
+        async fn notify(
+            &self,
+            group_id: &str,
+            event: SystemMessageEvent,
+            session_id: &str,
+            session_participants: &[Participant],
+        ) -> ServiceResult<usize> {
+            self.notifications
+                .lock()
+                .await
+                .push(RecordedSystemMessageNotification {
+                    group_id: group_id.to_string(),
+                    event,
+                    session_id: session_id.to_string(),
+                    participants: session_participants.to_vec(),
+                });
+            Ok(session_participants.len())
+        }
+    }
+
     struct TestHarness {
         service: BcsChannelService,
         binding_repo: Arc<MemoryChannelBindingRepo>,
@@ -1419,6 +1496,7 @@ mod tests {
         session_repo: Arc<RecordingSessionRepo>,
         registry: Arc<RecordingRegistry>,
         message_flow: Arc<RecordingMessageFlow>,
+        system_message: Arc<RecordingSystemMessage>,
         provider: Arc<RecordingProvider>,
         delivery: Arc<RecordingDelivery>,
         collaboration_runtime: Arc<RecordingCollaborationRuntime>,
@@ -1463,6 +1541,7 @@ mod tests {
             groups.upsert(group).await?;
             let registry = Arc::new(RecordingRegistry::default());
             let message_flow = Arc::new(RecordingMessageFlow::default());
+            let system_message = Arc::new(RecordingSystemMessage::default());
             let delivery = Arc::new(RecordingDelivery::default());
             let provider = Arc::new(RecordingProvider::new(delivery.clone()));
             let providers = Arc::new(
@@ -1476,6 +1555,7 @@ mod tests {
                 participant_repo.clone(),
                 session_repo.clone(),
                 message_flow.clone(),
+                system_message.clone(),
                 collaboration_runtime.clone(),
                 groups,
                 registry.clone(),
@@ -1493,6 +1573,7 @@ mod tests {
                 session_repo,
                 registry,
                 message_flow,
+                system_message,
                 provider,
                 delivery,
                 collaboration_runtime,
@@ -1508,6 +1589,7 @@ mod tests {
             groups.upsert(group).await?;
             let registry = Arc::new(RecordingRegistry::default());
             let message_flow = Arc::new(RecordingMessageFlow::default());
+            let system_message = Arc::new(RecordingSystemMessage::default());
             let delivery = Arc::new(RecordingDelivery::default());
             let provider = Arc::new(RecordingProvider::new(delivery.clone()));
             let providers = Arc::new(
@@ -1521,6 +1603,7 @@ mod tests {
                 participant_repo.clone(),
                 session_repo.clone(),
                 message_flow.clone(),
+                system_message.clone(),
                 collaboration_runtime.clone(),
                 groups,
                 registry.clone(),
@@ -1538,6 +1621,7 @@ mod tests {
                 session_repo,
                 registry,
                 message_flow,
+                system_message,
                 provider,
                 delivery,
                 collaboration_runtime,
@@ -1563,6 +1647,7 @@ mod tests {
             im_participants,
             sessions,
             message_flow,
+            Arc::new(RecordingSystemMessage::default()),
             Arc::new(RecordingCollaborationRuntime::default()),
             groups,
             registry,
@@ -2585,6 +2670,88 @@ mod tests {
             attachments[0]["url"],
             "https://download.example.com/image?token=temporary"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn inbound_group_target_injects_initial_context_once_for_new_session() -> TestResult {
+        let mut group = manager_group("group_1");
+        group.label = Some("跨团队协作".to_string());
+        group.context = Some("发布前完成风险检查".to_string());
+        let harness = TestHarness::new(group).await?;
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+
+        harness
+            .service
+            .handle_inbound(inbound("conv_1", "u1", Some("张三"), "msg_1"))
+            .await?;
+        harness
+            .service
+            .handle_inbound(inbound("conv_1", "u1", Some("张三"), "msg_2"))
+            .await?;
+
+        let notifications = harness.system_message.notifications.lock().await;
+        assert_eq!(notifications.len(), 1);
+        let notification = &notifications[0];
+        assert_eq!(notification.group_id, "group_1");
+        assert_eq!(notification.session_id, "group_1:00000001");
+        assert_eq!(notification.participants.len(), 2);
+        assert!(notification.participants.iter().all(Participant::is_bot));
+        let SystemMessageEvent::SessionContext {
+            group_id,
+            session_id,
+            reason,
+            session_input,
+            task_ledger,
+        } = &notification.event
+        else {
+            return Err("expected session context notification".into());
+        };
+        assert_eq!(group_id, "group_1");
+        assert_eq!(session_id, &notification.session_id);
+        assert_eq!(reason, "跨团队协作");
+        assert_eq!(session_input, &None);
+        assert_eq!(task_ledger, &None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn inbound_bot_target_does_not_inject_initial_group_context() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "binding_bot",
+                "robot_1",
+                BindingTarget::Bot {
+                    bot_id: "target_bot".to_string(),
+                },
+                Visibility::FullTranscript,
+            ))
+            .await?;
+
+        harness
+            .service
+            .handle_inbound(inbound("conv_1", "u1", Some("张三"), "msg_1"))
+            .await?;
+
+        assert!(harness.system_message.notifications.lock().await.is_empty());
+
         Ok(())
     }
 
