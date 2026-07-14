@@ -13,6 +13,7 @@ from agentclaw.community.adapters.http.dependencies import RequestContext, get_r
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotService,
     BotServiceError,
+    BotInvalidLifecycleStateError,
     BotNotFoundError,
     DeviceAllocationError,
     BotNameExistsError,
@@ -762,6 +763,34 @@ class TestRestartBot:
         resp = tc.post("/api/bots/default/restart")
         assert resp.json()["error_code"] == 500
 
+    def test_recycled_bot_returns_conflict(self, client):
+        tc, svc, _ = client
+        svc.restart_bot.side_effect = BotInvalidLifecycleStateError(
+            bot_id="default",
+            current_status="RECYCLED",
+        )
+
+        resp = tc.post("/api/bots/default/restart")
+
+        assert resp.status_code == 409
+        assert resp.json()["success"] is False
+        assert resp.json()["error_code"] == 409
+
+    def test_activation_in_progress_returns_accepted(self, client):
+        tc, svc, _ = client
+        svc.restart_bot.return_value = {
+            **BOT_SAMPLE,
+            "status": "REACTIVATING",
+            "restart_in_progress": True,
+            "message": "Bot activation is in progress",
+        }
+
+        resp = tc.post("/api/bots/default/restart")
+
+        assert resp.status_code == 202
+        assert resp.json()["success"] is True
+        assert resp.json()["data"]["restart_in_progress"] is True
+
 
 # ---------------------------------------------------------------------------
 # POST /api/bots/switch-engine
@@ -819,6 +848,37 @@ class TestRestartScheduler:
         svc.restart_bot.side_effect = BotServiceError("fail")
         resp = tc.post("/api/bots/restart-scheduler", json={"user_id": "test_user", "bot_id": "default"})
         assert resp.json()["error_code"] == 500
+
+    def test_recycled_bot_returns_conflict(self, client):
+        tc, svc, _ = client
+        svc.restart_bot.side_effect = BotInvalidLifecycleStateError(
+            bot_id="default",
+            current_status="RECYCLED",
+        )
+
+        resp = tc.post(
+            "/api/bots/restart-scheduler",
+            json={"user_id": "test_user", "bot_id": "default"},
+        )
+
+        assert resp.status_code == 409
+        assert resp.json()["error_code"] == 409
+
+    def test_activation_in_progress_returns_accepted(self, client):
+        tc, svc, _ = client
+        svc.restart_bot.return_value = {
+            **BOT_SAMPLE,
+            "status": "PENDING",
+            "restart_in_progress": True,
+        }
+
+        resp = tc.post(
+            "/api/bots/restart-scheduler",
+            json={"user_id": "test_user", "bot_id": "default"},
+        )
+
+        assert resp.status_code == 202
+        assert resp.json()["success"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -884,6 +944,37 @@ class TestRestartForOthers:
         svc.restart_bot.side_effect = BotNotFoundError("nope")
         resp = tc.post("/api/bots/restart-for-others", json={"target_user_id": "u1", "target_bot_id": "missing"})
         assert resp.json()["error_code"] == 404
+
+    def test_recycled_bot_returns_conflict(self, admin_client):
+        tc, svc, _, _ = admin_client
+        svc.restart_bot.side_effect = BotInvalidLifecycleStateError(
+            bot_id="default",
+            current_status="RECYCLED",
+        )
+
+        resp = tc.post(
+            "/api/bots/restart-for-others",
+            json={"target_user_id": "u1", "target_bot_id": "default"},
+        )
+
+        assert resp.status_code == 409
+        assert resp.json()["error_code"] == 409
+
+    def test_activation_in_progress_returns_accepted(self, admin_client):
+        tc, svc, _, _ = admin_client
+        svc.restart_bot.return_value = {
+            **BOT_SAMPLE,
+            "status": "REACTIVATING",
+            "restart_in_progress": True,
+        }
+
+        resp = tc.post(
+            "/api/bots/restart-for-others",
+            json={"target_user_id": "u1", "target_bot_id": "default"},
+        )
+
+        assert resp.status_code == 202
+        assert resp.json()["success"] is True
 
 
 # ---------------------------------------------------------------------------

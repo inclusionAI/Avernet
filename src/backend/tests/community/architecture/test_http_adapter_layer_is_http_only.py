@@ -124,7 +124,7 @@ _CORE_SERVICE_MODULE_EXEMPT_SUFFIX: tuple[str, ...] = (
 _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     # Errors raised by services that the router translates to HTTP:
     "FileTooLargeError",
-    "BotServiceError", "BotNotFoundError", "BotPermissionError",
+    "BotServiceError", "BotInvalidLifecycleStateError", "BotNotFoundError", "BotPermissionError",
     "BotLimitExceededError", "BotNameExistsError", "BotNameInvalidError",
     "DeviceAllocationError", "DeviceLimitError",
     # Multi-instance entry-resolution errors raised by DeviceServiceRouter and
