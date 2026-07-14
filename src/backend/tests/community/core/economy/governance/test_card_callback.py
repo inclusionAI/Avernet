@@ -154,6 +154,39 @@ class TestCardCallbackResolve:
         assert row.response_source == "card_callback"
         assert row.governance_status == "waiting_review"
 
+    def test_minimal_card_payload_roundtrip(self, session, engine):
+        """Card sends {items:[...]} + top-level remark (补充说明); server enriches v2.
+
+        Mirrors card_cb190863 handleSubmit after cleanup: feedback_payload carries
+        only items[]; overall remark rides as top-level `remark`; no overall_action /
+        overall_remark. Server must persist a self-contained v2 payload with the
+        remark preserved in overall.remark.
+        """
+        svc = _build_svc(engine)
+        _make_notification(session)
+
+        result = svc.resolve(
+            "n-001", "optimized", "user-1",
+            remark="补充说明文字",
+            feedback_payload={"items": [
+                {"index": 1, "action": "accepted", "remark": None},
+                {"index": 2, "action": "rejected", "remark": "不行"},
+            ]},
+            source="card_callback",
+        )
+        assert result.success
+
+        row = session.query(GovernanceTicketOrm).filter_by(ticket_id="t-n-001").one()
+        stored = json.loads(row.feedback_payload)
+        assert stored["feedback_schema_version"] == 2
+        assert stored["overall"]["decision"] == "accepted"
+        # 补充说明随顶层 remark 进入 overall.remark(不丢)
+        assert stored["overall"]["remark"] == "补充说明文字"
+        items = {it["index"]: it for it in stored["items"]}
+        assert items[1]["decision"] == "accepted"
+        assert items[2]["decision"] == "rejected"
+        assert items[2]["remark"] == "不行"
+
     def test_dispute_with_remark_writes_to_db(self, session, engine):
         """response=dispute + remark → closed in DB."""
         svc = _build_svc(engine)
@@ -200,7 +233,7 @@ class TestCardCallbackResolve:
         assert result.close_reason is None
 
     def test_feedback_payload_writes_to_db(self, session, engine):
-        """feedback_payload written as JSON string in DB."""
+        """feedback_payload enriched to self-contained v2 and written as JSON."""
         svc = _build_svc(engine)
         _make_notification(session)
 
@@ -221,7 +254,19 @@ class TestCardCallbackResolve:
 
         row = session.query(GovernanceTicketOrm).filter_by(ticket_id="t-n-001").one()
         stored = json.loads(row.feedback_payload)
-        assert stored["overall_action"] == "partial"
+        # v2 self-contained structure (server-enriched, not the raw input)
+        assert stored["feedback_schema_version"] == 2
+        assert stored["ticket_ref"]["notification_id"] == "n-001"
+        assert stored["ticket_ref"]["worker_id"] == "user-1:bot-1"
+        # raw_response preserved + normalized overall decision
+        assert stored["overall"]["raw_response"] == "optimized"
+        assert stored["overall"]["decision"] == "accepted"
+        # user per-item decisions preserved (no suggestion full set → fallback)
+        items = {it["index"]: it for it in stored["items"]}
+        assert items[1]["decision"] == "accepted"
+        assert items[2]["decision"] == "rejected"
+        assert items[2]["remark"] == "Need this"
+        assert stored["meta"]["response_source"] == "card_callback"
 
 
 # ── Error paths ──────────────────────────────────────────────────

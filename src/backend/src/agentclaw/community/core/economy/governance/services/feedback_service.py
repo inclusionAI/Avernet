@@ -59,6 +59,255 @@ _RESPONSE_TRANSITION_MAP: dict[str, tuple[str, str]] = {
     # need_time → scheduled, handled separately
 }
 
+# ── v2 feedback_payload 归一化 ─────────────────────────────────────
+# 卡片顶层 raw `response` → 归一化 `overall.decision`(对齐下游 ETL 枚举)。
+# 逐项决策直接采用卡片 items[].action,未出现 index 视为 `unevaluated`。
+_NORMALIZED_OVERALL_DECISION: dict[str, str] = {
+    Response.OPTIMIZED.value: "accepted",
+    Response.NEED_TIME.value: "deferred",
+    Response.DISPUTE.value: "rejected",
+    Response.WHITELIST.value: "whitelist",
+}
+
+# 归一化顶层决策中需要 remark 的取值(dispute/whitelist → rejected/whitelist)。
+_REMARK_REQUIRED_RAW = {Response.DISPUTE.value, Response.WHITELIST.value}
+
+# 卡片逐项 action → 归一化 item.decision(verbatim;卡片仅 accepted/partial/rejected)。
+_ITEM_ACTIONS = {"accepted", "partial", "rejected"}
+_UNEVALUATED = "unevaluated"
+
+
+def _normalize_response(raw_response: str) -> str:
+    """把卡片顶层 raw `response` 归一化为 `overall.decision` 枚举。
+
+    Args:
+        raw_response: 卡片回传的原始 response(optimized/need_time/dispute/whitelist)。
+
+    Returns:
+        归一化决策: accepted | deferred | rejected | whitelist。
+
+    Raises:
+        ValueError: raw_response 不在 4 个合法值内(调用方应已先行校验)。
+    """
+    normalized = _NORMALIZED_OVERALL_DECISION.get(raw_response)
+    if normalized is None:
+        raise ValueError(f"Unnormalizable response: {raw_response}")
+    return normalized
+
+
+def _compute_consistency_flag(
+    overall_decision: str,
+    item_decisions: list[str],
+) -> str:
+    """计算 overall 与逐项决策一致性标志。
+
+    Args:
+        overall_decision: 归一化顶层决策(accepted/rejected/deferred/whitelist)。
+        item_decisions: 已点评项的归一化逐项决策列表(不含未点评项)。
+
+    Returns:
+        ``consistent`` 逐项全同一且与顶层一致;
+        ``partial_mix`` 顶层 accepted 但存在逐项 rejected/partial;
+        ``overall_dominates`` 无任何逐项反馈(全 unevaluated)。
+    """
+    if not item_decisions:
+        return "overall_dominates"
+    unique = set(item_decisions)
+    if len(unique) == 1 and next(iter(unique)) == overall_decision:
+        return "consistent"
+    if overall_decision == "accepted" and (unique & {"rejected", "partial"}):
+        return "partial_mix"
+    return "consistent"
+
+
+# ── v2 feedback_payload enrich(自包含) ─────────────────────────────
+_FEEDBACK_SCHEMA_VERSION = 2
+
+
+def _coerce_payload_input(payload: Any) -> dict[str, Any]:
+    """把卡片回传的 feedback_payload(Pydantic 模型或 dict)归一为 dict。
+
+    Args:
+        payload: ``CardCallbackFeedbackPayload`` 模型 / dict / None。
+
+    Returns:
+        dict;None 输入返回空 dict。
+    """
+    if payload is None:
+        return {}
+    if isinstance(payload, dict):
+        return payload
+    # Pydantic v2 模型
+    dump = getattr(payload, "model_dump", None)
+    if callable(dump):
+        return dump(exclude_none=False)
+    return dict(payload)  # 兜底
+
+
+def _parse_notification_structured(raw: str | None) -> dict[str, Any] | None:
+    """解析 ticket.notification_structured JSON;失败/空返回 None(降级用)。"""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _hit_dimensions_list(ticket: Any) -> list[str]:
+    """ticket.triggered_dimensions(逗号分隔串)→ 去空 list。"""
+    raw = ticket.triggered_dimensions
+    if not raw:
+        return []
+    return [d.strip() for d in str(raw).split(",") if d.strip()]
+
+
+def _build_enriched_items(
+    structured: dict[str, Any] | None,
+    user_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """构建逐项反馈(含建议项正文快照),未点评项标 unevaluated。
+
+    以 ``notification_structured.action_items`` 为建议全集(确保 index 对齐)，
+    按 index 合并用户决策。structured 解析失败时退回用户提供的 items。
+
+    Args:
+        structured: 解析后的 notification_structured dict(可能 None)。
+        user_items: 用户回传的逐项决策 list[{index,action,remark}]。
+
+    Returns:
+        items[]: 每项含 index/decision/suggestion_action/正文快照/remark。
+    """
+    user_by_index: dict[int, dict[str, Any]] = {}
+    for it in user_items:
+        idx = it.get("index")
+        if isinstance(idx, int):
+            user_by_index[idx] = it
+
+    raw_suggestions = (
+        structured.get("action_items") or structured.get("optimizationSuggestions") or []
+        if structured
+        else []
+    )
+
+    if not raw_suggestions:
+        # 降级:无建议全集,仅输出用户点评项
+        return [
+            {
+                "index": it.get("index"),
+                "decision": it.get("action") if it.get("action") in _ITEM_ACTIONS else _UNEVALUATED,
+                "suggestion_action": None,
+                "what_to_change": None,
+                "why": None,
+                "expected_effect": None,
+                "remark": it.get("remark"),
+            }
+            for it in user_items
+            if isinstance(it.get("index"), int)
+        ]
+
+    result: list[dict[str, Any]] = []
+    for idx, sug in enumerate(raw_suggestions, start=1):
+        index = sug.get("index") if isinstance(sug.get("index"), int) else idx
+        user_it = user_by_index.get(index)
+        action = user_it.get("action") if user_it else None
+        decision = action if action in _ITEM_ACTIONS else _UNEVALUATED
+        result.append({
+            "index": index,
+            "decision": decision,
+            "suggestion_action": sug.get("action") or sug.get("title"),
+            "what_to_change": sug.get("what_to_change") or sug.get("description"),
+            "why": sug.get("why"),
+            "expected_effect": sug.get("expected_effect"),
+            "remark": user_it.get("remark") if user_it else None,
+        })
+    return result
+
+
+def _build_enriched_payload(
+    *,
+    ticket: Any,
+    notification_id: str,
+    raw_response: str,
+    remark: str | None,
+    repair_deadline: datetime | None,
+    feedback_payload: Any,
+    source: str,
+    actor_id: str | None,
+    now: datetime,
+) -> dict[str, Any]:
+    """从 ticket + 回传输入构建自包含 v2 feedback_payload dict。
+
+    输入仅取用户能提供的(整体决策/备注/截止日/逐项决策);``ticket_ref``/
+    ``analysis_snapshot``/建议项正文快照均由服务端注入,不可被前端伪造。
+    notification_structured 解析失败时降级,绝不丢弃用户决策。
+
+    Args:
+        ticket: 已加载的 GovernanceTicket(自带 worker_id/dt_version 等)。
+        notification_id: 通知唯一 ID。
+        raw_response: 卡片原始 response(optimized/need_time/dispute/whitelist)。
+        remark: 用户整体备注。
+        repair_deadline: need_time 截止日。
+        feedback_payload: 卡片结构化输入(模型/dict/None)。
+        source: 反馈来源(card_callback/http_api/admin_api)。
+        actor_id: 实际操作人。
+        now: 提交时刻。
+
+    Returns:
+        v2 自包含 payload dict,调用方 json.dumps 后写库。
+    """
+    overall_decision = _normalize_response(raw_response)
+    payload_in = _coerce_payload_input(feedback_payload)
+    user_items_raw = payload_in.get("items") or []
+    user_items = [it for it in user_items_raw if isinstance(it, dict)]
+
+    structured = _parse_notification_structured(ticket.notification_structured)
+    items = _build_enriched_items(structured, user_items)
+
+    item_decisions = [it["decision"] for it in items if it["decision"] != _UNEVALUATED]
+    consistency_flag = _compute_consistency_flag(overall_decision, item_decisions)
+
+    deferred_until = (
+        repair_deadline.isoformat() if raw_response == Response.NEED_TIME.value and repair_deadline else None
+    )
+
+    meta_block = structured.get("meta") if structured and isinstance(structured.get("meta"), dict) else {}
+
+    return {
+        "feedback_schema_version": _FEEDBACK_SCHEMA_VERSION,
+        "ticket_ref": {
+            "notification_id": notification_id,
+            "worker_id": ticket.worker_id,
+            "dt_version": ticket.dt_version,
+            "ticket_id": ticket.ticket_id,
+        },
+        "analysis_snapshot": {
+            "hit_dimensions": _hit_dimensions_list(ticket),
+            "hit_dimensions_count": ticket.hit_dimensions_count,
+            "governance_action": meta_block.get("governance_action"),
+            "governance_urgency": ticket.severity,
+            "governance_decision": ticket.initial_decision,
+            "expected_token_saving": ticket.estimated_saving_tokens,
+            "saving_ratio": ticket.saving_ratio,
+            "suggestion_count": len(items),
+        },
+        "overall": {
+            "decision": overall_decision,
+            "raw_response": raw_response,
+            "remark": remark,
+            "deferred_until": deferred_until,
+            "consistency_flag": consistency_flag,
+        },
+        "items": items,
+        "meta": {
+            "response_source": source,
+            "submitted_at": now.isoformat(),
+            "staff_id": actor_id,
+            "actor_id": actor_id,
+        },
+    }
+
 
 @dataclass
 class ResolveResult:
@@ -271,19 +520,31 @@ class GovernanceFeedbackService:
         else:
             target_status, review_reason = _RESPONSE_TRANSITION_MAP[response]
 
-        # Validate feedback_payload
+        # Build self-contained v2 feedback_payload (enrich on server side).
+        # Enrichment reads ticket.notification_structured; degrades gracefully,
+        # so an Invalid-feedback_payload error only fires on serialization.
         feedback_payload_json: str | None = None
-        if feedback_payload is not None:
-            try:
-                json.dumps(feedback_payload)
-                feedback_payload_json = json.dumps(feedback_payload)
-            except (TypeError, ValueError):
-                return ResolveResult(
-                    success=False,
-                    error="Invalid feedback_payload JSON",
-                    error_code="INVALID_FEEDBACK_PAYLOAD",
-                    notification_id=notification_id,
-                )
+        try:
+            enriched = _build_enriched_payload(
+                ticket=ticket,
+                notification_id=notification_id,
+                raw_response=response,
+                remark=remark,
+                repair_deadline=repair_deadline if response == Response.NEED_TIME else None,
+                feedback_payload=feedback_payload,
+                source=source,
+                actor_id=effective_actor,
+                now=now,
+            )
+            feedback_payload_json = json.dumps(enriched, ensure_ascii=False)
+        except (TypeError, ValueError) as exc:
+            log.warning("[GovernanceFeedback] enrich failed nid=%s: %s", notification_id, exc)
+            return ResolveResult(
+                success=False,
+                error="Invalid feedback_payload JSON",
+                error_code="INVALID_FEEDBACK_PAYLOAD",
+                notification_id=notification_id,
+            )
 
         # Advance ticket state via the driver service (sole driver). The
         # driver orchestrates: state transition (guard-activated) + cancel
