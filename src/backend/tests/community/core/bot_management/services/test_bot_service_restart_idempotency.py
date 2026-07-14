@@ -158,6 +158,9 @@ def _make_service(
     svc._bot_publish_repo = bot_publish_repo if bot_publish_repo is not None else MagicMock()
     svc._baas_template_resolver = baas_template_resolver
     svc._task_queue_service = task_queue_service
+    svc._drm_reader = MagicMock()
+    svc._drm_reader.read.return_value = None
+    svc._bcn_service = MagicMock()
     return svc
 
 
@@ -418,6 +421,103 @@ class TestRestartGuardOrchestration:
         baas.upgrade_bot.assert_called_once()
         assert baas.upgrade_bot.call_args.kwargs["migration_path"] is None
         publish_repo.get_by_publish_bot_id.assert_not_called()
+
+    def test_restart_baas_aicoding_personal_coding_registers_bcn_before_upgrade(self):
+        """BaaS 原地重启不经过 start_bot，也必须补齐 AI Coding 的 BCN 注册。"""
+        repo = FakeRestartLockRepo()
+        svc = _make_service(repo)
+        svc._drm_reader.read.return_value = "true"
+        svc._template_service.get_template_config.return_value = {}
+        bot = _make_bot(
+            status="ACTIVE",
+            binding_id=42,
+            bot_type="personal",
+            active_engine="aicoding",
+            template_type="personalCoding",
+        )
+        svc._repository.get_by_id_and_owner.return_value = bot
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42, device_provider="baas", device_id="BOT-uuid-9",
+        )
+        svc._device_service_provider = lambda: device_service
+        call_order: list[str] = []
+        svc._bcn_service.register_provider_bot.side_effect = lambda **_: (
+            call_order.append("bcn")
+            or {
+                "bot_uuid": "bcn-bot-1",
+                "bot_runtime_token": "token",
+            }
+        )
+        baas = MagicMock()
+        baas.upgrade_bot.side_effect = lambda **_: call_order.append("upgrade") or {}
+        svc._baas_service_provider = lambda: baas
+
+        svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        svc._bcn_service.register_provider_bot.assert_called_once_with(
+            teamclaw_bot_uuid="bot001",
+            owner_workno="user001",
+            name="TestBot",
+            summary="",
+        )
+        baas.upgrade_bot.assert_called_once()
+        assert call_order == ["bcn", "upgrade"]
+
+    def test_restart_baas_ineligible_template_does_not_register_bcn(self):
+        """applicationCoding 不在 BCN Provider 注册范围内。"""
+        repo = FakeRestartLockRepo()
+        svc = _make_service(repo)
+        svc._drm_reader.read.return_value = "true"
+        svc._template_service.get_template_config.return_value = {}
+        bot = _make_bot(
+            status="ACTIVE",
+            binding_id=42,
+            bot_type="personal",
+            active_engine="aicoding",
+            template_type="applicationCoding",
+        )
+        svc._repository.get_by_id_and_owner.return_value = bot
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42, device_provider="baas", device_id="BOT-uuid-9",
+        )
+        svc._device_service_provider = lambda: device_service
+        baas = MagicMock()
+        svc._baas_service_provider = lambda: baas
+
+        svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        svc._bcn_service.register_provider_bot.assert_not_called()
+        baas.upgrade_bot.assert_called_once()
+
+    def test_restart_baas_bcn_registration_failure_does_not_block_upgrade(self):
+        """BCN 注册失败沿用既有 best-effort 语义，不阻塞 BaaS 重启。"""
+        repo = FakeRestartLockRepo()
+        svc = _make_service(repo)
+        svc._drm_reader.read.return_value = "true"
+        svc._template_service.get_template_config.return_value = {}
+        svc._bcn_service.register_provider_bot.side_effect = RuntimeError("bcn down")
+        bot = _make_bot(
+            status="ACTIVE",
+            binding_id=42,
+            bot_type="personal",
+            active_engine="aicoding",
+            template_type="personalCoding",
+        )
+        svc._repository.get_by_id_and_owner.return_value = bot
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42, device_provider="baas", device_id="BOT-uuid-9",
+        )
+        svc._device_service_provider = lambda: device_service
+        baas = MagicMock()
+        svc._baas_service_provider = lambda: baas
+
+        svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        svc._bcn_service.register_provider_bot.assert_called_once()
+        baas.upgrade_bot.assert_called_once()
 
     def test_restart_arca_still_uses_stop_start(self):
         """arca bot 仍走 stop+start，不进 baas 原地分支。"""
