@@ -140,7 +140,7 @@ class DeviceService:
         """The binding's status for gating/listing — the stored column.
 
         Every engine (teclaw included) now reads from the stored binding status:
-        the TeclawStatusReconciler persists a teclaw container's resolved status
+        the TeclawPublishTaskHandler persists a teclaw container's resolved status
         onto the column post-provision, so there is no per-read baas probe.
         """
         return record.status

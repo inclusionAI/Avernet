@@ -1612,7 +1612,7 @@ class TestSyncBotConfigWhenDeviceActive:
 
 class TestEffectiveBindingStatusUsesStoredColumn:
     """Status gating reads the STORED binding column for every engine — the
-    teclaw read-through is gone (the TeclawStatusReconciler keeps the column
+    teclaw read-through is gone (the TeclawPublishTaskHandler keeps the column
     fresh post-provision), so the connect FAILED gate and the connectable-list
     ACTIVE filter both decide off the stored status."""
 

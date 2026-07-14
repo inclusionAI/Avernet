@@ -114,7 +114,7 @@ class TestResolveDesktopLiveStatus:
 
 class TestTeclawStatusNotMerged:
     """Teclaw status is no longer read through to baas on the list: the
-    TeclawStatusReconciler persists the resolved status onto the stored column,
+    TeclawPublishTaskHandler persists the resolved status onto the stored column,
     so the DB value passes through unchanged and baas is never consulted here."""
 
     def test_teclaw_status_passes_through_unchanged(self):

@@ -39,6 +39,7 @@ _EXPECTED_PARTICIPANTS: frozenset[str] = frozenset({
     "CronAutoSetupListener",     # Phase 2: self-subscribe to event bus
     "DesktopBotLifecycle",       # Phase 2: recover PENDING desktop bots
     "BaasPublishTaskLifecycle",  # Phase 2: register durable BaaS publish handlers
+    "TeclawPublishTaskLifecycle",  # Phase 2: register durable Teclaw publish handler
 })
 
 

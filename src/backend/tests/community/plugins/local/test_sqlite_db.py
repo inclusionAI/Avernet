@@ -28,6 +28,15 @@ class TestSqliteDBSession:
             # Each call should give a distinct session object
             assert s1 is not s2
 
+    def test_session_context_lock_is_reentrant_in_one_thread(self):
+        """A nested context without an active transaction must not deadlock."""
+        from agentclaw.community.plugins.local.database import SqliteDB
+
+        db = SqliteDB()
+        with db.session():
+            with db.orm_session():
+                pass
+
     def test_no_compat_import(self):
         """SqliteDB must NOT import from compat."""
         import inspect
