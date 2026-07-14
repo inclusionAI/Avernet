@@ -23,6 +23,7 @@ from agentclaw.community.plugin_api.passport import (
     SubResourceItem,
     extract_cli_items,
     unpack_resource_scope,
+    validate_passport_target_env,
 )
 
 
@@ -67,7 +68,10 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         workspace_path: Optional[str] = None,
         admins: Optional[list[str]] = None,
         cli_items: Optional[list[CliItem]] = None,
+        *,
+        target_env: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
+        validate_passport_target_env(target_env)
         return self._issue(bot_id)
 
     def apply_agent_passport(
@@ -92,16 +96,33 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         return None
 
     def query_auth_status(
-        self, bot_id: str, owner_workno: str
+        self,
+        bot_id: str,
+        owner_workno: str,
+        *,
+        target_env: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
+        validate_passport_target_env(target_env)
         return {"status": "ISSUED", "token": _token_for(bot_id)}
 
-    def query_token(self, bot_id: str, owner_workno: str) -> Optional[str]:
+    def query_token(
+        self,
+        bot_id: str,
+        owner_workno: str,
+        *,
+        target_env: Optional[str] = None,
+    ) -> Optional[str]:
+        validate_passport_target_env(target_env)
         return _token_for(bot_id)
 
     def query_agent_passport(
-        self, bot_id: str, owner_workno: str
+        self,
+        bot_id: str,
+        owner_workno: str,
+        *,
+        target_env: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
+        validate_passport_target_env(target_env)
         return {
             "agent_id": bot_id,
             "agent_code": bot_id,

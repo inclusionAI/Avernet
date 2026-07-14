@@ -144,7 +144,26 @@ def test_repair_missing_passport_uses_first_apply_and_verifies_control_plane():
     assert apply_kwargs["bot_id"] == "default"
     assert apply_kwargs["owner_workno"] == "172168"
     assert apply_kwargs["mcp_codes"] == ["mcp.one"]
+    assert apply_kwargs["target_env"] == "prod"
     passport.apply_agent_passport.assert_not_called()
+
+    expected_query = {
+        "bot_id": "default",
+        "owner_workno": "172168",
+        "target_env": "prod",
+    }
+    assert [call.kwargs for call in passport.query_agent_passport.call_args_list] == [
+        expected_query,
+        expected_query,
+    ]
+    assert [call.kwargs for call in passport.query_auth_status.call_args_list] == [
+        expected_query,
+        expected_query,
+    ]
+    assert [call.kwargs for call in passport.query_token.call_args_list] == [
+        expected_query,
+        expected_query,
+    ]
 
     update_kwargs = repository.update_ext_by_id_owner_and_env.call_args.kwargs
     assert update_kwargs["env"] == "prod"

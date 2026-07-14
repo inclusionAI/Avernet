@@ -106,14 +106,17 @@ class DefaultBotPassportRepairService:
             passport = self._passport_plugin.query_agent_passport(
                 bot_id="default",
                 owner_workno=target_user_id,
+                target_env=target_env,
             )
             auth_status = self._passport_plugin.query_auth_status(
                 bot_id="default",
                 owner_workno=target_user_id,
+                target_env=target_env,
             )
             token = self._passport_plugin.query_token(
                 bot_id="default",
                 owner_workno=target_user_id,
+                target_env=target_env,
             )
         except Exception as exc:
             raise DefaultBotPassportRepairError(
@@ -151,6 +154,7 @@ class DefaultBotPassportRepairService:
                     engine_type=bot.get("active_engine"),
                     access_mode="RESTRICTED",
                     workspace_path="/home/admin/.openclaw",
+                    target_env=target_env,
                 )
             except Exception as exc:
                 raise DefaultBotPassportRepairError(
@@ -165,14 +169,17 @@ class DefaultBotPassportRepairService:
                 passport = self._passport_plugin.query_agent_passport(
                     bot_id="default",
                     owner_workno=target_user_id,
+                    target_env=target_env,
                 )
                 auth_status = self._passport_plugin.query_auth_status(
                     bot_id="default",
                     owner_workno=target_user_id,
+                    target_env=target_env,
                 )
                 token = self._passport_plugin.query_token(
                     bot_id="default",
                     owner_workno=target_user_id,
+                    target_env=target_env,
                 )
             except Exception as exc:
                 raise DefaultBotPassportRepairError(
