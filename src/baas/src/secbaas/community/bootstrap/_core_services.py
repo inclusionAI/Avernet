@@ -77,8 +77,7 @@ from secbaas.community.core.service.publish_manage import (
 )
 from secbaas.community.core.service.scheduler import AppScheduler
 from secbaas.community.core.service.sse import (
-    BcnStreamConverter,
-    DefaultStreamConverter,  # noqa: F401  触发默认 SSE converter 注册
+    DefaultStreamConverter,
     SseConverterFactory,
 )
 from secbaas.community.core.service.template_manage import DefaultDeviceTemplateService
@@ -204,6 +203,11 @@ class CoreServiceContainer(containers.DeclarativeContainer):
 
     # ── Infrastructure providers ──────────────────────────────────────────────
 
+    system_config_service = providers.Singleton(
+        DefaultSystemConfigManageService,
+        repository=system_config_repo,
+    )
+
     chat_client_pool = providers.Singleton(
         AsyncChatClientPool,
         max_size=config.chat_client_pool.max_size,
@@ -212,6 +216,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         session_key_timeout=config.chat_client_pool.session_key_timeout,
         max_retries=config.chat_client_pool.max_retries,
         retry_base_backoff=config.chat_client_pool.retry_base_backoff,
+        system_config_service=system_config_service,
     )
 
     tenant_service = providers.Singleton(
@@ -445,11 +450,6 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         engine_adapter_registry=engine_adapter_registry,
     )
 
-    system_config_service = providers.Singleton(
-        DefaultSystemConfigManageService,
-        repository=system_config_repo,
-    )
-
     bot_qpm_manage_service = providers.Singleton(
         DefaultBotQpmManageService,
         repository=bot_qpm_repository,
@@ -619,8 +619,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         SseConverterFactory,
         converter_factories=providers.Dict(
             {
-                DefaultStreamConverter.name(): providers.Object(DefaultStreamConverter),
-                BcnStreamConverter.name(): providers.Object(BcnStreamConverter),
+                "default": providers.Object(DefaultStreamConverter),
             }
         ),
     )

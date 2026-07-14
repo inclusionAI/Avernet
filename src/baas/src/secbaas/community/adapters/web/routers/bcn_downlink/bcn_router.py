@@ -275,7 +275,7 @@ async def _dispatch_chat_send_stream(
     except ValueError as exc:
         raise BcnInvalidRequestError(str(exc)) from exc
 
-    converter = converter_factory.create("bcn")
+    converter = converter_factory.create("default")
 
     async def _stream() -> AsyncIterator[str]:
         try:
