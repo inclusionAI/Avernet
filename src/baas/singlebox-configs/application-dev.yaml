@@ -31,7 +31,6 @@ user_config:
       database_url: "sqlite:////tmp/secbaas_singlebox.db"
     secret: "stub"
     cache: "stub"
-    engine_adapter: "stub"
     bot_service: "local"
     engine_adapter: "stub"  # stub | real (singlebox 默认不连真实 engine)
 

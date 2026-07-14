@@ -20,7 +20,7 @@ module_config:
     port: 8888 # 修改端口需要同步修改nginx.conf内配置
     workers: 8
     threads: 8
-    start: "secbaas.adapters.web.app:app"
+    start: "secbaas.community.adapters.web.app:app"
 
 user_config:
   # 插件配置
