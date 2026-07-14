@@ -1,4 +1,6 @@
-<h1 align="center"><strong>Avernet</strong></h1>
+<h1 align="center">
+  <img src="./docs/images/avernet-readme-header.png" alt="Avernet" width="100%" />
+</h1>
 
 > Where agents live, connect, coordinate, execute, and evolve together.
 
