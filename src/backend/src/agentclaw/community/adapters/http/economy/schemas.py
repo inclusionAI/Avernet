@@ -1,6 +1,7 @@
 """Pydantic schemas for economy/governance endpoints."""
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -222,6 +223,35 @@ class ReviewTicketListResponse(BaseModel):
         )
 
 
+def _extract_feedback_notification_id(payload_json: str | None) -> str | None:
+    """从 feedback_payload JSON 解出本次反馈回执来自哪个 notification_id。
+
+    v2 自包含 payload 的 ``ticket_ref.notification_id`` 即回调触发的通知 ID
+    (写库时由服务端 enrich 从回调入参注入,不可伪造)。v1 / 解析失败 / 缺字段 → None。
+    保证反馈原子性:回执来源随反馈 payload 同行落地,零额外列、零 join。
+
+    Args:
+        payload_json: task_record.feedback_payload 列原始 JSON 字符串。
+
+    Returns:
+        notification_id 或 None。
+    """
+    if not payload_json:
+        return None
+    try:
+        payload = json.loads(payload_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    ref = payload.get("ticket_ref")
+    if isinstance(ref, dict):
+        nid = ref.get("notification_id")
+        if isinstance(nid, str) and nid:
+            return nid
+    return None
+
+
 class ReviewTicketDetailResponse(BaseModel):
     """评审工单详情 — 列表字段外加详情面板所需全部字段。"""
 
@@ -246,6 +276,7 @@ class ReviewTicketDetailResponse(BaseModel):
     response_at: str | None = None
     response_source: str | None = None
     feedback_payload: str | None = None
+    feedback_notification_id: str | None = None
     # 评审 / 生命周期
     review_reason: str | None = None
     review_decision: str | None = None
@@ -286,6 +317,7 @@ class ReviewTicketDetailResponse(BaseModel):
             response_at=_iso(ticket.feedback_at),
             response_source=ticket.feedback_source,
             feedback_payload=ticket.feedback_payload,
+            feedback_notification_id=_extract_feedback_notification_id(ticket.feedback_payload),
             review_reason=ticket.review_reason,
             review_decision=ticket.review_decision,
             reviewed_by=ticket.reviewed_by,
@@ -411,14 +443,43 @@ class RecordsDeleteRequest(BaseModel):
 # Card callback (iframe fetch POST)
 # ---------------------------------------------------------------------------
 
+class CardCallbackFeedbackItem(BaseModel):
+    """单个建议项的用户逐项决策(卡片 items[] 输入)。
+
+    仅含用户能提供的信息;建议项正文快照由服务端 enrich 注入,不在输入内。
+    """
+
+    index: int = Field(..., description="建议项序号,与分析表 action_items[].index 对齐")
+    action: str = Field(..., description="accepted / partial / rejected")
+    remark: str | None = Field(None, description="逐项备注(选填)")
+
+
+class CardCallbackFeedbackPayload(BaseModel):
+    """卡片 feedback_payload 输入结构(v1 字段集,服务端据此 enrich 成 v2 自包含 payload)。"""
+
+    version: int | None = Field(None, description="卡片自定版本号(非顶层 feedback_schema_version)")
+    overall_action: str | None = Field(None, description="整体决策(accepted/partial/rejected 等)")
+    overall_remark: str | None = Field(None, description="整体补充说明")
+    repair_deadline: str | None = Field(None, description="need_time 修复截止日期(ISO)")
+    items: list[CardCallbackFeedbackItem] | None = Field(None, description="逐项决策列表")
+
+    model_config = {"extra": "allow"}
+
+
 class CardCallbackIFrameRequest(BaseModel):
-    """Request body for card-callback iframe fetch POST."""
+    """Request body for card-callback iframe fetch POST.
+
+    ``feedback_payload`` 优先按结构化模型解析;旧卡片回传的任意 dict 仍被接受
+    (模型允许 extra 字段),逐项决策取 ``items[]``,其余兜底走 dict 访问。
+    """
 
     notification_id: str = Field(..., description="通知唯一 ID")
     response: str = Field(..., description="optimized / need_time / dispute / whitelist")
     remark: str | None = Field(None, description="用户补充说明（dispute/whitelist 时必填，其他时选填）")
     repair_deadline: str | None = Field(None, description="need_time 时必填，ISO 日期")
-    feedback_payload: dict | None = Field(None, description="结构化反馈 JSON（items 等，不含 overall_remark）")
+    feedback_payload: CardCallbackFeedbackPayload | dict | None = Field(
+        None, description="结构化反馈 JSON（items 等，不含 overall_remark）",
+    )
 
 
 class CardCallbackResponse(BaseModel):

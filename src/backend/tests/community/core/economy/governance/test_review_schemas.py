@@ -153,6 +153,8 @@ class TestReviewTicketDetailResponse:
         assert d.response_remark == "user disputed"
         assert d.response_at == "2026-07-10T08:00:00"
         assert d.feedback_payload == '{"reason": "false positive"}'
+        # v1-style payload (no ticket_ref) → no feedback_notification_id surfaced
+        assert d.feedback_notification_id is None
         # 生命周期
         assert d.review_reason == "user_disputed"
         assert d.mute_until == "2026-07-12T00:00:00"
@@ -171,6 +173,31 @@ class TestReviewTicketDetailResponse:
         assert d.close_reason is None
         assert d.reviewed_at is None
         assert d.gmt_create is None
+
+    def test_feedback_notification_id_extracted_from_v2_payload(self) -> None:
+        """v2 feedback_payload 的 ticket_ref.notification_id 透出到详情顶层。"""
+        import json as _json
+        v2 = _json.dumps({
+            "feedback_schema_version": 2,
+            "ticket_ref": {
+                "notification_id": "n-callback-xyz",
+                "worker_id": "owner-1:bot-1",
+                "dt_version": "20260710",
+                "ticket_id": "T-001",
+            },
+        })
+        t = _make_ticket(feedback_payload=v2)
+        d = ReviewTicketDetailResponse.from_ticket(t)
+        assert d.feedback_notification_id == "n-callback-xyz"
+
+    def test_feedback_notification_id_degrades_on_garbage(self) -> None:
+        """损坏 / 缺 ticket_ref / 空 payload → None,不抛。"""
+        t = _make_ticket(feedback_payload="{not json")
+        assert ReviewTicketDetailResponse.from_ticket(t).feedback_notification_id is None
+        t2 = _make_ticket(feedback_payload=None)
+        assert ReviewTicketDetailResponse.from_ticket(t2).feedback_notification_id is None
+        t3 = _make_ticket(feedback_payload='{"no_ref": true}')
+        assert ReviewTicketDetailResponse.from_ticket(t3).feedback_notification_id is None
 
 
 class TestWorkflowReviewResponse:
