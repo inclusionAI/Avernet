@@ -14,7 +14,9 @@ from pathlib import Path
 import pytest
 
 from secbaas.community.plugins.sandbox.arca.local_proc import _process_manager as pm
-from secbaas.community.plugins.sandbox.arca.local_proc import _sandbox_plugin as sandbox_plugin
+from secbaas.community.plugins.sandbox.arca.local_proc import (
+    _sandbox_plugin as sandbox_plugin,
+)
 
 
 def _repo_bcn_plugin_path() -> Path:
