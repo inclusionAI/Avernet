@@ -6,6 +6,7 @@ BAAS_DIR="$PROJECT_DIR"
 WORKSPACE_DIR="$(cd "$PROJECT_DIR/../.." && pwd)"
 REPORT_DIR="$BAAS_DIR/pytest_report"
 LOG_FILE="$BAAS_DIR/tmp/test.log"
+export COVERAGE_E2E_DIR="${COVERAGE_E2E_DIR:-$BAAS_DIR/tmp/coverage/baas-e2e}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

@@ -1361,6 +1361,7 @@ dependencies = [
 dev = [
     { name = "basedpyright" },
     { name = "black" },
+    { name = "coverage" },
     { name = "debugpy" },
     { name = "flake8" },
     { name = "httpx" },
@@ -1411,6 +1412,7 @@ requires-dist = [
 dev = [
     { name = "basedpyright", specifier = ">=1.39.8" },
     { name = "black", specifier = ">=26.1.0" },
+    { name = "coverage", specifier = ">=7.6.0" },
     { name = "debugpy", specifier = ">=1.8.0" },
     { name = "flake8", specifier = ">=7.3.0" },
     { name = "httpx", specifier = ">=0.27.0" },

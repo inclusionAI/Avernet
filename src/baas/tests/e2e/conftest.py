@@ -182,9 +182,212 @@ class APITestHelper:
 
     def params(self, **kwargs: Any) -> dict[str, Any]:
         """Build query params with tenant."""
-        params = {"tenant": self.tenant}
+        params: dict[str, Any] = {"tenant": self.tenant}
         params.update({k: v for k, v in kwargs.items() if v is not None})
         return params
+
+    # ── Bot Runtime / Dispatcher URLs ──────────────────────────────────────
+
+    def bot_http_conn_url(self, bot_uuid: str) -> str:
+        """Build bot HTTP connection info URL."""
+        return f"/api/v1/bots/{bot_uuid}/http-info"
+
+    def bot_wss_conn_url(self, bot_uuid: str) -> str:
+        """Build bot WSS connection info URL."""
+        return f"/api/v1/bots/{bot_uuid}/ws-info"
+
+    def bot_cmd_url(self, bot_uuid: str) -> str:
+        """Build bot CMD endpoint URL.
+
+        NOTE: The actual route is tenant-scoped:
+        /api/v1/bots/{tenant}/{bot_uuid}/execute-command
+
+        This builder uses a tenant-agnostic format — callers should
+        construct the full URL manually if tenant is required.
+        """
+        return f"/api/v1/bots/{self.tenant}/{bot_uuid}/execute-command"
+
+    def bot_open_folder_url(self, bot_uuid: str) -> str:
+        """Build bot open-folder endpoint URL.
+
+        NOTE: The actual route is tenant-scoped:
+        /api/v1/bots/{tenant}/{bot_uuid}/open-folder
+        """
+        return f"/api/v1/bots/{self.tenant}/{bot_uuid}/open-folder"
+
+    def bot_start_progress_url(self, bot_uuid: str) -> str:
+        """Build bot start progress URL."""
+        return f"/api/v1/bots/{bot_uuid}/start-progress"
+
+    def bot_devices_url(self, bot_uuid: str) -> str:
+        """Build bot devices list URL."""
+        return f"/api/v1/bots/{bot_uuid}/devices"
+
+    def bot_sessions_url(self, bot_uuid: str, session_id: str | None = None) -> str:
+        """Build bot sessions URL.
+
+        NOTE: No dedicated sessions sub-route exists in the OpenAPI.
+        Sessions are managed via /api/v1/sessions.
+        """
+        base = "/api/v1/sessions"
+        if session_id:
+            return f"{base}/{session_id}"
+        return base
+
+    def bot_detail_url(self, bot_uuid: str) -> str:
+        """Build bot detail-by-uuid URL."""
+        return f"{self.bot_url(bot_uuid)}/detail-by-uuid"
+
+    # ── Device / Device Binding URLs ───────────────────────────────────────
+
+    def device_url(self, device_uuid: str) -> str:
+        """Build device detail URL."""
+        return f"/api/v1/devices/{device_uuid}"
+
+    def device_binding_url(self) -> str:
+        """Build device binding query URL."""
+        return "/api/v1/device-bindings"
+
+    # ── Health Check URLs ──────────────────────────────────────────────────
+
+    def bot_health_url(self, bot_uuid: str | None = None) -> str:
+        """Build bot health check URL.
+
+        The actual route is /api/v1/bot-health-checker/health.
+        Passing bot_uuid adds it as a query param.
+        """
+        return "/api/v1/bot-health-checker/health"
+
+    def paas_health_url(self) -> str:
+        """Build PaaS health check URL.
+
+        NOTE: No dedicated PaaS health route exists. Tests that use this
+        should expect 404 or be skipped.
+        """
+        return "/api/v1/health-check/paas"
+
+    def sandbox_health_url(self) -> str:
+        """Build sandbox health check URL.
+
+        The actual route is /api/v1/bot-health-checker/sandbox.
+        """
+        return "/api/v1/bot-health-checker/sandbox"
+
+    # ── Open API URLs ──────────────────────────────────────────────────────
+
+    def open_api_message_url(self) -> str:
+        """Build open API message endpoint URL.
+
+        NOTE: No /api/v1/open/* routes exist in the main OpenAPI.
+        The stub-adapter-boot test references /openapi/v1/messages/stream.
+        """
+        return "/openapi/v1/messages"
+
+    def open_api_run_url(self) -> str:
+        """Build open API run endpoint URL.
+
+        NOTE: No /api/v1/open/* routes exist in the main OpenAPI.
+        """
+        return "/openapi/v1/runs"
+
+    def open_api_session_url(self, session_id: str | None = None) -> str:
+        """Build open API session URL.
+
+        NOTE: No /api/v1/open/* routes exist in the main OpenAPI.
+        """
+        base = "/openapi/v1/sessions"
+        if session_id:
+            return f"{base}/{session_id}"
+        return base
+
+    # ── SSE URLs ────────────────────────────────────────────────────────────
+
+    def sse_url(self, channel: str | None = None) -> str:
+        """Build SSE subscription URL.
+
+        NOTE: No /api/v1/sse route exists in OpenAPI.
+        SSE is handled via dedicated bot-health-checker routes.
+        Tests using this should be skipped or expect 404.
+        """
+        return "/api/v1/sse/events"
+
+    # ── BCN URLs ────────────────────────────────────────────────────────────
+
+    def bcn_downlink_url(self) -> str:
+        """Build BCN downlink URL.
+
+        NOTE: No /bcn/downlink route exists in OpenAPI.
+        BCN is likely served on a separate port or via a different router.
+        Tests using this should be skipped.
+        """
+        return "/api/v1/bcn/downlink"
+
+    # ── Relay Session URLs ──────────────────────────────────────────────────
+
+    def relay_session_url(self, session_id: str | None = None) -> str:
+        """Build relay session URL.
+
+        NOTE: No dedicated relay-sessions route exists in OpenAPI.
+        The closest equivalent is /api/v1/paas/devices.
+        Tests using this should be skipped.
+        """
+        return "/api/v1/relay-sessions"
+
+    # ── Config / Template / QPM / Tenant URLs ───────────────────────────────
+
+    def device_template_url(self, template_uuid: str | None = None) -> str:
+        """Build device template URL."""
+        base = "/api/v1/device-templates"
+        if template_uuid:
+            return f"{base}/{template_uuid}"
+        return base
+
+    def qpm_config_url(self, bot_id: str | None = None) -> str:
+        """Build bot QPM config URL.
+
+        The actual route is /api/v1/bot-qpm (not under /bots/{id}/qpm).
+        """
+        base = "/api/v1/bot-qpm"
+        if bot_id:
+            return f"{base}/{bot_id}"
+        return base
+
+    # ── Internal URLs ───────────────────────────────────────────────────────
+
+    def internal_health_url(self) -> str:
+        """Build internal health check URL.
+
+        NOTE: No dedicated internal/health route exists.
+        The closest equivalent is /api/v1/bot-health-checker/health.
+        """
+        return "/api/v1/bot-health-checker/health"
+
+    def internal_cache_url(self) -> str:
+        """Build internal cache URL.
+
+        The actual cache route is /api/v1/cache/{key} (key-scoped, not general).
+        This builder returns the base prefix for cache tests.
+        """
+        return "/api/v1/cache"
+
+    def internal_management_url(self) -> str:
+        """Build internal management URL.
+
+        NOTE: Get /api/v1/bot-health-checker/active_bots for bot management status.
+        """
+        return "/api/v1/bot-health-checker/active_bots"
+
+    # ── Distributed Lock URLs ───────────────────────────────────────────────
+
+    def lock_url(self, lock_key: str | None = None) -> str:
+        """Build distributed lock URL.
+
+        NOTE: No locks route exists in the OpenAPI. This is a stub.
+        Tests using this should be skipped.
+        """
+        if lock_key:
+            return f"/api/v1/locks/{lock_key}"
+        return "/api/v1/locks"
 
 
 @pytest.fixture
