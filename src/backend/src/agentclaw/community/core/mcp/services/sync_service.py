@@ -813,8 +813,9 @@ class MCPSyncService:
     ) -> dict[str, Any]:
         """通知 passport 系统更新 bot 当前可用的 MCP codes 列表。
 
-        passport 用该列表做前端权限校验等下游消费。若查询 bot 元数据
-        （名称、描述）失败，仍会尝试更新 passport，仅记录 warning。
+        passport 用该列表做前端权限校验等下游消费。bot 元数据同时用于
+        解析默认 CLI 授权范围；若查询失败，为避免写入不完整的 CLI 快照，
+        本次 passport 更新会中止并返回失败。
 
         Args:
             bot_id: 目标 bot ID。
@@ -835,14 +836,12 @@ class MCPSyncService:
                 bot_desc = bot.get("bot_desc")
                 template_type = bot.get("template_type")
                 engine_type = (
-                    engine_type or bot.get("active_engine") or bot.get("engine_type")
+                    bot.get("active_engine") or bot.get("engine_type") or engine_type
                 )
         except Exception as e:
-            # 查 bot 是 metadata 补全，失败不影响 passport 主调用。
-            logger.warning(
-                "[MCPSyncService] 获取 bot 信息供 passport 使用失败: bot_id=%s, error=%s",
-                bot_id, e,
-            )
+            error = f"获取 bot 信息失败，无法安全解析默认 CLI 范围: {e}"
+            logger.error("[MCPSyncService] %s, bot_id=%s", error, bot_id)
+            return {"success": False, "error": error}
 
         # MCP 同步触发 resourceManifest 更新时，要回填当前 CLI，避免覆盖式更新丢失 CLI 授权。
         try:
