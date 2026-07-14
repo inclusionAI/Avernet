@@ -1108,6 +1108,7 @@ dependencies = [
 name = "bcs-protocol"
 version = "0.1.0"
 dependencies = [
+ "bcs-domain",
  "serde",
  "serde_json",
  "tracing",

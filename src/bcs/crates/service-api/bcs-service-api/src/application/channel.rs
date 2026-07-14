@@ -4,10 +4,9 @@
 //! HTTP/CLI 管理 binding。实现在 `services/bcs-channel`。
 
 use async_trait::async_trait;
-use bcs_protocol::Attachment;
 
 use bcs_domain::{
-    BindingTarget, GroupChatScope, ChannelBinding, ChannelConfig, ChannelType,
+    Attachment, BindingTarget, GroupChatScope, ChannelBinding, ChannelConfig, ChannelType,
     ParticipantRole, Visibility,
 };
 

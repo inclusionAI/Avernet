@@ -1,7 +1,7 @@
 //! Message-flow use-case contracts.
 
 use async_trait::async_trait;
-use bcs_protocol::Attachment;
+use bcs_domain::Attachment;
 use serde_json::Value;
 
 use crate::{

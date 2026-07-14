@@ -321,7 +321,12 @@ async fn handle_chat_send(
             from_name: params.bot_name.clone(),
             message: params.message,
             mentions: params.mentions,
-            attachments: params.attachments,
+            attachments: params.attachments.map(|attachments| {
+                attachments
+                    .into_iter()
+                    .map(bcs_domain::Attachment::from)
+                    .collect()
+            }),
             thinking: params.thinking,
             idempotency_key: params.idempotency_key,
             sender_conn_id,

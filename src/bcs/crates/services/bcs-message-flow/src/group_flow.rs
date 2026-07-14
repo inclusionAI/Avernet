@@ -1,10 +1,11 @@
 use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
-use bcs_domain::{NewMessage, SenderType};
+use bcs_domain::{Attachment, NewMessage, SenderType};
 use bcs_protocol::{
-    Attachment, BcsFrame, RequestFrame, build_chat_inject_frame, build_chat_send_frame,
-    build_direct_chat_inject_frame, build_direct_chat_send_frame, build_session_key, now_ms,
+    Attachment as WireAttachment, BcsFrame, RequestFrame, build_chat_inject_frame,
+    build_chat_send_frame, build_direct_chat_inject_frame, build_direct_chat_send_frame,
+    build_session_key, now_ms,
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
@@ -337,7 +338,7 @@ fn persisted_inbound_content(content: &str, attachments: Option<&[Attachment]>) 
 
 #[cfg(test)]
 mod attachment_persistence_tests {
-    use bcs_protocol::{Attachment, AttachmentType};
+    use bcs_domain::{Attachment, AttachmentType};
 
     use super::persisted_inbound_content;
 
@@ -2122,6 +2123,13 @@ async fn frame_for_target(
     );
     let context_projection =
         context_projection_for_delivery(flow, group, cmd.session_id.as_deref()).await;
+    let wire_attachments = cmd.attachments.as_ref().map(|attachments| {
+        attachments
+            .iter()
+            .cloned()
+            .map(WireAttachment::from)
+            .collect()
+    });
     match target.delivery_type {
         DeliveryType::Send => {
             if context_projection == ContextProjection::DirectBot {
@@ -2132,7 +2140,7 @@ async fn frame_for_target(
                     &cmd.from_actor_id,
                     sender_display_name,
                     &target.bot_uuid,
-                    &cmd.attachments,
+                    &wire_attachments,
                     &cmd.thinking,
                     protocol_version,
                     cmd.session_id.as_deref(),
@@ -2148,7 +2156,7 @@ async fn frame_for_target(
                 sender_display_name,
                 &decision.mentions,
                 &target.bot_uuid,
-                &cmd.attachments,
+                &wire_attachments,
                 &cmd.thinking,
                 is_self,
                 protocol_version,
@@ -2166,7 +2174,7 @@ async fn frame_for_target(
                     &cmd.from_actor_id,
                     sender_display_name,
                     &target.bot_uuid,
-                    &cmd.attachments,
+                    &wire_attachments,
                     protocol_version,
                     cmd.session_id.as_deref(),
                 );
@@ -2181,7 +2189,7 @@ async fn frame_for_target(
                 sender_display_name,
                 &decision.mentions,
                 &target.bot_uuid,
-                &cmd.attachments,
+                &wire_attachments,
                 is_self,
                 protocol_version,
                 from_bot_owner,

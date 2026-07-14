@@ -31,20 +31,49 @@ pub struct Attachment {
     pub expires_at: Option<u64>,
 }
 
-impl Attachment {
-    /// Stable metadata suitable for message history persistence.
-    ///
-    /// Short-lived URLs and their expiry are intentionally excluded so message
-    /// history never persists an upstream temporary capability URL.
-    pub fn stable_metadata(&self) -> serde_json::Value {
-        serde_json::json!({
-            "attachment_id": self.attachment_id,
-            "type": self.attachment_type,
-            "file_name": self.file_name,
-            "mime_type": self.mime_type,
-            "size": self.size,
-            "sha256": self.sha256,
-        })
+impl From<bcs_domain::Attachment> for Attachment {
+    fn from(value: bcs_domain::Attachment) -> Self {
+        Self {
+            attachment_id: value.attachment_id,
+            attachment_type: value.attachment_type.into(),
+            file_name: value.file_name,
+            mime_type: value.mime_type,
+            size: value.size,
+            sha256: value.sha256,
+            url: value.url,
+            expires_at: value.expires_at,
+        }
+    }
+}
+
+impl From<Attachment> for bcs_domain::Attachment {
+    fn from(value: Attachment) -> Self {
+        Self {
+            attachment_id: value.attachment_id,
+            attachment_type: value.attachment_type.into(),
+            file_name: value.file_name,
+            mime_type: value.mime_type,
+            size: value.size,
+            sha256: value.sha256,
+            url: value.url,
+            expires_at: value.expires_at,
+        }
+    }
+}
+
+impl From<bcs_domain::AttachmentType> for AttachmentType {
+    fn from(value: bcs_domain::AttachmentType) -> Self {
+        match value {
+            bcs_domain::AttachmentType::Image => Self::Image,
+        }
+    }
+}
+
+impl From<AttachmentType> for bcs_domain::AttachmentType {
+    fn from(value: AttachmentType) -> Self {
+        match value {
+            AttachmentType::Image => Self::Image,
+        }
     }
 }
 
@@ -53,7 +82,7 @@ mod tests {
     use super::{Attachment, AttachmentType};
 
     #[test]
-    fn attachment_wire_shape_and_stable_metadata() {
+    fn attachment_wire_shape_and_domain_conversion() {
         let attachment = Attachment {
             attachment_id: "att_1".to_string(),
             attachment_type: AttachmentType::Image,
@@ -69,10 +98,10 @@ mod tests {
         assert_eq!(wire["type"], "image");
         assert_eq!(wire["url"], attachment.url);
 
-        let stable = attachment.stable_metadata();
-        assert_eq!(stable["attachment_id"], "att_1");
-        assert!(stable.get("url").is_none());
-        assert!(stable.get("expires_at").is_none());
+        let domain: bcs_domain::Attachment = attachment.into();
+        assert_eq!(domain.attachment_id, "att_1");
+        assert_eq!(domain.attachment_type, bcs_domain::AttachmentType::Image);
+        assert_eq!(domain.url, "https://bcs.example.com/attachments?id=att_1&token=short");
     }
 
     #[test]
