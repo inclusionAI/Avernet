@@ -332,38 +332,50 @@ class BotRunRequestExecutor:
 
         seq = 0
         delta_buffer: list[str] = []
+        delta_engine_type: str | None = None
         agent_buffer: list[dict] = []
+        agent_engine_type: str | None = None
         cache_key = f"run:{run.run_id}:seq"
 
         def _flush_delta() -> None:
             """将缓冲的 delta 合并为一条 chunk 写入。"""
-            nonlocal seq, delta_buffer
+            nonlocal seq, delta_buffer, delta_engine_type
             if not delta_buffer:
                 return
             merged = "".join(delta_buffer)
             delta_buffer.clear()
+            metadata_json = None
+            if delta_engine_type:
+                metadata_json = json.dumps({"engine_type": delta_engine_type})
+                delta_engine_type = None
             seq += 1
             self._chunk_repository.insert_chunk(
                 run_id=run.run_id,
                 seq=seq,
                 chunk_type="delta",
                 content=merged,
+                metadata=metadata_json,
             )
             self._cache_plugin.set(cache_key, f"{seq}:delta", ttl_seconds=120)
 
         def _flush_agent() -> None:
             """将缓冲的 agent 事件合并为一条 chunk（JSON array）写入。"""
-            nonlocal seq, agent_buffer
+            nonlocal seq, agent_buffer, agent_engine_type
             if not agent_buffer:
                 return
             merged = json.dumps(agent_buffer, ensure_ascii=False)
             agent_buffer.clear()
+            metadata_json = None
+            if agent_engine_type:
+                metadata_json = json.dumps({"engine_type": agent_engine_type})
+                agent_engine_type = None
             seq += 1
             self._chunk_repository.insert_chunk(
                 run_id=run.run_id,
                 seq=seq,
                 chunk_type="agent",
                 content=merged,
+                metadata=metadata_json,
             )
             self._cache_plugin.set(cache_key, f"{seq}:agent", ttl_seconds=120)
 
@@ -377,9 +389,10 @@ class BotRunRequestExecutor:
             nonlocal seq
             _flush_buffers()
             seq += 1
-            metadata_json = (
-                json.dumps(stream_chunk.metadata) if stream_chunk.metadata else None
-            )
+            meta = dict(stream_chunk.metadata) if stream_chunk.metadata else {}
+            if stream_chunk.engine_type:
+                meta["engine_type"] = stream_chunk.engine_type
+            metadata_json = json.dumps(meta) if meta else None
             self._chunk_repository.insert_chunk(
                 run_id=run.run_id,
                 seq=seq,
@@ -403,11 +416,15 @@ class BotRunRequestExecutor:
             ):
                 if chunk.type == "delta":
                     delta_buffer.append(chunk.content)
+                    if chunk.engine_type:
+                        delta_engine_type = chunk.engine_type
                     if time.monotonic() - last_flush_ts >= self._stream_flush_interval:
                         _flush_buffers()
                         last_flush_ts = time.monotonic()
                 elif chunk.type == "agent":
                     agent_buffer.append(chunk.metadata or {})
+                    if chunk.engine_type:
+                        agent_engine_type = chunk.engine_type
                     if time.monotonic() - last_flush_ts >= self._stream_flush_interval:
                         _flush_buffers()
                         last_flush_ts = time.monotonic()
