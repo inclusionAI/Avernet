@@ -1,6 +1,7 @@
 //! Message-flow use-case contracts.
 
 use async_trait::async_trait;
+use bcs_domain::Attachment;
 use serde_json::Value;
 
 use crate::{
@@ -30,7 +31,7 @@ pub struct WebSendCommand {
     pub from_name: Option<String>,
     pub message: String,
     pub mentions: Vec<String>,
-    pub attachments: Option<Vec<Value>>,
+    pub attachments: Option<Vec<Attachment>>,
     pub thinking: Option<String>,
     pub idempotency_key: Option<String>,
     pub sender_conn_id: Option<u64>,

@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub mod a2a;
+pub mod attachment;
 pub mod delivery;
 pub mod http;
 pub mod principal;
@@ -23,6 +24,7 @@ pub mod ws;
 pub mod stream;
 
 pub use a2a::A2aRunStatus;
+pub use attachment::{Attachment, AttachmentType};
 pub use delivery::{BotDeliveryKind, FrontendDeliveryKind, FrontendDeliveryTarget};
 pub use http::chat_run;
 pub use http::{

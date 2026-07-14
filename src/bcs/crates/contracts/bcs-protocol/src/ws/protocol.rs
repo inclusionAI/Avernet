@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
+use crate::Attachment;
+
 // ---------------------------------------------------------------------------
 // Protocol versioning
 // ---------------------------------------------------------------------------
@@ -553,6 +555,8 @@ pub struct ChatSendParams {
     pub bcs_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
 }
 
 /// Response for chat.send request.
@@ -580,6 +584,8 @@ pub struct ChatInjectParams {
     /// BCS session layer id (`{group_id}:{8_hex}`). None when not pinned to a session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bcs_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
 }
 
 /// Parameters for chat.abort request.
@@ -889,6 +895,7 @@ pub fn build_chat_inject_frame(
     from_bot_name: &str,
     mentions: &[String],
     target_bot: &str,
+    attachments: &Option<Vec<Attachment>>,
     is_self: bool,
     protocol_version: u32,
     from_bot_owner: Option<String>,
@@ -932,6 +939,7 @@ pub fn build_chat_inject_frame(
         } else {
             None
         },
+        attachments: attachments.clone().unwrap_or_default(),
     };
     let mut payload = serde_json::to_value(inject).unwrap_or_else(|error| {
         tracing::warn!(%error, "failed to serialize chat.inject params");
@@ -962,7 +970,7 @@ pub fn build_chat_send_frame(
     from_bot_name: &str,
     mentions: &[String],
     target_bot: &str,
-    attachments: &Option<Vec<Value>>,
+    attachments: &Option<Vec<Attachment>>,
     thinking: &Option<String>,
     is_self: bool,
     protocol_version: u32,
@@ -1014,6 +1022,7 @@ pub fn build_chat_send_frame(
             None
         },
         tags: Vec::new(),
+        attachments: attachments.clone().unwrap_or_default(),
     };
     let mut params = serde_json::to_value(send).unwrap_or_else(|error| {
         tracing::warn!(%error, "failed to serialize chat.send params");
@@ -1021,12 +1030,6 @@ pub fn build_chat_send_frame(
     });
     if let Some(obj) = params.as_object_mut() {
         obj.insert("deliver".to_string(), Value::Bool(true));
-        if let Some(attachments) = attachments {
-            obj.insert(
-                "attachments".to_string(),
-                Value::Array(attachments.clone()),
-            );
-        }
         if let Some(thinking) = thinking {
             obj.insert("thinking".to_string(), Value::String(thinking.clone()));
         }
@@ -1050,7 +1053,7 @@ pub fn build_direct_chat_send_frame(
     from_actor_id: &str,
     from_actor_name: &str,
     target_bot: &str,
-    attachments: &Option<Vec<Value>>,
+    attachments: &Option<Vec<Attachment>>,
     thinking: &Option<String>,
     protocol_version: u32,
     bcs_session_id: Option<&str>,
@@ -1091,6 +1094,7 @@ pub fn build_direct_chat_send_frame(
             None
         },
         tags: Vec::new(),
+        attachments: attachments.clone().unwrap_or_default(),
     };
     let mut params = serde_json::to_value(send).unwrap_or_else(|error| {
         tracing::warn!(%error, "failed to serialize direct chat.send params");
@@ -1098,12 +1102,6 @@ pub fn build_direct_chat_send_frame(
     });
     if let Some(obj) = params.as_object_mut() {
         obj.insert("deliver".to_string(), Value::Bool(true));
-        if let Some(attachments) = attachments {
-            obj.insert(
-                "attachments".to_string(),
-                Value::Array(attachments.clone()),
-            );
-        }
         if let Some(thinking) = thinking {
             obj.insert("thinking".to_string(), Value::String(thinking.clone()));
         }
@@ -1124,6 +1122,7 @@ pub fn build_direct_chat_inject_frame(
     from_actor_id: &str,
     from_actor_name: &str,
     target_bot: &str,
+    attachments: &Option<Vec<Attachment>>,
     protocol_version: u32,
     bcs_session_id: Option<&str>,
 ) -> BcsFrame {
@@ -1160,6 +1159,7 @@ pub fn build_direct_chat_inject_frame(
         } else {
             None
         },
+        attachments: attachments.clone().unwrap_or_default(),
     };
     let mut payload = serde_json::to_value(inject).unwrap_or_else(|error| {
         tracing::warn!(%error, "failed to serialize direct chat.inject params");
@@ -2062,7 +2062,7 @@ mod tests {
         let ctx = test_group_context_input();
         let frame = build_chat_inject_frame(
             "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target",
-            false, 2, None, None, Some("grp-test:00000000"),
+            &None, false, 2, None, None, Some("grp-test:00000000"),
         );
         match frame {
             BcsFrame::Request(req) => {
@@ -2079,7 +2079,7 @@ mod tests {
         let ctx = test_group_context_input();
         let frame = build_chat_inject_frame(
             "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target",
-            false, 3, None, None, Some("grp-test:abc12345"),
+            &None, false, 3, None, None, Some("grp-test:abc12345"),
         );
         match frame {
             BcsFrame::Request(req) => {

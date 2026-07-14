@@ -139,7 +139,11 @@ async function startGatewayStub() {
   };
 }
 
-function installRuntime(port: number, storePath: string) {
+function installRuntime(
+  port: number,
+  storePath: string,
+  capturedInbound?: { value?: Record<string, unknown> },
+) {
   setBcsRuntime({
     config: {
       async loadConfig() {
@@ -159,7 +163,8 @@ function installRuntime(port: number, storePath: string) {
         },
       },
       reply: {
-        finalizeInboundContext(ctx: unknown) {
+        finalizeInboundContext(ctx: Record<string, unknown>) {
+          if (capturedInbound) capturedInbound.value = ctx;
           return ctx;
         },
       },
@@ -241,7 +246,8 @@ describe('OpenClaw gateway protocol compatibility', () => {
     const gateway = await startGatewayStub();
     const dataDir = await mkdtemp(join(tmpdir(), 'bcn-inject-'));
     const storePath = join(dataDir, 'sessions', 'sessions.json');
-    installRuntime(gateway.port, storePath);
+    const capturedInbound: { value?: Record<string, unknown> } = {};
+    installRuntime(gateway.port, storePath, capturedInbound);
     const { client, responses } = createResponseClient();
 
     try {
@@ -253,7 +259,13 @@ describe('OpenClaw gateway protocol compatibility', () => {
           params: {
             session_key: 'group-1',
             bcs_group_id: 'group-1',
-            message: { content: [{ type: 'text', text: 'hello from inject' }] },
+            message: { content: [] },
+            attachments: [{
+              attachment_id: 'att-1',
+              type: 'image',
+              file_name: 'diagram.png',
+              url: 'https://download.dingtalk.example/temporary-image-token',
+            }],
             channel: { user_id: 'alice' },
             session_context: {
               from: 'alice',
@@ -269,12 +281,19 @@ describe('OpenClaw gateway protocol compatibility', () => {
 
       assert.equal(responses.length, 1);
       assert.equal(responses[0].ok, true);
+      const observationText = '[Image attachment: name=diagram.png; image content is not available in this silent observation]';
+      assert.equal(capturedInbound.value?.Body, observationText);
+      assert.equal(capturedInbound.value?.MediaUrl, undefined);
+      assert.equal(capturedInbound.value?.MediaUrls, undefined);
+      assert.equal(capturedInbound.value?.MediaPath, undefined);
+      assert.equal(capturedInbound.value?.MediaPaths, undefined);
 
       const connectFrame = gateway.frames.find(frame => frame.method === 'connect');
       assert.equal(connectFrame?.params?.minProtocol, 3);
       assert.equal(connectFrame?.params?.maxProtocol, REQUIRED_GATEWAY_PROTOCOL);
       assert.deepEqual(connectFrame?.params?.scopes, [ 'operator.admin' ]);
-      assert.ok(gateway.frames.some(frame => frame.method === 'chat.inject'));
+      const injectFrame = gateway.frames.find(frame => frame.method === 'chat.inject');
+      assert.equal(injectFrame?.params?.message, observationText);
     } finally {
       await gateway.close();
       await rm(dataDir, { recursive: true, force: true });

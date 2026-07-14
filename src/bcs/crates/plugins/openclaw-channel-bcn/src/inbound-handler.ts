@@ -9,6 +9,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { rm } from 'node:fs/promises';
 import type { BcsWsClient } from './bcs-ws-client.js';
 import { resolveGatewayPort, scopesForGatewayMethod } from './gateway-security.js';
 import { getBcsRuntime } from './runtime.js';
@@ -19,6 +20,7 @@ import type {
   ChatHistoryParams,
   ChatHistoryMessage,
   ContentBlock,
+  Attachment,
   ChatEventPayload,
   ChatEventRouting,
   PendingRouteIntent,
@@ -37,6 +39,10 @@ const CHANNEL_ID = 'bcs';
 const OPENCLAW_GATEWAY_MIN_PROTOCOL = 3;
 const OPENCLAW_GATEWAY_MAX_PROTOCOL = 4;
 const NO_REPLY_TEXT = 'NO_REPLY';
+const MAX_IMAGE_ATTACHMENTS = 5;
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const IMAGE_DOWNLOAD_TIMEOUT_MS = 30_000;
+const IMAGE_READ_IDLE_TIMEOUT_MS = 10_000;
 
 /** Extract sender name from [from:botName] prefix. Returns stripped text and sender name. */
 function extractFromPrefix(raw: string): { senderName: string; text: string } {
@@ -214,6 +220,267 @@ function extractText(content: ContentBlock[]): string {
     }
   }
   return parts.join('\n');
+}
+
+const SUPPORTED_IMAGE_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+]);
+
+function extractImageAttachments(attachments: Attachment[] | undefined): Attachment[] {
+  return (attachments ?? []).filter(attachment => attachment.type === 'image');
+}
+
+function sanitizeAttachmentDisplay(value: string): string {
+  // COSEC: prevent untrusted filenames from breaking structured prompt notes.
+  return value
+    .replace(/[\p{Cc}\[\]]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200) || 'image';
+}
+
+function sanitizeAttachmentLogValue(value: string): string {
+  // COSEC: prevent control-character injection from untrusted attachment metadata in logs.
+  return value.replace(/[\p{Cc}]+/gu, ' ').trim().slice(0, 128) || 'unknown';
+}
+
+function attachmentFallbackText(attachments: Attachment[]): string {
+  return attachments.length === 1
+    ? `[Image: ${sanitizeAttachmentDisplay(attachments[0].file_name)}]`
+    : `[Images: ${attachments.map(attachment => sanitizeAttachmentDisplay(attachment.file_name)).join(', ')}]`;
+}
+
+function attachmentObservationText(attachments: Attachment[]): string {
+  return attachments.map(attachment => {
+    const metadata = [
+      `name=${sanitizeAttachmentDisplay(attachment.file_name)}`,
+      attachment.mime_type ? `type=${sanitizeAttachmentDisplay(attachment.mime_type)}` : undefined,
+      typeof attachment.size === 'number' ? `size=${attachment.size} bytes` : undefined,
+    ].filter(Boolean).join(', ');
+    return `[Image attachment: ${metadata}; image content is not available in this silent observation]`;
+  }).join('\n');
+}
+
+function buildInjectText(messageText: string, attachments: Attachment[]): string {
+  return [ messageText, attachmentObservationText(attachments) ].filter(Boolean).join('\n');
+}
+
+function normalizeMimeType(value?: string): string | undefined {
+  const normalized = value?.split(';')[0]?.trim().toLowerCase();
+  return normalized || undefined;
+}
+
+function sniffSupportedImageMime(buffer: Buffer): string | undefined {
+  // COSEC: accept image content only when its magic bytes match a supported format.
+  if (
+    buffer.length >= 8
+    && buffer.subarray(0, 8).equals(Buffer.from([ 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a ]))
+  ) {
+    return 'image/png';
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (buffer.length >= 6) {
+    const signature = buffer.toString('ascii', 0, 6);
+    if (signature === 'GIF87a' || signature === 'GIF89a') return 'image/gif';
+  }
+  if (
+    buffer.length >= 12
+    && buffer.toString('ascii', 0, 4) === 'RIFF'
+    && buffer.toString('ascii', 8, 12) === 'WEBP'
+  ) {
+    return 'image/webp';
+  }
+  return undefined;
+}
+
+type PreparedImage = {
+  path: string;
+  contentType: string;
+};
+
+type InboundImageErrorCode =
+  | 'TOO_MANY_IMAGES'
+  | 'IMAGE_EXPIRED'
+  | 'INVALID_IMAGE_URL'
+  | 'IMAGE_TOO_LARGE'
+  | 'IMAGE_DOWNLOAD_TIMEOUT'
+  | 'IMAGE_DOWNLOAD_FAILED'
+  | 'UNSUPPORTED_IMAGE_TYPE'
+  | 'IMAGE_STORE_FAILED'
+  | 'IMAGE_ABORTED';
+
+class InboundImageError extends Error {
+  constructor(
+    readonly code: InboundImageErrorCode,
+    readonly userMessage: string,
+    readonly attachmentId?: string,
+  ) {
+    super(code);
+    this.name = 'InboundImageError';
+  }
+}
+
+async function cleanupPreparedImages(images: PreparedImage[]): Promise<void> {
+  await Promise.all(images.map(async image => {
+    await rm(image.path, { force: true }).catch(() => undefined);
+  }));
+}
+
+function validateImageUrl(attachment: Attachment): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(attachment.url);
+  } catch {
+    throw new InboundImageError(
+      'INVALID_IMAGE_URL',
+      'The attached image has an invalid download URL.',
+      attachment.attachment_id,
+    );
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new InboundImageError(
+      'INVALID_IMAGE_URL',
+      'The attached image has an invalid download URL.',
+      attachment.attachment_id,
+    );
+  }
+}
+
+async function prepareImageAttachments(params: {
+  attachments: Attachment[];
+  abortSignal: AbortSignal;
+  runtime: ReturnType<typeof getBcsRuntime>;
+}): Promise<PreparedImage[]> {
+  if (params.attachments.length === 0) return [];
+
+  if (params.attachments.length > MAX_IMAGE_ATTACHMENTS) {
+    throw new InboundImageError(
+      'TOO_MANY_IMAGES',
+      `A message can contain at most ${MAX_IMAGE_ATTACHMENTS} images.`,
+    );
+  }
+
+  const media = params.runtime.channel?.media;
+  if (!media?.fetchRemoteMedia || !media?.saveMediaBuffer) {
+    throw new InboundImageError(
+      'IMAGE_STORE_FAILED',
+      'Image processing is unavailable in the current OpenClaw runtime.',
+    );
+  }
+
+  const prepared: PreparedImage[] = [];
+  try {
+    for (const attachment of params.attachments) {
+      if (typeof attachment.expires_at === 'number' && attachment.expires_at <= Date.now()) {
+        throw new InboundImageError(
+          'IMAGE_EXPIRED',
+          'The attached image download link has expired.',
+          attachment.attachment_id,
+        );
+      }
+      if (typeof attachment.size === 'number' && attachment.size > MAX_IMAGE_BYTES) {
+        throw new InboundImageError(
+          'IMAGE_TOO_LARGE',
+          'The attached image exceeds the 20 MB limit.',
+          attachment.attachment_id,
+        );
+      }
+      validateImageUrl(attachment);
+
+      const timeoutSignal = AbortSignal.timeout(IMAGE_DOWNLOAD_TIMEOUT_MS);
+      const downloadSignal = AbortSignal.any([ params.abortSignal, timeoutSignal ]);
+      let fetched: { buffer: Buffer; contentType?: string; fileName?: string };
+      try {
+        // OpenClaw's guarded media fetch applies SSRF checks to the initial URL and redirects.
+        fetched = await media.fetchRemoteMedia({
+          url: attachment.url,
+          filePathHint: attachment.file_name,
+          maxBytes: MAX_IMAGE_BYTES,
+          maxRedirects: 3,
+          readIdleTimeoutMs: IMAGE_READ_IDLE_TIMEOUT_MS,
+          requestInit: { signal: downloadSignal },
+        });
+      } catch (err) {
+        if (params.abortSignal.aborted) {
+          throw new InboundImageError(
+            'IMAGE_ABORTED',
+            'Image processing was aborted.',
+            attachment.attachment_id,
+          );
+        }
+        if (timeoutSignal.aborted) {
+          throw new InboundImageError(
+            'IMAGE_DOWNLOAD_TIMEOUT',
+            'The attached image download timed out.',
+            attachment.attachment_id,
+          );
+        }
+        if ((err as { code?: string })?.code === 'max_bytes') {
+          throw new InboundImageError(
+            'IMAGE_TOO_LARGE',
+            'The attached image exceeds the 20 MB limit.',
+            attachment.attachment_id,
+          );
+        }
+        throw new InboundImageError(
+          'IMAGE_DOWNLOAD_FAILED',
+          'The attached image could not be downloaded. The link may have expired.',
+          attachment.attachment_id,
+        );
+      }
+
+      const contentType = Buffer.isBuffer(fetched.buffer)
+        ? sniffSupportedImageMime(fetched.buffer)
+        : undefined;
+      if (!contentType) {
+        throw new InboundImageError(
+          'UNSUPPORTED_IMAGE_TYPE',
+          'Unsupported image format. Supported formats are JPEG, PNG, GIF, and WebP.',
+          attachment.attachment_id,
+        );
+      }
+
+      let saved: { path: string; size: number; contentType?: string };
+      try {
+        saved = await media.saveMediaBuffer(
+          fetched.buffer,
+          contentType,
+          'inbound',
+          MAX_IMAGE_BYTES,
+          fetched.fileName ?? attachment.file_name,
+        );
+      } catch {
+        throw new InboundImageError(
+          'IMAGE_STORE_FAILED',
+          'The attached image could not be prepared for analysis.',
+          attachment.attachment_id,
+        );
+      }
+
+      const savedContentType = normalizeMimeType(saved.contentType) ?? contentType;
+      if (!SUPPORTED_IMAGE_MIME_TYPES.has(savedContentType)) {
+        await rm(saved.path, { force: true }).catch(() => undefined);
+        throw new InboundImageError(
+          'UNSUPPORTED_IMAGE_TYPE',
+          'Unsupported image format. Supported formats are JPEG, PNG, GIF, and WebP.',
+          attachment.attachment_id,
+        );
+      }
+      prepared.push({
+        path: saved.path,
+        contentType: savedContentType,
+      });
+    }
+    return prepared;
+  } catch (err) {
+    await cleanupPreparedImages(prepared);
+    throw err;
+  }
 }
 
 function buildChatEventPayload(
@@ -446,7 +713,9 @@ export async function handleChatSend(
   const sessionContext = params.session_context;
 
   // Extract text from message content
-  const text = extractText(params.message?.content ?? []);
+  const imageAttachments = extractImageAttachments(params.attachments);
+  const messageText = extractText(params.message?.content ?? []);
+  const text = messageText || (imageAttachments.length > 0 ? attachmentFallbackText(imageAttachments) : '');
   if (!text) {
     client.sendResponse(request.id, false, undefined, {
       code: 'INVALID_REQUEST',
@@ -470,6 +739,7 @@ export async function handleChatSend(
   // Track active stream for abort support
   const abortController = new AbortController();
   activeStreams.set(runId, abortController);
+  let preparedImages: PreparedImage[] = [];
 
   // Track run context for agent event routing
   runContexts.set(runId, { groupId: bcsGroupId, client });
@@ -478,6 +748,11 @@ export async function handleChatSend(
   try {
     const rt = getBcsRuntime();
     const currentCfg = await rt.config.loadConfig();
+    preparedImages = await prepareImageAttachments({
+      attachments: imageAttachments,
+      abortSignal: abortController.signal,
+      runtime: rt,
+    });
 
     // Resolve agent route to find the correct agent for this session
     const route = rt.channel.routing.resolveAgentRoute({
@@ -534,6 +809,14 @@ export async function handleChatSend(
       ConversationLabel: bcsGroupId ? `BCS Group ${bcsGroupId}` : 'BCS Onboarding',
       Timestamp: Date.now(),
       CommandAuthorized: true,
+      MediaPath: preparedImages[0]?.path,
+      MediaType: preparedImages[0]?.contentType,
+      MediaPaths: preparedImages.length > 0
+        ? preparedImages.map(image => image.path)
+        : undefined,
+      MediaTypes: preparedImages.length > 0
+        ? preparedImages.map(image => image.contentType)
+        : undefined,
     });
 
     // Resolve store path for session storage using the resolved agentId
@@ -626,12 +909,19 @@ export async function handleChatSend(
       }
     }
   } catch (err: any) {
-    log?.error?.(`Error processing chat.send for run_id=${runId}: ${err?.message ?? err}`);
-    if (err?.stack) {
-      log?.error?.(`[DEBUG] Stack trace for run_id=${runId}:\n${err.stack}`);
-    }
-    if (err?.cause) {
-      log?.error?.(`[DEBUG] Error cause for run_id=${runId}:`, err.cause);
+    const imageError = err instanceof InboundImageError ? err : undefined;
+    if (imageError) {
+      log?.error?.(
+        `[BCS] Image preparation failed for run_id=${runId}, attachment_id=${sanitizeAttachmentLogValue(imageError.attachmentId ?? 'unknown')}, code=${imageError.code}`,
+      );
+    } else {
+      log?.error?.(`Error processing chat.send for run_id=${runId}: ${err?.message ?? err}`);
+      if (err?.stack) {
+        log?.error?.(`[DEBUG] Stack trace for run_id=${runId}:\n${err.stack}`);
+      }
+      if (err?.cause) {
+        log?.error?.(`[DEBUG] Error cause for run_id=${runId}:`, err.cause);
+      }
     }
 
     if (runContexts.get(runId)?.finalSent) {
@@ -644,13 +934,17 @@ export async function handleChatSend(
         state: 'error',
         message: {
           role: 'assistant',
-          content: [{ type: 'text', text: 'An error occurred while processing your message.' }],
+          content: [{
+            type: 'text',
+            text: imageError?.userMessage ?? 'An error occurred while processing your message.',
+          }],
           timestamp: Date.now(),
         },
       };
       client.sendEvent('chat.event', errorPayload as unknown as Record<string, unknown>, nextSeq(client));
     }
   } finally {
+    await cleanupPreparedImages(preparedImages);
     activeStreams.delete(runId);
     runContexts.delete(runId);
     visibleReplyByRunId.delete(runId);
@@ -848,7 +1142,9 @@ export async function handleChatInject(
   const sessionContext = params.session_context;
 
   // Extract text from message content
-  const text = extractText(params.message?.content ?? []);
+  const imageAttachments = extractImageAttachments(params.attachments);
+  const messageText = extractText(params.message?.content ?? []);
+  const text = buildInjectText(messageText, imageAttachments);
   if (!text) {
     client.sendResponse(request.id, false, undefined, {
       code: 'INVALID_REQUEST',

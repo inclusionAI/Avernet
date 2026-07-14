@@ -156,6 +156,16 @@ async fn provider_delivery_posts_bearer_token_and_chat_send_body() {
                     "message": {
                         "text": "hello"
                     },
+                    "attachments": [{
+                        "attachment_id": "att-1",
+                        "type": "image",
+                        "file_name": "diagram.png",
+                        "mime_type": "image/png",
+                        "size": 4,
+                        "sha256": "abcd",
+                        "url": "https://bcs.example.com/attachments?id=att-1&token=short",
+                        "expires_at": 1710960000000_u64
+                    }],
                     "timeout_ms": 1_800_000,
                     "tags": ["tag1", "tag2"]
                 })),
@@ -187,6 +197,8 @@ async fn provider_delivery_posts_bearer_token_and_chat_send_body() {
     assert_eq!(request.body["from"]["name"], "Sender Bot");
     assert_eq!(request.body["from"]["actor_id"], "sender-bot-id");
     assert_eq!(request.body["message"]["text"], "hello");
+    assert_eq!(request.body["attachments"][0]["attachment_id"], "att-1");
+    assert_eq!(request.body["attachments"][0]["type"], "image");
     assert_eq!(request.body["timeout_ms"], 1_800_000);
     assert!(request.body.get("extensions").is_none());
 
@@ -641,7 +653,17 @@ async fn provider_delivery_posts_chat_inject_body_with_bcn_group_id() {
                     },
                     "message": {
                         "text": "observe"
-                    }
+                    },
+                    "attachments": [{
+                        "attachment_id": "att-1",
+                        "type": "image",
+                        "file_name": "diagram.png",
+                        "mime_type": "image/png",
+                        "size": 4,
+                        "sha256": "abcd",
+                        "url": "https://bcs.example.com/attachments?id=att-1&token=short",
+                        "expires_at": 1710960000000_u64
+                    }]
                 })),
             )),
             delivery_kind: BotDeliveryKind::Inject,
@@ -660,6 +682,7 @@ async fn provider_delivery_posts_chat_inject_body_with_bcn_group_id() {
     assert_eq!(request.body["from"]["kind"], "bot");
     assert_eq!(request.body["from"]["name"], "Sender Bot");
     assert_eq!(request.body["message"]["text"], "observe");
+    assert_eq!(request.body["attachments"][0]["attachment_id"], "att-1");
 
     server.abort();
 }

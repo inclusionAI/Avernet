@@ -142,7 +142,7 @@ export function createBcsPlugin(options: BcsChannelPluginOptions = {}) {
 
     capabilities: {
       chatTypes: [ 'group' as const ],
-      media: false,
+      media: true,
       threads: false,
       reactions: false,
       edit: false,

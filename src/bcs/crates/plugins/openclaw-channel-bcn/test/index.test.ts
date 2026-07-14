@@ -1,5 +1,7 @@
 import { strict as assert } from 'node:assert';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import plugin, { bcsPlugin, registerBcsCore, setBcsRuntime } from '../src/index.js';
@@ -389,7 +391,7 @@ describe('openclaw-channel-bcn', () => {
     assert.equal(plugin.id, 'openclaw-channel-bcn');
     assert.equal(bcsPlugin.id, 'bcs');
     assert.equal(bcsPlugin.meta.label, 'BCS');
-    assert.equal(bcsPlugin.capabilities.media, false);
+    assert.equal(bcsPlugin.capabilities.media, true);
   });
 
   it('does not synthesize a fallback reply when OpenClaw returns no text', () => {
@@ -399,10 +401,15 @@ describe('openclaw-channel-bcn', () => {
   });
 
   it('builds chat deltas and final from assistant agent events', async () => {
+    const mediaDir = await mkdtemp(join(tmpdir(), 'bcn-inbound-image-'));
+    const savedImagePath = join(mediaDir, 'diagram.png');
     const responses: Array<{ id: string; ok: boolean; payload?: Record<string, unknown> }> = [];
     const events: Array<{ event: string; payload: Record<string, unknown>; seq: number }> = [];
+    const fetchCalls: any[] = [];
+    const saveCalls: any[] = [];
     let agentEventHandler: ((evt: Record<string, unknown>) => boolean) | undefined;
     let capturedReplyOptions: Record<string, unknown> | undefined;
+    let capturedInboundContext: Record<string, unknown> | undefined;
     const client = {
       sendResponse(id: string, ok: boolean, payload?: Record<string, unknown>) {
         responses.push({ id, ok, payload });
@@ -442,6 +449,25 @@ describe('openclaw-channel-bcn', () => {
         },
       },
       channel: {
+        media: {
+          async fetchRemoteMedia(options: any) {
+            fetchCalls.push(options);
+            return {
+              buffer: Buffer.from([ 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a ]),
+              contentType: 'image/png',
+              fileName: 'diagram.png',
+            };
+          },
+          async saveMediaBuffer(...args: any[]) {
+            saveCalls.push(args);
+            writeFileSync(savedImagePath, 'stored-image');
+            return {
+              path: savedImagePath,
+              size: 3,
+              contentType: 'image/png',
+            };
+          },
+        },
         routing: {
           resolveAgentRoute() {
             return { agentId: 'agent-1', sessionKey: 'bcs:group-1' };
@@ -449,6 +475,7 @@ describe('openclaw-channel-bcn', () => {
         },
         reply: {
           finalizeInboundContext(ctx: Record<string, unknown>) {
+            capturedInboundContext = ctx;
             return ctx;
           },
           async dispatchReplyWithBufferedBlockDispatcher({ dispatcherOptions, replyOptions }: any) {
@@ -535,9 +562,15 @@ describe('openclaw-channel-bcn', () => {
         session_context: {},
         message: {
           role: 'user',
-          content: [{ type: 'text', text: 'run with tools' }],
+          content: [],
           timestamp: Date.now(),
         },
+        attachments: [{
+          attachment_id: 'att-1',
+          type: 'image',
+          file_name: 'diagram.png',
+          url: 'https://download.dingtalk.example/temporary-image-token',
+        }],
       },
     };
 
@@ -550,6 +583,26 @@ describe('openclaw-channel-bcn', () => {
       assert.equal(typeof runId, 'string');
       assert.equal(capturedReplyOptions?.disableBlockStreaming, false);
       assert.equal(capturedReplyOptions?.sourceReplyDeliveryMode, 'automatic');
+      assert.equal(capturedInboundContext?.Body, '[Image: diagram.png]');
+      assert.equal(capturedInboundContext?.MediaPath, savedImagePath);
+      assert.equal(capturedInboundContext?.MediaType, 'image/png');
+      assert.deepEqual(capturedInboundContext?.MediaPaths, [ savedImagePath ]);
+      assert.deepEqual(capturedInboundContext?.MediaTypes, [ 'image/png' ]);
+      assert.equal(capturedInboundContext?.MediaUrl, undefined);
+      assert.equal(capturedInboundContext?.MediaUrls, undefined);
+      assert.equal(fetchCalls.length, 1);
+      assert.equal(fetchCalls[0].url, 'https://download.dingtalk.example/temporary-image-token');
+      assert.equal(fetchCalls[0].filePathHint, 'diagram.png');
+      assert.equal(fetchCalls[0].maxBytes, 20 * 1024 * 1024);
+      assert.equal(fetchCalls[0].maxRedirects, 3);
+      assert.ok(fetchCalls[0].requestInit.signal instanceof AbortSignal);
+      assert.deepEqual(saveCalls[0].slice(1), [
+        'image/png',
+        'inbound',
+        20 * 1024 * 1024,
+        'diagram.png',
+      ]);
+      assert.equal(existsSync(savedImagePath), false);
       assert.equal(events.filter(item => item.event === 'agent').length, 9);
       const chatEvents = events.filter(item => item.event === 'chat.event');
       assert.deepEqual(chatEvents.map(item => item.payload.state), [ 'delta', 'delta', 'delta', 'final' ]);
@@ -565,6 +618,161 @@ describe('openclaw-channel-bcn', () => {
       assert.deepEqual(chatEvents.map(item => item.payload.run_id), [ runId, runId, runId, runId ]);
     } finally {
       cleanupAgentEventsSubscription();
+      abortAllStreams();
+      await rm(mediaDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an oversized downloaded image before starting an agent run', async () => {
+    const responses: Array<{ id: string; ok: boolean; payload?: Record<string, unknown> }> = [];
+    const events: Array<{ event: string; payload: Record<string, unknown>; seq: number }> = [];
+    let routeResolved = false;
+    let replyDispatched = false;
+    let mediaSaved = false;
+    const client = {
+      sendResponse(id: string, ok: boolean, payload?: Record<string, unknown>) {
+        responses.push({ id, ok, payload });
+      },
+      sendEvent(event: string, payload: Record<string, unknown>, seq: number) {
+        events.push({ event, payload, seq });
+      },
+    };
+    setBcsRuntime({
+      config: {
+        async loadConfig() {
+          return {};
+        },
+      },
+      channel: {
+        media: {
+          async fetchRemoteMedia() {
+            throw Object.assign(new Error('must not be exposed'), { code: 'max_bytes' });
+          },
+          async saveMediaBuffer() {
+            mediaSaved = true;
+          },
+        },
+        routing: {
+          resolveAgentRoute() {
+            routeResolved = true;
+            return { agentId: 'agent-1', sessionKey: 'bcs:group-1' };
+          },
+        },
+        reply: {
+          finalizeInboundContext(ctx: Record<string, unknown>) {
+            return ctx;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher() {
+            replyDispatched = true;
+          },
+        },
+      },
+    } as any);
+
+    try {
+      await handleChatSend({
+        type: 'req',
+        id: 'chat-image-too-large',
+        method: 'chat.send',
+        params: {
+          bcs_group_id: 'group-1',
+          channel: { source: 'api', user_id: 'user-1' },
+          session_context: {},
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text: 'analyze this image' }],
+            timestamp: Date.now(),
+          },
+          attachments: [{
+            attachment_id: 'att-too-large',
+            type: 'image',
+            file_name: 'large.png',
+            url: 'https://download.dingtalk.example/large-image-token',
+          }],
+        },
+      }, client as any, {
+        accountId: 'default',
+        botId: 'bot-1',
+      } as any);
+
+      assert.equal(responses.length, 1);
+      assert.equal(responses[0].ok, true);
+      assert.equal(typeof responses[0].payload?.run_id, 'string');
+      assert.equal(routeResolved, false);
+      assert.equal(replyDispatched, false);
+      assert.equal(mediaSaved, false);
+      assert.equal(events.length, 1);
+      assert.equal(events[0].event, 'chat.event');
+      assert.equal(events[0].payload.state, 'error');
+      assert.equal(
+        (events[0].payload.message as any).content[0].text,
+        'The attached image exceeds the 20 MB limit.',
+      );
+    } finally {
+      abortAllStreams();
+    }
+  });
+
+  it('rejects non-image bytes even when the URL and MIME claim PNG', async () => {
+    const events: Array<{ event: string; payload: Record<string, unknown> }> = [];
+    let routeResolved = false;
+    const client = {
+      sendResponse() {},
+      sendEvent(event: string, payload: Record<string, unknown>) {
+        events.push({ event, payload });
+      },
+    };
+    setBcsRuntime({
+      config: { async loadConfig() { return {}; } },
+      channel: {
+        media: {
+          async fetchRemoteMedia() {
+            return {
+              buffer: Buffer.from('not an image'),
+              contentType: 'image/png',
+              fileName: 'spoofed.png',
+            };
+          },
+          async saveMediaBuffer() {
+            throw new Error('must not save spoofed content');
+          },
+        },
+        routing: {
+          resolveAgentRoute() {
+            routeResolved = true;
+          },
+        },
+      },
+    } as any);
+
+    try {
+      await handleChatSend({
+        type: 'req',
+        id: 'chat-image-spoofed',
+        method: 'chat.send',
+        params: {
+          bcs_group_id: 'group-1',
+          channel: { source: 'api', user_id: 'user-1' },
+          session_context: {},
+          message: { role: 'user', content: [], timestamp: Date.now() },
+          attachments: [{
+            attachment_id: 'att-spoofed',
+            type: 'image',
+            file_name: 'spoofed.png',
+            mime_type: 'image/png',
+            url: 'https://download.dingtalk.example/spoofed.png',
+          }],
+        },
+      }, client as any, { accountId: 'default', botId: 'bot-1' } as any);
+
+      assert.equal(routeResolved, false);
+      assert.equal(events.length, 1);
+      assert.equal(events[0].payload.state, 'error');
+      assert.equal(
+        (events[0].payload.message as any).content[0].text,
+        'Unsupported image format. Supported formats are JPEG, PNG, GIF, and WebP.',
+      );
+    } finally {
       abortAllStreams();
     }
   });

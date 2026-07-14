@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 
 use bcs_domain::{
-    BindingTarget, GroupChatScope, ChannelBinding, ChannelConfig, ChannelType,
+    Attachment, BindingTarget, GroupChatScope, ChannelBinding, ChannelConfig, ChannelType,
     ParticipantRole, Visibility,
 };
 
@@ -34,6 +34,8 @@ impl From<ServiceError> for ChannelUseCaseError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelInboundFailureKind {
     InvalidInbound,
+    UnsupportedAttachment,
+    AttachmentProcessingFailed,
     BindingNotFound,
     BindingLookupFailed,
     ActorResolutionFailed,
@@ -105,6 +107,8 @@ pub struct InboundMessage {
     pub im_user_id: String,
     pub im_user_nick: Option<String>,
     pub text: String,
+    /// Channel-normalized temporary attachments. The first rollout accepts images only.
+    pub attachments: Option<Vec<Attachment>>,
     /// 该消息是否 @ 了本机器人(isInAtList / atUsers 命中)。
     pub is_at_bot: bool,
     /// 去重用。
