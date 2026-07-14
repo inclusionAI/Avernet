@@ -1,0 +1,206 @@
+"""Service-bot scale operations + device-count resolution, mixed in."""
+from __future__ import annotations
+
+import asyncio
+import time
+from typing import Any, Dict
+
+from agentclaw.community.core.devices.models import DeviceBindingStatus
+from agentclaw.community.core.service_bot.repository.models import (
+    BotPublishRecord,
+    PublishStatus,
+)
+from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
+from agentclaw.community.core.service_bot.services.bot_publish_service import (
+    PublishNotFoundError,
+    PublishStatusInvalidError,
+)
+from agentclaw.community.core.service_bot.services.publish_flow.errors import (
+    PublishFlowServiceError,
+)
+from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.log import get_logger
+
+logger = get_logger()
+
+DEVICE_COUNT_CONFIG_BUSINESS_CODE = "service_bot_device_count"
+DEVICE_COUNT_DEFAULT_PARAM_CODE = "default"
+
+
+class ScaleMixin:
+    """Service-bot scale operations + device-count resolution, mixed in."""
+
+    def scale_bot(
+        self,
+        publish_id: int,
+        operator: str = "system",
+    ) -> dict:
+        """Initiate a scale operation for a published service bot.
+
+        Currently only supports service bots in the online stage (SUCCESS / ONLINE_PUB).
+        Obtains bot_uuid from the publish record's online binding, then calls the BaaS scale API.
+        """
+        logger.info(
+            f"[PublishFlowService.scale_bot] called: publish_id={publish_id}, "
+            f"operator={operator}"
+        )
+
+        publish_record = self._publish_service.get_publish_by_id(publish_id)
+        if not publish_record:
+            raise PublishNotFoundError(f"Publish order not found: {publish_id}")
+
+        owner_id = self._get_owner_id(publish_record)
+        bot = self._bot_service.get_bot(
+            bot_id=publish_record.source_bot_id,
+            user_id=owner_id,
+        )
+        if not bot:
+            raise PublishFlowServiceError(f"Bot does not exist: {publish_record.source_bot_id}")
+
+        active_engine = (bot.get("active_engine") or "").strip().lower()
+        if not self._provider_behavior(bot).supports_scale:
+            return {
+                "success": True,
+                "message": "Service bots on the teclaw engine do not support scaling",
+                "publish_id": publish_id,
+                "engine": active_engine,
+                "supported": True,
+            }
+
+        current_status = PublishStatus(publish_record.status)
+        if current_status != PublishStatus.SUCCESS:
+            raise PublishStatusInvalidError(
+                f"The current status {current_status} does not support scale operations"
+            )
+
+        ext = self._get_latest_ext(publish_id)
+        online_binding_id = (ext.get("binding") or {}).get(PublishStage.ONLINE.value)
+        if not online_binding_id:
+            raise PublishFlowServiceError(
+                f"Binding info for the online stage not found: publish_id={publish_id}"
+            )
+
+        binding = self._publish_service.get_device_binding_by_id(online_binding_id)
+        if not binding or not binding.device_id:
+            raise PublishFlowServiceError(
+                f"Device binding record does not exist or is missing device_id: binding_id={online_binding_id}"
+            )
+
+        bot_uuid = binding.device_id
+        target_count = self._resolve_scale_target_count(publish_record)
+        request_id = f"scale_{bot_uuid}_{int(time.time() * 1000)}"
+
+        result = self._baas_service.scale_bot(
+            bot_uuid=bot_uuid,
+            owner_id=operator,
+            request_id=request_id,
+            target_count=target_count,
+            auto_approve_publish=True,
+        )
+
+        scale_publish_id = result.get("publish_id")
+        if scale_publish_id is not None:
+            def _mutate(latest_ext: dict) -> None:
+                latest_ext.setdefault("scale", {})["publish_id"] = scale_publish_id
+
+            self._mutate_and_update_ext(
+                publish_id=publish_id,
+                mutator=_mutate,
+            )
+
+        logger.info(
+            f"[PublishFlowService.scale_bot] scale submitted: publish_id={publish_id}, "
+            f"bot_uuid={bot_uuid}, target_count={target_count}, result={result}"
+        )
+
+        return {
+            "success": True,
+            "message": "Scale task submitted",
+            "publish_id": publish_id,
+            "bot_uuid": bot_uuid,
+            "target_count": target_count,
+            "baas_publish_id": result.get("publish_id"),
+            "data": result,
+        }
+
+    def _resolve_scale_target_count(self, publish_record: BotPublishRecord) -> int:
+        """Resolve the target device count for scaling a service Bot."""
+        owner_id = self._get_owner_id(publish_record)
+        bot = self._bot_service.get_bot(
+            bot_id=publish_record.source_bot_id,
+            user_id=owner_id,
+        )
+        if not bot:
+            raise PublishFlowServiceError(f"Bot does not exist: {publish_record.source_bot_id}")
+
+        ext_count = self._read_device_count_from_bot_ext(bot.get("ext"))
+        if ext_count is not None:
+            logger.info(
+                "[PublishFlowService._resolve_scale_target_count] use bot ext device_count=%s for bot_id=%s",
+                ext_count,
+                publish_record.source_bot_id,
+            )
+            return ext_count
+
+        default_count = self._get_default_scale_target_count()
+        if default_count is not None:
+            logger.info(
+                "[PublishFlowService._resolve_scale_target_count] use common_config default device_count=%s for bot_id=%s",
+                default_count,
+                publish_record.source_bot_id,
+            )
+            return default_count
+
+        raise PublishFlowServiceError(
+            f"service_bot_config.device_count not found, and no default device_count is configured: bot_id={publish_record.source_bot_id}"
+        )
+
+    def _read_device_count_from_bot_ext(self, bot_ext: dict[str, Any] | None) -> int | None:
+        if not isinstance(bot_ext, dict):
+            return None
+        service_bot_config = bot_ext.get("service_bot_config")
+        if not isinstance(service_bot_config, dict):
+            return None
+        return self._normalize_device_count(
+            service_bot_config.get("device_count"),
+            source="bot.ext.service_bot_config.device_count",
+        )
+
+    def _get_default_scale_target_count(self) -> int | None:
+        value = self._common_config_service.get_value(
+            business_code=DEVICE_COUNT_CONFIG_BUSINESS_CODE,
+            param_code=DEVICE_COUNT_DEFAULT_PARAM_CODE,
+            env=get_current_env(),
+            default=None,
+        )
+        logger.info(
+            "[PublishFlowService._get_default_scale_target_count] common_config value=%s",
+            value,
+        )
+        return self._normalize_device_count(
+            value,
+            source="common_config.service_bot_device_count.default",
+        )
+
+    def _normalize_device_count(self, value: Any, *, source: str) -> int | None:
+        if value is None or value == "":
+            return None
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            logger.warning(
+                "[PublishFlowService._normalize_device_count] invalid device_count from %s: %r",
+                source,
+                value,
+            )
+            return None
+        if count < 1:
+            logger.warning(
+                "[PublishFlowService._normalize_device_count] non-positive device_count from %s: %r",
+                source,
+                value,
+            )
+            return None
+        return count
+

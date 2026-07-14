@@ -5,6 +5,7 @@ Timing is DB-owned, so deadline behavior is exercised via ``deadline_seconds``
 and backoff config rather than injected clocks.
 """
 import asyncio
+import time
 from contextlib import contextmanager
 
 import pytest
@@ -234,3 +235,39 @@ def test_disabled_worker_startup_is_noop():
 
     asyncio.run(boot())
     assert len(w.repo.list_by_status(status=TaskStatus.SUCCEEDED, env=ENV)) == 0
+
+
+# ── lease-renewal heartbeat ─────────────────────────────────────────────────
+
+def test_heartbeat_renews_lease_during_long_handler(monkeypatch):
+    """A handler that runs longer than the lease keeps its claim (renewed by the
+    heartbeat) and its outcome write still succeeds."""
+    w = _world(lease_seconds=1)
+
+    calls = []
+    orig_renew = w.repo.renew_lease
+
+    def _spy(**kwargs):
+        calls.append(kwargs)
+        return orig_renew(**kwargs)
+
+    monkeypatch.setattr(w.repo, "renew_lease", _spy)
+
+    class _SlowHandler:
+        @property
+        def task_type(self):
+            return "slow"
+
+        def handle(self, payload):
+            time.sleep(2.5)  # > lease_seconds=1 → heartbeat must renew
+            return Complete()
+
+    w.registry.register(_SlowHandler())
+    rec = w.enqueue("slow")
+
+    asyncio.run(w.worker.run_once())
+
+    # Heartbeat fired at least once during the 2.5s run, and because the lease
+    # stayed with this worker the terminal Complete write succeeded.
+    assert len(calls) >= 1
+    assert w.status_of(rec.id) == TaskStatus.SUCCEEDED

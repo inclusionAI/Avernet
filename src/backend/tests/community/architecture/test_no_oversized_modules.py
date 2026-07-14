@@ -77,8 +77,6 @@ _ALLOWLIST: dict[str, str] = {
         "~1443 lines — skill-set router; CRUD + skills + mcps + default-skill admin.",
 
     # ── service_bot cluster ──────────────────────────────────────────
-    "core/service_bot/services/publish_flow_service.py":
-        "~2222 lines — publish-flow orchestration; staged transitions + retry.",
     "core/service_bot/services/baas_service.py":
         "~2608 lines — single BaasService: BaaS API client + payload builders "
         "+ sandbox/mount-point shaping + dataclasses. Demoted from the Rule 20 "

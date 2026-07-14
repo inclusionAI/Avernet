@@ -73,10 +73,8 @@ user_config:
   dormant:
     dry_run: true
 
-  # In-process task-queue worker: off by default (enable once a handler + table
-  # exist).
-  task_queue_worker:
-    enabled: false
+  # task_queue_worker: enabled at the base (application.yaml) so the publish flow
+  # runs its durable stage tasks; community inherits that (no override here).
 
   # Desktop-bot periodic scan: off by default (safe — no background mutation).
   desktop_bot_periodic_scan:

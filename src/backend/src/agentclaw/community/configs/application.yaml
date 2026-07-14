@@ -156,6 +156,13 @@ user_config:
     apply_owner_whitelist: []
     global_dry_run: false
 
+  # In-process durable task-queue worker (one per pod). Enabled by default so the
+  # publish flow's stage advances (build/release/progress-poll) run as persisted,
+  # crash-safe tasks. The test profile overrides this to false so unit tests don't
+  # spin a background loop.
+  task_queue_worker:
+    enabled: true
+
   # NOTE: dima (applicationCoding 7x24 hosting API + credentials) is corp-only —
   # carried by the corp env overlays; the community build has no DIMA hosting.
   #

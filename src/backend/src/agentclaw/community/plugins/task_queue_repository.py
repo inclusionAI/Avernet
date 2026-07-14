@@ -297,6 +297,21 @@ class TaskQueueRepository:
             },
         )
 
+    def renew_lease(self, *, task_id: int, worker_id: str, lease_seconds: int) -> bool:
+        # Holder-guarded lease extension: keep RUNNING + claimed_by, only push
+        # lease_expires_at forward (DB clock). Not via _apply_to_holder because the
+        # new timestamp must be computed inside the session (_now_plus).
+        with self._db.orm_session() as db:
+            affected = (
+                db.query(self.Model)
+                .filter(self._holder_filter(task_id, worker_id))
+                .update(
+                    {self.Model.lease_expires_at: self._now_plus(db, lease_seconds)},
+                    synchronize_session=False,
+                )
+            )
+        return affected == 1
+
     # ── diagnosis / tests ───────────────────────────────────────────────
 
     def get_by_id(self, task_id: int) -> Optional[TaskRecord]:

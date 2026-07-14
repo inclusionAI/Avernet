@@ -210,6 +210,11 @@ class TaskWorker(LifecycleBase):
             )
             return
 
+        # Keep the claim alive while the handler runs: a long handler (e.g. a
+        # slow build) would otherwise outlive lease_seconds and be re-claimed +
+        # double-run on another pod. The heartbeat renews the lease DB-side until
+        # the handler returns (or the lease is lost to another worker).
+        heartbeat = asyncio.create_task(self._heartbeat(task.id))
         try:
             outcome = await asyncio.to_thread(handler.handle, task.payload)
         except Exception as exc:  # handler raising == implicit Retry with backoff
@@ -220,8 +225,38 @@ class TaskWorker(LifecycleBase):
                 exc,
             )
             outcome = Retry(error=repr(exc))
+        finally:
+            heartbeat.cancel()
+            try:
+                await heartbeat
+            except asyncio.CancelledError:
+                pass
 
         await self._apply(task, outcome)
+
+    async def _heartbeat(self, task_id: int) -> None:
+        """Periodically extend the running task's lease until cancelled.
+
+        Interval is ``lease_seconds / 3`` (min 1s) so two renews of headroom fit
+        inside one lease. Stops early if a renew is a no-op — the lease was already
+        lost to another worker, so there is nothing left to keep alive.
+        """
+        interval = max(1.0, self._config.lease_seconds / 3)
+        while True:
+            await asyncio.sleep(interval)
+            renewed = await self._db(
+                self._repo.renew_lease,
+                task_id=task_id,
+                worker_id=self._worker_id,
+                lease_seconds=self._config.lease_seconds,
+            )
+            if not renewed:
+                logger.warning(
+                    "[TaskWorker] lease renew for task id=%s was a no-op — claim "
+                    "lost to another worker; stopping heartbeat",
+                    task_id,
+                )
+                return
 
     async def _apply(self, task: TaskRecord, outcome) -> None:
         if isinstance(outcome, Complete):

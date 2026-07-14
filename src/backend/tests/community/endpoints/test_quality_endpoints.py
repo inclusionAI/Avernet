@@ -106,9 +106,9 @@ def _seed_init_task(world):
 
     _seed_operator(world)
 
-    # Mock PublishFlowService.general_publish via DI binding (not instance mutation)
+    # Mock PublishFlowService.eval_publish via DI binding (not instance mutation)
     mock_publish_service = MagicMock()
-    mock_publish_service.general_publish = AsyncMock(return_value={
+    mock_publish_service.eval_publish = AsyncMock(return_value={
         "bot_uuid": "test-bot-uuid",
         "baas_publish_id": "test-baas-publish-id",
     })
@@ -730,9 +730,9 @@ def _seed_admin_and_init_task(world):
 
     _seed_super_admin(world)
 
-    # Mock PublishFlowService.general_publish via DI binding (not instance mutation)
+    # Mock PublishFlowService.eval_publish via DI binding (not instance mutation)
     mock_publish_service = MagicMock()
-    mock_publish_service.general_publish = AsyncMock(return_value={
+    mock_publish_service.eval_publish = AsyncMock(return_value={
         "bot_uuid": "test-bot-uuid",
         "baas_publish_id": "test-baas-publish-id",
     })
