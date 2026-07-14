@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Callable, cast  # noqa: UP035 - injector binding key must match provider side
 
-from injector import Injector, Module, inject, provider, singleton
+from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.core.bot_management.token_vault import TokenVault
@@ -56,9 +56,13 @@ from agentclaw.community.core.devices.services.device_service_router import Devi
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.notify.protocol import NotifyBotLister
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
+from agentclaw.community.di.modules.infrastructure.test.devices import (
+    configure_local_device_test_runtime,
+)
 from agentclaw.corp.di import config_corp as ccfg
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
+from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
 from agentclaw.corp.plugins.prod.arca_factory import ArcaSandboxFactory
 
@@ -69,7 +73,7 @@ logger = get_logger()
 class TestingDevicesModule(Module):
     """SQLite + local-mode overrides for devices."""
 
-    def configure(self, binder) -> None:
+    def configure(self, binder: Binder) -> None:
         """Override the prod Moltis ``DeviceConnectionManager`` binding.
 
         ``DevicesModule`` unconditionally binds the prod Moltis impl under
@@ -78,18 +82,7 @@ class TestingDevicesModule(Module):
         in this module wins over the prod module's). Rule 20: Protocol must
         resolve to its ``local`` impl in single box.
         """
-        from agentclaw.community.plugin_api.device_connection_manager import (
-            DeviceConnectionManagerPlugin,
-        )
-        from agentclaw.community.plugins.local.device_connection_manager import (
-            NoopDeviceConnectionManagerPlugin,
-        )
-
-        binder.bind(
-            DeviceConnectionManagerPlugin,
-            to=NoopDeviceConnectionManagerPlugin,
-            scope=singleton,
-        )
+        configure_local_device_test_runtime(binder)
         # The device-filesystem resolver is now a neutral ``core`` binding in the
         # base ``DevicesModule`` (B9); the per-provider filesystems are driven by
         # test doubles / real-HTTP seams via the injected deps. No binding here.
@@ -145,6 +138,7 @@ class TestingDevicesModule(Module):
         arca_baas_rollout_policy: ArcaBotCreateBaasRolloutPolicy,
         data_init_service_factory: Callable[[], DataInitService],
         token_vault: TokenVault,
+        passport_plugin: PassportPlugin,
         sandbox_client: SandboxRuntimeClient,
     ) -> DeviceService:
         """Local-only ``DeviceServiceRouter`` build (singlebox via BaaS)."""
@@ -186,6 +180,7 @@ class TestingDevicesModule(Module):
             providers=providers,
             default_provider_key=LOCAL_DEVICE_PROVIDER,
             arca_baas_rollout_policy=arca_baas_rollout_policy,
+            passport_plugin=passport_plugin,
             sandbox_client=sandbox_client,
         )
 
