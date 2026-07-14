@@ -17,6 +17,8 @@ log = get_logger("orm-repository")
 # Upload path: CREATED->UPLOADING->UPLOAD_COMPLETED->PULLING->DONE
 # Retention path: CREATED->UPLOADING->UPLOAD_COMPLETED->DONE (device_path IS NULL)  [Phase 69]
 # Download path: CREATED->PUSHING->DONE
+# Cancel path: any non-terminal upload state -> CANCELLED (terminal)  [Phase 72]
+# Delete staging path: DONE/FAILED/CANCELLED -> DELETED (terminal)  [Phase 72]
 # Failure: any non-terminal state -> FAILED
 # Same-state: idempotent no-op
 VALID_TRANSITIONS = frozenset({
@@ -33,6 +35,15 @@ VALID_TRANSITIONS = frozenset({
     ("UPLOAD_COMPLETED", "FAILED"),
     ("PULLING", "FAILED"),
     ("PUSHING", "FAILED"),
+    # Phase 72: Cancel upload -- any non-terminal upload state -> CANCELLED
+    ("CREATED", "CANCELLED"),
+    ("UPLOADING", "CANCELLED"),
+    ("UPLOAD_COMPLETED", "CANCELLED"),
+    ("PULLING", "CANCELLED"),
+    # Phase 72: Delete staging -- terminal states -> DELETED
+    ("DONE", "DELETED"),
+    ("FAILED", "DELETED"),
+    ("CANCELLED", "DELETED"),
 })
 
 
@@ -54,8 +65,12 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         device_path: str | None,
         fileservice_staging_path: str,
         error_message: str | None,
+        multipart_session_id: str | None = None,
     ) -> int:
-        log.info("create_ticket: transfer_id=%s, direction=%s", transfer_id, direction)
+        log.info(
+            "create_ticket: transfer_id=%s, direction=%s, multipart_session_id=%s",
+            transfer_id, direction, multipart_session_id is not None,
+        )
         env = get_current_env()
         row = FileTransferTicketModel(
             transfer_id=transfer_id,
@@ -68,6 +83,7 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
             device_path=device_path,
             fileservice_staging_path=fileservice_staging_path,
             error_message=error_message,
+            multipart_session_id=multipart_session_id,
             env=env,
         )
         self._session.add(row)
@@ -169,6 +185,40 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
             return None
         record = row.to_record()
         log.info("[file-transfer:get_by_transfer_id] result: id=%s", record.id)
+        return record
+
+    @with_orm_session
+    def get_by_fileservice_staging_path(
+        self, staging_path: str,
+    ) -> TicketRecord | None:
+        """Look up a ticket by its fileservice_staging_path.
+
+        Staging path is globally unique per env (constructed from transfer_id),
+        so no tenant filter is needed.
+
+        Args:
+            staging_path: Full OSS object key (fileservice_staging_path).
+
+        Returns:
+            TicketRecord if found, None otherwise.
+        """
+        log.info(
+            "[file-transfer:get_by_staging_path] staging_path=%s", staging_path,
+        )
+        env = get_current_env()
+        row = (
+            self._session.query(FileTransferTicketModel)
+            .filter(
+                FileTransferTicketModel.fileservice_staging_path == staging_path,
+                FileTransferTicketModel.env == env,
+            )
+            .first()
+        )
+        if row is None:
+            log.info("[file-transfer:get_by_staging_path] result: not found")
+            return None
+        record = row.to_record()
+        log.info("[file-transfer:get_by_staging_path] result: id=%s", record.id)
         return record
 
     @with_orm_session

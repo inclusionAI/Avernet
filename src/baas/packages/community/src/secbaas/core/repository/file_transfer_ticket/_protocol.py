@@ -51,6 +51,7 @@ class TicketRepository(Protocol):
         device_path: str | None,
         fileservice_staging_path: str,
         error_message: str | None,
+        multipart_session_id: str | None = None,
     ) -> int:
         """Insert a new transfer ticket record. Returns the new record ID."""
         ...
@@ -80,6 +81,15 @@ class TicketRepository(Protocol):
         self, transfer_id: str, tenant: str | None = None,
     ) -> TicketRecord | None:
         """Look up a ticket by its transfer_id, optionally scoped to tenant.
+
+        Returns None if not found.
+        """
+        ...
+
+    def get_by_fileservice_staging_path(
+        self, staging_path: str,
+    ) -> TicketRecord | None:
+        """Look up a ticket by its fileservice_staging_path.
 
         Returns None if not found.
         """
