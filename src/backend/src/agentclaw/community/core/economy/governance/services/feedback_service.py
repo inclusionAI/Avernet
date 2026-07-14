@@ -185,11 +185,13 @@ def _build_enriched_items(
         if isinstance(idx, int):
             user_by_index[idx] = it
 
-    raw_suggestions = (
-        structured.get("action_items") or structured.get("optimizationSuggestions") or []
-        if structured
-        else []
-    )
+    # action_items / optimizationSuggestions 须为 list(防御畸形 notification_structured:
+    # Text 列无 schema 约束,非 list 值会触发 AttributeError 穿透 resolve 的 except)。
+    raw_suggestions: list = []
+    if structured:
+        suggestions_val = structured.get("action_items") or structured.get("optimizationSuggestions")
+        if isinstance(suggestions_val, list):
+            raw_suggestions = suggestions_val
 
     if not raw_suggestions:
         # 降级:无建议全集,仅输出用户点评项
@@ -209,6 +211,8 @@ def _build_enriched_items(
 
     result: list[dict[str, Any]] = []
     for idx, sug in enumerate(raw_suggestions, start=1):
+        if not isinstance(sug, dict):
+            continue
         index = sug.get("index") if isinstance(sug.get("index"), int) else idx
         user_it = user_by_index.get(index)
         action = user_it.get("action") if user_it else None
