@@ -36,6 +36,7 @@ class FileTransferTicketModel(Base):
     error_message = Column(Text, nullable=True)
     download_url = Column(String(2048), nullable=True)
     upload_url = Column(String(2048), nullable=True)
+    multipart_session_id = Column(String(256), nullable=True)
     env = Column(String(16), nullable=False)
 
     __table_args__ = (
@@ -60,5 +61,6 @@ class FileTransferTicketModel(Base):
             error_message=self.error_message,
             download_url=self.download_url,
             upload_url=self.upload_url,
+            multipart_session_id=self.multipart_session_id,
             env=self.env,
         )
