@@ -14,9 +14,14 @@ from ..bot_manage import BotStartProgressResponse
 from ..device_manage import CommandResult
 from ._http_connection_info import HttpConnectionInfo
 from ._file_transfer_models import (
+    CancelUploadResponse,
+    CompleteUploadResponse,
     GetDownloadUrlResponse,
     GetTransferStatusResponse,
     GetUploadUrlResponse,
+    ShareLinkResponse,
+    StagingDeleteResponse,
+    StagingListResponse,
 )
 from ._models import (
     BotChatContext,
@@ -124,11 +129,13 @@ class BotFileTransferDispatcher(Protocol):
         self,
         bot_uuid: str,
         tenant: str,
-        device_path: str,
+        device_path: str | None = None,
         filename: str | None = None,
         expire_seconds: int = 3600,
         staging_subdir: str | None = None,
         device_affinity: str | None = None,
+        file_size: int = 0,
+        part_size: int | None = None,
     ) -> GetUploadUrlResponse: ...
 
     async def dispatch_get_download_url(
@@ -145,6 +152,37 @@ class BotFileTransferDispatcher(Protocol):
         transfer_id: str,
         tenant: str | None = None,
     ) -> GetTransferStatusResponse: ...
+
+    async def dispatch_complete_upload(
+        self,
+        transfer_id: str,
+        tenant: str | None = None,
+    ) -> CompleteUploadResponse: ...
+
+    async def dispatch_cancel_upload(
+        self,
+        transfer_id: str,
+        tenant: str | None = None,
+    ) -> CancelUploadResponse: ...
+
+    async def dispatch_list_staging(
+        self,
+        prefix: str,
+        limit: int = 100,
+        marker: str | None = None,
+    ) -> StagingListResponse: ...
+
+    async def dispatch_delete_staging(
+        self,
+        key: str,
+    ) -> StagingDeleteResponse: ...
+
+    async def dispatch_generate_share_link(
+        self,
+        transfer_id: str,
+        expire_seconds: int = 86400,
+        tenant: str | None = None,
+    ) -> ShareLinkResponse: ...
 
 
 @runtime_checkable
