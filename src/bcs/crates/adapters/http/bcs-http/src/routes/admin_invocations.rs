@@ -119,10 +119,10 @@ pub async fn create_admin_run(
         return service_error(error, request_id);
     }
 
-    let run_id = format!("run_{}", Uuid::new_v4().simple());
+    let run_id = new_admin_run_id();
     let session_id = request
         .session_id
-        .unwrap_or_else(|| format!("admin:{run_id}"));
+        .unwrap_or_else(|| default_admin_session_id(&run_id));
     if !valid_session_id(&session_id) {
         return response_error(
             StatusCode::BAD_REQUEST,
@@ -516,7 +516,44 @@ fn valid_session_id(value: &str) -> bool {
     !value.is_empty()
         && value
             .chars()
-            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | ':'))
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':'))
+}
+
+fn default_admin_session_id(run_id: &str) -> String {
+    format!("admin-{run_id}")
+}
+
+fn new_admin_run_id() -> String {
+    format!("run-{}", Uuid::new_v4().simple())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{default_admin_session_id, new_admin_run_id, valid_session_id};
+
+    #[test]
+    fn admin_run_id_uses_hyphenated_prefix() {
+        let run_id = new_admin_run_id();
+
+        assert!(run_id.starts_with("run-"));
+        assert!(!run_id.contains('_'));
+    }
+
+    #[test]
+    fn default_session_id_is_valid_and_derived_from_run_id() {
+        let run_id = "run-7f3a2b1c";
+        let session_id = default_admin_session_id(run_id);
+
+        assert_eq!(session_id, "admin-run-7f3a2b1c");
+        assert!(valid_session_id(&session_id));
+    }
+
+    #[test]
+    fn session_id_accepts_simple_identifier_characters() {
+        assert!(valid_session_id("Session_name.1:part-a"));
+        assert!(!valid_session_id(""));
+        assert!(!valid_session_id("session/name"));
+    }
 }
 
 fn schedule_timeout_callback(state: HttpAppState, run_id: String, timeout_ms: u64) {
