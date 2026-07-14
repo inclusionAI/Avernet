@@ -18,6 +18,7 @@ _OPENCLAW_RSYNC_EXCLUDES = [
     "workspace/config/mcporter.json",
     "workspace/.learnings/",
     "workspace/.openclaw/",
+    "workspace/.git/",
     "workspace/*/.git/",
     "workspace/skills/skills-repo",
     "workspace/skills/.skills-repo*",
