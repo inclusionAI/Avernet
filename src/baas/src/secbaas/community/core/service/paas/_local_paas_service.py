@@ -937,6 +937,15 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         # (e.g., dataclass or namedtuple) rather than requiring an exact
         # WsConnectionInfo instance.
         ws_url = getattr(conn_info, "ws_url", "")
+        if not ws_url:
+            raise DeviceCreationError(
+                error_code="PLUGIN_ERROR",
+                message="Plugin resolved an empty or invalid WebSocket URL",
+                context={
+                    "machine_id": machine_id,
+                    "session_id": session_id,
+                },
+            )
         token = getattr(conn_info, "token", "")
         target = getattr(conn_info, "target", "")
         expires_at = getattr(
