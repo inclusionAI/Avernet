@@ -87,7 +87,7 @@ def _seed_successful_publish(
         [
             {
                 "sql": (
-                    "INSERT INTO ac_service_bot_publish ("
+                    "INSERT INTO ac_bot_publish ("
                     "source_bot_pk, source_bot_id, publish_bot_id, name, owner_id, "
                     "permission_owner, status, version, env, gmt_create, gmt_modified, ext"
                     ") VALUES ("
