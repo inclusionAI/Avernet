@@ -234,3 +234,50 @@ class TestDeviceBindingSqliteOrmEquivalence:
         assert record.apply_reason == "equiv test"
         assert record.applied_by == "tester"
         assert record.gmt_create is not None
+
+
+class TestListBaasDevicesByTtlAscProviderFilter:
+    """list_baas_devices_by_ttl_asc 必须只返回 provider_type='ARCA' 的设备。
+
+    DeviceTtlTimer 用此查询捞服务 bot 设备做 TTL 续期 + 探活;teclaw 的
+    update_device_ttl 是 NotImplementedError,混入会触发无效续期噪声,
+    企业版还可能因探活失败累加 refresh_fail_count 误置 STOPPED。
+    """
+
+    def _insert_device(self, *, provider_type: str, sandbox_id: str, ttl: str) -> int:
+        device_repo = get_container().repository.device_repository()
+        return device_repo.insert_device(
+            device_uuid=_generate_uuid(),
+            tenant="tenant-ttl",
+            env=TEST_ENV,
+            domain="test",
+            creator="tester",
+            modifier="tester",
+            status="ACTIVE",
+            provider_type=provider_type,
+            provider_device_id=sandbox_id,
+            provider_device_props={
+                "sandbox_id": sandbox_id,
+                "ttl_expiration_time": ttl,
+            },
+        )
+
+    def test_excludes_non_arca_providers(self):
+        """TECLAW 设备即使 ACTIVE 且有 sandbox_id,也不得被 TTL 任务捞出。"""
+        repo = get_container().repository.device_binding_repository()
+
+        arca_id = self._insert_device(
+            provider_type="ARCA", sandbox_id="sbx-arca", ttl="2026-01-01 00:00:00"
+        )
+        teclaw_id = self._insert_device(
+            provider_type="TECLAW", sandbox_id="sbx-teclaw", ttl="2026-01-01 00:00:00"
+        )
+
+        result = repo.list_baas_devices_by_ttl_asc(limit=100)
+
+        returned_ids = {row["id"] for row in result}
+        provider_types = {row["provider_type"] for row in result}
+
+        assert arca_id in returned_ids
+        assert teclaw_id not in returned_ids
+        assert provider_types == {"ARCA"}
