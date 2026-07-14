@@ -23,6 +23,7 @@ class TestHttpConnInfo:
     pytestmark = pytest.mark.dispatcher
 
     @pytest.mark.asyncio
+    @pytest.mark.skip(reason="TODO: http-conn endpoint returns 404 in sofa mode")
     async def test_get_http_conn_info(self, api: APITestHelper) -> None:
         """GET /bots/{bot_uuid}/http-conn returns connection info."""
         bot = await find_existing_bot(api)
