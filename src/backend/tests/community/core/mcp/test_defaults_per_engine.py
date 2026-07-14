@@ -165,14 +165,14 @@ from agentclaw.community.core.mcp.services._defaults import (
 )
 
 _EXPECTED_CLI_CODES = (
-    "adev-cli", "acli", "antcode-cli", "linke", "linke-cli",
-    "linkw-cli", "qmx-invoke-cli", "serverless", "derisk-cli",
+    "adev-cli", "acli", "antcode-cli",
+    "linkw-cli", "serverless", "derisk-cli",
 )
 
 
-def _assert_nine_default_clis(items):
+def _assert_default_clis(items):
     codes = [it["cli_code"] for it in items]
-    assert len(items) == 9
+    assert len(items) == len(_EXPECTED_CLI_CODES)
     for code in _EXPECTED_CLI_CODES:
         assert code in codes
     for it in items:
@@ -184,17 +184,17 @@ def _assert_nine_default_clis(items):
 
 def test_aicoding_engine_has_default_cli_items():
     items = get_default_cli_items("aicoding")
-    _assert_nine_default_clis(items)
+    _assert_default_clis(items)
 
 
 def test_claude_code_personal_coding_uses_aicoding_link():
     items = get_default_cli_items("claude_code", "personalCoding")
-    _assert_nine_default_clis(items)
+    _assert_default_clis(items)
 
 
 def test_claude_code_application_coding_uses_aicoding_link():
     items = get_default_cli_items("claude_code", "applicationCoding")
-    _assert_nine_default_clis(items)
+    _assert_default_clis(items)
 
 
 def test_claude_code_without_template_or_unknown_template_returns_empty():
@@ -206,8 +206,8 @@ def test_claude_code_without_template_or_unknown_template_returns_empty():
     # 非字符串且不可哈希的 template_type（来自用户 JSON）→ 不抛 TypeError，空（fail-closed）
     assert get_default_cli_items("claude_code", []) == []
     assert get_default_cli_items("claude_code", {}) == []
-    # aicoding 引擎不依赖 template_type，始终返回 9 项
-    assert len(get_default_cli_items("aicoding", [])) == 9
+    # aicoding 引擎不依赖 template_type，始终返回默认 CLI 项
+    assert len(get_default_cli_items("aicoding", [])) == len(_EXPECTED_CLI_CODES)
 
 
 def test_non_aicoding_engines_return_empty_regardless_of_template():
