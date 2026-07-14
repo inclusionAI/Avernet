@@ -119,12 +119,12 @@ class TestErrorScenarios:
         """SC #3: expired ticket + no OSS file -> poller marks FAILED.
 
         Conditions for timeout:
-        1. gmt_create + upload_timeout_seconds < datetime.utcnow()
+        1. gmt_create + upload_timeout_seconds < datetime.now()
         2. check_object_exists returns False (no file ever uploaded)
 
         The poller._config.upload_timeout_seconds defaults to 3600 (1 hour).
         gmt_create is set to 2 hours ago to ensure a safe margin for
-        timezone-naive comparison with datetime.utcnow().
+        timezone-naive comparison with datetime.now().
         """
         # Clear stub storage so check_object_exists returns False
         stub_oss_backend._storage.clear()
