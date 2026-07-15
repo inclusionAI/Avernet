@@ -121,11 +121,41 @@ uniform.
    with `kind ∈ {*_first_release, eval_publish}` and no id **is** the orphan
    flag; the next attempt abandons it and proceeds (see OQ1 below).
 
-`approve_workflow` is verify-then-act: read the workflow
-(`get_publish_progress`), if terminal or past approval mark `APPROVED`
-(no-op call skipped); if awaiting approval call `approve_publish` and CAS
-`ID_RECORDED→APPROVED` **only on success** — an approve exception propagates
-as a step failure (no more swallow-and-return-False).
+`approve_workflow` is verify-then-act, and **confirmation comes from observed
+workflow status, never from the approve call being accepted**. Verified BaaS
+semantics (`_publish_service.approve_stage`, `_bot_management_service.
+_auto_approve_publish`):
+
+- `auto_approve_publish=True` stamps `extra_config.auto_approve` and spawns a
+  **fire-and-forget server-side loop** (`asyncio.create_task`, ≤20×1s) that
+  approves every stage gate internally; on exhaustion the callback pathway
+  continues it.
+- While that flag is set, **public approve calls are silently ignored**
+  (guard at `_publish_service.py:1420-1427` — logged, current state
+  returned, no error). Today's client approves after arca/baas create/
+  upgrade/stop are therefore server-side no-ops.
+- Otherwise approve is state-safe: SUCCESS → no-op, ACTIVE → benign
+  "continue execution", PENDING/APPROVING → real transition, FAILED/other →
+  `ValueError`.
+
+So the step is: read the workflow status; past the approval gate (ACTIVE/
+executing/terminal-SUCCESS) → mark `APPROVED` without calling. Sitting at
+PENDING/APPROVING → call `approve_publish`, then mark `APPROVED` only if the
+**returned/re-read status** actually left the gate; if it did not (the
+auto-approve-ignored case: BaaS's own loop hasn't gotten to it yet), leave
+the step incomplete and let the progress poll re-drive — do not spin. An
+approve exception propagates as a step failure (no more
+swallow-and-return-False). This closes the redundancy without per-provider
+branching: auto-approved workflows resolve via the status read (no call
+sent once past the gate), teclaw workflows get the load-bearing call, and
+the double/triple approves disappear.
+
+**Non-goal (verified as risky, kept out)**: changing any
+`auto_approve_publish` flag. Flipping teclaw→auto would make our approve
+lever ignored and hang teclaw recovery on BaaS's own fire-and-forget loop;
+flipping arca→manual would require client-driving every batch stage gate
+(multi-gate publishes are exactly why the server loop exists). Both are
+behavior changes orthogonal to idempotency; candidate follow-up only.
 
 **Legacy fence / backfill**: `open_operation` for a publish record that
 predates the ledger seeds rows from the ext markers it can trust
@@ -256,6 +286,14 @@ Rewired (main):
   fake-flow tests updated where handler wiring changed.
 
 ## Risks & mitigations
+
+- **BaaS's own auto-approve loop is fire-and-forget** (server-side
+  `asyncio.create_task`, bounded iterations): a BaaS pod crash right after
+  create can leave an auto-approve workflow at PENDING with public approves
+  ignored — un-drivable from our side. Out of scope (BaaS-internal
+  durability, mirror of the gap we're fixing backend-side); user-driven
+  retry recovers by opening a fresh workflow, and the ledger makes the stuck
+  one visible. Candidate follow-up issue on the BaaS side.
 
 - **Ledger/differencing mis-adoption** (claiming a workflow that isn't ours):
   fenced three ways (ledger-known ids, intent timestamp, publish type); the
