@@ -39,7 +39,7 @@ def _build_cron_command(
         kind: 任务类型 (autoInitiate 或 agentTurn)
         workflow: Devflow 工作流名称
         append_message: 补充说明，拼接在发起消息末尾
-    
+
     注：命令末尾固定带 |maxTaskNum:3（单次触发最多发起 3 个任务）。
     """
     prefix = f"查询dima空间{dima_space_id}的待开发需求，开启7*24小时自动研发"

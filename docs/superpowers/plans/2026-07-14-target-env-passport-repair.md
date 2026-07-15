@@ -119,4 +119,3 @@
 5. 验证 AgentHub 新注册数据为 PROD；ACM 授权关系可查询。
 6. 对同一 bot 重复调用，结果应为已验证/幂等，不新增重复记录。
 7. 批量处理目标用户后，在线上环境重启对应 bot，使 agentCode 写入 Arca 容器 credential 文件。
-
