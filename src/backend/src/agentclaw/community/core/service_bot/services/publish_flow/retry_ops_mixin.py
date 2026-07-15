@@ -135,11 +135,29 @@ class RetryOpsMixin:
             and self.is_online_release_recorded(publish_id)
         )
         if restart:
-            # BaaS publish failed; call restart_bot to retry
-            restart_result = self.restart_bot(
-                publish_id=publish_id,
-                operator=operator,
-            )
+            # BaaS publish failed; re-deploy via the restart work. Run
+            # execute_restart INLINE (not the durable RESTART_TASK enqueue that the
+            # /restart endpoint uses): the #162 poll enqueued below and the restart
+            # task would otherwise be claimed in the same worker batch and run
+            # concurrently, so the poll could read ext.restart before the task wrote
+            # it. Running inline writes ext.restart + re-delivers synchronously, so
+            # the poll then self-drives the record out of its *_PUB wait state. The
+            # runner inside execute_restart still gives crash-safe, idempotent
+            # issuance (adopt-by-query on a user re-retry).
+            stage = self._determine_restart_stage(rollback_status)
+            try:
+                restart_result = await self.execute_restart(
+                    publish_id=publish_id,
+                    stage=stage.value,
+                    operator=operator,
+                )
+            except Exception as e:
+                logger.warning(
+                    "[PublishFlowService.retry] execute_restart failed: "
+                    "publish_id=%s stage=%s error=%s",
+                    publish_id, stage.value if stage else None, e,
+                )
+                restart_result = {"success": False, "message": str(e)}
             success = restart_result.get("success", False)
             if success:
                 # (#162) The BaaS-restart branch parks the record in its *_PUB wait

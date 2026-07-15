@@ -355,7 +355,7 @@ async def test_retry_clears_retry_flag_when_restart_submit_fails():
         status=PublishStatus.VALIDATE_PUB.value,
         ext={**ext, 'retry': True},
     )
-    svc.restart_bot = Mock(return_value={'success': False, 'message': 'submit failed'})
+    svc.execute_restart = AsyncMock(return_value={'success': False, 'message': 'submit failed'})
 
     result = await svc.retry(publish_id=1, operator='u1')
 
@@ -393,7 +393,7 @@ async def test_retry_restart_enqueues_progress_poll_on_success():
         status=PublishStatus.VALIDATE_PUB.value,
         ext={**ext, 'retry': True},
     )
-    svc.restart_bot = Mock(return_value={'success': True, 'message': 'ok', 'stage': 'verify'})
+    svc.execute_restart = AsyncMock(return_value={'success': True, 'message': 'ok', 'stage': 'verify'})
 
     result = await svc.retry(publish_id=1, operator='u1')
 
@@ -430,7 +430,7 @@ async def test_retry_restart_does_not_enqueue_poll_when_submit_fails():
         status=PublishStatus.VALIDATE_PUB.value,
         ext={**ext, 'retry': True},
     )
-    svc.restart_bot = Mock(return_value={'success': False, 'message': 'submit failed'})
+    svc.execute_restart = AsyncMock(return_value={'success': False, 'message': 'submit failed'})
 
     await svc.retry(publish_id=1, operator='u1')
 
@@ -3139,9 +3139,10 @@ async def test_retry_from_online_pub_recorded_calls_restart():
         },
     )
     svc, _ = _svc_with_record(record)
-    svc.restart_bot = Mock(return_value={"success": True})
+    # #162 + durable restart: retry runs execute_restart inline then enqueues the poll.
+    svc.execute_restart = AsyncMock(return_value={"success": True})
     result = await svc.retry(publish_id=1, operator="op")
-    svc.restart_bot.assert_called_once()
+    svc.execute_restart.assert_awaited_once()
     assert result.action == "restart"
 
 
