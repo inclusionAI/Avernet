@@ -129,9 +129,19 @@ Consequences for this design:
   closes most windows.
 - For mutations on an **existing bot** (upgrade, restart, scale, stop/destroy,
   rollback deploy): if we crash after BaaS accepted but before we persisted
-  the returned workflow id, the re-run recovers the id by querying the bot's
-  publishes (and SVC-PUB-15 guarantees a re-issue can't stack a duplicate
-  active workflow).
+  the returned workflow id, the re-run recovers the id by **ledger
+  differencing over the bot's full workflow list** (`list_by_bot_id`, all
+  statuses) — not the active-only query, because the in-doubt workflow may
+  already be terminal by resume time. Subtract every workflow id the ledger
+  knows for this bot, fence with the intent row's creation timestamp (also
+  excludes pre-ledger historical workflows) and the intent's publish type;
+  an unclaimed match is ours → adopt it and continue from whatever state it
+  is in (awaiting approval → approve; executing → poll; SUCCESS/FAILED →
+  jump to the corresponding record steps). No unclaimed match → the request
+  never landed → issue it. Matching can never use request_id: it is not
+  stored on the workflow row (only echoed in the create response, which is
+  what the crash lost). SVC-PUB-15 backstops mis-judged re-issues while a
+  workflow is still active.
 - For **bot creation** (first release, eval): there is no same-bot guard to
   lean on. The window between "create issued" and "response persisted" is
   closed by reconcile-before-create (query BaaS for a bot matching the
