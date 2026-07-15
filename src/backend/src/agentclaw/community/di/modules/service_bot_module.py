@@ -65,6 +65,9 @@ from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
     BotPublishRepositoryProtocol,
 )
+from agentclaw.community.core.service_bot.repository.publish_operation_protocol import (
+    PublishOperationRepositoryProtocol,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
@@ -110,6 +113,9 @@ from agentclaw.community.core.service_bot.repository.config_artifact_offload imp
 from agentclaw.community.plugins.bot_publish_repository import (
     BotPublishRepository as UnifiedBotPublishRepository,
 )
+from agentclaw.community.plugins.publish_operation_repository import (
+    PublishOperationRepository as UnifiedPublishOperationRepository,
+)
 from agentclaw.community.utils import env_utils
 
 logger = get_logger()
@@ -132,6 +138,13 @@ class ServiceBotModule(Module):
         binder.bind(
             BotPublishRepositoryProtocol,
             to=UnifiedBotPublishRepository,
+            scope=singleton,
+        )
+        # Publish operation ledger repository — same unified-ORM pattern; the
+        # crash-safe operation ledger (ac_publish_operation).
+        binder.bind(
+            PublishOperationRepositoryProtocol,
+            to=UnifiedPublishOperationRepository,
             scope=singleton,
         )
 

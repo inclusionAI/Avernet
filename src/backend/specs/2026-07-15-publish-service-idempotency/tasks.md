@@ -36,19 +36,19 @@
   - [x] Full suite green (nothing consumes it yet — service_bot suite: 566 passed).
 - **Depends on:** —
 
-## Task 2: Unified ORM ledger repository + DI — [ ]
+## Task 2: Unified ORM ledger repository + DI — [x]
 - **Goal:** One repository body over `DatabasePlugin.orm_session()` (prod +
   SQLite), wired in DI, exhaustively unit-tested.
 - **Files:** `plugins/publish_operation_repository.py`, DI wiring in
   `di/modules/service_bot_module.py` (alongside the existing repos),
   `tests/community/core/service_bot/repository/test_publish_operation_repository.py`.
 - **Done when:**
-  - [ ] All protocol methods implemented; state transitions are single
-        CAS UPDATEs (`WHERE id=? AND state=?`) returning win/lose.
-  - [ ] Unit tests: intent insert + unique-key conflict → existing row
-        returned; each legal CAS transition; illegal transition loses;
-        attempt bump creates a fresh row keyed `attempt+1`.
-  - [ ] Full suite green.
+  - [x] All protocol methods implemented; state transitions are single
+        CAS UPDATEs (`WHERE id=? AND state IN (...)`) returning win/lose.
+  - [x] Unit tests: intent insert + unique-key conflict raises; each legal
+        CAS transition; illegal transition loses; attempt bump / max_attempt;
+        list-by-publish/bot; JSON round-trip. (12 passed.)
+  - [x] Full suite green.
 - **Depends on:** Task 1
 
 ## Task 3: BaaS read-only endpoint — publishes by bot — [ ]
