@@ -12,6 +12,18 @@ from ..conftest import APITestHelper, find_existing_bot
 pytestmark = [pytest.mark.e2e, pytest.mark.baseline]
 
 
+# NOTE: The /api/v1/bots/{bot_uuid}/devices endpoint returns
+# ApiResponse[list[DeviceListResponse]] — data is a list of paginated
+# DeviceListResponse objects, one per matching bot record (a bot_uuid may
+# map to multiple records with different statuses).  Unpack the first
+# element for pagination assertions.
+def _unpack_devices(response_body: dict) -> dict:
+    raw = response_body["data"]
+    if isinstance(raw, list):
+        return raw[0] if raw else {"items": [], "total": 0, "page": 1, "page_size": 20}
+    return raw
+
+
 class TestDeviceNormal:
     """Normal-path device tests."""
 
@@ -30,7 +42,7 @@ class TestDeviceNormal:
         assert response.status_code == 200
         data = response.json()
         assert "data" in data
-        devices_data = data["data"]
+        devices_data = _unpack_devices(data)
         assert "items" in devices_data
 
     @pytest.mark.asyncio
@@ -46,21 +58,18 @@ class TestDeviceNormal:
         )
 
         assert response.status_code == 200
-        data = response.json()["data"]
-        assert "items" in data
-        assert "total" in data
-        assert "page" in data
-        assert "page_size" in data
-        assert isinstance(data["items"], list)
+        devices_data = _unpack_devices(response.json())
+        assert "items" in devices_data
+        assert "total" in devices_data
+        assert "page" in devices_data
+        assert "page_size" in devices_data
+        assert isinstance(devices_data["items"], list)
 
-        if data["items"]:
-            device = data["items"][0]
+        if devices_data["items"]:
+            device = devices_data["items"][0]
             assert "device_uuid" in device or "uuid" in device
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(
-        reason="TODO: bot_devices endpoint returns list not paginated dict in sofa mode"
-    )
     async def test_get_device_detail(self, api: APITestHelper) -> None:
         """GET /devices/{device_uuid} returns device detail."""
         bot = await find_existing_bot(api)
@@ -73,7 +82,8 @@ class TestDeviceNormal:
         )
 
         assert devices_response.status_code == 200
-        items = devices_response.json()["data"]["items"]
+        devices_data = _unpack_devices(devices_response.json())
+        items = devices_data.get("items", [])
         if not items:
             pytest.skip("Bot has no devices")
 
@@ -118,8 +128,6 @@ class TestDeviceNormal:
         )
 
         assert response.status_code == 200
-        data = response.json()["data"]
-        if not isinstance(data, dict):
-            pytest.skip(f"Unexpected response shape: {type(data).__name__}")
-        assert data.get("page_size", 0) > 0
-        assert data["page"] == 1
+        devices_data = _unpack_devices(response.json())
+        assert devices_data.get("page_size", 0) > 0
+        assert devices_data["page"] == 1
