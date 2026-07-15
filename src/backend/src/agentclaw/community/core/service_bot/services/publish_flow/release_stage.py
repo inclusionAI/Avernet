@@ -65,10 +65,6 @@ class ReleaseRecordOps(Protocol):
         engine_overrides: dict | None = None,
     ) -> dict: ...
 
-    def approve_baas_publish(
-        self, baas_publish_id: int, operator: str, stage: PublishStage, request_id: str
-    ) -> bool: ...
-
     def refresh_publish_handle(self, binding_id, publish_id) -> None: ...
 
 
@@ -180,9 +176,10 @@ class ReleaseStageRunner:
         if not baas_publish_id:
             raise PublishFlowServiceError("BaaS layer did not return publish_id")
 
-        # Three distinct steps invoked in sequence: (1) create the device binding,
-        # (2) record the binding/publish refs + provider promotion + status into
-        # ext, (3) approve the BaaS workflow.
+        # Two steps invoked in sequence: (1) create the device binding, (2) record
+        # the binding/publish refs + provider promotion + status into ext. The
+        # BaaS workflow is auto-approved server-side (#197: all-auto) — no client
+        # approve step.
         binding_id = self._ops.create_release_binding(
             bot=bot,
             bot_uuid=bot_uuid,
@@ -198,16 +195,6 @@ class ReleaseStageRunner:
             source_status=spec.source_status,
             target_status=spec.target_status,
             engine_overrides=overrides,
-        )
-        request_id = self._build_service.generate_request_id(
-            bot=bot,
-            publish_stage=spec.stage.value,
-        )
-        self._ops.approve_baas_publish(
-            baas_publish_id=baas_publish_id,
-            operator=operator,
-            stage=spec.stage,
-            request_id=request_id,
         )
 
         logger.info(
@@ -295,24 +282,11 @@ class ReleaseStageRunner:
             ext=ext,
         )
 
-        request_id = self._build_service.generate_request_id(
-            bot=bot,
-            publish_stage=spec.upgrade_request_label,
-        )
-        approved = self._ops.approve_baas_publish(
-            baas_publish_id=baas_publish_id,
-            operator=operator,
-            stage=spec.stage,
-            request_id=request_id,
-        )
-        if approved is True:
-            # Provider-specific post-upgrade refresh (teclaw re-pushes the MCP
-            # outbound rule; ARCA/baas refresh via the startup callback → no-op).
-            self._provider_behavior(bot).refresh_after_upgrade(
-                bot_uuid=bot_uuid,
-                bot=bot,
-            )
-
+        # All-auto approval (#197): the upgrade workflow is auto-approved
+        # server-side — no client approve. The teclaw post-upgrade MCP outbound
+        # rule refresh moves to the progress-poll SUCCESS handler
+        # (ProgressSyncMixin._handle_sync_success), triggering on observed deploy
+        # success rather than an approve return value.
         logger.info(
             "[ReleaseStageRunner.upgrade_release] %s upgrade completed: "
             "bot_uuid=%s, baas_publish_id=%s",

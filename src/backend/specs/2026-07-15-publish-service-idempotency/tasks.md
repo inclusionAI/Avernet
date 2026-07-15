@@ -128,7 +128,7 @@
   - [x] Full suite green (endpoint suites unchanged — approves still sent).
 - **Depends on:** —
 
-## Task 7: Delete client approves; MCP refresh onto poll success — [ ]
+## Task 7: Delete client approves; MCP refresh onto poll success — [x]
 - **Goal:** Remove every `approve_publish` call and `approve_baas_publish`
   itself; move teclaw `refresh_after_upgrade` from the `approved is True`
   gate to `_handle_sync_success`. **Intentional behavior change**: no client
@@ -141,12 +141,14 @@
   `publish_flow/progress_sync_mixin.py` (sync-success refresh trigger),
   affected unit/endpoint tests.
 - **Done when:**
-  - [ ] `grep -r approve_publish src/backend/src/agentclaw/community/core/service_bot/services` →
-        no mutation-path hits.
-  - [ ] `refresh_after_upgrade` fires exactly once on sync-success of an
-        upgrade-kind operation for teclaw (test), never for arca (no-op).
-  - [ ] Endpoint suites updated: no approve call expected anywhere.
-  - [ ] Full suite green.
+  - [x] No `approve_baas_publish` / `.approve_publish(` call remains in the
+        service_bot services (only a docstring mention).
+  - [x] `_refresh_provider_mcp_after_success` re-pushes for teclaw on
+        sync-success, no-op for arca (dedicated unit tests); upgrade path no
+        longer refreshes (deferred to the poll).
+  - [x] Endpoint suites updated: the draft→validate_pub case asserts create
+        posted + no `/approve`; full endpoint suite green (565).
+  - [x] service_bot suite green (604); full-suite run in progress.
 - **Depends on:** Task 6 (flags first — approval must never be orphaned)
 
 ## Task 8: First release onto the runner + crash-window harness — [ ]

@@ -449,13 +449,15 @@ def _assert_artifact_composed(response, world) -> None:
     extra_assertions=(
         _expect_status(_V1, PublishStatus.VALIDATE_PUB),
         _assert_artifact_composed,
-        _expect_post("/api/v1/bots", "/approve"),
+        _expect_post("/api/v1/bots"),
+        # #197 all-auto: BaaS auto-approves server-side — no client /approve POST.
+        _expect_no_post("/approve"),
         _expect_no_post("/destroy"),
     ),
 )
 def draft_process_builds_to_validate_pub():
-    """DRAFT /process backgrounds build+create+approve → VALIDATE_PUB, artifact
-    carries the seeded resource + user/shared skills."""
+    """DRAFT /process backgrounds build+create (auto-approved server-side) →
+    VALIDATE_PUB, artifact carries the seeded resource + user/shared skills."""
 
 
 @endpoint_test(

@@ -245,21 +245,8 @@ def test_should_upgrade_online_requires_last_publish_success():
     assert svc._should_upgrade_online(publish_record) is False
 
 
-def test_approve_baas_publish_returns_false_when_baas_raises():
-    publish_service = Mock()
-    build_service = Mock()
-    baas_service = Mock()
-    baas_service.approve_publish.side_effect = RuntimeError("down")
-    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
-
-    result = svc.approve_baas_publish(
-        baas_publish_id=9,
-        operator="op",
-        stage=PublishStage.VERIFY,
-        request_id="rid",
-    )
-
-    assert result is False
+# (#197 all-auto) approve_baas_publish was removed — every BaaS mutation is
+# auto-approved server-side, so there is no client approve method to test.
 
 
 @pytest.mark.asyncio
@@ -1068,11 +1055,13 @@ async def test_verify_upgrade_stamps_canary_delivered_and_persisted():
 
 
 @pytest.mark.asyncio
-async def test_verify_upgrade_refreshes_teclaw_rule_after_baas_approve():
+async def test_verify_upgrade_no_client_approve_and_defers_teclaw_refresh():
+    # #197 all-auto: the upgrade path no longer sends a client approve, and the
+    # teclaw MCP refresh moves to the progress-poll SUCCESS handler — so it must
+    # NOT fire in the upgrade path itself.
     publish_service = Mock()
     build_service = Mock()
     build_service.upgrade_async = AsyncMock(return_value={"publish_id": 9})
-    build_service.generate_request_id = Mock(return_value="rid")
     build_service.refresh_teclaw_mcp_outbound_rule = Mock()
     baas_service = Mock()
     baas_service.resolve_container_provider.return_value = "teclaw"
@@ -1081,7 +1070,6 @@ async def test_verify_upgrade_refreshes_teclaw_rule_after_baas_approve():
     )
     svc._ext_state.get_latest_ext = Mock(return_value=_artifact_ext("draft"))
     svc._ext_state.update_status = Mock()
-    svc.approve_baas_publish = Mock(return_value=True)
     svc.refresh_publish_handle = Mock()
 
     record = _make_publish_record(
@@ -1098,10 +1086,8 @@ async def test_verify_upgrade_refreshes_teclaw_rule_after_baas_approve():
         verify_binding_id=123,
     )
 
-    build_service.refresh_teclaw_mcp_outbound_rule.assert_called_once_with(
-        bot_uuid="BOT-old",
-        bot=bot,
-    )
+    baas_service.approve_publish.assert_not_called()
+    build_service.refresh_teclaw_mcp_outbound_rule.assert_not_called()
 
 
 # ── Task 7: verify promotion fetches + overlays + stores per-stage channels ──
@@ -1322,11 +1308,12 @@ async def test_online_upgrade_stamps_release_delivered_and_persisted():
 
 
 @pytest.mark.asyncio
-async def test_online_upgrade_refreshes_teclaw_rule_after_baas_approve():
+async def test_online_upgrade_no_client_approve_and_defers_teclaw_refresh():
+    # #197 all-auto: online upgrade sends no client approve; the teclaw MCP
+    # refresh is deferred to the progress-poll SUCCESS handler.
     publish_service = Mock()
     build_service = Mock()
     build_service.upgrade_async = AsyncMock(return_value={"publish_id": 9})
-    build_service.generate_request_id = Mock(return_value="rid")
     build_service.refresh_teclaw_mcp_outbound_rule = Mock()
     baas_service = Mock()
     baas_service.resolve_container_provider.return_value = "teclaw"
@@ -1340,7 +1327,6 @@ async def test_online_upgrade_refreshes_teclaw_rule_after_baas_approve():
     publish_service.get_device_binding_by_id.return_value = Mock(device_id="BOT-old")
     svc._ext_state.get_latest_ext = Mock(return_value=_artifact_ext("canary"))
     svc._ext_state.update_status = Mock()
-    svc.approve_baas_publish = Mock(return_value=True)
     svc.refresh_publish_handle = Mock()
 
     record = _make_publish_record(
@@ -1357,10 +1343,56 @@ async def test_online_upgrade_refreshes_teclaw_rule_after_baas_approve():
         bot=bot,
     )
 
-    build_service.refresh_teclaw_mcp_outbound_rule.assert_called_once_with(
-        bot_uuid="BOT-old",
-        bot=bot,
+    baas_service.approve_publish.assert_not_called()
+    build_service.refresh_teclaw_mcp_outbound_rule.assert_not_called()
+
+
+@pytest.mark.unit
+def test_refresh_provider_mcp_after_success_repushes_for_teclaw():
+    # #197 all-auto: the teclaw MCP outbound-rule refresh now keys off sync
+    # SUCCESS. Teclaw → re-push via build_service; the binding's device_id is
+    # the bot_uuid.
+    publish_service = Mock()
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id="BOT-x")
+    build_service = Mock()
+    build_service.refresh_teclaw_mcp_outbound_rule = Mock()
+    baas_service = Mock()
+    baas_service.resolve_container_provider.return_value = "teclaw"
+    bot_service = Mock()
+    bot = {"bot_id": "bot-source", "entity_id": "u1"}
+    bot_service.get_bot.return_value = bot
+    svc = _pf(publish_service, build_service, baas_service, bot_service,
+              _arca_router(build_service))
+
+    record = _make_publish_record(id=30, status=PublishStatus.ONLINE_PUB.value)
+    svc._refresh_provider_mcp_after_success(
+        record, {"binding": {PublishStage.ONLINE.value: 77}}, PublishStage.ONLINE
     )
+
+    build_service.refresh_teclaw_mcp_outbound_rule.assert_called_once_with(
+        bot_uuid="BOT-x", bot=bot
+    )
+
+
+@pytest.mark.unit
+def test_refresh_provider_mcp_after_success_noop_for_arca():
+    publish_service = Mock()
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id="BOT-x")
+    build_service = Mock()
+    build_service.refresh_teclaw_mcp_outbound_rule = Mock()
+    baas_service = Mock()
+    baas_service.resolve_container_provider.return_value = "arca"
+    bot_service = Mock()
+    bot_service.get_bot.return_value = {"bot_id": "bot-source", "entity_id": "u1"}
+    svc = _pf(publish_service, build_service, baas_service, bot_service,
+              _arca_router(build_service))
+
+    record = _make_publish_record(id=31, status=PublishStatus.ONLINE_PUB.value)
+    svc._refresh_provider_mcp_after_success(
+        record, {"binding": {PublishStage.ONLINE.value: 77}}, PublishStage.ONLINE
+    )
+
+    build_service.refresh_teclaw_mcp_outbound_rule.assert_not_called()
 
 
 # ── Task 8: online promotion fetches + overlays + stores per-stage channels ──
@@ -2235,7 +2267,6 @@ async def test_eval_publish_success():
     }
 
     svc = _pf(publish_service, build_service, baas_service, bot_service, _arca_router(build_service))
-    svc.approve_baas_publish = Mock(return_value=True)
     publish_service.get_publish_by_id.return_value = _make_publish_record(
         id=301,
         version=3,
@@ -2254,12 +2285,8 @@ async def test_eval_publish_success():
     assert build_service.release_async.await_args.kwargs["bot"] == bot_service.get_bot.return_value
     assert build_service.release_async.await_args.kwargs["ext_info"] == {"biz_id": "biz-001"}
     assert bot_service.get_bot.return_value["ext"] == {}
-    svc.approve_baas_publish.assert_called_once_with(
-        baas_publish_id=901,
-        operator="u1",
-        stage=PublishStage.EVAL,
-        request_id="rid-eval",
-    )
+    # #197 all-auto: eval CREATE is auto-approved server-side — no client approve.
+    baas_service.approve_publish.assert_not_called()
 
 
 def test_eval_teardown_success():
@@ -2268,7 +2295,6 @@ def test_eval_teardown_success():
     baas_service = Mock()
     baas_service.destroy_bot.return_value = {"publish_id": 902}
     svc = _pf(Mock(), build_service, baas_service, Mock(), _arca_router(build_service))
-    svc.approve_baas_publish = Mock(return_value=True)
 
     result = svc.eval_teardown(
         "BOT-EVAL-2",
@@ -2287,12 +2313,8 @@ def test_eval_teardown_success():
         operator="u1",
         request_id="rid-destroy-eval",
     )
-    svc.approve_baas_publish.assert_called_once_with(
-        baas_publish_id=902,
-        operator="u1",
-        stage=PublishStage.EVAL,
-        request_id="rid-destroy-eval",
-    )
+    # #197 all-auto: destroy_bot auto-approves server-side — no client approve.
+    baas_service.approve_publish.assert_not_called()
 
 
 def test_get_baas_publish_progress_success_default_include_devices_public_name():
@@ -2354,6 +2376,7 @@ def test_handle_sync_success_skips_destroy_verify_bot_for_teclaw_online_publish(
     svc._mark_previous_publish_superseded = Mock()
     svc._activate_binding = Mock()
     svc._destroy_bot_by_stage = Mock()
+    svc._refresh_provider_mcp_after_success = Mock()  # separately tested
 
     result = svc._handle_sync_success(
         publish_id=21,
@@ -2392,6 +2415,7 @@ def test_handle_sync_success_destroys_verify_bot_for_non_teclaw_online_publish()
     svc._mark_previous_publish_superseded = Mock()
     svc._activate_binding = Mock()
     svc._destroy_bot_by_stage = Mock()
+    svc._refresh_provider_mcp_after_success = Mock()  # separately tested
 
     result = svc._handle_sync_success(
         publish_id=22,
@@ -2427,6 +2451,7 @@ def test_handle_sync_success_verify_stage_updates_validating_and_clears_retry():
     svc._mark_previous_publish_superseded = Mock()
     svc._activate_binding = Mock()
     svc._destroy_bot_by_stage = Mock()
+    svc._refresh_provider_mcp_after_success = Mock()  # separately tested
 
     result = svc._handle_sync_success(
         publish_id=23,

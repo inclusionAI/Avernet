@@ -96,7 +96,11 @@ def test_release_teclaw_continues_when_agent_pass_rule_update_fails():
     )
 
     assert result == {"bot_uuid": "BOT-t", "publish_id": 5}
-    baas.approve_publish.assert_called_once()
+    # The teclaw outbound-rule push is attempted (and its failure swallowed) even
+    # though #197 all-auto removed the client approve — the rule push is a
+    # separate side effect, not approval.
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_called_once()
+    baas.approve_publish.assert_not_called()
 
 
 @pytest.mark.unit

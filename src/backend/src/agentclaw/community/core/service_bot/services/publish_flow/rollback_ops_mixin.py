@@ -131,27 +131,18 @@ class RollbackOpsMixin:
             ext=target_ext,
         )
 
-        # 7. Approve the BaaS publish record
-        request_id = self._build_service.generate_request_id(
-            bot=bot,
-            publish_stage="rollback",
-        )
-        self.approve_baas_publish(
-            baas_publish_id=baas_publish_id,
-            operator=operator,
-            stage=PublishStage.ONLINE,
-            request_id=request_id,
-        )
+        # 7. All-auto approval (#197): the rollback deploy workflow is
+        # auto-approved server-side (upgrade payload sets auto_approve_publish) —
+        # no client approve.
 
-        # 8. Enqueue the durable progress poll on the TARGET record. Rollback parks
-        # the target at ONLINE_PUB with ext.publish.online set but never passes
+        # 8. Enqueue the durable progress poll on the TARGET record (#162). Rollback
+        # parks the target at ONLINE_PUB with ext.publish.online set but never passes
         # through verify_flow/online_release, so pre-#105 only user /sync polling
         # ever finished it. The poll's advance_publish_progress reads
         # ext.publish.online and drives ONLINE_PUB → SUCCESS (binding activation +
         # supersede via _handle_sync_success), so the rollback self-completes with
         # no user polling — and becomes crash-safe.
         enqueue_progress_poll(self._task_queue_service, publish_id=target_publish_id)
-
         logger.info(
             f"[PublishFlowService.execute_rollback] Rollback deployment initiated: "
             f"current_publish_id={current_publish_id}, target_publish_id={target_publish_id}, "
@@ -233,18 +224,9 @@ class RollbackOpsMixin:
                 f"Bot destroy initiated: bot_uuid={bot_uuid}, stage={stage.value}, destroy_publish_id={destroy_publish_id}"
             )
 
-            # Approve the destroy workflow record
-            if destroy_publish_id:
-                self.approve_baas_publish(
-                    baas_publish_id=destroy_publish_id,
-                    operator="system",
-                    stage=stage,
-                    request_id=request_id,
-                )
-                logger.info(
-                    f"[PublishFlowService._destroy_bot_by_stage] "
-                    f"Bot destroy approved: bot_uuid={bot_uuid}, stage={stage.value}, destroy_publish_id={destroy_publish_id}"
-                )
+            # All-auto approval (#197): stop_bot's payload auto-approves the
+            # DESTROY workflow server-side (auto_approve_publish default True) —
+            # no client approve.
 
             # Update device_binding status to RELEASED (DeviceBindingMixin owns
             # the binding write).

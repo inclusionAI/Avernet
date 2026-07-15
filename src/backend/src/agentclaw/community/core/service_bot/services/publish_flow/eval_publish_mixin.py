@@ -89,19 +89,8 @@ class EvalPublishMixin:
         if not bot_uuid:
             raise PublishFlowServiceError("Eval-environment release failed: BaaS returned no bot_uuid")
 
-        request_id = self._build_service.generate_request_id(
-            bot=bot,
-            publish_stage=publish_stage.value,
-        )
-        # Best-effort approve; skip when BaaS returned no publish workflow id.
-        if baas_publish_id:
-            self.approve_baas_publish(
-                baas_publish_id=baas_publish_id,
-                operator=operator,
-                stage=publish_stage,
-                request_id=request_id,
-            )
-
+        # All-auto approval (#197): the eval CREATE workflow is auto-approved
+        # server-side — no client approve.
         result = {
             "success": True,
             "publish_id": publish_id,
@@ -142,14 +131,8 @@ class EvalPublishMixin:
             request_id=request_id,
         )
         destroy_publish_id = destroy_result.get("publish_id")
-        # Best-effort approve; skip when BaaS returned no publish workflow id.
-        if destroy_publish_id:
-            self.approve_baas_publish(
-                baas_publish_id=destroy_publish_id,
-                operator=operator,
-                stage=PublishStage.EVAL,
-                request_id=request_id,
-            )
+        # All-auto approval (#197): destroy_bot's payload auto-approves the
+        # DESTROY workflow server-side — no client approve.
         result = {
             "success": True,
             "bot_uuid": bot_uuid,

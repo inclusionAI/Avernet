@@ -299,16 +299,13 @@ class RestartMixin:
                     f"error={save_error}"
                 )
 
-            # Approve the BaaS-layer restart publish record
-            self.approve_baas_publish(
-                baas_publish_id=restart_publish_id,
-                operator=operator,
-                stage=stage,
-                request_id=request_id,
-            )
+            # All-auto approval (#197): the restart workflow is auto-approved
+            # server-side (upgrade/create payloads set auto_approve_publish=True)
+            # — no client approve. (This whole path moves onto the durable task
+            # queue + operation runner in Task 11.)
             logger.info(
                 f"[PublishFlowService._restart_bot_async] "
-                f"Bot restart approved: bot_uuid={bot_uuid}, stage={stage.value}, "
+                f"Bot restart submitted: bot_uuid={bot_uuid}, stage={stage.value}, "
                 f"restart_publish_id={restart_publish_id}"
             )
 

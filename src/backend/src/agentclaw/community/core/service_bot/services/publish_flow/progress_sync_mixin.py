@@ -122,6 +122,13 @@ class ProgressSyncMixin:
             bot_id=publish_record.source_bot_id,
         )
 
+        # All-auto approval (#197): teclaw's post-upgrade MCP outbound-rule
+        # refresh — formerly gated on the (now-removed) client approve return —
+        # triggers here, on observed deploy success. No-op for ARCA/baas;
+        # idempotent (a re-push) for teclaw, so running it for both first-release
+        # and upgrade successes is safe.
+        self._refresh_provider_mcp_after_success(publish_record, ext, stage)
+
         if stage == PublishStage.ONLINE:
             self._destroy_verify_bot_after_online_success(publish_id, publish_record)
 
@@ -131,6 +138,41 @@ class ProgressSyncMixin:
             message=f"Publish progress synced successfully, status: {baas_status}",
             data=progress,
         )
+
+    def _refresh_provider_mcp_after_success(
+        self,
+        publish_record: BotPublishRecord,
+        ext: dict,
+        stage: PublishStage,
+    ) -> None:
+        """Re-establish the provider's post-upgrade MCP outbound rule after a
+        BaaS publish reaches SUCCESS (teclaw re-pushes; ARCA/baas no-op).
+
+        Best-effort — a failure is logged and does not block the publish. This
+        replaces the former approve-gated refresh in ``upgrade_release`` (#197
+        all-auto): the refresh now keys off observed deploy success."""
+        binding_id = (ext.get("binding") or {}).get(stage.value)
+        if not binding_id:
+            return
+        binding = self._publish_service.get_device_binding_by_id(binding_id)
+        if not binding or not binding.device_id:
+            return
+        owner_id = self._get_owner_id(publish_record)
+        bot = self._bot_service.get_bot(
+            bot_id=publish_record.source_bot_id, user_id=owner_id
+        )
+        if not bot:
+            return
+        try:
+            self._provider_behavior(bot).refresh_after_upgrade(
+                bot_uuid=binding.device_id, bot=bot
+            )
+        except Exception as e:
+            logger.warning(
+                "[PublishFlowService._refresh_provider_mcp_after_success] "
+                "refresh failed: publish_id=%s stage=%s error=%s",
+                publish_record.id, stage.value, e,
+            )
 
     def _mark_previous_publish_superseded(
         self,
