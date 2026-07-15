@@ -527,3 +527,93 @@ async def test_scale_crash_after_call_resume_adopts_not_rescales():
     assert op.baas_publish_id == 901
     # The BaaS call carried the runner's deterministic request id, not a wall clock.
     assert baas.scale_bot.call_args.kwargs["request_id"] == "pub1.scale.online.a1"
+
+
+# ── eval publish/teardown: crash windows ──────────────────────────────────────
+def _eval_flow(ledger, baas, build_service, record):
+    svc = _flow(ledger=ledger, baas=baas, build_service=build_service,
+                publish_service=Mock())
+    svc._publish_service.get_publish_by_id = Mock(return_value=record)
+    svc._bot_service.get_bot = Mock(return_value={"bot_id": "b", "entity_id": "u"})
+    return svc
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_creation_orphan_visible_as_pending_op():
+    # Eval is a CREATION (no bot to adopt). A crash after the BaaS create but
+    # before the id is recorded leaves an in-flight PENDING op → the orphan bot is
+    # observable; the re-run re-issues (accepted creation orphan) and records the
+    # second workflow.
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+
+    async def release_async(**kw):
+        wid = baas.issue("BOT-eval", "CREATE")
+        return {"bot_uuid": "BOT-eval", "publish_id": wid, "status": "RUNNING"}
+
+    build_service.release_async = AsyncMock(side_effect=release_async)
+    record = _record(PublishStatus.SUCCESS.value)
+    svc = _eval_flow(ledger, baas, build_service, record)
+
+    crashed = []
+
+    def checkpoint(name):
+        if name == "after_issue" and not crashed:
+            crashed.append(1)
+            raise RuntimeError("crash after eval create, before record")
+
+    svc._operation_runner._checkpoint = checkpoint
+
+    with pytest.raises(RuntimeError):
+        await svc.eval_publish(1, "op", biz_id="biz-1")
+    assert build_service.release_async.await_count == 1
+    op = ledger.get_latest_by_kind(1, "eval_publish", "eval")
+    assert op.state == PublishOperationState.PENDING.value  # in-flight → observable
+
+    svc._operation_runner._checkpoint = lambda _n: None
+    result = await svc.eval_publish(1, "op", biz_id="biz-1")
+    assert build_service.release_async.await_count == 2  # re-issued (creation orphan)
+    assert result["success"] is True
+    op = ledger.get_latest_by_kind(1, "eval_publish", "eval")
+    assert op.state == PublishOperationState.COMPLETED.value
+    assert op.baas_publish_id == 902  # the second (recorded) workflow
+    # The TTL teardown safety net was enqueued for the eval bot.
+    assert svc._task_queue_service.enqueue.called
+
+
+@pytest.mark.asyncio
+async def test_eval_teardown_crash_after_issue_resume_adopts():
+    ledger = _ledger()
+    baas = FakeBaas()
+    svc = _flow(ledger=ledger, baas=baas, build_service=Mock(), publish_service=Mock())
+
+    def destroy_bot(**kw):
+        wid = baas.issue("BOT-eval", "DESTROY")
+        return {"publish_id": wid}
+
+    baas.destroy_bot = Mock(side_effect=destroy_bot)
+
+    crashed = []
+
+    def checkpoint(name):
+        if name == "after_issue" and not crashed:
+            crashed.append(1)
+            raise RuntimeError("crash after eval destroy, before record")
+
+    svc._operation_runner._checkpoint = checkpoint
+
+    with pytest.raises(RuntimeError):
+        await svc.execute_eval_teardown(publish_id=7, bot_uuid="BOT-eval", operator="op")
+    assert baas.destroy_bot.call_count == 1  # destroyed once, unrecorded
+
+    svc._operation_runner._checkpoint = lambda _n: None
+    result = await svc.execute_eval_teardown(publish_id=7, bot_uuid="BOT-eval", operator="op")
+    # Existing bot → adopt the in-doubt DESTROY workflow; NO second destroy.
+    assert baas.destroy_bot.call_count == 1
+    assert result["success"] is True
+    assert result["baas_publish_id"] == 901
+    op = ledger.get_latest_by_kind(7, "eval_teardown", "eval")
+    assert op.state == PublishOperationState.COMPLETED.value
+    assert op.baas_publish_id == 901
+    assert baas.destroy_bot.call_args.kwargs["request_id"] == "pub7.eval_teardown.eval.a1"

@@ -2322,7 +2322,11 @@ async def test_eval_publish_success():
         "ext": {},
     }
 
-    svc = _pf(publish_service, build_service, baas_service, bot_service, _arca_router(build_service))
+    task_queue_service = Mock()
+    svc = _pf(
+        publish_service, build_service, baas_service, bot_service, _arca_router(build_service),
+        task_queue_service=task_queue_service,
+    )
     publish_service.get_publish_by_id.return_value = _make_publish_record(
         id=301,
         version=3,
@@ -2335,7 +2339,6 @@ async def test_eval_publish_success():
     assert result["stage"] == "eval"
     assert result["bot_uuid"] == "BOT-EVAL-1"
     assert result["baas_publish_id"] == 901
-    assert result["baas_bot_status"] == "RUNNING"
     assert build_service.release_async.await_args.kwargs["publish_stage"] == PublishStage.EVAL
     assert build_service.release_async.await_args.kwargs["version"] == "3"
     assert build_service.release_async.await_args.kwargs["bot"] == bot_service.get_bot.return_value
@@ -2343,34 +2346,46 @@ async def test_eval_publish_success():
     assert bot_service.get_bot.return_value["ext"] == {}
     # #197 all-auto: eval CREATE is auto-approved server-side — no client approve.
     baas_service.approve_publish.assert_not_called()
+    # #197: a TTL teardown safety-net task is enqueued for the eval bot.
+    from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+        EVAL_TEARDOWN_TASK,
+        _EVAL_TEARDOWN_TTL_SECONDS,
+    )
+    task_queue_service.enqueue.assert_called_once()
+    call = task_queue_service.enqueue.call_args
+    assert call.args[0] == EVAL_TEARDOWN_TASK
+    assert call.args[1] == {"publish_id": 301, "bot_uuid": "BOT-EVAL-1", "operator": "u1"}
+    assert call.kwargs["delay_seconds"] == _EVAL_TEARDOWN_TTL_SECONDS
 
 
 def test_eval_teardown_success():
-    build_service = Mock()
-    build_service.generate_request_id = Mock(return_value="rid-destroy-eval")
-    baas_service = Mock()
-    baas_service.destroy_bot.return_value = {"publish_id": 902}
-    svc = _pf(Mock(), build_service, baas_service, Mock(), _arca_router(build_service))
-
-    result = svc.eval_teardown(
-        "BOT-EVAL-2",
-        operator="u1",
-        request_bot={"entity_id": "u1", "entity_type": "staff", "bot_id": "bot-source"},
+    from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+        EVAL_TEARDOWN_TASK,
     )
+
+    build_service = Mock()
+    baas_service = Mock()
+    task_queue_service = Mock()
+    svc = _pf(
+        Mock(), build_service, baas_service, Mock(), _arca_router(build_service),
+        task_queue_service=task_queue_service,
+    )
+
+    result = svc.eval_teardown("BOT-EVAL-2", operator="u1", publish_id=301)
 
     assert result == {
         "success": True,
         "bot_uuid": "BOT-EVAL-2",
-        "baas_publish_id": 902,
-        "message": "Eval environment teardown submitted",
+        "message": "Eval environment teardown enqueued",
     }
-    baas_service.destroy_bot.assert_called_once_with(
-        bot_uuid="BOT-EVAL-2",
-        operator="u1",
-        request_id="rid-destroy-eval",
-    )
-    # #197 all-auto: destroy_bot auto-approves server-side — no client approve.
-    baas_service.approve_publish.assert_not_called()
+    # #197: teardown is now enqueued as the durable eval_teardown task (delay 0),
+    # not a direct inline destroy_bot.
+    baas_service.destroy_bot.assert_not_called()
+    task_queue_service.enqueue.assert_called_once()
+    call = task_queue_service.enqueue.call_args
+    assert call.args[0] == EVAL_TEARDOWN_TASK
+    assert call.args[1] == {"publish_id": 301, "bot_uuid": "BOT-EVAL-2", "operator": "u1"}
+    assert call.kwargs["delay_seconds"] == 0
 
 
 def test_get_baas_publish_progress_success_default_include_devices_public_name():
@@ -3002,6 +3017,37 @@ def test_restart_bot_success_enqueues_durable_task_and_returns_stage():
     assert result["success"] is True
     assert result["stage"] == PublishStage.ONLINE.value
     assert result["bot_uuid"] == "BOT-x"
+
+
+def test_eval_teardown_handler_dispatches_to_execute_eval_teardown():
+    # #197: the durable eval_teardown handler unpacks the payload and runs the
+    # runner-based teardown; a non-success result becomes a Fail outcome.
+    from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+        EVAL_TEARDOWN_TASK,
+        PublishEvalTeardownHandler,
+    )
+    from agentclaw.community.core.task_queue.types import Complete, Fail
+
+    flow = Mock()
+    flow.execute_eval_teardown = AsyncMock(
+        return_value={"success": True, "bot_uuid": "BOT-eval", "baas_publish_id": 5}
+    )
+    handler = PublishEvalTeardownHandler(flow=flow, task_queue_service=Mock())
+    assert handler.task_type == EVAL_TEARDOWN_TASK
+
+    outcome = handler.handle(
+        {"publish_id": 9, "bot_uuid": "BOT-eval", "operator": "op"}
+    )
+    assert isinstance(outcome, Complete)
+    flow.execute_eval_teardown.assert_awaited_once_with(
+        publish_id=9, bot_uuid="BOT-eval", operator="op"
+    )
+
+    flow.execute_eval_teardown = AsyncMock(return_value={"success": False, "message": "boom"})
+    outcome = handler.handle(
+        {"publish_id": 9, "bot_uuid": "BOT-eval", "operator": "op"}
+    )
+    assert isinstance(outcome, Fail)
 
 
 # ---- retry() across source_status ------------------------------------------

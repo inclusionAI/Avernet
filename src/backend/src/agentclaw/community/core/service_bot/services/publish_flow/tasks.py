@@ -60,12 +60,20 @@ ONLINE_RELEASE_TASK = "service_bot.publish.online_release"
 PROGRESS_POLL_TASK = "service_bot.publish.progress_poll"
 RESTART_TASK = "service_bot.publish.restart"
 DESTROY_TASK = "service_bot.publish.destroy"
+EVAL_TEARDOWN_TASK = "service_bot.publish.eval_teardown"
 
 # Give-up horizons (DB-enforced). Build+release can be slow; the poll waits on the
 # BaaS workflow, matching the devices poll deadline.
 _STAGE_TASK_DEADLINE_SECONDS = 3600
 _POLL_TASK_DEADLINE_SECONDS = 86400
 _POLL_DELAY_SECONDS = 8.0
+
+# Eval environments are ephemeral: this is the TTL safety-net horizon after which
+# an orphaned eval bot (its quality task never reached to_env_released) is torn
+# down. The teardown task's give-up deadline must outlast the delay plus an
+# execution window, or the row would be retired before it ever becomes eligible.
+_EVAL_TEARDOWN_TTL_SECONDS = 86400
+_EVAL_TEARDOWN_DEADLINE_SECONDS = _EVAL_TEARDOWN_TTL_SECONDS + _STAGE_TASK_DEADLINE_SECONDS
 
 # States still waiting on a BaaS publish → the poll keeps driving them.
 _POLL_ACTIVE_STATES = {PublishStatus.VALIDATE_PUB, PublishStatus.ONLINE_PUB}
@@ -148,6 +156,30 @@ def enqueue_destroy(
         DESTROY_TASK,
         build_restart_payload(publish_id=publish_id, stage=stage, operator=operator),
         deadline_seconds=_STAGE_TASK_DEADLINE_SECONDS,
+    )
+
+
+def build_eval_teardown_payload(*, publish_id: int, bot_uuid: str, operator: str) -> dict:
+    return {"publish_id": publish_id, "bot_uuid": bot_uuid, "operator": operator}
+
+
+def enqueue_eval_teardown(
+    task_queue_service: TaskQueueService,
+    *,
+    publish_id: int,
+    bot_uuid: str,
+    operator: str,
+    delay_seconds: int = 0,
+) -> None:
+    """Enqueue the durable eval teardown. ``delay_seconds`` = the TTL safety net
+    at publish time; ``0`` for an explicit (post-eval) early teardown."""
+    task_queue_service.enqueue(
+        EVAL_TEARDOWN_TASK,
+        build_eval_teardown_payload(
+            publish_id=publish_id, bot_uuid=bot_uuid, operator=operator
+        ),
+        deadline_seconds=_EVAL_TEARDOWN_DEADLINE_SECONDS,
+        delay_seconds=delay_seconds,
     )
 
 
@@ -312,6 +344,35 @@ class PublishDestroyHandler(_PublishTaskBase):
         return Complete()
 
 
+class PublishEvalTeardownHandler(_PublishTaskBase):
+    """Durable eval-environment teardown — idempotent via the ``eval_teardown``
+    operation runner op (existing bot → adopt-by-query, never a second destroy).
+
+    Two enqueues converge here: the TTL safety net from ``eval_publish`` (delayed)
+    and the explicit post-eval teardown (delay 0). Both key on the same op, so
+    whichever runs first destroys and completes the op; the other adopts the
+    recorded DESTROY workflow and is a no-op."""
+
+    @property
+    def task_type(self) -> str:
+        return EVAL_TEARDOWN_TASK
+
+    def handle(self, payload: Optional[dict]) -> TaskOutcome:
+        publish_id = _require_int(payload, "publish_id")
+        bot_uuid = _require_str(payload, "bot_uuid")
+        operator = _require_str(payload, "operator")
+        return asyncio.run(self._run(publish_id, bot_uuid, operator))
+
+    async def _run(self, publish_id: int, bot_uuid: str, operator: str) -> TaskOutcome:
+        result = await self._flow.execute_eval_teardown(
+            publish_id=publish_id, bot_uuid=bot_uuid, operator=operator
+        )
+        if not result or not result.get("success"):
+            message = (result or {}).get("message", "unknown error")
+            return Fail(f"eval teardown failed: bot_uuid={bot_uuid}, {message}")
+        return Complete()
+
+
 class PublishProgressPollHandler(_PublishTaskBase):
     """Drive a BaaS-publish wait to terminal by reusing ``advance_publish_progress``."""
 
@@ -390,6 +451,11 @@ class PublishTaskLifecycle(LifecycleBase):
         )
         self._registry.register(
             PublishDestroyHandler(
+                flow=self._flow, task_queue_service=self._task_queue_service
+            )
+        )
+        self._registry.register(
+            PublishEvalTeardownHandler(
                 flow=self._flow, task_queue_service=self._task_queue_service
             )
         )

@@ -72,22 +72,52 @@ class EvalPublishMixin:
         if biz_id:
             ext_info["biz_id"] = biz_id
 
-        # Release to the eval environment.
-        release_result = await self._build_service.release_async(
-            bot=bot,
-            user_id=owner_id,
-            migration_path=migration_path,
-            device_count=1,
-            publish_stage=publish_stage,
-            version=str(publish_record.version or 1),
-            delivery=delivery,
-            ext_info=ext_info,
+        # (#197) Crash-safe issuance via the operation runner. Eval is a CREATION
+        # (no bot to adopt), so a crash after the BaaS create but before the id is
+        # recorded re-creates a bounded orphan — the in-flight PENDING op makes that
+        # orphan observable. The workflow id + bot_uuid land in the ledger.
+        op = self._operation_runner.open_operation(
+            publish_id=publish_id,
+            kind="eval_publish",
+            stage=publish_stage.value,
+            operator=operator,
+            params={"biz_id": biz_id} if biz_id else None,
         )
 
-        bot_uuid = release_result.get("bot_uuid")
-        baas_publish_id = release_result.get("publish_id")
+        async def _issue():
+            return await self._build_service.release_async(
+                bot=bot,
+                user_id=owner_id,
+                migration_path=migration_path,
+                device_count=1,
+                publish_stage=publish_stage,
+                version=str(publish_record.version or 1),
+                delivery=delivery,
+                ext_info=ext_info,
+            )
+
+        op = await self._operation_runner.acquire_workflow(op, _issue)
+        bot_uuid = op.bot_uuid
+        baas_publish_id = op.baas_publish_id
         if not bot_uuid:
             raise PublishFlowServiceError("Eval-environment release failed: BaaS returned no bot_uuid")
+        self._operation_runner.complete_operation(op)
+
+        # Enqueue the TTL teardown safety net: if the quality task never reaches
+        # to_env_released, the orphaned eval bot is destroyed after the TTL. The
+        # explicit post-eval teardown (delay 0) converges on the same runner op.
+        from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+            enqueue_eval_teardown,
+            _EVAL_TEARDOWN_TTL_SECONDS,
+        )
+
+        enqueue_eval_teardown(
+            self._task_queue_service,
+            publish_id=publish_id,
+            bot_uuid=bot_uuid,
+            operator=operator,
+            delay_seconds=_EVAL_TEARDOWN_TTL_SECONDS,
+        )
 
         # All-auto approval (#197): the eval CREATE workflow is auto-approved
         # server-side — no client approve.
@@ -97,7 +127,7 @@ class EvalPublishMixin:
             "stage": publish_stage.value,
             "bot_uuid": bot_uuid,
             "baas_publish_id": baas_publish_id,
-            "baas_bot_status": release_result.get("status"),
+            "baas_bot_status": None,
         }
         logger.info(
             f"[PublishFlowService.eval_publish] Release success: {result}"
@@ -109,30 +139,79 @@ class EvalPublishMixin:
         bot_uuid: str,
         *,
         operator: str = "system",
+        publish_id: int = 0,
         request_bot: dict | None = None,
     ) -> dict:
-        """Tear down the eval environment.
+        """Tear down the eval environment (#197: enqueue the durable teardown).
 
-        Depends only on the eval environment's own bot_uuid; a caller may later
-        read/pass it from a dedicated eval-task table. Does not touch the main
-        publish record's ext/binding.
+        Depends only on the eval environment's own bot_uuid; a caller may pass the
+        originating ``publish_id`` so this early teardown and the TTL safety net
+        (enqueued at ``eval_publish``) converge on the SAME runner op — otherwise it
+        defaults to 0. Enqueuing (rather than destroying inline) makes the teardown
+        crash-safe and idempotent via the ``eval_teardown`` op; the sync caller does
+        not block on the BaaS destroy. Does not touch the main publish record.
         """
         if not bot_uuid:
             raise PublishFlowServiceError("bot_uuid must not be empty")
 
-        request_bot = request_bot or {"bot_id": bot_uuid}
-        request_id = self._build_service.generate_request_id(
-            bot=request_bot,
-            publish_stage="destroy_eval",
+        from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+            enqueue_eval_teardown,
         )
-        destroy_result = self._baas_service.destroy_bot(
+
+        enqueue_eval_teardown(
+            self._task_queue_service,
+            publish_id=publish_id,
             bot_uuid=bot_uuid,
             operator=operator,
-            request_id=request_id,
         )
-        destroy_publish_id = destroy_result.get("publish_id")
-        # All-auto approval (#197): destroy_bot's payload auto-approves the
-        # DESTROY workflow server-side — no client approve.
+        result = {
+            "success": True,
+            "bot_uuid": bot_uuid,
+            "message": "Eval environment teardown enqueued",
+        }
+        logger.info(
+            f"[PublishFlowService.eval_teardown] Teardown enqueued: {result}"
+        )
+        return result
+
+    async def execute_eval_teardown(
+        self,
+        *,
+        publish_id: int,
+        bot_uuid: str,
+        operator: str = "system",
+    ) -> dict:
+        """Durable eval teardown work (#197): destroy the eval bot through the
+        operation runner so a crash-resume adopts the in-doubt DESTROY workflow
+        (existing bot) instead of issuing a second destroy.
+
+        Keyed on ``(publish_id, eval_teardown)`` with ``bot_uuid``, so the TTL and
+        the explicit teardown that share a publish_id resume the same op. Returns
+        ``{success, bot_uuid, baas_publish_id}``."""
+        if not bot_uuid:
+            raise PublishFlowServiceError("bot_uuid must not be empty")
+
+        op = self._operation_runner.open_operation(
+            publish_id=publish_id,
+            kind="eval_teardown",
+            stage=PublishStage.EVAL.value,
+            bot_uuid=bot_uuid,
+            operator=operator,
+        )
+
+        async def _issue():
+            return self._baas_service.destroy_bot(
+                bot_uuid=bot_uuid,
+                operator=operator,
+                request_id=op.request_id,
+            )
+
+        # acquire_workflow exceptions propagate (durable retry resumes the same
+        # non-terminal op → adopt-by-query), mirroring execute_restart.
+        op = await self._operation_runner.acquire_workflow(op, _issue)
+        destroy_publish_id = op.baas_publish_id
+        self._operation_runner.complete_operation(op)
+
         result = {
             "success": True,
             "bot_uuid": bot_uuid,
@@ -140,7 +219,7 @@ class EvalPublishMixin:
             "message": "Eval environment teardown submitted",
         }
         logger.info(
-            f"[PublishFlowService.eval_teardown] Destroy success: {result}"
+            f"[PublishFlowService.execute_eval_teardown] Destroy success: {result}"
         )
         return result
 

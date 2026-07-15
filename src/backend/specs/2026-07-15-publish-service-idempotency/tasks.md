@@ -271,7 +271,7 @@
   green. [x]
 - **Depends on:** Group B
 
-## Task 15: Eval publish/teardown + TTL task — [ ]
+## Task 15: Eval publish/teardown + TTL task — [x]
 - **Goal:** `eval_publish` opens an `eval_publish` op (bot_uuid/workflow id
   recorded in `result`) and enqueues a TTL `service_bot.publish.eval_teardown`
   task; `eval_teardown` becomes an `eval_teardown` runner op.
@@ -279,7 +279,7 @@
   (`PublishEvalTeardownHandler`), crash-window eval cases, tests.
 - **Done when:** crashed teardown re-runs idempotently; orphaned eval create
   is visible as a PENDING/ID_RECORDED op; TTL task enqueued at publish;
-  suite green.
+  suite green. [x]
 - **Depends on:** Group B
 
 ## Task 16: Approval flow — intent-first puid + durable trigger — [ ]
