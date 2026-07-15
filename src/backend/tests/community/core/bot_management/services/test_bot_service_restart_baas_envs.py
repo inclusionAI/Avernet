@@ -228,11 +228,11 @@ class TestRestartBaasEnvInjection:
         # template_config 透传到 BaaS device 层（供 SandboxOverrides 覆写镜像/规格）
         assert kwargs["template_config"] is not None
 
-    def test_personal_coding_injects_bot_type_personal_no_relay_defaults(self):
-        """personalCoding + claude_code → BOT_TYPE=personal，不写 RELAY_DEFAULT_*。"""
+    def test_personal_coding_injects_bot_type_personal_and_relay_defaults(self):
+        """personalCoding + claude_code → BOT_TYPE=personal，并写 RELAY_DEFAULT_*。"""
         svc, baas, _ = _make_service(
             active_engine="claude_code",
-            template_config={"model": "m1", "runtime": "py"},  # 应被门控忽略
+            template_config={"model": "m1", "runtime": "py"},
         )
         bot = _make_bot(active_engine="claude_code", template_type="personalCoding")
 
@@ -242,8 +242,8 @@ class TestRestartBaasEnvInjection:
         envs = kwargs["extra_envs"]
         assert envs is not None
         assert envs["BOT_TYPE"] == "personal"
-        assert "RELAY_DEFAULT_MODEL" not in envs
-        assert "RELAY_DEFAULT_RUNTIME" not in envs
+        assert envs["RELAY_DEFAULT_MODEL"] == "m1"
+        assert envs["RELAY_DEFAULT_RUNTIME"] == "py"
 
     def test_claude_code_engine_injects_envs(self):
         """claude_code 引擎同样命中门控（与 aicoding 等价）。"""

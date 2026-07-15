@@ -6,6 +6,10 @@ import hashlib
 import time
 from typing import TYPE_CHECKING, Any, override
 
+from agentclaw.community.core.bot_management.engines import (
+    BotProvisioningContext,
+    get_engine_provisioning_registry,
+)
 from agentclaw.community.core.devices.errors import DeviceServiceError
 from agentclaw.community.core.devices.models import (
     AllocatedDevice,
@@ -519,10 +523,18 @@ class BaasDeviceService(DeviceService):
         if not isinstance(template_config, dict):
             template_config = {}
 
+        provisioning_ctx = BotProvisioningContext(
+            bot_id=resolved_bot_id,
+            owner_id=resolved_owner_id,
+            active_engine=resolved_engine,
+            bot_type=resolved_bot_type,
+            template_type=template_type,
+            template_config=template_config,
+        )
         raw_codefuse_token = (
-            template_config.get("token")
-            if template_type == "applicationCoding"
-            else None
+            get_engine_provisioning_registry()
+            .resolve_for_context(provisioning_ctx)
+            .extract_runtime_token(provisioning_ctx)
         )
         codefuse_token = (
             self._vault.decrypt_or_passthrough(raw_codefuse_token)
