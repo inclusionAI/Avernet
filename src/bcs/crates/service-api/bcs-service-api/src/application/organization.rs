@@ -3,13 +3,19 @@ use bcs_domain::{Organization, OrganizationMember};
 
 use crate::{
     OrganizationCandidateBot, OrganizationCandidateBotPage, OrganizationCandidatePageQuery,
-    OrganizationCandidateQuery, OrganizationMemberDetail, OrganizationMemberPage, ServiceResult,
+    OrganizationCandidateQuery, OrganizationMemberDetail, OrganizationMemberPage,
+    OrganizationMemberProfile, OrganizationMemberProfilePatch, ServiceResult,
 };
 use crate::core::OrganizationMemberPageQuery;
 
 #[derive(Debug, Clone)]
 pub struct OrganizationAuth {
     pub provider_id: String,
+    pub provider_admin_token: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct OrganizationMemberAuth {
     pub provider_admin_token: String,
 }
 
@@ -32,10 +38,18 @@ pub struct UpdateOrganizationCommand {
 
 #[derive(Debug, Clone)]
 pub struct PutOrganizationMemberCommand {
-    pub auth: OrganizationAuth,
+    pub auth: OrganizationMemberAuth,
     pub organization_code: String,
     pub bot_uuid: String,
     pub role: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateOrganizationMemberProfileCommand {
+    pub auth: OrganizationMemberAuth,
+    pub organization_code: String,
+    pub bot_uuid: String,
+    pub patch: OrganizationMemberProfilePatch,
 }
 
 #[async_trait]
@@ -54,19 +68,19 @@ pub trait OrganizationManagementService: Send + Sync {
     ) -> ServiceResult<OrganizationMember>;
     async fn delete_member(
         &self,
-        auth: OrganizationAuth,
+        auth: OrganizationMemberAuth,
         organization_code: &str,
         bot_uuid: &str,
     ) -> ServiceResult<()>;
     async fn get_member(
         &self,
-        auth: OrganizationAuth,
+        auth: OrganizationMemberAuth,
         organization_code: &str,
         bot_uuid: &str,
     ) -> ServiceResult<Option<OrganizationMember>>;
     async fn get_member_detail(
         &self,
-        auth: OrganizationAuth,
+        auth: OrganizationMemberAuth,
         organization_code: &str,
         bot_uuid: &str,
     ) -> ServiceResult<Option<OrganizationMemberDetail>> {
@@ -77,14 +91,14 @@ pub trait OrganizationManagementService: Send + Sync {
     }
     async fn list_members(
         &self,
-        auth: OrganizationAuth,
+        auth: OrganizationMemberAuth,
         organization_code: &str,
         include_disabled: bool,
         role: Option<&str>,
     ) -> ServiceResult<Vec<OrganizationMember>>;
     async fn list_members_page(
         &self,
-        auth: OrganizationAuth,
+        auth: OrganizationMemberAuth,
         organization_code: &str,
         query: OrganizationMemberPageQuery,
     ) -> ServiceResult<OrganizationMemberPage> {
@@ -109,6 +123,10 @@ pub trait OrganizationManagementService: Send + Sync {
             limit: query.limit,
         })
     }
+    async fn update_member_profile(
+        &self,
+        command: UpdateOrganizationMemberProfileCommand,
+    ) -> ServiceResult<OrganizationMemberProfile>;
     async fn candidate_bots(
         &self,
         auth: OrganizationAuth,

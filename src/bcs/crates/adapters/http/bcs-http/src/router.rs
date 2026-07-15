@@ -84,14 +84,18 @@ fn build_api_routes() -> Router<HttpAppState> {
                 .patch(routes::organizations::patch_organization),
         )
         .route(
-            "/providers/{provider_id}/organizations/{organization_code}/members",
+            "/organizations/{organization_code}/members",
             get(routes::organizations::list_members),
         )
         .route(
-            "/providers/{provider_id}/organizations/{organization_code}/members/{bot_uuid}",
+            "/organizations/{organization_code}/members/{bot_uuid}",
             get(routes::organizations::get_member)
                 .put(routes::organizations::put_member)
                 .delete(routes::organizations::delete_member),
+        )
+        .route(
+            "/organizations/{organization_code}/members/{bot_uuid}/profile",
+            patch(routes::organizations::patch_member_profile),
         )
         .route(
             "/providers/{provider_id}/organization-candidate-bots",

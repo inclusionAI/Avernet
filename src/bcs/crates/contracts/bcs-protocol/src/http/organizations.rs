@@ -24,6 +24,21 @@ pub struct PutOrganizationMemberRequest {
     pub role: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct PatchOrganizationMemberProfileRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub domains: Option<Vec<String>>,
+    #[serde(default)]
+    pub skills: Option<Vec<Skill>>,
+    #[serde(default)]
+    pub scopes: Option<Vec<String>>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrganizationResponse {
     pub organization_code: String,
@@ -64,6 +79,14 @@ pub struct OrganizationMemberDetailResponse {
     pub role: Option<String>,
     pub disabled: bool,
     pub bot: Option<OrganizationMemberBotResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrganizationMemberProfileResponse {
+    pub organization_code: String,
+    pub bot_uuid: String,
+    pub provider_id: String,
+    pub profile: BotCapabilities,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

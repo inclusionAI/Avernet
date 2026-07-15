@@ -134,8 +134,9 @@ pub use application::{
     ProviderCoordinationEventKind, ProviderCoordinationIntent, ProviderManagementService,
     RegisterProviderBotCommand, RegisterProviderBotOutcome, RegisterProviderCommand,
     RegisterProviderOutcome, UpdateProviderCommand, CreateOrganizationCommand,
-    OrganizationAuth, OrganizationManagementService, PutOrganizationMemberCommand,
-    UpdateOrganizationCommand,
+    OrganizationAuth, OrganizationManagementService, OrganizationMemberAuth,
+    PutOrganizationMemberCommand, UpdateOrganizationCommand,
+    UpdateOrganizationMemberProfileCommand,
 };
 pub use port::{
     BotConnectionControlPort, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
@@ -204,7 +205,7 @@ pub use core::{
     RegisteredProvider, AuthorizedOrganizationPair, OrganizationCandidateBot, OrganizationCandidateBotPage,
     OrganizationCandidatePageQuery, OrganizationCandidateQuery,
     OrganizationCoreService, OrganizationMemberBotDetail, OrganizationMemberDetail,
-    OrganizationMemberPageQuery,
+    OrganizationMemberPageQuery, OrganizationMemberProfile, OrganizationMemberProfilePatch,
     RelationCoreService, BCS_SYSTEM_MESSAGE, RelationEdge, ResponseMode, RouteAndSendResult,
     RouteParticipantOverlay, RouteSelectorWire, RoutingCoreService, RoutingDecision,
     RoutingMode, RoutingPolicy, RoutingTarget, RuntimeBotIdentity, SenderRoutesValidationError,

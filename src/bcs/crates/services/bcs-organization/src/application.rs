@@ -5,8 +5,10 @@ use bcs_domain::{Organization, OrganizationMember};
 use bcs_service_api::{
     CreateOrganizationCommand, OrganizationAuth, OrganizationCandidateBot, OrganizationCandidateBotPage,
     OrganizationCandidatePageQuery, OrganizationCandidateQuery, OrganizationCoreService, OrganizationManagementService,
-    OrganizationMemberDetail, OrganizationMemberPage, OrganizationMemberPageQuery, ProviderCoreService,
+    OrganizationMemberAuth, OrganizationMemberDetail, OrganizationMemberPage, OrganizationMemberPageQuery,
+    OrganizationMemberProfile, ProviderCoreService,
     PutOrganizationMemberCommand, ServiceResult, UpdateOrganizationCommand,
+    UpdateOrganizationMemberProfileCommand,
 };
 
 #[derive(Clone)]
@@ -28,6 +30,19 @@ impl OrganizationManagement {
             .get_provider(&auth.provider_id, &auth.provider_admin_token)
             .await?;
         Ok(())
+    }
+
+    async fn authenticate_member(&self, auth: &OrganizationMemberAuth) -> ServiceResult<String> {
+        let provider = self
+            .providers
+            .authenticate_provider_admin(&auth.provider_admin_token)
+            .await?;
+        if provider.disabled {
+            return Err(bcs_service_api::ServiceError::Forbidden(
+                "organization_manager_disabled".to_string(),
+            ));
+        }
+        Ok(provider.provider_id)
     }
 }
 
@@ -81,10 +96,10 @@ impl OrganizationManagementService for OrganizationManagement {
         &self,
         command: PutOrganizationMemberCommand,
     ) -> ServiceResult<OrganizationMember> {
-        self.authenticate(&command.auth).await?;
+        let provider_id = self.authenticate_member(&command.auth).await?;
         self.core
             .put_member(
-                &command.auth.provider_id,
+                &provider_id,
                 &command.organization_code,
                 &command.bot_uuid,
                 command.role.as_deref(),
@@ -94,51 +109,51 @@ impl OrganizationManagementService for OrganizationManagement {
 
     async fn delete_member(
         &self,
-        auth: OrganizationAuth,
+        auth: OrganizationMemberAuth,
         organization_code: &str,
         bot_uuid: &str,
     ) -> ServiceResult<()> {
-        self.authenticate(&auth).await?;
+        let provider_id = self.authenticate_member(&auth).await?;
         self.core
-            .delete_member(&auth.provider_id, organization_code, bot_uuid)
+            .delete_member(&provider_id, organization_code, bot_uuid)
             .await
     }
 
     async fn get_member(
         &self,
-        auth: OrganizationAuth,
+        auth: OrganizationMemberAuth,
         organization_code: &str,
         bot_uuid: &str,
     ) -> ServiceResult<Option<OrganizationMember>> {
-        self.authenticate(&auth).await?;
+        let provider_id = self.authenticate_member(&auth).await?;
         self.core
-            .get_member_for_manager(&auth.provider_id, organization_code, bot_uuid)
+            .get_member_for_manager(&provider_id, organization_code, bot_uuid)
             .await
     }
 
     async fn get_member_detail(
         &self,
-        auth: OrganizationAuth,
+        auth: OrganizationMemberAuth,
         organization_code: &str,
         bot_uuid: &str,
     ) -> ServiceResult<Option<OrganizationMemberDetail>> {
-        self.authenticate(&auth).await?;
+        let provider_id = self.authenticate_member(&auth).await?;
         self.core
-            .get_member_detail_for_manager(&auth.provider_id, organization_code, bot_uuid)
+            .get_member_detail_for_manager(&provider_id, organization_code, bot_uuid)
             .await
     }
 
     async fn list_members(
         &self,
-        auth: OrganizationAuth,
+        auth: OrganizationMemberAuth,
         organization_code: &str,
         include_disabled: bool,
         role: Option<&str>,
     ) -> ServiceResult<Vec<OrganizationMember>> {
-        self.authenticate(&auth).await?;
+        let provider_id = self.authenticate_member(&auth).await?;
         self.core
             .list_members_for_manager(
-                &auth.provider_id,
+                &provider_id,
                 organization_code,
                 include_disabled,
                 role,
@@ -148,13 +163,28 @@ impl OrganizationManagementService for OrganizationManagement {
 
     async fn list_members_page(
         &self,
-        auth: OrganizationAuth,
+        auth: OrganizationMemberAuth,
         organization_code: &str,
         query: OrganizationMemberPageQuery,
     ) -> ServiceResult<OrganizationMemberPage> {
-        self.authenticate(&auth).await?;
+        let provider_id = self.authenticate_member(&auth).await?;
         self.core
-            .list_members_page_for_manager(&auth.provider_id, organization_code, query)
+            .list_members_page_for_manager(&provider_id, organization_code, query)
+            .await
+    }
+
+    async fn update_member_profile(
+        &self,
+        command: UpdateOrganizationMemberProfileCommand,
+    ) -> ServiceResult<OrganizationMemberProfile> {
+        let provider_id = self.authenticate_member(&command.auth).await?;
+        self.core
+            .update_member_profile(
+                &provider_id,
+                &command.organization_code,
+                &command.bot_uuid,
+                command.patch,
+            )
             .await
     }
 

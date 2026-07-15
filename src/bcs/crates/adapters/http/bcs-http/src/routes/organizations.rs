@@ -8,17 +8,20 @@ use bcs_protocol::{
     CreateOrganizationRequest, OrganizationCandidateBotListResponse,
     OrganizationCandidateBotResponse, OrganizationListResponse, OrganizationMemberListResponse,
     OrganizationMemberBotResponse, OrganizationMemberDetailResponse, OrganizationMemberResponse,
-    OrganizationResponse, PatchOrganizationRequest, PutOrganizationMemberRequest,
+    OrganizationMemberProfileResponse, OrganizationResponse,
+    PatchOrganizationMemberProfileRequest, PatchOrganizationRequest, PutOrganizationMemberRequest,
 };
 use bcs_service_api::{
     CreateOrganizationCommand, OrganizationAuth, OrganizationCandidateBot,
-    OrganizationCandidatePageQuery, OrganizationCandidateQuery, OrganizationMemberPageQuery, PutOrganizationMemberCommand,
-    OrganizationMemberBotDetail, OrganizationMemberDetail, ServiceError, UpdateOrganizationCommand,
+    OrganizationCandidatePageQuery, OrganizationCandidateQuery, OrganizationMemberAuth,
+    OrganizationMemberBotDetail, OrganizationMemberDetail, OrganizationMemberPageQuery,
+    OrganizationMemberProfilePatch, PutOrganizationMemberCommand,
+    ServiceError, UpdateOrganizationCommand, UpdateOrganizationMemberProfileCommand,
 };
 use serde::Deserialize;
 
 use crate::error::HttpAdapterError;
-use crate::mapping::capabilities::to_wire_capabilities;
+use crate::mapping::capabilities::{to_core_skill, to_wire_capabilities};
 use crate::state::HttpAppState;
 
 #[derive(Debug, Deserialize)]
@@ -124,11 +127,11 @@ pub async fn patch_organization(
 
 pub async fn put_member(
     State(state): State<HttpAppState>,
-    Path((provider_id, organization_code, bot_uuid)): Path<(String, String, String)>,
+    Path((organization_code, bot_uuid)): Path<(String, String)>,
     headers: HeaderMap,
     Json(req): Json<PutOrganizationMemberRequest>,
 ) -> Result<Json<OrganizationMemberResponse>, HttpAdapterError> {
-    let auth = organization_auth(provider_id, &headers)?;
+    let auth = organization_member_auth(&headers)?;
     let member = state
         .services
         .organization_management
@@ -145,10 +148,10 @@ pub async fn put_member(
 
 pub async fn delete_member(
     State(state): State<HttpAppState>,
-    Path((provider_id, organization_code, bot_uuid)): Path<(String, String, String)>,
+    Path((organization_code, bot_uuid)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<StatusCode, HttpAdapterError> {
-    let auth = organization_auth(provider_id, &headers)?;
+    let auth = organization_member_auth(&headers)?;
     state
         .services
         .organization_management
@@ -160,10 +163,10 @@ pub async fn delete_member(
 
 pub async fn get_member(
     State(state): State<HttpAppState>,
-    Path((provider_id, organization_code, bot_uuid)): Path<(String, String, String)>,
+    Path((organization_code, bot_uuid)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Json<OrganizationMemberDetailResponse>, HttpAdapterError> {
-    let auth = organization_auth(provider_id, &headers)?;
+    let auth = organization_member_auth(&headers)?;
     let member = state
         .services
         .organization_management
@@ -176,11 +179,11 @@ pub async fn get_member(
 
 pub async fn list_members(
     State(state): State<HttpAppState>,
-    Path((provider_id, organization_code)): Path<(String, String)>,
+    Path(organization_code): Path<String>,
     headers: HeaderMap,
     Query(query): Query<ListMembersQuery>,
 ) -> Result<Json<OrganizationMemberListResponse>, HttpAdapterError> {
-    let auth = organization_auth(provider_id, &headers)?;
+    let auth = organization_member_auth(&headers)?;
     let offset = query.offset.unwrap_or(0);
     let limit = query.limit.unwrap_or(50);
     if !(1..=200).contains(&limit) {
@@ -208,6 +211,51 @@ pub async fn list_members(
         offset: page.offset,
         limit: page.limit,
         total: page.total,
+    }))
+}
+
+pub async fn patch_member_profile(
+    State(state): State<HttpAppState>,
+    Path((organization_code, bot_uuid)): Path<(String, String)>,
+    headers: HeaderMap,
+    payload: Result<Json<PatchOrganizationMemberProfileRequest>, axum::extract::rejection::JsonRejection>,
+) -> Result<Json<OrganizationMemberProfileResponse>, HttpAdapterError> {
+    let Json(req) = payload.map_err(|error| HttpAdapterError::BadRequest(error.body_text()))?;
+    if req.name.is_none()
+        && req.summary.is_none()
+        && req.domains.is_none()
+        && req.skills.is_none()
+        && req.scopes.is_none()
+    {
+        return Err(HttpAdapterError::BadRequest(
+            "at least one member profile field is required".to_string(),
+        ));
+    }
+    let auth = organization_member_auth(&headers)?;
+    let profile = state
+        .services
+        .organization_management
+        .update_member_profile(UpdateOrganizationMemberProfileCommand {
+            auth,
+            organization_code,
+            bot_uuid,
+            patch: OrganizationMemberProfilePatch {
+                name: req.name,
+                summary: req.summary,
+                domains: req.domains,
+                skills: req
+                    .skills
+                    .map(|skills| skills.into_iter().map(to_core_skill).collect()),
+                scopes: req.scopes,
+            },
+        })
+        .await
+        .map_err(organization_error)?;
+    Ok(Json(OrganizationMemberProfileResponse {
+        organization_code: profile.organization_code,
+        bot_uuid: profile.bot_uuid,
+        provider_id: profile.provider_id,
+        profile: to_wire_capabilities(profile.capabilities),
     }))
 }
 
@@ -250,6 +298,14 @@ fn organization_auth(
 ) -> Result<OrganizationAuth, HttpAdapterError> {
     Ok(OrganizationAuth {
         provider_id,
+        provider_admin_token: bearer_token(headers)?,
+    })
+}
+
+fn organization_member_auth(
+    headers: &HeaderMap,
+) -> Result<OrganizationMemberAuth, HttpAdapterError> {
+    Ok(OrganizationMemberAuth {
         provider_admin_token: bearer_token(headers)?,
     })
 }

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use bcs_domain::{ActorKind, Organization, OrganizationMember};
 
-use crate::{BotCapabilities, OrganizationMemberPage, ServiceResult};
+use crate::{BotCapabilities, OrganizationMemberPage, ServiceError, ServiceResult, Skill};
 use crate::port::repo::OrganizationDiscoveryBot;
 
 #[derive(Debug, Clone)]
@@ -62,6 +62,23 @@ pub struct OrganizationMemberPageQuery {
     pub role: Option<String>,
     pub offset: u64,
     pub limit: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct OrganizationMemberProfilePatch {
+    pub name: Option<String>,
+    pub summary: Option<String>,
+    pub domains: Option<Vec<String>>,
+    pub skills: Option<Vec<Skill>>,
+    pub scopes: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OrganizationMemberProfile {
+    pub organization_code: String,
+    pub bot_uuid: String,
+    pub provider_id: String,
+    pub capabilities: BotCapabilities,
 }
 
 #[async_trait]
@@ -153,6 +170,19 @@ pub trait OrganizationCoreService: Send + Sync {
             total,
             offset: query.offset,
             limit: query.limit,
+        })
+    }
+    async fn update_member_profile(
+        &self,
+        managing_provider_id: &str,
+        organization_code: &str,
+        bot_uuid: &str,
+        patch: OrganizationMemberProfilePatch,
+    ) -> ServiceResult<OrganizationMemberProfile> {
+        let _ = (managing_provider_id, organization_code, bot_uuid, patch);
+        Err(ServiceError::InvalidOperation {
+            message: "organization member profile update is not configured".to_string(),
+            request_id: None,
         })
     }
     async fn candidate_bots(
