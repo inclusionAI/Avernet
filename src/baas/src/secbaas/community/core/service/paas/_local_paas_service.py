@@ -134,7 +134,7 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
     # "relay"  = agentclawproxy + open_ws_relay (same + cross-machine).
     # Override per-instance via the ws_conn_mode constructor parameter or
     # the _LOCAL_WS_CONN_MODE module constant in _factory.py.
-    _DEFAULT_WS_CONN_MODE: str = "relay"
+    _DEFAULT_WS_CONN_MODE: str = "direct"
 
     def __init__(
         self,
@@ -660,6 +660,7 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         paas_device_id: str,
         port: int,
         path: str,
+        ws_conn_mode: str | None = None,
     ) -> WsConnectionInfo:
         """Resolve WebSocket connection info for a local device.
 
@@ -675,11 +676,15 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
                 (``container_id--machine_id--user_id``).
             port: Target port on the device.
             path: WebSocket path on the device (e.g., ``/api/openclaw/ws``).
+            ws_conn_mode: Optional override for the connection mode.
+                ``"relay"`` activates agentclawproxy-based relay; any other value
+                (including ``None``) falls back to the instance default (``"direct"``).
 
         Returns:
             WsConnectionInfo with ws_url, token, target, and expires_at.
         """
-        if self._ws_conn_mode == "relay":
+        mode = ws_conn_mode if ws_conn_mode is not None else self._ws_conn_mode
+        if mode == "relay":
             return await self._resolve_ws_conn_info_relay(paas_device_id, port, path)
         return await self._resolve_ws_conn_info_direct(paas_device_id, port, path)
 

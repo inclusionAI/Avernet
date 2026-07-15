@@ -220,6 +220,7 @@ class LocalPaasService(Protocol):
         paas_device_id: str,
         port: int,
         path: str,
+        ws_conn_mode: str | None = None,
     ) -> WsConnectionInfo:
         """Resolve WebSocket connection info for a device."""
         ...
@@ -285,6 +286,7 @@ class PaasServiceFacade(Protocol):
         paas_device_id: str,
         port: int,
         path: str,
+        ws_conn_mode: str | None = None,
     ) -> WsConnectionInfo:
         """Resolve WebSocket connection info for a device."""
         ...

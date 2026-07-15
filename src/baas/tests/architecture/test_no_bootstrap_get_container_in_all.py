@@ -28,8 +28,8 @@ _KNOWN_DEBT: dict[str, list[tuple[str, int]]] = {
     "core": [
         ("core/utils/callback_utils.py", 31),
         ("core/repository/ws_relay_session/_factory.py", 11),
-        ("core/service/paas/_local_paas_service.py", 1005),
-        ("core/service/paas/_local_paas_service.py", 2212),
+        ("core/service/paas/_local_paas_service.py", 1010),
+        ("core/service/paas/_local_paas_service.py", 2217),
     ],
     "plugins": [
         ("plugins/sandbox/utils/arca_utils.py", 92),

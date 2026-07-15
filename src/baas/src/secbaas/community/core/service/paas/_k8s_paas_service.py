@@ -709,7 +709,7 @@ class K8sPaasService(PaasService):
         )
 
     async def resolve_ws_conn_info(
-        self, paas_device_id: str, port: int, path: str
+        self, paas_device_id: str, port: int, path: str, ws_conn_mode: str | None = None
     ) -> WsConnectionInfo:
         """Resolve WebSocket connection info for a K8s device.
 

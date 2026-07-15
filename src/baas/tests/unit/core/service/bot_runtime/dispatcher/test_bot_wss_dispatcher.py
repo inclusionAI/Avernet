@@ -795,6 +795,7 @@ class TestDispatchBotWsConnInfoWithDeviceUuid:
             paas_device_id="ARCA-SANDBOX-test-001",
             port=20003,
             path="/api/openclaw/ws",
+            ws_conn_mode=None,
         )
 
     @pytest.mark.asyncio
@@ -946,6 +947,7 @@ class TestDispatchBotWsConnInfoWithDeviceUuid:
             paas_device_id="ARCA-SANDBOX-test-001",
             port=20003,
             path="/api/openclaw/ws",
+            ws_conn_mode=None,
         )
 
     @pytest.mark.asyncio
