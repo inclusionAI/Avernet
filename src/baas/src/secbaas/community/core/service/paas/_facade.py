@@ -920,9 +920,20 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                     f"Platform does not support WebSocket connection: {e}",
                 ),
             ) from e
-        except PaasError:
-            # Re-raise PaasError as it already has platform context
-            raise
+        except PaasError as e:
+            self._logger.error(
+                f"resolve_ws_conn_info failed for {paas_device_id}: "
+                f"{e.code} - {e.message}"
+            )
+            raise DeviceFacadeException(
+                operation="resolve_ws_conn_info",
+                platform_type=await self._get_platform_type(service)
+                if service
+                else "UNKNOWN",
+                template_id=template_id,
+                paas_device_id=paas_device_id,
+                original_error=e,
+            ) from e
         except DeviceCreationError as e:
             # Common expected error: machine offline - log as warning to reduce alert noise
             if e.error_code == "MACHINE_OFFLINE":

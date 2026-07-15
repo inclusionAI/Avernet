@@ -3167,11 +3167,12 @@ class BaasService:  # pragma: no cover
         tenant: Optional[str] = None,
         device_affinity: Optional[str] = None,
         device_uuid: Optional[str] = None,
+        ws_conn_mode: Optional[str] = None,
         timeout: float = 5.0,
     ) -> HttpConnectionInfo:
         """获取容器 HTTP 连接信息。
 
-        调用 GET /api/v1/bots/{device_id}/http-info?tenant=&port=&path=&device_affinity=&device_uuid=
+        调用 GET /api/v1/bots/{device_id}/http-info?tenant=&port=&path=&device_affinity=&device_uuid=&ws_conn_mode=
         BaaS 端 endpoint：commit 9d4622c1e 引入（plan-01 接入）。
 
         Args:
