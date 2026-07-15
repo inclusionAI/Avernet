@@ -21,18 +21,17 @@ class RestartMixin:
         publish_id: int,
         operator: str = "system",
     ) -> dict:
-        """Restart the Bot (executed asynchronously).
+        """Submit a Bot restart (durable, crash-safe).
 
-        Determines the current stage from the publish record status, obtains the bot_uuid
-        from the binding info, and calls the BaaS-layer upgrade interface to re-deploy.
-        This method runs asynchronously via asyncio.create_task and does not wait for the result.
+        Determines the current stage from the publish record status, validates the
+        binding/bot/artifact, and enqueues the durable restart task (#197). The
+        actual re-deploy runs in ``execute_restart`` through the operation runner —
+        this method returns as soon as the task is submitted (it does not wait for
+        the re-deploy). Replaces the former fire-and-forget ``asyncio.create_task``.
 
         Flow:
-        1. Query the publish record by publish_id
-        2. Determine the current stage from the publish record status (VERIFY/ONLINE)
-        3. Get the binding_id for the corresponding stage from ext
-        4. Query the device_binding record by binding_id to obtain device_id (i.e. bot_uuid)
-        5. Call BotBuildService.upgrade_async() to re-deploy the Bot
+        1. Resolve + validate the target (record → stage → binding → bot → artifact)
+        2. Enqueue the durable restart task
 
         Args:
             publish_id: Publish record ID

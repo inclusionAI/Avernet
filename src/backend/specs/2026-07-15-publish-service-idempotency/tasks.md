@@ -334,7 +334,7 @@
   benefit. Tracked for a focused follow-up.
 - **Depends on:** Group C
 
-## Task 19: Transition cleanup — ext marker writes removed — [ ]
+## Task 19: Transition cleanup — ext marker writes removed — [DEFERRED]
 - **Goal:** Remove the dual-written `ext.restart.*` / `ext.scale.*` writes
   and the legacy `generate_request_id` (readers are on the ledger since
   Group C). **May be deferred one release** — keep as the final, independent
@@ -343,6 +343,14 @@
   `bot_build_service.py`, affected tests.
 - **Done when:** no writer of the legacy markers remains; #157 consumers
   confirmed on the ledger-backed reader; suite green.
+- **Decision:** DEFERRED to a follow-up release, as the task itself allows.
+  Its own dependency is "one release of dual-write elapsed" — since Tasks 11
+  & 14 ship in THIS PR, the dual-write has not yet been in production, so the
+  ext markers must remain as the crash-resume fallback for any in-flight
+  pre-ledger records during rollout. Removing them now would strand those
+  records. The ledger is already the source of truth (readers prefer it, fall
+  back to ext); dropping the writers is a safe, isolated follow-up once one
+  release has elapsed.
 - **Depends on:** Tasks 11, 14 (one release of dual-write elapsed)
 
 ## Task 20: Final verification pass — [ ]

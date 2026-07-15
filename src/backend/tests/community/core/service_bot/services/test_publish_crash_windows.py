@@ -619,6 +619,59 @@ async def test_eval_teardown_crash_after_issue_resume_adopts():
     assert baas.destroy_bot.call_args.kwargs["request_id"] == "pub7.eval_teardown.eval.a1"
 
 
+# ── rollback deploy: crash windows (existing-bot adopt) ───────────────────────
+@pytest.mark.asyncio
+async def test_rollback_deploy_crash_after_issue_resume_adopts():
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+
+    async def upgrade_async(**kw):
+        wid = baas.issue("BOT-live", "UPDATE")
+        return {"publish_id": wid, "success": True}
+
+    build_service.upgrade_async = AsyncMock(side_effect=upgrade_async)
+    svc = _flow(ledger=ledger, baas=baas, build_service=build_service, publish_service=Mock())
+
+    target = _record(PublishStatus.SUCCESS.value)
+    target.ext = {
+        "migration_path": "/m",
+        "binding": {"online": 88},
+    }
+    current = _record(PublishStatus.DRAFT.value)
+    svc._publish_service.get_publish_by_id = Mock(
+        side_effect=lambda pid: target if pid == 2 else current
+    )
+    svc._ext_state.get_latest_ext = Mock(return_value=target.ext)
+    svc._publish_service.get_device_binding_by_id = Mock(
+        return_value=Mock(device_id="BOT-live")
+    )
+    svc._bot_service.get_bot = Mock(return_value={"bot_id": "b", "entity_id": "u"})
+    svc._update_publish_status = Mock()
+
+    crashed = []
+
+    def checkpoint(name):
+        if name == "after_issue" and not crashed:
+            crashed.append(1)
+            raise RuntimeError("crash after rollback deploy issued, before record")
+
+    svc._operation_runner._checkpoint = checkpoint
+
+    with pytest.raises(RuntimeError):
+        await svc.execute_rollback(current_publish_id=1, target_publish_id=2, operator="op")
+    assert build_service.upgrade_async.await_count == 1  # issued once, unrecorded
+
+    svc._operation_runner._checkpoint = lambda _n: None
+    result = await svc.execute_rollback(current_publish_id=1, target_publish_id=2, operator="op")
+    # Existing bot → adopt the in-doubt rollback workflow; NO second deploy.
+    assert build_service.upgrade_async.await_count == 1
+    assert result.baas_publish_id == "901"
+    op = ledger.get_latest_by_kind(2, "rollback_deploy", "online")
+    assert op.state == PublishOperationState.COMPLETED.value
+    assert op.baas_publish_id == 901
+
+
 # ── approval create: intent-first orphan window ───────────────────────────────
 @pytest.mark.asyncio
 async def test_approval_create_intent_first_orphan_visible_then_recorded():
