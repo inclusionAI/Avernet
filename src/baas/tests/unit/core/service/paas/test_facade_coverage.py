@@ -867,7 +867,7 @@ class TestResolveWsConnInfo:
 
         result = await f.resolve_ws_conn_info("dev@42", 8080, "/ws")
         assert isinstance(result, WsConnectionInfo)
-        mock_svc.resolve_ws_conn_info.assert_awaited_once_with("dev", 8080, "/ws")
+        mock_svc.resolve_ws_conn_info.assert_awaited_once_with("dev", 8080, "/ws", ws_conn_mode=None)
 
     @pytest.mark.asyncio
     async def test_resolve_ws_invalid_port(self):
@@ -960,7 +960,7 @@ class TestResolveWsConnInfo:
 
         await f.resolve_ws_conn_info("legacy-dev", 8080, "/ws")
         mock_svc.resolve_ws_conn_info.assert_awaited_once_with(
-            "legacy-dev", 8080, "/ws"
+            "legacy-dev", 8080, "/ws", ws_conn_mode=None
         )
 
 
