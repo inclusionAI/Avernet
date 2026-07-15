@@ -416,6 +416,7 @@ pub struct FakeRegistryService {
     bots: RwLock<HashMap<String, RegisteredBot>>,
     protocol_versions: RwLock<HashMap<String, u32>>,
     delivery_targets: RwLock<HashMap<String, BotDeliveryTarget>>,
+    including_deleted_gets: RwLock<HashMap<String, usize>>,
 }
 
 impl FakeRegistryService {
@@ -441,6 +442,15 @@ impl FakeRegistryService {
                 status: ActorStatus::Online,
             },
         );
+    }
+
+    pub async fn including_deleted_get_count(&self, id: &str) -> usize {
+        self.including_deleted_gets
+            .read()
+            .await
+            .get(id)
+            .copied()
+            .unwrap_or_default()
     }
 
     pub async fn set_visibility(&self, id: &str, visibility: &str) {
@@ -499,6 +509,13 @@ impl BotRegistryCoreService for FakeRegistryService {
 
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot> {
         self.bots.read().await.get(bot_id).cloned()
+    }
+
+    async fn get_including_deleted(&self, bot_id: &str) -> Option<RegisteredBot> {
+        let mut gets = self.including_deleted_gets.write().await;
+        *gets.entry(bot_id.to_string()).or_default() += 1;
+        drop(gets);
+        self.get(bot_id).await
     }
 
     async fn get_agent_credentials(&self, bot_id: &str) -> Option<AgentCredentials> {
