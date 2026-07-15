@@ -141,7 +141,8 @@ pub use application::{
 pub use port::{
     BotConnectionControlPort, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
     BotDeliveryResult, BotMetricCount, BotMetricsSnapshotPort, BotRepoPort, BotRunContext,
-    BotRunContextPort, ChatRunCleanupPort, ChatRunEventPort, ChatRunMetricCount, DeliveryBlockContext,
+    BotRunContextPort, BotTerminalEvent, BotTerminalObserverPort, BotTerminalState,
+    NoopBotTerminalObserver, ChatRunCleanupPort, ChatRunEventPort, ChatRunMetricCount, DeliveryBlockContext,
     DeliveryBlockReason, DeliveryBlockSurface, DeliveryMetricKind, DeliveryMetricTarget,
     DeliveryPolicyBlockInstrumentationHook, DirectChatClientKind, DirectChatRunEvent,
     DirectChatRunLifecycleHook, DirectChatRunReason, DirectChatRunSnapshotPort, DirectChatRunState,

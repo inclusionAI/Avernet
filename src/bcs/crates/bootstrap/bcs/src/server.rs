@@ -50,6 +50,10 @@ use bcs_fuse_client::FuseClient;
 use bcs_fusion::{FuseClientService, FuseWorkerProfileService, LocalFusionService};
 use bcs_group::{GroupConfig, GroupCore, GroupManagement};
 use bcs_group_store::{MemoryGroupRepo, MySqlGroupStore};
+use bcs_http::{
+    admin_invocation_terminal::AdminInvocationTerminalObserver,
+    state::AdminInvocationStore,
+};
 use bcs_judge::{LlmJudgeService, NoopJudgeEvaluator};
 use bcs_leader_election::StandaloneLeaderElection;
 use bcs_llm_api::LlmChatCompletionPort;
@@ -81,7 +85,8 @@ use bcs_security_gateway_api::SecurityGatewayPort;
 use bcs_service_api::lifecycle::ServiceLifecycle;
 use bcs_service_api::{
     A2aChatRunService, A2aChatService, BotDeliveryPort, BotDeliveryTarget, BotRegistryCoreService,
-    BotMetricsSnapshotPort, BotRunContextPort, ChannelService, CollaborationTemplateService,
+    BotMetricsSnapshotPort, BotRunContextPort, BotTerminalObserverPort, ChannelService,
+    CollaborationTemplateService,
     DirectChatClientKind, DirectChatRunEvent, DirectChatRunLifecycleHook,
     DirectChatRunReason, DirectChatRunSnapshotPort, FrontendDeliveryPort, GroupCoreService,
     GroupHistoryBotRequestPort, GroupManagementService, GroupMessageHistoryService,
@@ -564,6 +569,9 @@ pub struct BcsServerState {
 
     /// User-controlled outbound HTTP URL security policy.
     pub outbound_url_guard: OutboundUrlGuard,
+
+    /// Process-local organization-admin invocation callback associations.
+    pub admin_invocation_runs: Arc<AdminInvocationStore>,
 }
 
 impl std::fmt::Debug for BcsServerState {
@@ -795,6 +803,7 @@ impl Default for BcsServerState {
     fn default() -> Self {
         let config = BcsConfig::default();
         let outbound_url_guard = outbound_url_guard_from_config(&config);
+        let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         let provider_repos = memory_provider_repos();
         let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(config.bots_base_dir.clone()));
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
@@ -972,6 +981,10 @@ impl Default for BcsServerState {
             system_message.clone(),
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
+            Arc::new(AdminInvocationTerminalObserver::new(
+                admin_invocation_runs.clone(),
+                outbound_url_guard.clone(),
+            )),
         );
         let group_management_impl = Arc::new(GroupManagement::new(
             sessions.clone(),
@@ -1144,6 +1157,7 @@ impl Default for BcsServerState {
             auth_config,
             user_identity_port,
             outbound_url_guard,
+            admin_invocation_runs,
         }
     }
 }
@@ -1476,6 +1490,7 @@ fn create_message_flow_services(
     system_message: Arc<dyn bcs_service_api::SystemMessageService>,
     message_repo: Option<Arc<dyn MessageRepoPort>>,
     provider_stream_gray_list: Arc<ProviderStreamGrayList>,
+    bot_terminal_observer: Arc<dyn BotTerminalObserverPort>,
 ) -> (Arc<dyn MessageFlowService>, ChannelSlot) {
     let mut message_flow = BcsMessageFlow::new(
         group,
@@ -1489,7 +1504,8 @@ fn create_message_flow_services(
     .with_session_management(session_management)
     .with_bot_run_context(bot_run_context)
     .with_system_message(system_message)
-    .with_provider_stream_gray_list(provider_stream_gray_list);
+    .with_provider_stream_gray_list(provider_stream_gray_list)
+    .with_bot_terminal_observer(bot_terminal_observer);
     if let Some(repo) = message_repo {
         message_flow = message_flow.with_message_repo(repo);
     }
@@ -1937,6 +1953,7 @@ impl BcsServer {
         provider_request_url_guard: OutboundUrlGuard,
         callback_url_guard: OutboundUrlGuard,
     ) -> Self {
+        let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         // Create service implementations (synchronous, in-memory mode)
         let provider_repos = memory_provider_repos();
         let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(config.bots_base_dir.clone()));
@@ -2120,6 +2137,10 @@ impl BcsServer {
             use_cases.system_message.clone(),
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
+            Arc::new(AdminInvocationTerminalObserver::new(
+                admin_invocation_runs.clone(),
+                callback_url_guard.clone(),
+            )),
         );
 
         let collaboration_store = Arc::new(MemoryCollaborationStore::new());
@@ -2265,6 +2286,7 @@ impl BcsServer {
             auth_config,
             user_identity_port,
             outbound_url_guard: callback_url_guard,
+            admin_invocation_runs,
         });
 
         Self { config, state }
@@ -2292,6 +2314,7 @@ impl BcsServer {
         use bcs_service_api::BotRegistryCoreService;
 
         let outbound_url_guard = outbound_url_guard_from_config(&config);
+        let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         let user_directory = match extensions.user_directory_plugin.clone() {
             Some(plugin) => Some(plugin),
             None => create_user_directory_plugin(&config)?,
@@ -2632,6 +2655,10 @@ impl BcsServer {
             use_cases.system_message.clone(),
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
+            Arc::new(AdminInvocationTerminalObserver::new(
+                admin_invocation_runs.clone(),
+                outbound_url_guard.clone(),
+            )),
         );
         frontend_connections
             .set_bot_query(use_cases.bot_query.clone())
@@ -2803,6 +2830,7 @@ impl BcsServer {
             auth_config,
             user_identity_port,
             outbound_url_guard,
+            admin_invocation_runs,
         });
 
         Ok(Self { config, state })

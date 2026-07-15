@@ -244,9 +244,6 @@ pub async fn post_bot_event(
         "provider callback: received bot event"
     );
     let credential = credential_from_headers(&state, &headers, &provider_id).await?;
-    let callback_run_id = req.run_id.clone();
-    let callback_state = effective_state.clone();
-    let callback_message_text = req.message.text.clone();
 
     let outcome = match state
         .services
@@ -277,18 +274,6 @@ pub async fn post_bot_event(
         delivered_count = %outcome.delivered_count,
         failed_count = %outcome.failed_count,
         "provider callback: bot event processed"
-    );
-
-    crate::routes::admin_invocations::notify_terminal_callback(
-        &state,
-        &callback_run_id,
-        match callback_state {
-            ChatEventState::Final => "final",
-            ChatEventState::Error => "error",
-            ChatEventState::Aborted => "aborted",
-            _ => "non_terminal",
-        },
-        &callback_message_text,
     );
 
     Ok(Json(json!({

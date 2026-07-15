@@ -360,6 +360,28 @@ impl AdminInvocationStore {
         Some(run.clone())
     }
 
+    pub fn claim_callback_for_bot(
+        &self,
+        run_id: &str,
+        target_bot_uuid: &str,
+    ) -> Option<AdminInvocationRun> {
+        let mut runs = self
+            .runs
+            .lock()
+            .expect("admin invocation store lock poisoned");
+        purge_expired(&mut runs);
+        let run = runs.get_mut(run_id)?;
+        if run.target_bot_uuid != target_bot_uuid
+            || run.detach
+            || run.callback.is_none()
+            || run.callback_claimed
+        {
+            return None;
+        }
+        run.callback_claimed = true;
+        Some(run.clone())
+    }
+
     pub fn set_delivery_error(&self, run_id: &str, error: String) {
         let mut runs = self
             .runs
@@ -647,6 +669,11 @@ impl HttpAppState {
 
     pub fn with_outbound_url_guard(mut self, outbound_url_guard: OutboundUrlGuard) -> Self {
         self.outbound_url_guard = outbound_url_guard;
+        self
+    }
+
+    pub fn with_admin_invocation_runs(mut self, runs: Arc<AdminInvocationStore>) -> Self {
+        self.admin_invocation_runs = runs;
         self
     }
 

@@ -142,6 +142,7 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
         .with_channel_http_ingress(state.channel_http_ingress.clone())
         .with_auth_chain(state.auth_chain.clone(), state.auth_config.clone())
         .with_outbound_url_guard(state.outbound_url_guard.clone())
+        .with_admin_invocation_runs(state.admin_invocation_runs.clone())
         .with_user_identity(Arc::new(
             ChainUserIdentityPort::new(state.auth_chain.clone()),
         ))
@@ -445,6 +446,7 @@ mod tests {
             auth_config: bcs_auth_api::AuthConfig::default(),
             user_identity_port: None,
             outbound_url_guard: OutboundUrlGuard::allowing_private_networks_for_tests(),
+            admin_invocation_runs: Arc::new(bcs_http::state::AdminInvocationStore::default()),
         })
     }
 

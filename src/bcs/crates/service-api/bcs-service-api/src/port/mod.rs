@@ -1,4 +1,5 @@
 pub mod bot_connection;
+pub mod bot_terminal_observer;
 pub mod chat_run;
 pub mod channel_delivery;
 pub mod delivery;
@@ -12,6 +13,9 @@ pub mod secret;
 pub mod session_callback;
 
 pub use bot_connection::{BotConnectionControlPort, KickReason};
+pub use bot_terminal_observer::{
+    BotTerminalEvent, BotTerminalObserverPort, BotTerminalState, NoopBotTerminalObserver,
+};
 pub use chat_run::{BotRunContext, BotRunContextPort, ChatRunCleanupPort, ChatRunEventPort};
 pub use channel_delivery::{
     ChannelBindingRef, ChannelDeliveryPort, ChannelDeliveryResult, ChannelOutboundEvent,

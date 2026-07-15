@@ -1,7 +1,4 @@
-use std::{
-    net::IpAddr,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
     Json,
@@ -11,14 +8,13 @@ use axum::{
 };
 use bcs_domain::ProviderRecord;
 use bcs_protocol::BCN_PROVIDER_ID_HEADER;
-use bcs_route_security::OutboundUrlError;
 use bcs_service_api::{
     AsyncA2aChatCommand, BotActor, CallerContext, ChatResponseMode, ChatRunQueryCommand,
-    ServiceError,
+    BotTerminalState, ServiceError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tracing::{info, warn};
+use tracing::info;
 use uuid::Uuid;
 
 use crate::{
@@ -354,78 +350,17 @@ pub fn notify_terminal_callback(
     terminal_state: &str,
     text: &str,
 ) {
-    if !matches!(terminal_state, "final" | "error" | "aborted") {
-        return;
-    }
-    let Some(run) = state.admin_invocation_runs.claim_callback(run_id) else {
-        return;
+    let terminal_state = match terminal_state {
+        "final" => BotTerminalState::Final,
+        "error" => BotTerminalState::Error,
+        "aborted" => BotTerminalState::Aborted,
+        _ => return,
     };
-    let Some(callback) = run.callback else {
-        return;
-    };
-    let body = if terminal_state == "final" {
-        json!({ "run_id": run_id, "provider_id": run.provider_id, "status": "completed", "message": { "role": "assistant", "content": [{ "type": "text", "text": text }] } })
-    } else {
-        json!({ "run_id": run_id, "provider_id": run.provider_id, "status": "failed", "error": { "code": "ADMIN_INVOCATION_TARGET_FAILED", "message": text } })
-    };
-    let provider_id = run.provider_id;
-    let run_id = run_id.to_string();
-    let outbound_url_guard = state.outbound_url_guard.clone();
-    tokio::spawn(async move {
-        let callback_url = callback_url_for_log(&callback.url);
-        let guarded_url = match outbound_url_guard.resolve_request_http_url(&callback.url).await {
-            Ok(url) => url,
-            Err(error) => {
-                warn!(
-                    run_id = %run_id,
-                    provider_id = %provider_id,
-                    callback_url = %callback_url,
-                    resolved_ip = ?callback_blocked_ip(&error),
-                    reason = %error,
-                    "organization admin terminal callback blocked by outbound URL policy"
-                );
-                return;
-            }
-        };
-        let mut client_builder = reqwest::Client::builder()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none());
-        if let Some((host, addresses)) = guarded_url.dns_override() {
-            client_builder = client_builder.resolve_to_addrs(host, addresses);
-        }
-        let client = match client_builder.build() {
-            Ok(client) => client,
-            Err(error) => {
-                warn!(
-                    run_id = %run_id,
-                    provider_id = %provider_id,
-                    callback_url = %callback_url,
-                    error = %error,
-                    "organization admin terminal callback client creation failed"
-                );
-                return;
-            }
-        };
-        let response = client
-            .post(guarded_url.as_str())
-            .header("content-type", "application/json")
-            .header(BCN_PROVIDER_ID_HEADER, provider_id)
-            .bearer_auth(callback.bearer_token)
-            .json(&body)
-            .send()
-            .await;
-        match response {
-            Ok(response) if response.status().is_success() => {
-                info!(run_id = %run_id, "organization admin terminal callback acknowledged")
-            }
-            Ok(response) => {
-                warn!(run_id = %run_id, status = %response.status(), "organization admin terminal callback was not acknowledged")
-            }
-            Err(error) => {
-                warn!(run_id = %run_id, error = %error, "organization admin terminal callback failed")
-            }
-        }
-    });
+    crate::admin_invocation_terminal::AdminInvocationTerminalObserver::new(
+        state.admin_invocation_runs.clone(),
+        state.outbound_url_guard.clone(),
+    )
+    .notify(run_id, terminal_state, text);
 }
 
 async fn authenticate_manager(
@@ -566,34 +501,15 @@ fn new_admin_run_id() -> String {
     format!("run-{}", Uuid::new_v4().simple())
 }
 
-fn callback_blocked_ip(error: &OutboundUrlError) -> Option<IpAddr> {
-    match error {
-        OutboundUrlError::UnsafeAddress(address) => Some(*address),
-        _ => None,
-    }
-}
-
-fn callback_url_for_log(callback_url: &str) -> String {
-    let Ok(mut url) = reqwest::Url::parse(callback_url) else {
-        return "<invalid callback URL>".to_string();
-    };
-    let _ = url.set_username("");
-    let _ = url.set_password(None);
-    url.set_query(None);
-    url.set_fragment(None);
-    url.to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
     use bcs_route_security::OutboundUrlError;
 
-    use super::{
-        callback_blocked_ip, callback_url_for_log, default_admin_session_id, new_admin_run_id,
-        valid_session_id,
-    };
+    use crate::admin_invocation_terminal::{callback_blocked_ip, callback_url_for_log};
+
+    use super::{default_admin_session_id, new_admin_run_id, valid_session_id};
 
     #[test]
     fn admin_run_id_uses_hyphenated_prefix() {
