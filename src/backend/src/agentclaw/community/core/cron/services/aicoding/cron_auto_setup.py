@@ -75,10 +75,10 @@ def _frequency_to_cron(frequency: str) -> str:
     """将 trigger_frequency 转换为 cron 表达式"""
     mapping = {
         "hourly": "0 * * * *",          # 每小时
-        "daily": "0 10,14,18 * * *",    # 每天10点、14点、18点
-        "weekly": "0 10,14,18 * * 1",   # 每周一10点、14点、18点
+        "daily": DEFAULT_CRON_SCHEDULE,  # 每天10点、14点、18点
+        "weekly": "0 10,14,18 * * 1",    # 每周一10点、14点、18点
     }
-    return mapping.get(frequency, "0 10,14,18 * * *")
+    return mapping.get(frequency, DEFAULT_CRON_SCHEDULE)
 
 
 def _build_cron_name(bot_name: str, bot_id: str) -> str:
