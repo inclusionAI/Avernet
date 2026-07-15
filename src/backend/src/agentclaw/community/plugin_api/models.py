@@ -54,6 +54,8 @@ class BotModel(Base):
     env = Column(String(20), default=get_current_env, nullable=False)
     bot_type = Column(String(128), default='personal', nullable=True)
     template_type = Column(String(64), nullable=True)  # 模板类型，如 applicationCoding
+    call_type = Column(String(16), default="owner", nullable=False)
+    caller_config_revision = Column(BigInteger, default=0, nullable=False)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -82,6 +84,8 @@ class BotModel(Base):
             "env": self.env,
             "bot_type": self.bot_type,
             "template_type": self.template_type,
+            "call_type": self.call_type,
+            "caller_config_revision": self.caller_config_revision,
         }
 
 
