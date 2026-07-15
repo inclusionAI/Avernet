@@ -475,6 +475,15 @@ class TestGetCallerConnection:
 
         assert result["need_poll"] is False
         bot_build_service.release_async.assert_called_once()
+        # Verify binding_id is saved to ext and binding status is updated
+        binding_repo.update_status.assert_called_once_with(binding_id=BINDING_ID, status="ACTIVE")
+        # Verify update_instance was called with binding_id in ext
+        update_calls = instance_repo.update_instance.call_args_list
+        assert any(
+            call[1].get("ext", {}).get("binding_id") == BINDING_ID
+            for call in update_calls
+            if call[1].get("ext")
+        )
 
     @pytest.mark.asyncio
     async def test_instance_not_ready_returns_need_poll(self):
@@ -509,6 +518,7 @@ class TestGetCallerConnection:
             "service_bot_publish_id": 123,
             "version": 1,
             "baas_publish_id": 888,  # Has baas_publish_id
+            "binding_id": BINDING_ID,  # Has binding_id from previous create
         }
         instance_repo.get_instance = MagicMock(
             return_value={"id": 1, "status": "init", "ext": existing_ext}
@@ -525,6 +535,8 @@ class TestGetCallerConnection:
         bot_build_service.release_async.assert_not_called()
         # Should poll progress
         baas.get_publish_progress.assert_called_once()
+        # Should update binding status with binding_id from ext
+        binding_repo.update_status.assert_called_once_with(binding_id=BINDING_ID, status="PENDING")
         assert result["need_poll"] is True
         assert result["connection"] is None
 
@@ -563,6 +575,7 @@ class TestGetCallerConnection:
             "service_bot_publish_id": 123,
             "version": 1,
             "baas_publish_id": 888,  # Has baas_publish_id, but status is not 'init'
+            "binding_id": BINDING_ID,  # Has binding_id from ext
         }
         instance_repo.get_instance = MagicMock(
             return_value={"id": 1, "status": "failed", "ext": existing_ext}
@@ -577,6 +590,8 @@ class TestGetCallerConnection:
 
         # Should call upgrade_async since status is not 'init'
         bot_build_service.upgrade_async.assert_called_once()
+        # Should update binding status with binding_id from ext
+        binding_repo.update_status.assert_called_once_with(binding_id=BINDING_ID, status="PENDING")
         assert result["need_poll"] is True
         assert result["connection"] is None
 
