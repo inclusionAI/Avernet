@@ -32,8 +32,8 @@ pub use onboard::{AdminOnboardRequest, OnboardRequest, OnboardResponse};
 pub use organizations::{
     CreateOrganizationRequest, OrganizationCandidateBotListResponse,
     OrganizationCandidateBotResponse, OrganizationListResponse, OrganizationMemberListResponse,
-    OrganizationMemberResponse, OrganizationResponse, PatchOrganizationRequest,
-    PutOrganizationMemberRequest,
+    OrganizationMemberBotResponse, OrganizationMemberDetailResponse, OrganizationMemberResponse,
+    OrganizationResponse, PatchOrganizationRequest, PutOrganizationMemberRequest,
 };
 pub use provider::{
     BCN_EVENT_ID_HEADER, BCN_MESSAGE_ID_HEADER, BCN_PROTOCOL_VERSION_HEADER, BCN_TRANSPORT_HEADER,

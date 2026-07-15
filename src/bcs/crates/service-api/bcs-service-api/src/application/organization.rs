@@ -3,7 +3,7 @@ use bcs_domain::{Organization, OrganizationMember};
 
 use crate::{
     OrganizationCandidateBot, OrganizationCandidateBotPage, OrganizationCandidatePageQuery,
-    OrganizationCandidateQuery, OrganizationMemberPage, ServiceResult,
+    OrganizationCandidateQuery, OrganizationMemberDetail, OrganizationMemberPage, ServiceResult,
 };
 use crate::core::OrganizationMemberPageQuery;
 
@@ -64,6 +64,17 @@ pub trait OrganizationManagementService: Send + Sync {
         organization_code: &str,
         bot_uuid: &str,
     ) -> ServiceResult<Option<OrganizationMember>>;
+    async fn get_member_detail(
+        &self,
+        auth: OrganizationAuth,
+        organization_code: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationMemberDetail>> {
+        Ok(self
+            .get_member(auth, organization_code, bot_uuid)
+            .await?
+            .map(|member| OrganizationMemberDetail { member, bot: None }))
+    }
     async fn list_members(
         &self,
         auth: OrganizationAuth,

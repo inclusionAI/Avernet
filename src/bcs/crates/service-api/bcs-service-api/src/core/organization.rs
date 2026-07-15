@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use bcs_domain::{Organization, OrganizationMember};
+use bcs_domain::{ActorKind, Organization, OrganizationMember};
 
 use crate::{BotCapabilities, OrganizationMemberPage, ServiceResult};
 use crate::port::repo::OrganizationDiscoveryBot;
@@ -37,6 +37,23 @@ pub struct OrganizationCandidateBotPage {
     pub total: u64,
     pub offset: u64,
     pub limit: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct OrganizationMemberBotDetail {
+    pub provider_id: String,
+    pub provider_bot_ref: String,
+    pub agent_code: Option<String>,
+    pub capabilities: BotCapabilities,
+    pub created_by: Option<String>,
+    pub actor_kind: ActorKind,
+    pub env: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OrganizationMemberDetail {
+    pub member: OrganizationMember,
+    pub bot: Option<OrganizationMemberBotDetail>,
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +110,17 @@ pub trait OrganizationCoreService: Send + Sync {
         organization_code: &str,
         bot_uuid: &str,
     ) -> ServiceResult<Option<OrganizationMember>>;
+    async fn get_member_detail_for_manager(
+        &self,
+        managing_provider_id: &str,
+        organization_code: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationMemberDetail>> {
+        Ok(self
+            .get_member_for_manager(managing_provider_id, organization_code, bot_uuid)
+            .await?
+            .map(|member| OrganizationMemberDetail { member, bot: None }))
+    }
     async fn list_members_for_manager(
         &self,
         managing_provider_id: &str,

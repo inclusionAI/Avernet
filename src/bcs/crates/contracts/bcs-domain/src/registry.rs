@@ -112,7 +112,8 @@ pub struct BotCapabilities {
 
     /// AI安全网关agent_code，用于消息路由时的安全检查。
     /// 从HTTP Header `x-agentclaw-agent-code` 读取，可选字段。
-    /// SECURITY: 此字段敏感，不应序列化到客户端，仅通过专用接口在服务端内部访问。
+    /// 此字段是用于路由的ID类标识，不是敏感凭证。仅通过明确包含该字段的接口返回，
+    /// 不随通用BotCapabilities响应自动序列化。
     #[serde(default, skip_serializing, skip_serializing_if = "Option::is_none")]
     pub agent_code: Option<String>,
 

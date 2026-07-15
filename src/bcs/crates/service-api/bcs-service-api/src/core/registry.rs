@@ -64,7 +64,8 @@ pub trait BotRegistryCoreService: Send + Sync {
     async fn update_status(&self, bot_id: &str, status: BotDynamicStatus) -> bool;
 
     /// Get a bot's registration info.
-    /// Note: This method excludes sensitive fields (agent_code, agent_token) from the returned capabilities.
+    /// This method excludes `agent_code` so delivery contracts must opt in to
+    /// exposing that routing identifier, and excludes the sensitive `agent_token` credential.
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot>;
 
     /// Like [`get`](Self::get) but also returns soft-deleted bots.
@@ -77,8 +78,9 @@ pub trait BotRegistryCoreService: Send + Sync {
         self.get(bot_id).await
     }
 
-    /// Get sensitive agent credentials (agent_code and agent_token) for a bot.
-    /// This is a separate method to avoid leaking sensitive data in regular get() calls.
+    /// Get a bot's routing identifier (`agent_code`) and sensitive credential (`agent_token`).
+    /// This is a separate method so callers explicitly select the fields they need and do not
+    /// leak `agent_token` through regular bot responses.
     /// Used by AI Security Gateway for message validation.
     async fn get_agent_credentials(&self, bot_id: &str) -> Option<AgentCredentials>;
 

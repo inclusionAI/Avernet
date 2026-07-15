@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use axum::{
@@ -11,7 +12,7 @@ use bcs_http::{router::build_router, state::HttpAppState};
 use bcs_service_api::{
     CreateOrganizationCommand, OrganizationAuth, OrganizationCandidateBot,
     OrganizationCandidateQuery, OrganizationManagementService, OrganizationMemberPage,
-    OrganizationMemberPageQuery,
+    OrganizationMemberBotDetail, OrganizationMemberDetail, OrganizationMemberPageQuery,
     PutOrganizationMemberCommand, ServiceError, ServiceResult, UpdateOrganizationCommand,
 };
 use bcs_services_container::Services;
@@ -39,6 +40,8 @@ fn test_app() -> TestApp {
 struct RecordingOrganizationManagement {
     calls: Mutex<Vec<String>>,
     next_error: Mutex<Option<ServiceError>>,
+    member_bot_missing: AtomicBool,
+    member_missing: AtomicBool,
 }
 
 impl RecordingOrganizationManagement {
@@ -111,6 +114,22 @@ impl OrganizationManagementService for RecordingOrganizationManagement {
     ) -> ServiceResult<Option<OrganizationMember>> {
         self.record(format!("get_member:{}:{organization_code}:{bot_uuid}", auth.provider_id)).await?;
         Ok(Some(sample_member(organization_code.to_string(), bot_uuid.to_string())))
+    }
+
+    async fn get_member_detail(
+        &self,
+        auth: OrganizationAuth,
+        organization_code: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationMemberDetail>> {
+        self.record(format!("get_member_detail:{}:{organization_code}:{bot_uuid}", auth.provider_id)).await?;
+        if self.member_missing.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
+        Ok(Some(OrganizationMemberDetail {
+            member: sample_member(organization_code.to_string(), bot_uuid.to_string()),
+            bot: (!self.member_bot_missing.load(Ordering::Relaxed)).then(sample_member_bot_detail),
+        }))
     }
 
     async fn list_members(
@@ -188,6 +207,106 @@ fn sample_member(organization_code: String, bot_uuid: String) -> OrganizationMem
         created_at: 1,
         updated_at: 2,
     }
+}
+
+fn sample_member_bot_detail() -> OrganizationMemberBotDetail {
+    OrganizationMemberBotDetail {
+        provider_id: "provider-b".to_string(),
+        provider_bot_ref: "provider-b-ref".to_string(),
+        agent_code: Some("agent-code-b".to_string()),
+        capabilities: bcs_service_api::BotCapabilities {
+            name: Some("Bot B".to_string()),
+            summary: Some("Reviews code".to_string()),
+            domains: vec!["engineering".to_string()],
+            skills: vec![bcs_service_api::Skill::with_description(
+                "code_review",
+                "Review changes",
+            )],
+            scopes: vec!["source_code".to_string()],
+            visibility: "protected".to_string(),
+            agent_code: Some("must-not-leak-from-capabilities".to_string()),
+            agent_token: Some("must-not-leak".to_string()),
+            ..bcs_service_api::BotCapabilities::default()
+        },
+        created_by: Some("yuange".to_string()),
+        actor_kind: bcs_service_api::ActorKind::Bot,
+        env: Some("prod".to_string()),
+    }
+}
+
+#[tokio::test]
+async fn get_member_returns_flat_bot_detail_without_credentials_or_status() {
+    let app = test_app();
+    let response = request(
+        &app.app,
+        "GET",
+        "/providers/provider-a/organizations/promo-2026/members/bot-b",
+        Some("provider-token"),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "organization_code": "promo-2026",
+            "bot_uuid": "bot-b",
+            "role": "traffic",
+            "disabled": false,
+            "bot": {
+                "provider_id": "provider-b",
+                "provider_bot_ref": "provider-b-ref",
+                "agent_code": "agent-code-b",
+                "name": "Bot B",
+                "summary": "Reviews code",
+                "domains": ["engineering"],
+                "skills": [{"name": "code_review", "description": "Review changes"}],
+                "scopes": ["source_code"],
+                "visibility": "protected",
+                "created_by": "yuange",
+                "actor_kind": "bot",
+                "env": "prod"
+            }
+        })
+    );
+}
+
+#[tokio::test]
+async fn get_member_returns_null_bot_when_registered_bot_is_missing() {
+    let app = test_app();
+    app.recording.member_bot_missing.store(true, Ordering::Relaxed);
+
+    let response = request(
+        &app.app,
+        "GET",
+        "/providers/provider-a/organizations/promo-2026/members/bot-b",
+        Some("provider-token"),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    assert!(json.get("bot").is_some(), "response must include the bot field");
+    assert_eq!(json["bot"], Value::Null);
+}
+
+#[tokio::test]
+async fn get_member_returns_not_found_when_member_is_missing() {
+    let app = test_app();
+    app.recording.member_missing.store(true, Ordering::Relaxed);
+
+    let response = request(
+        &app.app,
+        "GET",
+        "/providers/provider-a/organizations/promo-2026/members/missing",
+        Some("provider-token"),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::BotCapabilities;
+use crate::{BotCapabilities, Skill};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateOrganizationRequest {
@@ -39,6 +39,31 @@ pub struct OrganizationMemberResponse {
     pub bot_uuid: String,
     pub role: Option<String>,
     pub disabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrganizationMemberBotResponse {
+    pub provider_id: String,
+    pub provider_bot_ref: String,
+    pub agent_code: Option<String>,
+    pub name: Option<String>,
+    pub summary: Option<String>,
+    pub domains: Vec<String>,
+    pub skills: Vec<Skill>,
+    pub scopes: Vec<String>,
+    pub visibility: String,
+    pub created_by: Option<String>,
+    pub actor_kind: String,
+    pub env: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrganizationMemberDetailResponse {
+    pub organization_code: String,
+    pub bot_uuid: String,
+    pub role: Option<String>,
+    pub disabled: bool,
+    pub bot: Option<OrganizationMemberBotResponse>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -79,12 +79,20 @@ async fn test_context() -> TestContext {
 }
 
 async fn register_provider(ctx: &TestContext, name: &str) -> ProviderFixture {
+    register_provider_with_auth(ctx, name, ProviderAuthMode::StaticBearer).await
+}
+
+async fn register_provider_with_auth(
+    ctx: &TestContext,
+    name: &str,
+    auth_mode: ProviderAuthMode,
+) -> ProviderFixture {
     let registered = ctx
         .provider_core
         .register_provider(
             name.to_string(),
             "https://provider.example.com/bcs/webhook".to_string(),
-            ProviderAuthMode::StaticBearer,
+            auth_mode,
             "11111111".to_string(),
             None,
             None,
@@ -95,6 +103,80 @@ async fn register_provider(ctx: &TestContext, name: &str) -> ProviderFixture {
         provider_id: registered.provider.provider_id,
         admin_token: registered.provider_admin_token,
     }
+}
+
+#[tokio::test]
+async fn member_detail_includes_flattening_source_data_and_agent_code() {
+    let ctx = test_context().await;
+    let provider_a = register_provider(&ctx, "Provider A").await;
+    let provider_b = register_provider_with_auth(
+        &ctx,
+        "Provider B",
+        ProviderAuthMode::AgentPass,
+    )
+    .await;
+    grant_manager(&ctx, &provider_b, &provider_a).await;
+    register_bot(&ctx, &provider_b, "bot-b").await;
+    create_org(&ctx, &provider_a).await;
+    ctx.service
+        .put_member(PutOrganizationMemberCommand {
+            auth: provider_auth(&provider_a),
+            organization_code: "promo-2026".to_string(),
+            bot_uuid: "bot-b".to_string(),
+            role: Some("reviewer".to_string()),
+        })
+        .await
+        .expect("add member");
+
+    let detail = ctx
+        .service
+        .get_member_detail(provider_auth(&provider_a), "promo-2026", "bot-b")
+        .await
+        .expect("get member detail")
+        .expect("member exists");
+
+    assert_eq!(detail.member.bot_uuid, "bot-b");
+    assert_eq!(detail.member.role.as_deref(), Some("reviewer"));
+    let bot = detail.bot.expect("registered bot detail");
+    assert_eq!(bot.provider_id, provider_b.provider_id);
+    assert_eq!(bot.provider_bot_ref, "bot-b-ref");
+    assert_eq!(bot.agent_code.as_deref(), Some("bot-b-ref"));
+    assert_eq!(bot.capabilities.name.as_deref(), Some("bot-b name"));
+    assert_eq!(bot.capabilities.summary.as_deref(), Some("bot-b summary"));
+    assert_eq!(bot.capabilities.domains, ["marketing"]);
+    assert_eq!(bot.capabilities.skills, [Skill::new("planning")]);
+    assert_eq!(bot.capabilities.scopes, ["campaign"]);
+    assert_eq!(bot.capabilities.visibility, "protected");
+    assert_eq!(bot.created_by.as_deref(), Some("11111111"));
+    assert_eq!(bot.actor_kind, bcs_service_api::ActorKind::Bot);
+}
+
+#[tokio::test]
+async fn member_detail_keeps_member_when_registered_bot_is_missing() {
+    let ctx = test_context().await;
+    let provider_a = register_provider(&ctx, "Provider A").await;
+    register_bot(&ctx, &provider_a, "bot-a").await;
+    create_org(&ctx, &provider_a).await;
+    ctx.service
+        .put_member(PutOrganizationMemberCommand {
+            auth: provider_auth(&provider_a),
+            organization_code: "promo-2026".to_string(),
+            bot_uuid: "bot-a".to_string(),
+            role: None,
+        })
+        .await
+        .expect("add member");
+    assert!(ctx.registry.soft_delete("bot-a").await);
+
+    let detail = ctx
+        .service
+        .get_member_detail(provider_auth(&provider_a), "promo-2026", "bot-a")
+        .await
+        .expect("get stale member detail")
+        .expect("member remains");
+
+    assert_eq!(detail.member.bot_uuid, "bot-a");
+    assert!(detail.bot.is_none());
 }
 
 async fn grant_manager(
