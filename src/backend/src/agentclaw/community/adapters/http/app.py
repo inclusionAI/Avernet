@@ -138,6 +138,7 @@ from agentclaw.community.adapters.http.cron import router as cron_router  # noqa
 from agentclaw.community.adapters.http.cron.cron_noauth_router import router as cron_noauth_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding import notify_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_management import router as bot_management_router  # noqa: E402
+from agentclaw.community.adapters.http.caller_identity.router import router as caller_identity_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant import router as bot_dormant_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant.router import internal_router as bot_dormant_internal_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_build import router as service_bot_router  # noqa: E402
@@ -288,6 +289,15 @@ from agentclaw.community.core.errors import (  # noqa: E402
     Unauthorized,
     ValidationError,
 )
+from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
+    CallerCallTypeInvalidError,
+    CallerIdentityNotFoundError,
+    CallerIdentityPermissionError,
+    CallerIdentityReadOnlyError,
+    CallerLockEpochError,
+    CallerMcpNotFoundError,
+    CallerMcpSyncError,
+)
 
 _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     ValidationError:       400,
@@ -297,6 +307,13 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     NotFound:              404,
     Conflict:              409,
     InternalError:         500,
+    CallerIdentityPermissionError: 403,
+    CallerIdentityNotFoundError: 404,
+    CallerIdentityReadOnlyError: 409,
+    CallerLockEpochError: 409,
+    CallerMcpNotFoundError: 404,
+    CallerMcpSyncError: 500,
+    CallerCallTypeInvalidError: 500,
 }
 
 _DATA_PROXY_ERROR_STATUS_MAP: dict[type[DataProxyError], int] = {
@@ -435,6 +452,7 @@ app.include_router(identity_router)
 app.include_router(aicoding_router)
 app.include_router(aicoding_data_proxy_router)
 app.include_router(bot_management_router.router)
+app.include_router(caller_identity_router)
 app.include_router(bot_dormant_router.router)
 app.include_router(bot_dormant_internal_router)
 app.include_router(service_bot_router)

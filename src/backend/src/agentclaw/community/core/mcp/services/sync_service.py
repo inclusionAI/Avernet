@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
@@ -19,7 +20,10 @@ from agentclaw.community.core.devices.services.device_context import (
 )
 from agentclaw.community.core.mcp.services._defaults import get_default_cli_items
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
-from agentclaw.community.core.mcp.services.passport_scope import passport_mcp_codes_from_entries
+from agentclaw.community.core.mcp.services.passport_scope import (
+    passport_mcp_codes_from_entries,
+    passport_mcp_items_from_entries,
+)
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider, UserMCPConfigRepository
 from agentclaw.community.plugin_api.device_sync import DeviceSyncPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
@@ -392,6 +396,44 @@ class MCPSyncService:
         if not passport_result.get("success"):
             return passport_result
 
+        return {"success": True}
+
+    async def sync_mcp_identity_to_agent_principal(
+        self,
+        *,
+        user_id: str,
+        entity_id: str,
+        bot_id: str,
+        entity_type: str,
+        engine_type: str,
+        active_mcps: list[dict[str, Any]],
+        identity_modes: Mapping[str, object],
+    ) -> dict[str, Any]:
+        """Replace Agent Principal MCP identity metadata without device sync."""
+        del entity_id, entity_type, engine_type
+        try:
+            mcp_items = passport_mcp_items_from_entries(
+                active_mcps,
+                identity_modes=identity_modes,
+            )
+            self.passport_update.update_mcp_identity_to_agent_principal(
+                bot_id=bot_id,
+                user_id=user_id,
+                mcp_items=mcp_items,
+            )
+        except Exception as exc:
+            logger.warning(
+                "caller_agent_principal_sync_failed bot_id=%s error_type=%s",
+                bot_id,
+                type(exc).__name__,
+            )
+            return {"success": False, "error": "Agent Principal update failed"}
+
+        logger.info(
+            "caller_agent_principal_sync_succeeded bot_id=%s mcp_count=%s",
+            bot_id,
+            len(mcp_items),
+        )
         return {"success": True}
 
     async def sync_mcp_detail_to_all_bots(
