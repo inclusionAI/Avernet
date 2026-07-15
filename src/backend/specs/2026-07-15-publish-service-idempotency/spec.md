@@ -22,12 +22,13 @@ window of one operation and does not cover approval at all.
 
 The change introduces a persistent **operation ledger** (a dedicated table, per
 the issue discussion — not more ext keys) that records intent *before* the BaaS
-call and tracks each subsequent obligation (id received, approved, recorded)
+call and tracks each subsequent obligation (id received, recorded)
 as an individually completed step, so a re-run resumes at the first incomplete
 step instead of blindly re-executing from the top. Alongside it, the remaining
 fire-and-forget execution paths (restart, offline's background destroy) move
-onto the durable task queue, approval becomes a single re-drivable step whose
-failure is visible, and BaaS request ids become deterministic everywhere. The
+onto the durable task queue, approval is delegated uniformly to BaaS
+server-side auto-approval (requested on every mutation; no client approve
+calls remain), and BaaS request ids become deterministic everywhere. The
 worst structural offenders in this pipeline (multiple 100–190-line methods
 mixing orchestration, BaaS I/O, and persistence) are restructured into the
 step pattern as part of the same work.
@@ -86,12 +87,13 @@ the fix's mechanism and the cleanup.
   flow to resume and converge on its own after restart, so that no publish is
   stranded "in progress" forever and no duplicate bot appears on the BaaS side.
 - As a bot owner, when I retry a failed publish, I want the retry to pick up
-  exactly where the previous attempt actually stopped (including re-driving an
-  un-sent approval), so that retrying never creates a second bot or waits on a
-  workflow that was never approved.
-- As an operator, when an approve call to BaaS fails, I want the operation to
-  report failure (and be retryable), not report success while the bot silently
-  never starts.
+  exactly where the previous attempt actually stopped (including adopting a
+  workflow the previous attempt already created), so that retrying never
+  creates a second bot.
+- As an operator, when a workflow never starts executing (its server-side
+  auto-approval was lost to a BaaS crash), I want that state visible and
+  recoverable through the normal retry path, not a silent forever-pending
+  publish.
 - As a bot owner, when I take a bot offline, I want the online bot to actually
   be destroyed even if the backend restarts mid-operation, so that offline
   bots do not keep running (and billing) on the BaaS side.
@@ -136,7 +138,7 @@ Consequences for this design:
   knows for this bot, fence with the intent row's creation timestamp (also
   excludes pre-ledger historical workflows) and the intent's publish type;
   an unclaimed match is ours → adopt it and continue from whatever state it
-  is in (awaiting approval → approve; executing → poll; SUCCESS/FAILED →
+  is in (non-terminal → hand off to the progress poll; SUCCESS/FAILED →
   jump to the corresponding record steps). No unclaimed match → the request
   never landed → issue it. Matching can never use request_id: it is not
   stored on the workflow row (only echoed in the create response, which is
@@ -187,8 +189,8 @@ Operation ledger:
       kind, target, deterministic request id, parameters) in a dedicated
       ledger table **before** the BaaS call is issued.
 - [ ] The BaaS-returned publish id is persisted against that intent record as
-      its own step; approval completion is persisted as its own step; a re-run
-      of the operation resumes at the first incomplete step.
+      its own step; a re-run of the operation resumes at the first
+      incomplete step.
 - [ ] `retry()`'s choice between "BaaS restart" and "re-run the release work"
       is driven by the ledger's per-step state, not by the coarse
       `ext.publish.online` presence check.
@@ -196,20 +198,20 @@ Operation ledger:
       markers and the approval `puid`) lives in the ledger, shrinking the ext
       blob's read-modify-write surface.
 
-Approval:
+Approval (decision: all-auto — approval is BaaS's job, uniformly):
 
-- [ ] There is exactly one approve step per BaaS workflow (the double approve
-      in the release path is removed).
-- [ ] An approve failure fails the operation step visibly and is re-driven on
-      re-run; no operation reports success while its workflow is unapproved.
-      (Today the failure is swallowed: the flow reports success and the record
-      waits on the unapproved workflow until the poll deadline. Step-level
-      re-drive replaces that; the abandonment criterion above covers the case
-      where re-driving is pointless because an earlier phase must be redone.)
-- [ ] Approve sends its own **client-generated** request id (we generate it
-      and record it in the ledger; BaaS only echoes it), distinct from the
-      create's — two different operations must be distinguishable in logs and
-      in the ledger.
+- [ ] Every BaaS mutation requests server-side auto-approval
+      (`auto_approve_publish=True`), including the teclaw create/update and
+      destroy payloads that omit it today.
+- [ ] No client-side approve call remains anywhere in the publish pipeline
+      (removing the current mix of load-bearing, redundant, and
+      server-ignored approves).
+- [ ] teclaw's post-upgrade MCP refresh triggers on observed deploy success
+      (progress-poll SUCCESS), no longer on an approve call's return value.
+- [ ] A workflow that fails to auto-approve (BaaS-side crash of its approval
+      loop) is visible via the ledger + non-advancing poll, and is
+      recoverable by abandoning the operation and reissuing via the existing
+      retry path.
 
 Durability of background work:
 
@@ -255,7 +257,8 @@ Tests:
 
 - [ ] Crash-window tests exist per operation: simulate a kill between each
       pair of steps, re-run, assert convergence (single bot, id retained,
-      approved) — against the real repository layer, not an in-memory fake.
+      auto-approval requested, no client approve sent) — against the real
+      repository layer, not an in-memory fake.
 - [ ] Full `tests/community` suite stays green.
 
 ## In Scope
@@ -268,7 +271,8 @@ Tests:
 - A new ledger table + repository (following the existing repository/protocol
   conventions) and its wiring into the operations above.
 - Migrating restart and offline-destroy onto the existing `TaskQueueService`.
-- Request-id generation policy and the single-approve consolidation.
+- Request-id generation policy and the all-auto approval switch (every
+  mutation requests `auto_approve_publish=True`; client approves deleted).
 - Method decomposition of the long methods listed in #197.
 - New crash-window/resume tests; updating existing tests broken by the
   restructuring.
