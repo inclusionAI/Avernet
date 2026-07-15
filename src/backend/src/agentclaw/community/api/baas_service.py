@@ -118,6 +118,7 @@ class BaasServiceProtocol(Protocol):
         tenant: str = "",
         device_affinity: Optional[str] = None,
         device_uuid: Optional[str] = None,
+        ws_conn_mode: Optional[str] = None,
     ) -> BotWsConnectionInfoResponse:
         """Resolve WebSocket / proxypass info for a device binding.
 
@@ -135,6 +136,7 @@ class BaasServiceProtocol(Protocol):
         tenant: Optional[str] = None,
         device_affinity: Optional[str] = None,
         device_uuid: Optional[str] = None,
+        ws_conn_mode: Optional[str] = None,
         timeout: float = 5.0,
     ) -> HttpConnectionInfo:
         """Resolve HTTP container info for a device binding.
@@ -145,6 +147,9 @@ class BaasServiceProtocol(Protocol):
         ``device_uuid`` (optional) locks a specific instance in a multi-instance
         service bot — symmetric with :meth:`get_ws_info`. Propagated as the
         ``device_uuid`` query param of BaaS ``/http-info``.
+
+        ``ws_conn_mode`` (optional) connection mode override (e.g. ``"relay"``
+        for agentclawproxy-based relay). Passed through to BaaS /http-info.
         """
         ...
 

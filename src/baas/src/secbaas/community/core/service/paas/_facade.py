@@ -834,6 +834,7 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
         paas_device_id: str,
         port: int,
         path: str,
+        ws_conn_mode: str | None = None,
     ) -> WsConnectionInfo:
         """Resolve WebSocket connection information for a device.
 
@@ -857,6 +858,9 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                              (e.g., "sandbox-abc123@42" or "legacy-device")
             port: Target port on the device container's WebSocket service (1-65535)
             path: WebSocket path on device (e.g., /api/openclaw/ws)
+            ws_conn_mode: Optional connection mode override (e.g. ``"relay"`` for
+                agentclawproxy-based relay). Passed through to the platform-specific
+                service. ``None`` means no override.
 
         Returns:
             WsConnectionInfo containing ws_url, token, target, and expiration time
@@ -900,7 +904,9 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
             )
 
             # Step 4: Delegate to service polymorphic method per D-05
-            return await service.resolve_ws_conn_info(raw_id, port, path)
+            return await service.resolve_ws_conn_info(
+                raw_id, port, path, ws_conn_mode=ws_conn_mode
+            )
 
         except NotImplementedError as e:
             # Wrap in DeviceFacadeException with full context per D-06
@@ -916,9 +922,20 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                     f"Platform does not support WebSocket connection: {e}",
                 ),
             ) from e
-        except PaasError:
-            # Re-raise PaasError as it already has platform context
-            raise
+        except PaasError as e:
+            self._logger.error(
+                f"resolve_ws_conn_info failed for {paas_device_id}: "
+                f"{e.code} - {e.message}"
+            )
+            raise DeviceFacadeException(
+                operation="resolve_ws_conn_info",
+                platform_type=await self._get_platform_type(service)
+                if service
+                else "UNKNOWN",
+                template_id=template_id,
+                paas_device_id=paas_device_id,
+                original_error=e,
+            ) from e
         except DeviceCreationError as e:
             # Common expected error: machine offline - log as warning to reduce alert noise
             if e.error_code == "MACHINE_OFFLINE":

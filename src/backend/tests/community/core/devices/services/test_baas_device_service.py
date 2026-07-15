@@ -293,6 +293,7 @@ class TestGetDeviceConnection:
             bind_id=7,
             device_affinity="u001",
             device_uuid=None,
+            ws_conn_mode=None,
         )
         assert result.type == "baas"
         assert result.target == "BAAS_DEVICE@template:20003"

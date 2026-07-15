@@ -444,7 +444,7 @@ def test_compose_conn_info_uses_baas_ws_info(local_device_service, mock_baas):
     assert conn.token == "http-token-001"
     assert conn.bot_uuid == "bot-test-001"
     mock_baas.get_ws_info.assert_called_once_with(
-        bind_id=99, device_affinity="u001"
+        bind_id=99, device_affinity="u001", ws_conn_mode=None
     )
 
 

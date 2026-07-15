@@ -94,6 +94,12 @@ async def get_bot_ws_connection_info(
             description="Target a specific device UUID for WebSocket connection (optional, auto-selects if omitted)"
         ),
     ] = None,
+    ws_conn_mode: Annotated[
+        str | None,
+        Query(
+            description="WebSocket connection mode: 'direct' (default) or 'relay' (cross-machine proxy)"
+        ),
+    ] = None,
     dispatcher: BotWssDispatcher = Depends(
         Provide[ApplicationContainer.services.bot_wss_dispatcher]
     ),
@@ -132,6 +138,7 @@ async def get_bot_ws_connection_info(
             tenant=tenant,
             device_affinity=device_affinity,
             device_uuid=device_uuid,
+            ws_conn_mode=ws_conn_mode,
         )
 
         logger.info(

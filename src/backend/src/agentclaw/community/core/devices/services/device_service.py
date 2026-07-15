@@ -349,6 +349,7 @@ class DeviceService:
         device: AllocatedDevice,
         port: int | None = None,
         ttl: int | None = None,
+        ws_conn_mode: str | None = None,
     ) -> DeviceConnectionInfo:
         """Compose device connection information (hook — subclasses override).
 
@@ -939,6 +940,7 @@ class DeviceService:
         port: int | None = None,
         ttl: int | None = None,
         device_uuid: str | None = None,
+        ws_conn_mode: str | None = None,
     ) -> DeviceConnectionInfo:
         """Get device connection information.
 
@@ -1002,7 +1004,7 @@ class DeviceService:
         )
         resolved_port = port or 20003
 
-        return self._compose_device_conn_info(device=allocated_device, port=resolved_port, ttl=ttl)
+        return self._compose_device_conn_info(device=allocated_device, port=resolved_port, ttl=ttl, ws_conn_mode=ws_conn_mode)
 
     def report_device_alive(
         self, *, device_id: str, token: str, skip_token_check: bool = False

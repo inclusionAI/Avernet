@@ -53,6 +53,7 @@ class DefaultBotWssDispatcher(BotBaseDispatcher, BotWssDispatcher):
         tenant: str,
         device_affinity: str | None = None,
         device_uuid: str | None = None,
+        ws_conn_mode: str | None = None,
     ) -> WsConnectionInfo:
         """Dispatch WebSocket connection info for a bot.
 
@@ -67,6 +68,7 @@ class DefaultBotWssDispatcher(BotBaseDispatcher, BotWssDispatcher):
                 tenant=tenant,
                 port=port,
                 path=path,
+                ws_conn_mode=ws_conn_mode,
             )
 
         # Auto-select flow (existing behavior)
@@ -87,6 +89,7 @@ class DefaultBotWssDispatcher(BotBaseDispatcher, BotWssDispatcher):
             paas_device_id=paas_device_id,
             port=port,
             path=path,
+            ws_conn_mode=ws_conn_mode,
         )
 
         logger.info(
@@ -103,6 +106,7 @@ class DefaultBotWssDispatcher(BotBaseDispatcher, BotWssDispatcher):
         tenant: str,
         port: int,
         path: str,
+        ws_conn_mode: str | None = None,
     ) -> WsConnectionInfo:
         """Resolve WS connection info for a specific device UUID.
 
@@ -172,6 +176,7 @@ class DefaultBotWssDispatcher(BotBaseDispatcher, BotWssDispatcher):
             paas_device_id=paas_device_id,
             port=port,
             path=path,
+            ws_conn_mode=ws_conn_mode,
         )
 
         logger.info(
