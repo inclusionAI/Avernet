@@ -672,6 +672,69 @@ async def test_rollback_deploy_crash_after_issue_resume_adopts():
     assert op.baas_publish_id == 901
 
 
+# ── offline destroy: durable + idempotent (binding-status + stop-idempotency) ──
+def _destroy_flow(ledger, baas, record, *, binding_status="ACTIVE"):
+    svc = _flow(ledger=ledger, baas=baas, build_service=Mock(), publish_service=Mock())
+    svc._publish_service.get_publish_by_id = Mock(return_value=record)
+    svc._publish_service.get_device_binding_by_id = Mock(
+        return_value=Mock(device_id="BOT-live", status=binding_status)
+    )
+    svc._release_binding = Mock()
+    return svc
+
+
+@pytest.mark.asyncio
+async def test_offline_destroy_stop_then_releases_binding():
+    ledger = _ledger()
+    baas = FakeBaas()
+    baas.stop_bot = Mock(return_value={"publish_id": 777})
+    record = _record(PublishStatus.RELEASED.value)
+    record.ext = {"binding": {"online": 42}}
+    svc = _destroy_flow(ledger, baas, record, binding_status="ACTIVE")
+
+    result = await svc.execute_offline_destroy(publish_id=5, stage="online", operator="op")
+
+    assert result["success"] is True
+    assert baas.stop_bot.call_count == 1
+    # Deterministic, correlation-only request id (stable across retries).
+    assert baas.stop_bot.call_args.kwargs["request_id"] == "offline_destroy.pub5.online"
+    svc._release_binding.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_offline_destroy_released_binding_short_circuits():
+    # A re-enqueue for an already-destroyed record (binding RELEASED) is a true
+    # no-op — no second stop_bot (idempotency without a trackable workflow id).
+    ledger = _ledger()
+    baas = FakeBaas()
+    baas.stop_bot = Mock(return_value={"publish_id": 777})
+    record = _record(PublishStatus.RELEASED.value)
+    record.ext = {"binding": {"online": 42}}
+    svc = _destroy_flow(ledger, baas, record, binding_status="RELEASED")
+
+    result = await svc.execute_offline_destroy(publish_id=5, stage="online", operator="op")
+
+    assert result["success"] is True
+    baas.stop_bot.assert_not_called()
+    svc._release_binding.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_offline_destroy_stop_failure_propagates_for_retry():
+    # A stop_bot failure must PROPAGATE (not be masked as done) so the durable task
+    # retries instead of stranding the online bot.
+    ledger = _ledger()
+    baas = FakeBaas()
+    baas.stop_bot = Mock(side_effect=RuntimeError("baas /stop failed"))
+    record = _record(PublishStatus.RELEASED.value)
+    record.ext = {"binding": {"online": 42}}
+    svc = _destroy_flow(ledger, baas, record, binding_status="ACTIVE")
+
+    with pytest.raises(RuntimeError):
+        await svc.execute_offline_destroy(publish_id=5, stage="online", operator="op")
+    svc._release_binding.assert_not_called()
+
+
 # ── approval create: intent-first orphan window ───────────────────────────────
 @pytest.mark.asyncio
 async def test_approval_create_intent_first_orphan_visible_then_recorded():

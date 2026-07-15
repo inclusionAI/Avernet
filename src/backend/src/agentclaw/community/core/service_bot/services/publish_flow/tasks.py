@@ -345,8 +345,11 @@ class PublishRestartHandler(_PublishTaskBase):
 
 
 class PublishDestroyHandler(_PublishTaskBase):
-    """Durable bot destroy (offline / stage teardown) — replaces the fire-and-forget
-    background destroy. Idempotent via the destroy_stage operation runner op."""
+    """Durable bot destroy (offline) — replaces the fire-and-forget background
+    destroy. Idempotent via ``execute_offline_destroy``: a RELEASED binding
+    short-circuits (destroy already ran) and ``stop_bot`` is idempotent
+    server-side, so a re-delivery is a no-op. A genuine ``stop_bot`` failure
+    propagates so the task retries rather than masking it as done."""
 
     @property
     def task_type(self) -> str:
@@ -359,10 +362,12 @@ class PublishDestroyHandler(_PublishTaskBase):
         return asyncio.run(self._run(publish_id, stage, operator))
 
     async def _run(self, publish_id: int, stage: str, operator: str) -> TaskOutcome:
-        from agentclaw.community.core.service_bot.types import PublishStage
-
-        result = self._flow.destroy_publish_history(
-            publish_id=publish_id, stage=PublishStage(stage)
+        # execute_offline_destroy raises on a real BaaS/ledger failure → the
+        # exception propagates out of asyncio.run and the queue retries the task
+        # (resuming the same non-terminal op → adopt), so a transient destroy
+        # failure is no longer silently completed.
+        result = await self._flow.execute_offline_destroy(
+            publish_id=publish_id, stage=stage, operator=operator
         )
         if not result or not result.get("success"):
             return Fail(f"destroy failed: publish_id={publish_id}, {(result or {}).get('message')}")

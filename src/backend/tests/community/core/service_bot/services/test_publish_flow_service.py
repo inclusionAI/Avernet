@@ -3050,6 +3050,34 @@ def test_eval_teardown_handler_dispatches_to_execute_eval_teardown():
     assert isinstance(outcome, Fail)
 
 
+def test_destroy_handler_dispatches_to_execute_offline_destroy():
+    # #197 (H2/H3): the durable destroy handler runs the runner-based
+    # execute_offline_destroy (idempotent via the offline_destroy op) and returns
+    # Fail on a non-success result so a failed destroy retries instead of masking.
+    from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+        DESTROY_TASK,
+        PublishDestroyHandler,
+    )
+    from agentclaw.community.core.task_queue.types import Complete, Fail
+
+    flow = Mock()
+    flow.execute_offline_destroy = AsyncMock(
+        return_value={"success": True, "message": "ok", "baas_publish_id": 5}
+    )
+    handler = PublishDestroyHandler(flow=flow, task_queue_service=Mock())
+    assert handler.task_type == DESTROY_TASK
+
+    outcome = handler.handle({"publish_id": 4, "stage": "online", "operator": "op"})
+    assert isinstance(outcome, Complete)
+    flow.execute_offline_destroy.assert_awaited_once_with(
+        publish_id=4, stage="online", operator="op"
+    )
+
+    flow.execute_offline_destroy = AsyncMock(return_value={"success": False, "message": "boom"})
+    outcome = handler.handle({"publish_id": 4, "stage": "online", "operator": "op"})
+    assert isinstance(outcome, Fail)
+
+
 def test_approval_trigger_handler_dispatches_to_execute_approval_trigger():
     # #197: the durable AGREED-trigger handler unpacks the payload and drives the
     # approval service's status-CAS-guarded trigger; a non-success is a Fail.

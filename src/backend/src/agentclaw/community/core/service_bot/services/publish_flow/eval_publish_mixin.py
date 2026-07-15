@@ -101,6 +101,12 @@ class EvalPublishMixin:
         baas_publish_id = op.baas_publish_id
         if not bot_uuid:
             raise PublishFlowServiceError("Eval-environment release failed: BaaS returned no bot_uuid")
+        if baas_publish_id is None:
+            # Defensive: completing with None would hide an un-recorded workflow now
+            # that complete() also accepts PENDING (#197).
+            raise PublishFlowServiceError(
+                f"Eval release did not record a BaaS publish_id: publish_id={publish_id}"
+            )
         self._operation_runner.complete_operation(op)
 
         # Enqueue the TTL teardown safety net: if the quality task never reaches

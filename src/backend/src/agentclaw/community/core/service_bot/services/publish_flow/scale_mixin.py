@@ -113,6 +113,13 @@ class ScaleMixin:
 
         op = await self._operation_runner.acquire_workflow(op, _issue)
         scale_publish_id = op.baas_publish_id
+        if scale_publish_id is None:
+            # Defensive: acquire_workflow guarantees a recorded id for a BaaS op
+            # (issue/adopt), so completing with None would hide an un-recorded
+            # workflow now that complete() also accepts PENDING (#197).
+            raise PublishFlowServiceError(
+                f"scale did not record a BaaS publish_id: publish_id={publish_id}"
+            )
 
         # Dual-write ext.scale.publish_id (the ledger op is the source of truth;
         # ext is the read handle sync_scale_progress falls back to).

@@ -4,6 +4,9 @@ from __future__ import annotations
 from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
+    PublishOperationError,
+)
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 
@@ -240,6 +243,16 @@ class RestartMixin:
                 restart_result.get("success") is False
                 and restart_result.get("error_code") == "BOT_NOT_FOUND"
             ):
+                # NOTE (#197, known limitation): the BOT_NOT_FOUND fallback recreates
+                # the bot inline. Because restart reuses the existing binding (which
+                # still points at the gone bot_uuid) rather than minting a new one,
+                # this recreate leg is NOT fully crash-idempotent — a crash in the
+                # narrow window after the create but before the workflow is recorded
+                # can re-create a second orphan bot on resume (adopt-by-query queries
+                # the OLD, gone bot and finds nothing). This is a rare path
+                # (restarting an already-destroyed bot) and a pre-existing shape;
+                # a proper fix (mint a fresh binding + a dedicated recreate op, like
+                # upgrade_release's first-release fallback) is tracked as a follow-up.
                 logger.warning(
                     "[PublishFlowService.execute_restart] target bot not found, "
                     "fallback to first release: publish_id=%s bot_uuid=%s stage=%s",
@@ -265,6 +278,13 @@ class RestartMixin:
         # recorded publish_id (raises PublishOperationError otherwise).
         op = await self._operation_runner.acquire_workflow(op, _issue)
         restart_publish_id = op.baas_publish_id
+        if restart_publish_id is None:
+            # Defensive: acquire_workflow guarantees a recorded id (issue/adopt);
+            # completing with None would hide an un-recorded workflow now that
+            # complete() also accepts PENDING (#197).
+            raise PublishOperationError(
+                f"restart did not record a BaaS publish_id: publish_id={publish_id}"
+            )
 
         # Refresh the teclaw read handle to the restart workflow (best-effort).
         self.refresh_publish_handle(binding_id, restart_publish_id)

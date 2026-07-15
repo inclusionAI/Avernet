@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 
+from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
     PublishStatus,
@@ -173,6 +174,75 @@ class RollbackOpsMixin:
             baas_publish_id=str(baas_publish_id),
             device_binding_id=online_binding_id,
         )
+
+    async def execute_offline_destroy(
+        self,
+        publish_id: int,
+        stage: str,
+        operator: str = "system",
+    ) -> dict:
+        """Durable offline destroy (#197): tear down the stage's bot idempotently.
+
+        NOT routed through the operation runner: BaaS ``/stop`` may not return a
+        trackable ``publish_id``, so adopt-by-query cannot fence it. Idempotency is
+        instead binding-status + stop-based:
+
+        * a binding already ``RELEASED`` means the destroy already ran → no-op (so a
+          re-enqueue, including ``offline_publish``'s crash-resume re-enqueue on a
+          RELEASED record, is a true no-op);
+        * ``stop_bot`` is idempotent server-side, so a duplicate delivery in the
+          narrow pre-release window is harmless.
+
+        Crucially this does NOT swallow BaaS failures — a ``stop_bot`` exception
+        propagates so the durable task retries (the earlier best-effort path masked
+        failures as done, stranding the online bot). Returns ``{success, ...}``."""
+        stage_enum = PublishStage(stage)
+        publish_record = self._publish_service.get_publish_by_id(publish_id)
+        if not publish_record:
+            return {"success": False, "message": f"Publish record not found: {publish_id}"}
+
+        ext = publish_record.ext or {}
+        binding_id = (ext.get("binding") or {}).get(stage_enum.value)
+        if not binding_id:
+            # Nothing bound for this stage → nothing to destroy (idempotent no-op).
+            return {"success": True, "message": f"No binding for stage {stage_enum.value}"}
+
+        binding = self._publish_service.get_device_binding_by_id(binding_id)
+        if not binding or not binding.device_id:
+            return {"success": True, "message": f"Binding missing device_id: {binding_id}"}
+
+        # Idempotent short-circuit: a RELEASED binding means the destroy already ran.
+        if binding.status == DeviceBindingStatus.RELEASED.value:
+            return {"success": True, "message": f"Already released: binding_id={binding_id}"}
+
+        bot_uuid = binding.device_id
+        # Deterministic, correlation-only request id (stable across retries).
+        request_id = f"offline_destroy.pub{publish_id}.{stage_enum.value}"
+
+        # stop_bot raises BaasServiceError on a real failure → propagates out of the
+        # handler's asyncio.run → the queue retries (no longer masked as done).
+        destroy_result = self._baas_service.stop_bot(
+            bot_uuid=bot_uuid,
+            operator=operator,
+            request_id=request_id,
+        )
+        destroy_publish_id = destroy_result.get("publish_id")
+
+        # DeviceBindingMixin owns the binding write; the RELEASED status is what the
+        # next run's short-circuit reads.
+        self._release_binding(binding_id, destroy_publish_id=destroy_publish_id)
+
+        logger.info(
+            "[PublishFlowService.execute_offline_destroy] destroy submitted: "
+            "publish_id=%s stage=%s bot_uuid=%s destroy_publish_id=%s",
+            publish_id, stage_enum.value, bot_uuid, destroy_publish_id,
+        )
+        return {
+            "success": True,
+            "message": f"Destroy submitted, stage={stage_enum.value}",
+            "bot_uuid": bot_uuid,
+            "baas_publish_id": destroy_publish_id,
+        }
 
     def _destroy_bot_by_stage(
         self,

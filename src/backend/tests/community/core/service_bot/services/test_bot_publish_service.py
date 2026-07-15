@@ -301,6 +301,29 @@ class TestOfflinePublish:
         )
 
     @pytest.mark.asyncio
+    async def test_offline_publish_released_record_reenqueues_destroy(self):
+        """(#197 H1) 崩溃恢复：记录已是 RELEASED（前一次下线已翻转状态但可能在
+        入队销毁前崩溃）→ 重新入队销毁，避免线上 bot 泄漏。销毁任务侧幂等去重。"""
+        mock_repo = Mock()
+        mock_record = _create_mock_record(record_id=1, status=PublishStatus.RELEASED)
+        mock_repo.get_by_id.return_value = mock_record
+
+        mock_publish_flow_service = Mock()
+        service = _make_service(
+            bot_publish_repo=mock_repo,
+            publish_flow_service_provider=lambda: mock_publish_flow_service,
+        )
+
+        result = await service.offline_publish(publish_id=1)
+
+        assert result["success"] is True
+        # 不再翻转状态（已是 RELEASED），只重新入队销毁。
+        mock_repo.update_status.assert_not_called()
+        mock_publish_flow_service.enqueue_offline_destroy.assert_called_once_with(
+            publish_id=1, stage=PublishStage.ONLINE, operator="system"
+        )
+
+    @pytest.mark.asyncio
     async def test_offline_publish_success_without_non_terminal_records(self):
         """SUCCESS 状态无非终态发布单时，创建新草稿发布单，状态更新为 RELEASED。"""
         # Arrange

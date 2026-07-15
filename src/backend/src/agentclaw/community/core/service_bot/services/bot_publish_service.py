@@ -936,6 +936,28 @@ class BotPublishService(PublishRollbackMixin):
 
         # Step 2: 根据状态判断 stage
         current_status = publish_record.status
+
+        # (#197) Crash-resume: a prior online offline already flipped
+        # SUCCESS→RELEASED but may have crashed before the durable destroy was
+        # enqueued (the flip and the enqueue are not atomic). Re-enqueue so the
+        # online bot is never leaked. execute_offline_destroy short-circuits when
+        # the destroy already COMPLETED, so this re-enqueue is a true no-op then.
+        if current_status == PublishStatus.RELEASED:
+            publish_flow_service.enqueue_offline_destroy(
+                publish_id=publish_id, stage=PublishStage.ONLINE, operator="system"
+            )
+            logger.info(
+                f"[offline_publish] Re-enqueued destroy for already-RELEASED record "
+                f"(crash-resume): publish_id={publish_id}"
+            )
+            return {
+                "success": True,
+                "bot_destroyed": False,
+                "new_publish_id": None,
+                "new_publish_version": None,
+                "message": f"下线销毁已重新提交（崩溃恢复）: publish_id={publish_id}",
+            }
+
         stage = self._resolve_offline_stage(current_status, publish_id)
 
         logger.info(

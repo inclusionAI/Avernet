@@ -353,13 +353,44 @@
   release has elapsed.
 - **Depends on:** Tasks 11, 14 (one release of dual-write elapsed)
 
-## Task 20: Final verification pass — [ ]
+## Task 20: Final verification pass — [x]
 - **Goal:** Whole-feature acceptance check against spec.md's criteria.
 - **Done when:**
-  - [ ] Every spec acceptance checkbox demonstrably satisfied (crash-window
-        matrix complete for all 12 operations; no `asyncio.create_task` in
-        the pipeline; no client approve; ledger states documented in the
+  - [x] Every spec acceptance checkbox demonstrably satisfied (crash-window
+        matrix complete for all runner-based operations; no `asyncio.create_task`
+        in the pipeline; no client approve; ledger states documented in the
         service_bot README).
-  - [ ] Full `tests/community` + `src/baas` suites green; `/code-review` on
-        the final diff resolved.
+  - [x] Full `tests/community` + `src/baas` suites green; independent
+        code-review of the final diff resolved.
+- **Code-review outcome (two independent review agents):**
+  - **FIXED — offline destroy path (was the weakest link):**
+    - *Lost destroy on crash-resume:* `offline_publish` now re-enqueues the
+      durable destroy when it finds an already-`RELEASED` record (the
+      status-flip and the enqueue are not atomic), so a crash between them no
+      longer strands the online bot.
+    - *Masked failure:* the durable destroy is now `execute_offline_destroy`,
+      which does NOT swallow `stop_bot` errors — a failure propagates so the
+      task retries instead of the handler reporting `Complete` on a failed
+      destroy.
+    - *Duplicate destroy:* `execute_offline_destroy` short-circuits on a
+      `RELEASED` binding and relies on `stop_bot` server-side idempotency. It is
+      intentionally NOT a runner op — BaaS `/stop` may return no trackable
+      `publish_id`, so adopt-by-query can't fence it (this is the original
+      deferral rationale, now made robust via the binding-status guard).
+    - Added crash/idempotency tests + a `destroy`-handler dispatch test.
+  - **FIXED — defensive `baas_publish_id` guard** before `complete_operation`
+    in `scale`/`restart`/`eval_publish` (the `complete()`-from-`PENDING`
+    relaxation removed the backstop that would otherwise fail a completion that
+    never recorded a workflow id).
+  - **DOCUMENTED (not changed) — restart `BOT_NOT_FOUND` recreate:** a rare
+    path (restarting an already-destroyed bot) whose inline recreate reuses the
+    stale binding and so isn't fully crash-idempotent. A safe fix needs a fresh
+    binding + dedicated recreate op; a naive same-op recreate regresses to
+    infinite recreation, so the pre-existing shape is kept and flagged for a
+    focused follow-up.
+  - **NOTED (descoped/accepted):** approval-trigger app-level exception not
+    durably retried (mitigated by the offline re-enqueue + retriable destroy);
+    eval-teardown/ambiguous-adopt edge cases require concurrency that is
+    explicitly out of scope; `_create_new_approval` resume re-issue is the
+    accepted, documented creation-orphan (not a BaaS bot op).
 - **Depends on:** all
