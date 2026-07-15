@@ -1257,6 +1257,75 @@ export async function getRegisterToken(options?: { [key: string]: any }) {
   });
 }
 
+
+// === OAuth 登录接口（一期 BCN 开源） ===
+
+/** 获取当前 OAuth 登录用户响应 */
+export interface AuthUserResponse {
+  /** 用户唯一标识 */
+  user_id: string;
+  /** 展示名称 */
+  name?: string | null;
+  /** 登录 provider */
+  provider: string;
+  /** 头像 URL */
+  avatar?: string | null;
+}
+
+/** OAuth 登录跳转地址 provider */
+export interface AuthUrlProvider {
+  name: string;
+  url: string;
+}
+
+/** 获取 OAuth 登录跳转地址响应 */
+export interface AuthUrlResponse {
+  providers: AuthUrlProvider[];
+}
+
+/**
+ * 获取当前 OAuth 登录用户信息
+ * GET /auth/user（前端经 /bcnproxy/auth/user 代理到 BCN 后端）
+ */
+export async function getAuthUser(options?: { [key: string]: any }) {
+  return request<AuthUserResponse>('/bcnproxy/auth/user', {
+    method: 'GET',
+    skipErrorHandler: true,
+    ...(options || {}),
+  });
+}
+
+/**
+ * 获取 OAuth 登录跳转地址
+ * GET /auth/url（前端经 /bcnproxy/auth/url 代理到 BCN 后端）
+ *
+ * 多 provider 时调用方默认选择 providers[0]；return_to 为前端回跳兜底，
+ * 后端不识别时也不影响前端 localStorage returnTo 恢复逻辑。
+ */
+export async function getAuthUrl(
+  params?: { returnTo?: string },
+  options?: { [key: string]: any },
+) {
+  return request<AuthUrlResponse>('/bcnproxy/auth/url', {
+    method: 'GET',
+    params: params?.returnTo ? { return_to: params.returnTo } : undefined,
+    skipErrorHandler: true,
+    ...(options || {}),
+  });
+}
+
+/**
+ * 退出 OAuth 登录
+ * POST /auth/logout（前端经 /bcnproxy/auth/logout 代理到 BCN 后端）
+ */
+export async function logoutAuth(options?: { [key: string]: any }) {
+  return request<{ success?: boolean }>('/bcnproxy/auth/logout', {
+    method: 'POST',
+    skipErrorHandler: true,
+    ...(options || {}),
+  });
+}
+
 // === Session 管理接口 ===
 
 /** Session 信息（API 响应） */

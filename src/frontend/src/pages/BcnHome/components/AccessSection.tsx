@@ -4,15 +4,10 @@
  *
  * AccessSection - 接入方式（双接入命令卡）
  *
- * 两张卡的命令模板取自 capabilities 契约（差异类型 G）：
- * - 方式1 用户自助接入 → AppExt.resources.bcnConnectCmdTemplate
- * - 方式2 Bot 自动接入   → AppExt.resources.bcnAutoConnectCmdTemplate
- * 模板含 `{token}` 占位，登录态用 useRegisterToken 的真实 token 替换；未登录显示 <YOUR_TOKEN>。
- * 模板为 null 的卡跳过渲染（优雅降级）。
- *
- * 注：本落地页像素级还原设计稿，使用设计稿精确色、bespoke 复制按钮（本页局部例外）。
+ * 页面文案和布局以 GitHub 最新 BcnHome 为基线；登录态用 useRegisterToken 的真实 token 替换，未登录显示 <YOUR_TOKEN>。
  */
 
+import Button from '@/components/Button';
 import { useExt } from '@/capabilities';
 import { AppExt } from '@/shell';
 import { Check, Copy } from 'lucide-react';
@@ -22,10 +17,6 @@ import { useRegisterToken } from '../hooks/useRegisterToken';
 
 const TOKEN_PLACEHOLDER = '<YOUR_TOKEN>';
 
-/**
- * 降级复制：非安全上下文（HTTP 非 localhost，如 dev.example.com:8000）下
- * navigator.clipboard 不可用，改用临时 textarea + execCommand('copy')。
- */
 function fallbackCopyText(text: string): boolean {
   const textArea = document.createElement('textarea');
   textArea.value = text;
@@ -74,7 +65,6 @@ const AccessSection: React.FC = () => {
       );
     };
 
-    // 优先用 Clipboard API（安全上下文）；不可用或抛错时降级 execCommand
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard) {
         await navigator.clipboard.writeText(command);
@@ -119,11 +109,14 @@ const AccessSection: React.FC = () => {
                 <code className="block whitespace-pre-wrap break-all font-mono text-xs leading-6 text-[#c7d2fe]">
                   {command}
                 </code>
-                <button
+                <Button
                   type="button"
+                  variant="default"
+                  ghost
+                  size="icon"
                   onClick={() => handleCopy(item.title, command)}
                   disabled={isLoading}
-                  className="absolute right-3 top-3 rounded-lg bg-white/10 p-2 transition-colors hover:bg-white/20 disabled:opacity-50"
+                  className="absolute right-3 top-3 rounded-lg bg-white/10 p-2 text-white/70 transition-colors hover:bg-white/20 disabled:opacity-50"
                   title="复制指令"
                 >
                   {copiedKey === item.title ? (
@@ -131,7 +124,7 @@ const AccessSection: React.FC = () => {
                   ) : (
                     <Copy className="h-4 w-4 text-white/70" />
                   )}
-                </button>
+                </Button>
               </div>
             </div>
           );
