@@ -49,11 +49,13 @@ def _seed_service_bot(
                     "INSERT INTO ac_bots ("
                     "bot_id, bot_name, bot_desc, entity_id, entity_type, creator_id, owner_id, "
                     "owner_name, engine_types, active_engine, status, binding_id, device_id, "
-                    "gmt_create, gmt_modified, is_delete, public, ext, env, bot_type"
+                    "gmt_create, gmt_modified, is_delete, public, ext, env, bot_type, "
+                    "call_type, caller_config_revision"
                     ") VALUES ("
                     ":bot_id, :bot_name, :bot_desc, :owner_id, 'staff', :owner_id, :owner_id, "
                     ":owner_id, :engine_types, :active_engine, 'ACTIVE', NULL, NULL, "
-                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, '0', :ext, :env, 'service'"
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, '0', :ext, :env, 'service', "
+                    "'owner', 0"
                     ")"
                 ),
                 "params": {
