@@ -301,8 +301,22 @@ pub struct AdminInvocationRun {
     pub detach: bool,
     pub expires_at_ms: u64,
     pub delivery_error: Option<String>,
+    pub terminal: Option<AdminInvocationTerminal>,
     pub callback: Option<AdminInvocationCallback>,
     pub callback_claimed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdminInvocationTerminalStatus {
+    Completed,
+    Failed,
+    TimedOut,
+}
+
+#[derive(Debug, Clone)]
+pub struct AdminInvocationTerminal {
+    pub status: AdminInvocationTerminalStatus,
+    pub text: String,
 }
 
 #[derive(Debug, Clone)]
@@ -346,24 +360,10 @@ impl AdminInvocationStore {
         runs.get(run_id).cloned()
     }
 
-    pub fn claim_callback(&self, run_id: &str) -> Option<AdminInvocationRun> {
-        let mut runs = self
-            .runs
-            .lock()
-            .expect("admin invocation store lock poisoned");
-        purge_expired(&mut runs);
-        let run = runs.get_mut(run_id)?;
-        if run.detach || run.callback.is_none() || run.callback_claimed {
-            return None;
-        }
-        run.callback_claimed = true;
-        Some(run.clone())
-    }
-
-    pub fn claim_callback_for_bot(
+    pub fn record_terminal(
         &self,
         run_id: &str,
-        target_bot_uuid: &str,
+        terminal: AdminInvocationTerminal,
     ) -> Option<AdminInvocationRun> {
         let mut runs = self
             .runs
@@ -371,15 +371,25 @@ impl AdminInvocationStore {
             .expect("admin invocation store lock poisoned");
         purge_expired(&mut runs);
         let run = runs.get_mut(run_id)?;
-        if run.target_bot_uuid != target_bot_uuid
-            || run.detach
-            || run.callback.is_none()
-            || run.callback_claimed
-        {
+        record_terminal_and_claim_callback(run, terminal)
+    }
+
+    pub fn record_terminal_for_bot(
+        &self,
+        run_id: &str,
+        target_bot_uuid: &str,
+        terminal: AdminInvocationTerminal,
+    ) -> Option<AdminInvocationRun> {
+        let mut runs = self
+            .runs
+            .lock()
+            .expect("admin invocation store lock poisoned");
+        purge_expired(&mut runs);
+        let run = runs.get_mut(run_id)?;
+        if run.target_bot_uuid != target_bot_uuid {
             return None;
         }
-        run.callback_claimed = true;
-        Some(run.clone())
+        record_terminal_and_claim_callback(run, terminal)
     }
 
     pub fn set_delivery_error(&self, run_id: &str, error: String) {
@@ -391,6 +401,21 @@ impl AdminInvocationStore {
             run.delivery_error = Some(error);
         }
     }
+}
+
+fn record_terminal_and_claim_callback(
+    run: &mut AdminInvocationRun,
+    terminal: AdminInvocationTerminal,
+) -> Option<AdminInvocationRun> {
+    if run.terminal.is_some() {
+        return None;
+    }
+    run.terminal = Some(terminal);
+    if run.callback.is_none() || run.callback_claimed {
+        return None;
+    }
+    run.callback_claimed = true;
+    Some(run.clone())
 }
 
 fn purge_expired(runs: &mut HashMap<String, AdminInvocationRun>) {

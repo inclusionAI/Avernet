@@ -19,7 +19,9 @@ use uuid::Uuid;
 
 use crate::{
     headers::extract_bearer_token,
-    state::{AdminInvocationCallback, AdminInvocationRun, HttpAppState},
+    state::{
+        AdminInvocationCallback, AdminInvocationRun, AdminInvocationTerminalStatus, HttpAppState,
+    },
 };
 
 const DEFAULT_TIMEOUT_MS: u64 = 30 * 60 * 1000;
@@ -148,7 +150,8 @@ pub async fn create_admin_run(
             detach: request.detach,
             expires_at_ms,
             delivery_error: None,
-            callback: if request.detach { None } else { callback },
+            terminal: None,
+            callback,
             callback_claimed: false,
         },
     );
@@ -195,15 +198,11 @@ pub async fn create_admin_run(
             state
                 .admin_invocation_runs
                 .set_delivery_error(&run_id, message);
-            if !request.detach {
-                notify_terminal_callback(&state, &run_id, "error", "target bot delivery failed");
-            }
+            notify_terminal_callback(&state, &run_id, "error", "target bot delivery failed");
             "delivery_failed".to_string()
         }
     };
-    if !request.detach {
-        schedule_timeout_callback(state.clone(), run_id.clone(), timeout_ms);
-    }
+    schedule_timeout_callback(state.clone(), run_id.clone(), timeout_ms);
     let location = format!("/organizations/{organization_code}/admin-runs/{run_id}");
     let mut response = (
         StatusCode::ACCEPTED,
@@ -264,16 +263,57 @@ pub async fn get_admin_run(
         );
     }
     if run.detach {
-        let (status, error) = match run.delivery_error {
-            Some(message) => (
-                "delivery_failed".to_string(),
-                Some(AdminRunError {
-                    code: "ADMIN_INVOCATION_DELIVERY_FAILED",
-                    message,
-                }),
-            ),
-            None => ("dispatched".to_string(), None),
-        };
+        if let Some(message) = run.delivery_error {
+            return Json(Envelope {
+                code: 20000,
+                message: "ok".to_string(),
+                data: AdminRunView {
+                    run_id,
+                    provider_id,
+                    organization_code,
+                    target_bot_uuid: run.target_bot_uuid,
+                    session_id: run.session_id,
+                    status: "delivery_failed".to_string(),
+                    message: None,
+                    error: Some(AdminRunError {
+                        code: "ADMIN_INVOCATION_DELIVERY_FAILED",
+                        message,
+                    }),
+                },
+                request_id,
+            })
+            .into_response();
+        }
+        if let Some(terminal) = run.terminal {
+            let completed = terminal.status == AdminInvocationTerminalStatus::Completed;
+            let timed_out = terminal.status == AdminInvocationTerminalStatus::TimedOut;
+            return Json(Envelope {
+                code: 20000,
+                message: "ok".to_string(),
+                data: AdminRunView {
+                    run_id,
+                    provider_id,
+                    organization_code,
+                    target_bot_uuid: run.target_bot_uuid,
+                    session_id: run.session_id,
+                    status: if completed {
+                        "completed"
+                    } else if timed_out {
+                        "timed_out"
+                    } else {
+                        "failed"
+                    }
+                    .to_string(),
+                    message: completed.then(|| json!({ "role": "assistant", "content": [{ "type": "text", "text": terminal.text }] })),
+                    error: (!completed).then(|| AdminRunError {
+                        code: "ADMIN_INVOCATION_TARGET_FAILED",
+                        message: terminal.text,
+                    }),
+                },
+                request_id,
+            })
+            .into_response();
+        }
         return Json(Envelope {
             code: 20000,
             message: "ok".to_string(),
@@ -283,9 +323,9 @@ pub async fn get_admin_run(
                 organization_code,
                 target_bot_uuid: run.target_bot_uuid,
                 session_id: run.session_id,
-                status,
+                status: "dispatched".to_string(),
                 message: None,
-                error,
+                error: None,
             },
             request_id,
         })
@@ -553,31 +593,14 @@ mod tests {
 fn schedule_timeout_callback(state: HttpAppState, run_id: String, timeout_ms: u64) {
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(timeout_ms)).await;
-        let Some(run) = state.admin_invocation_runs.get(&run_id) else {
-            return;
-        };
-        let result = state
-            .services
-            .a2a_chat_runs
-            .get_run(ChatRunQueryCommand {
-                caller: CallerContext::Bot(BotActor {
-                    bot_uuid: run.target_bot_uuid,
-                }),
-                run_id: run_id.clone(),
-                wait_ms: 0,
-                since_version: 0,
-            })
-            .await;
-        if let Ok(result) = result {
-            if matches!(result.status.as_str(), "timeout" | "timed_out" | "failed") {
-                notify_terminal_callback(
-                    &state,
-                    &run_id,
-                    "error",
-                    "target bot did not complete the run before timeout",
-                );
-            }
-        }
+        crate::admin_invocation_terminal::AdminInvocationTerminalObserver::new(
+            state.admin_invocation_runs.clone(),
+            state.outbound_url_guard.clone(),
+        )
+        .notify_timeout(
+            &run_id,
+            "target bot did not complete the run before timeout",
+        );
     });
 }
 

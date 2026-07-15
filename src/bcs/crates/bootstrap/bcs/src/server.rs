@@ -3325,6 +3325,251 @@ fn direct_chat_run_lifecycle_hook(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::to_bytes;
+    use bcs_protocol::{BcsFrame, EventFrame, RequestFrame};
+    use bcs_service_api::RegisterProviderCommand;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::time::{Duration, timeout};
+    use tower::ServiceExt;
+
+    async fn response_json(response: Response) -> serde_json::Value {
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    async fn read_http_request(socket: &mut tokio::net::TcpStream) -> Vec<u8> {
+        let mut request = Vec::new();
+        loop {
+            let mut chunk = [0; 1024];
+            let count = socket.read(&mut chunk).await.unwrap();
+            assert!(count > 0, "callback closed before request completed");
+            request.extend_from_slice(&chunk[..count]);
+            let Some(headers_end) = request.windows(4).position(|window| window == b"\r\n\r\n")
+            else {
+                continue;
+            };
+            let headers_end = headers_end + 4;
+            let headers = String::from_utf8_lossy(&request[..headers_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    line.split_once(':').and_then(|(name, value)| {
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().unwrap())
+                    })
+                })
+                .unwrap_or(0);
+            if request.len() >= headers_end + content_length {
+                return request;
+            }
+        }
+    }
+
+    struct AdminRunTestOrganization {
+        provider_id: String,
+    }
+
+    impl AdminRunTestOrganization {
+        fn organization(&self, code: &str) -> bcs_domain::Organization {
+            bcs_domain::Organization {
+                env: "local".to_string(),
+                code: code.to_string(),
+                name: "Admin WS Org".to_string(),
+                description: None,
+                managing_provider_id: self.provider_id.clone(),
+                disabled: false,
+                created_at: 1,
+                updated_at: 1,
+            }
+        }
+
+        fn member(&self, code: &str, bot_uuid: &str) -> bcs_domain::OrganizationMember {
+            bcs_domain::OrganizationMember {
+                env: "local".to_string(),
+                organization_code: code.to_string(),
+                bot_uuid: bot_uuid.to_string(),
+                role: None,
+                disabled: false,
+                created_at: 1,
+                updated_at: 1,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl OrganizationCoreService for AdminRunTestOrganization {
+        async fn create(
+            &self,
+            _managing_provider_id: &str,
+            code: &str,
+            _name: &str,
+            _description: Option<&str>,
+        ) -> bcs_service_api::ServiceResult<bcs_domain::Organization> {
+            Ok(self.organization(code))
+        }
+
+        async fn get_for_manager(
+            &self,
+            _managing_provider_id: &str,
+            code: &str,
+        ) -> bcs_service_api::ServiceResult<bcs_domain::Organization> {
+            Ok(self.organization(code))
+        }
+
+        async fn list_for_manager(
+            &self,
+            _managing_provider_id: &str,
+            _include_disabled: bool,
+        ) -> bcs_service_api::ServiceResult<Vec<bcs_domain::Organization>> {
+            Ok(Vec::new())
+        }
+
+        async fn update_for_manager(
+            &self,
+            _managing_provider_id: &str,
+            code: &str,
+            _name: Option<&str>,
+            _description: Option<Option<&str>>,
+            _disabled: Option<bool>,
+        ) -> bcs_service_api::ServiceResult<bcs_domain::Organization> {
+            Ok(self.organization(code))
+        }
+
+        async fn put_member(
+            &self,
+            _managing_provider_id: &str,
+            organization_code: &str,
+            bot_uuid: &str,
+            _role: Option<&str>,
+        ) -> bcs_service_api::ServiceResult<bcs_domain::OrganizationMember> {
+            Ok(self.member(organization_code, bot_uuid))
+        }
+
+        async fn delete_member(
+            &self,
+            _managing_provider_id: &str,
+            _organization_code: &str,
+            _bot_uuid: &str,
+        ) -> bcs_service_api::ServiceResult<()> {
+            Ok(())
+        }
+
+        async fn get_member_for_manager(
+            &self,
+            _managing_provider_id: &str,
+            organization_code: &str,
+            bot_uuid: &str,
+        ) -> bcs_service_api::ServiceResult<Option<bcs_domain::OrganizationMember>> {
+            Ok(Some(self.member(organization_code, bot_uuid)))
+        }
+
+        async fn list_members_for_manager(
+            &self,
+            _managing_provider_id: &str,
+            _organization_code: &str,
+            _include_disabled: bool,
+            _role: Option<&str>,
+        ) -> bcs_service_api::ServiceResult<Vec<bcs_domain::OrganizationMember>> {
+            Ok(Vec::new())
+        }
+
+        async fn candidate_bots(
+            &self,
+            _managing_provider_id: &str,
+            _query: bcs_service_api::OrganizationCandidateQuery,
+        ) -> bcs_service_api::ServiceResult<Vec<bcs_service_api::OrganizationCandidateBot>> {
+            Ok(Vec::new())
+        }
+
+        async fn require_effective_member(
+            &self,
+            organization_code: &str,
+            bot_uuid: &str,
+        ) -> bcs_service_api::ServiceResult<bcs_domain::OrganizationMember> {
+            Ok(self.member(organization_code, bot_uuid))
+        }
+
+        async fn list_effective_members(
+            &self,
+            _organization_code: &str,
+            _role: Option<&str>,
+        ) -> bcs_service_api::ServiceResult<Vec<bcs_domain::OrganizationMember>> {
+            Ok(Vec::new())
+        }
+
+        async fn require_runtime_member(
+            &self,
+            organization_code: &str,
+            bot_uuid: &str,
+        ) -> bcs_service_api::ServiceResult<bcs_domain::OrganizationMember> {
+            Ok(self.member(organization_code, bot_uuid))
+        }
+
+        async fn list_runtime_members(
+            &self,
+            _organization_code: &str,
+            _role: Option<&str>,
+        ) -> bcs_service_api::ServiceResult<Vec<bcs_domain::OrganizationMember>> {
+            Ok(Vec::new())
+        }
+
+        async fn authorize_pair(
+            &self,
+            organization_code: &str,
+            sender_bot_uuid: &str,
+            target_bot_uuid: &str,
+        ) -> bcs_service_api::ServiceResult<bcs_service_api::AuthorizedOrganizationPair> {
+            Ok(bcs_service_api::AuthorizedOrganizationPair {
+                organization: self.organization(organization_code),
+                sender: self.member(organization_code, sender_bot_uuid),
+                target: self.member(organization_code, target_bot_uuid),
+            })
+        }
+    }
+
+    struct AdminRunTestA2aRuns;
+
+    #[async_trait]
+    impl A2aChatRunService for AdminRunTestA2aRuns {
+        async fn run_blocking_chat(
+            &self,
+            _cmd: bcs_service_api::BlockingA2aChatCommand,
+        ) -> bcs_service_api::ServiceResult<bcs_service_api::BlockingA2aChatOutcome> {
+            unreachable!("admin run test only uses async chat")
+        }
+
+        async fn start_async_chat(
+            &self,
+            cmd: bcs_service_api::AsyncA2aChatCommand,
+        ) -> bcs_service_api::ServiceResult<bcs_service_api::AsyncA2aChatAccepted> {
+            Ok(bcs_service_api::AsyncA2aChatAccepted {
+                run_id: cmd.run_id,
+                bot_uuid: cmd.target_bot_id,
+                session_id: cmd.session_key,
+                status: "dispatched".to_string(),
+                expires_at_ms: u64::MAX,
+            })
+        }
+
+        async fn get_run(
+            &self,
+            cmd: bcs_service_api::ChatRunQueryCommand,
+        ) -> bcs_service_api::ServiceResult<bcs_service_api::A2aRunStatus> {
+            Ok(bcs_service_api::A2aRunStatus {
+                run_id: cmd.run_id,
+                status: "running".to_string(),
+                response: None,
+            })
+        }
+
+        async fn cancel_run(
+            &self,
+            _cmd: bcs_service_api::ChatRunCancelCommand,
+        ) -> bcs_service_api::ServiceResult<bcs_service_api::A2aRunStatus> {
+            unreachable!("admin run test does not cancel")
+        }
+    }
 
     #[test]
     fn judge_llm_provider_selection_uses_openai_compatible_type() {
@@ -3429,6 +3674,170 @@ mod tests {
             &first.coordination_processed,
             &second.coordination_processed
         ));
+    }
+
+    #[tokio::test]
+    async fn detached_admin_run_observes_websocket_terminal_and_callbacks_once() {
+        let callback_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let callback_url = format!(
+            "http://{}/admin-terminal",
+            callback_listener.local_addr().unwrap()
+        );
+        let mut config = BcsConfig::default();
+        config.async_chat_run_timeout_ms = 5_000;
+        let server = BcsServer::new_allowing_private_outbound_for_tests(config);
+
+        let provider = server
+            .state
+            .services
+            .provider_management
+            .register_provider(RegisterProviderCommand {
+                name: "Admin Provider".to_string(),
+                webhook_url: callback_url.clone(),
+                admin_callback_url: Some(callback_url),
+                auth_mode: bcs_domain::ProviderAuthMode::StaticBearer,
+                created_by: "admin-owner".to_string(),
+                protocol_version: None,
+                coordination: None,
+            })
+            .await
+            .unwrap();
+
+        let dispatch_state = bot_ws_dispatch_state(&server.state);
+        let (bot_tx, mut bot_rx) = tokio::sync::mpsc::channel(16);
+        let mut registered_bot_id = None;
+        let connect = BcsFrame::Request(RequestFrame::new(
+            "connect-1",
+            "bot.connect",
+            Some(serde_json::json!({
+                "bot_id": "ws-admin-target",
+                "protocol_version": 1
+            })),
+        ));
+        bcs_ws::bot::dispatch_frame(
+            &dispatch_state,
+            &serde_json::to_string(&connect).unwrap(),
+            &bot_tx,
+            &mut registered_bot_id,
+        )
+        .await
+        .unwrap();
+        assert_eq!(registered_bot_id.as_deref(), Some("ws-admin-target"));
+        let _connect_response = bot_rx.recv().await.unwrap();
+
+        let mut http_state = crate::http_adapter::build_http_app_state(server.state.clone()).await;
+        http_state.services.organization = Arc::new(AdminRunTestOrganization {
+            provider_id: provider.provider_id.clone(),
+        });
+        http_state.services.a2a_chat_runs = Arc::new(AdminRunTestA2aRuns);
+        let app = bcs_http::router::build_router(http_state);
+
+        let create_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/organizations/admin-ws-org/admin-runs")
+                    .header("content-type", "application/json")
+                    .header("x-bcn-provider-id", &provider.provider_id)
+                    .header(
+                        "authorization",
+                        format!("Bearer {}", provider.provider_admin_token),
+                    )
+                    .body(Body::from(
+                        serde_json::json!({
+                            "target_bot_uuid": "ws-admin-target",
+                            "message": {
+                                "role": "user",
+                                "content": [{"type": "text", "text": "run detached"}]
+                            },
+                            "detach": true,
+                            "run_timeout_ms": 5_000
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(create_response.status(), StatusCode::ACCEPTED);
+        let create_body = response_json(create_response).await;
+        let run_id = create_body["data"]["run_id"].as_str().unwrap().to_string();
+
+        let terminal = BcsFrame::Event(EventFrame::new(
+            "chat.event",
+            Some(serde_json::json!({
+                "run_id": run_id,
+                "bcs_group_id": "",
+                "state": "final",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "detached websocket result"}],
+                    "timestamp": 1
+                }
+            })),
+            Some(1),
+        ));
+        bcs_ws::bot::dispatch_frame(
+            &dispatch_state,
+            &serde_json::to_string(&terminal).unwrap(),
+            &bot_tx,
+            &mut registered_bot_id,
+        )
+        .await
+        .unwrap();
+        bcs_ws::bot::dispatch_frame(
+            &dispatch_state,
+            &serde_json::to_string(&terminal).unwrap(),
+            &bot_tx,
+            &mut registered_bot_id,
+        )
+        .await
+        .unwrap();
+
+        let get_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!(
+                        "/organizations/admin-ws-org/admin-runs/{run_id}"
+                    ))
+                    .header("x-bcn-provider-id", &provider.provider_id)
+                    .header(
+                        "authorization",
+                        format!("Bearer {}", provider.provider_admin_token),
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(get_response.status(), StatusCode::OK);
+        let get_body = response_json(get_response).await;
+        assert_eq!(get_body["data"]["status"], "completed");
+        assert_eq!(
+            get_body["data"]["message"]["content"][0]["text"],
+            "detached websocket result"
+        );
+
+        let (mut callback_socket, _) = timeout(Duration::from_secs(2), callback_listener.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        let callback_request = read_http_request(&mut callback_socket).await;
+        callback_socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+            .await
+            .unwrap();
+        let callback_request = String::from_utf8_lossy(&callback_request);
+        assert!(callback_request.contains("detached websocket result"));
+        assert!(callback_request.contains(&run_id));
+        assert!(
+            timeout(Duration::from_millis(100), callback_listener.accept())
+                .await
+                .is_err()
+        );
     }
 }
 

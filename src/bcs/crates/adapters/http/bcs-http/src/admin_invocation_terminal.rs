@@ -6,7 +6,10 @@ use bcs_service_api::{BotTerminalEvent, BotTerminalObserverPort, BotTerminalStat
 use serde_json::json;
 use tracing::{info, warn};
 
-use crate::state::{AdminInvocationRun, AdminInvocationStore};
+use crate::state::{
+    AdminInvocationRun, AdminInvocationStore, AdminInvocationTerminal,
+    AdminInvocationTerminalStatus,
+};
 
 #[derive(Clone)]
 pub struct AdminInvocationTerminalObserver {
@@ -23,20 +26,32 @@ impl AdminInvocationTerminalObserver {
     }
 
     pub fn notify(&self, run_id: &str, state: BotTerminalState, text: &str) {
-        let Some(run) = self.runs.claim_callback(run_id) else {
+        let terminal = terminal_from_bot_state(state, text);
+        let Some(run) = self.runs.record_terminal(run_id, terminal.clone()) else {
             return;
         };
-        self.dispatch(run_id, run, state, text);
+        self.dispatch(run_id, run, &terminal);
     }
 
-    fn dispatch(&self, run_id: &str, run: AdminInvocationRun, state: BotTerminalState, text: &str) {
+    pub fn notify_timeout(&self, run_id: &str, text: &str) {
+        let terminal = AdminInvocationTerminal {
+            status: AdminInvocationTerminalStatus::TimedOut,
+            text: text.to_string(),
+        };
+        let Some(run) = self.runs.record_terminal(run_id, terminal.clone()) else {
+            return;
+        };
+        self.dispatch(run_id, run, &terminal);
+    }
+
+    fn dispatch(&self, run_id: &str, run: AdminInvocationRun, terminal: &AdminInvocationTerminal) {
         let Some(callback) = run.callback else {
             return;
         };
-        let body = if state == BotTerminalState::Final {
-            json!({ "run_id": run_id, "provider_id": run.provider_id, "status": "completed", "message": { "role": "assistant", "content": [{ "type": "text", "text": text }] } })
+        let body = if terminal.status == AdminInvocationTerminalStatus::Completed {
+            json!({ "run_id": run_id, "provider_id": run.provider_id, "status": "completed", "message": { "role": "assistant", "content": [{ "type": "text", "text": terminal.text }] } })
         } else {
-            json!({ "run_id": run_id, "provider_id": run.provider_id, "status": "failed", "error": { "code": "ADMIN_INVOCATION_TARGET_FAILED", "message": text } })
+            json!({ "run_id": run_id, "provider_id": run.provider_id, "status": "failed", "error": { "code": "ADMIN_INVOCATION_TARGET_FAILED", "message": terminal.text } })
         };
         let provider_id = run.provider_id;
         let run_id = run_id.to_string();
@@ -105,13 +120,25 @@ impl AdminInvocationTerminalObserver {
 #[async_trait::async_trait]
 impl BotTerminalObserverPort for AdminInvocationTerminalObserver {
     async fn observe(&self, event: BotTerminalEvent) {
+        let terminal = terminal_from_bot_state(event.state, &event.text);
         let Some(run) = self
             .runs
-            .claim_callback_for_bot(&event.run_id, &event.bot_uuid)
+            .record_terminal_for_bot(&event.run_id, &event.bot_uuid, terminal.clone())
         else {
             return;
         };
-        self.dispatch(&event.run_id, run, event.state, &event.text);
+        self.dispatch(&event.run_id, run, &terminal);
+    }
+}
+
+fn terminal_from_bot_state(state: BotTerminalState, text: &str) -> AdminInvocationTerminal {
+    AdminInvocationTerminal {
+        status: if state == BotTerminalState::Final {
+            AdminInvocationTerminalStatus::Completed
+        } else {
+            AdminInvocationTerminalStatus::Failed
+        },
+        text: text.to_string(),
     }
 }
 
@@ -159,6 +186,7 @@ mod tests {
                 .as_millis() as u64
                 + 60_000,
             delivery_error: None,
+            terminal: None,
             callback: Some(AdminInvocationCallback {
                 url: callback_url,
                 bearer_token: "callback-token".to_string(),
@@ -260,6 +288,25 @@ mod tests {
             })
             .await;
 
-        assert!(runs.claim_callback_for_bot("run-1", "target-bot").is_some());
+        assert!(runs.get("run-1").unwrap().terminal.is_none());
+    }
+
+    #[test]
+    fn timeout_is_recorded_without_a_configured_callback() {
+        let runs = Arc::new(AdminInvocationStore::default());
+        let mut run = admin_run("http://127.0.0.1:1/callback".to_string());
+        run.detach = true;
+        run.callback = None;
+        runs.insert("run-timeout".to_string(), run);
+        let observer = AdminInvocationTerminalObserver::new(
+            runs.clone(),
+            OutboundUrlGuard::allowing_private_networks_for_tests(),
+        );
+
+        observer.notify_timeout("run-timeout", "target timed out");
+
+        let terminal = runs.get("run-timeout").unwrap().terminal.unwrap();
+        assert_eq!(terminal.status, AdminInvocationTerminalStatus::TimedOut);
+        assert_eq!(terminal.text, "target timed out");
     }
 }
