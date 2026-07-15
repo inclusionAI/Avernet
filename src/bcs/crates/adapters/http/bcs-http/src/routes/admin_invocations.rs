@@ -564,11 +564,60 @@ fn new_admin_run_id() -> String {
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
+    use axum::body::to_bytes;
+    use bcs_domain::ProviderRecord;
     use bcs_route_security::OutboundUrlError;
+    use bcs_service_api::ServiceError;
+    use bcs_services_container::Services;
+    use serde_json::{Value, json};
 
     use crate::admin_invocation_terminal::{callback_blocked_ip, callback_url_for_log};
+    use crate::state::{AdminInvocationRun, AdminInvocationTerminalStatus, HttpAppState};
 
-    use super::{default_admin_session_id, new_admin_run_id, valid_session_id};
+    use super::{
+        AdminRunContent, AdminRunMessage, callback_snapshot, default_admin_session_id,
+        new_admin_run_id, notify_terminal_callback, run_view_from_a2a, schedule_timeout_callback,
+        service_error, valid_session_id, validate_message,
+    };
+
+    fn test_state() -> HttpAppState {
+        HttpAppState::new(Services::builder().build_for_test())
+    }
+
+    fn provider_with_config(config: &str) -> ProviderRecord {
+        ProviderRecord {
+            provider_id: "provider-a".to_string(),
+            name: "Provider A".to_string(),
+            config: config.to_string(),
+            created_by: "admin".to_string(),
+            owners: "[]".to_string(),
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    fn stored_run(run_id: &str) -> AdminInvocationRun {
+        AdminInvocationRun {
+            provider_id: "provider-a".to_string(),
+            organization_code: "engineering".to_string(),
+            target_bot_uuid: "bot-target".to_string(),
+            session_id: format!("admin-{run_id}"),
+            detach: false,
+            expires_at_ms: u64::MAX,
+            delivery_error: None,
+            terminal: None,
+            callback: None,
+            callback_claimed: false,
+        }
+    }
+
+    async fn response_json(response: axum::response::Response) -> Value {
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        serde_json::from_slice(&bytes).expect("response JSON")
+    }
 
     #[test]
     fn admin_run_id_uses_hyphenated_prefix() {
@@ -605,6 +654,176 @@ mod tests {
                 "https://bearer-token@provider.example.com/callback?token=secret#fragment",
             ),
             "https://provider.example.com/callback"
+        );
+    }
+
+    #[test]
+    fn admin_message_requires_one_non_empty_user_text_block() {
+        let message = |role: &str, kind: &str, text: &str| AdminRunMessage {
+            role: role.to_string(),
+            content: vec![AdminRunContent {
+                kind: kind.to_string(),
+                text: text.to_string(),
+            }],
+        };
+
+        assert_eq!(
+            validate_message(message("user", "text", "review this")),
+            Ok("review this".to_string())
+        );
+        assert!(validate_message(message("assistant", "text", "review this")).is_err());
+        assert!(validate_message(message("user", "image", "review this")).is_err());
+        assert!(validate_message(message("user", "text", "  ")).is_err());
+        assert!(
+            validate_message(AdminRunMessage {
+                role: "user".to_string(),
+                content: Vec::new(),
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a2a_run_view_maps_success_and_terminal_failures() {
+        let completed = run_view_from_a2a(
+            "run-completed".to_string(),
+            "provider-a".to_string(),
+            "engineering".to_string(),
+            stored_run("run-completed"),
+            "completed".to_string(),
+            Some(json!({ "content": "finished" })),
+        );
+        assert_eq!(completed.status, "completed");
+        assert_eq!(
+            completed.message,
+            Some(json!({
+                "role": "assistant",
+                "content": [{ "type": "text", "text": "finished" }]
+            }))
+        );
+        assert!(completed.error.is_none());
+
+        for status in ["failed", "timed_out", "timeout"] {
+            let view = run_view_from_a2a(
+                format!("run-{status}"),
+                "provider-a".to_string(),
+                "engineering".to_string(),
+                stored_run(&format!("run-{status}")),
+                status.to_string(),
+                Some(json!({ "message": "ignored on terminal error" })),
+            );
+            assert_eq!(
+                view.status,
+                if status == "timeout" {
+                    "timed_out"
+                } else {
+                    status
+                }
+            );
+            assert!(view.message.is_none());
+            let error = view.error.expect("terminal error");
+            assert_eq!(error.code, "ADMIN_INVOCATION_TARGET_FAILED");
+        }
+    }
+
+    #[tokio::test]
+    async fn service_errors_use_the_admin_run_envelope_contract() {
+        let cases = [
+            (
+                ServiceError::Forbidden("not a member".to_string()),
+                axum::http::StatusCode::FORBIDDEN,
+                40303,
+                "target bot is not an effective organization member",
+            ),
+            (
+                ServiceError::InvalidOperation {
+                    message: "invalid request".to_string(),
+                    request_id: None,
+                },
+                axum::http::StatusCode::BAD_REQUEST,
+                40001,
+                "invalid request",
+            ),
+            (
+                ServiceError::BotNotFound("bot-target".to_string()),
+                axum::http::StatusCode::NOT_FOUND,
+                40402,
+                "admin run not found",
+            ),
+            (
+                ServiceError::InternalError("storage unavailable".to_string()),
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                50001,
+                "Internal error: storage unavailable",
+            ),
+        ];
+
+        for (error, expected_status, expected_code, expected_message) in cases {
+            let response = service_error(error, "req-test".to_string());
+            assert_eq!(response.status(), expected_status);
+            let body = response_json(response).await;
+            assert_eq!(body["code"], expected_code);
+            assert_eq!(body["message"], expected_message);
+            assert_eq!(body["request_id"], "req-test");
+        }
+    }
+
+    #[tokio::test]
+    async fn callback_snapshot_validates_config_and_timeout_marks_the_run() {
+        let state = test_state();
+
+        assert!(
+            callback_snapshot(&state, &provider_with_config("not-json"))
+                .await
+                .is_err()
+        );
+        assert!(
+            callback_snapshot(&state, &provider_with_config("{}"))
+                .await
+                .expect("callback snapshot")
+                .is_none()
+        );
+        assert!(
+            callback_snapshot(
+                &state,
+                &provider_with_config(
+                    r#"{"admin_callback_url":"https://provider.example/callback"}"#
+                ),
+            )
+            .await
+            .is_err()
+        );
+
+        let run_id = "run-timeout";
+        state
+            .admin_invocation_runs
+            .insert(run_id.to_string(), stored_run(run_id));
+        schedule_timeout_callback(state.clone(), run_id.to_string(), 0);
+        let terminal = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                if let Some(terminal) = state
+                    .admin_invocation_runs
+                    .get_for_provider(run_id, "provider-a")
+                    .and_then(|run| run.terminal)
+                {
+                    break terminal;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("timeout terminal");
+        assert_eq!(terminal.status, AdminInvocationTerminalStatus::TimedOut);
+
+        notify_terminal_callback(&state, run_id, "unknown", "ignored");
+        let terminal_after_unknown = state
+            .admin_invocation_runs
+            .get_for_provider(run_id, "provider-a")
+            .and_then(|run| run.terminal)
+            .expect("timeout terminal remains");
+        assert_eq!(
+            terminal_after_unknown.status,
+            AdminInvocationTerminalStatus::TimedOut
         );
     }
 }
