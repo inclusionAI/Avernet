@@ -62,19 +62,19 @@ class TestFrequencyToCron:
     """Tests for _frequency_to_cron helper."""
 
     def test_daily(self):
-        assert _frequency_to_cron("daily") == "0 10,18 * * *"
+        assert _frequency_to_cron("daily") == "0 10,14,18 * * *"
 
     def test_hourly(self):
         assert _frequency_to_cron("hourly") == "0 * * * *"
 
     def test_weekly(self):
-        assert _frequency_to_cron("weekly") == "0 10,18 * * 1"
+        assert _frequency_to_cron("weekly") == "0 10,14,18 * * 1"
 
     def test_unknown_defaults_to_daily(self):
-        assert _frequency_to_cron("custom") == "0 10,18 * * *"
+        assert _frequency_to_cron("custom") == "0 10,14,18 * * *"
 
     def test_empty_defaults_to_daily(self):
-        assert _frequency_to_cron("") == "0 10,18 * * *"
+        assert _frequency_to_cron("") == "0 10,14,18 * * *"
 
 
 class TestBuildCronName:
@@ -152,6 +152,7 @@ class TestBuildCronCommand:
             "|user:user_dima_bot_1|agent:bot_personal_dima_1"
             "|kind:autoInitiate"
             "|message:开始编码"
+            "|maxTaskNum:3"
         )
 
     def test_empty_message_not_included(self):
@@ -202,6 +203,7 @@ class TestBuildCronCommand:
             "|workflow:devflow"
             "|message:开始编码"
             "|append_message:注意代码质量"
+            "|maxTaskNum:3"
         )
 
 
@@ -338,7 +340,7 @@ class TestCronAutoSetupService:
         assert call_kwargs["path"] == "/api/cron"
         body = call_kwargs["body"]
         assert body["name"] == "7*24小时自动生码_TestBot_bot1"
-        assert body["schedule"] == "0 10,18 * * *"
+        assert body["schedule"] == "0 10,14,18 * * *"
         # 新格式命令：查询dima空间{space_id}的待开发需求，开启7*24小时自动研发|space:{space_id}|user:{user_id}|agent:{agent_id}
         assert body["command"].startswith("查询dima空间")
         assert f"space:{dima_space_id}" in body["command"]
