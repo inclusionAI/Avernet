@@ -235,23 +235,38 @@ class QueueTaskMessageDispatcher:
                                 frames = json.loads(chunk_rec.content or "[]")
                             except (json.JSONDecodeError, TypeError):
                                 frames = []
+                            engine_type = None
+                            if chunk_rec.metadata:
+                                try:
+                                    meta = json.loads(chunk_rec.metadata)
+                                    if isinstance(meta, dict):
+                                        engine_type = meta.get("engine_type")
+                                except (json.JSONDecodeError, TypeError):
+                                    pass
                             for frame in frames:
                                 yield StreamChunk(
                                     type="agent",
                                     content="",
                                     metadata=frame,
+                                    engine_type=engine_type,
                                 )
                         else:
                             metadata = None
+                            engine_type = None
                             if chunk_rec.metadata:
                                 try:
                                     metadata = json.loads(chunk_rec.metadata)
+                                    if isinstance(metadata, dict):
+                                        engine_type = metadata.pop("engine_type", None)
+                                        if not metadata:
+                                            metadata = None
                                 except (json.JSONDecodeError, TypeError):
                                     pass
                             yield StreamChunk(
                                 type=chunk_rec.chunk_type,
                                 content=chunk_rec.content or "",
                                 metadata=metadata,
+                                engine_type=engine_type,
                             )
                         if chunk_rec.chunk_type in terminal_types:
                             return

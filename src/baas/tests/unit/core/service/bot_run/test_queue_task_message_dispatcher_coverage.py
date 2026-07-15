@@ -188,6 +188,149 @@ class TestDispatchInject:
             )
 
 
+class TestDispatchSendStreamEngineType:
+    """engine_type 从 chunk 表 metadata 还原到 StreamChunk 的测试。"""
+
+    @pytest.mark.asyncio
+    async def test_agent_chunk_with_engine_type(self):
+        """agent chunk 的 metadata 含 engine_type 时，还原到 StreamChunk。"""
+        d = _make_dispatcher()
+        d._cache_plugin.get.return_value = "1:agent"
+        chunk_rec = MagicMock()
+        chunk_rec.seq = 1
+        chunk_rec.chunk_type = "agent"
+        chunk_rec.content = json.dumps([{"frame": 1}])
+        chunk_rec.metadata = json.dumps({"engine_type": "dify"})
+        d._chunk_repository.get_chunks_after.return_value = [chunk_rec]
+        run = MagicMock()
+        run.status = "FAILED"
+        d._run_repository.get_by_run_id.return_value = run
+
+        chunks = []
+        async for c in d.dispatch_send_stream(
+            bot_service=MagicMock(),
+            run_id="run-1",
+            session_id="sess-1",
+            message="hello",
+            binding_info=_make_binding_info(),
+            bot_id="bot-1",
+        ):
+            chunks.append(c)
+        agent_chunks = [c for c in chunks if c.type == "agent"]
+        assert len(agent_chunks) == 1
+        assert agent_chunks[0].engine_type == "dify"
+
+    @pytest.mark.asyncio
+    async def test_agent_chunk_engine_type_invalid_metadata_json(self):
+        """agent chunk 的 metadata 非法 JSON 时，engine_type 为 None。"""
+        d = _make_dispatcher()
+        d._cache_plugin.get.return_value = "1:agent"
+        chunk_rec = MagicMock()
+        chunk_rec.seq = 1
+        chunk_rec.chunk_type = "agent"
+        chunk_rec.content = json.dumps([{"frame": 1}])
+        chunk_rec.metadata = "bad json"
+        d._chunk_repository.get_chunks_after.return_value = [chunk_rec]
+        run = MagicMock()
+        run.status = "FAILED"
+        d._run_repository.get_by_run_id.return_value = run
+
+        chunks = []
+        async for c in d.dispatch_send_stream(
+            bot_service=MagicMock(),
+            run_id="run-1",
+            session_id="sess-1",
+            message="hello",
+            binding_info=_make_binding_info(),
+            bot_id="bot-1",
+        ):
+            chunks.append(c)
+        agent_chunks = [c for c in chunks if c.type == "agent"]
+        assert len(agent_chunks) == 1
+        assert agent_chunks[0].engine_type is None
+
+    @pytest.mark.asyncio
+    async def test_non_agent_chunk_engine_type_only_metadata(self):
+        """非 agent chunk 的 metadata 仅含 engine_type 时，pop 后 metadata 为 None。"""
+        d = _make_dispatcher()
+        d._cache_plugin.get.return_value = "1:final"
+        chunk_rec = MagicMock()
+        chunk_rec.seq = 1
+        chunk_rec.chunk_type = "final"
+        chunk_rec.content = "done"
+        chunk_rec.metadata = json.dumps({"engine_type": "openclaw"})
+        d._chunk_repository.get_chunks_after.return_value = [chunk_rec]
+        d._run_repository.get_by_run_id.return_value = None
+
+        chunks = []
+        async for c in d.dispatch_send_stream(
+            bot_service=MagicMock(),
+            run_id="run-1",
+            session_id="sess-1",
+            message="hello",
+            binding_info=_make_binding_info(),
+            bot_id="bot-1",
+        ):
+            chunks.append(c)
+        assert len(chunks) == 1
+        assert chunks[0].engine_type == "openclaw"
+        assert chunks[0].metadata is None
+
+    @pytest.mark.asyncio
+    async def test_non_agent_chunk_engine_type_with_other_metadata(self):
+        """非 agent chunk 的 metadata 同时含 engine_type 和其他字段时，保留剩余 metadata。"""
+        d = _make_dispatcher()
+        d._cache_plugin.get.return_value = "1:final"
+        chunk_rec = MagicMock()
+        chunk_rec.seq = 1
+        chunk_rec.chunk_type = "final"
+        chunk_rec.content = "done"
+        chunk_rec.metadata = json.dumps({"engine_type": "openclaw", "extra": "val"})
+        d._chunk_repository.get_chunks_after.return_value = [chunk_rec]
+        d._run_repository.get_by_run_id.return_value = None
+
+        chunks = []
+        async for c in d.dispatch_send_stream(
+            bot_service=MagicMock(),
+            run_id="run-1",
+            session_id="sess-1",
+            message="hello",
+            binding_info=_make_binding_info(),
+            bot_id="bot-1",
+        ):
+            chunks.append(c)
+        assert len(chunks) == 1
+        assert chunks[0].engine_type == "openclaw"
+        assert chunks[0].metadata == {"extra": "val"}
+
+    @pytest.mark.asyncio
+    async def test_non_agent_chunk_engine_type_invalid_metadata_json(self):
+        """非 agent chunk 的 metadata 非法 JSON 时，engine_type 为 None。"""
+        d = _make_dispatcher()
+        d._cache_plugin.get.return_value = "1:final"
+        chunk_rec = MagicMock()
+        chunk_rec.seq = 1
+        chunk_rec.chunk_type = "final"
+        chunk_rec.content = "done"
+        chunk_rec.metadata = "bad json"
+        d._chunk_repository.get_chunks_after.return_value = [chunk_rec]
+        d._run_repository.get_by_run_id.return_value = None
+
+        chunks = []
+        async for c in d.dispatch_send_stream(
+            bot_service=MagicMock(),
+            run_id="run-1",
+            session_id="sess-1",
+            message="hello",
+            binding_info=_make_binding_info(),
+            bot_id="bot-1",
+        ):
+            chunks.append(c)
+        assert len(chunks) == 1
+        assert chunks[0].engine_type is None
+        assert chunks[0].metadata is None
+
+
 class TestDispatchSendStream:
     @pytest.mark.asyncio
     async def test_stream_basic_with_final(self):
