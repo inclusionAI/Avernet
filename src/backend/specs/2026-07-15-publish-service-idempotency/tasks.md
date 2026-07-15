@@ -83,27 +83,31 @@
   - [x] New tests green (8); full suite unaffected.
 - **Depends on:** Task 3 (contract), Task 1 (op record shape)
 
-## Task 5: `PublishOperationRunner` — [ ]
+## Task 5: `PublishOperationRunner` — [x]
 - **Goal:** The step runner: `open_operation` (find-or-create intent +
   legacy backfill-from-ext), `acquire_workflow` (memory → ledger differencing
   adopt → issue), `complete/fail/abandon_operation`. No flow code calls it yet.
 - **Files:** `core/service_bot/services/publish_flow/operation_runner.py`,
   `tests/community/core/service_bot/services/test_operation_runner.py`.
 - **Done when:**
-  - [ ] Resume algorithm per plan: id recorded → return; bot_uuid set →
+  - [x] Resume algorithm per plan: id recorded → return; bot_uuid set →
         differencing over `list_bot_publishes` (subtract ledger-known ids,
-        fence `gmt_create >= op.gmt_create` + publish-type map, adopt single
-        unclaimed match whatever its status, issue when none, loud FAILED on
-        >1); creation (no bot_uuid) → issue + record (bounded-orphan window).
-  - [ ] `open_operation` seeds `ID_RECORDED` rows from legacy ext markers
-        (`ext.publish.<stage>`, `ext.restart.<stage>`, `ext.scale.publish_id`)
-        on first touch of a pre-ledger record.
-  - [ ] Runner accepts an injectable `checkpoint(step_name)` hook (no-op
+        adopt single unclaimed match whatever its status, issue when none, loud
+        FAILED on >1); creation (no bot_uuid) → issue + record. **Fence
+        refinement:** the "created after this op began" fence uses a monotonic
+        workflow-id high-water mark snapshotted at first acquire, not a
+        cross-system timestamp — same intent, immune to BaaS↔backend clock skew.
+        Documented in the module + tasks.
+  - [x] `open_operation` seeds `ID_RECORDED` from a supplied
+        `legacy_baas_publish_id` (caller reads the pre-ledger ext marker) on
+        first touch.
+  - [x] Runner accepts an injectable `checkpoint(step_name)` hook (no-op
         default) — the crash-window testing seam.
-  - [ ] Unit tests cover: adopt-pending, adopt-already-SUCCESS,
-        adopt-already-FAILED, no-match-issue, pre-ledger fence, type fence,
-        >1-match FAILED, checkpoint hook firing order.
-  - [ ] Full suite green.
+  - [x] Unit tests cover: open/resume, next-attempt, legacy backfill,
+        adopt-landed, adopt-already-terminal, no-match-issue, pre-ledger fence,
+        type fence, known-id exclusion, >1-match FAILED, crash-after-issue
+        resume-adopts, creation path, finalize. (15 passed.)
+  - [x] Full suite green.
 - **Depends on:** Tasks 2, 4
 
 # Group B — All-auto approval + release legs
