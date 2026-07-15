@@ -41,6 +41,7 @@ from secbaas.community.core.repository.bot_run import BotRunRecord, BotRunReposi
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot_service import BotServicePlugin, LogRelationPayload
 
+from ..config import SystemConfigKey
 from ._bot_run_utils import (
     binding_data_to_info,
     build_chat_metadata,
@@ -553,7 +554,7 @@ class BotRunner:
     ) -> MessageDispatcher:
         """根据 system_config 选择 dispatcher。
 
-        查找顺序：``bot_run.dispatcher_route.{bot_id}:{method}`` → ``{bot_id}`` → ``*``。
+        查找顺序：``bot_run.dispatcher_route.{bot_id}:{method}`` → ``{bot_id}`` → ``default``。
         值为 dispatcher 类名（如 ``"QueueTaskMessageDispatcher"``），未配置默认走 TaskMessageDispatcher。
         """
         default_name = "TaskMessageDispatcher"
@@ -561,9 +562,9 @@ class BotRunner:
         if self._system_config_service is not None:
             keys = []
             if method:
-                keys.append(f"bot_run.dispatcher_route.{bot_id}:{method}")
-            keys.append(f"bot_run.dispatcher_route.{bot_id}")
-            keys.append("bot_run.dispatcher_route.default")
+                keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.{bot_id}:{method}")
+            keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.{bot_id}")
+            keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.default")
             for key in keys:
                 try:
                     config = self._system_config_service.get_config(key)

@@ -296,15 +296,27 @@ class TestCreateConfig:
         # Router passes env=None; service auto-detects
         assert call_arg.name == "Full Config"
 
-    def test_create_config_validates_conf_key_format(self, client):
-        """Invalid conf_key format returns 422."""
+    def test_create_config_accepts_special_chars(self, client):
+        """conf_key without format restriction accepts special characters."""
+        cfg = make_config_response(conf_key="invalid@key")
         payload = {
             "conf_key": "invalid@key",
             "name": "Bad Key",
             "operator": "admin",
         }
-        response = client.post("/api/v1/system-configs", json=payload)
-        assert response.status_code == 422
+        mock_svc = MagicMock()
+        mock_svc.create_config.return_value = cfg
+
+        _set_mock(client, mock_svc)
+        with patch(
+            "secbaas.community.core.service.config_manage._system_config_service.get_current_env",
+            return_value="dev",
+        ):
+            response = client.post("/api/v1/system-configs", json=payload)
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["data"]["conf_key"] == "invalid@key"
 
     def test_create_config_missing_required_fields(self, client):
         """Missing required fields returns 422."""

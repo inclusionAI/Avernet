@@ -45,13 +45,6 @@ class TestSystemConfigCreate:
             data = SystemConfigCreate(conf_key=key, name="test")
             assert data.conf_key == key
 
-    def test_conf_key_pattern_invalid(self):
-        """WHEN conf_key does not match pattern, THEN ValidationError."""
-        keys = ["leading.dot.", ".leading", "spaces in key", "", "a..b"]
-        for key in keys:
-            with pytest.raises(ValidationError, match="conf_key"):
-                SystemConfigCreate(conf_key=key, name="test")
-
     def test_conf_key_max_length(self):
         """WHEN conf_key exceeds 256 chars, THEN ValidationError."""
         with pytest.raises(ValidationError):
