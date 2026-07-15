@@ -15,6 +15,9 @@ from agentclaw.community.core.service_bot.services.bot_build_service import (
     BotBuildService,
     BotBuildServiceError,
 )
+from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
+    DeliveryArtifact,
+)
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.core.devices.services.baas_template_resolver import (
     BaasTemplateResolution,
@@ -67,7 +70,7 @@ def test_release_routes_teclaw_to_create_teclaw_bot():
     svc, baas = _svc("teclaw")
     svc.release(
         _BOT, user_id="u1", migration_path="", publish_stage=PublishStage.VERIFY,
-        config_artifact=_ARTIFACT,
+        delivery=DeliveryArtifact(_ARTIFACT),
     )
     baas.create_teclaw_bot.assert_called_once()
     ck = baas.create_teclaw_bot.call_args
@@ -89,7 +92,7 @@ def test_release_teclaw_continues_when_agent_pass_rule_update_fails():
 
     result = svc.release(
         _BOT, user_id="u1", migration_path="", publish_stage=PublishStage.VERIFY,
-        config_artifact=_ARTIFACT,
+        delivery=DeliveryArtifact(_ARTIFACT),
     )
 
     assert result == {"bot_uuid": "BOT-t", "publish_id": 5}
@@ -161,7 +164,7 @@ def test_upgrade_routes_teclaw_to_update_teclaw_bot():
     svc, baas = _svc("teclaw")
     svc.upgrade(
         "BOT-t", _BOT, user_id="u1", migration_path="",
-        publish_stage=PublishStage.ONLINE, config_artifact=_ARTIFACT,
+        publish_stage=PublishStage.ONLINE, delivery=DeliveryArtifact(_ARTIFACT),
     )
     baas.update_teclaw_bot.assert_called_once()
     uk = baas.update_teclaw_bot.call_args
@@ -220,7 +223,7 @@ def test_upgrade_teclaw_keeps_token_out_of_update_payload_when_query_fails():
 
     result = svc.upgrade(
         "BOT-t", _BOT, user_id="u1", migration_path="",
-        publish_stage=PublishStage.ONLINE, config_artifact=_ARTIFACT,
+        publish_stage=PublishStage.ONLINE, delivery=DeliveryArtifact(_ARTIFACT),
     )
 
     assert result == {"bot_uuid": "BOT-t", "publish_id": 6}
@@ -359,7 +362,7 @@ def test_release_device_count_does_not_apply_to_teclaw_path():
         migration_path="",
         device_count=9,
         publish_stage=PublishStage.VERIFY,
-        config_artifact=_ARTIFACT,
+        delivery=DeliveryArtifact(_ARTIFACT),
     )
 
     assert baas.create_teclaw_bot.call_args.kwargs["device_count"] == 1
@@ -378,7 +381,7 @@ def test_upgrade_device_count_does_not_apply_to_teclaw_path():
         migration_path="",
         device_count=9,
         publish_stage=PublishStage.ONLINE,
-        config_artifact=_ARTIFACT,
+        delivery=DeliveryArtifact(_ARTIFACT),
     )
 
     assert baas.update_teclaw_bot.call_args.kwargs["device_count"] == 1

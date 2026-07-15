@@ -19,7 +19,7 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
 )
 from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
-    apply_engine_overrides,
+    DeliveryArtifact,
     restamp_stage,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
@@ -140,16 +140,44 @@ class PublishExtState:
             accept_stages={stage.value},
         )
 
-    @staticmethod
-    def artifact_for_stage(
-        config_artifact: dict | None,
-        stage: PublishStage,
-        overrides: dict | None,
-    ) -> dict | None:
-        """The artifact to deliver for ``stage``: stamp ``engine_ext.stage`` and
-        overlay that stage's channel ``engine_overrides``. No-ops for the ARCA
-        mount path (no ``config_artifact``)."""
-        return apply_engine_overrides(restamp_stage(config_artifact, stage), overrides)
+    # ── delivery-composition seam ────────────────────────────────────────
+    # The single boundary between a stored build artifact and what BaaS receives.
+    # Every delivery path (release, restart, rollback, eval) composes through one of
+    # these two producers rather than reading ``ext['config_artifact']`` itself, so a
+    # path cannot skip the per-stage stamp+overlay and silently ship the raw artifact
+    # (the "single-config-slot hazard" that bit restart and rollback). The two differ
+    # only in *where the stage overrides come from* — the one legitimate per-path
+    # choice, made explicit here instead of re-derived at each call site.
+    def compose_live(
+        self, publish_record: BotPublishRecord, stage: PublishStage
+    ) -> tuple[DeliveryArtifact, dict | None]:
+        """Compose the delivery artifact for ``stage`` using a LIVE re-fetch of that
+        stage's channel ``engine_overrides`` from the channel reader.
+
+        Used by the release (first/upgrade) and eval paths, which run *at promotion
+        time* and want the stage's currently-active channels. Returns the composed
+        ``DeliveryArtifact`` *and* the raw overrides applied — the release path
+        persists the latter (``store_stage_overrides``) so a future restart/rollback
+        can reproduce it, avoiding a second channel read; eval discards it. Both
+        no-op for the ARCA mount path (``config_artifact=None``, ``overrides=None``)."""
+        overrides = self.stage_overrides(publish_record, stage)
+        base = (publish_record.ext or {}).get("config_artifact")
+        return DeliveryArtifact.compose(base, stage, overrides), overrides
+
+    def compose_stored(self, ext: dict, stage: PublishStage) -> DeliveryArtifact:
+        """Compose the delivery artifact for ``stage`` from the STORED per-stage
+        overrides slot (``ext['engine_overrides_by_stage'][stage]``).
+
+        Used by the restart and rollback paths, which must *reproduce* what was
+        promoted at release time rather than re-derive it live — restarting or
+        rolling back to a non-latest stage must deliver that stage's own channels,
+        never the currently-live ones. These paths only read the slot (they never
+        persist), so no overrides are handed back. ``or {}`` (not a get-default):
+        the slot may hold JSON ``null`` in a raw ext blob. No stored overrides
+        (pre-feature record) or no ``config_artifact`` (ARCA) → the stamp+overlay
+        no-ops, preserving the base."""
+        overrides = (ext.get("engine_overrides_by_stage") or {}).get(stage.value)
+        return DeliveryArtifact.compose(ext.get("config_artifact"), stage, overrides)
 
     @staticmethod
     def store_stage_overrides(

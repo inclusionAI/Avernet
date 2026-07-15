@@ -153,12 +153,10 @@ class ReleaseStageRunner:
         publish_id = publish_record.id
         owner_id = self._ext_state.owner_id(publish_record)
 
-        overrides = self._ext_state.stage_overrides(publish_record, spec.stage)
-        config_artifact = PublishExtState.artifact_for_stage(
-            (publish_record.ext or {}).get("config_artifact"),
-            spec.stage,
-            overrides,
-        )
+        # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
+        # ext['config_artifact'] is never handed to BaaS. ``overrides`` is the applied
+        # overlay, persisted below so a future restart/rollback can reproduce it.
+        delivery, overrides = self._ext_state.compose_live(publish_record, spec.stage)
         release_kwargs = dict(
             bot=bot,
             user_id=owner_id,
@@ -169,7 +167,7 @@ class ReleaseStageRunner:
             # downstream (release_async / build service) branches on the container
             # provider to interpret config_artifact. Push that decision behind the
             # provider seam in a follow-up; tracked separately.
-            config_artifact=config_artifact,
+            delivery=delivery,
         )
         if spec.first_release_passes_version:
             release_kwargs["version"] = f"{publish_record.version}"
@@ -246,12 +244,10 @@ class ReleaseStageRunner:
         version = f"{publish_record.version}"
         owner_id = self._ext_state.owner_id(publish_record)
 
-        overrides = self._ext_state.stage_overrides(publish_record, spec.stage)
-        config_artifact = PublishExtState.artifact_for_stage(
-            (publish_record.ext or {}).get("config_artifact"),
-            spec.stage,
-            overrides,
-        )
+        # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
+        # ext['config_artifact'] is never handed to BaaS. ``overrides`` is the applied
+        # overlay, persisted below via the provider's stage-promotion write.
+        delivery, overrides = self._ext_state.compose_live(publish_record, spec.stage)
         upgrade_result = await self._build_service.upgrade_async(
             bot_uuid=bot_uuid,
             bot=bot,
@@ -260,7 +256,7 @@ class ReleaseStageRunner:
             migration_path=migration_path,
             publish_stage=spec.stage,
             version=version,
-            config_artifact=config_artifact,
+            delivery=delivery,
         )
 
         if (

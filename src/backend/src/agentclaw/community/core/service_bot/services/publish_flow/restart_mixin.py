@@ -2,24 +2,16 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any, Dict
 
-from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
     PublishStatus,
-)
-from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
-from agentclaw.community.core.service_bot.services.bot_publish_service import (
-    PublishNotFoundError,
-    PublishStatusInvalidError,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
-from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -233,19 +225,12 @@ class RestartMixin:
             )
             version = f"{publish_record.version}"
 
-            # Compose the delivery artifact for THIS stage: stamp engine_ext.stage
-            # to the restarted stage and overlay that stage's stored channel
-            # engine_overrides (reproducing what was promoted, NOT a live re-fetch).
-            # Reading the per-stage slot fixes the single-config-slot hazard — a
-            # restart of a non-latest stage no longer delivers another stage's
-            # channels. No stored overrides (pre-feature record) or no
-            # config_artifact (ARCA) → no-ops, preserving prior behavior.
-            ext = publish_record.ext or {}
-            # `or {}` (not a get-default): the key may hold JSON null in a raw ext blob.
-            stored_overrides = (ext.get("engine_overrides_by_stage") or {}).get(stage.value)
-            config_artifact = self._artifact_for_stage(
-                ext.get("config_artifact"), stage, stored_overrides
-            )
+            # Compose the delivery artifact for THIS stage through the single seam
+            # (STORED overrides slot: reproduce what was promoted, NOT a live
+            # re-fetch). The seam reproduces the per-stage channels + stage stamp so a
+            # restart of a non-latest stage never delivers another stage's channels —
+            # the single-config-slot hazard is closed at the boundary.
+            delivery = self._ext_state.compose_stored(publish_record.ext or {}, stage)
             restart_result = await self._build_service.upgrade_async(
                 bot_uuid=bot_uuid,
                 bot=bot,
@@ -254,7 +239,7 @@ class RestartMixin:
                 migration_path=migration_path,
                 publish_stage=stage,
                 version=version,
-                config_artifact=config_artifact,
+                delivery=delivery,
             )
 
             if restart_result.get("success") is False and restart_result.get("error_code") == "BOT_NOT_FOUND":
@@ -270,9 +255,9 @@ class RestartMixin:
                     device_count=1,
                     publish_stage=stage,
                     version=version,
-                    # teclaw: the fallback must carry the frozen artifact too,
+                    # teclaw: the fallback must carry the same composed artifact,
                     # else create_teclaw_bot would receive an empty config.
-                    config_artifact=config_artifact,
+                    delivery=delivery,
                 )
 
             restart_publish_id = restart_result.get("publish_id")

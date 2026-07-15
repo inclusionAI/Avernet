@@ -549,7 +549,7 @@ async def test_restart_fallback_threads_config_artifact():
     except Exception:
         pass  # downstream approve/status flow not under test
 
-    assert build_service.release_async.await_args.kwargs["config_artifact"] == artifact
+    assert build_service.release_async.await_args.kwargs["delivery"].config_artifact == artifact
 
 
 # ── Task 9: restart reads stored per-stage overrides ─────────────────────────
@@ -591,7 +591,7 @@ async def test_restart_verify_delivers_stored_verify_overrides_not_online():
         stage=PublishStage.VERIFY, operator="op",
     )
 
-    delivered = build_service.upgrade_async.await_args.kwargs["config_artifact"]
+    delivered = build_service.upgrade_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_overrides"] == _VERIFY_CH
     assert delivered["engine_ext"]["stage"] == "canary"
 
@@ -618,7 +618,7 @@ async def test_restart_no_stored_overrides_delivers_restamped_base():
         stage=PublishStage.VERIFY, operator="op",
     )
 
-    delivered = build_service.upgrade_async.await_args.kwargs["config_artifact"]
+    delivered = build_service.upgrade_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_overrides"] == base_channels  # unchanged (no overlay)
     assert delivered["engine_ext"]["stage"] == "canary"    # still restamped
 
@@ -644,7 +644,7 @@ async def test_restart_tolerates_null_engine_overrides_by_stage():
         stage=PublishStage.VERIFY, operator="op",
     )
 
-    delivered = build_service.upgrade_async.await_args.kwargs["config_artifact"]
+    delivered = build_service.upgrade_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_ext"]["stage"] == "canary"
 
 
@@ -892,7 +892,7 @@ async def test_verify_first_release_stamps_canary_delivered_and_persisted():
         bot={"bot_id": "b2", "owner_id": "u1"},
     )
 
-    delivered = build_service.release_async.await_args.kwargs["config_artifact"]
+    delivered = build_service.release_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_ext"]["stage"] == "canary"
     # identity keys stable across the promotion
     assert delivered["engine_ext"]["bot_id"] == "b2"
@@ -931,7 +931,7 @@ async def test_verify_upgrade_stamps_canary_delivered_and_persisted():
         verify_binding_id=123,
     )
 
-    delivered = build_service.upgrade_async.await_args.kwargs["config_artifact"]
+    delivered = build_service.upgrade_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_ext"]["stage"] == "canary"
     persisted = svc._ext_state.update_status.call_args.kwargs["ext"]["config_artifact"]
     assert persisted["engine_ext"]["stage"] == "canary"
@@ -1016,7 +1016,7 @@ async def test_verify_first_release_overlays_and_stores_stage_channels():
     # fetched for the VERIFY stage only
     assert reader.overrides_for_stage.call_args.kwargs["accept_stages"] == {"verify"}
     # delivered artifact carries the verify channels
-    delivered = build_service.release_async.await_args.kwargs["config_artifact"]
+    delivered = build_service.release_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_overrides"] == _VERIFY_CH
     assert delivered["engine_ext"]["stage"] == "canary"
     # persisted per-stage map
@@ -1050,7 +1050,7 @@ async def test_verify_upgrade_overlays_and_stores_stage_channels():
         bot={"bot_id": "b2", "owner_id": "u1"}, bot_uuid="BOT-old", verify_binding_id=123,
     )
 
-    delivered = build_service.upgrade_async.await_args.kwargs["config_artifact"]
+    delivered = build_service.upgrade_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_overrides"] == _VERIFY_CH
     assert delivered["engine_ext"]["stage"] == "canary"
     persisted_ext = svc._ext_state.update_status.call_args.kwargs["ext"]
@@ -1112,7 +1112,7 @@ async def test_verify_first_release_arca_skips_channel_fetch_and_store():
     )
 
     reader.overrides_for_stage.assert_not_called()
-    assert build_service.release_async.await_args.kwargs["config_artifact"] is None
+    assert build_service.release_async.await_args.kwargs["delivery"].config_artifact is None
     persisted_ext = svc._ext_state.update_status.call_args.kwargs["ext"]
     assert "engine_overrides_by_stage" not in persisted_ext
 
@@ -1145,7 +1145,7 @@ async def test_online_first_release_stamps_release_delivered_and_persisted():
         bot={"bot_id": "b2", "owner_id": "u1"},
     )
 
-    delivered = build_service.release_async.await_args.kwargs["config_artifact"]
+    delivered = build_service.release_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_ext"]["stage"] == "release"
     persisted = svc._ext_state.update_status.call_args.kwargs["ext"]["config_artifact"]
     assert persisted["engine_ext"]["stage"] == "release"
@@ -1185,7 +1185,7 @@ async def test_online_upgrade_stamps_release_delivered_and_persisted():
         bot={"bot_id": "b2", "owner_id": "u1"},
     )
 
-    delivered = build_service.upgrade_async.await_args.kwargs["config_artifact"]
+    delivered = build_service.upgrade_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_ext"]["stage"] == "release"
     persisted = svc._ext_state.update_status.call_args.kwargs["ext"]["config_artifact"]
     assert persisted["engine_ext"]["stage"] == "release"
@@ -1267,7 +1267,7 @@ async def test_online_first_release_overlays_and_stores_stage_channels():
     )
 
     assert reader.overrides_for_stage.call_args.kwargs["accept_stages"] == {"online"}
-    delivered = build_service.release_async.await_args.kwargs["config_artifact"]
+    delivered = build_service.release_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_overrides"] == _ONLINE_CH
     assert delivered["engine_ext"]["stage"] == "release"
     persisted_ext = svc._ext_state.update_status.call_args.kwargs["ext"]
@@ -1305,7 +1305,7 @@ async def test_online_upgrade_overlays_and_stores_stage_channels():
         bot={"bot_id": "b2", "owner_id": "u1"},
     )
 
-    delivered = build_service.upgrade_async.await_args.kwargs["config_artifact"]
+    delivered = build_service.upgrade_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_overrides"] == _ONLINE_CH
     assert delivered["engine_ext"]["stage"] == "release"
     persisted_ext = svc._ext_state.update_status.call_args.kwargs["ext"]
@@ -1342,7 +1342,7 @@ async def test_arca_path_has_no_config_artifact_and_is_not_restamped():
         bot={"bot_id": "b2", "owner_id": "u1"},
     )
 
-    assert build_service.release_async.await_args.kwargs["config_artifact"] is None
+    assert build_service.release_async.await_args.kwargs["delivery"].config_artifact is None
     persisted = svc._ext_state.update_status.call_args.kwargs["ext"]
     assert "config_artifact" not in persisted
 
@@ -1532,8 +1532,11 @@ async def test_execute_rollback_missing_binding():
 
 
 @pytest.mark.asyncio
-async def test_execute_rollback_with_config_artifact():
-    """execute_rollback uses config_artifact (the teclaw scenario)."""
+async def test_execute_rollback_composes_stored_online_delivery():
+    """execute_rollback composes the delivery through the seam (teclaw scenario):
+    the target version's frozen artifact is restamped to the online (release) stage
+    and its STORED online channel overrides are overlaid — the raw artifact is never
+    delivered. This is the #168 behavior, folded into the shared seam."""
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -1552,13 +1555,17 @@ async def test_execute_rollback_with_config_artifact():
         source_bot_id="bot-456",
     )
 
-    # Target version has only config_artifact (no migration_path)
+    # Target version carries a frozen artifact (last stamped canary, with stale
+    # channels) + the online channels promoted at its online release; no migration_path.
     target_record = _make_publish_record(
         id=2,
         status=PublishStatus.SUCCESS.value,
         version=2,
         ext={
-            "config_artifact": "s3://bucket/artifact/v2.json",
+            "config_artifact": _enriched_artifact(
+                "canary", {"channels": {"dingding": {"accounts": [{"client_id": "stale"}]}}}
+            ),
+            "engine_overrides_by_stage": {"online": _ONLINE_CH},
             "binding": {"online": 200},
         },
     )
@@ -1583,13 +1590,79 @@ async def test_execute_rollback_with_config_artifact():
         operator="user1",
     )
 
-    # Verify upgrade_async used config_artifact
+    # The seam restamped to the online (release) stage and overlaid the stored online
+    # channels — the raw canary/stale artifact is never delivered.
     upgrade_call = build_service.upgrade_async.call_args
-    assert upgrade_call.kwargs["config_artifact"] == "s3://bucket/artifact/v2.json"
+    delivered = upgrade_call.kwargs["delivery"].config_artifact
+    assert delivered["engine_ext"]["stage"] == "release"
+    assert delivered["engine_overrides"] == _ONLINE_CH
     assert upgrade_call.kwargs["migration_path"] is None
 
     assert result.publish_id == 2
     assert result.status == PublishStatus.ONLINE_PUB
+
+
+def _rollback_svc(target_ext, *, reader=None):
+    """Wire a PublishFlowService for an execute_rollback(3 → 2) call, with the target
+    (id=2) carrying ``target_ext`` and an online binding. Returns (svc, build_service)."""
+    publish_service = Mock()
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(return_value={"publish_id": 12345})
+    build_service.generate_request_id = Mock(return_value="req")
+    bot_service = Mock()
+    kw = {"channel_overrides_reader": reader} if reader is not None else {}
+    svc = _pf(publish_service, build_service, Mock(), bot_service, _arca_router(build_service), **kw)
+
+    current = _make_publish_record(id=3, status=PublishStatus.DRAFT.value, version=3, source_bot_id="bot-1")
+    target = _make_publish_record(id=2, status=PublishStatus.SUCCESS.value, version=2, ext=target_ext)
+    publish_service.get_publish_by_id = Mock(side_effect=lambda pk: {2: target, 3: current}.get(pk))
+    binding = Mock()
+    binding.device_id = "BOT-online"
+    publish_service.get_device_binding_by_id.return_value = binding
+    bot_service.get_bot.return_value = {"bot_id": "bot-1", "entity_id": "e", "entity_type": "staff"}
+    return svc, build_service
+
+
+@pytest.mark.asyncio
+async def test_execute_rollback_reads_stored_slot_not_live_channels():
+    # Regression (#168): rollback must reproduce the target's promoted channels from
+    # the STORED slot — never re-fetch live (live holds the post-change card the user
+    # is rolling away from). The live reader must not be consulted.
+    reader = Mock()
+    reader.overrides_for_stage = Mock()
+    svc, build_service = _rollback_svc(
+        {
+            "config_artifact": _enriched_artifact("release"),
+            "engine_overrides_by_stage": {"online": _ONLINE_CH},
+            "binding": {"online": 200},
+        },
+        reader=reader,
+    )
+
+    await svc.execute_rollback(current_publish_id=3, target_publish_id=2, operator="u1")
+
+    delivered = build_service.upgrade_async.call_args.kwargs["delivery"].config_artifact
+    assert delivered["engine_overrides"] == _ONLINE_CH  # stored slot delivered
+    reader.overrides_for_stage.assert_not_called()  # never live
+
+
+@pytest.mark.asyncio
+async def test_execute_rollback_pre_feature_target_delivers_base_restamped_only():
+    # Pre-feature target (no engine_overrides_by_stage): overlay no-ops, base channels
+    # delivered unchanged; engine_ext.stage still restamped to release. Backward-compat.
+    base_ch = {"channels": {"dingding": {"accounts": [{"client_id": "base"}]}}}
+    svc, build_service = _rollback_svc(
+        {
+            "config_artifact": _enriched_artifact("release", base_ch),
+            "binding": {"online": 200},
+        }
+    )
+
+    await svc.execute_rollback(current_publish_id=3, target_publish_id=2, operator="u1")
+
+    delivered = build_service.upgrade_async.call_args.kwargs["delivery"].config_artifact
+    assert delivered["engine_overrides"] == base_ch  # unchanged (no overlay)
+    assert delivered["engine_ext"]["stage"] == "release"  # still restamped
 
 
 # teclaw build-time file promotion moved to TeclawProviderBehavior; its test now
@@ -1722,7 +1795,6 @@ def test_scale_bot_teclaw_returns_supported_message_without_baas_call():
 
 @pytest.mark.unit
 def test_scale_bot_invalid_status():
-    from agentclaw.community.core.service_bot.services.bot_publish_service import PublishStatusInvalidError
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -2374,7 +2446,7 @@ def _svc_with_record(
 
 
 _CREATE_TASK = (
-    "agentclaw.community.core.service_bot.services.publish_flow_service.asyncio.create_task"
+    "agentclaw.community.core.service_bot.services.publish_flow.restart_mixin.asyncio.create_task"
 )
 
 

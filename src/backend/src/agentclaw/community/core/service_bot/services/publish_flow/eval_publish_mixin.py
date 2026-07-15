@@ -1,25 +1,18 @@
 """Eval-environment publish/teardown + status query, mixed in."""
 from __future__ import annotations
 
-import asyncio
-import time
 from typing import Any, Dict
 
-from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.service_bot.repository.models import (
-    BotPublishRecord,
     PublishStatus,
 )
-from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
-    PublishStatusInvalidError,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
-from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -70,12 +63,10 @@ class EvalPublishMixin:
         if not bot:
             raise PublishFlowServiceError(f"Bot not found: {publish_record.source_bot_id}")
 
-        eval_overrides = self._stage_overrides(publish_record, publish_stage)
-        eval_artifact = self._artifact_for_stage(
-            config_artifact,
-            publish_stage,
-            eval_overrides,
-        )
+        # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
+        # config_artifact read above is only the build-artifact presence guard. Eval
+        # does not persist, so the applied overrides are discarded.
+        delivery, _ = self._ext_state.compose_live(publish_record, publish_stage)
 
         ext_info = {}
         if biz_id:
@@ -89,7 +80,7 @@ class EvalPublishMixin:
             device_count=1,
             publish_stage=publish_stage,
             version=str(publish_record.version or 1),
-            config_artifact=eval_artifact,
+            delivery=delivery,
             ext_info=ext_info,
         )
 

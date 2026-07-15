@@ -12,6 +12,7 @@ This module is the single source of truth for those key names and for the
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from agentclaw.community.core.service_bot.types import PublishStage
@@ -114,3 +115,40 @@ def apply_engine_overrides(
     applied = dict(config_artifact)
     applied["engine_overrides"] = merged
     return applied
+
+
+@dataclass(frozen=True)
+class DeliveryArtifact:
+    """The composed artifact handed to the BaaS delivery boundary for one stage.
+
+    ``config_artifact`` is the fully composed delivery payload — ``engine_ext.stage``
+    restamped to the target stage and that stage's DingTalk channel
+    ``engine_overrides`` overlaid. It is the single value the publish flow hands to
+    ``BotBuildService.release`` / ``upgrade``, and a ``DeliveryArtifact`` is only
+    obtainable via :meth:`compose` (driven by the ``PublishExtState`` seam), so flow
+    code cannot pass a raw, un-composed artifact to BaaS.
+
+    The field is required (no default) but its value is nullable: ``None`` is the
+    intentional ARCA mount-path state — that path pins ``migration_path`` and carries
+    no ``config_artifact``, and the non-teclaw BaaS branch ignores it. (Per the
+    repository's ``T | None`` rule, ``None`` here is a real contract state, not a
+    missing required value.)
+    """
+
+    config_artifact: dict[str, Any] | None
+
+    @classmethod
+    def compose(
+        cls,
+        config_artifact: dict[str, Any] | None,
+        stage: PublishStage,
+        overrides: dict[str, Any] | None,
+    ) -> "DeliveryArtifact":
+        """Compose the delivery payload for ``stage``: restamp ``engine_ext.stage``
+        and overlay ``overrides``' channel config onto ``config_artifact``.
+
+        The single combiner of :func:`restamp_stage` and :func:`apply_engine_overrides`.
+        No-ops (payload stays ``config_artifact``) when there is no artifact (ARCA) or
+        no ``overrides`` (pre-feature record); ``config_artifact=None`` in → out.
+        """
+        return cls(apply_engine_overrides(restamp_stage(config_artifact, stage), overrides))
