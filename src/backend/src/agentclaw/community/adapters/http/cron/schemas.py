@@ -45,15 +45,22 @@ class UpdateCronRequest(BaseModel):
     notify: Optional[Dict[str, Any]] = Field(None, description="通知配置")
 
 
-class CronTaskData(BaseModel):
-    """Cron 任务数据"""
-    task_id: Optional[str] = None
-    bot_id: Optional[str] = None
-    bot_name: Optional[str] = None
-    owner_id: Optional[str] = None
+class CronBotData(BaseModel):
+    """Cron 详情关联的 Bot 与运行态信息。"""
+
+    bot_id: str
+    bot_name: str
+    owner_id: str
+    bot_type: str
     runtime_stage: Optional[str] = None
     publish_id: Optional[int] = None
     publish_status: Optional[str] = None
+
+
+class CronTaskData(BaseModel):
+    """Cron 任务数据"""
+    task_id: Optional[str] = None
+    bot: Optional[CronBotData] = None
     name: Optional[str] = None
     schedule: Optional[str] = None
     command: Optional[str] = None
