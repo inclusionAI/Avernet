@@ -834,6 +834,7 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
         paas_device_id: str,
         port: int,
         path: str,
+        ws_conn_mode: str | None = None,
     ) -> WsConnectionInfo:
         """Resolve WebSocket connection information for a device.
 
@@ -857,6 +858,9 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                              (e.g., "sandbox-abc123@42" or "legacy-device")
             port: Target port on the device container's WebSocket service (1-65535)
             path: WebSocket path on device (e.g., /api/openclaw/ws)
+            ws_conn_mode: Optional connection mode override (e.g. ``"relay"`` for
+                agentclawproxy-based relay). Passed through to the platform-specific
+                service. ``None`` means no override.
 
         Returns:
             WsConnectionInfo containing ws_url, token, target, and expiration time
@@ -900,7 +904,7 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
             )
 
             # Step 4: Delegate to service polymorphic method per D-05
-            return await service.resolve_ws_conn_info(raw_id, port, path)
+            return await service.resolve_ws_conn_info(raw_id, port, path, ws_conn_mode=ws_conn_mode)
 
         except NotImplementedError as e:
             # Wrap in DeviceFacadeException with full context per D-06
