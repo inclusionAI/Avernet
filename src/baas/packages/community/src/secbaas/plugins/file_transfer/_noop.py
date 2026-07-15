@@ -26,19 +26,19 @@ class NoopFileTransferBackend(FileTransferBackend):
     def generate_upload_url(self, staging_path: str, expire_seconds: int) -> str:
         raise NotImplementedError(
             "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'oss' to enable."
+            "Set config.plugins.file_transfer to 'real' to enable."
         )
 
     def check_object_exists(self, staging_path: str) -> bool:
         raise NotImplementedError(
             "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'oss' to enable."
+            "Set config.plugins.file_transfer to 'real' to enable."
         )
 
     def generate_download_url(self, staging_path: str, expire_seconds: int) -> str:
         raise NotImplementedError(
             "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'oss' to enable."
+            "Set config.plugins.file_transfer to 'real' to enable."
         )
 
     def initiate_multipart_upload(
@@ -46,13 +46,13 @@ class NoopFileTransferBackend(FileTransferBackend):
     ) -> MultipartSession:
         raise NotImplementedError(
             "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'oss' to enable."
+            "Set config.plugins.file_transfer to 'real' to enable."
         )
 
     def list_parts(self, staging_path: str, session_id: str) -> list[PartInfo]:
         raise NotImplementedError(
             "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'oss' to enable."
+            "Set config.plugins.file_transfer to 'real' to enable."
         )
 
     def complete_multipart_upload(
@@ -60,13 +60,13 @@ class NoopFileTransferBackend(FileTransferBackend):
     ) -> None:
         raise NotImplementedError(
             "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'oss' to enable."
+            "Set config.plugins.file_transfer to 'real' to enable."
         )
 
     def abort_multipart_upload(self, staging_path: str, session_id: str) -> None:
         raise NotImplementedError(
             "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'oss' to enable."
+            "Set config.plugins.file_transfer to 'real' to enable."
         )
 
     def list_objects(
@@ -74,11 +74,31 @@ class NoopFileTransferBackend(FileTransferBackend):
     ) -> ObjectListing:
         raise NotImplementedError(
             "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'oss' to enable."
+            "Set config.plugins.file_transfer to 'real' to enable."
         )
 
     def delete_object(self, key: str) -> None:
         raise NotImplementedError(
             "File transfer is not configured. "
-            "Set config.plugins.file_transfer to 'oss' to enable."
+            "Set config.plugins.file_transfer to 'real' to enable."
+        )
+
+    def build_staging_path(
+        self,
+        tenant: str,
+        transfer_id: str,
+        filename: str,
+        subdir: str | None = None,
+    ) -> str:
+        raise NotImplementedError(
+            "File transfer is not configured. "
+            "Set config.plugins.file_transfer to 'real' to enable."
+        )
+
+    def build_staging_prefix(
+        self, tenant: str, subdir: str | None = None,
+    ) -> str:
+        raise NotImplementedError(
+            "File transfer is not configured. "
+            "Set config.plugins.file_transfer to 'real' to enable."
         )

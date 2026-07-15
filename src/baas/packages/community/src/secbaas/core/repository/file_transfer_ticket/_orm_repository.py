@@ -24,6 +24,7 @@ log = get_logger("orm-repository")
 VALID_TRANSITIONS = frozenset({
     ("CREATED", "UPLOADING"),
     ("UPLOADING", "UPLOAD_COMPLETED"),
+    ("CREATED", "UPLOAD_COMPLETED"),  # v1.5: complete_upload + poller OSS detection
     ("UPLOAD_COMPLETED", "PULLING"),
     ("UPLOAD_COMPLETED", "DONE"),  # Phase 69: retention mode shortcut (device_path IS NULL)
     ("PULLING", "DONE"),
@@ -189,29 +190,31 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
 
     @with_orm_session
     def get_by_fileservice_staging_path(
-        self, staging_path: str,
+        self, staging_path: str, tenant: str | None = None,
     ) -> TicketRecord | None:
         """Look up a ticket by its fileservice_staging_path.
 
-        Staging path is globally unique per env (constructed from transfer_id),
-        so no tenant filter is needed.
-
         Args:
             staging_path: Full OSS object key (fileservice_staging_path).
+            tenant: Optional tenant filter for authorization enforcement.
 
         Returns:
             TicketRecord if found, None otherwise.
         """
         log.info(
-            "[file-transfer:get_by_staging_path] staging_path=%s", staging_path,
+            "[file-transfer:get_by_staging_path] staging_path=%s, tenant=%s",
+            staging_path, tenant,
         )
         env = get_current_env()
+        filters = [
+            FileTransferTicketModel.fileservice_staging_path == staging_path,
+            FileTransferTicketModel.env == env,
+        ]
+        if tenant is not None:
+            filters.append(FileTransferTicketModel.tenant == tenant)
         row = (
             self._session.query(FileTransferTicketModel)
-            .filter(
-                FileTransferTicketModel.fileservice_staging_path == staging_path,
-                FileTransferTicketModel.env == env,
-            )
+            .filter(*filters)
             .first()
         )
         if row is None:

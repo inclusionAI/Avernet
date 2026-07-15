@@ -24,6 +24,7 @@ Test helper methods:
 from __future__ import annotations
 
 from secbaas.spi.file_transfer import (
+    FileTransferBackend,
     MultipartSession,
     ObjectItem,
     ObjectListing,
@@ -31,16 +32,27 @@ from secbaas.spi.file_transfer import (
 )
 
 
-class StubFileTransferBackend:
+class StubFileTransferBackend(FileTransferBackend):
     """In-memory stub implementing FileTransferBackend Protocol.
 
     Uses a dict[str, bytes] keyed by transfer_id to simulate OSS storage.
     Provides put_content/get_content helpers for test-side file simulation.
+
+    .. note::
+
+        Storage keys are bare transfer IDs (extracted from staging paths),
+        **not** full OSS-style paths.  ``list_objects`` filters against these
+        bare keys, which means prefix queries using tenant-scoped staging-path
+        prefixes (e.g. ``"baas-file-transfer/t1/"``) will return empty results.
+        Tests that exercise ``list_objects`` should seed storage via
+        ``put_content`` with transfer-ID URLs, or use bare transfer IDs as
+        prefixes.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, staging_root_path: str = "baas-file-transfer") -> None:
         self._storage: dict[str, bytes] = {}
         self._multipart_sessions: dict[str, dict] = {}
+        self._staging_root_path = staging_root_path
 
     # ── Protocol methods ────────────────────────────────────────────
 
@@ -280,10 +292,53 @@ class StubFileTransferBackend:
             The transfer_id portion of the path, e.g. ``abc123``.
         """
         parts = staging_path.split("/")
-        if len(parts) >= 2 and parts[0] == "file-transfers":
-            return parts[1]
+        if len(parts) >= 3 and parts[0] in ("file-transfers", "baas-file-transfer", self._staging_root_path):
+            return parts[-2]
         return staging_path  # fallback
 
+    def build_staging_path(
+        self,
+        tenant: str,
+        transfer_id: str,
+        filename: str,
+        subdir: str | None = None,
+    ) -> str:
+        """Construct full OSS object key for file transfer staging.
+
+        The Dispatcher calls this instead of hardcoding paths.
+        Pattern: baas-file-transfer/{tenant}[/{subdir}]/{transfer_id}/{filename}
+
+        Args:
+            tenant: Tenant identifier for scoping.
+            transfer_id: Transfer ticket ID for uniqueness.
+            filename: Target filename on the OSS object.
+            subdir: Optional subdirectory under the tenant scope.
+
+        Returns:
+            Complete OSS object key string.
+        """
+        root = self._staging_root_path
+        subdir_part = f"{subdir}/" if subdir else ""
+        return f"{root}/{tenant}/{subdir_part}{transfer_id}/{filename}"
+
+    def build_staging_prefix(
+        self, tenant: str, subdir: str | None = None,
+    ) -> str:
+        """Construct OSS key prefix for tenant-scoped object listing.
+
+        Used by list_staging to scope results to a single tenant.
+        The returned prefix ends with "/".
+
+        Args:
+            tenant: Tenant identifier for scoping.
+            subdir: Optional subdirectory under the tenant scope.
+
+        Returns:
+            Prefix string ending with "/".
+        """
+        root = self._staging_root_path
+        subdir_part = f"{subdir}/" if subdir else ""
+        return f"{root}/{tenant}/{subdir_part}"
     def _parse_url_transfer_id(self, url: str) -> str:
         """Extract transfer_id from a fake stub URL.
 
@@ -296,7 +351,9 @@ class StubFileTransferBackend:
         Raises:
             ValueError: If the URL does not start with a recognised stub prefix.
         """
-        for prefix in ("stub-upload://", "stub-download://"):
+        for prefix in ("stub-upload://", "stub-download://", "stub-mp-upload://"):
             if url.startswith(prefix):
-                return url[len(prefix):]
+                rest = url[len(prefix):]
+                # multipart URLs have format: {transfer_id}/{part_number}
+                return rest.split("/", 1)[0]
         raise ValueError(f"Unrecognized stub URL: {url}")

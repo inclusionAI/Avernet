@@ -170,6 +170,9 @@ class DirectoryNotEmptyError(BotServiceError):
     """Staging directory is not empty.
 
     Raised when DELETE staging is called for a prefix that still contains objects.
+
+    TODO(phase-future): Implement directory-not-empty check in delete staging
+    flow to prevent accidental bulk deletion of non-empty prefixes.
     """
 
     error_code = "DIRECTORY_NOT_EMPTY"

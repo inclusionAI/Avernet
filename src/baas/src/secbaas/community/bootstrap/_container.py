@@ -129,6 +129,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         bot_qpm_repository=repository.bot_qpm_repository,
         distributed_lock_repository=repository.distributed_lock_repository,
         cache_plugin=plugins.cache_plugin,
+        file_transfer_backend=plugins.file_transfer_backend,
         ws_relay_session_repo=repository.ws_relay_session_repository,
         ticket_repository=repository.ticket_repository,
     )

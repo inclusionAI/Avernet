@@ -85,7 +85,6 @@ from secbaas.community.core.service.sse import (
 from secbaas.community.core.service.template_manage import DefaultDeviceTemplateService
 from secbaas.community.core.service.tenant_manage import DefaultTenantManageService
 from secbaas.community.spi.sandbox import PaasSandboxPlugins
-from secbaas.community.plugins.file_transfer import AliyunOssFileTransferBackend, NoopFileTransferBackend
 
 
 def _real_bot_service_plugin(base_url: str = "", timeout: float = 10.0):
@@ -283,14 +282,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         ws_relay_session_repository=ws_relay_session_repo,
     )
 
-    file_transfer_backend = providers.Selector(
-        config.plugins.file_transfer,
-        oss=providers.Singleton(
-            AliyunOssFileTransferBackend,
-            secret_store=secret_plugin,
-        ),
-        noop=providers.Singleton(NoopFileTransferBackend),
-    )
+    file_transfer_backend = providers.Dependency()
 
     paas_facade = providers.Singleton(
         PaasServiceFacade,
@@ -401,11 +393,6 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     )
 
     # ── Service providers ─────────────────────────────────────────────────────
-
-    tenant_service = providers.Singleton(
-        DefaultTenantManageService,
-        tenant_repository=tenant_repo,
-    )
 
     device_template_service = providers.Singleton(
         DefaultDeviceTemplateService,
