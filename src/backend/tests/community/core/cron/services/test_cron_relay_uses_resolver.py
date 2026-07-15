@@ -1747,7 +1747,17 @@ class TestForwardRequestUsesResolver:
         transport = MagicMock()
         transport.invoke = AsyncMock(return_value={
             "success": True,
-            "data": {"id": "task-1", "name": "daily"},
+            "data": {
+                "id": "task-1",
+                "name": "daily",
+                "bot_id": "stale-bot",
+                "bot_name": "Stale Bot",
+                "owner_id": "stale-owner",
+                "bot_type": "service",
+                "runtime_stage": "online",
+                "publish_id": 999,
+                "publish_status": "success",
+            },
         })
 
         svc = _make_service(
@@ -2679,3 +2689,135 @@ class TestForwardRequestUsesResolver:
         assert exc_info.value.error_code == 400
         assert str(exc_info.value) == "body must be a dictionary"
         bot_provider.get_bot.assert_not_called()
+
+
+class TestGetCronDetailBotContext:
+    @pytest.mark.asyncio
+    async def test_personal_draft_detail_adds_nested_bot_context(self):
+        bot_provider = MagicMock()
+        bot_provider.get_bot.return_value = {
+            "bot_id": "personal-bot",
+            "owner_id": "owner-1",
+            "binding_id": 42,
+            "bot_name": "Personal Bot",
+            "bot_type": "personal",
+        }
+
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device()
+
+        resolver = MagicMock()
+        resolver.resolve_for_bot.return_value = _make_ctx(
+            binding_id=42,
+            bot_id="personal-bot",
+            user_id="owner-1",
+        )
+
+        transport = MagicMock()
+        transport.invoke = AsyncMock(return_value={
+            "success": True,
+            "data": {"id": "task-1", "name": "daily"},
+        })
+
+        svc = _make_service(
+            bot_provider=bot_provider,
+            device_provider=device_provider,
+            resolver=resolver,
+            transport=transport,
+        )
+
+        result = await svc.get_cron_detail(
+            bot_id="personal-bot",
+            user_id="owner-1",
+            nick_name="Owner",
+            task_id="task-1",
+        )
+
+        assert result["data"]["bot"] == {
+            "bot_id": "personal-bot",
+            "bot_name": "Personal Bot",
+            "owner_id": "owner-1",
+            "bot_type": "personal",
+        }
+        assert "runtime_stage" not in result["data"]["bot"]
+        assert {
+            "bot_id",
+            "bot_name",
+            "owner_id",
+            "bot_type",
+            "runtime_stage",
+            "publish_id",
+            "publish_status",
+        }.isdisjoint(result["data"])
+
+    @pytest.mark.asyncio
+    async def test_service_verify_detail_adds_publish_context_to_nested_bot(self):
+        bot_provider = MagicMock()
+        bot_provider.get_bot.return_value = {
+            "bot_id": "service-bot",
+            "owner_id": "owner-1",
+            "binding_id": 10,
+            "bot_name": "Service Bot",
+            "bot_type": "service",
+        }
+
+        publish_repo = MagicMock()
+        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = (
+            _make_publish_record(
+                publish_id=101,
+                status=PublishStatus.VALIDATING.value,
+                binding_key="verify",
+                binding_id=20,
+            )
+        )
+
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device()
+
+        resolver = MagicMock()
+        resolver.resolve_for_binding.return_value = _make_ctx(
+            binding_id=20,
+            bot_id="service-bot",
+            user_id="owner-1",
+        )
+
+        transport = MagicMock()
+        transport.invoke = AsyncMock(return_value={
+            "success": True,
+            "data": {"id": "task-1", "name": "daily"},
+        })
+
+        svc = _make_service(
+            bot_provider=bot_provider,
+            device_provider=device_provider,
+            resolver=resolver,
+            transport=transport,
+            publish_repo=publish_repo,
+        )
+
+        result = await svc.get_cron_detail(
+            bot_id="service-bot",
+            user_id="owner-1",
+            nick_name="Owner",
+            task_id="task-1",
+            runtime_stage="verify",
+        )
+
+        assert result["data"]["bot"] == {
+            "bot_id": "service-bot",
+            "bot_name": "Service Bot",
+            "owner_id": "owner-1",
+            "bot_type": "service",
+            "runtime_stage": "verify",
+            "publish_id": 101,
+            "publish_status": PublishStatus.VALIDATING.value,
+        }
+        assert {
+            "bot_id",
+            "bot_name",
+            "owner_id",
+            "bot_type",
+            "runtime_stage",
+            "publish_id",
+            "publish_status",
+        }.isdisjoint(result["data"])

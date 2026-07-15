@@ -148,11 +148,13 @@ def _collect_models():
 
     # ── cron ──
     from agentclaw.community.adapters.http.cron.schemas import (
+        CronBotData,
         CronTaskData,
         CronRunData,
         CronStatusData,
     )
     models.extend([
+        (CronBotData, None),
         (CronTaskData, None),
         (CronRunData, None),
         (CronStatusData, None),
