@@ -2,8 +2,9 @@
 
 use bcs_service_api::{
     BotRegistryCoreService, FriendCoreService, FriendRequestCoreService, FriendRequestDirection,
-    FusionCoreService, GroupCoreService, ProposalCoreService, RelationCoreService,
-    RoutingCoreService, ServiceError, SystemMessageDispatcherService, SystemMessageProducerService,
+    FusionCoreService, GroupCoreService, OrganizationCoreService, ProposalCoreService,
+    RelationCoreService, RoutingCoreService, ServiceError, SystemMessageDispatcherService,
+    SystemMessageProducerService,
 };
 
 pub async fn bot_registry_core_service_contract_tests<T: BotRegistryCoreService + ?Sized>(
@@ -61,6 +62,46 @@ pub async fn friend_request_core_service_contract_tests<T: FriendRequestCoreServ
 pub async fn fusion_core_service_contract_tests<T: FusionCoreService + ?Sized>(_svc: &T) {}
 
 pub async fn group_core_service_contract_tests<T: GroupCoreService + ?Sized>(_svc: &T) {}
+
+pub async fn organization_core_service_contract_tests<T: OrganizationCoreService + ?Sized>(
+    svc: &T,
+    managing_provider_id: &str,
+    organization_code: &str,
+) {
+    let created = svc
+        .create(
+            managing_provider_id,
+            organization_code,
+            "Organization Contract",
+            Some("created by the core contract"),
+        )
+        .await
+        .expect("create organization");
+    assert_eq!(created.code, organization_code);
+    assert_eq!(created.managing_provider_id, managing_provider_id);
+
+    let fetched = svc
+        .get_for_manager(managing_provider_id, organization_code)
+        .await
+        .expect("get organization");
+    assert_eq!(fetched.name, "Organization Contract");
+    assert!(svc
+        .list_for_manager(managing_provider_id, false)
+        .await
+        .expect("list organizations")
+        .iter()
+        .any(|organization| organization.code == organization_code));
+    assert!(matches!(
+        svc.create(managing_provider_id, organization_code, "Duplicate", None)
+            .await,
+        Err(ServiceError::Conflict(_))
+    ));
+    assert!(matches!(
+        svc.get_for_manager("contract-other-manager", organization_code)
+            .await,
+        Err(ServiceError::Forbidden(_))
+    ));
+}
 
 pub async fn proposal_core_service_contract_tests<T: ProposalCoreService + ?Sized>(_svc: &T) {}
 

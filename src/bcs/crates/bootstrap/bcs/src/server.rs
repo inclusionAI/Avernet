@@ -1084,7 +1084,6 @@ impl Default for BcsServerState {
             .provider_core(provider_core)
             .provider_bot_core(provider_bot_core)
             .provider_management(provider_management)
-            .organization(organization_core)
             .organization_management(organization_management)
             .provider_bot_events(provider_bot_events)
             .group_management(group_management.clone())
@@ -2221,7 +2220,6 @@ impl BcsServer {
             .provider_core(provider_core)
             .provider_bot_core(provider_bot_core)
             .provider_management(provider_management)
-            .organization(organization_core)
             .organization_management(organization_management)
             .provider_bot_events(provider_bot_events)
             .group_management(maybe_wrap_group_management(&config, use_cases.group_management))
@@ -2760,7 +2758,6 @@ impl BcsServer {
             .provider_core(provider_core)
             .provider_bot_core(provider_bot_core)
             .provider_management(provider_management)
-            .organization(organization_core)
             .organization_management(organization_management)
             .provider_bot_events(provider_bot_events)
             .group_management(maybe_wrap_group_management(&config, use_cases.group_management))
@@ -3726,9 +3723,12 @@ mod tests {
         let _connect_response = bot_rx.recv().await.unwrap();
 
         let mut http_state = crate::http_adapter::build_http_app_state(server.state.clone()).await;
-        http_state.services.organization = Arc::new(AdminRunTestOrganization {
-            provider_id: provider.provider_id.clone(),
-        });
+        http_state.services.organization_management = Arc::new(OrganizationManagement::new(
+            http_state.services.provider_core.clone(),
+            Arc::new(AdminRunTestOrganization {
+                provider_id: provider.provider_id.clone(),
+            }),
+        ));
         http_state.services.a2a_chat_runs = Arc::new(AdminRunTestA2aRuns);
         let app = bcs_http::router::build_router(http_state);
 

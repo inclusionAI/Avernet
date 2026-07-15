@@ -354,7 +354,11 @@ impl OrganizationRepoPort for DbOrganizationStore {
         }
         let rows = self.db.query(DbStatement::with_params(sql, params)).await
             .map_err(|error| service_db_error("list_discovery_bots", error))?;
-        Ok(Some(rows.into_iter().filter_map(row_to_discovery_bot).collect()))
+        Ok(Some(
+            rows.into_iter()
+                .map(row_to_discovery_bot)
+                .collect::<ServiceResult<Vec<_>>>()?,
+        ))
     }
 
     async fn list_members_page(
@@ -447,29 +451,29 @@ fn row_to_member(row: DbRow) -> ServiceResult<OrganizationMember> {
     })
 }
 
-fn row_to_discovery_bot(row: DbRow) -> Option<OrganizationDiscoveryBot> {
-    let bot_uuid = optional_string(&row, "bot_uuid").ok().flatten()?;
-    let mut capabilities = optional_string(&row, "bot_info")
-        .ok()
-        .flatten()
-        .and_then(|bot_info| serde_json::from_str::<BotCapabilities>(&bot_info).ok())
-        .unwrap_or_default();
-    capabilities.name = optional_string(&row, "bot_name").ok().flatten();
-    if let Some(visibility) = optional_string(&row, "visibility").ok().flatten() {
+fn row_to_discovery_bot(row: DbRow) -> ServiceResult<OrganizationDiscoveryBot> {
+    let bot_uuid = required_string(&row, "bot_uuid")?;
+    let mut capabilities = match optional_string(&row, "bot_info")? {
+        Some(bot_info) => serde_json::from_str::<BotCapabilities>(&bot_info).map_err(|error| {
+            ServiceError::InternalError(format!(
+                "organization db bot_info: invalid capabilities JSON: {error}"
+            ))
+        })?,
+        None => BotCapabilities::default(),
+    };
+    capabilities.name = optional_string(&row, "bot_name")?;
+    if let Some(visibility) = optional_string(&row, "visibility")? {
         capabilities.visibility = visibility;
     }
-    capabilities.agent_code = optional_string(&row, "agent_code")
-        .ok()
-        .flatten()
-        .or(capabilities.agent_code);
+    capabilities.agent_code = optional_string(&row, "agent_code")?.or(capabilities.agent_code);
     capabilities.agent_token = None;
-    let actor_kind = match optional_string(&row, "actor_kind").ok().flatten().as_deref() {
+    let actor_kind = match optional_string(&row, "actor_kind")?.as_deref() {
         Some("human") => ActorKind::Human,
         _ => ActorKind::Bot,
     };
-    Some(OrganizationDiscoveryBot {
+    Ok(OrganizationDiscoveryBot {
         bot_uuid,
-        role: optional_string(&row, "role").ok().flatten(),
+        role: optional_string(&row, "role")?,
         capabilities,
         actor_kind,
     })
@@ -627,6 +631,18 @@ mod tests {
         DbRow::new(BTreeMap::from([("total".to_string(), DbValue::from(total))]))
     }
 
+    fn discovery_row(bot_info: DbValue) -> DbRow {
+        DbRow::new(BTreeMap::from([
+            ("bot_uuid".to_string(), DbValue::from("bot-a")),
+            ("role".to_string(), DbValue::from("planner")),
+            ("bot_name".to_string(), DbValue::from("Bot A")),
+            ("bot_info".to_string(), bot_info),
+            ("visibility".to_string(), DbValue::from("protected")),
+            ("actor_kind".to_string(), DbValue::from("bot")),
+            ("agent_code".to_string(), DbValue::Null),
+        ]))
+    }
+
     fn create_record() -> CreateOrganizationRecord {
         CreateOrganizationRecord {
             env: "contract".to_string(),
@@ -697,6 +713,46 @@ mod tests {
             Err(ServiceError::InternalError(message))
                 if message.contains("organization db set_member_disabled")
                     && message.contains("write unavailable")
+        ));
+    }
+
+    #[tokio::test]
+    async fn discovery_bot_rejects_malformed_capabilities_json() {
+        let db = Arc::new(RecordingDbPlugin::with_rows(vec![discovery_row(
+            DbValue::from("{not-json"),
+        )]));
+        let result = DbOrganizationStore::sqlite(db)
+            .list_discovery_bots("contract", "promo-2026", None)
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(ServiceError::InternalError(message))
+                if message.contains("organization db bot_info")
+                    && message.contains("invalid capabilities JSON")
+        ));
+    }
+
+    #[tokio::test]
+    async fn discovery_bot_propagates_column_type_errors() {
+        let row = DbRow::new(BTreeMap::from([
+            ("bot_uuid".to_string(), DbValue::from("bot-a")),
+            ("role".to_string(), DbValue::from("planner")),
+            ("bot_name".to_string(), DbValue::from(42_i64)),
+            ("bot_info".to_string(), DbValue::Null),
+            ("visibility".to_string(), DbValue::from("protected")),
+            ("actor_kind".to_string(), DbValue::from("bot")),
+            ("agent_code".to_string(), DbValue::Null),
+        ]));
+        let db = Arc::new(RecordingDbPlugin::with_rows(vec![row]));
+        let result = DbOrganizationStore::sqlite(db)
+            .list_discovery_bots("contract", "promo-2026", None)
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(ServiceError::InternalError(message))
+                if message.contains("organization db bot_name")
         ));
     }
 

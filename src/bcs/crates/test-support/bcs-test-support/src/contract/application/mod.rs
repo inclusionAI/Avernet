@@ -5,6 +5,7 @@ use bcs_service_api::{
     BotManagementService, BotOnboardingService, BotQueryService, BotRuntimeConnectionService,
     FriendService, GroupFusionService, GroupManagementService, GroupMessageHistoryService,
     GroupProposalService, GroupQueryService, HumanActorService, MessageFlowService,
+    CreateOrganizationCommand, OrganizationAuth, OrganizationManagementService, ServiceError,
     SystemMessageService, WorkbenchSessionService, WorkerProfileService,
 };
 
@@ -50,6 +51,37 @@ pub async fn group_query_service_contract_tests<T: GroupQueryService + ?Sized>(_
 pub async fn human_actor_service_contract_tests<T: HumanActorService + ?Sized>(_svc: &T) {}
 
 pub async fn message_flow_service_contract_tests<T: MessageFlowService + ?Sized>(_svc: &T) {}
+
+pub async fn organization_management_service_contract_tests<
+    T: OrganizationManagementService + ?Sized,
+>(
+    svc: &T,
+    valid_auth: OrganizationAuth,
+    invalid_auth: OrganizationAuth,
+    organization_code: &str,
+) {
+    assert!(matches!(
+        svc.list(invalid_auth, false).await,
+        Err(ServiceError::Unauthorized(_))
+    ));
+
+    let created = svc
+        .create(CreateOrganizationCommand {
+            auth: valid_auth.clone(),
+            organization_code: organization_code.to_string(),
+            name: "Application Contract".to_string(),
+            description: None,
+        })
+        .await
+        .expect("create organization through application service");
+    assert_eq!(created.code, organization_code);
+
+    let fetched = svc
+        .get(valid_auth, organization_code)
+        .await
+        .expect("get organization through application service");
+    assert_eq!(fetched.name, "Application Contract");
+}
 
 pub async fn worker_profile_service_contract_tests<T: WorkerProfileService + ?Sized>(_svc: &T) {}
 

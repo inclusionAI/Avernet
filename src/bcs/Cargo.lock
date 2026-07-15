@@ -1058,6 +1058,7 @@ dependencies = [
  "bcs-domain",
  "bcs-organization-store",
  "bcs-service-api",
+ "bcs-test-support",
  "futures",
  "tempfile",
  "tokio",

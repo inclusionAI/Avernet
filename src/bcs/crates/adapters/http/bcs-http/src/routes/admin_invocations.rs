@@ -10,7 +10,7 @@ use bcs_domain::ProviderRecord;
 use bcs_protocol::BCN_PROVIDER_ID_HEADER;
 use bcs_service_api::{
     AsyncA2aChatCommand, BotActor, CallerContext, ChatResponseMode, ChatRunQueryCommand,
-    BotTerminalState, ServiceError,
+    BotTerminalState, OrganizationAuth, ServiceError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -87,6 +87,11 @@ struct AdminRunError {
     message: String,
 }
 
+struct AuthenticatedOrganizationManager {
+    provider: ProviderRecord,
+    auth: OrganizationAuth,
+}
+
 pub async fn create_admin_run(
     State(state): State<HttpAppState>,
     Path(organization_code): Path<String>,
@@ -94,10 +99,11 @@ pub async fn create_admin_run(
     Json(request): Json<CreateAdminRunRequest>,
 ) -> Response {
     let request_id = request_id();
-    let provider = match authenticate_manager(&state, &headers, &organization_code).await {
-        Ok(provider) => provider,
+    let manager = match authenticate_manager(&state, &headers, &organization_code).await {
+        Ok(manager) => manager,
         Err(error) => return error.into_response_with_id(request_id),
     };
+    let provider = manager.provider;
     let provider_id = provider.provider_id.clone();
     let text = match validate_message(request.message) {
         Ok(text) => text,
@@ -114,8 +120,12 @@ pub async fn create_admin_run(
     }
     if let Err(error) = state
         .services
-        .organization
-        .require_effective_member(&organization_code, &request.target_bot_uuid)
+        .organization_management
+        .require_invocable_member(
+            manager.auth,
+            &organization_code,
+            &request.target_bot_uuid,
+        )
         .await
     {
         return service_error(error, request_id);
@@ -238,11 +248,11 @@ pub async fn get_admin_run(
     headers: HeaderMap,
 ) -> Response {
     let request_id = request_id();
-    let provider = match authenticate_manager(&state, &headers, &organization_code).await {
-        Ok(provider) => provider,
+    let manager = match authenticate_manager(&state, &headers, &organization_code).await {
+        Ok(manager) => manager,
         Err(error) => return error.into_response_with_id(request_id),
     };
-    let provider_id = provider.provider_id;
+    let provider_id = manager.provider.provider_id;
     let Some(run) = state
         .admin_invocation_runs
         .get_for_provider(&run_id, &provider_id)
@@ -407,7 +417,7 @@ async fn authenticate_manager(
     state: &HttpAppState,
     headers: &HeaderMap,
     organization_code: &str,
-) -> Result<ProviderRecord, AdminRunRouteError> {
+) -> Result<AuthenticatedOrganizationManager, AdminRunRouteError> {
     let token = extract_bearer_token(headers).ok_or_else(|| {
         AdminRunRouteError::new(
             StatusCode::UNAUTHORIZED,
@@ -453,12 +463,21 @@ async fn authenticate_manager(
             "provider is disabled",
         ));
     }
+    let auth = OrganizationAuth {
+        provider_id: provider.provider_id.clone(),
+        provider_admin_token: token.to_string(),
+    };
     let organization = state
         .services
-        .organization
-        .get_for_manager(&provider.provider_id, organization_code)
+        .organization_management
+        .get(auth.clone(), organization_code)
         .await
         .map_err(|error| match error {
+            ServiceError::Unauthorized(_) => AdminRunRouteError::new(
+                StatusCode::UNAUTHORIZED,
+                40101,
+                "invalid provider admin token",
+            ),
             ServiceError::InvalidOperation { .. } => {
                 AdminRunRouteError::new(StatusCode::NOT_FOUND, 40401, "organization not found")
             }
@@ -480,7 +499,7 @@ async fn authenticate_manager(
             "organization manager required",
         ));
     }
-    Ok(provider)
+    Ok(AuthenticatedOrganizationManager { provider, auth })
 }
 
 async fn callback_snapshot(

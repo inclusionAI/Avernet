@@ -143,6 +143,27 @@ impl OrganizationManagementService for OrganizationManagement {
             .await
     }
 
+    async fn require_invocable_member(
+        &self,
+        auth: OrganizationAuth,
+        organization_code: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<OrganizationMember> {
+        self.authenticate(&auth).await?;
+        let organization = self
+            .core
+            .get_for_manager(&auth.provider_id, organization_code)
+            .await?;
+        if organization.managing_provider_id != auth.provider_id {
+            return Err(bcs_service_api::ServiceError::Forbidden(
+                "organization_manager_required".to_string(),
+            ));
+        }
+        self.core
+            .require_effective_member(organization_code, bot_uuid)
+            .await
+    }
+
     async fn list_members(
         &self,
         auth: OrganizationMemberAuth,

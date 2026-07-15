@@ -134,6 +134,23 @@ impl OrganizationManagementService for RecordingOrganizationManagement {
         }))
     }
 
+    async fn require_invocable_member(
+        &self,
+        auth: OrganizationAuth,
+        organization_code: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<OrganizationMember> {
+        self.record(format!(
+            "require_invocable_member:{}:{organization_code}:{bot_uuid}",
+            auth.provider_id
+        ))
+        .await?;
+        Ok(sample_member(
+            organization_code.to_string(),
+            bot_uuid.to_string(),
+        ))
+    }
+
     async fn list_members(
         &self,
         auth: OrganizationMemberAuth,

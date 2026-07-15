@@ -13,7 +13,7 @@ use bcs_service_api::{
     FriendCoreService, FriendService, FrontendDeliveryPort,
     FusionCoreService, Group, GroupCoreService, GroupFusionService, GroupManagementService,
     GroupMessageHistoryService, GroupProposalService, GroupQueryService, HumanActorService,
-    MessageFlowService, OrganizationCoreService, OrganizationManagementService,
+    MessageFlowService, OrganizationManagementService,
     ProposalCoreService, ProviderBotCoreService, ProviderCoreService,
     ProviderBotEventService, ProviderManagementService, RelationCoreService, RoutingCoreService,
     SecretService, SessionManagementService, SystemMessageService, WorkbenchSessionService,
@@ -84,8 +84,6 @@ pub struct Services {
     pub provider_management: Arc<dyn ProviderManagementService>,
     /// Provider bot event application service.
     pub provider_bot_events: Arc<dyn ProviderBotEventService>,
-    /// Organization core service.
-    pub organization: Arc<dyn OrganizationCoreService>,
     /// Organization management application service.
     pub organization_management: Arc<dyn OrganizationManagementService>,
     /// Group query application service.
@@ -152,7 +150,6 @@ pub struct ServicesBuilder {
     provider_bot_core: Option<Arc<dyn ProviderBotCoreService>>,
     provider_management: Option<Arc<dyn ProviderManagementService>>,
     provider_bot_events: Option<Arc<dyn ProviderBotEventService>>,
-    organization: Option<Arc<dyn OrganizationCoreService>>,
     organization_management: Option<Arc<dyn OrganizationManagementService>>,
     group_query: Option<Arc<dyn GroupQueryService>>,
     group_management: Option<Arc<dyn GroupManagementService>>,
@@ -337,12 +334,6 @@ impl ServicesBuilder {
         self
     }
 
-    /// Set the organization core service.
-    pub fn organization(mut self, service: Arc<dyn OrganizationCoreService>) -> Self {
-        self.organization = Some(service);
-        self
-    }
-
     /// Set the organization management application service.
     pub fn organization_management(
         mut self,
@@ -445,7 +436,6 @@ impl ServicesBuilder {
             provider_bot_core: required(self.provider_bot_core, "provider_bot_core")?,
             provider_management: required(self.provider_management, "provider_management")?,
             provider_bot_events: required(self.provider_bot_events, "provider_bot_events")?,
-            organization: required(self.organization, "organization")?,
             organization_management: required(
                 self.organization_management,
                 "organization_management",
@@ -476,7 +466,7 @@ impl ServicesBuilder {
             NoopGroupFusionService, NoopGroupManagementService, NoopGroupMessageHistoryService,
             NoopGroupProposalService, NoopGroupQueryService, NoopHumanActorService,
             NoopCollaborationRuntimeService, NoopCollaborationTemplateService,
-            NoopMessageFlowService, NoopOrganizationCoreService, NoopOrganizationManagementService,
+            NoopMessageFlowService, NoopOrganizationManagementService,
             NoopProposalCoreService, NoopProviderBotCoreService, NoopProviderBotEventService,
             NoopProviderCoreService,
             NoopProviderManagementService, NoopRelationCoreService, NoopRoutingCoreService,
@@ -564,9 +554,6 @@ impl ServicesBuilder {
             provider_bot_events: self
                 .provider_bot_events
                 .unwrap_or_else(|| Arc::new(NoopProviderBotEventService)),
-            organization: self
-                .organization
-                .unwrap_or_else(|| Arc::new(NoopOrganizationCoreService)),
             organization_management: self
                 .organization_management
                 .unwrap_or_else(|| Arc::new(NoopOrganizationManagementService)),
