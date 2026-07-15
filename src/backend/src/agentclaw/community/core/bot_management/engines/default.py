@@ -14,13 +14,13 @@ class DefaultProvisioningStrategy:
     def engine_type(self) -> str:
         return self._engine_type
 
-    def build_extra_envs(self, ctx: BotProvisioningContext):
+    def build_extra_envs(self, ctx: BotProvisioningContext) -> dict[str, str] | None:
         return None
 
     def should_encrypt_template_token(self, ctx: BotProvisioningContext) -> bool:
         return False
 
-    def extract_runtime_token(self, ctx: BotProvisioningContext):
+    def extract_runtime_token(self, ctx: BotProvisioningContext) -> str | None:
         return None
 
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:

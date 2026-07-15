@@ -57,7 +57,10 @@ class AicodingProvisioningStrategy:
 
         repo_list: list[str] = []
         for repo_key in ("backend_repo", "frontend_repo", "lib_repo"):
-            for repo in template_config.get(repo_key, []) or []:
+            repos = template_config.get(repo_key)
+            if not isinstance(repos, list):
+                continue
+            for repo in repos:
                 if isinstance(repo, dict):
                     repo_url = repo.get("repo_url")
                     if repo_url:

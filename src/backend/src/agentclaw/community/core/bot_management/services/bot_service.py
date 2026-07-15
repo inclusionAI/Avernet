@@ -1355,6 +1355,8 @@ class BotService:
                 # restart / start-bot paths use the saved overrides (image,
                 # command, envs, resource_spec) instead of losing them.
                 bot_template_type = bot_record.get("template_type") if bot_record else None
+                # Get bot_type from bot_record before building provisioning context.
+                resolved_bot_type = bot_record.get("bot_type", "") if bot_record else ""
                 resolved_template_config = None
                 try:
                     resolved_template_config = self._template_service.get_template_config(bot_id)
@@ -1399,8 +1401,6 @@ class BotService:
                 # This creates a record in ac_entity_device_binding table
                 resolved_owner_id = owner_id or user_id
                 admins = self._query_admin_worknos(bot_id=str(bot_id), owner_id=resolved_owner_id)
-                # Get bot_type from bot_record (already fetched above)
-                resolved_bot_type = bot_record.get("bot_type", "") if bot_record else ""
                 # 路由到具体 provider 前，先把 template_uid 上下文带给 device 层。
                 # 解析失败先记下来；只有后续真正走 BaaS 时才需要 fail-fast。
                 device_template_config = self._attach_template_uid_context(

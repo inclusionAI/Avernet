@@ -42,3 +42,20 @@ def test_default_strategy_noops_for_non_coding_template():
     assert strategy.build_extra_envs(ctx) is None
     assert strategy.should_encrypt_template_token(ctx) is False
     assert strategy.extract_runtime_token(ctx) is None
+
+
+def test_aicoding_strategy_ignores_non_list_repo_fields():
+    strategy = AicodingProvisioningStrategy("aicoding")
+    ctx = BotProvisioningContext(
+        active_engine="aicoding",
+        template_type="applicationCoding",
+        template_config={
+            "backend_repo": {"repo_url": "git@bad/dict.git"},
+            "frontend_repo": "not-a-list",
+            "lib_repo": [{"repo_url": "git@good/lib.git"}],
+        },
+    )
+
+    envs = strategy.build_extra_envs(ctx)
+    assert envs is not None
+    assert envs["GIT_ADDRESSES"] == '["git@good/lib.git"]'
