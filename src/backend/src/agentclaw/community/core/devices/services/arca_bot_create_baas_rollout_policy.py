@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from agentclaw.community.core.bot_management.engines.aicoding import (
+    CODING_TEMPLATE_TYPES as AICODING_TEMPLATE_TYPES,
+)
 from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_branches import (
     SUPPORTED_ARCA_CREATE_BAAS_ROLLOUT_BRANCHES,
 )
@@ -38,7 +41,7 @@ class ArcaBotCreateBaasRolloutPolicy:
     ``device_provider``，绕过本策略。
     """
 
-    CODING_TEMPLATE_TYPES = {"personalCoding", "applicationCoding"}
+    CODING_TEMPLATE_TYPES = AICODING_TEMPLATE_TYPES
     LEGACY_ARCA_CREATE_BRANCHES = SUPPORTED_ARCA_CREATE_BAAS_ROLLOUT_BRANCHES
 
     def __init__(

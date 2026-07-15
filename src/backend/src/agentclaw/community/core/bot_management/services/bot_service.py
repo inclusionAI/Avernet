@@ -1054,8 +1054,7 @@ class BotService:
                     except Exception as e:
                         logger.warning(f"[bot_service.create_bot] Failed to get symlink_mappings: {e}")
 
-                    # AIX coding bot 场景：传入额外的环境变量
-                    # applicationCoding / personalCoding 均触发；BOT_TYPE 始终随 template_type 注入
+                    # Engine strategy 场景：按具体引擎策略传入额外环境变量。
                     extra_envs = None
                     # 路由到具体 provider 前，先把 template_uid 上下文带给 device 层。
                     # 解析失败先记下来；只有后续真正走 BaaS 时才需要 fail-fast。
@@ -1067,17 +1066,31 @@ class BotService:
                         template_type=template_type,
                         template_config=template_config,
                     )
-                    if resolved_active_engine in ("claude_code", "aicoding") and template_type in ("applicationCoding", "personalCoding"):
-                        from agentclaw.community.core.bot_management.utils import build_aix_extra_envs
+                    from agentclaw.community.core.bot_management.engines import (
+                        BotProvisioningContext,
+                        get_engine_provisioning_registry,
+                    )
 
-                        extra_envs = build_aix_extra_envs(template_config, template_type=template_type)
-                        if extra_envs:
-                            logger.info(
-                                f"[bot_service.create_bot] Setting AIX extra_envs for coding bot {bot_id}: "
-                                f"bot_type={extra_envs.get('BOT_TYPE')}, "
-                                f"devflow={extra_envs.get('AIX_DEVFLOW_INFO', '')}, "
-                                f"repos={extra_envs.get('GIT_ADDRESSES', '[]')}"
-                            )
+                    provisioning_ctx = BotProvisioningContext(
+                        bot_id=str(bot_id),
+                        owner_id=user_id,
+                        active_engine=resolved_active_engine,
+                        bot_type=resolved_bot_type,
+                        template_type=template_type,
+                        template_config=template_config,
+                    )
+                    extra_envs = (
+                        get_engine_provisioning_registry()
+                        .resolve_for_context(provisioning_ctx)
+                        .build_extra_envs(provisioning_ctx)
+                    )
+                    if extra_envs:
+                        logger.info(
+                            f"[bot_service.create_bot] Setting engine extra_envs for bot {bot_id}: "
+                            f"bot_type={extra_envs.get('BOT_TYPE')}, "
+                            f"devflow={extra_envs.get('AIX_DEVFLOW_INFO', '')}, "
+                            f"repos={extra_envs.get('GIT_ADDRESSES', '[]')}"
+                        )
 
                     device_result = service.apply_device(
                         apply_reason=f"Create bot: {resolved_bot_name or bot_id}",
@@ -1351,28 +1364,36 @@ class BotService:
                         bot_id, e,
                     )
 
-                # AIX coding bot 重启场景：传入额外的环境变量
-                # applicationCoding / personalCoding 均触发；BOT_TYPE 始终随 template_type 注入
-                # engine 口径与 create_bot（:997）对齐：claude_code + aicoding，
-                # 否则 aicoding bot 重启会丢失 extra_envs（含 RELAY_DEFAULT_MODEL）。
+                # Engine strategy 重启场景：传入额外的环境变量。
                 extra_envs = None
-                if active_engine in ("claude_code", "aicoding") and bot_template_type in ("applicationCoding", "personalCoding"):
-                    try:
-                        from agentclaw.community.core.bot_management.utils import build_aix_extra_envs
+                try:
+                    from agentclaw.community.core.bot_management.engines import (
+                        BotProvisioningContext,
+                        get_engine_provisioning_registry,
+                    )
 
-                        extra_envs = build_aix_extra_envs(
-                            resolved_template_config,
-                            template_type=bot_template_type,
+                    provisioning_ctx = BotProvisioningContext(
+                        bot_id=str(bot_id),
+                        owner_id=owner_id or user_id,
+                        active_engine=active_engine,
+                        bot_type=resolved_bot_type,
+                        template_type=bot_template_type,
+                        template_config=resolved_template_config,
+                    )
+                    extra_envs = (
+                        get_engine_provisioning_registry()
+                        .resolve_for_context(provisioning_ctx)
+                        .build_extra_envs(provisioning_ctx)
+                    )
+                    if extra_envs:
+                        logger.info(
+                            f"[bot_service._allocate_device_async] Setting engine extra_envs for restart bot {bot_id}: "
+                            f"bot_type={extra_envs.get('BOT_TYPE')}, "
+                            f"devflow={extra_envs.get('AIX_DEVFLOW_INFO', '')}, "
+                            f"repos={extra_envs.get('GIT_ADDRESSES', '[]')}"
                         )
-                        if extra_envs:
-                            logger.info(
-                                f"[bot_service._allocate_device_async] Setting AIX extra_envs for restart bot {bot_id}: "
-                                f"bot_type={extra_envs.get('BOT_TYPE')}, "
-                                f"devflow={extra_envs.get('AIX_DEVFLOW_INFO', '')}, "
-                                f"repos={extra_envs.get('GIT_ADDRESSES', '[]')}"
-                            )
-                    except Exception as e:
-                        logger.warning(f"[bot_service._allocate_device_async] Failed to build AIX extra_envs for bot {bot_id}: {e}")
+                except Exception as e:
+                    logger.warning(f"[bot_service._allocate_device_async] Failed to build engine extra_envs for bot {bot_id}: {e}")
 
                 # Call device service to allocate device
                 # This creates a record in ac_entity_device_binding table
@@ -2023,14 +2044,28 @@ class BotService:
                     )
                 logger.info(f"[bot_service.update_bot] Template updated for bot {bot_id}")
 
-                # applicationCoding bot：token 变化时把新 token 下发到运行中容器
-                # 的 codefuse.json（与 save_codefuse_token / apply_device 启动写入、
-                # reconciler 重启写入同路径），使 PUT /api/bots/{bot_id} 改 token 后
-                # 无需前端再单独调 codefuse/auth。仅当本次入参携带 token 字段且与
-                # 旧值解密后不同才触发；异步执行，失败只告警不阻断主流程。
-                if bot.get("template_type") == "applicationCoding" and isinstance(
-                    template_config, dict
-                ) and "token" in template_config:
+                # Runtime token 变化时按引擎策略刷新运行中容器。仅当本次入参
+                # 携带 token 字段且与旧值解密后不同才触发；异步执行，失败只告警
+                # 不阻断主流程。
+                from agentclaw.community.core.bot_management.engines import (
+                    BotProvisioningContext,
+                    get_engine_provisioning_registry,
+                )
+
+                token_ctx = BotProvisioningContext(
+                    bot_id=bot_id,
+                    owner_id=bot.get("owner_id") or user_id,
+                    active_engine=bot.get("active_engine"),
+                    bot_type=bot.get("bot_type"),
+                    template_type=bot.get("template_type"),
+                    template_config=template_config if isinstance(template_config, dict) else None,
+                )
+                token_strategy = get_engine_provisioning_registry().resolve_for_context(token_ctx)
+                if (
+                    isinstance(template_config, dict)
+                    and "token" in template_config
+                    and token_strategy.extract_runtime_token(token_ctx) is not None
+                ):
                     self._maybe_refresh_codefuse_token_async(
                         bot_id=bot_id,
                         user_id=user_id,
@@ -3507,27 +3542,39 @@ class BotService:
         # None，upgrade 行为与改动前完全一致（envs 退化为 AGENTCLAW_ENGINE 单值）。
         extra_envs: Optional[Dict[str, Any]] = None
         device_template_config: Optional[Dict[str, Any]] = None
-        if active_engine in ("claude_code", "aicoding") and bot_template_type in ("applicationCoding", "personalCoding"):
-            try:
-                from agentclaw.community.core.bot_management.utils import build_aix_extra_envs
+        try:
+            from agentclaw.community.core.bot_management.engines import (
+                BotProvisioningContext,
+                get_engine_provisioning_registry,
+            )
 
-                extra_envs = build_aix_extra_envs(
-                    resolved_template_config,
-                    template_type=bot_template_type,
+            provisioning_ctx = BotProvisioningContext(
+                bot_id=str(bot_id),
+                owner_id=user_id,
+                active_engine=active_engine,
+                bot_type=bot.get("bot_type", ""),
+                template_type=bot_template_type,
+                template_config=resolved_template_config,
+            )
+            extra_envs = (
+                get_engine_provisioning_registry()
+                .resolve_for_context(provisioning_ctx)
+                .build_extra_envs(provisioning_ctx)
+            )
+            if extra_envs:
+                logger.info(
+                    f"[bot_service._restart_bot_baas] Setting engine extra_envs for baas restart bot {bot_id}: "
+                    f"bot_type={extra_envs.get('BOT_TYPE')}, "
+                    f"model={extra_envs.get('RELAY_DEFAULT_MODEL', '')}, "
+                    f"runtime={extra_envs.get('RELAY_DEFAULT_RUNTIME', '')}, "
+                    f"devflow={extra_envs.get('AIX_DEVFLOW_INFO', '')}"
                 )
-                if extra_envs:
-                    logger.info(
-                        f"[bot_service._restart_bot_baas] Setting AIX extra_envs for baas restart bot {bot_id}: "
-                        f"bot_type={extra_envs.get('BOT_TYPE')}, "
-                        f"model={extra_envs.get('RELAY_DEFAULT_MODEL', '')}, "
-                        f"runtime={extra_envs.get('RELAY_DEFAULT_RUNTIME', '')}, "
-                        f"devflow={extra_envs.get('AIX_DEVFLOW_INFO', '')}"
-                    )
-            except Exception as e:
-                logger.warning(
-                    "[bot_service._restart_bot_baas] Failed to build AIX extra_envs for bot %s: %s",
-                    bot_id, e,
-                )
+        except Exception as e:
+            logger.warning(
+                "[bot_service._restart_bot_baas] Failed to build engine extra_envs for bot %s: %s",
+                bot_id, e,
+            )
+        if extra_envs:
             # 与 _allocate_device_async 对齐：附加 template_uid 上下文给 BaaS device 层。
             # 解析失败仅记 warning 不阻断（_attach_template_uid_context 内部已兜底）。
             try:
@@ -3545,6 +3592,7 @@ class BotService:
                     bot_id, e,
                 )
                 device_template_config = resolved_template_config
+
 
         import uuid as _uuid
         request_id = _uuid.uuid4().hex

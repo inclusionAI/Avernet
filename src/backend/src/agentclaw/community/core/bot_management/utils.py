@@ -132,79 +132,31 @@ def resolve_agent_code(
     return ""
 
 
-# template_type -> BOT_TYPE 环境变量映射
-_BOT_TYPE_ENV_MAP: Dict[str, str] = {
-    "personalCoding": "personal",
-    "applicationCoding": "application",
-}
-
-
+# Backward-compatible wrapper for legacy callers.  The actual coding
+# template/env rules live in ``engines/aicoding/strategy.py``.
 def build_aix_extra_envs(
     template_config: Dict[str, Any] | None,
     template_type: str | None = None,
 ) -> Dict[str, str] | None:
     """构建 AIX coding bot 的额外环境变量。
 
-    根据传入的 template_type 与 template_config 按需写入：
-    - BOT_TYPE: 由 template_type 映射而来
-      (personalCoding -> personal, applicationCoding -> application)
-    - AIX_DEVFLOW_INFO: devflow_workflow 字段值（有值才写入）
-    - GIT_ADDRESSES: backend_repo + frontend_repo + lib_repo 中所有 repo_url 的合集
-      （非空才写入，序列化为 JSON 字符串）
-
-    Args:
-        template_config: Template 配置字典，可能为空
-        template_type: 模板类型，例如 "applicationCoding"、"personalCoding"
-
-    Returns:
-        extra_envs 字典；若三者都未写入则返回 None。
-        典型场景:
-        - applicationCoding: {"BOT_TYPE": "application", "AIX_DEVFLOW_INFO": ..., "GIT_ADDRESSES": ...}
-        - personalCoding: {"BOT_TYPE": "personal"}（通常没有 devflow / repos）
+    Compatibility wrapper around EngineProvisioningStrategy.  Kept so older
+    callers/tests can continue importing ``build_aix_extra_envs`` while the
+    single source of truth for coding templates and RELAY_DEFAULT_* envs lives
+    in the aicoding provisioning strategy.
     """
-    envs: Dict[str, str] = {}
+    from agentclaw.community.core.bot_management.engines import (
+        BotProvisioningContext,
+        get_engine_provisioning_registry,
+    )
 
-    # BOT_TYPE：由 template_type 决定，与 template_config 无关
-    bot_type = _BOT_TYPE_ENV_MAP.get(template_type or "")
-    if bot_type:
-        envs["BOT_TYPE"] = bot_type
-
-    if template_config:
-        # AIX_DEVFLOW_INFO：从 devflow_workflow 中提取 path 字段（支持字符串或字典格式）
-        devflow_workflow = template_config.get("devflow_workflow", "")
-        if isinstance(devflow_workflow, dict):
-            aix_devflow_info = devflow_workflow.get("path", "")
-        elif isinstance(devflow_workflow, str):
-            aix_devflow_info = devflow_workflow
-        else:
-            aix_devflow_info = ""
-        if aix_devflow_info:
-            envs["AIX_DEVFLOW_INFO"] = aix_devflow_info
-
-        # GIT_ADDRESSES：收集所有 repo_url
-        repo_list: List[str] = []
-        for repo_key in ("backend_repo", "frontend_repo", "lib_repo"):
-            for repo in template_config.get(repo_key, []) or []:
-                repo_url = repo.get("repo_url")
-                if repo_url:
-                    repo_list.append(repo_url)
-        if repo_list:
-            envs["GIT_ADDRESSES"] = json.dumps(repo_list, ensure_ascii=False)
-
-        # RELAY_DEFAULT_MODEL / RELAY_DEFAULT_RUNTIME：仅 applicationCoding 下发 model / runtime，
-        # 作为容器内 relay 的默认配置（覆盖容器写死默认）。显式判 template_type，避免
-        # personalCoding 等被误注入；有值才写。create / restart 都经本函数，env 经 extra_envs
-        # 透传到 arca/baas 两条分支。
-        if (template_type or "") == "applicationCoding":
-            model = template_config.get("model")
-            if isinstance(model, str) and model.strip():
-                envs["RELAY_DEFAULT_MODEL"] = model.strip()
-            runtime = template_config.get("runtime")
-            if isinstance(runtime, str) and runtime.strip():
-                envs["RELAY_DEFAULT_RUNTIME"] = runtime.strip()
-
-    return envs or None
-
+    ctx = BotProvisioningContext(
+        active_engine="aicoding",
+        template_type=template_type,
+        template_config=template_config,
+    )
+    strategy = get_engine_provisioning_registry().resolve_for_context(ctx)
+    return strategy.build_extra_envs(ctx)
 
 def trigger_memory_initialization(
     bot_id: str,
