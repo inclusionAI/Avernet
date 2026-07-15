@@ -359,3 +359,59 @@ async def test_upgrade_bot_not_found_abandons_and_falls_back():
     fr = ledger.get_latest_by_kind(1, "online_first_release", "online")
     assert fr.state == PublishOperationState.COMPLETED.value
     build_service.release_async.assert_awaited_once()
+
+
+# ── retry / abandonment: ledger-driven decisions (#197 Task 10) ───────────────
+def test_is_online_release_recorded_reads_ledger():
+    ledger = _ledger()
+    baas = FakeBaas()
+    publish_service = Mock()
+    publish_service.get_publish_by_id.return_value = _record(PublishStatus.ONLINE_PUB.value)
+    svc = _flow(ledger=ledger, baas=baas, build_service=Mock(),
+                publish_service=publish_service)
+
+    # No op, no ext marker (record ext has no 'publish') → not recorded.
+    assert svc.is_online_release_recorded(1) is False
+
+    # An online op with a recorded workflow → recorded.
+    op = svc._operation_runner.open_operation(
+        publish_id=1, kind="online_first_release", stage="online"
+    )
+    ledger.record_workflow(op.id, baas_publish_id=901, bot_uuid="BOT-x")
+    assert svc.is_online_release_recorded(1) is True
+
+
+def test_is_online_release_recorded_ext_fallback_for_pre_ledger():
+    ledger = _ledger()
+    svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock(),
+                publish_service=Mock())
+    # No ledger op, but a legacy ext.publish.online marker (pre-ledger record).
+    rec = _record(PublishStatus.ONLINE_PUB.value)
+    rec.ext = {"publish": {"online": 500}}
+    svc._publish_service.get_publish_by_id = Mock(return_value=rec)
+    assert svc.is_online_release_recorded(2) is True
+
+
+def test_abandon_inflight_operations_marks_nonterminal():
+    ledger = _ledger()
+    svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock())
+
+    pending = svc._operation_runner.open_operation(
+        publish_id=1, kind="verify_first_release", stage="verify"
+    )
+    recorded = svc._operation_runner.open_operation(
+        publish_id=1, kind="online_first_release", stage="online"
+    )
+    ledger.record_workflow(recorded.id, baas_publish_id=901, bot_uuid="B")
+    done = svc._operation_runner.open_operation(
+        publish_id=1, kind="restart", stage="online"
+    )
+    ledger.record_workflow(done.id, baas_publish_id=902, bot_uuid="B")
+    ledger.complete(done.id)
+
+    svc._abandon_inflight_operations(1, reason="rebuild")
+
+    assert ledger.get_by_id(pending.id).state == PublishOperationState.ABANDONED.value
+    assert ledger.get_by_id(recorded.id).state == PublishOperationState.ABANDONED.value
+    # Already-terminal COMPLETED op is left untouched.
+    assert ledger.get_by_id(done.id).state == PublishOperationState.COMPLETED.value

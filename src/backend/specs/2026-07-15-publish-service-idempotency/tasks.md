@@ -185,7 +185,7 @@
   - [ ] Full suite green.
 - **Depends on:** Task 8
 
-## Task 10: `retry()` decisions from the ledger — [ ]
+## Task 10: `retry()` decisions from the ledger — [x]
 - **Goal:** Replace the `is_online_release_recorded` heuristic: retry reads
   the online op's ledger state (`ID_RECORDED` ⇒ BaaS-restart branch;
   `PENDING` ⇒ resume via the online-release task; stuck non-advancing ⇒

@@ -241,6 +241,7 @@ class PublishFlowService(
         # Crash-safe operation ledger + step runner (#197): every BaaS mutation
         # in the release/restart/offline/rollback/eval/approval paths goes through
         # this so a crash-resume adopts an in-doubt workflow instead of re-issuing.
+        self._publish_operation_repo = publish_operation_repo
         self._operation_runner = PublishOperationRunner(
             ledger=publish_operation_repo,
             baas_service=baas_service,
@@ -937,6 +938,14 @@ class PublishFlowService(
         else:
             # BUILDING / BUILT: re-enqueue the verify_flow task (the build sub-step
             # is skipped when already BUILT).
+            if rollback_status == PublishStatus.BUILDING:
+                # A rebuild changes the artifact, so any release op from the failed
+                # attempt is superseded — abandon it (#197 abandonment) so the fresh
+                # attempt opens new ledger ops rather than resuming/adopting a stale
+                # workflow built from the old artifact.
+                self._abandon_inflight_operations(
+                    publish_id, reason="retry rebuild — superseded"
+                )
             enqueue_verify_flow(
                 self._task_queue_service, publish_id=publish_id, operator=operator
             )
@@ -946,6 +955,21 @@ class PublishFlowService(
             action="process",
             message="Retry submitted, please check progress later",
         )
+
+    def _abandon_inflight_operations(self, publish_id: int, reason: str) -> None:
+        """Abandon every non-terminal ledger op for a publish record (#197).
+
+        Used when the record is restarted from an earlier phase (rebuild) or
+        superseded by a new version — the in-flight ops are no longer the current
+        intent, so a fresh attempt must open new ops rather than resume these."""
+        from agentclaw.community.core.service_bot.repository.models import (
+            PublishOperationState,
+        )
+
+        terminal = {s.value for s in PublishOperationState.terminal()}
+        for op in self._publish_operation_repo.list_by_publish(publish_id):
+            if op.state not in terminal:
+                self._publish_operation_repo.abandon(op.id, reason)
 
     def _get_owner_id(self, publish_record: BotPublishRecord) -> str:
         return self._ext_state.owner_id(publish_record)
@@ -987,14 +1011,23 @@ class PublishFlowService(
         return self._publish_service.get_publish_by_id(publish_id)
 
     def is_online_release_recorded(self, publish_id: int) -> bool:
-        """True once this record's online BaaS publish is recorded in ext.
+        """True once this record's online BaaS workflow has been created.
 
-        The online release runs *within* ONLINE_PUB (``process`` owns the
-        VALIDATING → ONLINE_PUB advance), so the live status alone can't tell a
-        not-yet-run release from a completed one. The presence of
-        ``ext.publish.online`` is the idempotency marker: a re-run of the
-        online_release task (crash-resume) skips a second BaaS create, and retry
-        uses it to choose BaaS-restart vs. re-running the release work."""
+        Driven by the operation ledger (#197): the latest online-stage op
+        (``online_first_release`` or ``online_upgrade``) is at ``ID_RECORDED``/
+        ``COMPLETED`` with a ``baas_publish_id`` once the BaaS workflow exists.
+        The online_release task uses this to skip a second create on crash-resume,
+        and ``retry`` uses it to choose BaaS-restart vs. re-running the release.
+
+        Falls back to the legacy ``ext.publish.online`` marker for records that
+        predate the ledger (no online op rows yet) — dropped once the transition
+        window closes."""
+        for kind in ("online_first_release", "online_upgrade"):
+            op = self._publish_operation_repo.get_latest_by_kind(
+                publish_id, kind, PublishStage.ONLINE.value
+            )
+            if op is not None and op.baas_publish_id is not None:
+                return True
         record = self.get_publish_record(publish_id)
         ext = (record.ext or {}) if record else {}
         return bool(ext.get("publish", {}).get(PublishStage.ONLINE.value))
