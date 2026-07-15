@@ -197,7 +197,6 @@ class ExpertChatInstanceService:
                     bot_uuid=bot_uuid,
                     bot_id=bot_id,
                     owner_id=owner_id,
-                    user_id=user_id,
                     migration_path=migration_path,
                     version=version,
                 )
@@ -381,7 +380,7 @@ class ExpertChatInstanceService:
         try:
             result = await self._bot_build_service.release_async(
                 bot=bot_info,
-                user_id=user_id,
+                user_id=owner_id,
                 migration_path=migration_path,
                 device_count=1,
                 publish_stage=PublishStage.ONLINE,
@@ -389,8 +388,8 @@ class ExpertChatInstanceService:
             )
         except Exception as e:
             logger.error(
-                "[ExpertChatInstance] release_async failed: bot=%s user=%s: %s",
-                bot_id, user_id, e,
+                "[ExpertChatInstance] release_async failed: bot=%s owner=%s: %s",
+                bot_id, owner_id, e,
             )
             raise ConnectionError(
                 f"Failed to create caller container: {e}",
@@ -437,7 +436,6 @@ class ExpertChatInstanceService:
         bot_uuid: str,
         bot_id: str,
         owner_id: str,
-        user_id: str,
         migration_path: Optional[str],
         version: int = 1,
     ) -> Dict[str, Any]:
@@ -462,7 +460,7 @@ class ExpertChatInstanceService:
             result = await self._bot_build_service.upgrade_async(
                 bot_uuid=bot_uuid,
                 bot=bot_info,
-                user_id=user_id,
+                user_id=owner_id,
                 migration_path=migration_path,
                 device_count=1,
                 publish_stage=PublishStage.ONLINE,
