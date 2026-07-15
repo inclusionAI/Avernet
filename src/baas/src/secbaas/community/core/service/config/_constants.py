@@ -61,3 +61,5 @@ class SystemConfigKey(StrEnum):
     Value: "true" or "false" (default: "true")
     Usage: Read per environment by appending ".{env}" suffix to the key.
     """
+
+    DISPATCHER_ROUTE = "bot_run.dispatcher_route"
