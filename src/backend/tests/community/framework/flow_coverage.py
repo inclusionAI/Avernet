@@ -66,6 +66,10 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "auth": _EXEMPT_REASON,
     "bot_public": _EXEMPT_REASON,
     "channel": _EXEMPT_REASON,
+    "caller_identity": (
+        "Agent Principal and BaaS outbound-rule calls require remote credentials; "
+        "covered by local API/core tests until a singlebox-compatible external seam exists."
+    ),
     "common_config": _EXEMPT_REASON,
     "config": _EXEMPT_REASON,
     "config_compose": _EXEMPT_REASON,

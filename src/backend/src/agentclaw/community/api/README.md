@@ -53,6 +53,8 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.access.repository       # UserInfoRecord — typed in user_service.py
   - agentclaw.community.core.bot_chat.schemas        # ConversationDetail, HealthCheckData — typed in bot_chat_service.py
+  - agentclaw.community.core.caller_identity.contracts  # Caller identity API DTOs and stable errors
+  - agentclaw.community.core.caller_identity.credential  # CallerToken — typed in caller_credential.py
   - agentclaw.community.core.channel.services.repositories  # ChannelRecord — typed in channel_service.py
   - agentclaw.community.core.economy.governance.domain.enums     # GovernanceStatus — typed in governance_service.py LifecycleServiceProtocol
   - agentclaw.community.core.economy.governance.domain.record    # GovernanceRecord — typed in governance_service.py Protocol
