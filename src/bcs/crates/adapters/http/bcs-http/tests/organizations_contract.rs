@@ -435,6 +435,42 @@ async fn patch_member_profile_rejects_empty_and_unknown_fields() {
 }
 
 #[tokio::test]
+async fn patch_member_profile_requires_admin_token_and_maps_service_errors() {
+    let app = test_app();
+    let uri = "/organizations/promo-2026/members/bot-b/profile";
+    let body = Some(json!({"name": "Updated Bot"}));
+
+    let missing_token = request(&app.app, "PATCH", uri, None, body.clone()).await;
+    assert_eq!(missing_token.status(), StatusCode::UNAUTHORIZED);
+
+    for (error, expected_status) in [
+        (
+            ServiceError::Forbidden("organization_member_disabled".to_string()),
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            ServiceError::BotNotFound("bot-b".to_string()),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            ServiceError::InternalError("database write failed".to_string()),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ),
+    ] {
+        app.recording.fail_next(error).await;
+        let response = request(
+            &app.app,
+            "PATCH",
+            uri,
+            Some("provider-token"),
+            body.clone(),
+        )
+        .await;
+        assert_eq!(response.status(), expected_status);
+    }
+}
+
+#[tokio::test]
 async fn candidate_bots_returns_requested_page_metadata() {
     let app = test_app();
     let response = request(
