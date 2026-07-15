@@ -76,6 +76,9 @@ from agentclaw.community.core.service_bot.services.publish_flow.release_stage im
     VERIFY_SPEC,
     ReleaseStageRunner,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
+    PublishOperationRunner,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     enqueue_online_release,
     enqueue_progress_poll,
@@ -89,6 +92,9 @@ from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
+    from agentclaw.community.core.service_bot.repository.publish_operation_protocol import (
+        PublishOperationRepositoryProtocol,
+    )
     from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion import (
         TeclawFilePromotion,
     )
@@ -170,6 +176,7 @@ class PublishFlowService(
         device_binding_repo: "DeviceBindingRepository",
         channel_overrides_reader: "ChannelEngineOverridesReader",
         task_queue_service: TaskQueueService,
+        publish_operation_repo: "PublishOperationRepositoryProtocol",
     ):
         """Initialize the flow processing service.
 
@@ -231,6 +238,14 @@ class PublishFlowService(
             bot_publish_service, channel_overrides_reader
         )
 
+        # Crash-safe operation ledger + step runner (#197): every BaaS mutation
+        # in the release/restart/offline/rollback/eval/approval paths goes through
+        # this so a crash-resume adopts an in-doubt workflow instead of re-issuing.
+        self._operation_runner = PublishOperationRunner(
+            ledger=publish_operation_repo,
+            baas_service=baas_service,
+        )
+
         # Stage-parameterized release runner: one first-release + one upgrade
         # implementation for both verify and online (was four near-duplicate
         # methods). The runners take their real dependencies explicitly; the
@@ -241,6 +256,7 @@ class PublishFlowService(
             baas_service=baas_service,
             provider_behaviors=self._provider_behaviors,
             ops=self,
+            operation_runner=self._operation_runner,
         )
         self._build_stage_runner = BuildStageRunner(
             ext_state=self._ext_state,

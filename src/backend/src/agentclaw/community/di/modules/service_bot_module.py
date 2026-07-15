@@ -424,6 +424,7 @@ class ServiceBotModule(Module):
         oss_storage: ObjectStoragePlugin,
         channel_overrides_reader: ChannelEngineOverridesReader,
         task_queue_service: TaskQueueService,
+        publish_operation_repo: PublishOperationRepositoryProtocol,
     ) -> PublishFlowService:
         """Construct ``PublishFlowService``.
 
@@ -447,6 +448,7 @@ class ServiceBotModule(Module):
             teclaw_file_promotion=TeclawFilePromotion(oss_storage=oss_storage),
             channel_overrides_reader=channel_overrides_reader,
             task_queue_service=task_queue_service,
+            publish_operation_repo=publish_operation_repo,
         )
 
     @singleton

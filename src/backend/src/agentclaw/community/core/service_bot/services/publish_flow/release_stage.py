@@ -33,6 +33,9 @@ from agentclaw.community.core.service_bot.services.publish_flow.provider_behavio
     ProviderBehavior,
     ProviderBehaviorRouter,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
+    PublishOperationRunner,
+)
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 
@@ -81,6 +84,10 @@ class StageSpec:
     # Historical quirk preserved: the verify first-release does NOT pass a
     # ``version`` to ``release_async`` (defaults to "1"); the online one does.
     first_release_passes_version: bool
+    # Ledger operation kinds (#197): the first-release and upgrade op kinds for
+    # this stage, used by the operation runner for crash-safe issuance.
+    first_release_kind: str
+    upgrade_kind: str
 
 
 VERIFY_SPEC = StageSpec(
@@ -91,6 +98,8 @@ VERIFY_SPEC = StageSpec(
     first_release_message="Released to the verify environment",
     upgrade_message="Upgraded and released to the verify environment",
     first_release_passes_version=False,
+    first_release_kind="verify_first_release",
+    upgrade_kind="verify_upgrade",
 )
 
 # The online release runs *within* ONLINE_PUB: the user-driven ``process`` owns the
@@ -106,6 +115,8 @@ ONLINE_SPEC = StageSpec(
     first_release_message="Publish submitted",
     upgrade_message="Upgrade publish submitted",
     first_release_passes_version=True,
+    first_release_kind="online_first_release",
+    upgrade_kind="online_upgrade",
 )
 
 
@@ -120,12 +131,14 @@ class ReleaseStageRunner:
         baas_service: BaasService,
         provider_behaviors: ProviderBehaviorRouter,
         ops: ReleaseRecordOps,
+        operation_runner: "PublishOperationRunner",
     ) -> None:
         self._ext_state = ext_state
         self._build_service = build_service
         self._baas_service = baas_service
         self._provider_behaviors = provider_behaviors
         self._ops = ops
+        self._operation_runner = operation_runner
 
     def _provider_behavior(self, bot: dict) -> ProviderBehavior:
         """The :class:`ProviderBehavior` for ``bot``'s container."""
@@ -153,39 +166,55 @@ class ReleaseStageRunner:
         # ext['config_artifact'] is never handed to BaaS. ``overrides`` is the applied
         # overlay, persisted below so a future restart/rollback can reproduce it.
         delivery, overrides = self._ext_state.compose_live(publish_record, spec.stage)
-        release_kwargs = dict(
-            bot=bot,
-            user_id=owner_id,
-            migration_path=migration_path,
-            device_count=1,
-            publish_stage=spec.stage,
-            # TODO(totalfrank): this still isn't fully provider-agnostic — the
-            # downstream (release_async / build service) branches on the container
-            # provider to interpret config_artifact. Push that decision behind the
-            # provider seam in a follow-up; tracked separately.
-            delivery=delivery,
-        )
-        if spec.first_release_passes_version:
-            release_kwargs["version"] = f"{publish_record.version}"
-        release_result = await self._build_service.release_async(**release_kwargs)
 
-        bot_uuid = release_result.get("bot_uuid")
-        baas_publish_id = release_result.get("publish_id")
+        # Crash-safe issuance (#197): open the ledger op, then acquire the workflow
+        # (issue the BaaS create at most once — a resume adopts the in-doubt bot via
+        # its returned bot_uuid rather than creating a second one).
+        op = self._operation_runner.open_operation(
+            publish_id=publish_id,
+            kind=spec.first_release_kind,
+            stage=spec.stage.value,
+            operator=operator,
+        )
+
+        async def _issue():
+            release_kwargs = dict(
+                bot=bot,
+                user_id=owner_id,
+                migration_path=migration_path,
+                device_count=1,
+                publish_stage=spec.stage,
+                # TODO(totalfrank): this still isn't fully provider-agnostic — the
+                # downstream (release_async / build service) branches on the container
+                # provider to interpret config_artifact. Push that decision behind the
+                # provider seam in a follow-up; tracked separately.
+                delivery=delivery,
+            )
+            if spec.first_release_passes_version:
+                release_kwargs["version"] = f"{publish_record.version}"
+            return await self._build_service.release_async(**release_kwargs)
+
+        op = await self._operation_runner.acquire_workflow(op, _issue)
+        bot_uuid = op.bot_uuid
+        baas_publish_id = op.baas_publish_id
         if not bot_uuid:
             raise PublishFlowServiceError("BaaS layer did not return bot_uuid")
         if not baas_publish_id:
             raise PublishFlowServiceError("BaaS layer did not return publish_id")
 
-        # Two steps invoked in sequence: (1) create the device binding, (2) record
-        # the binding/publish refs + provider promotion + status into ext. The
-        # BaaS workflow is auto-approved server-side (#197: all-auto) — no client
-        # approve step.
-        binding_id = self._ops.create_release_binding(
-            bot=bot,
-            bot_uuid=bot_uuid,
-            baas_publish_id=baas_publish_id,
-            operator=operator,
-        )
+        # Two follow-up steps: (1) create the device binding (recorded into the op's
+        # result so a re-run reuses it rather than creating a second binding), (2)
+        # record the binding/publish refs + provider promotion + status into ext (a
+        # source-status-guarded CAS — a no-op on a re-run that already advanced).
+        binding_id = (op.result or {}).get("binding_id")
+        if binding_id is None:
+            binding_id = self._ops.create_release_binding(
+                bot=bot,
+                bot_uuid=bot_uuid,
+                baas_publish_id=baas_publish_id,
+                operator=operator,
+            )
+            op = self._operation_runner.record_step_result(op, {"binding_id": binding_id})
         self._ops.record_release_ext(
             publish_id=publish_id,
             bot=bot,
@@ -196,6 +225,7 @@ class ReleaseStageRunner:
             target_status=spec.target_status,
             engine_overrides=overrides,
         )
+        self._operation_runner.complete_operation(op)
 
         logger.info(
             "[ReleaseStageRunner.first_release] %s release completed: bot_uuid=%s",

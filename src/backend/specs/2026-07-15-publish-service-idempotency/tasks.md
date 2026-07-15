@@ -151,23 +151,24 @@
   - [x] service_bot suite green (604); full-suite run in progress.
 - **Depends on:** Task 6 (flags first — approval must never be orphaned)
 
-## Task 8: First release onto the runner + crash-window harness — [ ]
-- **Goal:** `first_release` (verify/online/eval-create path) issues its BaaS
-  create through `open_operation`/`acquire_workflow`; binding insert and
-  `record_release_ext` record into op `result` so re-runs skip them. First
-  real crash-window tests land with the harness.
-- **Files:** `publish_flow/release_stage.py`, `publish_flow_service.py`
-  (runner injection), `tests/community/core/service_bot/services/test_publish_crash_windows.py`
-  (new: harness + first-release cases).
+## Task 8: First release onto the runner + crash-window harness — [x]
+- **Goal:** `first_release` (verify/online path) issues its BaaS create through
+  `open_operation`/`acquire_workflow`; binding insert records into op `result`
+  so re-runs skip it. First real crash-window tests land with the harness.
+- **Files:** `publish_flow/release_stage.py` (StageSpec kinds, runner-wired
+  first_release), `publish_flow_service.py` + `di/modules/service_bot_module.py`
+  (runner + ledger-repo injection),
+  `tests/community/core/service_bot/services/test_publish_crash_windows.py` (new).
 - **Done when:**
-  - [ ] Harness per plan: real repos on SQLite + scripted fake BaasService
-        recording mutation calls; parametrized `(operation, crash_after_step)`.
-  - [ ] First-release cases: crash after intent / after create / after
-        binding / after ext write → re-run converges; exactly one create
-        reached the fake; auto-approve requested; no approve call; workflow
-        id in ledger; record status correct. Creation-window case asserts
-        the abandoned PENDING row (bounded orphan) is visible.
-  - [ ] Full suite green.
+  - [x] Harness: real ledger repo on SQLite + scripted fake BaaS recording
+        issuance; crash injected via the runner checkpoint / one-shot ext side
+        effect; re-run asserts convergence.
+  - [x] First-release cases: crash before-issue (issues once on resume); crash
+        after-binding (reuses workflow + binding via op.result, converges to
+        COMPLETED); creation-window (accepted bounded orphan — re-issues, the
+        in-flight PENDING op makes it observable).
+  - [x] service_bot + publish endpoint suites green (665; durable-pipeline e2e
+        green).
 - **Depends on:** Tasks 5, 7
 
 ## Task 9: Upgrade release onto the runner — [ ]

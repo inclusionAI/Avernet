@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -41,6 +42,47 @@ def _make_publish_record(**kwargs):
     return BotPublishRecord(**data)
 
 
+def _real_ledger():
+    """A real PublishOperationRepository on a fresh in-memory SQLite — so the
+    operation runner exercises real ledger CAS in flow tests (#197)."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from agentclaw.community.core.base import Base
+    from agentclaw.community.core.service_bot.repository.models import (  # noqa: F401
+        PublishOperationModel,
+    )
+    from agentclaw.community.plugins.publish_operation_repository import (
+        PublishOperationRepository,
+    )
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+
+    class _DB:
+        def __init__(self, e):
+            self._f = sessionmaker(bind=e, autoflush=False)
+
+        @contextmanager
+        def orm_session(self):
+            db = self._f()
+            try:
+                yield db
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()
+
+    return PublishOperationRepository(_DB(engine))
+
+
 def _pf(*args, **kw):
     """Construct PublishFlowService for tests, defaulting the DI-required teclaw
     promotion deps to Mocks (the arca/verify flow tests don't exercise them)."""
@@ -50,6 +92,7 @@ def _pf(*args, **kw):
     kw.setdefault("device_fs_dispatcher", Mock())
     kw.setdefault("teclaw_file_promotion", Mock())
     kw.setdefault("device_binding_repo", Mock())
+    kw.setdefault("publish_operation_repo", _real_ledger())
     if "channel_overrides_reader" not in kw:
         # Default to "no channels for this stage" ({}), so promotion delivers the
         # base artifact with channels cleared — tests that care about channels pass
@@ -1189,7 +1232,13 @@ async def test_verify_first_release_raises_when_baas_returns_no_publish_id():
     record = _make_publish_record(
         status=PublishStatus.BUILT.value, ext=_artifact_ext("draft")
     )
-    with pytest.raises(PublishFlowServiceError, match="publish_id"):
+    # #197: the operation runner records the workflow id, so a missing publish_id
+    # is caught there as a PublishOperationError (before any binding write).
+    from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
+        PublishOperationError,
+    )
+
+    with pytest.raises(PublishOperationError, match="publish_id"):
         await svc._execute_verify_first_release(
             publish_record=record, operator="op", migration_path="",
             bot={"bot_id": "b2", "owner_id": "u1"},
