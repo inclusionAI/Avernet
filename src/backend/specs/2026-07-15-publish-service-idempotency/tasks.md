@@ -18,7 +18,7 @@
 
 # Group A — Foundation (additive; nothing calls the new code yet)
 
-## Task 1: Ledger model, protocol, DDL — [ ]
+## Task 1: Ledger model, protocol, DDL — [x]
 - **Goal:** `ac_publish_operation` exists as ORM model + record + enums +
   repository protocol + SQL file. Pure addition.
 - **Files:** `core/service_bot/repository/models.py` (PublishOperationModel/
@@ -26,14 +26,14 @@
   `core/service_bot/repository/publish_operation_protocol.py`,
   `core/service_bot/sql/ac_publish_operation.sql`.
 - **Done when:**
-  - [ ] Columns/keys exactly as plan.md ("The operation ledger" table):
+  - [x] Columns/keys exactly as plan.md ("The operation ledger" table):
         `uk_op (publish_id, operation_kind, stage, attempt)`,
         `idx_pub_state`, `idx_bot`; states `PENDING/ID_RECORDED/COMPLETED/
         FAILED/ABANDONED`; kinds per plan.
-  - [ ] Protocol: insert-intent, get-by-key, list-by-publish, list-by-bot,
-        CAS state transitions (record-workflow-id, complete, fail, abandon),
-        bump-attempt.
-  - [ ] Full suite green (nothing consumes it yet).
+  - [x] Protocol: insert-intent, get-by-key/get-latest-by-kind,
+        list-by-publish, list-by-bot, CAS state transitions (record-workflow-id,
+        complete, fail, abandon), update-result, max-attempt (bump).
+  - [x] Full suite green (nothing consumes it yet — service_bot suite: 566 passed).
 - **Depends on:** —
 
 ## Task 2: Unified ORM ledger repository + DI — [ ]
