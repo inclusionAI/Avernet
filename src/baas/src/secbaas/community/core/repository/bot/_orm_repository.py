@@ -173,7 +173,9 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
     ) -> list[BotRecord]:
         log.info(
             "list_by_bot_uuid_including_deleted: bot_uuid=%s, tenant=%s, env=%s",
-            bot_uuid, tenant, env,
+            bot_uuid,
+            tenant,
+            env,
         )
         rows = (
             self._session.query(BotModel)
@@ -186,9 +188,7 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
             .all()
         )
         items = [r.to_record() for r in rows]
-        log.info(
-            "[bot:list_by_bot_uuid_including_deleted] result: %s rows", len(items)
-        )
+        log.info("[bot:list_by_bot_uuid_including_deleted] result: %s rows", len(items))
         return items
 
     @with_orm_session

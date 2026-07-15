@@ -4,6 +4,7 @@ Exercises the union-across-bot-records + newest-first ordering + unknown-bot
 empty behaviour in isolation, with fake repositories (no DB), so the
 adopt-by-query differencing contract is pinned without infra.
 """
+
 from datetime import datetime
 from types import SimpleNamespace
 

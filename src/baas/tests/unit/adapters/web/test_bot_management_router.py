@@ -1776,8 +1776,9 @@ class TestRouterDefinition:
 # ==================== GET /{bot_uuid}/publishes — list_bot_publishes ====================
 
 
-def _make_publish_summary(id: int = 100, bot_id: int = 1, publish_type: str = "UPDATE",
-                          status: str = "ACTIVE"):
+def _make_publish_summary(
+    id: int = 100, bot_id: int = 1, publish_type: str = "UPDATE", status: str = "ACTIVE"
+):
     from secbaas.community.api.publish_manage import BotPublishSummary
 
     return BotPublishSummary(
