@@ -161,6 +161,23 @@ class CronRuntimeOperationsMixin:
 
     # ── 单目标与多实例转发 ────────────────────────────────────────
 
+    @staticmethod
+    def _build_bot_context(target: CronRuntimeTarget) -> dict[str, Any]:
+        """构造详情接口使用的 Bot 与运行态上下文。"""
+        context: dict[str, Any] = {
+            "bot_id": target.bot_id,
+            "bot_name": target.bot_name,
+            "owner_id": target.owner_id,
+            "bot_type": target.bot_type,
+        }
+        if target.bot_type == "service":
+            context["runtime_stage"] = target.runtime_stage
+            if target.publish_id is not None:
+                context["publish_id"] = target.publish_id
+            if target.publish_status is not None:
+                context["publish_status"] = target.publish_status
+        return context
+
     def _decorate_single_result(
         self,
         result: dict,
@@ -168,6 +185,7 @@ class CronRuntimeOperationsMixin:
         target: CronRuntimeTarget,
         bot: dict,
         include_runtime: bool,
+        include_bot_context: bool = False,
     ) -> None:
         """为单目标 adapter 响应补充 bot 与运行态元数据。"""
         if not (
@@ -175,6 +193,20 @@ class CronRuntimeOperationsMixin:
             and result.get("data")
             and isinstance(result["data"], dict)
         ):
+            return
+
+        if include_bot_context:
+            for field in (
+                "bot_id",
+                "bot_name",
+                "owner_id",
+                "bot_type",
+                "runtime_stage",
+                "publish_id",
+                "publish_status",
+            ):
+                result["data"].pop(field, None)
+            result["data"]["bot"] = self._build_bot_context(target)
             return
 
         result["data"]["bot_id"] = target.bot_id
@@ -197,6 +229,7 @@ class CronRuntimeOperationsMixin:
         path: str,
         body: Optional[dict] = None,
         params: Optional[dict] = None,
+        include_bot_context: bool = False,
     ) -> dict:
         """转发到单个运行态目标。"""
         # 单目标操作依次完成目标解析、设备校验、转发和返回值装饰。
@@ -222,6 +255,7 @@ class CronRuntimeOperationsMixin:
             target=target,
             bot=bot,
             include_runtime=runtime_stage != RUNTIME_STAGE_DRAFT,
+            include_bot_context=include_bot_context,
         )
         return result
 
@@ -305,6 +339,7 @@ class CronRuntimeOperationsMixin:
             runtime_stage=runtime_stage,
             method="GET",
             path=f"/api/cron/{task_id}",
+            include_bot_context=True,
         )
 
     async def create_cron(

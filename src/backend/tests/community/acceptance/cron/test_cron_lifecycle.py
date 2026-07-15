@@ -134,8 +134,12 @@ def test_cron_crud_and_published_baas_runtime_live(live_backend, acceptance_fs_r
         assert verify_response.status_code == 200, verify_response.text
         verify_body = verify_response.json()
         assert verify_body["success"] is True, verify_body
-        assert verify_body["data"]["runtime_stage"] == "verify", verify_body
-        assert verify_body["data"]["publish_status"] == "success", verify_body
+        verify_bot = verify_body["data"]["bot"]
+        assert verify_bot["bot_type"] == "service", verify_body
+        assert verify_bot["runtime_stage"] == "verify", verify_body
+        assert verify_bot["publish_status"] == "success", verify_body
+        assert "runtime_stage" not in verify_body["data"], verify_body
+        assert "publish_status" not in verify_body["data"], verify_body
 
         running_response = client.get(
             "/api/cron/running",
