@@ -5,7 +5,7 @@ use bcs_domain::{Organization, OrganizationMember};
 use bcs_service_api::{
     CreateOrganizationCommand, OrganizationAuth, OrganizationCandidateBot, OrganizationCandidateBotPage,
     OrganizationCandidatePageQuery, OrganizationCandidateQuery, OrganizationCoreService, OrganizationManagementService,
-    OrganizationMemberPage, OrganizationMemberPageQuery, ProviderCoreService,
+    OrganizationMemberDetail, OrganizationMemberPage, OrganizationMemberPageQuery, ProviderCoreService,
     PutOrganizationMemberCommand, ServiceResult, UpdateOrganizationCommand,
 };
 
@@ -113,6 +113,18 @@ impl OrganizationManagementService for OrganizationManagement {
         self.authenticate(&auth).await?;
         self.core
             .get_member_for_manager(&auth.provider_id, organization_code, bot_uuid)
+            .await
+    }
+
+    async fn get_member_detail(
+        &self,
+        auth: OrganizationAuth,
+        organization_code: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationMemberDetail>> {
+        self.authenticate(&auth).await?;
+        self.core
+            .get_member_detail_for_manager(&auth.provider_id, organization_code, bot_uuid)
             .await
     }
 

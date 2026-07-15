@@ -8,7 +8,8 @@ use bcs_service_api::{
     ListOrganizationMembersPageQuery, ListOrganizationMembersQuery, ListOrganizationsQuery,
     OrganizationCandidateBot, OrganizationCandidateBotPage, OrganizationCandidatePageQuery,
     OrganizationCandidateQuery, OrganizationCoreService,
-    OrganizationMemberPage, OrganizationMemberPageQuery, OrganizationRepoPort,
+    OrganizationMemberBotDetail, OrganizationMemberDetail, OrganizationMemberPage,
+    OrganizationMemberPageQuery, OrganizationRepoPort,
     ProviderBotBindingRepoPort, ProviderRecord, ProviderRepoPort, ServiceError, ServiceResult,
     UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
 };
@@ -415,6 +416,48 @@ impl OrganizationCoreService for OrganizationCore {
         self.organizations
             .get_member(&self.env, organization_code, bot_uuid)
             .await
+    }
+
+    async fn get_member_detail_for_manager(
+        &self,
+        managing_provider_id: &str,
+        organization_code: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationMemberDetail>> {
+        let Some(member) = self
+            .get_member_for_manager(managing_provider_id, organization_code, bot_uuid)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let Some(bot) = self.registry.get(bot_uuid).await else {
+            return Ok(Some(OrganizationMemberDetail { member, bot: None }));
+        };
+        let Some(binding) = self
+            .provider_bindings
+            .get_binding_by_bot_uuid(bot_uuid)
+            .await?
+        else {
+            return Ok(Some(OrganizationMemberDetail { member, bot: None }));
+        };
+        let agent_code = self
+            .registry
+            .get_agent_credentials(bot_uuid)
+            .await
+            .and_then(|credentials| credentials.agent_code);
+
+        Ok(Some(OrganizationMemberDetail {
+            member,
+            bot: Some(OrganizationMemberBotDetail {
+                provider_id: binding.provider_id,
+                provider_bot_ref: binding.provider_bot_ref,
+                agent_code,
+                capabilities: bot.capabilities,
+                created_by: bot.created_by,
+                actor_kind: bot.actor_kind,
+                env: bot.env,
+            }),
+        }))
     }
 
     async fn list_members_for_manager(
