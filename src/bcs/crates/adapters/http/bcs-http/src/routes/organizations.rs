@@ -3,17 +3,17 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
 };
-use bcs_domain::{Organization, OrganizationMember};
+use bcs_domain::{ActorKind, Organization, OrganizationMember};
 use bcs_protocol::{
     CreateOrganizationRequest, OrganizationCandidateBotListResponse,
     OrganizationCandidateBotResponse, OrganizationListResponse, OrganizationMemberListResponse,
-    OrganizationMemberResponse, OrganizationResponse, PatchOrganizationRequest,
-    PutOrganizationMemberRequest,
+    OrganizationMemberBotResponse, OrganizationMemberDetailResponse, OrganizationMemberResponse,
+    OrganizationResponse, PatchOrganizationRequest, PutOrganizationMemberRequest,
 };
 use bcs_service_api::{
     CreateOrganizationCommand, OrganizationAuth, OrganizationCandidateBot,
     OrganizationCandidatePageQuery, OrganizationCandidateQuery, OrganizationMemberPageQuery, PutOrganizationMemberCommand,
-    ServiceError, UpdateOrganizationCommand,
+    OrganizationMemberBotDetail, OrganizationMemberDetail, ServiceError, UpdateOrganizationCommand,
 };
 use serde::Deserialize;
 
@@ -162,16 +162,16 @@ pub async fn get_member(
     State(state): State<HttpAppState>,
     Path((provider_id, organization_code, bot_uuid)): Path<(String, String, String)>,
     headers: HeaderMap,
-) -> Result<Json<OrganizationMemberResponse>, HttpAdapterError> {
+) -> Result<Json<OrganizationMemberDetailResponse>, HttpAdapterError> {
     let auth = organization_auth(provider_id, &headers)?;
     let member = state
         .services
         .organization_management
-        .get_member(auth, &organization_code, &bot_uuid)
+        .get_member_detail(auth, &organization_code, &bot_uuid)
         .await
         .map_err(organization_error)?
         .ok_or_else(|| HttpAdapterError::NotFound("organization member not found".to_string()))?;
-    Ok(Json(member_to_response(member)))
+    Ok(Json(member_detail_to_response(member)))
 }
 
 pub async fn list_members(
@@ -280,6 +280,38 @@ fn member_to_response(member: OrganizationMember) -> OrganizationMemberResponse 
         bot_uuid: member.bot_uuid,
         role: member.role,
         disabled: member.disabled,
+    }
+}
+
+fn member_detail_to_response(detail: OrganizationMemberDetail) -> OrganizationMemberDetailResponse {
+    OrganizationMemberDetailResponse {
+        organization_code: detail.member.organization_code,
+        bot_uuid: detail.member.bot_uuid,
+        role: detail.member.role,
+        disabled: detail.member.disabled,
+        bot: detail.bot.map(member_bot_to_response),
+    }
+}
+
+fn member_bot_to_response(bot: OrganizationMemberBotDetail) -> OrganizationMemberBotResponse {
+    let capabilities = to_wire_capabilities(bot.capabilities);
+    OrganizationMemberBotResponse {
+        provider_id: bot.provider_id,
+        provider_bot_ref: bot.provider_bot_ref,
+        agent_code: bot.agent_code,
+        name: capabilities.name,
+        summary: capabilities.summary,
+        domains: capabilities.domains,
+        skills: capabilities.skills,
+        scopes: capabilities.scopes,
+        visibility: capabilities.visibility,
+        created_by: bot.created_by,
+        actor_kind: match bot.actor_kind {
+            ActorKind::Bot => "bot",
+            ActorKind::Human => "human",
+        }
+        .to_string(),
+        env: bot.env,
     }
 }
 
