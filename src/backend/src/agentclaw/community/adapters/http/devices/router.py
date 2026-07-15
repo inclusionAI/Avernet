@@ -385,6 +385,7 @@ async def get_device_connection(
     port: int | None = None,
     ttl: int | None = None,
     device_uuid: str | None = Query(None, description="锁定多实例中的特定实例；不传则自动选活跃实例"),
+    ws_conn_mode: str | None = Query(None, description="WebSocket connection mode: 'direct'(default)/'relay'"),
     user: AuthenticatedUser = Depends(get_current_user),
     service: DeviceServiceProtocol = Injected(DeviceServiceProtocol),
 ) -> ApiResponse[DeviceConnectionResponse]:
@@ -409,6 +410,7 @@ async def get_device_connection(
             port=port,
             ttl=ttl,
             device_uuid=device_uuid,
+            ws_conn_mode=ws_conn_mode,
         )
 
         return ApiResponse(
@@ -478,6 +480,7 @@ async def get_device_connection_by_bot(
     bot_id: str,
     port: int | None = None,
     device_uuid: str | None = Query(None, description="锁定多实例中的特定实例；不传则自动选活跃实例"),
+    ws_conn_mode: str | None = Query(None, description="WebSocket connection mode: 'direct'(default)/'relay'"),
     user: AuthenticatedUser = Depends(get_current_user),
     service: DeviceServiceProtocol = Injected(DeviceServiceProtocol),
 ) -> ApiResponse[DeviceConnectionResponse]:
@@ -502,6 +505,7 @@ async def get_device_connection_by_bot(
             operator=operator,
             port=port,
             device_uuid=device_uuid,
+            ws_conn_mode=ws_conn_mode,
         )
 
         return ApiResponse(

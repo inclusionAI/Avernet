@@ -67,6 +67,7 @@ class PaasService(PaasServiceProtocol, ABC):
         paas_device_id: str,
         port: int,
         path: str,
+        ws_conn_mode: str | None = None,
     ) -> WsConnectionInfo:
         """Resolve WebSocket connection info for a device.
 
@@ -74,6 +75,8 @@ class PaasService(PaasServiceProtocol, ABC):
             paas_device_id: Raw platform device ID without @template_id suffix.
             port: Target port on the device.
             path: WebSocket path (e.g., /api/openclaw/ws).
+            ws_conn_mode: Optional connection mode override (e.g. ``"relay"``).
+                ``None`` means no override. Only consumed by LocalPaasService.
 
         Returns:
             WsConnectionInfo containing ws_url, token, target, and expires_at.

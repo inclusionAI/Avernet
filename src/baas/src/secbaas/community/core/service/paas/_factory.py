@@ -61,7 +61,7 @@ def is_paas_mock_mode() -> bool:
     return os.environ.get("PAAS_MOCK_MODE", "").lower() in ("true", "1", "yes")
 
 
-_LOCAL_WS_CONN_MODE = "relay"
+_LOCAL_WS_CONN_MODE = "direct"
 
 
 logger = get_logger("core-service")

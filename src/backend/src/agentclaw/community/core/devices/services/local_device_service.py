@@ -429,6 +429,7 @@ class LocalDeviceService(DeviceService):
         device: AllocatedDevice,
         port: int | None = None,
         ttl: int | None = None,
+        ws_conn_mode: str | None = None,
     ) -> DeviceConnectionInfo:
         """通过 BaaS get_ws_info 获取容器连接信息。"""
         if device.device_provider != LOCAL_DEVICE_PROVIDER:
@@ -470,6 +471,7 @@ class LocalDeviceService(DeviceService):
             ws_info = self._baas_service.get_ws_info(
                 bind_id=binding_id,
                 device_affinity=device.device_props.get("entity_id"),
+                ws_conn_mode=ws_conn_mode,
             )
         except Exception as e:
             logger.warning(
@@ -497,6 +499,7 @@ class LocalDeviceService(DeviceService):
                 bind_id=binding_id,
                 port=adapter_port,
                 device_affinity=device.device_props.get("entity_id"),
+                ws_conn_mode=ws_conn_mode,
             )
             url = http_info.http_url
             token = http_info.token
@@ -741,6 +744,7 @@ class LocalDeviceService(DeviceService):
         port: int | None = None,
         ttl: int | None = None,
         device_uuid: str | None = None,
+        ws_conn_mode: str | None = None,
     ) -> DeviceConnectionInfo:
         """Get device connection info.
 
@@ -787,6 +791,7 @@ class LocalDeviceService(DeviceService):
             device=allocated_device,
             port=port,
             ttl=ttl,
+            ws_conn_mode=ws_conn_mode,
         )
 
     # ──────────────────────────────────────────────────────────────────────

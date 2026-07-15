@@ -96,6 +96,7 @@ class PoolabPaasService(PaasService):
         paas_device_id: str,
         port: int,
         path: str,
+        ws_conn_mode: str | None = None,
     ) -> WsConnectionInfo:
         return await self._plugin.resolve_ws_conn_info(
             paas_device_id,

@@ -712,6 +712,7 @@ class BaasDeviceService(DeviceService):
         port: int | None = None,
         ttl: int | None = None,
         device_uuid: str | None = None,
+        ws_conn_mode: str | None = None,
     ) -> DeviceConnectionInfo:
         """获取设备连接信息。
 
@@ -723,6 +724,7 @@ class BaasDeviceService(DeviceService):
             port: 端口号（BaaS 层忽略，由服务端决定）
             ttl: TTL（BaaS 层忽略，由服务端决定）
             device_uuid: 多实例场景锁定特定实例（可选）；不传则 BaaS 自动选活跃实例
+            ws_conn_mode: WebSocket 连接模式透传（可选）；不传则不覆盖
 
         Returns:
             DeviceConnectionInfo: 设备连接信息
@@ -741,6 +743,7 @@ class BaasDeviceService(DeviceService):
                 bind_id=binding_id,
                 device_affinity=operator.staff_id,
                 device_uuid=device_uuid,
+                ws_conn_mode=ws_conn_mode,
             )
         except BaasServiceError as e:
             logger.error(f"[BaasDeviceService.get_device_connection] BaaS error: {e}")
