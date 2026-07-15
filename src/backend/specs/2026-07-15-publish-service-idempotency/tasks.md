@@ -296,7 +296,7 @@
 
 # Group D — Quality + cleanup
 
-## Task 17: `baas_service.py` consolidation — [ ]
+## Task 17: `baas_service.py` consolidation — [x]
 - **Goal:** Extract `_post_workflow_mutation(path, payload)` shared by
   destroy/stop/restart/scale/upgrade (same POST + code-check + extract
   publish_id boilerplate); decompose `_build_create_bot_payload` (~194
@@ -304,7 +304,12 @@
 - **Files:** `baas_service.py`, its unit tests (payload assertions pinned
   before refactor).
 - **Done when:** behavior-pinned payload tests unchanged and green; each
-  extracted method ≤80 lines.
+  extracted method ≤80 lines. [x]
+- **Notes:** the shared POST helper already existed as `_post_bots_api`
+  (scale/upgrade/create used it); consolidated destroy/stop/restart onto it
+  (added an optional `tenant` override) and dropped their inline boilerplate.
+  Extracted the envs/overrides resolution from `_build_create_bot_payload`
+  into `_resolve_deploy_envs_spec_image`.
 - **Depends on:** Group C
 
 ## Task 18: Long-method decomposition sweep — [ ]

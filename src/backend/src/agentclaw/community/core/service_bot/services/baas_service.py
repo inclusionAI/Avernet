@@ -473,15 +473,17 @@ class BaasService:  # pragma: no cover
         path: str,
         payload: Dict[str, Any],
         action: str,
+        tenant: Optional[str] = None,
     ) -> Dict[str, Any]:
         """发送 POST 请求到 BaaS Bot API，处理响应和错误码（内部实现）。
 
         ``path`` 应为前导斜杠的相对路径（如 ``/api/v1/bots``）；base_url 由
-        ``self._http``（baas-qualified HttpClient）自动拼接。
+        ``self._http``（baas-qualified HttpClient）自动拼接。``tenant`` 留空时使用
+        ``self._tenant``（多实例重启等场景可显式覆盖）。
         """
         response = self._http.post(
             path,
-            params={"tenant": self._tenant},
+            params={"tenant": tenant or self._tenant},
             json=payload,
             timeout=30.0,
         )
@@ -674,25 +676,12 @@ class BaasService:  # pragma: no cover
                 f"[BaasService._build_create_bot_payload] no resource_spec: bot_id={bot_id}"
             )
 
-        envs = {"AGENTCLAW_ENGINE": engine}
-        if extra_envs:
-            envs.update(extra_envs)
-
-        docker_image = None
-        overrides = SandboxOverrides.from_template_config(template_config)
-        if not overrides.is_empty():
-            try:
-                overrides.validate()
-            except InvalidSandboxOverridesError as e:
-                raise BaasServiceError(f"沙箱覆写参数校验失败: {e}") from e
-
-            # 旧 Arca 使用 template_config 覆盖模板默认镜像、规格和环境变量；
-            # BaaS Docker template 的镜像覆写字段名为 docker_image。
-            envs = overrides.merged_envs(envs)
-            if overrides.resource_spec is not None:
-                resource_spec = overrides.resource_spec
-            if overrides.image is not None:
-                docker_image = overrides.image
+        envs, resource_spec, docker_image = self._resolve_deploy_envs_spec_image(
+            engine=engine,
+            extra_envs=extra_envs,
+            template_config=template_config,
+            resource_spec=resource_spec,
+        )
 
         # 构建部署配置
         # user_id / tc_bot_id: BaaS 侧按 user_id+tc_bot_id 唯一确定 workspace 目录
@@ -740,6 +729,42 @@ class BaasService:  # pragma: no cover
         payload["config"] = config.to_dict()
 
         return payload
+
+    def _resolve_deploy_envs_spec_image(
+        self,
+        *,
+        engine: str,
+        extra_envs: Optional[Dict[str, Any]],
+        template_config: Optional[Dict[str, Any]],
+        resource_spec: Any,
+    ) -> tuple[Dict[str, Any], Any, Optional[str]]:
+        """Resolve the deploy config's ``(envs, resource_spec, docker_image)``.
+
+        Base envs carry the engine; ``extra_envs`` and any validated
+        ``template_config`` sandbox overrides (image/spec/envs) layer on top. Old
+        Arca used ``template_config`` to override the template's default image,
+        spec, and envs; the BaaS Docker template's image-override field is
+        ``docker_image``. Returns the possibly-overridden triple.
+        """
+        envs = {"AGENTCLAW_ENGINE": engine}
+        if extra_envs:
+            envs.update(extra_envs)
+
+        docker_image = None
+        overrides = SandboxOverrides.from_template_config(template_config)
+        if not overrides.is_empty():
+            try:
+                overrides.validate()
+            except InvalidSandboxOverridesError as e:
+                raise BaasServiceError(f"沙箱覆写参数校验失败: {e}") from e
+
+            envs = overrides.merged_envs(envs)
+            if overrides.resource_spec is not None:
+                resource_spec = overrides.resource_spec
+            if overrides.image is not None:
+                docker_image = overrides.image
+
+        return envs, resource_spec, docker_image
 
     def create_bot(
         self,
@@ -1058,36 +1083,15 @@ class BaasService:  # pragma: no cover
         )
 
         try:
-            response = self._http.post(
-                f"/api/v1/bots/{bot_uuid}/destroy",
-                params={"tenant": self._tenant},
-                json=payload,
-                timeout=30.0,
+            result = self._post_bots_api(
+                path=f"/api/v1/bots/{bot_uuid}/destroy",
+                payload=payload,
+                action="destroy_bot",
             )
-            response.raise_for_status()
-
-            response_data = response.json()
-
-            logger.info(
-                "[BaasService.destroy_bot] BaaS raw response: %s",
-                response_data,
-            )
-
-            # 检查响应码
-            if response_data.get("code") != 0:
-                raise BaasServiceError(
-                    f"BaaS API error: {response_data.get('message', 'Unknown error')}"
-                )
-
-            result = response_data.get("data", {})
-
-            publish_id = result.get("publish_id")
-
             logger.info(
                 f"[BaasService.destroy_bot] "
-                f"Bot destroy initiated: bot_uuid={bot_uuid}, publish_id={publish_id}"
+                f"Bot destroy initiated: bot_uuid={bot_uuid}, publish_id={result.get('publish_id')}"
             )
-
             return result
 
         except httpx.HTTPStatusError as e:
@@ -1098,6 +1102,8 @@ class BaasService:  # pragma: no cover
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
+        except BaasServiceError:
+            raise
         except Exception as e:
             logger.error(
                 f"[BaasService.destroy_bot] "
@@ -1211,36 +1217,15 @@ class BaasService:  # pragma: no cover
         )
 
         try:
-            response = self._http.post(
-                f"/api/v1/bots/{bot_uuid}/stop",
-                params={"tenant": self._tenant},
-                json=payload,
-                timeout=30.0,
+            result = self._post_bots_api(
+                path=f"/api/v1/bots/{bot_uuid}/stop",
+                payload=payload,
+                action="stop_bot",
             )
-            response.raise_for_status()
-
-            response_data = response.json()
-
-            logger.info(
-                "[BaasService.stop_bot] BaaS raw response: %s",
-                response_data,
-            )
-
-            # 检查响应码
-            if response_data.get("code") != 0:
-                raise BaasServiceError(
-                    f"BaaS API error: {response_data.get('message', 'Unknown error')}"
-                )
-
-            result = response_data.get("data", {})
-
-            publish_id = result.get("publish_id")
-
             logger.info(
                 f"[BaasService.stop_bot] "
-                f"Bot destroy initiated: bot_uuid={bot_uuid}, publish_id={publish_id}"
+                f"Bot destroy initiated: bot_uuid={bot_uuid}, publish_id={result.get('publish_id')}"
             )
-
             return result
 
         except httpx.HTTPStatusError as e:
@@ -1251,6 +1236,8 @@ class BaasService:  # pragma: no cover
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
+        except BaasServiceError:
+            raise
         except Exception as e:
             logger.error(
                 f"[BaasService.stop_bot] "
@@ -2925,21 +2912,12 @@ class BaasService:  # pragma: no cover
         }
 
         try:
-            response = self._http.post(
-                f"/api/v1/bots/{bot_uuid}/update-devices",
-                json=payload,
-                params={"tenant": effective_tenant},
-                timeout=30.0,
+            data = self._post_bots_api(
+                path=f"/api/v1/bots/{bot_uuid}/update-devices",
+                payload=payload,
+                action="restart_devices",
+                tenant=effective_tenant,
             )
-            response.raise_for_status()
-            response_data = response.json()
-
-            if response_data.get("code") != 0:
-                raise BaasServiceError(
-                    f"BaaS API error: {response_data.get('message', 'Unknown error')}"
-                )
-
-            data = response_data.get("data", {})
             logger.info(
                 f"[BaasService.restart_devices] Success: "
                 f"bot_uuid={bot_uuid}, publish_id={data.get('publish_id')}"
