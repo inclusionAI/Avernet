@@ -1,0 +1,843 @@
+openapi: 3.1.0
+info:
+  title: API — Bot 运行时（命令/HTTP/WS）
+  version: "2026-06-30"
+  description: >
+    secbaas Bot 运行时分组（**当前态**）。提供与运行中 Bot 设备的交互能力：
+    Shell 命令执行、HTTP 透明代理、WebSocket 连接信息、HTTP 连接信息和文件夹操作。
+
+    **认证**：使用 Buservice 会话 Cookie（`bcs_session`）。
+
+servers:
+  - url: https://secbaas.alipay.com
+    description: 生产环境
+  - url: https://secbaas-pre.alipay.com
+    description: 预发环境（staging）
+
+security:
+  - ssoCookie: []
+
+tags:
+  - name: bot-cmd
+    description: 命令执行 —— 在 Bot 设备上执行 Shell 命令。
+  - name: bot-http
+    description: HTTP 代理 —— 透明代理 HTTP 请求到 Bot 设备。
+  - name: bot-conn
+    description: 连接信息 —— 获取 HTTP 和 WebSocket 连接信息。
+  - name: bot-folder
+    description: 文件夹操作 —— 在 LOCAL 平台的设备上打开文件夹。
+  - name: file-transfer
+    description: 文件传输 —— OSS 上传/下载、分片管理、分享链接
+
+paths:
+  /api/v1/bots/{tenant}/{bot_uuid}/execute-command:
+    parameters:
+      - { name: tenant, in: path, required: true, schema: { type: string }, description: 租户名称。 }
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+    post:
+      operationId: executeCommandOnBot
+      tags: [bot-cmd]
+      summary: 在 Bot 设备上执行命令
+      description: >
+        在 Bot 的活跃设备上执行 Shell 命令。自动选择一个活跃设备，通过 PaaS 层执行。
+        支持设置超时时间和环境变量。
+      parameters:
+        - { name: device_affinity, in: query, required: false, schema: { type: string }, description: 设备亲缘性键，用于一致性哈希的粘性设备选择。 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExecuteCommandRequest" }
+      responses:
+        "200":
+          description: 命令执行结果。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommandResultResponse" }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+        "503":
+          description: 无可用活跃设备。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+
+  /api/v1/bots/{tenant}/{bot_uuid}/invoke-http/{port}/{path}:
+    parameters:
+      - { name: tenant, in: path, required: true, schema: { type: string } }
+      - { name: bot_uuid, in: path, required: true, schema: { type: string } }
+      - { name: port, in: path, required: true, schema: { type: integer, minimum: 1, maximum: 65535 }, description: 目标端口。 }
+      - { name: path, in: path, required: true, schema: { type: string }, description: 转发到设备的请求路径。 }
+    get:
+      operationId: invokeHttpGet
+      tags: [bot-http]
+      summary: HTTP GET 代理到 Bot 设备
+      description: 透明代理 HTTP GET 请求到 Bot 的活跃设备。
+      parameters:
+        - { name: device_affinity, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: 代理响应（透传设备的状态码、头和体）。
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+        "503":
+          description: 无可用活跃设备。
+    post:
+      operationId: invokeHttpPost
+      tags: [bot-http]
+      summary: HTTP POST 代理到 Bot 设备
+      description: 透明代理 HTTP POST 请求到 Bot 的活跃设备。
+      parameters:
+        - { name: device_affinity, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: 代理响应（透传设备的状态码、头和体）。
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+        "503":
+          description: 无可用活跃设备。
+    put:
+      operationId: invokeHttpPut
+      tags: [bot-http]
+      summary: HTTP PUT 代理到 Bot 设备
+      parameters:
+        - { name: device_affinity, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: 代理响应。
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+    delete:
+      operationId: invokeHttpDelete
+      tags: [bot-http]
+      summary: HTTP DELETE 代理到 Bot 设备
+      parameters:
+        - { name: device_affinity, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: 代理响应。
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/bots/{bot_uuid}/http-info:
+    get:
+      operationId: getBotHttpConnectionInfo
+      tags: [bot-conn]
+      summary: 获取 Bot HTTP 连接信息
+      description: >
+        解析 Bot 的 HTTP 连接信息。返回通过 agentclawproxy 网关直连的 URL 和 Token。
+      parameters:
+        - { name: bot_uuid, in: path, required: true, schema: { type: string } }
+        - { name: port, in: query, required: true, schema: { type: integer, minimum: 1, maximum: 65535 }, description: 目标 HTTP 端口。 }
+        - { name: path, in: query, required: true, schema: { type: string }, description: 设备上的 HTTP 路径。 }
+        - { name: tenant, in: query, required: true, schema: { type: string } }
+        - { name: device_affinity, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: 连接信息。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HttpConnectionInfoResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+        "503":
+          description: 无可用活跃设备。
+
+  /api/v1/bots/{bot_uuid}/ws-info:
+    get:
+      operationId: getBotWsConnectionInfo
+      tags: [bot-conn]
+      summary: 获取 Bot WebSocket 连接信息
+      description: >
+        解析 Bot 的 WebSocket 连接信息。返回通过 agentclawproxy 网关直连的 WebSocket URL、
+        Token 和过期时间。
+      parameters:
+        - { name: bot_uuid, in: path, required: true, schema: { type: string } }
+        - { name: port, in: query, required: true, schema: { type: integer, minimum: 1, maximum: 65535 }, description: 目标 WebSocket 端口。 }
+        - { name: path, in: query, required: true, schema: { type: string }, description: 设备上的 WebSocket 路径。 }
+        - { name: tenant, in: query, required: true, schema: { type: string } }
+        - { name: device_affinity, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: WebSocket 连接信息。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WsConnectionInfoResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+        "503":
+          description: 无可用活跃设备。
+
+  /api/v1/bots/{bot_uuid}/start-progress:
+    parameters:
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+    get:
+      operationId: getBotStartProgress
+      tags: [bot-cmd]
+      summary: 查询 Bot 设备启动进度
+      description: >
+        查询 Bot 活跃设备的容器启动进度。通过 PaaS 层发送 start-progress 命令，
+        仅支持 LOCAL 平台。
+      parameters:
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+        - { name: device_affinity, in: query, required: false, schema: { type: string }, description: 设备亲缘性键，用于一致性哈希的粘性设备选择。 }
+      responses:
+        "200":
+          description: 启动进度。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BotStartProgressResponse" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+        "501":
+          description: 非 LOCAL 平台不支持此操作。
+        "503":
+          description: 无可用活跃设备。
+        "500":
+          description: 内部错误或 PaaS 错误。
+
+  /api/v1/bots/{tenant}/{bot_uuid}/open-folder:
+    parameters:
+      - { name: tenant, in: path, required: true, schema: { type: string } }
+      - { name: bot_uuid, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: openFolderOnBot
+      tags: [bot-folder]
+      summary: 打开 Bot 设备上的文件夹
+      description: >
+        在 Bot 设备的文件资源管理器中打开指定文件夹。
+        仅支持 LOCAL 平台，非 LOCAL 平台返回 501。
+      parameters:
+        - { name: device_affinity, in: query, required: false, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OpenFolderRequest" }
+      responses:
+        "200":
+          description: 操作成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuccessResponse" }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+        "501":
+          description: 非 LOCAL 平台不支持此操作。
+
+  # ── 文件传输 ──────────────────────────────────────────────────────────
+
+  /api/v1/bots/{tenant}/{bot_uuid}/files/upload-url:
+    parameters:
+      - { name: tenant, in: path, required: true, schema: { type: string }, description: 租户名称。 }
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+    post:
+      operationId: getUploadUrl
+      tags: [file-transfer]
+      summary: 获取预签名上传 URL
+      description: >
+        为指定 Bot 获取一个 OSS 预签名上传 URL。调用方使用该 URL 将文件直接 PUT 到 OSS
+        暂存区，随后 Poller 感知到文件后触发设备下载。支持 SINGLE 和 MULTIPART 两种模式。
+      parameters:
+        - { name: device_affinity, in: query, required: false, schema: { type: string }, description: 设备亲缘性键。 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GetUploadUrlRequest" }
+      responses:
+        "200":
+          description: 预签名上传 URL。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GetUploadUrlResponse" }
+        "404":
+          description: Bot 未找到或无设备。
+        "501":
+          description: 平台不支持此操作。
+        "503":
+          description: 无可用活跃设备。
+        "500":
+          description: 内部错误。
+
+  /api/v1/bots/{tenant}/{bot_uuid}/files/download-url:
+    parameters:
+      - { name: tenant, in: path, required: true, schema: { type: string }, description: 租户名称。 }
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+    post:
+      operationId: getDownloadUrl
+      tags: [file-transfer]
+      summary: 发起设备文件下载
+      description: >
+        触发设备将指定文件上传到 OSS 暂存区，返回 transfer_id 供后续轮询。
+        下载方向采用异步票据模型：调用方通过查询传输状态接口轮询，文件到达后获取下载 URL。
+      parameters:
+        - { name: device_affinity, in: query, required: false, schema: { type: string }, description: 设备亲缘性键。 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GetDownloadUrlRequest" }
+      responses:
+        "200":
+          description: 下载请求已受理。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GetDownloadUrlResponse" }
+        "404":
+          description: Bot 未找到或无设备。
+        "501":
+          description: 平台不支持此操作。
+        "503":
+          description: 无可用活跃设备。
+        "500":
+          description: 内部错误。
+
+  /api/v1/bots/{tenant}/{bot_uuid}/files/upload-url/{transfer_id}/complete:
+    parameters:
+      - { name: tenant, in: path, required: true, schema: { type: string }, description: 租户名称。 }
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+      - { name: transfer_id, in: path, required: true, schema: { type: string }, description: upload-url 响应返回的 transfer_id。 }
+    post:
+      operationId: completeUpload
+      tags: [file-transfer]
+      summary: 完成上传（单文件/分片）
+      description: >
+        完成之前发起的上传操作。SINGLE 模式下验证文件是否已存在于 OSS 暂存区；
+        MULTIPART 模式下组装已上传的分片为最终文件。成功后将票据状态转换为 UPLOAD_COMPLETED。
+      responses:
+        "200":
+          description: 上传完成。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CompleteUploadResponse" }
+        "404":
+          description: transfer_id 对应的传输记录未找到。
+        "409":
+          description: OSS 对象未找到或票据状态冲突。
+        "501":
+          description: 平台不支持此操作。
+        "500":
+          description: 内部错误。
+
+  /api/v1/bots/{tenant}/{bot_uuid}/files/upload-url/{transfer_id}:
+    parameters:
+      - { name: tenant, in: path, required: true, schema: { type: string }, description: 租户名称。 }
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+      - { name: transfer_id, in: path, required: true, schema: { type: string }, description: upload-url 响应返回的 transfer_id。 }
+    delete:
+      operationId: cancelUpload
+      tags: [file-transfer]
+      summary: 取消上传
+      description: >
+        取消正在进行的上传操作。若为 MULTIPART 模式，还将中止 OSS 分片上传会话。
+        票据状态转换为 CANCELLED。
+      responses:
+        "200":
+          description: 上传已取消。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CancelUploadResponse" }
+        "404":
+          description: transfer_id 对应的传输记录未找到。
+        "409":
+          description: 票据状态冲突（已处于终态）。
+        "501":
+          description: 平台不支持此操作。
+        "500":
+          description: 内部错误。
+
+  /api/v1/bots/{tenant}/{bot_uuid}/files/staging:
+    parameters:
+      - { name: tenant, in: path, required: true, schema: { type: string }, description: 租户名称。 }
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+    get:
+      operationId: listStaging
+      tags: [file-transfer]
+      summary: 查询暂存区文件列表
+      description: >
+        列出 OSS 暂存区中的文件对象。支持基于 marker 的分页遍历，
+        每个条目包含 key、size 和 last_modified 信息。
+      parameters:
+        - { name: prefix, in: query, required: false, schema: { type: string }, description: OSS key 前缀过滤。 }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }, description: 每页数量（1-1000，默认 100）。 }
+        - { name: marker, in: query, required: false, schema: { type: string }, description: 分页标记，从上一次响应中获取。 }
+      responses:
+        "200":
+          description: 暂存区文件列表。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StagingListResponse" }
+        "500":
+          description: 内部错误。
+    delete:
+      operationId: deleteStaging
+      tags: [file-transfer]
+      summary: 删除暂存区文件
+      description: >
+        从 OSS 暂存区删除单个文件。仅支持处于终态（DONE/FAILED/CANCELLED/DELETED）
+        的票据，删除后票据状态转换为 DELETED。
+      parameters:
+        - { name: key, in: query, required: true, schema: { type: string }, description: 完整 OSS 对象 key。 }
+      responses:
+        "200":
+          description: 文件删除结果。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StagingDeleteResponse" }
+        "404":
+          description: transfer_id 对应的传输记录未找到。
+        "409":
+          description: 票据未处于终态，不可删除。
+        "501":
+          description: 平台不支持此操作。
+        "500":
+          description: 内部错误。
+
+  /api/v1/bots/{tenant}/{bot_uuid}/files/transfers/{transfer_id}:
+    parameters:
+      - { name: tenant, in: path, required: true, schema: { type: string }, description: 租户名称。 }
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+      - { name: transfer_id, in: path, required: true, schema: { type: string }, description: 传输票据 ID。 }
+    get:
+      operationId: getTransferStatus
+      tags: [file-transfer]
+      summary: 查询传输状态
+      description: >
+        通过 transfer_id 查询文件传输的状态。返回传输状态、方向、文件名、设备路径，
+        当状态为 DONE 时包含下载 URL，状态为 CREATED 时包含上传 URL（用于断点续传），
+        状态为 FAILED 时包含错误信息。
+      responses:
+        "200":
+          description: 传输状态。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GetTransferStatusResponse" }
+        "404":
+          description: transfer_id 对应的传输记录未找到。
+        "500":
+          description: 内部错误。
+
+  /api/v1/bots/{tenant}/{bot_uuid}/files/transfers/{transfer_id}/share-link:
+    parameters:
+      - { name: tenant, in: path, required: true, schema: { type: string }, description: 租户名称。 }
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+      - { name: transfer_id, in: path, required: true, schema: { type: string }, description: 传输票据 ID。 }
+    post:
+      operationId: generateShareLink
+      tags: [file-transfer]
+      summary: 生成分享下载链接
+      description: >
+        为已完成的文件传输生成一个可分享的预签名下载链接。
+        仅支持处于 DONE 状态的票据。分享链接为 OSS 预签名 GET URL，
+        默认有效期 24 小时，最长 7 天。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ShareLinkRequest" }
+      responses:
+        "200":
+          description: 分享链接生成成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShareLinkResponse" }
+        "404":
+          description: transfer_id 对应的传输记录未找到。
+        "422":
+          description: 票据状态不满足分享条件（非 DONE 状态）。
+        "501":
+          description: 平台不支持此操作。
+        "500":
+          description: 内部错误。
+
+components:
+  securitySchemes:
+    ssoCookie:
+      $ref: "./_shared.yaml#/components/securitySchemes/ssoCookie"
+
+  schemas:
+    ExecuteCommandRequest:
+      type: object
+      required: [cmd]
+      properties:
+        cmd:
+          type: string
+          minLength: 1
+          maxLength: 8192
+          description: 要执行的 Shell 命令。
+        env:
+          type: object
+          additionalProperties: { type: string }
+          nullable: true
+          description: 命令的可选环境变量。
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 300
+          default: 30
+          description: 命令超时时间（秒）。
+
+    CommandResult:
+      type: object
+      properties:
+        exit_code:
+          type: integer
+          nullable: true
+          description: 命令退出码。
+        stdout:
+          type: string
+          description: 标准输出。
+        stderr:
+          type: string
+          description: 标准错误输出。
+        timed_out:
+          type: boolean
+          default: false
+
+    CommandResultResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties: { data: { $ref: "#/components/schemas/CommandResult" } }
+
+    HttpConnectionInfoResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                http_url:
+                  type: string
+                token:
+                  type: string
+                target:
+                  type: string
+
+    WsConnectionInfoResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                ws_url:
+                  type: string
+                token:
+                  type: string
+                target:
+                  type: string
+                expires_at:
+                  type: string
+                  format: date-time
+
+    BotStartProgressResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                progress:
+                  type: string
+                  description: 启动进度信息（mng daemon 定义）。
+                error_message:
+                  type: string
+                  nullable: true
+                  description: 错误信息（仅在出错时返回）。
+
+    OpenFolderRequest:
+      type: object
+      properties:
+        folder_path:
+          type: string
+          maxLength: 1024
+          nullable: true
+          description: "要打开的文件夹路径。为 null 时使用平台默认路径。"
+
+    SuccessResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                message:
+                  type: string
+
+    # ── 文件传输 ──────────────────────────────────────────────────────
+
+    GetUploadUrlRequest:
+      type: object
+      required: []
+      properties:
+        device_path:
+          type: string
+          nullable: true
+          maxLength: 1024
+          description: "设备端目标文件路径；为 null 时文件只保留在 OSS（保留模式）。"
+        filename:
+          type: string
+          nullable: true
+          description: OSS 暂存文件名；缺省时从 device_path 提取。
+        expire_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+          default: 3600
+          description: 预签名 URL 有效期（秒）。
+        staging_subdir:
+          type: string
+          nullable: true
+          description: OSS file-transfers/ 下的可选子目录。
+        file_size:
+          type: integer
+          minimum: 0
+          default: 0
+          description: 文件大小（字节），用于 SINGLE/MULTIPART 路由。0 或不设默认 SINGLE。
+        part_size:
+          type: integer
+          nullable: true
+          minimum: 1048576
+          description: 自定义分片大小（字节），仅 MULTIPART 模式使用，缺省为 10MB。
+
+    GetUploadUrlResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                upload_url:
+                  type: string
+                  nullable: true
+                  description: OSS 预签名 PUT URL（SINGLE 模式）。
+                transfer_id:
+                  type: string
+                  description: 传输票据 ID，用于后续轮询。
+                expires_at:
+                  type: string
+                  description: 预签名 URL 过期时间。
+                type:
+                  type: string
+                  default: "SINGLE"
+                  description: 上传模式（SINGLE 或 MULTIPART）。
+                upload_session_id:
+                  type: string
+                  nullable: true
+                  description: OSS 分片上传会话 ID（仅 MULTIPART 模式）。
+                part_size:
+                  type: integer
+                  nullable: true
+                  description: 分片大小（字节，仅 MULTIPART 模式）。
+                part_count:
+                  type: integer
+                  nullable: true
+                  description: 总片数（仅 MULTIPART 模式）。
+                parts:
+                  type: array
+                  nullable: true
+                  description: 分片信息列表（仅 MULTIPART 模式）。
+                  items:
+                    type: object
+
+    GetDownloadUrlRequest:
+      type: object
+      required: [device_path]
+      properties:
+        device_path:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 设备上要下载的文件绝对路径。
+        expire_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+          default: 3600
+          description: 预签名 URL 有效期（秒）。
+
+    GetDownloadUrlResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                transfer_id:
+                  type: string
+                  description: 传输票据 ID，用于轮询下载 URL。
+                expires_at:
+                  type: string
+                  description: 预签名 URL 过期时间。
+
+    CompleteUploadResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                transfer_id:
+                  type: string
+                  description: 传输票据 ID。
+                status:
+                  type: string
+                  description: 上传完成后的状态。
+
+    CancelUploadResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                transfer_id:
+                  type: string
+                  description: 传输票据 ID。
+                status:
+                  type: string
+                  description: 取消后的状态（CANCELLED）。
+
+    StagingListResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                prefix:
+                  type: string
+                  description: 当前查询的 OSS key 前缀。
+                items:
+                  type: array
+                  description: 暂存区对象列表。
+                  items:
+                    type: object
+                truncated:
+                  type: boolean
+                  description: 结果集是否被截断（true 表示还有更多数据）。
+                next_marker:
+                  type: string
+                  nullable: true
+                  description: 下一页分页标记。
+
+    StagingDeleteResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                deleted_key:
+                  type: string
+                  description: 被删除的 OSS 对象 key。
+                transfer_id:
+                  type: string
+                  description: 关联的传输票据 ID。
+                previous_status:
+                  type: string
+                  description: 删除前的票据状态。
+                new_status:
+                  type: string
+                  description: 删除后的票据状态（DELETED）。
+
+    GetTransferStatusResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                transfer_id:
+                  type: string
+                  description: 传输票据 ID。
+                status:
+                  type: string
+                  description: 传输状态（CREATED/UPLOADING/UPLOAD_COMPLETED/DOWNLOADING/DONE/FAILED/CANCELLED/DELETED）。
+                direction:
+                  type: string
+                  description: 传输方向（UPLOAD 或 DOWNLOAD）。
+                filename:
+                  type: string
+                  description: 文件名。
+                device_path:
+                  type: string
+                  nullable: true
+                  description: 设备端文件路径。
+                download_url:
+                  type: string
+                  nullable: true
+                  description: 下载 URL（仅 DONE 状态返回）。
+                upload_url:
+                  type: string
+                  nullable: true
+                  description: 上传 URL（仅 CREATED 状态返回，用于断点续传）。
+                expires_at:
+                  type: string
+                  nullable: true
+                  description: URL 过期时间。
+                error_message:
+                  type: string
+                  nullable: true
+                  description: 错误信息（仅 FAILED 状态返回）。
+                created_at:
+                  type: string
+                  description: 创建时间。
+                updated_at:
+                  type: string
+                  description: 最后更新时间。
+
+    ShareLinkRequest:
+      type: object
+      properties:
+        expire_seconds:
+          type: integer
+          minimum: 60
+          maximum: 604800
+          default: 86400
+          description: 分享链接有效期（秒），默认 86400（24 小时），最长 604800（7 天）。
+
+    ShareLinkResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                share_url:
+                  type: string
+                  description: 预签名分享下载 URL。
+                transfer_id:
+                  type: string
+                  description: 关联的传输票据 ID。
+                expires_at:
+                  type: string
+                  description: 分享链接过期时间。

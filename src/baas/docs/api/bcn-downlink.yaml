@@ -1,0 +1,275 @@
+openapi: 3.1.0
+info:
+  title: API — BCN 下行链路
+  version: "2026-06-30"
+  description: >
+    secbaas BCN 下行链路分组（**当前态**）。接收 BCN -> Provider 的下行请求，
+    根据 body.method 分发处理。
+
+    **认证**：使用 Pre-shared Secret Token（`Authorization: Bearer <token>`）。
+
+    **响应格式**：使用独立的 `{ok, error?}` 结构，而非统一 `ApiResponse` 信封。
+
+    **SSE 传输**：支持通过 `X-BCN-TRANSPORT` 请求头切换传输模式。当
+    `X-BCN-TRANSPORT: sse` 且 `body.method` 为 `chat.send` 时，响应以 SSE
+    (text/event-stream) 流式返回。非 `chat.send` 方法配合 SSE 传输将返回
+    HTTP 400。
+
+servers:
+  - url: https://secbaas.alipay.com
+    description: 生产环境
+  - url: https://secbaas-pre.alipay.com
+    description: 预发环境（staging）
+
+tags:
+  - name: bcn-downlink
+    description: BCN 下行链路 —— chat.send / chat.inject / chat.history。
+
+paths:
+  /bcn/downlink:
+    post:
+      operationId: bcnDownlink
+      tags: [bcn-downlink]
+      summary: BCN 下行统一入口
+      description: >
+        接收 BCN 下行请求，根据 body.method 分发到不同的处理逻辑：
+
+        - **chat.send**: 请求 Bot 对当前会话轮次进行响应
+        - **chat.inject**: 向 Bot 注入消息（不触发推理）
+        - **chat.history**: 查询聊天历史
+
+        请求头 `X-BCN-TRANSPORT` 控制传输模式：`json`（默认）返回标准 JSON
+        响应；`sse` 搭配 `chat.send` 方法返回 SSE 流式响应。
+      parameters:
+        - name: X-BCN-TRANSPORT
+          in: header
+          required: false
+          schema:
+            type: string
+            enum: [json, sse]
+            default: json
+          description: |
+            传输模式。`json` 返回标准 JSON 响应；`sse` 仅对 `chat.send`
+            方法生效，返回 text/event-stream 流式响应。其他方法配合
+            `sse` 将返回 HTTP 400。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BcnDownlinkRequest" }
+      responses:
+        "200":
+          description: >
+            请求处理成功。具体返回结构依赖于 method。当 `X-BCN-TRANSPORT: sse`
+            且 method 为 `chat.send` 时，本响应为 text/event-stream 流式输出。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BcnSuccessResponse" }
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE 流式响应，事件流中包含 `data` 字段为 JSON 编码的消息块。
+        "400":
+          description: >
+            请求格式错误，或 `X-BCN-TRANSPORT: sse` 用于非 `chat.send` 方法时返回。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BcnErrorResponse" }
+        "401":
+          description: 认证失败（Authorization header 缺失/无效）。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BcnErrorResponse" }
+        "404":
+          description: Bot 或会话不存在。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BcnErrorResponse" }
+        "501":
+          description: 不支持的 method。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BcnErrorResponse" }
+        "500":
+          description: 服务内部错误。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BcnErrorResponse" }
+
+components:
+  schemas:
+    BcnDownlinkRequest:
+      type: object
+      description: BCN 下行请求，根据 method 字段分发到不同处理逻辑。
+      properties:
+        type:
+          type: string
+          enum: [req]
+          default: req
+        id:
+          type: string
+        method:
+          type: string
+          enum: [chat.send, chat.inject, chat.history]
+        session_id:
+          type: string
+        bcn_group_id:
+          type: string
+        to_bot:
+          $ref: "#/components/schemas/BcnBotRef"
+        from:
+          $ref: "#/components/schemas/BcnFromRef"
+        message:
+          $ref: "#/components/schemas/BcnDownlinkMessage"
+        timeout_ms:
+          type: integer
+          default: 60000
+        limit:
+          type: integer
+          description: 仅 chat.history 使用。最多返回的消息条数。
+        before:
+          type: integer
+          nullable: true
+        after:
+          type: integer
+          nullable: true
+        extensions:
+          type: object
+          additionalProperties: true
+          nullable: true
+
+    BcnBotRef:
+      type: object
+      properties:
+        provider_id:
+          type: string
+        provider_bot_ref:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items: { type: string }
+          nullable: true
+
+    BcnFromRef:
+      type: object
+      properties:
+        kind:
+          type: string
+        id:
+          type: string
+          nullable: true
+        name:
+          type: string
+          nullable: true
+
+    BcnDownlinkMessage:
+      type: object
+      properties:
+        role:
+          type: string
+        content:
+          oneOf:
+            - type: string
+            - type: array
+              items: { $ref: "#/components/schemas/BcnContentBlock" }
+        timestamp:
+          type: integer
+          nullable: true
+
+    BcnContentBlock:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [text, toolCall]
+        text:
+          type: string
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        id:
+          type: string
+          nullable: true
+        arguments:
+          type: string
+          nullable: true
+
+    BcnSuccessResponse:
+      type: object
+      description: >
+        BCN 下行成功响应。chat.send 和 chat.inject 返回 `{ok: true}`，
+        chat.history 额外返回消息列表。
+      properties:
+        ok:
+          type: boolean
+          default: true
+        session_id:
+          type: string
+          description: 仅 chat.history 返回。
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/BcnHistoryMessage" }
+          description: 仅 chat.history 返回。
+        has_more:
+          type: boolean
+          description: 仅 chat.history 返回。
+        next_before:
+          type: integer
+          nullable: true
+        next_after:
+          type: integer
+          nullable: true
+
+    BcnHistoryMessage:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        role:
+          type: string
+        content:
+          oneOf:
+            - type: string
+            - type: array
+              items: { $ref: "#/components/schemas/BcnContentBlock" }
+        timestamp:
+          type: integer
+        stopReason:
+          type: string
+          nullable: true
+        historyMeta:
+          type: object
+          nullable: true
+        toolName:
+          type: string
+          nullable: true
+        toolCallId:
+          type: string
+          nullable: true
+        isError:
+          type: boolean
+          nullable: true
+
+    BcnErrorResponse:
+      type: object
+      description: BCN 统一下行错误响应。
+      properties:
+        ok:
+          type: boolean
+          default: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            retryable:
+              type: boolean
+              default: false
+            retry_after_ms:
+              type: integer
+              nullable: true

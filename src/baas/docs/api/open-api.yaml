@@ -1,0 +1,548 @@
+openapi: 3.1.0
+info:
+  title: API — 开放 API（外部调用）
+  version: "2026-06-30"
+  description: >
+    secbaas 对外暴露的开放 API 分组（**当前态**）。供外部用户/系统通过 API Key 认证
+    与 Bot 交互：单次对话、消息投递、会话查询。
+
+    **认证**：使用 `Authorization: Bearer <api-key>` 传递 API Key。密钥状态须为
+    `ACTIVE`（活跃）才可认证。
+
+    **响应**：开放 API 使用 `ApiResponse` 信封（`{code, message, data}`），
+    `code=0` 表示成功。BCN 下行链路使用独立的 `{ok, error?}` 格式。
+
+servers:
+  - url: https://secbaas.alipay.com
+    description: 生产环境
+  - url: https://secbaas-pre.alipay.com
+    description: 预发环境（staging）
+
+security:
+  - apiKeyAuth: []
+
+tags:
+  - name: open-api-runs
+    description: 单次对话 —— 发送消息并查询执行结果。
+  - name: open-api-messages
+    description: 消息投递 —— 向指定 Bot 投递消息并查询处理结果。
+  - name: open-api-sessions
+    description: 会话查询 —— 查询 Bot 会话信息及消息列表。
+
+paths:
+  # ── Runs ────────────────────────────────────────────────────────────────
+  /openapi/v1/runs:
+    post:
+      operationId: createRun
+      tags: [open-api-runs]
+      summary: 单次对话
+      description: >
+        通过 API Key 认证，向 Bot 发起一次单轮对话。请求体包含消息文本和可选元数据。
+        返回 `run_id`，可用于后续查询对话结果。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunRequest" }
+      responses:
+        "200":
+          description: 对话请求已接收。`code=0` 表示成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunResponse" }
+              example: { code: 0, message: "success", data: { run_id: "run_abc123" } }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404":
+          description: Bot 不存在或未绑定。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunResponse" }
+              example: { code: 60001, message: "bot binding not found", data: null }
+        "429":
+          description: 调用频率超限。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunResponse" }
+              example: { code: 42901, message: "too many requests", data: null }
+        "500":
+          description: 服务内部错误。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunResponse" }
+              example: { code: 50001, message: "internal error", data: null }
+
+  /openapi/v1/runs/{run_id}:
+    get:
+      operationId: getRunResult
+      tags: [open-api-runs]
+      summary: 查询对话结果
+      description: >
+        根据 `run_id` 查询对话任务的执行结果。返回运行状态、Bot 回复内容及元数据。
+      parameters:
+        - { name: run_id, in: path, required: true, schema: { type: string }, description: 运行 ID。 }
+      responses:
+        "200":
+          description: 查询成功，`code=0` 表示成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunResultResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404":
+          description: Run 不存在。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunResultResponse" }
+              example: { code: 40401, message: "Run not found: run_abc123", data: null }
+
+  # ── Messages ────────────────────────────────────────────────────────────
+  /openapi/v1/messages:
+    post:
+      operationId: deliverMessage
+      tags: [open-api-messages]
+      summary: 消息投递
+      description: >
+        通过 API Key 认证，向指定 Bot 投递一条消息。与 `POST /runs` 不同，本接口需要显式
+        指定目标 `bot_id`。返回 `message_id` 和 `session_id`，可用于查询消息处理结果。
+        可通过 `callback_url` 字段启用 HTTP 回调结果通知。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MessageRequest" }
+      responses:
+        "200":
+          description: 消息投递成功，`code=0` 表示成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageResponse" }
+              example: { code: 0, message: "success", data: { message_id: "msg_abc", session_id: "sess_123" } }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "./_shared.yaml#/components/responses/Forbidden" }
+        "404":
+          description: Bot 不存在。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageResponse" }
+              example: { code: 60001, message: "bot not found", data: null }
+        "429":
+          description: 调用频率超限。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageResponse" }
+              example: { code: 42901, message: "too many requests", data: null }
+
+  /openapi/v1/messages/stream:
+    post:
+      operationId: deliverMessageStream
+      tags: [open-api-messages]
+      summary: 流式消息投递
+      description: >
+        通过 Bearer Token 认证的 API Key 投递消息到指定 Bot，以 SSE（Server-Sent Events）
+        流式返回 Bot 回复结果。先发送 `ready` 事件（含 `message_id` 与 `session_id`），
+        再逐块发送 Bot 回复内容，以 `error` 事件作为错误终止。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StreamMessageRequest" }
+      responses:
+        "200":
+          description: 流式投递成功，响应类型为 `text/event-stream`。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            text/event-stream:
+              schema: { type: string, description: SSE 事件流。 }
+              example: |
+                event: ready
+                data: {"message_id":"msg_abc","session_id":"sess_123"}
+
+                data: {"content":"你好"}
+
+                data: {"content":"，世界"}
+
+                data: [DONE]
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "./_shared.yaml#/components/responses/Forbidden" }
+        "404":
+          description: Bot 不存在。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageResponse" }
+              example: { code: 60001, message: "bot not found", data: null }
+        "429":
+          description: 调用频率超限。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageResponse" }
+              example: { code: 42901, message: "too many requests", data: null }
+        "503":
+          description: Bot 不可用。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageResponse" }
+              example: { code: 60001, message: "bot not available", data: null }
+        "500":
+          description: 服务内部错误。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageResponse" }
+              example: { code: 50001, message: "internal error", data: null }
+
+  /openapi/v1/messages/{message_id}:
+    get:
+      operationId: getMessageResult
+      tags: [open-api-messages]
+      summary: 查询消息结果
+      description: >
+        根据 `message_id` 查询消息投递的处理结果。返回消息处理状态、Bot 回复内容等。
+      parameters:
+        - { name: message_id, in: path, required: true, schema: { type: string }, description: 消息 ID。 }
+      responses:
+        "200":
+          description: 查询成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageResultResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "./_shared.yaml#/components/responses/Forbidden" }
+        "404":
+          description: 消息不存在。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageResultResponse" }
+              example: { code: 40401, message: "Message not found: msg_abc", data: null }
+
+  # ── Sessions ────────────────────────────────────────────────────────────
+  /openapi/v1/sessions/{session_id}:
+    get:
+      operationId: getSession
+      tags: [open-api-sessions]
+      summary: 查询会话
+      description: >
+        通过 API Key 认证，查询指定会话的信息。可选的 `bot_id` 参数用于指定所属 Bot，
+        不传时自动从 API Key 解析。`lifecycle_stage` 参数控制查询哪个生命周期的会话。
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string }, description: 会话 ID。 }
+        - { name: bot_id, in: query, required: false, schema: { type: string }, description: "Bot ID，格式为 bot_id 或 default:staff_no。不传则从 API Key 解析（仅 app_type=bot 时）。" }
+        - { name: lifecycle_stage, in: query, required: false, schema: { type: string, enum: [online, verify, draft, all], default: online }, description: Bot 生命周期阶段。 }
+      responses:
+        "200":
+          description: 查询成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionQueryResponse" }
+              example: { code: 0, message: "success", data: { session_id: "sess_123", bot_id: "bot_1", status: "active", created_at: "2024-01-01T00:00:00", updated_at: "2024-01-01T01:00:00" } }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "./_shared.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /openapi/v1/sessions/{session_id}/messages:
+    get:
+      operationId: getSessionMessages
+      tags: [open-api-sessions]
+      summary: 查询会话消息列表
+      description: >
+        查询指定会话的消息记录列表。支持 `limit` 参数控制返回条数上限（默认 1000）。
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string }, description: 会话 ID。 }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 1000 }, description: 返回消息数量上限。 }
+        - { name: bot_id, in: query, required: false, schema: { type: string }, description: "Bot ID，不传则从 API Key 解析。" }
+        - { name: lifecycle_stage, in: query, required: false, schema: { type: string, enum: [online, verify, draft, all], default: online } }
+      responses:
+        "200":
+          description: 查询成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionMessagesResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "./_shared.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    apiKeyAuth:
+      $ref: "./_shared.yaml#/components/securitySchemes/apiKeyAuth"
+
+  schemas:
+    # ── Run ──
+    RunRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          description: 用户消息内容。
+        metadata:
+          type: object
+          additionalProperties: true
+          description: 可选的元数据信息（如来源、标签等）。
+      example: { message: "Hello, bot!", metadata: { source: "api" } }
+
+    RunResponseData:
+      type: object
+      properties:
+        run_id:
+          type: string
+          description: 运行 ID，用于后续查询对话结果。
+
+    RunResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties: { data: { $ref: "#/components/schemas/RunResponseData" } }
+
+    RunResultData:
+      type: object
+      properties:
+        content:
+          type: string
+          nullable: true
+          description: Bot 回复内容。
+        extra:
+          type: object
+          properties:
+            usage:
+              type: object
+              additionalProperties: true
+              description: Token 使用信息。
+
+    RunResultResponseData:
+      type: object
+      properties:
+        run_id:
+          type: string
+          description: 运行 ID。
+        bot_id:
+          type: string
+          description: Bot ID。
+        session_id:
+          type: string
+          description: 会话 ID（若有时）。
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+          description: 运行状态。
+        created_at:
+          type: string
+          format: date-time
+          description: 创建时间。
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 完成时间。
+        result:
+          nullable: true
+          $ref: "#/components/schemas/RunResultData"
+        error:
+          type: string
+          nullable: true
+          description: 错误信息。
+
+    RunResultResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties: { data: { $ref: "#/components/schemas/RunResultResponseData" } }
+
+    # ── Stream Message Request ──
+    StreamMessageRequest:
+      type: object
+      required: [message, bot_id]
+      properties:
+        message:
+          type: string
+          description: 用户消息内容。
+        bot_id:
+          type: string
+          description: Bot 唯一标识。
+        metadata:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: 可选的元数据信息（如来源、标签等）。
+        callback_url:
+          type: string
+          nullable: true
+          description: 回调 URL。
+      example: { message: "Hello!", bot_id: "bot_123", metadata: {} }
+
+    # ── Message ──
+    MessageRequest:
+      type: object
+      required: [message, bot_id]
+      properties:
+        message:
+          type: string
+          description: 用户消息内容。
+        bot_id:
+          type: string
+          description: Bot 唯一标识。
+        metadata:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: 可选的元数据信息。
+        callback_url:
+          type: string
+          nullable: true
+          description: HTTP 回调地址。设置后将以 HTTP 回调方式返回消息结果。
+      example: { message: "Hello!", bot_id: "bot_123", metadata: {} }
+
+    MessageResponseData:
+      type: object
+      properties:
+        message_id:
+          type: string
+          description: 消息 ID，用于追踪投递状态。
+        session_id:
+          type: string
+          nullable: true
+          description: 会话 ID（若有时）。
+
+    MessageResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties: { data: { $ref: "#/components/schemas/MessageResponseData" } }
+
+    MessageResultData:
+      type: object
+      properties:
+        content:
+          type: string
+          nullable: true
+          description: Bot 回复内容。
+        extra:
+          type: object
+          properties:
+            usage:
+              type: object
+              additionalProperties: true
+
+    MessageResultResponseData:
+      type: object
+      properties:
+        message_id:
+          type: string
+        bot_id:
+          type: string
+        session_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        result:
+          nullable: true
+          $ref: "#/components/schemas/MessageResultData"
+        error:
+          type: string
+          nullable: true
+
+    MessageResultResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties: { data: { $ref: "#/components/schemas/MessageResultResponseData" } }
+
+    # ── Session ──
+    SessionQueryResponseData:
+      type: object
+      properties:
+        session_id:
+          type: string
+        bot_id:
+          type: string
+        status:
+          type: string
+          description: 会话状态。
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    SessionQueryResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties: { data: { $ref: "#/components/schemas/SessionQueryResponseData" } }
+
+    MessageItem:
+      type: object
+      properties:
+        id:
+          type: string
+          nullable: true
+        session_id:
+          type: string
+          nullable: true
+        role:
+          type: string
+          enum: [user, assistant, tool_result]
+        content:
+          type: string
+          nullable: true
+        meta:
+          type: object
+          additionalProperties: true
+          nullable: true
+        created_at:
+          type: string
+          nullable: true
+        history_meta:
+          type: object
+          additionalProperties: true
+          nullable: true
+
+    SessionMessagesResponseData:
+      type: object
+      properties:
+        session_id:
+          type: string
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/MessageItem" }
+        total:
+          type: integer
+        has_more:
+          type: boolean
+
+    SessionMessagesResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties: { data: { $ref: "#/components/schemas/SessionMessagesResponseData" } }
+
+    

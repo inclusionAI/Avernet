@@ -1,0 +1,143 @@
+openapi: 3.1.0
+info:
+  title: API — 内部服务
+  version: "2026-06-30"
+  description: >
+    secbaas 内部服务分组（**当前态**）。提供跨实例转发的内部端点、
+    内部健康检查和缓存读写能力。
+
+    **认证**：不要求应用层认证，安全依赖 MOSN 服务网格的网络隔离。
+
+servers:
+  - url: https://secbaas.alipay.com
+    description: 生产环境
+  - url: https://secbaas-pre.alipay.com
+    description: 预发环境（staging）
+
+security:
+  - meshAuth: []
+
+tags:
+  - name: internal
+    description: 内部服务 —— 跨实例转发、内部健康检查、缓存管理。
+
+paths:
+  /internal/v1/forward:
+    post:
+      operationId: internalForward
+      tags: [internal]
+      summary: 跨实例请求转发
+      description: >
+        接收来自其他 secbaas 实例的转发请求。用于分布式部署中跨实例路由
+        到目标机器所在节点的 mng daemon。
+
+        认证依赖 MOSN 服务网格的网络隔离，不要求 Bearer Token。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ForwardRequest" }
+      responses:
+        "200":
+          description: 转发请求处理完成（成功或失败均返回 200，通过 body 的 status 区分）。
+        "400":
+          description: 请求格式错误（缺少 machine_id）。
+
+  /api/v1/cache/{key}:
+    parameters:
+      - { name: key, in: path, required: true, schema: { type: string }, description: 缓存键。 }
+    get:
+      operationId: getCache
+      tags: [internal]
+      summary: 读取缓存
+      description: 按 key 读取缓存中的值，未命中返回 404。
+      responses:
+        "200":
+          description: 读取成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CacheGetResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+    post:
+      operationId: setCache
+      tags: [internal]
+      summary: 写入缓存
+      description: 将 value 写入缓存，超过 ttl_seconds 后自动过期。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CacheSetRequest" }
+      responses:
+        "200":
+          description: 写入成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CacheSetResponse" }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+
+  /internal/bot-health-checker/alive:
+    get:
+      operationId: internalHealthAliveCheck
+      tags: [internal]
+      summary: 内部存活检查
+      description: 用于内部服务间健康检查的轻量存活检测端点。
+      responses:
+        "200":
+          description: 存活。
+
+components:
+  securitySchemes:
+    meshAuth:
+      $ref: "./_shared.yaml#/components/securitySchemes/meshAuth"
+
+  schemas:
+    ForwardRequest:
+      type: object
+      required: [action, machine_id, params, request_id]
+      properties:
+        action:
+          type: string
+          description: 要执行的动作（如 execute_command）。
+        machine_id:
+          type: string
+          description: 目标机器 ID，用于 BaaS 内部路由。
+        params:
+          type: object
+          additionalProperties: true
+          description: 动作参数（转发给 mng daemon）。
+        request_id:
+          type: string
+          description: 唯一请求 ID，用于关联追踪。
+
+    CacheSetRequest:
+      type: object
+      required: [value, ttl_seconds]
+      properties:
+        value:
+          type: string
+        ttl_seconds:
+          type: integer
+          minimum: 1
+          maximum: 2592000
+          description: 过期时间（秒），1 到 30 天。
+
+    CacheSetResponse:
+      type: object
+      properties:
+        key:
+          type: string
+        ttl_seconds:
+          type: integer
+
+    CacheGetResponse:
+      type: object
+      properties:
+        key:
+          type: string
+        value:
+          type: string

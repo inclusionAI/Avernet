@@ -1,0 +1,525 @@
+openapi: 3.1.0
+info:
+  title: API — 发布流水线
+  version: "2026-06-30"
+  description: >
+    secbaas 发布流水线分组（**当前态**）。管理 Bot 生命周期变更的多阶段部署流水线，
+    包括创建、审批、执行、完成与重试。
+
+    **认证**：使用 Buservice 会话 Cookie（`bcs_session`）。
+
+    **响应**：使用 `ApiResponse` 信封（`{code, message, data}`），`code=0` 表示成功。
+
+servers:
+  - url: https://secbaas.alipay.com
+    description: 生产环境
+  - url: https://secbaas-pre.alipay.com
+    description: 预发环境（staging）
+
+security:
+  - ssoCookie: []
+
+tags:
+  - name: publishes
+    description: 发布流水线 —— 创建、审批、执行、完成与重试。
+
+paths:
+  /api/v1/publishes:
+    post:
+      operationId: createPublish
+      tags: [publishes]
+      summary: 创建发布
+      description: >
+        创建一个新的发布操作。创建后的发布记录进入 PENDING 状态（等待审批），
+        根据发布类型生成批次配置。
+      parameters:
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePublishRequest" }
+      responses:
+        "200":
+          description: 创建成功，返回发布 ID 和状态。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishResponse" }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "409": { $ref: "./_shared.yaml#/components/responses/Conflict" }
+
+  /api/v1/publishes/{publish_id}:
+    get:
+      operationId: getPublish
+      tags: [publishes]
+      summary: 查询发布详情
+      parameters:
+        - { name: publish_id, in: path, required: true, schema: { type: integer }, description: 发布 ID。 }
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+      responses:
+        "200":
+          description: 查询成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/publishes/{publish_id}/progress:
+    get:
+      operationId: getPublishProgress
+      tags: [publishes]
+      summary: 查询发布进度
+      description: >
+        返回发布操作的详细进度信息，包括总体进度百分比、各阶段分解、
+        设备操作统计和时序信息。`include_devices=true` 时返回设备级详情。
+      parameters:
+        - { name: publish_id, in: path, required: true, schema: { type: integer }, description: 发布 ID。 }
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+        - { name: include_devices, in: query, required: false, schema: { type: boolean, default: false }, description: 是否返回设备级详情（用于重试场景）。 }
+      responses:
+        "200":
+          description: 查询成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishProgressResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/publishes/{publish_id}/start-progress:
+    get:
+      operationId: getPublishStartProgress
+      tags: [publishes]
+      summary: 通过发布 ID 查询 Bot 设备启动进度
+      description: >
+        通过 publish_id 解析为 bot_uuid，查询 Bot 活跃设备的容器启动进度。
+        仅支持 LOCAL 平台。
+      parameters:
+        - { name: publish_id, in: path, required: true, schema: { type: integer }, description: 发布 ID。 }
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+        - { name: device_affinity, in: query, required: false, schema: { type: string, nullable: true }, description: 设备亲和性过滤（可选）。 }
+      responses:
+        "200":
+          description: 查询成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StartProgressResponse" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+        "500": { $ref: "./_shared.yaml#/components/responses/InternalError" }
+        "501":
+          description: 平台不支持（非 LOCAL 平台）（HTTP 501）。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "./_shared.yaml#/components/schemas/Envelope" }
+        "503":
+          description: 服务不可用（HTTP 503）。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "./_shared.yaml#/components/schemas/Envelope" }
+
+  /api/v1/publishes/{publish_id}/approve:
+    post:
+      operationId: approvePublishStage
+      tags: [publishes]
+      summary: 批准当前阶段
+      description: >
+        批准发布当前阶段并继续。PENDING → ACTIVE，或 APPROVING → 下一阶段。
+      parameters:
+        - { name: publish_id, in: path, required: true, schema: { type: integer } }
+        - { name: tenant, in: query, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApproveRequest" }
+      responses:
+        "200":
+          description: 批准成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+        "409": { $ref: "./_shared.yaml#/components/responses/Conflict" }
+
+  /api/v1/publishes/{publish_id}/reject:
+    post:
+      operationId: rejectPublish
+      tags: [publishes]
+      summary: 拒绝发布
+      description: >
+        在审批关卡拒绝发布。仅可拒绝 PENDING 或 APPROVING 状态的发布，过渡到 REJECTED。
+      parameters:
+        - { name: publish_id, in: path, required: true, schema: { type: integer } }
+        - { name: tenant, in: query, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RejectRequest" }
+      responses:
+        "200":
+          description: 拒绝成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishResponse" }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/publishes/{publish_id}/revoke:
+    post:
+      operationId: revokePublish
+      tags: [publishes]
+      summary: 撤销发布
+      description: >
+        在批准后撤销发布。仅可撤销 APPROVING 状态的发布，过渡到 REVOKED。
+      parameters:
+        - { name: publish_id, in: path, required: true, schema: { type: integer } }
+        - { name: tenant, in: query, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RevokeRequest" }
+      responses:
+        "200":
+          description: 撤销成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishResponse" }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/publishes/{publish_id}/execute:
+    post:
+      operationId: executePublishStage
+      tags: [publishes]
+      summary: 执行当前阶段
+      description: >
+        处理当前阶段的待处理批次，执行设备排空和滚动更新。仅可在 ACTIVE 状态下执行。
+        返回执行结果包括排空状态。
+      parameters:
+        - { name: publish_id, in: path, required: true, schema: { type: integer } }
+        - { name: tenant, in: query, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExecuteRequest" }
+      responses:
+        "200":
+          description: 执行结果。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrainResultResponse" }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+        "409": { $ref: "./_shared.yaml#/components/responses/Conflict" }
+
+  /api/v1/publishes/{publish_id}/complete:
+    post:
+      operationId: completePublish
+      tags: [publishes]
+      summary: 完成发布
+      description: >
+        将发布标记为成功完成。过渡到 SUCCESS 状态并递增 Bot 版本。
+        应在所有阶段完成后调用。
+      parameters:
+        - { name: publish_id, in: path, required: true, schema: { type: integer } }
+        - { name: tenant, in: query, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CompleteRequest" }
+      responses:
+        "200":
+          description: 完成成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishResponse" }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/publishes/{publish_id}/retry:
+    post:
+      operationId: retryPublish
+      tags: [publishes]
+      summary: 重试失败的发布
+      description: >
+        为失败的发布创建新的发布（包含相同的 bot_id、publish_type 和 config），
+        新发布从 PENDING 状态开始。仅适用于 FAILED 状态的发布。
+      parameters:
+        - { name: publish_id, in: path, required: true, schema: { type: integer }, description: 原始失败的发布 ID。 }
+        - { name: tenant, in: query, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RetryRequest" }
+      responses:
+        "200":
+          description: 重试成功，返回新的发布记录。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishResponse" }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/publish/device-callback:
+    post:
+      operationId: deviceCallback
+      tags: [publishes]
+      summary: 设备启动回调
+      description: >
+        接收设备启动钩子的执行结果。驱动状态更新链：device → publish_record → batch → publish → bot。
+        幂等：已处理的记录忽略重复回调。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeviceCallbackRequest" }
+      responses:
+        "200":
+          description: 回调处理成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceCallbackResponse" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+        "500": { $ref: "./_shared.yaml#/components/responses/InternalError" }
+
+components:
+  securitySchemes:
+    ssoCookie:
+      $ref: "./_shared.yaml#/components/securitySchemes/ssoCookie"
+
+  schemas:
+    PublishConfig:
+      type: object
+      description: 发布配置 —— 阶段/批次/排空设置。
+      properties:
+        target_count:
+          type: integer
+          nullable: true
+        drain_timeout_seconds:
+          type: integer
+          nullable: true
+        auto_complete:
+          type: boolean
+          default: true
+        stages:
+          type: object
+          additionalProperties: true
+          nullable: true
+
+    CreatePublishRequest:
+      type: object
+      required: [bot_id, publish_type, operator]
+      properties:
+        bot_id:
+          type: integer
+          description: Bot ID。
+        publish_type:
+          type: string
+          enum: [CREATE, UPDATE, RESTART, SCALE_UP, SCALE_DOWN, DESTROY]
+        operator:
+          type: string
+          minLength: 1
+          maxLength: 128
+        config:
+          nullable: true
+          $ref: "#/components/schemas/PublishConfig"
+        request_id:
+          type: string
+          minLength: 32
+          maxLength: 64
+          nullable: true
+
+    ApproveRequest:
+      type: object
+      required: [operator]
+      properties:
+        operator:
+          type: string
+          minLength: 1
+          maxLength: 128
+        comment:
+          type: string
+          maxLength: 512
+          nullable: true
+
+    RejectRequest:
+      type: object
+      required: [operator, reason]
+      properties:
+        operator:
+          type: string
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 512
+
+    RevokeRequest:
+      type: object
+      required: [operator]
+      properties:
+        operator:
+          type: string
+        reason:
+          type: string
+          maxLength: 512
+          nullable: true
+
+    ExecuteRequest:
+      type: object
+      required: [operator]
+      properties:
+        operator:
+          type: string
+
+    CompleteRequest:
+      type: object
+      required: [operator]
+      properties:
+        operator:
+          type: string
+
+    RetryRequest:
+      type: object
+      required: [operator]
+      properties:
+        operator:
+          type: string
+        config:
+          nullable: true
+          $ref: "#/components/schemas/PublishConfig"
+
+    DeviceCallbackRequest:
+      type: object
+      description: 设备启动回调请求。
+      properties:
+        device_uuid:
+          type: string
+        status:
+          type: string
+        message:
+          type: string
+          nullable: true
+
+    PublishResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        bot_id:
+          type: integer
+        publish_type:
+          type: string
+        status:
+          type: string
+        stages:
+          type: object
+          additionalProperties: true
+          nullable: true
+        config:
+          nullable: true
+          $ref: "#/components/schemas/PublishConfig"
+        gmt_create:
+          type: string
+          format: date-time
+          nullable: true
+        gmt_modified:
+          type: string
+          format: date-time
+          nullable: true
+
+    PublishProgressResponse:
+      type: object
+      properties:
+        publish_id:
+          type: integer
+        status:
+          type: string
+        current_stage:
+          type: string
+          nullable: true
+        overall_progress:
+          type: object
+          properties:
+            total_batches:
+              type: integer
+            completed_batches:
+              type: integer
+            total_devices:
+              type: integer
+            processed_devices:
+              type: integer
+            failed_devices:
+              type: integer
+            progress_percentage:
+              type: number
+        stages:
+          type: array
+          items: { type: object }
+          nullable: true
+        timeline:
+          type: object
+          nullable: true
+        device_details:
+          type: array
+          items: { type: object }
+          nullable: true
+
+    DrainResultResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        sessions_remaining:
+          type: integer
+        duration_seconds:
+          type: number
+        timeout_reached:
+          type: boolean
+          default: false
+
+    DeviceCallbackResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties: { data: { type: object, additionalProperties: true } }
+
+    StartProgressResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                progress:
+                  type: string
+                  description: 设备启动进度信息。
+                error_message:
+                  type: string
+                  nullable: true
+                  description: 错误信息（如有）。

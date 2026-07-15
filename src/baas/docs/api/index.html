@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>API 文档</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, system-ui, sans-serif; }
+    #bar {
+      position: sticky; top: 0; z-index: 10; display: flex; gap: 14px;
+      align-items: center; padding: 8px 16px; background: #1f2933; color: #fff;
+      font-size: 14px; flex-wrap: wrap;
+    }
+    #bar select { padding: 4px 8px; font-size: 14px; }
+    #bar .grp { display: flex; gap: 6px; align-items: center; }
+    #err { color: #f88; }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <strong>API 文档</strong>
+    <span class="grp">分组：<select id="spec"></select></span>
+    <span id="err"></span>
+  </div>
+  <div id="redoc"></div>
+
+  <script src="https://unpkg.com/redoc@2/bundles/redoc.standalone.js"></script>
+  <script src="https://unpkg.com/js-yaml@4/dist/js-yaml.min.js"></script>
+  <script>
+    // Each entry: { label, path-relative-to-this-dir }.
+    // Add a line here when you author a new group fragment.
+    const SPECS = [
+      { label: "第 1 组 — Bot · 生命周期与管理", path: "bots.yaml" },
+      { label: "第 2 组 — 发布流水线", path: "publishes.yaml" },
+      { label: "第 3 组 — 开放 API（外部调用）", path: "open-api.yaml" },
+      { label: "第 4 组 — BCN 下行链路", path: "bcn-downlink.yaml" },
+      { label: "第 5 组 — Bot 运行时（命令/HTTP/WS）", path: "bot-runtime.yaml" },
+      { label: "第 6 组 — Bot 健康检查", path: "health-checker.yaml" },
+      { label: "第 7 组 — 内部服务", path: "internal.yaml" },
+      { label: "第 8 组 — 配置管理", path: "config.yaml" },
+    ];
+    const SHARED_REF = "./_shared.yaml";
+
+    const specSel = document.getElementById("spec");
+    const errEl = document.getElementById("err");
+    SPECS.forEach(s => {
+      const o = document.createElement("option");
+      o.value = s.path; o.textContent = s.label; specSel.appendChild(o);
+    });
+
+    const qp = new URLSearchParams(location.search);
+    if (qp.get("spec")) specSel.value = qp.get("spec");
+
+    async function fetchYaml(path) {
+      const r = await fetch(path, { cache: "no-store" });
+      if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
+      return jsyaml.load(await r.text());
+    }
+
+    // Merge _shared.yaml components into the group and rewrite external refs to
+    // local ones, so the resulting object is self-contained (Redoc can't resolve
+    // relative external $refs when handed a parsed object instead of a URL).
+    function bundleShared(group, shared) {
+      group.components = group.components || {};
+      const sc = shared.components || {};
+      for (const sec in sc) {
+        group.components[sec] = group.components[sec] || {};
+        for (const name in sc[sec]) {
+          const existing = group.components[sec][name];
+          const isExternalRef = existing && typeof existing === "object"
+            && typeof existing.$ref === "string" && existing.$ref.startsWith(SHARED_REF + "#");
+          if (!(name in group.components[sec]) || isExternalRef) {
+            group.components[sec][name] = sc[sec][name];
+          }
+        }
+      }
+      rewriteRefs(group);
+      return group;
+    }
+    function rewriteRefs(node) {
+      if (Array.isArray(node)) { node.forEach(rewriteRefs); return; }
+      if (node && typeof node === "object") {
+        for (const k in node) {
+          if (k === "$ref" && typeof node[k] === "string" && node[k].startsWith(SHARED_REF + "#")) {
+            node[k] = node[k].slice(SHARED_REF.length);
+          } else {
+            rewriteRefs(node[k]);
+          }
+        }
+      }
+    }
+
+    async function render() {
+      errEl.textContent = "";
+      const path = specSel.value;
+      const base = path.slice(0, path.lastIndexOf("/") + 1) || "./";
+      try {
+        const [group, shared] = await Promise.all([
+          fetchYaml(path),
+          fetchYaml(base + "_shared.yaml"),
+        ]);
+        const spec = bundleShared(group, shared);
+        Redoc.init(spec, { hideDownloadButton: false, expandResponses: "200,201" },
+          document.getElementById("redoc"));
+      } catch (e) {
+        errEl.textContent = "加载失败：" + e.message;
+        console.error(e);
+      }
+    }
+
+    specSel.addEventListener("change", render);
+    render();
+  </script>
+</body>
+</html>

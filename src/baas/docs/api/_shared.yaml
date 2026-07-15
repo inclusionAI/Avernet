@@ -1,0 +1,190 @@
+openapi: 3.1.0
+info:
+  title: API — 共享组件（Shared Components）
+  version: "2026-06-30"
+  description: >
+    所有分组片段共用的组件：鉴权方案、统一响应信封、错误体、追踪头与可复用错误
+    响应。各分组 YAML 通过 `$ref: "./_shared.yaml#/components/..."` 引用，避免重复。
+    本文件不定义任何路径。
+paths: {}
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API-Key
+      description: >
+        开放 API 认证：Bearer Token 模式携带 API 密钥。密钥通过 `POST /api/v1/admin/api-keys`
+        管理，有三种状态：`ACTIVE`（活跃）、`INACTIVE`（非活跃）、`REVOKED`（已吊销）。
+        只有 `ACTIVE` 状态的密钥可通过认证。
+
+        请求头：`Authorization: Bearer <api-key>`
+
+        认证失败返回 HTTP 401、`code:401000`。
+
+    appSpecificApiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: API-Key
+      description: >
+        特定 app_type 的 API Key 认证。某些端点（如 Bot Health Checker、Sandbox Device）
+        要求 API Key 的 app_type 为特定值（如 "health-checker"）。认证失败且 app_type
+        不匹配时返回 HTTP 403。
+
+    ssoCookie:
+      type: apiKey
+      in: cookie
+      name: bcs_session
+      description: >
+        内部管理端点认证：基于 Buservice（蚂蚁集团统一认证服务）的用户会话 Cookie。
+        通过 `Cookie: bcs_session=<session>` 传递用户会话，服务端解析当前登录用户。
+        认证失败返回 HTTP 302，重定向到登录页面。
+
+        鉴权使用 Antbuservice 权限平台配合 HMAC-SHA256 签名请求，部分操作需特定
+        权限码（如 `agentclaw_system_config_admin`）。
+
+    meshAuth:
+      type: apiKey
+      in: header
+      name: X-Mesh-Internal
+      description: >
+        内部服务间调用认证（纯声明式）：`/internal/*` 端点供 backend (agentclaw) 等
+        内部服务通过 MOSN 服务网格调用，安全依赖网络隔离，不要求 Bearer Token。
+        本 scheme 仅为文档占位，实际不执行应用层鉴权。
+
+  schemas:
+    # 统一响应信封：所有响应（成功与失败）同构。
+    Envelope:
+      type: object
+      description: >
+        统一响应信封。所有成功与失败响应都使用本结构。
+      required: [code, message, request_id]
+      properties:
+        code:
+          type: integer
+          description: >
+            6 位状态码：前 3 位为 HTTP 状态码，后 3 位为业务子码（`000` 为该状态的默认）。
+            示例：成功 `200000`、创建成功 `201000`、入参非法 `400000`、未认证 `401000`、
+            无权限 `403000`、不存在 `404000`、冲突 `409000`、超出配额 `429000`、
+            服务端错误 `500000`。
+          examples: [200000, 404002]
+        message:
+          type: string
+          description: 可读状态信息，**始终为英文**（成功时通常为 "OK"）。
+        data:
+          nullable: true
+          description: 接口负载；失败时为 null。
+        request_id:
+          type: string
+          description: 请求追踪 ID，用于问题定位（需 32-64 字符，字母/数字/连字符/下划线）。
+      example: { code: 200000, message: "OK", data: null, request_id: "487ec32cf90b424195f6786651ac1ba5" }
+
+    # 分页列表数据结构
+    PaginatedData:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          description: 数据项列表。
+          items: {}
+        total:
+          type: integer
+          description: 总记录数。
+
+    # 分页响应结构
+    PaginatedResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: 总记录数。
+        page:
+          type: integer
+          description: 当前页码。
+        page_size:
+          type: integer
+          description: 每页记录数。
+        items:
+          type: array
+          description: 当前页数据项列表。
+          items: {}
+
+    # 通用成功结构
+    SuccessData:
+      type: object
+      properties:
+        success:
+          type: boolean
+          description: 操作是否成功。
+          default: true
+        message:
+          type: string
+          description: 操作结果消息。
+          default: "Operation completed successfully"
+
+  headers:
+    XTraceId:
+      description: 请求追踪 id，在每个响应上回显以便关联排查。
+      schema: { type: string }
+
+  # 目标态错误响应：统一 Envelope，真实 HTTP 状态码 + 6 位 code（默认 xxx000）。
+  responses:
+    BadRequest:
+      description: 入参非法（HTTP 400，默认 `code:400000`）。
+      headers:
+        X-Trace-Id: { $ref: "#/components/headers/XTraceId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+          example: { code: 400000, message: "invalid request", data: null, request_id: "req-400a" }
+    Unauthorized:
+      description: >
+        未认证（HTTP 401，默认 `code:401000`）。API Key 缺失/无效、或 Buservice 会话
+        未登录。**不做 302 浏览器重定向**：客户端据此重新获取认证凭据后重试。
+      headers:
+        X-Trace-Id: { $ref: "#/components/headers/XTraceId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+          example: { code: 401000, message: "authentication required", data: null, request_id: "req-401a" }
+    Forbidden:
+      description: 无权限访问，app_type 不匹配或缺少管理员权限（HTTP 403，默认 `code:403000`）。
+      headers:
+        X-Trace-Id: { $ref: "#/components/headers/XTraceId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+          example: { code: 403000, message: "permission denied", data: null, request_id: "req-403a" }
+    NotFound:
+      description: 资源不存在（HTTP 404，默认 `code:404000`）。
+      headers:
+        X-Trace-Id: { $ref: "#/components/headers/XTraceId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+          example: { code: 404000, message: "not found", data: null, request_id: "req-404a" }
+    Conflict:
+      description: 与现有资源状态冲突（如重名、重复创建）（HTTP 409，默认 `code:409000`）。
+      headers:
+        X-Trace-Id: { $ref: "#/components/headers/XTraceId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+          example: { code: 409000, message: "resource conflict", data: null, request_id: "req-409a" }
+    TooManyRequests:
+      description: 超出配额 / 频率限制（HTTP 429，默认 `code:429000`）。
+      headers:
+        X-Trace-Id: { $ref: "#/components/headers/XTraceId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+          example: { code: 429000, message: "quota exceeded", data: null, request_id: "req-429a" }
+    InternalError:
+      description: 服务端发生未预期的错误（HTTP 500，默认 `code:500000`）。
+      headers:
+        X-Trace-Id: { $ref: "#/components/headers/XTraceId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+          example: { code: 500000, message: "internal error", data: null, request_id: "req-500a" }

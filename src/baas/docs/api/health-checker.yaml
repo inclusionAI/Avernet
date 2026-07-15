@@ -1,0 +1,208 @@
+openapi: 3.1.0
+info:
+  title: API — Bot 健康检查
+  version: "2026-06-30"
+  description: >
+    secbaas Bot 健康检查分组（**当前态**）。提供 Bot 设备的活跃查询、
+    健康检查、TTL 延长和沙箱设备管理能力。
+
+    **认证**：使用 Bearer Token 携带 API Key，且 app_type 必须为 `health-checker`。
+    非 `health-checker` 类型的 API Key 会收到 HTTP 403。
+
+    - **Bot Health Checker 端点**（前缀 `/api/v1/bot-health-checker`）：需
+      API Key 的 `app_type="health-checker"`。
+    - **Sandbox Device 端点**（前缀 `/api/v1/sandbox-device`）：同样需
+      `app_type="health-checker"`。
+
+servers:
+  - url: https://secbaas.alipay.com
+    description: 生产环境
+  - url: https://secbaas-pre.alipay.com
+    description: 预发环境（staging）
+
+security:
+  - appSpecificApiKey: []
+
+tags:
+  - name: health-checker
+    description: Bot 健康检查 —— 活跃设备查询、健康检查、TTL 延长。
+  - name: sandbox-device
+    description: 沙箱设备管理 —— 激活沙箱查询、探活告警、续期。
+
+paths:
+  /api/v1/bot-health-checker/active_bots:
+    get:
+      operationId: listActiveBots
+      tags: [health-checker]
+      summary: 查询活跃 Bot 设备列表
+      description: 分页查询所有活跃 Bot 的设备列表。
+      parameters:
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: page_size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: 查询成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "./_shared.yaml#/components/responses/Forbidden" }
+
+  /api/v1/bot-health-checker/devices:
+    get:
+      operationId: listBotHealthDevices
+      tags: [health-checker]
+      summary: 查询指定 Bot 的 PaaS 设备列表
+      parameters:
+        - { name: bot_id, in: query, required: true, schema: { type: string }, description: Bot ID。 }
+      responses:
+        "200":
+          description: 查询成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "./_shared.yaml#/components/responses/Forbidden" }
+
+  /api/v1/bot-health-checker/ttl/extend:
+    post:
+      operationId: extendBotTtl
+      tags: [health-checker]
+      summary: 延长 Bot 设备 TTL
+      description: 延长指定 Bot 设备的生存时间（TTL）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExtendTtlRequest" }
+      responses:
+        "200":
+          description: 延长成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "./_shared.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/bot-health-checker/health:
+    get:
+      operationId: checkBotHealth
+      tags: [health-checker]
+      summary: 执行 Bot 设备健康检查
+      parameters:
+        - { name: bot_uuid, in: query, required: true, schema: { type: string }, description: Bot UUID。 }
+      responses:
+        "200":
+          description: 健康检查结果。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "./_shared.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/bot-health-checker/alive:
+    get:
+      operationId: checkBotAlive
+      tags: [health-checker]
+      summary: 检查 Bot 是否存活
+      parameters:
+        - { name: bot_uuid, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 存活检查结果。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "./_shared.yaml#/components/responses/Forbidden" }
+
+  /api/v1/bot-health-checker/sandbox:
+    get:
+      operationId: getBotHealthSandbox
+      tags: [health-checker]
+      summary: 查询沙箱信息
+      parameters:
+        - { name: bot_uuid, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 沙箱信息。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "./_shared.yaml#/components/responses/Forbidden" }
+
+  /api/v1/sandbox-device/active-sandboxes:
+    get:
+      operationId: listActiveSandboxes
+      tags: [sandbox-device]
+      summary: 分页查询激活沙箱设备
+      parameters:
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: page_size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: 查询成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "./_shared.yaml#/components/responses/Forbidden" }
+
+  /api/v1/sandbox-device/probe-and-warn:
+    post:
+      operationId: probeAndWarn
+      tags: [sandbox-device]
+      summary: 探活告警
+      description: 对沙箱设备进行探活检测，超过阈值则发出告警。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProbeAndWarnRequest" }
+      responses:
+        "200":
+          description: 探活告警结果。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "./_shared.yaml#/components/responses/Forbidden" }
+
+  /api/v1/sandbox-device/renew-ttl:
+    post:
+      operationId: renewSandboxTtl
+      tags: [sandbox-device]
+      summary: 续期沙箱设备
+      description: 延长沙箱设备的 TTL。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RenewTtlRequest" }
+      responses:
+        "200":
+          description: 续期结果。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "403": { $ref: "./_shared.yaml#/components/responses/Forbidden" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    appSpecificApiKey:
+      $ref: "./_shared.yaml#/components/securitySchemes/appSpecificApiKey"
+
+  schemas:
+    ExtendTtlRequest:
+      type: object
+      properties:
+        bot_uuid:
+          type: string
+        ttl_minutes:
+          type: integer
+          minimum: 1
+
+    ProbeAndWarnRequest:
+      type: object
+      properties:
+        bot_uuid:
+          type: string
+
+    RenewTtlRequest:
+      type: object
+      properties:
+        bot_uuid:
+          type: string
+        ttl_minutes:
+          type: integer
+          minimum: 1

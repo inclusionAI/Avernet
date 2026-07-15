@@ -1,0 +1,720 @@
+openapi: 3.1.0
+info:
+  title: API — Bot · 生命周期与管理
+  version: "2026-06-30"
+  description: >
+    secbaas Bot 分组（**当前态**）。Bot 的创建、查询、更新、销毁、扩缩容、重启及设备状态查询。
+
+    **认证**：使用 Buservice 会话 Cookie（`bcs_session`）。
+
+    **响应**：使用 `ApiResponse` 信封（`{code, message, data}`），`code=0` 表示成功。
+    所有端点需要在查询参数中显式传递 `tenant`。
+
+servers:
+  - url: https://secbaas.alipay.com
+    description: 生产环境
+  - url: https://secbaas-pre.alipay.com
+    description: 预发环境（staging）
+
+security:
+  - ssoCookie: []
+
+tags:
+  - name: bot-management
+    description: Bot 生命周期管理 —— 创建、查询、更新、销毁、扩缩容、重启。
+
+paths:
+  /api/v1/bots:
+    get:
+      operationId: listBots
+      tags: [bot-management]
+      summary: 查询 Bot 列表
+      description: >
+        分页查询租户下的 Bot 列表。支持按状态过滤。
+      parameters:
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: page_size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: status, in: query, required: false, schema: { type: string }, description: "状态过滤（如 ACTIVE、PENDING、FAILED、DESTROYING、RELEASED）。" }
+      responses:
+        "200":
+          description: 查询成功，返回 Bot 列表。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BotListResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+
+    post:
+      operationId: createBot
+      tags: [bot-management]
+      summary: 创建 Bot
+      description: >
+        创建一个新 Bot。需指定名称、模板 UUID、设备数量和操作人。
+        通过发布工作流异步创建设备，返回创建的 Bot 及 `publish_id`。
+      parameters:
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateBotRequest" }
+      responses:
+        "200":
+          description: 创建成功，返回 Bot 信息及发布 ID。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateBotResponse" }
+              example: { code: 0, message: "success", data: { bot_uuid: "abc123", publish_id: 1 } }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "409": { $ref: "./_shared.yaml#/components/responses/Conflict" }
+
+  /api/v1/bots/{bot_uuid}:
+    parameters:
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID（业务标识）。 }
+    get:
+      operationId: getBot
+      tags: [bot-management]
+      summary: 查询单个 Bot
+      description: >
+        根据 Bot UUID 查询 Bot 的详细信息。
+      parameters:
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+      responses:
+        "200":
+          description: 查询成功，返回 Bot 详情。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BotResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/bots/{bot_uuid}/detail-by-uuid:
+    parameters:
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+    get:
+      operationId: getBotDetailByUuid
+      tags: [bot-management]
+      summary: 查询 Bot 详情（含设备信息）
+      description: >
+        根据 Bot UUID 查询所有关联的 Bot 记录及其设备列表。
+        一个 Bot UUID 可能有多条记录（不同状态），每条记录包含关联的设备列表。
+      parameters:
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+      responses:
+        "200":
+          description: 查询成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BotListResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/bots/{bot_id}/detail-by-id:
+    parameters:
+      - { name: bot_id, in: path, required: true, schema: { type: integer }, description: Bot ID（内部数据库 ID）。 }
+    get:
+      operationId: getBotDetailById
+      tags: [bot-management]
+      summary: 按内部 ID 查询 Bot 详情
+      description: >
+        根据 Bot 的内部数据库 ID，查询单个 Bot 及其关联设备。
+      parameters:
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+      responses:
+        "200":
+          description: 查询成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BotResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/bots/{bot_uuid}/update:
+    parameters:
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+    post:
+      operationId: updateBot
+      tags: [bot-management]
+      summary: 更新 Bot
+      description: >
+        更新 Bot 的名称、描述或配置。配置变更是触发 UPDATE 发布的信号。
+      parameters:
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateBotRequest" }
+      responses:
+        "200":
+          description: 更新成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateBotResponse" }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/bots/{bot_uuid}/destroy:
+    parameters:
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+    post:
+      operationId: destroyBot
+      tags: [bot-management]
+      summary: 销毁 Bot
+      description: >
+        通过发布工作流销毁 Bot 及其关联设备。返回 Bot 信息和 `publish_id`。
+      parameters:
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DestroyBotRequest" }
+      responses:
+        "200":
+          description: 销毁成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DestroyBotResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+        "409": { $ref: "./_shared.yaml#/components/responses/Conflict" }
+
+  /api/v1/bots/{bot_uuid}/stop:
+    parameters:
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+    post:
+      operationId: stopBot
+      tags: [bot-management]
+      summary: 停止 Bot
+      description: >
+        停止 Bot 并释放关联资源。通过发布工作流执行。
+      parameters:
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StopBotRequest" }
+      responses:
+        "200":
+          description: 停止成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StopBotResponse" }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/bots/{bot_uuid}/scale:
+    parameters:
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+    post:
+      operationId: scaleBot
+      tags: [bot-management]
+      summary: 扩缩容 Bot
+      description: >
+        将 Bot 的设备数调整到目标数量。通过发布工作流执行扩缩容。
+      parameters:
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScaleBotRequest" }
+      responses:
+        "200":
+          description: 扩缩容成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScaleBotResponse" }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/bots/{bot_uuid}/restart:
+    parameters:
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+    post:
+      operationId: restartBot
+      tags: [bot-management]
+      summary: 重启 Bot
+      description: >
+        重启 Bot 的设备。支持 `scope` 参数指定重启范围：
+        - `all`（默认）：重启所有 ACTIVE 和 FAILED 设备
+        - `unhealthy`：仅重启 FAILED 设备
+      parameters:
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RestartBotRequest" }
+      responses:
+        "200":
+          description: 重启成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RestartBotResponse" }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/bots/{bot_uuid}/update-devices:
+    parameters:
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+    post:
+      operationId: updateBotDevices
+      tags: [bot-management]
+      summary: 更新指定 Bot 设备
+      description: >
+        对指定的设备 UUID 列表执行销毁+重建周期。仅影响指定设备，Bot 记录状态不变。
+      parameters:
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateDevicesRequest" }
+      responses:
+        "200":
+          description: 更新成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateDevicesResponse" }
+        "400": { $ref: "./_shared.yaml#/components/responses/BadRequest" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/bots/{bot_uuid}/device-status:
+    parameters:
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+    get:
+      operationId: getBotDeviceStatus
+      tags: [bot-management]
+      summary: 查询 Bot 设备聚合状态
+      description: >
+        返回 Bot 所有设备的聚合状态：全部在线、全部离线或部分在线/离线，
+        并包含详细的设备数量统计。
+      parameters:
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+      responses:
+        "200":
+          description: 查询成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BotDeviceStatusResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+  /api/v1/bots/{bot_uuid}/devices:
+    parameters:
+      - { name: bot_uuid, in: path, required: true, schema: { type: string }, description: Bot UUID。 }
+    get:
+      operationId: getBotDevicesByUuid
+      tags: [bot-management]
+      summary: 查询 Bot 关联设备（按 UUID）
+      description: >
+        根据 Bot UUID 查询所有关联 Bot 记录的设备列表。一个 Bot UUID 可能映射到
+        多条记录（不同状态），返回每条记录对应的设备列表。
+      parameters:
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+      responses:
+        "200":
+          description: 查询成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BotDevicesResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+
+  /api/v1/bots/{bot_id}/devices-by-id:
+    parameters:
+      - { name: bot_id, in: path, required: true, schema: { type: integer }, description: Bot ID（内部数据库 ID）。 }
+    get:
+      operationId: getBotDevicesById
+      tags: [bot-management]
+      summary: 查询 Bot 关联设备（按内部 ID）
+      description: >
+        根据 Bot 的内部数据库 ID，分页查询其关联设备及详细状态信息。
+      parameters:
+        - { name: tenant, in: query, required: true, schema: { type: string }, description: 租户名称。 }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: page_size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: 查询成功。
+          headers: { X-Trace-Id: { $ref: "./_shared.yaml#/components/headers/XTraceId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BotDevicesPaginatedResponse" }
+        "401": { $ref: "./_shared.yaml#/components/responses/Unauthorized" }
+        "404": { $ref: "./_shared.yaml#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    ssoCookie:
+      $ref: "./_shared.yaml#/components/securitySchemes/ssoCookie"
+
+  schemas:
+    # ── Shared ──
+    BotConfig:
+      type: object
+      description: Bot 配置（实体与部署设置）。
+      properties:
+        entity_id:
+          type: string
+          nullable: true
+        deploy_env:
+          type: string
+          nullable: true
+        engine_type:
+          type: string
+          nullable: true
+      additionalProperties: true
+
+    # ── Create ──
+    CreateBotRequest:
+      type: object
+      required: [name, template_uuid, device_count, operator]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Bot 名称。
+        template_uuid:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 设备模板 UUID。
+        device_count:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: 初始设备数量。
+        operator:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 操作人。
+        description:
+          type: string
+          maxLength: 512
+          nullable: true
+          description: Bot 描述。
+        config:
+          nullable: true
+          $ref: "#/components/schemas/BotConfig"
+        request_id:
+          type: string
+          minLength: 32
+          maxLength: 64
+          nullable: true
+          description: 请求追踪 ID。
+
+    CreateBotResponse:
+      type: object
+      properties:
+        bot_uuid:
+          type: string
+        publish_id:
+          type: integer
+          nullable: true
+          description: 发布 ID，用于跟踪设备创建进度。
+
+    # ── Update ──
+    UpdateBotRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 128
+          nullable: true
+        description:
+          type: string
+          maxLength: 512
+          nullable: true
+        operator:
+          type: string
+          maxLength: 64
+          default: ""
+        request_id:
+          type: string
+          maxLength: 128
+          nullable: true
+        config:
+          nullable: true
+          $ref: "#/components/schemas/BotConfig"
+
+    UpdateBotResponse:
+      type: object
+      properties:
+        bot_uuid:
+          type: string
+        publish_id:
+          type: integer
+          nullable: true
+
+    # ── Destroy ──
+    DestroyBotRequest:
+      type: object
+      required: [operator, request_id]
+      properties:
+        operator:
+          type: string
+          minLength: 1
+          maxLength: 64
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        auto_approve_publish:
+          type: boolean
+          default: false
+
+    DestroyBotResponse:
+      type: object
+      properties:
+        bot_uuid:
+          type: string
+        publish_id:
+          type: integer
+          nullable: true
+
+    # ── Stop ──
+    StopBotRequest:
+      type: object
+      required: [operator, request_id]
+      properties:
+        operator:
+          type: string
+          minLength: 1
+          maxLength: 64
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        auto_approve_publish:
+          type: boolean
+          default: false
+
+    StopBotResponse:
+      type: object
+      properties:
+        bot_uuid:
+          type: string
+        publish_id:
+          type: integer
+          nullable: true
+
+    # ── Scale ──
+    ScaleBotRequest:
+      type: object
+      required: [target_count, operator]
+      properties:
+        target_count:
+          type: integer
+          minimum: 1
+          maximum: 100
+        operator:
+          type: string
+          minLength: 1
+          maxLength: 64
+        auto_approve_publish:
+          type: boolean
+          default: false
+
+    ScaleBotResponse:
+      type: object
+      properties:
+        bot_uuid:
+          type: string
+        target_count:
+          type: integer
+        publish_id:
+          type: integer
+          nullable: true
+
+    # ── Restart ──
+    RestartBotRequest:
+      type: object
+      required: [operator]
+      properties:
+        operator:
+          type: string
+          minLength: 1
+          maxLength: 64
+        auto_approve_publish:
+          type: boolean
+          default: false
+        scope:
+          type: string
+          enum: [all, unhealthy]
+          default: all
+          description: "重启范围：all（ACTIVE+FAILED）或 unhealthy（仅 FAILED）。"
+
+    RestartBotResponse:
+      type: object
+      properties:
+        bot_uuid:
+          type: string
+        publish_id:
+          type: integer
+          nullable: true
+
+    # ── Update Devices ──
+    UpdateDevicesRequest:
+      type: object
+      required: [operator, device_uuids]
+      properties:
+        operator:
+          type: string
+          minLength: 1
+          maxLength: 64
+        device_uuids:
+          type: array
+          items: { type: string, minLength: 1 }
+          minLength: 1
+          description: 要更新设备的 UUID 列表。
+        auto_approve_publish:
+          type: boolean
+          default: true
+        config:
+          nullable: true
+          $ref: "#/components/schemas/BotConfig"
+
+    UpdateDevicesResponse:
+      type: object
+      properties:
+        bot_uuid:
+          type: string
+        publish_id:
+          type: integer
+          nullable: true
+
+    # ── List / Detail ──
+    BotResponse:
+      type: object
+      properties:
+        bot_uuid:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        version:
+          type: integer
+          nullable: true
+        template_uuid:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        device_count:
+          type: integer
+          nullable: true
+        config:
+          nullable: true
+          $ref: "#/components/schemas/BotConfig"
+        gmt_create:
+          type: string
+          format: date-time
+          nullable: true
+        gmt_modified:
+          type: string
+          format: date-time
+          nullable: true
+
+    BotListData:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/BotResponse" }
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+
+    BotListResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties: { data: { $ref: "#/components/schemas/BotListData" } }
+
+    BotDeviceStatusResponse:
+      type: object
+      properties:
+        overall_status:
+          type: string
+          enum: [all_online, all_offline, partial, unknown]
+        total_devices:
+          type: integer
+        online_count:
+          type: integer
+        offline_count:
+          type: integer
+        failed_count:
+          type: integer
+        pending_count:
+          type: integer
+
+    DeviceListResponseItem:
+      type: object
+      properties:
+        device_uuid:
+          type: string
+        status:
+          type: string
+        provider_type:
+          type: string
+        provider_device_id:
+          type: string
+          nullable: true
+        gmt_create:
+          type: string
+          format: date-time
+          nullable: true
+
+    BotDevicesResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties: { data: { type: array, items: { type: array, items: { $ref: "#/components/schemas/DeviceListResponseItem" } } } }
+
+    DeviceListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/DeviceListResponseItem" }
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+
+    BotDevicesPaginatedResponse:
+      allOf:
+        - { type: object, properties: { code: { type: integer }, message: { type: string } } }
+        - type: object
+          properties: { data: { $ref: "#/components/schemas/DeviceListResponse" } }
