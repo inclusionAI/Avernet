@@ -301,3 +301,68 @@ async def test_ingest_otlp_traces_persists_observations_and_chat_trace(monkeypat
     }
     assert calls["logs"][0]["status"] == "success"
     assert calls["logs"][0]["trace_ids"] == ["trace-ingest"]
+
+
+@pytest.mark.asyncio
+async def test_ingest_otlp_traces_does_not_promote_child_span_to_trace(monkeypatch):
+    calls = {
+        "observations": [],
+        "traces": [],
+        "logs": [],
+    }
+
+    class FakeRepo:
+        def __init__(self, db):
+            self.db = db
+
+        def upsert_ocb_observation(self, observation):
+            calls["observations"].append(observation)
+
+        def upsert_ocb_trace(self, trace, source):
+            calls["traces"].append((trace, source))
+
+    monkeypatch.setattr(otel_router, "BotChatDbRepository", FakeRepo)
+    monkeypatch.setattr(otel_router, "_write_otlp_request_log", lambda **kwargs: calls["logs"].append(kwargs))
+
+    payload = {
+        "resourceSpans": [
+            {
+                "resource": {
+                    "attributes": [
+                        _attr("identity.owner_id", "197444"),
+                        _attr("identity.bot_id", "default"),
+                        _attr("agentic.runtime.name", "openclaw"),
+                    ]
+                },
+                "scopeSpans": [
+                    {
+                        "spans": [
+                            {
+                                "traceId": "trace-child-only",
+                                "spanId": "tool-1",
+                                "parentSpanId": "chat-1",
+                                "name": "tool exec",
+                                "attributes": [
+                                    _attr("gen_ai.span.kind", "TOOL"),
+                                    _attr("gen_ai.conversation.id", "session-key"),
+                                ],
+                            },
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    result = await ingest_otlp_traces(payload=payload, db=object())
+
+    assert result.success is True
+    assert result.data.trace_count == 0
+    assert result.data.observation_count == 1
+    assert calls["observations"][0]["name"] == "tool exec"
+    assert calls["observations"][0]["type"] == "TOOL"
+    assert calls["traces"] == []
+    assert calls["logs"][0]["status"] == "success"
+    assert calls["logs"][0]["trace_count"] == 0
+    assert calls["logs"][0]["observation_count"] == 1
+    assert calls["logs"][0]["trace_ids"] == ["trace-child-only"]
