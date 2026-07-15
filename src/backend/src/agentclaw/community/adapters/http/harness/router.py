@@ -94,6 +94,7 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     CollaboratorPermissionInterceptor,
     with_interceptors,
 )
+from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 
 logger = get_logger()
 
@@ -858,10 +859,14 @@ async def diagnose(
     scanner: ContentScannerProtocol = Injected(ContentScannerProtocol),
     scan_repo: HarnessScanRecordRepository = Injected(HarnessScanRecordRepository),
     patch_planner: PatchPlannerProtocol = Injected(PatchPlannerProtocol),
+    bot_repo: BotRepository = Injected(BotRepository),
 ):
     """Start an async diagnostic scan. Returns scan_id for polling."""
     if not body.bot_id or not body.entity_id:
         raise HTTPException(status_code=400, detail="bot_id and entity_id are required")
+
+    if not bot_repo.get_by_id_and_owner(body.bot_id, body.entity_id):
+        raise HTTPException(status_code=404, detail=f"Bot not found: {body.bot_id}")
 
     # Dedup check: reject if there is an unfinished scan created within 5 minutes
     if scan_repo.has_active_scan(
