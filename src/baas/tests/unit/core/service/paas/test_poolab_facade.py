@@ -33,7 +33,7 @@ from secbaas.community.core.service.paas import (
     PaasServiceFacade,
     PoolabPaasService,
 )
-from secbaas.plugins.sandbox.poolab import StubPoolabSandboxPlugin
+from secbaas.community.plugins.sandbox.poolab import StubPoolabSandboxPlugin
 
 # ============================================================================
 # Fixtures

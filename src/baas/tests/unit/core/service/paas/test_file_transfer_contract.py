@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import pytest
 
-from secbaas.core.service.paas._arca_paas_service import ArcaPaasService
-from secbaas.core.service.paas._k8s_paas_service import K8sPaasService
-from secbaas.core.service.paas._local_paas_service import LocalPaasService
-from secbaas.core.service.paas._poolab_paas_service import PoolabPaasService
-from secbaas.core.service.paas._sigma_paas_service import SigmaPaasService
-from secbaas.core.service.paas._standalone_paas_service import StandalonePaasService
-from secbaas.core.service.paas._teclaw_paas_service import TeClawPaasService
+from secbaas.community.core.service.paas._arca_paas_service import ArcaPaasService
+from secbaas.community.core.service.paas._k8s_paas_service import K8sPaasService
+from secbaas.community.core.service.paas._local_paas_service import LocalPaasService
+from secbaas.community.core.service.paas._poolab_paas_service import PoolabPaasService
+from secbaas.community.core.service.paas._sigma_paas_service import SigmaPaasService
+from secbaas.community.core.service.paas._standalone_paas_service import StandalonePaasService
+from secbaas.community.core.service.paas._teclaw_paas_service import TeClawPaasService
 
 
 # ---------------------------------------------------------------------------
