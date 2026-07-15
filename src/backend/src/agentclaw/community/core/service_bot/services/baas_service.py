@@ -3216,6 +3216,8 @@ class BaasService:  # pragma: no cover
             params["device_affinity"] = device_affinity
         if device_uuid:
             params["device_uuid"] = device_uuid
+        if ws_conn_mode:
+            params["ws_conn_mode"] = ws_conn_mode
 
         try:
             response = self._http.get(
