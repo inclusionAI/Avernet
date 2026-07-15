@@ -6,8 +6,8 @@ Spec: `spec.md` in this directory. Issue: #197.
 
 One new persistence primitive (the **operation ledger** table + repository),
 one new orchestration primitive (the **step runner** that executes every BaaS
-mutation as `ensure_intent → resolve_in_doubt → record_workflow →
-ensure_approved → finalize`), and then a per-operation rewiring pass that
+mutation as `open (intent) → acquire (workflow) → approve → finalize`), and
+then a per-operation rewiring pass that
 converts each publish operation onto those primitives. The durable task queue
 (existing) absorbs the remaining fire-and-forget paths. One read-only BaaS
 endpoint is added (publishes-by-bot) because the adopt-by-query mechanism
@@ -86,14 +86,26 @@ a new repository:
 API (all synchronous DB ops; the BaaS call is the caller-supplied coroutine):
 
 ```python
-op = runner.ensure_operation(publish_id=..., kind=..., stage=..., params=...,
-                             bot_uuid=...)        # find-or-create intent (PENDING)
-op = await runner.ensure_workflow(op, issue=make_baas_call)   # steps 2+3
-op = runner.ensure_approved(op, operator=...)      # step 4, verify-then-act
-runner.complete(op)  /  runner.fail(op, err)  /  runner.abandon(op, reason)
+op = runner.open_operation(publish_id=..., kind=..., stage=..., params=...,
+                           bot_uuid=...)          # find-or-create intent (PENDING)
+op = await runner.acquire_workflow(op, issue=make_baas_call)   # steps 2+3
+op = runner.approve_workflow(op, operator=...)     # step 4, verify-then-act
+runner.complete_operation(op) / runner.fail_operation(op, err) / runner.abandon_operation(op, reason)
 ```
 
-`ensure_workflow` implements the confirmed resume algorithm:
+**One ledger operation ≠ one BaaS call.** A ledger row models one *logical*
+publish operation, which spans two BaaS calls against the same workflow
+(create/mutate, then approve). Approve is a step on the parent row rather
+than its own operation because it has no identity until the create returns a
+workflow id, it needs none of the in-doubt machinery (it returns no new id —
+its crash recovery is just "read the workflow status, approve if still
+awaiting"), and user-level retry/abandon operates on the logical operation,
+never on the approve alone. Mutations that BaaS auto-approves server-side
+(`auto_approve_publish`) go through the same `approve_workflow` step, which
+resolves to already-approved via the same status read — the model stays
+uniform.
+
+`acquire_workflow` implements the confirmed resume algorithm:
 
 1. `op.baas_publish_id` set → return (already recorded; caller proceeds).
 2. Else if `op.bot_uuid` set (existing-bot mutation) → **ledger differencing**:
@@ -109,13 +121,13 @@ runner.complete(op)  /  runner.fail(op, err)  /  runner.abandon(op, reason)
    with `kind ∈ {*_first_release, eval_publish}` and no id **is** the orphan
    flag; the next attempt abandons it and proceeds (see OQ1 below).
 
-`ensure_approved` is verify-then-act: read the workflow
+`approve_workflow` is verify-then-act: read the workflow
 (`get_publish_progress`), if terminal or past approval mark `APPROVED`
 (no-op call skipped); if awaiting approval call `approve_publish` and CAS
 `ID_RECORDED→APPROVED` **only on success** — an approve exception propagates
 as a step failure (no more swallow-and-return-False).
 
-**Legacy fence / backfill**: `ensure_operation` for a publish record that
+**Legacy fence / backfill**: `open_operation` for a publish record that
 predates the ledger seeds rows from the ext markers it can trust
 (`ext.publish.<stage>`, `ext.restart.<stage>`, `ext.scale.publish_id`) as
 `ID_RECORDED` (approval state unknown → verify-then-act resolves it). This is
@@ -141,7 +153,7 @@ what makes the timestamp fence in step 2 sufficient.
 
 | Operation | Today | Change |
 |---|---|---|
-| Verify/online first release | `ReleaseStageRunner.first_release` 4-step inline | runner op (kind per stage); binding insert + `record_release_ext` keep their order but each records into `result` so re-runs skip; approve via `ensure_approved` after ext write (order unchanged) |
+| Verify/online first release | `ReleaseStageRunner.first_release` 4-step inline | runner op (kind per stage); binding insert + `record_release_ext` keep their order but each records into `result` so re-runs skip; approve via `approve_workflow` after ext write (order unchanged) |
 | Verify/online upgrade | `upgrade_release` inline | runner op; BOT_NOT_FOUND fallback = `abandon(upgrade op)` + open first-release op |
 | Restart | fire-and-forget `asyncio.create_task` | `restart_bot` validates + writes intent + enqueues new durable task `service_bot.publish.restart`; handler runs the runner steps; old marker no longer cleared pre-submit (the new op row supersedes it; `sync_restart_progress` reads the latest restart op) |
 | Scale | timestamp request_id, ext write after call | runner op; deterministic request id; `sync_scale_progress` reads ledger |
