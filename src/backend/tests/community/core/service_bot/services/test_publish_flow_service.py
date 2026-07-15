@@ -2679,6 +2679,29 @@ async def test_process_describe_only_states_do_not_mutate(status, fragment):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status,fragment",
+    [
+        (PublishStatus.UPGRADED, "Superseded"),
+        (PublishStatus.RELEASED, "Taken offline"),
+    ],
+)
+async def test_process_terminal_states_describe_instead_of_raising(status, fragment):
+    # A record can reach a terminal state concurrently (superseded by a newer
+    # publish / taken offline) while a process() call is in flight. process()
+    # describes these gracefully via the _SYNC_ONLY fallback instead of raising
+    # PublishStatusInvalidError.
+    record = _make_publish_record(status=status.value)
+    tq = Mock()
+    svc, publish_service = _svc_with_record(record, task_queue_service=tq)
+    result = await svc.process(publish_id=1, operator="op")
+    assert result.status == status
+    assert fragment in result.message
+    tq.enqueue.assert_not_called()
+    publish_service.update_publish_status.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_process_failed_reports_error_message():
     record = _make_publish_record(
         status=PublishStatus.FAILED.value, ext={"error_message": "boom"}
