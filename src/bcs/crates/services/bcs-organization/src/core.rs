@@ -430,21 +430,18 @@ impl OrganizationCoreService for OrganizationCore {
         else {
             return Ok(None);
         };
-        let Some(bot) = self.registry.get(bot_uuid).await else {
+        let (bot, binding, credentials) = futures::join!(
+            self.registry.get(bot_uuid),
+            self.provider_bindings.get_binding_by_bot_uuid(bot_uuid),
+            self.registry.get_agent_credentials(bot_uuid),
+        );
+        let Some(bot) = bot else {
             return Ok(Some(OrganizationMemberDetail { member, bot: None }));
         };
-        let Some(binding) = self
-            .provider_bindings
-            .get_binding_by_bot_uuid(bot_uuid)
-            .await?
-        else {
+        let Some(binding) = binding? else {
             return Ok(Some(OrganizationMemberDetail { member, bot: None }));
         };
-        let agent_code = self
-            .registry
-            .get_agent_credentials(bot_uuid)
-            .await
-            .and_then(|credentials| credentials.agent_code);
+        let agent_code = credentials.and_then(|credentials| credentials.agent_code);
 
         Ok(Some(OrganizationMemberDetail {
             member,
