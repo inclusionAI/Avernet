@@ -4,7 +4,7 @@ WORK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 CONFIG_DIR="$WORK_DIR/configs"
 VENV_DIR="$WORK_DIR/.venv"
-WORKSPACE_VENV_DIR="$(cd "$WORK_DIR"/../.. && pwd)/.venv"
+# WORKSPACE_VENV_DIR="$(cd "$WORK_DIR"/../.. && pwd)/.venv"
 APP_PORT="8888"
 RUN_MODE=""
 APP_LOG_DIR="$HOME/logs/secbaas"
@@ -50,12 +50,12 @@ log_usage() {
 # 检查虚拟环境 — 优先使用工作区根 .venv，回退到社区包的 .venv
 check_venv() {
     # 如果工作区根 .venv 存在且可用，直接使用
-    if [[ -d "$WORKSPACE_VENV_DIR" && -x "$WORKSPACE_VENV_DIR/bin/python" ]]; then
-        VENV_DIR="$WORKSPACE_VENV_DIR"
-        PYTHON_BIN="$VENV_DIR/bin/python"
-        log_info "使用工作区虚拟环境: $VENV_DIR"
-        return 0
-    fi
+    # if [[ -d "$WORKSPACE_VENV_DIR" && -x "$WORKSPACE_VENV_DIR/bin/python" ]]; then
+    #     VENV_DIR="$WORKSPACE_VENV_DIR"
+    #     PYTHON_BIN="$VENV_DIR/bin/python"
+    #     log_info "使用工作区虚拟环境: $VENV_DIR"
+    #     return 0
+    # fi
 
     if [[ ! -d "$VENV_DIR" ]]; then
         log_warn "虚拟环境不存在，正在使用 uv 创建..."
