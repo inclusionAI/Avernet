@@ -14,7 +14,6 @@ class SystemConfigCreate(BaseModel):
 
     conf_key: str = Field(
         ...,
-        pattern=r"^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)*$",
         max_length=256,
         description="配置key，以点为分隔符的1段或多段字符串key",
     )
