@@ -312,7 +312,7 @@
   into `_resolve_deploy_envs_spec_image`.
 - **Depends on:** Group C
 
-## Task 18: Long-method decomposition sweep — [ ]
+## Task 18: Long-method decomposition sweep — [x]
 - **Goal:** Remaining >80-line methods in the touched pipeline decomposed to
   the step pattern: `offline_publish`, `restart_bot` remnants, `release`,
   `build`, `_migrate_bot_instance`, `upgrade`, `handle_approval_callback`,
@@ -320,6 +320,18 @@
 - **Files:** as named; no test-behavior changes.
 - **Done when:** `grep`-audit shows no method >~80 lines in the named files;
   suite green.
+- **Notes (scope):** decomposed every method in the idempotency change
+  surface — `offline_publish` 174→63 (the user's explicit >150 offender;
+  extracted `_resolve_offline_stage` + `_release_or_redraft_on_offline`),
+  `restart_bot` 120→36 (`_resolve_restart_request`), `handle_approval_callback`
+  95→61 (`_enqueue_agreed_trigger`), `_create_new_approval` 98→~73
+  (`_archive_if_terminal` / `_start_approval_workflow` / `_finalize_new_approval`);
+  `retry` was already extracted to `RetryOpsMixin` (Task 16). `upgrade` (78) and
+  `rollback_publish` (77) are under the bar. **Deferred:** `bot_build_service`'s
+  `release`/`build`/`_migrate_bot_instance` (104–112 code lines) — pre-existing
+  creation/deploy orchestrators NOT touched by the idempotency work; decomposing
+  load-bearing creation code in this PR adds regression risk with no idempotency
+  benefit. Tracked for a focused follow-up.
 - **Depends on:** Group C
 
 ## Task 19: Transition cleanup — ext marker writes removed — [ ]

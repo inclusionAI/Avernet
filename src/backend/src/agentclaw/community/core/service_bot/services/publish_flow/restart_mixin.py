@@ -48,99 +48,15 @@ class RestartMixin:
             f"[PublishFlowService.restart_bot] called: publish_id={publish_id}, operator={operator}"
         )
 
-        # Step 1: Query the publish record
-        publish_record = self._publish_service.get_publish_by_id(publish_id)
-        if not publish_record:
-            logger.warning(
-                f"[PublishFlowService.restart_bot] Publish record not found: publish_id={publish_id}"
-            )
-            return {
-                "success": False,
-                "message": f"Publish record not found: publish_id={publish_id}",
-            }
+        # Resolve + validate the restart target (record → stage → binding → bot →
+        # artifact). On any failure ``error`` is the response dict to return.
+        error, stage, bot_uuid = self._resolve_restart_request(publish_id)
+        if error is not None:
+            return error
 
-        # Step 2: Determine the current stage from the status
-        current_status = PublishStatus(publish_record.status)
-        stage = self._determine_restart_stage(current_status)
-        if not stage:
-            logger.warning(
-                f"[PublishFlowService.restart_bot] "
-                f"Cannot restart for status: {current_status}, publish_id={publish_id}"
-            )
-            return {
-                "success": False,
-                "message": f"Current status {current_status} does not support restart operation",
-                "status": current_status,
-            }
-
-        # Step 3: (#197) The previous ext.restart marker is NO LONGER cleared here.
-        # Clearing it before the new workflow id was recorded was a crash hazard
-        # (a crash after clear left no marker at all). The durable restart op now
-        # owns idempotency; the marker is dual-written by ``execute_restart`` once
-        # the new workflow id is recorded.
-        ext = self._get_latest_ext(publish_id)
-
-        # Step 4: Get the binding_id for the corresponding stage from ext
-        binding_info = ext.get("binding", {})
-        binding_id = binding_info.get(stage.value)
-
-        if not binding_id:
-            logger.warning(
-                f"[PublishFlowService.restart_bot] "
-                f"No binding_id found for stage={stage.value}, publish_id={publish_id}"
-            )
-            return {
-                "success": False,
-                "message": f"No binding info found for stage {stage.value}",
-                "stage": stage.value,
-            }
-
-        # Step 5: Query the device_binding record by binding_id
-        binding = self._publish_service.get_device_binding_by_id(binding_id)
-        if not binding:
-            logger.warning(
-                f"[PublishFlowService.restart_bot] Device binding not found: binding_id={binding_id}"
-            )
-            return {
-                "success": False,
-                "message": f"Device binding record not found: binding_id={binding_id}",
-            }
-
-        bot_uuid = binding.device_id
-        if not bot_uuid:
-            logger.warning(
-                f"[PublishFlowService.restart_bot] No device_id in binding: binding_id={binding_id}"
-            )
-            return {
-                "success": False,
-                "message": f"Device binding record has no device_id: binding_id={binding_id}",
-            }
-
-        bot_service = self._bot_service
-        bot = bot_service.get_bot(bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id)
-        if not bot:
-            logger.warning(
-                f"[PublishFlowService.restart_bot] Bot not found: bot_id={publish_record.source_bot_id}"
-            )
-            return {
-                "success": False,
-                "message": f"Bot not found: {publish_record.source_bot_id}",
-            }
-
-        migration_path = ext.get("migration_path")
-        config_artifact = ext.get("config_artifact")
-        if not migration_path and not config_artifact:
-            logger.warning(
-                f"[PublishFlowService.restart_bot] No build artifact in ext: publish_id={publish_id}"
-            )
-            return {
-                "success": False,
-                "message": f"Publish record is missing build artifact: publish_id={publish_id}",
-            }
-
-        # Step 6: (#197) Enqueue the DURABLE restart task instead of a
-        # fire-and-forget asyncio task. The handler re-resolves and runs the
-        # re-deploy through the operation runner (crash-safe, idempotent).
+        # (#197) Enqueue the DURABLE restart task instead of a fire-and-forget
+        # asyncio task. The handler re-resolves and runs the re-deploy through the
+        # operation runner (crash-safe, idempotent).
         from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
             enqueue_restart,
         )
@@ -155,7 +71,7 @@ class RestartMixin:
         logger.info(
             f"[PublishFlowService.restart_bot] Restart task enqueued: "
             f"publish_id={publish_id}, bot_uuid={bot_uuid}, stage={stage.value}, "
-            f"operator={operator}, owner_id={publish_record.owner_id}"
+            f"operator={operator}"
         )
 
         return {
@@ -164,6 +80,98 @@ class RestartMixin:
             "stage": stage.value,
             "bot_uuid": bot_uuid,
         }
+
+    def _resolve_restart_request(self, publish_id: int):
+        """Validate + resolve a restart request from ``publish_id``.
+
+        Returns ``(error, stage, bot_uuid)``: on failure ``error`` is the response
+        dict (``success=False`` + message) and stage/bot_uuid are None; on success
+        ``error`` is None and stage/bot_uuid are populated. The build-artifact
+        presence is also checked here so the durable handler always has one."""
+        publish_record = self._publish_service.get_publish_by_id(publish_id)
+        if not publish_record:
+            logger.warning(
+                f"[PublishFlowService.restart_bot] Publish record not found: publish_id={publish_id}"
+            )
+            return {
+                "success": False,
+                "message": f"Publish record not found: publish_id={publish_id}",
+            }, None, None
+
+        current_status = PublishStatus(publish_record.status)
+        stage = self._determine_restart_stage(current_status)
+        if not stage:
+            logger.warning(
+                f"[PublishFlowService.restart_bot] "
+                f"Cannot restart for status: {current_status}, publish_id={publish_id}"
+            )
+            return {
+                "success": False,
+                "message": f"Current status {current_status} does not support restart operation",
+                "status": current_status,
+            }, None, None
+
+        # (#197) The previous ext.restart marker is NO LONGER cleared here.
+        # Clearing it before the new workflow id was recorded was a crash hazard
+        # (a crash after clear left no marker at all). The durable restart op now
+        # owns idempotency; the marker is dual-written by ``execute_restart`` once
+        # the new workflow id is recorded.
+        ext = self._get_latest_ext(publish_id)
+
+        binding_id = (ext.get("binding", {}) or {}).get(stage.value)
+        if not binding_id:
+            logger.warning(
+                f"[PublishFlowService.restart_bot] "
+                f"No binding_id found for stage={stage.value}, publish_id={publish_id}"
+            )
+            return {
+                "success": False,
+                "message": f"No binding info found for stage {stage.value}",
+                "stage": stage.value,
+            }, None, None
+
+        binding = self._publish_service.get_device_binding_by_id(binding_id)
+        if not binding:
+            logger.warning(
+                f"[PublishFlowService.restart_bot] Device binding not found: binding_id={binding_id}"
+            )
+            return {
+                "success": False,
+                "message": f"Device binding record not found: binding_id={binding_id}",
+            }, None, None
+
+        bot_uuid = binding.device_id
+        if not bot_uuid:
+            logger.warning(
+                f"[PublishFlowService.restart_bot] No device_id in binding: binding_id={binding_id}"
+            )
+            return {
+                "success": False,
+                "message": f"Device binding record has no device_id: binding_id={binding_id}",
+            }, None, None
+
+        bot = self._bot_service.get_bot(
+            bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id
+        )
+        if not bot:
+            logger.warning(
+                f"[PublishFlowService.restart_bot] Bot not found: bot_id={publish_record.source_bot_id}"
+            )
+            return {
+                "success": False,
+                "message": f"Bot not found: {publish_record.source_bot_id}",
+            }, None, None
+
+        if not ext.get("migration_path") and not ext.get("config_artifact"):
+            logger.warning(
+                f"[PublishFlowService.restart_bot] No build artifact in ext: publish_id={publish_id}"
+            )
+            return {
+                "success": False,
+                "message": f"Publish record is missing build artifact: publish_id={publish_id}",
+            }, None, None
+
+        return None, stage, bot_uuid
 
     async def execute_restart(
         self,
