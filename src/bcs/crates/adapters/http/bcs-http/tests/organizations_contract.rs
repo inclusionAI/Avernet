@@ -13,8 +13,9 @@ use bcs_service_api::{
     CreateOrganizationCommand, OrganizationAuth, OrganizationCandidateBot,
     OrganizationCandidateQuery, OrganizationManagementService, OrganizationMemberPage,
     OrganizationMemberAuth, OrganizationMemberBotDetail, OrganizationMemberDetail,
-    OrganizationMemberPageQuery,
+    OrganizationMemberPageQuery, OrganizationMemberProfile,
     PutOrganizationMemberCommand, ServiceError, ServiceResult, UpdateOrganizationCommand,
+    UpdateOrganizationMemberProfileCommand,
 };
 use bcs_services_container::Services;
 use serde_json::{Value, json};
@@ -168,6 +169,32 @@ impl OrganizationManagementService for RecordingOrganizationManagement {
             total: 1,
             offset: query.offset,
             limit: query.limit,
+        })
+    }
+
+    async fn update_member_profile(
+        &self,
+        command: UpdateOrganizationMemberProfileCommand,
+    ) -> ServiceResult<OrganizationMemberProfile> {
+        self.record(format!(
+            "update_member_profile:{}:{}:{}",
+            command.auth.provider_admin_token,
+            command.organization_code,
+            command.bot_uuid,
+        ))
+        .await?;
+        Ok(OrganizationMemberProfile {
+            organization_code: command.organization_code,
+            bot_uuid: command.bot_uuid,
+            provider_id: "provider-b".to_string(),
+            capabilities: bcs_service_api::BotCapabilities {
+                name: command.patch.name,
+                summary: command.patch.summary,
+                domains: command.patch.domains.unwrap_or_default(),
+                skills: command.patch.skills.unwrap_or_default(),
+                scopes: command.patch.scopes.unwrap_or_default(),
+                ..bcs_service_api::BotCapabilities::default()
+            },
         })
     }
 
@@ -358,6 +385,52 @@ async fn provider_prefixed_member_routes_are_removed() {
     ] {
         let response = request(&app.app, method, uri, Some("provider-token"), body).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {uri}");
+    }
+}
+
+#[tokio::test]
+async fn patch_member_profile_accepts_supported_fields() {
+    let app = test_app();
+    let response = request(
+        &app.app,
+        "PATCH",
+        "/organizations/promo-2026/members/bot-b/profile",
+        Some("provider-token"),
+        Some(json!({
+            "name": "Updated Bot",
+            "summary": "Updated summary",
+            "domains": ["engineering"],
+            "skills": [
+                "code_review",
+                {"name": "sql_analysis", "description": "Analyzes SQL"}
+            ],
+            "scopes": ["production"]
+        })),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["organization_code"], "promo-2026");
+    assert_eq!(body["bot_uuid"], "bot-b");
+    assert_eq!(body["provider_id"], "provider-b");
+    assert_eq!(body["capabilities"]["name"], "Updated Bot");
+    assert_eq!(body["capabilities"]["skills"][1]["name"], "sql_analysis");
+}
+
+#[tokio::test]
+async fn patch_member_profile_rejects_empty_and_unknown_fields() {
+    let app = test_app();
+    for body in [json!({}), json!({"visibility": "public"})] {
+        let response = request(
+            &app.app,
+            "PATCH",
+            "/organizations/promo-2026/members/bot-b/profile",
+            Some("provider-token"),
+            Some(body),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }
 

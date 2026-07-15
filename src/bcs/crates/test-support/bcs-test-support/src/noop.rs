@@ -714,6 +714,13 @@ impl OrganizationManagementService for NoopOrganizationManagementService {
         Err(service_not_configured("organization service"))
     }
 
+    async fn update_member_profile(
+        &self,
+        _command: UpdateOrganizationMemberProfileCommand,
+    ) -> ServiceResult<OrganizationMemberProfile> {
+        Err(service_not_configured("organization service"))
+    }
+
     async fn candidate_bots(
         &self,
         _auth: OrganizationAuth,

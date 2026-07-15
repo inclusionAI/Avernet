@@ -94,6 +94,10 @@ fn build_api_routes() -> Router<HttpAppState> {
                 .delete(routes::organizations::delete_member),
         )
         .route(
+            "/organizations/{organization_code}/members/{bot_uuid}/profile",
+            patch(routes::organizations::patch_member_profile),
+        )
+        .route(
             "/providers/{provider_id}/organization-candidate-bots",
             get(routes::organizations::candidate_bots),
         )

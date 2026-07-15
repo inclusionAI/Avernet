@@ -6,8 +6,9 @@ use bcs_service_api::{
     CreateOrganizationCommand, OrganizationAuth, OrganizationCandidateBot, OrganizationCandidateBotPage,
     OrganizationCandidatePageQuery, OrganizationCandidateQuery, OrganizationCoreService, OrganizationManagementService,
     OrganizationMemberAuth, OrganizationMemberDetail, OrganizationMemberPage, OrganizationMemberPageQuery,
-    ProviderCoreService,
+    OrganizationMemberProfile, ProviderCoreService,
     PutOrganizationMemberCommand, ServiceResult, UpdateOrganizationCommand,
+    UpdateOrganizationMemberProfileCommand,
 };
 
 #[derive(Clone)]
@@ -169,6 +170,21 @@ impl OrganizationManagementService for OrganizationManagement {
         let provider_id = self.authenticate_member(&auth).await?;
         self.core
             .list_members_page_for_manager(&provider_id, organization_code, query)
+            .await
+    }
+
+    async fn update_member_profile(
+        &self,
+        command: UpdateOrganizationMemberProfileCommand,
+    ) -> ServiceResult<OrganizationMemberProfile> {
+        let provider_id = self.authenticate_member(&command.auth).await?;
+        self.core
+            .update_member_profile(
+                &provider_id,
+                &command.organization_code,
+                &command.bot_uuid,
+                command.patch,
+            )
             .await
     }
 

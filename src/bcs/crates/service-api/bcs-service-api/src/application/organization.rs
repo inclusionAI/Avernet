@@ -3,7 +3,8 @@ use bcs_domain::{Organization, OrganizationMember};
 
 use crate::{
     OrganizationCandidateBot, OrganizationCandidateBotPage, OrganizationCandidatePageQuery,
-    OrganizationCandidateQuery, OrganizationMemberDetail, OrganizationMemberPage, ServiceResult,
+    OrganizationCandidateQuery, OrganizationMemberDetail, OrganizationMemberPage,
+    OrganizationMemberProfile, OrganizationMemberProfilePatch, ServiceResult,
 };
 use crate::core::OrganizationMemberPageQuery;
 
@@ -41,6 +42,14 @@ pub struct PutOrganizationMemberCommand {
     pub organization_code: String,
     pub bot_uuid: String,
     pub role: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateOrganizationMemberProfileCommand {
+    pub auth: OrganizationMemberAuth,
+    pub organization_code: String,
+    pub bot_uuid: String,
+    pub patch: OrganizationMemberProfilePatch,
 }
 
 #[async_trait]
@@ -114,6 +123,10 @@ pub trait OrganizationManagementService: Send + Sync {
             limit: query.limit,
         })
     }
+    async fn update_member_profile(
+        &self,
+        command: UpdateOrganizationMemberProfileCommand,
+    ) -> ServiceResult<OrganizationMemberProfile>;
     async fn candidate_bots(
         &self,
         auth: OrganizationAuth,
