@@ -419,7 +419,10 @@ def test_restart_device_success_returns_publish_id():
 
     assert result == {"publish_id": 42}
     baas.restart_devices.assert_called_once_with(
-        "bot-uuid-abc", device_uuids=["DEVICE-001"], operator="owner-001"
+        "bot-uuid-abc",
+        device_uuids=["DEVICE-001"],
+        operator="owner-001",
+        request_id="restart_dev.b1001.DEVICE-001",
     )
 
 

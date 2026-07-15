@@ -23,7 +23,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import json
 import time
-import uuid
 
 import httpx
 
@@ -2885,6 +2884,7 @@ class BaasService:  # pragma: no cover
         device_uuids: list[str],
         *,
         operator: str,
+        request_id: str,
         tenant: str = "",
     ) -> dict[str, Any]:
         """重启指定设备（多实例场景）。
@@ -2897,6 +2897,8 @@ class BaasService:  # pragma: no cover
             bot_uuid: BaaS Bot UUID
             device_uuids: 要重启的设备 UUID 列表
             operator: 操作者身份（必填，BaaS 契约要求）
+            request_id: 调用方提供的确定性关联 id（#197：取代原 uuid4，
+                重试同一逻辑重启时保持稳定，便于日志追踪；BaaS 侧仅作关联，非去重键）
             tenant: 租户名称，默认使用 self._tenant
 
         Returns:
@@ -2905,8 +2907,9 @@ class BaasService:  # pragma: no cover
         Raises:
             BaasServiceError: 重启失败
         """
+        if not request_id:
+            raise BaasServiceError("request_id is required for restarting devices")
         effective_tenant = tenant or self._tenant
-        request_id = uuid.uuid4().hex
         logger.info(
             f"[BaasService.restart_devices] Restarting devices: "
             f"bot_uuid={bot_uuid}, device_uuids={device_uuids}, "

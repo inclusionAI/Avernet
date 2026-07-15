@@ -381,7 +381,14 @@ class DeviceInstanceService:
         if baas_service is None:
             raise DeviceServiceError("BaasService not available for device restart")
 
+        # (#197) Deterministic, correlation-only request id (was uuid4): stable
+        # across retries of the same logical restart so a BaaS log line traces
+        # back to the exact binding + device. request_id is not a BaaS dedup key.
+        request_id = f"restart_dev.b{binding_id}.{device_uuid}"
         data = baas_service.restart_devices(
-            bot_uuid, device_uuids=[device_uuid], operator=operator.staff_id
+            bot_uuid,
+            device_uuids=[device_uuid],
+            operator=operator.staff_id,
+            request_id=request_id,
         )
         return {"publish_id": data.get("publish_id")}

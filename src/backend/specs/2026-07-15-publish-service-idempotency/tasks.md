@@ -259,7 +259,7 @@
   - [x] Full suite green.
 - **Depends on:** Group B
 
-## Task 14: Scale onto the runner — [ ]
+## Task 14: Scale onto the runner — [x]
 - **Goal:** `scale_bot` through the runner with the deterministic request id
   (timestamp id gone); `sync_scale_progress` reads the ledger (ext.scale
   dual-written); `restart_devices` uuid4 replaced with a caller-supplied
@@ -268,7 +268,7 @@
   (`restart_devices` signature), `publish_flow/progress_sync_mixin.py`,
   crash-window scale case, tests.
 - **Done when:** crash-after-call case adopts instead of re-scaling; suite
-  green.
+  green. [x]
 - **Depends on:** Group B
 
 ## Task 15: Eval publish/teardown + TTL task — [ ]

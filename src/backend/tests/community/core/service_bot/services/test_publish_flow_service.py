@@ -1881,7 +1881,8 @@ async def test_execute_rollback_pre_feature_target_delivers_base_restamped_only(
 
 
 @pytest.mark.unit
-def test_scale_bot_success_prefers_bot_ext_device_count():
+@pytest.mark.asyncio
+async def test_scale_bot_success_prefers_bot_ext_device_count():
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -1910,7 +1911,7 @@ def test_scale_bot_success_prefers_bot_ext_device_count():
     bot_service.get_bot = Mock(return_value={"bot_id": "bot-source", "ext": {"service_bot_config": {"device_count": 3}}})
     baas_service.scale_bot = Mock(return_value={"publish_id": 888, "target_count": 3})
 
-    result = svc.scale_bot(publish_id=10, operator="u1")
+    result = await svc.scale_bot(publish_id=10, operator="u1")
 
     assert result["success"] is True
     assert result["bot_uuid"] == "BOT-UUID-1"
@@ -1922,7 +1923,8 @@ def test_scale_bot_success_prefers_bot_ext_device_count():
     assert kwargs["owner_id"] == "u1"
     assert kwargs["target_count"] == 3
     assert kwargs["auto_approve_publish"] is True
-    assert kwargs["request_id"].startswith("scale_BOT-UUID-1_")
+    # (#197) request_id is now the runner's deterministic op id (wall-clock id gone).
+    assert kwargs["request_id"] == "pub10.scale.online.a1"
     publish_service.update_publish_ext.assert_called_once_with(
         publish_id=10,
         ext={"binding": {"online": 123}, "scale": {"publish_id": 888}},
@@ -1930,7 +1932,8 @@ def test_scale_bot_success_prefers_bot_ext_device_count():
 
 
 @pytest.mark.unit
-def test_scale_bot_falls_back_to_common_config_default_device_count():
+@pytest.mark.asyncio
+async def test_scale_bot_falls_back_to_common_config_default_device_count():
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -1960,7 +1963,7 @@ def test_scale_bot_falls_back_to_common_config_default_device_count():
     common_config_service.get_value = Mock(return_value=2)
     baas_service.scale_bot = Mock(return_value={"publish_id": 999, "target_count": 2})
 
-    result = svc.scale_bot(publish_id=13, operator="u1")
+    result = await svc.scale_bot(publish_id=13, operator="u1")
 
     assert result["target_count"] == 2
     common_config_service.get_value.assert_called_once()
@@ -1969,11 +1972,12 @@ def test_scale_bot_falls_back_to_common_config_default_device_count():
     assert kwargs["owner_id"] == "u1"
     assert kwargs["target_count"] == 2
     assert kwargs["auto_approve_publish"] is True
-    assert kwargs["request_id"].startswith("scale_BOT-UUID-2_")
+    assert kwargs["request_id"] == "pub13.scale.online.a1"
 
 
 @pytest.mark.unit
-def test_scale_bot_teclaw_returns_supported_message_without_baas_call():
+@pytest.mark.asyncio
+async def test_scale_bot_teclaw_returns_supported_message_without_baas_call():
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -1991,7 +1995,7 @@ def test_scale_bot_teclaw_returns_supported_message_without_baas_call():
     # provider seam reads teclaw → TeclawProviderBehavior (supports_scale=False).
     baas_service.resolve_container_provider.return_value = "teclaw"
 
-    result = svc.scale_bot(publish_id=15, operator="u1")
+    result = await svc.scale_bot(publish_id=15, operator="u1")
 
     assert result == {
         "success": True,
@@ -2005,7 +2009,8 @@ def test_scale_bot_teclaw_returns_supported_message_without_baas_call():
 
 
 @pytest.mark.unit
-def test_scale_bot_invalid_status():
+@pytest.mark.asyncio
+async def test_scale_bot_invalid_status():
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -2015,11 +2020,12 @@ def test_scale_bot_invalid_status():
     publish_service.get_publish_by_id = Mock(return_value=_make_publish_record(id=11, status=PublishStatus.DRAFT.value))
 
     with pytest.raises(PublishStatusInvalidError, match="does not support scale operations"):
-        svc.scale_bot(publish_id=11, operator="u1")
+        await svc.scale_bot(publish_id=11, operator="u1")
 
 
 @pytest.mark.unit
-def test_scale_bot_missing_online_binding():
+@pytest.mark.asyncio
+async def test_scale_bot_missing_online_binding():
     from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowServiceError
     publish_service = Mock()
     build_service = Mock()
@@ -2030,11 +2036,12 @@ def test_scale_bot_missing_online_binding():
     publish_service.get_publish_by_id = Mock(return_value=_make_publish_record(id=12, status=PublishStatus.SUCCESS.value, ext={}))
 
     with pytest.raises(PublishFlowServiceError, match="Binding info for the online stage not found"):
-        svc.scale_bot(publish_id=12, operator="u1")
+        await svc.scale_bot(publish_id=12, operator="u1")
 
 
 @pytest.mark.unit
-def test_scale_bot_raises_when_ext_and_common_config_both_missing():
+@pytest.mark.asyncio
+async def test_scale_bot_raises_when_ext_and_common_config_both_missing():
     from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowServiceError
     publish_service = Mock()
     build_service = Mock()
@@ -2064,7 +2071,7 @@ def test_scale_bot_raises_when_ext_and_common_config_both_missing():
     common_config_service.get_value = Mock(return_value=None)
 
     with pytest.raises(PublishFlowServiceError, match="service_bot_config\\.device_count not found"):
-        svc.scale_bot(publish_id=14, operator="u1")
+        await svc.scale_bot(publish_id=14, operator="u1")
 
 
 @pytest.mark.unit

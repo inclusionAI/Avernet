@@ -736,7 +736,7 @@ async def scale_publish_bot(
             f"[scale_publish_bot] Scaling: publish_id={publish_id}, user_id={user_id}, "
         )
 
-        result = flow_service.scale_bot(
+        result = await flow_service.scale_bot(
             publish_id=publish_id,
             operator=user_id,
         )

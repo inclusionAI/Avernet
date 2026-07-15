@@ -454,8 +454,17 @@ class ProgressSyncMixin:
 
         current_status = PublishStatus(publish_record.status)
         ext = publish_record.ext or {}
-        scale_info = ext.get("scale", {})
-        scale_publish_id = scale_info.get("publish_id")
+
+        # (#197) Prefer the ledger's scale op workflow id (source of truth);
+        # fall back to the dual-written ext.scale marker for pre-ledger records.
+        scale_publish_id = None
+        scale_op = self._publish_operation_repo.get_latest_by_kind(
+            publish_id, "scale", PublishStage.ONLINE.value
+        )
+        if scale_op is not None and scale_op.baas_publish_id is not None:
+            scale_publish_id = scale_op.baas_publish_id
+        if not scale_publish_id:
+            scale_publish_id = (ext.get("scale", {}) or {}).get("publish_id")
 
         if not scale_publish_id:
             logger.warning(

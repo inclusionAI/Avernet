@@ -473,3 +473,57 @@ async def test_restart_crash_after_issue_resume_adopts():
     op = ledger.get_latest_by_kind(1, "restart", "online")
     assert op.state == PublishOperationState.COMPLETED.value
     assert op.baas_publish_id == 901
+
+
+# ── scale: crash windows (existing-bot adopt) ─────────────────────────────────
+def _scale_flow(ledger, baas, record, bot_uuid="BOT-live"):
+    svc = _flow(ledger=ledger, baas=baas, build_service=Mock(),
+                publish_service=Mock())
+    svc._publish_service.get_publish_by_id = Mock(return_value=record)
+    svc._publish_service.get_device_binding_by_id = Mock(
+        return_value=Mock(device_id=bot_uuid)
+    )
+    svc._bot_service.get_bot = Mock(return_value={"bot_id": "b", "entity_id": "u"})
+    svc._ext_state.get_latest_ext = Mock(return_value={"binding": {"online": 42}})
+    svc._resolve_scale_target_count = Mock(return_value=3)
+    svc._mutate_and_update_ext = Mock()
+    return svc
+
+
+@pytest.mark.asyncio
+async def test_scale_crash_after_call_resume_adopts_not_rescales():
+    ledger = _ledger()
+    baas = FakeBaas()
+
+    def scale_bot(**kw):
+        wid = baas.issue("BOT-live", "SCALE_UP")
+        return {"publish_id": wid, "target_count": kw.get("target_count")}
+
+    baas.scale_bot = Mock(side_effect=scale_bot)
+    record = _record(PublishStatus.SUCCESS.value)
+    svc = _scale_flow(ledger, baas, record)
+
+    crashed = []
+
+    def checkpoint(name):
+        if name == "after_issue" and not crashed:
+            crashed.append(1)
+            raise RuntimeError("crash after scale call, before record")
+
+    svc._operation_runner._checkpoint = checkpoint
+
+    with pytest.raises(RuntimeError):
+        await svc.scale_bot(publish_id=1, operator="op")
+    assert baas.scale_bot.call_count == 1  # scaled once, unrecorded
+
+    svc._operation_runner._checkpoint = lambda _n: None
+    result = await svc.scale_bot(publish_id=1, operator="op")
+    # Existing bot → adopt the in-doubt SCALE workflow; NO second scale call.
+    assert baas.scale_bot.call_count == 1
+    assert result["success"] is True
+    assert result["baas_publish_id"] == 901
+    op = ledger.get_latest_by_kind(1, "scale", "online")
+    assert op.state == PublishOperationState.COMPLETED.value
+    assert op.baas_publish_id == 901
+    # The BaaS call carried the runner's deterministic request id, not a wall clock.
+    assert baas.scale_bot.call_args.kwargs["request_id"] == "pub1.scale.online.a1"
