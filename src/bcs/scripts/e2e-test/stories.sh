@@ -781,18 +781,24 @@ print("1" if any(item.get("bot_uuid") == target for item in json.load(sys.stdin)
 ' "$provider_bot_uuid" 2>/dev/null || echo 0)
     assert_eq "organization candidates include the provider bot" "$candidate_bot" "1"
 
-    api_request_headers PUT "/providers/${provider_id}/organizations/${organization_code}/members/${provider_bot_uuid}" \
+    api_request_headers PUT "/organizations/${organization_code}/members/${provider_bot_uuid}" \
         '{"role":"reviewer"}' \
         "Authorization: Bearer ${admin_token}"
     require_status "provider adds its bot to the organization" "200" || return
     assert_json_eq "organization member keeps its role" "$RESPONSE" "role" "reviewer"
 
-    api_request_headers GET "/providers/${provider_id}/organizations/${organization_code}/members/${provider_bot_uuid}" "" \
+    api_request_headers PATCH "/organizations/${organization_code}/members/${provider_bot_uuid}/profile" \
+        '{"name":"E2E organization bot"}' \
+        "Authorization: Bearer ${admin_token}"
+    require_status "provider updates an organization member profile" "200" || return
+    assert_json_eq "organization member profile update is persisted" "$RESPONSE" "name" "E2E organization bot"
+
+    api_request_headers GET "/organizations/${organization_code}/members/${provider_bot_uuid}" "" \
         "Authorization: Bearer ${admin_token}"
     require_status "provider reads an organization member" "200" || return
     assert_json_eq "organization member read keeps the bot id" "$RESPONSE" "bot_uuid" "$provider_bot_uuid"
 
-    api_request_headers GET "/providers/${provider_id}/organizations/${organization_code}/members?role=reviewer" "" \
+    api_request_headers GET "/organizations/${organization_code}/members?role=reviewer" "" \
         "Authorization: Bearer ${admin_token}"
     require_status "provider lists organization members by role" "200" || return
     local listed_member
@@ -803,7 +809,7 @@ print("1" if any(item.get("bot_uuid") == target for item in json.load(sys.stdin)
 ' "$provider_bot_uuid" 2>/dev/null || echo 0)
     assert_eq "organization member list includes the provider bot" "$listed_member" "1"
 
-    api_request_headers DELETE "/providers/${provider_id}/organizations/${organization_code}/members/${provider_bot_uuid}" "" \
+    api_request_headers DELETE "/organizations/${organization_code}/members/${provider_bot_uuid}" "" \
         "Authorization: Bearer ${admin_token}"
     require_status "provider removes its bot from the organization" "204" || return
 }
