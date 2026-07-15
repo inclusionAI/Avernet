@@ -30,7 +30,7 @@ class TestGetConnectionUsesResolver:
     """改造后 _get_connection 走 resolver,不再调 device v2。"""
 
     def test_get_connection_calls_resolver_not_v2(self):
-        """改造后:权限通过后调 resolver.resolve_for_bot,v2 应完全不被调。"""
+        """改造后:权限通过后调 resolver.resolve_for_binding,v2 应完全不被调。"""
         # resolver 返回一个 ctx，conn_info 是关键字段集
         ctx = MagicMock()
         ctx.conn_info = {
@@ -41,7 +41,7 @@ class TestGetConnectionUsesResolver:
             "type": "local",
         }
         resolver = MagicMock()
-        resolver.resolve_for_bot = MagicMock(return_value=ctx)
+        resolver.resolve_for_binding = MagicMock(return_value=ctx)
 
         # v2 必须不被调到
         device_provider = MagicMock()
@@ -55,11 +55,11 @@ class TestGetConnectionUsesResolver:
             device_provider=device_provider,
         )
 
-        bot = {"bot_id": "bot1", "owner_id": "owner1", "public": "0"}
+        bot = {"bot_id": "bot1", "owner_id": "owner1", "public": "0", "binding_id": 123}
         conn = svc._get_connection(bot, user_id="owner1")
 
-        # 1. resolver 被调一次,入参 (bot_id, user_id) — 与 Task 2.1-2.4 姿势一致
-        resolver.resolve_for_bot.assert_called_once_with("bot1", "owner1")
+        # 1. resolver 被调一次,入参 (binding_id, user_id, bot_id)
+        resolver.resolve_for_binding.assert_called_once_with(123, "owner1", bot_id="bot1")
 
         # 2. v2 完全不被调(资源被 resolver 接管)
         device_provider.get_device_connection_v2.assert_not_called()
