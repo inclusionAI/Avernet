@@ -170,11 +170,13 @@ class BotFileTransferDispatcher(Protocol):
         prefix: str,
         limit: int = 100,
         marker: str | None = None,
+        tenant: str | None = None,
     ) -> StagingListResponse: ...
 
     async def dispatch_delete_staging(
         self,
         key: str,
+        tenant: str | None = None,
     ) -> StagingDeleteResponse: ...
 
     async def dispatch_generate_share_link(

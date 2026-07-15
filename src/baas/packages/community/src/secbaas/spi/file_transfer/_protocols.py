@@ -96,7 +96,12 @@ class FileTransferBackend(Protocol):
             staging_path: Complete OSS object key.
 
         Returns:
-            True if object exists and is readable, False otherwise.
+            True if object exists and is readable.
+            False if object does not exist (NoSuchKey).
+
+        Raises:
+            OssError: On access-denied, server, or network errors —
+                these are infrastructure failures, not "object missing".
         """
         ...
 
@@ -207,5 +212,45 @@ class FileTransferBackend(Protocol):
 
         Args:
             key: Full OSS object key to delete.
+        """
+        ...
+
+    def build_staging_path(
+        self,
+        tenant: str,
+        transfer_id: str,
+        filename: str,
+        subdir: str | None = None,
+    ) -> str:
+        """Construct full OSS object key for file transfer staging.
+
+        The Dispatcher calls this instead of hardcoding paths.
+        Pattern: ``{staging_root}/{tenant}[/{subdir}]/{transfer_id}/{filename}``
+
+        Args:
+            tenant: Tenant identifier for scoping.
+            transfer_id: Transfer ticket ID for uniqueness.
+            filename: Target filename on the OSS object.
+            subdir: Optional subdirectory under the tenant scope.
+
+        Returns:
+            Complete OSS object key string.
+        """
+        ...
+
+    def build_staging_prefix(
+        self, tenant: str, subdir: str | None = None,
+    ) -> str:
+        """Construct OSS key prefix for tenant-scoped object listing.
+
+        Used by list_staging to scope results to a single tenant.
+        The returned prefix ends with ``"/"``.
+
+        Args:
+            tenant: Tenant identifier for scoping.
+            subdir: Optional subdirectory under the tenant scope.
+
+        Returns:
+            Prefix string ending with ``"/"``.
         """
         ...

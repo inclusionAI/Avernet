@@ -28,7 +28,6 @@ from secbaas.api.bot_runtime import (
     TransferNotFoundError,
 )
 from secbaas.api.bot_runtime._exceptions import (
-    DirectoryNotEmptyError,
     OssObjectNotFoundError,
     TransferNotTerminalError,
 )
@@ -54,7 +53,12 @@ async def get_upload_url(
     request: GetUploadUrlRequest,
     device_affinity: Annotated[
         str | None,
-        Query(description="Device affinity key", include_in_schema=False),
+        Query(
+            description="Device affinity key for sticky device selection. "
+            "Hidden from schema as this is an internal routing hint, "
+            "not a user-facing parameter.",
+            include_in_schema=False,
+        ),
     ] = None,
     dispatcher: BotFileTransferDispatcher = Depends(
         Provide[ApplicationContainer.services.bot_file_transfer_dispatcher]
@@ -136,7 +140,12 @@ async def get_download_url(
     request: GetDownloadUrlRequest,
     device_affinity: Annotated[
         str | None,
-        Query(description="Device affinity key", include_in_schema=False),
+        Query(
+            description="Device affinity key for sticky device selection. "
+            "Hidden from schema as this is an internal routing hint, "
+            "not a user-facing parameter.",
+            include_in_schema=False,
+        ),
     ] = None,
     dispatcher: BotFileTransferDispatcher = Depends(
         Provide[ApplicationContainer.services.bot_file_transfer_dispatcher]
@@ -242,6 +251,15 @@ async def complete_upload(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": "TRANSFER_NOT_FOUND", "message": str(e)},
         )
+    except OssObjectNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": e.error_code,
+                "message": str(e),
+                "transfer_id": transfer_id,
+            },
+        )
     except TransferStateConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -343,6 +361,7 @@ async def list_staging(
             prefix=prefix or "",
             limit=limit,
             marker=marker,
+            tenant=tenant,
         )
         return ApiResponse(data=result)
 
@@ -377,7 +396,7 @@ async def delete_staging(
     )
 
     try:
-        result = await dispatcher.dispatch_delete_staging(key=key)
+        result = await dispatcher.dispatch_delete_staging(key=key, tenant=tenant)
         return ApiResponse(data=result)
 
     except TransferNotFoundError as e:
@@ -388,7 +407,11 @@ async def delete_staging(
     except TransferNotTerminalError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail={"error": e.error_code, "message": str(e.message)},
+            detail={
+                "error": e.error_code,
+                "message": str(e),
+                "transfer_id": e.transfer_id,
+            },
         )
     except NotImplementedError as e:
         raise HTTPException(

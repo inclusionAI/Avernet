@@ -147,6 +147,12 @@ user_config:
       pre: "https://poolab-pre.example.com"
       prod: "https://poolab-prod.example.com"
 
+# File transfer OSS storage backend configuration (enterprise/prod deployments only)
+  file_transfer_oss:
+    endpoint: ""
+    bucket_name: ""
+    staging_root_path: "baas-file-transfer"
+    secret_name: ""
   # SecBaaS 回调服务器 URL（按环境）
   # 设备 start hook 完成后通过此 URL 回调状态。
   secbaas:

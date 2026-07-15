@@ -47,6 +47,7 @@ from secbaas.community.plugins.sandbox.k8s.real import K8sClientManager
 from secbaas.community.plugins.sandbox.poolab import StubPoolabSandboxPlugin
 from secbaas.community.plugins.sandbox.teclaw import StubTeClawBotPlugin
 from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
+from secbaas.community.plugins.file_transfer import NoopFileTransferBackend
 
 
 class PluginContainer(containers.DeclarativeContainer):
@@ -124,6 +125,8 @@ class PluginContainer(containers.DeclarativeContainer):
         local=providers.Singleton(LocalBotServicePlugin),
         stub=providers.Singleton(StubBotServicePlugin),
     )
+
+    file_transfer_backend = providers.Singleton(NoopFileTransferBackend)
 
 
 __all__ = [

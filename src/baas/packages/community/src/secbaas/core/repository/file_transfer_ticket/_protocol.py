@@ -2,6 +2,10 @@
 
 from typing import Protocol, runtime_checkable
 
+from secbaas.api.bot_runtime._file_transfer_models import (
+    TransferNotFoundError as ApiTransferNotFoundError,
+)
+
 from ._record import TicketRecord
 
 
@@ -13,8 +17,14 @@ class FileTransferRepositoryError(RuntimeError):
         self.error_code = error_code
 
 
-class TransferNotFoundError(FileTransferRepositoryError):
-    """Raised when a transfer ticket is not found by transfer_id."""
+class TransferNotFoundError(FileTransferRepositoryError, ApiTransferNotFoundError):
+    """Raised when a transfer ticket is not found by transfer_id.
+
+    Inherits from both FileTransferRepositoryError (repo-layer base) and
+    the API-layer TransferNotFoundError so that except clauses catching
+    the API class also handle repo-originated instances (e.g., from
+    update_status in race conditions).
+    """
 
     def __init__(self, transfer_id: str) -> None:
         super().__init__(
@@ -87,9 +97,11 @@ class TicketRepository(Protocol):
         ...
 
     def get_by_fileservice_staging_path(
-        self, staging_path: str,
+        self, staging_path: str, tenant: str | None = None,
     ) -> TicketRecord | None:
         """Look up a ticket by its fileservice_staging_path.
+
+        Optionally scoped to tenant for authorization enforcement.
 
         Returns None if not found.
         """
