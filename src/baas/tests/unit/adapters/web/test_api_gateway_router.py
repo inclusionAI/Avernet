@@ -842,11 +842,11 @@ class TestGetAllowedBots:
         self,
         sample_app_key_response: APIKeyResponse,
     ) -> None:
-        """Key with None policy → legacy allow-all, normalized to ['*']."""
+        """Key with None policy → deny-all, normalized to []."""
         key = sample_app_key_response.model_copy(update={"policy": None})
         result = await get_allowed_bots("sk-app", key)
         assert isinstance(result, ApiResponse)
-        assert result.data == {"allowed_bots": ["*"]}
+        assert result.data == {"allowed_bots": []}
 
     @pytest.mark.asyncio
     async def test_none_sentinel_filtered_out(

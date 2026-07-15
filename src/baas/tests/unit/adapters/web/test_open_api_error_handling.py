@@ -57,7 +57,7 @@ def _make_api_key_record(app_type="baas", app_id=BOT_UUID, tenant=TENANT):
         env="test",
         creator="test",
         modifier=None,
-        policy=None,
+        policy='{"allowed_bots":["*"]}',
     )
 
 
