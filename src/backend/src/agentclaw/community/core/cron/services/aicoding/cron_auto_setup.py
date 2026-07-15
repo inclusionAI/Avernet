@@ -13,10 +13,11 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 # 定时任务默认配置
-DEFAULT_CRON_SCHEDULE = "0 10,18 * * *"  # 每天上午10点、下午18点各一次
+DEFAULT_CRON_SCHEDULE = "0 10,14,18 * * *"  # 每天10点、14点、18点各一次
 DEFAULT_CRON_TIMEZONE = "Asia/Shanghai"
 DEFAULT_CRON_TIMEOUT_SECS = 86400  # 24小时
 DEFAULT_CRON_MODEL = None  # 使用引擎默认模型
+DEFAULT_MAX_TASK_NUM = 3  # 单次触发最多发起任务数，写死默认值 3
 
 
 def _build_cron_command(
@@ -38,6 +39,8 @@ def _build_cron_command(
         kind: 任务类型 (autoInitiate 或 agentTurn)
         workflow: Devflow 工作流名称
         append_message: 补充说明，拼接在发起消息末尾
+    
+    注：命令末尾固定带 |maxTaskNum:3（单次触发最多发起 3 个任务）。
     """
     prefix = f"查询dima空间{dima_space_id}的待开发需求，开启7*24小时自动研发"
     parts = [
@@ -52,6 +55,8 @@ def _build_cron_command(
         parts.append(f"message:{message}")
     if append_message:
         parts.append(f"append_message:{append_message}")
+    # maxTaskNum 写死默认 3：创建任务时显式嵌入，使引擎 cap 限制可见、可追溯。
+    parts.append(f"maxTaskNum:{DEFAULT_MAX_TASK_NUM}")
     return f"{prefix}|{'|'.join(parts)}"
 
 
@@ -70,10 +75,10 @@ def _frequency_to_cron(frequency: str) -> str:
     """将 trigger_frequency 转换为 cron 表达式"""
     mapping = {
         "hourly": "0 * * * *",          # 每小时
-        "daily": "0 10,18 * * *",       # 每天10点和18点
-        "weekly": "0 10,18 * * 1",      # 每周一10点和18点
+        "daily": "0 10,14,18 * * *",    # 每天10点、14点、18点
+        "weekly": "0 10,14,18 * * 1",   # 每周一10点、14点、18点
     }
-    return mapping.get(frequency, "0 10,18 * * *")
+    return mapping.get(frequency, "0 10,14,18 * * *")
 
 
 def _build_cron_name(bot_name: str, bot_id: str) -> str:
