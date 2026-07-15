@@ -11,6 +11,7 @@ use bcs_service_api::{
     OrganizationCoreService, ProviderBotBindingRepoPort, ProviderBotCoreService,
     ProviderCoreService, ProviderCredentialRepoPort, ProviderRepoPort, RegisterProviderBotParams,
     CreateOrganizationCommand, OrganizationAuth, OrganizationManagementService,
+    OrganizationMemberAuth,
     ProviderOrganizationManagementConfig, PutOrganizationMemberCommand, ServiceError, ServiceResult,
 };
 use bcs_bot_store::provider::MemoryProviderStore;
@@ -169,6 +170,12 @@ async fn register_organization_bot(
 fn organization_auth(provider: &OrganizationProviderFixture) -> OrganizationAuth {
     OrganizationAuth {
         provider_id: provider.provider_id.clone(),
+        provider_admin_token: provider.admin_token.clone(),
+    }
+}
+
+fn organization_member_auth(provider: &OrganizationProviderFixture) -> OrganizationMemberAuth {
+    OrganizationMemberAuth {
         provider_admin_token: provider.admin_token.clone(),
     }
 }
@@ -998,7 +1005,7 @@ async fn organization_scoped_discovery_keeps_members_after_provider_state_change
     ] {
         organization_management
             .put_member(PutOrganizationMemberCommand {
-                auth: organization_auth(&provider_a),
+                auth: organization_member_auth(&provider_a),
                 organization_code: "promo-2026".to_string(),
                 bot_uuid: bot_uuid.to_string(),
                 role: Some(role.to_string()),
