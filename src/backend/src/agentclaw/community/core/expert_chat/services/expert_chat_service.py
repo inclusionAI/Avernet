@@ -422,15 +422,17 @@ class ExpertChatService:
         self._check_chat_access(bot, user_id)
 
         # 2. 走 resolver (全仓唯一 provider 解析点,替代 v2)
+        if not binding_id:
+            raise ConnectionError(
+                "binding_id 未提供",
+                error_code="5001",
+            )
         logger.info(
             f"[ExpertChatService] Resolving device context: bot={bot_id}, "
             f"owner={owner_id}, user={user_id}, binding_id={binding_id}"
         )
         try:
-            if binding_id:
-                ctx = self._resolver.resolve_for_binding(binding_id, user_id, bot_id=bot_id)
-            else:
-                ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
+            ctx = self._resolver.resolve_for_binding(binding_id, user_id, bot_id=bot_id)
         except DeviceNotBoundError as e:
             logger.warning(f"[ExpertChatService] Bot has no active binding: {bot_id}: {e}")
             raise BotNotPublishedError(f"Bot未绑定设备: {bot_id}")

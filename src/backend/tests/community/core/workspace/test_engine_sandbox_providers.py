@@ -59,6 +59,16 @@ class TestOpenClawProvider:
         assert plan.extra_sync_source_relpath == ""
         assert plan.extra_sync_target_relpath == ""
 
+    def test_default_read_only_rules_include_skills_local(self):
+        # 验证 workspace/skills/skills-local 路径在只读规则中
+        # （修正了历史路径 workspace/skills-local 的错误）
+        provider = OpenClawSandboxProvider(workspace=_workspace())
+        rule_paths = {r.path for r in provider.get_default_read_only_rules()}
+
+        assert "workspace/skills/skills-local" in rule_paths
+        # 确保旧路径不再存在
+        assert "workspace/skills-local" not in rule_paths
+
 
 @pytest.mark.unit
 class TestClaudeCodeProvider:

@@ -41,7 +41,7 @@ _OPENCLAW_DEFAULT_RULES = [
     ReadOnlyRule(path="workspace/*.md", rule_type="glob"),
     ReadOnlyRule(path="/home/admin/.mcporter/mcporter.json", rule_type="file"),
     ReadOnlyRule(path="agents/*/agent/models.json", rule_type="glob"),
-    ReadOnlyRule(path="workspace/skills-local", rule_type="glob"),
+    ReadOnlyRule(path="workspace/skills/skills-local", rule_type="glob"),
 ]
 
 
