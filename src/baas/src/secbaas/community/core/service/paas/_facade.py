@@ -904,7 +904,9 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
             )
 
             # Step 4: Delegate to service polymorphic method per D-05
-            return await service.resolve_ws_conn_info(raw_id, port, path, ws_conn_mode=ws_conn_mode)
+            return await service.resolve_ws_conn_info(
+                raw_id, port, path, ws_conn_mode=ws_conn_mode
+            )
 
         except NotImplementedError as e:
             # Wrap in DeviceFacadeException with full context per D-06

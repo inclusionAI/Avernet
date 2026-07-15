@@ -867,7 +867,9 @@ class TestResolveWsConnInfo:
 
         result = await f.resolve_ws_conn_info("dev@42", 8080, "/ws")
         assert isinstance(result, WsConnectionInfo)
-        mock_svc.resolve_ws_conn_info.assert_awaited_once_with("dev", 8080, "/ws", ws_conn_mode=None)
+        mock_svc.resolve_ws_conn_info.assert_awaited_once_with(
+            "dev", 8080, "/ws", ws_conn_mode=None
+        )
 
     @pytest.mark.asyncio
     async def test_resolve_ws_invalid_port(self):
@@ -939,7 +941,7 @@ class TestResolveWsConnInfo:
         )
         factory.create.return_value = mock_svc
 
-        with pytest.raises(PaasError):
+        with pytest.raises(DeviceFacadeException):
             await f.resolve_ws_conn_info("dev@42", 8080, "/ws")
 
     @pytest.mark.asyncio

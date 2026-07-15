@@ -262,7 +262,9 @@ class StandalonePaasService(PaasService):
             exit_code=result.exit_code,
             stdout=result.stdout,
             stderr=result.stderr,
-            execution_time_ms=int(result.elapsed_time) if getattr(result, "elapsed_time", None) is not None else 0,
+            execution_time_ms=int(result.elapsed_time)
+            if getattr(result, "elapsed_time", None) is not None
+            else 0,
             command=cmd,
             env=env,
         )

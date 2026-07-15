@@ -96,7 +96,9 @@ async def get_bot_ws_connection_info(
     ] = None,
     ws_conn_mode: Annotated[
         str | None,
-        Query(description="WebSocket connection mode: 'direct' (default) or 'relay' (cross-machine proxy)"),
+        Query(
+            description="WebSocket connection mode: 'direct' (default) or 'relay' (cross-machine proxy)"
+        ),
     ] = None,
     dispatcher: BotWssDispatcher = Depends(
         Provide[ApplicationContainer.services.bot_wss_dispatcher]

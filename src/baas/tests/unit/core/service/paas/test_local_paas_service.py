@@ -2855,18 +2855,26 @@ class TestResolveWsConnInfoModeDecision:
 
     @pytest.mark.asyncio
     async def test_no_ws_conn_mode__uses_default(
-        self, local_paas_service,
+        self,
+        local_paas_service,
     ):
         """When ws_conn_mode is not passed, the instance default is used.
 
         The default _ws_conn_mode is now "direct", so not passing
         ws_conn_mode should call _resolve_ws_conn_info_direct.
         """
-        with mock.patch.object(
-            local_paas_service, "_resolve_ws_conn_info_direct", new_callable=AsyncMock
-        ) as mock_direct, mock.patch.object(
-            local_paas_service, "_resolve_ws_conn_info_relay", new_callable=AsyncMock
-        ) as mock_relay:
+        with (
+            mock.patch.object(
+                local_paas_service,
+                "_resolve_ws_conn_info_direct",
+                new_callable=AsyncMock,
+            ) as mock_direct,
+            mock.patch.object(
+                local_paas_service,
+                "_resolve_ws_conn_info_relay",
+                new_callable=AsyncMock,
+            ) as mock_relay,
+        ):
             await local_paas_service.resolve_ws_conn_info(
                 paas_device_id="abc123--machine-001--user-001",
                 port=8080,
@@ -2878,14 +2886,22 @@ class TestResolveWsConnInfoModeDecision:
 
     @pytest.mark.asyncio
     async def test_ws_conn_mode_relay__uses_relay(
-        self, local_paas_service,
+        self,
+        local_paas_service,
     ):
         """Explicit ws_conn_mode="relay" overrides the default to relay path."""
-        with mock.patch.object(
-            local_paas_service, "_resolve_ws_conn_info_direct", new_callable=AsyncMock
-        ) as mock_direct, mock.patch.object(
-            local_paas_service, "_resolve_ws_conn_info_relay", new_callable=AsyncMock
-        ) as mock_relay:
+        with (
+            mock.patch.object(
+                local_paas_service,
+                "_resolve_ws_conn_info_direct",
+                new_callable=AsyncMock,
+            ) as mock_direct,
+            mock.patch.object(
+                local_paas_service,
+                "_resolve_ws_conn_info_relay",
+                new_callable=AsyncMock,
+            ) as mock_relay,
+        ):
             await local_paas_service.resolve_ws_conn_info(
                 paas_device_id="abc123--machine-001--user-001",
                 port=8080,
@@ -2898,14 +2914,22 @@ class TestResolveWsConnInfoModeDecision:
 
     @pytest.mark.asyncio
     async def test_ws_conn_mode_direct__uses_direct(
-        self, local_paas_service,
+        self,
+        local_paas_service,
     ):
         """Explicit ws_conn_mode="direct" selects direct path."""
-        with mock.patch.object(
-            local_paas_service, "_resolve_ws_conn_info_direct", new_callable=AsyncMock
-        ) as mock_direct, mock.patch.object(
-            local_paas_service, "_resolve_ws_conn_info_relay", new_callable=AsyncMock
-        ) as mock_relay:
+        with (
+            mock.patch.object(
+                local_paas_service,
+                "_resolve_ws_conn_info_direct",
+                new_callable=AsyncMock,
+            ) as mock_direct,
+            mock.patch.object(
+                local_paas_service,
+                "_resolve_ws_conn_info_relay",
+                new_callable=AsyncMock,
+            ) as mock_relay,
+        ):
             await local_paas_service.resolve_ws_conn_info(
                 paas_device_id="abc123--machine-001--user-001",
                 port=8080,
@@ -2918,14 +2942,22 @@ class TestResolveWsConnInfoModeDecision:
 
     @pytest.mark.asyncio
     async def test_ws_conn_mode_invalid__silent_degrade_to_direct(
-        self, local_paas_service,
+        self,
+        local_paas_service,
     ):
         """Any non-"relay" value silently degrades to direct mode (D-05)."""
-        with mock.patch.object(
-            local_paas_service, "_resolve_ws_conn_info_direct", new_callable=AsyncMock
-        ) as mock_direct, mock.patch.object(
-            local_paas_service, "_resolve_ws_conn_info_relay", new_callable=AsyncMock
-        ) as mock_relay:
+        with (
+            mock.patch.object(
+                local_paas_service,
+                "_resolve_ws_conn_info_direct",
+                new_callable=AsyncMock,
+            ) as mock_direct,
+            mock.patch.object(
+                local_paas_service,
+                "_resolve_ws_conn_info_relay",
+                new_callable=AsyncMock,
+            ) as mock_relay,
+        ):
             await local_paas_service.resolve_ws_conn_info(
                 paas_device_id="abc123--machine-001--user-001",
                 port=8080,
