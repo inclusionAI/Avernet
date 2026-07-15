@@ -58,6 +58,7 @@ logger = get_logger()
 VERIFY_FLOW_TASK = "service_bot.publish.verify_flow"
 ONLINE_RELEASE_TASK = "service_bot.publish.online_release"
 PROGRESS_POLL_TASK = "service_bot.publish.progress_poll"
+RESTART_TASK = "service_bot.publish.restart"
 
 # Give-up horizons (DB-enforced). Build+release can be slow; the poll waits on the
 # BaaS workflow, matching the devices poll deadline.
@@ -122,6 +123,20 @@ def enqueue_progress_poll(
         PROGRESS_POLL_TASK,
         build_poll_payload(publish_id=publish_id),
         deadline_seconds=_POLL_TASK_DEADLINE_SECONDS,
+    )
+
+
+def build_restart_payload(*, publish_id: int, stage: str, operator: str) -> dict:
+    return {"publish_id": publish_id, "stage": stage, "operator": operator}
+
+
+def enqueue_restart(
+    task_queue_service: TaskQueueService, *, publish_id: int, stage: str, operator: str
+) -> None:
+    task_queue_service.enqueue(
+        RESTART_TASK,
+        build_restart_payload(publish_id=publish_id, stage=stage, operator=operator),
+        deadline_seconds=_STAGE_TASK_DEADLINE_SECONDS,
     )
 
 
@@ -231,6 +246,36 @@ class PublishOnlineReleaseHandler(_PublishTaskBase):
         return Complete()
 
 
+class PublishRestartHandler(_PublishTaskBase):
+    """Durable Bot restart (re-deploy) — replaces the old fire-and-forget
+    ``asyncio.create_task``.
+
+    The restart work runs through the operation runner (``execute_restart``), so a
+    crash-resume adopts the in-doubt restart workflow (existing bot) instead of
+    issuing a second one. Approval is server-side (all-auto). Progress stays
+    user-driven via ``sync_restart_progress`` (``ext.restart.<stage>``, written by
+    the runner step), so no poll is enqueued here."""
+
+    @property
+    def task_type(self) -> str:
+        return RESTART_TASK
+
+    def handle(self, payload: Optional[dict]) -> TaskOutcome:
+        publish_id = _require_int(payload, "publish_id")
+        stage = _require_str(payload, "stage")
+        operator = _require_str(payload, "operator")
+        return asyncio.run(self._run(publish_id, stage, operator))
+
+    async def _run(self, publish_id: int, stage: str, operator: str) -> TaskOutcome:
+        result = await self._flow.execute_restart(
+            publish_id=publish_id, stage=stage, operator=operator
+        )
+        if not result or not result.get("success"):
+            message = (result or {}).get("message", "unknown error")
+            return Fail(f"restart failed: publish_id={publish_id}, {message}")
+        return Complete()
+
+
 class PublishProgressPollHandler(_PublishTaskBase):
     """Drive a BaaS-publish wait to terminal by reusing ``advance_publish_progress``."""
 
@@ -299,6 +344,11 @@ class PublishTaskLifecycle(LifecycleBase):
         )
         self._registry.register(
             PublishOnlineReleaseHandler(
+                flow=self._flow, task_queue_service=self._task_queue_service
+            )
+        )
+        self._registry.register(
+            PublishRestartHandler(
                 flow=self._flow, task_queue_service=self._task_queue_service
             )
         )

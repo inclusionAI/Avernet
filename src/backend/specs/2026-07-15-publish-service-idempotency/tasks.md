@@ -202,7 +202,7 @@
 
 # Group C — Remaining operations
 
-## Task 11: Restart → durable task + ledger op — [ ]
+## Task 11: Restart → durable task + ledger op — [x]
 - **Goal:** `restart_bot` = validate + `open_operation(restart)` + enqueue
   durable `service_bot.publish.restart`; handler runs the runner steps; the
   previous marker is no longer cleared pre-submit; `sync_restart_progress`

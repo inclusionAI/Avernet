@@ -680,13 +680,23 @@ def test_create_release_binding_defaults_provider_to_baas():
     assert publish_service.create_device_binding.call_args.kwargs["device_provider"] == "baas"
 
 
+def _setup_restart(svc, record, bot_uuid="BOT-x"):
+    """Wire the resolution mocks execute_restart re-reads from publish_id."""
+    svc._publish_service.get_publish_by_id = Mock(return_value=record)
+    svc._publish_service.get_device_binding_by_id = Mock(
+        return_value=Mock(device_id=bot_uuid)
+    )
+    svc._bot_service.get_bot = Mock(return_value={"bot_id": "b", "entity_id": "u"})
+    svc._mutate_and_update_ext = Mock()
+    svc.refresh_publish_handle = Mock()
+
+
 @pytest.mark.asyncio
 async def test_restart_fallback_threads_config_artifact():
     # On BOT_NOT_FOUND, restart falls back to release_async — which for a teclaw
     # bot must carry the frozen artifact (from ext), not an empty config.
     publish_service = Mock()
     build_service = Mock()
-    build_service.generate_request_id = Mock(return_value="rid")
     build_service.upgrade_async = AsyncMock(
         return_value={"success": False, "error_code": "BOT_NOT_FOUND"}
     )
@@ -695,26 +705,16 @@ async def test_restart_fallback_threads_config_artifact():
     svc = _pf(
         publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
     )
-    svc._ext_state.update_status = Mock()
-    svc._ext_state.get_latest_ext = Mock(return_value={})
 
     artifact = {"schema_version": 2, "skills": []}
-    record = _make_publish_record(ext={"config_artifact": artifact})
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "config_artifact": artifact},
+    )
+    _setup_restart(svc, record)
 
-    try:
-        await svc._restart_bot_async(
-            publish_id=1,
-            publish_record=record,
-            migration_path="",
-            bot_uuid="BOT-x",
-            binding_id=1,
-            bot={"bot_id": "b", "entity_id": "u"},
-            stage=PublishStage.ONLINE,
-            operator="op",
-        )
-    except Exception:
-        pass  # downstream approve/status flow not under test
-
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+    assert result["success"] is True
     assert build_service.release_async.await_args.kwargs["delivery"].config_artifact == artifact
 
 
@@ -744,18 +744,17 @@ async def test_restart_verify_delivers_stored_verify_overrides_not_online():
     svc.approve_baas_publish = Mock()
 
     record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
         ext={
+            "binding": {"verify": 1},
             "config_artifact": _enriched_artifact(
                 "release", {"channels": {"dingding": {"accounts": [{"client_id": "draft"}]}}}
             ),
             "engine_overrides_by_stage": {"verify": _VERIFY_CH, "online": _ONLINE_CH},
         }
     )
-    await svc._restart_bot_async(
-        publish_id=1, publish_record=record, migration_path="", bot_uuid="BOT-x",
-        binding_id=1, bot={"bot_id": "b", "entity_id": "u"},
-        stage=PublishStage.VERIFY, operator="op",
-    )
+    _setup_restart(svc, record)
+    await svc.execute_restart(publish_id=1, stage="verify", operator="op")
 
     delivered = build_service.upgrade_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_overrides"] == _VERIFY_CH
@@ -776,13 +775,12 @@ async def test_restart_no_stored_overrides_delivers_restamped_base():
     svc.approve_baas_publish = Mock()
 
     record = _make_publish_record(
-        ext={"config_artifact": _enriched_artifact("release", base_channels)}
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"verify": 1},
+             "config_artifact": _enriched_artifact("release", base_channels)},
     )
-    await svc._restart_bot_async(
-        publish_id=1, publish_record=record, migration_path="", bot_uuid="BOT-x",
-        binding_id=1, bot={"bot_id": "b", "entity_id": "u"},
-        stage=PublishStage.VERIFY, operator="op",
-    )
+    _setup_restart(svc, record)
+    await svc.execute_restart(publish_id=1, stage="verify", operator="op")
 
     delivered = build_service.upgrade_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_overrides"] == base_channels  # unchanged (no overlay)
@@ -794,21 +792,17 @@ async def test_restart_tolerates_null_engine_overrides_by_stage():
     # A raw ext blob may carry engine_overrides_by_stage as JSON null; the lookup
     # must not raise (the {} get-default does not fire on a present-but-None value).
     build_service = Mock()
-    build_service.generate_request_id = Mock(return_value="rid")
     build_service.upgrade_async = AsyncMock(return_value={"publish_id": 9})
     svc = _pf(Mock(), build_service, Mock(), Mock(), _arca_router(build_service))
-    svc.refresh_publish_handle = Mock()
-    svc._mutate_and_update_ext = Mock()
-    svc.approve_baas_publish = Mock()
 
     record = _make_publish_record(
-        ext={"config_artifact": _enriched_artifact("release"), "engine_overrides_by_stage": None}
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"verify": 1},
+             "config_artifact": _enriched_artifact("release"),
+             "engine_overrides_by_stage": None},
     )
-    await svc._restart_bot_async(
-        publish_id=1, publish_record=record, migration_path="", bot_uuid="BOT-x",
-        binding_id=1, bot={"bot_id": "b", "entity_id": "u"},
-        stage=PublishStage.VERIFY, operator="op",
-    )
+    _setup_restart(svc, record)
+    await svc.execute_restart(publish_id=1, stage="verify", operator="op")
 
     delivered = build_service.upgrade_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_ext"]["stage"] == "canary"
@@ -2978,7 +2972,13 @@ def test_restart_bot_missing_binding_returns_failure():
     assert result["success"] is False
 
 
-def test_restart_bot_success_schedules_async_and_returns_stage():
+def test_restart_bot_success_enqueues_durable_task_and_returns_stage():
+    # #197: restart_bot no longer fire-and-forgets; it enqueues the durable
+    # RESTART_TASK and returns the resolved stage/bot_uuid synchronously.
+    from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+        RESTART_TASK,
+    )
+
     record = _make_publish_record(
         status=PublishStatus.SUCCESS.value,
         ext={"binding": {"online": 42}, "migration_path": "/m"},
@@ -2986,10 +2986,12 @@ def test_restart_bot_success_schedules_async_and_returns_stage():
     svc, publish_service = _svc_with_record(record)
     publish_service.get_device_binding_by_id.return_value = Mock(device_id="BOT-x")
     svc._bot_service.get_bot = Mock(return_value={"bot_id": "bot-source"})
-    svc._restart_bot_async = Mock()
-    with patch(_CREATE_TASK) as create_task:
-        result = svc.restart_bot(publish_id=1, operator="op")
-    create_task.assert_called_once()
+    svc._task_queue_service = Mock()
+
+    result = svc.restart_bot(publish_id=1, operator="op")
+
+    svc._task_queue_service.enqueue.assert_called_once()
+    assert svc._task_queue_service.enqueue.call_args.args[0] == RESTART_TASK
     assert result["success"] is True
     assert result["stage"] == PublishStage.ONLINE.value
     assert result["bot_uuid"] == "BOT-x"

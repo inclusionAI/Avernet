@@ -421,3 +421,55 @@ def test_abandon_inflight_operations_marks_nonterminal():
     assert ledger.get_by_id(recorded.id).state == PublishOperationState.ABANDONED.value
     # Already-terminal COMPLETED op is left untouched.
     assert ledger.get_by_id(done.id).state == PublishOperationState.COMPLETED.value
+
+
+# ── restart: crash windows (durable task, existing-bot adopt) ──────────────────
+def _restart_flow(ledger, baas, build_service, record, bot_uuid="BOT-live"):
+    svc = _flow(ledger=ledger, baas=baas, build_service=build_service,
+                publish_service=Mock())
+    svc._publish_service.get_publish_by_id = Mock(return_value=record)
+    svc._publish_service.get_device_binding_by_id = Mock(
+        return_value=Mock(device_id=bot_uuid)
+    )
+    svc._bot_service.get_bot = Mock(return_value={"bot_id": "b", "entity_id": "u"})
+    svc._mutate_and_update_ext = Mock()
+    svc.refresh_publish_handle = Mock()
+    return svc
+
+
+@pytest.mark.asyncio
+async def test_restart_crash_after_issue_resume_adopts():
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+
+    async def upgrade_async(**kw):
+        wid = baas.issue("BOT-live", "UPDATE")
+        return {"publish_id": wid, "success": True}
+
+    build_service.upgrade_async = AsyncMock(side_effect=upgrade_async)
+    record = _record(PublishStatus.SUCCESS.value)
+    record.ext = {"binding": {"online": 42}, "migration_path": "/m"}
+    svc = _restart_flow(ledger, baas, build_service, record)
+
+    crashed = []
+
+    def checkpoint(name):
+        if name == "after_issue" and not crashed:
+            crashed.append(1)
+            raise RuntimeError("crash after restart issued, before record")
+
+    svc._operation_runner._checkpoint = checkpoint
+
+    with pytest.raises(RuntimeError):
+        await svc.execute_restart(publish_id=1, stage="online", operator="op")
+    assert build_service.upgrade_async.await_count == 1
+
+    svc._operation_runner._checkpoint = lambda _n: None
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+    # Existing bot → adopt the in-doubt workflow; no second restart issued.
+    assert build_service.upgrade_async.await_count == 1
+    assert result["success"] is True
+    op = ledger.get_latest_by_kind(1, "restart", "online")
+    assert op.state == PublishOperationState.COMPLETED.value
+    assert op.baas_publish_id == 901
