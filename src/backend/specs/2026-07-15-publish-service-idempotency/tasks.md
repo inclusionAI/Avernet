@@ -245,7 +245,7 @@
   - [ ] Full suite green.
 - **Depends on:** Group B
 
-## Task 13: Rollback — transactional flips + runner deploy — [ ]
+## Task 13: Rollback — transactional flips + runner deploy — [x]
 - **Goal:** The two record flips execute in one `orm_session()` transaction
   via a combined repo method; `execute_rollback`'s deploy leg becomes a
   `rollback_deploy` runner op (poll enqueue unchanged).
@@ -254,9 +254,9 @@
   `publish_rollback_mixin.py`, `publish_flow/rollback_ops_mixin.py`,
   crash-window rollback cases, `test_service_bot_rollback.py`.
 - **Done when:**
-  - [ ] Crash between flips is impossible (single transaction) — test
+  - [x] Crash between flips is impossible (single transaction) — test
         asserts both-or-neither; deploy crash cases converge.
-  - [ ] Full suite green.
+  - [x] Full suite green.
 - **Depends on:** Group B
 
 ## Task 14: Scale onto the runner — [ ]

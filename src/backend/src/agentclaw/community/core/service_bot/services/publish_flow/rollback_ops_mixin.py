@@ -104,18 +104,31 @@ class RollbackOpsMixin:
         # longer silently ship the raw artifact (the single-config-slot hazard).
         version = f"{target_record.version}"
         delivery = self._ext_state.compose_stored(target_ext, PublishStage.ONLINE)
-        upgrade_result = await self._build_service.upgrade_async(
+
+        # (#197) Crash-safe issuance via the operation runner (existing bot →
+        # adopt-by-query on resume, never a second rollback deploy).
+        op = self._operation_runner.open_operation(
+            publish_id=target_publish_id,
+            kind="rollback_deploy",
+            stage=PublishStage.ONLINE.value,
             bot_uuid=bot_uuid,
-            bot=bot,
-            user_id=owner_id,
-            device_count=1,
-            migration_path=migration_path,
-            publish_stage=PublishStage.ONLINE,
-            version=version,
-            delivery=delivery,
+            operator=operator,
         )
 
-        baas_publish_id = upgrade_result.get("publish_id")
+        async def _issue():
+            return await self._build_service.upgrade_async(
+                bot_uuid=bot_uuid,
+                bot=bot,
+                user_id=owner_id,
+                device_count=1,
+                migration_path=migration_path,
+                publish_stage=PublishStage.ONLINE,
+                version=version,
+                delivery=delivery,
+            )
+
+        op = await self._operation_runner.acquire_workflow(op, _issue)
+        baas_publish_id = op.baas_publish_id
         if not baas_publish_id:
             raise PublishFlowServiceError("BaaS-layer upgrade did not return publish_id")
 
@@ -130,6 +143,7 @@ class RollbackOpsMixin:
             source_status=PublishStatus.SUCCESS,
             ext=target_ext,
         )
+        self._operation_runner.complete_operation(op)
 
         # 7. All-auto approval (#197): the rollback deploy workflow is
         # auto-approved server-side (upgrade payload sets auto_approve_publish) —

@@ -265,6 +265,30 @@ class BotPublishRepositoryProtocol(Protocol):
         """
         ...
 
+    def rollback_flip(
+        self,
+        *,
+        current_id: int,
+        current_ext: Dict[str, Any],
+        current_source_status: str,
+        current_target_status: str,
+        target_id: int,
+        target_ext: Dict[str, Any],
+        target_source_status: str,
+        target_target_status: str,
+    ) -> tuple[bool, bool]:
+        """原子地翻转回滚的两条发布单状态（同一事务）。
+
+        current: source→target（如 SUCCESS→DRAFT），写入 current_ext。
+        target:  source→target（如 UPGRADED→SUCCESS），写入 target_ext。
+        两条 UPDATE 在同一事务内提交，避免“翻转一半”导致 can_rollback 永久拒绝
+        的半回滚死局（#197）。均为乐观锁 CAS。
+
+        Returns:
+            (current_ok, target_ok): 各自 CAS 是否命中。
+        """
+        ...
+
     def update_version(
         self,
         publish_id: int,

@@ -150,7 +150,9 @@ class PublishRollbackMixin:
                 f"Target publish record not found: last_pub_id={current_record.last_pub_id}"
             )
 
-        # 3. 当前版本状态改为 DRAFT，记录 ext.rollback
+        # 3+4. (#197) 原子地翻转两条记录（同一事务），避免“翻转一半”导致
+        # can_rollback 永久拒绝的半回滚死局。current: SUCCESS→DRAFT（记 ext.rollback）；
+        # target: UPGRADED→SUCCESS（标 rollback_restored_from）。
         current_ext = current_record.ext or {}
         current_ext["rollback"] = {
             "rolled_back_at": datetime.now().isoformat(),
@@ -158,28 +160,27 @@ class PublishRollbackMixin:
             "rollback_reason": reason,
             "target_publish_id": current_record.last_pub_id,
         }
-        self.update_publish_status_with_ext(
-            publish_id=publish_id,
-            target_status=PublishStatus.DRAFT,
-            ext=current_ext,
-            source_status=PublishStatus.SUCCESS,
-        )
-        logger.info(
-            f"[rollback_publish] Current publish status changed to DRAFT: publish_id={publish_id}"
-        )
-
-        # 4. 目标版本状态恢复为 SUCCESS，标记 rollback_restored_from
         target_ext = target_record.ext or {}
         target_ext["rollback_restored_from"] = publish_id
-        self.update_publish_status_with_ext(
-            publish_id=current_record.last_pub_id,
-            target_status=PublishStatus.SUCCESS,
-            ext=target_ext,
-            source_status=PublishStatus.UPGRADED,
+
+        current_ok, target_ok = self._repo.rollback_flip(
+            current_id=publish_id,
+            current_ext=current_ext,
+            current_source_status=PublishStatus.SUCCESS.value,
+            current_target_status=PublishStatus.DRAFT.value,
+            target_id=current_record.last_pub_id,
+            target_ext=target_ext,
+            target_source_status=PublishStatus.UPGRADED.value,
+            target_target_status=PublishStatus.SUCCESS.value,
         )
+        if not (current_ok and target_ok):
+            raise BotPublishServiceError(
+                f"回滚状态翻转失败（并发或状态不符）: current_ok={current_ok}, "
+                f"target_ok={target_ok}, publish_id={publish_id}"
+            )
         logger.info(
-            f"[rollback_publish] Target publish status changed to SUCCESS: "
-            f"publish_id={current_record.last_pub_id}, marked rollback_restored_from={publish_id}"
+            f"[rollback_publish] Atomically flipped: current({publish_id}) SUCCESS→DRAFT, "
+            f"target({current_record.last_pub_id}) UPGRADED→SUCCESS"
         )
 
         # 5. 执行回滚部署（通过 PublishFlowService）

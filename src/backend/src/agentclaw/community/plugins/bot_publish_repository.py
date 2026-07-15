@@ -363,6 +363,60 @@ class BotPublishRepository:
             return None
         return self.get_by_id(publish_id)
 
+    def rollback_flip(
+        self,
+        *,
+        current_id: int,
+        current_ext: Dict[str, Any],
+        current_source_status: str,
+        current_target_status: str,
+        target_id: int,
+        target_ext: Dict[str, Any],
+        target_source_status: str,
+        target_target_status: str,
+    ) -> tuple[bool, bool]:
+        env = get_current_env()
+        cur_json, cur_pending = self._offload.prepare(current_ext, current_id, env)
+        tgt_json, tgt_pending = self._offload.prepare(target_ext, target_id, env)
+        with self._db.orm_session() as db:
+            cur_affected = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.id == current_id,
+                    self.Model.status == current_source_status,
+                )
+                .update(
+                    {
+                        self.Model.status: current_target_status,
+                        self.Model.ext: cur_json,
+                        self.Model.gmt_modified: func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+            tgt_affected = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.id == target_id,
+                    self.Model.status == target_source_status,
+                )
+                .update(
+                    {
+                        self.Model.status: target_target_status,
+                        self.Model.ext: tgt_json,
+                        self.Model.gmt_modified: func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+            # Upload offloaded artifacts only for rows that actually took the write
+            # (inside the txn so a put failure rolls both flips back together).
+            if cur_affected > 0:
+                self._offload.upload(cur_pending)
+            if tgt_affected > 0:
+                self._offload.upload(tgt_pending)
+        return cur_affected > 0, tgt_affected > 0
+
     def update_version(
         self,
         publish_id: int,
