@@ -44,6 +44,13 @@ pub struct MessageTracker {
     /// tool blocks. BCS rebuilds segment-local thinking text from `data.delta`
     /// and clears this buffer whenever a non-thinking stream event is observed.
     streaming_thinking_buf: Mutex<HashMap<String, String>>,
+    /// run_id → (sender role, channel sender display name).
+    ///
+    /// Provider bots do not heartbeat like WebSocket bots, so their registry
+    /// memory entry can expire while the persisted record remains available.
+    /// Cache sender metadata for the run instead of reading the group and bot
+    /// registry on every streaming delta.
+    channel_sender_info: Mutex<HashMap<String, (bcs_domain::ParticipantRole, String)>>,
 }
 
 impl MessageTracker {
@@ -54,6 +61,7 @@ impl MessageTracker {
             streaming_chat_buf: Mutex::new(HashMap::new()),
             chat_delta_mode: Mutex::new(HashSet::new()),
             streaming_thinking_buf: Mutex::new(HashMap::new()),
+            channel_sender_info: Mutex::new(HashMap::new()),
         }
     }
 
@@ -121,6 +129,24 @@ impl MessageTracker {
         self.streaming_thinking_buf.lock().await.remove(run_id);
     }
 
+    pub async fn channel_sender_info(
+        &self,
+        run_id: &str,
+    ) -> Option<(bcs_domain::ParticipantRole, String)> {
+        self.channel_sender_info.lock().await.get(run_id).cloned()
+    }
+
+    pub async fn cache_channel_sender_info(
+        &self,
+        run_id: &str,
+        info: (bcs_domain::ParticipantRole, String),
+    ) {
+        self.channel_sender_info
+            .lock()
+            .await
+            .insert(run_id.to_string(), info);
+    }
+
     /// Whether the run has received any `delta_text` frame (SSE self-accumulate
     /// mode). At `final`, delta-mode runs flush their accumulated buffer instead
     /// of overriding with the final frame's cumulative full text.
@@ -157,6 +183,7 @@ impl MessageTracker {
     pub async fn cleanup_run(&self, run_id: &str) -> Option<String> {
         self.chat_delta_mode.lock().await.remove(run_id);
         self.streaming_thinking_buf.lock().await.remove(run_id);
+        self.channel_sender_info.lock().await.remove(run_id);
         self.streaming_chat_buf.lock().await.remove(run_id)
     }
 }

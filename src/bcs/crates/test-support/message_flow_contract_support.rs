@@ -76,6 +76,7 @@ fn bot_participant(id: &str, name: &str, role: ParticipantRole) -> Participant {
 #[derive(Default)]
 pub struct FakeGroupCoreService {
     groups: RwLock<HashMap<String, Group>>,
+    get_counts: RwLock<HashMap<String, usize>>,
     message_counts: RwLock<HashMap<String, usize>>,
     fail_add_message: RwLock<bool>,
 }
@@ -83,6 +84,15 @@ pub struct FakeGroupCoreService {
 impl FakeGroupCoreService {
     pub async fn fail_add_message(&self) {
         *self.fail_add_message.write().await = true;
+    }
+
+    pub async fn get_count(&self, id: &str) -> usize {
+        self.get_counts
+            .read()
+            .await
+            .get(id)
+            .copied()
+            .unwrap_or_default()
     }
 }
 
@@ -94,6 +104,9 @@ impl GroupCoreService for FakeGroupCoreService {
     }
 
     async fn get(&self, id: &str) -> Option<Group> {
+        let mut counts = self.get_counts.write().await;
+        *counts.entry(id.to_string()).or_default() += 1;
+        drop(counts);
         self.groups.read().await.get(id).cloned()
     }
 
@@ -416,6 +429,7 @@ pub struct FakeRegistryService {
     bots: RwLock<HashMap<String, RegisteredBot>>,
     protocol_versions: RwLock<HashMap<String, u32>>,
     delivery_targets: RwLock<HashMap<String, BotDeliveryTarget>>,
+    including_deleted_gets: RwLock<HashMap<String, usize>>,
 }
 
 impl FakeRegistryService {
@@ -441,6 +455,15 @@ impl FakeRegistryService {
                 status: ActorStatus::Online,
             },
         );
+    }
+
+    pub async fn including_deleted_get_count(&self, id: &str) -> usize {
+        self.including_deleted_gets
+            .read()
+            .await
+            .get(id)
+            .copied()
+            .unwrap_or_default()
     }
 
     pub async fn set_visibility(&self, id: &str, visibility: &str) {
@@ -499,6 +522,13 @@ impl BotRegistryCoreService for FakeRegistryService {
 
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot> {
         self.bots.read().await.get(bot_id).cloned()
+    }
+
+    async fn get_including_deleted(&self, bot_id: &str) -> Option<RegisteredBot> {
+        let mut gets = self.including_deleted_gets.write().await;
+        *gets.entry(bot_id.to_string()).or_default() += 1;
+        drop(gets);
+        self.get(bot_id).await
     }
 
     async fn get_agent_credentials(&self, bot_id: &str) -> Option<AgentCredentials> {

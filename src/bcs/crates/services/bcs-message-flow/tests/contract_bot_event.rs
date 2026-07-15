@@ -713,6 +713,14 @@ async fn terminal_cleanup_clears_thinking_delta_buffer_for_reused_run_id() {
 #[tokio::test]
 async fn bot_delta_channel_outbound_uses_delta_text_not_synthesized_snapshot() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group
+        .participants
+        .iter_mut()
+        .find(|participant| participant.bot_uuid == "bot-observer")
+        .unwrap()
+        .bot_name = None;
+    support.group.upsert(group).await.unwrap();
     let flow = BcsMessageFlow::new(
         support.group.clone(),
         support.routing.clone(),
@@ -723,6 +731,7 @@ async fn bot_delta_channel_outbound_uses_delta_text_not_synthesized_snapshot() {
     let recording_channel = Arc::new(RecordingChannelService::default());
     let channel: Arc<dyn ChannelService> = recording_channel.clone();
     assert!(flow.channel_slot().set(channel).is_ok());
+    let group_get_count_before = support.group.get_count("group-1").await;
 
     for delta in ["你", "好"] {
         flow.handle_bot_event(BotEventCommand {
@@ -743,6 +752,20 @@ async fn bot_delta_channel_outbound_uses_delta_text_not_synthesized_snapshot() {
 
     let outbound = recording_channel.outbound().await;
     assert_eq!(outbound.len(), 2);
+    assert_eq!(outbound[0].sender_label, "Observer");
+    assert_eq!(
+        support
+            .registry
+            .including_deleted_get_count("bot-observer")
+            .await,
+        1,
+        "streaming deltas should resolve a missing provider bot name only once per run"
+    );
+    assert_eq!(
+        support.group.get_count("group-1").await - group_get_count_before,
+        1,
+        "streaming deltas should resolve sender role and name from the group only once per run"
+    );
     assert_eq!(outbound[0].text.as_deref(), Some("你"));
     assert_eq!(outbound[0].raw_payload["message"]["content"][0]["text"], "你");
     assert_eq!(
@@ -751,6 +774,60 @@ async fn bot_delta_channel_outbound_uses_delta_text_not_synthesized_snapshot() {
         "ChatDelta sent to channel adapters must stay incremental even when BCS synthesizes cumulative message.content for frontend rendering"
     );
     assert_eq!(outbound[1].raw_payload["message"]["content"][0]["text"], "你好");
+}
+
+#[tokio::test]
+async fn bot_final_channel_outbound_resolves_missing_sender_name() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group
+        .participants
+        .iter_mut()
+        .find(|participant| participant.bot_uuid == "bot-observer")
+        .unwrap()
+        .bot_name = Some("bot-observer".to_string());
+    support.group.upsert(group).await.unwrap();
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+    let recording_channel = Arc::new(RecordingChannelService::default());
+    let channel: Arc<dyn ChannelService> = recording_channel.clone();
+    assert!(flow.channel_slot().set(channel).is_ok());
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "run-channel-final".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({
+            "state": "final",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "你好"}],
+            },
+        }),
+        state: ChatEventState::Final,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    let outbound = recording_channel.outbound().await;
+    assert_eq!(outbound.len(), 1);
+    assert_eq!(outbound[0].kind, ChannelOutboundEventKind::ChatFinal);
+    assert_eq!(outbound[0].sender_label, "Observer");
+    assert_eq!(outbound[0].text.as_deref(), Some("你好"));
+    assert!(
+        flow.message_tracker
+            .channel_sender_info("run-channel-final")
+            .await
+            .is_none(),
+        "terminal run cleanup should remove cached channel sender metadata"
+    );
 }
 
 #[tokio::test]

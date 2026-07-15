@@ -16,7 +16,7 @@ use bcs_service_api::{
     MessageLogTargetSummary, MESSAGE_LOG_SCHEMA_VERSION, message_log_json,
     RouteParticipantOverlay, ResponseMode, RoutingDecision, RoutingMode, RoutingTarget,
     RunFallbackDelivery, ServiceError, ServiceResult, SystemMessageEvent, TaskCompleteCommand,
-    TaskDispatchCommand, TaskMessageCommand, backfill_bot_names,
+    TaskDispatchCommand, TaskMessageCommand, backfill_bot_names, backfill_participant_names,
 };
 use serde_json::Value;
 use tracing::{info, warn};
@@ -186,23 +186,7 @@ async fn try_channel_outbound(flow: &BcsMessageFlow, cmd: &BotEventCommand) {
         return;
     };
 
-    let (sender_role, sender_label) = match flow.group.get(&cmd.group_id).await {
-        Some(group) => group
-            .participants
-            .into_iter()
-            .find(|participant| participant.bot_uuid == cmd.bot_id)
-            .map(|participant| {
-                (
-                    participant.role,
-                    participant
-                        .bot_name
-                        .filter(|name| !name.trim().is_empty())
-                        .unwrap_or_else(|| cmd.bot_id.clone()),
-                )
-            })
-            .unwrap_or((bcs_domain::ParticipantRole::Observer, cmd.bot_id.clone())),
-        None => (bcs_domain::ParticipantRole::Observer, cmd.bot_id.clone()),
-    };
+    let (sender_role, sender_label) = resolve_channel_sender(flow, cmd).await;
     let text = channel_outbound_text(kind, cmd);
     let raw_payload = if kind == ChannelOutboundEventKind::System {
         serde_json::json!({ "state": channel_terminal_state(&cmd.state) })
@@ -237,6 +221,59 @@ async fn try_channel_outbound(flow: &BcsMessageFlow, cmd: &BotEventCommand) {
     {
         warn!(run_id = %cmd.run_id, error = %error, "channel outbound hook failed");
     }
+}
+
+async fn resolve_channel_sender(
+    flow: &BcsMessageFlow,
+    cmd: &BotEventCommand,
+) -> (bcs_domain::ParticipantRole, String) {
+    if let Some(info) = flow
+        .message_tracker
+        .channel_sender_info(&cmd.run_id)
+        .await
+    {
+        return info;
+    }
+
+    let info = match flow.group.get(&cmd.group_id).await {
+        Some(group) => match group
+            .participants
+            .into_iter()
+            .find(|participant| participant.bot_uuid == cmd.bot_id)
+        {
+            Some(mut participant) => {
+                let sender_role = participant.role;
+                let label = match participant_display_name(&participant) {
+                    Some(label) => label,
+                    None => {
+                        backfill_participant_names(
+                            flow.registry.as_ref(),
+                            std::slice::from_mut(&mut participant),
+                        )
+                        .await;
+                        participant_display_name(&participant)
+                            .unwrap_or_else(|| cmd.bot_id.clone())
+                    }
+                };
+                (sender_role, label)
+            }
+            None => (bcs_domain::ParticipantRole::Observer, cmd.bot_id.clone()),
+        },
+        None => (bcs_domain::ParticipantRole::Observer, cmd.bot_id.clone()),
+    };
+    flow.message_tracker
+        .cache_channel_sender_info(&cmd.run_id, info.clone())
+        .await;
+    info
+}
+
+fn participant_display_name(participant: &bcs_service_api::Participant) -> Option<String> {
+    participant
+        .bot_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty() && *name != participant.bot_uuid)
+        .map(str::to_string)
 }
 
 fn channel_event_kind(cmd: &BotEventCommand) -> Option<ChannelOutboundEventKind> {
