@@ -1717,6 +1717,7 @@ class BaasService:  # pragma: no cover
         tenant: str = "",
         device_affinity: Optional[str] = None,
         device_uuid: Optional[str] = None,
+        ws_conn_mode: Optional[str] = None,
     ) -> BotWsConnectionInfoResponse:
         """获取 WebSocket 连接信息.
 
@@ -1729,6 +1730,7 @@ class BaasService:  # pragma: no cover
             tenant: 租户名称；空则回落到 self._tenant（BaasConfig.tenant，各部署配置）
             device_affinity: 设备亲和性标识，用于指定目标设备（可选）
             device_uuid: 多实例场景锁定特定实例（可选）；不传则 BaaS 自动选活跃实例
+            ws_conn_mode: WebSocket 连接模式透传（可选）；不传则不覆盖
 
         Returns:
             BotWsConnectionInfoResponse: WebSocket 连接信息
@@ -1748,6 +1750,7 @@ class BaasService:  # pragma: no cover
             tenant=tenant,
             device_affinity=device_affinity,
             device_uuid=device_uuid,
+            ws_conn_mode=ws_conn_mode,
         )
 
     def get_ws_info_by_bot_uuid(
@@ -1758,6 +1761,7 @@ class BaasService:  # pragma: no cover
         tenant: str = "",
         device_affinity: Optional[str] = None,
         device_uuid: Optional[str] = None,
+        ws_conn_mode: Optional[str] = None,
     ) -> BotWsConnectionInfoResponse:
         """获取 WebSocket 连接信息（通过 bot_uuid 直接查询）.
 
@@ -1770,6 +1774,7 @@ class BaasService:  # pragma: no cover
             tenant: 租户名称；空则回落到 self._tenant（BaasConfig.tenant，各部署配置）
             device_affinity: 设备亲和性标识，用于指定目标设备（可选）
             device_uuid: 多实例场景锁定特定实例（可选）；不传则 BaaS 自动选活跃实例
+            ws_conn_mode: WebSocket 连接模式透传（可选）；不传则不覆盖
 
         Returns:
             BotWsConnectionInfoResponse: WebSocket 连接信息
@@ -1793,6 +1798,8 @@ class BaasService:  # pragma: no cover
             params["device_affinity"] = device_affinity
         if device_uuid:
             params["device_uuid"] = device_uuid
+        if ws_conn_mode:
+            params["ws_conn_mode"] = ws_conn_mode
 
         try:
             response = self._http.get(

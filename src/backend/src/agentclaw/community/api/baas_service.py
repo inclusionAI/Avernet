@@ -118,6 +118,7 @@ class BaasServiceProtocol(Protocol):
         tenant: str = "",
         device_affinity: Optional[str] = None,
         device_uuid: Optional[str] = None,
+        ws_conn_mode: Optional[str] = None,
     ) -> BotWsConnectionInfoResponse:
         """Resolve WebSocket / proxypass info for a device binding.
 

@@ -665,6 +665,7 @@ class DeviceServiceRouter(DeviceService):
         port: int | None = None,
         ttl: int | None = None,
         device_uuid: str | None = None,
+        ws_conn_mode: str | None = None,
     ):
         """获取设备连接信息 - 根据 binding_id 路由.
 
@@ -674,7 +675,7 @@ class DeviceServiceRouter(DeviceService):
         service = self._get_provider_for_binding(binding_id)
         return service.get_device_connection(
             binding_id=binding_id, operator=operator, port=port, ttl=ttl,
-            device_uuid=device_uuid,
+            device_uuid=device_uuid, ws_conn_mode=ws_conn_mode,
         )
 
     @override
@@ -879,6 +880,7 @@ class DeviceServiceRouter(DeviceService):
         port: int | None = None,
         ttl: int | None = None,
         device_uuid: str | None = None,
+        ws_conn_mode: str | None = None,
     ):
         """通过 bot_id 获取设备连接信息（对话页主入口，§3）。
 
@@ -897,6 +899,7 @@ class DeviceServiceRouter(DeviceService):
             port=port,
             ttl=ttl,
             device_uuid=device_uuid,
+            ws_conn_mode=ws_conn_mode,
         )
 
     @override
