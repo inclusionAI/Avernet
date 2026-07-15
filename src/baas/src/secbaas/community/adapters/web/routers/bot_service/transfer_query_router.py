@@ -8,14 +8,14 @@ from typing import Annotated
 from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 
-from secbaas.api import ApiResponse
-from secbaas.api.bot_runtime import (
+from secbaas.community.api import ApiResponse
+from secbaas.community.api.bot_runtime import (
     BotFileTransferDispatcher,
     GetTransferStatusResponse,
     TransferNotFoundError,
 )
-from secbaas.bootstrap import ApplicationContainer
-from secbaas.logger import get_logger
+from secbaas.community.bootstrap import ApplicationContainer
+from secbaas.community.logger import get_logger
 
 logger = get_logger("router")
 

@@ -9,8 +9,8 @@ from typing import Annotated
 from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
-from secbaas.api import ApiResponse
-from secbaas.api.bot_runtime import (
+from secbaas.community.api import ApiResponse
+from secbaas.community.api.bot_runtime import (
     BotFileTransferDispatcher,
     BotNotFoundError,
     CancelUploadResponse,
@@ -27,14 +27,14 @@ from secbaas.api.bot_runtime import (
     StagingListResponse,
     TransferNotFoundError,
 )
-from secbaas.api.bot_runtime._exceptions import (
+from secbaas.community.api.bot_runtime._exceptions import (
     OssObjectNotFoundError,
     TransferNotTerminalError,
 )
-from secbaas.api.device_manage import DeviceFacadeException
-from secbaas.bootstrap import ApplicationContainer
-from secbaas.core.repository.file_transfer_ticket import TransferStateConflictError
-from secbaas.logger import get_logger
+from secbaas.community.api.device_manage import DeviceFacadeException
+from secbaas.community.bootstrap import ApplicationContainer
+from secbaas.community.core.repository.file_transfer_ticket import TransferStateConflictError
+from secbaas.community.logger import get_logger
 
 logger = get_logger("router")
 
