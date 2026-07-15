@@ -56,10 +56,12 @@ of the publish operations are. Concretely (all confirmed against current code):
   process death leaks a live online bot with the DB claiming RELEASED.
 - Rollback's two un-transactioned CAS writes can crash into a half-rolled-back
   state that its own precondition check then permanently rejects.
-- Scale and `restart_devices` generate timestamp/uuid request ids, so every
-  retry is a brand-new BaaS workflow — defeating the one idempotency mechanism
-  BaaS offers — while the create/approve path reuses one request id for two
-  logically distinct operations.
+- Scale and `restart_devices` generate timestamp/uuid request ids, so retries
+  of the same logical operation cannot even be correlated in logs, while the
+  create/approve path reuses one request id for two logically distinct
+  operations. (Note: BaaS does **not** dedup on request id at all — see
+  "Recovery model" below — so recovery never rides on request ids; they are
+  correlation/audit only.)
 - Eval publish creates a real BaaS bot and persists nothing anywhere; a crash
   orphans the bot with no record to reconcile or tear down.
 - The human-approval flow persists the workflow platform's `puid` only after
@@ -104,6 +106,40 @@ the fix's mechanism and the cleanup.
   a crash at any point is tractable and new operations follow the pattern by
   construction.
 
+## Recovery model (BaaS facts confirmed during spec review)
+
+Verified against the in-repo BaaS server (`src/baas`), because they shape what
+recovery can and cannot rely on:
+
+- **`request_id` is correlation-only.** It is client-generated, required, logged
+  and echoed back — but never persisted (no column on the publish table), never
+  deduped on, and not queryable. No recovery step may rely on BaaS request-id
+  semantics.
+- **BaaS enforces one active publish per bot** (SVC-PUB-15 in
+  `create_publish`): a second mutation on the same bot while a workflow is
+  active is rejected, and BaaS self-heals its own orphan publish rows
+  (publish without batch records) by failing them and letting the new publish
+  proceed.
+- **Workflows are queryable by bot**: `list_publishes(tenant, bot_id, status)`
+  / `get_active_by_bot_id` exist server-side.
+
+Consequences for this design:
+
+- The ledger's resume-at-step prevents *our* blind re-issues — that alone
+  closes most windows.
+- For mutations on an **existing bot** (upgrade, restart, scale, stop/destroy,
+  rollback deploy): if we crash after BaaS accepted but before we persisted
+  the returned workflow id, the re-run recovers the id by querying the bot's
+  publishes (and SVC-PUB-15 guarantees a re-issue can't stack a duplicate
+  active workflow).
+- For **bot creation** (first release, eval): there is no same-bot guard to
+  lean on. The window between "create issued" and "response persisted" is
+  closed by reconcile-before-create (query BaaS for a bot matching the
+  intent's identity) if bot identity is queryable — otherwise it remains a
+  **bounded, observable orphan**: the ledger records that a create was in
+  flight, so the orphan is discoverable and cleanable instead of silent
+  (today's behavior). See Open Questions.
+
 ## Acceptance Criteria
 
 Crash-resume convergence (the core invariant):
@@ -114,10 +150,19 @@ Crash-resume convergence (the core invariant):
       the process between **any two consecutive persistence/BaaS steps** and
       re-running the operation converges to the intended end state with:
       no second BaaS bot or workflow created, no BaaS-returned publish id
-      lost, and no workflow left unapproved.
+      lost, and no workflow left unapproved. For the bot-creation window
+      specifically, the guarantee is per the Recovery model: at worst a
+      recorded, discoverable, cleanable orphan — never an untracked duplicate.
 - [ ] The convergence guarantee is for sequential re-runs (crash → re-run).
       Concurrent overlap of the same task (lease-expiry double-claim) is
       explicitly out of scope per the issue discussion.
+- [ ] Resume-at-step never traps a doomed operation: a user-driven retry can
+      **abandon** an in-flight ledger operation and restart from an earlier
+      phase (e.g. rebuild after fixing a bad artifact, then re-release). The
+      abandoned operation is marked as such in the ledger — and its BaaS-side
+      workflow/bot reconciled or cleaned where possible — so the escape hatch
+      that exists today (phase-level retry from `source_status`) is preserved,
+      not replaced, by step-level resume.
 
 Operation ledger:
 
@@ -140,8 +185,14 @@ Approval:
       in the release path is removed).
 - [ ] An approve failure fails the operation step visibly and is re-driven on
       re-run; no operation reports success while its workflow is unapproved.
-- [ ] Approve carries its own deterministic request id, distinct from the
-      create's.
+      (Today the failure is swallowed: the flow reports success and the record
+      waits on the unapproved workflow until the poll deadline. Step-level
+      re-drive replaces that; the abandonment criterion above covers the case
+      where re-driving is pointless because an earlier phase must be redone.)
+- [ ] Approve sends its own **client-generated** request id (we generate it
+      and record it in the ledger; BaaS only echoes it), distinct from the
+      create's — two different operations must be distinguishable in logs and
+      in the ledger.
 
 Durability of background work:
 
@@ -149,13 +200,18 @@ Durability of background work:
       pipeline: restart and offline's bot destroy run as durable task-queue
       tasks (same pattern as the existing verify/online tasks).
 
-Request ids:
+Request ids (correlation/audit only — BaaS does not consume them for
+idempotency, per the Recovery model):
 
-- [ ] Every BaaS mutation sends a deterministic request id, stable across
-      re-runs of the same logical operation and distinct across different
-      logical operations (including different versions/attempts where those
-      are genuinely different operations). The timestamp id in scale and the
+- [ ] Every BaaS mutation sends a client-generated request id that is
+      deterministic per logical operation (stable across re-runs of the same
+      operation, distinct across different operations) and is recorded in
+      that operation's ledger row — so any BaaS-side log line is traceable to
+      the exact ledger step that issued it. The timestamp id in scale and the
       uuid in `restart_devices` are replaced.
+- [ ] No recovery logic depends on BaaS request-id semantics; recovery uses
+      the ledger plus BaaS's queryable state (publishes by bot, active-publish
+      guard) only.
 
 Known-defect fixes subsumed by the above:
 
@@ -206,8 +262,10 @@ Tests:
   infra-side if ever needed, per the issue discussion.
 - Atomic status-advance+enqueue (outbox) and the stuck-record
   sweep/reconciler — postponed to #198.
-- BaaS-server-side behavior changes (we consume its request_id semantics; we
-  do not change them).
+- BaaS-server-side behavior changes — with one possible exception under
+  discussion (Open Question 1b: a narrow request-id dedup addition to close
+  the bot-creation window exactly). Absent that, we only consume BaaS's
+  existing queryable state.
 - The #157 restart-readiness UX itself (this work only makes its data source
   reliable).
 - Backfilling/repairing records already stranded in production (manual
@@ -217,14 +275,22 @@ Tests:
 
 ## Open Questions
 
-1. **BaaS request_id dedup semantics.** The recovery story assumes BaaS
-   dedups mutations on `request_id` (returning the original workflow rather
-   than creating a new one) — or at least that we can query a workflow by
-   request_id to reconcile. Which of the two does BaaS actually support, per
-   endpoint (create / update / stop / scale / restart / approve)? If neither,
-   the ledger can still prevent *our* re-issues (resume-at-step), but the
-   window between "intent persisted" and "id persisted" needs a
-   reconcile-by-query or an accepted (now bounded and observable) orphan.
+1. ~~BaaS request_id dedup semantics.~~ **Resolved during spec review**: BaaS
+   neither dedups on `request_id` nor persists it — correlation-only (see
+   Recovery model). Recovery instead uses the ledger + BaaS's per-bot
+   active-publish guard + publishes-by-bot queries. Two follow-on questions:
+   1a. **Reconcile-before-create feasibility.** For the bot-creation window,
+       can an in-flight create be detected by querying BaaS (is the bot name
+       or another identity we send unique/queryable per tenant)? If yes, the
+       create window closes fully; if no, it degrades to the bounded
+       observable orphan. To be answered in the plan phase by reading the
+       BaaS bot model.
+   1b. **Optional BaaS-side dedup.** BaaS is in this repo, so adding real
+       server-side idempotency (persist `request_id`, unique per tenant,
+       return the existing workflow on replay) is feasible and would close
+       the creation window exactly. The issue currently scopes BaaS server
+       changes out — is that worth revisiting for this one narrow addition,
+       or do we stay client-side only?
 2. **Ledger write vs. publish-record status write atomicity.** Ledger steps
    and the publish record's status/ext CAS live in different tables. Is a
    same-transaction guarantee required for any step pair, or is
