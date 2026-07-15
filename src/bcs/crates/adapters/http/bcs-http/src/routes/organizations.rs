@@ -255,7 +255,7 @@ pub async fn patch_member_profile(
         organization_code: profile.organization_code,
         bot_uuid: profile.bot_uuid,
         provider_id: profile.provider_id,
-        capabilities: to_wire_capabilities(profile.capabilities),
+        profile: to_wire_capabilities(profile.capabilities),
     }))
 }
 

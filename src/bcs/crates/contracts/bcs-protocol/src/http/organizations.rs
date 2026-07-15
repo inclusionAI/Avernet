@@ -33,35 +33,10 @@ pub struct PatchOrganizationMemberProfileRequest {
     pub summary: Option<String>,
     #[serde(default)]
     pub domains: Option<Vec<String>>,
-    #[serde(default, deserialize_with = "deserialize_optional_skills")]
+    #[serde(default)]
     pub skills: Option<Vec<Skill>>,
     #[serde(default)]
     pub scopes: Option<Vec<String>>,
-}
-
-fn deserialize_optional_skills<'de, D>(deserializer: D) -> Result<Option<Vec<Skill>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de::Error;
-
-    let values = Option::<Vec<serde_json::Value>>::deserialize(deserializer)?;
-    values
-        .map(|values| {
-            values
-                .into_iter()
-                .map(|value| match value {
-                    serde_json::Value::String(name) => Ok(Skill::new(name)),
-                    serde_json::Value::Object(_) => {
-                        serde_json::from_value(value).map_err(D::Error::custom)
-                    }
-                    other => Err(D::Error::custom(format!(
-                        "expected string or object in skills array, got {other}"
-                    ))),
-                })
-                .collect()
-        })
-        .transpose()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,7 +86,7 @@ pub struct OrganizationMemberProfileResponse {
     pub organization_code: String,
     pub bot_uuid: String,
     pub provider_id: String,
-    pub capabilities: BotCapabilities,
+    pub profile: BotCapabilities,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

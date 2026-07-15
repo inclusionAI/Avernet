@@ -401,7 +401,7 @@ async fn patch_member_profile_accepts_supported_fields() {
             "summary": "Updated summary",
             "domains": ["engineering"],
             "skills": [
-                "code_review",
+                {"name": "code_review", "description": "Reviews code"},
                 {"name": "sql_analysis", "description": "Analyzes SQL"}
             ],
             "scopes": ["production"]
@@ -414,14 +414,19 @@ async fn patch_member_profile_accepts_supported_fields() {
     assert_eq!(body["organization_code"], "promo-2026");
     assert_eq!(body["bot_uuid"], "bot-b");
     assert_eq!(body["provider_id"], "provider-b");
-    assert_eq!(body["capabilities"]["name"], "Updated Bot");
-    assert_eq!(body["capabilities"]["skills"][1]["name"], "sql_analysis");
+    assert_eq!(body["profile"]["name"], "Updated Bot");
+    assert_eq!(body["profile"]["skills"][1]["name"], "sql_analysis");
+    assert!(body.get("capabilities").is_none());
 }
 
 #[tokio::test]
-async fn patch_member_profile_rejects_empty_and_unknown_fields() {
+async fn patch_member_profile_rejects_empty_unknown_and_legacy_skill_shapes() {
     let app = test_app();
-    for body in [json!({}), json!({"visibility": "public"})] {
+    for body in [
+        json!({}),
+        json!({"visibility": "public"}),
+        json!({"skills": ["code_review"]}),
+    ] {
         let response = request(
             &app.app,
             "PATCH",

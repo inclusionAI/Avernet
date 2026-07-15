@@ -791,7 +791,7 @@ print("1" if any(item.get("bot_uuid") == target for item in json.load(sys.stdin)
         '{"name":"E2E organization bot"}' \
         "Authorization: Bearer ${admin_token}"
     require_status "provider updates an organization member profile" "200" || return
-    assert_json_eq "organization member profile update is persisted" "$RESPONSE" "name" "E2E organization bot"
+    assert_json_eq "organization member profile update is persisted" "$RESPONSE" "profile.name" "E2E organization bot"
 
     api_request_headers GET "/organizations/${organization_code}/members/${provider_bot_uuid}" "" \
         "Authorization: Bearer ${admin_token}"
