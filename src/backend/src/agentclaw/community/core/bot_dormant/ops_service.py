@@ -10,6 +10,7 @@ from agentclaw.community.core.bot_dormant.service import Candidate, DormantBotSe
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 logger = get_logger()
@@ -86,12 +87,14 @@ class DormantOpsService:
             run_id, bot_id, owner_id, dry_run, reason,
         )
         with self._dormant_service._db.orm_session() as session:
+            env = get_current_env()
             bot = (
                 session.query(BotModel)
                 .filter(
                     BotModel.bot_id == bot_id,
                     BotModel.owner_id == owner_id,
                     BotModel.is_delete == 0,
+                    BotModel.env == env,
                 )
                 .order_by(BotModel.gmt_modified.desc(), BotModel.id.desc())
                 .first()

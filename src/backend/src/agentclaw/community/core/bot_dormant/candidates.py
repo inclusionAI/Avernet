@@ -4,7 +4,7 @@ Extracted from service.py to keep that module under the 1000-line guard.
 
 Exposes:
   ``Candidate`` — frozen dataclass representing a bot that passed both stages.
-  ``filter_candidates(session, N)`` — Stage-1/2 SQL + in-memory filter.
+  ``filter_candidates(session, N, env)`` — Stage-1/2 SQL + in-memory filter.
 """
 from __future__ import annotations
 
@@ -53,13 +53,14 @@ def partition_by_protected_owner(
     return protected, unprotected
 
 
-def filter_candidates(session: Session, N: int) -> list[Candidate]:
+def filter_candidates(session: Session, N: int, env: str) -> list[Candidate]:
     """Return bots eligible for dormancy governance.
 
     Args:
         session: SQLAlchemy session (works with both SQLite and MySQL).
         N: Age threshold in days. Bots created fewer than N days ago
            are excluded.
+        env: Runtime environment whose bots are eligible for this scan.
 
     Returns:
         List of :class:`Candidate` after both filter stages.
@@ -73,6 +74,7 @@ def filter_candidates(session: Session, N: int) -> list[Candidate]:
             BotModel.status == "ACTIVE",
             BotModel.is_delete == 0,
             BotModel.bot_type == "personal",
+            BotModel.env == env,
             BotModel.gmt_create < cutoff,
         )
         .order_by(BotModel.gmt_modified.desc(), BotModel.id.desc())

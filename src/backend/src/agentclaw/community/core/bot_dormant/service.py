@@ -1,7 +1,7 @@
 """Dormant bot candidate filtering and scan/decision service.
 
 Exposes:
-  ``filter_candidates(session, N)`` — Stage-1/2 SQL+in-memory filter.
+  ``filter_candidates(session, N, env)`` — Stage-1/2 SQL+in-memory filter.
   ``DormantBotService`` — orchestrates a full scan run with single-signal
       active detection (/alive session check only).
 
@@ -711,7 +711,7 @@ class DormantBotService:
         the service safe for long-lived cron use.
 
         Steps:
-        1. filter_candidates(N) to get eligible bots.
+        1. filter_candidates(N, env) to get eligible bots.
         2. For each candidate: check_alive (N+M window) — single-signal /alive.
            unknown → skip; alive.result=='true' → active/none;
            else days_inactive from max(alive.last_session_time, gmt_create):
@@ -763,7 +763,7 @@ class DormantBotService:
         )
 
         # Step 1: gather candidates
-        candidates = filter_candidates(session, self._N)
+        candidates = filter_candidates(session, self._N, env)
         protected_candidates, candidates = partition_by_protected_owner(
             candidates, protected_owner_ids
         )

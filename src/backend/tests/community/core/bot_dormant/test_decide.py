@@ -30,10 +30,11 @@ from agentclaw.community.core.bot_dormant.baas_client import (
     AliveResult,
     BaasDormantClient,
 )
+from agentclaw.community.core.bot_dormant import ops_service as ops_service_module
+from agentclaw.community.core.bot_dormant.ops_service import DormantOpsService
 from agentclaw.community.core.common_config import CommonWhiteListService
 from agentclaw.community.core.common_config.models import CommonConfigRecord
 from agentclaw.community.core.common_config.service import CommonConfigService
-from agentclaw.community.core.bot_dormant.ops_service import DormantOpsService
 from agentclaw.community.core.bot_dormant.service import (
     Candidate,
     DormantBotService,
@@ -216,8 +217,9 @@ def _insert_bot_record(
     bot_type: str = "personal",
     bot_name: str = "Test Bot",
     gmt_create: datetime | None = None,
+    env: str | None = None,
 ) -> BotModel:
-    bot = BotModel(
+    values = dict(
         bot_id=bot_id,
         entity_id=entity_id,
         entity_type="user",
@@ -230,6 +232,9 @@ def _insert_bot_record(
         gmt_create=gmt_create or (_now() - timedelta(days=30)),
         gmt_modified=_now(),
     )
+    if env is not None:
+        values["env"] = env
+    bot = BotModel(**values)
     session.add(bot)
     session.commit()
     return bot
@@ -244,12 +249,14 @@ def test_internal_scan_filters_protected_owner_before_alive_check(caplog, monkey
         bot_id="protected_bot",
         owner_id="protected_owner",
         entity_id="100001",
+        env="prod",
     )
     _insert_bot_record(
         session,
         bot_id="normal_bot",
         owner_id="normal_owner",
         entity_id="100002",
+        env="prod",
     )
     baas = AsyncMock(spec=BaasDormantClient)
     baas.check_alive = AsyncMock(
@@ -459,6 +466,44 @@ def test_manual_recycle_one_rejects_missing_bot():
             owner_id="owner1",
             dry_run=False,
         )
+
+
+@pytest.mark.unit
+def test_manual_recycle_one_rejects_cross_environment_bot_before_side_effects(
+    monkeypatch,
+):
+    """A pre ops request must not enqueue or recycle a prod-only bot."""
+    session = _make_session()
+    _insert_bot_record(
+        session,
+        bot_id="prod_only",
+        owner_id="owner1",
+        env="prod",
+    )
+    service = _make_service(session)
+    service._enqueue_recycle = MagicMock()
+    service._execute_recycle = MagicMock()
+    service._write_audit = MagicMock()
+    ops_service = DormantOpsService(service, MagicMock())
+    monkeypatch.setattr(
+        ops_service_module,
+        "get_current_env",
+        lambda: "pre",
+        raising=False,
+    )
+
+    with pytest.raises(ValueError, match="bot not found"):
+        ops_service.recycle_one(
+            bot_id="prod_only",
+            owner_id="owner1",
+            dry_run=False,
+        )
+
+    service._enqueue_recycle.assert_not_called()
+    service._execute_recycle.assert_not_called()
+    service._write_audit.assert_not_called()
+    assert session.query(DormantCheckAudit).count() == 0
+    assert session.query(DormantNotifyLog).count() == 0
 
 
 @pytest.mark.unit
