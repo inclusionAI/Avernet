@@ -105,6 +105,53 @@ class TestCreateCron:
         )
 
 
+class TestGetCronDetail:
+    """GET /api/cron/{taskId} — 任务详情与所属 Bot 上下文。"""
+
+    def test_detail_schema(self, gw_client, world, contract_snapshot_update):
+        _seed_bot_with_device(world)
+        created = _create_cron(gw_client)
+        task_id = created["data"]["id"]
+
+        resp = gw_client.get(f"/api/cron/{task_id}", params={"bot_id": BOT_ID})
+        body = resp.json()
+
+        assert_success(body, "GET /api/cron/{taskId}")
+        assert_response_data_contract(
+            body,
+            "rule13_GET_api_cron_task_id",
+            update=contract_snapshot_update,
+        )
+        assert_has_fields(
+            body["data"],
+            {"id": str, "name": str, "bot": dict},
+            label="GET /api/cron/{taskId} data",
+        )
+        assert_has_fields(
+            body["data"]["bot"],
+            {
+                "bot_id": str,
+                "bot_name": str,
+                "owner_id": str,
+                "bot_type": str,
+                "runtime_stage": str,
+            },
+            label="GET /api/cron/{taskId} data.bot",
+        )
+        assert body["data"]["bot"]["bot_id"] == BOT_ID
+        assert body["data"]["bot"]["bot_type"] == "service"
+        assert body["data"]["bot"]["runtime_stage"] == "draft"
+        assert {
+            "bot_id",
+            "bot_name",
+            "owner_id",
+            "bot_type",
+            "runtime_stage",
+            "publish_id",
+            "publish_status",
+        }.isdisjoint(body["data"])
+
+
 class TestDeleteCron:
     """DELETE /api/cron/{taskId} — 删除任务。"""
 

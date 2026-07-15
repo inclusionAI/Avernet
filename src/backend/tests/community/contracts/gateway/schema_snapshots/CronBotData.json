@@ -1,0 +1,65 @@
+{
+  "description": "Cron 详情关联的 Bot 与运行态信息。",
+  "properties": {
+    "bot_id": {
+      "title": "Bot Id",
+      "type": "string"
+    },
+    "bot_name": {
+      "title": "Bot Name",
+      "type": "string"
+    },
+    "owner_id": {
+      "title": "Owner Id",
+      "type": "string"
+    },
+    "bot_type": {
+      "title": "Bot Type",
+      "type": "string"
+    },
+    "runtime_stage": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Runtime Stage"
+    },
+    "publish_id": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Publish Id"
+    },
+    "publish_status": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Publish Status"
+    }
+  },
+  "required": [
+    "bot_id",
+    "bot_name",
+    "owner_id",
+    "bot_type"
+  ],
+  "title": "CronBotData",
+  "type": "object"
+}
