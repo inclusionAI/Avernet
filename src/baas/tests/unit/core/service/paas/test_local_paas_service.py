@@ -2843,6 +2843,100 @@ class TestResolveWsConnInfoRelay:
         assert result.expires_at < expected_max
 
 
+class TestResolveWsConnInfoModeDecision:
+    """Tests for resolve_ws_conn_info() ws_conn_mode decision logic (D-02, D-05).
+
+    Verifies the decision boundary: which internal method
+    (_resolve_ws_conn_info_direct vs _resolve_ws_conn_info_relay) is called
+    based on the ws_conn_mode parameter. All tests use AsyncMock on the
+    private methods to isolate the decision logic from the actual network
+    operations.
+    """
+
+    @pytest.mark.asyncio
+    async def test_no_ws_conn_mode__uses_default(
+        self, local_paas_service,
+    ):
+        """When ws_conn_mode is not passed, the instance default is used.
+
+        The default _ws_conn_mode is now "direct", so not passing
+        ws_conn_mode should call _resolve_ws_conn_info_direct.
+        """
+        with mock.patch.object(
+            local_paas_service, "_resolve_ws_conn_info_direct", new_callable=AsyncMock
+        ) as mock_direct, mock.patch.object(
+            local_paas_service, "_resolve_ws_conn_info_relay", new_callable=AsyncMock
+        ) as mock_relay:
+            await local_paas_service.resolve_ws_conn_info(
+                paas_device_id="abc123--machine-001--user-001",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+
+        mock_direct.assert_called_once()
+        mock_relay.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ws_conn_mode_relay__uses_relay(
+        self, local_paas_service,
+    ):
+        """Explicit ws_conn_mode="relay" overrides the default to relay path."""
+        with mock.patch.object(
+            local_paas_service, "_resolve_ws_conn_info_direct", new_callable=AsyncMock
+        ) as mock_direct, mock.patch.object(
+            local_paas_service, "_resolve_ws_conn_info_relay", new_callable=AsyncMock
+        ) as mock_relay:
+            await local_paas_service.resolve_ws_conn_info(
+                paas_device_id="abc123--machine-001--user-001",
+                port=8080,
+                path="/api/openclaw/ws",
+                ws_conn_mode="relay",
+            )
+
+        mock_relay.assert_called_once()
+        mock_direct.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ws_conn_mode_direct__uses_direct(
+        self, local_paas_service,
+    ):
+        """Explicit ws_conn_mode="direct" selects direct path."""
+        with mock.patch.object(
+            local_paas_service, "_resolve_ws_conn_info_direct", new_callable=AsyncMock
+        ) as mock_direct, mock.patch.object(
+            local_paas_service, "_resolve_ws_conn_info_relay", new_callable=AsyncMock
+        ) as mock_relay:
+            await local_paas_service.resolve_ws_conn_info(
+                paas_device_id="abc123--machine-001--user-001",
+                port=8080,
+                path="/api/openclaw/ws",
+                ws_conn_mode="direct",
+            )
+
+        mock_direct.assert_called_once()
+        mock_relay.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ws_conn_mode_invalid__silent_degrade_to_direct(
+        self, local_paas_service,
+    ):
+        """Any non-"relay" value silently degrades to direct mode (D-05)."""
+        with mock.patch.object(
+            local_paas_service, "_resolve_ws_conn_info_direct", new_callable=AsyncMock
+        ) as mock_direct, mock.patch.object(
+            local_paas_service, "_resolve_ws_conn_info_relay", new_callable=AsyncMock
+        ) as mock_relay:
+            await local_paas_service.resolve_ws_conn_info(
+                paas_device_id="abc123--machine-001--user-001",
+                port=8080,
+                path="/api/openclaw/ws",
+                ws_conn_mode="invalid_value",
+            )
+
+        mock_direct.assert_called_once()
+        mock_relay.assert_not_called()
+
+
 class TestResolveInvokeHttpInfo:
     """Tests for resolve_invoke_http_info method with proxypass mode."""
 
