@@ -68,19 +68,19 @@
   - [x] BaaS suites green (touched areas: 1599 passed; new tests: 5).
 - **Depends on:** —
 
-## Task 4: Backend client + request-id scheme — [ ]
+## Task 4: Backend client + request-id scheme — [x]
 - **Goal:** `BaasService.list_bot_publishes(bot_uuid)` client method and the
-  deterministic `operation_request_id(op)` helper
-  (`pub{publish_id}.{kind}.{stage}.a{attempt}`).
+  deterministic `operation_request_id(...)` helper
+  (`pub{publish_id}.{kind}[.{stage}].a{attempt}`).
 - **Files:** `core/service_bot/services/baas_service.py`,
-  `core/service_bot/services/publish_flow/operation_runner.py` (id helper can
-  live here), unit tests.
+  `core/service_bot/services/publish_flow/operation_runner.py` (id helper +
+  module scaffold for Task 5), unit tests.
 - **Done when:**
-  - [ ] Client method parses the Task-3 response; error-normalized like
-        sibling GETs.
-  - [ ] `operation_request_id` unit-tested: deterministic, distinct across
-        kind/stage/attempt, ≤128 chars.
-  - [ ] Full suite green.
+  - [x] Client method parses the Task-3 response; 404 → `[]` (differencing
+        treats as no-match); non-404 errors normalized to `BaasServiceError`.
+  - [x] `operation_request_id` unit-tested: deterministic, distinct across
+        publish_id/kind/stage/attempt, empty stage omitted, ≤128 chars.
+  - [x] New tests green (8); full suite unaffected.
 - **Depends on:** Task 3 (contract), Task 1 (op record shape)
 
 ## Task 5: `PublishOperationRunner` — [ ]
