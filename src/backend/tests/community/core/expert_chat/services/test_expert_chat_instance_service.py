@@ -238,7 +238,7 @@ class TestCreateContainer:
         # Verify release_async was called with correct parameters
         bot_build_service.release_async.assert_called_once()
         call_kwargs = bot_build_service.release_async.call_args[1]
-        assert call_kwargs["user_id"] == USER_ID
+        assert call_kwargs["user_id"] == OWNER_ID
         assert call_kwargs["migration_path"] == "/nas/path"
         assert call_kwargs["publish_stage"] == PublishStage.ONLINE
         # Verify binding was created with correct params
@@ -266,7 +266,7 @@ class TestCreateContainer:
         bot_build_service.release_async.assert_called_once()
         call_kwargs = bot_build_service.release_async.call_args[1]
         assert call_kwargs["bot"] == bot_info
-        assert call_kwargs["user_id"] == USER_ID
+        assert call_kwargs["user_id"] == OWNER_ID
         assert call_kwargs["migration_path"] == "/nas/path"
         assert call_kwargs["device_count"] == 1
         assert call_kwargs["publish_stage"] == PublishStage.ONLINE
@@ -283,7 +283,7 @@ class TestUpgradeContainer:
         bot_repo.get_by_id_and_owner = MagicMock(return_value=None)
 
         with pytest.raises(ConnectionError) as exc_info:
-            await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, USER_ID, migration_path="/nas/path")
+            await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, migration_path="/nas/path")
 
         assert exc_info.value.error_code == "5001"
 
@@ -294,7 +294,7 @@ class TestUpgradeContainer:
         _wire_bot_repo(bot_repo)
         bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
 
-        result = await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, USER_ID, migration_path="/nas/path")
+        result = await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, migration_path="/nas/path")
 
         assert result["bot_uuid"] == BOT_UUID
         assert result["publish_id"] == 999
@@ -308,7 +308,7 @@ class TestUpgradeContainer:
         bot_build_service.upgrade_async = AsyncMock(side_effect=RuntimeError("upgrade failed"))
 
         with pytest.raises(ConnectionError) as exc_info:
-            await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, USER_ID, migration_path="/nas/path")
+            await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, migration_path="/nas/path")
 
         assert exc_info.value.error_code == "5001"
         assert "upgrade failed" in exc_info.value.original_error
@@ -326,13 +326,13 @@ class TestUpgradeContainer:
         _wire_bot_repo(bot_repo, bot_info)
         bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
 
-        await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, USER_ID, migration_path="/nas/path", version=3)
+        await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, migration_path="/nas/path", version=3)
 
         bot_build_service.upgrade_async.assert_called_once()
         call_kwargs = bot_build_service.upgrade_async.call_args[1]
         assert call_kwargs["bot_uuid"] == BOT_UUID
         assert call_kwargs["bot"] == bot_info
-        assert call_kwargs["user_id"] == USER_ID
+        assert call_kwargs["user_id"] == OWNER_ID
         assert call_kwargs["migration_path"] == "/nas/path"
         assert call_kwargs["device_count"] == 1
         assert call_kwargs["publish_stage"] == PublishStage.ONLINE
