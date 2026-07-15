@@ -8,7 +8,8 @@ use bcs_protocol::{
 use bcs_service_api::application::channel::OutboundMessage;
 use bcs_service_api::{
     ActorStatus, BotDeliveryCommand, BotDeliveryKind, BotDeliveryResult, BotDeliveryTarget,
-    BotEventCommand, BotEventOutcome, ChannelOutboundEventKind, ChannelRenderHint,
+    BotEventCommand, BotEventOutcome, BotTerminalEvent, BotTerminalState,
+    ChannelOutboundEventKind, ChannelRenderHint,
     ChatEventRouting, ChatEventState, ChatResponseMode,
     DefaultDelivery, DeliveryType, FrontendDeliveryCommand, FrontendDeliveryKind,
     FrontendDeliveryResult, FrontendDeliveryTarget, Group, GroupKind, GroupStatus, GroupStrategy, MessageDeliveryResult,
@@ -136,6 +137,7 @@ pub async fn handle_bot_event(
 
     if let Some(task_id) = task_id_for_event {
         bot_deliveries.extend(handle_task_bot_event(flow, &cmd, &task_id).await?);
+        notify_terminal_observer(flow, &cmd).await;
         return Ok(BotEventOutcome {
             bot_deliveries,
             frontend_deliveries,
@@ -156,6 +158,7 @@ pub async fn handle_bot_event(
         bot_deliveries.extend(relay.bot_deliveries);
         frontend_deliveries.extend(relay.frontend_deliveries);
         flow.message_tracker.cleanup_run(&cmd.run_id).await;
+        notify_terminal_observer(flow, &cmd).await;
         return Ok(BotEventOutcome {
             bot_deliveries,
             frontend_deliveries,
@@ -167,6 +170,7 @@ pub async fn handle_bot_event(
         });
     }
 
+    notify_terminal_observer(flow, &cmd).await;
     Ok(BotEventOutcome {
         bot_deliveries,
         frontend_deliveries,
@@ -176,6 +180,39 @@ pub async fn handle_bot_event(
         failed_count: 0,
         delivery_results: Vec::new(),
     })
+}
+
+async fn notify_terminal_observer(flow: &BcsMessageFlow, cmd: &BotEventCommand) {
+    if !matches!(cmd.event_type.as_str(), "chat" | "chat.event") {
+        return;
+    }
+    let state = match cmd.state {
+        ChatEventState::Final => BotTerminalState::Final,
+        ChatEventState::Error => BotTerminalState::Error,
+        ChatEventState::Aborted => BotTerminalState::Aborted,
+        _ => return,
+    };
+    flow.bot_terminal_observer
+        .observe(BotTerminalEvent {
+            run_id: cmd.run_id.clone(),
+            bot_uuid: cmd.bot_id.clone(),
+            state,
+            text: terminal_event_text(&cmd.event_payload),
+        })
+        .await;
+}
+
+fn terminal_event_text(event: &Value) -> String {
+    let message = extract_message_text(event);
+    if !message.is_empty() {
+        return message;
+    }
+    event
+        .get("errorMessage")
+        .or_else(|| event.get("error_message"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
 }
 
 async fn try_channel_outbound(flow: &BcsMessageFlow, cmd: &BotEventCommand) {

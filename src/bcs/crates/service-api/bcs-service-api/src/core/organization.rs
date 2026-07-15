@@ -204,26 +204,36 @@ pub trait OrganizationCoreService: Send + Sync {
             .unwrap_or_default();
         Ok(OrganizationCandidateBotPage { bots, total, offset: query.offset, limit: query.limit })
     }
+    /// Require membership plus the current provider/binding/delegation eligibility policy.
     async fn require_effective_member(
         &self,
         organization_code: &str,
         bot_uuid: &str,
     ) -> ServiceResult<OrganizationMember>;
+    /// List members that satisfy the current provider/binding/delegation eligibility policy.
     async fn list_effective_members(
         &self,
         organization_code: &str,
         role: Option<&str>,
     ) -> ServiceResult<Vec<OrganizationMember>>;
+    /// Require only active organization and member lifecycle state.
+    ///
+    /// This does not confer authority to access another bot. Authorization callers must use
+    /// `require_effective_member` or a use-case-specific application service instead.
     async fn require_runtime_member(
         &self,
         organization_code: &str,
         bot_uuid: &str,
     ) -> ServiceResult<OrganizationMember>;
+    /// List members by active organization/member lifecycle state only.
     async fn list_runtime_members(
         &self,
         organization_code: &str,
         role: Option<&str>,
     ) -> ServiceResult<Vec<OrganizationMember>>;
+    /// Return a store-optimized discovery snapshot when the repository supports it.
+    ///
+    /// Consumers remain responsible for applying the authorization semantics of their use case.
     async fn list_runtime_discovery_bots(
         &self,
         _organization_code: &str,
@@ -231,6 +241,7 @@ pub trait OrganizationCoreService: Send + Sync {
     ) -> ServiceResult<Option<Vec<OrganizationDiscoveryBot>>> {
         Ok(None)
     }
+    /// Authorize both participants for an organization-scoped A2A interaction.
     async fn authorize_pair(
         &self,
         organization_code: &str,

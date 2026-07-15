@@ -10,6 +10,7 @@ use bcs_protocol::{
 use bcs_service_api::{
     ActorKind, ActorStatus, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
     BotDeliveryResult, BotDeliveryTarget, BotEventCommand, BotEventOutcome, BotRunContext, BotRunContextPort,
+    BotTerminalObserverPort, NoopBotTerminalObserver,
     BotRegistryCoreService, CallerContext, ChatAbortCommand, ChatAbortOutcome,
     DeliveryBlockContext, DeliveryBlockReason,
     DeliveryBlockSurface, DeliveryMetricKind, DeliveryMetricTarget, DeliveryType,
@@ -57,6 +58,7 @@ pub struct BcsMessageFlow {
     pub message_tracker: Arc<crate::message_tracker::MessageTracker>,
     pub provider_stream_gray_list: Option<Arc<ProviderStreamGrayList>>,
     pub channel: Arc<OnceLock<Arc<dyn ChannelService>>>,
+    pub bot_terminal_observer: Arc<dyn BotTerminalObserverPort>,
 }
 
 impl BcsMessageFlow {
@@ -83,11 +85,20 @@ impl BcsMessageFlow {
             message_tracker: Arc::new(crate::message_tracker::MessageTracker::new()),
             provider_stream_gray_list: None,
             channel: Arc::new(OnceLock::new()),
+            bot_terminal_observer: Arc::new(NoopBotTerminalObserver),
         }
     }
 
     pub fn channel_slot(&self) -> Arc<OnceLock<Arc<dyn ChannelService>>> {
         self.channel.clone()
+    }
+
+    pub fn with_bot_terminal_observer(
+        mut self,
+        observer: Arc<dyn BotTerminalObserverPort>,
+    ) -> Self {
+        self.bot_terminal_observer = observer;
+        self
     }
 
     pub fn with_system_message(mut self, system_message: Arc<dyn SystemMessageService>) -> Self {

@@ -83,6 +83,7 @@ pub async fn register_provider(
         .register_provider(RegisterProviderCommand {
             name: req.name,
             webhook_url: req.webhook_url,
+            admin_callback_url: req.admin_callback_url,
             auth_mode: auth_mode_from_wire(req.auth.mode),
             created_by,
             protocol_version: req.protocol_version,
@@ -141,7 +142,9 @@ pub async fn get_provider(
         .get_provider(&provider_id, &provider_admin_token)
         .await
         .map_err(provider_error)?;
-    Ok(Json(provider_to_response(provider).map_err(provider_error)?))
+    Ok(Json(
+        provider_to_response(provider).map_err(provider_error)?,
+    ))
 }
 
 pub async fn patch_provider(
@@ -162,6 +165,7 @@ pub async fn patch_provider(
             authenticated_staff_id,
             name: req.name,
             webhook_url: req.webhook_url,
+            admin_callback_url: req.admin_callback_url,
             protocol_version: req.protocol_version,
             coordination: req.coordination.map(coordination_from_wire),
             organization_management: req
@@ -170,7 +174,9 @@ pub async fn patch_provider(
         })
         .await
         .map_err(provider_error)?;
-    Ok(Json(provider_to_response(provider).map_err(provider_error)?))
+    Ok(Json(
+        provider_to_response(provider).map_err(provider_error)?,
+    ))
 }
 
 pub async fn register_provider_bot(
@@ -362,7 +368,9 @@ async fn set_provider_disabled(
         )
         .await
         .map_err(provider_error)?;
-    Ok(Json(provider_to_response(provider).map_err(provider_error)?))
+    Ok(Json(
+        provider_to_response(provider).map_err(provider_error)?,
+    ))
 }
 
 fn auth_mode_from_wire(mode: ProviderAuthModeDto) -> ProviderAuthMode {
@@ -488,6 +496,10 @@ fn provider_to_response(provider: ProviderRecord) -> Result<ProviderInfoResponse
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
+    let admin_callback_url = config
+        .get("admin_callback_url")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let auth_mode = downlink
         .get("auth_mode")
         .and_then(Value::as_str)
@@ -506,6 +518,7 @@ fn provider_to_response(provider: ProviderRecord) -> Result<ProviderInfoResponse
         provider_id: provider.provider_id,
         name: provider.name,
         webhook_url,
+        admin_callback_url,
         auth_mode,
         coordination,
         organization_management,
@@ -562,10 +575,7 @@ pub async fn switch_bot_delivery(
         });
     }
 
-    if !state
-        .allowed_switch_provider_ids
-        .contains(&provider_id)
-    {
+    if !state.allowed_switch_provider_ids.contains(&provider_id) {
         return Err(ProviderRouteError {
             status: StatusCode::FORBIDDEN,
             message: format!(
@@ -609,7 +619,10 @@ fn switch_delivery_error(error: BotUseCaseError) -> ProviderRouteError {
             status: StatusCode::NOT_FOUND,
             message: format!("Provider '{}' not found", p),
         },
-        BotUseCaseError::ProviderNotReadyForDownlink { provider_id, reason } => ProviderRouteError {
+        BotUseCaseError::ProviderNotReadyForDownlink {
+            provider_id,
+            reason,
+        } => ProviderRouteError {
             status: StatusCode::CONFLICT,
             message: format!("Provider '{}' downlink not ready: {}", provider_id, reason),
         },

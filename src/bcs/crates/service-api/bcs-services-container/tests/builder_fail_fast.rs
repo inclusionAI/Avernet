@@ -9,7 +9,7 @@ use bcs_test_support::{
     NoopFusionCoreService, NoopGroupCoreService, NoopGroupFusionService,
     NoopGroupManagementService, NoopGroupMessageHistoryService, NoopGroupProposalService,
     NoopGroupQueryService, NoopHumanActorService, NoopMessageFlowService,
-    NoopOrganizationCoreService, NoopOrganizationManagementService, NoopProposalCoreService,
+    NoopOrganizationManagementService, NoopProposalCoreService,
     NoopProviderBotCoreService, NoopProviderBotEventService, NoopProviderCoreService,
     NoopProviderManagementService, NoopRelationCoreService, NoopRoutingCoreService,
     NoopSecretService, NoopSessionManagementService, NoopSystemMessageService,
@@ -27,17 +27,8 @@ fn build_fails_fast_when_required_service_unset() {
 }
 
 #[test]
-fn build_fails_fast_when_organization_core_unset() {
-    let result = fully_wired_builder_except_organization().build();
-    assert!(matches!(
-        result,
-        Err(BuilderError::MissingService(name)) if name == "organization"
-    ));
-}
-
-#[test]
 fn build_fails_fast_when_organization_management_unset() {
-    let result = fully_wired_builder_except_organization_management().build();
+    let result = fully_wired_builder_without_organization_management().build();
     assert!(matches!(
         result,
         Err(BuilderError::MissingService(name)) if name == "organization_management"
@@ -74,7 +65,6 @@ fn build_succeeds_when_all_required_services_set() {
         .provider_bot_core(Arc::new(NoopProviderBotCoreService))
         .provider_management(Arc::new(NoopProviderManagementService))
         .provider_bot_events(Arc::new(NoopProviderBotEventService))
-        .organization(Arc::new(NoopOrganizationCoreService))
         .organization_management(Arc::new(NoopOrganizationManagementService))
         .group_query(Arc::new(NoopGroupQueryService))
         .group_management(Arc::new(NoopGroupManagementService))
@@ -91,17 +81,7 @@ fn build_succeeds_when_all_required_services_set() {
     assert!(Arc::ptr_eq(&services.registry, &services.registry));
 }
 
-fn fully_wired_builder_except_organization() -> ServicesBuilder {
-    fully_wired_builder_without_organization_fields()
-        .organization_management(Arc::new(NoopOrganizationManagementService))
-}
-
-fn fully_wired_builder_except_organization_management() -> ServicesBuilder {
-    fully_wired_builder_without_organization_fields()
-        .organization(Arc::new(NoopOrganizationCoreService))
-}
-
-fn fully_wired_builder_without_organization_fields() -> ServicesBuilder {
+fn fully_wired_builder_without_organization_management() -> ServicesBuilder {
     ServicesBuilder::new()
         .registry(Arc::new(NoopBotRegistryCoreService))
         .group(Arc::new(NoopGroupCoreService))

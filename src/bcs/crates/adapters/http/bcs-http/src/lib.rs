@@ -1,6 +1,7 @@
 //! HTTP delivery adapter for BCS.
 
 mod chat_digest;
+pub mod admin_invocation_terminal;
 pub mod error;
 pub mod headers;
 pub mod mapping;

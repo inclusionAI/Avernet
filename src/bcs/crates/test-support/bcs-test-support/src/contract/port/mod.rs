@@ -1,6 +1,7 @@
 //! Port contract harnesses.
 
 pub mod metrics;
+pub mod bot_terminal_observer;
 
 use bcs_service_api::{
     BotDeliveryPort, ChatRunCleanupPort, ChatRunEventPort, FrontendDeliveryPort,
@@ -14,6 +15,7 @@ pub use metrics::{
     group_metrics_snapshot_port_contract_tests, group_session_metrics_snapshot_port_contract_tests,
     ws_lifecycle_instrumentation_hook_contract_tests,
 };
+pub use bot_terminal_observer::bot_terminal_observer_port_contract_tests;
 
 pub async fn bot_delivery_port_contract_tests<T: BotDeliveryPort + ?Sized>(_port: &T) {}
 

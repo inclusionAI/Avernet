@@ -704,6 +704,15 @@ impl OrganizationManagementService for NoopOrganizationManagementService {
         Err(service_not_configured("organization service"))
     }
 
+    async fn require_invocable_member(
+        &self,
+        _auth: OrganizationAuth,
+        _organization_code: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<OrganizationMember> {
+        Err(service_not_configured("organization service"))
+    }
+
     async fn list_members(
         &self,
         _auth: OrganizationMemberAuth,

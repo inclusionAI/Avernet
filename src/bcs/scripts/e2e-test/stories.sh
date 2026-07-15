@@ -809,6 +809,26 @@ print("1" if any(item.get("bot_uuid") == target for item in json.load(sys.stdin)
 ' "$provider_bot_uuid" 2>/dev/null || echo 0)
     assert_eq "organization member list includes the provider bot" "$listed_member" "1"
 
+    api_request_headers POST "/organizations/${organization_code}/admin-runs" \
+        "{\"target_bot_uuid\":\"${provider_bot_uuid}\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Review the E2E release plan\"}]},\"detach\":true}" \
+        "Authorization: Bearer ${admin_token}" \
+        "X-BCN-Provider-Id: ${provider_id}"
+    require_status "provider starts an organization admin run" "202" || return
+    local admin_run_id
+    admin_run_id=$(json_path "$RESPONSE" "data.run_id")
+    assert_not_empty "organization admin run returns a run id" "$admin_run_id"
+    assert_json_eq "organization admin run keeps its organization" "$RESPONSE" "data.organization_code" "$organization_code"
+    assert_json_eq "organization admin run keeps its target bot" "$RESPONSE" "data.target_bot_uuid" "$provider_bot_uuid"
+    [[ -n "$admin_run_id" ]] || return
+
+    api_request_headers GET "/organizations/${organization_code}/admin-runs/${admin_run_id}" "" \
+        "Authorization: Bearer ${admin_token}" \
+        "X-BCN-Provider-Id: ${provider_id}"
+    require_status "provider reads the organization admin run" "200" || return
+    assert_json_eq "organization admin run read keeps its run id" "$RESPONSE" "data.run_id" "$admin_run_id"
+    assert_json_eq "organization admin run read keeps its target bot" "$RESPONSE" "data.target_bot_uuid" "$provider_bot_uuid"
+    assert_json_not_empty "organization admin run read exposes status" "$RESPONSE" "data.status"
+
     api_request_headers DELETE "/organizations/${organization_code}/members/${provider_bot_uuid}" "" \
         "Authorization: Bearer ${admin_token}"
     require_status "provider removes its bot from the organization" "204" || return

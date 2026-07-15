@@ -48,7 +48,8 @@ pub trait ProviderCoreService: Send + Sync {
     ) -> ServiceResult<RegisteredProvider>;
 
     async fn authenticate_provider_admin(&self, token: &str) -> ServiceResult<ProviderRecord>;
-    async fn get_downlink_credential(&self, provider_id: &str) -> ServiceResult<ProviderCredential>;
+    async fn get_downlink_credential(&self, provider_id: &str)
+    -> ServiceResult<ProviderCredential>;
     async fn get_provider(
         &self,
         provider_id: &str,
@@ -65,6 +66,25 @@ pub trait ProviderCoreService: Send + Sync {
         coordination: Option<ProviderCoordinationConfig>,
         organization_management: Option<ProviderOrganizationManagementConfig>,
     ) -> ServiceResult<ProviderRecord>;
+
+    async fn update_provider_admin_callback_url(
+        &self,
+        provider_id: &str,
+        provider_admin_token: &str,
+        authenticated_staff_id: &str,
+        admin_callback_url: String,
+    ) -> ServiceResult<ProviderRecord> {
+        let _ = (
+            provider_id,
+            provider_admin_token,
+            authenticated_staff_id,
+            admin_callback_url,
+        );
+        Err(ServiceError::InvalidOperation {
+            message: "provider admin callback updates are not configured".to_string(),
+            request_id: None,
+        })
+    }
     async fn set_provider_disabled(
         &self,
         provider_id: &str,

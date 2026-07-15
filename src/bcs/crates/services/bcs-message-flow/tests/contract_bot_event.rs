@@ -5,7 +5,8 @@ use bcs_message_flow::task_store::{new_task_entry, TaskLedgerStatus, TASK_TTL_MS
 use bcs_protocol::BcsFrame;
 use bcs_service_api::{
     ActorKind, BotDeliveryKind, BotDeliveryTarget, BotEventCommand, BotRegistryCoreService,
-    BotRunContextPort, ChannelOutboundEventKind, ChannelRenderHint, ChatEventState,
+    BotRunContextPort, BotTerminalEvent, BotTerminalObserverPort, BotTerminalState,
+    ChannelOutboundEventKind, ChannelRenderHint, ChatEventState,
     ChatResponseMode, DefaultDelivery,
     FrontendDeliveryTarget, GroupCoreService, GroupKind, GroupStatus, GroupStrategy,
     MessageFlowService, Participant, ParticipantMode, ParticipantRole,
@@ -33,6 +34,18 @@ struct RecordingSystemNotification {
     event: SystemMessageEvent,
     session_id: String,
     participants: Vec<Participant>,
+}
+
+#[derive(Default)]
+struct RecordingBotTerminalObserver {
+    events: Mutex<Vec<BotTerminalEvent>>,
+}
+
+#[async_trait::async_trait]
+impl BotTerminalObserverPort for RecordingBotTerminalObserver {
+    async fn observe(&self, event: BotTerminalEvent) {
+        self.events.lock().await.push(event);
+    }
 }
 
 #[derive(Default)]
@@ -114,6 +127,72 @@ impl SystemMessageService for RecordingSystemMessage {
         });
         Ok(1)
     }
+}
+
+#[tokio::test]
+async fn websocket_chat_events_notify_terminal_observer_only_for_terminal_states() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let observer = Arc::new(RecordingBotTerminalObserver::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_bot_terminal_observer(observer.clone());
+
+    for (run_id, state, payload) in [
+        (
+            "run-websocket-final",
+            ChatEventState::Final,
+            json!({
+                "state": "final",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "websocket result"}],
+                },
+            }),
+        ),
+        (
+            "run-websocket-error",
+            ChatEventState::Error,
+            json!({"state": "error", "errorMessage": "websocket failed"}),
+        ),
+        (
+            "run-websocket-aborted",
+            ChatEventState::Aborted,
+            json!({"state": "aborted", "error_message": "websocket aborted"}),
+        ),
+        (
+            "run-websocket-delta",
+            ChatEventState::Delta,
+            json!({"state": "delta", "message": {"content": "partial"}}),
+        ),
+    ] {
+        flow.handle_bot_event(BotEventCommand {
+            bot_id: "bot-observer".to_string(),
+            run_id: run_id.to_string(),
+            group_id: "group-1".to_string(),
+            event_type: "chat.event".to_string(),
+            event_payload: payload,
+            state,
+            bcs_session_id: None,
+        })
+        .await
+        .unwrap();
+    }
+
+    let events = observer.events.lock().await;
+    assert_eq!(events.len(), 3);
+    assert_eq!(events[0].run_id, "run-websocket-final");
+    assert_eq!(events[0].bot_uuid, "bot-observer");
+    assert_eq!(events[0].state, BotTerminalState::Final);
+    assert_eq!(events[0].text, "websocket result");
+    assert_eq!(events[1].state, BotTerminalState::Error);
+    assert_eq!(events[1].text, "websocket failed");
+    assert_eq!(events[2].state, BotTerminalState::Aborted);
+    assert_eq!(events[2].text, "websocket aborted");
 }
 
 #[tokio::test]

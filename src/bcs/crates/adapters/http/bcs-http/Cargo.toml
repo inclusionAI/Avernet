@@ -36,6 +36,7 @@ urlencoding     = { workspace = true }
 uuid            = { workspace = true }
 sha2            = { workspace = true }
 hex             = { workspace = true }
+reqwest         = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true }

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{net::IpAddr, sync::Arc};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -11,7 +11,7 @@ use bcs_protocol::{
     ProviderWebhookSender, RequestFrame,
 };
 use bcs_protocol::stream::{ChatState, StreamEvent, parse_stream_event};
-use bcs_route_security::OutboundUrlGuard;
+use bcs_route_security::{OutboundUrlError, OutboundUrlGuard};
 use bcs_service_api::{
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotEventCommand,
     BotRunContext, BotRunContextPort, ChatEventState, GroupHistoryBotRequestPort, MessageFlowService,
@@ -654,13 +654,23 @@ async fn send_provider_request(
             "not http provider target".to_string(),
         ));
     };
-    let guarded_url = url_guard
-        .resolve_request_http_url(webhook_url)
-        .await
-        .map_err(|error| ServiceError::InvalidOperation {
-            message: format!("provider webhook_url is not allowed: {error}"),
-            request_id: Some(body.id.clone()),
-        })?;
+    let guarded_url = match url_guard.resolve_request_http_url(webhook_url).await {
+        Ok(url) => url,
+        Err(error) => {
+            warn!(
+                provider_id = %body.to_bot.provider_id,
+                provider_bot_ref = %body.to_bot.provider_bot_ref,
+                webhook_url = %webhook_url_for_log(webhook_url),
+                resolved_ip = ?blocked_outbound_ip(&error),
+                reason = %error,
+                "provider downlink: webhook blocked by outbound URL policy"
+            );
+            return Err(ServiceError::InvalidOperation {
+                message: format!("provider webhook_url is not allowed: {error}"),
+                request_id: Some(body.id.clone()),
+            });
+        }
+    };
     let client_policy = ProviderClientPolicy::for_request(accept_sse);
     let pinned_client = provider_client_for_url(&guarded_url, client_policy).map_err(|error| {
         ServiceError::InternalError(format!("provider HTTP client build failed: {error}"))
@@ -792,6 +802,24 @@ async fn send_provider_request(
     }
 
     Ok(response)
+}
+
+fn blocked_outbound_ip(error: &OutboundUrlError) -> Option<IpAddr> {
+    match error {
+        OutboundUrlError::UnsafeAddress(address) => Some(*address),
+        _ => None,
+    }
+}
+
+fn webhook_url_for_log(webhook_url: &str) -> String {
+    let Ok(mut url) = reqwest::Url::parse(webhook_url) else {
+        return "<invalid webhook URL>".to_string();
+    };
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    url.to_string()
 }
 
 fn provider_client_builder(policy: ProviderClientPolicy) -> reqwest::ClientBuilder {

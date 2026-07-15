@@ -73,6 +73,7 @@ where
                 "provider downlink: posting webhook"
                     | "provider downlink: response headers received"
                     | "provider downlink: history response"
+                    | "provider downlink: webhook blocked by outbound URL policy"
             )
         }) {
             self.events
@@ -277,6 +278,47 @@ async fn provider_delivery_rejects_private_webhook_url_before_request() {
         .expect_err("private webhook URL should be rejected before request");
 
     assert!(err.to_string().contains("provider webhook_url is not allowed"));
+}
+
+#[tokio::test]
+async fn provider_delivery_logs_policy_rejection_with_provider_url_ip_and_reason() {
+    let logs = install_log_capture();
+    logs.lock().unwrap().clear();
+
+    let transport = HttpProviderTransport::new();
+    let err = transport
+        .deliver(BotDeliveryCommand {
+            target: provider_target("http://127.0.0.1:1/webhook".to_string()),
+            run_id: "run-private-log".to_string(),
+            frame: BcsFrame::Request(RequestFrame::new(
+                "run-private-log",
+                "chat.send",
+                Some(json!({ "bcs_group_id": "group-1", "message": { "text": "hello" } })),
+            )),
+            delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
+        })
+        .await
+        .expect_err("private webhook URL should be rejected before request");
+
+    assert!(err.to_string().contains("provider webhook_url is not allowed"));
+    let events = logs.lock().unwrap();
+    let event = events
+        .iter()
+        .find(|event| {
+            event.field("message").as_deref()
+                == Some("provider downlink: webhook blocked by outbound URL policy")
+        })
+        .expect("blocked provider webhook log");
+    assert_eq!(event.field("provider_id").as_deref(), Some("provider-1"));
+    assert_eq!(
+        event.field("webhook_url").as_deref(),
+        Some("http://127.0.0.1:1/webhook")
+    );
+    assert_eq!(event.field("resolved_ip").as_deref(), Some("Some(127.0.0.1)"));
+    assert!(event
+        .field("reason")
+        .is_some_and(|reason| reason.contains("not allowed for outbound callbacks")));
 }
 
 #[tokio::test]

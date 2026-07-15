@@ -83,6 +83,11 @@ pub struct ProviderCoordinationEventRequest {
 pub struct RegisterProviderRequest {
     pub name: String,
     pub webhook_url: String,
+    /// Optional provider-level endpoint for terminal organization-admin run
+    /// notifications. This is intentionally separate from the bot downlink
+    /// webhook URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admin_callback_url: Option<String>,
     pub auth: ProviderAuthDto,
     /// Downlink protocol version: "1.0" (callback, default) or "2.0" (streaming/SSE).
     /// Omitted = "1.0" for backward compatibility.
@@ -104,6 +109,8 @@ pub struct ProviderInfoResponse {
     pub provider_id: String,
     pub name: String,
     pub webhook_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admin_callback_url: Option<String>,
     pub auth_mode: ProviderAuthModeDto,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coordination: Option<ProviderCoordinationConfigDto>,
@@ -120,6 +127,8 @@ pub struct PatchProviderRequest {
     pub name: Option<String>,
     #[serde(default)]
     pub webhook_url: Option<String>,
+    #[serde(default)]
+    pub admin_callback_url: Option<String>,
     /// Downlink protocol version ("1.0" | "2.0"). When present, updates the
     /// stored downlink config; controls whether SSE streaming is eligible.
     #[serde(default)]

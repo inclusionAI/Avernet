@@ -25,6 +25,19 @@ fn selected_routes_are_still_present() {
 }
 
 #[test]
+fn bot_events_route_does_not_own_admin_terminal_callbacks() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let body = fs::read_to_string(root.join("src/routes/bot_events.rs"))
+        .expect("src/routes/bot_events.rs");
+
+    assert!(
+        !body.contains("notify_terminal_callback")
+            && !body.contains("admin_invocation_terminal"),
+        "bot events must reach admin terminal observers through message flow"
+    );
+}
+
+#[test]
 fn selected_routes_do_not_import_concrete_service_crates() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let forbidden = [
