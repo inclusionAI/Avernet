@@ -85,6 +85,7 @@ class SigmaPaasService(PaasService):
         paas_device_id: str,
         port: int,
         path: str,
+        ws_conn_mode: str | None = None,
     ) -> WsConnectionInfo:
         """STUB: Resolve WebSocket connection info for Sigma device.
 

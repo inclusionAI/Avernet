@@ -316,6 +316,7 @@ class StandalonePaasService(PaasService):
         paas_device_id: str,
         port: int,
         path: str,
+        ws_conn_mode: str | None = None,
     ) -> WsConnectionInfo:
         """Resolve WebSocket connection info via plugin.
 
