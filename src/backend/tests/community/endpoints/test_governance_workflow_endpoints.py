@@ -14,7 +14,11 @@ from __future__ import annotations
 from datetime import datetime
 
 from agentclaw.community.core.economy.governance.repositories.orm import (
+    GovernanceNotificationOrm,
     GovernanceTicketOrm,
+)
+from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
+    NotifyLogRepository,
 )
 from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
     TaskRecordRepository,
@@ -471,3 +475,75 @@ def _seed_review_open_ticket(world) -> None:
 )
 def review_action_invalid_status_error():
     """Error path: review on non-waiting_review ticket → 400."""
+
+
+# ---------------------------------------------------------------------------
+# 4. GET /workflow/tickets/pending-notification — query notification_id
+# ---------------------------------------------------------------------------
+
+
+def _seed_ticket_with_notify(world) -> None:
+    """Seed a ticket + a notify_log row so pending-notification finds it."""
+    ticket_id = "tkt-pn-1"
+    _insert_ticket(
+        world, ticket_id=ticket_id,
+        governance_status="open",
+        bot_id="bot-pn",
+    )
+    worker_id = "owner-1:bot-pn"
+    notify_repo = world.get(NotifyLogRepository)
+    notify_repo.insert_notification(
+        GovernanceNotificationOrm(
+            notification_id="nid-pn-test-1",
+            ticket_id=ticket_id,
+            bot_id="bot-pn",
+            bot_name="bot-alpha",
+            owner_id="owner-1",
+            worker_id=worker_id,
+            dt_version="20260705",
+            governance_decision="actionable",
+            governance_cycle_id=ticket_id,
+            governance_status="open",
+            notify_status="sent",
+            notify_type="first_send",
+            notify_source="offline_batch",
+            send_attempt_count=1,
+        ),
+    )
+
+
+def _assert_pending_notification_found(response, world) -> None:
+    data = response.json()
+    assert data["success"] is True
+    assert data["data"]["notification_id"] == "nid-pn-test-1"
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets/pending-notification",
+    scenario="ok",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"ticket_id": "tkt-pn-1"},
+    ),
+    seed=_seed_ticket_with_notify,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(_assert_pending_notification_found,),
+)
+def pending_notification_ok():
+    """Happy path: returns notification_id for ticket with notify_log row."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets/pending-notification",
+    scenario="not_found",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"ticket_id": "tkt-no-notify-999"},
+    ),
+    # No seed — ticket has no notify_log row → 404
+    expect=ExpectError(status=404),
+)
+def pending_notification_not_found_error():
+    """Error path: ticket with no notification → 404."""

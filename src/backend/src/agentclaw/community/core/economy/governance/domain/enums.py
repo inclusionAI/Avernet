@@ -76,6 +76,7 @@ class AuditAction(str, Enum):
 
     # ── Admin review (new) ────────────────────────────
     REVIEW_APPROVE_CLOSE = "review_approve_close"       # 管理员审核通过关闭 (§7.5.2)
+    REVIEW_APPROVE_SCHEDULED = "review_approve_scheduled"  # 管理员审核同意排期 → scheduled (§7.5.2)
     REVIEW_APPROVE_WHITELIST = "review_approve_whitelist"  # 管理员审核通过加白 (§7.5.2)
     REVIEW_REJECT_FOR_REOPEN = "review_reject_for_reopen"  # 管理员打回, 释放 active_worker (§7.5.2)
 
@@ -154,6 +155,22 @@ class Response(str, Enum):
     NEED_TIME = "need_time"
     DISPUTE = "dispute"
     WHITELIST = "whitelist"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class TicketAction(str, Enum):
+    """管理员 review 动作 — 对用户反馈的裁决(§7.5.2 + need_time 待审扩展)。
+
+    按用户反馈类型分发不同"同意"动作,驳回通用。加白(approve_whitelist)是 whitelist
+    反馈的同意裁决(与运维独立一键加白 /admin/whitelist 出发点不同,并存)。
+    """
+
+    APPROVE_CLOSE = "approve_close"            # 同意(optimized/dispute)→ closed
+    APPROVE_SCHEDULED = "approve_scheduled"    # 同意(need_time)→ scheduled [新]
+    APPROVE_WHITELIST = "approve_whitelist"    # 同意(whitelist)→ 加白 + closed
+    REJECT_FOR_REOPEN = "reject_for_reopen"    # 驳回(通用)→ closed(review_rejected, scan 重建)
 
     def __str__(self) -> str:
         return self.value

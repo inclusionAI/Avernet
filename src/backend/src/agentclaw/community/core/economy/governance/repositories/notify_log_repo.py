@@ -110,6 +110,35 @@ class NotifyLogRepository:
             )
             return [GovernanceNotification.from_orm(r) for r in rows]
 
+    def list_by_ticket(
+        self,
+        ticket_id: str,
+        *,
+        only_pending: bool = False,
+    ) -> list[GovernanceNotification]:
+        """A ticket's notify_log rows (all notify types), newest first — domain models.
+
+        Args:
+            ticket_id: 工单稳定 UUID。
+            only_pending: True → 仅 pending/sending(待回复)通知。
+
+        Returns:
+            该 ticket 关联的通知列表(notification_id/notify_status/...)。
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            q = s.query(GovernanceNotificationOrm).filter(
+                GovernanceNotificationOrm.ticket_id == ticket_id,
+                GovernanceNotificationOrm.env == _env,
+            )
+            if only_pending:
+                q = q.filter(
+                    GovernanceNotificationOrm.notify_status.in_(("pending", "sending")),
+                )
+            rows = q.order_by(GovernanceNotificationOrm.gmt_create.desc()).all()
+            return [GovernanceNotification.from_orm(r) for r in rows]
+
     # ------------------------------------------------------------------
     # notify_log — emergency-scope queries
     # ------------------------------------------------------------------

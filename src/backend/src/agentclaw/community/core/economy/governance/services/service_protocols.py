@@ -436,6 +436,10 @@ class GovernanceWorkflowServiceProtocol(Protocol):
         """评审工单详情(单工单领域模型)。"""
         ...
 
+    def get_pending_notification(self, ticket_id: str) -> dict | None:
+        """查工单待回复通知(notification_id + 元信息)。"""
+        ...
+
     def review_ticket(
         self, ticket_id: str, action: str, admin_id: str, remark: str = "",
     ) -> TicketActionOutcome:

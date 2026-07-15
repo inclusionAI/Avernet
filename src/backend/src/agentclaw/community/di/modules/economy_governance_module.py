@@ -263,6 +263,7 @@ class EconomyGovernanceModule(Module):
         config: EconomyGovernanceConfig,
         lifecycle_service: GovernanceLifecycleService,
         whitelist_service: GovernanceWhitelistService,
+        notify_repo: NotifyLogRepository,
     ) -> GovernanceWorkflowService:
         """Construct GovernanceWorkflowService — 工单审批(从 admin 按路由边界拆出)。
 
@@ -275,6 +276,7 @@ class EconomyGovernanceModule(Module):
             config=config,
             lifecycle_svc=lifecycle_service,
             whitelist_service=whitelist_service,
+            notify_repo=notify_repo,
         )
 
     @singleton

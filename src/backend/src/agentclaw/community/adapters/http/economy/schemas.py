@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from agentclaw.community.core.economy.governance.domain.enums import GovernanceStatus
 from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
+from agentclaw.community.core.economy.governance.domain.ticket import compute_available_actions
 
 if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.domain.ticket import (
@@ -252,6 +254,19 @@ def _extract_feedback_notification_id(payload_json: str | None) -> str | None:
     return None
 
 
+class TicketActionInfo(BaseModel):
+    """单个可做 review 动作(后端下发,前端动态渲染)。
+
+    后端成动作单一事实源:按用户反馈返回可做动作集 + 差异化 label + endpoint +
+    remark_required。前端据此渲染,不硬编码动作/文案/状态-动作映射。
+    """
+
+    value: str = Field(..., description="动作枚举值(approve_close/approve_scheduled/approve_whitelist/reject_for_reopen)")
+    label: str = Field(..., description="中文展示文案(按用户反馈差异化)")
+    endpoint: str = Field(..., description="POST 端点路径")
+    remark_required: bool = Field(False, description="备注是否必填")
+
+
 class ReviewTicketDetailResponse(BaseModel):
     """评审工单详情 — 列表字段外加详情面板所需全部字段。"""
 
@@ -277,6 +292,10 @@ class ReviewTicketDetailResponse(BaseModel):
     response_source: str | None = None
     feedback_payload: str | None = None
     feedback_notification_id: str | None = None
+    available_actions: list[TicketActionInfo] = Field(
+        default_factory=list,
+        description="当前可做 review 动作(按用户反馈派生,前端动态渲染)",
+    )
     # 评审 / 生命周期
     review_reason: str | None = None
     review_decision: str | None = None
@@ -292,6 +311,19 @@ class ReviewTicketDetailResponse(BaseModel):
     # 元信息
     gmt_create: str | None = None
     gmt_modified: str | None = None
+
+    @classmethod
+    def _build_available_actions(cls, ticket: GovernanceTicket) -> list[TicketActionInfo]:
+        """按工单当前状态构造可做 review 动作(仅 waiting_review 下发,其余空)。
+
+        委托领域层 ``compute_available_actions(user_feedback)``(按反馈派生)。
+        非 waiting_review(open/scheduled/closed)不发动作。
+        """
+        if ticket.governance_status != GovernanceStatus.WAITING_REVIEW:
+            return []
+        return [
+            TicketActionInfo(**a) for a in compute_available_actions(ticket.user_feedback)
+        ]
 
     @classmethod
     def from_ticket(cls, ticket: GovernanceTicket) -> ReviewTicketDetailResponse:
@@ -318,6 +350,7 @@ class ReviewTicketDetailResponse(BaseModel):
             response_source=ticket.feedback_source,
             feedback_payload=ticket.feedback_payload,
             feedback_notification_id=_extract_feedback_notification_id(ticket.feedback_payload),
+            available_actions=cls._build_available_actions(ticket),
             review_reason=ticket.review_reason,
             review_decision=ticket.review_decision,
             reviewed_by=ticket.reviewed_by,

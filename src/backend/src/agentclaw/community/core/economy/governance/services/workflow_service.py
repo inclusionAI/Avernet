@@ -41,6 +41,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
         TaskRecordRepository,
     )
+    from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
+        NotifyLogRepository,
+    )
 
 log = get_logger(__name__)
 
@@ -60,12 +63,14 @@ class GovernanceWorkflowService:
         config: Any,  # EconomyGovernanceConfig
         lifecycle_svc: GovernanceLifecycleServiceProtocol,
         whitelist_service: GovernanceWhitelistServiceProtocol,
+        notify_repo: NotifyLogRepository,
     ) -> None:
         self._task_repo = task_repo
         self._audit_repo = audit_repo
         self._config = config
         self._lifecycle_svc = lifecycle_svc
         self._whitelist_service = whitelist_service
+        self._notify_repo = notify_repo
 
     def list_review_tickets(
         self,
@@ -111,6 +116,32 @@ class GovernanceWorkflowService:
         """
         return self._task_repo.find_by_ticket_id(ticket_id)
 
+    def get_pending_notification(self, ticket_id: str) -> dict | None:
+        """查工单待回复(sent/pending)通知,返回 notification_id + 元信息。
+
+        前端 admin review 时需拿到 notification_id 用于 card-callback 推进状态。
+        open 工单的 notification_id 不在 task_record,在 notify_log(正向查)。
+
+        Args:
+            ticket_id: 工单稳定 UUID。
+
+        Returns:
+            ``{notification_id, notify_status, notify_type, gmt_create}`` 或 None。
+        """
+        # 优先 pending/sending(待回复);若无,取最近一条 sent(已发未反馈)
+        notifies = self._notify_repo.list_by_ticket(ticket_id, only_pending=True)
+        if not notifies:
+            notifies = self._notify_repo.list_by_ticket(ticket_id)
+        if not notifies:
+            return None
+        n = notifies[0]  # 最新
+        return {
+            "notification_id": n.notification_id,
+            "notify_status": n.delivery_status.value if n.delivery_status else None,
+            "notify_type": n.notify_type.value if n.notify_type else None,
+            "sent_at": n.sent_at.isoformat() if n.sent_at else None,
+        }
+
     def review_ticket(
         self, ticket_id: str, action: str, admin_id: str, remark: str = "",
     ) -> TicketActionOutcome:
@@ -118,7 +149,9 @@ class GovernanceWorkflowService:
 
         Actions: approve_close / approve_whitelist / reject_for_reopen.
         """
-        valid_actions = {"approve_close", "approve_whitelist", "reject_for_reopen"}
+        valid_actions = {
+            "approve_close", "approve_scheduled", "approve_whitelist", "reject_for_reopen",
+        }
         if action not in valid_actions:
             return TicketActionOutcome(
                 ticket_id=ticket_id, status=GovernanceStatus.WAITING_REVIEW,
@@ -150,6 +183,11 @@ class GovernanceWorkflowService:
             review_reason = ticket.review_reason or "unknown"
             close_reason = f"{review_reason}_approved"
             cooldown_until = now + timedelta(days=cooldown_days)
+        elif action == "approve_scheduled":
+            # 同意排期 → SCHEDULED(不关单),close_reason 作 review 标记;
+            # 不设 cooldown,保留 ticket.repair_deadline(need_time 反馈时记录)
+            close_reason = "schedule_approved"
+            cooldown_until = None
         elif action == "approve_whitelist":
             close_reason = "whitelist_approved"
             cooldown_until = None
@@ -188,6 +226,7 @@ class GovernanceWorkflowService:
 
         audit_action_map = {
             "approve_close": AuditAction.REVIEW_APPROVE_CLOSE,
+            "approve_scheduled": AuditAction.REVIEW_APPROVE_SCHEDULED,
             "approve_whitelist": AuditAction.REVIEW_APPROVE_WHITELIST,
             "reject_for_reopen": AuditAction.REVIEW_REJECT_FOR_REOPEN,
         }
@@ -202,8 +241,12 @@ class GovernanceWorkflowService:
             dry_run=0,
         )
 
+        outcome_status = (
+            GovernanceStatus.SCHEDULED if action == "approve_scheduled"
+            else GovernanceStatus.CLOSED
+        )
         return TicketActionOutcome(
             ticket_id=ticket_id,
-            status=GovernanceStatus.CLOSED,
+            status=outcome_status,
             close_reason=close_reason,
         )

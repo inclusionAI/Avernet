@@ -52,11 +52,13 @@ _FORMAL_RESPONSES = {e.value for e in Response}
 _BLOCKED_STATUSES = {GovernanceStatus.SCHEDULED, GovernanceStatus.WAITING_REVIEW, GovernanceStatus.CLOSED}
 
 # response → (target_status, review_reason) — all go to waiting_review (§7.4.2)
+# need_time 也进 waiting_review 待审(管理员用 approve_scheduled 同意排期 → scheduled);
+# repair_deadline 仍记录供 approve_scheduled 用,但反馈时不再直接 mute。
 _RESPONSE_TRANSITION_MAP: dict[str, tuple[str, str]] = {
     Response.OPTIMIZED: (GovernanceStatus.WAITING_REVIEW, "user_optimized"),
+    Response.NEED_TIME: (GovernanceStatus.WAITING_REVIEW, "user_need_time"),
     Response.DISPUTE: (GovernanceStatus.WAITING_REVIEW, "user_disputed"),
     Response.WHITELIST: (GovernanceStatus.WAITING_REVIEW, "user_whitelisted"),
-    # need_time → scheduled, handled separately
 }
 
 # ── v2 feedback_payload 归一化 ─────────────────────────────────────
@@ -510,19 +512,12 @@ class GovernanceFeedbackService:
                 notification_id=notification_id,
             )
 
-        # Apply feedback (§7.4.2)
+        # Apply feedback (§7.4.2) — 四种反馈均进 waiting_review 待审。
+        # need_time 的 repair_deadline 记录到 ticket(供 approve_scheduled 用),
+        # 但反馈时不直接 mute(改由管理员 approve_scheduled 审批后进 scheduled)。
         now = datetime.now()
-        target_status: str
-        review_reason: str | None = None
+        target_status, review_reason = _RESPONSE_TRANSITION_MAP[response]
         mute_until: datetime | None = None
-
-        if response == Response.NEED_TIME:
-            target_status = GovernanceStatus.SCHEDULED
-            mute_until = repair_deadline + timedelta(
-                days=self._config.cooldown_days,
-            )
-        else:
-            target_status, review_reason = _RESPONSE_TRANSITION_MAP[response]
 
         # Build self-contained v2 feedback_payload (enrich on server side).
         # Enrichment reads ticket.notification_structured; degrades gracefully,
@@ -562,8 +557,8 @@ class GovernanceFeedbackService:
             target_status=target_status,
             feedback_remark=remark,
             repair_deadline=repair_deadline if response == Response.NEED_TIME else None,
-            resume_at=mute_until if response == Response.NEED_TIME else None,
-            review_reason=review_reason if response != Response.NEED_TIME else None,
+            resume_at=None,  # waiting_review 不 mute;mute 改由 approve_scheduled 审批后决定
+            review_reason=review_reason,
             actor_id=effective_actor,
             feedback_payload=feedback_payload_json,
         )
@@ -623,7 +618,7 @@ class GovernanceFeedbackService:
             notification_id=notification_id,
             governance_status=target_status,
             close_reason=ticket.close_reason,
-            mute_until=mute_until if response == Response.NEED_TIME else None,
+            mute_until=None,  # waiting_review 不 mute;mute 由 approve_scheduled 决定
             response=response,
             response_source=source,
         )

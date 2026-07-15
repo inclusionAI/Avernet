@@ -278,6 +278,110 @@ class TestProcessRecord:
         assert result.action == "cooldown_filtered"
 
 
+# --- Tests: feedback_verdict strong-signal consumption (review-feedback-loop) ---
+
+
+class TestFeedbackVerdictConsumption:
+    """建单消费上次工单 feedback_verdict 强信号:通知带提示 + 审计带 verdict/remark。"""
+
+    def _seed_closed_with_verdict(
+        self, session, *, response, review_decision, close_reason="review_rejected",
+        review_remark=None,
+    ):
+        """种一条 closed 工单(带 user feedback + admin review),cooldown 过期。
+        verdict = compute_feedback_verdict(response, review_decision, 'closed')。"""
+        row = GovernanceTicketOrm(
+            ticket_id=uuid.uuid4().hex,
+            worker_id="staff-001:bot-001",
+            active_worker=None,  # closed 释放
+            governance_status="closed",
+            governance_decision="actionable",
+            latest_decision="actionable",
+            close_reason=close_reason,
+            env="dev",
+            bot_id="bot-001",
+            owner_id="staff-001",
+            dt_version="20260705",
+            bot_name="TestBot",
+            consecutive_normal_days=0,
+            remind_count=0,
+            last_sync_at=datetime.now(),
+            response=response,
+            review_decision=review_decision,
+            reviewed_by="admin-1",
+            reviewed_at=datetime.now(),
+            review_remark=review_remark,
+            cooldown_until=datetime.now() - timedelta(days=1),  # 过期,不被 cooldown 过滤
+        )
+        session.add(row)
+        session.commit()
+        return row
+
+    def test_whitelist_denied_strong_signal_hint_and_audit(self, session, engine):
+        """whitelist_denied(用户加白被驳回)→ 新单通知带提示 + 审计带 last_verdict。"""
+        svc, db = _build_svc(engine)
+        self._seed_closed_with_verdict(
+            session, response="whitelist", review_decision="reject_for_reopen",
+            review_remark="加白理由不充分",
+        )
+        result = svc.process_record(
+            _sample_record(), run_id="run-vd", notify_source="offline_batch",
+            dry_run=True,
+        )
+        assert result.action == "would_create"
+        assert "上次用户申请加白已被管理员驳回" in (result.notification_md_preview or "")
+        # 审计(自管 session,经 audit_repo 写入)
+        with db.orm_session() as s:
+            audit = s.query(AuditLogOrm).filter_by(run_id="run-vd").first()
+            assert audit is not None
+            assert "last_verdict=whitelist_denied" in (audit.error_msg or "")
+            assert "last_review_remark=加白理由不充分" in (audit.error_msg or "")
+
+    def test_dispute_accepted_strong_signal(self, session, engine):
+        svc, db = _build_svc(engine)
+        self._seed_closed_with_verdict(
+            session, response="dispute", review_decision="approve_close",
+            close_reason="approve_close",
+        )
+        result = svc.process_record(
+            _sample_record(), run_id="run-vd2", notify_source="offline_batch",
+            dry_run=True,
+        )
+        assert "上次用户申诉已被管理员采纳关单" in (result.notification_md_preview or "")
+        with db.orm_session() as s:
+            audit = s.query(AuditLogOrm).filter_by(run_id="run-vd2").first()
+            assert "last_verdict=dispute_accepted" in (audit.error_msg or "")
+
+    def test_non_strong_signal_no_hint(self, session, engine):
+        """非强信号(confirmed)→ 通知无提示句;审计 last_verdict 仍记录(verdict 非 other)。"""
+        svc, db = _build_svc(engine)
+        self._seed_closed_with_verdict(
+            session, response="optimized", review_decision="approve_close",
+            close_reason="approve_close",
+        )
+        result = svc.process_record(
+            _sample_record(), run_id="run-vd3", notify_source="offline_batch",
+            dry_run=True,
+        )
+        assert "💡" not in (result.notification_md_preview or "")
+        # confirmed 非 other → 审计仍记 last_verdict(但不带提示)
+        with db.orm_session() as s:
+            audit = s.query(AuditLogOrm).filter_by(run_id="run-vd3").first()
+            assert "last_verdict=confirmed" in (audit.error_msg or "")
+
+    def test_no_prior_closed_no_audit_fragment(self, session, engine):
+        """无上一 closed 工单 → 审计 error_msg 不含 last_verdict。"""
+        svc, db = _build_svc(engine)
+        svc.process_record(
+            _sample_record(), run_id="run-vd4", notify_source="offline_batch",
+            dry_run=True,
+        )
+        with db.orm_session() as s:
+            audit = s.query(AuditLogOrm).filter_by(run_id="run-vd4").first()
+            assert audit is not None
+            assert audit.error_msg is None or "last_verdict" not in (audit.error_msg or "")
+
+
 # --- Tests: process_offline_batch ---
 
 

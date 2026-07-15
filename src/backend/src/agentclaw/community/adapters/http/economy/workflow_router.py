@@ -170,6 +170,31 @@ async def get_review_ticket_detail(
     return ApiResponse(success=True, data=data.model_dump())
 
 
+# ── Workflow: 待回复通知查询 ─────────────────────────────────────────────
+
+
+@workflow_router.get(
+    "/tickets/pending-notification",
+    summary="查工单待回复通知(notification_id)",
+)
+async def get_pending_notification(
+    ticket_id: str = Query(..., description="工单 ID"),
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+) -> ApiResponse:
+    """查工单当前通知的 notification_id。
+
+    open 工单(用户未反馈)的 notification_id 在 notify_log,不在 task_record。
+    前端 admin review / card-callback 推进状态时需此 ID。
+    优先返回 pending/sending(待回复);无则最近一条 sent。
+    """
+    del ctx  # RequestContext 仅用于走 AuthPlugin 鉴权链路
+    result = await asyncio.to_thread(admin_svc.get_pending_notification, ticket_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No notification found for ticket")
+    return ApiResponse(success=True, data=result)
+
+
 # ── Workflow: 审批动作 ────────────────────────────────────────────────────
 
 

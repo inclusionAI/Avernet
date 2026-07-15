@@ -9,10 +9,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime
+from typing import Any
 
 from agentclaw.community.core.economy.governance.domain.base import _iso
 from agentclaw.community.core.economy.governance.domain.enums import (
     GovernanceStatus,
+    Response,
+    TicketAction,
 )
 
 
@@ -82,6 +85,132 @@ TICKET_TRANSITIONS: dict[GovernanceStatus, frozenset[GovernanceStatus]] = {
     }),
     GovernanceStatus.CLOSED: frozenset(),
 }
+
+
+# ── feedback_verdict 纯函数(user⊗admin 成对派生,零跨层依赖) ──────
+# pair 表直接用 response 原值(optimized/dispute/whitelist/need_time),不做中间
+# 归一化翻译——系统别处不用的中间词只会增加理解负担。离线侧可直接 import 复用。
+
+# (response, review_decision) → verdict(双流齐备的成对结果)
+# review 四态:approve_close/approve_scheduled[新]/approve_whitelist/reject_for_reopen。
+# 命名贴合四反馈语义;need_time 同意走 approve_scheduled(→schedule_confirmed),
+# approve_close 对 need_time 不作正常路径(available_actions 不下发)落 other。
+_VERDICT_PAIR: dict[tuple[str, str], str] = {
+    ("optimized", "approve_close"): "confirmed",
+    ("optimized", "reject_for_reopen"): "optimized_rejected",
+    ("optimized", "approve_whitelist"): "admin_overroled_whitelist",
+    ("dispute", "approve_close"): "dispute_accepted",
+    ("dispute", "reject_for_reopen"): "dispute_rejected",
+    ("whitelist", "approve_whitelist"): "whitelist_confirmed",
+    ("whitelist", "reject_for_reopen"): "whitelist_denied",
+    ("whitelist", "approve_close"): "whitelist_dismissed",
+    ("need_time", "approve_scheduled"): "schedule_confirmed",
+    ("need_time", "reject_for_reopen"): "schedule_rejected",
+}
+
+# response → pending_review_* (review 缺席时,按用户决策细分)
+_VERDICT_PENDING: dict[str, str] = {
+    "optimized": "pending_review_optimized",
+    "whitelist": "pending_review_whitelist",
+    "dispute": "pending_review_dispute",
+    "need_time": "pending_review_need_time",
+}
+
+
+def compute_feedback_verdict(
+    response: str | None,
+    review_decision: str | None,
+    governance_status: GovernanceStatus | str | None,
+) -> str:
+    """用户反馈 ⊗ 管理员 review 的成对裁决结果(读时派生,纯函数,不落库)。
+
+    输入三个既有 task_record 字段,产出成对 verdict 字符串。review 缺席
+    (review_decision 空)走 ``pending_review_*``;用户未反馈走
+    ``awaiting_user_feedback``/``admin_only_*``;缺省落 ``other``。
+
+    纯函数:无 self/session/DB 依赖,在线自循环与离线侧 import 同源复用。
+
+    Args:
+        response: 用户原始反馈(optimized/need_time/dispute/whitelist),None=未反馈。
+        review_decision: 管理员审批(approve_close/approve_scheduled/approve_whitelist/
+                reject_for_reopen),None=未审。
+        governance_status: 工单状态(open/scheduled/waiting_review/closed)。
+
+    Returns:
+        verdict 字符串(见模块 ``_VERDICT_PAIR`` / ``_VERDICT_PENDING`` 系列)。
+    """
+    if review_decision:
+        if not response:
+            return f"admin_only_{review_decision}"
+        return _VERDICT_PAIR.get((response, review_decision), "other")
+    # review 缺席:待审或未到 review 阶段
+    if not response:
+        return "awaiting_user_feedback"
+    return _VERDICT_PENDING.get(response, "other")
+
+
+# ── available_actions 纯函数(按用户反馈下发可做 review 动作) ──────
+# review 覆盖四种反馈(need_time 改为进 waiting_review 待审)。按反馈给不同"同意"
+# 动作 + 通用 reject。加白(approve_whitelist)是 whitelist 反馈的同意裁决,与运维
+# 独立一键加白(/admin/whitelist)出发点不同、并存。label 按反馈差异化,后端下发。
+
+_REVIEW_ENDPOINT = "POST /api/economy/governance/workflow/tickets/review"
+
+# 同意动作的 label 按反馈差异化(避免笼统"批准关闭"丢语义)
+_APPROVE_LABEL: dict[str, str] = {
+    "optimized": "确认已优化",
+    "dispute": "采纳申诉",
+    "whitelist": "同意加白",
+    "need_time": "同意排期",
+}
+# 驳回 label 按反馈差异化
+_REJECT_LABEL: dict[str, str] = {
+    "optimized": "不认可,重开",
+    "dispute": "驳回申诉,重开",
+    "whitelist": "驳回加白,重开",
+    "need_time": "不认可,重开",
+}
+# 各反馈的"同意"动作
+_APPROVE_ACTION: dict[str, TicketAction] = {
+    "optimized": TicketAction.APPROVE_CLOSE,
+    "dispute": TicketAction.APPROVE_CLOSE,
+    "whitelist": TicketAction.APPROVE_WHITELIST,
+    "need_time": TicketAction.APPROVE_SCHEDULED,
+}
+
+
+def _action_info(
+    action: TicketAction, label: str, remark_required: bool,
+) -> dict[str, Any]:
+    """构造单个动作描述(前端动态渲染用)。"""
+    return {
+        "value": action.value,
+        "label": label,
+        "endpoint": _REVIEW_ENDPOINT,
+        "remark_required": remark_required,
+    }
+
+
+def compute_available_actions(user_feedback: str | None) -> list[dict[str, Any]]:
+    """按用户反馈类型返回可做的 review 动作列表(纯函数,在线/离线复用同源)。
+
+    Args:
+        user_feedback: 用户原始反馈(optimized/need_time/dispute/whitelist);
+            None 或未知值 → [](非 review 流程不发动作)。
+
+    Returns:
+        动作 dict 列表,每项含 value/label/endpoint/remark_required。 approve 类
+        动作在前(同意),reject_for_reopen 在后(驳回)。
+    """
+    approve = _APPROVE_ACTION.get(user_feedback)
+    if approve is None:
+        return []  # 无反馈或非四种反馈 → 不在 review 流程
+    approve_label = _APPROVE_LABEL[user_feedback]
+    reject_label = _REJECT_LABEL[user_feedback]
+    return [
+        _action_info(approve, approve_label, remark_required=False),
+        _action_info(TicketAction.REJECT_FOR_REOPEN, reject_label, remark_required=True),
+    ]
 
 
 @dataclass(slots=True)
@@ -246,6 +375,30 @@ class GovernanceTicket:
         """§7.4.1: 仅 open + 未反馈 才接受。"""
         return self.governance_status == GovernanceStatus.OPEN and self.user_feedback is None
 
+    @property
+    def feedback_verdict(self) -> str:
+        """用户反馈 ⊗ 管理员 review 的成对裁决结果(读时派生委托纯函数,不落库)。
+
+        委托模块级 :func:`compute_feedback_verdict`,输入既有 task_record 三字段
+        (``user_feedback``/``review_decision``/``governance_status``)。在线自循环与
+        离线侧复用同源规则。
+        """
+        return compute_feedback_verdict(
+            self.user_feedback,
+            self.review_decision,
+            self.governance_status,
+        )
+
+    @property
+    def available_actions(self) -> list[dict[str, Any]]:
+        """该工单当前可做的 review 动作(按用户反馈派生,读时算不落库)。
+
+        委托模块级 :func:`compute_available_actions`,按 ``user_feedback`` 返回对应
+        同意+驳回动作。前端据此动态渲染,后端成动作单一事实源。非 review 流程
+        (无反馈/非四种反馈)→ []。
+        """
+        return compute_available_actions(self.user_feedback)
+
     # ── 状态机行为 ──────────────────────────────────────
 
     def transition_to(self, target: GovernanceStatus) -> None:
@@ -355,36 +508,42 @@ class GovernanceTicket:
         close_reason: str | None = None,
         cooldown_until: datetime | None = None,
     ) -> None:
-        """管理员审核 — WAITING_REVIEW → CLOSED(三态分支)。
+        """管理员审核 — WAITING_REVIEW → CLOSED/SCHEDULED(四态分支)。
 
         Args:
-            review_decision: 审核决策(approve_close / approve_whitelist /
-                reject_for_reopen)。
+            review_decision: 审核决策(approve_close / approve_scheduled /
+                approve_whitelist / reject_for_reopen)。
             reviewed_by: 审核人 ID。
             reviewed_at: 审核时间(None → 取 now)。
             review_remark: 审核备注。
             close_reason: 关闭原因(None 时按 review_decision 取默认)。
             cooldown_until: 冷却截止时间(仅 approve_close 可带)。
 
-        逐字段对齐 repo ``review_ticket`` L310-341:
-          - review_decision / reviewed_by / reviewed_at(默认 now) /
-            review_remark / remind_at=None(无条件清,L314)
-          - 三态分支:
-            approve_close    → close_reason=close_reason|'approve_close',
+        分支:
+          approve_close     → CLOSED,close_reason=close_reason|'approve_close',
                               可带 cooldown_until
-            approve_whitelist→ close_reason='whitelisted'
-            reject_for_reopen→ close_reason='review_rejected'(打回仍关闭,
+          approve_scheduled → SCHEDULED(同意排期,不关单),close_reason='schedule_approved',
+                              保留 repair_deadline;不释放 active_worker(仍 active 观察)
+          approve_whitelist → CLOSED,close_reason='whitelisted'
+          reject_for_reopen → CLOSED,close_reason='review_rejected'(打回仍关闭,
                               下个 scan 重建 open 单)
-          - 共性:closed_at=now、active_worker=None(释放,L320/327/336/341)
         """
-        self.transition_to(GovernanceStatus.CLOSED)
         now = datetime.now()
         self.review_decision = review_decision
         self.reviewed_by = reviewed_by
         self.reviewed_at = reviewed_at or now
         self.review_remark = review_remark
+        self.remind_at = None  # 无条件清
+
+        if review_decision == "approve_scheduled":
+            # 同意排期 → SCHEDULED(不关单,继续排期观察),不释放 active_worker
+            self.transition_to(GovernanceStatus.SCHEDULED)
+            self.close_reason = close_reason or "schedule_approved"
+            return
+
+        # 其余三态 → CLOSED
+        self.transition_to(GovernanceStatus.CLOSED)
         self.closed_at = now
-        self.remind_at = None  # 无条件清,对齐 repo L314
         self.assignee = None   # 释放 active_worker
         if review_decision == "approve_close":
             self.close_reason = close_reason or "approve_close"

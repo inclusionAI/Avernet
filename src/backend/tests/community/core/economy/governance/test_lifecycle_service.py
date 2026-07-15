@@ -287,6 +287,20 @@ class TestPauseReviewEmergency:
         assert t.review_decision == "approve_close"
         assert t.reviewed_by == "admin-1"
 
+    def test_review_approve_scheduled_to_scheduled(self) -> None:
+        """approve_scheduled → SCHEDULED(不关单),close_reason='schedule_approved'。"""
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-sch", status="waiting_review")
+        assert svc.review_ticket(
+            "T-sch", review_decision="approve_scheduled",
+            reviewed_by="admin-1", review_remark="排期 ok",
+        ) is True
+        t = svc._task_repo.find_by_ticket_id("T-sch")  # noqa: SLF001
+        assert t.governance_status == GovernanceStatus.SCHEDULED
+        assert t.review_decision == "approve_scheduled"
+        assert t.close_reason == "schedule_approved"
+        assert t.reviewed_by == "admin-1"
+
     def test_emergency_close_open_to_closed(self) -> None:
         svc, db, _ = _build_svc()
         _seed_ticket(db, ticket_id="T-emg", status="open")

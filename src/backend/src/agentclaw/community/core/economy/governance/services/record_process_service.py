@@ -63,6 +63,36 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 
+# ── 上次反馈成对裁决(feedback_verdict)强信号 → 通知提示文案 ──────────
+# 建单时若上一工单 feedback_verdict 属强信号,通知带一句提示 + 审计带 verdict/remark,
+# 让在线自循环消费 user⊗admin 成对结果(§review-feedback-loop)。
+_STRONG_VERDICT_HINT: dict[str, str] = {
+    "whitelist_denied": "上次用户申请加白已被管理员驳回,本次继续按治理建议跟进。",
+    "dispute_accepted": "上次用户申诉已被管理员采纳关单,本次重新冒头请复核。",
+    "schedule_confirmed": "上次用户排期已被管理员批准,观察是否按期改善。",
+    "whitelist_confirmed": "上次用户加白已被管理员确认(误判),本次冒头请谨慎。",
+}
+
+
+def _build_last_feedback_audit(verdict: str, review_remark: str | None) -> str | None:
+    """构造建单审计的 last_feedback 片段:强信号 verdict + 非空 review_remark。
+
+    Args:
+        verdict: 上一工单 feedback_verdict(空串=无上一工单/无 verdict)。
+        review_remark: 上一工单管理员裁决备注(None=无)。
+
+    Returns:
+        审计片段(如 ``last_verdict=whitelist_denied; last_review_remark=...``),
+        verdict 非强信号且 remark 空 → None(不写入)。
+    """
+    if not verdict or verdict == "other":
+        return None
+    parts = [f"last_verdict={verdict}"]
+    if review_remark:
+        remark = review_remark if len(review_remark) <= 120 else review_remark[:119] + "…"
+        parts.append(f"last_review_remark={remark}")
+    return "; ".join(parts)
+
 
 # ── Result types ─────────────────────────────────────────────────────────
 
@@ -595,12 +625,27 @@ class GovernanceRecordService:
                 or latest_closed.closed_at
             )
 
+        # 上次反馈成对裁决(feedback_verdict):强信号时通知带一句"上次反馈提示"
+        # + 审计带 verdict/remark,让在线自循环消费 user⊗admin 成对结果。
+        last_verdict = latest_closed.feedback_verdict if latest_closed else ""
+        last_review_remark = (
+            latest_closed.review_remark if latest_closed else None
+        )
+        last_feedback_hint = _STRONG_VERDICT_HINT.get(last_verdict)
+
         # Render notification markdown
         notification_md = self._render_svc.render_first_notification_md(
             record,
             dt_version=dt_version,
             use_reopen_template=use_reopen_template,
             reopen_ref_time=reopen_ref_time,
+        )
+        if last_feedback_hint:
+            notification_md = f"{notification_md}\n\n> 💡 {last_feedback_hint}"
+
+        # 审计上下文:强信号 verdict + 非空 review_remark 进 error_msg(可追溯)
+        last_feedback_audit = _build_last_feedback_audit(
+            last_verdict, last_review_remark,
         )
 
         if dry_run:
@@ -611,6 +656,7 @@ class GovernanceRecordService:
                 governance_decision=record.governance_decision,
                 hit_dimensions=record.hit_dimensions,
                 action_taken=AuditAction.ENQUEUED,
+                error_msg=last_feedback_audit,
                 dry_run=1,
             )
             return RecordProcessResult(
@@ -690,6 +736,7 @@ class GovernanceRecordService:
             expected_token_saving=record.expected_token_saving,
             saving_ratio=record.saving_ratio,
             action_taken=AuditAction.ENQUEUED,
+            error_msg=last_feedback_audit,
             dry_run=0,
         )
 

@@ -176,6 +176,7 @@ def _build_workflow_svc(engine):
         config=FakeGovernanceConfig(),
         lifecycle_svc=lifecycle_svc,
         whitelist_service=whitelist_service,
+        notify_repo=notify_repo,
     )
     return svc, db
 
@@ -530,6 +531,20 @@ class TestReviewTicket:
 
         with db.orm_session() as s:
             ticket = s.query(GovernanceTicketOrm).first()
+            assert ticket.cooldown_until is None
+
+    def test_approve_scheduled(self, session, engine):
+        """approve_scheduled → status=scheduled(不关单),close_reason=schedule_approved。"""
+        svc, db = self._setup_waiting_review(engine)
+        result = svc.review_ticket(
+            "t-review", action="approve_scheduled", admin_id="admin-1",
+        )
+        assert result.status.value == "scheduled"
+        assert result.close_reason == "schedule_approved"
+
+        with db.orm_session() as s:
+            ticket = s.query(GovernanceTicketOrm).first()
+            assert ticket.governance_status == "scheduled"
             assert ticket.cooldown_until is None
 
     def test_invalid_action(self, session, engine):
