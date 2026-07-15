@@ -498,7 +498,8 @@ async def test_executor_stream_engine_type_in_delta():
     )
 
     delta_calls = [
-        c for c in chunk_repo.insert_chunk.call_args_list
+        c
+        for c in chunk_repo.insert_chunk.call_args_list
         if c[1]["chunk_type"] == "delta"
     ]
     assert len(delta_calls) == 1
@@ -546,7 +547,8 @@ async def test_executor_stream_engine_type_in_agent():
     )
 
     agent_calls = [
-        c for c in chunk_repo.insert_chunk.call_args_list
+        c
+        for c in chunk_repo.insert_chunk.call_args_list
         if c[1]["chunk_type"] == "agent"
     ]
     assert len(agent_calls) == 1
@@ -593,7 +595,8 @@ async def test_executor_stream_engine_type_in_final_with_metadata():
     )
 
     final_calls = [
-        c for c in chunk_repo.insert_chunk.call_args_list
+        c
+        for c in chunk_repo.insert_chunk.call_args_list
         if c[1]["chunk_type"] == "final"
     ]
     assert len(final_calls) == 1
@@ -641,7 +644,8 @@ async def test_executor_stream_engine_type_in_error_with_metadata():
     )
 
     error_calls = [
-        c for c in chunk_repo.insert_chunk.call_args_list
+        c
+        for c in chunk_repo.insert_chunk.call_args_list
         if c[1]["chunk_type"] == "error"
     ]
     assert len(error_calls) == 1
