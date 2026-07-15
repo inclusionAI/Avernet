@@ -21,6 +21,7 @@ from agentclaw.community.core.bot_dormant.candidates import (
 )
 from agentclaw.community.core.bot_dormant.sqlite_models import DormantWhitelist
 from agentclaw.community.plugin_api.models import Base, BotModel
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 def _make_session():
@@ -159,7 +160,7 @@ def test_filter_candidates_returns_only_qualifying_bots():
     session.add(wl_entry)
     session.commit()
 
-    candidates = filter_candidates(session, N)
+    candidates = filter_candidates(session, N, env=get_current_env())
 
     candidate_ids = {c.bot_id for c in candidates}
 
@@ -183,6 +184,65 @@ def test_filter_candidates_returns_only_qualifying_bots():
         assert c.owner_id
         assert c.bot_name is not None  # may be empty string but should exist
 
+    session.close()
+
+
+@pytest.mark.integration
+def test_filter_candidates_only_uses_rows_from_requested_environment():
+    """A newer prod duplicate must not shadow the pre row during a pre scan."""
+    session = _make_session()
+    now = _now()
+    old_create = now - timedelta(days=60)
+    pre_bot = BotModel(
+        bot_id="shared_bot",
+        bot_name="Pre Bot",
+        entity_id="111",
+        entity_type="user",
+        creator_id="owner1",
+        owner_id="owner1",
+        status="ACTIVE",
+        is_delete=0,
+        bot_type="personal",
+        env="pre",
+        gmt_create=old_create,
+        gmt_modified=now - timedelta(days=1),
+    )
+    prod_bot = BotModel(
+        bot_id="shared_bot",
+        bot_name="Prod Bot",
+        entity_id="222",
+        entity_type="user",
+        creator_id="owner1",
+        owner_id="owner1",
+        status="ACTIVE",
+        is_delete=0,
+        bot_type="personal",
+        env="prod",
+        gmt_create=old_create,
+        gmt_modified=now,
+    )
+    prod_only = BotModel(
+        bot_id="prod_only",
+        bot_name="Prod Only",
+        entity_id="333",
+        entity_type="user",
+        creator_id="owner2",
+        owner_id="owner2",
+        status="ACTIVE",
+        is_delete=0,
+        bot_type="personal",
+        env="prod",
+        gmt_create=old_create,
+        gmt_modified=now,
+    )
+    session.add_all([pre_bot, prod_bot, prod_only])
+    session.commit()
+
+    candidates = filter_candidates(session, 30, env="pre")
+
+    assert [(c.bot_id, c.owner_id, c.entity_id) for c in candidates] == [
+        ("shared_bot", "owner1", "111"),
+    ]
     session.close()
 
 
@@ -237,7 +297,7 @@ def test_filter_candidates_deduplicates_same_bot_owner_pair():
     session.add_all([first, latest, other_owner])
     session.commit()
 
-    candidates = filter_candidates(session, N)
+    candidates = filter_candidates(session, N, env=get_current_env())
 
     dup_candidates = [
         c for c in candidates
@@ -279,7 +339,7 @@ def test_filter_candidates_empty_when_all_excluded():
     session.add(wl)
     session.commit()
 
-    candidates = filter_candidates(session, N)
+    candidates = filter_candidates(session, N, env=get_current_env())
     assert candidates == []
     session.close()
 
@@ -309,7 +369,7 @@ def test_filter_candidates_excludes_non_personal():
     session.add(team_bot)
     session.commit()
 
-    candidates = filter_candidates(session, N)
+    candidates = filter_candidates(session, N, env=get_current_env())
     assert not any(c.bot_id == "team_bot" for c in candidates)
     session.close()
 
@@ -339,6 +399,6 @@ def test_filter_candidates_excludes_deleted():
     session.add(deleted_bot)
     session.commit()
 
-    candidates = filter_candidates(session, N)
+    candidates = filter_candidates(session, N, env=get_current_env())
     assert not any(c.bot_id == "deleted_bot" for c in candidates)
     session.close()
