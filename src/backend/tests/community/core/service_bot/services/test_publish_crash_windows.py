@@ -266,3 +266,96 @@ async def test_first_release_creation_orphan_window_reissues_and_is_visible():
     op = ledger.get_latest_by_kind(1, "verify_first_release", "verify")
     assert op.state == PublishOperationState.COMPLETED.value
     assert op.baas_publish_id == 902  # the second (recorded) workflow
+
+
+# ── upgrade release: crash windows ────────────────────────────────────────────
+def _upgrade_flow(ledger, baas, build_service):
+    svc = _flow(ledger=ledger, baas=baas, build_service=build_service)
+    # An upgrade reuses an existing binding + reads/writes ext; stub those so the
+    # test focuses on issuance idempotency.
+    svc._ext_state.get_latest_ext = Mock(return_value={})
+    svc._ext_state.update_status = Mock()
+    svc.refresh_publish_handle = Mock()
+    return svc
+
+
+async def _run_online_upgrade(svc, record, bot_uuid="BOT-live"):
+    # Resolve _execute_upgrade_release's last-publish/binding lookups to bot_uuid.
+    from unittest.mock import Mock as _M
+    last = _record(PublishStatus.SUCCESS.value)
+    last.ext = {"binding": {"online": 88}}
+    svc._publish_service.get_publish_by_id = _M(return_value=last)
+    svc._publish_service.get_device_binding_by_id = _M(return_value=_M(device_id=bot_uuid))
+    svc._bot_service.get_bot = _M(return_value={"bot_id": "b2", "entity_id": "u1"})
+    return await svc._execute_upgrade_release(
+        publish_record=record, operator="op", migration_path="/m",
+        bot={"bot_id": "b2", "entity_id": "u1"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_upgrade_crash_after_issue_resume_adopts_not_reissues():
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+
+    async def upgrade_async(**kw):
+        wid = baas.issue("BOT-live", "UPDATE")
+        return {"publish_id": wid, "success": True}
+
+    build_service.upgrade_async = AsyncMock(side_effect=upgrade_async)
+    svc = _upgrade_flow(ledger, baas, build_service)
+
+    crashed = []
+
+    def checkpoint(name):
+        if name == "after_issue" and not crashed:
+            crashed.append(1)
+            raise RuntimeError("crash after upgrade issued, before record")
+
+    svc._operation_runner._checkpoint = checkpoint
+
+    record = _record(PublishStatus.VALIDATING.value)
+    record.last_pub_id = 10
+    with pytest.raises(RuntimeError):
+        await _run_online_upgrade(svc, record)
+    assert build_service.upgrade_async.await_count == 1  # issued once, unrecorded
+
+    svc._operation_runner._checkpoint = lambda _n: None
+    await _run_online_upgrade(svc, record)
+    # Existing-bot → adopt the in-doubt workflow; NO second upgrade.
+    assert build_service.upgrade_async.await_count == 1
+    op = ledger.get_latest_by_kind(1, "online_upgrade", "online")
+    assert op.state == PublishOperationState.COMPLETED.value
+    assert op.baas_publish_id == 901
+
+
+@pytest.mark.asyncio
+async def test_upgrade_bot_not_found_abandons_and_falls_back():
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+
+    async def upgrade_async(**kw):
+        return {"success": False, "error_code": "BOT_NOT_FOUND"}
+
+    async def release_async(**kw):
+        wid = baas.issue("BOT-new", "CREATE")
+        return {"bot_uuid": "BOT-new", "publish_id": wid}
+
+    build_service.upgrade_async = AsyncMock(side_effect=upgrade_async)
+    build_service.release_async = AsyncMock(side_effect=release_async)
+    svc = _upgrade_flow(ledger, baas, build_service)
+    svc.create_release_binding = Mock(return_value=55)
+    svc.record_release_ext = Mock()
+
+    record = _record(PublishStatus.VALIDATING.value)
+    record.last_pub_id = 10
+    await _run_online_upgrade(svc, record)
+
+    # Upgrade op abandoned; the first-release fallback opened its own op + created.
+    up = ledger.get_latest_by_kind(1, "online_upgrade", "online")
+    assert up.state == PublishOperationState.ABANDONED.value
+    fr = ledger.get_latest_by_kind(1, "online_first_release", "online")
+    assert fr.state == PublishOperationState.COMPLETED.value
+    build_service.release_async.assert_awaited_once()

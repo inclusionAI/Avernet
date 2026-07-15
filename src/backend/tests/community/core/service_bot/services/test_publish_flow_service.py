@@ -93,6 +93,12 @@ def _pf(*args, **kw):
     kw.setdefault("teclaw_file_promotion", Mock())
     kw.setdefault("device_binding_repo", Mock())
     kw.setdefault("publish_operation_repo", _real_ledger())
+    # The operation runner queries baas_service.list_bot_publishes for adopt-by-
+    # query; a bare Mock returns a non-iterable Mock. Default it to "no prior
+    # workflows" so upgrade/existing-bot flow tests issue normally.
+    baas = args[2] if len(args) >= 3 else kw.get("baas_service")
+    if isinstance(baas, Mock):
+        baas.list_bot_publishes.return_value = []
     if "channel_overrides_reader" not in kw:
         # Default to "no channels for this stage" ({}), so promotion delivers the
         # base artifact with channels cleared — tests that care about channels pass

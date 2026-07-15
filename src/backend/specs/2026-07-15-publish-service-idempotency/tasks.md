@@ -171,7 +171,7 @@
         green).
 - **Depends on:** Tasks 5, 7
 
-## Task 9: Upgrade release onto the runner — [ ]
+## Task 9: Upgrade release onto the runner — [x]
 - **Goal:** `upgrade_release` through the runner; BOT_NOT_FOUND fallback
   becomes `abandon_operation(upgrade op)` + first-release op (visible in
   ledger).

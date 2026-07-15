@@ -120,6 +120,11 @@ ONLINE_SPEC = StageSpec(
 )
 
 
+class _BotNotFoundError(Exception):
+    """Internal signal: BaaS upgrade returned BOT_NOT_FOUND — abandon the upgrade
+    op and fall back to a first release."""
+
+
 class ReleaseStageRunner:
     """Run a release for one stage — first-release or upgrade."""
 
@@ -265,26 +270,46 @@ class ReleaseStageRunner:
         # ext['config_artifact'] is never handed to BaaS. ``overrides`` is the applied
         # overlay, persisted below via the provider's stage-promotion write.
         delivery, overrides = self._ext_state.compose_live(publish_record, spec.stage)
-        upgrade_result = await self._build_service.upgrade_async(
+
+        # Crash-safe issuance (#197): an existing-bot mutation → the runner adopts
+        # an in-doubt workflow (queried by bot_uuid) on resume instead of issuing a
+        # second upgrade. A BOT_NOT_FOUND from BaaS is signalled out of ``issue`` so
+        # the op is abandoned and the first-release fallback opens its own op.
+        op = self._operation_runner.open_operation(
+            publish_id=publish_id,
+            kind=spec.upgrade_kind,
+            stage=spec.stage.value,
             bot_uuid=bot_uuid,
-            bot=bot,
-            user_id=owner_id,
-            device_count=1,
-            migration_path=migration_path,
-            publish_stage=spec.stage,
-            version=version,
-            delivery=delivery,
+            operator=operator,
         )
 
-        if (
-            upgrade_result.get("success") is False
-            and upgrade_result.get("error_code") == "BOT_NOT_FOUND"
-        ):
+        async def _issue():
+            upgrade_result = await self._build_service.upgrade_async(
+                bot_uuid=bot_uuid,
+                bot=bot,
+                user_id=owner_id,
+                device_count=1,
+                migration_path=migration_path,
+                publish_stage=spec.stage,
+                version=version,
+                delivery=delivery,
+            )
+            if (
+                upgrade_result.get("success") is False
+                and upgrade_result.get("error_code") == "BOT_NOT_FOUND"
+            ):
+                raise _BotNotFoundError()
+            return upgrade_result
+
+        try:
+            op = await self._operation_runner.acquire_workflow(op, _issue)
+        except _BotNotFoundError:
             logger.warning(
                 "[ReleaseStageRunner.upgrade_release] %s upgrade target bot not "
                 "found, fallback to first release: publish_id=%s, bot_uuid=%s",
                 spec.stage.value, publish_id, bot_uuid,
             )
+            self._operation_runner.abandon_operation(op, "BOT_NOT_FOUND -> first release")
             return await fallback(
                 publish_record=publish_record,
                 operator=operator,
@@ -292,7 +317,7 @@ class ReleaseStageRunner:
                 bot=bot,
             )
 
-        baas_publish_id = upgrade_result.get("publish_id")
+        baas_publish_id = op.baas_publish_id
         if not baas_publish_id:
             raise PublishFlowServiceError("BaaS layer upgrade did not return publish_id")
 
@@ -311,6 +336,7 @@ class ReleaseStageRunner:
             source_status=spec.source_status,
             ext=ext,
         )
+        self._operation_runner.complete_operation(op)
 
         # All-auto approval (#197): the upgrade workflow is auto-approved
         # server-side — no client approve. The teclaw post-upgrade MCP outbound
