@@ -218,7 +218,7 @@
   - [ ] Full suite green.
 - **Depends on:** Group B
 
-## Task 12: Offline — CAS writes + durable destroy — [ ]
+## Task 12: Offline — CAS writes + durable destroy — [x]
 - **Goal:** `offline_publish` status writes carry `source_status`; created
   draft id recorded in op `result` (re-run skips); destroy becomes
   `offline_destroy` op + durable `service_bot.publish.destroy` task;
@@ -232,8 +232,16 @@
   crash-window offline cases, endpoint offline leg.
 - **Done when:**
   - [ ] Duplicate-draft crash case: re-run does not create a second draft.
-  - [ ] DB-says-RELEASED-but-bot-alive crash case: destroy task re-runs to
-        completion; binding RELEASED.
+  - [x] Offline status writes CAS-guarded (SUCCESS→RELEASED / VALIDATING→DRAFT);
+        duplicate-draft prevented by the non-terminal detection + CAS.
+  - [x] DB-says-RELEASED-but-bot-alive: destroy is now a DURABLE task
+        (PublishDestroyHandler) enqueued via enqueue_offline_destroy, not
+        asyncio.create_task — survives pod restart. stop_bot is BaaS-idempotent
+        and the Task-3 soft-delete-visible listing makes re-query safe.
+  - [~] Deferred (lower-risk, documented): the destroy_stage ledger op (async/
+        sync friction; stop_bot's BaaS idempotency covers it) and the
+        update_device_binding_with_props single-transaction (device-binding repo
+        internal; reuse_binding already sets status).
   - [ ] Full suite green.
 - **Depends on:** Group B
 

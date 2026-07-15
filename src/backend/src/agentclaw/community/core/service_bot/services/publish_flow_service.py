@@ -84,6 +84,7 @@ from agentclaw.community.core.service_bot.services.publish_flow.operation_runner
     PublishOperationRunner,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+    enqueue_destroy,
     enqueue_online_release,
     enqueue_progress_poll,
     enqueue_verify_flow,
@@ -958,6 +959,16 @@ class PublishFlowService(
             status=rollback_status,
             action="process",
             message="Retry submitted, please check progress later",
+        )
+
+    def enqueue_offline_destroy(self, publish_id: int, stage, operator: str) -> None:
+        """Enqueue the durable destroy task for an offline (#197) — replaces the
+        former fire-and-forget background destroy. ``stage`` is a PublishStage."""
+        enqueue_destroy(
+            self._task_queue_service,
+            publish_id=publish_id,
+            stage=stage.value if hasattr(stage, "value") else str(stage),
+            operator=operator,
         )
 
     def _abandon_inflight_operations(self, publish_id: int, reason: str) -> None:

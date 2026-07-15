@@ -1,5 +1,4 @@
 """Bot Publish Service - Bot发布服务业务逻辑层。"""
-import asyncio
 import threading
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
@@ -993,7 +992,11 @@ class BotPublishService(PublishRollbackMixin):
                     f"skipping bot deletion: bot_id={bot_id}, owner_id={owner_id}"
                 )
                 # 有非终态发布单，不删除 bot，仅将当前发布单状态置为 released
-                self._repo.update_status(publish_id, PublishStatus.RELEASED)
+                # (#197) CAS-guarded (SUCCESS→RELEASED): a re-run that lost the
+                # race is a no-op instead of a blind re-write.
+                self._repo.update_status(
+                    publish_id, PublishStatus.RELEASED, PublishStatus.SUCCESS
+                )
                 logger.info(
                     f"[offline_publish] Publish status updated to released: publish_id={publish_id}"
                 )
@@ -1029,15 +1032,19 @@ class BotPublishService(PublishRollbackMixin):
                     f"original_id={publish_id} -> new_id={new_record.id}, version={new_version}"
                 )
 
-                # 将当前发布单状态置为 released
-                self._repo.update_status(publish_id, PublishStatus.RELEASED)
+                # 将当前发布单状态置为 released (#197 CAS-guarded SUCCESS→RELEASED)
+                self._repo.update_status(
+                    publish_id, PublishStatus.RELEASED, PublishStatus.SUCCESS
+                )
                 logger.info(
                     f"[offline_publish] Publish status updated to released: publish_id={publish_id}"
                 )
 
-        # Step 4: 如果是 VALIDATING 状态，将发布单置为草稿
+        # Step 4: 如果是 VALIDATING 状态，将发布单置为草稿 (#197 CAS-guarded)
         if current_status == PublishStatus.VALIDATING:
-            self._repo.update_status(publish_id, PublishStatus.DRAFT)
+            self._repo.update_status(
+                publish_id, PublishStatus.DRAFT, PublishStatus.VALIDATING
+            )
             logger.info(
                 f"[offline_publish] Publish status updated to draft: publish_id={publish_id}"
             )
@@ -1052,23 +1059,12 @@ class BotPublishService(PublishRollbackMixin):
             )
             return result
 
-        async def _destroy_in_background():
-            try:
-                destroy_result = publish_flow_service.destroy_publish_history(
-                    publish_id=publish_id,
-                    stage=stage,
-                )
-                logger.info(
-                    f"[offline_publish] Background destroy completed: publish_id={publish_id}, "
-                    f"stage={stage.value}, result={destroy_result}"
-                )
-            except Exception as e:
-                logger.error(
-                    f"[offline_publish] Background destroy failed: publish_id={publish_id}, "
-                    f"stage={stage.value}, error={e}"
-                )
-
-        asyncio.create_task(_destroy_in_background())
+        # (#197) Enqueue a DURABLE destroy task instead of a fire-and-forget
+        # asyncio task, so a pod restart mid-offline does not leak a running
+        # online bot (the DB said RELEASED but the bot was never destroyed).
+        publish_flow_service.enqueue_offline_destroy(
+            publish_id=publish_id, stage=stage, operator="system"
+        )
         result["message"] = f"下线请求已提交，销毁流程正在后台执行: stage={stage.value}"
 
         logger.info(

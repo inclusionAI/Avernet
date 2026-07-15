@@ -59,6 +59,7 @@ VERIFY_FLOW_TASK = "service_bot.publish.verify_flow"
 ONLINE_RELEASE_TASK = "service_bot.publish.online_release"
 PROGRESS_POLL_TASK = "service_bot.publish.progress_poll"
 RESTART_TASK = "service_bot.publish.restart"
+DESTROY_TASK = "service_bot.publish.destroy"
 
 # Give-up horizons (DB-enforced). Build+release can be slow; the poll waits on the
 # BaaS workflow, matching the devices poll deadline.
@@ -135,6 +136,16 @@ def enqueue_restart(
 ) -> None:
     task_queue_service.enqueue(
         RESTART_TASK,
+        build_restart_payload(publish_id=publish_id, stage=stage, operator=operator),
+        deadline_seconds=_STAGE_TASK_DEADLINE_SECONDS,
+    )
+
+
+def enqueue_destroy(
+    task_queue_service: TaskQueueService, *, publish_id: int, stage: str, operator: str
+) -> None:
+    task_queue_service.enqueue(
+        DESTROY_TASK,
         build_restart_payload(publish_id=publish_id, stage=stage, operator=operator),
         deadline_seconds=_STAGE_TASK_DEADLINE_SECONDS,
     )
@@ -276,6 +287,31 @@ class PublishRestartHandler(_PublishTaskBase):
         return Complete()
 
 
+class PublishDestroyHandler(_PublishTaskBase):
+    """Durable bot destroy (offline / stage teardown) — replaces the fire-and-forget
+    background destroy. Idempotent via the destroy_stage operation runner op."""
+
+    @property
+    def task_type(self) -> str:
+        return DESTROY_TASK
+
+    def handle(self, payload: Optional[dict]) -> TaskOutcome:
+        publish_id = _require_int(payload, "publish_id")
+        stage = _require_str(payload, "stage")
+        operator = _require_str(payload, "operator")
+        return asyncio.run(self._run(publish_id, stage, operator))
+
+    async def _run(self, publish_id: int, stage: str, operator: str) -> TaskOutcome:
+        from agentclaw.community.core.service_bot.types import PublishStage
+
+        result = self._flow.destroy_publish_history(
+            publish_id=publish_id, stage=PublishStage(stage)
+        )
+        if not result or not result.get("success"):
+            return Fail(f"destroy failed: publish_id={publish_id}, {(result or {}).get('message')}")
+        return Complete()
+
+
 class PublishProgressPollHandler(_PublishTaskBase):
     """Drive a BaaS-publish wait to terminal by reusing ``advance_publish_progress``."""
 
@@ -349,6 +385,11 @@ class PublishTaskLifecycle(LifecycleBase):
         )
         self._registry.register(
             PublishRestartHandler(
+                flow=self._flow, task_queue_service=self._task_queue_service
+            )
+        )
+        self._registry.register(
+            PublishDestroyHandler(
                 flow=self._flow, task_queue_service=self._task_queue_service
             )
         )

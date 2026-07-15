@@ -291,13 +291,13 @@ class TestOfflinePublish:
         assert result["new_publish_id"] is None
         # 有非终态发布单，不创建新草稿发布单
         mock_bot_service.delete_bot.assert_not_called()
-        # 验证状态更新为 RELEASED
-        mock_repo.update_status.assert_called_once_with(1, PublishStatus.RELEASED)
-        # 验证 destroy_publish_history 被调用（通过后台任务）
-        await asyncio.sleep(0.1)
-        mock_publish_flow_service.destroy_publish_history.assert_called_once_with(
-            publish_id=1,
-            stage=PublishStage.ONLINE,
+        # 验证状态更新为 RELEASED (#197 CAS-guarded SUCCESS→RELEASED)
+        mock_repo.update_status.assert_called_once_with(
+            1, PublishStatus.RELEASED, PublishStatus.SUCCESS
+        )
+        # (#197) 销毁改为入队持久化任务，不再后台直接调用
+        mock_publish_flow_service.enqueue_offline_destroy.assert_called_once_with(
+            publish_id=1, stage=PublishStage.ONLINE, operator="system"
         )
 
     @pytest.mark.asyncio
@@ -363,13 +363,13 @@ class TestOfflinePublish:
         # 验证创建新发布单时关联原发布单（last_pub_id = publish_id）
         insert_call_args = mock_repo.insert.call_args
         assert insert_call_args[0][0]["last_pub_id"] == 1
-        # 验证状态更新为 RELEASED
-        mock_repo.update_status.assert_called_once_with(1, PublishStatus.RELEASED)
-        # 验证 destroy_publish_history 被调用（通过后台任务）
-        await asyncio.sleep(0.1)
-        mock_publish_flow_service.destroy_publish_history.assert_called_once_with(
-            publish_id=1,
-            stage=PublishStage.ONLINE,
+        # 验证状态更新为 RELEASED (#197 CAS-guarded)
+        mock_repo.update_status.assert_called_once_with(
+            1, PublishStatus.RELEASED, PublishStatus.SUCCESS
+        )
+        # (#197) 销毁改为入队持久化任务
+        mock_publish_flow_service.enqueue_offline_destroy.assert_called_once_with(
+            publish_id=1, stage=PublishStage.ONLINE, operator="system"
         )
 
     @pytest.mark.asyncio
@@ -405,11 +405,12 @@ class TestOfflinePublish:
         assert result["success"] is True
         # VALIDATING 状态不调用 delete_bot
         mock_bot_service.delete_bot.assert_not_called()
-        # 验证状态更新为 DRAFT
-        mock_repo.update_status.assert_called_once_with(1, PublishStatus.DRAFT)
-        # VERIFY 阶段不执行销毁流程
-        await asyncio.sleep(0.1)
-        mock_publish_flow_service.destroy_publish_history.assert_not_called()
+        # 验证状态更新为 DRAFT (#197 CAS-guarded VALIDATING→DRAFT)
+        mock_repo.update_status.assert_called_once_with(
+            1, PublishStatus.DRAFT, PublishStatus.VALIDATING
+        )
+        # VERIFY 阶段不执行销毁流程（也不入队）
+        mock_publish_flow_service.enqueue_offline_destroy.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_offline_publish_not_found(self):
