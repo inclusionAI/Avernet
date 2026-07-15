@@ -731,6 +731,7 @@ async fn bot_delta_channel_outbound_uses_delta_text_not_synthesized_snapshot() {
     let recording_channel = Arc::new(RecordingChannelService::default());
     let channel: Arc<dyn ChannelService> = recording_channel.clone();
     assert!(flow.channel_slot().set(channel).is_ok());
+    let group_get_count_before = support.group.get_count("group-1").await;
 
     for delta in ["你", "好"] {
         flow.handle_bot_event(BotEventCommand {
@@ -759,6 +760,11 @@ async fn bot_delta_channel_outbound_uses_delta_text_not_synthesized_snapshot() {
             .await,
         1,
         "streaming deltas should resolve a missing provider bot name only once per run"
+    );
+    assert_eq!(
+        support.group.get_count("group-1").await - group_get_count_before,
+        1,
+        "streaming deltas should resolve sender role and name from the group only once per run"
     );
     assert_eq!(outbound[0].text.as_deref(), Some("你"));
     assert_eq!(outbound[0].raw_payload["message"]["content"][0]["text"], "你");
@@ -815,6 +821,13 @@ async fn bot_final_channel_outbound_resolves_missing_sender_name() {
     assert_eq!(outbound[0].kind, ChannelOutboundEventKind::ChatFinal);
     assert_eq!(outbound[0].sender_label, "Observer");
     assert_eq!(outbound[0].text.as_deref(), Some("你好"));
+    assert!(
+        flow.message_tracker
+            .channel_sender_info("run-channel-final")
+            .await
+            .is_none(),
+        "terminal run cleanup should remove cached channel sender metadata"
+    );
 }
 
 #[tokio::test]

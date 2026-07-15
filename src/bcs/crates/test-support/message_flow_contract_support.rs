@@ -76,6 +76,7 @@ fn bot_participant(id: &str, name: &str, role: ParticipantRole) -> Participant {
 #[derive(Default)]
 pub struct FakeGroupCoreService {
     groups: RwLock<HashMap<String, Group>>,
+    get_counts: RwLock<HashMap<String, usize>>,
     message_counts: RwLock<HashMap<String, usize>>,
     fail_add_message: RwLock<bool>,
 }
@@ -83,6 +84,15 @@ pub struct FakeGroupCoreService {
 impl FakeGroupCoreService {
     pub async fn fail_add_message(&self) {
         *self.fail_add_message.write().await = true;
+    }
+
+    pub async fn get_count(&self, id: &str) -> usize {
+        self.get_counts
+            .read()
+            .await
+            .get(id)
+            .copied()
+            .unwrap_or_default()
     }
 }
 
@@ -94,6 +104,9 @@ impl GroupCoreService for FakeGroupCoreService {
     }
 
     async fn get(&self, id: &str) -> Option<Group> {
+        let mut counts = self.get_counts.write().await;
+        *counts.entry(id.to_string()).or_default() += 1;
+        drop(counts);
         self.groups.read().await.get(id).cloned()
     }
 

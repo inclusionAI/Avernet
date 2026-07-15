@@ -227,38 +227,44 @@ async fn resolve_channel_sender(
     flow: &BcsMessageFlow,
     cmd: &BotEventCommand,
 ) -> (bcs_domain::ParticipantRole, String) {
-    let Some(group) = flow.group.get(&cmd.group_id).await else {
-        return (bcs_domain::ParticipantRole::Observer, cmd.bot_id.clone());
-    };
-    let Some(mut participant) = group
-        .participants
-        .into_iter()
-        .find(|participant| participant.bot_uuid == cmd.bot_id)
-    else {
-        return (bcs_domain::ParticipantRole::Observer, cmd.bot_id.clone());
-    };
-    let sender_role = participant.role;
-    if let Some(label) = participant_display_name(&participant) {
-        return (sender_role, label);
-    }
-    if let Some(label) = flow
+    if let Some(info) = flow
         .message_tracker
-        .channel_sender_label(&cmd.run_id)
+        .channel_sender_info(&cmd.run_id)
         .await
     {
-        return (sender_role, label);
+        return info;
     }
 
-    backfill_participant_names(
-        flow.registry.as_ref(),
-        std::slice::from_mut(&mut participant),
-    )
-    .await;
-    let label = participant_display_name(&participant).unwrap_or_else(|| cmd.bot_id.clone());
+    let info = match flow.group.get(&cmd.group_id).await {
+        Some(group) => match group
+            .participants
+            .into_iter()
+            .find(|participant| participant.bot_uuid == cmd.bot_id)
+        {
+            Some(mut participant) => {
+                let sender_role = participant.role;
+                let label = match participant_display_name(&participant) {
+                    Some(label) => label,
+                    None => {
+                        backfill_participant_names(
+                            flow.registry.as_ref(),
+                            std::slice::from_mut(&mut participant),
+                        )
+                        .await;
+                        participant_display_name(&participant)
+                            .unwrap_or_else(|| cmd.bot_id.clone())
+                    }
+                };
+                (sender_role, label)
+            }
+            None => (bcs_domain::ParticipantRole::Observer, cmd.bot_id.clone()),
+        },
+        None => (bcs_domain::ParticipantRole::Observer, cmd.bot_id.clone()),
+    };
     flow.message_tracker
-        .cache_channel_sender_label(&cmd.run_id, label.clone())
+        .cache_channel_sender_info(&cmd.run_id, info.clone())
         .await;
-    (sender_role, label)
+    info
 }
 
 fn participant_display_name(participant: &bcs_service_api::Participant) -> Option<String> {
