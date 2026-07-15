@@ -49,7 +49,7 @@ def _make_service(
 
 
 def _resolver_returning_ctx(conn_info: dict | None = None):
-    """Construct a resolver mock whose resolve_for_bot returns a ctx
+    """Construct a resolver mock whose resolve_for_binding returns a ctx
     with .conn_info == conn_info dict."""
     ctx = MagicMock()
     ctx.conn_info = conn_info or {
@@ -60,6 +60,7 @@ def _resolver_returning_ctx(conn_info: dict | None = None):
         "type": "local",
     }
     resolver = MagicMock()
+    resolver.resolve_for_binding = MagicMock(return_value=ctx)
     resolver.resolve_for_bot = MagicMock(return_value=ctx)
     return resolver
 
@@ -91,11 +92,11 @@ class TestExpertChatPermissionCheck:
         collab = _collab_service_returning(False)  # collab 不会被问到
         svc = _make_service(resolver=resolver, collaborator_service=collab)
 
-        bot = {"bot_id": "bot1", "owner_id": "owner1", "public": "0"}
+        bot = {"bot_id": "bot1", "owner_id": "owner1", "public": "0", "binding_id": 123}
         conn = svc._get_connection(bot, user_id="owner1")  # caller == owner
 
         assert conn["url"] == "http://localhost:8080"
-        resolver.resolve_for_bot.assert_called_once_with("bot1", "owner1")
+        resolver.resolve_for_binding.assert_called_once_with(123, "owner1", bot_id="bot1")
         # owner 路径下不应问 collaborator
         collab.check_collaborator_permission.assert_not_called()
 
@@ -109,13 +110,12 @@ class TestExpertChatPermissionCheck:
         collab = _collab_service_returning(False)
         svc = _make_service(resolver=resolver, collaborator_service=collab)
 
-        bot = {"bot_id": "bot1", "owner_id": "owner1", "public": "1"}
+        bot = {"bot_id": "bot1", "owner_id": "owner1", "public": "1", "binding_id": 123}
         conn = svc._get_connection(bot, user_id="visitor1")  # caller != owner
 
         assert conn["url"] == "http://localhost:8080"
-        # P0 修复:resolver 第二参用 owner_id(查 binding 用),而不是 visitor1(caller)。
-        # binding 在 owner 名下,用 visitor1 查会查不到 → 误报「Bot 未绑定设备」。
-        resolver.resolve_for_bot.assert_called_once_with("bot1", "owner1")
+        # binding_id 路径：resolver 使用 binding_id 调用 resolve_for_binding
+        resolver.resolve_for_binding.assert_called_once_with(123, "visitor1", bot_id="bot1")
         # public 短路 — 不应问 collaborator
         collab.check_collaborator_permission.assert_not_called()
 
@@ -125,13 +125,12 @@ class TestExpertChatPermissionCheck:
         collab = _collab_service_returning(True)
         svc = _make_service(resolver=resolver, collaborator_service=collab)
 
-        bot = {"bot_id": "bot1", "owner_id": "owner1", "public": "0"}
+        bot = {"bot_id": "bot1", "owner_id": "owner1", "public": "0", "binding_id": 123}
         conn = svc._get_connection(bot, user_id="collab1")
 
         assert conn["url"] == "http://localhost:8080"
-        # P0 修复:resolver 用 owner_id 查 binding(binding 在 owner 名下,
-        # collab1 查不到);caller 身份只在权限校验和 builder device_affinity 用。
-        resolver.resolve_for_bot.assert_called_once_with("bot1", "owner1")
+        # binding_id 路径：resolver 使用 binding_id 调用 resolve_for_binding
+        resolver.resolve_for_binding.assert_called_once_with(123, "collab1", bot_id="bot1")
         collab.check_collaborator_permission.assert_called_once()
         # 校验入参与旧 device_service.py:831-836 等价
         call_kwargs = collab.check_collaborator_permission.call_args.kwargs
@@ -150,7 +149,7 @@ class TestExpertChatPermissionCheck:
         collab = _collab_service_returning(False)
         svc = _make_service(resolver=resolver, collaborator_service=collab)
 
-        bot = {"bot_id": "bot1", "owner_id": "owner1", "public": "0"}
+        bot = {"bot_id": "bot1", "owner_id": "owner1", "public": "0", "binding_id": 123}
 
         with pytest.raises(ChatPermissionError, match="stranger1"):
             svc._get_connection(bot, user_id="stranger1")
@@ -166,10 +165,10 @@ class TestExpertChatPermissionCheck:
         collab = _collab_service_returning(False)
         svc = _make_service(resolver=resolver, collaborator_service=collab)
 
-        bot = {"bot_id": "bot1", "owner_id": "owner1", "public": "0"}
+        bot = {"bot_id": "bot1", "owner_id": "owner1", "public": "0", "binding_id": 123}
 
         with pytest.raises(ChatPermissionError):
             svc._get_connection(bot, user_id="stranger1")
 
         # 关键守护: resolver 不应被调
-        resolver.resolve_for_bot.assert_not_called()
+        resolver.resolve_for_binding.assert_not_called()
