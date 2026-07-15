@@ -12,8 +12,9 @@ use bcs_protocol::{
 };
 use bcs_service_api::{
     CreateOrganizationCommand, OrganizationAuth, OrganizationCandidateBot,
-    OrganizationCandidatePageQuery, OrganizationCandidateQuery, OrganizationMemberPageQuery, PutOrganizationMemberCommand,
-    OrganizationMemberBotDetail, OrganizationMemberDetail, ServiceError, UpdateOrganizationCommand,
+    OrganizationCandidatePageQuery, OrganizationCandidateQuery, OrganizationMemberAuth,
+    OrganizationMemberBotDetail, OrganizationMemberDetail, OrganizationMemberPageQuery,
+    PutOrganizationMemberCommand, ServiceError, UpdateOrganizationCommand,
 };
 use serde::Deserialize;
 
@@ -124,11 +125,11 @@ pub async fn patch_organization(
 
 pub async fn put_member(
     State(state): State<HttpAppState>,
-    Path((provider_id, organization_code, bot_uuid)): Path<(String, String, String)>,
+    Path((organization_code, bot_uuid)): Path<(String, String)>,
     headers: HeaderMap,
     Json(req): Json<PutOrganizationMemberRequest>,
 ) -> Result<Json<OrganizationMemberResponse>, HttpAdapterError> {
-    let auth = organization_auth(provider_id, &headers)?;
+    let auth = organization_member_auth(&headers)?;
     let member = state
         .services
         .organization_management
@@ -145,10 +146,10 @@ pub async fn put_member(
 
 pub async fn delete_member(
     State(state): State<HttpAppState>,
-    Path((provider_id, organization_code, bot_uuid)): Path<(String, String, String)>,
+    Path((organization_code, bot_uuid)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<StatusCode, HttpAdapterError> {
-    let auth = organization_auth(provider_id, &headers)?;
+    let auth = organization_member_auth(&headers)?;
     state
         .services
         .organization_management
@@ -160,10 +161,10 @@ pub async fn delete_member(
 
 pub async fn get_member(
     State(state): State<HttpAppState>,
-    Path((provider_id, organization_code, bot_uuid)): Path<(String, String, String)>,
+    Path((organization_code, bot_uuid)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Json<OrganizationMemberDetailResponse>, HttpAdapterError> {
-    let auth = organization_auth(provider_id, &headers)?;
+    let auth = organization_member_auth(&headers)?;
     let member = state
         .services
         .organization_management
@@ -176,11 +177,11 @@ pub async fn get_member(
 
 pub async fn list_members(
     State(state): State<HttpAppState>,
-    Path((provider_id, organization_code)): Path<(String, String)>,
+    Path(organization_code): Path<String>,
     headers: HeaderMap,
     Query(query): Query<ListMembersQuery>,
 ) -> Result<Json<OrganizationMemberListResponse>, HttpAdapterError> {
-    let auth = organization_auth(provider_id, &headers)?;
+    let auth = organization_member_auth(&headers)?;
     let offset = query.offset.unwrap_or(0);
     let limit = query.limit.unwrap_or(50);
     if !(1..=200).contains(&limit) {
@@ -250,6 +251,14 @@ fn organization_auth(
 ) -> Result<OrganizationAuth, HttpAdapterError> {
     Ok(OrganizationAuth {
         provider_id,
+        provider_admin_token: bearer_token(headers)?,
+    })
+}
+
+fn organization_member_auth(
+    headers: &HeaderMap,
+) -> Result<OrganizationMemberAuth, HttpAdapterError> {
+    Ok(OrganizationMemberAuth {
         provider_admin_token: bearer_token(headers)?,
     })
 }

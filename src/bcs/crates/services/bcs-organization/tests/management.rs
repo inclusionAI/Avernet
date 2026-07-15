@@ -8,7 +8,7 @@ use bcs_organization_store::MemoryOrganizationRepo;
 use bcs_service_api::{
     BotRegistryCoreService, CreateOrganizationCommand, OrganizationAuth,
     OrganizationCandidatePageQuery, OrganizationCandidateQuery, OrganizationCoreService, OrganizationManagementService,
-    OrganizationMemberPageQuery, ProviderAuthMode,
+    OrganizationMemberAuth, OrganizationMemberPageQuery, ProviderAuthMode,
     ProviderBotBindingRepoPort, ProviderBotCoreService, ProviderCoreService,
     ProviderCredentialRepoPort, ProviderOrganizationManagementConfig, ProviderRepoPort,
     PutOrganizationMemberCommand, RegisterProviderBotParams, ServiceError, Skill,
@@ -39,6 +39,12 @@ fn bad_provider_auth(provider: &ProviderFixture) -> OrganizationAuth {
     OrganizationAuth {
         provider_id: provider.provider_id.clone(),
         provider_admin_token: "not-a-real-admin-token".to_string(),
+    }
+}
+
+fn member_auth(provider: &ProviderFixture) -> OrganizationMemberAuth {
+    OrganizationMemberAuth {
+        provider_admin_token: provider.admin_token.clone(),
     }
 }
 
@@ -120,7 +126,7 @@ async fn member_detail_includes_flattening_source_data_and_agent_code() {
     create_org(&ctx, &provider_a).await;
     ctx.service
         .put_member(PutOrganizationMemberCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             bot_uuid: "bot-b".to_string(),
             role: Some("reviewer".to_string()),
@@ -130,7 +136,7 @@ async fn member_detail_includes_flattening_source_data_and_agent_code() {
 
     let detail = ctx
         .service
-        .get_member_detail(provider_auth(&provider_a), "promo-2026", "bot-b")
+        .get_member_detail(member_auth(&provider_a), "promo-2026", "bot-b")
         .await
         .expect("get member detail")
         .expect("member exists");
@@ -159,7 +165,7 @@ async fn member_detail_keeps_member_when_registered_bot_is_missing() {
     create_org(&ctx, &provider_a).await;
     ctx.service
         .put_member(PutOrganizationMemberCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             bot_uuid: "bot-a".to_string(),
             role: None,
@@ -170,7 +176,7 @@ async fn member_detail_keeps_member_when_registered_bot_is_missing() {
 
     let detail = ctx
         .service
-        .get_member_detail(provider_auth(&provider_a), "promo-2026", "bot-a")
+        .get_member_detail(member_auth(&provider_a), "promo-2026", "bot-a")
         .await
         .expect("get stale member detail")
         .expect("member remains");
@@ -246,7 +252,7 @@ async fn put_member_allows_own_and_granted_provider_bots_and_restores_disabled_m
     let own = ctx
         .service
         .put_member(PutOrganizationMemberCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             bot_uuid: "bot-a".to_string(),
             role: Some("planner".to_string()),
@@ -258,7 +264,7 @@ async fn put_member_allows_own_and_granted_provider_bots_and_restores_disabled_m
     let granted = ctx
         .service
         .put_member(PutOrganizationMemberCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             bot_uuid: "bot-b".to_string(),
             role: Some("traffic_analyst".to_string()),
@@ -268,12 +274,12 @@ async fn put_member_allows_own_and_granted_provider_bots_and_restores_disabled_m
     assert_eq!(granted.bot_uuid, "bot-b");
 
     ctx.service
-        .delete_member(provider_auth(&provider_a), "promo-2026", "bot-b")
+        .delete_member(member_auth(&provider_a), "promo-2026", "bot-b")
         .await
         .expect("delete existing member");
     let disabled = ctx
         .service
-        .get_member(provider_auth(&provider_a), "promo-2026", "bot-b")
+        .get_member(member_auth(&provider_a), "promo-2026", "bot-b")
         .await
         .expect("read disabled member")
         .expect("disabled member is retained");
@@ -282,7 +288,7 @@ async fn put_member_allows_own_and_granted_provider_bots_and_restores_disabled_m
     let restored = ctx
         .service
         .put_member(PutOrganizationMemberCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             bot_uuid: "bot-b".to_string(),
             role: Some("traffic_analyst".to_string()),
@@ -292,7 +298,7 @@ async fn put_member_allows_own_and_granted_provider_bots_and_restores_disabled_m
     assert!(!restored.disabled);
 
     ctx.service
-        .delete_member(provider_auth(&provider_a), "promo-2026", "missing-member")
+        .delete_member(member_auth(&provider_a), "promo-2026", "missing-member")
         .await
         .expect("delete missing member is idempotent");
 }
@@ -308,7 +314,7 @@ async fn put_member_rejects_ungranted_provider_bot() {
     let err = ctx
         .service
         .put_member(PutOrganizationMemberCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             bot_uuid: "bot-c".to_string(),
             role: Some("planner".to_string()),
@@ -338,7 +344,7 @@ async fn put_member_rejects_disabled_organization_before_bot_checks() {
     let err = ctx
         .service
         .put_member(PutOrganizationMemberCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             bot_uuid: "missing-bot".to_string(),
             role: Some("planner".to_string()),
@@ -358,7 +364,7 @@ async fn put_member_rejects_missing_and_deleted_bots() {
     let missing = ctx
         .service
         .put_member(PutOrganizationMemberCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             bot_uuid: "missing-bot".to_string(),
             role: Some("planner".to_string()),
@@ -372,7 +378,7 @@ async fn put_member_rejects_missing_and_deleted_bots() {
     let deleted = ctx
         .service
         .put_member(PutOrganizationMemberCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             bot_uuid: "deleted-bot".to_string(),
             role: Some("planner".to_string()),
@@ -426,7 +432,7 @@ async fn validation_rejects_invalid_code_invalid_role_and_patch_without_fields()
     let invalid_role = ctx
         .service
         .put_member(PutOrganizationMemberCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             bot_uuid: "bot-a".to_string(),
             role: Some("bad role!".to_string()),
@@ -569,7 +575,7 @@ async fn scoped_a2a_authorizes_pair_after_cross_provider_grant_revocation() {
     create_org(&ctx, &provider_a).await;
     ctx.service
         .put_member(PutOrganizationMemberCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             bot_uuid: "bot-a".to_string(),
             role: Some("planner".to_string()),
@@ -578,7 +584,7 @@ async fn scoped_a2a_authorizes_pair_after_cross_provider_grant_revocation() {
         .expect("add sender");
     ctx.service
         .put_member(PutOrganizationMemberCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             bot_uuid: "bot-b".to_string(),
             role: Some("traffic_analyst".to_string()),
@@ -627,7 +633,7 @@ async fn effective_membership_rejects_disabled_org_disabled_member_and_nonmember
     for bot_uuid in ["bot-a", "bot-b"] {
         ctx.service
             .put_member(PutOrganizationMemberCommand {
-                auth: provider_auth(&provider_a),
+                auth: member_auth(&provider_a),
                 organization_code: "promo-2026".to_string(),
                 bot_uuid: bot_uuid.to_string(),
                 role: None,
@@ -637,7 +643,7 @@ async fn effective_membership_rejects_disabled_org_disabled_member_and_nonmember
     }
 
     ctx.service
-        .delete_member(provider_auth(&provider_a), "promo-2026", "bot-b")
+        .delete_member(member_auth(&provider_a), "promo-2026", "bot-b")
         .await
         .expect("disable member");
     let disabled_member = ctx
@@ -693,7 +699,7 @@ async fn runtime_member_list_keeps_active_members_after_provider_grant_revocatio
         }
         ctx.service
             .put_member(PutOrganizationMemberCommand {
-                auth: provider_auth(&provider_a),
+                auth: member_auth(&provider_a),
                 organization_code: "promo-2026".to_string(),
                 bot_uuid: bot_uuid.to_string(),
                 role: Some(role.to_string()),
@@ -755,7 +761,7 @@ async fn scoped_a2a_ignores_disabled_binding_and_rejects_missing_org() {
     for bot_uuid in ["bot-a", "bot-b"] {
         ctx.service
             .put_member(PutOrganizationMemberCommand {
-                auth: provider_auth(&provider_a),
+                auth: member_auth(&provider_a),
                 organization_code: "promo-2026".to_string(),
                 bot_uuid: bot_uuid.to_string(),
                 role: None,
@@ -794,7 +800,7 @@ async fn scoped_a2a_allows_sender_to_target_itself_with_one_member_record() {
     create_org(&ctx, &provider_a).await;
     ctx.service
         .put_member(PutOrganizationMemberCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             bot_uuid: "bot-a".to_string(),
             role: None,
@@ -819,7 +825,7 @@ async fn member_page_for_manager_forwards_query_to_repository_page() {
     for bot_uuid in ["bot-c", "bot-a", "bot-b"] {
         ctx.service
             .put_member(PutOrganizationMemberCommand {
-                auth: provider_auth(&provider_a),
+                auth: member_auth(&provider_a),
                 organization_code: "promo-2026".to_string(),
                 bot_uuid: bot_uuid.to_string(),
                 role: Some("traffic_analyst".to_string()),
@@ -831,7 +837,7 @@ async fn member_page_for_manager_forwards_query_to_repository_page() {
     let page = ctx
         .service
         .list_members_page(
-            provider_auth(&provider_a),
+            member_auth(&provider_a),
             "promo-2026",
             OrganizationMemberPageQuery {
                 include_disabled: false,

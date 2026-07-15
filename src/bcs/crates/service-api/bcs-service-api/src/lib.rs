@@ -134,7 +134,8 @@ pub use application::{
     ProviderCoordinationEventKind, ProviderCoordinationIntent, ProviderManagementService,
     RegisterProviderBotCommand, RegisterProviderBotOutcome, RegisterProviderCommand,
     RegisterProviderOutcome, UpdateProviderCommand, CreateOrganizationCommand,
-    OrganizationAuth, OrganizationManagementService, PutOrganizationMemberCommand,
+    OrganizationAuth, OrganizationManagementService, OrganizationMemberAuth,
+    PutOrganizationMemberCommand,
     UpdateOrganizationCommand,
 };
 pub use port::{

@@ -14,6 +14,11 @@ pub struct OrganizationAuth {
 }
 
 #[derive(Debug, Clone)]
+pub struct OrganizationMemberAuth {
+    pub provider_admin_token: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct CreateOrganizationCommand {
     pub auth: OrganizationAuth,
     pub organization_code: String,
@@ -32,7 +37,7 @@ pub struct UpdateOrganizationCommand {
 
 #[derive(Debug, Clone)]
 pub struct PutOrganizationMemberCommand {
-    pub auth: OrganizationAuth,
+    pub auth: OrganizationMemberAuth,
     pub organization_code: String,
     pub bot_uuid: String,
     pub role: Option<String>,
@@ -54,19 +59,19 @@ pub trait OrganizationManagementService: Send + Sync {
     ) -> ServiceResult<OrganizationMember>;
     async fn delete_member(
         &self,
-        auth: OrganizationAuth,
+        auth: OrganizationMemberAuth,
         organization_code: &str,
         bot_uuid: &str,
     ) -> ServiceResult<()>;
     async fn get_member(
         &self,
-        auth: OrganizationAuth,
+        auth: OrganizationMemberAuth,
         organization_code: &str,
         bot_uuid: &str,
     ) -> ServiceResult<Option<OrganizationMember>>;
     async fn get_member_detail(
         &self,
-        auth: OrganizationAuth,
+        auth: OrganizationMemberAuth,
         organization_code: &str,
         bot_uuid: &str,
     ) -> ServiceResult<Option<OrganizationMemberDetail>> {
@@ -77,14 +82,14 @@ pub trait OrganizationManagementService: Send + Sync {
     }
     async fn list_members(
         &self,
-        auth: OrganizationAuth,
+        auth: OrganizationMemberAuth,
         organization_code: &str,
         include_disabled: bool,
         role: Option<&str>,
     ) -> ServiceResult<Vec<OrganizationMember>>;
     async fn list_members_page(
         &self,
-        auth: OrganizationAuth,
+        auth: OrganizationMemberAuth,
         organization_code: &str,
         query: OrganizationMemberPageQuery,
     ) -> ServiceResult<OrganizationMemberPage> {

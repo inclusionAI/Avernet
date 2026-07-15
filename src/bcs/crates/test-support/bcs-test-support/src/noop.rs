@@ -688,7 +688,7 @@ impl OrganizationManagementService for NoopOrganizationManagementService {
 
     async fn delete_member(
         &self,
-        _auth: OrganizationAuth,
+        _auth: OrganizationMemberAuth,
         _organization_code: &str,
         _bot_uuid: &str,
     ) -> ServiceResult<()> {
@@ -697,7 +697,7 @@ impl OrganizationManagementService for NoopOrganizationManagementService {
 
     async fn get_member(
         &self,
-        _auth: OrganizationAuth,
+        _auth: OrganizationMemberAuth,
         _organization_code: &str,
         _bot_uuid: &str,
     ) -> ServiceResult<Option<OrganizationMember>> {
@@ -706,7 +706,7 @@ impl OrganizationManagementService for NoopOrganizationManagementService {
 
     async fn list_members(
         &self,
-        _auth: OrganizationAuth,
+        _auth: OrganizationMemberAuth,
         _organization_code: &str,
         _include_disabled: bool,
         _role: Option<&str>,
