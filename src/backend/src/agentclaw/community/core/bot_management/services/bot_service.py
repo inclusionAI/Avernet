@@ -3271,7 +3271,7 @@ class BotService:
             )
             return self._activation_in_progress_result(bot)
 
-        if bot_status != "ACTIVE":
+        if bot_status not in {"ACTIVE", "FAILED"}:
             logger.warning(
                 "[bot_service.restart_bot] reject restart for invalid lifecycle state: "
                 "bot_id=%s user_id=%s bot_status=%s",
@@ -3295,8 +3295,9 @@ class BotService:
         # Restart is a lifecycle operation, not a fresh create rollout. When a
         # current binding exists, preserve its provider so an existing ARCA bot
         # cannot be migrated to BaaS merely because the owner later entered the
-        # create whitelist. If there is no binding, there is no provider fact to
-        # preserve and start_bot falls back to the normal allocation path.
+        # create whitelist. An ACTIVE bot without a binding retains the legacy
+        # fallback to normal allocation. A FAILED bot without a binding cannot
+        # safely recover because its historical provider is unknown.
         current_device_provider = None
         binding_id = bot.get("binding_id")
         if binding_id:
@@ -3317,7 +3318,10 @@ class BotService:
                 current = self._activation_in_progress_result(bot)
                 current["status"] = "PENDING"
                 return current
-            if binding_status and binding_status != DeviceBindingStatus.ACTIVE.value:
+            if binding_status and binding_status not in {
+                DeviceBindingStatus.ACTIVE.value,
+                DeviceBindingStatus.FAILED.value,
+            }:
                 logger.warning(
                     "[bot_service.restart_bot] reject restart for invalid binding state: "
                     "bot_id=%s user_id=%s binding_id=%s binding_status=%s",
@@ -3334,6 +3338,17 @@ class BotService:
                 f"[bot_service.restart_bot] preserve device_provider before restart: "
                 f"bot_id={bot_id}, user_id={user_id}, binding_id={binding_id}, "
                 f"device_provider={current_device_provider}"
+            )
+        elif bot_status == "FAILED":
+            logger.warning(
+                "[bot_service.restart_bot] reject failed bot without binding: "
+                "bot_id=%s user_id=%s",
+                bot_id,
+                user_id,
+            )
+            raise BotInvalidLifecycleStateError(
+                bot_id=bot_id,
+                current_status="FAILED_WITHOUT_BINDING",
             )
         else:
             logger.info(

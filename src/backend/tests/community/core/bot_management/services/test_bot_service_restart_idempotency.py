@@ -242,8 +242,9 @@ class TestRestartGuardOrchestration:
         stop.assert_not_called()
         start.assert_not_called()
 
-    def test_failed_binding_restart_is_rejected(self):
-        """A failed binding must not be released or replaced by restart."""
+    @pytest.mark.parametrize("bot_status", ["ACTIVE", "FAILED"])
+    def test_failed_arca_binding_restart_recovers_in_place(self, bot_status):
+        """Arca failures are recoverable through the existing stop/start path."""
         repo = FakeRestartLockRepo()
         device_service = MagicMock()
         device_service.get_device.return_value = SimpleNamespace(
@@ -252,8 +253,85 @@ class TestRestartGuardOrchestration:
             status=DeviceBindingStatus.FAILED,
         )
         svc = _make_service(repo, device_provider=device_service)
+        bot = _make_bot(
+            status=bot_status,
+            binding_id=42,
+        )
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch.object(svc, "stop_bot", return_value=True) as stop, \
+             patch.object(svc, "start_bot", return_value=bot) as start:
+            result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result == bot
+        stop.assert_called_once()
+        start.assert_called_once()
+        assert start.call_args.kwargs["device_provider"] == "arca"
+
+    def test_failed_bot_with_failed_baas_binding_restarts_in_place(self):
+        """A failed BaaS bot keeps its binding and uses the BaaS update path."""
+        repo = FakeRestartLockRepo()
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="baas",
+            device_id="BOT-uuid-9",
+            status=DeviceBindingStatus.FAILED,
+        )
+        svc = _make_service(
+            repo,
+            device_provider=device_service,
+            baas_service_provider=lambda: MagicMock(),
+        )
+        bot = _make_bot(status="FAILED", binding_id=42)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch.object(svc, "_restart_bot_baas", return_value=bot) as restart_baas, \
+             patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot") as start:
+            result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result == bot
+        restart_baas.assert_called_once_with(
+            bot_id="bot001",
+            user_id="user001",
+            binding_id=42,
+            bot=bot,
+        )
+        stop.assert_not_called()
+        start.assert_not_called()
+
+    def test_failed_bot_without_binding_is_rejected(self):
+        """A failed bot without provider history must not re-enter create rollout."""
+        repo = FakeRestartLockRepo()
+        svc = _make_service(repo)
         svc._repository.get_by_id_and_owner.return_value = _make_bot(
-            status="ACTIVE",
+            status="FAILED",
+            binding_id=None,
+        )
+
+        with patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot") as start:
+            with pytest.raises(BotInvalidLifecycleStateError) as exc_info:
+                svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert exc_info.value.current_status == "FAILED_WITHOUT_BINDING"
+        assert repo.acquire_calls == 0
+        stop.assert_not_called()
+        start.assert_not_called()
+
+    def test_released_binding_restart_is_rejected(self):
+        """A released binding no longer identifies a live runtime to restart."""
+        repo = FakeRestartLockRepo()
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="arca",
+            status=DeviceBindingStatus.RELEASED,
+        )
+        svc = _make_service(repo, device_provider=device_service)
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(
+            status="FAILED",
             binding_id=42,
         )
 
@@ -262,7 +340,7 @@ class TestRestartGuardOrchestration:
             with pytest.raises(BotInvalidLifecycleStateError) as exc_info:
                 svc.restart_bot(bot_id="bot001", user_id="user001")
 
-        assert exc_info.value.current_status == "BINDING_FAILED"
+        assert exc_info.value.current_status == "BINDING_RELEASED"
         assert repo.acquire_calls == 0
         stop.assert_not_called()
         start.assert_not_called()
