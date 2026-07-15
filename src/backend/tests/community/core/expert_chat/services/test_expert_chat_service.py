@@ -448,6 +448,25 @@ class TestGetConnection:
     - resolver 抛其他异常 → 翻成 ConnectionError 5001
     """
 
+    def test_no_binding_id_raises_connection_error(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        """binding_id 不存在时抛出 ConnectionError(5001)。"""
+        resolver = MagicMock()
+        svc = _make_service(
+            mock_repository, mock_bot_repo, mock_device_provider,
+            mock_resolver=resolver,
+        )
+        # bot 没有 binding_id
+        bot = {"bot_id": "bot1", "owner_id": "user1", "public": "0", "binding_id": None}
+
+        with pytest.raises(ConnectionError) as exc_info:
+            svc._get_connection(bot, "user1")
+        assert exc_info.value.error_code == "5001"
+        # resolver 不应被调用
+        resolver.resolve_for_binding.assert_not_called()
+        resolver.resolve_for_bot.assert_not_called()
+
     def test_no_active_binding_raises_bot_not_published(
         self, mock_repository, mock_bot_repo, mock_device_provider
     ):
@@ -455,15 +474,15 @@ class TestGetConnection:
         from agentclaw.community.core.devices.services.device_context import DeviceNotBoundError
 
         resolver = MagicMock()
-        resolver.resolve_for_bot = MagicMock(
-            side_effect=DeviceNotBoundError("no active binding for bot=bot1")
+        resolver.resolve_for_binding = MagicMock(
+            side_effect=DeviceNotBoundError("no active binding for binding_id=123")
         )
         svc = _make_service(
             mock_repository, mock_bot_repo, mock_device_provider,
             mock_resolver=resolver,
         )
         # owner 调自己的 bot → 权限直通,resolver 被调到
-        bot = {"bot_id": "bot1", "owner_id": "user1", "public": "0"}
+        bot = {"bot_id": "bot1", "owner_id": "user1", "public": "0", "binding_id": 123}
 
         with pytest.raises(BotNotPublishedError):
             svc._get_connection(bot, "user1")
@@ -479,12 +498,12 @@ class TestGetConnection:
             "engine_type": "openclaw",
             "type": "local",  # 透传自 LocalConnInfoBuilder
         }
-        resolver.resolve_for_bot = MagicMock(return_value=ctx)
+        resolver.resolve_for_binding = MagicMock(return_value=ctx)
         svc = _make_service(
             mock_repository, mock_bot_repo, mock_device_provider,
             mock_resolver=resolver,
         )
-        bot = {"bot_id": "bot1", "owner_id": "user1", "public": "0"}
+        bot = {"bot_id": "bot1", "owner_id": "user1", "public": "0", "binding_id": 123}
 
         conn = svc._get_connection(bot, "user1")
 
@@ -503,12 +522,12 @@ class TestGetConnection:
             "engine_type": "openclaw",
             "type": "remote",  # 透传自 ArcaConnInfoBuilder
         }
-        resolver.resolve_for_bot = MagicMock(return_value=ctx)
+        resolver.resolve_for_binding = MagicMock(return_value=ctx)
         svc = _make_service(
             mock_repository, mock_bot_repo, mock_device_provider,
             mock_resolver=resolver,
         )
-        bot = {"bot_id": "bot1", "owner_id": "user1", "public": "0"}
+        bot = {"bot_id": "bot1", "owner_id": "user1", "public": "0", "binding_id": 123}
 
         conn = svc._get_connection(bot, "user1")
 
@@ -538,52 +557,28 @@ class TestGetConnection:
             mock_collaborator_service=collab,
         )
         # 非 owner、非 public、非 collaborator
-        bot = {"bot_id": "bot1", "owner_id": "owner1", "public": "0"}
+        bot = {"bot_id": "bot1", "owner_id": "owner1", "public": "0", "binding_id": 123}
 
         with pytest.raises(ChatPermissionError):
             svc._get_connection(bot, "stranger1")
         # 早失败 — resolver 完全不应被调
-        resolver.resolve_for_bot.assert_not_called()
+        resolver.resolve_for_binding.assert_not_called()
 
     def test_generic_error_raises_connection_error_with_5001(
         self, mock_repository, mock_bot_repo, mock_device_provider
     ):
         """resolver 抛通用异常 → ConnectionError(5001)。"""
         resolver = MagicMock()
-        resolver.resolve_for_bot = MagicMock(side_effect=Exception("network timeout"))
+        resolver.resolve_for_binding = MagicMock(side_effect=Exception("network timeout"))
         svc = _make_service(
             mock_repository, mock_bot_repo, mock_device_provider,
             mock_resolver=resolver,
         )
-        bot = {"bot_id": "bot1", "owner_id": "user1", "public": "0"}
+        bot = {"bot_id": "bot1", "owner_id": "user1", "public": "0", "binding_id": 123}
 
         with pytest.raises(ConnectionError) as exc_info:
             svc._get_connection(bot, "user1")
         assert exc_info.value.error_code == "5001"
-
-    def test_public_bot_called_by_other_uses_owner_id_not_caller(
-        self, mock_repository, mock_bot_repo, mock_device_provider
-    ):
-        """张三(owner)的 public bot,李四(caller)调用 → resolver 用 owner_id=张三 查 binding,
-        不是 user_id=李四。这是 P0 修复点:改造前 user_id 当 owner_id 用,public bot 必查不到。
-        """
-        resolver = MagicMock()
-        ctx = MagicMock()
-        ctx.conn_info = {"url": "http://x", "headers": {}, "use_proxy": False, "engine_type": "openclaw"}
-        resolver.resolve_for_bot = MagicMock(return_value=ctx)
-        svc = _make_service(
-            mock_repository, mock_bot_repo, mock_device_provider,
-            mock_resolver=resolver,
-        )
-        # owner=张三,public=1,caller=李四(非 owner)→ public 分支放行
-        bot = {"bot_id": "public-bot", "owner_id": "zhangsan", "public": "1"}
-
-        svc._get_connection(bot, "lisi")
-
-        # 关键断言:resolver 调用的第二参是 owner_id,不是 user_id
-        resolver.resolve_for_bot.assert_called_once_with("public-bot", "zhangsan")
-        # by-binding 入口未被调
-        resolver.resolve_for_binding.assert_not_called()
 
     def test_service_bot_uses_binding_id_path(
         self, mock_repository, mock_bot_repo, mock_device_provider
