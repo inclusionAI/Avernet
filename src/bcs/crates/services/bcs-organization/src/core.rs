@@ -10,6 +10,7 @@ use bcs_service_api::{
     OrganizationCandidateQuery, OrganizationCoreService,
     OrganizationMemberBotDetail, OrganizationMemberDetail, OrganizationMemberPage,
     OrganizationMemberPageQuery, OrganizationRepoPort,
+    OrganizationMemberProfile, OrganizationMemberProfilePatch,
     ProviderBotBindingRepoPort, ProviderRecord, ProviderRepoPort, ServiceError, ServiceResult,
     UpdateOrganizationRecord, UpsertOrganizationMemberRecord,
 };
@@ -500,6 +501,83 @@ impl OrganizationCoreService for OrganizationCore {
                 limit: query.limit,
             })
             .await
+    }
+
+    async fn update_member_profile(
+        &self,
+        managing_provider_id: &str,
+        organization_code: &str,
+        bot_uuid: &str,
+        patch: OrganizationMemberProfilePatch,
+    ) -> ServiceResult<OrganizationMemberProfile> {
+        validate_external_id("bot_uuid", bot_uuid)?;
+        if patch.name.is_none()
+            && patch.summary.is_none()
+            && patch.domains.is_none()
+            && patch.skills.is_none()
+            && patch.scopes.is_none()
+        {
+            return Err(ServiceError::InvalidOperation {
+                message: "no member profile fields to update".to_string(),
+                request_id: None,
+            });
+        }
+        if let Some(name) = patch.name.as_deref() {
+            validate_required_text("name", name, 256)?;
+        }
+
+        let organization = self
+            .require_managed_organization(managing_provider_id, organization_code)
+            .await?;
+        if organization.disabled {
+            return Err(ServiceError::Forbidden("organization_disabled".to_string()));
+        }
+        let member = self
+            .organizations
+            .get_member(&self.env, organization_code, bot_uuid)
+            .await?
+            .ok_or_else(|| ServiceError::Forbidden("organization_member_required".to_string()))?;
+        self.ensure_member_effective(&organization, member).await?;
+
+        let binding = self
+            .provider_bindings
+            .get_binding_by_bot_uuid(bot_uuid)
+            .await?
+            .ok_or_else(|| ServiceError::Forbidden("provider_managed_bot_required".to_string()))?;
+        let mut bot = self
+            .registry
+            .get(bot_uuid)
+            .await
+            .ok_or_else(|| ServiceError::BotNotFound(bot_uuid.to_string()))?;
+        if let Some(name) = patch.name {
+            bot.capabilities.name = Some(name.trim().to_string());
+        }
+        if let Some(summary) = patch.summary {
+            bot.capabilities.summary = Some(summary);
+        }
+        if let Some(domains) = patch.domains {
+            bot.capabilities.domains = domains;
+        }
+        if let Some(skills) = patch.skills {
+            bot.capabilities.skills = skills;
+        }
+        if let Some(scopes) = patch.scopes {
+            bot.capabilities.scopes = scopes;
+        }
+        self.registry
+            .save_to_storage(bot_uuid, &bot.capabilities)
+            .await?;
+        let updated = self
+            .registry
+            .get(bot_uuid)
+            .await
+            .ok_or_else(|| ServiceError::BotNotFound(bot_uuid.to_string()))?;
+        Ok(OrganizationMemberProfile {
+            organization_code: organization_code.to_string(),
+            bot_uuid: bot_uuid.to_string(),
+            provider_id: binding.provider_id,
+            capabilities: updated.capabilities,
+        })
     }
 
 
