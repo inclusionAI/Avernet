@@ -440,9 +440,10 @@ async def test_retry_restart_does_not_enqueue_poll_when_submit_fails():
 @pytest.mark.asyncio
 async def test_execute_rollback_enqueues_progress_poll_for_target():
     """Regression for #162: execute_rollback must enqueue the durable progress poll
-    on the TARGET record after approving the BaaS publish, so the rollback advances
-    ONLINE_PUB → SUCCESS through the durable queue instead of depending on user
-    /sync polling (which became read-only in #105)."""
+    on the TARGET record, so the rollback advances ONLINE_PUB → SUCCESS through the
+    durable queue instead of depending on user /sync polling (which became read-only
+    in #105). Under all-auto approval (#197) there is no client approve — the runner
+    issues the auto-approved rollback deploy and the poll drives it to terminal."""
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -476,7 +477,6 @@ async def test_execute_rollback_enqueues_progress_poll_for_target():
     build_service.upgrade_async = AsyncMock(return_value={'publish_id': baas_publish_id})
     build_service.generate_request_id.return_value = 'rid'
     svc._update_publish_status = Mock()
-    svc.approve_baas_publish = Mock(return_value=True)
 
     result = await svc.execute_rollback(
         current_publish_id=current_id,
@@ -486,13 +486,13 @@ async def test_execute_rollback_enqueues_progress_poll_for_target():
 
     assert result.publish_id == target_id
     assert result.status == PublishStatus.ONLINE_PUB
-    # The poll targets the rollback TARGET (not the current) record and is enqueued
-    # after approve_baas_publish.
+    # The poll targets the rollback TARGET (not the current) record.
     svc._task_queue_service.enqueue.assert_called_once()
     args = svc._task_queue_service.enqueue.call_args.args
     assert args[0] == PROGRESS_POLL_TASK
     assert args[1] == {'publish_id': target_id}
-    svc.approve_baas_publish.assert_called_once()
+    # #197 all-auto: no client approve.
+    assert not hasattr(svc, "approve_baas_publish") or not svc.approve_baas_publish.called
 
 
 def test_handle_sync_failure_clears_retry_flag_and_stores_source_status_value():
