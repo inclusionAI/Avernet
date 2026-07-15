@@ -27,6 +27,8 @@ E2E_TESTS_GROUP=(
     # --- session lifecycle (session = a group's instantiated run) ---
     "test_session_invite_join"
     "test_session_lifecycle"
+    # --- session collection (收藏: collect / uncollect / collected list) ---
+    "test_session_collection"
 )
 
 # ============================================================================
@@ -448,6 +450,35 @@ _api_delete_session() {
     api_delete "/sessions/$1?bot_id=${BOT_PM_UUID}"
 }
 
+# Count items in a collected-list (`GET .../sessions?...&collected=true`)
+# response body held in $RESPONSE. Prints 0 on any parse error.
+_collected_count() {
+    printf '%s' "$RESPONSE" | python3 -c "
+import json,sys
+try:
+    d=json.load(sys.stdin)
+    items=d.get('items') or d.get('sessions') or (d if isinstance(d,list) else [])
+    print(len(items))
+except Exception:
+    print('0')
+" 2>/dev/null || echo 0
+}
+
+# Print 1 if $1 (session id) is present in the collected-list response body
+# held in $RESPONSE, else 0 (also 0 on parse error).
+_collected_contains() {
+    printf '%s' "$RESPONSE" | python3 -c "
+import json,sys
+try:
+    d=json.load(sys.stdin)
+    items=d.get('items') or d.get('sessions') or (d if isinstance(d,list) else [])
+    ids=[i.get('session_id') or i.get('id') for i in items]
+    print('1' if sys.argv[1] in ids else '0')
+except Exception:
+    print('0')
+" "$1" 2>/dev/null || echo 0
+}
+
 # POST /sessions/join/{token} — the standard "human joins a session" flow.
 # Builds on the bcs-cli session invite-link test: create a session, mint an
 # invite token, then have the mock human join it, verifying the closed
@@ -607,5 +638,129 @@ except Exception:
         fail "session $sid deletion NOT verified (HTTP=$HTTP_STATUS body=$(printf '%s' "$RESPONSE" | head -c 100))"; TESTS_FAILED=$((TESTS_FAILED+1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL+1))
+    _cli_delete_group "$gid"
+}
+
+# Session collection (收藏): a bot marks/unmarks a session as collected and
+# lists collected sessions. Flow: collected list empty -> collected=true needs
+# participant (400) -> collect as PM (200) -> idempotent repeat -> list shows
+# it -> per-bot isolation (ENG sees nothing) -> collect by non-participant QA
+# (404) -> uncollect as PM (200) -> idempotent repeat -> list empty again.
+# _cli_create_group seeds {PM(driver), ENG}; QA is not a group member, so it is
+# not a session participant — the non-participant collect -> 404 case.
+test_session_collection() {
+    info "Session(收藏): collect / uncollect / collected=true list"
+    ensure_cli_token PM || { skip_case "no PM token"; TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
+    local gid; gid="$(_cli_create_group)"
+    [[ -z "$gid" ]] && { fail "setup create-group failed"; TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
+
+    local sid; sid="$(_api_create_session "$gid" collect-sess)"
+    if [[ -z "$sid" ]]; then
+        fail "session create failed"; TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1))
+        _cli_delete_group "$gid"; return
+    fi
+    pass "session created ($sid)"; TESTS_PASSED=$((TESTS_PASSED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # (A) collected list is empty before any collect.
+    api_get "/groups/${gid}/sessions?participant=${BOT_PM_UUID}&collected=true"
+    if [[ "$HTTP_STATUS" = "200" ]] && [ "$(_collected_count)" = "0" ]; then
+        pass "collected list empty before collect"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "collected list not empty before collect (HTTP=$HTTP_STATUS count=$(_collected_count))"; TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # (B) collected=true without participant -> 400.
+    api_get "/groups/${gid}/sessions?collected=true"
+    if [[ "$HTTP_STATUS" = "400" ]]; then
+        pass "collected=true without participant rejected (400)"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "collected=true without participant returned $HTTP_STATUS (expected 400)"; TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # (C) collect as PM (bot token; PM is a session participant).
+    bot_post "/sessions/${sid}/collect" PM '{}'
+    if [[ "$HTTP_STATUS" = "200" ]]; then
+        pass "POST /sessions/{sid}/collect as PM returned 200"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "collect as PM returned $HTTP_STATUS: $(printf '%s' "$RESPONSE" | head -c 120)"; TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # (D) repeat collect is idempotent (still 200, not 404).
+    bot_post "/sessions/${sid}/collect" PM '{}'
+    if [[ "$HTTP_STATUS" = "200" ]]; then
+        pass "repeat collect idempotent (200)"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "repeat collect returned $HTTP_STATUS (expected 200 idempotent)"; TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # (E) collected list now contains the session.
+    api_get "/groups/${gid}/sessions?participant=${BOT_PM_UUID}&collected=true"
+    if [[ "$HTTP_STATUS" = "200" ]] && [ "$(_collected_contains "$sid")" = "1" ]; then
+        pass "collected list contains $sid after collect"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "collected list missing $sid (HTTP=$HTTP_STATUS contains=$(_collected_contains "$sid"))"; TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # (F) per-bot isolation: ENG has not collected, sees nothing.
+    api_get "/groups/${gid}/sessions?participant=${BOT_ENG_UUID}&collected=true"
+    if [[ "$HTTP_STATUS" = "200" ]] && [ "$(_collected_contains "$sid")" = "0" ]; then
+        pass "per-bot isolation: ENG collected list empty for PM's collection"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "ENG collected list unexpectedly contains $sid (HTTP=$HTTP_STATUS)"; TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # (G) collect by a non-participant (QA) -> 404. QA is not a group member.
+    ensure_cli_token QA >/dev/null 2>&1 || true
+    bot_post "/sessions/${sid}/collect" QA '{}'
+    if [[ "$HTTP_STATUS" = "404" ]]; then
+        pass "collect by non-participant QA rejected (404)"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "collect by non-participant QA returned $HTTP_STATUS (expected 404): $(printf '%s' "$RESPONSE" | head -c 120)"; TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # (H) uncollect as PM -> 200.
+    bot_delete "/sessions/${sid}/collect" PM
+    if [[ "$HTTP_STATUS" = "200" ]]; then
+        pass "DELETE /sessions/{sid}/collect as PM returned 200"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "uncollect as PM returned $HTTP_STATUS: $(printf '%s' "$RESPONSE" | head -c 120)"; TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # (I) repeat uncollect idempotent (still 200).
+    bot_delete "/sessions/${sid}/collect" PM
+    if [[ "$HTTP_STATUS" = "200" ]]; then
+        pass "repeat uncollect idempotent (200)"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "repeat uncollect returned $HTTP_STATUS (expected 200 idempotent)"; TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
+    # (J) collected list empty again after uncollect.
+    api_get "/groups/${gid}/sessions?participant=${BOT_PM_UUID}&collected=true"
+    if [[ "$HTTP_STATUS" = "200" ]] && [ "$(_collected_count)" = "0" ]; then
+        pass "collected list empty after uncollect"
+        TESTS_PASSED=$((TESTS_PASSED+1))
+    else
+        fail "collected list not empty after uncollect (HTTP=$HTTP_STATUS count=$(_collected_count))"; TESTS_FAILED=$((TESTS_FAILED+1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL+1))
+
     _cli_delete_group "$gid"
 }

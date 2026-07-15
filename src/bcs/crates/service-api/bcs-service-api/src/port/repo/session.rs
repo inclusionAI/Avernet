@@ -4,6 +4,7 @@
 
 use async_trait::async_trait;
 
+use crate::core::ServiceError;
 use crate::types::{
     Participant, ParticipantMode, ServiceResult, Session, SessionKind, SessionStatus,
 };
@@ -77,4 +78,29 @@ pub trait SessionRepoPort: Send + Sync {
     async fn update_title(&self, session_id: &str, title: Option<String>) -> ServiceResult<Session>;
     async fn list_group_ids_by_session_participant(&self, bot_uuid: &str) -> Vec<String>;
     async fn delete(&self, session_id: &str) -> ServiceResult<bool>;
+
+    // ── session collection (收藏) ──────────────────────────────
+    // Default impls keep existing test mocks compiling; real impls in
+    // mysql + memory override these (see bcs-session-store).
+    async fn collect(&self, _session_id: &str, _bot_uuid: &str) -> ServiceResult<()> {
+        Err(ServiceError::InternalError(
+            "collect not implemented for this SessionRepoPort".into(),
+        ))
+    }
+    async fn uncollect(&self, _session_id: &str, _bot_uuid: &str) -> ServiceResult<()> {
+        Err(ServiceError::InternalError(
+            "uncollect not implemented for this SessionRepoPort".into(),
+        ))
+    }
+    async fn list_collected_by_group(
+        &self,
+        _group_id: &str,
+        _bot_uuid: &str,
+        _status: Option<SessionStatus>,
+        _title_contains: Option<&str>,
+        _offset: u64,
+        _limit: u64,
+    ) -> Vec<Session> {
+        Vec::new()
+    }
 }

@@ -322,7 +322,8 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         group_id TEXT NOT NULL,
         bot_uuid TEXT NOT NULL,
         role TEXT NOT NULL,
-        env TEXT NOT NULL DEFAULT 'prod'
+        env TEXT NOT NULL DEFAULT 'prod',
+        collected INTEGER NOT NULL DEFAULT 0
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_session_participants_env_session_bot ON bcs_session_participants(env, session_id, bot_uuid)",
     "CREATE INDEX IF NOT EXISTS idx_session_participants_bot ON bcs_session_participants(env, bot_uuid)",
@@ -674,6 +675,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 3,
         name: "add_organizations",
     },
+    SqliteMigration {
+        version: 4,
+        name: "add_session_collection",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -683,6 +688,7 @@ pub fn sqlite_target_version() -> i64 {
         .unwrap_or(0)
 }
 
+#[allow(dead_code)]
 pub fn sqlite_migration_count() -> usize {
     SQLITE_VERSIONED_MIGRATIONS.len()
 }
@@ -772,6 +778,7 @@ pub async fn run_sqlite_bootstrap_tables(db: &dyn DbPlugin) -> DbResult<()> {
         }
     }
     ensure_sqlite_message_owner_bot_id(db).await?;
+    ensure_sqlite_session_collected_column(db).await?;
     Ok(())
 }
 
@@ -793,6 +800,25 @@ async fn ensure_sqlite_message_owner_bot_id(db: &dyn DbPlugin) -> DbResult<()> {
     db.execute(DbStatement::new(
         "CREATE INDEX IF NOT EXISTS idx_messages_session_owner_created \
          ON bcs_messages(session_id, owner_bot_id, created_at, session_seq)",
+    ))
+    .await?;
+    Ok(())
+}
+
+async fn ensure_sqlite_session_collected_column(db: &dyn DbPlugin) -> DbResult<()> {
+    if !table_exists(db, "bcs_session_participants").await? {
+        return Ok(());
+    }
+    let columns = sqlite_table_columns(db, "bcs_session_participants").await?;
+    if !columns.iter().any(|column| column == "collected") {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_session_participants ADD COLUMN collected INTEGER NOT NULL DEFAULT 0",
+        ))
+        .await?;
+    }
+    db.execute(DbStatement::new(
+        "CREATE INDEX IF NOT EXISTS idx_collected \
+         ON bcs_session_participants(env, group_id, bot_uuid, collected)",
     ))
     .await?;
     Ok(())
@@ -851,6 +877,9 @@ async fn apply_sqlite_migration_body(
         2 => repair_sqlite_channel_bindings_audit_schema(db).await,
         // Startup creates any missing organization tables before recording version 3.
         3 => Ok(()),
+        // collected column is added by ensure_sqlite_session_collected_column in
+        // run_sqlite_bootstrap_tables; version 4 only records progress.
+        4 => Ok(()),
         _ => Ok(()),
     }
 }
@@ -1070,7 +1099,8 @@ mod tests {
                     "channel_binding_audit_timestamps".to_string(),
                     "sqlite".to_string()
                 ),
-                (3, "add_organizations".to_string(), "sqlite".to_string())
+                (3, "add_organizations".to_string(), "sqlite".to_string()),
+                (4, "add_session_collection".to_string(), "sqlite".to_string())
             ]
         );
         Ok(())
@@ -1082,7 +1112,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 3);
+        assert_eq!(report.pending_versions.len(), 4);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1094,6 +1124,8 @@ mod tests {
         );
         assert_eq!(report.pending_versions[2].version, 3);
         assert_eq!(report.pending_versions[2].name, "add_organizations");
+        assert_eq!(report.pending_versions[3].version, 4);
+        assert_eq!(report.pending_versions[3].name, "add_session_collection");
         Ok(())
     }
 
@@ -1113,7 +1145,8 @@ mod tests {
                     "channel_binding_audit_timestamps".to_string(),
                     "sqlite".to_string()
                 ),
-                (3, "add_organizations".to_string(), "sqlite".to_string())
+                (3, "add_organizations".to_string(), "sqlite".to_string()),
+                (4, "add_session_collection".to_string(), "sqlite".to_string())
             ]
         );
         Ok(())
@@ -1222,5 +1255,47 @@ mod tests {
 
         assert!(err.to_string().contains("checksum mismatch"));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod collection_migration_tests {
+    use super::*;
+    use bcs_db_local::LocalSqliteDbPlugin;
+
+    async fn fresh_db() -> LocalSqliteDbPlugin {
+        let db = LocalSqliteDbPlugin::new().expect("open in-memory sqlite");
+        run_sqlite_bootstrap_tables(&db).await.expect("bootstrap");
+        run_sqlite_versioned_migrations(&db).await.expect("versioned");
+        db
+    }
+
+    #[tokio::test]
+    async fn fresh_db_has_session_participants_collected_column() {
+        let db = fresh_db().await;
+        let cols = sqlite_table_columns(&db, "bcs_session_participants").await.unwrap();
+        assert!(cols.iter().any(|c| c == "collected"),
+            "bcs_session_participants must have a collected column on fresh DB; got {cols:?}");
+    }
+
+    #[tokio::test]
+    async fn ensure_function_adds_collected_to_legacy_table() {
+        let db = LocalSqliteDbPlugin::new().expect("open in-memory sqlite");
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_session_participants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                session_id TEXT NOT NULL,
+                group_id TEXT NOT NULL,
+                bot_uuid TEXT NOT NULL,
+                role TEXT NOT NULL,
+                env TEXT NOT NULL DEFAULT 'prod'
+            )"
+        )).await.unwrap();
+        run_sqlite_bootstrap_tables(&db).await.expect("bootstrap repairs legacy table");
+        let cols = sqlite_table_columns(&db, "bcs_session_participants").await.unwrap();
+        assert!(cols.iter().any(|c| c == "collected"),
+            "ensure function must add collected to legacy bcs_session_participants; got {cols:?}");
     }
 }

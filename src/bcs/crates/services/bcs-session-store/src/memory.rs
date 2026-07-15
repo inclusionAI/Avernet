@@ -44,6 +44,7 @@ fn initial_callback_status(kind: SessionKind) -> Option<String> {
 #[derive(Default)]
 struct MemoryState {
     sessions: HashMap<String, Session>,
+    collected: std::collections::HashSet<(String, String)>,
 }
 
 // ---------------------------------------------------------------------------
@@ -400,7 +401,11 @@ impl SessionRepoPort for MemorySessionRepo {
             )));
         }
         sess.updated_at = now;
-        Ok(sess.clone())
+        let updated = sess.clone();
+        // collection mark is per-participant; leaving drops it
+        st.collected
+            .retain(|(sid, bid)| !(sid == session_id && bid == bot_uuid));
+        Ok(updated)
     }
 
     async fn update_participant_mode(
@@ -468,7 +473,71 @@ impl SessionRepoPort for MemorySessionRepo {
 
     async fn delete(&self, session_id: &str) -> ServiceResult<bool> {
         let mut st = self.state.write().await;
-        Ok(st.sessions.remove(session_id).is_some())
+        let existed = st.sessions.remove(session_id).is_some();
+        if existed {
+            st.collected.retain(|(sid, _)| sid != session_id);
+        }
+        Ok(existed)
+    }
+
+    async fn collect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> {
+        let mut st = self.state.write().await;
+        let session = st
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
+        if !session.participants.iter().any(|p| p.bot_uuid == bot_uuid) {
+            return Err(ServiceError::SessionNotFound(format!(
+                "participant {bot_uuid} not in session {session_id}"
+            )));
+        }
+        st.collected.insert((session_id.to_string(), bot_uuid.to_string()));
+        Ok(())
+    }
+
+    async fn uncollect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> {
+        let mut st = self.state.write().await;
+        // Idempotent: session must exist; otherwise no-op removal.
+        if !st.sessions.contains_key(session_id) {
+            return Err(ServiceError::SessionNotFound(session_id.to_string()));
+        }
+        st.collected.remove(&(session_id.to_string(), bot_uuid.to_string()));
+        Ok(())
+    }
+
+    async fn list_collected_by_group(
+        &self,
+        group_id: &str,
+        bot_uuid: &str,
+        status: Option<SessionStatus>,
+        title_contains: Option<&str>,
+        offset: u64,
+        limit: u64,
+    ) -> Vec<Session> {
+        let st = self.state.read().await;
+        let q = title_contains.map(|s| s.to_ascii_lowercase());
+        let mut v: Vec<_> = st
+            .sessions
+            .values()
+            .filter(|s| s.group_id == group_id)
+            .filter(|s| {
+                st.collected
+                    .contains(&(s.id.clone(), bot_uuid.to_string()))
+            })
+            .filter(|s| status.map(|want| s.status == want).unwrap_or(true))
+            .filter(|s| {
+                q.as_ref().map_or(true, |q| {
+                    s.session_title
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_ascii_lowercase()
+                        .contains(q)
+                })
+            })
+            .cloned()
+            .collect();
+        v.sort_by_key(|s| std::cmp::Reverse(s.created_at));
+        v.into_iter().skip(offset as usize).take(limit as usize).collect()
     }
 }
 
@@ -581,5 +650,143 @@ mod tests {
         let sessions = repo.list_by_group("g1", None, 0, 5, None, Some(target)).await;
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_title.as_deref(), Some("Target Session"));
+    }
+
+    #[tokio::test]
+    async fn collection_collect_then_list_then_uncollect() {
+        let repo = MemorySessionRepo::new();
+        let gid = "col-group";
+        let sess = repo
+            .create(
+                gid,
+                NewSessionParams {
+                    session_kind: SessionKind::Chat,
+                    participants: vec![Participant::bot("bot1", bcs_service_api::ParticipantRole::Driver)],
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("create");
+
+        // not collected yet
+        let listed = repo.list_collected_by_group(gid, "bot1", None, None, 0, 10).await;
+        assert!(listed.is_empty());
+
+        repo.collect(&sess.id, "bot1").await.expect("collect");
+        let listed = repo.list_collected_by_group(gid, "bot1", None, None, 0, 10).await;
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, sess.id);
+
+        // other bot does not see bot1's collection
+        let other = repo.list_collected_by_group(gid, "bot2", None, None, 0, 10).await;
+        assert!(other.is_empty());
+
+        repo.uncollect(&sess.id, "bot1").await.expect("uncollect");
+        let listed = repo.list_collected_by_group(gid, "bot1", None, None, 0, 10).await;
+        assert!(listed.is_empty());
+    }
+
+    #[tokio::test]
+    async fn collection_non_participant_collect_errors() {
+        let repo = MemorySessionRepo::new();
+        let gid = "col-group2";
+        let sess = repo
+            .create(
+                gid,
+                NewSessionParams {
+                    session_kind: SessionKind::Chat,
+                    participants: vec![Participant::bot("bot1", bcs_service_api::ParticipantRole::Driver)],
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("create");
+        let err = repo.collect(&sess.id, "not-a-participant").await;
+        assert!(err.is_err(), "collect by non-participant must error");
+    }
+
+    #[tokio::test]
+    async fn collection_uncollect_idempotent_for_non_participant() {
+        let repo = MemorySessionRepo::new();
+        let gid = "col-group3";
+        let sess = repo
+            .create(
+                gid,
+                NewSessionParams {
+                    session_kind: SessionKind::Chat,
+                    participants: vec![Participant::bot("bot1", bcs_service_api::ParticipantRole::Driver)],
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("create");
+        // uncollect a never-collected, still-participant session -> Ok
+        repo.uncollect(&sess.id, "bot1").await.expect("uncollect not collected ok");
+        // uncollect a non-participant -> Ok (idempotent)
+        repo.uncollect(&sess.id, "nobody").await.expect("uncollect non-participant ok");
+    }
+
+    #[tokio::test]
+    async fn collection_respects_status_and_title_filter() {
+        let repo = MemorySessionRepo::new();
+        let gid = "col-group4";
+        let s_running = repo
+            .create(gid, NewSessionParams {
+                session_kind: SessionKind::Chat,
+                session_title: Some("Alpha Report".into()),
+                participants: vec![Participant::bot("bot1", bcs_service_api::ParticipantRole::Driver)],
+                ..Default::default()
+            })
+            .await
+            .expect("create");
+        let s_to_complete = repo
+            .create(gid, NewSessionParams {
+                session_kind: SessionKind::Chat,
+                session_title: Some("Beta Note".into()),
+                participants: vec![Participant::bot("bot1", bcs_service_api::ParticipantRole::Driver)],
+                ..Default::default()
+            })
+            .await
+            .expect("create");
+        repo.complete_if_running(&s_to_complete.id, None, None).await.expect("complete");
+        repo.collect(&s_running.id, "bot1").await.expect("collect running");
+        repo.collect(&s_to_complete.id, "bot1").await.expect("collect completed");
+
+        let only_running = repo.list_collected_by_group(
+            gid, "bot1", Some(SessionStatus::Running), None, 0, 10,
+        ).await;
+        assert_eq!(only_running.len(), 1);
+        assert_eq!(only_running[0].id, s_running.id);
+
+        let only_alpha = repo.list_collected_by_group(
+            gid, "bot1", None, Some("alpha"), 0, 10,
+        ).await;
+        assert_eq!(only_alpha.len(), 1);
+        assert_eq!(only_alpha[0].id, s_running.id);
+    }
+
+    #[tokio::test]
+    async fn collection_lost_when_participant_removed() {
+        let repo = MemorySessionRepo::new();
+        let gid = "col-group5";
+        let sess = repo
+            .create(gid, NewSessionParams {
+                session_kind: SessionKind::Chat,
+                participants: vec![Participant::bot("bot1", bcs_service_api::ParticipantRole::Driver)],
+                ..Default::default()
+            })
+            .await
+            .expect("create");
+        repo.collect(&sess.id, "bot1").await.expect("collect");
+        assert_eq!(
+            repo.list_collected_by_group(gid, "bot1", None, None, 0, 10).await.len(),
+            1
+        );
+        repo.remove_participant(&sess.id, "bot1").await.expect("remove");
+        // after leaving, collection mark is gone (memory set must be pruned)
+        assert!(repo
+            .list_collected_by_group(gid, "bot1", None, None, 0, 10)
+            .await
+            .is_empty());
     }
 }
