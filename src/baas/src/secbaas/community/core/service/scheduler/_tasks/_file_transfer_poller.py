@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from secbaas.community.core.repository.file_transfer_ticket import (
     TicketRecord,
@@ -178,7 +178,7 @@ class FileTransferPoller:
             # Timeout check: gmt_create + upload_timeout_seconds < now
             if ticket.gmt_create + timedelta(
                 seconds=self._config.upload_timeout_seconds
-            ) < datetime.now():
+            ) < datetime.now(tz=timezone.utc).replace(tzinfo=None):
                 log.warning(
                     "[FileTransferPoller] Ticket %s timed out (created=%s, timeout=%ss)",
                     transfer_id,
@@ -334,7 +334,7 @@ class FileTransferPoller:
             # Timeout check (D-18: same upload_timeout_seconds)
             if ticket.gmt_create + timedelta(
                 seconds=self._config.upload_timeout_seconds
-            ) < datetime.now():
+            ) < datetime.now(tz=timezone.utc).replace(tzinfo=None):
                 log.warning(
                     "[FileTransferPoller] DOWNLOAD ticket %s timed out "
                     "(created=%s, timeout=%ss)",

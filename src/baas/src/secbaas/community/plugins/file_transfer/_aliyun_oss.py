@@ -129,18 +129,15 @@ class AliyunOssFileTransferBackend(FileTransferBackend):
     ) -> None:
         """Assemble multipart upload.
 
-        Validate part_count from list_parts result before calling OSS
-        complete.  The parts list is sourced from list_parts (not from
+        The parts list is sourced from list_parts (not from
         callers); the Dispatcher self-queries uploaded parts, so callers
-        never need to collect ETags.
+        never need to collect ETags.  The Dispatcher is responsible for
+        validating part count completeness before calling this method.
 
         Args:
             staging_path: Complete OSS object key.
             session_id: OSS upload_id.
             parts: List of PartInfo from list_parts (with etag set).
-
-        Raises:
-            ValueError: If part_count does not match expected.
         """
         try:
             # Pitfall 2: oss2 expects oss2.models.PartInfo with part_number and etag

@@ -1004,7 +1004,7 @@ class ArcaPaasService(PaasService):
         try:
             sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(paas_device_id)
             cmd = (
-                f"curl -fSL -o {shlex.quote(device_path)} "
+                f"curl -fSL --create-dirs -o {shlex.quote(device_path)} "
                 f"{shlex.quote(source_url)}"
             )
             result = sandbox.exec_command(
