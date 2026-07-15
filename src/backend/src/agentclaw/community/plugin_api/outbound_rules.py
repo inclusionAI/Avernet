@@ -53,3 +53,15 @@ class OutboundRuleProvider(Plugin, Protocol):
         """An identity-authorization-only outbound rule (the teclaw path), or
         ``None`` when no token / no egress mutation applies."""
         ...
+
+    def build_caller_rule(
+        self,
+        *,
+        caller_token: str,
+    ) -> "OutBoundOperationRule | None":
+        """Build the environment-authoritative Caller-token overlay.
+
+        The provider owns the fixed managed gateway scope. IAM callers supply
+        only the opaque token and never resolve per-MCP endpoints.
+        """
+        ...
