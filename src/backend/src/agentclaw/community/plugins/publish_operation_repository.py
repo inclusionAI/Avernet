@@ -180,13 +180,20 @@ class PublishOperationRepository:
         )
 
     def complete(self, op_id: int) -> Optional[PublishOperationRecord]:
+        # ID_RECORDED is the normal pre-complete state for BaaS ops (a workflow id
+        # was recorded). PENDING is also allowed for non-BaaS ops (e.g.
+        # approval_create) whose outcome (a puid) lives in ``result`` rather than
+        # ``baas_publish_id``, so they never pass through ID_RECORDED (#197).
         return self._cas_update(
             op_id,
             {
                 self.Model.state: PublishOperationState.COMPLETED.value,
                 self.Model.gmt_modified: func.now(),
             },
-            allowed_sources=[PublishOperationState.ID_RECORDED.value],
+            allowed_sources=[
+                PublishOperationState.ID_RECORDED.value,
+                PublishOperationState.PENDING.value,
+            ],
         )
 
     def fail(self, op_id: int, error: str) -> Optional[PublishOperationRecord]:

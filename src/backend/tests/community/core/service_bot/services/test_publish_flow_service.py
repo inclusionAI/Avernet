@@ -3050,6 +3050,37 @@ def test_eval_teardown_handler_dispatches_to_execute_eval_teardown():
     assert isinstance(outcome, Fail)
 
 
+def test_approval_trigger_handler_dispatches_to_execute_approval_trigger():
+    # #197: the durable AGREED-trigger handler unpacks the payload and drives the
+    # approval service's status-CAS-guarded trigger; a non-success is a Fail.
+    from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+        APPROVAL_TRIGGER_TASK,
+        PublishApprovalTriggerHandler,
+    )
+    from agentclaw.community.core.task_queue.types import Complete, Fail
+
+    approval_service = Mock()
+    approval_service.execute_approval_trigger = AsyncMock(
+        return_value={"success": True, "message": "ok"}
+    )
+    handler = PublishApprovalTriggerHandler(
+        approval_service_provider=lambda: approval_service
+    )
+    assert handler.task_type == APPROVAL_TRIGGER_TASK
+
+    outcome = handler.handle({"publish_id": 3, "action": "online", "operator": "op"})
+    assert isinstance(outcome, Complete)
+    approval_service.execute_approval_trigger.assert_awaited_once_with(
+        publish_id=3, action="online", operator="op"
+    )
+
+    approval_service.execute_approval_trigger = AsyncMock(
+        return_value={"success": False, "message": "bad"}
+    )
+    outcome = handler.handle({"publish_id": 3, "action": "offline", "operator": "op"})
+    assert isinstance(outcome, Fail)
+
+
 # ---- retry() across source_status ------------------------------------------
 
 @pytest.mark.asyncio

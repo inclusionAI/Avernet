@@ -136,12 +136,23 @@ def test_record_workflow_cas(repo):
 
 def test_complete_cas(repo):
     op = _intent(repo)
-    # complete requires ID_RECORDED first.
-    assert repo.complete(op.id) is None
+    # BaaS ops complete from ID_RECORDED (a workflow id was recorded).
     repo.record_workflow(op.id, baas_publish_id=1)
     done = repo.complete(op.id)
     assert done.state == PublishOperationState.COMPLETED.value
     # idempotent re-complete loses the CAS.
+    assert repo.complete(op.id) is None
+
+
+def test_complete_from_pending_for_non_baas_op(repo):
+    # #197: non-BaaS ops (e.g. approval_create) never record a workflow id — their
+    # outcome lives in result — so complete is also allowed straight from PENDING.
+    op = _intent(repo, publish_id=2, request_id="req-2")
+    assert op.state == PublishOperationState.PENDING.value
+    done = repo.complete(op.id)
+    assert done is not None
+    assert done.state == PublishOperationState.COMPLETED.value
+    # still idempotent — a terminal row can't re-complete.
     assert repo.complete(op.id) is None
 
 

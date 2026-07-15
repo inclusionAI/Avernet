@@ -37,7 +37,7 @@ re-runs a failed stage on its own.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
@@ -49,6 +49,9 @@ from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.service_bot.services.publish_approval_service import (
+        PublishApprovalService,
+    )
     from agentclaw.community.core.service_bot.services.publish_flow_service import (
         PublishFlowService,
     )
@@ -61,6 +64,7 @@ PROGRESS_POLL_TASK = "service_bot.publish.progress_poll"
 RESTART_TASK = "service_bot.publish.restart"
 DESTROY_TASK = "service_bot.publish.destroy"
 EVAL_TEARDOWN_TASK = "service_bot.publish.eval_teardown"
+APPROVAL_TRIGGER_TASK = "service_bot.publish.approval_trigger"
 
 # Give-up horizons (DB-enforced). Build+release can be slow; the poll waits on the
 # BaaS workflow, matching the devices poll deadline.
@@ -155,6 +159,27 @@ def enqueue_destroy(
     task_queue_service.enqueue(
         DESTROY_TASK,
         build_restart_payload(publish_id=publish_id, stage=stage, operator=operator),
+        deadline_seconds=_STAGE_TASK_DEADLINE_SECONDS,
+    )
+
+
+def build_approval_trigger_payload(*, publish_id: int, action: str, operator: str) -> dict:
+    return {"publish_id": publish_id, "action": action, "operator": operator}
+
+
+def enqueue_approval_trigger(
+    task_queue_service: TaskQueueService,
+    *,
+    publish_id: int,
+    action: str,
+    operator: str,
+) -> None:
+    """Enqueue the durable AGREED-trigger (online release / offline)."""
+    task_queue_service.enqueue(
+        APPROVAL_TRIGGER_TASK,
+        build_approval_trigger_payload(
+            publish_id=publish_id, action=action, operator=operator
+        ),
         deadline_seconds=_STAGE_TASK_DEADLINE_SECONDS,
     )
 
@@ -373,6 +398,40 @@ class PublishEvalTeardownHandler(_PublishTaskBase):
         return Complete()
 
 
+class PublishApprovalTriggerHandler:
+    """Durable AGREED-trigger — replaces the inline await in the approval callback.
+
+    Runs the online-release / offline trigger through the approval service, whose
+    status-CAS-guarded ``process()``/offline makes an AGREED-then-crash converge on
+    retry and a duplicate callback delivery a no-op. Holds a lazy provider to break
+    the approval-service ↔ flow-service DI cycle."""
+
+    def __init__(
+        self, *, approval_service_provider: Callable[[], "PublishApprovalService"]
+    ) -> None:
+        self._approval_service_provider = approval_service_provider
+
+    @property
+    def task_type(self) -> str:
+        return APPROVAL_TRIGGER_TASK
+
+    def handle(self, payload: Optional[dict]) -> TaskOutcome:
+        publish_id = _require_int(payload, "publish_id")
+        action = _require_str(payload, "action")
+        operator = _require_str(payload, "operator")
+        return asyncio.run(self._run(publish_id, action, operator))
+
+    async def _run(self, publish_id: int, action: str, operator: str) -> TaskOutcome:
+        approval_service = self._approval_service_provider()
+        result = await approval_service.execute_approval_trigger(
+            publish_id=publish_id, action=action, operator=operator
+        )
+        if not result or not result.get("success"):
+            message = (result or {}).get("message", "unknown error")
+            return Fail(f"approval trigger failed: publish_id={publish_id}, {message}")
+        return Complete()
+
+
 class PublishProgressPollHandler(_PublishTaskBase):
     """Drive a BaaS-publish wait to terminal by reusing ``advance_publish_progress``."""
 
@@ -428,10 +487,12 @@ class PublishTaskLifecycle(LifecycleBase):
         registry: HandlerRegistry,
         flow: "PublishFlowService",
         task_queue_service: TaskQueueService,
+        approval_service_provider: Callable[[], "PublishApprovalService"],
     ) -> None:
         self._registry = registry
         self._flow = flow
         self._task_queue_service = task_queue_service
+        self._approval_service_provider = approval_service_provider
 
     async def bootstrap(self) -> None:
         self._registry.register(
@@ -457,6 +518,11 @@ class PublishTaskLifecycle(LifecycleBase):
         self._registry.register(
             PublishEvalTeardownHandler(
                 flow=self._flow, task_queue_service=self._task_queue_service
+            )
+        )
+        self._registry.register(
+            PublishApprovalTriggerHandler(
+                approval_service_provider=self._approval_service_provider
             )
         )
         self._registry.register(

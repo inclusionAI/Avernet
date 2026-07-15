@@ -282,7 +282,7 @@
   suite green. [x]
 - **Depends on:** Group B
 
-## Task 16: Approval flow — intent-first puid + durable trigger — [ ]
+## Task 16: Approval flow — intent-first puid + durable trigger — [x]
 - **Goal:** `_create_new_approval` writes an `approval_create` intent before
   `start_approval` (puid into `result` after); the AGREED callback write also
   enqueues durable `service_bot.publish.approval_trigger`; handler calls the
@@ -291,7 +291,7 @@
   (`PublishApprovalTriggerHandler`), approval tests.
 - **Done when:** AGREED-then-crash case converges via the task; duplicate
   callback delivery is a no-op; orphaned approval instance visible as
-  PENDING op; suite green.
+  PENDING op; suite green. [x]
 - **Depends on:** Group B
 
 # Group D — Quality + cleanup

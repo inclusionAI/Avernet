@@ -617,3 +617,69 @@ async def test_eval_teardown_crash_after_issue_resume_adopts():
     assert op.state == PublishOperationState.COMPLETED.value
     assert op.baas_publish_id == 901
     assert baas.destroy_bot.call_args.kwargs["request_id"] == "pub7.eval_teardown.eval.a1"
+
+
+# ── approval create: intent-first orphan window ───────────────────────────────
+@pytest.mark.asyncio
+async def test_approval_create_intent_first_orphan_visible_then_recorded():
+    # The approval-workflow plugin is not a BaaS bot, so a crash after start_approval
+    # but before the puid/ext is persisted cannot be adopted — the intent-first
+    # approval_create op makes that orphaned approval instance observable (PENDING),
+    # and the re-run re-creates (accepted creation orphan) recording the second puid.
+    from unittest.mock import MagicMock
+    from agentclaw.community.core.service_bot.services.publish_approval_service import (
+        PublishApprovalService,
+    )
+
+    ledger = _ledger()
+    baas = FakeBaas()
+    flow = _flow(ledger=ledger, baas=baas, build_service=Mock(), publish_service=Mock())
+
+    record = _record(PublishStatus.VALIDATING.value)
+    record.owner_id = "owner"
+    publish_service = MagicMock()
+    publish_service.get_publish_by_id.return_value = record
+
+    bot_service = MagicMock()
+    bot_service.get_bot.return_value = {
+        "ext": {"service_bot_config": {"should_approval": True}}
+    }
+
+    puids = iter(["PUID-A", "PUID-B"])
+    process_service = MagicMock()
+    process_service.start_approval.side_effect = lambda **kw: {
+        "success": True, "puid": next(puids), "approval_url": "u"
+    }
+
+    # First ext write crashes (after start_approval + puid recorded on the op).
+    ext_calls = []
+
+    def update_ext(pid, ext):
+        ext_calls.append(ext)
+        if len(ext_calls) == 1:
+            raise RuntimeError("crash after start_approval, before ext persist")
+
+    publish_service.update_publish_ext = MagicMock(side_effect=update_ext)
+
+    approval = PublishApprovalService(
+        publish_service=publish_service,
+        publish_flow_service_provider=lambda: flow,
+        process_service=process_service,
+        bot_service=bot_service,
+        task_queue_service=MagicMock(),
+    )
+
+    with pytest.raises(RuntimeError):
+        await approval._create_new_approval(record, action="online", operator="collab")
+    assert process_service.start_approval.call_count == 1
+    op = ledger.get_latest_by_kind(1, "approval_create", "online")
+    assert op.state == PublishOperationState.PENDING.value  # in-flight → observable
+
+    # Re-run: resumes the PENDING op, re-creates the approval (orphan accepted),
+    # records the second puid, and completes.
+    result = await approval._create_new_approval(record, action="online", operator="collab")
+    assert result.status == "PROCESSING"
+    assert process_service.start_approval.call_count == 2
+    op = ledger.get_latest_by_kind(1, "approval_create", "online")
+    assert op.state == PublishOperationState.COMPLETED.value
+    assert op.result["puid"] == "PUID-B"

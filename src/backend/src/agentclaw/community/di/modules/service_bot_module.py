@@ -456,6 +456,7 @@ class ServiceBotModule(Module):
     @inject
     def publish_task_lifecycle(
         self,
+        injector: Injector,
         registry: HandlerRegistry,
         flow: PublishFlowService,
         task_queue_service: TaskQueueService,
@@ -464,11 +465,15 @@ class ServiceBotModule(Module):
         ``HandlerRegistry``. A singleton ``Lifecycle`` so discovery runs its
         ``bootstrap()`` before ``TaskWorker.startup()`` claims (mirrors
         ``baas_publish_task_lifecycle`` in ``DevicesModule``).
+
+        The approval trigger handler resolves ``PublishApprovalService`` lazily to
+        break its DI cycle with ``PublishFlowService``.
         """
         return PublishTaskLifecycle(
             registry=registry,
             flow=flow,
             task_queue_service=task_queue_service,
+            approval_service_provider=lambda: injector.get(PublishApprovalService),
         )
 
     @singleton
@@ -516,6 +521,7 @@ class ServiceBotModule(Module):
         publish_service: BotPublishService,
         process_service: ApprovalWorkflowPlugin,
         bot_service: BotService,
+        task_queue_service: TaskQueueService,
     ) -> PublishApprovalService:
         """Construct ``PublishApprovalService`` with lazy publish flow service provider.
 
@@ -528,6 +534,7 @@ class ServiceBotModule(Module):
             publish_flow_service_provider=lambda: injector.get(PublishFlowService),
             process_service=process_service,
             bot_service=bot_service,
+            task_queue_service=task_queue_service,
         )
 
     @singleton
