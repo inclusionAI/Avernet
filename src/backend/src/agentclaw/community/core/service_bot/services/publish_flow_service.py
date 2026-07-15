@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING
 
 from injector import inject
 
-from agentclaw.community.core.service_bot.repository.models import PublishStatus, BotPublishRecord
+from agentclaw.community.core.service_bot.repository.models import (
+    PublishStatus,
+    BotPublishRecord,
+    PublishOperationState,
+)
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
@@ -962,10 +966,6 @@ class PublishFlowService(
         Used when the record is restarted from an earlier phase (rebuild) or
         superseded by a new version — the in-flight ops are no longer the current
         intent, so a fresh attempt must open new ops rather than resume these."""
-        from agentclaw.community.core.service_bot.repository.models import (
-            PublishOperationState,
-        )
-
         terminal = {s.value for s in PublishOperationState.terminal()}
         for op in self._publish_operation_repo.list_by_publish(publish_id):
             if op.state not in terminal:
@@ -1011,22 +1011,32 @@ class PublishFlowService(
         return self._publish_service.get_publish_by_id(publish_id)
 
     def is_online_release_recorded(self, publish_id: int) -> bool:
-        """True once this record's online BaaS workflow has been created.
+        """True once this record's online release is fully recorded — i.e. the
+        binding + ``ext.publish.online`` were written, not merely the BaaS
+        workflow id.
 
-        Driven by the operation ledger (#197): the latest online-stage op
-        (``online_first_release`` or ``online_upgrade``) is at ``ID_RECORDED``/
-        ``COMPLETED`` with a ``baas_publish_id`` once the BaaS workflow exists.
-        The online_release task uses this to skip a second create on crash-resume,
-        and ``retry`` uses it to choose BaaS-restart vs. re-running the release.
+        This is the crash-resume guard for the online leg, which runs *within*
+        ONLINE_PUB with no status transition to guard it, so the threshold must
+        be the *completed* release, not just the created workflow. Both consumers
+        need this threshold:
 
-        Falls back to the legacy ``ext.publish.online`` marker for records that
-        predate the ledger (no online op rows yet) — dropped once the transition
-        window closes."""
+        * the online_release task gate (``tasks.py``) skips re-running the release
+          only when it is fully done; at ``ID_RECORDED``-but-not-complete a re-run
+          MUST re-enter (the runner then resumes: reuses the in-flight op + binding
+          and finishes the ext write) — gating on the mere workflow id would strand
+          the record with an orphaned bot (binding/ext never written).
+        * ``retry`` chooses BaaS-restart only for a completed release (a BaaS-side
+          failure); a partial release re-runs the release work instead.
+
+        Ledger-driven (#197): the latest online-stage op is ``COMPLETED``. The
+        ``ext.publish.online`` marker (written in the release's ext step, one step
+        before ``complete_operation``) is the fallback — it covers both the tiny
+        record-ext→complete window and records that predate the ledger."""
         for kind in ("online_first_release", "online_upgrade"):
             op = self._publish_operation_repo.get_latest_by_kind(
                 publish_id, kind, PublishStage.ONLINE.value
             )
-            if op is not None and op.baas_publish_id is not None:
+            if op is not None and op.state == PublishOperationState.COMPLETED.value:
                 return True
         record = self.get_publish_record(publish_id)
         ext = (record.ext or {}) if record else {}

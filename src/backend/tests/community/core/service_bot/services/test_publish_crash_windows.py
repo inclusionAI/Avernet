@@ -373,11 +373,17 @@ def test_is_online_release_recorded_reads_ledger():
     # No op, no ext marker (record ext has no 'publish') → not recorded.
     assert svc.is_online_release_recorded(1) is False
 
-    # An online op with a recorded workflow → recorded.
+    # An online op with only the workflow recorded (ID_RECORDED, binding/ext not
+    # yet written) is NOT "recorded": the crash-resume guard must let the release
+    # re-enter and finish, not skip it (Group B review Finding 1).
     op = svc._operation_runner.open_operation(
         publish_id=1, kind="online_first_release", stage="online"
     )
     ledger.record_workflow(op.id, baas_publish_id=901, bot_uuid="BOT-x")
+    assert svc.is_online_release_recorded(1) is False
+
+    # Only once the op COMPLETES (binding + ext done) is it "recorded".
+    ledger.complete(op.id)
     assert svc.is_online_release_recorded(1) is True
 
 
