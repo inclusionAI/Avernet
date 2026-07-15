@@ -1771,9 +1771,13 @@ class DefaultPublishService(PublishService):
         the bot's complete workflow history — including workflows already in a
         terminal state — not just the currently-active one. Returns ``[]`` when
         the bot_uuid is unknown (the router turns that into a 404).
+
+        Soft-deleted bot records are included: a successful DESTROY soft-deletes
+        the bot, and its DESTROY workflow must stay visible so a crash-resumed
+        destroy operation adopts it instead of re-issuing against a gone bot.
         """
         env = get_current_env()
-        bot_records = self._bot_repo.list_by_bot_uuid(
+        bot_records = self._bot_repo.list_by_bot_uuid_including_deleted(
             bot_uuid=bot_uuid, tenant=tenant, env=env
         )
         if not bot_records:

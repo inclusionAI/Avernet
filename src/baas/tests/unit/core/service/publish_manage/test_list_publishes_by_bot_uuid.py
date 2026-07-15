@@ -18,7 +18,9 @@ class _FakeBotRepo:
     def __init__(self, by_uuid):
         self._by_uuid = by_uuid
 
-    def list_by_bot_uuid(self, bot_uuid, tenant, env):
+    def list_by_bot_uuid_including_deleted(self, bot_uuid, tenant, env):
+        # The endpoint deliberately includes soft-deleted bots so destroy
+        # workflows stay adoptable; the fake returns whatever is registered.
         return self._by_uuid.get(bot_uuid, [])
 
 
@@ -72,3 +74,16 @@ async def test_unions_across_bot_records_newest_first():
     assert [s.id for s in out] == [300, 200, 100]  # newest workflow id first
     assert out[-1].publish_type == "CREATE"
     assert {s.status for s in out} == {"ACTIVE", "FAILED", "SUCCESS"}
+
+
+@pytest.mark.asyncio
+async def test_includes_soft_deleted_bot_destroy_workflow():
+    # A destroyed bot is soft-deleted; its DESTROY workflow must still list so a
+    # crash-resumed destroy op can adopt it instead of re-issuing.
+    svc = _service(
+        bot_by_uuid={"BOT-D": [_bot(20)]},  # fake includes-deleted returns it
+        pub_by_bot={20: [_pub(400, 20, publish_type="DESTROY", status="SUCCESS")]},
+    )
+    out = await svc.list_publishes_by_bot_uuid("t", "BOT-D")
+    assert [s.id for s in out] == [400]
+    assert out[0].publish_type == "DESTROY"
