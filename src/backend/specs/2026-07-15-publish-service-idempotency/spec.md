@@ -163,6 +163,13 @@ Crash-resume convergence (the core invariant):
       workflow/bot reconciled or cleaned where possible — so the escape hatch
       that exists today (phase-level retry from `source_status`) is preserved,
       not replaced, by step-level resume.
+      **No new frontend/interface is implied**: resume-at-step is invisible
+      (it is what the durable task worker does on its automatic re-runs), and
+      abandonment is triggered by the two user actions that already exist —
+      the retry endpoint (which decides server-side whether the in-flight
+      operation is resumable or must be abandoned and redone) and the
+      "publish a new version" flow (which must abandon the superseded
+      record's in-flight operation).
 
 Operation ledger:
 
