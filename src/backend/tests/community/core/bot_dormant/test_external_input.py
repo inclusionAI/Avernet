@@ -45,11 +45,18 @@ class FakeDB:
     def orm_session(self): yield self._session
 
 
-def _insert_bot(session, bot_id="bot1", entity_id="123", owner_id="ow"):
+def _insert_bot(
+    session,
+    bot_id="bot1",
+    entity_id="123",
+    owner_id="ow",
+    env=None,
+):
     session.add(BotModel(
         bot_id=bot_id, entity_id=entity_id, entity_type="staff",
         creator_id=owner_id, owner_id=owner_id, bot_name=bot_id,
         bot_type="personal", status="ACTIVE", is_delete=0,
+        **({"env": env} if env is not None else {}),
         gmt_create=_now() - timedelta(days=30),
         gmt_modified=_now(),
     ))
@@ -352,6 +359,38 @@ def test_external_processed_when_no_internal_candidates():
         DormantNotifyLog.notify_type == "warn",
     ).all()
     assert len(logs) == 1
+
+
+@pytest.mark.unit
+def test_external_input_rejects_bot_from_another_environment(monkeypatch):
+    """A pre scan must not act on a prod-only bot referenced by external input."""
+    session = _make_session()
+    _insert_bot(session, bot_id="shared_bot", owner_id="shared_owner", env="prod")
+    row_id = _insert_external(
+        session,
+        bot_id="shared_bot",
+        owner_id="shared_owner",
+        dt_str=(date.today() - timedelta(days=M)).strftime("%Y%m%d"),
+    )
+    monkeypatch.setattr(
+        "agentclaw.community.core.bot_dormant.service.get_current_env",
+        lambda: "pre",
+    )
+
+    service = _make_service(session)
+    _run(service.process_run(dry_run=False))
+
+    row = session.query(DormantExternalInput).filter_by(id=row_id).one()
+    audit = session.query(DormantCheckAudit).filter_by(
+        source="external_input",
+        bot_id="shared_bot",
+        owner_id="shared_owner",
+    ).one()
+    assert row.processed == 0
+    assert audit.check_result == "missing_bot"
+    assert audit.action_taken == "skipped"
+    assert session.query(DormantNotifyLog).count() == 0
+    service._bot_service.stop_bot.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
