@@ -116,9 +116,10 @@ _DESCRIBE_STATUS_MESSAGES = {
     PublishStatus.SUCCESS: "Publish complete",
 }
 
-# The read-only /sync status report covers every status, including the ones
-# process() handles as advance points or rejects — keep these out of
-# _DESCRIBE_STATUS_MESSAGES so process() behavior stays unchanged.
+# Statuses ``process()`` never advances *through*: DRAFT/VALIDATING are its advance
+# points (intercepted before describe-dispatch); UPGRADED/RELEASED are terminal.
+# Both describe paths (_describe_publish_status, describe_publish) fall back through
+# this table so a superseded/offline record reports a friendly message, not an error.
 _SYNC_ONLY_STATUS_MESSAGES = {
     PublishStatus.DRAFT: "Draft, publish not started",
     PublishStatus.VALIDATING: "Verify environment ready, awaiting online publish confirmation",
@@ -412,8 +413,8 @@ class PublishFlowService(
             action="sync",
         )
 
+    @staticmethod
     def _describe_publish_status(
-        self,
         publish_record: BotPublishRecord,
         current_status: PublishStatus,
     ) -> PublishFlowResult:
@@ -430,7 +431,11 @@ class PublishFlowService(
                 action="process",
             )
 
-        message = _DESCRIBE_STATUS_MESSAGES.get(current_status)
+        # Fall back through _SYNC_ONLY_STATUS_MESSAGES: a record can reach a terminal
+        # state (UPGRADED/RELEASED) concurrently — describe it, don't raise.
+        message = _DESCRIBE_STATUS_MESSAGES.get(
+            current_status
+        ) or _SYNC_ONLY_STATUS_MESSAGES.get(current_status)
         if message is None:
             raise PublishStatusInvalidError(f"Unknown publish status: {current_status}")
         return PublishFlowResult(
