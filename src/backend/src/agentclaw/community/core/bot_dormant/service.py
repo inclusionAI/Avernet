@@ -465,16 +465,14 @@ class DormantBotService:
         )
 
     def _process_external_inputs(self, session, dry_run: bool, summary: RunSummary,
-                                 run_id: str, protected_owner_ids: frozenset[str]) -> None:
+                                 run_id: str, protected_owner_ids: frozenset[str], env: str) -> None:
         """Two-stage governance for external_input rows.
 
         Each row triggers warns daily until days_since_input >= M, then a final
         recycle. Per-row try/except isolates failures.
 
-        Audit: every branch (whitelist skip / missing bot / invalid dt /
-        future date / warn / recycle / unexpected exception) writes a
-        DormantCheckAudit row with source='external_input' so the run is
-        fully observable in the audit table.
+        Every branch writes a DormantCheckAudit row with source='external_input'
+        so the external-input run is fully observable.
         """
         from datetime import date as _date
         from datetime import datetime as _datetime
@@ -533,6 +531,7 @@ class DormantBotService:
                     .filter(
                         BotModel.bot_id == row.bot_id,
                         BotModel.owner_id == row.owner_id,
+                        BotModel.env == env,
                     )
                     .first()
                 )
@@ -839,7 +838,7 @@ class DormantBotService:
         # After internal-scan loop completes, also process external_input rows.
         try:
             self._process_external_inputs(
-                session, dry_run, summary, run_id, protected_owner_ids
+                session, dry_run, summary, run_id, protected_owner_ids, env
             )
         except Exception:
             logger.exception(
