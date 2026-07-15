@@ -280,6 +280,24 @@ class PublishResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
+class BotPublishSummary(BaseModel):
+    """Lightweight publish descriptor for the by-bot listing.
+
+    Carries only what an idempotency/reconciliation caller needs to difference
+    a bot's publish workflows (id, type, status, creation time) — no per-row
+    stage query or full config, so listing a bot's whole publish history stays
+    cheap.
+    """
+
+    id: int = Field(..., description="Internal publish ID (the workflow id)")
+    bot_id: int = Field(..., description="Bot ID this publish belongs to")
+    publish_type: str = Field(..., description="Type of publish")
+    status: str = Field(..., description="Current lifecycle status")
+    gmt_create: datetime = Field(..., description="Creation timestamp")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
 class PublishBatchResponse(BaseModel):
     """Publish batch information."""
 

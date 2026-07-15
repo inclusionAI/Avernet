@@ -51,19 +51,21 @@
   - [x] Full suite green.
 - **Depends on:** Task 1
 
-## Task 3: BaaS read-only endpoint — publishes by bot — [ ]
+## Task 3: BaaS read-only endpoint — publishes by bot — [x]
 - **Goal:** `GET /api/v1/bots/{bot_uuid}/publishes` exposing the existing
   `list_publishes` (id, publish_type, status, gmt_create), resolving
   bot_uuid → bot_id. Read-only, additive.
-- **Files:** `src/baas/.../adapters/web/routers/bot_service/publish_router.py`
-  (or management_router — follow whichever owns bot-scoped GETs),
-  `src/baas/.../api/publish_manage/_models.py` (response model),
-  BaaS route tests.
+- **Files:** `src/baas/.../adapters/web/routers/bot_service/management_router.py`
+  (bot-scoped GETs), `src/baas/.../api/publish_manage/_models.py`
+  (`BotPublishSummary`) + `__init__.py` export + `_protocols.py`,
+  `src/baas/.../core/service/publish_manage/_publish_service.py`
+  (`list_publishes_by_bot_uuid`), BaaS route + service tests.
 - **Done when:**
-  - [ ] Route returns all publishes for the bot, newest first, with
-        publish_type/status/gmt_create; 404 on unknown bot_uuid; tenant
-        isolation respected.
-  - [ ] BaaS suite green.
+  - [x] Route returns all publishes for the bot (union across the uuid's bot
+        records), newest-first by workflow id, with
+        bot_id/publish_type/status/gmt_create; 404 on unknown bot_uuid;
+        tenant isolation respected.
+  - [x] BaaS suites green (touched areas: 1599 passed; new tests: 5).
 - **Depends on:** —
 
 ## Task 4: Backend client + request-id scheme — [ ]

@@ -23,6 +23,7 @@ from secbaas.community.api.publish_manage import (
     BatchDeviceProgress,
     BatchResult,
     BatchStatus,
+    BotPublishSummary,
     DeviceCallbackRequest,
     DeviceOperationResult,
     DrainResult,
@@ -1756,6 +1757,47 @@ class DefaultPublishService(PublishService):
         end = start + page_size
 
         return results[start:end]
+
+    async def list_publishes_by_bot_uuid(
+        self,
+        tenant: str,
+        bot_uuid: str,
+    ) -> list[BotPublishSummary]:
+        """List every publish workflow tied to a bot_uuid, newest first.
+
+        Backs ``GET /api/v1/bots/{bot_uuid}/publishes``. A bot_uuid may map to
+        several bot records (distinct statuses across its lifecycle); the union
+        of their publishes is returned so an idempotency caller can difference
+        the bot's complete workflow history — including workflows already in a
+        terminal state — not just the currently-active one. Returns ``[]`` when
+        the bot_uuid is unknown (the router turns that into a 404).
+        """
+        env = get_current_env()
+        bot_records = self._bot_repo.list_by_bot_uuid(
+            bot_uuid=bot_uuid, tenant=tenant, env=env
+        )
+        if not bot_records:
+            return []
+
+        summaries: list[BotPublishSummary] = []
+        for bot_record in bot_records:
+            for publish_record in self._publish_repo.list_by_bot_id(
+                bot_id=bot_record.id, tenant=tenant, env=env
+            ):
+                summaries.append(
+                    BotPublishSummary(
+                        id=publish_record.id,
+                        bot_id=publish_record.bot_id,
+                        publish_type=publish_record.publish_type,
+                        status=publish_record.status,
+                        gmt_create=publish_record.gmt_create,
+                    )
+                )
+
+        # Newest first by workflow id (monotonic), so adopt-by-query picks the
+        # most recent matching workflow deterministically.
+        summaries.sort(key=lambda s: s.id, reverse=True)
+        return summaries
 
     # ====================================================================
     # EXECUTION ENGINE - BATCH PROCESSING AND DEVICE DRAIN
