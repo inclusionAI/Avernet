@@ -377,11 +377,7 @@ async def ingest_otlp_traces(
 
         attrs = {**resource_attrs, **_attrs_to_dict(span.get("attributes"))}
         trace_id = span.get("traceId")
-        current = roots.get(trace_id)
-        if (
-            attrs.get("gen_ai.span.kind") == "CHAT"
-            or current is None
-        ):
+        if attrs.get("gen_ai.span.kind") == "CHAT":
             roots[trace_id] = (span, resource_attrs)
 
     for span, resource_attrs in roots.values():
