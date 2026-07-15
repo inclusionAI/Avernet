@@ -977,6 +977,12 @@ class BaasService:  # pragma: no cover
         config = BotConfig(
             entity_id=bot.get("entity_id", ""),
             entity_type=bot.get("entity_type", "staff"),
+            # All-auto approval (#197): the teclaw create/update payloads used to
+            # omit this (BotConfig default False), making the client-side approve
+            # load-bearing. Under all-auto, BaaS approves server-side and every
+            # client approve call is removed, so this must be True for both the
+            # teclaw create and update paths (both build through here).
+            auto_approve_publish=True,
             deploy_config=deploy_config,
         )
         payload: Dict[str, Any] = {
@@ -1041,6 +1047,10 @@ class BaasService:  # pragma: no cover
         payload = {
             "operator": operator,
             "request_id": request_id,
+            # All-auto approval (#197): destroy previously relied on a client-side
+            # approve after the call; under all-auto BaaS approves the DESTROY
+            # workflow server-side and the client approve is removed.
+            "auto_approve_publish": True,
         }
 
         logger.info(

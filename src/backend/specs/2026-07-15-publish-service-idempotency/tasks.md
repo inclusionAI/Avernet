@@ -112,19 +112,20 @@
 
 # Group B — All-auto approval + release legs
 
-## Task 6: Auto-approve on every mutation payload — [ ]
+## Task 6: Auto-approve on every mutation payload — [x]
 - **Goal:** teclaw create/update `BotConfig` and the destroy client payload
   request `auto_approve_publish=True`; every other mutation already does.
   Client approves still in place (they become server-ignored no-ops — safe
   overlap, no behavior cliff).
 - **Files:** `core/service_bot/services/baas_service.py`
-  (`_build_teclaw_payload` / `create_teclaw_bot` / `update_teclaw_bot` /
-  `destroy_bot`), payload unit tests.
+  (`_build_teclaw_payload` covers teclaw create+update; `destroy_bot`),
+  payload unit tests.
 - **Done when:**
-  - [ ] Payload tests assert `auto_approve_publish=True` (or
-        `config.auto_approve_publish=True`) on create/update/teclaw-create/
-        teclaw-update/stop/scale/destroy/restart-devices payloads.
-  - [ ] Full suite green (endpoint suites unchanged — approves still sent).
+  - [x] Confirmed create_bot/upgrade_bot/stop_bot default True, scale passes
+        True (scale_mixin), restart_devices hardcoded True; teclaw + destroy
+        now set True. Payload tests assert `config.auto_approve_publish=True`
+        (teclaw) and `auto_approve_publish=True` (destroy). (22 passed.)
+  - [x] Full suite green (endpoint suites unchanged — approves still sent).
 - **Depends on:** —
 
 ## Task 7: Delete client approves; MCP refresh onto poll success — [ ]
