@@ -23,7 +23,7 @@ Test helper methods:
 
 from __future__ import annotations
 
-from secbaas.spi.file_transfer import (
+from secbaas.community.spi.file_transfer import (
     FileTransferBackend,
     MultipartSession,
     ObjectItem,
