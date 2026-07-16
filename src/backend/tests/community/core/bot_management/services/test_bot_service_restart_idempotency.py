@@ -301,6 +301,61 @@ class TestRestartGuardOrchestration:
         stop.assert_not_called()
         start.assert_not_called()
 
+    def test_active_bot_with_stopped_arca_binding_restarts_with_preserved_provider(self):
+        """A stopped ARCA runtime can be replaced without changing providers."""
+        repo = FakeRestartLockRepo()
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="arca",
+            status=DeviceBindingStatus.STOPPED,
+        )
+        svc = _make_service(repo, device_provider=device_service)
+        bot = _make_bot(status="ACTIVE", binding_id=42)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch.object(svc, "stop_bot", return_value=True) as stop, \
+             patch.object(svc, "start_bot", return_value=bot) as start:
+            result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result == bot
+        stop.assert_called_once()
+        start.assert_called_once()
+        assert start.call_args.kwargs["device_provider"] == "arca"
+
+    def test_active_bot_with_stopped_baas_binding_restarts_in_place(self):
+        """A stopped BaaS runtime keeps its binding and uses the update path."""
+        repo = FakeRestartLockRepo()
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="baas",
+            device_id="BOT-uuid-9",
+            status=DeviceBindingStatus.STOPPED,
+        )
+        svc = _make_service(
+            repo,
+            device_provider=device_service,
+            baas_service_provider=lambda: MagicMock(),
+        )
+        bot = _make_bot(status="ACTIVE", binding_id=42)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch.object(svc, "_restart_bot_baas", return_value=bot) as restart_baas, \
+             patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot") as start:
+            result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result == bot
+        restart_baas.assert_called_once_with(
+            bot_id="bot001",
+            user_id="user001",
+            binding_id=42,
+            bot=bot,
+        )
+        stop.assert_not_called()
+        start.assert_not_called()
+
     def test_failed_bot_without_binding_is_rejected(self):
         """A failed bot without provider history must not re-enter create rollout."""
         repo = FakeRestartLockRepo()
