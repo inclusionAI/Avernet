@@ -5,12 +5,17 @@ use axum::{
     body::{Body, Bytes, to_bytes},
     http::{Request, StatusCode},
 };
+use bcs_auth_api::{AuthPluginChain, AuthPrincipal};
+use bcs_auth_local::StaticAuthPlugin;
 use bcs_channel_api::{
     ChannelHttpIngressPort, ChannelHttpIngressRegistry, ChannelHttpMethod, ChannelHttpRequest,
     ChannelHttpResponse, ChannelHttpRouteSpec, ChannelInboundSink, ChannelIngressError,
     ChannelProvider, ChannelProviderRegistry, ChannelProviderResult,
 };
-use bcs_http::{router::build_router, state::HttpAppState};
+use bcs_http::{
+    router::build_router,
+    state::{ChainUserIdentityPort, HttpAppState},
+};
 use bcs_service_api::{
     ServiceResult,
     application::InboundMessage,
@@ -21,6 +26,17 @@ use bcs_service_api::{
 use bcs_services_container::Services;
 use tokio::sync::Mutex;
 use tower::ServiceExt;
+
+fn static_auth_chain(staff_no: &str) -> Arc<AuthPluginChain> {
+    let principal = AuthPrincipal {
+        user_id: Some(staff_no.to_string()),
+        user_name: Some(staff_no.to_string()),
+        ..Default::default()
+    };
+    Arc::new(AuthPluginChain::new(vec![Box::new(
+        StaticAuthPlugin::with_principal(principal),
+    )]))
+}
 
 #[tokio::test]
 async fn provider_declared_http_route_is_mounted_and_dispatched() {
@@ -98,6 +114,13 @@ async fn channel_binding_management_routes_require_human_identity() {
             .body(Body::empty())
             .unwrap(),
         Request::builder()
+            .method("GET")
+            .uri(
+                "/channels/bindings/by-target?target_type=bot&target_id=bot_1&channel_type=dingtalk",
+            )
+            .body(Body::empty())
+            .unwrap(),
+        Request::builder()
             .method("PATCH")
             .uri("/channels/bindings/binding_1")
             .header("content-type", "application/json")
@@ -118,6 +141,33 @@ async fn channel_binding_management_routes_require_human_identity() {
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body["error"], "valid human identity is required");
     }
+}
+
+#[tokio::test]
+async fn channel_binding_target_query_is_mounted_for_human_identity() {
+    let chain = static_auth_chain("alice");
+    let app = build_router(
+        HttpAppState::new(Services::noop())
+            .with_user_identity(Arc::new(ChainUserIdentityPort::new(chain))),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(
+                    "/channels/bindings/by-target?target_type=group&target_id=group_1&channel_type=dingtalk",
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body, serde_json::json!({ "items": [] }));
 }
 
 #[derive(Clone)]

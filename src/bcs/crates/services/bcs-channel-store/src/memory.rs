@@ -7,8 +7,8 @@ use tokio::sync::RwLock;
 use tracing::info;
 
 use bcs_domain::{
-    BindingStatus, ChannelBinding, ChannelType, ConversationSessionMap, ImParticipantMap,
-    SessionScope,
+    BindingStatus, BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap,
+    ImParticipantMap, SessionScope,
 };
 use bcs_service_api::ServiceResult;
 use bcs_service_api::port::repo::{
@@ -106,6 +106,24 @@ impl ChannelBindingRepoPort for MemoryChannelBindingRepo {
 
     async fn list(&self) -> ServiceResult<Vec<ChannelBinding>> {
         Ok(self.bindings.read().await.clone())
+    }
+
+    async fn list_by_target(
+        &self,
+        target: &BindingTarget,
+        channel_type: Option<&str>,
+    ) -> ServiceResult<Vec<ChannelBinding>> {
+        let bindings = self.bindings.read().await;
+        Ok(bindings
+            .iter()
+            .filter(|binding| {
+                binding.target == *target
+                    && channel_type
+                        .map(|expected| binding.channel_type == expected)
+                        .unwrap_or(true)
+            })
+            .cloned()
+            .collect())
     }
 
     async fn set_status(&self, id: &str, active: bool) -> ServiceResult<()> {

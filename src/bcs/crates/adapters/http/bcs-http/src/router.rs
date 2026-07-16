@@ -119,6 +119,10 @@ fn build_api_routes() -> Router<HttpAppState> {
             get(routes::channel::list_bindings).post(routes::channel::create_binding),
         )
         .route(
+            "/channels/bindings/by-target",
+            get(routes::channel::list_bindings_by_target),
+        )
+        .route(
             "/channels/bindings/{id}",
             patch(routes::channel::set_binding_status)
                 .delete(routes::channel::delete_binding),

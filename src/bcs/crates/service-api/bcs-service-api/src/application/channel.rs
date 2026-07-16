@@ -163,6 +163,11 @@ pub trait ChannelService: Send + Sync {
         cmd: CreateBindingCommand,
     ) -> Result<ChannelBinding, ChannelUseCaseError>;
     async fn list_bindings(&self) -> Result<Vec<ChannelBinding>, ChannelUseCaseError>;
+    async fn list_bindings_by_target(
+        &self,
+        target: BindingTarget,
+        channel_type: Option<ChannelType>,
+    ) -> Result<Vec<ChannelBinding>, ChannelUseCaseError>;
     async fn set_binding_status(&self, id: &str, active: bool)
         -> Result<(), ChannelUseCaseError>;
     async fn update_binding_config(
