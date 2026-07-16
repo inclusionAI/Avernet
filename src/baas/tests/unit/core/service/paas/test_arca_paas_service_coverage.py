@@ -138,7 +138,13 @@ def _make_sandbox_info(**overrides):
         description="test desc",
         resource_spec={"cpu": 2},
         mount_points=[{"id": "m1"}],
-        storage={"storage_id": "stor-001"},
+        storage={
+            "type": "NAS",
+            "path": "/nas",
+            "storage_id": "stor-001",
+            "quota": "1Gi",
+            "permission": "0777",
+        },
     )
     defaults.update(overrides)
     info = MagicMock()
