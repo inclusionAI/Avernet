@@ -273,13 +273,20 @@ class ClaudeCodeSessionAdapter(SessionService):
     ) -> list[Session]:
         """List sessions matching the request filter."""
         token = auth.token if auth is not None else None
-        log.info("[list] user_id=%s agent_id=%s", request.user_id, request.agent_id)
+        has_session_key = bool(request.session_key and request.session_key.strip())
+        log.info(
+            "[list] user_id=%s agent_id=%s has_session_key=%s",
+            request.user_id,
+            request.agent_id,
+            has_session_key,
+        )
 
         raw_sessions = await self._port.sessions_list(
             token=token,
             offset=request.offset,
             limit=request.limit,
             agent_id=request.agent_id,
+            session_key=request.session_key,
         )
 
         sessions: list[Session] = []
