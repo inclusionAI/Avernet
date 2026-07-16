@@ -2014,6 +2014,8 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                     str(e),
                 ),
             ) from e
+        except DeviceFacadeException:
+            raise
         except PaasError as e:
             self._logger.error(
                 f"pull_file failed for {paas_device_id}: {e.code} - {e.message}"
@@ -2120,6 +2122,8 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                     str(e),
                 ),
             ) from e
+        except DeviceFacadeException:
+            raise
         except PaasError as e:
             self._logger.error(
                 f"push_file failed for {paas_device_id}: {e.code} - {e.message}"
