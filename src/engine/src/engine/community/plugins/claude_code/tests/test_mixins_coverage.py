@@ -948,6 +948,16 @@ class TestSessionMixin:
         impl, _ = _impl(c)
         assert await impl.sessions_list() == [{"key": "a"}]
 
+    async def test_list_nested_none_sessions_returns_empty(self, caplog):
+        c = _FakeRelayClient()
+        c.set_response("sessions.list", _ok({"sessions": None}))
+        impl, _ = _impl(c)
+
+        with caplog.at_level("WARNING", logger="claude-code-community-port"):
+            assert await impl.sessions_list() == []
+
+        assert "[sessions_list] malformed nested sessions shape type=NoneType" in caplog.messages
+
     async def test_list_non_dict_non_list_returns_empty(self):
         c = _FakeRelayClient()
         c.set_response("sessions.list", _ok("raw"))
