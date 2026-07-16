@@ -25,7 +25,17 @@ from agentclaw.community.core.caller_identity.contracts import (
     McpCallType,
     McpCallTypeUpdateResult,
 )
-from agentclaw.community.core.caller_identity.protocols import CallerMcpSyncProtocol
+from agentclaw.community.core.caller_identity.credential import (
+    CALLER_CHAT_TASK,
+    CALLER_CREDENTIAL_REQUEST_INVALID,
+    AuthContext,
+    CallerCredentialError,
+)
+from agentclaw.community.core.caller_identity.protocols import (
+    CallerMcpSyncProtocol,
+    CallerRuntimeUpdaterProtocol,
+    CallerTokenProviderProtocol,
+)
 from agentclaw.community.core.caller_identity.repository import (
     CallerIdentityEngineChangedError,
     CallerIdentityLockMismatchError,
@@ -33,6 +43,7 @@ from agentclaw.community.core.caller_identity.repository import (
 )
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
 logger = get_logger()
@@ -233,6 +244,48 @@ class CallerIdentityService:
             publish_id=publish_id,
             bot_call_type=bot_call_type,
             should_exchange_caller_token=should_exchange,
+        )
+
+    def exchange_caller_identity(
+        self,
+        *,
+        iam_token: str,
+        caller_user_id: str,
+        bot_id: str,
+        owner_user_id: str,
+        passport: PassportPlugin,
+        token_provider: CallerTokenProviderProtocol,
+        runtime_updater: CallerRuntimeUpdaterProtocol,
+        stage: str,
+        publish_id: int | None,
+    ) -> None:
+        """Exchange and install the Caller credential for one chat request."""
+        delegation_credential = passport.query_token(bot_id, owner_user_id) or ""
+        if not delegation_credential:
+            raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
+
+        passport_detail = passport.query_agent_passport(bot_id, owner_user_id)
+        agent_code_value = (
+            passport_detail.get("agent_code")
+            if isinstance(passport_detail, Mapping)
+            else None
+        )
+        agent_code = agent_code_value if isinstance(agent_code_value, str) else ""
+        caller_token = token_provider.exchange(
+            auth_context=AuthContext(user_id=caller_user_id),
+            iam_token=iam_token,
+            delegation_credential=delegation_credential,
+            task_metadata=CALLER_CHAT_TASK,
+        )
+        runtime_updater.update_caller_identity(
+            bot_id=bot_id,
+            owner_user_id=owner_user_id,
+            caller_user_id=caller_user_id,
+            caller_token=caller_token,
+            agent_pass_token=delegation_credential,
+            agent_code=agent_code,
+            stage=stage,
+            publish_id=publish_id,
         )
 
     def _compensate_after_sync_failure(

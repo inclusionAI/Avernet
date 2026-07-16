@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -15,6 +16,7 @@ from agentclaw.community.core.caller_identity.contracts import (
     DraftCallTypeMutationResult,
     McpCallType,
 )
+from agentclaw.community.core.caller_identity.credential import CallerToken
 from agentclaw.community.core.caller_identity.repository import (
     CallerIdentityEngineChangedError,
     CallerIdentityLockMismatchError,
@@ -75,6 +77,46 @@ def test_iam_context_reads_only_bot_aggregate_call_type() -> None:
     assert context.bot_call_type is McpCallType.CALLER
     deps.repository.list_draft_call_types.assert_not_called()
     deps.mcp_provider.collect_bot_active_mcps.assert_not_called()
+
+
+def test_exchange_caller_identity_uses_passport_and_installs_opaque_token() -> None:
+    service, _ = _service(bot=_bot(call_type="caller"))
+    passport = MagicMock()
+    passport.query_token.return_value = "agent-pass-token"
+    passport.query_agent_passport.return_value = {"agent_code": "agent-code"}
+    token_provider = MagicMock()
+    caller_token = CallerToken(
+        access_token="caller-token",
+        subject_user_id="caller-1",
+        expires_at=datetime.now(),
+        fingerprint="fingerprint",
+    )
+    token_provider.exchange.return_value = caller_token
+    runtime_updater = MagicMock()
+
+    service.exchange_caller_identity(
+        iam_token="iam-token",
+        caller_user_id="caller-1",
+        bot_id="bot-1",
+        owner_user_id="owner-1",
+        passport=passport,
+        token_provider=token_provider,
+        runtime_updater=runtime_updater,
+        stage="draft",
+        publish_id=None,
+    )
+
+    token_provider.exchange.assert_called_once()
+    runtime_updater.update_caller_identity.assert_called_once_with(
+        bot_id="bot-1",
+        owner_user_id="owner-1",
+        caller_user_id="caller-1",
+        caller_token=caller_token,
+        agent_pass_token="agent-pass-token",
+        agent_code="agent-code",
+        stage="draft",
+        publish_id=None,
+    )
 
 
 @pytest.mark.asyncio

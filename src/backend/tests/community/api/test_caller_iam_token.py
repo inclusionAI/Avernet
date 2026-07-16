@@ -41,9 +41,7 @@ class _Request:
 
 
 @pytest.mark.asyncio
-async def test_iam_route_exchanges_and_installs_caller_token_without_returning_it() -> (
-    None
-):
+async def test_iam_route_delegates_caller_exchange_without_returning_token() -> None:
     identity = MagicMock()
     identity.get_iam_token_context.return_value = CallerIamTokenContext(
         bot_id="bot-1",
@@ -93,4 +91,8 @@ async def test_iam_route_exchanges_and_installs_caller_token_without_returning_i
 
     assert response.status_code == 200
     assert json.loads(response.body) == {"success": True, "iam_token": "iam-token"}
-    runtime_updater.update_caller_identity.assert_called_once()
+    identity.exchange_caller_identity.assert_called_once()
+    exchange_kwargs = identity.exchange_caller_identity.call_args.kwargs
+    assert exchange_kwargs["caller_user_id"] == "caller-1"
+    assert exchange_kwargs["token_provider"] is token_provider
+    assert exchange_kwargs["runtime_updater"] is runtime_updater

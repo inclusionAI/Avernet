@@ -240,7 +240,7 @@ class CallerIdentityRepository:
                 .order_by(BotMcpCallConfigModel.server_code.asc())
                 .all()
             )
-        return {row.server_code: McpCallType.parse(row.call_type) for row in rows}
+            return {row.server_code: McpCallType.parse(row.call_type) for row in rows}
 
     @staticmethod
     def _aggregate(

@@ -4,21 +4,25 @@ The context read uses the local database and lock.  The PATCH case pins its
 HTTP route and response mapping; the core service unit tests cover its real
 transaction, lock, and Agent Principal synchronization branches.
 """
+
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
+from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
     CollaboratorLockService,
 )
-from agentclaw.community.core.caller_identity.contracts import (
-    McpCallType,
-    McpCallTypeUpdateResult,
+from agentclaw.community.core.skill_center.services.repositories import (
+    SkillSetRepository,
 )
-from agentclaw.community.core.caller_identity.service import CallerIdentityService
+from agentclaw.community.utils.env_utils import get_current_env
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot
-from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
+from tests.community.framework import (
+    CaseInput,
+    ExpectError,
+    ExpectSuccess,
+    endpoint_test,
+)
 
 
 _OWNER_ID = "caller_identity_owner"
@@ -39,26 +43,38 @@ def _seed_editable_service_bot(world) -> None:
         bot_type="service",
         status="ACTIVE",
     )
-    lock = world.get(CollaboratorLockService).acquire_lock(
+    world.get(CollaboratorLockService).acquire_lock(
         _BOT_ID,
         _OWNER_ID,
         _OWNER_ID,
     )
-    assert lock is not None and lock.id == 1
 
 
-def _seed_mutable_caller_identity(_world) -> None:
-    patch.object(
-        CallerIdentityService,
-        "update_mcp_call_type",
-        AsyncMock(
-            return_value=McpCallTypeUpdateResult(
-                server_code=_SERVER_CODE,
-                call_type=McpCallType.CALLER,
-                bot_call_type=McpCallType.CALLER,
-            )
-        ),
-    ).start()
+def _seed_mutable_caller_identity(world) -> None:
+    _seed_editable_service_bot(world)
+    bot = world.get(BotRepository).get_by_id(_BOT_ID)
+    engine_type = str(bot["active_engine"])
+    skill_set = world.get(SkillSetRepository).create(
+        {
+            "name": "Caller identity test set",
+            "description": "",
+            "user_id": _OWNER_ID,
+            "bolt_id": _BOT_ID,
+            "is_default": False,
+            "is_builtin": False,
+            "is_active": 1,
+            "engine_type": engine_type,
+        }
+    )
+    world.get(SkillSetRepository).add_mcp_to_set(
+        skill_set["id"],
+        _SERVER_CODE,
+        "Caller identity MCP",
+        description="",
+        icon="",
+        user_id=_OWNER_ID,
+        env=get_current_env(),
+    )
 
 
 def _assert_mcp_call_type_updated(response, world) -> None:
@@ -139,7 +155,10 @@ def update_mcp_call_type_happy():
     path="/api/bots/{bot_id}/mcps/{server_code}/call-type",
     scenario="error",
     input=CaseInput(
-        path_params={"bot_id": "missing_caller_identity_bot", "server_code": _SERVER_CODE},
+        path_params={
+            "bot_id": "missing_caller_identity_bot",
+            "server_code": _SERVER_CODE,
+        },
         headers={"x-user-id": _OWNER_ID},
         json_body={"call_type": "caller", "lock_epoch": 1},
     ),

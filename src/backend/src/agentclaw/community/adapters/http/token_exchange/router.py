@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Query, Request, Response
@@ -6,11 +6,9 @@ from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.api.caller_credential import (
-    CALLER_CHAT_TASK,
     CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
     CALLER_CREDENTIAL_REQUEST_INVALID,
     CALLER_OUTBOUND_UPDATE_FAILED,
-    AuthContext,
     CallerCredentialError,
     CallerRuntimeUpdater,
     CallerTokenProvider,
@@ -75,9 +73,7 @@ async def _resolve_current_user(request: Request):
         AuthPlugin,
         CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
     )
-    identity = await auth_plugin.resolve_user_from_request(
-        _build_auth_context(request)
-    )
+    identity = await auth_plugin.resolve_user_from_request(_build_auth_context(request))
     return AuthenticatedUser(
         id=identity.id,
         staffId=identity.staffId,
@@ -170,7 +166,8 @@ async def get_iam_token(
         )
         return _success_iam_response(iam_token, headers)
     try:
-        token_context = caller_identity.get_iam_token_context(
+        token_context = await asyncio.to_thread(
+            caller_identity.get_iam_token_context,
             bot_id=bot_id,
             stage=stage,
             publish_id=publish_id,
@@ -209,48 +206,25 @@ async def get_iam_token(
             PassportPlugin,
             CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
         )
-        delegation_credential = (
-            passport.query_token(bot_id, token_context.owner_id) or ""
-        )
-        if not delegation_credential:
-            raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
-        passport_detail = passport.query_agent_passport(
-            bot_id,
-            token_context.owner_id,
-        )
-        agent_code_value = (
-            passport_detail.get("agent_code")
-            if isinstance(passport_detail, Mapping)
-            else None
-        )
-        agent_code = (
-            agent_code_value
-            if isinstance(agent_code_value, str)
-            else ""
-        )
         provider = _get_optional_dependency(
             request,
             CallerTokenProvider,
             CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
-        )
-        caller_token = provider.exchange(
-            auth_context=AuthContext(user_id=current_user.staffId),
-            iam_token=iam_token,
-            delegation_credential=delegation_credential,
-            task_metadata=CALLER_CHAT_TASK,
         )
         updater = _get_optional_dependency(
             request,
             CallerRuntimeUpdater,
             CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
         )
-        updater.update_caller_identity(
+        await asyncio.to_thread(
+            caller_identity.exchange_caller_identity,
+            iam_token=iam_token,
+            caller_user_id=current_user.staffId,
             bot_id=bot_id,
             owner_user_id=token_context.owner_id,
-            caller_user_id=current_user.staffId,
-            caller_token=caller_token,
-            agent_pass_token=delegation_credential,
-            agent_code=agent_code,
+            passport=passport,
+            token_provider=provider,
+            runtime_updater=updater,
             stage=stage.value,
             publish_id=publish_id,
         )

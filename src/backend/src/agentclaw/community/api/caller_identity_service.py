@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+from agentclaw.community.core.caller_identity.protocols import (
+    CallerRuntimeUpdaterProtocol,
+    CallerTokenProviderProtocol,
+)
 from agentclaw.community.core.caller_identity.contracts import (
     CALLER_IDENTITY_CAPABILITY,
     CallerCallTypeInvalidError,
@@ -19,6 +23,7 @@ from agentclaw.community.core.caller_identity.contracts import (
     McpCallType,
     McpCallTypeUpdateResult,
 )
+from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
 @runtime_checkable
@@ -62,6 +67,20 @@ class CallerIdentityServiceProtocol(Protocol):
         stage: CallerIdentityStage,
         publish_id: int | None = None,
     ) -> CallerIamTokenContext: ...
+
+    def exchange_caller_identity(
+        self,
+        *,
+        iam_token: str,
+        caller_user_id: str,
+        bot_id: str,
+        owner_user_id: str,
+        passport: PassportPlugin,
+        token_provider: CallerTokenProviderProtocol,
+        runtime_updater: CallerRuntimeUpdaterProtocol,
+        stage: str,
+        publish_id: int | None,
+    ) -> None: ...
 
 
 __all__ = [

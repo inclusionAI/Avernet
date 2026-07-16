@@ -5,6 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
 
+from agentclaw.community.core.caller_identity.credential import (
+    AuthContext,
+    CallerToken,
+)
+
 
 @runtime_checkable
 class CallerMcpSyncProtocol(Protocol):
@@ -23,4 +28,40 @@ class CallerMcpSyncProtocol(Protocol):
     ) -> Mapping[str, Any]: ...
 
 
-__all__ = ["CallerMcpSyncProtocol"]
+@runtime_checkable
+class CallerTokenProviderProtocol(Protocol):
+    """Issue an opaque Caller execution credential."""
+
+    def exchange(
+        self,
+        *,
+        auth_context: AuthContext,
+        iam_token: str,
+        delegation_credential: str,
+        task_metadata: Mapping[str, str],
+    ) -> CallerToken: ...
+
+
+@runtime_checkable
+class CallerRuntimeUpdaterProtocol(Protocol):
+    """Install the exchanged Caller credential on the runtime."""
+
+    def update_caller_identity(
+        self,
+        *,
+        bot_id: str,
+        owner_user_id: str,
+        caller_user_id: str,
+        caller_token: CallerToken,
+        agent_pass_token: str,
+        agent_code: str,
+        stage: str,
+        publish_id: int | None,
+    ) -> None: ...
+
+
+__all__ = [
+    "CallerMcpSyncProtocol",
+    "CallerRuntimeUpdaterProtocol",
+    "CallerTokenProviderProtocol",
+]

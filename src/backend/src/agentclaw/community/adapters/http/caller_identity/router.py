@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -32,7 +33,7 @@ router = APIRouter(prefix="/api/bots", tags=["caller-identity"])
     "/{bot_id}/caller-context",
     response_model=CallerContextResponse,
 )
-def get_caller_context(
+async def get_caller_context(
     bot_id: str,
     query: Annotated[CallerContextQuery, Query()],
     user: AuthenticatedUser = Depends(get_current_user),
@@ -48,7 +49,8 @@ def get_caller_context(
     # COSEC: the actor is derived only from the authenticated request context;
     # query/path values cannot replace the current identity.
     try:
-        result = service.get_context(
+        result = await asyncio.to_thread(
+            service.get_context,
             bot_id=bot_id,
             actor_id=user.staffId,
             stage=query.stage,
