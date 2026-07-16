@@ -37,20 +37,22 @@ class ClaudeCodeSessionPort(Protocol):
         offset: int = 0,
         limit: int = 50,
         agent_id: str | None = None,
+        session_key: str | None = None,
     ) -> list[dict]:
         """Call ``sessions.list`` and return raw session dicts.
 
-        Pagination (``offset`` / ``limit``) and ``agent_id`` filtering are
-        forwarded as request params. Returns ``[]`` on gateway error.
+        ``agent_id`` filtering and exact, non-blank ``session_key`` filtering
+        are applied locally before pagination. Returns ``[]`` on gateway error.
 
         Args:
             token: MCP token for per-token pool routing; None -> default client.
             offset: Pagination offset (0-based).
             limit: Page size (default 50).
             agent_id: Optional agent filter.
+            session_key: Optional exact session-key filter; blank values are ignored.
 
         Returns:
-            List of raw session dicts (already paginated by the relay).
+            List of raw session dicts after local filtering and pagination.
         """
         ...
 
