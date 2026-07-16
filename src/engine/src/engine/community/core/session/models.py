@@ -68,6 +68,7 @@ class SessionCreateRequest(BaseModel):
     cwd: str | None = None
     uuid: str | None = None
     extInfo: dict[str, Any] | None = None
+    payload: dict[str, Any] | None = None
 
 
 class SessionDeleteRequest(BaseModel):
