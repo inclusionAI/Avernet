@@ -106,7 +106,7 @@ async def wait_for_publish_status(
     api: APITestHelper,
     publish_id: int,
     target_statuses: set[str],
-    timeout_seconds: float = 0.1,
+    timeout_seconds: float = 5.0,
     poll_interval: float = 0.1,
 ) -> str:
     """Poll until publish reaches one of the target statuses."""
