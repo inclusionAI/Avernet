@@ -1726,6 +1726,51 @@ class TestChatInjectDispatch:
         assert response.ok is False
         assert response.error.code == "METHOD_NOT_SUPPORTED"
         assert "no handler" in response.error.message
+        assert server._session_subscribers == {}
+        assert server._conn_sessions == {}
+
+    @pytest.mark.asyncio
+    async def test_inject_failure_keeps_existing_auto_subscription(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        fake_engine.chat = _FakeChatServiceWithInject(return_value={
+            "ok": False,
+            "error": {"code": "METHOD_NOT_SUPPORTED", "message": "no handler"},
+        })
+        server._session_subscribers = {"sk-1": {"conn-1"}}
+        server._conn_sessions = {"conn-1": {"sk-1"}}
+
+        response, _events = await server._handle_request(
+            websocket=MagicMock(),
+            conn_id="conn-1",
+            request=_req("chat.inject", {"sessionKey": "sk-1", "message": "hi"}),
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is False
+        assert server._session_subscribers == {"sk-1": {"conn-1"}}
+        assert server._conn_sessions == {"conn-1": {"sk-1"}}
+
+    @pytest.mark.asyncio
+    async def test_inject_dispatch_exception_removes_new_auto_subscription(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        EngineManager.get_instance()._engine = "openclaw"
+        server._forward_chat_inject_with_session_autocreate = AsyncMock(
+            side_effect=RuntimeError("relay down"),
+        )
+
+        response, _events = await server._handle_request(
+            websocket=MagicMock(),
+            conn_id="conn-1",
+            request=_req("chat.inject", {"sessionKey": "sk-1", "message": "hi"}),
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is False
+        assert response.error.code == "INTERNAL_ERROR"
+        assert server._session_subscribers == {}
+        assert server._conn_sessions == {}
 
     @pytest.mark.asyncio
     async def test_inject_service_exception_surfaces_internal_error(

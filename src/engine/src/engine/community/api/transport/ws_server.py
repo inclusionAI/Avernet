@@ -458,9 +458,13 @@ class EngineWebSocketServer:
                     k: v for k, v in params.items() if k in allowed and v is not None
                 }
                 session_key = request.params.get("sessionKey")
+                auto_subscription_added = False
                 if session_key and request.params.get("message"):
                     # An inject event may arrive before its RPC response. Subscribe before
                     # dispatching so the originating connection cannot miss that event.
+                    auto_subscription_added = conn_id not in self._session_subscribers.get(
+                        session_key, set()
+                    )
                     await self._subscribe_conn_to_session(conn_id, session_key)
                 # 优先调用 active engine 的 chat plugin.inject (claude_code 走 RPC 透传到 relay,
                 # 同时给业务层提供统一入口); 不实现 inject 的 engine (openclaw 走 gateway
@@ -469,9 +473,27 @@ class EngineWebSocketServer:
                 # __dict__ 检查, 避免 MagicMock 自动属性误触发新分支.
                 # 排查日志关键字: [ws_server chat.inject]
                 chat_plugin = EngineManager.get_instance().chat
-                if chat_plugin is not None and _chat_plugin_supports_inject(chat_plugin):
-                    return await self._handle_chat_inject(conn_id, request, request.params)
-                return await self._forward_chat_inject_with_session_autocreate(conn_id, request)
+                try:
+                    if chat_plugin is not None and _chat_plugin_supports_inject(chat_plugin):
+                        result = await self._handle_chat_inject(
+                            conn_id, request, request.params
+                        )
+                    else:
+                        result = await self._forward_chat_inject_with_session_autocreate(
+                            conn_id, request
+                        )
+                except Exception:
+                    if auto_subscription_added:
+                        # Preserve an earlier successful inject subscription for this session.
+                        self._unsubscribe_conn_from_session(conn_id, session_key)
+                        self._drop_idle_inject_listeners()
+                    raise
+
+                if auto_subscription_added and not result[0].ok:
+                    # Failed injects must not retain subscriptions created only for this request.
+                    self._unsubscribe_conn_from_session(conn_id, session_key)
+                    self._drop_idle_inject_listeners()
+                return result
             else:
                 return await self._forward_request(conn_id, request)
         except Exception as e:
