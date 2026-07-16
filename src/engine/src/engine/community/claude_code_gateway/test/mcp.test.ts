@@ -104,6 +104,74 @@ describe('McpStore', () => {
     assert.equal(s.list().length, 0);
   });
 
+  it('stdio create with env round-trips through disk intact', async () => {
+    const s = new McpStore(p, { writeDebounceMs: 0 });
+    // SKILL_ROOT, DATABASE_MODE and CLAWWEB_API_URL come from ClawMind's own
+    // configs/application.yaml / process.cwd() fallback, not from mcporter.json env
+    const env = {
+      MCP_TRANSPORT: 'stdio',
+      CCT_SOP_MCP_SERVER_MODE: 'prod',
+    };
+    const created = s.create({
+      serverCode: 'clawmind',
+      type: 'stdio',
+      command: 'node',
+      args: ['/home/admin/clawmind-mcp/dist/esm/platform/mcp-entry.js'],
+      env,
+      headers: {},
+      timeout_seconds: 30,
+      enabled: true,
+      description: 'ClawMind workflow engine',
+    });
+    assert.equal(created.serverCode, 'clawmind');
+    assert.equal(created.type, 'stdio');
+    assert.equal(created.command, 'node');
+    assert.deepEqual(created.args, ['/home/admin/clawmind-mcp/dist/esm/platform/mcp-entry.js']);
+    assert.deepEqual(created.env, env);
+    assert.equal('CallerToken' in created.headers, false, 'stdio should not get CallerToken on create');
+
+    await s.flush();
+    const s2 = new McpStore(p, { writeDebounceMs: 0 });
+    const loaded = s2.get('clawmind');
+    assert.ok(loaded);
+    assert.equal(loaded.type, 'stdio');
+    assert.equal(loaded.command, 'node');
+    assert.deepEqual(loaded.args, ['/home/admin/clawmind-mcp/dist/esm/platform/mcp-entry.js']);
+    assert.deepEqual(loaded.env, env, 'env must survive disk round-trip');
+    assert.equal('CallerToken' in loaded.headers, false, 'stdio should not get CallerToken after reload');
+
+    // Verify on-disk JSON has the env keys
+    const disk = JSON.parse(fs.readFileSync(p, 'utf8'));
+    const entry = disk.mcpServers.clawmind;
+    assert.ok(entry.env);
+    assert.equal(entry.env.MCP_TRANSPORT, 'stdio');
+    assert.equal(entry.env.CCT_SOP_MCP_SERVER_MODE, 'prod');
+    // SKILL_ROOT, DATABASE_MODE, CLAWWEB_API_URL not in mcporter env
+    assert.equal('SKILL_ROOT' in entry.env, false);
+    assert.equal('DATABASE_MODE' in entry.env, false);
+    assert.equal('CLAWWEB_API_URL' in entry.env, false);
+  });
+
+  it('stdio update preserves env and does not inject CallerToken', async () => {
+    const s = new McpStore(p, { writeDebounceMs: 0 });
+    s.create({
+      serverCode: 'clawmind',
+      type: 'stdio',
+      command: 'node',
+      args: ['/home/admin/clawmind-mcp/dist/esm/platform/mcp-entry.js'],
+      env: { MCP_TRANSPORT: 'stdio', CCT_SOP_MCP_SERVER_MODE: 'prod' },
+      headers: {},
+      timeout_seconds: 30,
+      enabled: true,
+    });
+    const updated = s.update('clawmind', { timeout_seconds: 60 });
+    assert.equal(updated.timeout_seconds, 60);
+    assert.equal(updated.command, 'node'); // preserved
+    assert.equal(updated.env.MCP_TRANSPORT, 'stdio'); // preserved
+    assert.equal(updated.env.CCT_SOP_MCP_SERVER_MODE, 'prod'); // preserved
+    assert.equal('CallerToken' in updated.headers, false, 'stdio update should not inject CallerToken');
+  });
+
   it('preserves legacy key variants on disk', async () => {
     // Simulate an mcporter.json that uses `baseUrl`/`transport`/`timeoutSeconds`
     fs.mkdirSync(path.dirname(p), { recursive: true });
