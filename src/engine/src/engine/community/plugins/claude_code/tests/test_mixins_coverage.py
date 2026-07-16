@@ -990,10 +990,11 @@ class TestSessionMixin:
 
     async def test_list_agent_id_filter_uses_canonical_key_without_agent_id(self):
         target_key = "agent:g1:session:target:user:u1"
+        legacy_key = "user:u1:session:legacy:agent:g1"
         c = _FakeRelayClient()
         c.set_response("sessions.list", _ok({"sessions": [
             {"key": "agent:g2:session:other:user:u1"},
-            {"key": "user:u1:session:legacy:agent:g1"},
+            {"key": legacy_key},
             {"key": target_key},
         ]}))
         impl, _ = _impl(c)
@@ -1003,6 +1004,9 @@ class TestSessionMixin:
         )
 
         assert out == [{"key": target_key}]
+        assert await impl.sessions_list(
+            agent_id="g1", session_key=legacy_key, offset=0, limit=1,
+        ) == [{"key": legacy_key}]
 
     async def test_list_session_key_filters_before_pagination(self):
         c = _FakeRelayClient()
