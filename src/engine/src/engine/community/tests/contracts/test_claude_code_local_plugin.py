@@ -106,6 +106,30 @@ async def test_local_claude_code_agent_lookup_uses_canonical_key_without_agent_i
     ) == [legacy]
 
 
+async def test_local_claude_code_agent_lookup_skips_malformed_session_keys():
+    plugin = LocalClaudeCodePluginImpl()
+    plugin._sessions = {
+        "non-string": {"key": None},
+        "canonical": {"key": "agent:g1:session:missing-user"},
+        "legacy": {"key": "user:u1:session:missing-agent"},
+        "unknown": {"key": "unknown:g1"},
+    }
+
+    assert await plugin.sessions_list(agent_id="g1") == []
+
+    explicit = {
+        "key": "agent:g2:session:explicit:user:u1",
+        "agentId": "g1",
+    }
+    plugin._sessions["explicit"] = explicit
+    assert await plugin.sessions_list(
+        agent_id="g1",
+        session_key="agent:g2:session:explicit:user:u1",
+        offset=0,
+        limit=1,
+    ) == [explicit]
+
+
 async def test_local_claude_code_session_key_diagnostics_do_not_log_the_key(caplog):
     plugin = LocalClaudeCodePluginImpl()
     await plugin.session_create("private-session-key")
