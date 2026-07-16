@@ -36,6 +36,7 @@ def _bind_bot_service(
     auth_rel=None,
     skill_set_factory=None,
     policy_service=None,
+    create_bot_for_others_service=None,
     default_bot_passport_repair_service=None,
 ):
     from agentclaw.community.core.bot_management.repository.protocol import BotRepository
@@ -43,11 +44,19 @@ def _bind_bot_service(
     from agentclaw.community.api.default_bot_passport_repair_service import (
         DefaultBotPassportRepairServiceProtocol,
     )
+    from agentclaw.community.api.create_bot_for_others_service import (
+        CreateBotForOthersServiceProtocol,
+    )
 
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotService, to=svc)
             binder.bind(BotServiceProtocol, to=svc)
+            if create_bot_for_others_service is not None:
+                binder.bind(
+                    CreateBotForOthersServiceProtocol,
+                    to=create_bot_for_others_service,
+                )
             if default_bot_passport_repair_service is not None:
                 binder.bind(
                     DefaultBotPassportRepairServiceProtocol,
@@ -169,7 +178,9 @@ def client(mock_bot_service, mock_passport):
         )
     )
     repair_service = MagicMock()
+    create_for_others_service = MagicMock()
     app.state.default_bot_passport_repair_service = repair_service
+    app.state.create_bot_for_others_service = create_for_others_service
     attach_injector(app, Injector([_bind_bot_service(
         mock_bot_service,
         bot_repo=MagicMock(),
@@ -177,6 +188,7 @@ def client(mock_bot_service, mock_passport):
         auth=mock_auth,
         auth_rel=MagicMock(),
         skill_set_factory=_stub_skill_set_factory(),
+        create_bot_for_others_service=create_for_others_service,
         default_bot_passport_repair_service=repair_service,
     )]))
 
@@ -200,7 +212,22 @@ def admin_client(mock_bot_service, mock_passport):
     mock_repo = MagicMock()
     mock_repo.exists_by_owner_and_bot_id.return_value = False
     repair_service = MagicMock()
+    create_for_others_service = MagicMock()
+    create_for_others_service.execute.return_value = {
+        "target_user_id": "u1",
+        "bot_id": "default",
+        "action": "created",
+        "bot": BOT_SAMPLE,
+        "passport": {
+            "status": "ISSUED",
+            "agent_code": "agent-u1",
+            "token_present": True,
+            "source": "applied",
+        },
+        "runtime": {"restart_required": False},
+    }
     app.state.default_bot_passport_repair_service = repair_service
+    app.state.create_bot_for_others_service = create_for_others_service
     attach_injector(app, Injector([_bind_bot_service(
         mock_bot_service,
         bot_repo=mock_repo,
@@ -208,6 +235,7 @@ def admin_client(mock_bot_service, mock_passport):
         auth=MagicMock(),
         auth_rel=MagicMock(),
         skill_set_factory=_stub_skill_set_factory(),
+        create_bot_for_others_service=create_for_others_service,
         default_bot_passport_repair_service=repair_service,
     )]))
 
@@ -1009,18 +1037,42 @@ class TestCreateForOthers:
 
     def test_creates_bot_when_no_default_exists(self, admin_client):
         tc, svc, _, mock_repo = admin_client
-        mock_repo.exists_by_owner_and_bot_id.return_value = False
-        svc.create_bot.return_value = BOT_SAMPLE
-        resp = tc.post("/api/bots/create-for-others", json={"target_user_id": "u1", "target_nick_name": "Alice"})
+        resp = tc.post(
+            "/api/bots/create-for-others",
+            headers={"cookie": "session-cookie"},
+            json={
+                "target_user_id": " u1 ",
+                "target_nick_name": " Alice ",
+                "bot_type": "personal",
+            },
+        )
         data = resp.json()
         assert data["success"] is True
         assert data["data"]["action"] == "created"
+        tc.app.state.create_bot_for_others_service.execute.assert_called_once_with(
+            target_user_id="u1",
+            target_nick_name="Alice",
+            bot_type="personal",
+            operator_user_id="100000",
+            operator_name="Test User",
+            cookie="session-cookie",
+        )
 
     def test_skips_if_active_default_bot_exists(self, admin_client):
         tc, svc, _, mock_repo = admin_client
-        mock_repo.exists_by_owner_and_bot_id.return_value = True
-        active_bot = {**BOT_SAMPLE, "bot_id": "default", "status": "ACTIVE"}
-        mock_repo.list_by_owner.return_value = (1, [active_bot])
+        tc.app.state.create_bot_for_others_service.execute.return_value = {
+            "target_user_id": "u1",
+            "bot_id": "default",
+            "status": "ACTIVE",
+            "action": "skipped",
+            "passport": {
+                "status": "ISSUED",
+                "agent_code": "agent-u1",
+                "token_present": True,
+                "source": "existing",
+            },
+            "runtime": {"restart_required": False},
+        }
         resp = tc.post("/api/bots/create-for-others", json={"target_user_id": "u1", "target_nick_name": "Alice"})
         data = resp.json()
         assert data["success"] is True
@@ -1028,17 +1080,53 @@ class TestCreateForOthers:
 
     def test_device_limit_error(self, admin_client):
         tc, svc, _, mock_repo = admin_client
-        mock_repo.exists_by_owner_and_bot_id.return_value = False
-        svc.create_bot.side_effect = DeviceLimitError("limit")
+        tc.app.state.create_bot_for_others_service.execute.side_effect = DeviceLimitError("limit")
         resp = tc.post("/api/bots/create-for-others", json={"target_user_id": "u1", "target_nick_name": "Alice"})
+        assert resp.json()["error_code"] == 429
+
+    def test_bot_limit_error(self, admin_client):
+        tc, _, _, _ = admin_client
+        tc.app.state.create_bot_for_others_service.execute.side_effect = (
+            BotLimitExceededError("limit")
+        )
+        resp = tc.post(
+            "/api/bots/create-for-others",
+            json={"target_user_id": "u1", "target_nick_name": "Alice"},
+        )
         assert resp.json()["error_code"] == 429
 
     def test_device_allocation_error(self, admin_client):
         tc, svc, _, mock_repo = admin_client
-        mock_repo.exists_by_owner_and_bot_id.return_value = False
-        svc.create_bot.side_effect = DeviceAllocationError("alloc fail")
+        tc.app.state.create_bot_for_others_service.execute.side_effect = DeviceAllocationError("alloc fail")
         resp = tc.post("/api/bots/create-for-others", json={"target_user_id": "u1", "target_nick_name": "Alice"})
         assert resp.json()["error_code"] == 500
+
+    def test_passport_preparation_error_preserves_control_plane_error_code(
+        self, admin_client
+    ):
+        from agentclaw.community.core.bot_management.errors import (
+            CreateBotForOthersError,
+        )
+
+        tc, _, _, _ = admin_client
+        tc.app.state.create_bot_for_others_service.execute.side_effect = (
+            CreateBotForOthersError(
+                "apply_first_agent_passport returned no token",
+                error_code=5401,
+            )
+        )
+
+        resp = tc.post(
+            "/api/bots/create-for-others",
+            json={"target_user_id": "u1", "target_nick_name": "Alice"},
+        )
+
+        assert resp.json() == {
+            "success": False,
+            "message": "apply_first_agent_passport returned no token",
+            "error_code": 5401,
+            "data": None,
+        }
 
 
 # ---------------------------------------------------------------------------
