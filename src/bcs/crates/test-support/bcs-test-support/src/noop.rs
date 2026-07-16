@@ -1890,6 +1890,14 @@ impl ChannelService for NoopChannelService {
         Ok(Vec::new())
     }
 
+    async fn list_bindings_by_target(
+        &self,
+        _target: bcs_domain::BindingTarget,
+        _channel_type: Option<bcs_domain::ChannelType>,
+    ) -> Result<Vec<ChannelBinding>, ChannelUseCaseError> {
+        Ok(Vec::new())
+    }
+
     async fn set_binding_status(
         &self,
         _id: &str,

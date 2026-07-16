@@ -843,12 +843,12 @@ print("1" if any(item.get("bot_uuid") == target for item in json.load(sys.stdin)
 # User story: A user validates channel behavior before an external provider is installed.
 #
 # Flow:
-#   Attempt to create a binding -> inspect configured bindings -> pause and delete
-#   a missing binding through the disabled bridge -> inspect bindings again.
+#   Attempt to create a binding -> inspect all and target-scoped bindings -> pause
+#   and delete a missing binding through the disabled bridge -> inspect bindings again.
 #
 # Critical assertions:
 #   - Binding creation fails with the explicit disabled-bridge bad-request contract.
-#   - Binding reads always expose a well-formed items array.
+#   - Full and target-scoped binding reads always expose a well-formed items array.
 #   - Disabled-bridge pause and delete follow their documented no-op acknowledgements.
 #   - No phantom binding appears after the rejected and no-op operations.
 story_user_validates_external_channel_setup() {
@@ -865,6 +865,12 @@ story_user_validates_external_channel_setup() {
     local items_is_array
     items_is_array=$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys; print("1" if isinstance(json.load(sys.stdin).get("items"), list) else "0")' 2>/dev/null || echo 0)
     assert_eq "channel binding list exposes an items array" "$items_is_array" "1"
+
+    local encoded_bot_id
+    encoded_bot_id=$(urlencode "$BOT_CEO_UUID")
+    api_get "/channels/bindings/by-target?target_type=bot&target_id=${encoded_bot_id}&channel_type=e2e-uninstalled-channel"
+    require_status "user can inspect bindings for one bot target" "200" || return
+    assert_json_eq "target-scoped channel binding list remains empty" "$RESPONSE" "items" "[]"
 
     local missing_binding="missing-binding-$$"
     api_patch "/channels/bindings/${missing_binding}" '{"active":false}'

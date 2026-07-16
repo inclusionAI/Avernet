@@ -13,7 +13,7 @@ use bcs_channel_api::{
     ChannelInboundSink, ChannelProvider, ChannelProviderRegistry,
 };
 use bcs_domain::{
-    ActorKind, BindingStatus, BindingTarget, ChannelBinding, ConversationSessionMap,
+    ActorKind, BindingStatus, BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap,
     Group, GroupChatScope, GroupStrategy, ImParticipantMap, Participant, ParticipantMode,
     ParticipantRole, Session, SessionKind, SessionScope, SessionStatus, SystemMessageEvent,
     Visibility,
@@ -940,14 +940,19 @@ impl ChannelService for BcsChannelService {
 
     async fn list_bindings(&self) -> Result<Vec<ChannelBinding>, ChannelUseCaseError> {
         let bindings = self.bindings.list().await?;
-        bindings
-            .into_iter()
-            .map(|mut binding| {
-                let provider = self.provider_for(&binding.channel_type)?;
-                binding.config = provider.redact_config(&binding.config);
-                Ok(binding)
-            })
-            .collect()
+        self.redact_bindings(bindings)
+    }
+
+    async fn list_bindings_by_target(
+        &self,
+        target: BindingTarget,
+        channel_type: Option<ChannelType>,
+    ) -> Result<Vec<ChannelBinding>, ChannelUseCaseError> {
+        let bindings = self
+            .bindings
+            .list_by_target(&target, channel_type.as_deref())
+            .await?;
+        self.redact_bindings(bindings)
     }
 
     async fn set_binding_status(
@@ -1002,6 +1007,20 @@ impl ChannelService for BcsChannelService {
 }
 
 impl BcsChannelService {
+    fn redact_bindings(
+        &self,
+        bindings: Vec<ChannelBinding>,
+    ) -> Result<Vec<ChannelBinding>, ChannelUseCaseError> {
+        bindings
+            .into_iter()
+            .map(|mut binding| {
+                let provider = self.provider_for(&binding.channel_type)?;
+                binding.config = provider.redact_config(&binding.config);
+                Ok(binding)
+            })
+            .collect()
+    }
+
     fn provider_for(
         &self,
         channel_type: &str,
@@ -1311,6 +1330,14 @@ mod tests {
             panic!("outbound delivery must not scan all channel bindings")
         }
 
+        async fn list_by_target(
+            &self,
+            target: &BindingTarget,
+            channel_type: Option<&str>,
+        ) -> ServiceResult<Vec<ChannelBinding>> {
+            self.inner.list_by_target(target, channel_type).await
+        }
+
         async fn set_status(&self, id: &str, active: bool) -> ServiceResult<()> {
             self.inner.set_status(id, active).await
         }
@@ -1345,6 +1372,14 @@ mod tests {
         }
 
         async fn list(&self) -> ServiceResult<Vec<ChannelBinding>> {
+            unreachable!("inbound binding lookup test only calls find_active_by_account")
+        }
+
+        async fn list_by_target(
+            &self,
+            _target: &BindingTarget,
+            _channel_type: Option<&str>,
+        ) -> ServiceResult<Vec<ChannelBinding>> {
             unreachable!("inbound binding lookup test only calls find_active_by_account")
         }
 
@@ -2004,6 +2039,49 @@ mod tests {
             .await?
             .expect("stored binding");
         assert_eq!(stored.config["client_secret"], "secret");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_bindings_by_target_filters_and_redacts_provider_config() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "binding_1",
+                "robot_1",
+                BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                Visibility::FullTranscript,
+            ))
+            .await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "binding_2",
+                "robot_2",
+                BindingTarget::Group {
+                    group_id: "group_2".to_string(),
+                },
+                Visibility::FullTranscript,
+            ))
+            .await?;
+
+        let bindings = harness
+            .service
+            .list_bindings_by_target(
+                BindingTarget::Group {
+                    group_id: "group_1".to_string(),
+                },
+                Some("dingtalk".to_string()),
+            )
+            .await?;
+
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].id, "binding_1");
+        assert_eq!(bindings[0].config["client_secret"], "<redacted>");
 
         Ok(())
     }

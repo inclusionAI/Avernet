@@ -5,7 +5,8 @@
 use async_trait::async_trait;
 
 use bcs_domain::{
-    ChannelBinding, ChannelType, ConversationSessionMap, ImParticipantMap, SessionScope,
+    BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap, ImParticipantMap,
+    SessionScope,
 };
 
 use crate::types::ServiceResult;
@@ -22,6 +23,12 @@ pub trait ChannelBindingRepoPort: Send + Sync {
         account_ref: &str,
     ) -> ServiceResult<Option<ChannelBinding>>;
     async fn list(&self) -> ServiceResult<Vec<ChannelBinding>>;
+    /// 管理查询：按 Bot/Group target 隔离，可选进一步限定 channel type。
+    async fn list_by_target(
+        &self,
+        target: &BindingTarget,
+        channel_type: Option<&str>,
+    ) -> ServiceResult<Vec<ChannelBinding>>;
     async fn set_status(&self, id: &str, active: bool) -> ServiceResult<()>;
     async fn set_config(&self, id: &str, config: serde_json::Value) -> ServiceResult<()>;
     async fn delete(&self, id: &str) -> ServiceResult<()>;

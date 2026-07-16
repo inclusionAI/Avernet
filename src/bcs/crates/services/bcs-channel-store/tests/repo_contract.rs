@@ -227,6 +227,63 @@ async fn binding_repo_lifecycle_filters_active_bindings() -> ServiceResult<()> {
 }
 
 #[tokio::test]
+async fn binding_repo_lists_only_requested_target_and_optional_channel() -> ServiceResult<()> {
+    let repo = MemoryChannelBindingRepo::new();
+
+    let mut group_dingtalk = binding("group_dingtalk", "robot_1", BindingStatus::Active);
+    group_dingtalk.target = BindingTarget::Group {
+        group_id: "group_1".to_string(),
+    };
+    repo.create(group_dingtalk).await?;
+
+    let mut group_other_channel = binding(
+        "group_other_channel",
+        "account_2",
+        BindingStatus::Active,
+    );
+    group_other_channel.target = BindingTarget::Group {
+        group_id: "group_1".to_string(),
+    };
+    group_other_channel.channel_type = "test_im".to_string();
+    repo.create(group_other_channel).await?;
+
+    let mut other_group = binding("other_group", "robot_2", BindingStatus::Active);
+    other_group.target = BindingTarget::Group {
+        group_id: "group_2".to_string(),
+    };
+    repo.create(other_group).await?;
+
+    let mut bot_binding = binding("bot_binding", "robot_3", BindingStatus::Active);
+    bot_binding.target = BindingTarget::Bot {
+        bot_id: "bot_1:user_1".to_string(),
+    };
+    repo.create(bot_binding).await?;
+
+    let group_target = BindingTarget::Group {
+        group_id: "group_1".to_string(),
+    };
+    let group_all_channels = repo.list_by_target(&group_target, None).await?;
+    assert_eq!(group_all_channels.len(), 2);
+
+    let group_dingtalk = repo
+        .list_by_target(&group_target, Some("dingtalk"))
+        .await?;
+    assert_eq!(group_dingtalk.len(), 1);
+    assert_eq!(group_dingtalk[0].id, "group_dingtalk");
+
+    let bot_target = BindingTarget::Bot {
+        bot_id: "bot_1:user_1".to_string(),
+    };
+    let bot_bindings = repo
+        .list_by_target(&bot_target, Some("dingtalk"))
+        .await?;
+    assert_eq!(bot_bindings.len(), 1);
+    assert_eq!(bot_bindings[0].id, "bot_binding");
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn binding_repo_preserves_generic_channel_type_and_config() -> ServiceResult<()> {
     let repo = MemoryChannelBindingRepo::new();
     let mut binding = binding("binding_generic", "account_1", BindingStatus::Active);

@@ -200,6 +200,31 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
         rows.iter().map(row_to_binding).collect()
     }
 
+    async fn list_by_target(
+        &self,
+        target: &BindingTarget,
+        channel_type: Option<&str>,
+    ) -> ServiceResult<Vec<ChannelBinding>> {
+        let target_json = serde_json::to_string(target)?;
+        let statement = match channel_type {
+            Some(channel_type) => DbStatement::with_params(
+                "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
+                 visibility, env, status, created_by, config_json \
+                 FROM bcs_channel_bindings \
+                 WHERE target_json = ? AND channel_type = ? ORDER BY id",
+                vec![DbValue::from(target_json), DbValue::from(channel_type)],
+            ),
+            None => DbStatement::with_params(
+                "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
+                 visibility, env, status, created_by, config_json \
+                 FROM bcs_channel_bindings WHERE target_json = ? ORDER BY id",
+                vec![DbValue::from(target_json)],
+            ),
+        };
+        let rows = self.query("list_bindings_by_target", statement).await?;
+        rows.iter().map(row_to_binding).collect()
+    }
+
     async fn set_status(&self, id: &str, active: bool) -> ServiceResult<()> {
         let status = if active {
             BindingStatus::Active
@@ -851,6 +876,42 @@ mod tests {
 
         binding_repo.delete("binding_1").await?;
         assert_eq!(binding_repo.get("binding_1").await?, None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_binding_list_by_target_filters_target_and_channel() -> ServiceResult<()> {
+        let (binding_repo, _, _) = sqlite_stores().await?;
+
+        let group_dingtalk = binding();
+        binding_repo.create(group_dingtalk).await?;
+
+        let mut group_other_channel = binding();
+        group_other_channel.id = "binding_other_channel".to_string();
+        group_other_channel.account_ref = "account_2".to_string();
+        group_other_channel.channel_type = "test_im".to_string();
+        binding_repo.create(group_other_channel).await?;
+
+        let mut other_group = binding();
+        other_group.id = "binding_other_group".to_string();
+        other_group.account_ref = "robot_2".to_string();
+        other_group.target = BindingTarget::Group {
+            group_id: "group_2".to_string(),
+        };
+        binding_repo.create(other_group).await?;
+
+        let group_target = BindingTarget::Group {
+            group_id: "group_1".to_string(),
+        };
+        let all_channels = binding_repo.list_by_target(&group_target, None).await?;
+        assert_eq!(all_channels.len(), 2);
+
+        let dingtalk = binding_repo
+            .list_by_target(&group_target, Some("dingtalk"))
+            .await?;
+        assert_eq!(dingtalk.len(), 1);
+        assert_eq!(dingtalk[0].id, "binding_1");
 
         Ok(())
     }

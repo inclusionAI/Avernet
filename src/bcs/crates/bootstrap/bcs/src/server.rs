@@ -209,6 +209,17 @@ impl ChannelService for DisabledChannelService {
         Ok(Vec::new())
     }
 
+    async fn list_bindings_by_target(
+        &self,
+        _target: bcs_domain::BindingTarget,
+        _channel_type: Option<bcs_domain::ChannelType>,
+    ) -> std::result::Result<
+        Vec<bcs_domain::ChannelBinding>,
+        bcs_service_api::application::channel::ChannelUseCaseError,
+    > {
+        Ok(Vec::new())
+    }
+
     async fn set_binding_status(
         &self,
         _id: &str,
