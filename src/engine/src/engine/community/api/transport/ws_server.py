@@ -755,6 +755,11 @@ class EngineWebSocketServer:
         self._inject_listener_refs[key] = (client, on_injected_event)
         return True
 
+    def _connection_has_live_inject_listener(self, conn_id: str, session_key: str) -> bool:
+        if conn_id not in self._session_subscribers.get(session_key, set()):
+            return False
+        return any(conn_id in conns for conns in self._inject_listener_conns.values())
+
     async def _fanout_injected_event(self, event: EventFrame) -> None:
         payload = event.payload if isinstance(event.payload, dict) else {}
         session_key = payload.get("sessionKey")
@@ -890,6 +895,14 @@ class EngineWebSocketServer:
         else:
             params.setdefault("idempotencyKey", uuid.uuid4().hex)
 
+        # The browser only sends chat.send. Bind this connection before starting
+        # the stream so OpenClaw-originated inject events can reach the session.
+        try:
+            await self._subscribe_conn_to_session(conn_id, session_key)
+        except Exception as e:
+            # Listener binding is best-effort and must not reject a valid chat.send.
+            log.warning("chat.send: failed to bind inject listener: %s", e)
+
         # ack first, then stream events in the background
         response = ResponseFrame.ok_response(request.id, {"accepted": True})
 
@@ -958,15 +971,25 @@ class EngineWebSocketServer:
                 event_name = event_frame.event
                 event_data = event_frame.payload
                 state = event_data.get("state", "")
+                run_id = event_data.get("runId", "")
 
                 # seq/ts stamping happens inside _send_event (guarded so
                 # pre-populated payloads are preserved).
                 event_data.setdefault("sessionKey", session_key)
 
+                # The live listener already fans this frame out to the current
+                # connection. Avoid sending the same inject event a second time
+                # through the foreground chat stream.
+                if (
+                    isinstance(run_id, str)
+                    and run_id.startswith("inject-")
+                    and self._connection_has_live_inject_listener(conn_id, session_key)
+                ):
+                    continue
+
                 await self._send_event(websocket, event_name, event_data)
 
                 if state in ("final", "error", "aborted"):
-                    run_id = event_data.get("runId", "")
                     if isinstance(run_id, str) and run_id.startswith("inject-"):
                         continue
                     log.info(f"[stream] chat stream ended: conn={conn_id}, reason={state}, total_events={event_count}")

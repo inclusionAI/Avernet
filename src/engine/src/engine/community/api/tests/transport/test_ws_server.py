@@ -116,6 +116,46 @@ def _req(method: str, params: dict, id: str = "r-1") -> RequestFrame:
 
 class TestHandleChatSend:
     @pytest.mark.asyncio
+    async def test_auto_subscribes_session_without_client_subscribe_request(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        websocket = MagicMock()
+        stream = AsyncMock()
+        subscribe = AsyncMock(return_value=True)
+        server._stream_chat_events = stream
+        server._subscribe_conn_to_session = subscribe
+        auth_gate_service.enabled = False
+        params = {"sessionKey": "agent:main:user:165137", "message": "hello"}
+
+        response = await server._handle_chat_send(
+            websocket, "conn-1", _req("chat.send", params), params,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is True
+        subscribe.assert_awaited_once_with("conn-1", "agent:main:user:165137")
+        stream.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_subscription_failure_does_not_reject_chat_send(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        websocket = MagicMock()
+        stream = AsyncMock()
+        server._stream_chat_events = stream
+        server._subscribe_conn_to_session = AsyncMock(side_effect=RuntimeError("listener down"))
+        auth_gate_service.enabled = False
+        params = {"sessionKey": "agent:main:user:165137", "message": "hello"}
+
+        response = await server._handle_chat_send(
+            websocket, "conn-1", _req("chat.send", params), params,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response.ok is True
+        stream.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_rejects_missing_iam_token(self, server, fake_engine, auth_gate_service):
         websocket = MagicMock()
         params = {"sessionKey": "agent:main:user:165137", "message": "hello"}
@@ -393,6 +433,40 @@ class TestHandleChatSend:
         auth_gate.assert_not_called()
         stream.assert_called_once()
         assert stream.call_args.args[-1] == "community-noop-run"
+
+
+class TestChatSendStream:
+    def test_connection_without_session_subscription_has_no_live_listener(self, server):
+        server._inject_listener_conns = {("tok-a", 1): {"conn-1"}}
+
+        assert server._connection_has_live_inject_listener("conn-1", "sk-1") is False
+
+    @pytest.mark.asyncio
+    async def test_live_listener_prevents_duplicate_inject_stream_event(self, server, fake_engine):
+        websocket = MagicMock()
+        websocket.send_text = AsyncMock()
+        server._session_subscribers = {"sk-1": {"conn-1"}}
+        server._inject_listener_conns = {("tok-a", 1): {"conn-1"}}
+
+        async def stream(*_args, **_kwargs):
+            yield EventFrame(
+                event="chat",
+                payload={"runId": "inject-1", "state": "final"},
+            )
+            yield EventFrame(
+                event="chat",
+                payload={"runId": "chat-1", "state": "final"},
+            )
+
+        fake_engine.chat.stream = stream
+
+        await server._stream_chat_events(
+            websocket, "conn-1", "sk-1", "hello", timeout_ms=None,
+        )
+
+        websocket.send_text.assert_awaited_once()
+        sent = json.loads(websocket.send_text.await_args.args[0])
+        assert sent["payload"]["runId"] == "chat-1"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
