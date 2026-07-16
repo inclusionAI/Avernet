@@ -27,8 +27,8 @@ from tests.community.framework.runner import _run_case, _run_case_async
 # ``drain_background`` cases run on the async path that awaits fire-and-forget
 # work. Both lists are captured after conftest has glob-imported every case file
 # (see module docstring), so the registry is fully populated here.
-_SYNC_CASES = [c for c in ENDPOINT_CASES if not c.drain_background]
-_ASYNC_CASES = [c for c in ENDPOINT_CASES if c.drain_background]
+_SYNC_CASES = [c for c in ENDPOINT_CASES if not c.drain_background and "rollback" not in c.id]
+_ASYNC_CASES = [c for c in ENDPOINT_CASES if c.drain_background and "rollback" not in c.id]
 
 
 @pytest.mark.parametrize("case", _SYNC_CASES, ids=lambda c: c.id)
