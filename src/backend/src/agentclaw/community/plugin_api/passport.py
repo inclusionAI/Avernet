@@ -46,7 +46,16 @@ class CliItem(TypedDict, total=False):
     cli_desc: str | None
 
 
-class PassportResourceScope(TypedDict):
+class McpScopeItem(TypedDict, total=False):
+    """Provider-neutral MCP resource item for Agent Principal updates."""
+
+    mcp_code: str
+    mcp_name: str | None
+    mcp_desc: str | None
+    identity_mode: str
+
+
+class PassportResourceScope(TypedDict, total=False):
     """Complete resourceManifest scope for overwrite-style updatePassport calls.
 
     AgentPass/tcauthmng treats each resource list in updatePassport as a full
@@ -55,6 +64,7 @@ class PassportResourceScope(TypedDict):
     """
 
     mcp_codes: list[str]
+    mcp_items: list[McpScopeItem]
     cli_items: list[CliItem]
 
 
@@ -79,7 +89,7 @@ def extract_cli_items(passport: Mapping[str, Any] | None) -> list[CliItem]:
 
 def unpack_resource_scope(
     resource_scope: PassportResourceScope | None,
-) -> tuple[list[str] | None, list[CliItem] | None]:
+) -> tuple[list[McpScopeItem] | None, list[CliItem] | None]:
     """Return DTO-ready MCP/CLI lists, or None pair for non-resource updates.
 
     Non-resource updates, such as admins or metadata, intentionally omit
@@ -88,9 +98,20 @@ def unpack_resource_scope(
     if resource_scope is None:
         return None, None
     try:
-        return resource_scope["mcp_codes"], resource_scope["cli_items"]
+        cli_items = resource_scope["cli_items"]
     except KeyError as e:
-        raise ValueError("resource_scope must include mcp_codes and cli_items") from e
+        raise ValueError(
+            "resource_scope must include mcp_codes and cli_items"
+        ) from e
+    if "mcp_items" in resource_scope:
+        return resource_scope["mcp_items"], cli_items
+    try:
+        mcp_codes = resource_scope["mcp_codes"]
+    except KeyError as e:
+        raise ValueError(
+            "resource_scope must include mcp_codes and cli_items"
+        ) from e
+    return [{"mcp_code": code} for code in mcp_codes], cli_items
 
 
 @runtime_checkable
@@ -114,6 +135,16 @@ class PassportPlugin(Plugin, Protocol):
         Passing resource_scope means the caller is updating resourceManifest and
         has already collected the complete MCP and CLI scope for this bot.
         """
+        ...
+
+    def update_mcp_identity_to_agent_principal(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        mcp_items: list[McpScopeItem],
+    ) -> None:
+        """Replace the Agent Principal MCP scope while preserving other resources."""
         ...
 
     def apply_first_agent_passport(

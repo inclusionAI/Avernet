@@ -36,3 +36,10 @@ class NoopOutboundRuleProvider(MockSeam, OutboundRuleProvider):
         agent_pass_token: str = "",
     ) -> "OutBoundOperationRule | None":
         return None
+
+    def build_caller_rule(
+        self,
+        *,
+        caller_token: str,
+    ) -> "OutBoundOperationRule | None":
+        return None
