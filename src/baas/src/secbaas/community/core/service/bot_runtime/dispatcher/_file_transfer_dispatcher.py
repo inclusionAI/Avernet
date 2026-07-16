@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from secbaas.community.api.bot_runtime import BotFileTransferDispatcher
-from secbaas.community.api.bot_runtime._file_transfer_models import (
+from secbaas.community.api.bot_runtime import (
     CancelUploadResponse,
     CompleteUploadResponse,
     GetDownloadUrlResponse,
@@ -455,7 +455,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
                 ticket.fileservice_staging_path,
             )
             if not exists:
-                from secbaas.community.api.bot_runtime._exceptions import (
+                from secbaas.community.api.bot_runtime import (
                     OssObjectNotFoundError,
                 )
 
@@ -629,7 +629,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         # D-09: validate terminal state
         terminal_states = {"DONE", "FAILED", "CANCELLED", "DELETED"}
         if ticket.status not in terminal_states:
-            from secbaas.community.api.bot_runtime._exceptions import (
+            from secbaas.community.api.bot_runtime import (
                 TransferNotTerminalError,
             )
             raise TransferNotTerminalError(

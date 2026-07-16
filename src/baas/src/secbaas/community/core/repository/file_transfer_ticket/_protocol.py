@@ -2,7 +2,7 @@
 
 from typing import Protocol, runtime_checkable
 
-from secbaas.community.api.bot_runtime._file_transfer_models import (
+from secbaas.community.api.bot_runtime import (
     TransferNotFoundError as ApiTransferNotFoundError,
 )
 

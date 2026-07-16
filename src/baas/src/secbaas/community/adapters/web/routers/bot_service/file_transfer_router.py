@@ -27,7 +27,7 @@ from secbaas.community.api.bot_runtime import (
     StagingListResponse,
     TransferNotFoundError,
 )
-from secbaas.community.api.bot_runtime._exceptions import (
+from secbaas.community.api.bot_runtime import (
     OssObjectNotFoundError,
     TransferNotTerminalError,
 )
