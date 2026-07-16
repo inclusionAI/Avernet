@@ -52,10 +52,10 @@ export interface MenuItem extends MenuManifest {
 
 /**
  * 当前 human 身份（差异类型 C 的载荷）。
- * 开源默认走 /bcnproxy/me（getMe）解析；内部 extend 读 window.__TERN__.user。
+ * 开源默认走 /auth/user 解析；内部 extend 读 window.__TERN__.user。
  */
 export interface HumanIdentity {
-  /** 用户唯一标识（开源=staff_no / 内部=outUserNo） */
+  /** 用户唯一标识（开源=user_id / 内部=outUserNo） */
   userId: string;
   /** 展示名（花名 / 昵称） */
   nickName: string;

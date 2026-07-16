@@ -141,6 +141,20 @@ function mergeBotFromLocal(
 /**
  * 将纯 BCN MyBotInfo（不在 local 中的）转换为 BotNetworkInfo
  */
+function resolveBcnBotDisplayName(
+  bcnBot: MyBotInfo,
+  actorKind: 'human' | 'bot',
+): string {
+  if (bcnBot.capabilities?.name) return bcnBot.capabilities.name;
+
+  if (actorKind === 'human') {
+    const { nickName, userId } = useUserStore.getState();
+    return nickName || userId || bcnBot.bot_uuid;
+  }
+
+  return bcnBot.bot_uuid;
+}
+
 function mergeBotFromBcnOnly(bcnBot: MyBotInfo): BotNetworkInfo {
   const actorKind: 'human' | 'bot' =
     bcnBot.actor_kind ||
@@ -151,7 +165,7 @@ function mergeBotFromBcnOnly(bcnBot: MyBotInfo): BotNetworkInfo {
 
   return {
     bot_uuid: bcnBot.bot_uuid,
-    bot_name: bcnBot.capabilities?.name || bcnBot.bot_uuid,
+    bot_name: resolveBcnBotDisplayName(bcnBot, actorKind),
     summary: bcnBot.capabilities?.summary ?? undefined,
     avatar_url: bcnBot.avatar_url,
     visibility: bcnBot.visibility ?? 'public',

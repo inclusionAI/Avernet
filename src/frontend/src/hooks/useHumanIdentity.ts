@@ -5,8 +5,8 @@
  * useHumanIdentity - 当前 human 身份收口 Hook
  *
  * 身份来源差异由 AppExt.authAdapter.getCurrentUser 决定（差异类型 C）：
- * - 开源形态：走 /bcnproxy/me（defaultAuthAdapter）
- * - 内部形态：读 window.__TERN__.user（src/internal/auth.ts 注入）
+ * - 开源形态：走 /auth/user（defaultAuthAdapter）
+ * - 内部形态：读 window.__TERN__.user（src/internal/adapters/auth.ts 注入）
  *
  * 挂载时解析身份并写入 userStore，作为 BCN 协作页面（GroupChat / SessionOnlyPage /
  * GroupChatPage / TopNavBar）的统一身份源，替代直读 useModel('@@initialState')。
