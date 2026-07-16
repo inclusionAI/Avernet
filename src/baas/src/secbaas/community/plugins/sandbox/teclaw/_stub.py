@@ -32,7 +32,9 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
     stub-teclaw URLs. close() is a no-op.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self, endpoint: str | None = None, timeout: float | None = None
+    ) -> None:
         self._bots: dict[str, dict[str, Any]] = {}
         # Storage keys ("bot_config", "status", "outbound_rule") align with TeClaw API v2 response field names
 

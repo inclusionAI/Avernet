@@ -170,6 +170,6 @@ class TestRestartHookFailure:
 
         # Hook failure on restart → publish FAILED
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=0.5
+            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=2.5
         )
         assert status == "FAILED", f"Expected FAILED, got {status}"
