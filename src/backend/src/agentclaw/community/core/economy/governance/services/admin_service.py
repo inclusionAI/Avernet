@@ -2,17 +2,17 @@
 
 Covers(对 admin_router):
   - Emergency brake (pause/resume) — cross-pod distributed cache
-  - bulk_whitelist — delegate to :class:`GovernanceWhitelistService`
-  - cancel_pending / close_all_open — emergency bulk operations
   - pause_ticket — admin pause to waiting_review (§7.5.1)
-  - emergency_close — immediate ticket close without cooldown
   - delete_records — emergency delete for record_daily / notify_log
-  - delete_whitelist_entry — delegate to :class:`GovernanceWhitelistService`
   - deliver_pending / deliver_by_worker — manual delivery pipeline
     (_run_delivery 内部实现,原 delivery_runner 已并回)
 
-审批面(list_review_tickets / get_review_ticket_detail / review_ticket)已按
-路由边界拆至 :class:`GovernanceWorkflowService`(对应 workflow_router)。
+白名单读写不再经本服务转发:admin_router 直连 GovernanceWhitelistService。
+
+关单能力(emergency_close / cancel_pending / close_all_open)已按"工单运营 vs 运维"
+边界迁至 :class:`GovernanceWorkflowService`(对应 workflow_router);本服务仅保留
+_deliver/pause/resume 等运维职责。审批面(list_review_tickets /
+get_review_ticket_detail / review_ticket)亦按路由边界拆至 WorkflowService。
 
 All ticket lifecycle transitions land on ``task_record`` — never on
 ``notify_log`` (§4.2.3 读写路由规则). Close paths cancel pending
@@ -251,104 +251,6 @@ class GovernanceAdminService:
                 run_id,
             )
 
-    def bulk_whitelist(
-        self,
-        bot_ids: list[str],
-        reason: str,
-        operator: str,
-    ) -> dict:
-        """Batch whitelist + cancel pending — delegates to WhitelistService."""
-        return self._whitelist_service.bulk_whitelist(bot_ids, reason, operator)
-
-    def cancel_pending(self, reason: str, operator: str) -> BulkOperationResult:
-        """Cancel ALL pending notifications (emergency close) + close the
-        matching ``task_record`` subjects (Task 8 口径对齐).
-
-        通知侧 cancel scope = open/muted 且 response IS NULL。工单侧按被关
-        通知的 ``ticket_id`` 集合关 —— **不可裸用全量** :meth:`bulk_close_open`
-        (会多关已反馈的 scheduled 单)。逐条走 :meth:`emergency_close` 链路
-        激活领域模型守卫、幂等。
-
-        Returns ``BulkOperationResult(affected=N, label="cancelled")``。
-        """
-        now = datetime.now()
-        cooldown_days = self._config.cooldown_days
-
-        # Step 1: pre-collect the ticket_id set scoped to the same filter as
-        # the notify bulk-cancel (only_unresponded=True), before the cancel
-        # mutates rows. 无 None(record_process 创建处恒非空,且查询已剔 None)。
-        ticket_ids = self._notify_repo.list_ticket_ids_open_muted(
-            only_unresponded=True,
-        )
-
-        # Step 2: notify-side bulk cancel (behavior unchanged) — mirrors
-        # notify_status/governance_status/close_reason/closed_at/cooldown_until.
-        cancelled = self._notify_repo.bulk_close_open_muted(
-            close_reason=CloseReason.EMERGENCY_CLOSED,
-            closed_at=now,
-            cooldown_until=now + timedelta(days=cooldown_days),
-            only_unresponded=True,
-        )
-
-        # Step 3: ticket-side close — per-ticket guard-activated, idempotent.
-        # Driver's emergency_close uses EMERGENCY_CLOSED (aligns notify side).
-        self._lifecycle_svc.bulk_close_by_ticket_ids(ticket_ids, now=now)
-
-        self._write_emergency_audit(
-            action_taken=AuditAction.ADMIN_CANCEL_PENDING,
-            actor_id=operator,
-            error_msg=f"reason={reason}; operator={operator}",
-        )
-        log.info(
-            "[GovernanceEmergency] cancel_pending by %s: cancelled=%d, tickets_closed_by=%d",
-            operator, cancelled, len(ticket_ids),
-        )
-        return BulkOperationResult(affected=cancelled, label="cancelled")
-
-    def close_all_open(self, reason: str, operator: str) -> BulkOperationResult:
-        """Close ALL open/muted records, including already-responded ones,
-        + close all open/scheduled ``task_record`` subjects (Task 8 口径对齐).
-
-        Unlike :meth:`cancel_pending` which only touches ``response IS NULL``
-        records, this closes **every** open/muted notification regardless of
-        whether the user has already responded (e.g. ``need_time`` → muted).
-
-        工单侧用全量 :meth:`bulk_close_open`(WHERE status IN (open,scheduled))
-        ——与通知侧 ``governance_status IN (open,muted)`` 口径天然对齐(全量
-        关,不区分反馈)。Existing notify ``response`` / ``response_source`` /
-        ``mute_until`` preserved.
-
-        Returns ``BulkOperationResult(affected=N, label="closed")``。
-        """
-        now = datetime.now()
-        cooldown_days = self._config.cooldown_days
-
-        # Step 1: notify-side bulk close (behavior unchanged).
-        closed = self._notify_repo.bulk_close_open_muted(
-            close_reason=CloseReason.ADMIN_CLOSED,
-            closed_at=now,
-            cooldown_until=now + timedelta(days=cooldown_days),
-            only_unresponded=False,
-        )
-
-        # Step 2: ticket-side full close (ADMIN_CLOSED). bulk_close_open's
-        # WHERE status IN (open,scheduled) + active_worker IS NOT NULL
-        # predicate is the state-legality guard (per-spec bulk exemption).
-        tickets_closed = self._lifecycle_svc.bulk_close_open(
-            close_reason=CloseReason.ADMIN_CLOSED, now=now,
-        )
-
-        self._write_emergency_audit(
-            action_taken=AuditAction.ADMIN_CLOSE_ALL,
-            actor_id=operator,
-            error_msg=f"reason={reason}; operator={operator}",
-        )
-        log.info(
-            "[GovernanceAdmin] close_all_open by %s: notify_closed=%d, tickets_closed=%d",
-            operator, closed, tickets_closed,
-        )
-        return BulkOperationResult(affected=closed, label="closed")
-
     # -- Ticket-level admin operations (§7.5) ----------------------------------
 
     def pause_ticket(
@@ -390,51 +292,6 @@ class GovernanceAdminService:
             ticket_id=ticket_id,
             status=GovernanceStatus.WAITING_REVIEW,
             review_reason="admin_paused",
-        )
-
-    def emergency_close(
-        self, ticket_id: str, admin_id: str, reason: str = "",
-    ) -> TicketActionOutcome:
-        """Immediate ticket close without cooldown (§6.3)."""
-        ticket = self._task_repo.find_by_ticket_id(ticket_id)
-        if not ticket:
-            return TicketActionOutcome(
-                ticket_id=ticket_id, status=GovernanceStatus.OPEN,
-                error="Ticket not found", error_code="NOT_FOUND",
-            )
-
-        if ticket.governance_status == GovernanceStatus.CLOSED:
-            return TicketActionOutcome(
-                ticket_id=ticket_id,
-                status=GovernanceStatus.CLOSED,
-                close_reason=ticket.close_reason,
-            )
-
-        now = datetime.now()
-
-        # Advance via driver service (sole driver). Driver orchestrates the
-        # CLOSE + cancel-pending. The audit row (with reason + actor_id=
-        # admin_id) is owned by admin_service below — the driver does not
-        # duplicate it, matching pause_ticket / review_ticket siblings.
-        self._lifecycle_svc.emergency_close(
-            ticket_id, now=now,
-        )
-
-        self._audit_repo.add_audit(
-            "admin-emergency-close",
-            bot_id=ticket.bot_id,
-            owner_id=ticket.owner_id,
-            actor_id=admin_id,
-            action_taken=AuditAction.ADMIN_CLOSE_ALL,
-            source="admin_api",
-            error_msg=f"ticket_id={ticket_id}; reason={reason}",
-            dry_run=0,
-        )
-
-        return TicketActionOutcome(
-            ticket_id=ticket_id,
-            status=GovernanceStatus.CLOSED,
-            close_reason=CloseReason.EMERGENCY_CLOSED,
         )
 
     # -- Records delete (emergency) — moved from router ------------------------
@@ -549,23 +406,6 @@ class GovernanceAdminService:
             "deleted": deleted,
             "not_found": not_found,
         }
-
-# ------------------------------------------------------------------
-    # Whitelist delete — delegates to GovernanceWhitelistService
-    # ------------------------------------------------------------------
-
-    def delete_whitelist_entry(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        reason: str,
-        operator: str,
-    ) -> dict:
-        """Delete a single whitelist entry — delegates to WhitelistService."""
-        return self._whitelist_service.delete_whitelist_entry(
-            bot_id=bot_id, owner_id=owner_id, reason=reason, operator=operator,
-        )
 
     # -- Deliver pending — moved from router (scan_and_deliver Phase 2-5) ------
 

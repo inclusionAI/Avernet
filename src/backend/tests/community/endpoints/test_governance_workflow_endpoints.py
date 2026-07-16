@@ -23,6 +23,9 @@ from agentclaw.community.core.economy.governance.repositories.notify_log_repo im
 from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
     TaskRecordRepository,
 )
+from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
+    GovernanceWhitelistRepository,
+)
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -105,6 +108,19 @@ def _seed_detail(world) -> None:
     )
 
 
+def _seed_detail_whitelisted(world) -> None:
+    """Seed a ticket whose (bot_id, owner_id) is also in the whitelist."""
+    _insert_ticket(
+        world, ticket_id="tkt-detail-wl",
+        bot_id="bot-wl-detail", owner_id="owner-wl-detail",
+        governance_status="waiting_review",
+    )
+    world.get(GovernanceWhitelistRepository).add(
+        bot_id="bot-wl-detail", owner_id="owner-wl-detail",
+        created_by="tester",
+    )
+
+
 def _seed_review_waiting(world) -> None:
     """Seed a waiting_review ticket for approve_close."""
     _insert_ticket(
@@ -176,6 +192,8 @@ def _assert_detail_found(response, world) -> None:
         "feedback_payload", "gmt_create",
     ):
         assert k in data, f"detail response missing field {k!r}"
+    # 白名单位(单点查询):seed 未加白 → False
+    assert data["in_whitelist"] is False
 
 
 def _assert_review_approved_closed(response, world) -> None:
@@ -308,6 +326,24 @@ def review_detail_ok():
 )
 def review_detail_not_found_error():
     """Error path: detail on missing ticket → 404."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets/detail",
+    scenario="ok_in_whitelist",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"ticket_id": "tkt-detail-wl"},
+    ),
+    seed=_seed_detail_whitelisted,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True, "data": {"in_whitelist": True}},
+    ),
+)
+def review_detail_in_whitelist_ok():
+    """Whitelist path: detail.in_whitelist=True when (bot,owner) whitelisted."""
 
 
 # ---------------------------------------------------------------------------

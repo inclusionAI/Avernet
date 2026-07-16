@@ -177,6 +177,30 @@ class GovernanceWhitelistService:
         """Count whitelist entries of a given type (delegates to repo)."""
         return self._whitelist_repo.count_by_type(whitelist_type=whitelist_type)
 
+    def list_all(
+        self,
+        *,
+        whitelist_type: str = "governance",
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        include_expired: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[WhitelistEntry], int]:
+        """全量分页查询白名单(delegates to repo)。
+
+        可选 owner_id / bot_id 精确筛选;include_expired=False 默认排除已过期;
+        返回 (领域模型列表, 筛选条件下总数)。
+        """
+        return self._whitelist_repo.list_all(
+            whitelist_type=whitelist_type,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            include_expired=include_expired,
+            limit=limit,
+            offset=offset,
+        )
+
     def add(
         self,
         *,

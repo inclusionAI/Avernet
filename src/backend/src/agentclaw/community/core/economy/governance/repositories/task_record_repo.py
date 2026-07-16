@@ -245,7 +245,7 @@ class TaskRecordRepository(TaskRecordQueryMixin):
             return count
 
     # ------------------------------------------------------------------
-    # Admin delete / count (emergency delete endpoint, §7.5)
+    # Admin delete / count (admin delete endpoint, §7.5)
     # ------------------------------------------------------------------
 
     def count_by_dt_versions(
@@ -350,3 +350,24 @@ class TaskRecordRepository(TaskRecordQueryMixin):
         with self._db.orm_session() as session:
             session.add(row)
             session.flush()
+
+    def update_delivery_status(self, ticket_id: str, status: str) -> bool:
+        """Update a single ticket's delivery_status (self-managed session).
+
+        Args:
+            ticket_id: 工单稳定 UUID。
+            status: 投递状态(none/first_send:pending/reminder:sent/...)。
+
+        Returns:
+            True if 1 row updated, False otherwise.
+        """
+        with self._db.orm_session() as session:
+            result = (
+                session.query(GovernanceTicketOrm)
+                .filter(GovernanceTicketOrm.ticket_id == ticket_id)
+                .update(
+                    {GovernanceTicketOrm.delivery_status: status},
+                    synchronize_session=False,
+                )
+            )
+            return result == 1

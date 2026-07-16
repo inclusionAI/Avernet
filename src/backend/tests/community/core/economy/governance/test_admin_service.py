@@ -1,5 +1,10 @@
-"""Tests for GovernanceAdminService — close_all_open, cancel_pending,
-pause_ticket, review_ticket, emergency_close, get_state."""
+"""Tests for governance admin/workflow services.
+
+Admin-service tests: pause_ticket, get_state, deliver_by_worker(留 admin)。
+Workflow-service tests(关单方法从 admin 迁入后改 _build_workflow_svc 构造):
+close_all_open / cancel_pending / emergency_close / close-vs-cancel 区分 /
+ticket-notify 对齐。review/list/detail/build_detail 亦属 workflow。
+"""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -185,11 +190,11 @@ def _build_workflow_svc(engine):
 
 
 class TestCloseAllOpen:
-    """Test GovernanceAdminService.close_all_open()."""
+    """Test GovernanceWorkflowService.close_all_open()(从 admin 迁入)。"""
 
     def test_closes_all_open_records(self, session, engine):
         """All open tickets → closed with close_reason=admin_closed."""
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         _make_notification(session, notification_id="n-open-1", governance_status="open")
         _make_notification(session, notification_id="n-open-2", governance_status="open")
 
@@ -206,7 +211,7 @@ class TestCloseAllOpen:
 
     def test_closes_scheduled_records(self, session, engine):
         """Scheduled records (e.g. need_time) → also closed."""
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         _make_notification(
             session, notification_id="n-sched-1", governance_status="muted",
             response="need_time",
@@ -223,7 +228,7 @@ class TestCloseAllOpen:
 
     def test_preserves_user_response(self, session, engine):
         """Existing response/response_source are NOT overwritten."""
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         _make_notification(
             session, notification_id="n-responded", governance_status="muted",
             response="need_time", response_source="card_callback",
@@ -240,7 +245,7 @@ class TestCloseAllOpen:
 
     def test_cancels_pending_notify_status(self, session, engine):
         """Pending notify_status → cancelled; already-sent → preserved."""
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         _make_notification(
             session, notification_id="n-pending",
             notify_status="pending", governance_status="open",
@@ -259,7 +264,7 @@ class TestCloseAllOpen:
 
     def test_skips_closed_records(self, session, engine):
         """Already-closed records are not affected."""
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         _make_notification(
             session, notification_id="n-closed", governance_status="closed",
             close_reason="user_optimized", closed_at=datetime.now(),
@@ -278,7 +283,7 @@ class TestCloseAllOpen:
 
     def test_writes_audit(self, session, engine):
         """close_all_open writes AuditLogOrm."""
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         _make_notification(session, notification_id="n-1", governance_status="open")
 
         svc.close_all_open(reason="emergency test", operator="admin-123")
@@ -290,14 +295,14 @@ class TestCloseAllOpen:
 
     def test_empty_set_is_idempotent(self, session, engine):
         """No active tickets → returns closed=0, no error."""
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
 
         result = svc.close_all_open(reason="test", operator="admin")
         assert result.affected == 0
 
     def test_cooldown_applied(self, session, engine):
         """Each closed ticket gets cooldown_until = now + cooldown_days."""
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         _make_notification(session, notification_id="n-1", governance_status="open")
 
         before = datetime.now()
@@ -320,7 +325,7 @@ class TestCancelPendingVsCloseAllOpen:
 
     def test_cancel_pending_closes_all_active(self, session, engine):
         """cancel_pending closes unresponded open/muted notifications with emergency_closed."""
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         _make_notification(session, notification_id="n-no-resp", governance_status="open")
         _make_notification(
             session, notification_id="n-no-resp-2", governance_status="muted",
@@ -337,7 +342,7 @@ class TestCancelPendingVsCloseAllOpen:
 
     def test_close_all_open_includes_responded(self, session, engine):
         """close_all_open closes ALL open/muted records, even with response, and applies cooldown."""
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         _make_notification(session, notification_id="n-no-resp", governance_status="open")
         _make_notification(
             session, notification_id="n-responded", governance_status="muted",
@@ -368,7 +373,7 @@ class TestEmergencyTicketNotifyAlignment:
         """close_all_open:open/muted 通知对应的 open/scheduled 工单 → CLOSED(admin_closed)。
         用全量 bulk_close_open(WHERE status IN (open,scheduled) 口径天然对齐通知侧
         governance_status IN (open,muted))。"""
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         _make_notification(session, notification_id="n-a", governance_status="open", ticket_id="t-a")
         _make_notification(session, notification_id="n-b", governance_status="muted",
                            response="need_time", ticket_id="t-b")
@@ -389,7 +394,7 @@ class TestEmergencyTicketNotifyAlignment:
         """cancel_pending:仅取消 response IS NULL 的通知,按被关通知的 ticket_id
         集合关工单(逐条 domain guard)—— **不可裸用全量 bulk_close_open**(会
         多关已反馈的 scheduled 单)。已反馈的 scheduled 工单保留(口径精确)。"""
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         # unresponded open → 取消通知 + 关工单(emergency_closed)
         _make_notification(session, notification_id="n-unresp", governance_status="open",
                            ticket_id="t-unresp")
@@ -411,7 +416,7 @@ class TestEmergencyTicketNotifyAlignment:
 
     def test_cancel_pending_idempotent_on_already_closed_ticket(self, session, engine):
         """工单已 closed → driver emergency_close 幂等跳过,不重复审计/不报错。"""
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         _make_notification(session, notification_id="n-dup", governance_status="open",
                            ticket_id="t-closed")
         _make_task_record(session, ticket_id="t-closed", governance_status="closed")
@@ -573,10 +578,10 @@ class TestReviewTicket:
 
 
 class TestEmergencyClose:
-    """Test GovernanceAdminService.emergency_close()."""
+    """Test GovernanceWorkflowService.emergency_close()(从 admin 迁入)。"""
 
     def test_open_to_closed(self, session, engine):
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         _make_task_record(session, ticket_id="t-em-1", governance_status="open")
 
         result = svc.emergency_close("t-em-1", admin_id="admin-1", reason="urgent")
@@ -589,7 +594,7 @@ class TestEmergencyClose:
             assert ticket.active_worker is None
 
     def test_waiting_review_to_closed(self, session, engine):
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         _make_task_record(
             session, ticket_id="t-em-2", governance_status="waiting_review",
         )
@@ -598,7 +603,7 @@ class TestEmergencyClose:
         assert result.status.value == "closed"
 
     def test_not_found(self, session, engine):
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         result = svc.emergency_close("nonexistent", admin_id="admin-1")
         assert result.error_code == "NOT_FOUND"
 
@@ -610,7 +615,7 @@ class TestEmergencyClose:
         review), so exactly ONE audit row with action=ADMIN_CLOSE_ALL is
         emitted, and it carries actor_id=admin_id.
         """
-        svc, db, _ = _build_svc(engine)
+        svc, db = _build_workflow_svc(engine)
         _make_task_record(session, ticket_id="t-em-audit", governance_status="open")
 
         result = svc.emergency_close("t-em-audit", admin_id="admin-77", reason="uh")
@@ -701,7 +706,7 @@ class TestListReviewTickets:
 
 
 class TestGetReviewTicketDetail:
-    """get_review_ticket_detail: 单工单领域模型, 不存在返回 None。"""
+    """get_review_ticket_detail: 纯取工单本体,不携带白名单派生位。"""
 
     def test_found(self, session, engine):
         svc, _ = _build_workflow_svc(engine)
@@ -716,6 +721,42 @@ class TestGetReviewTicketDetail:
     def test_not_found_returns_none(self, session, engine):
         svc, _ = _build_workflow_svc(engine)
         assert svc.get_review_ticket_detail("nonexistent") is None
+
+
+class TestBuildReviewTicketDetail:
+    """build_review_ticket_detail: 工单本体 + in_whitelist 组装(跨聚合派生)。"""
+
+    def test_assembles_default_not_whitelisted(self, session, engine):
+        svc, db = _build_workflow_svc(engine)
+        _make_task_record(
+            session, ticket_id="t-detail", governance_status="waiting_review",
+        )
+        result = svc.build_review_ticket_detail("t-detail")
+        assert result is not None
+        t, in_wl = result
+        assert type(t).__name__ == "GovernanceTicket"
+        # bot/owner seeded via _make_task_record 默认非白名单 → False
+        assert in_wl is False
+
+    def test_assembles_in_whitelist_true(self, session, engine):
+        """工单的 (bot_id, owner_id) 已在白名单 → in_whitelist=True。"""
+        svc, db = _build_workflow_svc(engine)
+        _make_task_record(
+            session, ticket_id="t-wl",
+            bot_id="bot-wl", owner_id="owner-wl", governance_status="open",
+        )
+        wl_repo = GovernanceWhitelistRepository(db=db)
+        wl_repo.add(
+            bot_id="bot-wl", owner_id="owner-wl", created_by="tester",
+        )
+        result = svc.build_review_ticket_detail("t-wl")
+        assert result is not None
+        _, in_wl = result
+        assert in_wl is True
+
+    def test_not_found_returns_none(self, session, engine):
+        svc, _ = _build_workflow_svc(engine)
+        assert svc.build_review_ticket_detail("nonexistent") is None
 
 
 class TestDeliverByWorker:

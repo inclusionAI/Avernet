@@ -67,6 +67,7 @@ class MutableSnapshot:
     last_decision_dt_version: str | None
     last_seen_at: datetime | None
     last_sync_at: datetime | None
+    delivery_status: str = "none"  # 最近通知投递状态: none/first_send:sent/reminder:failed/...
 
 
 # ── 状态机转换表(工单) ─────────────────────────
@@ -259,6 +260,7 @@ class GovernanceTicket:
     feedback_payload: str | None
     actor_id: str | None
     # ── 基础元信息(只读,由 from_orm 从 sealed 列灌入) ───
+    id: int | None = None             # 自增主键(只读,from_orm 灌入;to_orm 不写回)
     gmt_create: datetime | None = None
     gmt_modified: datetime | None = None
 
@@ -345,6 +347,11 @@ class GovernanceTicket:
     def last_sync_at(self) -> datetime | None:
         """最近一次离线同步时间 — 快照委托。"""
         return self._snapshot.last_sync_at
+
+    @property
+    def delivery_status(self) -> str:
+        """最近通知投递状态 — 快照委托(none/first_send:sent/reminder:failed/...)。"""
+        return self._snapshot.delivery_status
 
     # ── 业务 property ──────────────────────────────
 
@@ -669,6 +676,7 @@ class GovernanceTicket:
                 last_decision_dt_version=obj.last_decision_dt_version,
                 last_seen_at=obj.last_seen_at,
                 last_sync_at=obj.last_sync_at,
+                delivery_status=getattr(obj, "delivery_status", None) or "none",
             ),
             # 生命周期态
             governance_status=GovernanceStatus(obj.governance_status or "open"),
@@ -691,6 +699,7 @@ class GovernanceTicket:
             remind_count=obj.remind_count or 0,
             feedback_payload=obj.feedback_payload,
             actor_id=obj.actor_id,
+            id=getattr(obj, "id", None),
             gmt_create=getattr(obj, "gmt_create", None),
             gmt_modified=getattr(obj, "gmt_modified", None),
         )
@@ -756,6 +765,7 @@ class GovernanceTicket:
         row.remind_count = self.remind_count
         row.feedback_payload = self.feedback_payload
         row.actor_id = self.actor_id
+        row.delivery_status = self.delivery_status
         return row
 
     def apply_to(self, row: object) -> None:
@@ -786,6 +796,7 @@ class GovernanceTicket:
         row.remind_count = self.remind_count
         row.feedback_payload = self.feedback_payload
         row.actor_id = self.actor_id
+        row.delivery_status = self.delivery_status
 
     def to_dict(self) -> dict:
         """API 序列化 — router 直接 ``data=[t.to_dict() for t in items]``。

@@ -11,13 +11,11 @@ from datetime import datetime
 
 from .test_admin_service import (  # noqa: E402  (relative import within test package)
     _build_svc,
-    _make_notification,
 )
 
 from agentclaw.community.core.economy.governance.domain.enums import AuditAction
 from agentclaw.community.core.economy.governance.repositories.orm import (
     AuditLogOrm,
-    GovernanceNotificationOrm,
     GovernanceTicketOrm,
 )
 
@@ -181,77 +179,6 @@ class TestResume:
                 if a.action_taken == AuditAction.ADMIN_RESUME
             ]
             assert len(audits) == 1
-
-
-# ── bulk_whitelist ───────────────────────────────────────────────
-
-
-class TestBulkWhitelist:
-    """Cover bulk_whitelist — cancels pending notifications for specified bots."""
-
-    def test_whitelists_and_cancels_pending(self, session, engine):
-        """Bots with pending notifications → whitelisted + cancelled."""
-        svc, db, _ = _build_svc(engine)
-        _make_notification(
-            session, notification_id="n-1",
-            bot_id="bot-a", owner_id="owner-a", governance_status="open",
-            ticket_id="t-1",
-        )
-        _make_notification(
-            session, notification_id="n-2",
-            bot_id="bot-b", owner_id="owner-b", governance_status="open",
-            ticket_id="t-2",
-        )
-
-        result = svc.bulk_whitelist(
-            bot_ids=["bot-a", "bot-b"], reason="cleanup", operator="admin",
-        )
-
-        # Two distinct (bot, owner) pairs → 2 whitelisted.
-        assert result["whitelisted"] == 2
-        assert result["cancelled"] == 2
-
-        with db.orm_session() as s:
-            notif_rows = s.query(GovernanceNotificationOrm).all()
-            for n in notif_rows:
-                assert n.notify_status == "cancelled"
-                assert n.governance_status == "closed"
-
-    def test_no_matching_bots_skips_whitelist(self, session, engine):
-        """Unknown bot ids → no owner pairs → whitelisted=0, cancelled=0."""
-        svc, db, _ = _build_svc(engine)
-        _make_notification(
-            session, notification_id="n-1",
-            bot_id="bot-known", owner_id="owner-1", governance_status="open",
-        )
-
-        result = svc.bulk_whitelist(
-            bot_ids=["bot-unknown"], reason="x", operator="admin",
-        )
-
-        assert result["whitelisted"] == 0
-        assert result["cancelled"] == 0
-
-    def test_skips_already_closed_notifications(self, session, engine):
-        """Already-closed/sent notifications are not affected by bulk_whitelist."""
-        svc, db, _ = _build_svc(engine)
-        _make_notification(
-            session, notification_id="n-open",
-            bot_id="bot-x", owner_id="owner-x", governance_status="open",
-            ticket_id="t-open",
-        )
-        _make_notification(
-            session, notification_id="n-closed",
-            bot_id="bot-x", owner_id="owner-x", governance_status="closed",
-            ticket_id="t-closed", notify_status="sent",
-        )
-
-        result = svc.bulk_whitelist(
-            bot_ids=["bot-x"], reason="x", operator="admin",
-        )
-
-        # Only the open/pending notification is cancelled.
-        assert result["cancelled"] == 1
 
 
 # ── _read_pause_info non-str + error branches ────────────────────

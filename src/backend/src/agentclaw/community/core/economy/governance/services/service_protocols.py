@@ -34,6 +34,7 @@ if TYPE_CHECKING:
         GovernanceTicket,
     )
     from agentclaw.community.core.economy.governance.services.admin_service import (
+        BulkOperationResult,
         TicketActionOutcome,
     )
 
@@ -54,26 +55,7 @@ class GovernanceAdminServiceProtocol(Protocol):
     def resume(self, reason: str, operator: str) -> None:
         ...
 
-    def bulk_whitelist(
-        self,
-        bot_ids: list[str],
-        reason: str,
-        operator: str,
-    ) -> dict:
-        ...
-
-    def cancel_pending(self, reason: str, operator: str) -> dict:
-        ...
-
-    def close_all_open(self, reason: str, operator: str) -> dict:
-        ...
-
     def pause_ticket(
-        self, ticket_id: str, admin_id: str, reason: str = "",
-    ) -> TicketActionOutcome:
-        ...
-
-    def emergency_close(
         self, ticket_id: str, admin_id: str, reason: str = "",
     ) -> TicketActionOutcome:
         ...
@@ -81,16 +63,6 @@ class GovernanceAdminServiceProtocol(Protocol):
     def delete_records(
         self,
         body: dict,
-        operator: str,
-    ) -> dict:
-        ...
-
-    def delete_whitelist_entry(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        reason: str,
         operator: str,
     ) -> dict:
         ...
@@ -187,6 +159,19 @@ class GovernanceWhitelistServiceProtocol(Protocol):
         ...
 
     def count_by_type(self, *, whitelist_type: str = "governance") -> int:
+        ...
+
+    def list_all(
+        self,
+        *,
+        whitelist_type: str = "governance",
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        include_expired: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[Any], int]:
+        """全量分页查询白名单(可选 owner/bot 筛选 + 过期开关 + total)。"""
         ...
 
 
@@ -433,7 +418,17 @@ class GovernanceWorkflowServiceProtocol(Protocol):
     def get_review_ticket_detail(
         self, ticket_id: str,
     ) -> GovernanceTicket | None:
-        """评审工单详情(单工单领域模型)。"""
+        """评审工单详情(单工单领域模型,纯本体,不含跨聚合派生)。"""
+        ...
+
+    def build_review_ticket_detail(
+        self, ticket_id: str,
+    ) -> tuple[GovernanceTicket, bool] | None:
+        """组装工单详情视图:工单本体 + 是否在治理白名单中(跨聚合派生位)。
+
+        Returns ``(ticket, in_whitelist)``;工单不存在返回 None;
+        工单缺 bot_id/owner_id 时 in_whitelist=False。
+        """
         ...
 
     def get_pending_notification(self, ticket_id: str) -> dict | None:
@@ -444,4 +439,22 @@ class GovernanceWorkflowServiceProtocol(Protocol):
         self, ticket_id: str, action: str, admin_id: str, remark: str = "",
     ) -> TicketActionOutcome:
         """审批:approve_close / approve_whitelist / reject_for_reopen(§7.5.2)。"""
+        ...
+
+    def emergency_close(
+        self, ticket_id: str, admin_id: str, reason: str = "",
+    ) -> TicketActionOutcome:
+        """立即关单(无 cooldown),从 admin_service 迁入(工单运营归属)。"""
+        ...
+
+    def cancel_pending(
+        self, reason: str, operator: str,
+    ) -> BulkOperationResult:
+        """取消全部未响应待通知 + 关对应工单(从 admin_service 迁入)。"""
+        ...
+
+    def close_all_open(
+        self, reason: str, operator: str,
+    ) -> BulkOperationResult:
+        """关闭全部 open/muted(含已响应)+ 关全部 open/scheduled 工单(迁入)。"""
         ...

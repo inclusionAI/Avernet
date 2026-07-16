@@ -1,16 +1,20 @@
 """Endpoint coverage for governance admin router endpoints (7.5 / 6.3 / 7.3).
 
 规整后 admin router 端点(全 body/query,零 path 参数):
-  - /admin/tickets:close          关闭工单(单/多,body ticket_ids 循环 emergency_close)
-  - /admin/tickets:close-all      全部关单(dispatch:cancel_pending / close_all_open)
   - /admin/tickets:deliver        按 worker_id 精准投递(不重跑状态机)
   - /admin/whitelist:delete       删除白名单条目
   - /admin/whitelist:bulk-add     批量加白
+  - /admin/admin_whitelist (GET)  白名单只读分页列表
   - /admin/brake (POST)           全局制动 toggle(pause/resume)
   - /admin/brake (GET)            查询制动状态
   - /admin/records:delete         数据维护/清理
   - /admin/trigger-scan           手动触发 cron tick
   - /admin/scan-and-deliver       扫描+投递(测试工具)
+
+注:tickets:close / tickets:close-all 已迁至 workflow_router(路径 /workflow/tickets:close
+/ /workflow/tickets:close-all),其端点 case 路径已改 /workflow,仍在本文件注册由
+endpoint_runner 统一跑;close/close-all service 方法(emergency_close/cancel_pending/
+close_all_open)已迁 GovernanceWorkflowService。
 
 Uses real DI services and in-memory SQLite -- no MagicMock / unittest.mock.
 Each seed function inserts real data via repo methods so the endpoint handler
@@ -252,7 +256,7 @@ def _assert_brake_paused(response, world) -> None:
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:close",
+    path="/api/economy/governance/workflow/tickets:close",
     scenario="ok_multi",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -271,7 +275,7 @@ def tickets_close_multi_ok():
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:close",
+    path="/api/economy/governance/workflow/tickets:close",
     scenario="not_found_returns_outcome",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -294,7 +298,7 @@ def tickets_close_not_found_returns_outcome():
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:close-all",
+    path="/api/economy/governance/workflow/tickets:close-all",
     scenario="ok_full_close_all_open",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -310,7 +314,7 @@ def tickets_close_all_full_ok():
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:close-all",
+    path="/api/economy/governance/workflow/tickets:close-all",
     scenario="ok_only_unresponded_cancel_pending",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -566,7 +570,7 @@ def brake_get_no_auth():
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:close",
+    path="/api/economy/governance/workflow/tickets:close",
     scenario="error_empty_ticket_ids",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -580,7 +584,7 @@ def tickets_close_error_empty_ids():
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:close-all",
+    path="/api/economy/governance/workflow/tickets:close-all",
     scenario="error_missing_reason",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -632,3 +636,108 @@ def whitelist_bulk_add_error_empty_bot_ids():
 )
 def brake_toggle_error_missing_enabled():
     """Error path: missing required enabled field -> 422."""
+
+
+# ---------------------------------------------------------------------------
+# 12. /admin/whitelist (GET — 只读分页列表)
+# ---------------------------------------------------------------------------
+
+
+def _seed_whitelist_list(world) -> None:
+    """Seed mixed whitelist entries: two active + one expired (governance).
+
+    共 3 条 governance: bot-wl-1/user-wl-1(永久)、bot-wl-2/user-wl-2(永久)、
+    bot-wl-exp/user-wl-1(已过期)。默认查询应返回前两条,total=2。
+    """
+    from datetime import datetime, timedelta
+
+    wl_repo = world.get(GovernanceWhitelistRepository)
+    wl_repo.add(
+        bot_id="bot-wl-1", owner_id="user-wl-1", reason="r1", created_by="88888",
+    )
+    wl_repo.add(
+        bot_id="bot-wl-2", owner_id="user-wl-2", reason="r2", created_by="88888",
+    )
+    wl_repo.add(
+        bot_id="bot-wl-exp",
+        owner_id="user-wl-1",
+        reason="expired",
+        created_by="88888",
+        expires_at=datetime.now() - timedelta(days=1),
+    )
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/admin/whitelist",
+    scenario="ok_default_excludes_expired",
+    input=CaseInput(headers=_USER_HEADER),
+    seed=_seed_whitelist_list,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True, "data": {"total": 2}},
+    ),
+)
+def whitelist_get_ok_default_excludes_expired():
+    """Happy path: 默认排除过期,返回有效条目(total=2)。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/admin/whitelist",
+    scenario="ok_filter_by_owner",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"owner_id": "user-wl-1"},
+    ),
+    seed=_seed_whitelist_list,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True, "data": {"total": 1}},
+    ),
+)
+def whitelist_get_ok_filter_by_owner():
+    """Filter path: 按 owner 筛选(user-wl-1 有效条目仅 1 条,过期被排除)。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/admin/whitelist",
+    scenario="ok_include_expired",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"include_expired": "true"},
+    ),
+    seed=_seed_whitelist_list,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True, "data": {"total": 3}},
+    ),
+)
+def whitelist_get_ok_include_expired():
+    """Filter path: include_expired=true 返回全 3 条(含过期)。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/admin/whitelist",
+    scenario="error_limit_too_large",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"limit": "201"},
+    ),
+    expect=ExpectError(status=422),
+)
+def whitelist_get_error_limit_too_large():
+    """Error path: limit 超上限 200 -> 422。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/admin/whitelist",
+    scenario="no_auth",
+    input=CaseInput(),  # no x-user-id → LocalAuth raises Unauthorized
+    expect=ExpectError(status=401),
+)
+def whitelist_get_no_auth():
+    """Error path: 无鉴权 -> 401。"""

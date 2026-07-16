@@ -140,7 +140,7 @@ class WorkflowReviewResponse(BaseModel):
         """从 TicketActionOutcome 领域返回值构造响应(显式序列化,非裸 dict)。
 
         Args:
-            outcome: review_ticket / emergency_close 返回的领域 I/O 对象。
+            outcome: review_ticket / admin_close 返回的领域 I/O 对象。
 
         Returns:
             审批响应,status 取 enum 的 value 字符串。
@@ -167,6 +167,7 @@ class ReviewTicketItem(BaseModel):
     """评审工单列表单行 — 字段贴合 governance-admin.html 三栏展示。"""
 
     ticket_id: str | None = None
+    id: int | None = None
     bot_name: str | None = None
     owner_id: str | None = None
     governance_status: str = ""
@@ -176,6 +177,8 @@ class ReviewTicketItem(BaseModel):
     response: str | None = None
     review_reason: str | None = None
     gmt_create: str | None = None
+    gmt_modified: str | None = None
+    delivery_status: str | None = None
 
     @classmethod
     def from_ticket(cls, ticket: GovernanceTicket) -> ReviewTicketItem:
@@ -184,6 +187,7 @@ class ReviewTicketItem(BaseModel):
         status = ticket.governance_status
         return cls(
             ticket_id=ticket.ticket_id,
+            id=ticket.id,
             bot_name=ticket.bot_name,
             owner_id=ticket.owner_id,
             governance_status=status.value if hasattr(status, "value") else str(status or ""),
@@ -193,6 +197,8 @@ class ReviewTicketItem(BaseModel):
             response=ticket.user_feedback,
             review_reason=ticket.review_reason,
             gmt_create=_iso(ticket.gmt_create),
+            gmt_modified=_iso(ticket.gmt_modified),
+            delivery_status=ticket.delivery_status,
         )
 
 
@@ -272,6 +278,7 @@ class ReviewTicketDetailResponse(BaseModel):
 
     # 基础信息
     ticket_id: str | None = None
+    id: int | None = None
     worker_id: str | None = None
     bot_id: str | None = None
     owner_id: str | None = None
@@ -296,6 +303,10 @@ class ReviewTicketDetailResponse(BaseModel):
         default_factory=list,
         description="当前可做 review 动作(按用户反馈派生,前端动态渲染)",
     )
+    # 白名单状态(单点查询,仅详情;列表接口不查以防 N+1)
+    in_whitelist: bool = False
+    # 投递状态(回写自 notify_log)
+    delivery_status: str | None = None
     # 评审 / 生命周期
     review_reason: str | None = None
     review_decision: str | None = None
@@ -326,12 +337,24 @@ class ReviewTicketDetailResponse(BaseModel):
         ]
 
     @classmethod
-    def from_ticket(cls, ticket: GovernanceTicket) -> ReviewTicketDetailResponse:
-        """从 GovernanceTicket 领域模型构造详情(读 snapshot 委托 + 实体字段,datetime→ISO)。"""
+    def from_ticket(
+        cls,
+        ticket: GovernanceTicket,
+        *,
+        in_whitelist: bool = False,
+    ) -> ReviewTicketDetailResponse:
+        """从 GovernanceTicket 领域模型构造详情(读 snapshot 委托 + 实体字段,datetime→ISO)。
+
+        Args:
+            ticket: 工单领域模型。
+            in_whitelist: 该工单 (bot_id, owner_id) 是否在治理白名单中
+                (由 service 层单点查询传入,默认 False;列表接口不传以防 N+1)。
+        """
         s = ticket.snapshot
         status = ticket.governance_status
         return cls(
             ticket_id=ticket.ticket_id,
+            id=ticket.id,
             worker_id=ticket.worker_id,
             bot_id=ticket.bot_id,
             owner_id=ticket.owner_id,
@@ -351,6 +374,8 @@ class ReviewTicketDetailResponse(BaseModel):
             feedback_payload=ticket.feedback_payload,
             feedback_notification_id=_extract_feedback_notification_id(ticket.feedback_payload),
             available_actions=cls._build_available_actions(ticket),
+            in_whitelist=in_whitelist,
+            delivery_status=ticket.delivery_status,
             review_reason=ticket.review_reason,
             review_decision=ticket.review_decision,
             reviewed_by=ticket.reviewed_by,
@@ -391,7 +416,7 @@ class WhitelistDeleteRequest(BaseModel):
 
 # ---------------------------------------------------------------------------
 # Admin: 制动 (brake) / 工单批量管理 / 白名单批量 / 按 worker 投递
-# 拆自原 5-action EmergencyRequest(action 开关分发多资源),全 body 驱动。
+# 拆自原 5-action 统一 action 端点(action 开关分发多资源,已退场),全 body 驱动。
 # ---------------------------------------------------------------------------
 
 class BrakeToggleRequest(BaseModel):
@@ -407,7 +432,7 @@ class TicketsCloseRequest(BaseModel):
     """Request body for closing one or more governance tickets.
 
     单条/批量统一入参:把要关的 ticket_id 放进列表,handler 循环调
-    ``admin_svc.emergency_close``(已委托 ``lifecycle_svc``,关工单+cancel_pending
+    ``admin_svc.admin_close``(已委托 ``lifecycle_svc``,关工单+cancel_pending
     由 driver 编排)。禁止直调 repo。
     """
     reason: str = Field(..., description="Close reason for audit")
@@ -415,10 +440,10 @@ class TicketsCloseRequest(BaseModel):
 
 
 class TicketsCloseAllRequest(BaseModel):
-    """Request body for closing all active governance tickets (emergency bulk).
+    """Request body for closing all active governance tickets (admin bulk).
 
     handler dispatch 复用状态机收口后的两方法:
-    ``only_unresponded=true`` → ``admin_svc.cancel_pending``(仅未响应,EMERGENCY_CLOSED);
+    ``only_unresponded=true`` → ``admin_svc.cancel_pending``(仅未响应,ADMIN_CLOSED);
     否则 → ``admin_svc.close_all_open``(全量含已响应,ADMIN_CLOSED)。两方法已联合编排
     task_record 工单主体 + notify_log 通知 + audit(状态机 Task 8 口径对齐)。
    cooldown_days 走 config.cool_down_days,无入参。
@@ -463,7 +488,7 @@ class BrakeStateResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class RecordsDeleteRequest(BaseModel):
-    """Request body for emergency records / notifications delete."""
+    """Request body for admin records / notifications delete."""
     table: str = Field(..., description="record_daily | notify_log")
     dt_versions: list[str] | None = Field(None, description="按 dt_version 删除 (record_daily)")
     ids: list[int] | None = Field(None, description="按主键 ID 批量删除 (record_daily)")

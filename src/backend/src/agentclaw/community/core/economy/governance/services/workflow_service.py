@@ -20,9 +20,11 @@ from injector import inject
 
 from agentclaw.community.core.economy.governance.domain.enums import (
     AuditAction,
+    CloseReason,
     GovernanceStatus,
 )
 from agentclaw.community.core.economy.governance.services.admin_service import (
+    BulkOperationResult,
     TicketActionOutcome,
 )
 from agentclaw.community.core.economy.governance.services.service_protocols import (
@@ -49,10 +51,14 @@ log = get_logger(__name__)
 
 
 class GovernanceWorkflowService:
-    """工单审批服务 — list / detail / review(§7.5.2)。
+    """工单运营服务 — list / detail / review / 关单(§7.5.2)。
 
     review 三分支走 lifecycle_svc.review_ticket(状态机唯一驱动) + 审批副作用
-    (approve_whitelist 加白名单)+ 审计。零反向依赖 admin_service。
+    (approve_whitelist 加白名单)+ 审计。关单方法(emergency_close /
+    cancel_pending / close_all_open,从 admin_service 迁入)同走状态机 +
+    audit;依赖复用本服务既有注入(task_repo/audit_repo/config/lifecycle_svc
+    /notify_repo),零依赖补。仅 import admin_service 的
+    TicketActionOutcome / BulkOperationResult 数据类(单向,无循环)。
     """
 
     @inject
@@ -106,7 +112,10 @@ class GovernanceWorkflowService:
     def get_review_ticket_detail(
         self, ticket_id: str,
     ) -> GovernanceTicket | None:
-        """评审工单详情:取单个工单领域模型,供详情面板展示。
+        """评审工单详情:取单个工单领域模型。
+
+        纯取工单本体(task_record 映射),不含跨聚合派生状态(如白名单)——
+        白名单等派生位由 :meth:`build_review_ticket_detail` 组装。
 
         Args:
             ticket_id: 工单稳定 UUID。
@@ -115,6 +124,32 @@ class GovernanceWorkflowService:
             :class:`GovernanceTicket` 或 None(不存在)。
         """
         return self._task_repo.find_by_ticket_id(ticket_id)
+
+    def build_review_ticket_detail(
+        self, ticket_id: str,
+    ) -> tuple[GovernanceTicket, bool] | None:
+        """组装工单详情视图:工单本体 + 是否在治理白名单中(跨聚合派生位)。
+
+        in_whitelist 不是 ticket 领域模型的固有状态(它来自 ac_bot_whitelist
+        另一聚合),故不塞进 :class:`GovernanceTicket`,而在此组装方法里算出
+        随工单一并返回。复用既有 ``self._whitelist_service`` 注入,
+        ``is_whitelisted`` 已含 type+env+未过期判定,只点查一次。
+
+        Args:
+            ticket_id: 工单稳定 UUID。
+
+        Returns:
+            ``(ticket, in_whitelist)``;工单不存在返回 None。
+            工单缺 bot_id/owner_id 时 in_whitelist=False(防御兜底)。
+        """
+        ticket = self._task_repo.find_by_ticket_id(ticket_id)
+        if ticket is None:
+            return None
+        bot_id = getattr(ticket, "bot_id", None)
+        owner_id = getattr(ticket, "owner_id", None)
+        if not bot_id or not owner_id:
+            return ticket, False
+        return ticket, self._whitelist_service.is_whitelisted(bot_id, owner_id)
 
     def get_pending_notification(self, ticket_id: str) -> dict | None:
         """查工单待回复(sent/pending)通知,返回 notification_id + 元信息。
@@ -250,3 +285,167 @@ class GovernanceWorkflowService:
             status=outcome_status,
             close_reason=close_reason,
         )
+
+    # ── 关单方法(从 admin_service 迁入,工单运营面归属) ─────────────────
+
+
+    def emergency_close(
+        self, ticket_id: str, admin_id: str, reason: str = "",
+    ) -> TicketActionOutcome:
+        """Immediate ticket close without cooldown (§6.3)."""
+        ticket = self._task_repo.find_by_ticket_id(ticket_id)
+        if not ticket:
+            return TicketActionOutcome(
+                ticket_id=ticket_id, status=GovernanceStatus.OPEN,
+                error="Ticket not found", error_code="NOT_FOUND",
+            )
+
+        if ticket.governance_status == GovernanceStatus.CLOSED:
+            return TicketActionOutcome(
+                ticket_id=ticket_id,
+                status=GovernanceStatus.CLOSED,
+                close_reason=ticket.close_reason,
+            )
+
+        now = datetime.now()
+
+        # Advance via driver service (sole driver). Driver orchestrates the
+        # CLOSE + cancel-pending. The audit row (with reason + actor_id=
+        # admin_id) is owned by this service below — the driver does not
+        # duplicate it, matching pause_ticket / review_ticket siblings.
+        self._lifecycle_svc.emergency_close(
+            ticket_id, now=now,
+        )
+
+        self._audit_repo.add_audit(
+            "admin-emergency-close",
+            bot_id=ticket.bot_id,
+            owner_id=ticket.owner_id,
+            actor_id=admin_id,
+            action_taken=AuditAction.ADMIN_CLOSE_ALL,
+            source="admin_api",
+            error_msg=f"ticket_id={ticket_id}; reason={reason}",
+            dry_run=0,
+        )
+
+        return TicketActionOutcome(
+            ticket_id=ticket_id,
+            status=GovernanceStatus.CLOSED,
+            close_reason=CloseReason.EMERGENCY_CLOSED,
+        )
+
+    def cancel_pending(self, reason: str, operator: str) -> BulkOperationResult:
+        """Cancel ALL pending notifications (emergency close) + close the
+        matching ``task_record`` subjects (Task 8 口径对齐).
+
+        通知侧 cancel scope = open/muted 且 response IS NULL。工单侧按被关
+        通知的 ``ticket_id`` 集合关 —— **不可裸用全量** :meth:`bulk_close_open`
+        (会多关已反馈的 scheduled 单)。逐条走 :meth:`emergency_close` 链路
+        激活领域模型守卫、幂等。
+
+        Returns ``BulkOperationResult(affected=N, label="cancelled")``。
+        """
+        now = datetime.now()
+        cooldown_days = self._config.cooldown_days
+
+        # Step 1: pre-collect the ticket_id set scoped to the same filter as
+        # the notify bulk-cancel (only_unresponded=True), before the cancel
+        # mutates rows. 无 None(record_process 创建处恒非空,且查询已剔 None)。
+        ticket_ids = self._notify_repo.list_ticket_ids_open_muted(
+            only_unresponded=True,
+        )
+
+        # Step 2: notify-side bulk cancel (behavior unchanged) — mirrors
+        # notify_status/governance_status/close_reason/closed_at/cooldown_until.
+        cancelled = self._notify_repo.bulk_close_open_muted(
+            close_reason=CloseReason.EMERGENCY_CLOSED,
+            closed_at=now,
+            cooldown_until=now + timedelta(days=cooldown_days),
+            only_unresponded=True,
+        )
+
+        # Step 3: ticket-side close — per-ticket guard-activated, idempotent.
+        # Driver's emergency_close uses EMERGENCY_CLOSED (aligns notify side).
+        self._lifecycle_svc.bulk_close_by_ticket_ids(ticket_ids, now=now)
+
+        self._write_emergency_audit(
+            action_taken=AuditAction.ADMIN_CANCEL_PENDING,
+            actor_id=operator,
+            error_msg=f"reason={reason}; operator={operator}",
+        )
+        log.info(
+            "[GovernanceEmergency] cancel_pending by %s: cancelled=%d, tickets_closed_by=%d",
+            operator, cancelled, len(ticket_ids),
+        )
+        return BulkOperationResult(affected=cancelled, label="cancelled")
+
+    def close_all_open(self, reason: str, operator: str) -> BulkOperationResult:
+        """Close ALL open/muted records, including already-responded ones,
+        + close all open/scheduled ``task_record`` subjects (Task 8 口径对齐).
+
+        Unlike :meth:`cancel_pending` which only touches ``response IS NULL``
+        records, this closes **every** open/muted notification regardless of
+        whether the user has already responded (e.g. ``need_time`` → muted).
+
+        工单侧用全量 :meth:`bulk_close_open`(WHERE status IN (open,scheduled))
+        ——与通知侧 ``governance_status IN (open,muted)`` 口径天然对齐(全量
+        关,不区分反馈)。Existing notify ``response`` / ``response_source`` /
+        ``mute_until`` preserved.
+
+        Returns ``BulkOperationResult(affected=N, label="closed")``。
+        """
+        now = datetime.now()
+        cooldown_days = self._config.cooldown_days
+
+        # Step 1: notify-side bulk close (behavior unchanged).
+        closed = self._notify_repo.bulk_close_open_muted(
+            close_reason=CloseReason.ADMIN_CLOSED,
+            closed_at=now,
+            cooldown_until=now + timedelta(days=cooldown_days),
+            only_unresponded=False,
+        )
+
+        # Step 2: ticket-side full close (ADMIN_CLOSED). bulk_close_open's
+        # WHERE status IN (open,scheduled) + active_worker IS NOT NULL
+        # predicate is the state-legality guard (per-spec bulk exemption).
+        tickets_closed = self._lifecycle_svc.bulk_close_open(
+            close_reason=CloseReason.ADMIN_CLOSED, now=now,
+        )
+
+        self._write_emergency_audit(
+            action_taken=AuditAction.ADMIN_CLOSE_ALL,
+            actor_id=operator,
+            error_msg=f"reason={reason}; operator={operator}",
+        )
+        log.info(
+            "[GovernanceAdmin] close_all_open by %s: notify_closed=%d, tickets_closed=%d",
+            operator, closed, tickets_closed,
+        )
+        return BulkOperationResult(affected=closed, label="closed")
+
+    # ── 关单:私有 audit helper(随关单方法从 admin_service 迁入) ──────
+
+
+    def _write_emergency_audit(
+        self,
+        *,
+        action_taken: str,
+        actor_id: str | None = None,
+        error_msg: str = "",
+    ) -> None:
+        """Best-effort audit write for emergency operations.
+
+        Delegates to :meth:`GovernanceAuditRepository.add_audit` with the
+        emergency-specific ``run_id`` and ``source``.
+        """
+        try:
+            self._audit_repo.add_audit(
+                "emergency",
+                action_taken=action_taken,
+                actor_id=actor_id,
+                error_msg=error_msg,
+                source="admin_api",
+                dry_run=0,
+            )
+        except Exception:
+            log.exception("[GovernanceEmergency] Failed to write audit for %s", action_taken)

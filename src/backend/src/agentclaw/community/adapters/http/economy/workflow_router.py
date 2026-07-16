@@ -30,6 +30,8 @@ from agentclaw.community.adapters.http.economy.schemas import (
     ApiResponse,
     ReviewTicketDetailResponse,
     ReviewTicketListResponse,
+    TicketsCloseAllRequest,
+    TicketsCloseRequest,
     WorkflowReviewRequest,
     WorkflowReviewResponse,
 )
@@ -163,10 +165,13 @@ async def get_review_ticket_detail(
     只读 GET;工单不存在 → 404。ticket_id 走 query(与 admin 写操作零 path 参数风格统一)。
     """
     del ctx  # RequestContext 仅用于走 AuthPlugin 鉴权链路
-    ticket = await asyncio.to_thread(admin_svc.get_review_ticket_detail, ticket_id)
-    if ticket is None:
+    detail = await asyncio.to_thread(
+        admin_svc.build_review_ticket_detail, ticket_id,
+    )
+    if detail is None:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    data = ReviewTicketDetailResponse.from_ticket(ticket)
+    ticket, in_whitelist = detail
+    data = ReviewTicketDetailResponse.from_ticket(ticket, in_whitelist=in_whitelist)
     return ApiResponse(success=True, data=data.model_dump())
 
 
@@ -223,3 +228,65 @@ async def review_ticket(
     _raise_on_admin_error(result)
     data = WorkflowReviewResponse.from_outcome(result)
     return ApiResponse(success=True, data=data.model_dump())
+
+
+# ── Workflow: 关单(从 admin_router 迁入,工单运营归属) ─────────────────
+
+
+@workflow_router.post(
+    "/tickets:close",
+    summary="关闭工单(单/多,body ticket_ids 循环 emergency_close)",
+)
+async def tickets_close(
+    body: TicketsCloseRequest,
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+) -> ApiResponse:
+    """Close one or more governance tickets (emergency_close 循环)。
+
+    单条/批量统一入参:handler 循环调 ``admin_svc.emergency_close``(已委托
+    ``lifecycle_svc``,关工单 + cancel_pending 由 driver 编排)。禁止直调 repo。
+    """
+    operator = ctx.user_id
+
+    def _close_all():
+        results = []
+        for ticket_id in body.ticket_ids:
+            result = admin_svc.emergency_close(
+                ticket_id=ticket_id,
+                admin_id=operator,
+                reason=body.reason,
+            )
+            results.append(result.to_dict())
+        return results
+
+    results = await asyncio.to_thread(_close_all)
+    return ApiResponse(success=True, data=results)
+
+
+@workflow_router.post(
+    "/tickets:close-all",
+    summary="全部关单(dispatch:cancel_pending 仅未响应 / close_all_open 全量)",
+)
+async def tickets_close_all(
+    body: TicketsCloseAllRequest,
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+) -> ApiResponse:
+    """Close all active governance tickets (emergency bulk)。
+
+    ``only_unresponded=true`` → ``cancel_pending``(仅未响应,EMERGENCY_CLOSED,
+    label=cancelled);否则 → ``close_all_open``(全量含已响应,ADMIN_CLOSED,
+    label=closed)。两方法经状态机 Task 8 已联合编排 task_record 主体 +
+    notify_log 通知 + audit。cooldown_days 走 config(无入参)。
+    """
+    operator = ctx.user_id
+    if body.only_unresponded:
+        result = await asyncio.to_thread(
+            admin_svc.cancel_pending, reason=body.reason, operator=operator,
+        )
+    else:
+        result = await asyncio.to_thread(
+            admin_svc.close_all_open, reason=body.reason, operator=operator,
+        )
+    return ApiResponse(success=True, data=result.to_dict())
