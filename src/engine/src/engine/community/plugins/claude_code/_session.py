@@ -16,6 +16,7 @@ class _SessionPortMixin:
         offset: int = 0,
         limit: int = 50,
         agent_id: str | None = None,
+        session_key: str | None = None,
     ) -> list[dict]:
         client = await self._relay()
         try:
@@ -38,6 +39,17 @@ class _SessionPortMixin:
         # agent_id filter (relay doesn't filter server-side for this field).
         if agent_id is not None:
             sessions = [s for s in sessions if s.get("agentId") == agent_id]
+        requested_session_key = session_key if session_key and session_key.strip() else None
+        if requested_session_key is not None:
+            before_count = len(sessions)
+            # Filter before pagination so an exact key beyond the current page is found.
+            sessions = [item for item in sessions if item.get("key") == requested_session_key]
+            log.info(
+                "[sessions_list] session_key_filter has_session_key=%s before=%s matched=%s",
+                True,
+                before_count,
+                len(sessions),
+            )
         return sessions[offset: offset + limit]
 
     async def session_create(

@@ -222,7 +222,9 @@ async def test_sessions_list_returns_raw_dicts():
     c = _FakeRelayClient()
     c.set_response("sessions.list", _ok({"sessions": [{"key": "a"}, {"key": "b"}]}))
     impl, _ = _impl(c)
-    out = await impl.sessions_list(token=None, offset=0, limit=50, agent_id=None)
+    out = await impl.sessions_list(
+        token=None, offset=0, limit=50, agent_id=None, session_key=None,
+    )
     assert [s["key"] for s in out] == ["a", "b"]
 
 
