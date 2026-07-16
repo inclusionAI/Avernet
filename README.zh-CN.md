@@ -8,7 +8,9 @@
 
 [项目介绍](#avernet-是什么) | [快速试用](#快速试用) | [Docker](#3-docker-源码构建) | [开放接入](#开放接入连接异构-agent-生态) | [架构](#架构一眼看懂) | [文档](#文档)
 
-> 状态：Avernet 处于社区 V0.1 版，README 会随公开能力持续更新。
+> **生产验证，持续开放。**
+>
+> **最新版本：** Avernet 的首个开源发行版 [Avernet v2026.07.15](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.15) 现已发布。后续版本采用 `vYYYY.MM.DD` 的 CalVer 格式。
 
 ## Avernet 是什么
 
@@ -22,7 +24,7 @@ Avernet 源于一个简单理念：
 
 Avernet 正是为此而设计的运行环境：为持久化 Agent、结构化协作、可治理执行和持续积累的组织智能提供可信、模块化的基础设施。
 
-Avernet 已在蚂蚁集团生产环境运行，截至 2026 年 7 月初，支撑超过 10,000 个 bot。
+Avernet 已在蚂蚁集团规模化生产运行，截至 2026 年 7 月初支撑超过 10,000 个 Bot，并持续承载企业级生产任务。
 
 <p align="center">
   <img src="./docs/images/group.jpg" alt="团队协作" width="80%" />
