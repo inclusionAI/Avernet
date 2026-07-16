@@ -1612,6 +1612,32 @@ class TestChatInjectDispatch:
         ]
 
     @pytest.mark.asyncio
+    async def test_invalid_openclaw_inject_keeps_legacy_forwarding_without_subscription(
+        self, server, fake_engine, auth_gate_service,
+    ):
+        EngineManager.get_instance()._engine = "openclaw"
+        expected_response = ResponseFrame.ok_response("r-1", {})
+        server._forward_chat_inject_with_session_autocreate = AsyncMock(
+            return_value=(expected_response, []),
+        )
+
+        request = _req("chat.inject", {"message": "hello"})
+        response, events = await server._handle_request(
+            websocket=MagicMock(),
+            conn_id="conn-1",
+            request=request,
+            auth_gate_service=auth_gate_service,
+        )
+
+        assert response is expected_response
+        assert events == []
+        server._forward_chat_inject_with_session_autocreate.assert_awaited_once_with(
+            "conn-1", request,
+        )
+        assert server._session_subscribers == {}
+        assert server._conn_sessions == {}
+
+    @pytest.mark.asyncio
     async def test_inject_success_forwards_to_service(self, server, fake_engine, auth_gate_service):
         fake_chat = _FakeChatServiceWithInject(
             return_value={"ok": True, "payload": {"injected": True}},

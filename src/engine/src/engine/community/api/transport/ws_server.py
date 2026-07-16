@@ -458,20 +458,10 @@ class EngineWebSocketServer:
                     k: v for k, v in params.items() if k in allowed and v is not None
                 }
                 session_key = request.params.get("sessionKey")
-                if not session_key:
-                    return ResponseFrame.err_response(
-                        request.id,
-                        ErrorShape(ErrorCodes.INVALID_REQUEST, "Missing sessionKey"),
-                    ), []
-                if not request.params.get("message"):
-                    return ResponseFrame.err_response(
-                        request.id,
-                        ErrorShape(ErrorCodes.INVALID_REQUEST, "Missing message"),
-                    ), []
-
-                # An inject event may arrive before its RPC response. Subscribe before
-                # dispatching so the originating connection cannot miss that event.
-                await self._subscribe_conn_to_session(conn_id, session_key)
+                if session_key and request.params.get("message"):
+                    # An inject event may arrive before its RPC response. Subscribe before
+                    # dispatching so the originating connection cannot miss that event.
+                    await self._subscribe_conn_to_session(conn_id, session_key)
                 # 优先调用 active engine 的 chat plugin.inject (claude_code 走 RPC 透传到 relay,
                 # 同时给业务层提供统一入口); 不实现 inject 的 engine (openclaw 走 gateway
                 # 原生 chat.inject) 仍走 _forward_request 透传分支.

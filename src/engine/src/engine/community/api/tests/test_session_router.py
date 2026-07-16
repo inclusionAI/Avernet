@@ -92,6 +92,7 @@ class TestListSessions:
         call_args = mock_session_api.list.call_args[0][0]
         assert call_args.user_id == "u1"
         assert call_args.agent_id == "a1"
+        assert call_args.session_key is None
         assert call_args.limit == 5
         assert call_args.offset == 10
 
