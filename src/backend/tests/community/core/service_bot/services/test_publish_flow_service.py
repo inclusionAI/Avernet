@@ -1717,9 +1717,9 @@ async def test_execute_rollback_with_config_artifact():
         operator="user1",
     )
 
-# Verify upgrade_async used config_artifact, unchanged (backward compat)
+# Verify upgrade_async used delivery with config_artifact unchanged (backward compat)
     upgrade_call = build_service.upgrade_async.call_args
-    assert upgrade_call.kwargs["config_artifact"] == artifact
+    assert upgrade_call.kwargs["delivery"].config_artifact == artifact
     assert upgrade_call.kwargs["migration_path"] is None
 
     assert result.publish_id == 2
@@ -1800,7 +1800,7 @@ async def test_execute_rollback_delivers_stored_online_overrides_not_live():
         operator="user1",
     )
 
-    delivered = build_service.upgrade_async.await_args.kwargs["config_artifact"]
+    delivered = build_service.upgrade_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_overrides"] == stored_online
     assert delivered["engine_ext"]["stage"] == "release"
     # Stored slot, never a live re-fetch.
