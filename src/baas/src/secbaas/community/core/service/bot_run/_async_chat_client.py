@@ -21,12 +21,9 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
-from opentelemetry import context as otel_context
-from opentelemetry import trace as otel_trace
-from opentelemetry.context import Context
-
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.logger import get_logger
+from secbaas.community.tracer import get_tracer_plugin
 
 from ._bot_websocket_client import BotWebSocketClient
 from ._session_key_matcher import SessionKeyMatcher
@@ -35,24 +32,20 @@ from ._session_state import _SessionState
 logger = get_logger("core-bot-run")
 
 
-def _capture_trace_context() -> Context | None:
-    """捕获当前 OTel context，供后续回调中恢复。
+def _capture_trace_context() -> Any:
+    """捕获当前 trace context，供后续回调中恢复。
 
     在 send_message 注册 session 时调用，保存当前请求的 trace context。
-    返回值是不透明的 context 对象，传给 _attach_trace_context 恢复。
+    返回值是不透明的 context 对象，传给 _with_session_trace 恢复。
     """
-    ctx = otel_context.get_current()
-    span = otel_trace.get_current_span(ctx)
-    if span is not None and span.get_span_context().is_valid:
-        return ctx
-    return None
+    return get_tracer_plugin().capture_context()
 
 
 def _with_session_trace(method_name: str = "_on_event") -> Callable[..., Any]:
     """装饰器：从 payload 中查找 session state，恢复 trace context 后执行方法。
 
     适用于 _on_chat / _on_agent 等 WS 回调，这些回调在 _recv_loop 后台 Task
-    中执行，无 OTel span context。装饰器自动：
+    中执行，无 active trace context。装饰器自动：
       1. 从 payload.sessionKey 查找 _SessionState（支持模糊匹配）
       2. 恢复 state 中保存的 trace context，使日志 traceid 关联原始请求
       3. 将 state 作为关键字参数传入被装饰方法
@@ -76,17 +69,18 @@ def _with_session_trace(method_name: str = "_on_event") -> Callable[..., Any]:
             )
             state = match_result.state if match_result else None
 
-            otel_token = None
+            tracer = get_tracer_plugin()
+            token = None
             if state is not None and state.trace_context is not None:
-                otel_token = otel_context.attach(state.trace_context)
+                token = tracer.attach_context(state.trace_context)
             try:
                 if event_name is not None:
                     fn(self, event_name, payload, session_key=session_key, state=state)
                 else:
                     fn(self, payload, session_key=session_key, state=state)
             finally:
-                if otel_token is not None:
-                    otel_context.detach(otel_token)
+                if token is not None:
+                    tracer.detach_context(token)
 
         wrapper.__name__ = method_name
         wrapper.__qualname__ = f"AsyncChatClient.{method_name}"
@@ -579,8 +573,8 @@ class AsyncChatClient:
             self._active_sessions.clear()
             self._condition.notify_all()
 
+    @staticmethod
     async def _drain_stream_queue(
-        self,
         queue: asyncio.Queue[StreamChunk],
         timeout: int | None,
     ) -> AsyncIterator[StreamChunk]:
