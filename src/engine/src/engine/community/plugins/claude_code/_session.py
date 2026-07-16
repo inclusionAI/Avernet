@@ -7,6 +7,32 @@ from typing import Any
 log = logging.getLogger("claude-code-community-port")
 
 
+def _session_matches_agent_id(session: dict, agent_id: str) -> bool:
+    """Match an explicit relay agentId or the supported session-key forms."""
+    if "agentId" in session:
+        return session["agentId"] == agent_id
+
+    key = session.get("key")
+    if not isinstance(key, str):
+        return False
+    if key.startswith("agent:"):
+        try:
+            key_agent_id, remainder = key.removeprefix("agent:").split(
+                ":session:", 1)
+            session_id, user_id = remainder.split(":user:", 1)
+        except ValueError:
+            return False
+        return bool(key_agent_id and session_id and user_id) and key_agent_id == agent_id
+    if key.startswith("user:"):
+        try:
+            user_id, remainder = key.removeprefix("user:").split(":session:", 1)
+            session_id, key_agent_id = remainder.split(":agent:", 1)
+        except ValueError:
+            return False
+        return bool(user_id and session_id and key_agent_id) and key_agent_id == agent_id
+    return False
+
+
 class _SessionPortMixin:
     """Domain mixin: sessions.{list,patch,delete,reset} + chat.history."""
 
@@ -44,7 +70,14 @@ class _SessionPortMixin:
         sessions = [s for s in sessions if isinstance(s, dict)]
         # agent_id filter (relay doesn't filter server-side for this field).
         if agent_id is not None:
-            sessions = [s for s in sessions if s.get("agentId") == agent_id]
+            before_count = len(sessions)
+            sessions = [s for s in sessions if _session_matches_agent_id(s, agent_id)]
+            log.info(
+                "[sessions_list] agent_filter has_agent_id=%s before=%s matched=%s",
+                True,
+                before_count,
+                len(sessions),
+            )
         requested_session_key = session_key if session_key and session_key.strip() else None
         if requested_session_key is not None:
             before_count = len(sessions)
