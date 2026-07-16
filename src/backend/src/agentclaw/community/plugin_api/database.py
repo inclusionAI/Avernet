@@ -48,3 +48,13 @@ class DatabasePlugin(Plugin, Protocol):
                 s.add(record)   # persisted on clean exit, every runtime
         """
         ...
+
+    def transactional_orm_session(self) -> ContextManager[Any]:
+        """Return a real commit/rollback SQLAlchemy transaction.
+
+        This additive entrypoint is reserved for multi-statement units of work
+        that require row locks and rollback across all statements. Unlike
+        :meth:`orm_session`, production implementations must not use
+        ``AUTOCOMMIT`` isolation.
+        """
+        ...

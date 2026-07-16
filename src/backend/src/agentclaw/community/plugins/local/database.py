@@ -155,6 +155,7 @@ class SqliteDB(MockSeam, DatabasePlugin, LifecycleBase):
         import agentclaw.community.core.bot_dormant.sqlite_models  # noqa: F401  ac_bot_dormant_*
         import agentclaw.community.core.task_queue.repository.models  # noqa: F401  ac_task_queue
         import agentclaw.community.core.economy.governance.repositories.orm  # noqa: F401  governance_*
+        import agentclaw.community.core.caller_identity.models  # noqa: F401  caller identity tables
 
         # bot_chat uses a private ``Base = declarative_base()`` instead of
         # the canonical ``agentclaw.community.core.base.Base``. Side-effect import
@@ -211,3 +212,7 @@ class SqliteDB(MockSeam, DatabasePlugin, LifecycleBase):
                 raise
             finally:
                 db.close()
+
+    def transactional_orm_session(self):
+        """Reuse the existing local commit/rollback transaction."""
+        return self.orm_session()
