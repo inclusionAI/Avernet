@@ -8,52 +8,8 @@
 import * as BcnController from '@/services/backend-api/BcnController';
 import { useBcnAuthStore } from '@/stores/bcnAuthStore';
 import { extractErrorMessage } from '@/utils/requestErrorHandler';
-import { useCallback, useEffect } from 'react';
+import { useCallback } from 'react';
 import { toast } from 'sonner';
-
-const BCN_AUTH_RETURN_TO_KEY = 'bcn:auth:returnTo';
-
-function getCurrentReturnTo(): string {
-  if (typeof window === 'undefined') return '/';
-  return `${window.location.pathname}${window.location.search}${window.location.hash}`;
-}
-
-function isSafeReturnTo(value: string | null): value is string {
-  return !!value && value.startsWith('/') && !value.startsWith('//');
-}
-
-function persistReturnTo() {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(BCN_AUTH_RETURN_TO_KEY, getCurrentReturnTo());
-  } catch (error) {
-    console.warn('[useBcnAuth] 保存登录回跳地址失败:', error);
-  }
-}
-
-function consumeReturnTo(): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const value = window.localStorage.getItem(BCN_AUTH_RETURN_TO_KEY);
-    window.localStorage.removeItem(BCN_AUTH_RETURN_TO_KEY);
-    return isSafeReturnTo(value) ? value : null;
-  } catch (error) {
-    console.warn('[useBcnAuth] 读取登录回跳地址失败:', error);
-    return null;
-  }
-}
-
-export function restoreBcnAuthReturnToIfNeeded(): boolean {
-  if (typeof window === 'undefined') return false;
-  const searchParams = new URLSearchParams(window.location.search);
-  if (searchParams.get('login') !== 'success') return false;
-
-  const returnTo = consumeReturnTo();
-  if (!returnTo || returnTo === getCurrentReturnTo()) return false;
-
-  window.location.replace(returnTo);
-  return true;
-}
 
 export function useBcnAuth() {
   const status = useBcnAuthStore((state) => state.status);
@@ -75,10 +31,6 @@ export function useBcnAuth() {
     (state) => state.setLoadingLoginUrl,
   );
   const setLoggingOut = useBcnAuthStore((state) => state.setLoggingOut);
-
-  useEffect(() => {
-    restoreBcnAuthReturnToIfNeeded();
-  }, []);
 
   const checkAuth = useCallback(async () => {
     setCheckingAuth(true);
@@ -108,9 +60,7 @@ export function useBcnAuth() {
   const loadLoginUrl = useCallback(async () => {
     setLoadingLoginUrl(true);
     try {
-      const res = await BcnController.getAuthUrl({
-        returnTo: getCurrentReturnTo(),
-      });
+      const res = await BcnController.getAuthUrl();
       const firstUrl = res.providers?.[0]?.url || null;
       if (!firstUrl) {
         setLoginUrl(null);
@@ -131,7 +81,6 @@ export function useBcnAuth() {
   }, [setLoadingLoginUrl, setLoginUrl]);
 
   const login = useCallback(async () => {
-    persistReturnTo();
     const targetUrl = loginUrl || (await loadLoginUrl());
     if (!targetUrl) return;
     window.location.href = targetUrl;
