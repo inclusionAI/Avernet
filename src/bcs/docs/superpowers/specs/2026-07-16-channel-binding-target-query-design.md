@@ -41,3 +41,4 @@ GET /channels/bindings/by-target?target_type=group&target_id=group_1&channel_typ
 - service：目标查询结果的 provider 配置脱敏。
 - HTTP contract：新路由的人类身份认证。
 - route unit：目标类型转换与空目标校验。
+- e2e story：登录用户按 Bot target 查询绑定并获得稳定的 `items` 响应。
