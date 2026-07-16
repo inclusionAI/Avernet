@@ -7,9 +7,9 @@ repo_root="$(cd "$baas_root/../.." && pwd)"
 baas_dir="${BAAS_COMMUNITY_DIR:-$baas_root}"
 ci_workspace="${CITEST_WORKSPACE:-$repo_root}"
 report_dir="$baas_dir/pytest_report"
-junit_report="$report_dir/TEST-junit.xml"
+unit_report="$report_dir/TEST-unit.xml"
 coverage_report="$report_dir/TEST-cov.xml"
-line_coverage_min="${BAAS_CI_LINE_COVERAGE_MIN:-0}"
+line_coverage_min="${BAAS_CI_LINE_COVERAGE_MIN:-90}"
 python_bin="$(command -v python || command -v python3 || true)"
 base=""
 head="HEAD"
@@ -46,24 +46,20 @@ fi
 mkdir -p "$report_dir"
 
 set +e
-PYTHONPATH="$baas_dir/src:$baas_dir:${PYTHONPATH:-}" \
-"$baas_python" -m pytest tests -v \
-  --junitxml="$junit_report" \
-  --cov="$baas_dir/src" \
-  --cov-report="xml:$coverage_report" \
-  --cov-report=term-missing
-pytest_status=$?
+source scripts/lib/pipeline.sh && run_ci_pipeline bare e2e-sqlite
+baas_ci_status=$?
 set -e
 
-touch "$junit_report" "$coverage_report"
-if [[ "$pytest_status" -ne 0 ]]; then
-  echo "baas CI failed: pytest did not pass cleanly" >&2
-  exit "$pytest_status"
+touch "$unit_report" "$coverage_report"
+if [[ "$baas_ci_status" -ne 0 ]]; then
+  echo "BaaS CI failed: baas ci did not pass cleanly" >&2
+  exit "$baas_ci_status"
 fi
 
+echo "--- unit coverage report ---"
 check_args=(
   "$repo_root/scripts/ci/report_check.py"
-  --junit "$junit_report"
+  --junit "$unit_report"
   --coverage "$coverage_report"
   --source-root "$baas_dir/src"
   --min-case-pass-rate 100
@@ -73,4 +69,5 @@ if [[ -n "$base" ]]; then
   check_args+=(--base "$base" --head "$head" --min-change-line-coverage 90)
 fi
 "$python_bin" "${check_args[@]}"
+echo "--- end unit coverage report ---"
 echo "baas CI gate passed"
