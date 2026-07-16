@@ -1004,6 +1004,21 @@ class TestSessionMixin:
             {"key": "second"},
         ]
 
+    async def test_list_session_key_matches_raw_key_exactly(self):
+        c = _FakeRelayClient()
+        c.set_response("sessions.list", _ok({"sessions": [
+            {"key": "target"},
+            {"key": " target "},
+            {"key": "prefix-target"},
+            {"key": "target-suffix"},
+        ]}))
+        impl, _ = _impl(c)
+
+        assert await impl.sessions_list(session_key="target") == [{"key": "target"}]
+        assert await impl.sessions_list(session_key=" target ") == [{"key": " target "}]
+        assert await impl.sessions_list(session_key="tar") == []
+        assert await impl.sessions_list(session_key="get") == []
+
     async def test_list_offset_limit(self):
         c = _FakeRelayClient()
         c.set_response("sessions.list", _ok({"sessions": [{"key": str(i)} for i in range(10)]}))

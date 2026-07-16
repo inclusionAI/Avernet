@@ -13,11 +13,14 @@ dict so round-trip assertions work.
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
 from engine.community.kernel.frames import EventFrame
 from engine.community.plugin_api.claude_code.plugin import ClaudeCodePlugin
+
+log = logging.getLogger("local-claude-code-plugin")
 
 
 class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
@@ -129,10 +132,22 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
         offset: int = 0,
         limit: int = 50,
         agent_id: str | None = None,
+        session_key: str | None = None,
     ) -> list[dict]:
         items = list(self._sessions.values())
         if agent_id is not None:
             items = [s for s in items if s.get("agentId") == agent_id]
+        requested_session_key = session_key if session_key and session_key.strip() else None
+        if requested_session_key is not None:
+            before_count = len(items)
+            # COSEC: Log only non-sensitive filter state and aggregate counts.
+            items = [item for item in items if item.get("key") == requested_session_key]
+            log.info(
+                "[sessions_list] session_key_filter has_session_key=%s before=%s matched=%s",
+                True,
+                before_count,
+                len(items),
+            )
         return items[offset: offset + limit]
 
     async def session_create(
