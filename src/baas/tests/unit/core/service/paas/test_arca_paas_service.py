@@ -54,6 +54,15 @@ def arca_credentials():
 class TestDestroyDeviceWithStorage:
     """Test destroy_device storage cleanup behavior (TST-01 through TST-04)."""
 
+    @pytest.fixture(autouse=True)
+    def _enable_log_propagation(self):
+        """BareLoggerPlugin sets propagate=False, which breaks caplog."""
+        logger = logging.getLogger("core-service")
+        old = logger.propagate
+        logger.propagate = True
+        yield
+        logger.propagate = old
+
     def test__destroy_device_sync__with_storage(
         self, arca_credentials, mock_plugin, mock_sandbox
     ):
