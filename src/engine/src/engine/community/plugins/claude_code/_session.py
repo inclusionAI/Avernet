@@ -31,6 +31,12 @@ class _SessionPortMixin:
         payload = resp.payload or []
         if isinstance(payload, dict):
             sessions = payload.get("sessions", [])
+            if not isinstance(sessions, list):
+                log.warning(
+                    "[sessions_list] malformed nested sessions shape type=%s",
+                    type(sessions).__name__,
+                )
+                return []
         elif isinstance(payload, list):
             sessions = payload
         else:
