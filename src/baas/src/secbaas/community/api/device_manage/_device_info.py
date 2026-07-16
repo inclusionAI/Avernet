@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from ._models import Storage
+
 
 class DeviceInfo(BaseModel):
     """Base device info - platform-agnostic.
@@ -44,9 +46,7 @@ class ArcaDeviceInfo(DeviceInfo):
         default=None, description="挂载点信息"
     )
     envs: dict[str, str] | None = Field(default=None, description="环境变量")
-    storage: dict[str, Any] | None = Field(
-        default=None, description="NAS 持久化存储信息"
-    )
+    storage: Storage | None = Field(default=None, description="NAS 持久化存储信息")
 
 
 class SigmaDeviceInfo(DeviceInfo):

@@ -48,10 +48,10 @@ class Storage(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    type: str
-    path: str
+    type: str | None = None
+    path: str | None = None
     storage_id: str | None = None
-    quota: str
+    quota: str | None = None
     permission: str | None = None
 
 
