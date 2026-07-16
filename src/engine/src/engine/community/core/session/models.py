@@ -68,6 +68,8 @@ class SessionCreateRequest(BaseModel):
     cwd: str | None = None
     uuid: str | None = None
     extInfo: dict[str, Any] | None = None
+    gitAuthorName: str | None = None
+    gitAuthorEmail: str | None = None
 
 
 class SessionDeleteRequest(BaseModel):

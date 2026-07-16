@@ -21,6 +21,8 @@ class CreateSessionBody(BaseModel):
     engine: Optional[str] = None
     uuid: Optional[str] = None
     extInfo: Optional[dict[str, Any]] = None
+    gitAuthorName: Optional[str] = None
+    gitAuthorEmail: Optional[str] = None
 
 
 class UpdateSessionBody(BaseModel):

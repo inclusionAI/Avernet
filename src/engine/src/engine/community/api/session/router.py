@@ -147,6 +147,8 @@ async def create_session(body: CreateSessionBody) -> ApiResponse:
             runtime=body.runtime,
             uuid=body.uuid,
             extInfo=body.extInfo,
+            gitAuthorName=body.gitAuthorName,
+            gitAuthorEmail=body.gitAuthorEmail,
         ))
         log.info(f"[create_session] 创建成功: session_id={session.id}")
         return ApiResponse(success=True, data=_session_to_dict(session), warning=warning)
