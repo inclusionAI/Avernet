@@ -199,9 +199,10 @@ class OpenClawSessionAdapter(SessionService):
         """List sessions matching the request filter.
 
         The port handles the complete legacy ordering: sessions.list RPC →
-        bcs:group filter → agent_id filter → paginate → chat.history (page only)
-        → Bot 初始化配置 filter → model normalisation.  The adapter receives
-        the already-filtered, already-paginated page and only builds DTOs.
+        bcs:group filter → agent_id/session_key filters → paginate →
+        chat.history (page only) → Bot 初始化配置 filter → model normalisation.
+        The adapter receives the already-filtered, already-paginated page and
+        only builds DTOs.
         """
         token = auth.token if auth is not None else None
         log.info("[list] user_id=%s, agent_id=%s", request.user_id, request.agent_id)
@@ -211,6 +212,7 @@ class OpenClawSessionAdapter(SessionService):
             offset=request.offset,
             limit=request.limit,
             agent_id=request.agent_id,
+            session_key=request.session_key,
         )
 
         sessions: list[Session] = []
