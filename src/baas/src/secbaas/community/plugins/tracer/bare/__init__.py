@@ -80,3 +80,29 @@ class BareTracerPlugin(TracerPlugin):
             if ctx is not None and ctx.is_valid:
                 return format(ctx.trace_id, "032x")
         return "-"
+
+    def capture_context(self) -> Any:
+        """Capture the current OTel context for later restoration."""
+        from opentelemetry import context as otel_context
+        from opentelemetry import trace as otel_trace
+
+        ctx = otel_context.get_current()
+        span = otel_trace.get_current_span(ctx)
+        if span is not None and span.get_span_context().is_valid:
+            return ctx
+        return None
+
+    def attach_context(self, ctx: Any) -> Any:
+        """Activate a previously captured OTel context.
+
+        Returns a detach token to be passed to :meth:`detach_context`.
+        """
+        from opentelemetry import context as otel_context
+
+        return otel_context.attach(ctx)
+
+    def detach_context(self, token: Any) -> None:
+        """Restore the previous OTel context."""
+        from opentelemetry import context as otel_context
+
+        otel_context.detach(token)
