@@ -728,8 +728,13 @@ class _SessionPort:
         self._clear_response: dict[str, Any] = {"success": True, "payload": {}}
         self._reset_response: dict[str, Any] = {"success": True, "payload": {"reset": True}}
 
-    async def sessions_list(self, token=None, offset=0, limit=50, agent_id=None) -> list[dict]:
-        self.calls.append({"m": "list", "token": token, "offset": offset, "limit": limit, "agent_id": agent_id})
+    async def sessions_list(
+        self, token=None, offset=0, limit=50, agent_id=None, session_key=None,
+    ) -> list[dict]:
+        self.calls.append({
+            "m": "list", "token": token, "offset": offset, "limit": limit,
+            "agent_id": agent_id, "session_key": session_key,
+        })
         return self._sessions
 
     async def session_create(self, key, label=None, model=None, cwd=None, token=None) -> dict:
