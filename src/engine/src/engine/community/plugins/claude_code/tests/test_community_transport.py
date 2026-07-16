@@ -223,9 +223,12 @@ async def test_sessions_list_returns_raw_dicts():
     c.set_response("sessions.list", _ok({"sessions": [{"key": "a"}, {"key": "b"}]}))
     impl, _ = _impl(c)
     out = await impl.sessions_list(
-        token=None, offset=0, limit=50, agent_id=None, session_key=None,
+        token=None, offset=0, limit=50, agent_id=None, session_key="b",
     )
-    assert [s["key"] for s in out] == ["a", "b"]
+    assert [s["key"] for s in out] == ["b"]
+    _, args, kw = c.calls[-1]
+    assert args[0] == "sessions.list"
+    assert kw["params"] == {}
 
 
 async def test_session_create_calls_sessions_patch():

@@ -70,6 +70,33 @@ async def test_local_claude_code_plugin_contract_smoke():
     assert (await plugin.relay_forward_raw_frame({"type": "event"}))["success"] is True
 
 
+async def test_local_claude_code_session_key_lookup_is_exact_and_pre_paginated():
+    plugin = LocalClaudeCodePluginImpl()
+    first = await plugin.session_create("first", label="one")
+    target = await plugin.session_create("target", label="two")
+    padded = await plugin.session_create(" target ", label="three")
+    await plugin.session_create("prefix-target", label="four")
+    await plugin.session_create("target-suffix", label="five")
+
+    assert await plugin.sessions_list(session_key="target", offset=0, limit=1) == [target]
+    assert await plugin.sessions_list(session_key=" target ") == [padded]
+    assert await plugin.sessions_list(session_key="tar") == []
+    assert await plugin.sessions_list(session_key="get") == []
+    assert await plugin.sessions_list(session_key="missing", offset=0, limit=1) == []
+    assert await plugin.sessions_list(session_key="  ", offset=0, limit=1) == [first]
+
+
+async def test_local_claude_code_session_key_diagnostics_do_not_log_the_key(caplog):
+    plugin = LocalClaudeCodePluginImpl()
+    await plugin.session_create("private-session-key")
+
+    with caplog.at_level("INFO", logger="local-claude-code-plugin"):
+        await plugin.sessions_list(session_key="private-session-key")
+
+    assert "has_session_key=True" in caplog.text
+    assert "private-session-key" not in caplog.text
+
+
 async def test_local_claude_code_plugin_stateful_ports_and_error_branches():
     plugin = LocalClaudeCodePluginImpl()
 
