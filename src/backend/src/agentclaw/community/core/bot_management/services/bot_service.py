@@ -3321,6 +3321,7 @@ class BotService:
             if binding_status and binding_status not in {
                 DeviceBindingStatus.ACTIVE.value,
                 DeviceBindingStatus.FAILED.value,
+                DeviceBindingStatus.STOPPED.value,
             }:
                 logger.warning(
                     "[bot_service.restart_bot] reject restart for invalid binding state: "

@@ -49,6 +49,7 @@ class DeviceBindingStatus(StrEnum):
     """Device binding status enumeration."""
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
+    STOPPED = "STOPPED"
     FAILED = "FAILED"
     RELEASED = "RELEASED"
 
