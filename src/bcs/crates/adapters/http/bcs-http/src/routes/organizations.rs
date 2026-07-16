@@ -72,10 +72,10 @@ pub async fn create_organization(
 
 pub async fn get_organization(
     State(state): State<HttpAppState>,
-    Path((provider_id, organization_code)): Path<(String, String)>,
+    Path(organization_code): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<OrganizationResponse>, HttpAdapterError> {
-    let auth = organization_auth(provider_id, &headers)?;
+    let auth = organization_member_auth(&headers)?;
     let organization = state
         .services
         .organization_management
@@ -105,11 +105,11 @@ pub async fn list_organizations(
 
 pub async fn patch_organization(
     State(state): State<HttpAppState>,
-    Path((provider_id, organization_code)): Path<(String, String)>,
+    Path(organization_code): Path<String>,
     headers: HeaderMap,
     Json(req): Json<PatchOrganizationRequest>,
 ) -> Result<Json<OrganizationResponse>, HttpAdapterError> {
-    let auth = organization_auth(provider_id, &headers)?;
+    let auth = organization_member_auth(&headers)?;
     let organization = state
         .services
         .organization_management
@@ -375,6 +375,6 @@ fn candidate_to_response(bot: OrganizationCandidateBot) -> OrganizationCandidate
     OrganizationCandidateBotResponse {
         bot_uuid: bot.bot_uuid,
         provider_id: bot.provider_id,
-        capabilities: to_wire_capabilities(bot.capabilities),
+        name: bot.capabilities.name,
     }
 }

@@ -765,12 +765,12 @@ print("1" if any(item.get("organization_code") == target for item in json.load(s
 ' "$organization_code" 2>/dev/null || echo 0)
     assert_eq "organization list includes the created organization" "$listed_organization" "1"
 
-    api_request_headers GET "/providers/${provider_id}/organizations/${organization_code}" "" \
+    api_request_headers GET "/organizations/${organization_code}" "" \
         "Authorization: Bearer ${admin_token}"
     require_status "provider reads its organization" "200" || return
     assert_json_eq "organization read keeps its name" "$RESPONSE" "name" "E2E release organization"
 
-    api_request_headers PATCH "/providers/${provider_id}/organizations/${organization_code}" \
+    api_request_headers PATCH "/organizations/${organization_code}" \
         '{"name":"E2E release organization updated"}' \
         "Authorization: Bearer ${admin_token}"
     require_status "provider updates its organization" "200" || return

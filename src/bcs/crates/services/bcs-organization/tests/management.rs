@@ -666,7 +666,7 @@ async fn put_member_rejects_disabled_organization_before_bot_checks() {
     create_org(&ctx, &provider_a).await;
     ctx.service
         .update(UpdateOrganizationCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             name: None,
             description: None,
@@ -731,7 +731,7 @@ async fn organization_management_rejects_wrong_manager_and_bad_auth() {
 
     let wrong_manager = ctx
         .service
-        .get(provider_auth(&provider_b), "promo-2026")
+        .get(member_auth(&provider_b), "promo-2026")
         .await
         .expect_err("wrong manager should be rejected");
     assert!(matches!(wrong_manager, ServiceError::Forbidden(reason) if reason == "organization_manager_required"));
@@ -778,7 +778,7 @@ async fn validation_rejects_invalid_code_invalid_role_and_patch_without_fields()
     let patch_without_fields = ctx
         .service
         .update(UpdateOrganizationCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             name: None,
             description: None,
@@ -996,7 +996,7 @@ async fn effective_membership_rejects_disabled_org_disabled_member_and_nonmember
 
     ctx.service
         .update(UpdateOrganizationCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             name: None,
             description: None,
