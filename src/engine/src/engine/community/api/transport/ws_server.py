@@ -457,6 +457,21 @@ class EngineWebSocketServer:
                 request.params = {
                     k: v for k, v in params.items() if k in allowed and v is not None
                 }
+                session_key = request.params.get("sessionKey")
+                if not session_key:
+                    return ResponseFrame.err_response(
+                        request.id,
+                        ErrorShape(ErrorCodes.INVALID_REQUEST, "Missing sessionKey"),
+                    ), []
+                if not request.params.get("message"):
+                    return ResponseFrame.err_response(
+                        request.id,
+                        ErrorShape(ErrorCodes.INVALID_REQUEST, "Missing message"),
+                    ), []
+
+                # An inject event may arrive before its RPC response. Subscribe before
+                # dispatching so the originating connection cannot miss that event.
+                await self._subscribe_conn_to_session(conn_id, session_key)
                 # 优先调用 active engine 的 chat plugin.inject (claude_code 走 RPC 透传到 relay,
                 # 同时给业务层提供统一入口); 不实现 inject 的 engine (openclaw 走 gateway
                 # 原生 chat.inject) 仍走 _forward_request 透传分支.
@@ -628,9 +643,7 @@ class EngineWebSocketServer:
                 ErrorShape(ErrorCodes.INVALID_REQUEST, "Missing sessionKey"),
             ), []
 
-        self._session_subscribers.setdefault(session_key, set()).add(conn_id)
-        self._conn_sessions.setdefault(conn_id, set()).add(session_key)
-        live_inject = await self._ensure_openclaw_inject_listener(conn_id)
+        live_inject = await self._subscribe_conn_to_session(conn_id, session_key)
         return ResponseFrame.ok_response(
             request.id,
             {
@@ -659,6 +672,12 @@ class EngineWebSocketServer:
             request.id,
             {"unsubscribed": True, "sessionKey": session_key},
         ), []
+
+    async def _subscribe_conn_to_session(self, conn_id: str, session_key: str) -> bool:
+        """Register a connection for one session and bind its live inject listener."""
+        self._session_subscribers.setdefault(session_key, set()).add(conn_id)
+        self._conn_sessions.setdefault(conn_id, set()).add(session_key)
+        return await self._ensure_openclaw_inject_listener(conn_id)
 
     def _unsubscribe_conn(self, conn_id: str) -> None:
         for session_key in list(self._conn_sessions.pop(conn_id, set())):
