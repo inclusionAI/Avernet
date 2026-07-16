@@ -24,7 +24,6 @@ async def test_multipart_upload_initiation_returns_parts(
     Verifies the stub OSS backend's initiate_multipart_upload produces the
     expected MultipartSession with multiple parts and correct session_id.
     """
-    file_size = 209_715_200  # 200MB, above 100MB threshold
     staging_path = "file-transfers/test-mp-init/file.bin"
 
     session = stub_oss_backend.initiate_multipart_upload(
