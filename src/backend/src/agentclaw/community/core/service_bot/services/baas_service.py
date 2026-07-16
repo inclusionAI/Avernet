@@ -25,6 +25,15 @@ import json
 import time
 
 import httpx
+from agentclaw.community.core.caller_identity.credential import (
+    CALLER_CREDENTIAL_REQUEST_INVALID,
+    CALLER_OUTBOUND_INVALID,
+    CALLER_OUTBOUND_UPDATE_FAILED,
+    CALLER_TARGET_AMBIGUOUS,
+    CALLER_TARGET_NOT_FOUND,
+    CallerCredentialError,
+    CallerToken,
+)
 
 from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
@@ -3136,6 +3145,171 @@ class BaasService:  # pragma: no cover
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
+
+    def update_caller_identity(
+        self,
+        *,
+        bot_id: str,
+        owner_user_id: str,
+        caller_user_id: str,
+        caller_token: CallerToken,
+        agent_pass_token: str,
+        agent_code: str,
+        stage: str,
+        publish_id: int | None,
+    ) -> None:
+        """Install one Caller-token overlay on the Bot's current BaaS device."""
+        if (
+            not caller_token.access_token
+            or caller_token.subject_user_id != caller_user_id
+            or not agent_pass_token
+        ):
+            raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
+
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_user_id)
+        if (
+            not bot
+            or bot.get("bot_type") != "service"
+            or bot.get("status") != "ACTIVE"
+            or str(bot.get("owner_id") or "") != owner_user_id
+        ):
+            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+
+        binding_id = self._resolve_caller_binding_id(
+            bot=bot,
+            bot_id=bot_id,
+            owner_user_id=owner_user_id,
+            stage=stage,
+            publish_id=publish_id,
+        )
+        binding = self._device_binding_repo.get_by_id(binding_id)
+        if (
+            binding is None
+            or str(getattr(binding, "status", "")).upper() != "ACTIVE"
+            or not str(getattr(binding, "device_id", ""))
+        ):
+            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+
+        devices = self.list_devices_by_bot_uuid(str(binding.device_id), timeout=3.0)
+        if not devices:
+            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+        if len(devices) != 1:
+            raise CallerCredentialError(CALLER_TARGET_AMBIGUOUS)
+        paas_device_id = devices[0].get("provider_device_id")
+        if not self._is_valid_paas_device_id(paas_device_id):
+            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+
+        base_rule = self._build_outbound_operation_rule(
+            bot_id=bot_id,
+            owner_id=owner_user_id,
+            agent_pass_token=agent_pass_token,
+            agent_code=agent_code,
+        )
+        caller_rule = self._outbound_rule_provider.build_caller_rule(
+            caller_token=caller_token.access_token,
+        )
+        if not self._is_valid_caller_rule(caller_rule, caller_token.access_token):
+            raise CallerCredentialError(CALLER_OUTBOUND_INVALID)
+        assert caller_rule is not None
+        complete_rule = OutBoundOperationRule(
+            header_operation_rules=(
+                base_rule.header_operation_rules
+                + caller_rule.header_operation_rules
+            )
+        )
+
+        logger.info(
+            "caller_outbound_update_started bot_id=%s stage=%s rule_count=%s",
+            bot_id,
+            stage,
+            len(complete_rule.header_operation_rules),
+        )
+        try:
+            updated = self.update_device_outbound_rule(paas_device_id, complete_rule)
+        except Exception as exc:
+            logger.warning(
+                "caller_outbound_update_failed bot_id=%s stage=%s error_type=%s",
+                bot_id,
+                stage,
+                type(exc).__name__,
+            )
+            raise CallerCredentialError(CALLER_OUTBOUND_UPDATE_FAILED) from exc
+        if not updated:
+            raise CallerCredentialError(CALLER_OUTBOUND_UPDATE_FAILED)
+        logger.info(
+            "caller_outbound_update_succeeded bot_id=%s stage=%s",
+            bot_id,
+            stage,
+        )
+
+    def _resolve_caller_binding_id(
+        self,
+        *,
+        bot: Dict[str, Any],
+        bot_id: str,
+        owner_user_id: str,
+        stage: str,
+        publish_id: int | None,
+    ) -> int:
+        if stage == PublishStage.DRAFT.value:
+            binding_id = bot.get("binding_id")
+        elif stage in {PublishStage.VERIFY.value, PublishStage.ONLINE.value}:
+            if (
+                not isinstance(publish_id, int)
+                or isinstance(publish_id, bool)
+                or publish_id <= 0
+            ):
+                raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
+            record = self._bot_publish_repo.get_by_id(publish_id)
+            if (
+                record is None
+                or getattr(record, "source_bot_id", None) != bot_id
+                or getattr(record, "owner_id", None) != owner_user_id
+            ):
+                raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+            ext = getattr(record, "ext", None)
+            binding_id = (
+                (ext.get("binding") or {}).get(stage)
+                if isinstance(ext, dict)
+                else None
+            )
+        else:
+            raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
+        if (
+            not isinstance(binding_id, int)
+            or isinstance(binding_id, bool)
+            or binding_id <= 0
+        ):
+            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+        return binding_id
+
+    @staticmethod
+    def _is_valid_caller_rule(
+        caller_rule: OutBoundOperationRule | None,
+        access_token: str,
+    ) -> bool:
+        if caller_rule is None:
+            return False
+        return any(
+            rule.header_name == "x-caller-token"
+            and rule.action == "set"
+            and rule.value == access_token
+            for rule in caller_rule.header_operation_rules
+        )
+
+    @staticmethod
+    def _is_valid_paas_device_id(value: object) -> bool:
+        if not isinstance(value, str) or not value or len(value) > 256:
+            return False
+        device_id, separator, template_id = value.partition("@")
+        if not (device_id and separator and template_id and "@" not in template_id):
+            return False
+        # COSEC: the BaaS client interpolates this database-sourced identifier
+        # into a fixed relative URL, so reject path/control characters first.
+        safe_chars = frozenset(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
+        )
+        return all(char in safe_chars for char in device_id + template_id)
 
     def get_sandbox_id_from_publish_record(
         self,

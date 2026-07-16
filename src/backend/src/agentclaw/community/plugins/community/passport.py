@@ -18,6 +18,7 @@ from typing import Any, Optional
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import (
     CliItem,
+    McpScopeItem,
     PassportPlugin,
     PassportResourceScope,
     SubResourceItem,
@@ -53,6 +54,15 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         # ``unpack_resource_scope`` is still called so a malformed scope raises
         # the same ValueError the corp impl would, keeping callers honest.
         unpack_resource_scope(resource_scope)
+
+    def update_mcp_identity_to_agent_principal(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        mcp_items: list[McpScopeItem],
+    ) -> None:
+        self._validate_mcp_identity_items(mcp_items)
 
     def apply_first_agent_passport(
         self,
@@ -154,6 +164,15 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         return True
 
     # -- internal --------------------------------------------------------------
+
+    @staticmethod
+    def _validate_mcp_identity_items(mcp_items: list[McpScopeItem]) -> None:
+        if any(
+            not item.get("mcp_code")
+            or item.get("identity_mode") not in {"owner", "caller"}
+            for item in mcp_items
+        ):
+            raise ValueError("invalid MCP identity scope")
 
     @staticmethod
     def _issue(bot_id: str) -> dict[str, Any]:

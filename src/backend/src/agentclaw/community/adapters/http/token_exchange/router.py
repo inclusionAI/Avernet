@@ -1,10 +1,94 @@
-from fastapi import APIRouter, Request, Response
+import asyncio
+from typing import Any
+
+from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse
 
+from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+from agentclaw.community.api.caller_credential import (
+    CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
+    CALLER_CREDENTIAL_REQUEST_INVALID,
+    CALLER_OUTBOUND_UPDATE_FAILED,
+    CallerCredentialError,
+    CallerRuntimeUpdater,
+    CallerTokenProvider,
+)
+from agentclaw.community.api.caller_identity_service import (
+    CallerIdentityServiceProtocol,
+    CallerIdentityStage,
+)
 from agentclaw.community.di import Injected
+from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.auth import AuthPlugin, AuthRequestContext
+from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.token_exchange import TokenExchangePlugin
 
 router = APIRouter()
+logger = get_logger()
+
+
+def _cors_headers(request: Request) -> dict[str, str]:
+    origin = request.headers.get("origin", "*")
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Credentials": "true",
+    }
+
+
+def _success_iam_response(iam_token: str, headers: dict[str, str]) -> Response:
+    return JSONResponse(
+        content={"success": True, "iam_token": iam_token},
+        headers=headers,
+    )
+
+
+def _request_injector(request: Request):
+    return getattr(getattr(request, "app", None), "state", None).injector
+
+
+def _get_optional_dependency(
+    request: Request,
+    dependency: Any,
+    error_code: str,
+):
+    try:
+        return _request_injector(request).get(dependency)
+    except Exception as exc:
+        logger.warning("caller_token_dependency_unavailable code=%s", error_code)
+        raise CallerCredentialError(error_code) from exc
+
+
+def _build_auth_context(request: Request) -> AuthRequestContext:
+    return AuthRequestContext(
+        cookies=dict(request.cookies),
+        headers={k: v for k, v in request.headers.items()},
+        query_params=dict(request.query_params),
+        base_url=str(request.base_url),
+    )
+
+
+async def _resolve_current_user(request: Request):
+    auth_plugin = _get_optional_dependency(
+        request,
+        AuthPlugin,
+        CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
+    )
+    identity = await auth_plugin.resolve_user_from_request(_build_auth_context(request))
+    return AuthenticatedUser(
+        id=identity.id,
+        staffId=identity.staffId,
+        operatorName=identity.operatorName,
+        nickName=identity.nickName,
+        tenantId=identity.tenantId,
+    )
+
+
+def _caller_error_status(code: str) -> int:
+    if code == CALLER_CREDENTIAL_REQUEST_INVALID:
+        return 400
+    if code == CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE:
+        return 503
+    return 502
 
 
 @router.options("/api/v1/token/exchange")
@@ -26,11 +110,7 @@ async def token_exchange(
     request: Request,
     plugin: TokenExchangePlugin = Injected(TokenExchangePlugin),
 ) -> Response:
-    origin = request.headers.get("origin", "*")
-    headers = {
-        "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Credentials": "true",
-    }
+    headers = _cors_headers(request)
     # Plugin owns the per-runtime policy: Local returns a mock; Prod
     # reads IAM_TOKEN and calls Buservice. Missing cookie / upstream
     # failures raise DomainError subclasses mapped to 400/500 by the
@@ -54,12 +134,13 @@ async def get_iam_token_options(request: Request):
 
 
 @router.get("/api/v1/token/iam")
-async def get_iam_token(request: Request) -> Response:
-    origin = request.headers.get("origin", "*")
-    headers = {
-        "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Credentials": "true",
-    }
+async def get_iam_token(
+    request: Request,
+    bot_id: str | None = Query(default=None),
+    stage: CallerIdentityStage = Query(default=CallerIdentityStage.DRAFT),
+    publish_id: int | None = Query(default=None),
+) -> Response:
+    headers = _cors_headers(request)
     iam_token = request.cookies.get("IAM_TOKEN") or ""
     if not iam_token:
         return JSONResponse(
@@ -67,7 +148,115 @@ async def get_iam_token(request: Request) -> Response:
             status_code=400,
             headers=headers,
         )
-    return JSONResponse(
-        content={"success": True, "iam_token": iam_token},
-        headers=headers,
+    if not bot_id:
+        return _success_iam_response(iam_token, headers)
+
+    try:
+        caller_identity = _get_optional_dependency(
+            request,
+            CallerIdentityServiceProtocol,
+            CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
+        )
+    except CallerCredentialError:
+        logger.warning(
+            "caller_token_context_unavailable bot_id=%s stage=%s "
+            "reason=identity_service_missing",
+            bot_id,
+            stage.value,
+        )
+        return _success_iam_response(iam_token, headers)
+    try:
+        token_context = await asyncio.to_thread(
+            caller_identity.get_iam_token_context,
+            bot_id=bot_id,
+            stage=stage,
+            publish_id=publish_id,
+        )
+    except Exception:
+        logger.warning(
+            "caller_token_context_unavailable bot_id=%s stage=%s",
+            bot_id,
+            stage.value,
+        )
+        return _success_iam_response(iam_token, headers)
+    if not token_context.should_exchange_caller_token:
+        logger.info(
+            "caller_token_exchange_skipped bot_id=%s stage=%s call_type=%s",
+            bot_id,
+            stage.value,
+            token_context.bot_call_type.value,
+        )
+        return _success_iam_response(iam_token, headers)
+    if not token_context.owner_id:
+        logger.warning(
+            "caller_token_exchange_failed bot_id=%s stage=%s reason=owner_missing",
+            bot_id,
+            stage.value,
+        )
+        return JSONResponse(
+            content={"success": False, "error": CALLER_CREDENTIAL_REQUEST_INVALID},
+            status_code=400,
+            headers=headers,
+        )
+
+    try:
+        current_user = await _resolve_current_user(request)
+        passport = _get_optional_dependency(
+            request,
+            PassportPlugin,
+            CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
+        )
+        provider = _get_optional_dependency(
+            request,
+            CallerTokenProvider,
+            CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
+        )
+        updater = _get_optional_dependency(
+            request,
+            CallerRuntimeUpdater,
+            CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
+        )
+        await asyncio.to_thread(
+            caller_identity.exchange_caller_identity,
+            iam_token=iam_token,
+            caller_user_id=current_user.staffId,
+            bot_id=bot_id,
+            owner_user_id=token_context.owner_id,
+            passport=passport,
+            token_provider=provider,
+            runtime_updater=updater,
+            stage=stage.value,
+            publish_id=publish_id,
+        )
+    except CallerCredentialError as exc:
+        logger.warning(
+            "caller_token_exchange_failed bot_id=%s stage=%s code=%s",
+            bot_id,
+            stage.value,
+            exc.code,
+        )
+        return JSONResponse(
+            content={"success": False, "error": exc.code},
+            status_code=_caller_error_status(exc.code),
+            headers=headers,
+        )
+    except Exception:
+        logger.warning(
+            "caller_runtime_update_failed bot_id=%s stage=%s",
+            bot_id,
+            stage.value,
+        )
+        return JSONResponse(
+            content={"success": False, "error": CALLER_OUTBOUND_UPDATE_FAILED},
+            status_code=502,
+            headers=headers,
+        )
+
+    logger.info(
+        "caller_token_exchange_succeeded bot_id=%s stage=%s",
+        bot_id,
+        stage.value,
     )
+    # COSEC: the Caller credential is written to BaaS only. Returning it to
+    # the browser would turn a server-side runtime credential into an API secret.
+    return _success_iam_response(iam_token, headers)
