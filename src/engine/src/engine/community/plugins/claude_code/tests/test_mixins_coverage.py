@@ -978,6 +978,32 @@ class TestSessionMixin:
         out = await impl.sessions_list(agent_id="g1")
         assert [s["key"] for s in out] == ["a", "c"]
 
+    async def test_list_session_key_filters_before_pagination(self):
+        c = _FakeRelayClient()
+        c.set_response("sessions.list", _ok({"sessions": [
+            {"key": "first", "agentId": "g1"},
+            {"key": "target", "agentId": "g1"},
+            {"key": "other", "agentId": "g1"},
+        ]}))
+        impl, _ = _impl(c)
+
+        out = await impl.sessions_list(
+            agent_id="g1", session_key="target", offset=0, limit=1,
+        )
+
+        assert out == [{"key": "target", "agentId": "g1"}]
+
+    async def test_list_blank_session_key_preserves_existing_pagination(self):
+        c = _FakeRelayClient()
+        c.set_response("sessions.list", _ok({"sessions": [
+            {"key": "first"}, {"key": "second"},
+        ]}))
+        impl, _ = _impl(c)
+
+        assert await impl.sessions_list(session_key="   ", offset=1, limit=1) == [
+            {"key": "second"},
+        ]
+
     async def test_list_offset_limit(self):
         c = _FakeRelayClient()
         c.set_response("sessions.list", _ok({"sessions": [{"key": str(i)} for i in range(10)]}))
