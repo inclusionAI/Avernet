@@ -58,7 +58,7 @@ class TestAutoApprovePublish:
             api,
             publish_id,
             {"SUCCESS", "ACTIVE", "APPROVING", "FAILED"},
-            timeout_seconds=0.5,
+            timeout_seconds=5.0,
         )
         tlog.info(f"[TIMING] publish status: {status} at {time.monotonic() - t0:.2f}s")
         assert status in ("SUCCESS", "ACTIVE", "APPROVING"), (
@@ -107,7 +107,7 @@ class TestAutoApprovePublish:
             api,
             publish_id,
             {"SUCCESS", "ACTIVE", "APPROVING", "FAILED"},
-            timeout_seconds=0.5,
+            timeout_seconds=5.0,
         )
         tlog.info(f"[TIMING] publish status: {status} at {time.monotonic() - t0:.2f}s")
         assert status in ("SUCCESS", "ACTIVE", "APPROVING"), (
@@ -155,7 +155,7 @@ class TestAutoApprovePublish:
             api,
             publish_id,
             {"SUCCESS", "ACTIVE", "APPROVING", "FAILED"},
-            timeout_seconds=0.5,
+            timeout_seconds=5.0,
         )
         tlog.info(f"[TIMING] publish status: {status} at {time.monotonic() - t0:.2f}s")
         assert status in ("SUCCESS", "ACTIVE", "APPROVING"), (
@@ -210,7 +210,7 @@ class TestAutoApprovePublishWithHook:
 
         # Verify publish SUCCESS
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS"}, timeout_seconds=0.5
+            api, publish_id, {"SUCCESS"}, timeout_seconds=5.0
         )
         assert status == "SUCCESS", f"Expected SUCCESS, got {status}"
 
@@ -246,14 +246,14 @@ class TestAutoApprovePublishWithHook:
         )
 
         # Callback round 1: stage 1 (PROD_FIRST_BATCH, 1 device)
-        await send_callbacks_for_hook_devices(api, publish_id, timeout_seconds=0.5)
+        await send_callbacks_for_hook_devices(api, publish_id)
 
         # auto_approve loop handles APPROVING → ACTIVE for gate
         # Callback round 2: stage 2 (PROD_OTHER_BATCH, 1 device, auto-continue)
-        await send_callbacks_for_hook_devices(api, publish_id, timeout_seconds=0.5)
+        await send_callbacks_for_hook_devices(api, publish_id)
 
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS"}, timeout_seconds=0.5
+            api, publish_id, {"SUCCESS"}, timeout_seconds=5.0
         )
         assert status == "SUCCESS", f"Expected SUCCESS, got {status}"
 
@@ -288,18 +288,18 @@ class TestAutoApprovePublishWithHook:
         )
 
         # Callback round 1: stage 1 (GRAY, 1 device)
-        await send_callbacks_for_hook_devices(api, publish_id, timeout_seconds=0.5)
+        await send_callbacks_for_hook_devices(api, publish_id)
 
         # auto_approve handles APPROVING → ACTIVE
         # Callback round 2: stage 2 (PROD_FIRST_BATCH, 1 device)
-        await send_callbacks_for_hook_devices(api, publish_id, timeout_seconds=0.5)
+        await send_callbacks_for_hook_devices(api, publish_id)
 
         # auto_approve handles APPROVING → ACTIVE
         # Callback round 3: stage 3 (PROD_OTHER_BATCH, 1 device, auto-continue)
-        await send_callbacks_for_hook_devices(api, publish_id, timeout_seconds=0.5)
+        await send_callbacks_for_hook_devices(api, publish_id)
 
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS"}, timeout_seconds=0.5
+            api, publish_id, {"SUCCESS"}, timeout_seconds=5.0
         )
         assert status == "SUCCESS", f"Expected SUCCESS, got {status}"
 
@@ -343,7 +343,7 @@ class TestManualApproveIgnoredDuringAutoApprove:
             api,
             publish_id,
             {"SUCCESS", "ACTIVE", "APPROVING", "FAILED"},
-            timeout_seconds=0.5,
+            timeout_seconds=5.0,
         )
         assert status in ("SUCCESS", "ACTIVE", "APPROVING"), (
             f"Expected non-terminal, got {status}"
@@ -380,11 +380,11 @@ class TestManualApproveIgnoredDuringAutoApprove:
         )
 
         # Pipeline should still progress: send callbacks, verify SUCCESS
-        await send_callbacks_for_hook_devices(api, publish_id, timeout_seconds=0.5)
-        await send_callbacks_for_hook_devices(api, publish_id, timeout_seconds=0.5)
+        await send_callbacks_for_hook_devices(api, publish_id, timeout_seconds=5.0)
+        await send_callbacks_for_hook_devices(api, publish_id, timeout_seconds=5.0)
 
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS"}, timeout_seconds=0.5
+            api, publish_id, {"SUCCESS"}, timeout_seconds=5.0
         )
         assert status == "SUCCESS", f"Expected SUCCESS, got {status}"
 

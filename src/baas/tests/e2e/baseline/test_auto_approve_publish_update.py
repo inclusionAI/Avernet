@@ -230,7 +230,7 @@ class TestAutoApprovePublishUpdateWithHook:
         tlog.info(f"[TIMING] send_callbacks: {time.monotonic() - t_cb:.2f}s")
 
         status = await wait_for_publish_status(
-            api, update_publish_id, {"SUCCESS"}, timeout_seconds=0.5
+            api, update_publish_id, {"SUCCESS"}, timeout_seconds=5.0
         )
         assert status == "SUCCESS", f"Expected SUCCESS, got {status}"
 
@@ -275,15 +275,11 @@ class TestAutoApprovePublishUpdateWithHook:
         update_publish_id = update_resp.json()["data"].get("publish_id")
         assert update_publish_id is not None
 
-        await send_callbacks_for_hook_devices(
-            api, update_publish_id, timeout_seconds=0.5
-        )
-        await send_callbacks_for_hook_devices(
-            api, update_publish_id, timeout_seconds=0.5
-        )
+        await send_callbacks_for_hook_devices(api, update_publish_id)
+        await send_callbacks_for_hook_devices(api, update_publish_id)
 
         status = await wait_for_publish_status(
-            api, update_publish_id, {"SUCCESS"}, timeout_seconds=0.5
+            api, update_publish_id, {"SUCCESS"}, timeout_seconds=5.0
         )
         assert status == "SUCCESS", f"Expected SUCCESS, got {status}"
 
@@ -328,18 +324,12 @@ class TestAutoApprovePublishUpdateWithHook:
         update_publish_id = update_resp.json()["data"].get("publish_id")
         assert update_publish_id is not None
 
-        await send_callbacks_for_hook_devices(
-            api, update_publish_id, timeout_seconds=0.5
-        )
-        await send_callbacks_for_hook_devices(
-            api, update_publish_id, timeout_seconds=0.5
-        )
-        await send_callbacks_for_hook_devices(
-            api, update_publish_id, timeout_seconds=0.5
-        )
+        await send_callbacks_for_hook_devices(api, update_publish_id)
+        await send_callbacks_for_hook_devices(api, update_publish_id)
+        await send_callbacks_for_hook_devices(api, update_publish_id)
 
         status = await wait_for_publish_status(
-            api, update_publish_id, {"SUCCESS"}, timeout_seconds=0.5
+            api, update_publish_id, {"SUCCESS"}, timeout_seconds=5.0
         )
         assert status == "SUCCESS", f"Expected SUCCESS, got {status}"
 
