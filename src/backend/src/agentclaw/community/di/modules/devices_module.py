@@ -91,6 +91,9 @@ from agentclaw.community.core.devices.services.oss_to_nas_switch_service import 
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.notify.bot_lister import RepositoryNotifyBotLister
 from agentclaw.community.core.notify.protocol import NotifyBotLister
+from agentclaw.community.core.bot_collaborator.repository.protocol import (
+    CollaboratorRepositoryProtocol,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.system_config import (
     SystemConfigService,
@@ -168,12 +171,20 @@ class DevicesModule(Module):
         self,
         binding_repo: DeviceBindingRepository,
         bot_repo: BotRepository,
+        collaborator_repo: CollaboratorRepositoryProtocol,
     ) -> NotifyBotLister:
         # Neutral default: resolve notify targets from active device bindings.
         # Works for corp (ARCA/BaaS bindings) and community (BaaS bindings)
         # alike. The test/singlebox column overrides this with the bots-table
         # LocalNotifyBotLister (last-installed-wins).
-        return RepositoryNotifyBotLister(binding_repo=binding_repo, bot_repo=bot_repo)
+        # Collaborator bots are folded in via the collaborator repo so that
+        # the notify endpoint covers bots the user collaboratively manages,
+        # mirroring /api/bots/by-owner-or-collaborator.
+        return RepositoryNotifyBotLister(
+            binding_repo=binding_repo,
+            bot_repo=bot_repo,
+            collaborator_repo=collaborator_repo,
+        )
 
     @singleton
     @provider
