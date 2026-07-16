@@ -28,6 +28,14 @@ DEVICE_COUNT_DEFAULT_PARAM_CODE = "default"
 class RollbackOpsMixin:
     """Rollback deploy + BaaS bot teardown, mixed into PublishFlowService."""
 
+    @staticmethod
+    def _artifact_for_stage(config_artifact, stage, stored_overrides):
+        """Compose delivery artifact with stored stage overrides (mirrors restart path)."""
+        from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
+            DeliveryArtifact,
+        )
+        return DeliveryArtifact.compose(config_artifact, stage, stored_overrides)
+
     async def execute_rollback(
         self,
         current_publish_id: int,
@@ -121,7 +129,7 @@ class RollbackOpsMixin:
             migration_path=migration_path,
             publish_stage=PublishStage.ONLINE,
             version=version,
-            config_artifact=config_artifact,
+            delivery=config_artifact,
         )
 
         baas_publish_id = upgrade_result.get("publish_id")
