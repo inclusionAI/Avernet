@@ -12,6 +12,7 @@ from ._exceptions import (
     SessionNotFoundError,
     TooManyRequestsError,
     TransferNotTerminalError,
+    TransferStateConflictError,
 )
 from ._file_transfer_models import (
     CancelUploadResponse,
@@ -64,6 +65,7 @@ __all__ = [
     "SessionNotFoundError",
     "TooManyRequestsError",
     "TransferNotTerminalError",
+    "TransferStateConflictError",
     # Models
     "BotBindingInfo",
     "BotChatContext",

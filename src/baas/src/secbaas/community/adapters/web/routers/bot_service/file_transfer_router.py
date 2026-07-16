@@ -30,10 +30,10 @@ from secbaas.community.api.bot_runtime import (
 from secbaas.community.api.bot_runtime import (
     OssObjectNotFoundError,
     TransferNotTerminalError,
+    TransferStateConflictError,
 )
 from secbaas.community.api.device_manage import DeviceFacadeException
 from secbaas.community.bootstrap import ApplicationContainer
-from secbaas.community.core.repository.file_transfer_ticket import TransferStateConflictError
 from secbaas.community.logger import get_logger
 
 logger = get_logger("router")

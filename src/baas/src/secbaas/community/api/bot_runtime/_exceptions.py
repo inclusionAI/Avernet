@@ -181,3 +181,19 @@ class DirectoryNotEmptyError(BotServiceError):
     def __init__(self, key: str = ""):
         self.key = key
         super().__init__(f"Directory not empty: {key}")
+
+
+class TransferStateConflictError(BotServiceError):
+    """Raised when an invalid state transition is attempted on a file transfer.
+
+    This is the API-layer definition imported by adapters (routers).
+    The repo-layer equivalent inherits from this class so that except
+    clauses catching the API class also handle repo-originated instances.
+    """
+
+    error_code = "TRANSFER_STATE_CONFLICT"
+    http_status = 409
+
+    def __init__(self, message: str = ""):
+        self.message = message
+        super().__init__(message)

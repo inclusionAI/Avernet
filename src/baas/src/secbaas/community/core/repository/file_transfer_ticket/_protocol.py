@@ -4,6 +4,7 @@ from typing import Protocol, runtime_checkable
 
 from secbaas.community.api.bot_runtime import (
     TransferNotFoundError as ApiTransferNotFoundError,
+    TransferStateConflictError as ApiTransferStateConflictError,
 )
 
 from ._record import TicketRecord
@@ -33,8 +34,15 @@ class TransferNotFoundError(FileTransferRepositoryError, ApiTransferNotFoundErro
         )
 
 
-class TransferStateConflictError(FileTransferRepositoryError):
-    """Raised when an invalid state transition is attempted."""
+class TransferStateConflictError(
+    FileTransferRepositoryError, ApiTransferStateConflictError
+):
+    """Raised when an invalid state transition is attempted on a file transfer.
+
+    Inherits from both FileTransferRepositoryError (repo-layer base) and
+    the API-layer TransferStateConflictError so that except clauses catching
+    the API class also handle repo-originated instances.
+    """
 
     def __init__(self, message: str) -> None:
         super().__init__(message, error_code="FILE_TRANSFER_STATE_CONFLICT")
