@@ -401,7 +401,6 @@ async def test_retry_restart_does_not_enqueue_poll_when_submit_fails():
     svc._task_queue_service.enqueue.assert_not_called()
 
 
-@pytest.mark.skip(reason="TODO(#168): 待 totalfrank 修复 _artifact_for_stage")
 @pytest.mark.asyncio
 async def test_execute_rollback_enqueues_progress_poll_for_target():
     """Regression for #162: execute_rollback must enqueue the durable progress poll
@@ -1511,7 +1510,6 @@ def test_mark_previous_publish_superseded_warns_when_last_publish_not_found():
 # ============================================================================
 
 
-@pytest.mark.skip(reason="TODO(#168): 待 totalfrank 修复 _artifact_for_stage")
 @pytest.mark.asyncio
 async def test_execute_rollback_uses_fixed_device_count_one():
     """execute_rollback should always use a fixed device_count=1."""
@@ -1663,7 +1661,6 @@ async def test_execute_rollback_missing_binding():
         )
 
 
-@pytest.mark.skip(reason="TODO(#168): 待 totalfrank 修复 _artifact_for_stage delivery 契约")
 @pytest.mark.asyncio
 async def test_execute_rollback_with_config_artifact():
     """execute_rollback uses config_artifact (the teclaw scenario); a target
@@ -1720,16 +1717,15 @@ async def test_execute_rollback_with_config_artifact():
         operator="user1",
     )
 
-# Verify upgrade_async used config_artifact, unchanged (backward compat)
+# Verify upgrade_async used the delivery artifact, unchanged (backward compat)
     upgrade_call = build_service.upgrade_async.call_args
-    assert upgrade_call.kwargs["config_artifact"] == artifact
+    assert upgrade_call.kwargs["delivery"].config_artifact == artifact
     assert upgrade_call.kwargs["migration_path"] is None
 
     assert result.publish_id == 2
     assert result.status == PublishStatus.ONLINE_PUB
 
 
-@pytest.mark.skip(reason="TODO(#168): 待 totalfrank 修复 _artifact_for_stage delivery 契约")
 @pytest.mark.asyncio
 async def test_execute_rollback_delivers_stored_online_overrides_not_live():
     """Regression for #168: rollback must overlay the target version's STORED
@@ -1804,7 +1800,7 @@ async def test_execute_rollback_delivers_stored_online_overrides_not_live():
         operator="user1",
     )
 
-    delivered = build_service.upgrade_async.await_args.kwargs["config_artifact"]
+    delivered = build_service.upgrade_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_overrides"] == stored_online
     assert delivered["engine_ext"]["stage"] == "release"
     # Stored slot, never a live re-fetch.

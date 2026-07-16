@@ -96,20 +96,15 @@ class RollbackOpsMixin:
         if not bot:
             raise PublishFlowServiceError(f"Bot not found: {current_record.source_bot_id}")
 
-# Compose the delivery artifact for ONLINE: overlay the target version's
-        # STORED online channel engine_overrides (DingTalk config incl.
-        # card_template_id), reproducing what that version had when it was
-        # promoted — NOT a live re-fetch, which would deliver the very channel
-        # state the user is rolling away from. Same per-stage slot restart reads.
-        # No stored overrides (pre-feature record) or no config_artifact (ARCA)
-        # → no-ops, preserving prior behavior.
-        # `or {}` (not a get-default): the key may hold JSON null in a raw ext blob.
-        stored_overrides = (target_ext.get("engine_overrides_by_stage") or {}).get(
-            PublishStage.ONLINE.value
-        )
-        config_artifact = self._artifact_for_stage(
-            config_artifact, PublishStage.ONLINE, stored_overrides
-        )
+# Compose the delivery artifact for ONLINE through the single seam
+        # (STORED overrides slot: reproduce what was promoted, NOT a live
+        # re-fetch).  compose_stored reads the target version's stored online
+        # channel engine_overrides (DingTalk config incl. card_template_id),
+        # reproducing what that version had when it was promoted — NOT a live
+        # re-fetch, which would deliver the very channel state the user is
+        # rolling away from.  No stored overrides (pre-feature record) or no
+        # config_artifact (ARCA) → the stamp+overlay no-ops, preserving the base.
+        delivery = self._ext_state.compose_stored(target_ext, PublishStage.ONLINE)
 
         # 5. Call the BaaS upgrade interface to re-deploy
         version = f"{target_record.version}"
@@ -121,7 +116,7 @@ class RollbackOpsMixin:
             migration_path=migration_path,
             publish_stage=PublishStage.ONLINE,
             version=version,
-            config_artifact=config_artifact,
+            delivery=delivery,
         )
 
         baas_publish_id = upgrade_result.get("publish_id")
