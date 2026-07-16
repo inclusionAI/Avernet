@@ -59,3 +59,27 @@ def test_default_bot_passport_repair_service_is_composed_without_device_service(
     ]
     assert "device_service" not in arg_names
     assert "baas_service" not in arg_names
+
+
+def test_create_bot_for_others_service_is_composed_from_control_plane_dependencies() -> None:
+    module_path = Path(bot_management_module.__file__)
+    tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    providers = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "create_bot_for_others_service"
+    ]
+    assert providers
+    provider = providers[0]
+    arg_names = [arg.arg for arg in provider.args.args]
+    assert arg_names == [
+        "self",
+        "repository",
+        "bot_service",
+        "passport_plugin",
+        "auth_relationship_plugin",
+        "skill_set_factory",
+    ]
+    assert "device_service" not in arg_names
+    assert "baas_service" not in arg_names
