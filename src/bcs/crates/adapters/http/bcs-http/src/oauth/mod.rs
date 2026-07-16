@@ -32,6 +32,12 @@ pub struct OAuthRouteState {
     pub providers: HashMap<String, Arc<dyn OAuthProvider>>,
     pub state_store: OAuthStateStore,
     pub config: OAuthConfig,
+    /// Non-OAuth fallback identity source. When a request has no valid
+    /// `bcs_session` cookie (or OAuth is not configured at all),
+    /// `current_user_handler` resolves the caller via this chain — e.g. the
+    /// local mock plugin. `None` only in contract-test state that never serves
+    /// real traffic.
+    pub auth_chain: Option<Arc<bcs_auth_api::AuthPluginChain>>,
 }
 
 impl OAuthRouteState {
@@ -40,6 +46,7 @@ impl OAuthRouteState {
         user_port: Arc<dyn UserIdentityPort>,
         providers: HashMap<String, Arc<dyn OAuthProvider>>,
         config: OAuthConfig,
+        auth_chain: Option<Arc<bcs_auth_api::AuthPluginChain>>,
     ) -> Self {
         Self {
             jwt_service: JwtService::new(jwt_secret),
@@ -47,6 +54,25 @@ impl OAuthRouteState {
             providers,
             state_store: OAuthStateStore::new(Duration::from_secs(300)), // 5 min TTL
             config,
+            auth_chain,
+        }
+    }
+
+    /// Identity-only state for the no-OAuth case: `/auth/user` is backed solely
+    /// by the auth chain. The `JwtService` is unused on this path — the cookie
+    /// lookup is only attempted when `config.jwt_secret` is non-empty, which this
+    /// state leaves empty, so no cookie is ever verified here.
+    pub fn new_chain_only(
+        user_port: Arc<dyn UserIdentityPort>,
+        auth_chain: Arc<bcs_auth_api::AuthPluginChain>,
+    ) -> Self {
+        Self {
+            jwt_service: JwtService::new(""),
+            user_port,
+            providers: HashMap::new(),
+            state_store: OAuthStateStore::new(Duration::from_secs(300)), // 5 min TTL
+            config: OAuthConfig::default(),
+            auth_chain: Some(auth_chain),
         }
     }
 }
@@ -61,6 +87,16 @@ pub fn routes(state: Arc<OAuthRouteState>) -> Router {
         .route("/auth/refresh", post(refresh_handler))
         .route("/auth/user", get(current_user_handler))
         .route("/auth/user/{user_id}", get(get_user_handler))
+        .with_state(state)
+}
+
+/// Identity-only router: mounts just `GET /auth/user`. Used when no OAuth
+/// provider is configured but an auth chain exists, so non-OAuth callers
+/// (e.g. the local mock plugin) can still ask "who am I?" without registering
+/// the OAuth protocol routes that would otherwise 404/empty.
+pub fn identity_routes(state: Arc<OAuthRouteState>) -> Router {
+    Router::new()
+        .route("/auth/user", get(current_user_handler))
         .with_state(state)
 }
 
@@ -342,39 +378,44 @@ pub struct UserInfoResponse {
 
 /// GET /auth/user — "Who am I?"
 ///
-/// Identifies the user by their session cookie JWT. The JWT fingerprint
-/// (`SHA-256`) is used as a DB lookup key, so only the most-recently-issued
-/// cookie per user is valid (single-session model) and a revoked session
-/// (cleared hash on logout) returns 401.
+/// Identity is resolved solely through the request-time auth chain, which
+/// already encapsulates every authentication source:
+///
+/// - `oauth_session` plugin: verifies the `bcs_session` cookie JWT against the
+///   identity store and carries `user_name` / `avatar` from the resolved
+///   `UserIdentityInfo` row (no extra IO beyond the chain itself).
+/// - `local` plugin (non-OAuth / mock): resolves a principal from config or
+///   `X-Mock-*` headers.
+///
+/// This keeps `/auth/user` source-agnostic: new authentication plugins work
+/// here without changes, and there is no duplicated JWT/cookie logic. If the
+/// chain yields no identity, 401 is returned (preserving the
+/// `require_authentication` semantics).
 pub async fn current_user_handler(
     State(state): State<Arc<OAuthRouteState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    // 1. Extract JWT from cookie
-    let jwt = match extract_session_cookie(&headers) {
-        Some(t) => t,
-        None => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"}))).into_response(),
+    let Some(chain) = state.auth_chain.as_ref() else {
+        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"})))
+            .into_response();
     };
 
-    // 2. Verify JWT signature + expiration
-    match state.jwt_service.verify(&jwt) {
-        Ok(_) => {}
-        Err(_) => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"}))).into_response(),
-    };
-
-    // 3. Look up user by the JWT fingerprint in DB (single-session bind)
-    match state.user_port.get_identity_by_token(&bcs_jwt::token_hash(&jwt)).await {
-        Ok(Some(info)) => (StatusCode::OK, Json(UserInfoResponse {
-            user_id: info.user_id,
-            // Prefer the internal display name; fall back to the external one
-            // for legacy rows where user_name was never populated.
-            name: info.user_name.or(info.external_user_name),
-            provider: info.auth_source,
-            avatar: info.avatar,
-        })).into_response(),
-        Ok(None) => (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"}))).into_response(),
+    match chain.authenticate(&headers).await {
+        Ok(result) => match result.principal {
+            Some(principal) => (StatusCode::OK, Json(UserInfoResponse {
+                user_id: principal.user_id.unwrap_or_default(),
+                name: principal.user_name,
+                provider: principal
+                    .source_name
+                    .unwrap_or_else(|| "chain".to_string()),
+                avatar: principal.avatar,
+            }))
+                .into_response(),
+            None => (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"})))
+                .into_response(),
+        },
         Err(e) => {
-            warn!(error = %e, "get_identity_by_token failed");
+            warn!(error = %e, "auth chain failed in /auth/user");
             (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
         }
     }
