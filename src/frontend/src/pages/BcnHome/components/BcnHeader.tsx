@@ -38,21 +38,27 @@ const BcnHeader: React.FC<BcnHeaderProps> = ({
   const avatarText = displayName.slice(0, 1);
 
   useEffect(() => {
-    const observers = NAV_ITEMS.map((item) => {
-      const element = document.querySelector(item.href);
-      if (!element) return null;
-      const observer = new IntersectionObserver(
-        (entries) => {
-          entries.forEach((entry) => {
-            if (entry.isIntersecting) setActiveSection(item.href);
-          });
-        },
-        { rootMargin: '-120px 0px -55% 0px', threshold: 0.15 },
-      );
-      observer.observe(element);
-      return observer;
-    });
-    return () => observers.forEach((o) => o?.disconnect());
+    const updateActiveSection = () => {
+      const headerOffset = 120;
+      const currentItem = [...NAV_ITEMS]
+        .reverse()
+        .find((item) => {
+          const element = document.querySelector(item.href);
+          if (!element) return false;
+          return element.getBoundingClientRect().top <= headerOffset;
+        });
+
+      setActiveSection(currentItem?.href || NAV_ITEMS[0].href);
+    };
+
+    updateActiveSection();
+    document.addEventListener('scroll', updateActiveSection, true);
+    window.addEventListener('resize', updateActiveSection);
+
+    return () => {
+      document.removeEventListener('scroll', updateActiveSection, true);
+      window.removeEventListener('resize', updateActiveSection);
+    };
   }, []);
 
   useEffect(() => {
@@ -67,13 +73,14 @@ const BcnHeader: React.FC<BcnHeaderProps> = ({
   }, [menuOpen]);
 
   const scrollTo = (href: string) => {
+    setActiveSection(href);
     document
       .querySelector(href)
       ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   return (
-    <header className="sticky top-0 z-30 border-b border-[#dbe4f0] bg-white/88 shadow-[0_10px_30px_-24px_rgba(29,78,216,0.35)] backdrop-blur-xl">
+    <header className="fixed inset-x-0 top-0 z-50 border-b border-[#dbe4f0] bg-white/88 shadow-[0_10px_30px_-24px_rgba(29,78,216,0.35)] backdrop-blur-xl">
       <div className="mx-auto flex max-w-[1200px] items-center justify-between gap-6 px-8 py-4">
         <div className="flex items-center gap-3">
           <img

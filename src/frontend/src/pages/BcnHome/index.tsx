@@ -55,7 +55,7 @@ const BcnHome: React.FC = () => {
   };
 
   return (
-    <div className="h-full min-h-screen w-full overflow-y-auto bg-[#f5f7fa] scroll-smooth">
+    <div className="h-full min-h-screen w-full overflow-y-auto bg-[#f5f7fa] pt-[96px] scroll-smooth">
       <BcnHeader
         user={authGuard.user}
         isAuthenticated={!bcnProxyOnly || authGuard.isAuthenticated}
