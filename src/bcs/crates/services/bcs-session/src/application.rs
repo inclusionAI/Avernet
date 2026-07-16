@@ -217,4 +217,43 @@ impl SessionManagementService for SessionManagementServiceImpl {
     async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError> {
         Ok(self.repo.delete(session_id).await?)
     }
+
+    async fn collect(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+    ) -> Result<(), SessionUseCaseError> {
+        if self.repo.get(session_id).await.is_none() {
+            return Err(SessionUseCaseError::NotFound(session_id.to_string()));
+        }
+        self.repo.collect(session_id, bot_uuid).await?;
+        Ok(())
+    }
+
+    async fn uncollect(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+    ) -> Result<(), SessionUseCaseError> {
+        if self.repo.get(session_id).await.is_none() {
+            return Err(SessionUseCaseError::NotFound(session_id.to_string()));
+        }
+        self.repo.uncollect(session_id, bot_uuid).await?;
+        Ok(())
+    }
+
+    async fn list_collected_by_group(
+        &self,
+        group_id: &str,
+        bot_uuid: &str,
+        status: Option<SessionStatus>,
+        title_contains: Option<&str>,
+        offset: u64,
+        limit: u64,
+    ) -> Result<Vec<Session>, SessionUseCaseError> {
+        Ok(self
+            .repo
+            .list_collected_by_group(group_id, bot_uuid, status, title_contains, offset, limit)
+            .await)
+    }
 }

@@ -267,6 +267,11 @@ fn build_api_routes() -> Router<HttpAppState> {
             post(routes::sessions::complete_session),
         )
         .route(
+            "/sessions/{sid}/collect",
+            post(routes::sessions::collect_session)
+                .delete(routes::sessions::uncollect_session),
+        )
+        .route(
             "/sessions/{sid}/members",
             post(routes::sessions::add_session_participant),
         )

@@ -765,6 +765,71 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
     // list_group_ids_by_session_participant
     let groups = repo.list_group_ids_by_session_participant("bot1").await;
     assert!(groups.contains(&group_id.to_string()));
+
+    // ── session collection (收藏) contract ───────────────────
+    // Create a second participant so we can assert per-bot isolation.
+    let collect_session: Session = repo
+        .create(
+            &svc.group_id,
+            NewSessionParams {
+                session_kind: SessionKind::Chat,
+                participants: vec![
+                    Participant::bot("bot-collector", ParticipantRole::Driver),
+                    Participant::bot("bot-other", ParticipantRole::Consultant),
+                ],
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create session for collection contract");
+
+    // Not collected yet
+    assert!(repo
+        .list_collected_by_group(&svc.group_id, "bot-collector", None, None, 0, 10)
+        .await
+        .is_empty());
+
+    // collect by a participant
+    repo.collect(&collect_session.id, "bot-collector")
+        .await
+        .expect("collect by participant");
+    let collected = repo
+        .list_collected_by_group(&svc.group_id, "bot-collector", None, None, 0, 10)
+        .await;
+    assert_eq!(collected.len(), 1);
+    assert_eq!(collected[0].id, collect_session.id);
+
+    // per-bot isolation: other participant sees nothing
+    assert!(repo
+        .list_collected_by_group(&svc.group_id, "bot-other", None, None, 0, 10)
+        .await
+        .is_empty());
+
+    // collect by non-participant errors
+    let err = repo.collect(&collect_session.id, "bot-stranger").await;
+    assert!(err.is_err(), "collect by non-participant must error");
+
+    // repeat collect is idempotent (no error)
+    repo.collect(&collect_session.id, "bot-collector")
+        .await
+        .expect("repeat collect idempotent");
+
+    // uncollect removes it
+    repo.uncollect(&collect_session.id, "bot-collector")
+        .await
+        .expect("uncollect");
+    assert!(repo
+        .list_collected_by_group(&svc.group_id, "bot-collector", None, None, 0, 10)
+        .await
+        .is_empty());
+
+    // uncollect of a never-collected / non-participant is idempotent Ok
+    repo.uncollect(&collect_session.id, "bot-collector")
+        .await
+        .expect("uncollect not-collected idempotent");
+    repo.uncollect(&collect_session.id, "bot-stranger")
+        .await
+        .expect("uncollect non-participant idempotent");
 }
 
 pub async fn session_repo_port_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) {

@@ -337,13 +337,15 @@ _story_group_proposal_confirmation() {
 # Flow:
 #   Create a group session -> list and inspect it -> share group/session invitations
 #   -> join them -> manage session members and messages -> complete a chat session
-#   -> expose the group as a service -> invoke and inspect a service session -> clean up.
+#   -> expose the group as a service -> invoke and inspect a service session -> clean up
+#   -> collect and uncollect a session and list collected sessions.
 #
 # Critical assertions:
 #   - Invite tokens lead to the intended group or session and created sessions are queryable.
 #   - Completion status and output survive an independent read-back.
 #   - Service sessions preserve kind, group, title, and caller isolation.
 #   - Cross-caller reads and use of the wrong completion API are rejected with 403.
+#   - Collection (collect/uncollect/list) follows per-bot isolation and idempotency.
 story_user_runs_and_shares_sessions() {
     info "Story: a team creates, shares, completes, and invokes collaboration sessions"
     test_group_session_via_cli
@@ -353,6 +355,10 @@ story_user_runs_and_shares_sessions() {
     test_session_invite_join
     test_session_lifecycle
     _story_complete_and_invoke_sessions || return
+    # 收藏 (collection): a participant bot collects / uncollects a session and
+    # lists collected sessions; non-participant collect is rejected. Exercises
+    # POST/DELETE /sessions/{sid}/collect and the collected=true list filter.
+    test_session_collection
 }
 
 _story_complete_and_invoke_sessions() {

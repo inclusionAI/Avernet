@@ -141,4 +141,39 @@ pub trait SessionManagementService: Send + Sync {
     ) -> Result<Vec<String>, SessionUseCaseError>;
 
     async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError>;
+
+    // ── session collection (收藏) ──────────────────────────────
+    /// Mark a session as collected by `bot_uuid`. The bot must be a
+    /// participant of the session (the side-table row exists).
+    async fn collect(
+        &self,
+        _session_id: &str,
+        _bot_uuid: &str,
+    ) -> Result<(), SessionUseCaseError> {
+        Err(SessionUseCaseError::Internal(ServiceError::InternalError(
+            "collect not implemented for this SessionManagementService".into(),
+        )))
+    }
+    /// Remove the collection mark. Idempotent: only session-not-found is an
+    /// error; non-participant / not-collected returns Ok.
+    async fn uncollect(
+        &self,
+        _session_id: &str,
+        _bot_uuid: &str,
+    ) -> Result<(), SessionUseCaseError> {
+        Err(SessionUseCaseError::Internal(ServiceError::InternalError(
+            "uncollect not implemented for this SessionManagementService".into(),
+        )))
+    }
+    async fn list_collected_by_group(
+        &self,
+        _group_id: &str,
+        _bot_uuid: &str,
+        _status: Option<SessionStatus>,
+        _title_contains: Option<&str>,
+        _offset: u64,
+        _limit: u64,
+    ) -> Result<Vec<Session>, SessionUseCaseError> {
+        Ok(Vec::new())
+    }
 }

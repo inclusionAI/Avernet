@@ -1142,4 +1142,131 @@ impl SessionRepoPort for MySqlSessionStore {
             Err(_) => Ok(false),
         }
     }
+
+    async fn collect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> {
+        // Existence check via SELECT, NOT affected_rows: the MySQL connection does
+        // not set CLIENT_FOUND_ROWS (see bcs-config-api/src/mysql.rs to_mysql_url and
+        // bcs-db-mysql/src/manager.rs), so mysql_async reports CHANGED rows. A repeat
+        // collect (collected already 1) would yield affected_rows=0 and falsely look
+        // like a non-participant. SELECTing the side-table row first lets us
+        // distinguish non-participant (row absent) from already-collected (row present)
+        // independent of changed-rows semantics; the subsequent unconditional UPDATE is
+        // then idempotent by construction.
+        let check_sql = "SELECT 1 FROM bcs_session_participants \
+                         WHERE env = ? AND session_id = ? AND bot_uuid = ? LIMIT 1";
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                check_sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(session_id),
+                    DbValue::from(bot_uuid),
+                ],
+            ))
+            .await
+            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
+        if rows.is_empty() {
+            return Err(ServiceError::SessionNotFound(format!(
+                "participant {bot_uuid} not in session {session_id}"
+            )));
+        }
+        let update_sql = "UPDATE bcs_session_participants \
+                          SET collected = 1 \
+                          WHERE env = ? AND session_id = ? AND bot_uuid = ?";
+        self.db
+            .execute(DbStatement::with_params(
+                update_sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(session_id),
+                    DbValue::from(bot_uuid),
+                ],
+            ))
+            .await
+            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
+        Ok(())
+    }
+
+    async fn uncollect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> {
+        // Idempotent: the only caller-facing error is session-not-found, which
+        // the application layer checks via get() before calling. Here we run the
+        // UPDATE regardless of whether a side-table row / collected flag exists.
+        let sql = "UPDATE bcs_session_participants \
+                   SET collected = 0 \
+                   WHERE env = ? AND session_id = ? AND bot_uuid = ?";
+        self.db
+            .execute(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(session_id),
+                    DbValue::from(bot_uuid),
+                ],
+            ))
+            .await
+            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
+        Ok(())
+    }
+
+    async fn list_collected_by_group(
+        &self,
+        group_id: &str,
+        bot_uuid: &str,
+        status: Option<SessionStatus>,
+        title_contains: Option<&str>,
+        offset: u64,
+        limit: u64,
+    ) -> Vec<Session> {
+        let mut conditions: Vec<String> = vec![
+            "s.env = ?".to_string(),
+            "s.group_id = ?".to_string(),
+            "sp.group_id = ?".to_string(),
+            "sp.bot_uuid = ?".to_string(),
+            "sp.collected = 1".to_string(),
+        ];
+        let mut params: Vec<DbValue> = vec![
+            DbValue::from(self.env.as_str()),
+            DbValue::from(group_id),
+            DbValue::from(group_id),
+            DbValue::from(bot_uuid),
+        ];
+
+        if let Some(s) = status {
+            let status_str = match s {
+                SessionStatus::Running => "running",
+                SessionStatus::Completed => "completed",
+            };
+            conditions.push("s.status = ?".to_string());
+            params.push(DbValue::from(status_str));
+        }
+
+        if let Some(q) = title_contains {
+            conditions.push("s.session_title LIKE ?".to_string());
+            params.push(DbValue::from(format!("%{}%", q)));
+        }
+
+        params.push(DbValue::U64(limit));
+        params.push(DbValue::U64(offset));
+
+        let select_cols = self.select_cols_prefixed();
+        let sql = format!(
+            "SELECT {select_cols} FROM bcs_group_sessions s \
+             JOIN bcs_session_participants sp \
+               ON sp.env = s.env AND sp.session_id = s.session_id \
+             WHERE {where_clause} \
+             ORDER BY s.gmt_create DESC LIMIT ? OFFSET ?",
+            select_cols = select_cols,
+            where_clause = conditions.join(" AND "),
+        );
+
+        let rows = match self.db.query(DbStatement::with_params(&sql, params)).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "list_collected_by_group query failed");
+                return Vec::new();
+            }
+        };
+        rows.iter().filter_map(|r| row_to_session(r).ok()).collect()
+    }
 }

@@ -529,6 +529,9 @@ pub struct ListSessionsQuery {
     /// Filter sessions by participant (bot_uuid or human actor_id).
     #[serde(default)]
     pub participant: Option<String>,
+    /// When true, return only sessions collected by `participant` (requires participant).
+    #[serde(default)]
+    pub collected: Option<bool>,
     #[serde(default)]
     pub offset: u64,
     #[serde(default = "default_limit")]
@@ -546,6 +549,72 @@ pub async fn list_sessions_for_group(
     headers: HeaderMap,
     uri: Uri,
 ) -> impl IntoResponse {
+    // collected filter: requires participant, returns only sessions the bot
+    // has collected in this group. Does NOT run the legacy auto-create path.
+    if params.collected == Some(true) {
+        let bot_uuid = match params.participant.as_deref() {
+            Some(p) => p,
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": "invalid_params",
+                        "message": "collected filter requires participant"
+                    })),
+                )
+                    .into_response();
+            }
+        };
+        // Authorization: the caller must be authorized to act as (and therefore
+        // view the collections of) the requested `participant` bot. A bot token
+        // resolves to itself; a human caller must own the named bot. Without
+        // this check any caller could enumerate any bot's collected sessions
+        // in any group (BOLA).
+        match resolve_collector_bot(&state, &headers, &uri, Some(bot_uuid)).await {
+            Ok(authorized_bot) => {
+                if authorized_bot != bot_uuid {
+                    return (
+                        StatusCode::FORBIDDEN,
+                        Json(serde_json::json!({
+                            "error": "forbidden",
+                            "message": format!(
+                                "caller is not authorized to view collections for bot {}",
+                                bot_uuid
+                            )
+                        })),
+                    )
+                        .into_response();
+                }
+            }
+            Err(resp) => return resp,
+        }
+        let collected_sessions = match state
+            .services
+            .session_management
+            .list_collected_by_group(
+                &group_id,
+                bot_uuid,
+                params.status,
+                params.q.as_deref(),
+                params.offset,
+                params.limit,
+            )
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => return session_error_to_response(&e),
+        };
+        let items: Vec<Value> = collected_sessions
+            .iter()
+            .map(|s| session_to_json(s))
+            .collect();
+        return Json(serde_json::json!({
+            "items": items,
+            "group_id": group_id,
+        }))
+        .into_response();
+    }
+
     let sessions = match state
         .services
         .session_management
@@ -1636,6 +1705,113 @@ pub async fn delete_session(
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "not_found", "message": "session not found"})),
         ).into_response(),
+        Err(e) => session_error_to_response(&e),
+    }
+}
+
+// ---------------------------------------------------------------
+// POST /sessions/{sid}/collect
+// DELETE /sessions/{sid}/collect
+//
+// Mark / unmark a session as collected by a bot. Caller resolves via
+// resolve_group_chat_caller (bot token -> that bot; human cookie -> must
+// supply an owned bot via the `participant` body/query field, ownership
+// checked via registry.list_bots_by_creator).
+// ---------------------------------------------------------------
+
+#[derive(Debug, Deserialize, Default)]
+pub struct CollectSessionRequest {
+    /// Target bot that performs the collect. Required for human callers;
+    /// ignored (defaults to the calling bot) when a bot token is used.
+    #[serde(default)]
+    pub participant: Option<String>,
+}
+
+async fn resolve_collector_bot(
+    state: &HttpAppState,
+    headers: &HeaderMap,
+    uri: &Uri,
+    participant: Option<&str>,
+) -> Result<String, Response> {
+    let caller = match resolve_group_chat_caller(state, headers, uri).await {
+        Ok(c) => c,
+        Err(_) => {
+            return Err(
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({"error": "unauthorized"})),
+                )
+                    .into_response(),
+            )
+        }
+    };
+    match caller {
+        GroupChatCaller::Bot { bot_uuid } => Ok(bot_uuid),
+        GroupChatCaller::Human(h) => {
+            let bot_uuid = participant.ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": "invalid_params",
+                        "message": "human caller must supply participant"
+                    })),
+                )
+                    .into_response()
+            })?;
+            let owns = state
+                .services
+                .registry
+                .list_bots_by_creator(&h.staff_no)
+                .await
+                .iter()
+                .any(|b| b.bot_uuid == bot_uuid);
+            if !owns {
+                return Err(
+                    (
+                        StatusCode::FORBIDDEN,
+                        Json(serde_json::json!({
+                            "error": "forbidden",
+                            "message": format!("caller does not own bot {}", bot_uuid)
+                        })),
+                    )
+                        .into_response(),
+                );
+            }
+            Ok(bot_uuid.to_string())
+        }
+    }
+}
+
+pub async fn collect_session(
+    State(state): State<HttpAppState>,
+    Path(sid): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    Json(body): Json<CollectSessionRequest>,
+) -> impl IntoResponse {
+    let collector = match resolve_collector_bot(&state, &headers, &uri, body.participant.as_deref()).await {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    match state.services.session_management.collect(&sid, &collector).await {
+        Ok(()) => Json(serde_json::json!({"collected": true, "session_id": sid})).into_response(),
+        Err(e) => session_error_to_response(&e),
+    }
+}
+
+pub async fn uncollect_session(
+    State(state): State<HttpAppState>,
+    Path(sid): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    Query(body): Query<CollectSessionRequest>,
+) -> impl IntoResponse {
+    let collector = match resolve_collector_bot(&state, &headers, &uri, body.participant.as_deref()).await {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    match state.services.session_management.uncollect(&sid, &collector).await {
+        Ok(()) => Json(serde_json::json!({"collected": false, "session_id": sid})).into_response(),
         Err(e) => session_error_to_response(&e),
     }
 }
