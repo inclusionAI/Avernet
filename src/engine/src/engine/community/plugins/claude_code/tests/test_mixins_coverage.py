@@ -1008,6 +1008,18 @@ class TestSessionMixin:
             agent_id="g1", session_key=legacy_key, offset=0, limit=1,
         ) == [{"key": legacy_key}]
 
+    async def test_list_agent_id_filter_skips_malformed_session_keys(self):
+        c = _FakeRelayClient()
+        c.set_response("sessions.list", _ok({"sessions": [
+            {"key": None},
+            {"key": "agent:g1:session:missing-user"},
+            {"key": "user:u1:session:missing-agent"},
+            {"key": "unknown:g1"},
+        ]}))
+        impl, _ = _impl(c)
+
+        assert await impl.sessions_list(agent_id="g1") == []
+
     async def test_list_session_key_filters_before_pagination(self):
         c = _FakeRelayClient()
         c.set_response("sessions.list", _ok({"sessions": [
