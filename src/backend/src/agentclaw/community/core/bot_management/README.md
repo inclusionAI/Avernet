@@ -14,6 +14,7 @@ provides:
   - "RenderScreenService"
   - "TeclawProvisionService"
   - "TeclawPublishTaskLifecycle"
+  - "CreateBotForOthersService"
   - "DefaultBotPassportRepairService"
 consumes:
   - "DeviceAccessor"

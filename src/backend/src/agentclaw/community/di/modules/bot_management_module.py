@@ -30,6 +30,9 @@ from injector import (
 )
 
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.create_bot_for_others_service import (
+    CreateBotForOthersServiceProtocol,
+)
 from agentclaw.community.api.data_init_service import DataInitServiceProtocol
 from agentclaw.community.api.default_bot_passport_repair_service import (
     DefaultBotPassportRepairServiceProtocol,
@@ -52,6 +55,9 @@ from agentclaw.community.core.bot_management.repository.template_repository_prot
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.cleanup_service import BotCleanupService
+from agentclaw.community.core.bot_management.services.create_bot_for_others_service import (
+    CreateBotForOthersService,
+)
 from agentclaw.community.core.bot_management.services.data_init_service import DataInitService
 from agentclaw.community.core.bot_management.services.default_bot_passport_repair_service import (
     DefaultBotPassportRepairService,
@@ -228,6 +234,25 @@ class BotManagementModule(Module):
     ) -> DefaultBotPassportRepairServiceProtocol:
         return DefaultBotPassportRepairService(
             repository=repository,
+            passport_plugin=passport_plugin,
+            auth_relationship_plugin=auth_relationship_plugin,
+            skill_set_factory=skill_set_factory,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def create_bot_for_others_service(
+        self,
+        repository: BotRepository,
+        bot_service: BotService,
+        passport_plugin: PassportPlugin,
+        auth_relationship_plugin: AuthRelationshipPlugin,
+        skill_set_factory: SkillSetServiceFactory,
+    ) -> CreateBotForOthersServiceProtocol:
+        return CreateBotForOthersService(
+            repository=repository,
+            bot_service=bot_service,
             passport_plugin=passport_plugin,
             auth_relationship_plugin=auth_relationship_plugin,
             skill_set_factory=skill_set_factory,

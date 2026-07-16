@@ -11,7 +11,6 @@ Provides CRUD operations for bots:
 Each bot is associated with an entity (staff, proj, team) and has its own device.
 """
 import asyncio
-from datetime import datetime, timedelta
 from typing import Any, List, Literal, Optional
 
 from fastapi import APIRouter, Query, Request, Response, Depends, Path
@@ -22,6 +21,9 @@ from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.core.access.admin_scopes import super_admin
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.create_bot_for_others_service import (
+    CreateBotForOthersServiceProtocol,
+)
 from agentclaw.community.api.data_init_service import DataInitServiceProtocol
 from agentclaw.community.api.default_bot_passport_repair_service import (
     DefaultBotPassportRepairServiceProtocol,
@@ -47,6 +49,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     validate_bot_name,
 )
 from agentclaw.community.core.bot_management.errors import (
+    CreateBotForOthersError,
     DefaultBotPassportRepairError,
 )
 from agentclaw.community.core.bot_management.utils import (
@@ -609,8 +612,9 @@ async def repair_default_passport_for_others(
 async def create_bot_for_others(
     request: Request,
     ctx: RequestContext = Depends(get_request_context),
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    bot_repo: BotRepository = Injected(BotRepository),
+    create_service: CreateBotForOthersServiceProtocol = Injected(
+        CreateBotForOthersServiceProtocol
+    ),
 ) -> ApiResponse:
     """
     Create a bot for another user (admin only).
@@ -667,113 +671,61 @@ async def create_bot_for_others(
         target_user_id = target_user_id.strip()
         target_nick_name = target_nick_name.strip()
 
-        # Check if target user already has a default bot
-        has_default_bot = bot_repo.exists_by_owner_and_bot_id(target_user_id, "default")
-
-        if has_default_bot:
-            # Get the default bot to check its status
-            total, items = bot_repo.list_by_owner(target_user_id, page=1, page_size=100)
-            default_bot = None
-            for bot in items:
-                if bot.get("bot_id") == "default":
-                    default_bot = bot
-                    break
-
-            if default_bot:
-                bot_status = default_bot.get("status", "UNKNOWN")
-                bot_id = default_bot.get("bot_id")
-
-                if bot_status == "ACTIVE":
-                    # Bot is already active, skip creation
-                    logger.info(f"[bot_router.create_bot_for_others] Target {target_user_id} already has ACTIVE default bot, skipping")
-                    return ApiResponse(
-                        success=True,
-                        message="目标用户已有活跃的default bot，跳过创建",
-                        data={
-                            "action": "skipped",
-                            "bot_id": bot_id,
-                            "status": bot_status,
-                            "target_user_id": target_user_id,
-                        },
-                    )
-                else:
-                    # Bot exists but not active (PENDING/FAILED), check if 30 minutes passed since last modification
-                    gmt_modified = default_bot.get("gmt_modified")
-                    should_restart = False
-
-                    if gmt_modified:
-                        if isinstance(gmt_modified, str):
-                            try:
-                                gmt_modified = datetime.fromisoformat(gmt_modified.replace('Z', '+00:00'))
-                            except ValueError:
-                                gmt_modified = None
-
-                        if isinstance(gmt_modified, datetime):
-                            time_diff = datetime.now(gmt_modified.tzinfo) - gmt_modified
-                            if time_diff >= timedelta(minutes=30):
-                                should_restart = True
-                            else:
-                                remaining = timedelta(minutes=30) - time_diff
-                                logger.info(f"[bot_router.create_bot_for_others] Target {target_user_id} bot modified {time_diff.seconds // 60} minutes ago, skip restart, need {remaining.seconds // 60} more minutes")
-                                return ApiResponse(
-                                    success=True,
-                                    message=f"目标用户default bot（状态: {bot_status}）修改时间不足30分钟，跳过重启，还需约{remaining.seconds // 60}分钟",
-                                    data={
-                                        "action": "skipped_wait",
-                                        "bot_id": bot_id,
-                                        "status": bot_status,
-                                        "target_user_id": target_user_id,
-                                        "minutes_since_modified": time_diff.seconds // 60,
-                                        "minutes_remaining": remaining.seconds // 60,
-                                    },
-                                )
-                    else:
-                        # No modification time, restart anyway
-                        should_restart = True
-
-                    if should_restart:
-                        logger.info(f"[bot_router.create_bot_for_others] Target {target_user_id} has default bot with status {bot_status}, restarting")
-                        result = bot_service.restart_bot(
-                            bot_id=bot_id,
-                            user_id=target_user_id,
-                            nick_name=target_nick_name,
-                        )
-
-                        return ApiResponse(
-                            success=True,
-                            message=f"目标用户已有default bot（状态: {bot_status}），已触发重启",
-                            data={
-                                "action": "restarted",
-                                "bot": result,
-                                "target_user_id": target_user_id,
-                            },
-                        )
-
-        # No default bot exists, create a new one
-        logger.info(f"[bot_router.create_bot_for_others] Creating default bot for target {target_user_id}")
         cookie = request.headers.get("cookie", "")
-        result = bot_service.create_bot(
-            user_id=target_user_id,
-            nick_name=target_nick_name,
-            bot_name=target_nick_name,
-            entity_id=target_user_id,
-            entity_type="staff",
+        result = create_service.execute(
+            target_user_id=target_user_id,
+            target_nick_name=target_nick_name,
             bot_type=bot_type,
+            operator_user_id=caller_user_id,
+            operator_name=ctx.nick_name or caller_user_id,
             cookie=cookie,
         )
+        action = result.get("action")
+        if action == "created":
+            message = "成功为目标用户创建default bot"
+        elif action == "restarted":
+            message = (
+                f"目标用户已有default bot（状态: {result.get('status')}），已触发重启"
+            )
+        elif action == "skipped_wait":
+            message = (
+                f"目标用户default bot（状态: {result.get('status')}）修改时间不足30分钟，"
+                f"跳过重启，还需约{result.get('minutes_remaining')}分钟"
+            )
+        elif action == "repaired":
+            message = "目标用户已有活跃的default bot，已补齐Passport，请安排重启"
+        else:
+            message = "目标用户已有活跃的default bot，Passport已校验，跳过创建"
 
-        logger.info(f"[bot_router.create_bot_for_others] Successfully created bot for {target_user_id}: {result.get('bot_id')}")
+        logger.info(
+            "[bot_router.create_bot_for_others] complete operator=%s target=%s "
+            "bot_id=default action=%s passport_source=%s restart_required=%s",
+            caller_user_id,
+            target_user_id,
+            action,
+            (result.get("passport") or {}).get("source"),
+            (result.get("runtime") or {}).get("restart_required"),
+        )
 
         return ApiResponse(
             success=True,
-            message="成功为目标用户创建default bot",
-            data={
-                "action": "created",
-                "bot": result,
-                "target_user_id": target_user_id,
-            },
+            message=message,
+            data=result,
         )
 
+    except CreateBotForOthersError as e:
+        logger.warning(
+            "[bot_router.create_bot_for_others] control-plane preparation failed: "
+            "error_code=%s error=%s",
+            e.error_code,
+            e,
+        )
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=e.error_code,
+            data=None,
+        )
     except BotNameExistsError as e:
         logger.warning(f"[bot_router.create_bot_for_others] Bot name exists: {e}")
         return ApiResponse(
@@ -782,7 +734,7 @@ async def create_bot_for_others(
             error_code=409,
             data=None,
         )
-    except DeviceLimitError as e:
+    except (BotLimitExceededError, DeviceLimitError) as e:
         logger.warning(f"[bot_router.create_bot_for_others] Device limit reached: {e}")
         return ApiResponse(
             success=False,
