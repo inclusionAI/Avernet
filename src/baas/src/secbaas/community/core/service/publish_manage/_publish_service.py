@@ -1880,19 +1880,41 @@ class DefaultPublishService(PublishService):
             has_pending_callbacks = counts.get("PROCESSING", 0) > 0
 
             if not has_pending_callbacks:
-                # All records dispatched inline — mark batch COMPLETED/FAILED now
-                batch_status = (
-                    BatchStatus.COMPLETED.value
-                    if batch_result.success
-                    else BatchStatus.FAILED.value
-                )
-                batch_repo.update_status(
-                    batch_id=batch.id,
-                    tenant=tenant,
-                    env=env,
-                    status=batch_status,
-                    modifier=operator,
-                )
+                # All records dispatched inline — mark batch COMPLETED/FAILED now.
+                # BUT: the callback handler (running in a background thread) may
+                # have already set the batch to FAILED.  If we overwrite FAILED
+                # with COMPLETED here the publish will incorrectly auto-complete
+                # to SUCCESS.  Check the current batch status first and preserve
+                # a terminal status that was set by the callback handler.
+                current_batch = batch_repo.get_by_id(batch.id, tenant, env)
+                if current_batch and current_batch.status == BatchStatus.FAILED.value:
+                    # Callback already set batch to FAILED — count the failures
+                    # but do NOT overwrite the terminal status
+                    failed_in_batch = counts.get("FAILED", 0)
+                    total_failed += failed_in_batch
+                    logger.info(
+                        f"Batch {batch.id} already FAILED via callback "
+                        f"({failed_in_batch} failed records), preserving callback result"
+                    )
+                elif current_batch and current_batch.status == BatchStatus.COMPLETED.value:
+                    # Callback already set batch to COMPLETED — nothing to do
+                    logger.info(
+                        f"Batch {batch.id} already COMPLETED via callback, "
+                        f"preserving callback result"
+                    )
+                else:
+                    batch_status = (
+                        BatchStatus.COMPLETED.value
+                        if batch_result.success
+                        else BatchStatus.FAILED.value
+                    )
+                    batch_repo.update_status(
+                        batch_id=batch.id,
+                        tenant=tenant,
+                        env=env,
+                        status=batch_status,
+                        modifier=operator,
+                    )
             else:
                 # Async hooks dispatched — batch stays RUNNING until callbacks complete
                 logger.info(
