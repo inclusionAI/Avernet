@@ -224,6 +224,55 @@ class TestSessionsList:
         assert history_calls[0][1]["sessionKey"] == "s2"
         assert history_calls[1][1]["sessionKey"] == "s3"
 
+    async def test_session_key_filter_applied_before_pagination(self):
+        sessions = [
+            {"key": f"s{i}", "label": f"Session {i}", "model": None}
+            for i in range(21)
+        ]
+        impl, client = _make_impl({
+            "sessions.list": self._sessions_payload(sessions),
+            "chat.history": self._history_payload([
+                {"id": "m1", "role": "user", "content": "hi"},
+            ]),
+            "providers.available": self._providers_payload(),
+        })
+
+        result = await impl.sessions_list(token="tok", session_key="s20", limit=1)
+
+        assert [session["key"] for session in result] == ["s20"]
+        history_calls = [call for call in client.calls if call[0] == "chat.history"]
+        assert [call[1]["sessionKey"] for call in history_calls] == ["s20"]
+
+    async def test_session_key_filter_returns_empty_list_for_no_match(self):
+        impl, client = _make_impl({
+            "sessions.list": self._sessions_payload([
+                {"key": "s1", "label": "Session 1", "model": None},
+            ]),
+            "providers.available": self._providers_payload(),
+        })
+
+        result = await impl.sessions_list(token="tok", session_key="missing")
+
+        assert result == []
+        assert not [call for call in client.calls if call[0] == "chat.history"]
+
+    async def test_blank_session_key_keeps_existing_pagination(self):
+        sessions = [
+            {"key": "s0", "label": "Session 0", "model": None},
+            {"key": "s1", "label": "Session 1", "model": None},
+        ]
+        impl, _ = _make_impl({
+            "sessions.list": self._sessions_payload(sessions),
+            "chat.history": self._history_payload([
+                {"id": "m1", "role": "user", "content": "hi"},
+            ]),
+            "providers.available": self._providers_payload(),
+        })
+
+        result = await impl.sessions_list(token="tok", session_key="   ", offset=1, limit=1)
+
+        assert [session["key"] for session in result] == ["s1"]
+
     async def test_model_normalization_present(self):
         """_normalized_model is set for each returned session dict."""
         sessions = [{"key": "s1", "label": "S1", "model": "qwen-plus"}]

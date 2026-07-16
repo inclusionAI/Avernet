@@ -95,6 +95,12 @@ class TestListSessions:
         assert call_args.limit == 5
         assert call_args.offset == 10
 
+    def test_session_key_query_param_forwarded(self, client, mock_session_api):
+        resp = client.get("/api/sessions?session_key=session%3Atarget")
+        assert resp.status_code == 200
+        call_args = mock_session_api.list.call_args[0][0]
+        assert call_args.session_key == "session:target"
+
     def test_service_error_returns_500(self, client, mock_session_api):
         mock_session_api.list.side_effect = RuntimeError("db error")
         resp = client.get("/api/sessions")

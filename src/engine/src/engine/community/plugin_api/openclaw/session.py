@@ -26,6 +26,7 @@ class OpenClawSessionPort(Protocol):
         offset: int = 0,
         limit: int = 50,
         agent_id: str | None = None,
+        session_key: str | None = None,
     ) -> list[dict]:
         """Orchestrate `sessions.list` + bcs filter + paginate + chat.history + init filter.
 
@@ -33,11 +34,12 @@ class OpenClawSessionPort(Protocol):
           1. `sessions.list` RPC → raw sessions
           2. Filter out `bcs:group` sessions (keep `bcs:group:bcs-cli`)
           3. Filter by `agent_id` if provided (request-param-driven but primitive)
-          4. Paginate: slice `[offset : offset+limit]`
-          5. Fetch `chat.history` ONLY for the paginated page sessions
-          6. Filter out single-message "Bot 初始化配置" sessions from the page
-          7. Normalise model strings via `providers.available` (cached)
-          8. Return the final page dicts (with `_messages` and `_message_count` populated)
+          4. Filter by exact non-blank `session_key` if provided
+          5. Paginate: slice `[offset : offset+limit]`
+          6. Fetch `chat.history` ONLY for the paginated page sessions
+          7. Filter out single-message "Bot 初始化配置" sessions from the page
+          8. Normalise model strings via `providers.available` (cached)
+          9. Return the final page dicts (with `_messages` and `_message_count` populated)
 
         Pagination is performed BEFORE the per-session `chat.history` RPCs so
         that history is fetched only for the visible page — matching legacy

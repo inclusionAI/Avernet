@@ -155,8 +155,13 @@ class LocalOpenClawPluginImpl(OpenClawPlugin):
         offset: int = 0,
         limit: int = 50,
         agent_id: str | None = None,
+        session_key: str | None = None,
     ) -> list[dict]:
         items = list(self._sessions.values())
+        requested_session_key = session_key if session_key and session_key.strip() else None
+        if requested_session_key is not None:
+            # Keep local mode aligned with production: filter before pagination.
+            items = [item for item in items if item.get("key") == requested_session_key]
         return items[offset: offset + limit]
 
     async def session_create(

@@ -102,6 +102,7 @@ class _SessionPortMixin:
         offset: int = 0,
         limit: int = 50,
         agent_id: str | None = None,
+        session_key: str | None = None,
     ) -> list[dict[str, Any]]:
         """Orchestrate session listing with the exact legacy ordering.
 
@@ -109,11 +110,12 @@ class _SessionPortMixin:
           1. `sessions.list` RPC → raw sessions
           2. Filter `bcs:group` sessions (gateway-cleanup, fixed)
           3. Filter by `agent_id` if provided
-          4. Paginate: slice `[offset : offset+limit]` — BEFORE history fetch
-          5. Fetch `chat.history` ONLY for the paginated page sessions
-          6. Filter "Bot 初始化配置" single-message sessions from the page
-          7. Normalise model strings (cached provider map)
-          8. Return the final page dicts with `_messages`/`_message_count` set
+          4. Filter by exact non-blank `session_key` if provided
+          5. Paginate: slice `[offset : offset+limit]` — BEFORE history fetch
+          6. Fetch `chat.history` ONLY for the paginated page sessions
+          7. Filter "Bot 初始化配置" single-message sessions from the page
+          8. Normalise model strings (cached provider map)
+          9. Return the final page dicts with `_messages`/`_message_count` set
 
         Returns `[]` on gateway error.  A page may return fewer than `limit`
         items when "Bot 初始化配置" sessions fall within it (exact legacy
@@ -160,14 +162,19 @@ class _SessionPortMixin:
         if agent_id is not None:
             raw_sessions = [s for s in raw_sessions if s.get("agentId") == agent_id]
 
-        # Step 4: Paginate BEFORE history fetch (legacy ordering).
+        requested_session_key = session_key if session_key and session_key.strip() else None
+        if requested_session_key is not None:
+            # Filter before pagination so a copied key can be found beyond the current page.
+            raw_sessions = [s for s in raw_sessions if s.get("key") == requested_session_key]
+
+        # Step 5: Paginate BEFORE history fetch (legacy ordering).
         page = raw_sessions[offset: offset + limit]
 
         # Build/retrieve the cached provider map (FIX 2 — at most one RPC ever).
         provider_map = await self._get_provider_map(client)
 
-        # Step 5: Fetch chat.history ONLY for the page sessions.
-        # Step 6: Filter "Bot 初始化配置" single-message init sessions from page.
+        # Step 6: Fetch chat.history ONLY for the page sessions.
+        # Step 7: Filter "Bot 初始化配置" single-message init sessions from page.
         enriched: list[dict[str, Any]] = []
         for s in page:
             key = s.get("key", "")
@@ -194,7 +201,7 @@ class _SessionPortMixin:
 
             enriched.append(s)
 
-        # Step 7: Normalise model strings in place.
+        # Step 8: Normalise model strings in place.
         # gateway 的 sessions.list 每行已经把 provider 拆到独立字段 modelProvider
         # （见 openclaw session-utils.ts resolveSessionDisplayModelIdentityRef:
         # 非 CLI provider 原样返回），model 字段是 bare id。优先用 row 上现成的

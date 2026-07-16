@@ -91,6 +91,9 @@ async def test_local_openclaw_plugin_stateful_ports_and_error_branches():
     await plugin.session_create("s1", label="one", model="m1")
     await plugin.session_create("s2", label="two", model="m2")
     assert [s["key"] for s in await plugin.sessions_list(offset=1, limit=1)] == ["s2"]
+    assert [s["key"] for s in await plugin.sessions_list(session_key="s2", limit=1)] == ["s2"]
+    assert await plugin.sessions_list(session_key="missing") == []
+    assert [s["key"] for s in await plugin.sessions_list(session_key="   ", limit=1)] == ["s1"]
     await plugin.session_patch_then_get("s1", label="patched")
     assert (await plugin.sessions_list())[0]["label"] == "patched"
     await plugin.session_patch_then_get("new", model="m3")

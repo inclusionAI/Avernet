@@ -109,6 +109,7 @@ def _message_to_dict(msg) -> Dict:
 async def list_sessions(
     user_id: Optional[str] = None,
     agent_id: Optional[str] = None,
+    session_key: str | None = None,
     limit: int = 20,
     offset: int = 0,
     engine: Optional[str] = None,
@@ -118,7 +119,11 @@ async def list_sessions(
     try:
         api = _get_session_api(engine)
         sessions = await api.list(SessionListRequest(
-            user_id=user_id, agent_id=agent_id, limit=limit, offset=offset,
+            user_id=user_id,
+            agent_id=agent_id,
+            session_key=session_key,
+            limit=limit,
+            offset=offset,
         ))
         log.info(f"[list_sessions] 查询完成, 返回 {len(sessions)} 条会话")
         return ApiResponse(

@@ -136,15 +136,24 @@ class _FakeSessionPort:
         offset: int = 0,
         limit: int = 50,
         agent_id: str | None = None,
+        session_key: str | None = None,
     ) -> list[dict]:
         self.sessions_list_calls.append(
-            {"token": token, "offset": offset, "limit": limit, "agent_id": agent_id}
+            {
+                "token": token,
+                "offset": offset,
+                "limit": limit,
+                "agent_id": agent_id,
+                "session_key": session_key,
+            }
         )
-        # Mirror the real port: pagination + agent_id filtering happen HERE
+        # Mirror the real port: request filtering happens before pagination.
         # (the adapter forwards the primitives and only builds DTOs).
         result = self._sessions_list_result
         if agent_id is not None:
             result = [s for s in result if s.get("agentId") == agent_id]
+        if session_key and session_key.strip():
+            result = [s for s in result if s.get("key") == session_key]
         return result[offset : offset + limit]
 
     async def session_create(
@@ -250,6 +259,16 @@ async def test_list_forwards_pagination_to_port():
     assert len(sessions) == 2
     assert sessions[0].key == "session:2:user:default"
     assert sessions[1].key == "session:3:user:default"
+
+
+@pytest.mark.asyncio
+async def test_list_forwards_session_key_to_port():
+    port = _FakeSessionPort()
+    adapter = OpenClawSessionAdapter(port)
+
+    await adapter.list(SessionListRequest(session_key="session:target"))
+
+    assert port.sessions_list_calls[0]["session_key"] == "session:target"
 
 
 @pytest.mark.asyncio
