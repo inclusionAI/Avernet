@@ -40,9 +40,12 @@ const TopNavBar: React.FC<TopNavBarProps> = ({
   isLoadingMyBots,
   onBotSwitch,
 }) => {
-  // 获取用户头像 URL（用于 human actor）；由 useHumanIdentity 写入 userStore，
-  // 身份来源差异（开源 /me、内部 __TERN__）已收口到 authAdapter。
+  // 获取用户展示信息（用于 human actor）；由 useHumanIdentity 写入 userStore，
+  // 身份来源差异（开源 /auth/user、内部 __TERN__）已收口到 authAdapter。
+  const userId = useUserStore((state) => state.userId);
+  const userNickName = useUserStore((state) => state.nickName);
   const userAvatarUrl = useUserStore((state) => state.avatarUrl);
+  const userDisplayName = userNickName || userId || undefined;
 
   // 创建 Bot 接入引导入口（bcnBotOnboarding）：开源专属，开源默认 true，内部 extend 为 false。
   const { bcnBotOnboarding } = useExt(AppExt).features;
@@ -245,6 +248,9 @@ const TopNavBar: React.FC<TopNavBarProps> = ({
                 isOnboarding={onboardingBotUuid === bot.bot_uuid}
                 onRefreshName={handleRefreshName}
                 isRefreshingName={refreshingBotUuid === bot.bot_uuid}
+                userDisplayName={
+                  bot.actor_kind === 'human' ? userDisplayName : undefined
+                }
                 userAvatarUrl={
                   bot.actor_kind === 'human' ? userAvatarUrl : undefined
                 }
