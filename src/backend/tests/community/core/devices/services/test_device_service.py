@@ -439,6 +439,22 @@ class TestReleaseDevice:
         )
         assert result is released_record
 
+    def test_release_stopped_device(self):
+        record = _make_record(status=DeviceBindingStatus.STOPPED.value)
+        released_record = _make_record(status=DeviceBindingStatus.RELEASED.value)
+        repo = MagicMock()
+        repo.get_by_id.side_effect = [record, released_record]
+        svc = _make_service(repo=repo)
+
+        result = svc.release_device(
+            binding_id=1,
+            release_reason="finalize stopped binding",
+            operator=_make_operator(),
+        )
+
+        assert result is released_record
+        repo.release_binding.assert_called_once()
+
     def test_release_released_device_raises(self):
         record = _make_record(status=DeviceBindingStatus.RELEASED.value)
         repo = MagicMock()
