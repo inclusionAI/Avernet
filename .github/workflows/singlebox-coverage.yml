@@ -13,7 +13,6 @@ on:
       - "src/bcs/**"
       - "src/engine/**"
       - "src/frontend/**"
-      - "src/plugin/**"
       - ".github/workflows/singlebox-coverage.yml"
   push:
     branches:
@@ -26,7 +25,6 @@ on:
       - "src/bcs/**"
       - "src/engine/**"
       - "src/frontend/**"
-      - "src/plugin/**"
       - ".github/workflows/singlebox-coverage.yml"
   workflow_dispatch:
     inputs:
