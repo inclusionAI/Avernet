@@ -173,6 +173,7 @@ class ReviewTicketItem(BaseModel):
 
     ticket_id: str | None = None
     id: int | None = None
+    bot_id: str | None = None
     bot_name: str | None = None
     owner_id: str | None = None
     governance_status: str = ""
@@ -193,6 +194,7 @@ class ReviewTicketItem(BaseModel):
         return cls(
             ticket_id=ticket.ticket_id,
             id=ticket.id,
+            bot_id=ticket.bot_id,
             bot_name=ticket.bot_name,
             owner_id=ticket.owner_id,
             governance_status=status.value if hasattr(status, "value") else str(status or ""),
