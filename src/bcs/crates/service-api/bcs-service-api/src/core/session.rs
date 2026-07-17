@@ -1,7 +1,7 @@
 //! Session core business rules（无 IO）。
 
 use crate::types::{SessionKind, SessionStatus};
-use bcs_domain::MAX_SESSION_ID_CHARS;
+use bcs_domain::{MAX_GENERATED_GROUP_ID_CHARS, MAX_SESSION_ID_CHARS};
 
 /// 校验 session_id 格式：`{group_id}:{8_hex}`。
 /// 合法 legacy：`{group_id}:00000000`。
@@ -22,6 +22,9 @@ pub fn validate_session_id(session_id: &str, group_id: &str) -> bool {
 /// 生成新 session_id：`{group_id}:{8_hex}`。
 /// 随机 u32 冲突概率 1/2^32；store 层用 `uk_session_id` 唯一索引兜底。
 pub fn new_session_id(group_id: &str) -> Result<String, &'static str> {
+    if group_id.chars().count() > MAX_GENERATED_GROUP_ID_CHARS {
+        return Err("generated session_id exceeds the 64-character limit");
+    }
     let session_id = format!("{}:{:08x}", group_id, fastrand::u32(..));
     if validate_session_id(&session_id, group_id) {
         Ok(session_id)
@@ -88,6 +91,17 @@ mod tests {
 
         assert_eq!(session_id.chars().count(), 64);
         assert!(validate_session_id(&session_id, &group_id));
+    }
+
+    #[test]
+    fn session_id_limit_counts_unicode_characters_not_bytes() {
+        let group_id = "群".repeat(MAX_GENERATED_GROUP_ID_CHARS);
+        let session_id = format!("{group_id}:abcdef12");
+
+        assert_eq!(session_id.chars().count(), MAX_SESSION_ID_CHARS);
+        assert!(session_id.len() > MAX_SESSION_ID_CHARS);
+        assert!(validate_session_id(&session_id, &group_id));
+        assert!(new_session_id(&group_id).is_ok());
     }
 
     #[test]

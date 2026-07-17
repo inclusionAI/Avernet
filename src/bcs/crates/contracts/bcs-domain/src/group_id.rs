@@ -47,7 +47,7 @@ pub fn channel_group_id(
 
     let token = opaque_token(source_id);
     let group_id = compose_group_id(Some(channel_type), group_kind, &token);
-    if group_id.chars().count() > MAX_GENERATED_GROUP_ID_CHARS {
+    if group_id.len() > MAX_GENERATED_GROUP_ID_CHARS {
         return Err(GroupIdBuildError::SessionIdTooLong);
     }
     Ok(group_id)
