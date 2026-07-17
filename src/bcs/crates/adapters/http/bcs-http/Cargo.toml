@@ -44,6 +44,9 @@ bcs-bot = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-cli = { workspace = true }
 bcs-friend = { workspace = true }
+bcs-group-store = { workspace = true }
+bcs-session = { workspace = true }
+bcs-session-store = { workspace = true }
 bcs-auth-local = { workspace = true }
 bcs-services-container = { workspace = true, features = ["test-support"] }
 bcs-test-support = { workspace = true }

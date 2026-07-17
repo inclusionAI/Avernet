@@ -159,16 +159,16 @@ for item in items:
     _cli_story_run "operator reads the expanded group" PM get-group --id "$group_id" || return
     assert_contains "CLI group read contains the added specialist" "$BCS_CLI_STDOUT" "$BOT_QA_UUID"
 
-    _cli_story_run "operator lists groups containing itself" PM list-groups --mine || return
-    assert_contains "CLI --mine list identifies the current bot" "$BCS_CLI_STDOUT" "Groups for current bot ${BOT_PM_UUID}"
-    local cli_mine_output="$BCS_CLI_STDOUT" cli_mine_count api_mine_count
-    cli_mine_count=$(printf '%s\n' "$cli_mine_output" | sed -nE 's/^Groups for current bot .+ \(([0-9]+)\):$/\1/p' | head -1)
-    assert_not_empty "CLI --mine list exposes its result count" "$cli_mine_count"
-    api_get "/bots/${BOT_PM_UUID}/groups"
-    require_status "CLI --mine result can be checked against the bot-group API" "200" || return
+    _cli_story_run "operator lists groups containing itself" PM list-groups || return
+    local cli_group_count api_group_count
+    cli_group_count=$(printf '%s' "$BCS_CLI_STDOUT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["returned"])' 2>/dev/null)
+    assert_not_empty "CLI current-bot group list exposes its result count" "$cli_group_count"
+    assert_contains "CLI current-bot group list contains the managed group" "$BCS_CLI_STDOUT" "$group_id"
+    api_get "/bots/${BOT_PM_UUID}/groups?include_session_groups=false"
+    require_status "CLI group list can be checked against the formal bot-group API" "200" || return
     assert_contains "bot-group read-back contains the CLI-managed group" "$RESPONSE" "$group_id"
-    api_mine_count=$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("items", [])))' 2>/dev/null)
-    assert_eq "CLI --mine count matches the bot-group API" "$cli_mine_count" "$api_mine_count"
+    api_group_count=$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("items", [])))' 2>/dev/null)
+    assert_eq "CLI current-bot count matches the formal bot-group API" "$cli_group_count" "$api_group_count"
 
     _cli_story_run "operator fuses team perspectives" PM fuse --group "$group_id" \
         --question "Is the release ready?" \
