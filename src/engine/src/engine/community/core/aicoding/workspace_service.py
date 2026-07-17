@@ -14,6 +14,7 @@ used directly — no NFS prefix conversion is needed here.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import TYPE_CHECKING
@@ -111,6 +112,12 @@ class WorkspaceService:
     ) -> None:
         self._file = file_plugin
         self._bash = bash_plugin
+        # Serialize expensive git scans per workspace.  sessions.list can be
+        # polled frequently by the frontend; if a repo-level git command hangs,
+        # allowing overlapping scans multiplies stuck subprocesses and can starve
+        # the event loop.  We intentionally skip, rather than queue, when a scan
+        # for the same workspace is already in progress.
+        self._git_locks: dict[str, asyncio.Lock] = {}
 
     # ── path helpers ──────────────────────────────────────────────────
 
@@ -252,12 +259,31 @@ class WorkspaceService:
 
     # ── git diff ──────────────────────────────────────────────────────
 
+    def _get_git_lock(self, workspace: str) -> asyncio.Lock:
+        """Return the per-workspace git-operation lock."""
+        lock = self._git_locks.get(workspace)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._git_locks[workspace] = lock
+        return lock
+
     async def list_git_diff(
         self, session_id: str, cwd: str | None = None
     ) -> GitDiffTreeResult:
         """List changed files across all git projects in the workspace."""
         workspace = self.ensure_workspace_exists(session_id, cwd)
 
+        lock = self._get_git_lock(workspace)
+        if lock.locked():
+            log.info("list_git_diff skipped: git scan already running cwd=%s", workspace)
+            return GitDiffTreeResult(session_id=session_id, diff_head=[])
+
+        async with lock:
+            return await self._list_git_diff_locked(session_id, workspace)
+
+    async def _list_git_diff_locked(
+        self, session_id: str, workspace: str
+    ) -> GitDiffTreeResult:
         # 1) Discover git projects under the workspace.
         #
         # ``.git`` may be a directory (standard repo) OR a file (worktree
@@ -271,7 +297,7 @@ class WorkspaceService:
             f'-maxdepth 1 -type d -name .repos -prune -o '
             f'-maxdepth 2 -name .git \\( -type d -o -type f \\) -print'
         )
-        find_res = await self._bash.exec(cmd=find_cmd, cwd=workspace, timeout=15)
+        find_res = await self._bash.exec(cmd=find_cmd, cwd=workspace, timeout=5)
         if find_res.exit_code != 0:
             log.warning(
                 "list_git_diff find failed: cwd=%s stderr=%s",
@@ -294,7 +320,7 @@ class WorkspaceService:
                     "status --porcelain=v1 --untracked-files=all"
                 ),
                 cwd=project_path,
-                timeout=30,
+                timeout=5,
             )
             if status_res.exit_code != 0:
                 log.warning(

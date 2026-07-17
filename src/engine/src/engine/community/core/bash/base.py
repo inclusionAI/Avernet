@@ -69,7 +69,12 @@ class BaseBashService(BashService):
                 exit_code=proc.returncode or 0,
             )
         except asyncio.TimeoutError:
-            proc.kill()
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                # The process may have exited between wait_for timing out and
+                # kill(); treat this as a normal timeout cleanup race.
+                pass
             await proc.communicate()
             return BashExecResult(
                 stdout="",

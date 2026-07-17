@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Optional
@@ -454,6 +455,64 @@ async def test_list_git_diff_aggregates_per_project(workspace_dir: Path) -> None
     fe = next(p for p in result.diff_head if p.project == "project-fe")
     names = {child.name for child in (fe.tree.children or [])}
     assert names == {"README.md", "new.txt"}
+
+
+async def test_list_git_diff_skips_when_same_workspace_scan_running(
+    workspace_dir: Path,
+) -> None:
+    """同 workspace 的 git 扫描已在跑时，后续请求直接空返回而不排队。"""
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingFindBash(FakeBashPlugin):
+        async def exec(
+            self,
+            cmd: str,
+            cwd: str,
+            timeout: int = 30,
+            auth=None,  # noqa: ANN001
+        ) -> BashExecResult:
+            self.calls.append((cmd, cwd, timeout))
+            if "find" in cmd:
+                entered.set()
+                await release.wait()
+                return BashExecResult(stdout="", stderr="", exit_code=0)
+            return BashExecResult(stdout="", stderr="", exit_code=0)
+
+    bash = BlockingFindBash()
+    service = _make_service(bash_plugin=bash)
+
+    first = asyncio.create_task(service.list_git_diff(SESSION_ID))
+    await entered.wait()
+
+    second = await service.list_git_diff(SESSION_ID)
+    assert second.diff_head == []
+    assert len(bash.calls) == 1
+
+    release.set()
+    await first
+
+
+def test_list_git_diff_git_commands_use_short_timeout(workspace_dir: Path) -> None:
+    """git diff/status 路径使用 5s 超时，避免慢 git 子进程堆积。"""
+    bash = FakeBashPlugin()
+    bash.add(
+        "find",
+        str(workspace_dir),
+        BashExecResult(stdout=f"{workspace_dir}/project-fe/.git\n", stderr="", exit_code=0),
+    )
+    bash.add(
+        "git -c core.quotePath=false status",
+        f"{workspace_dir}/project-fe",
+        BashExecResult(stdout="M  ok.py\n", stderr="", exit_code=0),
+    )
+    service = _make_service(bash_plugin=bash)
+
+    async def run() -> None:
+        await service.list_git_diff(SESSION_ID)
+
+    asyncio.run(run())
+    assert [timeout for _, _, timeout in bash.calls] == [5, 5]
 
 
 async def test_list_git_diff_returns_empty_when_find_fails(
