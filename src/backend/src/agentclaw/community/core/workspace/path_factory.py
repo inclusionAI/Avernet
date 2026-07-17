@@ -45,87 +45,14 @@ BAAS_ENGINE_SKILLS_ROOT = Path("/home/admin/.openclaw/workspace/skills")
 BAAS_ENGINE_SKILLS_ROOT = Path("/home/admin/.openclaw/workspace/skills")
 
 
-def _get_config_value(key: str, default_value: Path, env_var: Optional[str] = None) -> Path:
-    """从环境变量或 application.yaml 读取配置值。
-
-    优先级:
-    1. 环境变量（env_var 指定）
-    2. configs/application-dev.yaml 或 application.yaml 的 user_config.{key}
-    3. default_value
-
-    Args:
-        key: user_config 下的 key 名
-        default_value: 找不到时的默认值
-        env_var: 环境变量名（可选）
-
-    Returns:
-        Path
-    """
-    if env_var:
-        env_value = os.getenv(env_var)
-        if env_value:
-            if env_value.startswith("~"):
-                env_value = str(Path.home()) + env_value[1:]
-            logger.info(f"[_get_config_value] {key} loaded from env {env_var}: {env_value}")
-            return Path(env_value)
-
-    try:    
-        import yaml
-
-        # Overlay selection mirrors the yaml provider's: the test suite
-        # (DEPLOY_PROFILE=test, SERVER_ENV unset) reads the neutral community
-        # application-test.yaml instead of the corp application-dev.yaml. An
-        # explicitly set SERVER_ENV always wins (dev/stable → dev overlay; else base
-        # only), so tests that set SERVER_ENV to exercise a specific env are unaffected.
-        profile = (os.getenv("DEPLOY_PROFILE") or "").lower()
-        # Match yaml_provider._select_overlay_name's env resolution exactly (incl. the
-        # REAL_SERVER_ENV fallback the container supplies) so the two sites never
-        # disagree on the overlay within one process.
-        env = (os.getenv("SERVER_ENV") or os.getenv("REAL_SERVER_ENV") or "").lower()
-        if env == "" and profile in ("test", "corp_test"):
-            config_names = ["application-test.yaml", "application.yaml"]
-        elif env in ("dev", "stable", ""):
-            config_names = ["application-dev.yaml", "application.yaml"]
-        else:
-            config_names = ["application.yaml"]
-
-        # B11: configs live in the community subtree (agentclaw/community/configs);
-        # a deploy's assembled runtime `configs/` (cwd) holds them too.
-        config_dirs = [
-            Path.cwd() / "configs",
-            Path(__file__).resolve().parents[2] / "configs",  # agentclaw/community/configs
-        ]
-
-        for config_dir in config_dirs:
-            for config_name in config_names:
-                config_path = config_dir / config_name
-                if config_path.exists():
-                    try:
-                        with open(config_path, "r", encoding="utf-8") as f:
-                            config = yaml.safe_load(f)
-                            if config and "user_config" in config:
-                                user_config = config["user_config"]
-                                if key in user_config:
-                                    value = user_config[key]
-                                    if value.startswith("~"):
-                                        value = str(Path.home()) + value[1:]
-                                    logger.info(f"[_get_config_value] {key} loaded from {config_path}: {value}")
-                                    return Path(value)
-                    except Exception as e:
-                        logger.warning(f"[_get_config_value] Failed to read {config_path}: {e}")
-                        continue
-    except ImportError:
-        logger.warning(f"[_get_config_value] yaml not installed, using default for {key}")
-    except Exception as e:
-        logger.warning(f"[_get_config_value] Error reading config for {key}: {e}")
-
-    logger.info(f"[_get_config_value] {key} using default: {default_value}")
-    return default_value
-
-
 def _get_aidesktop_root() -> Path:
-    """读取 aidesktop_root（优先 AIDESKTOP_ROOT 环境变量，其次 yaml，默认 /aidesktop）。"""
-    return _get_config_value("aidesktop_root", DEFAULT_AIDESKTOP_ROOT, "AIDESKTOP_ROOT")
+    """Read aidesktop_root from env, then the process-cached config provider."""
+    value = os.getenv("AIDESKTOP_ROOT")
+    if not value:
+        from agentclaw.community.core.config.provider import load_config
+
+        value = load_config().user_config.get("aidesktop_root")
+    return Path(value).expanduser() if value else DEFAULT_AIDESKTOP_ROOT
 
 
 def _get_aidesktop_env_folder() -> str:
