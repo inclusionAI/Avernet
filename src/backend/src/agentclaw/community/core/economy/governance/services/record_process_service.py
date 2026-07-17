@@ -27,9 +27,6 @@ from typing import TYPE_CHECKING, Any
 
 from injector import inject
 
-from agentclaw.community.core.economy.governance.domain.base import (
-    build_delivery_status_json,
-)
 from agentclaw.community.core.economy.governance.domain.enums import (
     AuditAction,
     CloseReason,
@@ -791,7 +788,6 @@ class GovernanceRecordService:
                 last_decision_dt_version=dt_version,
                 last_seen_at=now,
                 last_sync_at=now,
-                delivery_status="none",  # 工单刚建,尚无通知投递
             ),
         )
         # Remind chained by scan after first_send; None until then (§7.3.3).
@@ -823,10 +819,10 @@ class GovernanceRecordService:
         )
         # env auto-filled by ORM default=get_current_env (not in constructor)
         self._notify_repo.add_notification(notify_row)
-        # 回写工单投递状态:JSON(first_send:pending,通知已建待发)
+        # 回写工单投递状态:pending(通知已建待发)
         self._task_repo.update_delivery_status(
             ticket_id,
-            build_delivery_status_json(NotifyType.FIRST_SEND.value, "pending"),
+            "pending",
         )
 
         # Audit enqueued (self-managed session)

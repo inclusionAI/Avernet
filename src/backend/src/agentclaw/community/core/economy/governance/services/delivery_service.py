@@ -23,9 +23,6 @@ from typing import TYPE_CHECKING, Any
 
 from injector import inject
 
-from agentclaw.community.core.economy.governance.domain.base import (
-    build_delivery_status_json,
-)
 from agentclaw.community.core.economy.governance.domain.enums import (
     AuditAction,
     NotifyStatus,
@@ -335,13 +332,13 @@ class GovernanceDeliveryService:
                     at=now,
                     channel=result_channel if result_channel and result_channel != original_channel else None,
                 )
-                # Update ticket delivery_status: JSON {notify_type}:sent (§7.3.5)
-                ticket_delivery_status = build_delivery_status_json(
-                    p.notify_type.value, NotifyStatus.SENT.value,
-                    sent_at=now,
-                    external_message_id=r.get("external_message_id"),
+                # Update ticket delivery_status: sent (§7.3.5)
+                self._task_repo.update_delivery_status(
+                    p.ticket_id,
+                    NotifyStatus.SENT.value,
                 )
-                self._task_repo.update_delivery_status(p.ticket_id, ticket_delivery_status)
+                # 投递成功刷 last_notified_at
+                self._task_repo.update_last_notified_at(p.ticket_id, now)
                 self._audit_repo.add_audit(
                     audit_run_id, p.bot_id, p.owner_id,
                     notification_id=nid,
@@ -363,12 +360,11 @@ class GovernanceDeliveryService:
                 p = pending_by_id.get(nid)
                 if p is None:
                     continue
-                # Update ticket delivery_status: JSON {notify_type}:failed (§7.3.5)
-                ticket_delivery_status = build_delivery_status_json(
-                    p.notify_type.value, NotifyStatus.FAILED.value,
-                    error="delivery failed",
+                # Update ticket delivery_status: failed (§7.3.5)
+                self._task_repo.update_delivery_status(
+                    p.ticket_id,
+                    NotifyStatus.FAILED.value,
                 )
-                self._task_repo.update_delivery_status(p.ticket_id, ticket_delivery_status)
                 self._audit_repo.add_audit(
                     audit_run_id, p.bot_id, p.owner_id,
                     notification_id=nid,
@@ -461,25 +457,21 @@ class GovernanceDeliveryService:
                 status=NotifyStatus.SENT,
                 external_id=external_id,
             )
-            # Update ticket delivery_status for reminder: reminder:sent
+            # Update ticket delivery_status for reminder: sent
             self._task_repo.update_delivery_status(
                 ticket.ticket_id,
-                build_delivery_status_json(
-                    NotifyType.REMINDER.value, NotifyStatus.SENT.value,
-                    sent_at=now, external_message_id=external_id,
-                ),
+                NotifyStatus.SENT.value,
             )
+            # 投递成功刷 last_notified_at
+            self._task_repo.update_last_notified_at(ticket.ticket_id, now)
         else:
             self._notify_repo.update_delivery_status(
                 notification_id, status=NotifyStatus.FAILED,
             )
-            # Update ticket delivery_status for reminder: reminder:failed
+            # Update ticket delivery_status for reminder: failed
             self._task_repo.update_delivery_status(
                 ticket.ticket_id,
-                build_delivery_status_json(
-                    NotifyType.REMINDER.value, NotifyStatus.FAILED.value,
-                    error="reminder delivery failed",
-                ),
+                NotifyStatus.FAILED.value,
             )
 
         # Advance reminder chain: increment remind_count + set next remind_at

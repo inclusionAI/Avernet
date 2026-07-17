@@ -66,6 +66,11 @@ _ALLOWED_REVIEW_STATUSES = frozenset(
     {"open", "scheduled", "waiting_review", "closed"}
 )
 
+# 投递状态过滤值(pending / sent / failed / cancelled)。
+_ALLOWED_DELIVERY_STATUSES = frozenset(
+    {"pending", "sent", "failed", "cancelled"}
+)
+
 
 # ---------------------------------------------------------------------------
 # Private helpers — keeps handlers short
@@ -109,6 +114,30 @@ def _validate_status_filter(statuses: list[str] | None) -> list[str] | None:
     return statuses
 
 
+def _validate_delivery_status_filter(delivery_statuses: list[str] | None) -> list[str] | None:
+    """校验 ``delivery_status`` query 取值,返回归一化后的列表。
+
+    语义守恒:
+      - None  = 缺省 → 不过滤投递态
+      - []    = 显式空过滤 → 空结果路径
+      - 非空  = 任一非法值 → 422
+    """
+    if delivery_statuses is None:
+        return None
+    if len(delivery_statuses) == 0:
+        return []
+    invalid = [s for s in delivery_statuses if s not in _ALLOWED_DELIVERY_STATUSES]
+    if invalid:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Invalid delivery_status {invalid!r}; allowed: "
+                f"{sorted(_ALLOWED_DELIVERY_STATUSES)}"
+            ),
+        )
+    return delivery_statuses
+
+
 # ── Workflow: 工单列表 ────────────────────────────────────────────────────
 
 
@@ -126,6 +155,13 @@ async def list_review_tickets(
             "缺省 = 全部活跃态(open+scheduled+waiting_review)"
         ),
     ),
+    delivery_status: list[str] | None = Query(
+        default=None,
+        description=(
+            "投递状态过滤(允许: pending / sent / failed / cancelled);"
+            "缺省 = 不过滤"
+        ),
+    ),
     offset: int = Query(0, ge=0, description="分页偏移"),
     limit: int = Query(50, ge=1, le=200, description="分页上限(<=200)"),
 ) -> ApiResponse:
@@ -135,11 +171,13 @@ async def list_review_tickets(
     """
     del ctx  # RequestContext 仅用于走 AuthPlugin 鉴权链路
     normalized = _validate_status_filter(statuses)
+    delivery_normalized = _validate_delivery_status_filter(delivery_status)
     tickets, total = await asyncio.to_thread(
         admin_svc.list_review_tickets,
         normalized,
         offset=offset,
         limit=limit,
+        delivery_statuses=delivery_normalized,
     )
     status_filter = normalized if normalized is not None else [
         "open", "scheduled", "waiting_review",

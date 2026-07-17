@@ -11,9 +11,6 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.domain.base import (
-    parse_delivery_status,
-)
 from agentclaw.community.core.economy.governance.domain.enums import AuditAction
 from agentclaw.community.core.economy.governance.repositories.orm import (
     AuditLogOrm,
@@ -792,68 +789,27 @@ class TestBuildReviewTicketDetail:
         svc, _ = _build_workflow_svc(engine)
         assert svc.build_review_ticket_detail("nonexistent") is None
 
-    def test_backfills_delivery_status_from_notify_log(self, session, engine):
-        """delivery_status="none" 时从 notify_log 反推真实状态。"""
-        svc, db = _build_workflow_svc(engine)
-        # 创建工单,delivery_status 初始为 "none"
-        _make_task_record(
-            session,
-            ticket_id="t-backfill",
-            delivery_status="none",
-        )
-        # 创建对应的 first_send 通知,状态为 sent
-        _make_notification(
-            session,
-            notification_id="n-backfill",
-            ticket_id="t-backfill",
-            notify_status="sent",
-            notify_type="first_send",
-        )
-
-        result = svc.build_review_ticket_detail("t-backfill")
-        assert result is not None
-        ticket, _ = result
-        # 应从 notify_log 反推为 first_send:sent(now JSON)
-        parsed = parse_delivery_status(ticket.delivery_status)
-        assert parsed["notify_type"] == "first_send"
-        assert parsed["notify_status"] == "sent"
-
-    def test_no_notify_log_keeps_none(self, session, engine):
-        """无通知记录时保持 delivery_status="none"。"""
-        svc, db = _build_workflow_svc(engine)
-        _make_task_record(
-            session,
-            ticket_id="t-no-notify",
-            delivery_status="none",
-        )
-
-        result = svc.build_review_ticket_detail("t-no-notify")
-        assert result is not None
-        ticket, _ = result
-        # 无通知记录,保持 "none"
-        assert ticket.delivery_status == "none"
-
     def test_non_none_delivery_status_unchanged(self, session, engine):
-        """delivery_status 非 "none" 时不触发补查,避免过度查询。"""
+        """delivery_status 四态时不触发补查,避免过度查询。"""
         svc, db = _build_workflow_svc(engine)
         _make_task_record(
             session,
             ticket_id="t-existing",
-            delivery_status="reminder:sent",
+            delivery_status="sent",
         )
         _make_notification(
             session,
             notification_id="n-existing",
             ticket_id="t-existing",
-            notify_status="sent",
-            notify_type="first_send",  # 与工单状态不一致
+            notify_status="failed",  # 与工单状态不一致
+            notify_type="reminder",
         )
 
         result = svc.build_review_ticket_detail("t-existing")
         assert result is not None
         ticket, _ = result
-        # 应保持原状态,不反推
-        assert ticket.delivery_status == "reminder:sent"
+        # 四态不触发补查,保持原值
+        assert ticket.delivery_status == "sent"
 
 
 class TestDeliverByWorker:
@@ -1012,14 +968,12 @@ class TestDeliverByWorker:
         ).all()
         assert notify_rows[0].notify_status == "sent"
 
-        # 验证 task_record 的 delivery_status 已更新为 first_send:sent(JSON)
+        # 验证 task_record 的 delivery_status 已更新为 sent 单值
         with db.orm_session() as s:
             ticket = s.query(GovernanceTicketOrm).filter_by(
                 ticket_id=ticket_id,
             ).one()
-            parsed = parse_delivery_status(ticket.delivery_status)
-            assert parsed["notify_type"] == "first_send"
-            assert parsed["notify_status"] == "sent"
+            assert ticket.delivery_status == "sent"
 
     def test_updates_ticket_delivery_status_on_failure(self, session, engine):
         """发送失败后应更新 task_record 的 delivery_status 为 {notify_type}:failed。"""
@@ -1086,11 +1040,9 @@ class TestDeliverByWorker:
         assert result["sent_count"] == 0
         assert result["results"][0]["success"] is False
 
-        # 验证 task_record 的 delivery_status 已更新为 first_send:failed(JSON)
+        # 验证 task_record 的 delivery_status 已更新为 failed 单值
         with db.orm_session() as s:
             ticket = s.query(GovernanceTicketOrm).filter_by(
                 ticket_id=ticket_id,
             ).one()
-            parsed = parse_delivery_status(ticket.delivery_status)
-            assert parsed["notify_type"] == "first_send"
-            assert parsed["notify_status"] == "failed"
+            assert ticket.delivery_status == "failed"

@@ -27,19 +27,14 @@ import json
 from agentclaw.community.log import get_logger
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from injector import inject
 
-from agentclaw.community.core.economy.governance.domain.base import (
-    build_delivery_status_json,
-)
 from agentclaw.community.core.economy.governance.domain.enums import (
     AuditAction,
-    CloseReason,
     GovernanceStatus,
-    NotifyStatus,
     NotifyType,
 )
 from agentclaw.community.core.economy.governance.services.service_protocols import (
@@ -61,9 +56,6 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.economy.governance.domain.ticket import (
-        GovernanceTicket,
-    )
     from agentclaw.community.core.economy.governance.repositories.audit_repo import (
         GovernanceAuditRepository,
     )
@@ -520,7 +512,6 @@ class GovernanceAdminService:
                 last_decision_dt_version=record.dt_version,
                 last_seen_at=now,
                 last_sync_at=now,
-                delivery_status="none",
             ),
         )
         self._lifecycle_svc.open_ticket(ticket=ticket_model)
@@ -551,7 +542,7 @@ class GovernanceAdminService:
         self._notify_repo.add_notification(notify_row)
         self._task_repo.update_delivery_status(
             ticket_id,
-            build_delivery_status_json(NotifyType.FIRST_SEND.value, "pending"),
+            "pending",  # 建单初始投递状态:待发送
         )
 
         # Audit

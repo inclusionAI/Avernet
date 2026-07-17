@@ -230,6 +230,7 @@ class TaskRecordQueryMixin:
         *,
         offset: int = 0,
         limit: int = 50,
+        delivery_statuses: list[str] | None = None,
     ) -> list[GovernanceTicket]:
         """All tickets in the given statuses (cross-owner), newest first, paged.
 
@@ -239,21 +240,29 @@ class TaskRecordQueryMixin:
             statuses: 治理状态白名单(open/scheduled/waiting_review/closed)。
             offset: 分页偏移。
             limit: 分页上限。
+            delivery_statuses: 投递状态白名单(pending/sent/failed/cancelled),
+                None 不过滤,空列表短路返回空列表(对齐 statuses 行为)。
 
         Returns:
             List of :class:`GovernanceTicket` (gmt_create 由 from_orm 灌入)。
         """
         if not statuses:
             return []
+        if delivery_statuses is not None and not delivery_statuses:
+            return []
         _env = get_current_env()
         with self._db.orm_session() as s:
-            rows = (
+            q = (
                 s.query(GovernanceTicketOrm)
                 .filter(
                     GovernanceTicketOrm.governance_status.in_(statuses),
                     GovernanceTicketOrm.env == _env,
                 )
-                .order_by(GovernanceTicketOrm.gmt_create.desc())
+            )
+            if delivery_statuses:
+                q = q.filter(GovernanceTicketOrm.delivery_status.in_(delivery_statuses))
+            rows = (
+                q.order_by(GovernanceTicketOrm.gmt_create.desc())
                 .offset(offset)
                 .limit(limit)
                 .all()
@@ -263,27 +272,33 @@ class TaskRecordQueryMixin:
     def count_tickets_by_statuses(
         self,
         statuses: list[str],
+        delivery_statuses: list[str] | None = None,
     ) -> int:
         """Count all tickets in the given statuses (cross-owner, paged-list 配套)。
 
         Args:
             statuses: 治理状态白名单。
+            delivery_statuses: 投递状态白名单,None 不过滤,空列表短路返回 0。
 
         Returns:
             满足条件的工单总数(与 list_tickets_by_statuses 同阶过滤)。
         """
         if not statuses:
             return 0
+        if delivery_statuses is not None and not delivery_statuses:
+            return 0
         _env = get_current_env()
         with self._db.orm_session() as s:
-            return (
+            q = (
                 s.query(GovernanceTicketOrm)
                 .filter(
                     GovernanceTicketOrm.governance_status.in_(statuses),
                     GovernanceTicketOrm.env == _env,
                 )
-                .count()
             )
+            if delivery_statuses:
+                q = q.filter(GovernanceTicketOrm.delivery_status.in_(delivery_statuses))
+            return q.count()
 
     def count_active_open(
         self,

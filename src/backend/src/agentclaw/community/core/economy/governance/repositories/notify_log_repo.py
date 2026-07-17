@@ -18,9 +18,6 @@ from datetime import datetime
 
 from injector import inject
 
-from agentclaw.community.core.economy.governance.domain.base import (
-    build_delivery_status_json,
-)
 from agentclaw.community.core.economy.governance.domain.enums import (
     GovernanceStatus,
     NotifyStatus,
@@ -46,8 +43,7 @@ def _update_ticket_delivery_status(
     Args:
         session: 已开启的 ORM session(不自行管理事务,复用调用方的 orm_session)。
         ticket_id: 工单稳定 UUID。
-        status: 投递状态 JSON 字符串(由 ``build_delivery_status_json`` 构造,含
-            notify_type/notify_status/sent_at/external_message_id/error)。
+        status: 投递状态单值(pending/sent/failed/cancelled)。
     """
     if not ticket_id:
         return
@@ -354,7 +350,7 @@ class NotifyLogRepository:
             if count > 0:
                 _update_ticket_delivery_status(
                     s, ticket_id,
-                    build_delivery_status_json(None, NotifyStatus.CANCELLED.value),
+                    NotifyStatus.CANCELLED.value,
                 )
             return count
 
@@ -414,9 +410,7 @@ class NotifyLogRepository:
                 if row and row.ticket_id:
                     _update_ticket_delivery_status(
                         s, row.ticket_id,
-                        build_delivery_status_json(
-                            row.notify_type, NotifyStatus.SENDING.value,
-                        ),
+                        NotifyStatus.PENDING.value,  # sending → pending (投递中仍属待发送态)
                     )
             return result == 1
 
@@ -452,11 +446,7 @@ class NotifyLogRepository:
                 if row and row.ticket_id:
                     _update_ticket_delivery_status(
                         s, row.ticket_id,
-                        build_delivery_status_json(
-                            row.notify_type, NotifyStatus.SENT.value,
-                            sent_at=sent_at,
-                            external_message_id=external_message_id,
-                        ),
+                        NotifyStatus.SENT.value,  # 投递成功
                     )
             return result == 1
 
@@ -496,10 +486,7 @@ class NotifyLogRepository:
                     fail_status = NotifyStatus.FAILED.value if is_terminal else NotifyStatus.PENDING.value
                     _update_ticket_delivery_status(
                         s, row.ticket_id,
-                        build_delivery_status_json(
-                            row.notify_type, fail_status,
-                            error=error_msg if is_terminal else None,
-                        ),
+                        fail_status,  # 终态失败/回退待发
                     )
             return result == 1
 

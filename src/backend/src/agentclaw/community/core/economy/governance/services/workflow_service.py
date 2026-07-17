@@ -19,9 +19,6 @@ from typing import TYPE_CHECKING, Any
 
 from injector import inject
 
-from agentclaw.community.core.economy.governance.domain.base import (
-    build_delivery_status_json,
-)
 from agentclaw.community.core.economy.governance.domain.enums import (
     AuditAction,
     CloseReason,
@@ -90,6 +87,7 @@ class GovernanceWorkflowService:
         *,
         offset: int = 0,
         limit: int = 50,
+        delivery_statuses: list[str] | None = None,
     ) -> tuple[list[GovernanceTicket], int]:
         """评审工单列表:按治理状态过滤(跨 owner)、分页,返回领域模型 + 总数。
 
@@ -99,6 +97,8 @@ class GovernanceWorkflowService:
                 [] 显式表示无任何状态匹配 → 返回空(repo 层空列表短路)。
             offset: 分页偏移。
             limit: 分页上限。
+            delivery_statuses: 投递状态白名单(pending/sent/failed/cancelled);
+                None 时不过滤;[] 空列表短路返回空。
 
         Returns:
             (工单领域模型列表, 满足条件的总数)。领域模型经 from_orm 灌入
@@ -111,8 +111,11 @@ class GovernanceWorkflowService:
         ]
         tickets = self._task_repo.list_tickets_by_statuses(
             effective, offset=offset, limit=limit,
+            delivery_statuses=delivery_statuses,
         )
-        total = self._task_repo.count_tickets_by_statuses(effective)
+        total = self._task_repo.count_tickets_by_statuses(
+            effective, delivery_statuses=delivery_statuses,
+        )
         return tickets, total
 
     def get_review_ticket_detail(
@@ -151,20 +154,6 @@ class GovernanceWorkflowService:
         ticket = self._task_repo.find_by_ticket_id(ticket_id)
         if ticket is None:
             return None
-
-        # delivery_status 补查: 当解析为 none 时,从 notify_log 反推真实状态
-        # (防止工单创建后崩溃,delivery_status 未更新)。
-        # delivery_status 是 snapshot 上的只读 property,直接改 _snapshot.delivery_status。
-        # 兼容旧行拼接("none")与新行 JSON(notify_status=none)统一走 parse 判断。
-        if ticket.delivery_status_json["notify_status"] == "none":
-            notified = self._notify_repo.list_by_ticket(ticket_id, only_pending=False)
-            if notified:
-                latest = notified[0]  # newest first
-                notify_type = latest.notify_type.value if latest.notify_type else "first_send"
-                notify_status = latest.delivery_status.value if latest.delivery_status else "pending"
-                ticket._snapshot.delivery_status = build_delivery_status_json(  # noqa: SLF001
-                    notify_type, notify_status,
-                )
 
         bot_id = getattr(ticket, "bot_id", None)
         owner_id = getattr(ticket, "owner_id", None)

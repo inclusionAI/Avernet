@@ -11,10 +11,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
-from agentclaw.community.core.economy.governance.domain.base import (
-    _iso,
-    parse_delivery_status,
-)
+from agentclaw.community.core.economy.governance.domain.base import _iso
 from agentclaw.community.core.economy.governance.domain.enums import (
     GovernanceStatus,
     Response,
@@ -71,7 +68,8 @@ class MutableSnapshot:
     last_decision_dt_version: str | None
     last_seen_at: datetime | None
     last_sync_at: datetime | None
-    delivery_status: str = "none"  # 最近通知投递状态: JSON 字符串(见 base.build/parse_delivery_status_json)或旧行拼接 first_send:sent
+    delivery_status: str = "pending"  # 最近通知投递状态单值: pending/sent/failed/cancelled
+    last_notified_at: datetime | None = None  # 最近一次成功通知时间(首投/reminder sent时刷)
     token_baseline: int | None = None
 
 
@@ -356,25 +354,20 @@ class GovernanceTicket:
 
     @property
     def delivery_status(self) -> str:
-        """最近通知投递状态 — 快照委托(原始字符串:JSON 或旧行拼接)。
+        """最近通知投递状态单值 — 快照委托。
 
-        保留原始字符串以兼容现有写入回填(to_orm/apply_to 透传)与 ``== "none"``
-        之外的判断;需要语义化结构时用 :attr:`delivery_status_json`。
+        活动4态: pending/sent/failed/cancelled。
+        none为列默认哨兵(历史遗留),读时经懒补全归一为pending。
         """
         return self._snapshot.delivery_status
 
     @property
-    def delivery_status_json(self) -> dict[str, Any]:
-        """投递状态解析后的 5-key dict(兼容旧行拼接格式)。
+    def last_notified_at(self) -> datetime | None:
+        """最近一次成功通知时间 — 快照委托。
 
-        读取边界统一走 :func:`parse_delivery_status`,旧行(如
-        ``first_send:sent``)自动解析为等价结构,供 schema 序列化与前端展示;
-        新行存 JSON 字符串则无损还原。
-
-        Returns:
-            ``{notify_type, notify_status, sent_at, external_message_id, error}``。
+        首投/reminder 投递成功(sent)时刷新;失败/取消不动。
         """
-        return parse_delivery_status(self._snapshot.delivery_status)
+        return self._snapshot.last_notified_at
 
     # ── 业务 property ──────────────────────────────
 
@@ -704,7 +697,8 @@ class GovernanceTicket:
                 last_decision_dt_version=obj.last_decision_dt_version,
                 last_seen_at=obj.last_seen_at,
                 last_sync_at=obj.last_sync_at,
-                delivery_status=getattr(obj, "delivery_status", None) or "none",
+                delivery_status=getattr(obj, "delivery_status", None) or "pending",
+                last_notified_at=getattr(obj, "last_notified_at", None),
             ),
             # 生命周期态
             governance_status=GovernanceStatus(obj.governance_status or "open"),
@@ -796,6 +790,7 @@ class GovernanceTicket:
         row.feedback_payload = self.feedback_payload
         row.actor_id = self.actor_id
         row.delivery_status = self.delivery_status
+        row.last_notified_at = self.last_notified_at
         return row
 
     def apply_to(self, row: object) -> None:
@@ -827,6 +822,7 @@ class GovernanceTicket:
         row.feedback_payload = self.feedback_payload
         row.actor_id = self.actor_id
         row.delivery_status = self.delivery_status
+        row.last_notified_at = self.last_notified_at
 
     def to_dict(self) -> dict:
         """API 序列化 — router 直接 ``data=[t.to_dict() for t in items]``。

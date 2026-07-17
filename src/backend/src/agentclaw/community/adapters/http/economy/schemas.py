@@ -191,6 +191,9 @@ class ReviewTicketItem(BaseModel):
     gmt_create: str | None = None
     gmt_modified: str | None = None
     delivery_status: str | None = None
+    remind_count: int = 0
+    remind_at: str | None = None
+    last_notified_at: str | None = None
 
     @classmethod
     def from_ticket(cls, ticket: GovernanceTicket) -> ReviewTicketItem:
@@ -214,6 +217,9 @@ class ReviewTicketItem(BaseModel):
             gmt_create=_iso(ticket.gmt_create),
             gmt_modified=_iso(ticket.gmt_modified),
             delivery_status=ticket.delivery_status,
+            remind_count=ticket.remind_count or 0,
+            remind_at=_iso(ticket.remind_at),
+            last_notified_at=_iso(ticket.last_notified_at),
         )
 
 
@@ -322,12 +328,9 @@ class ReviewTicketDetailResponse(BaseModel):
     )
     # 白名单状态(单点查询,仅详情;列表接口不查以防 N+1)
     in_whitelist: bool = False
-    # 投递状态(回写自 notify_log):原始 JSON 字符串 + 展平 dict
+    # 投递状态(回写自 notify_log):单值四态 + 最近一次通知时间
     delivery_status: str | None = None
-    delivery_status_json: dict | None = Field(
-        None,
-        description="投递状态展平对象(notify_type/notify_status/sent_at/external_message_id/error)",
-    )
+    last_notified_at: str | None = None
     # 评审 / 生命周期
     review_reason: str | None = None
     review_decision: str | None = None
@@ -399,7 +402,7 @@ class ReviewTicketDetailResponse(BaseModel):
             available_actions=cls._build_available_actions(ticket),
             in_whitelist=in_whitelist,
             delivery_status=ticket.delivery_status,
-            delivery_status_json=ticket.delivery_status_json,
+            last_notified_at=_iso(ticket.last_notified_at),
             review_reason=ticket.review_reason,
             review_decision=ticket.review_decision,
             reviewed_by=ticket.reviewed_by,

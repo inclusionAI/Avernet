@@ -483,7 +483,8 @@ class GovernanceTicketOrm(Base):
     # --- 其它 ---
     feedback_payload = Column(Text, nullable=True, comment="结构化反馈 JSON")
     actor_id = Column(String(64), nullable=True, comment="实际操作人ID")
-    delivery_status = Column(String(255), default="none", comment="最近通知投递状态(JSON 字符串): {notify_type,notify_status,sent_at,external_message_id,error}; 旧行拼接如 first_send:sent 由 parse_delivery_status 兼容读")
+    delivery_status = Column(String(32), default="none", comment="最近通知投递状态单值: pending/sent/failed/cancelled;none 为列默认哨兵(历史遗留)")
+    last_notified_at = Column(TIMESTAMP, nullable=True, default=None, comment="最近一次成功通知时间(首投/reminder sent 时刷新;失败/取消不动)")
 
     def to_dict(self) -> dict:
         """Convert to plain dict — safe to use after session closes.
@@ -541,6 +542,8 @@ class GovernanceTicketOrm(Base):
             "remind_count": self.remind_count,
             "feedback_payload": self.feedback_payload,
             "actor_id": self.actor_id,
+            "delivery_status": self.delivery_status,
+            "last_notified_at": self.last_notified_at,
             "last_sync_at": self.last_sync_at,
             "env": self.env,
             "gmt_create": self.gmt_create,

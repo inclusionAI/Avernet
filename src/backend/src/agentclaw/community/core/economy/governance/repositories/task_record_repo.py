@@ -383,7 +383,7 @@ class TaskRecordRepository(TaskRecordQueryMixin):
 
         Args:
             ticket_id: 工单稳定 UUID。
-            status: 投递状态(none/first_send:pending/reminder:sent/...)。
+            status: 投递状态单值(pending/sent/failed/cancelled)。
 
         Returns:
             True if 1 row updated, False otherwise.
@@ -394,6 +394,27 @@ class TaskRecordRepository(TaskRecordQueryMixin):
                 .filter(GovernanceTicketOrm.ticket_id == ticket_id)
                 .update(
                     {GovernanceTicketOrm.delivery_status: status},
+                    synchronize_session=False,
+                )
+            )
+            return result == 1
+
+    def update_last_notified_at(self, ticket_id: str, ts: datetime | None) -> bool:
+        """Update a single ticket's last_notified_at (self-managed session).
+
+        Args:
+            ticket_id: 工单稳定 UUID。
+            ts: 最近一次成功通知时间(首投/reminder sent 时刷),None 清空。
+
+        Returns:
+            True if 1 row updated, False otherwise.
+        """
+        with self._db.orm_session() as session:
+            result = (
+                session.query(GovernanceTicketOrm)
+                .filter(GovernanceTicketOrm.ticket_id == ticket_id)
+                .update(
+                    {GovernanceTicketOrm.last_notified_at: ts},
                     synchronize_session=False,
                 )
             )

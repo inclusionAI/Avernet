@@ -81,14 +81,19 @@ class TaskRecordRepositoryProtocol(Protocol):
         *,
         offset: int = 0,
         limit: int = 50,
+        delivery_statuses: list[str] | None = None,
     ) -> list[GovernanceTicket]:
         """All tickets in given statuses (cross-owner), newest first, paged.
 
-        评审场景按治理状态过滤工单,跨 owner。
+        评审场景按治理状态过滤工单,跨 owner;可选按投递状态过滤。
         """
         ...
 
-    def count_tickets_by_statuses(self, statuses: list[str]) -> int:
+    def count_tickets_by_statuses(
+        self,
+        statuses: list[str],
+        delivery_statuses: list[str] | None = None,
+    ) -> int:
         """Count tickets in given statuses (cross-owner; list 配套统计)。"""
         ...
 
