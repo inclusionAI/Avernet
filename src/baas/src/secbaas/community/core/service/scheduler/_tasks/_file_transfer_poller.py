@@ -90,15 +90,20 @@ class FileTransferPoller:
 
         try:
             all_tickets = self._ticket_repo.list_pending_uploads(
-                statuses=["CREATED", "UPLOADING"], limit=10000
+                # Include UPLOAD_COMPLETED and PUSHING as recovery states:
+                # if a ticket gets stuck after status transition but before
+                # the operation completes (e.g. pull_file fails after
+                # update_status), the next poller cycle can retry it.
+                statuses=["CREATED", "UPLOADING", "UPLOAD_COMPLETED", "PUSHING"],
+                limit=10000,
             )
-            # UPLOAD direction: CREATED/UPLOADING (existing logic)
+            # UPLOAD direction: CREATED/UPLOADING/UPLOAD_COMPLETED
             tickets = [t for t in all_tickets if t.direction == "UPLOAD"]
-            # DOWNLOAD direction: CREATED only (D-19)
+            # DOWNLOAD direction: CREATED/PUSHING (D-19)
             download_tickets = [
                 t
                 for t in all_tickets
-                if t.direction == "DOWNLOAD" and t.status == "CREATED"
+                if t.direction == "DOWNLOAD" and t.status in ("CREATED", "PUSHING")
             ]
         except Exception:
             log.exception("[FileTransferPoller] Failed to query pending uploads")
@@ -242,14 +247,24 @@ class FileTransferPoller:
                         "transitioning to DONE",
                         transfer_id,
                     )
-                    self._ticket_repo.update_status(
-                        transfer_id, "UPLOAD_COMPLETED", None
-                    )
+                    # Recovery: if ticket is already UPLOAD_COMPLETED (stuck
+                    # from a previous cycle), skip the redundant transition.
+                    if ticket.status != "UPLOAD_COMPLETED":
+                        self._ticket_repo.update_status(
+                            transfer_id, "UPLOAD_COMPLETED", None
+                        )
                     self._ticket_repo.update_status(transfer_id, "DONE", None)
                     return "retention_done"
 
                 # Normal path: UPLOAD_COMPLETED -> pull_file -> DONE
-                self._ticket_repo.update_status(transfer_id, "UPLOAD_COMPLETED", None)
+                # Recovery: if ticket is already UPLOAD_COMPLETED (stuck from
+                # a previous cycle where pull_file failed after status update),
+                # skip the redundant transition and proceed directly to
+                # download/pull.
+                if ticket.status != "UPLOAD_COMPLETED":
+                    self._ticket_repo.update_status(
+                        transfer_id, "UPLOAD_COMPLETED", None
+                    )
 
                 download_url = await asyncio.to_thread(
                     self._file_backend.generate_download_url,
@@ -377,11 +392,16 @@ class FileTransferPoller:
                     transfer_id,
                 )
 
-                # Transition CREATED → PUSHING on first OSS detection
-                # (VALID_TRANSITIONS: ("CREATED", "PUSHING") already exists)
-                self._ticket_repo.update_status(transfer_id, "PUSHING", None)
+                # Recovery: if ticket is already PUSHING (stuck from a
+                # previous cycle where steps 3-4 failed after step 1),
+                # skip the CREATED→PUSHING transition and proceed
+                # directly to download URL generation.
+                if ticket.status != "PUSHING":
+                    # Transition CREATED → PUSHING on first OSS detection
+                    # (VALID_TRANSITIONS: ("CREATED", "PUSHING") already exists)
+                    self._ticket_repo.update_status(transfer_id, "PUSHING", None)
 
-                # Generate download URL (D-17 step 2)
+                # Generate download URL (D-17 step 2) — idempotent
                 download_url = await asyncio.to_thread(
                     self._file_backend.generate_download_url,
                     ticket.fileservice_staging_path,
