@@ -30,9 +30,10 @@ pub use messages::{
 };
 pub use onboard::{AdminOnboardRequest, OnboardRequest, OnboardResponse};
 pub use organizations::{
-    CreateOrganizationRequest, OrganizationCandidateBotListResponse,
-    OrganizationCandidateBotResponse, OrganizationListResponse, OrganizationMemberListResponse,
-    OrganizationMemberBotResponse, OrganizationMemberDetailResponse, OrganizationMemberResponse,
+    CreateOrganizationRequest, OrganizationCandidateBotDetailResponse,
+    OrganizationCandidateBotListResponse, OrganizationCandidateBotResponse,
+    OrganizationListResponse, OrganizationMemberListResponse, OrganizationMemberBotResponse,
+    OrganizationMemberDetailResponse, OrganizationMemberResponse,
     OrganizationMemberProfileResponse, OrganizationResponse,
     PatchOrganizationMemberProfileRequest, PatchOrganizationRequest, PutOrganizationMemberRequest,
 };

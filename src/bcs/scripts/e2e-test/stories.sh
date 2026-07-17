@@ -776,7 +776,7 @@ print("1" if any(item.get("organization_code") == target for item in json.load(s
     require_status "provider updates its organization" "200" || return
     assert_json_eq "organization update is persisted" "$RESPONSE" "name" "E2E release organization updated"
 
-    api_request_headers GET "/providers/${provider_id}/organization-candidate-bots?q=Provider" "" \
+    api_request_headers GET "/providers/${provider_id}/organization-candidate-bots?organization_code=${organization_code}&q=Provider" "" \
         "Authorization: Bearer ${admin_token}"
     require_status "provider finds candidate bots for its organization" "200" || return
     local candidate_bot
@@ -787,11 +787,32 @@ print("1" if any(item.get("bot_uuid") == target for item in json.load(sys.stdin)
 ' "$provider_bot_uuid" 2>/dev/null || echo 0)
     assert_eq "organization candidates include the provider bot" "$candidate_bot" "1"
 
+    api_request_headers GET "/providers/${provider_id}/organization-candidate-bots/${provider_bot_uuid}?organization_code=${organization_code}" "" \
+        "Authorization: Bearer ${admin_token}"
+    require_status "provider reads candidate bot details before adding it" "200" || return
+    assert_json_eq "candidate detail reports a non-member before adding it" "$RESPONSE" "is_member" "false"
+    assert_json_eq "candidate detail keeps the requested bot id" "$RESPONSE" "bot_uuid" "$provider_bot_uuid"
+
     api_request_headers PUT "/organizations/${organization_code}/members/${provider_bot_uuid}" \
         '{"role":"reviewer"}' \
         "Authorization: Bearer ${admin_token}"
     require_status "provider adds its bot to the organization" "200" || return
     assert_json_eq "organization member keeps its role" "$RESPONSE" "role" "reviewer"
+
+    api_request_headers GET "/providers/${provider_id}/organization-candidate-bots?organization_code=${organization_code}&q=Provider" "" \
+        "Authorization: Bearer ${admin_token}"
+    require_status "provider lists candidates after adding the bot" "200" || return
+    candidate_bot=$(printf '%s' "$RESPONSE" | python3 -c '
+import json,sys
+target=sys.argv[1]
+print("1" if any(item.get("bot_uuid") == target for item in json.load(sys.stdin).get("bots", [])) else "0")
+' "$provider_bot_uuid" 2>/dev/null || echo 0)
+    assert_eq "organization candidates exclude the active member" "$candidate_bot" "0"
+
+    api_request_headers GET "/providers/${provider_id}/organization-candidate-bots/${provider_bot_uuid}?organization_code=${organization_code}" "" \
+        "Authorization: Bearer ${admin_token}"
+    require_status "provider reads candidate bot details after adding it" "200" || return
+    assert_json_eq "candidate detail reports an active member" "$RESPONSE" "is_member" "true"
 
     api_request_headers PATCH "/organizations/${organization_code}/members/${provider_bot_uuid}/profile" \
         '{"name":"E2E organization bot"}' \

@@ -6,8 +6,9 @@ use bcs_domain::{Organization, OrganizationMember, ProviderOrganizationManagemen
 use bcs_service_api::{
     AuthorizedOrganizationPair, BotCapabilities, BotRegistryCoreService, CreateOrganizationRecord,
     ListOrganizationMembersPageQuery, ListOrganizationMembersQuery, ListOrganizationsQuery,
-    OrganizationCandidateBot, OrganizationCandidateBotPage, OrganizationCandidatePageQuery,
-    OrganizationCandidateQuery, OrganizationCoreService,
+    OrganizationCandidateBot, OrganizationCandidateBotDetail, OrganizationCandidateBotPage, OrganizationCandidatePageQuery,
+    OrganizationCandidateQuery, OrganizationCandidateReadPort, OrganizationCandidateReadQuery,
+    OrganizationCoreService,
     OrganizationMemberBotDetail, OrganizationMemberDetail, OrganizationMemberPage,
     OrganizationMemberPageQuery, OrganizationRepoPort,
     OrganizationMemberProfile, OrganizationMemberProfilePatch,
@@ -22,6 +23,7 @@ pub struct OrganizationCore {
     organizations: Arc<dyn OrganizationRepoPort>,
     providers: Arc<dyn ProviderRepoPort>,
     provider_bindings: Arc<dyn ProviderBotBindingRepoPort>,
+    candidate_reads: Arc<dyn OrganizationCandidateReadPort>,
     registry: Arc<dyn BotRegistryCoreService>,
 }
 
@@ -31,6 +33,7 @@ impl OrganizationCore {
         organizations: Arc<dyn OrganizationRepoPort>,
         providers: Arc<dyn ProviderRepoPort>,
         provider_bindings: Arc<dyn ProviderBotBindingRepoPort>,
+        candidate_reads: Arc<dyn OrganizationCandidateReadPort>,
         registry: Arc<dyn BotRegistryCoreService>,
     ) -> Self {
         Self {
@@ -38,6 +41,7 @@ impl OrganizationCore {
             organizations,
             providers,
             provider_bindings,
+            candidate_reads,
             registry,
         }
     }
@@ -722,10 +726,29 @@ impl OrganizationCoreService for OrganizationCore {
         managing_provider_id: &str,
         query: OrganizationCandidateQuery,
     ) -> ServiceResult<Vec<OrganizationCandidateBot>> {
+        let organization = self
+            .require_managed_organization(managing_provider_id, &query.organization_code)
+            .await?;
+        if organization.disabled {
+            return Err(ServiceError::Forbidden("organization_disabled".to_string()));
+        }
         let allowed = self.allowed_provider_ids(managing_provider_id).await?;
         if allowed.is_empty() {
             return Ok(Vec::new());
         }
+
+        let active_member_ids = self
+            .organizations
+            .list_members(ListOrganizationMembersQuery {
+                env: self.env.clone(),
+                organization_code: organization.code,
+                include_disabled: false,
+                role: None,
+            })
+            .await?
+            .into_iter()
+            .map(|member| member.bot_uuid)
+            .collect::<HashSet<_>>();
 
         // Optional narrowing: an explicit provider_id must be within the
         // manager's authorized set, else 403 rather than a misleading empty
@@ -751,6 +774,9 @@ impl OrganizationCoreService for OrganizationCore {
             if !scoped.contains(&record.provider_id) {
                 continue;
             }
+            if active_member_ids.contains(&record.bot_uuid) {
+                continue;
+            }
             let capabilities = match record.capabilities {
                 Some(capabilities) => capabilities,
                 None => match self.registry.get(&record.bot_uuid).await {
@@ -772,11 +798,123 @@ impl OrganizationCoreService for OrganizationCore {
         Ok(candidates)
     }
 
+    async fn candidate_bot_detail_for_manager(
+        &self,
+        managing_provider_id: &str,
+        organization_code: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationCandidateBotDetail>> {
+        validate_external_id("bot_uuid", bot_uuid)?;
+        let organization = self
+            .require_managed_organization(managing_provider_id, organization_code)
+            .await?;
+        if organization.disabled {
+            return Err(ServiceError::Forbidden("organization_disabled".to_string()));
+        }
+        let allowed = self.allowed_provider_ids(managing_provider_id).await?;
+        let Some(binding) = self
+            .provider_bindings
+            .get_binding_by_bot_uuid(bot_uuid)
+            .await?
+        else {
+            return Ok(None);
+        };
+        if binding.disabled || !allowed.contains(&binding.provider_id) {
+            return Ok(None);
+        }
+        let Some(provider) = self.providers.get_provider(&binding.provider_id).await? else {
+            return Ok(None);
+        };
+        if provider.disabled {
+            return Ok(None);
+        }
+        let Some(bot) = self.registry.get(bot_uuid).await else {
+            return Ok(None);
+        };
+        if bot.actor_kind != bcs_domain::ActorKind::Bot {
+            return Ok(None);
+        }
+        let credentials = self.registry.get_agent_credentials(bot_uuid).await;
+        let member = self
+            .organizations
+            .get_member(&self.env, organization_code, bot_uuid)
+            .await?;
+
+        Ok(Some(OrganizationCandidateBotDetail {
+            organization_code: organization_code.to_string(),
+            bot_uuid: bot_uuid.to_string(),
+            is_member: member.is_some_and(|member| !member.disabled),
+            bot: OrganizationMemberBotDetail {
+                provider_id: binding.provider_id,
+                provider_bot_ref: binding.provider_bot_ref,
+                agent_code: credentials.and_then(|credentials| credentials.agent_code),
+                capabilities: bot.capabilities,
+                created_by: bot.created_by,
+                actor_kind: bot.actor_kind,
+                env: bot.env,
+            },
+        }))
+    }
+
     async fn candidate_bots_page(
         &self,
         managing_provider_id: &str,
         query: OrganizationCandidatePageQuery,
     ) -> ServiceResult<OrganizationCandidateBotPage> {
+        let organization = self
+            .require_managed_organization(
+                managing_provider_id,
+                &query.candidate.organization_code,
+            )
+            .await?;
+        if organization.disabled {
+            return Err(ServiceError::Forbidden("organization_disabled".to_string()));
+        }
+        let allowed = self.allowed_provider_ids(managing_provider_id).await?;
+        let scoped = match &query.candidate.provider_id {
+            Some(provider_id) if allowed.contains(provider_id) => vec![provider_id.clone()],
+            Some(_) => {
+                return Err(ServiceError::Forbidden(
+                    "organization_manager_not_authorized".to_string(),
+                ));
+            }
+            None => allowed.into_iter().collect(),
+        };
+        if let Some(page) = self
+            .candidate_reads
+            .list_organization_candidates_page(OrganizationCandidateReadQuery {
+                env: self.env.clone(),
+                organization_code: organization.code,
+                provider_ids: scoped,
+                q: query.candidate.q.clone(),
+                offset: query.offset,
+                limit: query.limit,
+            })
+            .await?
+        {
+            let mut bots = Vec::with_capacity(page.records.len());
+            for record in page.records {
+                let capabilities = match record.capabilities {
+                    Some(capabilities) => capabilities,
+                    None => match self.registry.get(&record.bot_uuid).await {
+                        Some(bot) => bot.capabilities,
+                        None => continue,
+                    },
+                };
+                bots.push(OrganizationCandidateBot {
+                    bot_uuid: record.bot_uuid,
+                    provider_id: record.provider_id,
+                    capabilities,
+                });
+            }
+            return Ok(OrganizationCandidateBotPage {
+                bots,
+                total: page.total,
+                offset: query.offset,
+                limit: query.limit,
+            });
+        }
+
         let offset = usize::try_from(query.offset).ok();
         let limit = usize::try_from(query.limit).ok();
         let candidates = self.candidate_bots(managing_provider_id, query.candidate).await?;

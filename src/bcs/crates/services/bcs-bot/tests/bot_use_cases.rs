@@ -933,6 +933,7 @@ async fn organization_scoped_discovery_keeps_members_after_provider_state_change
     let providers: Arc<dyn ProviderRepoPort> = provider_store.clone();
     let credentials: Arc<dyn ProviderCredentialRepoPort> = provider_store.clone();
     let bindings: Arc<dyn ProviderBotBindingRepoPort> = provider_store.clone();
+    let candidate_reads: Arc<dyn bcs_service_api::OrganizationCandidateReadPort> = provider_store.clone();
     let registry = Arc::new(BotCore::with_provider_repos(
         Arc::new(MemoryBotRepo::with_base_dir(data_dir.path().to_path_buf())),
         providers.clone(),
@@ -950,6 +951,7 @@ async fn organization_scoped_discovery_keeps_members_after_provider_state_change
         Arc::new(MemoryOrganizationRepo::new()),
         providers,
         bindings,
+        candidate_reads,
         registry.clone(),
     ));
     let organization_management = OrganizationManagement::new(

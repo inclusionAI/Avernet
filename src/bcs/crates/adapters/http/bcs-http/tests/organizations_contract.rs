@@ -11,7 +11,8 @@ use bcs_domain::{Organization, OrganizationMember};
 use bcs_http::{router::build_router, state::HttpAppState};
 use bcs_service_api::{
     CreateOrganizationCommand, OrganizationAuth, OrganizationCandidateBot,
-    OrganizationCandidateQuery, OrganizationManagementService, OrganizationMemberPage,
+    OrganizationCandidateBotDetail, OrganizationCandidateQuery,
+    OrganizationManagementService, OrganizationMemberPage,
     OrganizationMemberAuth, OrganizationMemberBotDetail, OrganizationMemberDetail,
     OrganizationMemberPageQuery, OrganizationMemberProfile,
     PutOrganizationMemberCommand, ServiceError, ServiceResult, UpdateOrganizationCommand,
@@ -225,7 +226,11 @@ impl OrganizationManagementService for RecordingOrganizationManagement {
         auth: OrganizationAuth,
         query: OrganizationCandidateQuery,
     ) -> ServiceResult<Vec<OrganizationCandidateBot>> {
-        self.record(format!("candidate_bots:{}:{:?}", auth.provider_id, query.q)).await?;
+        self.record(format!(
+            "candidate_bots:{}:{}:{:?}",
+            auth.provider_id, query.organization_code, query.q,
+        ))
+        .await?;
         Ok(vec![OrganizationCandidateBot {
             bot_uuid: "bot-b".to_string(),
             provider_id: "provider-b".to_string(),
@@ -235,6 +240,28 @@ impl OrganizationManagementService for RecordingOrganizationManagement {
                 ..bcs_service_api::BotCapabilities::default()
             },
         }])
+    }
+
+    async fn candidate_bot_detail(
+        &self,
+        auth: OrganizationAuth,
+        organization_code: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationCandidateBotDetail>> {
+        self.record(format!(
+            "candidate_bot_detail:{}:{organization_code}:{bot_uuid}",
+            auth.provider_id,
+        ))
+        .await?;
+        if bot_uuid == "missing" {
+            return Ok(None);
+        }
+        Ok(Some(OrganizationCandidateBotDetail {
+            organization_code: organization_code.to_string(),
+            bot_uuid: bot_uuid.to_string(),
+            is_member: bot_uuid == "bot-b",
+            bot: sample_member_bot_detail(),
+        }))
     }
 }
 
@@ -375,7 +402,7 @@ async fn organization_routes_call_application_service() {
         ("DELETE", "/organizations/promo-2026/members/bot-b", None, StatusCode::NO_CONTENT),
         ("GET", "/organizations/promo-2026/members", None, StatusCode::OK),
         ("GET", "/organizations/promo-2026/members/bot-b", None, StatusCode::OK),
-        ("GET", "/providers/provider-a/organization-candidate-bots?q=traffic", None, StatusCode::OK),
+        ("GET", "/providers/provider-a/organization-candidate-bots?organization_code=promo-2026&q=traffic", None, StatusCode::OK),
     ];
 
     for (method, uri, body, expected_status) in cases {
@@ -526,7 +553,7 @@ async fn candidate_bots_response_exposes_name_without_capabilities() {
     let response = request(
         &app.app,
         "GET",
-        "/providers/provider-a/organization-candidate-bots?q=traffic",
+        "/providers/provider-a/organization-candidate-bots?organization_code=promo-2026&q=traffic",
         Some("provider-token"),
         None,
     )
@@ -552,7 +579,7 @@ async fn candidate_bots_response_keeps_missing_name_as_null() {
     let response = request(
         &app.app,
         "GET",
-        "/providers/provider-a/organization-candidate-bots",
+        "/providers/provider-a/organization-candidate-bots?organization_code=promo-2026",
         Some("provider-token"),
         None,
     )
@@ -570,7 +597,7 @@ async fn candidate_bots_returns_requested_page_metadata() {
     let response = request(
         &app.app,
         "GET",
-        "/providers/provider-a/organization-candidate-bots?q=traffic&offset=10&limit=25",
+        "/providers/provider-a/organization-candidate-bots?organization_code=promo-2026&q=traffic&offset=10&limit=25",
         Some("provider-token"),
         None,
     )
@@ -582,6 +609,129 @@ async fn candidate_bots_returns_requested_page_metadata() {
     assert_eq!(json["limit"], 25);
     assert_eq!(json["total"], 1);
     assert_eq!(json["bots"], json!([]));
+    assert_eq!(
+        app.recording.calls.lock().await.as_slice(),
+        ["candidate_bots:provider-a:promo-2026:Some(\"traffic\")"]
+    );
+}
+
+#[tokio::test]
+async fn candidate_bots_requires_organization_code() {
+    let app = test_app();
+    let response = request(
+        &app.app,
+        "GET",
+        "/providers/provider-a/organization-candidate-bots",
+        Some("provider-token"),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(app.recording.calls.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn candidate_bot_detail_returns_membership_and_member_bot_projection() {
+    let app = test_app();
+    let response = request(
+        &app.app,
+        "GET",
+        "/providers/provider-a/organization-candidate-bots/bot-b?organization_code=promo-2026",
+        Some("provider-token"),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "organization_code": "promo-2026",
+            "bot_uuid": "bot-b",
+            "is_member": true,
+            "bot": {
+                "provider_id": "provider-b",
+                "provider_bot_ref": "provider-b-ref",
+                "agent_code": "agent-code-b",
+                "name": "Bot B",
+                "summary": "Reviews code",
+                "domains": ["engineering"],
+                "skills": [{"name": "code_review", "description": "Review changes"}],
+                "scopes": ["source_code"],
+                "visibility": "protected",
+                "created_by": "yuange",
+                "actor_kind": "bot",
+                "env": "prod"
+            }
+        })
+    );
+}
+
+#[tokio::test]
+async fn candidate_bot_detail_reports_non_member() {
+    let app = test_app();
+    let response = request(
+        &app.app,
+        "GET",
+        "/providers/provider-a/organization-candidate-bots/bot-c?organization_code=promo-2026",
+        Some("provider-token"),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    assert_eq!(json["organization_code"], "promo-2026");
+    assert_eq!(json["bot_uuid"], "bot-c");
+    assert_eq!(json["is_member"], false);
+}
+
+#[tokio::test]
+async fn candidate_bot_detail_requires_organization_code() {
+    let app = test_app();
+    let response = request(
+        &app.app,
+        "GET",
+        "/providers/provider-a/organization-candidate-bots/bot-b",
+        Some("provider-token"),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(app.recording.calls.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn candidate_bot_detail_requires_provider_token() {
+    let app = test_app();
+    let response = request(
+        &app.app,
+        "GET",
+        "/providers/provider-a/organization-candidate-bots/bot-b?organization_code=promo-2026",
+        None,
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(app.recording.calls.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn candidate_bot_detail_returns_not_found_for_out_of_scope_bot() {
+    let app = test_app();
+    let response = request(
+        &app.app,
+        "GET",
+        "/providers/provider-a/organization-candidate-bots/missing?organization_code=promo-2026",
+        Some("provider-token"),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
