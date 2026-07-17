@@ -12,6 +12,16 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from ..bot_manage import BotStartProgressResponse
 from ..device_manage import CommandResult
+from ._file_transfer_models import (
+    CancelUploadResponse,
+    CompleteUploadResponse,
+    GetDownloadUrlResponse,
+    GetTransferStatusResponse,
+    GetUploadUrlResponse,
+    ShareLinkResponse,
+    StagingDeleteResponse,
+    StagingListResponse,
+)
 from ._http_connection_info import HttpConnectionInfo
 from ._models import (
     BotChatContext,
@@ -109,6 +119,72 @@ class BotFetchStartProgressDispatcher(Protocol):
         tenant: str,
         device_affinity: str | None = None,
     ) -> BotStartProgressResponse: ...
+
+
+@runtime_checkable
+class BotFileTransferDispatcher(Protocol):
+    """文件传输调度器协议"""
+
+    async def dispatch_get_upload_url(
+        self,
+        bot_uuid: str,
+        tenant: str,
+        device_path: str | None = None,
+        filename: str | None = None,
+        expire_seconds: int = 3600,
+        staging_subdir: str | None = None,
+        device_affinity: str | None = None,
+        file_size: int = 0,
+        part_size: int | None = None,
+    ) -> GetUploadUrlResponse: ...
+
+    async def dispatch_get_download_url(
+        self,
+        bot_uuid: str,
+        tenant: str,
+        device_path: str,
+        expire_seconds: int = 3600,
+        device_affinity: str | None = None,
+    ) -> GetDownloadUrlResponse: ...
+
+    async def dispatch_get_transfer_status(
+        self,
+        transfer_id: str,
+        tenant: str | None = None,
+    ) -> GetTransferStatusResponse: ...
+
+    async def dispatch_complete_upload(
+        self,
+        transfer_id: str,
+        tenant: str | None = None,
+    ) -> CompleteUploadResponse: ...
+
+    async def dispatch_cancel_upload(
+        self,
+        transfer_id: str,
+        tenant: str | None = None,
+    ) -> CancelUploadResponse: ...
+
+    async def dispatch_list_staging(
+        self,
+        prefix: str,
+        limit: int = 100,
+        marker: str | None = None,
+        tenant: str | None = None,
+    ) -> StagingListResponse: ...
+
+    async def dispatch_delete_staging(
+        self,
+        key: str,
+        tenant: str | None = None,
+    ) -> StagingDeleteResponse: ...
+
+    async def dispatch_generate_share_link(
+        self,
+        transfer_id: str,
+        expire_seconds: int = 86400,
+        tenant: str | None = None,
+    ) -> ShareLinkResponse: ...
 
 
 @runtime_checkable

@@ -21,6 +21,7 @@ from secbaas.community.core.repository.device_template import (
 from secbaas.community.core.repository.distributed_lock import (
     OrmDistributedLockRepository,
 )
+from secbaas.community.core.repository.file_transfer_ticket import OrmTicketRepository
 from secbaas.community.core.repository.local_user_machine import (
     OrmLocalUserMachineRepository,
 )
@@ -153,4 +154,9 @@ class CoreRepositoryContainer(containers.DeclarativeContainer):
         config.plugins.database.plugin_database,
         ZDAS_ORM=_orm_repo(OrmWsRelaySessionRepository),
         SQLITE_ORM=_orm_repo(OrmWsRelaySessionRepository),
+    )
+    ticket_repository = providers.Selector(
+        config.plugins.database.plugin_database,
+        ZDAS_ORM=_orm_repo(OrmTicketRepository),
+        SQLITE_ORM=_orm_repo(OrmTicketRepository),
     )

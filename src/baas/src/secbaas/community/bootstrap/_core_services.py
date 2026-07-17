@@ -39,6 +39,7 @@ from secbaas.community.core.service.bot_run import (
 from secbaas.community.core.service.bot_runtime.dispatcher import (
     DefaultBotCmdDispatcher,
     DefaultBotFetchStartProgressDispatcher,
+    DefaultBotFileTransferDispatcher,
     DefaultBotHttpConnInfoDispatcher,
     DefaultBotHttpDispatcher,
     DefaultBotOpenFolderDispatcher,
@@ -77,7 +78,7 @@ from secbaas.community.core.service.publish_manage import (
 )
 from secbaas.community.core.service.scheduler import AppScheduler
 from secbaas.community.core.service.sse import (
-    DefaultStreamConverter,
+    DefaultStreamConverter,  # noqa: F401  triggers side-effect registration of default SSE converter
     SseConverterFactory,
 )
 from secbaas.community.core.service.template_manage import DefaultDeviceTemplateService
@@ -193,6 +194,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     distributed_lock_repository = providers.Dependency()
     cache_plugin = providers.Dependency()
     ws_relay_session_repo = providers.Dependency()
+    ticket_repository = providers.Dependency()
 
     # ── Auth service ──────────────────────────────────────────────────────────
 
@@ -279,6 +281,8 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         ws_relay_session_repository=ws_relay_session_repo,
     )
 
+    file_transfer_backend = providers.Dependency()
+
     paas_facade = providers.Singleton(
         PaasServiceFacade,
         device_repository=device_repo,
@@ -355,6 +359,15 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         paas_facade=paas_facade,
     )
 
+    bot_file_transfer_dispatcher = providers.Singleton(
+        DefaultBotFileTransferDispatcher,
+        bot_repo=bot_repo,
+        device_repo=device_repo,
+        paas_facade=paas_facade,
+        file_transfer_backend=file_transfer_backend,
+        ticket_repo=ticket_repository,
+    )
+
     bot_binding_resolver = providers.Singleton(
         BotBindingResolver,
         ac_bot_repo=ac_bot_repo,
@@ -379,11 +392,6 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     )
 
     # ── Service providers ─────────────────────────────────────────────────────
-
-    tenant_service = providers.Singleton(
-        DefaultTenantManageService,
-        tenant_repository=tenant_repo,
-    )
 
     device_template_service = providers.Singleton(
         DefaultDeviceTemplateService,

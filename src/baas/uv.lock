@@ -82,6 +82,28 @@ wheels = [
 ]
 
 [[package]]
+name = "aliyun-python-sdk-core"
+version = "2.16.0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "jmespath" },
+]
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/3e/09/da9f58eb38b4fdb97ba6523274fbf445ef6a06be64b433693da8307b4bec/aliyun-python-sdk-core-2.16.0.tar.gz", hash = "sha256:651caad597eb39d4fad6cf85133dffe92837d53bdf62db9d8f37dab6508bb8f9" }
+
+[[package]]
+name = "aliyun-python-sdk-kms"
+version = "2.16.5"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+dependencies = [
+    { name = "aliyun-python-sdk-core" },
+]
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/a8/2c/9877d0e6b18ecf246df671ac65a5d1d9fecbf85bdcb5d43efbde0d4662eb/aliyun-python-sdk-kms-2.16.5.tar.gz", hash = "sha256:f328a8a19d83ecbb965ffce0ec1e9930755216d104638cd95ecd362753b813b3" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/11/5c/0132193d7da2c735669a1ed103b142fd63c9455984d48c5a88a1a516efaa/aliyun_python_sdk_kms-2.16.5-py2.py3-none-any.whl", hash = "sha256:24b6cdc4fd161d2942619479c8d050c63ea9cd22b044fe33b60bbb60153786f0" },
+]
+
+[[package]]
 name = "annotated-doc"
 version = "0.0.4"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
@@ -310,6 +332,12 @@ wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/ae/ba/b44d472022f620d289d95fa830143235c0c36461c6f2437ea8d51e5481ed/coverage-7.14.1-cp312-cp312-win_arm64.whl", hash = "sha256:99cd41ff91afd94896fea3bc002706b6ae4ce95727d06e4a0f39c0a8d8bd8b1a" },
     { url = "https://mirrors.aliyun.com/pypi/packages/8a/3c/1a983b9a745d7f83d53f057bcc5bf79ba6a2bbc08266b3f0c7d6fe630c9b/coverage-7.14.1-py3-none-any.whl", hash = "sha256:a252f21c27e38347e60111a3266b03827422a7d5525951aceee313aa68bab1d2" },
 ]
+
+[[package]]
+name = "crcmod"
+version = "1.7"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/6b/b0/e595ce2a2527e169c3bcd6c33d2473c1918e0b7f6826a043ca1245dd4e5b/crcmod-1.7.tar.gz", hash = "sha256:dc7051a0db5f2bd48665a990d3ec1cc305a466a77358ca4492826f41f283601e" }
 
 [[package]]
 name = "cryptography"
@@ -590,6 +618,15 @@ dependencies = [
 sdist = { url = "https://mirrors.aliyun.com/pypi/packages/df/bf/f7da0350254c0ed7c72f3e33cef02e048281fec7ecec5f032d4aac52226b/jinja2-3.1.6.tar.gz", hash = "sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d" }
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl", hash = "sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67" },
+]
+
+[[package]]
+name = "jmespath"
+version = "0.10.0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/3c/56/3f325b1eef9791759784aa5046a8f6a1aff8f7c898a2e34506771d3b99d8/jmespath-0.10.0.tar.gz", hash = "sha256:b85d0567b8666149a93172712e68920734333c0ce7e89b78b3e987f71e5ed4f9" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/07/cb/5f001272b6faeb23c1c9e0acc04d48eaaf5c862c17709d20e3469c6e0139/jmespath-0.10.0-py2.py3-none-any.whl", hash = "sha256:cdf6525904cc597730141d61b36f2e4b8ecc257c420fa2f4549bac2c2d0cb72f" },
 ]
 
 [[package]]
@@ -930,6 +967,20 @@ wheels = [
 ]
 
 [[package]]
+name = "oss2"
+version = "2.19.1"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+dependencies = [
+    { name = "aliyun-python-sdk-core" },
+    { name = "aliyun-python-sdk-kms" },
+    { name = "crcmod" },
+    { name = "pycryptodome" },
+    { name = "requests" },
+    { name = "six" },
+]
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/df/b5/f2cb1950dda46ac2284d6c950489fdacd0e743c2d79a347924d3cc44b86f/oss2-2.19.1.tar.gz", hash = "sha256:a8ab9ee7eb99e88a7e1382edc6ea641d219d585a7e074e3776e9dec9473e59c1" }
+
+[[package]]
 name = "packaging"
 version = "26.2"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
@@ -1038,6 +1089,25 @@ source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
 sdist = { url = "https://mirrors.aliyun.com/pypi/packages/1b/7d/92392ff7815c21062bea51aa7b87d45576f649f16458d78b7cf94b9ab2e6/pycparser-3.0.tar.gz", hash = "sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29" }
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/0c/c3/44f3fbbfa403ea2a7c779186dc20772604442dde72947e7d01069cbe98e3/pycparser-3.0-py3-none-any.whl", hash = "sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992" },
+]
+
+[[package]]
+name = "pycryptodome"
+version = "3.23.0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/8e/a6/8452177684d5e906854776276ddd34eca30d1b1e15aa1ee9cefc289a33f5/pycryptodome-3.23.0.tar.gz", hash = "sha256:447700a657182d60338bab09fdb27518f8856aecd80ae4c6bdddb67ff5da44ef" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/db/6c/a1f71542c969912bb0e106f64f60a56cc1f0fabecf9396f45accbe63fa68/pycryptodome-3.23.0-cp37-abi3-macosx_10_9_universal2.whl", hash = "sha256:187058ab80b3281b1de11c2e6842a357a1f71b42cb1e15bce373f3d238135c27" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/6e/4e/a066527e079fc5002390c8acdd3aca431e6ea0a50ffd7201551175b47323/pycryptodome-3.23.0-cp37-abi3-macosx_10_9_x86_64.whl", hash = "sha256:cfb5cd445280c5b0a4e6187a7ce8de5a07b5f3f897f235caa11f1f435f182843" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/50/52/adaf4c8c100a8c49d2bd058e5b551f73dfd8cb89eb4911e25a0c469b6b4e/pycryptodome-3.23.0-cp37-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:67bd81fcbe34f43ad9422ee8fd4843c8e7198dd88dd3d40e6de42ee65fbe1490" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/5f/e9/a09476d436d0ff1402ac3867d933c61805ec2326c6ea557aeeac3825604e/pycryptodome-3.23.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c8987bd3307a39bc03df5c8e0e3d8be0c4c3518b7f044b0f4c15d1aa78f52575" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/f9/c5/ffe6474e0c551d54cab931918127c46d70cab8f114e0c2b5a3c071c2f484/pycryptodome-3.23.0-cp37-abi3-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:aa0698f65e5b570426fc31b8162ed4603b0c2841cbb9088e2b01641e3065915b" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/18/28/e199677fc15ecf43010f2463fde4c1a53015d1fe95fb03bca2890836603a/pycryptodome-3.23.0-cp37-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:53ecbafc2b55353edcebd64bf5da94a2a2cdf5090a6915bcca6eca6cc452585a" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/ce/ea/4fdb09f2165ce1365c9eaefef36625583371ee514db58dc9b65d3a255c4c/pycryptodome-3.23.0-cp37-abi3-musllinux_1_2_i686.whl", hash = "sha256:156df9667ad9f2ad26255926524e1c136d6664b741547deb0a86a9acf5ea631f" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/22/82/6edc3fc42fe9284aead511394bac167693fb2b0e0395b28b8bedaa07ef04/pycryptodome-3.23.0-cp37-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:dea827b4d55ee390dc89b2afe5927d4308a8b538ae91d9c6f7a5090f397af1aa" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/59/fe/aae679b64363eb78326c7fdc9d06ec3de18bac68be4b612fc1fe8902693c/pycryptodome-3.23.0-cp37-abi3-win32.whl", hash = "sha256:507dbead45474b62b2bbe318eb1c4c8ee641077532067fec9c1aa82c31f84886" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/54/2f/e97a1b8294db0daaa87012c24a7bb714147c7ade7656973fd6c736b484ff/pycryptodome-3.23.0-cp37-abi3-win_amd64.whl", hash = "sha256:c75b52aacc6c0c260f204cbdd834f76edc9fb0d8e0da9fbf8352ef58202564e2" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/18/3d/f9441a0d798bf2b1e645adc3265e55706aead1255ccdad3856dbdcffec14/pycryptodome-3.23.0-cp37-abi3-win_arm64.whl", hash = "sha256:11eeeb6917903876f134b56ba11abe95c0b0fd5e3330def218083c7d98bbcb3c" },
 ]
 
 [[package]]
@@ -1374,6 +1444,7 @@ dependencies = [
     { name = "opentelemetry-instrumentation-fastapi" },
     { name = "opentelemetry-instrumentation-openai" },
     { name = "opentelemetry-sdk" },
+    { name = "oss2" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
@@ -1426,6 +1497,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.63b1" },
     { name = "opentelemetry-instrumentation-openai", specifier = ">=0.62.1" },
     { name = "opentelemetry-sdk" },
+    { name = "oss2", specifier = ">=2.19.0" },
     { name = "pydantic", specifier = ">=2.10,<2.13" },
     { name = "pydantic-settings", specifier = ">=2.14.2" },
     { name = "pyyaml", specifier = ">=6.0.0" },

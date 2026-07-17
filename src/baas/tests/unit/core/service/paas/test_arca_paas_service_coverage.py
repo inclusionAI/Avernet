@@ -1391,3 +1391,145 @@ class TestSafeRepr:
         result = _safe_repr("abcdef", max_len=10)
         # repr("abcdef") = "'abcdef'" which is 8 chars, under max_len=10
         assert result == "'abcdef'"
+
+
+# ──────────────────────────── pull_file_from_url / _pull_file_sync tests ────────
+
+
+class TestPullFileFromUrl:
+    def test_pull_file_sync_success(self, service, mock_sandbox):
+        """Successful file pull via curl."""
+        exec_result = MagicMock()
+        exec_result.exit_code = 0
+        exec_result.stdout = ""
+        exec_result.stderr = ""
+        mock_sandbox.exec_command.return_value = exec_result
+
+        service._pull_file_sync("dev-001", "http://source/file", "/home/file", 300)
+
+        mock_sandbox.exec_command.assert_called_once()
+        cmd = mock_sandbox.exec_command.call_args.kwargs["cmd"]
+        assert "curl -fSL --create-dirs" in cmd
+        assert "http://source/file" in cmd
+        assert "/home/file" in cmd
+
+    def test_pull_file_sync_exit_code_nonzero(self, service, mock_sandbox):
+        """Non-zero exit code raises PaasError with FILE_TRANSFER_FAILED."""
+        exec_result = MagicMock()
+        exec_result.exit_code = 1
+        exec_result.stdout = ""
+        exec_result.stderr = "curl: (6) Could not resolve host"
+        mock_sandbox.exec_command.return_value = exec_result
+
+        with pytest.raises(PaasError) as exc_info:
+            service._pull_file_sync("dev-001", "http://source/file", "/home/file", 300)
+
+        assert exc_info.value.code == ErrorCode.FILE_TRANSFER_FAILED
+        assert "curl pull failed" in exc_info.value.message
+
+    def test_pull_file_sync_timeout(self, service, mock_sandbox):
+        """ArcaSandboxTimeoutError raises PaasError with FILE_TRANSFER_FAILED."""
+        from secbaas.community.spi.sandbox.arca import ArcaSandboxTimeoutError
+
+        mock_sandbox.exec_command.side_effect = ArcaSandboxTimeoutError("timed out")
+
+        with pytest.raises(PaasError) as exc_info:
+            service._pull_file_sync("dev-001", "http://source/file", "/home/file", 300)
+
+        assert exc_info.value.code == ErrorCode.FILE_TRANSFER_FAILED
+        assert "timed out" in exc_info.value.message
+
+    def test_pull_file_sync_generic_exception(self, service, mock_sandbox):
+        """Generic exception translated to PaasError."""
+        mock_sandbox.exec_command.side_effect = RuntimeError("unexpected error")
+
+        with pytest.raises(PaasError) as exc_info:
+            service._pull_file_sync("dev-001", "http://source/file", "/home/file", 300)
+
+        assert exc_info.value.code == ErrorCode.FILE_TRANSFER_FAILED
+
+    @pytest.mark.asyncio
+    async def test_pull_file_from_url_async(self, service, mock_sandbox):
+        """Async wrapper delegates to _pull_file_sync via to_thread."""
+        exec_result = MagicMock()
+        exec_result.exit_code = 0
+        exec_result.stdout = ""
+        exec_result.stderr = ""
+        mock_sandbox.exec_command.return_value = exec_result
+
+        await service.pull_file_from_url(
+            "dev-001", "http://source/file", "/home/file", 300
+        )
+
+        mock_sandbox.exec_command.assert_called_once()
+
+
+# ──────────────────────────── push_file_to_url / _push_file_sync tests ─────────
+
+
+class TestPushFileToUrl:
+    def test_push_file_sync_success(self, service, mock_sandbox):
+        """Successful file push via curl."""
+        exec_result = MagicMock()
+        exec_result.exit_code = 0
+        exec_result.stdout = ""
+        exec_result.stderr = ""
+        mock_sandbox.exec_command.return_value = exec_result
+
+        service._push_file_sync("dev-001", "/home/file", "http://target/url", 300)
+
+        mock_sandbox.exec_command.assert_called_once()
+        cmd = mock_sandbox.exec_command.call_args.kwargs["cmd"]
+        assert "curl -fSL -X PUT -T" in cmd
+        assert "http://target/url" in cmd
+        assert "/home/file" in cmd
+
+    def test_push_file_sync_exit_code_nonzero(self, service, mock_sandbox):
+        """Non-zero exit code raises PaasError with FILE_TRANSFER_FAILED."""
+        exec_result = MagicMock()
+        exec_result.exit_code = 2
+        exec_result.stdout = ""
+        exec_result.stderr = "curl: upload failed"
+        mock_sandbox.exec_command.return_value = exec_result
+
+        with pytest.raises(PaasError) as exc_info:
+            service._push_file_sync("dev-001", "/home/file", "http://target/url", 300)
+
+        assert exc_info.value.code == ErrorCode.FILE_TRANSFER_FAILED
+        assert "curl push failed" in exc_info.value.message
+
+    def test_push_file_sync_timeout(self, service, mock_sandbox):
+        """ArcaSandboxTimeoutError raises PaasError."""
+        from secbaas.community.spi.sandbox.arca import ArcaSandboxTimeoutError
+
+        mock_sandbox.exec_command.side_effect = ArcaSandboxTimeoutError("timed out")
+
+        with pytest.raises(PaasError) as exc_info:
+            service._push_file_sync("dev-001", "/home/file", "http://target/url", 300)
+
+        assert exc_info.value.code == ErrorCode.FILE_TRANSFER_FAILED
+        assert "timed out" in exc_info.value.message
+
+    def test_push_file_sync_generic_exception(self, service, mock_sandbox):
+        """Generic exception translated to PaasError."""
+        mock_sandbox.exec_command.side_effect = RuntimeError("unexpected")
+
+        with pytest.raises(PaasError) as exc_info:
+            service._push_file_sync("dev-001", "/home/file", "http://target/url", 300)
+
+        assert exc_info.value.code == ErrorCode.FILE_TRANSFER_FAILED
+
+    @pytest.mark.asyncio
+    async def test_push_file_to_url_async(self, service, mock_sandbox):
+        """Async wrapper delegates to _push_file_sync via to_thread."""
+        exec_result = MagicMock()
+        exec_result.exit_code = 0
+        exec_result.stdout = ""
+        exec_result.stderr = ""
+        mock_sandbox.exec_command.return_value = exec_result
+
+        await service.push_file_to_url(
+            "dev-001", "/home/file", "http://target/url", 300
+        )
+
+        mock_sandbox.exec_command.assert_called_once()

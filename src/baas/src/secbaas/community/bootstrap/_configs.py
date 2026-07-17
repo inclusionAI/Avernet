@@ -200,6 +200,28 @@ class PluginConfig(ConfigSchema):
     sandbox: SandboxPluginConfig = Field(default_factory=SandboxPluginConfig)
 
 
+class FileTransferPollerConfigSchema(ConfigSchema):
+    """File transfer poller configuration."""
+
+    config_section = "file_transfer_poller"
+    enabled: bool = Field(default=False)
+    lock_expire_seconds: int = Field(default=300, ge=1)
+    cron_interval_seconds: int = Field(default=10, ge=1)
+    upload_timeout_seconds: int = Field(default=3600, ge=1)
+    max_concurrent_tickets: int = Field(default=5, ge=1)
+    dry_run: bool = Field(default=False)
+
+
+class FileTransferOssConfigSchema(ConfigSchema):
+    """OSS storage backend configuration for file transfer."""
+
+    config_section = "file_transfer_oss"
+    endpoint: str = Field(default="")
+    bucket_name: str = Field(default="")
+    staging_root_path: str = Field(default="baas-file-transfer")
+    secret_name: str = Field(default="")
+
+
 class BotServiceConfig(ConfigSchema):
     """Bot service connection parameters."""
 

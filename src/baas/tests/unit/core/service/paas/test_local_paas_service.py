@@ -6923,3 +6923,27 @@ class TestOpenFolder:
         assert call_args.kwargs["target_instance"] == "other-instance"
         assert call_args.kwargs["action"] == "open_folder"
         assert call_args.kwargs["params"]["container_id"] == "container"
+
+
+class TestFileTransferNotImplemented:
+    """Verify LocalPaasService pull/push raise NotImplementedError."""
+
+    @pytest.mark.asyncio
+    async def test_pull_file_from_url_raises_not_implemented(self, local_paas_service):
+        """pull_file_from_url raises NotImplementedError with Local platform message."""
+        with pytest.raises(
+            NotImplementedError, match="File transfer not supported on Local platform"
+        ):
+            await local_paas_service.pull_file_from_url(
+                "container--machine--user", "http://src", "/dst"
+            )
+
+    @pytest.mark.asyncio
+    async def test_push_file_to_url_raises_not_implemented(self, local_paas_service):
+        """push_file_to_url raises NotImplementedError with Local platform message."""
+        with pytest.raises(
+            NotImplementedError, match="File transfer not supported on Local platform"
+        ):
+            await local_paas_service.push_file_to_url(
+                "container--machine--user", "/src", "http://dst"
+            )

@@ -22,6 +22,7 @@ user_config:
     cache: "stub"           # stub | real
     bot_service: "stub"  # real | local | stub
     engine_adapter: "stub"  # stub | real (aicoding/hermes/claude_code engine adapter)
+    file_transfer: "noop"  # noop | oss
     database:
       plugin_database: "SQLITE_ORM"    # ZDAS_ORM (production ORM) | SQLITE_ORM (test only)
       database_url: "sqlite:////tmp/secbaas.db"
@@ -99,6 +100,15 @@ user_config:
     lock_renew_interval_seconds: 60  # 分布式锁自动续期间隔（秒），默认: 60（0 表示禁用续期）
     dry_run: false  # 测试模式：只打印日志
 
+  # 文件传输轮询器配置（定期检测 OSS 上传完成并触发 device 下载）
+  file_transfer_poller:
+    enabled: true  # 是否启用定时任务
+    cron_interval_seconds: 10  # 执行间隔（秒），默认: 10
+    upload_timeout_seconds: 3600  # 上传超时（秒），超时未完成写入的 ticket 标记 FAILED
+    lock_expire_seconds: 300  # per-ticket 分布式锁过期时间（秒），默认: 300
+    max_concurrent_tickets: 5  # 单次扫描并发处理的 ticket 数上限
+    dry_run: false  # 测试模式：只打印日志
+
   # BotRun 队列恢复配置（周期性重置心跳过期的 RUNNING 请求回 PENDING）
   bot_run_recovery:
     enabled: false  # 是否启用定时任务
@@ -146,6 +156,12 @@ user_config:
       pre: "https://poolab-pre.example.com"
       prod: "https://poolab-prod.example.com"
 
+# File transfer OSS storage backend configuration (enterprise/prod deployments only)
+  file_transfer_oss:
+    endpoint: ""
+    bucket_name: ""
+    staging_root_path: "baas-file-transfer"
+    secret_name: ""
   # SecBaaS 回调服务器 URL（按环境）
   # 设备 start hook 完成后通过此 URL 回调状态。
   secbaas:

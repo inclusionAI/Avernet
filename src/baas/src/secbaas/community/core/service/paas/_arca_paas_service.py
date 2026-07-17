@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shlex
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse, urlunparse
 
 from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionInfo
 from secbaas.community.api.device_manage import (
@@ -964,6 +966,136 @@ class ArcaPaasService(PaasService):
             )
         except Exception as e:
             raise self._translate_error(e, ErrorCode.DEVICE_UNAVAILABLE)
+
+    # ------------------------------------------------------------------
+    # File transfer — Arca curl-based implementation (v1.4 launch platform)
+    # ------------------------------------------------------------------
+
+    async def pull_file_from_url(
+        self,
+        paas_device_id: str,
+        source_url: str,
+        device_path: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Download file from URL to device path via curl in Arca sandbox.
+
+        Args:
+            paas_device_id: Arca sandbox_id.
+            source_url: URL to download from (e.g. OSS pre-signed GET URL).
+            device_path: Absolute path on device to save the file to.
+            timeout_seconds: Maximum download time in seconds (default: 300).
+
+        Raises:
+            PaasError: With FILE_TRANSFER_FAILED if download fails or times out.
+        """
+        return await asyncio.to_thread(
+            self._pull_file_sync,
+            paas_device_id,
+            source_url,
+            device_path,
+            timeout_seconds,
+        )
+
+    def _pull_file_sync(
+        self,
+        paas_device_id: str,
+        source_url: str,
+        device_path: str,
+        timeout_seconds: int,
+    ) -> None:
+        """Synchronous implementation of pull_file_from_url for use in to_thread()."""
+        try:
+            sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(paas_device_id)
+            cmd = (
+                f"curl -fSL --create-dirs -o {shlex.quote(device_path)} "
+                f"{shlex.quote(source_url)}"
+            )
+            result = sandbox.exec_command(
+                cmd=cmd,
+                timeout_in_millis=timeout_seconds * 1000,
+                envs=None,
+            )
+            if result.exit_code != 0:
+                raise PaasError(
+                    ErrorCode.FILE_TRANSFER_FAILED,
+                    f"curl pull failed with exit code {result.exit_code}: {result.stderr}",
+                )
+            safe_url = urlunparse(urlparse(source_url)._replace(query="", fragment=""))
+            self._logger.info(
+                f"File pulled: {safe_url} -> {device_path} (sandbox={paas_device_id})"
+            )
+        except ArcaSandboxTimeoutError as e:
+            raise PaasError(
+                ErrorCode.FILE_TRANSFER_FAILED,
+                f"File pull timed out after {timeout_seconds}s: {e}",
+                e,
+            )
+        except Exception as e:
+            raise self._translate_error(e, ErrorCode.FILE_TRANSFER_FAILED)
+
+    async def push_file_to_url(
+        self,
+        paas_device_id: str,
+        device_path: str,
+        target_url: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Upload file from device path to URL via curl in Arca sandbox.
+
+        Args:
+            paas_device_id: Arca sandbox_id.
+            device_path: Absolute path on device of the file to upload.
+            target_url: URL to upload to (e.g. OSS pre-signed PUT URL).
+            timeout_seconds: Maximum upload time in seconds (default: 300).
+
+        Raises:
+            PaasError: With FILE_TRANSFER_FAILED if upload fails or times out.
+        """
+        return await asyncio.to_thread(
+            self._push_file_sync,
+            paas_device_id,
+            device_path,
+            target_url,
+            timeout_seconds,
+        )
+
+    def _push_file_sync(
+        self,
+        paas_device_id: str,
+        device_path: str,
+        target_url: str,
+        timeout_seconds: int,
+    ) -> None:
+        """Synchronous implementation of push_file_to_url for use in to_thread()."""
+        try:
+            sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(paas_device_id)
+            cmd = (
+                f"curl -fSL -X PUT -T {shlex.quote(device_path)} "
+                f"{shlex.quote(target_url)}"
+            )
+            result = sandbox.exec_command(
+                cmd=cmd,
+                timeout_in_millis=timeout_seconds * 1000,
+                envs=None,
+            )
+            if result.exit_code != 0:
+                raise PaasError(
+                    ErrorCode.FILE_TRANSFER_FAILED,
+                    f"curl push failed with exit code {result.exit_code}: {result.stderr}",
+                )
+            safe_url = urlunparse(urlparse(target_url)._replace(query="", fragment=""))
+            self._logger.info(
+                f"File pushed: {device_path} -> {safe_url} (sandbox={paas_device_id})"
+            )
+        except ArcaSandboxTimeoutError as e:
+            raise PaasError(
+                ErrorCode.FILE_TRANSFER_FAILED,
+                f"File push timed out after {timeout_seconds}s: {e}",
+                e,
+            )
+        except Exception as e:
+            raise self._translate_error(e, ErrorCode.FILE_TRANSFER_FAILED)
 
 
 class SandboxInfo:

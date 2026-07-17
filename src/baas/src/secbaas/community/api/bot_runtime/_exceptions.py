@@ -133,3 +133,67 @@ class TooManyRequestsError(BotServiceError):
             f"Too many concurrent tasks for bot_id={bot_id}: "
             f"active={active}, limit={limit}"
         )
+
+
+class TransferNotTerminalError(BotServiceError):
+    """Transfer is not in a terminal state.
+
+    Raised when an operation requiring a terminal transfer (DONE/FAILED/CANCELLED)
+    is attempted on a ticket that is still in progress.
+    """
+
+    error_code = "NOT_TERMINAL_STATE"
+    http_status = 409
+
+    def __init__(self, transfer_id: str = "", status: str = ""):
+        self.transfer_id = transfer_id
+        self.status = status
+        super().__init__(f"Transfer {transfer_id} is not in a terminal state: {status}")
+
+
+class OssObjectNotFoundError(BotServiceError):
+    """OSS object not found at the staging path.
+
+    Raised when complete upload detects no OSS object at the staging path,
+    indicating the caller has not finished uploading.
+    """
+
+    error_code = "OSS_OBJECT_NOT_FOUND"
+    http_status = 404
+
+    def __init__(self, staging_path: str = ""):
+        self.staging_path = staging_path
+        super().__init__(f"OSS object not found: {staging_path}")
+
+
+class DirectoryNotEmptyError(BotServiceError):
+    """Staging directory is not empty.
+
+    Raised when DELETE staging is called for a prefix that still contains objects.
+
+    TODO(phase-future): Implement directory-not-empty check in delete staging
+    flow to prevent accidental bulk deletion of non-empty prefixes.
+    """
+
+    error_code = "DIRECTORY_NOT_EMPTY"
+    http_status = 409
+
+    def __init__(self, key: str = ""):
+        self.key = key
+        super().__init__(f"Directory not empty: {key}")
+
+
+class TransferStateConflictError(BotServiceError):
+    """Raised when an invalid state transition is attempted on a file transfer.
+
+    This is the API-layer definition imported by adapters (routers).
+    The repo-layer equivalent inherits from this class so that except
+    clauses catching the API class also handle repo-originated instances.
+    """
+
+    error_code = "TRANSFER_STATE_CONFLICT"
+    http_status = 409
+
+    def __init__(self, message: str = ""):
+        self.message = message
+        super().__init__(message)

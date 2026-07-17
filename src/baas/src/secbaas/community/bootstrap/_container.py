@@ -129,7 +129,9 @@ class ApplicationContainer(containers.DeclarativeContainer):
         bot_qpm_repository=repository.bot_qpm_repository,
         distributed_lock_repository=repository.distributed_lock_repository,
         cache_plugin=plugins.cache_plugin,
+        file_transfer_backend=plugins.file_transfer_backend,
         ws_relay_session_repo=repository.ws_relay_session_repository,
+        ticket_repository=repository.ticket_repository,
     )
 
     tasks = providers.Container(
@@ -139,6 +141,9 @@ class ApplicationContainer(containers.DeclarativeContainer):
         device_binding_repo=repository.device_binding_repository,
         sandbox_device_router=services.sandbox_device_router,
         bot_run_queue_repository=repository.bot_run_queue_repository,
+        ticket_repository=repository.ticket_repository,
+        paas_service_facade=services.paas_facade,
+        file_transfer_backend=services.file_transfer_backend,
     )
 
     cron_lifecycle = providers.Singleton(
@@ -147,6 +152,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         tasks=providers.List(
             tasks.device_ttl_timer_task,
             tasks.bot_run_recovery_task,
+            tasks.file_transfer_poller_task,
         ),
     )
 
