@@ -1,16 +1,20 @@
 """Endpoint coverage for governance admin router endpoints (7.5 / 6.3 / 7.3).
 
 规整后 admin router 端点(全 body/query,零 path 参数):
-  - /admin/tickets:close          关闭工单(单/多,body ticket_ids 循环 emergency_close)
-  - /admin/tickets:close-all      全部关单(dispatch:cancel_pending / close_all_open)
   - /admin/tickets:deliver        按 worker_id 精准投递(不重跑状态机)
   - /admin/whitelist:delete       删除白名单条目
   - /admin/whitelist:bulk-add     批量加白
+  - /admin/admin_whitelist (GET)  白名单只读分页列表
   - /admin/brake (POST)           全局制动 toggle(pause/resume)
   - /admin/brake (GET)            查询制动状态
   - /admin/records:delete         数据维护/清理
   - /admin/trigger-scan           手动触发 cron tick
   - /admin/scan-and-deliver       扫描+投递(测试工具)
+
+注:tickets:close / tickets:close-all 已迁至 workflow_router(路径 /workflow/tickets:close
+/ /workflow/tickets:close-all),其端点 case 路径已改 /workflow,仍在本文件注册由
+endpoint_runner 统一跑;close/close-all service 方法(admin_close/cancel_pending/
+close_all_open)已迁 GovernanceWorkflowService。
 
 Uses real DI services and in-memory SQLite -- no MagicMock / unittest.mock.
 Each seed function inserts real data via repo methods so the endpoint handler
@@ -27,6 +31,9 @@ from agentclaw.community.api.governance_service import (
 from agentclaw.community.core.economy.governance.repositories.orm import (
     GovernanceNotificationOrm,
     GovernanceTicketOrm,
+)
+from agentclaw.community.core.economy.governance.repositories.audit_repo import (
+    GovernanceAuditRepository,
 )
 from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
     NotifyLogRepository,
@@ -59,7 +66,7 @@ def _insert_ticket(
 ) -> None:
     """Insert a real GovernanceTicketOrm row via repo.
 
-    The admin service methods (emergency_close, close_all_open, cancel_pending)
+    The admin service methods (admin_close, close_all_open, cancel_pending)
     read from this table through TaskRecordRepository.
     """
     repo = world.get(TaskRecordRepository)
@@ -141,7 +148,7 @@ def _seed_whitelist_delete_happy(world) -> None:
 
 
 def _seed_tickets_close_happy(world) -> None:
-    """Seed open tickets for tickets:close (单/多 emergency_close 循环)."""
+    """Seed open tickets for tickets:close (单/多 admin_close 循环)."""
     _insert_ticket(world, ticket_id="tkt-close-1", governance_status="open")
     _insert_ticket(world, ticket_id="tkt-close-2", governance_status="scheduled",
                    bot_id="bot-2", owner_id="owner-2")
@@ -201,7 +208,7 @@ def _seed_scan_and_deliver_happy(world) -> None:
 
 
 def _assert_tickets_closed(response, world) -> None:
-    """Verify both tickets were closed by emergency_close 循环."""
+    """Verify both tickets were closed by admin_close 循环."""
     repo = world.get(TaskRecordRepository)
     for tid in ("tkt-close-1", "tkt-close-2"):
         ticket = repo.find_by_ticket_id(tid)
@@ -209,7 +216,7 @@ def _assert_tickets_closed(response, world) -> None:
         assert ticket.governance_status == "closed", (
             f"Expected {tid} closed, got {ticket.governance_status}"
         )
-        assert ticket.close_reason == "emergency_closed"
+        assert ticket.close_reason == "admin_closed"
 
 
 def _assert_close_all_full_closed(response, world) -> None:
@@ -222,12 +229,12 @@ def _assert_close_all_full_closed(response, world) -> None:
 
 
 def _assert_close_all_unresponded_closed(response, world) -> None:
-    """close-all only_unresponded(cancel_pending)→ ticket 主体 CLOSED,EMERGENCY_CLOSED。"""
+    """close-all only_unresponded(cancel_pending)→ ticket 主体 CLOSED,ADMIN_CLOSED。"""
     repo = world.get(TaskRecordRepository)
     ticket = repo.find_by_ticket_id("tkt-ca-ur")
     assert ticket is not None
     assert ticket.governance_status == "closed"
-    assert ticket.close_reason == "emergency_closed"
+    assert ticket.close_reason == "admin_closed"
 
 
 def _assert_whitelist_deleted(response, world) -> None:
@@ -246,13 +253,13 @@ def _assert_brake_paused(response, world) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 1. /admin/tickets:close (单/多,emergency_close 循环)
+# 1. /admin/tickets:close (单/多,admin_close 循环)
 # ---------------------------------------------------------------------------
 
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:close",
+    path="/api/economy/governance/workflow/tickets:close",
     scenario="ok_multi",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -266,12 +273,12 @@ def _assert_brake_paused(response, world) -> None:
     extra_assertions=(_assert_tickets_closed,),
 )
 def tickets_close_multi_ok():
-    """Happy path: close multiple tickets via emergency_close 循环."""
+    """Happy path: close multiple tickets via admin_close 循环."""
 
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:close",
+    path="/api/economy/governance/workflow/tickets:close",
     scenario="not_found_returns_outcome",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -294,7 +301,7 @@ def tickets_close_not_found_returns_outcome():
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:close-all",
+    path="/api/economy/governance/workflow/tickets:close-all",
     scenario="ok_full_close_all_open",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -310,7 +317,7 @@ def tickets_close_all_full_ok():
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:close-all",
+    path="/api/economy/governance/workflow/tickets:close-all",
     scenario="ok_only_unresponded_cancel_pending",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -321,7 +328,7 @@ def tickets_close_all_full_ok():
     extra_assertions=(_assert_close_all_unresponded_closed,),
 )
 def tickets_close_all_only_unresponded_ok():
-    """Happy path: close-all only_unresponded → cancel_pending(EMERGENCY_CLOSED)."""
+    """Happy path: close-all only_unresponded → cancel_pending(ADMIN_CLOSED)."""
 
 
 # ---------------------------------------------------------------------------
@@ -566,7 +573,7 @@ def brake_get_no_auth():
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:close",
+    path="/api/economy/governance/workflow/tickets:close",
     scenario="error_empty_ticket_ids",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -580,7 +587,7 @@ def tickets_close_error_empty_ids():
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:close-all",
+    path="/api/economy/governance/workflow/tickets:close-all",
     scenario="error_missing_reason",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -632,3 +639,361 @@ def whitelist_bulk_add_error_empty_bot_ids():
 )
 def brake_toggle_error_missing_enabled():
     """Error path: missing required enabled field -> 422."""
+
+
+# ---------------------------------------------------------------------------
+# 12. /admin/whitelist (GET — 只读分页列表)
+# ---------------------------------------------------------------------------
+
+
+def _seed_whitelist_list(world) -> None:
+    """Seed mixed whitelist entries: two active + one expired (governance).
+
+    共 3 条 governance: bot-wl-1/user-wl-1(永久)、bot-wl-2/user-wl-2(永久)、
+    bot-wl-exp/user-wl-1(已过期)。默认查询应返回前两条,total=2。
+    """
+    from datetime import datetime, timedelta
+
+    wl_repo = world.get(GovernanceWhitelistRepository)
+    wl_repo.add(
+        bot_id="bot-wl-1", owner_id="user-wl-1", reason="r1", created_by="88888",
+    )
+    wl_repo.add(
+        bot_id="bot-wl-2", owner_id="user-wl-2", reason="r2", created_by="88888",
+    )
+    wl_repo.add(
+        bot_id="bot-wl-exp",
+        owner_id="user-wl-1",
+        reason="expired",
+        created_by="88888",
+        expires_at=datetime.now() - timedelta(days=1),
+    )
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/admin/whitelist",
+    scenario="ok_default_excludes_expired",
+    input=CaseInput(headers=_USER_HEADER),
+    seed=_seed_whitelist_list,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True, "data": {"total": 2}},
+    ),
+)
+def whitelist_get_ok_default_excludes_expired():
+    """Happy path: 默认排除过期,返回有效条目(total=2)。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/admin/whitelist",
+    scenario="ok_filter_by_owner",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"owner_id": "user-wl-1"},
+    ),
+    seed=_seed_whitelist_list,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True, "data": {"total": 1}},
+    ),
+)
+def whitelist_get_ok_filter_by_owner():
+    """Filter path: 按 owner 筛选(user-wl-1 有效条目仅 1 条,过期被排除)。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/admin/whitelist",
+    scenario="ok_include_expired",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"include_expired": "true"},
+    ),
+    seed=_seed_whitelist_list,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True, "data": {"total": 3}},
+    ),
+)
+def whitelist_get_ok_include_expired():
+    """Filter path: include_expired=true 返回全 3 条(含过期)。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/admin/whitelist",
+    scenario="error_limit_too_large",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"limit": "201"},
+    ),
+    expect=ExpectError(status=422),
+)
+def whitelist_get_error_limit_too_large():
+    """Error path: limit 超上限 200 -> 422。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/admin/whitelist",
+    scenario="no_auth",
+    input=CaseInput(),  # no x-user-id → LocalAuth raises Unauthorized
+    expect=ExpectError(status=401),
+)
+def whitelist_get_no_auth():
+    """Error path: 无鉴权 -> 401。"""
+
+
+# ---------------------------------------------------------------------------
+# 13. /workflow/audit-logs (GET — 按 worker 只读分页查治理审计; endpoint lives in workflow_router)
+#     Defined in workflow_router.py; cases kept here alongside the other governance endpoint suites.
+# ---------------------------------------------------------------------------
+
+
+def _seed_audit_logs(world) -> None:
+    """Seed governance audit rows via repo (env auto-resolved to match query).
+
+    三条审计:owner-1:bot-a(admin_whitelisted)、owner-1:bot-b(enqueued)、
+    owner-2:bot-a(admin_whitelisted)。按 worker owner-1:bot-a 应只命中 1 条。
+    """
+    audit_repo = world.get(GovernanceAuditRepository)
+    audit_repo.add_audit(
+        "admin-wl-seed1", bot_id="bot-a", owner_id="owner-1",
+        action_taken="admin_whitelisted", actor_id="88888", source="admin_api",
+    )
+    audit_repo.add_audit(
+        "seed-enqueued", bot_id="bot-b", owner_id="owner-1",
+        action_taken="enqueued", actor_id="99999", source="daily_scan",
+    )
+    audit_repo.add_audit(
+        "admin-wl-seed2", bot_id="bot-a", owner_id="owner-2",
+        action_taken="admin_whitelisted", actor_id="88888", source="admin_api",
+    )
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/audit-logs",
+    scenario="ok_by_worker_id",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"worker_id": "owner-1:bot-a"},
+    ),
+    seed=_seed_audit_logs,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True, "data": {"total": 1}},
+    ),
+)
+def audit_logs_get_ok_by_worker_id():
+    """Happy path: 复合 worker_id=owner-1:bot-a 命中 1 条审计(bot-a/owner-1)。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/audit-logs",
+    scenario="ok_by_owner_all_bots",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"owner_id": "owner-1"},
+    ),
+    seed=_seed_audit_logs,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True, "data": {"total": 2}},
+    ),
+)
+def audit_logs_get_ok_by_owner():
+    """Filter path: 按 owner-1 查(跨 bot)命中 2 条(bot-a + bot-b)。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/audit-logs",
+    scenario="ok_by_action_filter",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"action": "admin_whitelisted"},
+    ),
+    seed=_seed_audit_logs,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True, "data": {"total": 2}},
+    ),
+)
+def audit_logs_get_ok_by_action():
+    """Filter path: action=admin_whitelisted 命中 2 条(seed1 + seed2)。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/audit-logs",
+    scenario="error_no_filter_400",
+    input=CaseInput(headers=_USER_HEADER),
+    expect=ExpectError(status=400),
+)
+def audit_logs_get_error_no_filter():
+    """Error path: 无任何过滤维度(owner/bot/action)→ 400(防全表扫)。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/audit-logs",
+    scenario="error_invalid_worker_id_400",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"worker_id": "no-colon"},
+    ),
+    expect=ExpectError(status=400),
+)
+def audit_logs_get_error_invalid_worker_id():
+    """Error path: 非法 worker_id(缺冒号)→ 400。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/audit-logs",
+    scenario="no_auth",
+    input=CaseInput(),  # no x-user-id → LocalAuth raises Unauthorized
+    expect=ExpectError(status=401),
+)
+def audit_logs_get_no_auth():
+    """Error path: 无鉴权 -> 401。"""
+
+
+# ---------------------------------------------------------------------------
+# 14. /admin/tickets:remind (手动补发 reminder)
+# ---------------------------------------------------------------------------
+
+
+def _seed_remind_happy(world) -> None:
+    """Seed an active ticket with first_send notify for remind test."""
+    _insert_ticket(world, ticket_id="tkt-remind-1", governance_status="open",
+                   bot_id="bot-remind", owner_id="owner-remind")
+    _insert_notify_log(
+        world, ticket_id="tkt-remind-1", bot_id="bot-remind", owner_id="owner-remind",
+        notify_status="sent", governance_status="open",
+    )
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/admin/tickets:remind",
+    scenario="ok",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        json_body={"worker_id": "owner-remind:bot-remind"},
+    ),
+    seed=_seed_remind_happy,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+)
+def tickets_remind_ok():
+    """Happy path: 有 active 工单 → 立即补发 reminder。"""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/admin/tickets:remind",
+    scenario="error_no_active",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        json_body={"worker_id": "owner-none:bot-none"},
+    ),
+    expect=ExpectError(status=400),
+)
+def tickets_remind_error_no_active():
+    """Error path: 无 active 工单 → 400。"""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/admin/tickets:remind",
+    scenario="no_auth",
+    input=CaseInput(),
+    expect=ExpectError(status=401),
+)
+def tickets_remind_no_auth():
+    """Error path: 无鉴权 → 401。"""
+
+
+# ---------------------------------------------------------------------------
+# 15. /admin/tickets:offline-renew (强制换新)
+# ---------------------------------------------------------------------------
+
+
+def _seed_renew_happy(world) -> None:
+    """Seed an active ticket for offline-renew test (will be closed + replaced)."""
+    _insert_ticket(world, ticket_id="tkt-renew-old", governance_status="open",
+                   bot_id="bot-renew", owner_id="owner-renew")
+    _insert_notify_log(
+        world, ticket_id="tkt-renew-old", bot_id="bot-renew", owner_id="owner-renew",
+        notify_status="sent", governance_status="open",
+    )
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/admin/tickets:offline-renew",
+    scenario="ok_with_active",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        json_body={
+            "owner_id": "owner-renew",
+            "bot_id": "bot-renew",
+            "governance_decision": "actionable",
+            "dt_version": "20260710",
+            "hit_dimensions": "token_usage",
+            "saving_ratio": 0.5,
+        },
+    ),
+    seed=_seed_renew_happy,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+)
+def tickets_offline_renew_ok_with_active():
+    """Happy path: 有 active 工单 → 关老 + 建新 first_send。"""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/admin/tickets:offline-renew",
+    scenario="ok_no_active",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        json_body={
+            "owner_id": "owner-new",
+            "bot_id": "bot-new",
+            "governance_decision": "actionable",
+            "dt_version": "20260710",
+        },
+    ),
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+)
+def tickets_offline_renew_ok_no_active():
+    """Happy path: 无 active 工单 → 直接建新 first_send。"""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/admin/tickets:offline-renew",
+    scenario="error_missing_required",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        json_body={"owner_id": "owner-x"},
+    ),
+    expect=ExpectError(status=422),
+)
+def tickets_offline_renew_error_missing():
+    """Error path: 缺必填字段 → 422 (Pydantic)。"""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/admin/tickets:offline-renew",
+    scenario="no_auth",
+    input=CaseInput(),
+    expect=ExpectError(status=401),
+)
+def tickets_offline_renew_no_auth():
+    """Error path: 无鉴权 → 401。"""

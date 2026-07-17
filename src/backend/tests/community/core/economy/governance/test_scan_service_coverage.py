@@ -2,7 +2,7 @@
 
 Missing lines (from coverage report):
   289-290:  skip counters init
-  296-300:  emergency brake + ticket-None cancel path
+  296-300:  brake + ticket-None cancel path
   341-342:  closed-ticket cancel
   353:      dry_run skip
   431-436:  saving_ratio float + audit on send failure

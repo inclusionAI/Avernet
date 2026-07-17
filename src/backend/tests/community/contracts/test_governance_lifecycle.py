@@ -214,13 +214,13 @@ class TestLegalTransitionsEndToEnd:
         assert row.governance_status == GovernanceStatus.CLOSED
         assert row.review_decision == "approve_close"
 
-    def test_emergency_close_any_to_closed(self):
+    def test_admin_close_any_to_closed(self):
         driver, db, _ = _build_driver()
         _seed_ticket(db, ticket_id="T-emg", status="open")
-        assert driver.emergency_close("T-emg", now=datetime.now()) is True
+        assert driver.admin_close("T-emg", now=datetime.now()) is True
         row = driver._task_repo.find_by_ticket_id("T-emg")  # noqa: SLF001
         assert row.governance_status == GovernanceStatus.CLOSED
-        assert row.close_reason == CloseReason.EMERGENCY_CLOSED
+        assert row.close_reason == CloseReason.ADMIN_CLOSED
 
 
 # ---------------------------------------------------------------------------
@@ -242,12 +242,12 @@ class TestIllegalTransitionsRejected:
         driver, db, _ = _build_driver()
         _seed_ticket(db, ticket_id="T-c2", status="closed")
         assert driver.close_for_whitelist_hit("T-c2", now=datetime.now()) is False
-        assert driver.emergency_close("T-c2", now=datetime.now()) is False
+        assert driver.admin_close("T-c2", now=datetime.now()) is False
 
     def test_not_found_returns_false(self):
         driver, _, _ = _build_driver()
         assert driver.transition_schedule_due("nope", now=datetime.now()) is False
-        assert driver.emergency_close("nope", now=datetime.now()) is False
+        assert driver.admin_close("nope", now=datetime.now()) is False
         assert driver.close_for_whitelist_hit("nope", now=datetime.now()) is False
 
     def test_resume_from_closed_illegal_at_model(self):

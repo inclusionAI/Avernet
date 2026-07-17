@@ -376,3 +376,16 @@ class WhitelistRepositoryProtocol(Protocol):
     ) -> int:
         """Count whitelist entries of a given type."""
         ...
+
+    def list_all(
+        self,
+        *,
+        whitelist_type: str = "governance",
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        include_expired: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[WhitelistEntry], int]:
+        """全量分页查询白名单(可选 owner/bot 筛选 + 过期开关 + total)。"""
+        ...

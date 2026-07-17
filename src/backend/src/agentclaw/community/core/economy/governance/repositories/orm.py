@@ -243,7 +243,7 @@ class GovernanceNotificationOrm(Base):
 class AuditLogOrm(Base):
     """Append-only audit trail for governance operations.
 
-    Every scan run, user feedback, and emergency action writes
+    Every scan run, user feedback, and admin action writes
     a row here. The ``run_id`` ties all audit rows from a single
     scan together (UUID4).
 
@@ -264,7 +264,7 @@ class AuditLogOrm(Base):
     hit_dimensions = Column(String(512))
     expected_token_saving = Column(BigInteger, nullable=True)
     saving_ratio = Column(Numeric(10, 4), nullable=True)
-    action_taken = Column(String(64))  # enqueued/whitelist_filtered/muted/cooldown_filtered/auto_resolved/mute_expired/out_of_scope/reminded/expired_unresolved/data_not_ready/error/user_resolved/emergency_*
+    action_taken = Column(String(64))  # enqueued/whitelist_filtered/muted/cooldown_filtered/auto_resolved/mute_expired/out_of_scope/reminded/expired_unresolved/data_not_ready/error/user_resolved/admin_*
     source = Column(String(32), default="daily_scan")
     error_msg = Column(Text, nullable=True)
     actor_id = Column(String(64), nullable=True, comment="实际操作人ID — owner自操作=owner_id，admin代操作=admin_id，系统行为=NULL")
@@ -336,7 +336,7 @@ class WhitelistEntryOrm(Base):
     bot_id = Column(String(64), nullable=False)
     owner_id = Column(String(64), nullable=False)
     whitelist_type = Column(String(32), nullable=False)  # governance / dormant (reserved)
-    source = Column(String(64), default="manual")  # system / owner / admin / manual / emergency / card_callback / http_api / owner_feedback
+    source = Column(String(64), default="manual")  # system / owner / admin / manual / card_callback / http_api / owner_feedback
     reason = Column(String(512))
     created_by = Column(String(64))
     expires_at = Column(TIMESTAMP, nullable=True)  # NULL = permanent
@@ -475,6 +475,7 @@ class GovernanceTicketOrm(Base):
     # --- 其它 ---
     feedback_payload = Column(Text, nullable=True, comment="结构化反馈 JSON")
     actor_id = Column(String(64), nullable=True, comment="实际操作人ID")
+    delivery_status = Column(String(32), default="none", comment="最近通知投递状态: none/first_send:sent/reminder:failed/...")
 
     def to_dict(self) -> dict:
         """Convert to plain dict — safe to use after session closes.
