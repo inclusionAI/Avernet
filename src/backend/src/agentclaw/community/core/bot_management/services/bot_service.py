@@ -765,6 +765,7 @@ class BotService:
                         DeviceBindingStatus.ACTIVE.value,
                         DeviceBindingStatus.PENDING.value,
                         DeviceBindingStatus.FAILED.value,
+                        DeviceBindingStatus.STOPPED.value,
                     ]:
                         active_device_count += 1
                         bot_info = bot_binding_map.get(binding_id, {})
@@ -2830,7 +2831,8 @@ class BotService:
                 binding = service.get_device(binding_id=binding_id)
                 if binding and binding.status in [
                     DeviceBindingStatus.ACTIVE.value,
-                    DeviceBindingStatus.PENDING.value
+                    DeviceBindingStatus.PENDING.value,
+                    DeviceBindingStatus.STOPPED.value,
                 ]:
                     # Release the device
                     operator = _compose_operator_context(
@@ -3011,7 +3013,12 @@ class BotService:
             try:
                 service = self._device_service_provider()
                 binding = service.get_device(binding_id=binding_id)
-                if binding and binding.status in [DeviceBindingStatus.ACTIVE.value, DeviceBindingStatus.PENDING.value, DeviceBindingStatus.FAILED.value]:
+                if binding and binding.status in [
+                    DeviceBindingStatus.ACTIVE.value,
+                    DeviceBindingStatus.PENDING.value,
+                    DeviceBindingStatus.FAILED.value,
+                    DeviceBindingStatus.STOPPED.value,
+                ]:
                     operator = _compose_operator_context(user_id, resolved_nick_name)
                     service.release_device(
                         binding_id=binding_id,
