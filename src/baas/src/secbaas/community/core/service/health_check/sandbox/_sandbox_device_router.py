@@ -146,6 +146,23 @@ def _extract_sandbox_info_from_device(record: Any) -> SandboxDeviceInfo:
     )
 
 
+def _log_threshold_reached_warning(
+    sandbox_id: str,
+    fail_count: int,
+) -> None:
+    """记录设备达到告警阈值的日志。"""
+    try:
+        logger.warning(
+            f"[AcBindingSandboxHandler] sandbox_id={sandbox_id} "
+            f"reached warning threshold ({fail_count} >= {WARNING_THRESHOLD}), "
+            f"marking as {DeviceStatus.STOPPED.value}"
+        )
+    except Exception as e:
+        logger.warning(
+            f"[AcBindingSandboxHandler] Failed to log threshold warning: {e}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # AcBinding Handler
 # ---------------------------------------------------------------------------
@@ -204,8 +221,9 @@ class AcBindingSandboxHandler:
         fail_count = dp.get("refresh_fail_count", 0)
 
         if fail_count >= WARNING_THRESHOLD:
-            self._binding_repo.update_status(
-                binding_id=table_id, status=DeviceStatus.STOPPED.value
+            _log_threshold_reached_warning(
+                sandbox_id=sandbox_id,
+                fail_count=fail_count,
             )
             return WarnResult(
                 table_id=table_id,
