@@ -20,7 +20,8 @@ from dependency_injector.wiring import inject
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
-from secbaas.community.api import ApiResponse, SuccessResponse
+from secbaas.community.adapters.web.dependencies import get_op_ctx
+from secbaas.community.api import ApiResponse, OperationContext, SuccessResponse
 from secbaas.community.api.template_manage import (
     DeviceTemplateManageService,
     DeviceTemplateResponse,
@@ -38,6 +39,9 @@ class StatusTransitionRequest(BaseModel):
 
     current_status: TemplateStatus = Field(..., description="当前状态（用于定位记录）")
     new_status: TemplateStatus = Field(..., description="新状态")
+    operator: str = Field(
+        default="", min_length=0, max_length=128, description="操作人 ID"
+    )
 
 
 logger = get_logger("router")
@@ -52,6 +56,7 @@ async def list_templates(
     status: Annotated[TemplateStatus | None, Query(description="模板状态过滤")] = None,
     page: Annotated[int, Query(ge=1, description="页码")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="每页数量")] = 20,
+    op_ctx: OperationContext = Depends(get_op_ctx),
     service: DeviceTemplateManageService = Depends(
         Provide[ApplicationContainer.services.device_template_service]
     ),
@@ -59,7 +64,7 @@ async def list_templates(
     """List device templates for a tenant with optional status filter."""
 
     logger.info(
-        f"Listing templates: tenant={tenant}, status={status}, page={page}, page_size={page_size}"
+        f"Listing templates: tenant={tenant}, status={status}, page={page}, page_size={page_size}, operator={op_ctx.operator}"
     )
     result = service.list_templates(
         tenant=tenant,
@@ -76,6 +81,7 @@ async def list_online_templates(
     tenant: Annotated[str, Query(description="租户名称")],
     page: Annotated[int, Query(ge=1, description="页码")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="每页数量")] = 20,
+    op_ctx: OperationContext = Depends(get_op_ctx),
     service: DeviceTemplateManageService = Depends(
         Provide[ApplicationContainer.services.device_template_service]
     ),
@@ -83,7 +89,7 @@ async def list_online_templates(
     """List ONLINE status templates for bot creation."""
 
     logger.info(
-        f"Listing ONLINE templates: tenant={tenant}, page={page}, page_size={page_size}"
+        f"Listing ONLINE templates: tenant={tenant}, page={page}, page_size={page_size}, operator={op_ctx.operator}"
     )
     result = service.list_online_templates(
         tenant=tenant,
@@ -99,6 +105,7 @@ async def list_online_templates(
 @inject
 async def get_template_by_id(
     template_id: Annotated[int, Path(ge=0, description="模板ID (PaaS平台租户业务ID)")],
+    op_ctx: OperationContext = Depends(get_op_ctx),
     service: DeviceTemplateManageService = Depends(
         Provide[ApplicationContainer.services.device_template_service]
     ),
@@ -107,7 +114,9 @@ async def get_template_by_id(
 
     Note: template_id is globally unique across all tenants.
     """
-    logger.info(f"Getting template by template_id: {template_id}")
+    logger.info(
+        f"Getting template by template_id: {template_id}, operator: {op_ctx.operator}"
+    )
 
     template = service.get_by_template_id(template_id)
 
@@ -129,6 +138,7 @@ async def resolve_template(
     template_uuid: Annotated[
         str | None, Query(description="模板UUID (可选，不提供则返回默认模板)")
     ] = None,
+    op_ctx: OperationContext = Depends(get_op_ctx),
     service: DeviceTemplateManageService = Depends(
         Provide[ApplicationContainer.services.device_template_service]
     ),
@@ -140,7 +150,7 @@ async def resolve_template(
     2. Otherwise: return tenant's default_template_uuid from extra_config
     """
     logger.info(
-        f"Resolving template: tenant={tenant}, template_uuid={template_uuid or 'default'}"
+        f"Resolving template: tenant={tenant}, template_uuid={template_uuid or 'default'}, operator={op_ctx.operator}"
     )
 
     try:
@@ -164,13 +174,16 @@ async def resolve_template(
 async def get_template(
     template_uuid: Annotated[str, Path(description="模板UUID")],
     tenant: Annotated[str, Query(description="租户名称")],
+    op_ctx: OperationContext = Depends(get_op_ctx),
     service: DeviceTemplateManageService = Depends(
         Provide[ApplicationContainer.services.device_template_service]
     ),
 ) -> ApiResponse[DeviceTemplateResponse]:
     """Get template by UUID with tenant isolation."""
 
-    logger.info(f"Getting template: template_uuid={template_uuid}, tenant={tenant}")
+    logger.info(
+        f"Getting template: template_uuid={template_uuid}, tenant={tenant}, operator={op_ctx.operator}"
+    )
 
     template = service.get_online_template_by_uuid(tenant, template_uuid)
 
@@ -190,6 +203,7 @@ async def get_template(
 async def create_template(
     request: TemplateCreate,
     tenant: Annotated[str, Query(description="租户名称")],
+    op_ctx: OperationContext = Depends(get_op_ctx),
     service: DeviceTemplateManageService = Depends(
         Provide[ApplicationContainer.services.device_template_service]
     ),
@@ -208,7 +222,7 @@ async def create_template(
         f"template_uuid={'auto' if request.template_uuid is None else 'provided'}, "
         f"template_id={request.template_id}, type={request.type}, name={request.name}"
     )
-
+    request.operator = op_ctx.operator
     result = service.create_template(tenant=tenant, data=request)
     return ApiResponse(data=result)
 
@@ -222,6 +236,7 @@ async def update_template(
     status: Annotated[
         TemplateStatus, Query(description="模板状态")
     ] = TemplateStatus.ONLINE,
+    op_ctx: OperationContext = Depends(get_op_ctx),
     service: DeviceTemplateManageService = Depends(
         Provide[ApplicationContainer.services.device_template_service]
     ),
@@ -237,6 +252,7 @@ async def update_template(
     )
 
     # Update using composite key (tenant, template_uuid, status)
+    request.operator = op_ctx.operator
     updated = service.update_template(
         tenant=tenant,
         template_uuid=template_uuid,
@@ -264,6 +280,7 @@ async def transition_template_status(
     template_uuid: Annotated[str, Path(description="模板UUID")],
     request: StatusTransitionRequest,
     tenant: Annotated[str, Query(description="租户名称")],
+    op_ctx: OperationContext = Depends(get_op_ctx),
     service: DeviceTemplateManageService = Depends(
         Provide[ApplicationContainer.services.device_template_service]
     ),
@@ -277,6 +294,7 @@ async def transition_template_status(
         f"from={request.current_status.value} to={request.new_status.value}"
     )
 
+    request.operator = op_ctx.operator
     updated = service.update_status(
         tenant=tenant,
         template_uuid=template_uuid,
@@ -308,9 +326,9 @@ class DeleteTemplateRequest(BaseModel):
 @inject
 async def delete_template(
     template_uuid: Annotated[str, Path(description="模板UUID")],
-    request: DeleteTemplateRequest,
     tenant: Annotated[str, Query(description="租户名称")],
     status: Annotated[TemplateStatus, Query(description="模板状态 (用于定位记录)")],
+    op_ctx: OperationContext = Depends(get_op_ctx),
     service: DeviceTemplateManageService = Depends(
         Provide[ApplicationContainer.services.device_template_service]
     ),
@@ -322,14 +340,14 @@ async def delete_template(
     """
     logger.info(
         f"Deleting template: template_uuid={template_uuid}, tenant={tenant}, "
-        f"status={status}, operator={request.operator}"
+        f"status={status}, operator={op_ctx.operator}"
     )
 
     success = service.soft_delete_template(
         tenant=tenant,
         template_uuid=template_uuid,
         status=status,
-        operator=request.operator,
+        operator=op_ctx.operator,
     )
 
     if not success:
