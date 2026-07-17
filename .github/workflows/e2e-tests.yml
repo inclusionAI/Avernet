@@ -120,12 +120,9 @@ jobs:
         with:
           node-version: 22
           # No `cache: npm` here: the BCN plugin build uses `npm install`
-          # (not `npm ci`) under src/plugin, and src/plugin/package-lock.json is
-          # git-ignored (src/plugin/.gitignore), so there is no committed
-          # lockfile in the checkout for setup-node to key on. setup-node's
-          # cache errors the job when the dependency path doesn't resolve. The
-          # BCN deps are small; the npm fetch is a tolerable network round-trip.
-          # To re-enable, commit the lockfile (drop it from .gitignore) first.
+          # (not `npm ci`) under src/bcs/crates/plugins/openclaw-channel-bcn,
+          # which has no committed package-lock.json for setup-node to key on.
+          # The BCN deps are small, so the npm fetch is tolerable.
 
       - name: Install OpenClaw
         if: steps.changes.outputs.skip-bcs != 'true'
