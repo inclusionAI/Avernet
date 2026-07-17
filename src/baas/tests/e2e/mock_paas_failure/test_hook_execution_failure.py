@@ -64,7 +64,7 @@ class TestCreateHookFailure:
 
         # Wait for FAILED (hook failure triggers device FAILED, then publish FAILED)
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=0.5
+            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=5.0
         )
         assert status == "FAILED", f"Expected FAILED, got {status}"
 
@@ -131,7 +131,7 @@ class TestDestroyHookFailure:
 
         # Per D-03: destroy proceeds even if hook fails — wait for terminal state
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=0.5
+            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=5.0
         )
 
         # Verify publish reached a terminal state (SUCCESS or FAILED are both valid

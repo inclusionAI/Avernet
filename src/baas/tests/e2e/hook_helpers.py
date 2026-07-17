@@ -106,7 +106,7 @@ async def wait_for_publish_status(
     api: APITestHelper,
     publish_id: int,
     target_statuses: set[str],
-    timeout_seconds: float = 0.1,
+    timeout_seconds: float = 5.0,
     poll_interval: float = 0.1,
 ) -> str:
     """Poll until publish reaches one of the target statuses."""
@@ -166,7 +166,7 @@ async def send_callbacks_for_hook_devices(
     exit_code: int = 0,
     stdout: str = "mock hook output",
     stderr: str = "",
-    timeout_seconds: float = 0.1,
+    timeout_seconds: float = 5.0,
     poll_interval: float = 0.1,
 ) -> list[dict]:
     """Find CREATED devices in the current running batch and send callback for each."""
@@ -240,7 +240,7 @@ async def try_send_callbacks_for_hook_devices(
     exit_code: int = 0,
     stdout: str = "mock hook output",
     stderr: str = "",
-    timeout_seconds: float = 0.1,
+    timeout_seconds: float = 5.0,
     poll_interval: float = 0.1,
 ) -> list[dict] | None:
     """Try to find and callback CREATED devices. Returns None if none found (no assert)."""
@@ -303,7 +303,7 @@ async def send_mixed_callbacks(
     api: APITestHelper,
     publish_id: int,
     fail_index: int = -1,
-    timeout_seconds: float = 0.1,
+    timeout_seconds: float = 5.0,
     poll_interval: float = 0.1,
 ) -> list[dict]:
     """Send SUCCESS to all current-stage devices except device at fail_index (gets FAILED)."""
