@@ -797,9 +797,16 @@ class GovernanceAdminService:
             deep_link="",
             extra={},
         )
-        external_id = self._notify_sender.send(
-            msg, channel=getattr(self._config, "notify_channel", "markdown"),
-        )
+        try:
+            external_id = self._notify_sender.send(
+                msg, channel=getattr(self._config, "notify_channel", "markdown"),
+            )
+        except Exception:
+            log.exception(
+                "[GovernanceAdmin] reminder send failed for notification_id=%s",
+                notification_id,
+            )
+            external_id = None
 
         sent = external_id is not None
         if sent:
