@@ -665,6 +665,9 @@ class GovernanceAdminService:
                     at=now,
                     channel=result_channel if result_channel and result_channel != original_channel else None,
                 )
+                # Update ticket delivery_status: {notify_type}:sent (§7.3.5)
+                ticket_delivery_status = f"{p.notify_type.value}:sent"
+                self._task_repo.update_delivery_status(p.ticket_id, ticket_delivery_status)
                 self._audit_repo.add_audit(
                     audit_run_id, p.bot_id, p.owner_id,
                     notification_id=nid,
@@ -678,7 +681,7 @@ class GovernanceAdminService:
                     dry_run=0,
                 )
 
-            # ---- Failed: audit only ----
+            # ---- Failed: update ticket delivery_status + audit ----
             for r in results:
                 if r.get("success"):
                     continue
@@ -686,6 +689,9 @@ class GovernanceAdminService:
                 p = pending_by_id.get(nid)
                 if p is None:
                     continue
+                # Update ticket delivery_status: {notify_type}:failed (§7.3.5)
+                ticket_delivery_status = f"{p.notify_type.value}:failed"
+                self._task_repo.update_delivery_status(p.ticket_id, ticket_delivery_status)
                 self._audit_repo.add_audit(
                     audit_run_id, p.bot_id, p.owner_id,
                     notification_id=nid,
@@ -815,10 +821,14 @@ class GovernanceAdminService:
                 status=NotifyStatus.SENT,
                 external_id=external_id,
             )
+            # Update ticket delivery_status for reminder: reminder:sent
+            self._task_repo.update_delivery_status(ticket.ticket_id, "reminder:sent")
         else:
             self._notify_repo.update_delivery_status(
                 notification_id, status=NotifyStatus.FAILED,
             )
+            # Update ticket delivery_status for reminder: reminder:failed
+            self._task_repo.update_delivery_status(ticket.ticket_id, "reminder:failed")
 
         # Advance reminder chain: increment remind_count + set next remind_at
         # 以本次 reminder 为基准推后(同 scan_service _advance_reminder_chain 语义)。

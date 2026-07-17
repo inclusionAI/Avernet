@@ -145,6 +145,18 @@ class GovernanceWorkflowService:
         ticket = self._task_repo.find_by_ticket_id(ticket_id)
         if ticket is None:
             return None
+
+        # delivery_status 补查: 当为 "none" 时,从 notify_log 反推真实状态
+        # (防止工单创建后崩溃,delivery_status 未更新)
+        # delivery_status 是 snapshot 上的只读 property,直接改 _snapshot.delivery_status
+        if ticket.delivery_status == "none":
+            notified = self._notify_repo.list_by_ticket(ticket_id, only_pending=False)
+            if notified:
+                latest = notified[0]  # newest first
+                notify_type = latest.notify_type.value if latest.notify_type else "first_send"
+                notify_status = latest.delivery_status.value if latest.delivery_status else "pending"
+                ticket._snapshot.delivery_status = f"{notify_type}:{notify_status}"  # noqa: SLF001
+
         bot_id = getattr(ticket, "bot_id", None)
         owner_id = getattr(ticket, "owner_id", None)
         if not bot_id or not owner_id:
@@ -292,7 +304,10 @@ class GovernanceWorkflowService:
     def admin_close(
         self, ticket_id: str, admin_id: str, reason: str = "",
     ) -> TicketActionOutcome:
-        """Immediate ticket close without cooldown (§6.3)."""
+        """Admin close: close ticket + set cooldown + cancel pending (§6.3).
+
+        管理员检查后关单,使用 cooldown_days 设冷却(关单后 N 天内不重建)。
+        """
         ticket = self._task_repo.find_by_ticket_id(ticket_id)
         if not ticket:
             return TicketActionOutcome(
@@ -308,13 +323,13 @@ class GovernanceWorkflowService:
             )
 
         now = datetime.now()
+        cooldown_days = self._config.cooldown_days
+        cooldown_until = now + timedelta(days=cooldown_days)
 
         # Advance via driver service (sole driver). Driver orchestrates the
-        # CLOSE + cancel-pending. The audit row (with reason + actor_id=
-        # admin_id) is owned by this service below — the driver does not
-        # duplicate it, matching pause_ticket / review_ticket siblings.
+        # CLOSE + cooldown + cancel-pending.
         self._lifecycle_svc.admin_close(
-            ticket_id, now=now,
+            ticket_id, now=now, cooldown_until=cooldown_until,
         )
 
         self._audit_repo.add_audit(
@@ -324,7 +339,7 @@ class GovernanceWorkflowService:
             actor_id=admin_id,
             action_taken=AuditAction.ADMIN_CLOSE_ALL,
             source="admin_api",
-            error_msg=f"ticket_id={ticket_id}; reason={reason}",
+            error_msg=f"ticket_id={ticket_id}; reason={reason}; cooldown_until={cooldown_until.isoformat()}",
             dry_run=0,
         )
 
