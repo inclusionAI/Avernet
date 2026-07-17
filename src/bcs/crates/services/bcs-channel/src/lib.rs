@@ -14,9 +14,9 @@ use bcs_channel_api::{
 };
 use bcs_domain::{
     ActorKind, BindingStatus, BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap,
-    Group, GroupChatScope, GroupStrategy, ImParticipantMap, Participant, ParticipantMode,
+    Group, GroupChatScope, GroupKind, GroupStrategy, ImParticipantMap, Participant, ParticipantMode,
     ParticipantRole, Session, SessionKind, SessionScope, SessionStatus, SystemMessageEvent,
-    Visibility,
+    Visibility, channel_group_id,
 };
 use bcs_service_api::application::channel::{
     ChannelInboundError, ChannelInboundFailureKind, ChannelService, ChannelUseCaseError,
@@ -41,8 +41,6 @@ use bcs_service_api::{
 pub use visibility::visibility_allows;
 
 const DEFAULT_INBOUND_DEDUP_LIMIT: usize = 4096;
-const MAX_CHANNEL_SESSION_ID_CHARS: usize = 64;
-const GENERATED_SESSION_ID_SUFFIX_CHARS: usize = 9;
 
 /// Channel application service implementation.
 pub struct BcsChannelService {
@@ -206,7 +204,11 @@ impl BcsChannelService {
         msg: &InboundMessage,
         actor_id: &str,
     ) -> Result<String, ChannelUseCaseError> {
-        let group_id = channel_owned_group_id(&binding.channel_type, &(self.new_id)())?;
+        let group_id = channel_owned_group_id(
+            &binding.channel_type,
+            GroupKind::Dm,
+            &(self.new_id)(),
+        )?;
         let label = msg
             .im_user_nick
             .as_ref()
@@ -239,9 +241,17 @@ impl BcsChannelService {
         binding: &ChannelBinding,
         bot_id: &str,
     ) -> Result<String, ChannelUseCaseError> {
-        let group_id = channel_owned_group_id(&binding.channel_type, &binding.id)?;
+        let group_id = channel_owned_group_id(
+            &binding.channel_type,
+            GroupKind::Normal,
+            &binding.id,
+        )?;
         if self.groups.get(&group_id).await.is_some() {
             return Ok(group_id);
+        }
+        let legacy_group_id = legacy_channel_owned_group_id(&binding.channel_type, &binding.id);
+        if self.groups.get(&legacy_group_id).await.is_some() {
+            return Ok(legacy_group_id);
         }
         let mut group = Group::new(
             group_id.clone(),
@@ -907,7 +917,7 @@ impl ChannelService for BcsChannelService {
         provider.validate_config(&cmd.config).map_err(provider_error)?;
         let binding_id = (self.new_id)();
         if matches!(&target, BindingTarget::Bot { .. }) {
-            channel_owned_group_id(&cmd.channel_type, &binding_id)?;
+            channel_owned_group_id(&cmd.channel_type, GroupKind::Dm, &binding_id)?;
         }
         if self
             .bindings
@@ -1163,21 +1173,18 @@ fn normalize_required<'a>(
 
 fn channel_owned_group_id(
     channel_type: &str,
+    group_kind: GroupKind,
     owner_id: &str,
 ) -> Result<String, ChannelUseCaseError> {
     let channel_type = normalize_required(channel_type, "channel_type")?;
     let owner_id = normalize_required(owner_id, "channel group owner id")?;
-    let group_id = format!("{channel_type}_{owner_id}");
-    if group_id.chars().count() + GENERATED_SESSION_ID_SUFFIX_CHARS
-        > MAX_CHANNEL_SESSION_ID_CHARS
-    {
-        return Err(ChannelUseCaseError::Internal(ServiceError::InternalError(
-            format!(
-                "generated channel group id cannot produce a session id within {MAX_CHANNEL_SESSION_ID_CHARS} characters"
-            ),
-        )));
-    }
-    Ok(group_id)
+    channel_group_id(channel_type, group_kind, owner_id).map_err(|error| {
+        ChannelUseCaseError::Internal(ServiceError::InternalError(error.to_string()))
+    })
+}
+
+fn legacy_channel_owned_group_id(channel_type: &str, owner_id: &str) -> String {
+    format!("{}_{}", channel_type.trim(), owner_id.trim())
 }
 
 fn human_actor_id(staff_no: &str) -> String {
@@ -1253,7 +1260,7 @@ mod tests {
     };
     use bcs_domain::{
         ActorKind, BindingStatus, BindingTarget, BotCapabilities, BotDynamicStatus,
-        ChannelBinding, ChannelConfig, ChannelType, Group, GroupChatScope, Participant,
+        ChannelBinding, ChannelConfig, ChannelType, Group, GroupChatScope, GroupKind, Participant,
         ParticipantMode, ParticipantRole, RegisteredBot, Session, SessionKind, SessionScope,
         SessionStatus, Skill, StateMachineRun, StateMachineRunStatus, SystemMessageEvent,
         Visibility,
@@ -1833,15 +1840,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_direct_bot_binding_rejects_overlong_generated_session_id_before_persisting(
-    ) -> TestResult {
+    async fn create_direct_bot_binding_canonicalizes_long_internal_owner_id() -> TestResult {
         let harness = TestHarness::new_with_generated_id(
             manager_group("group_1"),
             "x".repeat(55),
         )
         .await?;
 
-        let result = harness
+        let binding = harness
             .service
             .create_binding(CreateBindingCommand {
                 channel_type: channel_type(),
@@ -1855,22 +1861,68 @@ mod tests {
                 created_by: Some("creator".to_string()),
                 config: dingtalk_config("robot_1"),
             })
-            .await;
+            .await?;
 
-        assert!(matches!(
-            result,
-            Err(ChannelUseCaseError::Internal(ServiceError::InternalError(_)))
-        ));
-        assert!(harness.binding_repo.list().await?.is_empty());
+        let group_id = channel_owned_group_id(
+            &binding.channel_type,
+            GroupKind::Dm,
+            &binding.id,
+        )?;
+        assert!(format!("{group_id}:abcdef12").chars().count() <= 64);
+        assert_eq!(harness.binding_repo.list().await?.len(), 1);
 
         Ok(())
     }
 
     #[test]
     fn channel_owned_group_id_rejects_overlong_session_id() {
-        let result = channel_owned_group_id("dingtalk", &"x".repeat(55));
+        let result = channel_owned_group_id(
+            "channel_name",
+            GroupKind::Dm,
+            "bc7d5297-4947-474d-a2f1-cdea1c5642b6",
+        );
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn channel_owned_group_id_encodes_channel_and_group_kind() -> TestResult {
+        let source_id = "bc7d5297-4947-474d-a2f1-cdea1c5642b6";
+
+        assert_eq!(
+            channel_owned_group_id("dingtalk", GroupKind::Normal, source_id)?,
+            "bcs_grp_dingtalk_bc7d52974947474da2f1cdea1c5642b6"
+        );
+        let dm_group_id = channel_owned_group_id("dingtalk", GroupKind::Dm, source_id)?;
+        assert_eq!(
+            dm_group_id,
+            "bcs_grp_dingtalk_dm_bc7d52974947474da2f1cdea1c5642b6"
+        );
+        assert_eq!(format!("{dm_group_id}:abcdef12").chars().count(), 61);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn managed_bot_group_reuses_legacy_channel_group_id() -> TestResult {
+        let legacy_group_id = "dingtalk_binding_bot";
+        let harness = TestHarness::new(manager_group(legacy_group_id)).await?;
+        let binding = active_binding(
+            "binding_bot",
+            "robot_1",
+            BindingTarget::Bot {
+                bot_id: "target_bot".to_string(),
+            },
+            Visibility::FullTranscript,
+        );
+
+        let group_id = harness
+            .service
+            .ensure_managed_single_bot_group(&binding, "target_bot")
+            .await?;
+
+        assert_eq!(group_id, legacy_group_id);
+        Ok(())
     }
 
     #[tokio::test]
@@ -2858,7 +2910,7 @@ mod tests {
             .get(binding_id, "conv_group", SessionScope::PerSender, Some("u1"))
             .await?
             .ok_or_else(|| ServiceError::InternalError("missing conversation".to_string()))?;
-        assert!(mapped.bcs_session_id.starts_with("dingtalk_"));
+        assert!(mapped.bcs_session_id.starts_with("bcs_grp_dingtalk_"));
         assert!(mapped.bcs_session_id.len() <= 64);
 
         Ok(())

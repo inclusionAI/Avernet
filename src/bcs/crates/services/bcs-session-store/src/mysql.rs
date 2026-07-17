@@ -455,7 +455,9 @@ impl SessionRepoPort for MySqlSessionStore {
 
         // Auto-generate path: up to 3 retries on uk_session_id collision.
         for _ in 0..3 {
-            let id = new_session_id(group_id);
+            let id = new_session_id(group_id).map_err(|error| {
+                ServiceError::SessionInvalidParams(error.to_string())
+            })?;
             match self
                 .insert_session(id, group_id.to_string(), params.clone(), current_millis())
                 .await

@@ -5,6 +5,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::Attachment;
+pub use bcs_domain::GROUP_ID_PREFIX;
 
 // ---------------------------------------------------------------------------
 // Protocol versioning
@@ -844,20 +845,11 @@ pub struct ChatEventPayload {
 // Frame-building helpers (shared by bcs-message-flow, bcs-system-message, etc.)
 // ---------------------------------------------------------------------------
 
-/// Prefix prepended to auto-generated group IDs so downstream engines can
-/// recognize a session as BCS-originated. Must match the value used when
-/// generating new group IDs in the group service.
-pub const GROUP_ID_PREFIX: &str = "bcs_grp_";
-
-/// Build the short `session_key` (`group:<8 chars>`) sent to bots.
+/// Build the short, stable `session_key` sent to bots.
 ///
-/// The 8-char window keeps the key compact, but a BCS-originated `wire_id`
-/// (e.g. `bcs_grp_demo-group-alpha`) carries an 8-char prefix that would otherwise
-/// consume the entire window and collapse every group to `group:bcs_grp_`.
-/// When the prefix is present we keep it and take 8 chars from the id *after*
-/// it, yielding `group:bcs_grp_demo-gro`. Legacy ids without the prefix are
-/// truncated exactly as before (`group:legacy-g`), so existing groups are
-/// unaffected.
+/// New generated IDs preserve the complete Channel / DM namespace and opaque
+/// token. Existing prefixed and unprefixed IDs retain the legacy
+/// first-8-character behavior so their engine histories remain addressable.
 ///
 /// Slicing uses `char_indices` to stay on UTF-8 boundaries; group ids are
 /// ASCII today, but this avoids a latent panic if that ever changes.
@@ -866,11 +858,27 @@ pub fn build_session_key(wire_id: &str) -> String {
         Some(rest) => (GROUP_ID_PREFIX, rest),
         None => ("", wire_id),
     };
+    if !prefix.is_empty() {
+        if let Some(group_id) = canonical_generated_group_id(rest) {
+            return format!("group:{prefix}{group_id}");
+        }
+    }
     let take = match rest.char_indices().nth(8) {
         Some((idx, _)) => &rest[..idx],
         None => rest,
     };
     format!("group:{}{}", prefix, take)
+}
+
+fn canonical_generated_group_id(rest: &str) -> Option<&str> {
+    let group_id = rest.split_once(':').map_or(rest, |(group_id, _)| group_id);
+    let token = group_id
+        .rsplit_once('_')
+        .map_or(group_id, |(_, token)| token);
+    if token.len() != 32 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(group_id)
 }
 
 /// Current time in milliseconds since Unix epoch.
@@ -1446,6 +1454,36 @@ mod tests {
         assert_eq!(
             build_session_key("bcs_grp_demo-group-alpha:demo-run-marker"),
             "group:bcs_grp_demo-gro"
+        );
+    }
+
+    #[test]
+    fn build_session_key_preserves_generated_group_namespace() {
+        assert_eq!(
+            build_session_key("bcs_grp_bc7d52974947474da2f1cdea1c5642b6"),
+            "group:bcs_grp_bc7d52974947474da2f1cdea1c5642b6"
+        );
+        assert_eq!(
+            build_session_key("bcs_grp_dingtalk_bc7d52974947474da2f1cdea1c5642b6"),
+            "group:bcs_grp_dingtalk_bc7d52974947474da2f1cdea1c5642b6"
+        );
+        assert_eq!(
+            build_session_key("bcs_grp_dingtalk_dm_bc7d52974947474da2f1cdea1c5642b6"),
+            "group:bcs_grp_dingtalk_dm_bc7d52974947474da2f1cdea1c5642b6"
+        );
+        assert_eq!(
+            build_session_key("bcs_grp_dm_bc7d52974947474da2f1cdea1c5642b6"),
+            "group:bcs_grp_dm_bc7d52974947474da2f1cdea1c5642b6"
+        );
+    }
+
+    #[test]
+    fn build_session_key_namespaced_session_form_ignores_session_suffix() {
+        assert_eq!(
+            build_session_key(
+                "bcs_grp_dingtalk_dm_bc7d52974947474da2f1cdea1c5642b6:abcdef12"
+            ),
+            "group:bcs_grp_dingtalk_dm_bc7d52974947474da2f1cdea1c5642b6"
         );
     }
 

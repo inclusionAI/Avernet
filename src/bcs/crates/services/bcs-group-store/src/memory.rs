@@ -13,7 +13,7 @@ use bcs_service_api::{GroupMetricCount, GroupMetricsSnapshotPort};
 use bcs_service_api::{
     Group as DomainGroup, GroupKind, GroupMessage, GroupStatus, GroupStrategy, Participant,
     ParticipantMode,
-    ServiceError, ServiceResult, ServiceSpec, Workspace,
+    ServiceError, ServiceResult, ServiceSpec, Workspace, generated_group_id,
 };
 
 /// In-memory implementation of [`GroupRepoPort`].
@@ -484,7 +484,9 @@ impl GroupBuilder {
 
     /// Build the group.
     pub fn build(self) -> DomainGroup {
-        let id = self.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let id = self
+            .id
+            .unwrap_or_else(|| generated_group_id(GroupKind::Normal));
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -520,6 +522,14 @@ impl GroupBuilder {
 mod tests {
     use super::*;
     use bcs_domain::{GroupMessageType, MessageRole, ParticipantRole};
+
+    #[test]
+    fn group_builder_uses_canonical_generated_id() {
+        let group = GroupBuilder::new("driver").build();
+
+        assert!(group.id.starts_with("bcs_grp_"));
+        assert_eq!(group.id.chars().count(), 40);
+    }
 
     #[tokio::test]
     async fn test_group_store_crud() {
