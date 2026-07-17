@@ -1,6 +1,4 @@
-"""工作项免鉴权路由 — 创建工作项、添加关联关系、Arkgw 文件上传。
-
-不检查用户身份，任何人均可访问。
+"""工作项路由 — 创建工作项、添加关联关系、Arkgw 文件上传。
 """
 from __future__ import annotations
 
@@ -87,7 +85,7 @@ async def create_work_item(
     req: CreateWorkItemRequest,
     service: WorkItemServiceProtocol = Injected(WorkItemServiceProtocol),
 ) -> WorkItemApiResponse:
-    """创建 DIMA 工作项（免鉴权，透传模式）。
+    """创建 DIMA 工作项（透传模式）。
 
     请求体中 staffId 为必填，其余字段直接透传到 DIMA OpenAPI。
     """
@@ -125,7 +123,7 @@ async def create_work_item_relation(
     req: CreateRelationRequest,
     service: WorkItemServiceProtocol = Injected(WorkItemServiceProtocol),
 ) -> WorkItemApiResponse:
-    """添加 DIMA 工作项关联关系（免鉴权）。
+    """添加 DIMA 工作项关联关系。
 
     POST /api/public/dima/work-items/relation/create
     Body: {
@@ -159,7 +157,7 @@ async def append_file_to_work_item(
     req: UpdateWorkItemRequest,
     service: WorkItemServiceProtocol = Injected(WorkItemServiceProtocol),
 ) -> WorkItemApiResponse:
-    """给 DIMA 工作项关联 URL（免鉴权）。
+    """给 DIMA 工作项关联 URL。
 
     POST /api/public/dima/work-items/append-file
     Body: {
@@ -195,7 +193,7 @@ async def update_work_item_document(
     req: DimaUpdateWorkItemDocumentRequest,
     service: WorkItemServiceProtocol = Injected(WorkItemServiceProtocol),
 ) -> WorkItemApiResponse:
-    """修改 DIMA 工作项描述内容（免鉴权）。
+    """修改 DIMA 工作项描述内容。
 
     POST /api/public/dima/work-items/document/update
     Body: {
@@ -244,7 +242,7 @@ async def upload_file_to_arkgw(
     url: Optional[str] = Form(None, description="图片文件链接（转存场景）"),
     service: WorkItemServiceProtocol = Injected(WorkItemServiceProtocol),
 ) -> WorkItemApiResponse:
-    """免鉴权上传文件到 Arkgw。
+    """上传文件到 Arkgw。
 
     file 和 url 二选一：
     - file 非空时上传文件

@@ -1,11 +1,11 @@
 """Tests for bot_public_noauth router.
 
-Tests for the no-auth endpoints:
+Tests for the public endpoints:
 - GET /api/public/bots/{bot_id}/appcoding-bots
 - PATCH /api/public/bots/{bot_id}/ext
 
-These endpoints should work without any authentication.
 """
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -63,7 +63,12 @@ def mock_bot_service():
             "gmt_create": "2026-01-01T00:00:00",
             "gmt_modified": "2026-01-01T00:00:00",
             "share_policy": None,
-            "ext": {"is_domain_bot": False, "arch_domain": "测试架构域"},
+            "ext": {
+                "is_domain_bot": False,
+                "arch_domain": "测试架构域",
+                "iam_token": "secret-jwt-1",
+                "token": "enc:v1:abc",
+            },
             "template_config": {"architect_bot_id": "arch_001"},
         },
         {
@@ -73,7 +78,7 @@ def mock_bot_service():
             "owner_id": "another_user",
             "status": "PENDING",
             "public": "0",
-            "ext": {"is_domain_bot": True},
+            "ext": '{"is_domain_bot": true, "iam_token": "secret-jwt-2", "token": "enc:v1:def"}',
         },
     ])
     return svc
@@ -99,7 +104,7 @@ def mock_bot_repo():
 
 @pytest.fixture
 def client(mock_bot_service, mock_bot_repo):
-    """TestClient with mocked services - no auth required."""
+    """TestClient with mocked services."""
     app = FastAPI()
     app.include_router(router)
     attach_injector(app, Injector([_bind_services(mock_bot_service, mock_bot_repo)]))
@@ -109,42 +114,78 @@ def client(mock_bot_service, mock_bot_repo):
 # --- Tests for GET /api/public/bots/{bot_id}/appcoding-bots ---
 
 class TestListCodingBotsPublic:
-    """GET /api/public/bots/{bot_id}/appcoding-bots — no auth required."""
+    """GET /api/public/bots/{bot_id}/appcoding-bots."""
 
     def test_no_auth_required(self, client):
-        """Should work without any authentication headers or cookies."""
+        """Should respond successfully on a basic request."""
         resp = client.get("/api/public/bots/arch_001/appcoding-bots")
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
         assert len(data["data"]) == 2
 
-    def test_returns_full_fields(self, client):
-        """Should return all bot fields without filtering."""
+    def test_returns_non_sensitive_fields(self, client):
+        """非敏感字段保留返回。"""
         resp = client.get("/api/public/bots/arch_001/appcoding-bots")
         assert resp.status_code == 200
-        data = resp.json()
-        items = data.get("data", [])
+        items = resp.json().get("data", [])
         assert len(items) > 0
 
         first = items[0]
-        # Check that all fields are present
-        assert "id" in first
-        assert "bot_id" in first
-        assert "bot_name" in first
-        assert "bot_desc" in first
-        assert "owner_id" in first
-        assert "owner_name" in first
-        assert "status" in first
-        assert "public" in first
-        assert "entity_id" in first
-        assert "entity_type" in first
-        assert "engine_types" in first
-        assert "active_engine" in first
-        assert "binding_id" in first
-        assert "device_id" in first
-        assert "ext" in first
-        assert "template_config" in first
+        for non_sensitive in (
+            "id",
+            "bot_id",
+            "bot_name",
+            "bot_desc",
+            "status",
+            "public",
+            "entity_id",
+            "entity_type",
+            "owner_id",
+            "owner_name",
+            "engine_types",
+            "active_engine",
+            "ext",
+            "template_config",
+        ):
+            assert non_sensitive in first, f"{non_sensitive} 应保留"
+
+    def test_sensitive_fields_scrubbed_top_level(self, client):
+        """顶层敏感字段必须被移除。"""
+        resp = client.get("/api/public/bots/arch_001/appcoding-bots")
+        assert resp.status_code == 200
+        items = resp.json().get("data", [])
+        assert len(items) > 0
+
+        for sensitive in (
+            "iam_token",
+            "token",
+            "device_id",
+            "binding_id",
+        ):
+            for item in items:
+                assert sensitive not in item, f"{sensitive} 不得出现在响应中"
+
+    def test_sensitive_fields_scrubbed_in_ext(self, client):
+        """ext 内的敏感字段必须被递归移除（含 JSON 字符串 ext）。"""
+        resp = client.get("/api/public/bots/arch_001/appcoding-bots")
+        assert resp.status_code == 200
+        items = resp.json().get("data", [])
+
+        first = items[0]
+        assert isinstance(first["ext"], dict)
+        assert "iam_token" not in first["ext"]
+        assert "token" not in first["ext"]
+        # 非敏感 ext 字段保留
+        assert first["ext"]["arch_domain"] == "测试架构域"
+
+        # 第二个 bot 的 ext 是 JSON 字符串，机密字段需在解码层被移除
+        second = items[1]
+        assert isinstance(second["ext"], str)
+        decoded = json.loads(second["ext"])
+        assert "iam_token" not in decoded
+        assert "token" not in decoded
+        assert decoded["is_domain_bot"] is True
 
     def test_returns_ext_with_arch_domain(self, client):
         """Should return ext field containing arch_domain and is_domain_bot."""
@@ -183,10 +224,10 @@ class TestListCodingBotsPublic:
 # --- Tests for PATCH /api/public/bots/{bot_id}/ext ---
 
 class TestUpdateBotExtPublic:
-    """PATCH /api/public/bots/{bot_id}/ext — no auth required, whitelist enforced."""
+    """PATCH /api/public/bots/{bot_id}/ext — whitelist enforced."""
 
     def test_no_auth_required(self, client):
-        """Should work without any authentication."""
+        """Should respond successfully on a basic PATCH."""
         resp = client.patch(
             "/api/public/bots/default/ext",
             json={"is_domain_bot": True, "arch_domain": "新架构域"},
@@ -302,15 +343,15 @@ class TestUpdateBotExtPublic:
         assert data["error_code"] == 500
 
 
-# --- Comparison tests: ensure no-auth and auth versions return similar data ---
+# --- Comparison tests: field structure parity ---
 
 class TestNoAuthVsAuthParity:
-    """Ensure no-auth endpoints return same data format as auth versions."""
+    """Ensure endpoints return expected data format."""
 
     def test_appcoding_bots_field_structure_matches(
         self, client, mock_bot_service
     ):
-        """Fields in no-auth response should match auth version structure."""
+        """Fields in response should match expected structure."""
         resp = client.get("/api/public/bots/arch_001/appcoding-bots")
         assert resp.status_code == 200
         data = resp.json()

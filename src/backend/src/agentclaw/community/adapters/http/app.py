@@ -430,8 +430,8 @@ app.include_router(antprocess_router)
 app.include_router(antcode_router)  # AntCode 集成
 app.include_router(bot_public_auth_router)
 app.include_router(bot_public_router)
-app.include_router(bot_public_noauth_router)  # 免鉴权版本（与鉴权版本并存）
-app.include_router(workitem_noauth_router)  # 工作项免鉴权接口 (route URL still /api/public/dima)
+app.include_router(bot_public_noauth_router)  
+app.include_router(workitem_noauth_router)  # 工作项接口 (route URL still /api/public/dima)
 app.include_router(oss_to_nas_router)
 app.include_router(system_health_router)
 app.include_router(system_readiness_router)
@@ -465,7 +465,7 @@ app.include_router(verify.router)
 app.include_router(sync.router)
 app.include_router(batch_sync.router)
 app.include_router(cron_router)
-app.include_router(cron_noauth_router)  # Cron 免鉴权接口
+app.include_router(cron_noauth_router) 
 app.include_router(notify_router)
 # Harness Engineering: patch template management & diagnosis
 app.include_router(harness_router)

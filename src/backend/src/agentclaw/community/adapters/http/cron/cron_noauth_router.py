@@ -1,6 +1,4 @@
-"""Cron 免鉴权路由 — 手动触发 autoInitiate 定时任务。
-
-不检查用户身份，任何人均可访问。user_id 由调用方传入。
+"""Cron 路由 — 手动触发 autoInitiate 定时任务。
 """
 from __future__ import annotations
 
@@ -21,12 +19,12 @@ router = APIRouter(prefix="/api/public/cron", tags=["cron-noauth"])
 @router.post("/auto-initiate/run", response_model=ApiResponse)
 async def run_auto_initiate(
     bot_id: str = Query(..., description="所属 Bot ID"),
-    user_id: str = Query(..., description="用户ID（调用方传入）"),
+    user_id: str = Query(..., description="用户ID"),
     nick_name: str = Query("", description="用户花名，缺省用 user_id"),
     force: bool = Query(True, description="是否强制执行"),
     service: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> ApiResponse:
-    """免鉴权 — 通过 bot_id 手动触发 autoInitiate 定时任务。
+    """通过 bot_id 手动触发 autoInitiate 定时任务。
 
     自动查找该 bot 下类型为 autoInitiate 的 cron job 并触发执行。
     """
@@ -59,14 +57,14 @@ async def run_auto_initiate(
 @router.post("/auto-initiate/run-single", response_model=ApiResponse)
 async def run_single_auto_initiate(
     bot_id: str = Query(..., description="所属 Bot ID"),
-    user_id: str = Query(..., description="用户ID（调用方传入）"),
+    user_id: str = Query(..., description="用户ID"),
     dima_url: str = Query(..., description="DIMA 需求 URL"),
     append_message: str = Query("", description="补充说明"),
     nick_name: str = Query("", description="用户花名，缺省用 user_id"),
     model: Optional[str] = Query(None, description="模型覆盖"),
     service: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> ApiResponse:
-    """免鉴权 — 为单个 DIMA 需求直接发起会话。
+    """为单个 DIMA 需求直接发起会话。
 
     接收一个 DIMA 需求 URL，直接创建会话并发送消息。
     workflow 从 bot 的 template_config 中自动读取，无需传入。
