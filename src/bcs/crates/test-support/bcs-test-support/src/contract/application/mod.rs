@@ -5,8 +5,9 @@ use bcs_service_api::{
     BotManagementService, BotOnboardingService, BotQueryService, BotRuntimeConnectionService,
     FriendService, GroupFusionService, GroupManagementService, GroupMessageHistoryService,
     GroupProposalService, GroupQueryService, HumanActorService, MessageFlowService,
-    CreateOrganizationCommand, OrganizationAuth, OrganizationManagementService, ServiceError,
-    SystemMessageService, WorkbenchSessionService, WorkerProfileService,
+    CreateOrganizationCommand, OrganizationAuth, OrganizationManagementService,
+    OrganizationMemberAuth, ServiceError, SystemMessageService, WorkbenchSessionService,
+    WorkerProfileService,
 };
 
 pub async fn a2a_chat_service_contract_tests<T: A2aChatService + ?Sized>(_svc: &T) {}
@@ -77,7 +78,12 @@ pub async fn organization_management_service_contract_tests<
     assert_eq!(created.code, organization_code);
 
     let fetched = svc
-        .get(valid_auth, organization_code)
+        .get(
+            OrganizationMemberAuth {
+                provider_admin_token: valid_auth.provider_admin_token,
+            },
+            organization_code,
+        )
         .await
         .expect("get organization through application service");
     assert_eq!(fetched.name, "Application Contract");

@@ -29,7 +29,7 @@ pub struct CreateOrganizationCommand {
 
 #[derive(Debug, Clone)]
 pub struct UpdateOrganizationCommand {
-    pub auth: OrganizationAuth,
+    pub auth: OrganizationMemberAuth,
     pub organization_code: String,
     pub name: Option<String>,
     pub description: Option<Option<String>>,
@@ -55,7 +55,11 @@ pub struct UpdateOrganizationMemberProfileCommand {
 #[async_trait]
 pub trait OrganizationManagementService: Send + Sync {
     async fn create(&self, command: CreateOrganizationCommand) -> ServiceResult<Organization>;
-    async fn get(&self, auth: OrganizationAuth, code: &str) -> ServiceResult<Organization>;
+    async fn get(
+        &self,
+        auth: OrganizationMemberAuth,
+        code: &str,
+    ) -> ServiceResult<Organization>;
     async fn list(
         &self,
         auth: OrganizationAuth,

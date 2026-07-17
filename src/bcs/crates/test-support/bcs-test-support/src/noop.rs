@@ -663,7 +663,11 @@ impl OrganizationManagementService for NoopOrganizationManagementService {
         Err(service_not_configured("organization service"))
     }
 
-    async fn get(&self, _auth: OrganizationAuth, _code: &str) -> ServiceResult<Organization> {
+    async fn get(
+        &self,
+        _auth: OrganizationMemberAuth,
+        _code: &str,
+    ) -> ServiceResult<Organization> {
         Err(service_not_configured("organization service"))
     }
 

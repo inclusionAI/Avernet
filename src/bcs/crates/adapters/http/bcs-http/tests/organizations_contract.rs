@@ -42,6 +42,7 @@ fn test_app() -> TestApp {
 struct RecordingOrganizationManagement {
     calls: Mutex<Vec<String>>,
     next_error: Mutex<Option<ServiceError>>,
+    candidate_name_missing: AtomicBool,
     member_bot_missing: AtomicBool,
     member_missing: AtomicBool,
 }
@@ -72,9 +73,13 @@ impl OrganizationManagementService for RecordingOrganizationManagement {
         Ok(sample_org(command.auth.provider_id, command.organization_code))
     }
 
-    async fn get(&self, auth: OrganizationAuth, code: &str) -> ServiceResult<Organization> {
-        self.record(format!("get:{}:{code}", auth.provider_id)).await?;
-        Ok(sample_org(auth.provider_id, code.to_string()))
+    async fn get(
+        &self,
+        auth: OrganizationMemberAuth,
+        code: &str,
+    ) -> ServiceResult<Organization> {
+        self.record(format!("get:{}:{code}", auth.provider_admin_token)).await?;
+        Ok(sample_org("provider-a".to_string(), code.to_string()))
     }
 
     async fn list(
@@ -87,8 +92,8 @@ impl OrganizationManagementService for RecordingOrganizationManagement {
     }
 
     async fn update(&self, command: UpdateOrganizationCommand) -> ServiceResult<Organization> {
-        self.record(format!("update:{}:{}", command.auth.provider_id, command.organization_code)).await?;
-        Ok(sample_org(command.auth.provider_id, command.organization_code))
+        self.record(format!("update:{}:{}", command.auth.provider_admin_token, command.organization_code)).await?;
+        Ok(sample_org("provider-a".to_string(), command.organization_code))
     }
 
     async fn put_member(
@@ -224,7 +229,11 @@ impl OrganizationManagementService for RecordingOrganizationManagement {
         Ok(vec![OrganizationCandidateBot {
             bot_uuid: "bot-b".to_string(),
             provider_id: "provider-b".to_string(),
-            capabilities: bcs_service_api::BotCapabilities::default(),
+            capabilities: bcs_service_api::BotCapabilities {
+                name: (!self.candidate_name_missing.load(Ordering::Relaxed))
+                    .then(|| "Bot B".to_string()),
+                ..bcs_service_api::BotCapabilities::default()
+            },
         }])
     }
 }
@@ -355,13 +364,13 @@ async fn get_member_returns_not_found_when_member_is_missing() {
 }
 
 #[tokio::test]
-async fn provider_scoped_organization_routes_call_application_service() {
+async fn organization_routes_call_application_service() {
     let app = test_app();
     let cases = [
         ("POST", "/providers/provider-a/organizations", Some(json!({"organization_code":"promo-2026","name":"Promo 2026","description":"campaign"})), StatusCode::OK),
-        ("GET", "/providers/provider-a/organizations/promo-2026", None, StatusCode::OK),
+        ("GET", "/organizations/promo-2026", None, StatusCode::OK),
         ("GET", "/providers/provider-a/organizations?include_disabled=true", None, StatusCode::OK),
-        ("PATCH", "/providers/provider-a/organizations/promo-2026", Some(json!({"name":"Promo 2026 updated","description":null,"disabled":false})), StatusCode::OK),
+        ("PATCH", "/organizations/promo-2026", Some(json!({"name":"Promo 2026 updated","description":null,"disabled":false})), StatusCode::OK),
         ("PUT", "/organizations/promo-2026/members/bot-b", Some(json!({"role":"traffic"})), StatusCode::OK),
         ("DELETE", "/organizations/promo-2026/members/bot-b", None, StatusCode::NO_CONTENT),
         ("GET", "/organizations/promo-2026/members", None, StatusCode::OK),
@@ -372,6 +381,25 @@ async fn provider_scoped_organization_routes_call_application_service() {
     for (method, uri, body, expected_status) in cases {
         let response = request(&app.app, method, uri, Some("provider-token"), body).await;
         assert_eq!(response.status(), expected_status, "{method} {uri}");
+    }
+}
+
+#[tokio::test]
+async fn provider_prefixed_organization_detail_routes_are_removed() {
+    let app = test_app();
+    for (method, body) in [
+        ("GET", None),
+        ("PATCH", Some(json!({"name": "Promo 2026 updated"}))),
+    ] {
+        let response = request(
+            &app.app,
+            method,
+            "/providers/provider-a/organizations/promo-2026",
+            Some("provider-token"),
+            body,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method}");
     }
 }
 
@@ -490,6 +518,50 @@ async fn patch_member_profile_requires_admin_token_and_maps_service_errors() {
         .await;
         assert_eq!(response.status(), expected_status);
     }
+}
+
+#[tokio::test]
+async fn candidate_bots_response_exposes_name_without_capabilities() {
+    let app = test_app();
+    let response = request(
+        &app.app,
+        "GET",
+        "/providers/provider-a/organization-candidate-bots?q=traffic",
+        Some("provider-token"),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    assert_eq!(
+        json["bots"][0],
+        json!({
+            "bot_uuid": "bot-b",
+            "provider_id": "provider-b",
+            "name": "Bot B"
+        })
+    );
+    assert!(json["bots"][0].get("capabilities").is_none());
+}
+
+#[tokio::test]
+async fn candidate_bots_response_keeps_missing_name_as_null() {
+    let app = test_app();
+    app.recording.candidate_name_missing.store(true, Ordering::Relaxed);
+    let response = request(
+        &app.app,
+        "GET",
+        "/providers/provider-a/organization-candidate-bots",
+        Some("provider-token"),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    assert_eq!(json["bots"][0]["name"], Value::Null);
+    assert!(json["bots"][0].get("capabilities").is_none());
 }
 
 #[tokio::test]
@@ -613,12 +685,12 @@ async fn member_page_service_contract_applies_page_query() {
 }
 
 #[tokio::test]
-async fn provider_scoped_organization_routes_reject_missing_bearer_token() {
+async fn organization_detail_routes_reject_missing_bearer_token() {
     let app = test_app();
     let response = request(
         &app.app,
         "GET",
-        "/providers/provider-a/organizations/promo-2026",
+        "/organizations/promo-2026",
         None,
         None,
     )
@@ -627,7 +699,7 @@ async fn provider_scoped_organization_routes_reject_missing_bearer_token() {
 }
 
 #[tokio::test]
-async fn provider_scoped_organization_routes_map_service_errors() {
+async fn organization_detail_routes_map_service_errors() {
     let app = test_app();
     let cases = [
         (ServiceError::Unauthorized("bad token".to_string()), StatusCode::UNAUTHORIZED),
@@ -644,7 +716,7 @@ async fn provider_scoped_organization_routes_map_service_errors() {
         let response = request(
             &app.app,
             "GET",
-            "/providers/provider-a/organizations/promo-2026",
+            "/organizations/promo-2026",
             Some("provider-token"),
             None,
         )

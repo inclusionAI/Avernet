@@ -60,9 +60,13 @@ impl OrganizationManagementService for OrganizationManagement {
             .await
     }
 
-    async fn get(&self, auth: OrganizationAuth, code: &str) -> ServiceResult<Organization> {
-        self.authenticate(&auth).await?;
-        self.core.get_for_manager(&auth.provider_id, code).await
+    async fn get(
+        &self,
+        auth: OrganizationMemberAuth,
+        code: &str,
+    ) -> ServiceResult<Organization> {
+        let provider_id = self.authenticate_member(&auth).await?;
+        self.core.get_for_manager(&provider_id, code).await
     }
 
     async fn list(
@@ -77,10 +81,10 @@ impl OrganizationManagementService for OrganizationManagement {
     }
 
     async fn update(&self, command: UpdateOrganizationCommand) -> ServiceResult<Organization> {
-        self.authenticate(&command.auth).await?;
+        let provider_id = self.authenticate_member(&command.auth).await?;
         self.core
             .update_for_manager(
-                &command.auth.provider_id,
+                &provider_id,
                 &command.organization_code,
                 command.name.as_deref(),
                 command

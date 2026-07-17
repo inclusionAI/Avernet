@@ -79,7 +79,7 @@ fn build_api_routes() -> Router<HttpAppState> {
                 .post(routes::organizations::create_organization),
         )
         .route(
-            "/providers/{provider_id}/organizations/{organization_code}",
+            "/organizations/{organization_code}",
             get(routes::organizations::get_organization)
                 .patch(routes::organizations::patch_organization),
         )
