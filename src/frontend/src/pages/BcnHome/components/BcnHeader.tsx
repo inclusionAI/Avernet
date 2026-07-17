@@ -2,75 +2,102 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * BcnHeader - 产品首页 sticky 顶栏
- *
- * 左：BCN logo（蓝圆角 + Bot 图标 + 双行文字）。
- * 中：锚点导航 pill 组（接入方式/特性/场景），IntersectionObserver 高亮当前 section + 平滑滚动。
- * 右：用户头像（花名首字，蓝底圆）+ 花名（取 useBcnIdentity；未登录降级为占位头像、不显示名字）。
- *
- * 注：本落地页为像素级还原设计稿，使用设计稿精确十六进制色、bespoke pill 控件，
- * 不套 lavender 色板 / Button whitelist（仅限本页的局部例外）。
+ * BcnHeader - 产品首页 sticky 顶栏。
+ * 页面导航和视觉以 GitHub 最新 BcnHome 为基线，右侧叠加登录/用户菜单。
  */
 
-import { Bot } from 'lucide-react';
-import React, { useEffect, useState } from 'react';
-import { useBcnIdentity } from '../hooks/useBcnIdentity';
+import Button from '@/components/Button';
+import type { BcnAuthUser } from '@/stores/bcnAuthStore';
+import { LogOut } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
 
 const NAV_ITEMS = [
   { label: '接入方式', href: '#access' },
   { label: 'Avernet', href: '#scenarios' },
 ];
 
-const BcnHeader: React.FC = () => {
-  const { nickName } = useBcnIdentity();
+interface BcnHeaderProps {
+  user: BcnAuthUser | null;
+  isAuthenticated: boolean;
+  isLoggingOut?: boolean;
+  onLogin: () => void;
+  onLogout: () => void;
+}
+
+const BcnHeader: React.FC<BcnHeaderProps> = ({
+  user,
+  isAuthenticated,
+  isLoggingOut,
+  onLogin,
+  onLogout,
+}) => {
   const [activeSection, setActiveSection] = useState('#access');
-  const avatarText = nickName?.slice(0, 1) || '用';
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const displayName = user?.name || user?.userId || '用户';
+  const avatarText = displayName.slice(0, 1);
 
   useEffect(() => {
-    const observers = NAV_ITEMS.map((item) => {
-      const element = document.querySelector(item.href);
-      if (!element) return null;
-      const observer = new IntersectionObserver(
-        (entries) => {
-          entries.forEach((entry) => {
-            if (entry.isIntersecting) setActiveSection(item.href);
-          });
-        },
-        { rootMargin: '-120px 0px -55% 0px', threshold: 0.15 },
-      );
-      observer.observe(element);
-      return observer;
-    });
-    return () => observers.forEach((o) => o?.disconnect());
+    const updateActiveSection = () => {
+      const headerOffset = 120;
+      const currentItem = [...NAV_ITEMS]
+        .reverse()
+        .find((item) => {
+          const element = document.querySelector(item.href);
+          if (!element) return false;
+          return element.getBoundingClientRect().top <= headerOffset;
+        });
+
+      setActiveSection(currentItem?.href || NAV_ITEMS[0].href);
+    };
+
+    updateActiveSection();
+    document.addEventListener('scroll', updateActiveSection, true);
+    window.addEventListener('resize', updateActiveSection);
+
+    return () => {
+      document.removeEventListener('scroll', updateActiveSection, true);
+      window.removeEventListener('resize', updateActiveSection);
+    };
   }, []);
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [menuOpen]);
+
   const scrollTo = (href: string) => {
+    setActiveSection(href);
     document
       .querySelector(href)
       ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   return (
-    <header className="sticky top-0 z-30 border-b border-[#dbe4f0] bg-white/88 backdrop-blur-xl shadow-[0_10px_30px_-24px_rgba(29,78,216,0.35)]">
+    <header className="fixed inset-x-0 top-0 z-50 border-b border-[#dbe4f0] bg-white/88 shadow-[0_10px_30px_-24px_rgba(29,78,216,0.35)] backdrop-blur-xl">
       <div className="mx-auto flex max-w-[1200px] items-center justify-between gap-6 px-8 py-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#1d4ed8] text-white shadow-sm">
-            <Bot className="h-5 w-5" />
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-[#1a2332]">Avernet</p>
-            <p className="text-xs tracking-[0.08em] text-[#8b95a5]">
-              多智能体协作平台
-            </p>
-          </div>
+          <img
+            src="/Avernet-logotitle.png"
+            alt="Avernet"
+            className="h-11 w-auto object-contain"
+          />
         </div>
 
         <div className="flex items-center gap-4">
           <nav className="hidden items-center gap-2 rounded-full border border-[#e6edf7] bg-[#f8fbff] p-1.5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.5)] md:flex">
             {NAV_ITEMS.map((item) => (
-              <button
+              <Button
                 key={item.label}
                 type="button"
+                variant="default"
+                ghost
                 onClick={() => scrollTo(item.href)}
                 className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
                   activeSection === item.href
@@ -79,20 +106,61 @@ const BcnHeader: React.FC = () => {
                 }`}
               >
                 {item.label}
-              </button>
+              </Button>
             ))}
           </nav>
 
-          <div className="flex items-center gap-3 rounded-full border border-[#e6edf7] bg-white px-3 py-2 shadow-sm">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#1d4ed8] text-sm font-semibold text-white">
-              {avatarText}
+          {!isAuthenticated ? (
+            <Button
+              type="button"
+              onClick={onLogin}
+              className="rounded-full bg-[#1d4ed8] px-5 text-sm font-semibold text-white hover:bg-[#1e40af]"
+            >
+              登录
+            </Button>
+          ) : (
+            <div ref={menuRef} className="relative">
+              <Button
+                type="button"
+                variant="default"
+                soft
+                onClick={() => setMenuOpen((open) => !open)}
+                className="h-auto rounded-full border border-[#e6edf7] bg-white px-3 py-2 shadow-sm hover:bg-white"
+              >
+                {user?.avatar ? (
+                  <img
+                    src={user.avatar}
+                    alt={displayName}
+                    className="h-9 w-9 rounded-full object-cover"
+                  />
+                ) : (
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#1d4ed8] text-sm font-semibold text-white">
+                    {avatarText}
+                  </span>
+                )}
+                <span className="max-w-[120px] truncate text-sm font-semibold text-[#1a2332]">
+                  {displayName}
+                </span>
+              </Button>
+
+              {menuOpen && (
+                <div className="absolute right-0 top-[calc(100%+8px)] w-44 rounded-2xl border border-[#e6edf7] bg-white p-2 shadow-lg">
+                  <Button
+                    type="button"
+                    variant="danger"
+                    ghost
+                    fullWidth
+                    loading={isLoggingOut}
+                    leftIcon={<LogOut className="h-4 w-4" />}
+                    onClick={onLogout}
+                    className="justify-start rounded-xl px-3 py-2 text-sm"
+                  >
+                    退出登录
+                  </Button>
+                </div>
+              )}
             </div>
-            {nickName && (
-              <span className="text-sm font-semibold text-[#1a2332]">
-                {nickName}
-              </span>
-            )}
-          </div>
+          )}
         </div>
       </div>
     </header>

@@ -49,8 +49,8 @@ pub async fn verify_oauth_session(
     //    token was superseded (single-session) or revoked on logout (cleared
     //    hash) — treat as unauthenticated, not a hard error.
     let presented_hash = token_hash(&token);
-    match user_port.get_identity_by_token(&presented_hash).await {
-        Ok(Some(info)) if info.user_id == claims.sub => {}
+    let info = match user_port.get_identity_by_token(&presented_hash).await {
+        Ok(Some(info)) if info.user_id == claims.sub => info,
         Ok(_) => return Ok(None),
         Err(e) => {
             return Err(AuthError::LookupFailed(format!(
@@ -63,9 +63,13 @@ pub async fn verify_oauth_session(
     // 4. Build principal. `claims.src` is the provider that issued this
     //    session JWT; since we signed it, the name is already trusted and is
     //    carried through verbatim — no per-provider allowlist here, so new
-    //    providers need no change to this crate.
+    //    providers need no change to this crate. Display fields (`user_name`,
+    //    `avatar`) are carried from the identity row resolved in step 3 — the
+    //    store already returned them, so no extra IO is needed here.
     let mut principal = AuthPrincipal::new(AuthSource::OAuth(claims.src.clone()));
     principal.user_id = Some(claims.sub.clone());
+    principal.user_name = info.user_name.or(info.external_user_name);
+    principal.avatar = info.avatar;
 
     Ok(Some(principal))
 }

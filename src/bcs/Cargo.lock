@@ -291,6 +291,7 @@ dependencies = [
  "bcs-group-store",
  "bcs-http",
  "bcs-judge",
+ "bcs-jwt",
  "bcs-leader-election",
  "bcs-llm-api",
  "bcs-llm-openai-compatible",

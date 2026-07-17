@@ -171,3 +171,4 @@ bcs = { path = ".", features = ["test-utils"] }
 bcs-cli = { workspace = true }
 bcs-services-container = { workspace = true, features = ["test-support"] }
 serial_test = "3"
+bcs-jwt = { workspace = true }

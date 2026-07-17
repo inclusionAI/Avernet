@@ -2848,73 +2848,99 @@ impl BcsServer {
         Ok(Self { config, state })
     }
 
-    /// Build the OAuth `/auth/*` router when OAuth is configured.
+    /// Build the `/auth/*` router.
     ///
-    /// Returns `None` (routes absent → 404) unless OAuth is configured with a
-    /// non-empty `jwt_secret`, a shared `UserIdentityPort` exists, and at least
-    /// one provider is configured. Provider creds and `cookie_secure`/`env`/
-    /// `jwt_secret` come from the resolved `auth_config` (see
+    /// Two mounting paths:
+    /// 1. **Full OAuth** — when `[auth.oauth]` is configured with a non-empty
+    ///    `jwt_secret`, an `http(s)` `base_url`, and at least one provider:
+    ///    mounts the complete OAuth protocol routes with the auth chain
+    ///    injected as the `/auth/user` fallback.
+    /// 2. **Identity-only** — when no usable OAuth config exists but an auth
+    ///    chain (e.g. the `local` mock plugin) is present: mounts just
+    ///    `GET /auth/user`, resolved solely via the chain. This lets deployments
+    ///    use `/auth/user` without configuring any OAuth provider.
+    ///
+    /// `jwt_secret` comes from the resolved `auth_config` (see
     /// `auth_wiring::resolve_auth_config`). Currently only `google` is wired.
-    fn build_oauth_router(&self) -> Option<Router> {
+    fn build_auth_router(&self) -> Option<Router> {
+        let auth_chain = Arc::clone(&self.state.auth_chain);
+
+        // --- Case 1: full OAuth configuration ------------------------------
         // `auth_config.oauth` is the resolved form: present only when a
         // non-empty jwt_secret was configured (I6 gate lives in resolve).
-        let resolved = self.state.auth_config.oauth.as_ref()?;
-        let raw = self.config.auth.oauth.as_ref()?;
-        let user_port = self.state.user_identity_port.clone()?;
+        if let (Some(resolved), Some(raw)) =
+            (self.state.auth_config.oauth.as_ref(), self.config.auth.oauth.as_ref())
+        {
+            if !resolved.jwt_secret.is_empty() {
+                let base = resolved.base_url.trim();
+                if base.starts_with("http://") || base.starts_with("https://") {
+                    let mut providers: std::collections::HashMap<
+                        String,
+                        Arc<dyn bcs_auth_api::OAuthProvider>,
+                    > = std::collections::HashMap::new();
 
-        if resolved.jwt_secret.is_empty() {
-            warn!("[auth.oauth] jwt_secret is empty; /auth/* not mounted");
-            return None;
-        }
+                    // Build every configured provider instance via the
+                    // composition-root factory. A misconfigured provider
+                    // (unknown kind / empty client_id) is an operator error:
+                    // fail fast at startup rather than silently dropping it and
+                    // surfacing a runtime 404.
+                    for (name, cfg) in &raw.providers {
+                        match crate::auth_wiring::build_oauth_provider(name, cfg) {
+                            Ok(provider) => {
+                                providers.insert(name.clone(), provider);
+                            }
+                            Err(e) => {
+                                panic!("Invalid OAuth provider configuration: {e}");
+                            }
+                        }
+                    }
 
-        let base = resolved.base_url.trim();
-        if !(base.starts_with("http://") || base.starts_with("https://")) {
-            warn!(
-                base_url = %resolved.base_url,
-                "[auth.oauth] base_url must be an http(s) URL; /auth/* not mounted"
-            );
-            return None;
-        }
+                    if !providers.is_empty() {
+                        if let Some(user_port) = self.state.user_identity_port.clone() {
+                            let route_state = Arc::new(bcs_http::oauth::OAuthRouteState::new(
+                                &resolved.jwt_secret,
+                                user_port,
+                                providers,
+                                resolved.clone(),
+                                Some(auth_chain),
+                            ));
 
-        let mut providers: std::collections::HashMap<
-            String,
-            Arc<dyn bcs_auth_api::OAuthProvider>,
-        > = std::collections::HashMap::new();
-
-        // Build every configured provider instance via the composition-root
-        // factory. A misconfigured provider (unknown kind / empty client_id) is
-        // an operator error: fail fast at startup rather than silently dropping
-        // it and surfacing a runtime 404.
-        for (name, cfg) in &raw.providers {
-            match crate::auth_wiring::build_oauth_provider(name, cfg) {
-                Ok(provider) => {
-                    providers.insert(name.clone(), provider);
+                            info!(
+                                providers = ?route_state.providers.keys().collect::<Vec<_>>(),
+                                cookie_secure = resolved.cookie_secure,
+                                env = %resolved.env,
+                                "Mounting OAuth /auth/* routes"
+                            );
+                            return Some(bcs_http::oauth::routes(route_state));
+                        }
+                    } else {
+                        warn!(
+                            "[auth.oauth] present but no OAuth providers configured; \
+                             mounting identity-only /auth/user"
+                        );
+                    }
+                } else {
+                    warn!(
+                        base_url = %resolved.base_url,
+                        "[auth.oauth] base_url must be an http(s) URL"
+                    );
                 }
-                Err(e) => {
-                    panic!("Invalid OAuth provider configuration: {e}");
-                }
+            } else {
+                warn!("[auth.oauth] jwt_secret is empty");
             }
         }
 
-        if providers.is_empty() {
-            warn!("[auth.oauth] present but no OAuth providers configured; /auth/* not mounted");
-            return None;
+        // --- Case 2: identity-only (chain-backed, no OAuth) -----------------
+        if let Some(user_port) = self.state.user_identity_port.clone() {
+            let route_state = Arc::new(bcs_http::oauth::OAuthRouteState::new_chain_only(
+                user_port,
+                auth_chain,
+            ));
+            info!("Mounting identity-only /auth/user (no OAuth providers configured)");
+            return Some(bcs_http::oauth::identity_routes(route_state));
         }
 
-        let route_state = Arc::new(bcs_http::oauth::OAuthRouteState::new(
-            &resolved.jwt_secret,
-            user_port,
-            providers,
-            resolved.clone(),
-        ));
-
-        info!(
-            providers = ?route_state.providers.keys().collect::<Vec<_>>(),
-            cookie_secure = resolved.cookie_secure,
-            env = %resolved.env,
-            "Mounting OAuth /auth/* routes"
-        );
-        Some(bcs_http::oauth::routes(route_state))
+        None
     }
 
     /// Build the Axum router.
@@ -2935,7 +2961,7 @@ impl BcsServer {
 
         let mut router = router.with_state(Arc::clone(&self.state)).merge(api_router);
 
-        if let Some(oauth_router) = self.build_oauth_router() {
+        if let Some(oauth_router) = self.build_auth_router() {
             router = router.merge(oauth_router);
         }
 

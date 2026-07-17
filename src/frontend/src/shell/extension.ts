@@ -32,12 +32,16 @@ const defaultAuthAdapter: AuthAdapter = {
     return null;
   },
   async refresh() {},
-  /** 开源默认 human 身份：走 /bcnproxy/me；未登录后端字段全 null → 返回 null。 */
+  /** 开源默认 human 身份：走 /auth/user；未登录或异常时返回 null。 */
   async getCurrentUser() {
     try {
-      const u = await BcnController.getMe();
-      return u?.staff_no
-        ? { userId: u.staff_no, nickName: u.nick_name || u.staff_no }
+      const u = await BcnController.getAuthUser();
+      return u?.user_id
+        ? {
+            userId: u.user_id,
+            nickName: u.name || u.user_id,
+            avatarUrl: u.avatar ?? undefined,
+          }
         : null;
     } catch (error) {
       console.error('[defaultAuthAdapter] getCurrentUser', error);
