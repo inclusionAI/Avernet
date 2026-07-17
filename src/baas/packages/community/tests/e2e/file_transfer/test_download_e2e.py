@@ -27,7 +27,6 @@ pytestmark = [pytest.mark.e2e, pytest.mark.sync]
 
 
 class TestDownloadE2E:
-
     pytestmark = pytest.mark.e2e
 
     @pytest.mark.asyncio
@@ -62,6 +61,7 @@ class TestDownloadE2E:
             bot_created = True
             try:
                 from ...conftest import activate_test_bot
+
                 await activate_test_bot(api, bot)
             except Exception:
                 pass  # Activation is best-effort for non-hook bots
@@ -132,12 +132,10 @@ class TestDownloadE2E:
                 for c in mock_ticket_repo.update_status.call_args_list
             ]
             assert (transfer_id, "PUSHING") in status_transitions, (
-                f"Expected PUSHING transition not found. "
-                f"Got: {status_transitions}"
+                f"Expected PUSHING transition not found. Got: {status_transitions}"
             )
             assert (transfer_id, "DONE") in status_transitions, (
-                f"Expected DONE transition not found. "
-                f"Got: {status_transitions}"
+                f"Expected DONE transition not found. Got: {status_transitions}"
             )
 
             # ── Step 7: Verify download_url was written ────────────────

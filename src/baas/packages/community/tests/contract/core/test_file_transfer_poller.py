@@ -126,16 +126,19 @@ class TestFileTransferPollerContract:
         )
 
         import asyncio
+
         result = asyncio.run(poller._process_single_ticket(ticket))  # noqa: SLF001
 
         assert result == "pull_success"
         # Verify status transitions: UPLOAD_COMPLETED, DONE
         # First positional arg is transfer_id; second is new_status
         status_transitions = [
-            (c.args[0], c.args[1])
-            for c in ticket_repo.update_status.call_args_list
+            (c.args[0], c.args[1]) for c in ticket_repo.update_status.call_args_list
         ]
-        assert ("tf-00000000-0000-0000-0000-000000000001", "UPLOAD_COMPLETED") in status_transitions
+        assert (
+            "tf-00000000-0000-0000-0000-000000000001",
+            "UPLOAD_COMPLETED",
+        ) in status_transitions
         assert ("tf-00000000-0000-0000-0000-000000000001", "DONE") in status_transitions
 
     # ── retention path ────────────────────────────────────────────────
@@ -154,6 +157,7 @@ class TestFileTransferPollerContract:
         )
 
         import asyncio
+
         result = asyncio.run(poller._process_single_ticket(ticket))  # noqa: SLF001
 
         assert result == "retention_done"
@@ -161,10 +165,12 @@ class TestFileTransferPollerContract:
         paas_facade.pull_file.assert_not_called()
         # Status transitions: UPLOAD_COMPLETED -> DONE
         status_transitions = [
-            (c.args[0], c.args[1])
-            for c in ticket_repo.update_status.call_args_list
+            (c.args[0], c.args[1]) for c in ticket_repo.update_status.call_args_list
         ]
-        assert ("tf-00000000-0000-0000-0000-000000000001", "UPLOAD_COMPLETED") in status_transitions
+        assert (
+            "tf-00000000-0000-0000-0000-000000000001",
+            "UPLOAD_COMPLETED",
+        ) in status_transitions
         assert ("tf-00000000-0000-0000-0000-000000000001", "DONE") in status_transitions
 
     # ── timeout path ──────────────────────────────────────────────────
@@ -186,6 +192,7 @@ class TestFileTransferPollerContract:
         )
 
         import asyncio
+
         result = asyncio.run(poller._process_single_ticket(ticket))  # noqa: SLF001
 
         assert result == "timed_out"

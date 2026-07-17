@@ -23,7 +23,6 @@ pytestmark = [pytest.mark.e2e, pytest.mark.sync]
 
 
 class TestUploadE2E:
-
     pytestmark = pytest.mark.e2e
 
     @pytest.mark.asyncio
@@ -56,6 +55,7 @@ class TestUploadE2E:
             bot_created = True
             try:
                 from ...conftest import activate_test_bot
+
                 await activate_test_bot(api, bot)
             except Exception:
                 pass  # Activation is best-effort for non-hook bots
@@ -117,8 +117,7 @@ class TestUploadE2E:
                 f"Got: {status_transitions}"
             )
             assert (data["transfer_id"], "DONE") in status_transitions, (
-                f"Expected DONE transition not found. "
-                f"Got: {status_transitions}"
+                f"Expected DONE transition not found. Got: {status_transitions}"
             )
 
             # ── Step 7: Verify device pull was triggered ───────────────

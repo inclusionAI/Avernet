@@ -1457,7 +1457,9 @@ class TestPullFileFromUrl:
         exec_result.stderr = ""
         mock_sandbox.exec_command.return_value = exec_result
 
-        await service.pull_file_from_url("dev-001", "http://source/file", "/home/file", 300)
+        await service.pull_file_from_url(
+            "dev-001", "http://source/file", "/home/file", 300
+        )
 
         mock_sandbox.exec_command.assert_called_once()
 
@@ -1526,6 +1528,8 @@ class TestPushFileToUrl:
         exec_result.stderr = ""
         mock_sandbox.exec_command.return_value = exec_result
 
-        await service.push_file_to_url("dev-001", "/home/file", "http://target/url", 300)
+        await service.push_file_to_url(
+            "dev-001", "/home/file", "http://target/url", 300
+        )
 
         mock_sandbox.exec_command.assert_called_once()

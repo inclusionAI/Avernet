@@ -12,13 +12,11 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from secbaas.community.core.repository.file_transfer_ticket import (
     TicketRecord,
     TicketRepository,
-    TransferNotFoundError,
-    TransferStateConflictError,
 )
 from secbaas.community.core.service.distributed_lock import DistributedLockService
 from secbaas.community.core.service.paas import PaasServiceFacade
@@ -98,7 +96,9 @@ class FileTransferPoller:
             tickets = [t for t in all_tickets if t.direction == "UPLOAD"]
             # DOWNLOAD direction: CREATED only (D-19)
             download_tickets = [
-                t for t in all_tickets if t.direction == "DOWNLOAD" and t.status == "CREATED"
+                t
+                for t in all_tickets
+                if t.direction == "DOWNLOAD" and t.status == "CREATED"
             ]
         except Exception:
             log.exception("[FileTransferPoller] Failed to query pending uploads")
@@ -118,7 +118,10 @@ class FileTransferPoller:
                 return await self._process_single_ticket(ticket)
 
         all_tickets_for_processing = tickets + download_tickets
-        log.info("[FileTransferPoller] Found %d pending tickets", len(all_tickets_for_processing))
+        log.info(
+            "[FileTransferPoller] Found %d pending tickets",
+            len(all_tickets_for_processing),
+        )
         results = await asyncio.gather(
             *[_process_with_semaphore(t) for t in all_tickets_for_processing]
         )
@@ -164,7 +167,8 @@ class FileTransferPoller:
         if ticket.status in ("CANCELLED", "DELETED", "FAILED", "DONE"):
             log.info(
                 "[FileTransferPoller] Skipping ticket %s — terminal state: %s",
-                transfer_id, ticket.status,
+                transfer_id,
+                ticket.status,
             )
             return "skipped"
 
@@ -178,7 +182,7 @@ class FileTransferPoller:
             # Timeout check: gmt_create + upload_timeout_seconds < now
             if ticket.gmt_create + timedelta(
                 seconds=self._config.upload_timeout_seconds
-            ) < datetime.now(tz=timezone.utc).replace(tzinfo=None):
+            ) < datetime.now(tz=UTC).replace(tzinfo=None):
                 log.warning(
                     "[FileTransferPoller] Ticket %s timed out (created=%s, timeout=%ss)",
                     transfer_id,
@@ -245,9 +249,7 @@ class FileTransferPoller:
                     return "retention_done"
 
                 # Normal path: UPLOAD_COMPLETED -> pull_file -> DONE
-                self._ticket_repo.update_status(
-                    transfer_id, "UPLOAD_COMPLETED", None
-                )
+                self._ticket_repo.update_status(transfer_id, "UPLOAD_COMPLETED", None)
 
                 download_url = await asyncio.to_thread(
                     self._file_backend.generate_download_url,
@@ -286,24 +288,12 @@ class FileTransferPoller:
         except Exception as e:
             error_msg = str(e)[:500]
             log.error(
-                "[FileTransferPoller] Ticket %s failed: %s",
+                "[FileTransferPoller] Transient error processing ticket %s: %s. "
+                "Skipping for retry in next poller cycle.",
                 transfer_id,
                 error_msg,
                 exc_info=True,
             )
-            try:
-                self._ticket_repo.update_status(transfer_id, "FAILED", error_msg)
-            except (TransferNotFoundError, TransferStateConflictError):
-                log.info(
-                    "[FileTransferPoller] Ticket %s already in terminal state, "
-                    "skipping FAILED mark",
-                    transfer_id,
-                )
-            except Exception:
-                log.exception(
-                    "[FileTransferPoller] Failed to mark ticket %s as FAILED",
-                    transfer_id,
-                )
             return "failed"
 
     async def _process_download_ticket(self, ticket: TicketRecord) -> str:
@@ -320,7 +310,8 @@ class FileTransferPoller:
         if ticket.status in ("CANCELLED", "DELETED", "FAILED", "DONE"):
             log.info(
                 "[FileTransferPoller] Skipping DOWNLOAD ticket %s — terminal state: %s",
-                transfer_id, ticket.status,
+                transfer_id,
+                ticket.status,
             )
             return "skipped"
 
@@ -334,7 +325,7 @@ class FileTransferPoller:
             # Timeout check (D-18: same upload_timeout_seconds)
             if ticket.gmt_create + timedelta(
                 seconds=self._config.upload_timeout_seconds
-            ) < datetime.now(tz=timezone.utc).replace(tzinfo=None):
+            ) < datetime.now(tz=UTC).replace(tzinfo=None):
                 log.warning(
                     "[FileTransferPoller] DOWNLOAD ticket %s timed out "
                     "(created=%s, timeout=%ss)",
@@ -382,8 +373,7 @@ class FileTransferPoller:
                     return "oss_not_ready"
 
                 log.info(
-                    "[FileTransferPoller] OSS object detected for "
-                    "DOWNLOAD ticket %s",
+                    "[FileTransferPoller] OSS object detected for DOWNLOAD ticket %s",
                     transfer_id,
                 )
 
@@ -399,9 +389,7 @@ class FileTransferPoller:
                 )
 
                 # Write download_url to ticket (D-17 step 3)
-                self._ticket_repo.update_urls(
-                    transfer_id, download_url=download_url
-                )
+                self._ticket_repo.update_urls(transfer_id, download_url=download_url)
 
                 # Transition PUSHING → DONE (D-17 step 4)
                 self._ticket_repo.update_status(transfer_id, "DONE", None)
@@ -423,22 +411,10 @@ class FileTransferPoller:
         except Exception as e:
             error_msg = str(e)[:500]
             log.error(
-                "[FileTransferPoller] DOWNLOAD ticket %s failed: %s",
+                "[FileTransferPoller] Transient error processing DOWNLOAD ticket %s: %s. "
+                "Skipping for retry in next poller cycle.",
                 transfer_id,
                 error_msg,
                 exc_info=True,
             )
-            try:
-                self._ticket_repo.update_status(transfer_id, "FAILED", error_msg)
-            except (TransferNotFoundError, TransferStateConflictError):
-                log.info(
-                    "[FileTransferPoller] DOWNLOAD ticket %s already in "
-                    "terminal state, skipping FAILED mark",
-                    transfer_id,
-                )
-            except Exception:
-                log.exception(
-                    "[FileTransferPoller] Failed to mark DOWNLOAD ticket %s as FAILED",
-                    transfer_id,
-                )
             return "failed"

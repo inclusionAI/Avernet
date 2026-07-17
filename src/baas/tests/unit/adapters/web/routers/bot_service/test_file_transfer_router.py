@@ -16,7 +16,9 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from secbaas.community.adapters.web.routers.bot_service.file_transfer_router import router
+from secbaas.community.adapters.web.routers.bot_service.file_transfer_router import (
+    router,
+)
 from secbaas.community.api.bot_runtime import (
     BotNotFoundError,
     CancelUploadResponse,
@@ -115,7 +117,9 @@ async def test_get_upload_url_bot_not_found(mock_dispatcher):
 @pytest.mark.asyncio
 async def test_get_upload_url_no_devices_found(mock_dispatcher):
     """POST upload-url with NoDevicesFoundError returns 404."""
-    mock_dispatcher.dispatch_get_upload_url.side_effect = NoDevicesFoundError("no devices")
+    mock_dispatcher.dispatch_get_upload_url.side_effect = NoDevicesFoundError(
+        "no devices"
+    )
 
     resp = await _post(
         "/api/v1/bots/t1/bot-001/files/upload-url",
@@ -129,7 +133,9 @@ async def test_get_upload_url_no_devices_found(mock_dispatcher):
 @pytest.mark.asyncio
 async def test_get_upload_url_no_active_devices(mock_dispatcher):
     """POST upload-url with NoActiveDevicesError returns 503."""
-    mock_dispatcher.dispatch_get_upload_url.side_effect = NoActiveDevicesError("none active")
+    mock_dispatcher.dispatch_get_upload_url.side_effect = NoActiveDevicesError(
+        "none active"
+    )
 
     resp = await _post(
         "/api/v1/bots/t1/bot-001/files/upload-url",
@@ -143,7 +149,9 @@ async def test_get_upload_url_no_active_devices(mock_dispatcher):
 @pytest.mark.asyncio
 async def test_get_upload_url_not_implemented(mock_dispatcher):
     """POST upload-url with NotImplementedError returns 501."""
-    mock_dispatcher.dispatch_get_upload_url.side_effect = NotImplementedError("not ready")
+    mock_dispatcher.dispatch_get_upload_url.side_effect = NotImplementedError(
+        "not ready"
+    )
 
     resp = await _post(
         "/api/v1/bots/t1/bot-001/files/upload-url",
@@ -173,7 +181,8 @@ async def test_get_upload_url_device_facade_exception(mock_dispatcher):
     assert resp.status_code == 502
     assert resp.json()["detail"]["error"] == "PLATFORM_ERROR"
 
-# 
+
+#
 # @pytest.mark.asyncio
 # async def test_get_upload_url_device_facade_no_original_error(mock_dispatcher):
 #     """POST upload-url with DeviceFacadeException without original_error returns FACADE_ERROR."""
@@ -188,7 +197,7 @@ async def test_get_upload_url_device_facade_exception(mock_dispatcher):
 #         "/api/v1/bots/t1/bot-001/files/upload-url",
 #         json_data={"device_path": "/x", "filename": "x"},
 #     )
-# 
+#
 #     assert resp.status_code == 502
 #     assert resp.json()["detail"]["error"] == "FACADE_ERROR"
 
@@ -242,7 +251,9 @@ async def test_get_download_url_bot_not_found(mock_dispatcher):
 @pytest.mark.asyncio
 async def test_get_download_url_no_devices_found(mock_dispatcher):
     """POST download-url with NoDevicesFoundError returns 404."""
-    mock_dispatcher.dispatch_get_download_url.side_effect = NoDevicesFoundError("no devices")
+    mock_dispatcher.dispatch_get_download_url.side_effect = NoDevicesFoundError(
+        "no devices"
+    )
     resp = await _post(
         "/api/v1/bots/t1/bot-001/files/download-url",
         json_data={"device_path": "/x"},
@@ -357,7 +368,9 @@ async def test_complete_upload_oss_object_not_found(mock_dispatcher):
 @pytest.mark.asyncio
 async def test_complete_upload_state_conflict(mock_dispatcher):
     """POST complete upload with TransferStateConflictError returns 409."""
-    mock_dispatcher.dispatch_complete_upload.side_effect = TransferStateConflictError("bad state")
+    mock_dispatcher.dispatch_complete_upload.side_effect = TransferStateConflictError(
+        "bad state"
+    )
     resp = await _post(
         "/api/v1/bots/t1/bot-001/files/upload-url/tf-001/complete",
     )
@@ -423,7 +436,9 @@ async def test_cancel_upload_transfer_not_found(mock_dispatcher):
 @pytest.mark.asyncio
 async def test_cancel_upload_state_conflict(mock_dispatcher):
     """DELETE cancel upload with TransferStateConflictError returns 409."""
-    mock_dispatcher.dispatch_cancel_upload.side_effect = TransferStateConflictError("bad state")
+    mock_dispatcher.dispatch_cancel_upload.side_effect = TransferStateConflictError(
+        "bad state"
+    )
     resp = await _delete(
         "/api/v1/bots/t1/bot-001/files/upload-url/tf-001",
     )
@@ -515,6 +530,7 @@ async def test_delete_staging_transfer_not_found(mock_dispatcher):
 async def test_delete_staging_not_terminal(mock_dispatcher):
     """DELETE staging with TransferNotTerminalError returns 409."""
     from secbaas.community.api.bot_runtime import TransferNotTerminalError as TNE
+
     mock_dispatcher.dispatch_delete_staging.side_effect = TNE(
         transfer_id="tf-001",
         status="CREATED",
@@ -571,7 +587,9 @@ async def test_generate_share_link_success(mock_dispatcher):
 @pytest.mark.asyncio
 async def test_generate_share_link_transfer_not_found(mock_dispatcher):
     """POST share-link with TransferNotFoundError returns 404."""
-    mock_dispatcher.dispatch_generate_share_link.side_effect = TransferNotFoundError("nope")
+    mock_dispatcher.dispatch_generate_share_link.side_effect = TransferNotFoundError(
+        "nope"
+    )
     resp = await _post(
         "/api/v1/bots/t1/bot-001/files/transfers/tf-001/share-link",
         json_data={"expire_seconds": 3600},
@@ -597,7 +615,9 @@ async def test_generate_share_link_value_error(mock_dispatcher):
 @pytest.mark.asyncio
 async def test_generate_share_link_not_implemented(mock_dispatcher):
     """POST share-link with NotImplementedError returns 501."""
-    mock_dispatcher.dispatch_generate_share_link.side_effect = NotImplementedError("nope")
+    mock_dispatcher.dispatch_generate_share_link.side_effect = NotImplementedError(
+        "nope"
+    )
     resp = await _post(
         "/api/v1/bots/t1/bot-001/files/transfers/tf-001/share-link",
         json_data={"expire_seconds": 3600},

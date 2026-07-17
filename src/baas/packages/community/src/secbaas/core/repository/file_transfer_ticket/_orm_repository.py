@@ -21,31 +21,36 @@ log = get_logger("orm-repository")
 # Delete staging path: DONE/FAILED/CANCELLED -> DELETED (terminal)  [Phase 72]
 # Failure: any non-terminal state -> FAILED
 # Same-state: idempotent no-op
-VALID_TRANSITIONS = frozenset({
-    ("CREATED", "UPLOADING"),
-    ("UPLOADING", "UPLOAD_COMPLETED"),
-    ("CREATED", "UPLOAD_COMPLETED"),  # v1.5: complete_upload + poller OSS detection
-    ("UPLOAD_COMPLETED", "PULLING"),
-    ("UPLOAD_COMPLETED", "DONE"),  # Phase 69: retention mode shortcut (device_path IS NULL)
-    ("PULLING", "DONE"),
-    ("CREATED", "PUSHING"),
-    ("PUSHING", "DONE"),
-    # Failure from any non-terminal state
-    ("CREATED", "FAILED"),
-    ("UPLOADING", "FAILED"),
-    ("UPLOAD_COMPLETED", "FAILED"),
-    ("PULLING", "FAILED"),
-    ("PUSHING", "FAILED"),
-    # Phase 72: Cancel upload -- any non-terminal upload state -> CANCELLED
-    ("CREATED", "CANCELLED"),
-    ("UPLOADING", "CANCELLED"),
-    ("UPLOAD_COMPLETED", "CANCELLED"),
-    ("PULLING", "CANCELLED"),
-    # Phase 72: Delete staging -- terminal states -> DELETED
-    ("DONE", "DELETED"),
-    ("FAILED", "DELETED"),
-    ("CANCELLED", "DELETED"),
-})
+VALID_TRANSITIONS = frozenset(
+    {
+        ("CREATED", "UPLOADING"),
+        ("UPLOADING", "UPLOAD_COMPLETED"),
+        ("CREATED", "UPLOAD_COMPLETED"),  # v1.5: complete_upload + poller OSS detection
+        ("UPLOAD_COMPLETED", "PULLING"),
+        (
+            "UPLOAD_COMPLETED",
+            "DONE",
+        ),  # Phase 69: retention mode shortcut (device_path IS NULL)
+        ("PULLING", "DONE"),
+        ("CREATED", "PUSHING"),
+        ("PUSHING", "DONE"),
+        # Failure from any non-terminal state
+        ("CREATED", "FAILED"),
+        ("UPLOADING", "FAILED"),
+        ("UPLOAD_COMPLETED", "FAILED"),
+        ("PULLING", "FAILED"),
+        ("PUSHING", "FAILED"),
+        # Phase 72: Cancel upload -- any non-terminal upload state -> CANCELLED
+        ("CREATED", "CANCELLED"),
+        ("UPLOADING", "CANCELLED"),
+        ("UPLOAD_COMPLETED", "CANCELLED"),
+        ("PULLING", "CANCELLED"),
+        # Phase 72: Delete staging -- terminal states -> DELETED
+        ("DONE", "DELETED"),
+        ("FAILED", "DELETED"),
+        ("CANCELLED", "DELETED"),
+    }
+)
 
 
 class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
@@ -70,7 +75,9 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
     ) -> int:
         log.info(
             "create_ticket: transfer_id=%s, direction=%s, multipart_session_id=%s",
-            transfer_id, direction, multipart_session_id is not None,
+            transfer_id,
+            direction,
+            multipart_session_id is not None,
         )
         env = get_current_env()
         row = FileTransferTicketModel(
@@ -120,7 +127,9 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         new_status: str,
         error_message: str | None = None,
     ) -> None:
-        log.info("update_status: transfer_id=%s, new_status=%s", transfer_id, new_status)
+        log.info(
+            "update_status: transfer_id=%s, new_status=%s", transfer_id, new_status
+        )
         from sqlalchemy import func
 
         env = get_current_env()
@@ -166,7 +175,9 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
 
     @with_orm_session
     def get_by_transfer_id(
-        self, transfer_id: str, tenant: str | None = None,
+        self,
+        transfer_id: str,
+        tenant: str | None = None,
     ) -> TicketRecord | None:
         log.info("get_by_transfer_id: transfer_id=%s, tenant=%s", transfer_id, tenant)
         env = get_current_env()
@@ -176,11 +187,7 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         ]
         if tenant is not None:
             filters.append(FileTransferTicketModel.tenant == tenant)
-        row = (
-            self._session.query(FileTransferTicketModel)
-            .filter(*filters)
-            .first()
-        )
+        row = self._session.query(FileTransferTicketModel).filter(*filters).first()
         if row is None:
             log.info("[file-transfer:get_by_transfer_id] result: not found")
             return None
@@ -190,7 +197,9 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
 
     @with_orm_session
     def get_by_fileservice_staging_path(
-        self, staging_path: str, tenant: str | None = None,
+        self,
+        staging_path: str,
+        tenant: str | None = None,
     ) -> TicketRecord | None:
         """Look up a ticket by its fileservice_staging_path.
 
@@ -203,7 +212,8 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         """
         log.info(
             "[file-transfer:get_by_staging_path] staging_path=%s, tenant=%s",
-            staging_path, tenant,
+            staging_path,
+            tenant,
         )
         env = get_current_env()
         filters = [
@@ -212,11 +222,7 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         ]
         if tenant is not None:
             filters.append(FileTransferTicketModel.tenant == tenant)
-        row = (
-            self._session.query(FileTransferTicketModel)
-            .filter(*filters)
-            .first()
-        )
+        row = self._session.query(FileTransferTicketModel).filter(*filters).first()
         if row is None:
             log.info("[file-transfer:get_by_staging_path] result: not found")
             return None
@@ -234,7 +240,9 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
     ) -> None:
         log.info(
             "update_urls: transfer_id=%s, download_url=%s, upload_url=%s",
-            transfer_id, bool(download_url), bool(upload_url),
+            transfer_id,
+            bool(download_url),
+            bool(upload_url),
         )
         from sqlalchemy import func
 

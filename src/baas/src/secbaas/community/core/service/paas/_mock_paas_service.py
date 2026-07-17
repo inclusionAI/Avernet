@@ -272,9 +272,7 @@ class MockPaasService(PaasService):
             PaasError: With FILE_TRANSFER_FAILED if _pull_should_fail is True.
         """
         if getattr(self, "_pull_should_fail", False):
-            raise PaasError(
-                ErrorCode.FILE_TRANSFER_FAILED, "mock file pull failure"
-            )
+            raise PaasError(ErrorCode.FILE_TRANSFER_FAILED, "mock file pull failure")
 
     async def push_file_to_url(
         self,
@@ -298,6 +296,4 @@ class MockPaasService(PaasService):
             PaasError: With FILE_TRANSFER_FAILED if _push_should_fail is True.
         """
         if getattr(self, "_push_should_fail", False):
-            raise PaasError(
-                ErrorCode.FILE_TRANSFER_FAILED, "mock file push failure"
-            )
+            raise PaasError(ErrorCode.FILE_TRANSFER_FAILED, "mock file push failure")

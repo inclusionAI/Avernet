@@ -1,6 +1,9 @@
 """Bot service routes — re-exports for convenience."""
 
 from secbaas.adapters.web.routers.bot_service.cmd_router import router as bot_cmd_router
+from secbaas.adapters.web.routers.bot_service.file_transfer_router import (
+    router as bot_file_transfer_router,
+)
 from secbaas.adapters.web.routers.bot_service.http_conn_router import (
     router as bot_http_conn_router,
 )
@@ -16,9 +19,6 @@ from secbaas.adapters.web.routers.bot_service.open_folder_router import (
 from secbaas.adapters.web.routers.bot_service.publish_router import callback_router
 from secbaas.adapters.web.routers.bot_service.publish_router import (
     router as publish_router,
-)
-from secbaas.adapters.web.routers.bot_service.file_transfer_router import (
-    router as bot_file_transfer_router,
 )
 from secbaas.adapters.web.routers.bot_service.transfer_query_router import (
     router as bot_transfer_query_router,

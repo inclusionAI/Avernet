@@ -5,9 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from secbaas.api.bot_runtime import TransferNotTerminalError
-
 
 pytestmark = [pytest.mark.e2e, pytest.mark.sync]
 
@@ -59,7 +57,9 @@ async def test_staging_list_pagination(
     """
     # Arrange: put several objects
     for i in range(5):
-        stub_oss_backend.put_content(f"stub-upload://page-obj-{i:02d}", f"data-{i}".encode())
+        stub_oss_backend.put_content(
+            f"stub-upload://page-obj-{i:02d}", f"data-{i}".encode()
+        )
 
     # First page
     page1 = stub_oss_backend.list_objects(prefix="page-obj-", limit=2, marker=None)
@@ -69,13 +69,17 @@ async def test_staging_list_pagination(
 
     # Second page
     page2 = stub_oss_backend.list_objects(
-        prefix="page-obj-", limit=2, marker=page1.next_marker,
+        prefix="page-obj-",
+        limit=2,
+        marker=page1.next_marker,
     )
     assert len(page2.items) == 2
 
     # Third (final) page
     page3 = stub_oss_backend.list_objects(
-        prefix="page-obj-", limit=2, marker=page2.next_marker,
+        prefix="page-obj-",
+        limit=2,
+        marker=page2.next_marker,
     )
     assert len(page3.items) == 1
     assert page3.truncated is False
@@ -138,7 +142,8 @@ async def test_staging_delete_non_terminal_returns_409(
         terminal_states = {"DONE", "FAILED", "CANCELLED", "DELETED"}
         if ticket.status not in terminal_states:
             raise TransferNotTerminalError(
-                transfer_id=ticket.transfer_id, status=ticket.status,
+                transfer_id=ticket.transfer_id,
+                status=ticket.status,
             )
 
     assert exc_info.value.error_code == "NOT_TERMINAL_STATE"

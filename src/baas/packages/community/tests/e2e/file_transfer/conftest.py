@@ -16,13 +16,12 @@ from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from secbaas.core.repository.file_transfer_ticket import TicketRecord, TicketRepository
 from secbaas.core.service.paas._facade import PaasServiceFacade
 from secbaas.core.service.paas._mock_paas_service import MockPaasService
 from secbaas.core.service.scheduler import FileTransferPoller, FileTransferPollerConfig
-from tests.utils.stub_file_transfer_backend import StubFileTransferBackend
 
+from tests.utils.stub_file_transfer_backend import StubFileTransferBackend
 
 # ── Fixtures ────────────────────────────────────────────────────────
 
@@ -126,7 +125,8 @@ def done_ticket() -> MagicMock:
 # ── Helper functions ────────────────────────────────────────────────
 
 
-def _make_ticket_record(*,
+def _make_ticket_record(
+    *,
     transfer_id: str,
     direction: str = "UPLOAD",
     status: str = "CREATED",
@@ -153,24 +153,27 @@ def _make_ticket_record(*,
         and supports attribute access for all 17 TicketRecord fields.
     """
     now = datetime.now()
-    return MagicMock(spec=TicketRecord, **{
-        "id": 1,
-        "gmt_create": gmt_create or (now - timedelta(seconds=30)),
-        "gmt_modified": now,
-        "transfer_id": transfer_id,
-        "tenant": "team_claw",
-        "paas_device_id": "mock-sandbox-abc@42",
-        "direction": direction,
-        "status": status,
-        "staging_subdir": None,
-        "filename": "test.txt",
-        "device_path": device_path,
-        "fileservice_staging_path": fileservice_staging_path
+    return MagicMock(
+        spec=TicketRecord,
+        **{
+            "id": 1,
+            "gmt_create": gmt_create or (now - timedelta(seconds=30)),
+            "gmt_modified": now,
+            "transfer_id": transfer_id,
+            "tenant": "team_claw",
+            "paas_device_id": "mock-sandbox-abc@42",
+            "direction": direction,
+            "status": status,
+            "staging_subdir": None,
+            "filename": "test.txt",
+            "device_path": device_path,
+            "fileservice_staging_path": fileservice_staging_path
             or f"file-transfers/{transfer_id}/test.txt",
-        "error_message": None,
-        "download_url": None,
-        "upload_url": None,
-        "multipart_session_id": multipart_session_id,
-        "env": "test",
-        **overrides,
-    })
+            "error_message": None,
+            "download_url": None,
+            "upload_url": None,
+            "multipart_session_id": multipart_session_id,
+            "env": "test",
+            **overrides,
+        },
+    )

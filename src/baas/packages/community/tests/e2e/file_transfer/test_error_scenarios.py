@@ -18,7 +18,6 @@ from ...conftest import (
     activate_test_bot,
     cleanup_bot,
     create_test_bot,
-    find_existing_bot,
 )
 from .conftest import _make_ticket_record
 

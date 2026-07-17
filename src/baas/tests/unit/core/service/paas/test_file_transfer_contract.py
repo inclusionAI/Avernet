@@ -15,9 +15,10 @@ from secbaas.community.core.service.paas._k8s_paas_service import K8sPaasService
 from secbaas.community.core.service.paas._local_paas_service import LocalPaasService
 from secbaas.community.core.service.paas._poolab_paas_service import PoolabPaasService
 from secbaas.community.core.service.paas._sigma_paas_service import SigmaPaasService
-from secbaas.community.core.service.paas._standalone_paas_service import StandalonePaasService
+from secbaas.community.core.service.paas._standalone_paas_service import (
+    StandalonePaasService,
+)
 from secbaas.community.core.service.paas._teclaw_paas_service import TeClawPaasService
-
 
 # ---------------------------------------------------------------------------
 # Conformance: all 7 classes have both methods
@@ -53,15 +54,11 @@ class TestFileTransferConformance:
 
     def test_has_pull_file_from_url(self, name, cls):
         """Every platform class has pull_file_from_url method."""
-        assert hasattr(cls, "pull_file_from_url"), (
-            f"{name} missing pull_file_from_url"
-        )
+        assert hasattr(cls, "pull_file_from_url"), f"{name} missing pull_file_from_url"
 
     def test_has_push_file_to_url(self, name, cls):
         """Every platform class has push_file_to_url method."""
-        assert hasattr(cls, "push_file_to_url"), (
-            f"{name} missing push_file_to_url"
-        )
+        assert hasattr(cls, "push_file_to_url"), f"{name} missing push_file_to_url"
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +96,9 @@ class TestPullFileFromUrlNotImplemented:
         m = cls.pull_file_from_url
         try:
             await m(None, "id", "http://source", "/path")
-            assert False, f"{name}.pull_file_from_url should have raised NotImplementedError"
+            assert False, (
+                f"{name}.pull_file_from_url should have raised NotImplementedError"
+            )
         except NotImplementedError as e:
             assert EXPECTED_MSGS[name] in str(e), (
                 f"{name}: expected message containing '{EXPECTED_MSGS[name]}', got '{e}'"
@@ -119,7 +118,9 @@ class TestPushFileFromUrlNotImplemented:
         m = cls.push_file_to_url
         try:
             await m(None, "id", "/path", "http://target")
-            assert False, f"{name}.push_file_to_url should have raised NotImplementedError"
+            assert False, (
+                f"{name}.push_file_to_url should have raised NotImplementedError"
+            )
         except NotImplementedError as e:
             assert EXPECTED_MSGS[name] in str(e), (
                 f"{name}: expected message containing '{EXPECTED_MSGS[name]}', got '{e}'"

@@ -990,7 +990,11 @@ class ArcaPaasService(PaasService):
             PaasError: With FILE_TRANSFER_FAILED if download fails or times out.
         """
         return await asyncio.to_thread(
-            self._pull_file_sync, paas_device_id, source_url, device_path, timeout_seconds
+            self._pull_file_sync,
+            paas_device_id,
+            source_url,
+            device_path,
+            timeout_seconds,
         )
 
     def _pull_file_sync(
@@ -1017,9 +1021,7 @@ class ArcaPaasService(PaasService):
                     ErrorCode.FILE_TRANSFER_FAILED,
                     f"curl pull failed with exit code {result.exit_code}: {result.stderr}",
                 )
-            safe_url = urlunparse(
-                urlparse(source_url)._replace(query="", fragment="")
-            )
+            safe_url = urlunparse(urlparse(source_url)._replace(query="", fragment=""))
             self._logger.info(
                 f"File pulled: {safe_url} -> {device_path} (sandbox={paas_device_id})"
             )
@@ -1051,7 +1053,11 @@ class ArcaPaasService(PaasService):
             PaasError: With FILE_TRANSFER_FAILED if upload fails or times out.
         """
         return await asyncio.to_thread(
-            self._push_file_sync, paas_device_id, device_path, target_url, timeout_seconds
+            self._push_file_sync,
+            paas_device_id,
+            device_path,
+            target_url,
+            timeout_seconds,
         )
 
     def _push_file_sync(
@@ -1078,9 +1084,7 @@ class ArcaPaasService(PaasService):
                     ErrorCode.FILE_TRANSFER_FAILED,
                     f"curl push failed with exit code {result.exit_code}: {result.stderr}",
                 )
-            safe_url = urlunparse(
-                urlparse(target_url)._replace(query="", fragment="")
-            )
+            safe_url = urlunparse(urlparse(target_url)._replace(query="", fragment=""))
             self._logger.info(
                 f"File pushed: {device_path} -> {safe_url} (sandbox={paas_device_id})"
             )

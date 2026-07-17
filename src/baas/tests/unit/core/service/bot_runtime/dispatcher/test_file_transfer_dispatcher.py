@@ -32,13 +32,23 @@ from secbaas.community.spi.file_transfer import (
 def _make_ticket(**overrides):
     now = datetime.now()
     defaults = dict(
-        id=1, gmt_create=now, gmt_modified=now,
-        transfer_id="tf-001", tenant="test-tenant",
-        paas_device_id="sandbox@42", direction="UPLOAD", status="CREATED",
-        staging_subdir=None, filename="data.csv", device_path="/home/data.csv",
+        id=1,
+        gmt_create=now,
+        gmt_modified=now,
+        transfer_id="tf-001",
+        tenant="test-tenant",
+        paas_device_id="sandbox@42",
+        direction="UPLOAD",
+        status="CREATED",
+        staging_subdir=None,
+        filename="data.csv",
+        device_path="/home/data.csv",
         fileservice_staging_path="file-transfers/t1/tf-001/data.csv",
-        error_message=None, download_url=None, upload_url=None,
-        multipart_session_id=None, env="test",
+        error_message=None,
+        download_url=None,
+        upload_url=None,
+        multipart_session_id=None,
+        env="test",
     )
     defaults.update(overrides)
     return TicketRecord(**defaults)
@@ -69,9 +79,12 @@ def file_backend():
     backend.check_object_exists.return_value = True
     backend.build_staging_path.return_value = "file-transfers/t1/tf-001/data.csv"
     backend.build_staging_prefix.return_value = "file-transfers/t1/"
-    backend.list_objects.return_value = ObjectListing(items=[], truncated=False, next_marker=None)
+    backend.list_objects.return_value = ObjectListing(
+        items=[], truncated=False, next_marker=None
+    )
     backend.initiate_multipart_upload.return_value = MultipartSession(
-        session_id="mp-session-1", part_count=2,
+        session_id="mp-session-1",
+        part_count=2,
         parts=[
             PartInfo(part_number=1, upload_url="https://oss.example.com/part1"),
             PartInfo(part_number=2, upload_url="https://oss.example.com/part2"),
@@ -91,8 +104,11 @@ def ticket_repo():
 @pytest.fixture
 def dispatcher(bot_repo, device_repo, paas_facade, file_backend, ticket_repo):
     return DefaultBotFileTransferDispatcher(
-        bot_repo=bot_repo, device_repo=device_repo, paas_facade=paas_facade,
-        file_transfer_backend=file_backend, ticket_repo=ticket_repo,
+        bot_repo=bot_repo,
+        device_repo=device_repo,
+        paas_facade=paas_facade,
+        file_transfer_backend=file_backend,
+        ticket_repo=ticket_repo,
     )
 
 
@@ -118,9 +134,12 @@ class TestDispatchGetUploadUrl:
     async def test_single_upload(self, dispatcher, bot_repo, device_repo, ticket_repo):
         _setup_resolve_bot_device(dispatcher, bot_repo, device_repo)
         result = await dispatcher.dispatch_get_upload_url(
-            bot_uuid="bot-001", tenant="t1",
-            device_path="/home/data.csv", filename="data.csv",
-            expire_seconds=3600, file_size=100,
+            bot_uuid="bot-001",
+            tenant="t1",
+            device_path="/home/data.csv",
+            filename="data.csv",
+            expire_seconds=3600,
+            file_size=100,
         )
         assert isinstance(result, GetUploadUrlResponse)
         assert result.type == "SINGLE"
@@ -130,19 +149,25 @@ class TestDispatchGetUploadUrl:
     @pytest.mark.asyncio
     async def test_retention_mode(self, dispatcher, ticket_repo):
         result = await dispatcher.dispatch_get_upload_url(
-            bot_uuid="bot-001", tenant="t1",
-            device_path=None, filename="retention.csv",
+            bot_uuid="bot-001",
+            tenant="t1",
+            device_path=None,
+            filename="retention.csv",
         )
         assert result.type == "SINGLE"
         ticket_repo.create_ticket.assert_called_once()
         assert ticket_repo.create_ticket.call_args.kwargs["paas_device_id"] == ""
 
     @pytest.mark.asyncio
-    async def test_multipart_upload(self, dispatcher, bot_repo, device_repo, ticket_repo, file_backend):
+    async def test_multipart_upload(
+        self, dispatcher, bot_repo, device_repo, ticket_repo, file_backend
+    ):
         _setup_resolve_bot_device(dispatcher, bot_repo, device_repo)
         result = await dispatcher.dispatch_get_upload_url(
-            bot_uuid="bot-001", tenant="t1",
-            device_path="/home/bigfile.bin", filename="bigfile.bin",
+            bot_uuid="bot-001",
+            tenant="t1",
+            device_path="/home/bigfile.bin",
+            filename="bigfile.bin",
             file_size=MULTIPART_THRESHOLD,
         )
         assert result.type == "MULTIPART"
@@ -154,9 +179,12 @@ class TestDispatchGetUploadUrl:
     async def test_multipart_custom_part_size(self, dispatcher, bot_repo, device_repo):
         _setup_resolve_bot_device(dispatcher, bot_repo, device_repo)
         result = await dispatcher.dispatch_get_upload_url(
-            bot_uuid="bot-001", tenant="t1",
-            device_path="/home/bigfile.bin", filename="bigfile.bin",
-            file_size=200_000_000, part_size=20_000_000,
+            bot_uuid="bot-001",
+            tenant="t1",
+            device_path="/home/bigfile.bin",
+            filename="bigfile.bin",
+            file_size=200_000_000,
+            part_size=20_000_000,
         )
         assert result.type == "MULTIPART"
         assert result.part_count == 10
@@ -167,7 +195,10 @@ class TestDispatchGetUploadUrl:
         _setup_resolve_bot_device(dispatcher, bot_repo, device_repo)
         with pytest.raises(ValueError, match="file_size must be non-negative"):
             await dispatcher.dispatch_get_upload_url(
-                bot_uuid="bot-001", tenant="t1", device_path="/x", file_size=-1,
+                bot_uuid="bot-001",
+                tenant="t1",
+                device_path="/x",
+                file_size=-1,
             )
 
     @pytest.mark.asyncio
@@ -175,24 +206,35 @@ class TestDispatchGetUploadUrl:
         _setup_resolve_bot_device(dispatcher, bot_repo, device_repo)
         with pytest.raises(ValueError, match="part_size must be positive"):
             await dispatcher.dispatch_get_upload_url(
-                bot_uuid="bot-001", tenant="t1", device_path="/x",
-                file_size=MULTIPART_THRESHOLD, part_size=-1,
+                bot_uuid="bot-001",
+                tenant="t1",
+                device_path="/x",
+                file_size=MULTIPART_THRESHOLD,
+                part_size=-1,
             )
 
     @pytest.mark.asyncio
-    async def test_staging_subdir_path_traversal_rejected(self, dispatcher, bot_repo, device_repo):
+    async def test_staging_subdir_path_traversal_rejected(
+        self, dispatcher, bot_repo, device_repo
+    ):
         _setup_resolve_bot_device(dispatcher, bot_repo, device_repo)
         with pytest.raises(ValueError, match="path traversal"):
             await dispatcher.dispatch_get_upload_url(
-                bot_uuid="bot-001", tenant="t1", device_path="/x",
+                bot_uuid="bot-001",
+                tenant="t1",
+                device_path="/x",
                 staging_subdir="../etc",
             )
 
     @pytest.mark.asyncio
-    async def test_staging_subdir_stripped(self, dispatcher, bot_repo, device_repo, file_backend):
+    async def test_staging_subdir_stripped(
+        self, dispatcher, bot_repo, device_repo, file_backend
+    ):
         _setup_resolve_bot_device(dispatcher, bot_repo, device_repo)
         await dispatcher.dispatch_get_upload_url(
-            bot_uuid="bot-001", tenant="t1", device_path="/x",
+            bot_uuid="bot-001",
+            tenant="t1",
+            device_path="/x",
             staging_subdir="/subdir/",
         )
         assert file_backend.build_staging_path.call_args.kwargs["subdir"] == "subdir"
@@ -203,10 +245,14 @@ class TestDispatchGetUploadUrl:
 
 class TestDispatchGetDownloadUrl:
     @pytest.mark.asyncio
-    async def test_download_url(self, dispatcher, bot_repo, device_repo, ticket_repo, paas_facade):
+    async def test_download_url(
+        self, dispatcher, bot_repo, device_repo, ticket_repo, paas_facade
+    ):
         _setup_resolve_bot_device(dispatcher, bot_repo, device_repo)
         result = await dispatcher.dispatch_get_download_url(
-            bot_uuid="bot-001", tenant="t1", device_path="/home/data.csv",
+            bot_uuid="bot-001",
+            tenant="t1",
+            device_path="/home/data.csv",
         )
         assert isinstance(result, GetDownloadUrlResponse)
         assert result.transfer_id is not None
@@ -228,7 +274,9 @@ class TestDispatchGetTransferStatus:
 
     @pytest.mark.asyncio
     async def test_status_created(self, dispatcher, ticket_repo):
-        ticket = _make_ticket(status="CREATED", upload_url="https://oss.example.com/put")
+        ticket = _make_ticket(
+            status="CREATED", upload_url="https://oss.example.com/put"
+        )
         ticket_repo.get_by_transfer_id.return_value = ticket
         result = await dispatcher.dispatch_get_transfer_status("tf-001", tenant="t1")
         assert result.status == "CREATED"
@@ -281,7 +329,9 @@ class TestDispatchCompleteUpload:
         file_backend.complete_multipart_upload.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_multipart_empty_parts_raises(self, dispatcher, ticket_repo, file_backend):
+    async def test_multipart_empty_parts_raises(
+        self, dispatcher, ticket_repo, file_backend
+    ):
         ticket = _make_ticket(status="CREATED", multipart_session_id="mp-1")
         ticket_repo.get_by_transfer_id.return_value = ticket
         file_backend.list_parts.return_value = []
@@ -378,14 +428,22 @@ class TestDispatchCancelUpload:
 class TestDispatchListStaging:
     @pytest.mark.asyncio
     async def test_with_tenant(self, dispatcher, file_backend):
-        result = await dispatcher.dispatch_list_staging(prefix="", limit=10, tenant="t1")
+        result = await dispatcher.dispatch_list_staging(
+            prefix="", limit=10, tenant="t1"
+        )
         assert isinstance(result, StagingListResponse)
-        file_backend.build_staging_prefix.assert_called_once_with(tenant="t1", subdir=None)
+        file_backend.build_staging_prefix.assert_called_once_with(
+            tenant="t1", subdir=None
+        )
 
     @pytest.mark.asyncio
     async def test_with_prefix_subdir(self, dispatcher, file_backend):
-        await dispatcher.dispatch_list_staging(prefix="my-subdir", limit=10, tenant="t1")
-        file_backend.build_staging_prefix.assert_called_once_with(tenant="t1", subdir="my-subdir")
+        await dispatcher.dispatch_list_staging(
+            prefix="my-subdir", limit=10, tenant="t1"
+        )
+        file_backend.build_staging_prefix.assert_called_once_with(
+            tenant="t1", subdir="my-subdir"
+        )
 
     @pytest.mark.asyncio
     async def test_path_traversal_rejected(self, dispatcher):
@@ -394,18 +452,30 @@ class TestDispatchListStaging:
 
     @pytest.mark.asyncio
     async def test_strips_legacy_prefix(self, dispatcher, file_backend):
-        await dispatcher.dispatch_list_staging(prefix="file-transfers/sub", limit=10, tenant="t1")
-        file_backend.build_staging_prefix.assert_called_once_with(tenant="t1", subdir="sub")
+        await dispatcher.dispatch_list_staging(
+            prefix="file-transfers/sub", limit=10, tenant="t1"
+        )
+        file_backend.build_staging_prefix.assert_called_once_with(
+            tenant="t1", subdir="sub"
+        )
 
     @pytest.mark.asyncio
     async def test_strips_baas_prefix(self, dispatcher, file_backend):
-        await dispatcher.dispatch_list_staging(prefix="baas-file-transfer/sub", limit=10, tenant="t1")
-        file_backend.build_staging_prefix.assert_called_once_with(tenant="t1", subdir="sub")
+        await dispatcher.dispatch_list_staging(
+            prefix="baas-file-transfer/sub", limit=10, tenant="t1"
+        )
+        file_backend.build_staging_prefix.assert_called_once_with(
+            tenant="t1", subdir="sub"
+        )
 
     @pytest.mark.asyncio
     async def test_legacy_prefix_exact_match(self, dispatcher, file_backend):
-        await dispatcher.dispatch_list_staging(prefix="file-transfers", limit=10, tenant="t1")
-        file_backend.build_staging_prefix.assert_called_once_with(tenant="t1", subdir=None)
+        await dispatcher.dispatch_list_staging(
+            prefix="file-transfers", limit=10, tenant="t1"
+        )
+        file_backend.build_staging_prefix.assert_called_once_with(
+            tenant="t1", subdir=None
+        )
 
 
 # ── dispatch_delete_staging ──────────────────────────────────────────

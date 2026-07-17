@@ -1,5 +1,6 @@
 """SQLAlchemy ORM model for baas_file_transfer_tickets table."""
 
+from secbaas.spi.database import Base
 from sqlalchemy import (
     BigInteger,
     Column,
@@ -10,8 +11,6 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-
-from secbaas.spi.database import Base
 
 from ._record import TicketRecord
 

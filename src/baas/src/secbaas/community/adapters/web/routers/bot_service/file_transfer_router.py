@@ -21,14 +21,12 @@ from secbaas.community.api.bot_runtime import (
     GetUploadUrlResponse,
     NoActiveDevicesError,
     NoDevicesFoundError,
+    OssObjectNotFoundError,
     ShareLinkRequest,
     ShareLinkResponse,
     StagingDeleteResponse,
     StagingListResponse,
     TransferNotFoundError,
-)
-from secbaas.community.api.bot_runtime import (
-    OssObjectNotFoundError,
     TransferNotTerminalError,
     TransferStateConflictError,
 )
@@ -96,23 +94,37 @@ async def get_upload_url(
     except NoDevicesFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "NO_DEVICES_FOUND", "message": str(e), "bot_uuid": bot_uuid},
+            detail={
+                "error": "NO_DEVICES_FOUND",
+                "message": str(e),
+                "bot_uuid": bot_uuid,
+            },
         )
     except NoActiveDevicesError as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "NO_ACTIVE_DEVICES", "message": str(e), "bot_uuid": bot_uuid},
+            detail={
+                "error": "NO_ACTIVE_DEVICES",
+                "message": str(e),
+                "bot_uuid": bot_uuid,
+            },
         )
     except NotImplementedError as e:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={"error": "NOT_IMPLEMENTED", "message": str(e), "bot_uuid": bot_uuid},
+            detail={
+                "error": "NOT_IMPLEMENTED",
+                "message": str(e),
+                "bot_uuid": bot_uuid,
+            },
         )
     except DeviceFacadeException as e:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
-                "error": e.original_error.code.value if e.original_error else "FACADE_ERROR",
+                "error": e.original_error.code.value
+                if e.original_error
+                else "FACADE_ERROR",
                 "message": str(e),
                 "context": {
                     "operation": e.operation,
@@ -179,23 +191,37 @@ async def get_download_url(
     except NoDevicesFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "NO_DEVICES_FOUND", "message": str(e), "bot_uuid": bot_uuid},
+            detail={
+                "error": "NO_DEVICES_FOUND",
+                "message": str(e),
+                "bot_uuid": bot_uuid,
+            },
         )
     except NoActiveDevicesError as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "NO_ACTIVE_DEVICES", "message": str(e), "bot_uuid": bot_uuid},
+            detail={
+                "error": "NO_ACTIVE_DEVICES",
+                "message": str(e),
+                "bot_uuid": bot_uuid,
+            },
         )
     except NotImplementedError as e:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={"error": "NOT_IMPLEMENTED", "message": str(e), "bot_uuid": bot_uuid},
+            detail={
+                "error": "NOT_IMPLEMENTED",
+                "message": str(e),
+                "bot_uuid": bot_uuid,
+            },
         )
     except DeviceFacadeException as e:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
-                "error": e.original_error.code.value if e.original_error else "FACADE_ERROR",
+                "error": e.original_error.code.value
+                if e.original_error
+                else "FACADE_ERROR",
                 "message": str(e),
                 "context": {
                     "operation": e.operation,
@@ -223,7 +249,9 @@ async def get_download_url(
 async def complete_upload(
     tenant: Annotated[str, Path(description="Tenant for isolation")],
     bot_uuid: Annotated[str, Path(description="Bot UUID")],
-    transfer_id: Annotated[str, Path(description="Transfer ID from upload-url response")],
+    transfer_id: Annotated[
+        str, Path(description="Transfer ID from upload-url response")
+    ],
     dispatcher: BotFileTransferDispatcher = Depends(
         Provide[ApplicationContainer.services.bot_file_transfer_dispatcher]
     ),
@@ -286,7 +314,9 @@ async def complete_upload(
 async def cancel_upload(
     tenant: Annotated[str, Path(description="Tenant for isolation")],
     bot_uuid: Annotated[str, Path(description="Bot UUID")],
-    transfer_id: Annotated[str, Path(description="Transfer ID from upload-url response")],
+    transfer_id: Annotated[
+        str, Path(description="Transfer ID from upload-url response")
+    ],
     dispatcher: BotFileTransferDispatcher = Depends(
         Provide[ApplicationContainer.services.bot_file_transfer_dispatcher]
     ),
@@ -341,7 +371,9 @@ async def list_staging(
     bot_uuid: Annotated[str, Path(description="Bot UUID")],
     prefix: Annotated[str | None, Query(description="OSS key prefix filter")] = None,
     limit: Annotated[int, Query(ge=1, le=1000, description="Page size")] = 100,
-    marker: Annotated[str | None, Query(description="Pagination marker from previous response")] = None,
+    marker: Annotated[
+        str | None, Query(description="Pagination marker from previous response")
+    ] = None,
     dispatcher: BotFileTransferDispatcher = Depends(
         Provide[ApplicationContainer.services.bot_file_transfer_dispatcher]
     ),
@@ -391,9 +423,7 @@ async def delete_staging(
     Only tickets in a terminal state (DONE/FAILED/CANCELLED/DELETED)
     can be deleted.  The ticket transitions to DELETED on success.
     """
-    logger.info(
-        f"delete_staging: tenant={tenant}, bot_uuid={bot_uuid}, key={key}"
-    )
+    logger.info(f"delete_staging: tenant={tenant}, bot_uuid={bot_uuid}, key={key}")
 
     try:
         result = await dispatcher.dispatch_delete_staging(key=key, tenant=tenant)
@@ -434,7 +464,9 @@ async def delete_staging(
 async def generate_share_link(
     tenant: Annotated[str, Path(description="Tenant for isolation")],
     bot_uuid: Annotated[str, Path(description="Bot UUID")],
-    transfer_id: Annotated[str, Path(description="Transfer ID from upload-url response")],
+    transfer_id: Annotated[
+        str, Path(description="Transfer ID from upload-url response")
+    ],
     request: ShareLinkRequest,
     dispatcher: BotFileTransferDispatcher = Depends(
         Provide[ApplicationContainer.services.bot_file_transfer_dispatcher]

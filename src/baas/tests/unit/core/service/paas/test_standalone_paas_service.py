@@ -605,7 +605,9 @@ class TestSmokeMethods:
         service = StandalonePaasService(
             plugin=plugin, credentials=make_docker_credentials()
         )
-        with pytest.raises(NotImplementedError, match="File transfer not supported on Docker platform"):
+        with pytest.raises(
+            NotImplementedError, match="File transfer not supported on Docker platform"
+        ):
             await service.pull_file_from_url("abc123", "http://src", "/dst")
 
     @pytest.mark.asyncio
@@ -615,7 +617,9 @@ class TestSmokeMethods:
         service = StandalonePaasService(
             plugin=plugin, credentials=make_docker_credentials()
         )
-        with pytest.raises(NotImplementedError, match="File transfer not supported on Docker platform"):
+        with pytest.raises(
+            NotImplementedError, match="File transfer not supported on Docker platform"
+        ):
             await service.push_file_to_url("abc123", "/src", "http://dst")
 
     @pytest.mark.asyncio

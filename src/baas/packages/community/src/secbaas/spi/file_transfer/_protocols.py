@@ -236,7 +236,9 @@ class FileTransferBackend(Protocol):
         ...
 
     def build_staging_prefix(
-        self, tenant: str, subdir: str | None = None,
+        self,
+        tenant: str,
+        subdir: str | None = None,
     ) -> str:
         """Construct OSS key prefix for tenant-scoped object listing.
 

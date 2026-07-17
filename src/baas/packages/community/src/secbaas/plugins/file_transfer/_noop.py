@@ -9,7 +9,6 @@ feature-flag checks before invoking transfer operations.
 from secbaas.spi.file_transfer import (
     FileTransferBackend,
     MultipartSession,
-    ObjectItem,
     ObjectListing,
     PartInfo,
 )
@@ -96,7 +95,9 @@ class NoopFileTransferBackend(FileTransferBackend):
         )
 
     def build_staging_prefix(
-        self, tenant: str, subdir: str | None = None,
+        self,
+        tenant: str,
+        subdir: str | None = None,
     ) -> str:
         raise NotImplementedError(
             "File transfer is not configured. "

@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from ..bot_manage import BotStartProgressResponse
 from ..device_manage import CommandResult
-from ._http_connection_info import HttpConnectionInfo
 from ._file_transfer_models import (
     CancelUploadResponse,
     CompleteUploadResponse,
@@ -23,6 +22,7 @@ from ._file_transfer_models import (
     StagingDeleteResponse,
     StagingListResponse,
 )
+from ._http_connection_info import HttpConnectionInfo
 from ._models import (
     BotChatContext,
     MessageInfo,

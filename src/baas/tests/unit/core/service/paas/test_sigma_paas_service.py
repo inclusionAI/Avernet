@@ -178,7 +178,9 @@ class TestSigmaPaasService:
         """pull_file_from_url raises NotImplementedError with Sigma platform message."""
         service = SigmaPaasService(credentials=sigma_credentials)
 
-        with pytest.raises(NotImplementedError, match="File transfer not supported on Sigma platform"):
+        with pytest.raises(
+            NotImplementedError, match="File transfer not supported on Sigma platform"
+        ):
             await service.pull_file_from_url("sigma-device", "http://src", "/dst")
 
     @pytest.mark.asyncio
@@ -186,5 +188,7 @@ class TestSigmaPaasService:
         """push_file_to_url raises NotImplementedError with Sigma platform message."""
         service = SigmaPaasService(credentials=sigma_credentials)
 
-        with pytest.raises(NotImplementedError, match="File transfer not supported on Sigma platform"):
+        with pytest.raises(
+            NotImplementedError, match="File transfer not supported on Sigma platform"
+        ):
             await service.push_file_to_url("sigma-device", "/src", "http://dst")

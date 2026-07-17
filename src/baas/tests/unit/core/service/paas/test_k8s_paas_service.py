@@ -551,12 +551,16 @@ class TestNotImplementedMethods:
 
     @pytest.mark.asyncio
     async def test_pull_file_from_url_raises(self, stub_service):
-        with pytest.raises(NotImplementedError, match="File transfer not supported on K8s platform"):
+        with pytest.raises(
+            NotImplementedError, match="File transfer not supported on K8s platform"
+        ):
             await stub_service.pull_file_from_url("any--pod", "http://src", "/dst")
 
     @pytest.mark.asyncio
     async def test_push_file_to_url_raises(self, stub_service):
-        with pytest.raises(NotImplementedError, match="File transfer not supported on K8s platform"):
+        with pytest.raises(
+            NotImplementedError, match="File transfer not supported on K8s platform"
+        ):
             await stub_service.push_file_to_url("any--pod", "/src", "http://dst")
 
 

@@ -220,6 +220,8 @@ class FileTransferOssConfigSchema(ConfigSchema):
     bucket_name: str = Field(default="")
     staging_root_path: str = Field(default="baas-file-transfer")
     secret_name: str = Field(default="")
+
+
 class BotServiceConfig(ConfigSchema):
     """Bot service connection parameters."""
 

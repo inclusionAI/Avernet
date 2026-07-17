@@ -4,6 +4,8 @@ from typing import Protocol, runtime_checkable
 
 from secbaas.community.api.bot_runtime import (
     TransferNotFoundError as ApiTransferNotFoundError,
+)
+from secbaas.community.api.bot_runtime import (
     TransferStateConflictError as ApiTransferStateConflictError,
 )
 
@@ -96,7 +98,9 @@ class TicketRepository(Protocol):
         ...
 
     def get_by_transfer_id(
-        self, transfer_id: str, tenant: str | None = None,
+        self,
+        transfer_id: str,
+        tenant: str | None = None,
     ) -> TicketRecord | None:
         """Look up a ticket by its transfer_id, optionally scoped to tenant.
 
@@ -105,7 +109,9 @@ class TicketRepository(Protocol):
         ...
 
     def get_by_fileservice_staging_path(
-        self, staging_path: str, tenant: str | None = None,
+        self,
+        staging_path: str,
+        tenant: str | None = None,
     ) -> TicketRecord | None:
         """Look up a ticket by its fileservice_staging_path.
 

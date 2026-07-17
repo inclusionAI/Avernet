@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
-
-from secbaas.core.service.paas._facade import PaasServiceFacade
-from secbaas.spi.file_transfer import PartInfo
-
 
 pytestmark = [pytest.mark.e2e, pytest.mark.sync]
 
@@ -54,7 +50,6 @@ async def test_multipart_complete_detects_parts(
     Simulates uploading 2 parts and then calling list_parts + complete_multipart_upload.
     Verifies data is assembled into _storage after completion.
     """
-    from .conftest import _make_ticket_record
 
     # Initiate multipart session first (sets up _multipart_sessions dict)
     transfer_id = "stub-mp-test-transfer"

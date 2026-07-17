@@ -14,8 +14,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from secbaas.community.api.bot_runtime import BotFileTransferDispatcher
 from secbaas.community.api.bot_runtime import (
+    BotFileTransferDispatcher,
     CancelUploadResponse,
     CompleteUploadResponse,
     GetDownloadUrlResponse,
@@ -131,7 +131,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             Path(device_path).name if device_path else "untitled"
         )
 
-# Construct staging path via backend (D-14)
+        # Construct staging path via backend (D-14)
         staging_path = self._file_transfer_backend.build_staging_path(
             tenant=tenant,
             transfer_id=transfer_id,
@@ -143,19 +143,27 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
 
         # Validate file_size before routing (applies to both SINGLE and MULTIPART)
         if file_size < 0:
-            raise ValueError(
-                f"file_size must be non-negative, got {file_size}"
-            )
+            raise ValueError(f"file_size must be non-negative, got {file_size}")
 
         # D-01/D-02: SINGLE/MULTIPART routing
         if file_size >= MULTIPART_THRESHOLD:
             # MULTIPART path
             effective_part_size = part_size if part_size else DEFAULT_PART_SIZE
             if effective_part_size <= 0:
-                raise ValueError(
-                    f"part_size must be positive, got {part_size}"
-                )
+                raise ValueError(f"part_size must be positive, got {part_size}")
             part_count = -(-file_size // effective_part_size)  # ceil division
+            # OSS limits multipart uploads to 10,000 parts.  Dynamically
+            # increase part_size to keep part_count within this bound.
+            _max_parts = 10000
+            if part_count > _max_parts:
+                effective_part_size = -(-file_size // _max_parts)
+                part_count = -(-file_size // effective_part_size)
+                logger.info(
+                    "Adjusted part_size to %d to keep part_count (%d) "
+                    "within OSS 10000 limit",
+                    effective_part_size,
+                    part_count,
+                )
 
             multipart_session = await asyncio.to_thread(
                 self._file_transfer_backend.initiate_multipart_upload,
@@ -182,7 +190,8 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             ]
 
             # Create ticket with multipart_session_id
-            self._ticket_repo.create_ticket(
+            await asyncio.to_thread(
+                self._ticket_repo.create_ticket,
                 transfer_id=transfer_id,
                 tenant=tenant,
                 paas_device_id=paas_device_id,
@@ -224,7 +233,8 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
                 staging_path,
             )
 
-            self._ticket_repo.create_ticket(
+            await asyncio.to_thread(
+                self._ticket_repo.create_ticket,
                 transfer_id=transfer_id,
                 tenant=tenant,
                 paas_device_id=paas_device_id,
@@ -287,7 +297,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         filename = Path(device_path).name
         transfer_id = uuid.uuid4().hex
 
-# Construct staging path via backend (no staging_subdir for download)
+        # Construct staging path via backend (no staging_subdir for download)
         staging_path = self._file_transfer_backend.build_staging_path(
             tenant=tenant,
             transfer_id=transfer_id,
@@ -321,7 +331,8 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         )
 
         # Create ticket
-        self._ticket_repo.create_ticket(
+        await asyncio.to_thread(
+            self._ticket_repo.create_ticket,
             transfer_id=transfer_id,
             tenant=tenant,
             paas_device_id=paas_device_id,
@@ -574,7 +585,6 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             limit,
             marker,
             tenant,
-
         )
 
         result = await asyncio.to_thread(
@@ -632,6 +642,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             from secbaas.community.api.bot_runtime import (
                 TransferNotTerminalError,
             )
+
             raise TransferNotTerminalError(
                 transfer_id=ticket.transfer_id,
                 status=ticket.status,

@@ -27,6 +27,7 @@ from secbaas.community.plugins.bot_service import (
 )
 from secbaas.community.plugins.cache.stub import StubCachePlugin
 from secbaas.community.plugins.database.stub.sqlite_orm import SqliteOrmPlugin
+from secbaas.community.plugins.file_transfer import NoopFileTransferBackend
 from secbaas.community.plugins.sandbox.arca import StubArcaSandboxPlugin
 from secbaas.community.plugins.sandbox.arca.local_proc import (
     LocalProcessArcaSandboxPlugin,
@@ -47,7 +48,6 @@ from secbaas.community.plugins.sandbox.k8s.real import K8sClientManager
 from secbaas.community.plugins.sandbox.poolab import StubPoolabSandboxPlugin
 from secbaas.community.plugins.sandbox.teclaw import StubTeClawBotPlugin
 from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
-from secbaas.community.plugins.file_transfer import NoopFileTransferBackend
 
 
 class PluginContainer(containers.DeclarativeContainer):

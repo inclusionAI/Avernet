@@ -9,7 +9,9 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from secbaas.community.adapters.web.routers.bot_service.transfer_query_router import router
+from secbaas.community.adapters.web.routers.bot_service.transfer_query_router import (
+    router,
+)
 from secbaas.community.api.bot_runtime import (
     GetTransferStatusResponse,
     TransferNotFoundError,
@@ -36,17 +38,19 @@ def mock_dispatcher():
 @pytest.mark.asyncio
 async def test_get_transfer_status_success(mock_dispatcher):
     """GET transfer status returns 200 with GetTransferStatusResponse."""
-    mock_dispatcher.dispatch_get_transfer_status.return_value = GetTransferStatusResponse(
-        transfer_id="tf-001",
-        status="DONE",
-        direction="UPLOAD",
-        filename="data.csv",
-        device_path="/home/data.csv",
-        download_url="https://oss.example.com/dl?token=abc",
-        upload_url=None,
-        expires_at="2099-01-01T00:00:00",
-        created_at="2025-01-01T00:00:00",
-        updated_at="2025-01-01T00:01:00",
+    mock_dispatcher.dispatch_get_transfer_status.return_value = (
+        GetTransferStatusResponse(
+            transfer_id="tf-001",
+            status="DONE",
+            direction="UPLOAD",
+            filename="data.csv",
+            device_path="/home/data.csv",
+            download_url="https://oss.example.com/dl?token=abc",
+            upload_url=None,
+            expires_at="2099-01-01T00:00:00",
+            created_at="2025-01-01T00:00:00",
+            updated_at="2025-01-01T00:01:00",
+        )
     )
 
     transport = ASGITransport(app=app)
@@ -65,7 +69,9 @@ async def test_get_transfer_status_success(mock_dispatcher):
 @pytest.mark.asyncio
 async def test_get_transfer_status_not_found(mock_dispatcher):
     """GET transfer status with TransferNotFoundError returns 404."""
-    mock_dispatcher.dispatch_get_transfer_status.side_effect = TransferNotFoundError("nope")
+    mock_dispatcher.dispatch_get_transfer_status.side_effect = TransferNotFoundError(
+        "nope"
+    )
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -80,7 +86,9 @@ async def test_get_transfer_status_not_found(mock_dispatcher):
 @pytest.mark.asyncio
 async def test_get_transfer_status_generic_exception(mock_dispatcher):
     """GET transfer status with generic Exception returns 500."""
-    mock_dispatcher.dispatch_get_transfer_status.side_effect = RuntimeError("unexpected")
+    mock_dispatcher.dispatch_get_transfer_status.side_effect = RuntimeError(
+        "unexpected"
+    )
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

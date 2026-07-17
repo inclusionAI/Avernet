@@ -97,7 +97,10 @@ class StubFileTransferBackend(FileTransferBackend):
     # ── Phase 72: Multipart upload methods ────────────────────────────
 
     def initiate_multipart_upload(
-        self, staging_path: str, expire_seconds: int, part_count: int = 2,
+        self,
+        staging_path: str,
+        expire_seconds: int,
+        part_count: int = 2,
     ) -> MultipartSession:
         """Initiate a stub multipart upload session.
 
@@ -128,7 +131,9 @@ class StubFileTransferBackend(FileTransferBackend):
             "uploaded_parts": {},
         }
         return MultipartSession(
-            session_id=session_id, part_count=part_count, parts=parts,
+            session_id=session_id,
+            part_count=part_count,
+            parts=parts,
         )
 
     def list_parts(self, staging_path: str, session_id: str) -> list[PartInfo]:
@@ -150,7 +155,10 @@ class StubFileTransferBackend(FileTransferBackend):
         ]
 
     def complete_multipart_upload(
-        self, staging_path: str, session_id: str, parts: list[PartInfo],
+        self,
+        staging_path: str,
+        session_id: str,
+        parts: list[PartInfo],
     ) -> None:
         """Assemble uploaded parts into the final file in _storage.
 
@@ -181,7 +189,10 @@ class StubFileTransferBackend(FileTransferBackend):
     # ── Phase 72: Staging object management methods ───────────────────
 
     def list_objects(
-        self, prefix: str, limit: int, marker: str | None,
+        self,
+        prefix: str,
+        limit: int,
+        marker: str | None,
     ) -> ObjectListing:
         """List storage keys matching a prefix with marker pagination.
 
@@ -194,9 +205,7 @@ class StubFileTransferBackend(FileTransferBackend):
             ObjectListing with items, truncated flag, and next_marker.
         """
         # Collect all matching keys, sorted
-        matching = sorted(
-            [k for k in self._storage.keys() if k.startswith(prefix)]
-        )
+        matching = sorted([k for k in self._storage.keys() if k.startswith(prefix)])
         # Apply marker-based pagination
         start_idx = 0
         if marker is not None:
@@ -260,7 +269,10 @@ class StubFileTransferBackend(FileTransferBackend):
         return self._storage.get(transfer_id, b"")
 
     def put_multipart_content(
-        self, transfer_id: str, data: bytes, part_number: int = 1,
+        self,
+        transfer_id: str,
+        data: bytes,
+        part_number: int = 1,
     ) -> None:
         """Simulate uploading a single part for a multipart upload.
 
@@ -292,7 +304,11 @@ class StubFileTransferBackend(FileTransferBackend):
             The transfer_id portion of the path, e.g. ``abc123``.
         """
         parts = staging_path.split("/")
-        if len(parts) >= 3 and parts[0] in ("file-transfers", "baas-file-transfer", self._staging_root_path):
+        if len(parts) >= 3 and parts[0] in (
+            "file-transfers",
+            "baas-file-transfer",
+            self._staging_root_path,
+        ):
             return parts[-2]
         return staging_path  # fallback
 
@@ -322,7 +338,9 @@ class StubFileTransferBackend(FileTransferBackend):
         return f"{root}/{tenant}/{subdir_part}{transfer_id}/{filename}"
 
     def build_staging_prefix(
-        self, tenant: str, subdir: str | None = None,
+        self,
+        tenant: str,
+        subdir: str | None = None,
     ) -> str:
         """Construct OSS key prefix for tenant-scoped object listing.
 
@@ -339,6 +357,7 @@ class StubFileTransferBackend(FileTransferBackend):
         root = self._staging_root_path
         subdir_part = f"{subdir}/" if subdir else ""
         return f"{root}/{tenant}/{subdir_part}"
+
     def _parse_url_transfer_id(self, url: str) -> str:
         """Extract transfer_id from a fake stub URL.
 
@@ -353,7 +372,7 @@ class StubFileTransferBackend(FileTransferBackend):
         """
         for prefix in ("stub-upload://", "stub-download://", "stub-mp-upload://"):
             if url.startswith(prefix):
-                rest = url[len(prefix):]
+                rest = url[len(prefix) :]
                 # multipart URLs have format: {transfer_id}/{part_number}
                 return rest.split("/", 1)[0]
         raise ValueError(f"Unrecognized stub URL: {url}")

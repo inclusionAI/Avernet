@@ -30,11 +30,14 @@ def mock_bucket():
 
 @pytest.fixture
 def backend(mock_secret_store, mock_bucket):
-    with patch(
-        "secbaas.community.plugins.file_transfer._aliyun_oss.oss2.Auth"
-    ) as mock_auth, patch(
-        "secbaas.community.plugins.file_transfer._aliyun_oss.oss2.Bucket",
-        return_value=mock_bucket,
+    with (
+        patch(
+            "secbaas.community.plugins.file_transfer._aliyun_oss.oss2.Auth"
+        ) as mock_auth,
+        patch(
+            "secbaas.community.plugins.file_transfer._aliyun_oss.oss2.Bucket",
+            return_value=mock_bucket,
+        ),
     ):
         mock_auth.return_value = MagicMock()
         return AliyunOssFileTransferBackend(secret_store=mock_secret_store)
@@ -55,8 +58,12 @@ class TestCheckObjectExists:
 
     def test_object_not_exists(self, backend, mock_bucket):
         import oss2
+
         mock_bucket.head_object.side_effect = oss2.exceptions.NoSuchKey(
-            status=404, headers={}, body="", details={"Code": "NoSuchKey", "Message": ""}
+            status=404,
+            headers={},
+            body="",
+            details={"Code": "NoSuchKey", "Message": ""},
         )
         assert backend.check_object_exists("path/to/file") is False
 
@@ -125,8 +132,12 @@ class TestMultipartUpload:
 
     def test_initiate_multipart_upload_oss_error(self, backend, mock_bucket):
         import oss2
+
         mock_bucket.init_multipart_upload.side_effect = oss2.exceptions.OssError(
-            status=500, headers={}, body="", details={"Code": "Error", "Message": "fail"}
+            status=500,
+            headers={},
+            body="",
+            details={"Code": "Error", "Message": "fail"},
         )
         with pytest.raises(oss2.exceptions.OssError):
             backend.initiate_multipart_upload("path/to/file", 3600, 2)

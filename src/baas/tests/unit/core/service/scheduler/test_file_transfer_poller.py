@@ -6,7 +6,7 @@ Tests:
 - _process_download_ticket: normal, timeout, lock failure, OSS detection
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -16,7 +16,6 @@ from secbaas.community.core.service.scheduler._tasks._file_transfer_poller impor
     FileTransferPoller,
     FileTransferPollerConfig,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -35,7 +34,7 @@ def _make_config(**overrides):
 
 
 def _make_ticket(**overrides):
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
     defaults = dict(
         id=1,
         gmt_create=now - timedelta(seconds=30),
@@ -169,6 +168,7 @@ class TestProcessSingleTicket:
         poller = _make_poller()
 
         import asyncio
+
         result = asyncio.run(poller._process_single_ticket(ticket))
 
         assert result == "pull_success"
@@ -184,6 +184,7 @@ class TestProcessSingleTicket:
         poller = _make_poller()
 
         import asyncio
+
         result = asyncio.run(poller._process_single_ticket(ticket))
 
         assert result == "retention_done"
@@ -194,11 +195,13 @@ class TestProcessSingleTicket:
         config = _make_config(upload_timeout_seconds=10)
         ticket = _make_ticket(
             status="CREATED",
-            gmt_create=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=60),
+            gmt_create=datetime.now(UTC).replace(tzinfo=None)
+            - timedelta(seconds=60),
         )
         poller = _make_poller(config=config)
 
         import asyncio
+
         result = asyncio.run(poller._process_single_ticket(ticket))
 
         assert result == "timed_out"
@@ -212,6 +215,7 @@ class TestProcessSingleTicket:
         poller = _make_poller()
 
         import asyncio
+
         result = asyncio.run(poller._process_single_ticket(ticket))
 
         assert result == "skipped"
@@ -226,6 +230,7 @@ class TestProcessSingleTicket:
         poller._lock_service.acquire_lock.return_value = lock_ctx
 
         import asyncio
+
         result = asyncio.run(poller._process_single_ticket(ticket))
 
         assert result == "skipped"
@@ -237,6 +242,7 @@ class TestProcessSingleTicket:
         poller._file_backend.check_object_exists.return_value = False
 
         import asyncio
+
         result = asyncio.run(poller._process_single_ticket(ticket))
 
         assert result == "oss_not_ready"
@@ -248,6 +254,7 @@ class TestProcessSingleTicket:
         poller._paas_facade.pull_file.side_effect = RuntimeError("network error")
 
         import asyncio
+
         result = asyncio.run(poller._process_single_ticket(ticket))
 
         assert result == "failed"
@@ -266,6 +273,7 @@ class TestProcessDownloadTicket:
         poller = _make_poller()
 
         import asyncio
+
         result = asyncio.run(poller._process_download_ticket(ticket))
 
         assert result == "download_ready"
@@ -286,11 +294,13 @@ class TestProcessDownloadTicket:
         ticket = _make_ticket(
             status="CREATED",
             direction="DOWNLOAD",
-            gmt_create=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=60),
+            gmt_create=datetime.now(UTC).replace(tzinfo=None)
+            - timedelta(seconds=60),
         )
         poller = _make_poller(config=config)
 
         import asyncio
+
         result = asyncio.run(poller._process_download_ticket(ticket))
 
         assert result == "timed_out"
@@ -304,6 +314,7 @@ class TestProcessDownloadTicket:
         poller = _make_poller()
 
         import asyncio
+
         result = asyncio.run(poller._process_download_ticket(ticket))
 
         assert result == "skipped"
@@ -317,6 +328,7 @@ class TestProcessDownloadTicket:
         poller._lock_service.acquire_lock.return_value = lock_ctx
 
         import asyncio
+
         result = asyncio.run(poller._process_download_ticket(ticket))
 
         assert result == "skipped"
@@ -328,6 +340,7 @@ class TestProcessDownloadTicket:
         poller._file_backend.check_object_exists.return_value = False
 
         import asyncio
+
         result = asyncio.run(poller._process_download_ticket(ticket))
 
         assert result == "oss_not_ready"
@@ -339,6 +352,7 @@ class TestProcessDownloadTicket:
         poller._file_backend.check_object_exists.side_effect = RuntimeError("oss down")
 
         import asyncio
+
         result = asyncio.run(poller._process_download_ticket(ticket))
 
         assert result == "failed"

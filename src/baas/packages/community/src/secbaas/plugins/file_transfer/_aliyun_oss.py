@@ -1,5 +1,4 @@
 import oss2
-
 from secbaas.logger import get_logger
 from secbaas.spi.file_transfer import (
     FileTransferBackend,
@@ -15,6 +14,7 @@ log = get_logger("file_transfer")
 # Hardcoded per CONTEXT.md D-05 -- no external config source.
 OSS_ENDPOINT = "https://oss-cn-hangzhou.aliyuncs.com"
 OSS_BUCKET = "secbaas-file-transfer"
+STAGING_ROOT_PATH = "baas-file-transfer"
 
 
 class AliyunOssFileTransferBackend(FileTransferBackend):
@@ -30,6 +30,34 @@ class AliyunOssFileTransferBackend(FileTransferBackend):
         access_key_secret = secret_store.get_secret("secbaas.oss.access_key_secret")
         auth = oss2.Auth(access_key_id, access_key_secret)
         self._bucket = oss2.Bucket(auth, OSS_ENDPOINT, OSS_BUCKET)
+
+    # ── Staging path construction (D-14) ─────────────────────────────
+
+    def build_staging_path(
+        self,
+        tenant: str,
+        transfer_id: str,
+        filename: str,
+        subdir: str | None = None,
+    ) -> str:
+        """Construct full OSS object key for file transfer staging.
+
+        Pattern: ``{staging_root}/{tenant}[/{subdir}]/{transfer_id}/{filename}``
+        """
+        subdir_part = f"{subdir}/" if subdir else ""
+        return f"{STAGING_ROOT_PATH}/{tenant}/{subdir_part}{transfer_id}/{filename}"
+
+    def build_staging_prefix(
+        self,
+        tenant: str,
+        subdir: str | None = None,
+    ) -> str:
+        """Construct OSS key prefix for tenant-scoped object listing.
+
+        The returned prefix ends with ``"/"``.
+        """
+        subdir_part = f"{subdir}/" if subdir else ""
+        return f"{STAGING_ROOT_PATH}/{tenant}/{subdir_part}"
 
     def generate_upload_url(self, staging_path: str, expire_seconds: int) -> str:
         return self._bucket.sign_url("PUT", staging_path, expire_seconds)
@@ -47,7 +75,10 @@ class AliyunOssFileTransferBackend(FileTransferBackend):
     # ── Phase 72: Multipart upload methods ────────────────────────────
 
     def initiate_multipart_upload(
-        self, staging_path: str, expire_seconds: int, part_count: int = 2,
+        self,
+        staging_path: str,
+        expire_seconds: int,
+        part_count: int = 2,
     ) -> MultipartSession:
         """Initiate OSS multipart upload and generate pre-signed per-part URLs.
 
@@ -72,21 +103,27 @@ class AliyunOssFileTransferBackend(FileTransferBackend):
             parts = []
             for i in range(1, part_count + 1):
                 upload_url = self._bucket.sign_url(
-                    "PUT", staging_path, expire_seconds,
+                    "PUT",
+                    staging_path,
+                    expire_seconds,
                     params={"uploadId": session_id, "partNumber": str(i)},
                 )
                 parts.append(PartInfo(part_number=i, upload_url=upload_url))
 
             log.info(
                 "[file-transfer:initiate_multipart_upload] result: session_id=%s, part_count=%s",
-                session_id, part_count,
+                session_id,
+                part_count,
             )
             return MultipartSession(
-                session_id=session_id, part_count=part_count, parts=parts,
+                session_id=session_id,
+                part_count=part_count,
+                parts=parts,
             )
         except (oss2.exceptions.OssError, oss2.exceptions.ClientError) as e:
             log.error(
-                "OSS error in initiate_multipart_upload: %s (code=%s)", str(e),
+                "OSS error in initiate_multipart_upload: %s (code=%s)",
+                str(e),
                 getattr(e, "code", "N/A"),
             )
             raise
@@ -125,7 +162,10 @@ class AliyunOssFileTransferBackend(FileTransferBackend):
             raise
 
     def complete_multipart_upload(
-        self, staging_path: str, session_id: str, parts: list[PartInfo],
+        self,
+        staging_path: str,
+        session_id: str,
+        parts: list[PartInfo],
     ) -> None:
         """Assemble multipart upload.
 
@@ -140,12 +180,16 @@ class AliyunOssFileTransferBackend(FileTransferBackend):
             parts: List of PartInfo from list_parts (with etag set).
         """
         try:
-            # Pitfall 2: oss2 expects oss2.models.PartInfo with part_number and etag
-            oss_parts = [
-                oss2.models.PartInfo(p.part_number, p.etag) for p in parts
-            ]
+            # Pitfall 2: oss2 expects oss2.models.PartInfo with part_number and etag.
+            # OSS requires parts sorted by part_number in ascending order.
+            oss_parts = sorted(
+                [oss2.models.PartInfo(p.part_number, p.etag) for p in parts],
+                key=lambda x: x.part_number,
+            )
             self._bucket.complete_multipart_upload(
-                staging_path, session_id, oss_parts,
+                staging_path,
+                session_id,
+                oss_parts,
             )
             log.info(
                 "[file-transfer:complete_multipart_upload] result: done, part_count=%s",
@@ -154,7 +198,8 @@ class AliyunOssFileTransferBackend(FileTransferBackend):
         except oss2.exceptions.OssError as e:
             log.error(
                 "OSS error in complete_multipart_upload: %s (code=%s)",
-                str(e), e.code,
+                str(e),
+                e.code,
             )
             raise
 
@@ -176,14 +221,18 @@ class AliyunOssFileTransferBackend(FileTransferBackend):
         except oss2.exceptions.OssError as e:
             log.error(
                 "OSS error in abort_multipart_upload: %s (code=%s)",
-                str(e), e.code,
+                str(e),
+                e.code,
             )
             raise
 
     # ── Phase 72: Staging object management methods ───────────────────
 
     def list_objects(
-        self, prefix: str, limit: int, marker: str | None,
+        self,
+        prefix: str,
+        limit: int,
+        marker: str | None,
     ) -> ObjectListing:
         """List staging objects with marker pagination.
 
@@ -215,7 +264,8 @@ class AliyunOssFileTransferBackend(FileTransferBackend):
             ]
             log.info(
                 "[file-transfer:list_objects] result: count=%s, truncated=%s",
-                len(items), result.is_truncated,
+                len(items),
+                result.is_truncated,
             )
             return ObjectListing(
                 items=items,

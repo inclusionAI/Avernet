@@ -21,6 +21,7 @@ from secbaas.community.core.repository.device_template import (
 from secbaas.community.core.repository.distributed_lock import (
     OrmDistributedLockRepository,
 )
+from secbaas.community.core.repository.file_transfer_ticket import OrmTicketRepository
 from secbaas.community.core.repository.local_user_machine import (
     OrmLocalUserMachineRepository,
 )
@@ -32,7 +33,6 @@ from secbaas.community.core.repository.tenant import OrmTenantRepository
 from secbaas.community.core.repository.ws_relay_session import (
     OrmWsRelaySessionRepository,
 )
-from secbaas.community.core.repository.file_transfer_ticket import OrmTicketRepository
 from secbaas.community.logger import get_logger
 
 logger = get_logger("bootstrap")
