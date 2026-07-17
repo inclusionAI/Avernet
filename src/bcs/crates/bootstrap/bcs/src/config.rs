@@ -292,7 +292,7 @@ pub struct BcsConfig {
 
     /// Async chat run (bcs-cli chat-async) — max wall-clock a single run may
     /// be pending/running before the cleanup task marks it failed("timeout").
-    /// Default 30 min, configurable up to 24 h.
+    /// Default 2 h 5 min, configurable up to 24 h.
     #[serde(default = "default_async_chat_run_timeout_ms")]
     pub async_chat_run_timeout_ms: u64,
 
@@ -404,7 +404,7 @@ fn default_register_path() -> String {
 }
 
 fn default_async_chat_run_timeout_ms() -> u64 {
-    30 * 60 * 1_000
+    (2 * 60 + 5) * 60 * 1_000
 }
 
 fn default_async_chat_run_retention_ms() -> u64 {
@@ -1055,6 +1055,7 @@ mod tests {
         assert_eq!(config.bots_base_dir, PathBuf::from("/bots"));
         assert!(config.fusion_provider.is_none());
         assert_eq!(config.max_history_per_session, 1000);
+        assert_eq!(config.async_chat_run_timeout_ms, 7_500_000);
         assert!(config.security.outbound_url.block_private_networks);
         assert!(!config.security.outbound_url.allow_loopback);
     }

@@ -158,8 +158,8 @@ bcs chat --bot-uuid "<目标Bot UUID>" --message "<消息内容>" [--session-id 
 - `--bot-uuid`: 目标 Bot 的 UUID（**必需**）
 - `--message`: 消息内容（**必需**）
 - `--session-id`: 指定稳定会话 ID。多次调用传入同一个 `session_id` 时，会落到目标 Bot 侧同一会话中，共享上下文。
-- `--detach`: 目标 Bot 首次确认收到消息后立即返回，不等待完整回复；服务端 run 会继续执行。适合长耗时任务。
-- `--timeout-ms`: 总等待预算（毫秒）。阻塞模式默认 30 分钟；配合 `--detach` 时默认等待首次确认 60 秒。
+- `--detach`: BCS 接受并启动 run 后立即返回，不等待完整回复；服务端 run 会继续执行。适合长耗时任务。
+- `--timeout-ms`: CLI 本地轮询预算（毫秒）。阻塞模式默认 30 分钟；配合 `--detach` 时默认等待首次确认 60 秒。该值不会改变 BCS run 生命周期，也不会传给 Provider 或下游 Bot。
 
 **示例：**
 

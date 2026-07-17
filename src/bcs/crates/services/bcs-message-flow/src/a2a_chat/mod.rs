@@ -25,6 +25,8 @@ use bcs_service_api::{
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+const A2A_DOWNSTREAM_EXECUTION_TIMEOUT_MS: u64 = 2 * 60 * 60 * 1_000;
+
 pub use event_parser::{
     DetachDeliveryCallback, DrainOutcome, classify_detach_delivery_callback,
     drain_chat_event, drain_chat_event_with_mode,
@@ -522,7 +524,6 @@ impl A2aChatService for A2aChat {
             &from_bot_name,
             cmd.from_actor_id.as_deref().unwrap_or(&from_bot_id),
             &cmd.message,
-            timeout_ms,
             &cmd.tags,
             cmd.caller_wait_mode.as_deref(),
         )?;
@@ -1240,7 +1241,6 @@ fn build_chat_send_frame(
     from_bot_name: &str,
     from_actor_id: &str,
     message: &str,
-    timeout_ms: u64,
     tags: &[String],
     caller_wait_mode: Option<&str>,
 ) -> ServiceResult<BcsFrame> {
@@ -1282,7 +1282,9 @@ fn build_chat_send_frame(
             routing_mode: None,
             group_type: None,
         },
-        timeout_ms: Some(timeout_ms),
+        // Downstream execution has its own budget and must not inherit the
+        // caller's local polling deadline or the BCS run lifecycle deadline.
+        timeout_ms: Some(A2A_DOWNSTREAM_EXECUTION_TIMEOUT_MS),
         idempotency_key: None,
         bcs_session_id: None,
         tags: tags.to_vec(),

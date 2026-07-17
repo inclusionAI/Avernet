@@ -1080,10 +1080,11 @@ enum Commands {
         #[arg(short, long)]
         message: String,
 
-        /// Overall wait budget in milliseconds (up to 24 hours).
+        /// Local polling budget in milliseconds (up to 24 hours).
         ///
+        /// This never changes the BCS run or downstream bot execution timeout.
         /// Defaults to 30 minutes for the blocking flow, or 60 seconds when
-        /// `--detach` is set (the budget for waiting on the bot's first ack).
+        /// `--detach` is set (the local budget for observing the first ack).
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..=86_400_000))]
         timeout_ms: Option<u64>,
 
@@ -1104,9 +1105,8 @@ enum Commands {
         #[arg(long, default_value_t = 15_000u64, hide = true)]
         poll_wait_ms: u64,
 
-        /// Detach after the bot acknowledges the message (first chat event).
-        /// The run keeps executing on the server; the CLI returns without
-        /// waiting for the full response.
+        /// Detach after BCS accepts and starts the run. The run keeps executing
+        /// on the server; the CLI returns without waiting for the full response.
         #[arg(long, default_value_t = false)]
         detach: bool,
 
@@ -2883,7 +2883,7 @@ async fn main() -> Result<()> {
                 oauth_headers.as_ref(),
             );
 
-            let effective_timeout_ms = timeout_ms.unwrap_or(if detach {
+            let client_wait_timeout_ms = timeout_ms.unwrap_or(if detach {
                 60_000
             } else {
                 1_800_000
@@ -2896,12 +2896,9 @@ async fn main() -> Result<()> {
                 json!({
                     "message": &message,
                     "from": serde_json::Value::Null,
-                    "timeout_ms": effective_timeout_ms,
                     "session_id": &session_id,
                     "tags": &tags,
                     "response_mode": &response_mode,
-                    "poll_wait_ms": poll_wait_ms,
-                    "detach": detach,
                     "organization_code": &organization_code,
                 })
             );
@@ -2914,7 +2911,7 @@ async fn main() -> Result<()> {
                         session_id.as_deref(),
                         &tags,
                         response_mode.as_deref(),
-                        Some(effective_timeout_ms),
+                        Some(client_wait_timeout_ms),
                         Some(poll_wait_ms),
                         organization_code.as_deref(),
                     )
@@ -2928,7 +2925,7 @@ async fn main() -> Result<()> {
                         session_id.as_deref(),
                         &tags,
                         response_mode.as_deref(),
-                        Some(effective_timeout_ms),
+                        Some(client_wait_timeout_ms),
                         Some(poll_wait_ms),
                         organization_code.as_deref(),
                     )
