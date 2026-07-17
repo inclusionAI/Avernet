@@ -45,9 +45,7 @@ class AliyunOssFileTransferBackend(FileTransferBackend):
         if config is not None and config.endpoint and config.bucket_name:
             self._endpoint = config.endpoint
             self._bucket_name = config.bucket_name
-            self._staging_root_path = (
-                config.staging_root_path or _DEFAULT_STAGING_ROOT
-            )
+            self._staging_root_path = config.staging_root_path or _DEFAULT_STAGING_ROOT
             access_key_id, access_key_secret = secret_store.get_kv_secret(
                 config.secret_name
             )
@@ -56,9 +54,7 @@ class AliyunOssFileTransferBackend(FileTransferBackend):
             self._bucket_name = _DEFAULT_BUCKET
             self._staging_root_path = _DEFAULT_STAGING_ROOT
             access_key_id = secret_store.get_secret("secbaas.oss.access_key_id")
-            access_key_secret = secret_store.get_secret(
-                "secbaas.oss.access_key_secret"
-            )
+            access_key_secret = secret_store.get_secret("secbaas.oss.access_key_secret")
         auth = oss2.Auth(access_key_id, access_key_secret)
         self._bucket = oss2.Bucket(auth, self._endpoint, self._bucket_name)
 
