@@ -6,7 +6,7 @@ _merge_e2e_coverage() {
         log_warn "COVERAGE_E2E_DIR not set or not found, skipping merge"
         return 0
     fi
-    log_sub "Merging E2E coverage from: $COVERAGE_E2E_DIR"
+    log_sub "E2E coverage summary"
     shopt -s nullglob
     local group_reports=("$COVERAGE_E2E_DIR"/*/.coverage)
     shopt -u nullglob
@@ -15,23 +15,65 @@ _merge_e2e_coverage() {
         return 0
     fi
     log_info "Found ${#group_reports[@]} group coverage reports"
+
+    # Show per-group coverage percentage (total only — fast)
+    log_info "Per-group coverage:"
+    for report in "${group_reports[@]}"; do
+        local group_dir=$(dirname "$report")
+        local group_name=$(basename "$group_dir")
+        local pct
+        pct=$(COVERAGE_FILE="$report" uv run coverage report --format=total --ignore-errors 2>/dev/null | tail -1)
+        log_info "  ${group_name}: ${pct}%  → file://${group_dir}/htmlcov/index.html"
+    done
+
+    # Merge all groups (--keep preserves per-group .coverage files)
     mkdir -p "$REPORT_DIR"
-    COVERAGE_FILE="$REPORT_DIR/.coverage" uv run coverage combine "${group_reports[@]}" || log_warn "Failed to combine coverage reports"
+    COVERAGE_FILE="$REPORT_DIR/.coverage" uv run coverage combine --keep "${group_reports[@]}" || log_warn "Failed to combine coverage reports"
     COVERAGE_FILE="$REPORT_DIR/.coverage" uv run coverage html -i -d "$REPORT_DIR/htmlcov-e2e" >/dev/null 2>&1 || true
     COVERAGE_FILE="$REPORT_DIR/.coverage" uv run coverage xml -o "$REPORT_DIR/coverage-e2e.xml" >/dev/null 2>&1 || true
     COVERAGE_FILE="$REPORT_DIR/.coverage" uv run coverage json -o "$REPORT_DIR/coverage-e2e.json" >/dev/null 2>&1 || true
-    log_info "E2E coverage reports (merged):"
-    log_info "  HTML: file://$REPORT_DIR/htmlcov-e2e/index.html"
-    log_info "  XML:  $REPORT_DIR/coverage-e2e.xml"
-    log_info "  JSON: $REPORT_DIR/coverage-e2e.json"
-    log_info "Per-group coverage reports:"
-    for group_dir in "$COVERAGE_E2E_DIR"/*/; do
-        local group_name=$(basename "$group_dir")
-        log_info "  $group_name: file://${group_dir}htmlcov/index.html"
-    done
-    COVERAGE_FILE="$REPORT_DIR/.coverage" uv run coverage report --source="$BAAS_DIR/src" 2>/dev/null | while IFS= read -r line; do
-        echo "  $line"
-    done
+
+    # Show merged total and key paas files
+    local merged_pct
+    merged_pct=$(COVERAGE_FILE="$REPORT_DIR/.coverage" uv run coverage report --format=total --ignore-errors 2>/dev/null | tail -1)
+    log_info "Merged E2E total: ${merged_pct}%"
+    log_info "Reports: file://$REPORT_DIR/htmlcov-e2e/index.html"
+    log_info "JSON:    $REPORT_DIR/coverage-e2e.json"
+
+    # Show paas key files coverage (what we care about)
+    COVERAGE_FILE="$REPORT_DIR/.coverage" uv run python -c "
+import coverage, sys
+cov = coverage.Coverage(data_file='$REPORT_DIR/.coverage')
+cov.load()
+results = []
+for fp in cov.get_data().measured_files():
+    short = fp.split('secbaas/community/')[-1] if 'secbaas/community/' in fp else fp
+    # Skip test files, stubs, __init__.py, .pyx, protocols
+    if '/tests/' in fp or '/spi/' in fp and '__init__' in fp:
+        continue
+    if fp.endswith('.pyx') or 'dependency_injector' in fp:
+        continue
+    # Skip stub/mock plugins — they exist only for test harness, not production code
+    if '/stub/' in fp or '/mock/' in fp:
+        continue
+    try:
+        a = cov.analysis2(fp)
+    except:
+        continue
+    s = set(a[1]) - set(a[2])
+    m = set(a[3])
+    total = len(s)
+    if total == 0:
+        continue
+    cov_lines = total - len(m)
+    pct = 100 * cov_lines / total
+    if pct < 90:
+        results.append((pct, cov_lines, total, short))
+results.sort()
+for pct, cov_lines, total, short in results:
+    print(f'  {pct:5.1f}% ({cov_lines:>3}/{total:<3}) {short}')
+print(f'\\n  Total sub-90% files: {len(results)}')
+" 2>/dev/null
 }
 
 run_arch_tests() {
@@ -199,6 +241,8 @@ run_e2e_mock_failure_device_not_found() {
     _stop_app
     return $rc
 }
+
+
 
 run_e2e_tests() {
     local mode="${1:-${_BAAS_MODE:-bare}}"

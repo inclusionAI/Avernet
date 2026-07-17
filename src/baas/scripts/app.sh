@@ -250,6 +250,7 @@ do_start() {
             --parallel-mode
             --save-signal=USR1
             --source="$WORK_DIR/src"
+            --omit="*/stub/*,*/mock/*"
             src/secbaas/community/main.py
             -c "$CONFIG_DIR"
             --mode "$APP_MODE"
