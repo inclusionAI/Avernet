@@ -71,20 +71,22 @@ def _scrub_sensitive(value: Any) -> Any:
             for k, v in value.items()
             if k not in SENSITIVE_FIELDS
         }
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [_scrub_sensitive(item) for item in value]
-    if isinstance(value, str) and value[:1] in "[{":
-        try:
-            decoded = json.loads(value)
-        except (ValueError, TypeError):
-            return value
-        scrubbed = _scrub_sensitive(decoded)
-        if isinstance(scrubbed, (dict, list)):
+    if isinstance(value, str):
+        stripped = value.lstrip()
+        if stripped[:1] in "[{":
             try:
-                return json.dumps(scrubbed, ensure_ascii=False)
-            except (TypeError, ValueError):
-                return scrubbed
-        return value
+                decoded = json.loads(stripped)
+            except (ValueError, TypeError):
+                return value
+            scrubbed = _scrub_sensitive(decoded)
+            if isinstance(scrubbed, (dict, list)):
+                try:
+                    return json.dumps(scrubbed, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    return scrubbed
+            return value
     return value
 
 

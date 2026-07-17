@@ -14,7 +14,10 @@ from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
-from agentclaw.community.adapters.http.bot_public.public_noauth_router import router
+from agentclaw.community.adapters.http.bot_public.public_noauth_router import (
+    _scrub_sensitive,
+    router,
+)
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 
@@ -219,6 +222,47 @@ class TestListCodingBotsPublic:
         data = resp.json()
         assert data["success"] is False
         assert data["error_code"] == 500
+
+
+# --- Unit tests for _scrub_sensitive (security regression) ---
+
+class TestScrubSensitiveUnit:
+    """直接覆盖 _scrub_sensitive；重点回归"JSON 字符串带前导空白绕过脱敏"。"""
+
+    def test_dict_top_level_sensitive_removed(self):
+        assert _scrub_sensitive({"iam_token": "x", "keep": 1}) == {"keep": 1}
+
+    def test_nested_dict_sensitive_removed(self):
+        assert _scrub_sensitive({"a": {"token": "t", "b": 2}}) == {"a": {"b": 2}}
+
+    def test_json_string_without_whitespace_scrubbed(self):
+        s = '{"iam_token": "t", "keep": 1}'
+        out = _scrub_sensitive(s)
+        assert isinstance(out, str)
+        dec = json.loads(out)
+        assert "iam_token" not in dec
+        assert dec["keep"] == 1
+
+    def test_json_string_with_leading_whitespace_scrubbed(self):
+        """regression: JSON 字符串带前导空白不得绕过脱敏。"""
+        s = '  \n {"iam_token": "t", "token": "enc:v1:x", "keep": 1}'
+        out = _scrub_sensitive(s)
+        assert isinstance(out, str)
+        dec = json.loads(out)
+        assert "iam_token" not in dec
+        assert "token" not in dec
+        assert dec["keep"] == 1
+
+    def test_non_json_string_returned_as_is(self):
+        assert _scrub_sensitive("enc:v1:plain-token") == "enc:v1:plain-token"
+
+    def test_tuple_handled_as_sequence(self):
+        out = _scrub_sensitive(({"token": "t"}, {"keep": 1}))
+        assert isinstance(out, list)
+        assert out == [{}, {"keep": 1}]
+
+    def test_list_scrubbed_recursively(self):
+        assert _scrub_sensitive([{"token": "t"}, [{"iam_token": "i"}]]) == [{}, [{}]]
 
 
 # --- Tests for PATCH /api/public/bots/{bot_id}/ext ---
