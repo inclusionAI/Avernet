@@ -771,8 +771,11 @@ class DeviceService:
             DeviceBindingStatus.ACTIVE.value,
             DeviceBindingStatus.PENDING.value,
             DeviceBindingStatus.FAILED.value,
+            DeviceBindingStatus.STOPPED.value,
         ]:
-            raise InvalidDeviceStatusError("only ACTIVE/PENDING/FAILED devices can be released")
+            raise InvalidDeviceStatusError(
+                "only ACTIVE/PENDING/FAILED/STOPPED devices can be released"
+            )
 
         entity_id = current.entity_id
         entity_type = current.entity_type

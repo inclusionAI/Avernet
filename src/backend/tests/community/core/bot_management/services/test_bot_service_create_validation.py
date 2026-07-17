@@ -289,6 +289,21 @@ class TestCheckDeviceLimitUsesCeiling:
         with pytest.raises(DeviceLimitError):
             svc._check_device_limit(entity_id="u1", entity_type="staff", owner_id="u1")
 
+    def test_stopped_binding_counts_toward_device_limit(self):
+        """STOPPED bindings remain restartable, so they still consume a device slot."""
+        ps = MagicMock()
+        ps.get_bots_ceiling.return_value = 1
+        svc = _make_service(max_bots=5, policy_service=ps)
+        svc._repository.list_by_owner.return_value = (1, [_bound_bot(0)])
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            status=DeviceBindingStatus.STOPPED.value,
+        )
+        svc._device_service_provider = lambda: device_service
+
+        with pytest.raises(DeviceLimitError):
+            svc._check_device_limit(entity_id="u1", entity_type="staff", owner_id="u1")
+
     def test_device_limit_skipped_when_ceiling_non_positive(self):
         """ceiling<=0（config 无效）→ 提前放行，不因 >=0 恒真拦住第一个 bot"""
         ps = MagicMock()
