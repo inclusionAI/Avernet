@@ -65,12 +65,14 @@ class GovernanceRecordInput(BaseModel):
     # 可选:身份补充
     worker_id: str | None = Field(None, description="生产者优先的 worker_id(owner_id:bot_id);缺则合成")
     bot_name: str | None = Field(None, description="Bot 名称")
+    owner_name: str | None = Field(None, description="负责人显示名")
     # 可选:数据字段,缺则默认 None,传给 refresh_snapshot/add_ticket
     hit_dimensions: str | None = Field(None, description="命中维度")
     hit_dimensions_count: int | None = Field(None, description="命中维度数")
     governance_max_priority: str | None = Field(None, description="治理优先级")
     expected_token_saving: int | None = Field(None, description="预期 token 节省")
     saving_ratio: float | None = Field(None, description="节省率 0-1")
+    token_baseline: int | None = Field(None, description="Token 消耗基线")
     task_summary: str | None = Field(None, description="任务摘要")
     notification_structured: str | None = Field(None, description="结构化通知 JSON")
     analysis_status: str | None = Field(None, description="分析状态")
@@ -84,11 +86,13 @@ class GovernanceRecordInput(BaseModel):
             dt_version=self.dt_version,
             worker_id=self.worker_id,
             bot_name=self.bot_name,
+            owner_name=self.owner_name,
             hit_dimensions=self.hit_dimensions,
             hit_dimensions_count=self.hit_dimensions_count,
             governance_max_priority=self.governance_max_priority,
             expected_token_saving=self.expected_token_saving,
             saving_ratio=self.saving_ratio,
+            token_baseline=self.token_baseline,
             task_summary=self.task_summary,
             notification_structured=self.notification_structured,
             analysis_status=self.analysis_status,
@@ -176,6 +180,8 @@ class ReviewTicketItem(BaseModel):
     bot_id: str | None = None
     bot_name: str | None = None
     owner_id: str | None = None
+    owner_name: str | None = None
+    token_baseline: int | None = None
     governance_status: str = ""
     latest_decision: str | None = None
     hit_dimensions: str | None = None
@@ -197,6 +203,8 @@ class ReviewTicketItem(BaseModel):
             bot_id=ticket.bot_id,
             bot_name=ticket.bot_name,
             owner_id=ticket.owner_id,
+            owner_name=ticket.owner_name,
+            token_baseline=s.token_baseline,
             governance_status=status.value if hasattr(status, "value") else str(status or ""),
             latest_decision=s.current_decision,
             hit_dimensions=s.triggered_dimensions,
@@ -289,7 +297,9 @@ class ReviewTicketDetailResponse(BaseModel):
     worker_id: str | None = None
     bot_id: str | None = None
     owner_id: str | None = None
+    owner_name: str | None = None
     bot_name: str | None = None
+    token_baseline: int | None = None
     dt_version: str | None = None
     task_summary: str | None = None
     governance_max_priority: str | None = None
@@ -312,8 +322,12 @@ class ReviewTicketDetailResponse(BaseModel):
     )
     # 白名单状态(单点查询,仅详情;列表接口不查以防 N+1)
     in_whitelist: bool = False
-    # 投递状态(回写自 notify_log)
+    # 投递状态(回写自 notify_log):原始 JSON 字符串 + 展平 dict
     delivery_status: str | None = None
+    delivery_status_json: dict | None = Field(
+        None,
+        description="投递状态展平对象(notify_type/notify_status/sent_at/external_message_id/error)",
+    )
     # 评审 / 生命周期
     review_reason: str | None = None
     review_decision: str | None = None
@@ -365,7 +379,9 @@ class ReviewTicketDetailResponse(BaseModel):
             worker_id=ticket.worker_id,
             bot_id=ticket.bot_id,
             owner_id=ticket.owner_id,
+            owner_name=ticket.owner_name,
             bot_name=ticket.bot_name,
+            token_baseline=s.token_baseline,
             dt_version=s.dt_version,
             task_summary=s.task_summary,
             governance_max_priority=s.severity,
@@ -383,6 +399,7 @@ class ReviewTicketDetailResponse(BaseModel):
             available_actions=cls._build_available_actions(ticket),
             in_whitelist=in_whitelist,
             delivery_status=ticket.delivery_status,
+            delivery_status_json=ticket.delivery_status_json,
             review_reason=ticket.review_reason,
             review_decision=ticket.review_decision,
             reviewed_by=ticket.reviewed_by,
@@ -535,6 +552,29 @@ class RecordsDeleteRequest(BaseModel):
     notification_ids: list[str] | None = Field(None, description="按 notification_id 批量删除 (notify_log)")
     dry_run: bool = Field(True, description="true=只统计不删除")
     reason: str = Field(..., description="操作原因，写入 audit")
+
+
+class TicketDeleteCascadeRequest(BaseModel):
+    """Request body for POST /admin/tickets:delete-cascade.
+
+    精确级联删单工单 + 归属通知(防写放大,不支持批量)。
+    """
+    ticket_id: str = Field(..., min_length=1, description="工单稳定 UUID")
+    dry_run: bool = Field(True, description="true=预览连带通知数,不删除不写审计")
+    reason: str = Field(..., min_length=1, description="操作原因,写入审计")
+
+
+class TicketDeleteCascadeResponse(BaseModel):
+    """Response data for POST /admin/tickets:delete-cascade.
+
+    区分三种语义:工单不存在 / 工单存在无通知 / 正常级联。
+    """
+    ticket_id: str = Field(..., description="入参回显的工单 ID")
+    ticket_found: bool = Field(..., description="false=工单不存在(env-scoped 查无)")
+    dry_run: bool = Field(..., description="是否 dry-run")
+    tickets_deleted: int = Field(..., description="删除工单数(0 或 1)")
+    notify_deleted: int = Field(..., description="连带删除的通知数")
+    notify_delete_failed: int = Field(..., description="best-effort 通知清理失败计数")
 
 
 # ---------------------------------------------------------------------------

@@ -211,3 +211,61 @@ class TestListDistinctBotOwner:
 # ----------------------------------------------------------------------
 # add_audit — moved to GovernanceAuditRepository (see test_audit_repo.py)
 # ----------------------------------------------------------------------
+
+
+# ----------------------------------------------------------------------
+# count_by_ticket_id / delete_by_ticket_id — ticket-cascade data layer
+# ----------------------------------------------------------------------
+
+class TestByTicketId:
+    """count_by_ticket_id / delete_by_ticket_id — ticket-cascade 支撑。
+
+    env-scoped 按 ticket_id 精确计数/硬删;不同 env 同 ticket_id 不交叉;
+    空结果 count=0 / delete=0。
+    """
+
+    def test_count_returns_rows_for_matching_ticket(self, session, engine, repo):
+        _make_notification(session, notification_id="n-a", ticket_id="tkt-1", env="dev")
+        _make_notification(session, notification_id="n-b", ticket_id="tkt-1", env="dev")
+        _make_notification(session, notification_id="n-c", ticket_id="tkt-2", env="dev")
+        with patch(_ENV_PATCH, return_value="dev"):
+            assert repo.count_by_ticket_id("tkt-1") == 2
+            assert repo.count_by_ticket_id("tkt-2") == 1
+
+    def test_count_zero_when_no_match(self, session, engine, repo):
+        _make_notification(session, notification_id="n-a", ticket_id="tkt-1", env="dev")
+        with patch(_ENV_PATCH, return_value="dev"):
+            assert repo.count_by_ticket_id("no-such-ticket") == 0
+
+    def test_count_is_env_scoped(self, session, engine, repo):
+        _make_notification(session, notification_id="n-dev", ticket_id="tkt-1", env="dev")
+        _make_notification(session, notification_id="n-pre", ticket_id="tkt-1", env="pre")
+        with patch(_ENV_PATCH, return_value="dev"):
+            assert repo.count_by_ticket_id("tkt-1") == 1
+        with patch(_ENV_PATCH, return_value="pre"):
+            assert repo.count_by_ticket_id("tkt-1") == 1
+
+    def test_delete_removes_all_rows_for_ticket_and_returns_count(self, session, engine, repo):
+        _make_notification(session, notification_id="n-a", ticket_id="tkt-1", env="dev")
+        _make_notification(session, notification_id="n-b", ticket_id="tkt-1", env="dev")
+        _make_notification(session, notification_id="n-c", ticket_id="tkt-2", env="dev")
+        with patch(_ENV_PATCH, return_value="dev"):
+            deleted = repo.delete_by_ticket_id("tkt-1")
+        assert deleted == 2
+        with patch(_ENV_PATCH, return_value="dev"):
+            assert repo.count_by_ticket_id("tkt-1") == 0
+            assert repo.count_by_ticket_id("tkt-2") == 1
+
+    def test_delete_zero_when_no_match(self, session, engine, repo):
+        _make_notification(session, notification_id="n-a", ticket_id="tkt-1", env="dev")
+        with patch(_ENV_PATCH, return_value="dev"):
+            assert repo.delete_by_ticket_id("no-such-ticket") == 0
+
+    def test_delete_is_env_scoped(self, session, engine, repo):
+        _make_notification(session, notification_id="n-dev", ticket_id="tkt-1", env="dev")
+        _make_notification(session, notification_id="n-pre", ticket_id="tkt-1", env="pre")
+        with patch(_ENV_PATCH, return_value="dev"):
+            assert repo.delete_by_ticket_id("tkt-1") == 1
+        # pre env 的行仍在
+        with patch(_ENV_PATCH, return_value="pre"):
+            assert repo.count_by_ticket_id("tkt-1") == 1

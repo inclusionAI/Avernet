@@ -39,12 +39,14 @@ def _make_ticket(**overrides) -> GovernanceTicket:
         last_decision_dt_version=None,
         last_seen_at=None,
         last_sync_at=datetime(2026, 7, 10, 12, 0, 0),
+        token_baseline=1500000,
     )
     defaults = dict(
         ticket_id="T-001",
         worker_id="owner-1:bot-1",
         bot_id="bot-1",
         owner_id="owner-1",
+        owner_name="Owner One",
         bot_name="TestBot",
         _snapshot=snapshot,
         governance_status=GovernanceStatus.WAITING_REVIEW,
@@ -81,6 +83,9 @@ class TestReviewTicketItem:
         assert item.ticket_id == "T-001"
         assert item.bot_name == "TestBot"
         assert item.owner_id == "owner-1"
+        # 新增展示字段
+        assert item.owner_name == "Owner One"
+        assert item.token_baseline == 1500000
         # enum → str
         assert item.governance_status == "waiting_review"
         # snapshot 委托属性
@@ -140,6 +145,9 @@ class TestReviewTicketDetailResponse:
         assert d.ticket_id == "T-001"
         assert d.worker_id == "owner-1:bot-1"
         assert d.bot_id == "bot-1"
+        # 新增展示字段
+        assert d.owner_name == "Owner One"
+        assert d.token_baseline == 1500000
         assert d.dt_version == "20260710"
         assert d.task_summary == "Bot cost high"
         assert d.governance_max_priority == "P1"

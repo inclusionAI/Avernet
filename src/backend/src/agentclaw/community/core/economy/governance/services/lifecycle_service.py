@@ -41,6 +41,7 @@ suite + grep guard, not ``test_protocol_contracts.py``.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 
 from agentclaw.community.core.economy.governance.domain.enums import (
@@ -153,6 +154,8 @@ class GovernanceLifecycleService:
             estimated_saving_tokens=snapshot.estimated_saving_tokens,
             saving_ratio=snapshot.saving_ratio,
             bot_name=ticket.bot_name,
+            owner_name=ticket.owner_name,
+            token_baseline=snapshot.token_baseline,
             task_summary=snapshot.task_summary,
             notification_structured=snapshot.notification_structured,
             analysis_status=snapshot.analysis_status,
@@ -181,11 +184,21 @@ class GovernanceLifecycleService:
             (default), ``datetime`` = set, ``None`` = clear. Lives on the
             model (not the snapshot); set before ``to_orm`` so it persists.
 
+        Display-field passthroughs (overwrite guard — incoming non-None
+        overwrites existing, incoming None keeps existing, so a batch that
+        omits them never erases a previously-known value):
+          - ``owner_name`` — identity display name; set on the model.
+          - ``token_baseline`` — a MutableSnapshot field, but intentionally
+            NOT routed through the model's ``refresh_snapshot``/``replace()``
+            (which would erase existing on None); set on the snapshot directly.
+
         Returns True if the ticket was found and updated.
         """
         # Pop non-snapshot passthroughs before delegating to the model's
         # snapshot-replace (which rejects keys absent from MutableSnapshot).
         bot_name = snapshot_fields.pop("bot_name", None)
+        owner_name = snapshot_fields.pop("owner_name", None)
+        token_baseline = snapshot_fields.pop("token_baseline", None)
         remind_at = snapshot_fields.pop("remind_at", "")
         ticket = self._task_repo.find_by_ticket_id(ticket_id)
         if ticket is None:
@@ -193,6 +206,10 @@ class GovernanceLifecycleService:
         ticket.refresh_snapshot(**snapshot_fields)
         if bot_name is not None:
             ticket.bot_name = bot_name
+        if owner_name is not None:
+            ticket.owner_name = owner_name
+        if token_baseline is not None:
+            ticket._snapshot = replace(ticket._snapshot, token_baseline=token_baseline)
         if remind_at != "":  # type: ignore[comparison-overlap]
             ticket.remind_at = remind_at  # type: ignore[assignment]
         return self._task_repo._save_ticket_with_snapshot(ticket)  # noqa: SLF001 — primitive
@@ -453,14 +470,19 @@ class GovernanceLifecycleService:
 
     def admin_close(
         self, ticket_id: str, *, now: datetime,
+        cooldown_until: datetime | None = None,
     ) -> bool:
         """Any non-CLOSED → CLOSED(admin_closed) + cancel pending.
 
         方案 A 链路:find → 幂等检查(已 CLOSED 返 False)→
-        ``ticket.close(ADMIN_CLOSED)``(守卫激活)→ ``save_ticket`` →
-        取消通知。审计由调用方(admin_service)拥有(携带 reason +
+        ``ticket.close(ADMIN_CLOSED, cooldown_until=...)``(守卫激活)→
+        ``save_ticket`` → 取消通知。审计由调用方(admin_service)拥有(携带 reason +
         actor_id=admin_id)—— 与 pause_ticket / review_ticket 等
         sibling 方法一致,driver 不重复写审计。
+
+        ``cooldown_until`` 透传到领域关单,与 ``review_ticket`` 的 approve_close
+        分支口径一致(关单后 N 天内不重建)。默认 None = 不设冷却(向后兼容)。
+        已 CLOSED 工单短路,never 到 close,cooldown 不被覆盖(幂等保持)。
 
         Returns True if the ticket was found and closed, False if not found
         (or already closed — idempotent no-op).
@@ -473,6 +495,7 @@ class GovernanceLifecycleService:
         try:
             ticket.close(
                 close_reason=CloseReason.ADMIN_CLOSED, closed_at=now,
+                cooldown_until=cooldown_until,
             )
         except IllegalTicketTransitionError as exc:
             self._audit_illegal(ticket_id, "admin_close", exc)

@@ -29,6 +29,9 @@ from typing import TYPE_CHECKING, Any
 
 from injector import inject
 
+from agentclaw.community.core.economy.governance.domain.base import (
+    build_delivery_status_json,
+)
 from agentclaw.community.core.economy.governance.domain.enums import (
     AuditAction,
     CloseReason,
@@ -316,6 +319,142 @@ class GovernanceAdminService:
             return self._delete_record_daily(body, operator, run_id)
         else:
             return self._delete_notify_log(body, operator, run_id)
+
+    # -- Ticket cascade delete (admin) — precise single-ticket purge --------
+    # Spec: 2026-07-17-records-delete-cascade-notify. Delete one ticket
+    # (task_record_daily) + its belonging notify_log rows (best-effort),
+    # keyed by ticket_id. Explicit dedicated interface — NOT an implicit
+    # cascade inside records:delete, to keep precise semantics + avoid
+    # write amplification (no batch).
+
+    def delete_ticket_cascade(
+        self, *, ticket_id: str, dry_run: bool, reason: str, operator: str,
+    ) -> dict:
+        """Precisely delete one ticket + its notify_log rows (best-effort).
+
+        Single-direction cascade (ticket → its notify), keyed by ``ticket_id``.
+        Best-effort: notify cleanup failure does NOT block ticket deletion;
+        the failure count is recorded in the audit + response. Dry-run previews
+        the linked notify count without deleting. Ticket-not-found returns
+        ``ticket_found=False`` and writes no audit (idempotent re-call).
+
+        Args:
+            ticket_id: 工单稳定 UUID (env-scoped lookup).
+            dry_run: True = preview only (no delete, no audit).
+            reason: 写审计的删除原因。
+            operator: 操作人 user_id (actor_id)。
+
+        Returns:
+            dict with keys: ticket_id, ticket_found, dry_run,
+            tickets_deleted, notify_deleted, notify_delete_failed.
+        """
+        ticket = self._task_repo.find_by_ticket_id(ticket_id)
+        if ticket is None:
+            return self._cascade_result(
+                ticket_id=ticket_id, ticket_found=False, dry_run=dry_run,
+                tickets_deleted=0, notify_deleted=0, notify_delete_failed=0,
+            )
+
+        notify_preview = self._notify_repo.count_by_ticket_id(ticket_id)
+        if dry_run:
+            return self._cascade_result(
+                ticket_id=ticket_id, ticket_found=True, dry_run=True,
+                tickets_deleted=0, notify_deleted=notify_preview,
+                notify_delete_failed=0,
+            )
+
+        tickets_deleted = self._task_repo.delete_by_ticket_id(ticket_id)
+        notify_deleted, notify_failed = self._cascade_delete_notify(ticket_id)
+        self._audit_cascade(
+            ticket=ticket, operator=operator, reason=reason,
+            tickets_deleted=tickets_deleted, notify_deleted=notify_deleted,
+            notify_delete_failed=notify_failed,
+        )
+        return self._cascade_result(
+            ticket_id=ticket_id, ticket_found=True, dry_run=False,
+            tickets_deleted=tickets_deleted, notify_deleted=notify_deleted,
+            notify_delete_failed=notify_failed,
+        )
+
+    def _cascade_delete_notify(self, ticket_id: str) -> tuple[int, int]:
+        """Best-effort bulk-delete of notify_log rows for a ticket.
+
+        Returns (deleted_count, failed_count). A SQL exception on the bulk
+        delete is caught: nothing was deleted (single atomic statement), so
+        ``failed_count`` reflects the preview count that could not be cleared.
+        Never raises — caller (delete_ticket_cascade) records the failure.
+
+        The recovery ``count_by_ticket_id`` is itself guarded: if the DB is
+        hard-down (delete failed AND re-count fails), returns the sentinel
+        ``-1`` so the caller still gets a non-raising response; ``-1`` signals
+        "unknown residual — operator must query manually" via the audit.
+        """
+        try:
+            deleted = self._notify_repo.delete_by_ticket_id(ticket_id)
+            return deleted, 0
+        except Exception:
+            log.exception(
+                "[GovernanceAdmin] notify cleanup failed for ticket_id=%s",
+                ticket_id,
+            )
+            try:
+                failed = self._notify_repo.count_by_ticket_id(ticket_id)
+            except Exception:
+                log.exception(
+                    "[GovernanceAdmin] notify re-count also failed "
+                    "for ticket_id=%s; reporting -1 (unknown residual)",
+                    ticket_id,
+                )
+                failed = -1
+            return 0, failed
+
+    def _audit_cascade(
+        self, *, ticket: Any, operator: str, reason: str,
+        tickets_deleted: int, notify_deleted: int, notify_delete_failed: int,
+    ) -> None:
+        """Best-effort audit write for ticket-cascade purge."""
+        run_id = f"cascade-{uuid.uuid4().hex[:8]}"
+        error_msg = (
+            f"reason={reason} "
+            f"ticket_id={ticket.ticket_id} "
+            f"worker_id={ticket.worker_id} "
+            f"bot_id={ticket.bot_id} "
+            f"owner_id={ticket.owner_id} "
+            f"tickets_deleted={tickets_deleted} "
+            f"notify_deleted={notify_deleted} "
+            f"notify_delete_failed={notify_delete_failed}"
+        )
+        try:
+            self._audit_repo.add_audit(
+                run_id,
+                bot_id=ticket.bot_id,
+                owner_id=ticket.owner_id,
+                actor_id=operator,
+                action_taken=AuditAction.TICKET_CASCADE_PURGED,
+                source="admin_api",
+                error_msg=error_msg,
+                dry_run=0,
+            )
+        except Exception:
+            log.exception(
+                "[GovernanceAdmin] audit write failed for %s",
+                AuditAction.TICKET_CASCADE_PURGED,
+            )
+
+    @staticmethod
+    def _cascade_result(
+        *, ticket_id: str, ticket_found: bool, dry_run: bool,
+        tickets_deleted: int, notify_deleted: int, notify_delete_failed: int,
+    ) -> dict:
+        """Build the uniform cascade response dict."""
+        return {
+            "ticket_id": ticket_id,
+            "ticket_found": ticket_found,
+            "dry_run": dry_run,
+            "tickets_deleted": tickets_deleted,
+            "notify_deleted": notify_deleted,
+            "notify_delete_failed": notify_delete_failed,
+        }
 
     def _delete_record_daily(
         self, body: dict, operator: str, run_id: str,
@@ -665,8 +804,12 @@ class GovernanceAdminService:
                     at=now,
                     channel=result_channel if result_channel and result_channel != original_channel else None,
                 )
-                # Update ticket delivery_status: {notify_type}:sent (§7.3.5)
-                ticket_delivery_status = f"{p.notify_type.value}:sent"
+                # Update ticket delivery_status: JSON {notify_type}:sent (§7.3.5)
+                ticket_delivery_status = build_delivery_status_json(
+                    p.notify_type.value, NotifyStatus.SENT.value,
+                    sent_at=now,
+                    external_message_id=r.get("external_message_id"),
+                )
                 self._task_repo.update_delivery_status(p.ticket_id, ticket_delivery_status)
                 self._audit_repo.add_audit(
                     audit_run_id, p.bot_id, p.owner_id,
@@ -689,8 +832,11 @@ class GovernanceAdminService:
                 p = pending_by_id.get(nid)
                 if p is None:
                     continue
-                # Update ticket delivery_status: {notify_type}:failed (§7.3.5)
-                ticket_delivery_status = f"{p.notify_type.value}:failed"
+                # Update ticket delivery_status: JSON {notify_type}:failed (§7.3.5)
+                ticket_delivery_status = build_delivery_status_json(
+                    p.notify_type.value, NotifyStatus.FAILED.value,
+                    error="delivery failed",
+                )
                 self._task_repo.update_delivery_status(p.ticket_id, ticket_delivery_status)
                 self._audit_repo.add_audit(
                     audit_run_id, p.bot_id, p.owner_id,
@@ -822,13 +968,25 @@ class GovernanceAdminService:
                 external_id=external_id,
             )
             # Update ticket delivery_status for reminder: reminder:sent
-            self._task_repo.update_delivery_status(ticket.ticket_id, "reminder:sent")
+            self._task_repo.update_delivery_status(
+                ticket.ticket_id,
+                build_delivery_status_json(
+                    NotifyType.REMINDER.value, NotifyStatus.SENT.value,
+                    sent_at=now, external_message_id=external_id,
+                ),
+            )
         else:
             self._notify_repo.update_delivery_status(
                 notification_id, status=NotifyStatus.FAILED,
             )
             # Update ticket delivery_status for reminder: reminder:failed
-            self._task_repo.update_delivery_status(ticket.ticket_id, "reminder:failed")
+            self._task_repo.update_delivery_status(
+                ticket.ticket_id,
+                build_delivery_status_json(
+                    NotifyType.REMINDER.value, NotifyStatus.FAILED.value,
+                    error="reminder delivery failed",
+                ),
+            )
 
         # Advance reminder chain: increment remind_count + set next remind_at
         # 以本次 reminder 为基准推后(同 scan_service _advance_reminder_chain 语义)。
@@ -911,6 +1069,7 @@ class GovernanceAdminService:
             worker_id=worker_key,
             bot_id=record.bot_id,
             owner_id=record.owner_id,
+            owner_name=record.owner_name,
             bot_name=record.bot_name,
             snapshot=MutableSnapshot(
                 dt_version=record.dt_version,
@@ -921,6 +1080,7 @@ class GovernanceAdminService:
                 severity=record.governance_max_priority,
                 estimated_saving_tokens=record.expected_token_saving,
                 saving_ratio=record.saving_ratio,
+                token_baseline=record.token_baseline,
                 task_summary=record.task_summary,
                 notification_structured=record.notification_structured,
                 analysis_status=record.analysis_status,
@@ -957,7 +1117,10 @@ class GovernanceAdminService:
             channel=getattr(self._config, "notify_channel", "markdown"),
         )
         self._notify_repo.add_notification(notify_row)
-        self._task_repo.update_delivery_status(ticket_id, "first_send:pending")
+        self._task_repo.update_delivery_status(
+            ticket_id,
+            build_delivery_status_json(NotifyType.FIRST_SEND.value, "pending"),
+        )
 
         # Audit
         self._audit_repo.add_audit(

@@ -64,7 +64,7 @@ def _build_svc():
 
 
 def _seed_ticket(db, *, ticket_id="T-100", status="open", remind_at=None,
-                 worker="owner-1:bot-1"):
+                 worker="owner-1:bot-1", owner_name=None, token_baseline=None):
     """Insert a task_record row directly via ORM for test seeding.
 
     ``worker`` sets both ``worker_id`` and ``active_worker``; the table has a
@@ -94,12 +94,14 @@ def _seed_ticket(db, *, ticket_id="T-100", status="open", remind_at=None,
             worker_id=worker,
             bot_id=bot_id,
             owner_id=owner_id,
+            owner_name=owner_name,
             bot_name="Bot1",
             dt_version="20260711",
             governance_decision="actionable",
             latest_decision="actionable",
             governance_status=status,
             active_worker=worker,
+            token_baseline=token_baseline,
             last_sync_at=datetime.now(),  # nullable=False, no default
             remind_at=remind_at,
             remind_count=0,
@@ -114,6 +116,7 @@ def _make_ticket_model(*, ticket_id="T-NEW") -> GovernanceTicket:
         worker_id="owner-2:bot-2",
         bot_id="bot-2",
         owner_id="owner-2",
+        owner_name=None,
         bot_name="Bot2",
         snapshot=MutableSnapshot(
             dt_version="20260711",
@@ -151,6 +154,32 @@ class TestOpenTicket:
         assert persisted is not None
         assert persisted.governance_status == GovernanceStatus.OPEN
         assert persisted.bot_id == "bot-2"
+
+    def test_open_ticket_persists_owner_name_and_baseline(self) -> None:
+        """create 路径须经 add_ticket 落盘 owner_name / token_baseline(防回归:曾因 add_ticket 标量签名缺失而丢值)。"""
+        svc, db, _ = _build_svc()
+        ticket = GovernanceTicket.create(
+            ticket_id="T-create-fields",
+            worker_id="owner-2:bot-2",
+            bot_id="bot-2",
+            owner_id="owner-2",
+            owner_name="Owner Two",
+            bot_name="Bot2",
+            snapshot=MutableSnapshot(
+                dt_version="20260711", initial_decision="actionable",
+                current_decision="actionable", triggered_dimensions="cost",
+                hit_dimensions_count=1, severity="P1", estimated_saving_tokens=5000,
+                saving_ratio=0.5, task_summary="high cost", notification_structured="{}",
+                analysis_status="done", consecutive_normal_days=0,
+                last_decision_dt_version=None, last_seen_at=None,
+                last_sync_at=datetime(2026, 7, 11), token_baseline=987654,
+            ),
+        )
+        svc.open_ticket(ticket=ticket)
+        persisted = svc._task_repo.find_by_ticket_id("T-create-fields")  # noqa: SLF001
+        assert persisted is not None
+        assert persisted.owner_name == "Owner Two"
+        assert persisted.snapshot.token_baseline == 987654
 
 
 # ---------------------------------------------------------------------------
@@ -353,6 +382,24 @@ class TestNonTransitions:
         t = svc._task_repo.find_by_ticket_id("T-rs")  # noqa: SLF001
         assert t.dt_version == "20260712"
         assert t.governance_status == GovernanceStatus.OPEN  # status unchanged
+
+    def test_refresh_snapshot_owner_name_baseline_guard(self) -> None:
+        """owner_name / token_baseline 走覆盖 guard:incoming 非 None 覆盖,None 保留 older。"""
+        svc, db, _ = _build_svc()
+        # seed 直接写已有值
+        _seed_ticket(db, ticket_id="T-guard", status="open", owner_name="Old", token_baseline=111)
+        # incoming None → 保留
+        assert svc.refresh_snapshot("T-guard", dt_version="20260712") is True
+        t = svc._task_repo.find_by_ticket_id("T-guard")  # noqa: SLF001
+        assert t.owner_name == "Old"
+        assert t.snapshot.token_baseline == 111
+        # incoming 非 None → 覆盖
+        assert svc.refresh_snapshot(
+            "T-guard", dt_version="20260713", owner_name="New", token_baseline=222,
+        ) is True
+        t = svc._task_repo.find_by_ticket_id("T-guard")  # noqa: SLF001
+        assert t.owner_name == "New"
+        assert t.snapshot.token_baseline == 222
 
     def test_advance_reminder_sets_remind_at(self) -> None:
         svc, db, _ = _build_svc()

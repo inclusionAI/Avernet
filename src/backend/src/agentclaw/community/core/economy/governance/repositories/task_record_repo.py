@@ -73,6 +73,8 @@ class TaskRecordRepository(TaskRecordQueryMixin):
         estimated_saving_tokens: int | None = None,
         saving_ratio: float | None = None,
         bot_name: str | None = None,
+        owner_name: str | None = None,
+        token_baseline: int | None = None,
         task_summary: str | None = None,
         notification_structured: str | None = None,
         analysis_status: str | None = None,
@@ -100,6 +102,7 @@ class TaskRecordRepository(TaskRecordQueryMixin):
             active_worker=assignee,
             bot_id=bot_id,
             owner_id=owner_id,
+            owner_name=owner_name,
             dt_version=dt_version,
             governance_decision=initial_decision,
             latest_decision=current_decision,
@@ -109,6 +112,7 @@ class TaskRecordRepository(TaskRecordQueryMixin):
             expected_token_saving=estimated_saving_tokens,
             saving_ratio=saving_ratio,
             bot_name=bot_name,
+            token_baseline=token_baseline,
             task_summary=task_summary,
             notification_structured=notification_structured,
             analysis_status=analysis_status,
@@ -335,6 +339,29 @@ class TaskRecordRepository(TaskRecordQueryMixin):
             existing_ids = {r.id for r in existing}
             not_found = [i for i in ids if i not in existing_ids]
             return len(existing_ids), not_found
+
+    def delete_by_ticket_id(self, ticket_id: str) -> int:
+        """Delete the single ticket row matching ticket_id (env-scoped).
+
+        Single-SQL delete (`WHERE env=? AND ticket_id=?`). Returns the
+        number of rows deleted (0 or 1). Used by the ticket-cascade admin
+        endpoint to precisely delete one ticket without write amplification.
+
+        Note: ``find_by_ticket_id`` (existence assertion, returns the
+        domain ``GovernanceTicket``) is provided by ``TaskRecordQueryMixin``
+        — this method only performs the deletion.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            deleted = (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.ticket_id == ticket_id,
+                    GovernanceTicketOrm.env == _env,
+                )
+                .delete(synchronize_session="fetch")
+            )
+            return deleted
 
     # ------------------------------------------------------------------
     # Test seeding (self-managed session + commit)

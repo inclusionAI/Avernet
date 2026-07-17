@@ -18,6 +18,9 @@ from datetime import datetime
 
 from injector import inject
 
+from agentclaw.community.core.economy.governance.domain.base import (
+    build_delivery_status_json,
+)
 from agentclaw.community.core.economy.governance.domain.enums import (
     GovernanceStatus,
     NotifyStatus,
@@ -43,7 +46,8 @@ def _update_ticket_delivery_status(
     Args:
         session: 已开启的 ORM session(不自行管理事务,复用调用方的 orm_session)。
         ticket_id: 工单稳定 UUID。
-        status: 投递状态(如 ``first_send:sent`` / ``reminder:failed`` / ``cancelled``)。
+        status: 投递状态 JSON 字符串(由 ``build_delivery_status_json`` 构造,含
+            notify_type/notify_status/sent_at/external_message_id/error)。
     """
     if not ticket_id:
         return
@@ -348,7 +352,10 @@ class NotifyLogRepository:
                 )
             )
             if count > 0:
-                _update_ticket_delivery_status(s, ticket_id, "cancelled")
+                _update_ticket_delivery_status(
+                    s, ticket_id,
+                    build_delivery_status_json(None, NotifyStatus.CANCELLED.value),
+                )
             return count
 
     def has_pending_or_sending_reminder(
@@ -406,7 +413,10 @@ class NotifyLogRepository:
                 ).first()
                 if row and row.ticket_id:
                     _update_ticket_delivery_status(
-                        s, row.ticket_id, f"{row.notify_type}:sending",
+                        s, row.ticket_id,
+                        build_delivery_status_json(
+                            row.notify_type, NotifyStatus.SENDING.value,
+                        ),
                     )
             return result == 1
 
@@ -441,7 +451,12 @@ class NotifyLogRepository:
                 ).first()
                 if row and row.ticket_id:
                     _update_ticket_delivery_status(
-                        s, row.ticket_id, f"{row.notify_type}:sent",
+                        s, row.ticket_id,
+                        build_delivery_status_json(
+                            row.notify_type, NotifyStatus.SENT.value,
+                            sent_at=sent_at,
+                            external_message_id=external_message_id,
+                        ),
                     )
             return result == 1
 
@@ -478,8 +493,14 @@ class NotifyLogRepository:
                     GovernanceNotificationOrm.notification_id == notification_id,
                 ).first()
                 if row and row.ticket_id:
-                    status = f"{row.notify_type}:failed" if is_terminal else f"{row.notify_type}:pending"
-                    _update_ticket_delivery_status(s, row.ticket_id, status)
+                    fail_status = NotifyStatus.FAILED.value if is_terminal else NotifyStatus.PENDING.value
+                    _update_ticket_delivery_status(
+                        s, row.ticket_id,
+                        build_delivery_status_json(
+                            row.notify_type, fail_status,
+                            error=error_msg if is_terminal else None,
+                        ),
+                    )
             return result == 1
 
     # ------------------------------------------------------------------
@@ -608,6 +629,44 @@ class NotifyLogRepository:
             existing_ids = {r.notification_id for r in existing}
             not_found = [i for i in notification_ids if i not in existing_ids]
             return len(existing_ids), not_found
+
+    def count_by_ticket_id(self, ticket_id: str) -> int:
+        """Count notify_log rows belonging to a ticket_id (env-scoped).
+
+        Used by ticket-cascade dry-run preview. Returns the number of
+        notification rows that share this ticket_id within the current env.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            return (
+                s.query(GovernanceNotificationOrm)
+                .filter(
+                    GovernanceNotificationOrm.ticket_id == ticket_id,
+                    GovernanceNotificationOrm.env == _env,
+                )
+                .count()
+            )
+
+    def delete_by_ticket_id(self, ticket_id: str) -> int:
+        """Delete all notify_log rows belonging to a ticket_id (env-scoped).
+
+        Single-SQL bulk delete (`WHERE env=? AND ticket_id=?`, backed by
+        ``idx_econ_gov_notify_ticket_id``). Returns the number of rows
+        deleted. Used by ticket-cascade best-effort notify cleanup.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            deleted = (
+                s.query(GovernanceNotificationOrm)
+                .filter(
+                    GovernanceNotificationOrm.ticket_id == ticket_id,
+                    GovernanceNotificationOrm.env == _env,
+                )
+                .delete(synchronize_session="fetch")
+            )
+            return deleted
 
     # ------------------------------------------------------------------
     # Command methods (P4 — Service→Repo ORM relocation)

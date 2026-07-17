@@ -67,6 +67,22 @@ class GovernanceAdminServiceProtocol(Protocol):
     ) -> dict:
         ...
 
+    def delete_ticket_cascade(
+        self,
+        *,
+        ticket_id: str,
+        dry_run: bool,
+        reason: str,
+        operator: str,
+    ) -> dict:
+        """按 ticket_id 精确级联删单工单 + 归属通知(best-effort)。
+
+        单向(ticket→notify)、单工单防写放大、dry-run 预览。工单不存在
+        返回 ticket_found=False 且不写审计。best-effort:通知清理失败不阻断
+        工单删除,失败计数计入审计+响应。
+        """
+        ...
+
     def deliver_pending(
         self,
         *,

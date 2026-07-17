@@ -90,6 +90,7 @@ class AuditAction(str, Enum):
     # ── Admin delete ───────────────────────────────────
     RECORDS_DELETED = "records_deleted"                     # 管理员删除 task_record 行
     NOTIFICATIONS_DELETED = "notifications_deleted"         # 管理员删除 notify_log 行
+    TICKET_CASCADE_PURGED = "ticket_cascade_purged"         # 管理员按 ticket_id 级联删工单+归属通知
 
     # ── Point-to-point delivery (manual testing tool) ────
     POINT_TO_POINT_NOTIFY_CREATED = "point_to_point_notify_created"      # p2p 自动创建了通知

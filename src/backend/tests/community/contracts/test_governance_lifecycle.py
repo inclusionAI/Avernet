@@ -119,6 +119,7 @@ def _make_ticket_model(ticket_id="T-NEW") -> GovernanceTicket:
         worker_id="o2:b2",
         bot_id="b2",
         owner_id="o2",
+        owner_name=None,
         bot_name="Bot2",
         snapshot=MutableSnapshot(
             dt_version="20260711",

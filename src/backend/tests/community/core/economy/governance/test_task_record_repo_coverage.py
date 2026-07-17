@@ -18,6 +18,7 @@ Repo methods return domain GovernanceTicket objects (not dicts).
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine, event
@@ -172,6 +173,7 @@ class TestSaveTicket:
             worker_id="w:x",
             bot_id="b:x",
             owner_id="o:x",
+            owner_name=None,
             bot_name="X",
             snapshot=MutableSnapshot(
                 dt_version="v1", initial_decision="actionable",
@@ -485,3 +487,50 @@ class TestInsertTicket:
         result = repo.find_by_ticket_id("tkt-ins")
         assert result is not None
         assert result.ticket_id == "tkt-ins"
+
+
+_TASK_ENV_PATCH = (
+    "agentclaw.community.core.economy.governance.repositories."
+    "task_record_repo.get_current_env"
+)
+
+
+class TestDeleteByTicketId:
+    """delete_by_ticket_id(ticket_id) -> int — ticket-cascade 数据层。
+
+    env-scoped 按 ticket_id 精确删单条工单;返回删除数(0/1);
+    不同 env 同 ticket_id 不交叉;空结果返回 0。
+    """
+
+    def test_delete_removes_ticket_and_returns_one(self, repo, engine):
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(ticket_id="tkt-del-001"))
+            s.commit()
+
+        with patch(_TASK_ENV_PATCH, return_value="dev"):
+            assert repo.delete_by_ticket_id("tkt-del-001") == 1
+            assert repo.find_by_ticket_id("tkt-del-001") is None
+
+    def test_delete_zero_when_no_match(self, repo, engine):
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(ticket_id="tkt-del-002"))
+            s.commit()
+
+        with patch(_TASK_ENV_PATCH, return_value="dev"):
+            assert repo.delete_by_ticket_id("no-such-ticket") == 0
+            # 无关工单不受影响
+            assert repo.find_by_ticket_id("tkt-del-002") is not None
+
+    def test_delete_is_env_scoped(self, repo, engine):
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(ticket_id="tkt-del-003"))  # 默认 dev
+            s.commit()
+
+        # 删 "pre" env → 命中 0 行(dev 行不受影响)
+        with patch(_TASK_ENV_PATCH, return_value="pre"):
+            assert repo.delete_by_ticket_id("tkt-del-003") == 0
+        with patch(_TASK_ENV_PATCH, return_value="dev"):
+            assert repo.find_by_ticket_id("tkt-del-003") is not None

@@ -11,6 +11,9 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import sessionmaker
 
+from agentclaw.community.core.economy.governance.domain.base import (
+    parse_delivery_status,
+)
 from agentclaw.community.core.economy.governance.domain.enums import AuditAction
 from agentclaw.community.core.economy.governance.repositories.orm import (
     AuditLogOrm,
@@ -779,8 +782,10 @@ class TestBuildReviewTicketDetail:
         result = svc.build_review_ticket_detail("t-backfill")
         assert result is not None
         ticket, _ = result
-        # 应从 notify_log 反推为 "first_send:sent"
-        assert ticket.delivery_status == "first_send:sent"
+        # 应从 notify_log 反推为 first_send:sent(now JSON)
+        parsed = parse_delivery_status(ticket.delivery_status)
+        assert parsed["notify_type"] == "first_send"
+        assert parsed["notify_status"] == "sent"
 
     def test_no_notify_log_keeps_none(self, session, engine):
         """无通知记录时保持 delivery_status="none"。"""
@@ -976,12 +981,14 @@ class TestDeliverByWorker:
         ).all()
         assert notify_rows[0].notify_status == "sent"
 
-        # 验证 task_record 的 delivery_status 已更新为 first_send:sent
+        # 验证 task_record 的 delivery_status 已更新为 first_send:sent(JSON)
         with db.orm_session() as s:
             ticket = s.query(GovernanceTicketOrm).filter_by(
                 ticket_id=ticket_id,
             ).one()
-            assert ticket.delivery_status == "first_send:sent"
+            parsed = parse_delivery_status(ticket.delivery_status)
+            assert parsed["notify_type"] == "first_send"
+            assert parsed["notify_status"] == "sent"
 
     def test_updates_ticket_delivery_status_on_failure(self, session, engine):
         """发送失败后应更新 task_record 的 delivery_status 为 {notify_type}:failed。"""
@@ -1050,9 +1057,11 @@ class TestDeliverByWorker:
         assert result["sent_count"] == 0
         assert result["results"][0]["success"] is False
 
-        # 验证 task_record 的 delivery_status 已更新为 first_send:failed
+        # 验证 task_record 的 delivery_status 已更新为 first_send:failed(JSON)
         with db.orm_session() as s:
             ticket = s.query(GovernanceTicketOrm).filter_by(
                 ticket_id=ticket_id,
             ).one()
-            assert ticket.delivery_status == "first_send:failed"
+            parsed = parse_delivery_status(ticket.delivery_status)
+            assert parsed["notify_type"] == "first_send"
+            assert parsed["notify_status"] == "failed"

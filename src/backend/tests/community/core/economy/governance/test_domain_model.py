@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import json
 from dataclasses import FrozenInstanceError
 from datetime import datetime
 from types import SimpleNamespace
@@ -28,11 +29,126 @@ from agentclaw.community.core.economy.governance.domain.enums import (
     NotifyStatus,
     NotifyType,
 )
+from agentclaw.community.core.economy.governance.domain.base import (
+    build_delivery_status_json,
+    parse_delivery_status,
+)
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# delivery_status 编解码(domain.base 字段序列化助手)
 # ---------------------------------------------------------------------------
+
+
+_DELIVERY_FIELDS = (
+    "notify_type", "notify_status", "sent_at", "external_message_id", "error",
+)
+
+
+class TestDeliveryStatusCodec:
+    """build_delivery_status_json / parse_delivery_status — JSON 构造 + 旧拼接 fallback。"""
+
+    # ── build ────────────────────────────────────────────────────────────
+
+    def test_build_full_payload_fixed_field_order(self) -> None:
+        raw = build_delivery_status_json(
+            "first_send", "sent",
+            sent_at="2026-07-17T10:00:00", external_message_id="log-xxx", error=None,
+        )
+        assert list(json.loads(raw).keys()) == list(_DELIVERY_FIELDS)
+        parsed = json.loads(raw)
+        assert parsed["notify_type"] == "first_send"
+        assert parsed["notify_status"] == "sent"
+        assert parsed["sent_at"] == "2026-07-17T10:00:00"
+        assert parsed["error"] is None
+
+    def test_build_minimal_defaults_null(self) -> None:
+        parsed = json.loads(build_delivery_status_json("reminder", "pending"))
+        assert parsed["notify_type"] == "reminder"
+        assert parsed["notify_status"] == "pending"
+        assert parsed["sent_at"] is None
+        assert parsed["external_message_id"] is None
+        assert parsed["error"] is None
+
+    def test_build_notify_type_none_for_bare(self) -> None:
+        parsed = json.loads(build_delivery_status_json(None, "cancelled"))
+        assert parsed["notify_type"] is None
+        assert parsed["notify_status"] == "cancelled"
+
+    def test_build_datetime_sent_at_iso(self) -> None:
+        ts = datetime(2026, 7, 17, 10, 0, 0)
+        assert json.loads(build_delivery_status_json("first_send", "sent", sent_at=ts))["sent_at"] == "2026-07-17T10:00:00"
+
+    def test_build_ensure_ascii_false_keeps_cn(self) -> None:
+        assert "钉钉限流" in build_delivery_status_json("first_send", "failed", error="钉钉限流")
+
+    # ── parse ────────────────────────────────────────────────────────────
+
+    def test_parse_none(self) -> None:
+        p = parse_delivery_status(None)
+        assert p["notify_status"] == "none"
+        assert p["notify_type"] is None
+
+    def test_parse_empty(self) -> None:
+        for raw in ("", "   "):
+            assert parse_delivery_status(raw)["notify_status"] == "none"
+
+    def test_parse_bare_none(self) -> None:
+        p = parse_delivery_status("none")
+        assert p["notify_type"] is None
+        assert p["notify_status"] == "none"
+
+    def test_parse_bare_cancelled(self) -> None:
+        p = parse_delivery_status("cancelled")
+        assert p["notify_type"] is None
+        assert p["notify_status"] == "cancelled"
+
+    def test_parse_legacy_concat(self) -> None:
+        p = parse_delivery_status("first_send:sent")
+        assert p["notify_type"] == "first_send"
+        assert p["notify_status"] == "sent"
+
+    def test_parse_json_roundtrip(self) -> None:
+        raw = build_delivery_status_json("first_send", "sent", sent_at="2026-07-17T10:00:00", external_message_id="log-1")
+        p = parse_delivery_status(raw)
+        assert p["notify_type"] == "first_send"
+        assert p["notify_status"] == "sent"
+        assert p["sent_at"] == "2026-07-17T10:00:00"
+        assert p["external_message_id"] == "log-1"
+
+    def test_parse_broken_json_fallback_none(self) -> None:
+        assert parse_delivery_status("{not valid")["notify_status"] == "none"
+
+    def test_parse_json_missing_status_defaults_none(self) -> None:
+        p = parse_delivery_status('{"notify_type": "first_send"}')
+        assert p["notify_type"] == "first_send"
+        assert p["notify_status"] == "none"
+
+    def test_parse_extra_keys_dropped(self) -> None:
+        raw = json.dumps({"notify_type": "x", "notify_status": "sent", "junk": 1})
+        assert set(parse_delivery_status(raw).keys()) == set(_DELIVERY_FIELDS)
+
+    def test_parse_concat_missing_tail(self) -> None:
+        p = parse_delivery_status("first_send:")
+        assert p["notify_type"] == "first_send"
+        assert p["notify_status"] == "none"
+
+    # ── round-trip ───────────────────────────────────────────────────────
+
+    def test_roundtrip_preserves_type_and_status(self) -> None:
+        cases = [
+            ("first_send", "pending", {}),
+            ("reminder", "sent", {"sent_at": "2026-07-17T10:00:00", "external_message_id": "log-9"}),
+            ("first_send", "failed", {"error": "boom"}),
+            (None, "cancelled", {}),
+        ]
+        for ntype, nstatus, extra in cases:
+            raw = build_delivery_status_json(ntype, nstatus, **extra)
+            p = parse_delivery_status(raw)
+            assert p["notify_type"] == ntype
+            assert p["notify_status"] == nstatus
+            for k, v in extra.items():
+                assert p[k] == v
 
 
 def _make_snapshot(**overrides) -> FrozenSnapshot:
@@ -494,6 +610,7 @@ def _make_ticket(**overrides) -> GovernanceTicket:
         worker_id="owner-1:bot-1",
         bot_id="bot-1",
         owner_id="owner-1",
+        owner_name=None,
         bot_name="TestBot",
         _snapshot=snapshot,
         governance_status=GovernanceStatus.OPEN,
@@ -528,6 +645,7 @@ def _make_ticket_orm_obj(**overrides) -> SimpleNamespace:
         worker_id="owner-1:bot-1",
         bot_id="bot-1",
         owner_id="owner-1",
+        owner_name="Owner One",
         bot_name="TestBot",
         dt_version="20260709",
         governance_decision="actionable",
@@ -536,6 +654,7 @@ def _make_ticket_orm_obj(**overrides) -> SimpleNamespace:
         governance_max_priority="P1",
         expected_token_saving=5000,
         saving_ratio=0.5,
+        token_baseline=123456,
         task_summary="summary",
         notification_structured='{"dims": ["cost"]}',
         analysis_status="done",
@@ -566,6 +685,7 @@ def _make_ticket_orm_obj(**overrides) -> SimpleNamespace:
         actor_id=None,
         gmt_create=datetime(2026, 7, 9, 8, 0, 0),
         gmt_modified=datetime(2026, 7, 9, 9, 0, 0),
+        delivery_status="none",
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -618,6 +738,7 @@ class TestTicketCreateFactory:
             worker_id="u1:bot1",
             bot_id="bot1",
             owner_id="u1",
+            owner_name=None,
             bot_name="Bot",
             snapshot=snap,
         )
@@ -637,6 +758,7 @@ class TestTicketCreateFactory:
             worker_id="u1:bot1",
             bot_id="bot1",
             owner_id="u1",
+            owner_name=None,
             bot_name="Bot",
             snapshot=snap,
             assignee="custom-assignee",
@@ -654,6 +776,7 @@ class TestTicketCreateFactory:
             worker_id="u1:bot1",
             bot_id="bot1",
             owner_id="u1",
+            owner_name=None,
             bot_name="Bot",
             snapshot=snap,
         )
@@ -1031,6 +1154,39 @@ class TestTicketFromOrm:
         for attr in ("id", "gmt_create", "gmt_modified"):
             assert hasattr(t, attr)
         assert t.gmt_create == datetime(2026, 7, 9, 8, 0, 0)
+
+    def test_delivery_status_json_none(self) -> None:
+        """delivery_status='none' → delivery_status_json 兼容解析。"""
+        orm_obj = _make_ticket_orm_obj(delivery_status="none")
+        t = GovernanceTicket.from_orm(orm_obj)
+        assert t.delivery_status == "none"
+        parsed = t.delivery_status_json
+        assert parsed["notify_type"] is None
+        assert parsed["notify_status"] == "none"
+
+    def test_delivery_status_json_new_json_row(self) -> None:
+        """新行 JSON delivery_status → delivery_status_json 无损还原。"""
+        json_str = (
+            '{"notify_type": "reminder", "notify_status": "sent",'
+            ' "sent_at": "2026-07-17T10:00:00",'
+            ' "external_message_id": "log-9", "error": null}'
+        )
+        t = GovernanceTicket.from_orm(_make_ticket_orm_obj(delivery_status=json_str))
+        parsed = t.delivery_status_json
+        assert parsed["notify_type"] == "reminder"
+        assert parsed["notify_status"] == "sent"
+        assert parsed["sent_at"] == "2026-07-17T10:00:00"
+        assert parsed["external_message_id"] == "log-9"
+        assert parsed["error"] is None
+
+    def test_delivery_status_json_legacy_concat(self) -> None:
+        """旧行拼接 delivery_status='first_send:sent' → 兼容解析为等价 JSON。"""
+        t = GovernanceTicket.from_orm(
+            _make_ticket_orm_obj(delivery_status="first_send:sent"),
+        )
+        parsed = t.delivery_status_json
+        assert parsed["notify_type"] == "first_send"
+        assert parsed["notify_status"] == "sent"
 
     def test_saving_ratio_float_conversion(self) -> None:
         """Numeric → float 转换。"""

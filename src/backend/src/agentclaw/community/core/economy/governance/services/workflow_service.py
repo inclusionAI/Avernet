@@ -18,6 +18,9 @@ from typing import TYPE_CHECKING, Any
 
 from injector import inject
 
+from agentclaw.community.core.economy.governance.domain.base import (
+    build_delivery_status_json,
+)
 from agentclaw.community.core.economy.governance.domain.enums import (
     AuditAction,
     CloseReason,
@@ -146,16 +149,19 @@ class GovernanceWorkflowService:
         if ticket is None:
             return None
 
-        # delivery_status 补查: 当为 "none" 时,从 notify_log 反推真实状态
-        # (防止工单创建后崩溃,delivery_status 未更新)
-        # delivery_status 是 snapshot 上的只读 property,直接改 _snapshot.delivery_status
-        if ticket.delivery_status == "none":
+        # delivery_status 补查: 当解析为 none 时,从 notify_log 反推真实状态
+        # (防止工单创建后崩溃,delivery_status 未更新)。
+        # delivery_status 是 snapshot 上的只读 property,直接改 _snapshot.delivery_status。
+        # 兼容旧行拼接("none")与新行 JSON(notify_status=none)统一走 parse 判断。
+        if ticket.delivery_status_json["notify_status"] == "none":
             notified = self._notify_repo.list_by_ticket(ticket_id, only_pending=False)
             if notified:
                 latest = notified[0]  # newest first
                 notify_type = latest.notify_type.value if latest.notify_type else "first_send"
                 notify_status = latest.delivery_status.value if latest.delivery_status else "pending"
-                ticket._snapshot.delivery_status = f"{notify_type}:{notify_status}"  # noqa: SLF001
+                ticket._snapshot.delivery_status = build_delivery_status_json(  # noqa: SLF001
+                    notify_type, notify_status,
+                )
 
         bot_id = getattr(ticket, "bot_id", None)
         owner_id = getattr(ticket, "owner_id", None)

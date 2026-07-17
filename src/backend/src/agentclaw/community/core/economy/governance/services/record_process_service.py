@@ -27,6 +27,9 @@ from typing import TYPE_CHECKING, Any
 
 from injector import inject
 
+from agentclaw.community.core.economy.governance.domain.base import (
+    build_delivery_status_json,
+)
 from agentclaw.community.core.economy.governance.domain.enums import (
     AuditAction,
     CloseReason,
@@ -583,11 +586,13 @@ class GovernanceRecordService:
                 ticket.ticket_id,
                 dt_version=dt_version,
                 bot_name=record.bot_name,
+                owner_name=record.owner_name,
                 triggered_dimensions=record.hit_dimensions,
                 hit_dimensions_count=record.hit_dimensions_count,
                 severity=record.governance_max_priority,
                 estimated_saving_tokens=record.expected_token_saving,
                 saving_ratio=record.saving_ratio,
+                token_baseline=record.token_baseline,
                 task_summary=record.task_summary,
                 notification_structured=record.notification_structured,
                 analysis_status=record.analysis_status,
@@ -767,6 +772,7 @@ class GovernanceRecordService:
             worker_id=worker_key,
             bot_id=bot_id,
             owner_id=owner_id_val,
+            owner_name=record.owner_name,
             bot_name=record.bot_name,
             snapshot=MutableSnapshot(
                 dt_version=dt_version,
@@ -777,6 +783,7 @@ class GovernanceRecordService:
                 severity=record.governance_max_priority,
                 estimated_saving_tokens=record.expected_token_saving,
                 saving_ratio=record.saving_ratio,
+                token_baseline=record.token_baseline,
                 task_summary=record.task_summary,
                 notification_structured=record.notification_structured,
                 analysis_status=record.analysis_status,
@@ -816,8 +823,11 @@ class GovernanceRecordService:
         )
         # env auto-filled by ORM default=get_current_env (not in constructor)
         self._notify_repo.add_notification(notify_row)
-        # 回写工单投递状态:first_send:pending(通知已建待发)
-        self._task_repo.update_delivery_status(ticket_id, "first_send:pending")
+        # 回写工单投递状态:JSON(first_send:pending,通知已建待发)
+        self._task_repo.update_delivery_status(
+            ticket_id,
+            build_delivery_status_json(NotifyType.FIRST_SEND.value, "pending"),
+        )
 
         # Audit enqueued (self-managed session)
         self._audit_repo.add_audit(

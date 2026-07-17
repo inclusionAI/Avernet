@@ -11,7 +11,10 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
-from agentclaw.community.core.economy.governance.domain.base import _iso
+from agentclaw.community.core.economy.governance.domain.base import (
+    _iso,
+    parse_delivery_status,
+)
 from agentclaw.community.core.economy.governance.domain.enums import (
     GovernanceStatus,
     Response,
@@ -43,6 +46,7 @@ class MutableSnapshot:
       - severity                 ← orm.governance_max_priority
       - estimated_saving_tokens  ← orm.expected_token_saving
       - saving_ratio             ← orm.saving_ratio
+      - token_baseline          ← orm.token_baseline (guard: 非 None 才刷新, 见 lifecycle_service)
       - task_summary             ← orm.task_summary
       - notification_structured  ← orm.notification_structured
       - analysis_status          ← orm.analysis_status
@@ -67,7 +71,8 @@ class MutableSnapshot:
     last_decision_dt_version: str | None
     last_seen_at: datetime | None
     last_sync_at: datetime | None
-    delivery_status: str = "none"  # 最近通知投递状态: none/first_send:sent/reminder:failed/...
+    delivery_status: str = "none"  # 最近通知投递状态: JSON 字符串(见 base.build/parse_delivery_status_json)或旧行拼接 first_send:sent
+    token_baseline: int | None = None
 
 
 # ── 状态机转换表(工单) ─────────────────────────
@@ -235,6 +240,7 @@ class GovernanceTicket:
     worker_id: str
     bot_id: str | None
     owner_id: str | None
+    owner_name: str | None
     bot_name: str | None
     _snapshot: MutableSnapshot
 
@@ -350,8 +356,25 @@ class GovernanceTicket:
 
     @property
     def delivery_status(self) -> str:
-        """最近通知投递状态 — 快照委托(none/first_send:sent/reminder:failed/...)。"""
+        """最近通知投递状态 — 快照委托(原始字符串:JSON 或旧行拼接)。
+
+        保留原始字符串以兼容现有写入回填(to_orm/apply_to 透传)与 ``== "none"``
+        之外的判断;需要语义化结构时用 :attr:`delivery_status_json`。
+        """
         return self._snapshot.delivery_status
+
+    @property
+    def delivery_status_json(self) -> dict[str, Any]:
+        """投递状态解析后的 5-key dict(兼容旧行拼接格式)。
+
+        读取边界统一走 :func:`parse_delivery_status`,旧行(如
+        ``first_send:sent``)自动解析为等价结构,供 schema 序列化与前端展示;
+        新行存 JSON 字符串则无损还原。
+
+        Returns:
+            ``{notify_type, notify_status, sent_at, external_message_id, error}``。
+        """
+        return parse_delivery_status(self._snapshot.delivery_status)
 
     # ── 业务 property ──────────────────────────────
 
@@ -587,6 +610,7 @@ class GovernanceTicket:
         worker_id: str,
         bot_id: str | None,
         owner_id: str | None,
+        owner_name: str | None,
         bot_name: str | None,
         snapshot: MutableSnapshot,
         assignee: str | None = None,
@@ -598,6 +622,7 @@ class GovernanceTicket:
             worker_id: owner_id:bot_id。
             bot_id: Bot ID。
             owner_id: 负责人 ID。
+            owner_name: 负责人显示名(展示用,可空)。
             bot_name: Bot 名称。
             snapshot: 可变快照(创建时一次性写入)。
             assignee: 工单持有人(active=worker_id; closed=None)。
@@ -610,6 +635,7 @@ class GovernanceTicket:
             worker_id=worker_id,
             bot_id=bot_id,
             owner_id=owner_id,
+            owner_name=owner_name,
             bot_name=bot_name,
             _snapshot=snapshot,
             governance_status=GovernanceStatus.OPEN,
@@ -658,6 +684,7 @@ class GovernanceTicket:
             worker_id=obj.worker_id,
             bot_id=obj.bot_id,
             owner_id=obj.owner_id,
+            owner_name=obj.owner_name,
             bot_name=obj.bot_name,
             # 可变快照
             _snapshot=MutableSnapshot(
@@ -669,6 +696,7 @@ class GovernanceTicket:
                 severity=obj.governance_max_priority,
                 estimated_saving_tokens=obj.expected_token_saving,
                 saving_ratio=_saving_ratio,
+                token_baseline=obj.token_baseline,
                 task_summary=obj.task_summary,
                 notification_structured=obj.notification_structured,
                 analysis_status=obj.analysis_status,
@@ -726,6 +754,7 @@ class GovernanceTicket:
         row.worker_id = self.worker_id
         row.bot_id = self.bot_id
         row.owner_id = self.owner_id
+        row.owner_name = self.owner_name
         row.bot_name = self.bot_name
         # 可变快照
         s = self._snapshot
@@ -736,6 +765,7 @@ class GovernanceTicket:
         row.hit_dimensions_count = s.hit_dimensions_count
         row.governance_max_priority = s.severity
         row.expected_token_saving = s.estimated_saving_tokens
+        row.token_baseline = s.token_baseline
         row.saving_ratio = s.saving_ratio
         row.task_summary = s.task_summary
         row.notification_structured = s.notification_structured
@@ -812,6 +842,7 @@ class GovernanceTicket:
             "bot_id": self.bot_id,
             "bot_name": self.bot_name,
             "owner_id": self.owner_id,
+            "owner_name": self.owner_name,
             "dt_version": s.dt_version,
             "governance_decision": s.initial_decision,
             "latest_decision": s.current_decision,
@@ -819,6 +850,7 @@ class GovernanceTicket:
             "hit_dimensions_count": s.hit_dimensions_count,
             "governance_max_priority": s.severity,
             "expected_token_saving": s.estimated_saving_tokens,
+            "token_baseline": s.token_baseline,
             "saving_ratio": s.saving_ratio,
             "task_summary": s.task_summary,
             "notification_structured": s.notification_structured,
