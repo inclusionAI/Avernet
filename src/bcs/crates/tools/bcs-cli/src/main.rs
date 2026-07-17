@@ -51,6 +51,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 #[cfg(debug_assertions)]
 use clap::ArgAction;
 use clap::{Parser, Subcommand};
@@ -64,6 +65,49 @@ use bcs_protocol::{BCS_PROTOCOL_VERSION, BotConnectParams};
 
 // disable agentpass, agentpass token should be auto injected into the http headers
 const AUTH_VIA_AGENT_PASS: bool = false;
+const DEFAULT_GROUP_BATCH_SIZE: u64 = 20;
+const GROUP_CONTINUATION_VERSION: u8 = 1;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct GroupContinuation {
+    version: u8,
+    bot_uuid: String,
+    next_offset: u64,
+    batch_size: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct GroupListOutput {
+    items: Vec<serde_json::Value>,
+    returned: u64,
+    total: u64,
+    has_more: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    continuation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_command: Option<String>,
+}
+
+fn encode_group_continuation(token: &GroupContinuation) -> Result<String> {
+    let bytes = serde_json::to_vec(token)
+        .map_err(|error| anyhow!("Failed to encode list-groups continuation token: {error}"))?;
+    Ok(URL_SAFE_NO_PAD.encode(bytes))
+}
+
+fn decode_group_continuation(encoded: &str) -> Result<GroupContinuation> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(encoded)
+        .map_err(|_| anyhow!("Invalid list-groups continuation token"))?;
+    let token: GroupContinuation = serde_json::from_slice(&bytes)
+        .map_err(|_| anyhow!("Invalid list-groups continuation token"))?;
+    if token.version != GROUP_CONTINUATION_VERSION {
+        return Err(anyhow!(
+            "Unsupported list-groups continuation token version: {}",
+            token.version
+        ));
+    }
+    Ok(token)
+}
 
 #[derive(Debug, Serialize, Default)]
 struct StructuredResult {
@@ -979,15 +1023,23 @@ enum Commands {
         focus: Option<String>,
     },
 
-    /// List groups, optionally limited to groups the current bot participates in
+    /// List groups the current bot formally participates in
     ListGroups {
         /// Authentication token (auto-discovered if not provided)
         #[arg(short, long)]
         token: Option<String>,
 
-        /// List only groups that include the current bot from the session file
+        /// Maximum number of groups to return in this batch
         #[arg(long)]
-        mine: bool,
+        batch_size: Option<u64>,
+
+        /// Continue from a token returned by a previous list-groups call
+        #[arg(long = "continue", value_name = "TOKEN")]
+        continuation: Option<String>,
+
+        /// Fetch all groups by following every batch
+        #[arg(long, conflicts_with = "continuation")]
+        all: bool,
     },
 
     /// Add a member to an existing group
@@ -2648,7 +2700,12 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&result)?);
         }
 
-        Commands::ListGroups { token, mine } => {
+        Commands::ListGroups {
+            token,
+            batch_size,
+            continuation,
+            all,
+        } => {
             let token = get_token(token.as_deref())?;
             let client = create_client(
                 &bcs_url,
@@ -2657,52 +2714,118 @@ async fn main() -> Result<()> {
                 oauth_headers.as_ref(),
             );
 
-            let (groups, current_bot_uuid) = if mine {
-                let bot_uuid = resolve_my_bot_uuid()?;
+            let bot_uuid = resolve_my_bot_uuid()?;
+            let continuation = continuation
+                .as_deref()
+                .map(decode_group_continuation)
+                .transpose()?;
+            if let Some(continuation) = continuation.as_ref() {
+                if continuation.bot_uuid != bot_uuid {
+                    return Err(anyhow!(
+                        "Continuation token belongs to bot {}, but the current session bot is {}",
+                        continuation.bot_uuid,
+                        bot_uuid
+                    ));
+                }
+            }
+            let start_offset = continuation
+                .as_ref()
+                .map(|token| token.next_offset)
+                .unwrap_or(0);
+            let batch_size = batch_size
+                .or_else(|| continuation.as_ref().map(|token| token.batch_size))
+                .unwrap_or(DEFAULT_GROUP_BATCH_SIZE);
+            if batch_size == 0 {
+                return Err(anyhow!("Batch size must be greater than 0"));
+            }
+            let mut offset = start_offset;
+            let mut groups = Vec::new();
+            let (next_offset, total) = loop {
                 debug_request!(
                     debug,
                     "GET",
                     &format!("/bots/{}/groups", &bot_uuid),
-                    json!({})
+                    json!({
+                        "offset": offset,
+                        "limit": batch_size,
+                        "include_session_groups": false,
+                    })
                 );
-                let groups = client.list_bot_groups(&bot_uuid).await?;
-                (groups, Some(bot_uuid))
+                let page = client
+                    .list_bot_groups(&bot_uuid, offset, batch_size, false)
+                    .await?;
+                if page.offset != offset || page.limit != batch_size {
+                    return Err(anyhow!(
+                        "Invalid bot groups pagination response: requested offset={} limit={}, received offset={} limit={}",
+                        offset,
+                        batch_size,
+                        page.offset,
+                        page.limit
+                    ));
+                }
+                let page_groups = page.items;
+                let total = page.total;
+                let page_returned = page_groups.len() as u64;
+                groups.extend(page_groups);
+                let next_offset = offset.saturating_add(page_returned);
+                if !all || page_returned == 0 || next_offset >= total {
+                    break (next_offset, total);
+                }
+                offset = next_offset;
+            };
+            let returned = groups.len() as u64;
+            let has_more = !all && returned > 0 && next_offset < total;
+            let continuation = if has_more {
+                Some(encode_group_continuation(&GroupContinuation {
+                    version: GROUP_CONTINUATION_VERSION,
+                    bot_uuid: bot_uuid.clone(),
+                    next_offset,
+                    batch_size,
+                })?)
             } else {
-                debug_request!(debug, "GET", "/groups", json!({}));
-                (client.list_groups().await?, None)
+                None
+            };
+            let next_command = continuation
+                .as_ref()
+                .map(|token| format!("bcs-cli list-groups --continue {token}"));
+            let output = GroupListOutput {
+                items: groups,
+                returned,
+                total,
+                has_more,
+                continuation,
+                next_command,
             };
 
-            debug_response!(
-                debug,
-                "200",
-                json!({
-                    "count": groups.len()
-                })
-            );
+            debug_response!(debug, "200", &output);
 
-            if let Some(bot_uuid) = current_bot_uuid {
-                println!("Groups for current bot {} ({}):", bot_uuid, groups.len());
+            if structured_mode {
+                println!("{}", serde_json::to_string(&output)?);
             } else {
-                println!("Groups ({}):", groups.len());
-            }
-            for group in groups {
-                let id = group
-                    .get("id")
-                    .or_else(|| group.get("group_id"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let mode = group
-                    .get("mode")
-                    .or_else(|| group.get("group_strategy"))
-                    .or_else(|| group.get("group_kind"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let driver = group
-                    .get("driver_bot")
-                    .or_else(|| group.get("coordinator_bot"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                println!("  - {} [{}] driver={}", id, mode, driver);
+                println!("Groups for current bot {} ({}/{}):", bot_uuid, returned, total);
+                for group in &output.items {
+                    let id = group
+                        .get("id")
+                        .or_else(|| group.get("group_id"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let mode = group
+                        .get("mode")
+                        .or_else(|| group.get("group_strategy"))
+                        .or_else(|| group.get("group_kind"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let driver = group
+                        .get("driver_bot")
+                        .or_else(|| group.get("coordinator_bot"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    println!("  - {} [{}] driver={}", id, mode, driver);
+                }
+                println!("Has more: {}", output.has_more);
+                if let Some(next_command) = output.next_command.as_deref() {
+                    println!("Next: {}", next_command);
+                }
             }
         }
 
@@ -3853,6 +3976,20 @@ mod tests {
         let mut file = std::fs::File::create(session_file).unwrap();
         file.write_all(serde_json::to_string_pretty(&value).unwrap().as_bytes())
             .unwrap();
+    }
+
+    #[test]
+    fn group_continuation_rejects_unsupported_version() {
+        let encoded = encode_group_continuation(&GroupContinuation {
+            version: GROUP_CONTINUATION_VERSION + 1,
+            bot_uuid: "bot-1".to_string(),
+            next_offset: 20,
+            batch_size: 20,
+        })
+        .unwrap();
+
+        let error = decode_group_continuation(&encoded).unwrap_err();
+        assert!(error.to_string().contains("Unsupported list-groups continuation token version"));
     }
 
     #[test]

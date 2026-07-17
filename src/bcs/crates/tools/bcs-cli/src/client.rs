@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
+use serde::Deserialize;
 use tracing::{debug, info, warn};
 
 use bcs_protocol::{
@@ -25,6 +26,14 @@ use bcs_protocol::{
 
 /// Default BCS URL if not configured.
 pub const DEFAULT_BCS_URL: &str = "http://localhost:21000";
+
+#[derive(Debug, Deserialize)]
+pub struct BotGroupListPage {
+    pub items: Vec<serde_json::Value>,
+    pub total: u64,
+    pub offset: u64,
+    pub limit: u64,
+}
 
 /// Client for interacting with the Bot Coordination Service.
 #[derive(Debug, Clone)]
@@ -1623,7 +1632,13 @@ impl BcsClient {
     }
 
     /// List groups that include a specific bot.
-    pub async fn list_bot_groups(&self, bot_uuid: &str) -> Result<Vec<serde_json::Value>> {
+    pub async fn list_bot_groups(
+        &self,
+        bot_uuid: &str,
+        offset: u64,
+        limit: u64,
+        include_session_groups: bool,
+    ) -> Result<BotGroupListPage> {
         let url = format!(
             "{}/bots/{}/groups",
             self.base_url,
@@ -1631,7 +1646,14 @@ impl BcsClient {
         );
 
         let response = self
-            .add_auth(self.http_client.get(&url))
+            .add_auth(self.http_client.get(&url).query(&[
+                ("offset", offset.to_string()),
+                ("limit", limit.to_string()),
+                (
+                    "include_session_groups",
+                    include_session_groups.to_string(),
+                ),
+            ]))
             .send()
             .await
             .context("Failed to list bot groups")?;
@@ -1642,9 +1664,7 @@ impl BcsClient {
             return Err(anyhow!("List bot groups failed ({}): {}", status, body));
         }
 
-        let result: serde_json::Value = response.json().await.context("Invalid bot groups response")?;
-
-        Ok(result["items"].as_array().cloned().unwrap_or_default())
+        response.json().await.context("Invalid bot groups response")
     }
 
     /// Add a member to a group.

@@ -71,6 +71,14 @@ pub struct ListBotGroupsQuery {
     pub group_kind: GroupKindFilter,
     #[serde(default)]
     pub q: Option<String>,
+    /// Include groups where the actor participates only through a session.
+    /// Defaults to true for backward compatibility.
+    #[serde(default = "default_include_session_groups")]
+    pub include_session_groups: bool,
+}
+
+fn default_include_session_groups() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize)]
@@ -530,6 +538,22 @@ pub async fn list_bot_groups(
         })
         .await
         .map_err(group_use_case_error_to_http)?;
+
+    if !query.include_session_groups {
+        let items: Vec<Value> = result
+            .items
+            .into_iter()
+            .map(bot_group_list_entry_to_legacy_json)
+            .collect();
+
+        return Ok(Json(serde_json::json!({
+            "bot_uuid": bot_uuid,
+            "items": items,
+            "total": result.total,
+            "offset": result.offset,
+            "limit": result.limit,
+        })));
+    }
 
     // Union: include groups where the actor is only a session participant
     // (not in group.participants), so humans added to a session via PATCH

@@ -7,6 +7,9 @@ use bcs_auth_local::StaticAuthPlugin;
 use bcs_bot::{ActorDirectory, Bot, BotOnboarding, BotCore, HumanActor};
 use bcs_friend::Friend;
 use bcs_group::{GroupManagement, GroupStore};
+use bcs_group_store::MemoryGroupRepo;
+use bcs_session::SessionManagementServiceImpl;
+use bcs_session_store::MemorySessionRepo;
 use bcs_http::{
     router::build_router,
     state::{
@@ -22,7 +25,7 @@ use bcs_service_api::{
     FriendCoreService, FriendRequest, FriendRequestCoreService, FriendRequestDirection,
     FriendRequestStatus, FriendService, Group, GroupCoreService, GroupKind, GroupStatus,
     GroupStrategy, HumanActorService, Participant, ParticipantRole, RelationCoreService,
-    ServiceResult, Skill,
+    ServiceResult, SessionRepoPort, Skill,
 };
 use bcs_services_container::{Services, ServicesBuilder};
 use bcs_test_support::{NoopFriendCoreService, NoopRelationCoreService};
@@ -2494,6 +2497,85 @@ async fn bot_groups_route_filters_absent_human_participant_groups() {
     assert_eq!(json["total"], 1);
     assert_eq!(json["items"].as_array().unwrap().len(), 1);
     assert_eq!(json["items"][0]["group_id"], "present-group");
+}
+
+#[tokio::test]
+async fn bot_groups_route_can_exclude_session_only_groups() {
+    let temp_dir = TempDir::new().unwrap();
+    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    let group = Arc::new(GroupStore::new());
+    group
+        .upsert(Group::new(
+            "session-only-group",
+            "driver-bot",
+            vec![Participant::bot("driver-bot", ParticipantRole::Driver)],
+        ))
+        .await
+        .unwrap();
+
+    let session_repo = Arc::new(MemorySessionRepo::new());
+    session_repo
+        .create(
+            "session-only-group",
+            bcs_service_api::NewSessionParams {
+                participants: vec![Participant::bot(
+                    "worker-bot",
+                    ParticipantRole::Consultant,
+                )],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let session_management = Arc::new(SessionManagementServiceImpl::new(
+        session_repo,
+        Arc::new(MemoryGroupRepo::new()),
+    ));
+    let services = services_builder_with_group_use_cases(
+        group,
+        registry,
+        Arc::new(NoopFriendCoreService),
+    )
+    .session_management(session_management)
+    .build_for_test();
+    let app = build_router(HttpAppState::new(services));
+
+    let default_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/bots/worker-bot/groups?offset=0&limit=10")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(default_response.status(), StatusCode::OK);
+    let body = to_bytes(default_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["total"], 1);
+    assert_eq!(json["items"][0]["group_id"], "session-only-group");
+
+    let formal_only_response = app
+        .oneshot(
+            Request::builder()
+                .uri(
+                    "/bots/worker-bot/groups?offset=0&limit=10&include_session_groups=false",
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(formal_only_response.status(), StatusCode::OK);
+    let body = to_bytes(formal_only_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["total"], 0);
+    assert!(json["items"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]

@@ -13,7 +13,7 @@ use tracing_subscriber::FmtSubscriber;
 
 mod client;
 
-pub use client::BcsClient;
+pub use client::{BcsClient, BotGroupListPage};
 
 /// Get current environment from `AGENTCLAW_ENV` or `env` variable.
 /// Priority: `AGENTCLAW_ENV` > `env` > `SERVER_ENV` chain > "dev" (default)
