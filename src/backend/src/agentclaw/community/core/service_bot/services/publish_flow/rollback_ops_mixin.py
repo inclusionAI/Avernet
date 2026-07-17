@@ -96,14 +96,18 @@ class RollbackOpsMixin:
         if not bot:
             raise PublishFlowServiceError(f"Bot not found: {current_record.source_bot_id}")
 
-        # 5. Call the BaaS upgrade interface to re-deploy. Compose the delivery
-        # artifact for the online stage through the single seam (STORED overrides
-        # slot: reproduce the target version's promoted online channels + release
-        # stamp). The raw config_artifact read above is only the build-artifact
-        # presence guard — what BaaS receives is composed here, so a rollback can no
-        # longer silently ship the raw artifact (the single-config-slot hazard).
-        version = f"{target_record.version}"
+# Compose the delivery artifact for ONLINE through the single seam
+        # (STORED overrides slot: reproduce what was promoted, NOT a live
+        # re-fetch).  compose_stored reads the target version's stored online
+        # channel engine_overrides (DingTalk config incl. card_template_id),
+        # reproducing what that version had when it was promoted — NOT a live
+        # re-fetch, which would deliver the very channel state the user is
+        # rolling away from.  No stored overrides (pre-feature record) or no
+        # config_artifact (ARCA) → the stamp+overlay no-ops, preserving the base.
         delivery = self._ext_state.compose_stored(target_ext, PublishStage.ONLINE)
+
+        # 5. Call the BaaS upgrade interface to re-deploy
+        version = f"{target_record.version}"
         upgrade_result = await self._build_service.upgrade_async(
             bot_uuid=bot_uuid,
             bot=bot,

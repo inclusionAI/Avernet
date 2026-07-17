@@ -1662,11 +1662,10 @@ async def test_execute_rollback_missing_binding():
 
 
 @pytest.mark.asyncio
-async def test_execute_rollback_composes_stored_online_delivery():
-    """execute_rollback composes the delivery through the seam (teclaw scenario):
-    the target version's frozen artifact is restamped to the online (release) stage
-    and its STORED online channel overrides are overlaid — the raw artifact is never
-    delivered. This is the #168 behavior, folded into the shared seam."""
+async def test_execute_rollback_with_config_artifact():
+    """execute_rollback uses config_artifact (the teclaw scenario); a target
+    without engine_overrides_by_stage (pre-feature record) delivers the raw
+    stored artifact unchanged (restamp/overlay no-op)."""
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -1685,17 +1684,15 @@ async def test_execute_rollback_composes_stored_online_delivery():
         source_bot_id="bot-456",
     )
 
-    # Target version carries a frozen artifact (last stamped canary, with stale
-    # channels) + the online channels promoted at its online release; no migration_path.
+# Target version has only config_artifact (no migration_path); no stored
+    # per-stage overrides.
+    artifact = {"schema_version": 3, "engine_type": "teclaw", "engine_ext": {}}
     target_record = _make_publish_record(
         id=2,
         status=PublishStatus.SUCCESS.value,
         version=2,
         ext={
-            "config_artifact": _enriched_artifact(
-                "canary", {"channels": {"dingding": {"accounts": [{"client_id": "stale"}]}}}
-            ),
-            "engine_overrides_by_stage": {"online": _ONLINE_CH},
+"config_artifact": artifact,
             "binding": {"online": 200},
         },
     )
@@ -1720,79 +1717,94 @@ async def test_execute_rollback_composes_stored_online_delivery():
         operator="user1",
     )
 
-    # The seam restamped to the online (release) stage and overlaid the stored online
-    # channels — the raw canary/stale artifact is never delivered.
+# Verify upgrade_async used the delivery artifact, unchanged (backward compat)
     upgrade_call = build_service.upgrade_async.call_args
-    delivered = upgrade_call.kwargs["delivery"].config_artifact
-    assert delivered["engine_ext"]["stage"] == "release"
-    assert delivered["engine_overrides"] == _ONLINE_CH
+    assert upgrade_call.kwargs["delivery"].config_artifact == artifact
     assert upgrade_call.kwargs["migration_path"] is None
 
     assert result.publish_id == 2
     assert result.status == PublishStatus.ONLINE_PUB
 
 
-def _rollback_svc(target_ext, *, reader=None):
-    """Wire a PublishFlowService for an execute_rollback(3 → 2) call, with the target
-    (id=2) carrying ``target_ext`` and an online binding. Returns (svc, build_service)."""
+@pytest.mark.asyncio
+async def test_execute_rollback_delivers_stored_online_overrides_not_live():
+    """Regression for #168: rollback must overlay the target version's STORED
+    online engine_overrides (DingTalk channels incl. card_template_id) onto the
+    delivered artifact — the per-stage slot persisted at that version's online
+    promotion — and must NOT re-fetch live channel config (which holds the state
+    being rolled away from)."""
     publish_service = Mock()
     build_service = Mock()
-    build_service.upgrade_async = AsyncMock(return_value={"publish_id": 12345})
-    build_service.generate_request_id = Mock(return_value="req")
+    baas_service = Mock()
     bot_service = Mock()
-    kw = {"channel_overrides_reader": reader} if reader is not None else {}
-    svc = _pf(publish_service, build_service, Mock(), bot_service, _arca_router(build_service), **kw)
 
-    current = _make_publish_record(id=3, status=PublishStatus.DRAFT.value, version=3, source_bot_id="bot-1")
-    target = _make_publish_record(id=2, status=PublishStatus.SUCCESS.value, version=2, ext=target_ext)
-    publish_service.get_publish_by_id = Mock(side_effect=lambda pk: {2: target, 3: current}.get(pk))
-    binding = Mock()
-    binding.device_id = "BOT-online"
-    publish_service.get_device_binding_by_id.return_value = binding
-    bot_service.get_bot.return_value = {"bot_id": "bot-1", "entity_id": "e", "entity_type": "staff"}
-    return svc, build_service
+    build_service.upgrade_async = AsyncMock(return_value={"publish_id": 12345})
+    build_service.generate_request_id = Mock(return_value="req-rollback-3")
+    baas_service.approve_publish = Mock()
 
-
-@pytest.mark.asyncio
-async def test_execute_rollback_reads_stored_slot_not_live_channels():
-    # Regression (#168): rollback must reproduce the target's promoted channels from
-    # the STORED slot — never re-fetch live (live holds the post-change card the user
-    # is rolling away from). The live reader must not be consulted.
+    # A live reader that would deliver the WRONG (current) channels if consulted.
     reader = Mock()
-    reader.overrides_for_stage = Mock()
-    svc, build_service = _rollback_svc(
-        {
-            "config_artifact": _enriched_artifact("release"),
-            "engine_overrides_by_stage": {"online": _ONLINE_CH},
+    reader.overrides_for_stage.return_value = {
+        "channels": {"dingding": {"enabled": True, "accounts": [{"client_id": "live-wrong"}]}}
+    }
+
+    svc = _pf(
+        publish_service, build_service, baas_service, bot_service,
+        _arca_router(build_service), channel_overrides_reader=reader,
+    )
+
+    current_record = _make_publish_record(
+        id=3, status=PublishStatus.DRAFT.value, version=3, source_bot_id="bot-456",
+    )
+
+    stored_online = {
+        "channels": {
+            "dingding": {
+                "enabled": True,
+                "accounts": [{"client_id": "cid-1", "card_template_id": "card-A"}],
+            }
+        }
+    }
+    target_record = _make_publish_record(
+        id=2,
+        status=PublishStatus.SUCCESS.value,
+        version=2,
+        ext={
+            # Base artifact carries stale draft channels; the stored online slot wins.
+            "config_artifact": _enriched_artifact(
+                "release",
+                {"channels": {"dingding": {"accounts": [{"client_id": "draft"}]}}},
+            ),
+            "engine_overrides_by_stage": {"verify": _VERIFY_CH, "online": stored_online},
             "binding": {"online": 200},
         },
-        reader=reader,
     )
 
-    await svc.execute_rollback(current_publish_id=3, target_publish_id=2, operator="u1")
+    mock_binding = Mock()
+    mock_binding.device_id = "device-uuid-003"
 
-    delivered = build_service.upgrade_async.call_args.kwargs["delivery"].config_artifact
-    assert delivered["engine_overrides"] == _ONLINE_CH  # stored slot delivered
-    reader.overrides_for_stage.assert_not_called()  # never live
+    def get_publish_side_effect(pk):
+        if pk == 2:
+            return target_record
+        elif pk == 3:
+            return current_record
+        return None
 
+    publish_service.get_publish_by_id = Mock(side_effect=get_publish_side_effect)
+    publish_service.get_device_binding_by_id.return_value = mock_binding
+    bot_service.get_bot.return_value = {"bot_id": "bot-456", "entity_id": "e2", "entity_type": "staff"}
 
-@pytest.mark.asyncio
-async def test_execute_rollback_pre_feature_target_delivers_base_restamped_only():
-    # Pre-feature target (no engine_overrides_by_stage): overlay no-ops, base channels
-    # delivered unchanged; engine_ext.stage still restamped to release. Backward-compat.
-    base_ch = {"channels": {"dingding": {"accounts": [{"client_id": "base"}]}}}
-    svc, build_service = _rollback_svc(
-        {
-            "config_artifact": _enriched_artifact("release", base_ch),
-            "binding": {"online": 200},
-        }
+    await svc.execute_rollback(
+        current_publish_id=3,
+        target_publish_id=2,
+        operator="user1",
     )
 
-    await svc.execute_rollback(current_publish_id=3, target_publish_id=2, operator="u1")
-
-    delivered = build_service.upgrade_async.call_args.kwargs["delivery"].config_artifact
-    assert delivered["engine_overrides"] == base_ch  # unchanged (no overlay)
-    assert delivered["engine_ext"]["stage"] == "release"  # still restamped
+    delivered = build_service.upgrade_async.await_args.kwargs["delivery"].config_artifact
+    assert delivered["engine_overrides"] == stored_online
+    assert delivered["engine_ext"]["stage"] == "release"
+    # Stored slot, never a live re-fetch.
+    reader.overrides_for_stage.assert_not_called()
 
 
 # teclaw build-time file promotion moved to TeclawProviderBehavior; its test now
