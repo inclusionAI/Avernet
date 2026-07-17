@@ -16,7 +16,7 @@ class CreateWorkItemRequest(BaseModel):
     """创建工作项请求 — 透传模式。"""
 
     staff_id: str = Field(..., alias="staffId", description="用户工号")
-    workspace_id: str = Field(..., alias="workspaceId", description="DIMA 空间 ID")
+    workspace_id: str = Field(..., alias="workspaceId", description="需求空间 ID")
     subject: str = Field(..., description="工作项标题")
     content: str = Field(..., description="工作项详情描述")
     format_type: str = Field("MARKDOWN", alias="formatType", description="文档格式: MARKDOWN / RICHTEXT")
@@ -27,7 +27,7 @@ class CreateWorkItemRequest(BaseModel):
 class CreateRelationRequest(BaseModel):
     """添加工作项关联关系请求（仅 common 类型）。"""
 
-    # operator 为 DIMA 签名鉴权要求的必传字段，实际不校验内容，任意非空值均可调通
+    # operator 为签名鉴权要求的必传字段，实际不校验内容，任意非空值均可调通
     operator: str = Field("100000", description="操作人工号（实际不校验内容，任意非空值均可）")
     relation_identifier: Optional[str] = Field(None, alias="relationIdentifier", description="关联类型标识")
     source_identifier: str = Field(..., alias="sourceIdentifier", description="源工作项标识")
@@ -50,14 +50,14 @@ class UpdateWorkItemRequest(BaseModel):
     """工作项关联 URL 请求 — 专用于给工作项添加 URL 关联。"""
 
     operator: str = Field("100000", description="操作人工号（实际不校验内容，任意非空值均可）")
-    work_item_id: str = Field(..., alias="dimaId", description="DIMA 工作项标识")
+    work_item_id: str = Field(..., alias="dimaId", description="工作项标识")
     url: str = Field(..., description="要关联的 URL")
 
     model_config = {"extra": "allow", "populate_by_name": True}
 
 
 class DimaUpdateWorkItemDocumentRequest(BaseModel):
-    """DIMA 修改工作项描述内容请求。"""
+    """修改工作项描述内容请求。"""
 
     staff_id: str = Field(..., alias="staffId", description="用户工号")
     work_item_id: str = Field(..., alias="workItemId", description="工作项 ID")
@@ -85,9 +85,9 @@ async def create_work_item(
     req: CreateWorkItemRequest,
     service: WorkItemServiceProtocol = Injected(WorkItemServiceProtocol),
 ) -> WorkItemApiResponse:
-    """创建 DIMA 工作项（透传模式）。
+    """创建工作项（透传模式）。
 
-    请求体中 staffId 为必填，其余字段直接透传到 DIMA OpenAPI。
+    请求体中 staffId 为必填，其余字段直接透传到 OpenAPI。
     """
     logger.info(
         "[workitem_noauth.create] staffId=%s, keys=%s",
@@ -123,7 +123,7 @@ async def create_work_item_relation(
     req: CreateRelationRequest,
     service: WorkItemServiceProtocol = Injected(WorkItemServiceProtocol),
 ) -> WorkItemApiResponse:
-    """添加 DIMA 工作项关联关系。
+    """添加工作项关联关系。
 
     POST /api/public/dima/work-items/relation/create
     Body: {
@@ -157,7 +157,7 @@ async def append_file_to_work_item(
     req: UpdateWorkItemRequest,
     service: WorkItemServiceProtocol = Injected(WorkItemServiceProtocol),
 ) -> WorkItemApiResponse:
-    """给 DIMA 工作项关联 URL。
+    """给工作项关联 URL。
 
     POST /api/public/dima/work-items/append-file
     Body: {
@@ -193,7 +193,7 @@ async def update_work_item_document(
     req: DimaUpdateWorkItemDocumentRequest,
     service: WorkItemServiceProtocol = Injected(WorkItemServiceProtocol),
 ) -> WorkItemApiResponse:
-    """修改 DIMA 工作项描述内容。
+    """修改工作项描述内容。
 
     POST /api/public/dima/work-items/document/update
     Body: {

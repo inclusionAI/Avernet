@@ -416,7 +416,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         append_message: str = "",
         model: str | None = None,
     ) -> dict:
-        """为单个 DIMA 需求直接发起会话。
+        """为单个需求直接发起会话。
 
         workflow 从 bot 的 template_config.ext.devflow_workflow 中读取，
         与 cron_auto_setup 保持一致，调用方无需传入。
@@ -425,7 +425,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
             bot_id: Bot ID
             user_id: 用户 ID
             nick_name: 用户花名
-            dima_url: DIMA 需求 URL
+            dima_url: 需求 URL
             append_message: 补充说明
             model: 可选模型覆盖
 
