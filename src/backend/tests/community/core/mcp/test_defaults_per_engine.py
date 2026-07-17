@@ -43,8 +43,8 @@ def test_claude_code_merges_aicoding_research_mcps():
         assert code in codes, f"missing aicoding-only MCP in claude_code: {code}"
     # 无重复。
     assert len(codes) == len(set(codes))
-    # 12 原有 + 6 新增 = 18。
-    assert len(codes) == 18
+    # 12 原有 + 6 新增 + 1 clawmind = 19。
+    assert len(codes) == 19
 
 
 def test_aicoding_has_its_own_list():
@@ -73,6 +73,13 @@ def test_hitl_is_default_for_mcp_enabled_engines():
     assert "hitl" in get_default_mcp_server_codes("hermes")
     assert "hitl" in get_default_mcp_server_codes("aicoding")
     assert "hitl" not in get_default_mcp_server_codes("moltis")
+
+
+def test_clawmind_is_default_for_claude_code_only():
+    assert "clawmind" in get_default_mcp_server_codes("claude_code")
+    assert "clawmind" not in get_default_mcp_server_codes("openclaw")
+    assert "clawmind" not in get_default_mcp_server_codes("hermes")
+    assert "clawmind" not in get_default_mcp_server_codes("aicoding")
 
 
 def test_bcs_mcp_is_default_for_mcp_enabled_engines():

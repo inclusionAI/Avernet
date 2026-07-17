@@ -9,3 +9,10 @@ servers:
     command: "python3"
     args:
       - "/home/admin/hitl/hitl_mcp_server.py"
+  clawmind:
+    command: "node"
+    args:
+      - "/home/admin/clawmind-mcp/dist/esm/platform/mcp-entry.js"
+    env:
+      MCP_TRANSPORT: "stdio"
+      CCT_SOP_MCP_SERVER_MODE: "prod"

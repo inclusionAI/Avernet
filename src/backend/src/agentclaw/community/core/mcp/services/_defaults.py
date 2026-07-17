@@ -59,6 +59,7 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "mcp.ant.faas.aixjiter.AixCodingMemoryMCP"},
         {"server_code": "mcp.ant.rgmcpserver.rgfastcheckmcpserver"},
         {"server_code": "hitl"},
+        {"server_code": "clawmind"},
     ],
     "hermes": [
         {"server_code": "mcp.ant.antprocessai.anttaskmcp"},
