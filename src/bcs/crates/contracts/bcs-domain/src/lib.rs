@@ -16,6 +16,7 @@ pub mod collaboration;
 pub mod friend;
 pub mod fusion;
 pub mod group;
+pub mod group_id;
 pub mod invite;
 pub mod message;
 pub mod organization;
@@ -55,6 +56,11 @@ pub use group::{
     DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, Participant, ParticipantKind,
     ParticipantMode, ParticipantRole, RoutingMode, RoutingPolicy, SenderRoutesValidationError,
     Workspace,
+};
+pub use group_id::{
+    GENERATED_SESSION_ID_SUFFIX_CHARS, GROUP_ID_PREFIX, GroupIdBuildError,
+    MAX_GENERATED_GROUP_ID_CHARS, MAX_SESSION_ID_CHARS, channel_group_id,
+    generated_group_id,
 };
 pub use message::{
     AuditEntry, DeliveryType, GroupMessage, GroupMessageType, MessageOwnerFilter, MessagePage, MessageQuery,

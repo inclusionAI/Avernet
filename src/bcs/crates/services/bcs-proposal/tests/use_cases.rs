@@ -223,6 +223,8 @@ async fn confirm_proposal_consumes_the_token_and_creates_group() {
         .unwrap();
 
     assert!(confirmed.created);
+    assert!(confirmed.group_id.starts_with("bcs_grp_"));
+    assert_eq!(confirmed.group_id.chars().count(), 40);
     assert_eq!(confirmed.driver_bot_id, "driver");
     assert_eq!(confirmed.participant_bot_ids, ["driver", "dba"]);
     assert!(fixture.proposal.get("proposal-token").await.is_none());

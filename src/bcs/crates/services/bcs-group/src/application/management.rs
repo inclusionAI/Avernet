@@ -22,6 +22,7 @@ use bcs_service_api::{
     WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand, WorkbenchConnectOutcome,
     WorkbenchParticipantView, WorkbenchSessionService, WorkbenchUseCaseError,
     backfill_bot_names, validate_sender_routes, CallbackChannelConfig,
+    generated_group_id,
 };
 use tracing::warn;
 use crate::core::validate_service_spec_patch;
@@ -707,7 +708,9 @@ impl GroupManagementService for GroupManagement {
 
         let is_human_originator = originator.starts_with("human_");
 
-        let group_id = cmd.group_id.unwrap_or_else(generated_group_id);
+        let group_id = cmd
+            .group_id
+            .unwrap_or_else(|| generated_group_id(GroupKind::Normal));
         let mut requested = Vec::new();
         for participant in cmd.participants {
             requested.push((participant.bot_id, participant.role));
@@ -949,7 +952,9 @@ impl GroupManagementService for GroupManagement {
             ));
         }
 
-        let group_id = cmd.group_id.unwrap_or_else(generated_group_id);
+        let group_id = cmd
+            .group_id
+            .unwrap_or_else(|| generated_group_id(GroupKind::Dm));
         let label = dm_label(cmd.label, cmd.topic.as_deref(), caller, &target.bot_uuid);
 
         let (actor_a, actor_b, legacy_driver_bot, originator_actor_id) = match caller_actor.actor_kind {
@@ -1860,15 +1865,6 @@ fn participant_role_to_wire(role: ParticipantRole) -> &'static str {
         ParticipantRole::Worker => "worker",
         ParticipantRole::Observer => "observer",
     }
-}
-
-/// Prefix prepended to auto-generated group IDs so downstream engines
-/// (OpenClaw / Moltis) can recognize a session as BCS-originated from its
-/// session key. Caller-supplied group IDs are left untouched.
-const GROUP_ID_PREFIX: &str = "bcs_grp_";
-
-fn generated_group_id() -> String {
-    format!("{}{}", GROUP_ID_PREFIX, uuid::Uuid::new_v4())
 }
 
 fn dm_label(

@@ -69,6 +69,27 @@ async fn create_group_authorizes_human_caller_with_any_driver() {
 }
 
 #[tokio::test]
+async fn create_group_without_explicit_id_uses_native_namespace() {
+    let fixture = Fixture::new().with_bot("driver", "Driver", "public", None);
+    let service = fixture.service_with_limits(5, 10, 10);
+    let mut cmd = create_cmd(
+        Some("driver"),
+        "driver",
+        vec![participant("driver", Some("driver"))],
+    );
+    cmd.group_id = None;
+
+    let created = service
+        .create_group(cmd)
+        .await
+        .expect("generated group should be created");
+
+    assert!(created.group_id.starts_with("bcs_grp_"));
+    assert!(!created.group_id.starts_with("bcs_grp_dm_"));
+    assert_eq!(created.group_id.chars().count(), 40);
+}
+
+#[tokio::test]
 async fn create_group_human_caller_with_ownerless_driver_ok() {
     // Human can designate ownerless bot as driver (no owner restriction).
     let fixture = Fixture::new().with_bot("driver", "Driver", "public", None);
@@ -1200,6 +1221,33 @@ async fn create_dm_creates_and_reuses_human_bot_pair() {
     assert!(!reused.created);
     assert_eq!(reused.group.group_id, "dm-under-test");
     assert_eq!(reused.group.context.as_deref(), Some("dm context"));
+}
+
+#[tokio::test]
+async fn create_dm_without_explicit_id_uses_dm_namespace() {
+    let fixture = Fixture::new().with_human("human_alice", "Alice").with_bot(
+        "assistant",
+        "Assistant",
+        "public",
+        Some("alice"),
+    );
+    let service = fixture.service_with_limits(5, 10, 10);
+
+    let created = service
+        .create_dm(DmCreateCommand {
+            group_id: None,
+            caller_actor_id: Some("human_alice".to_string()),
+            driver_bot: None,
+            target_actor_id: "assistant".to_string(),
+            label: None,
+            topic: None,
+            context: None,
+        })
+        .await
+        .expect("owner human should create generated Human-Bot DM");
+
+    assert!(created.group.group_id.starts_with("bcs_grp_dm_"));
+    assert_eq!(created.group.group_id.chars().count(), 43);
 }
 
 #[tokio::test]

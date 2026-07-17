@@ -141,12 +141,9 @@ impl SessionRepoPort for MemorySessionRepo {
 
         // Auto-generated id: retry 3 times to handle the ~0 probability collision.
         for _attempt in 0..3 {
-            let id = new_session_id(group_id);
-            if !validate_session_id(&id, group_id) {
-                return Err(ServiceError::SessionInvalidParams(format!(
-                    "generated session_id {id} failed format validation"
-                )));
-            }
+            let id = new_session_id(group_id).map_err(|error| {
+                ServiceError::SessionInvalidParams(error.to_string())
+            })?;
             let mut st = self.state.write().await;
             if st.sessions.contains_key(&id) {
                 continue;

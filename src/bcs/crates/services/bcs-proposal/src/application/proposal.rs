@@ -5,10 +5,10 @@ use bcs_service_api::{
     BotRegistryCoreService, CreateOrReactivateCommand, FriendCoreService, Group,
     GroupChatProposal, GroupCoreService, GroupProposalConfirmCommand, GroupProposalConfirmResult,
     GroupProposalCreateCommand, GroupProposalCreateResult, GroupProposalPreviewCommand,
-    GroupProposalPreviewResult, GroupProposalService, GroupStatus, GroupUseCaseError,
+    GroupProposalPreviewResult, GroupProposalService, GroupKind, GroupStatus, GroupUseCaseError,
     NewSessionParams, Participant, ParticipantMode, ParticipantRole, ProposalCoreService,
     RegisteredBot, ServiceError, SessionKind, SessionManagementService, SystemMessageEvent,
-    SystemMessageService,
+    SystemMessageService, generated_group_id,
 };
 use tokio::sync::Mutex;
 
@@ -296,7 +296,7 @@ impl GroupProposalService for GroupProposalUseCases {
             });
         }
 
-        let group_id = uuid::Uuid::new_v4().to_string();
+        let group_id = generated_group_id(GroupKind::Normal);
         let mut group = Group::new(&group_id, proposal.driver_bot.clone(), participants);
         group.label = Some(format!("Group: {}", proposal.reason));
         self.group.upsert(group.clone()).await?;
