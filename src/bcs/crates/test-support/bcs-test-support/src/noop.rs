@@ -612,6 +612,15 @@ impl OrganizationCoreService for NoopOrganizationCoreService {
         Err(service_not_configured("organization service"))
     }
 
+    async fn candidate_bot_detail_for_manager(
+        &self,
+        _managing_provider_id: &str,
+        _organization_code: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationCandidateBotDetail>> {
+        Err(service_not_configured("organization service"))
+    }
+
     async fn require_effective_member(
         &self,
         _organization_code: &str,
@@ -739,6 +748,15 @@ impl OrganizationManagementService for NoopOrganizationManagementService {
         _auth: OrganizationAuth,
         _query: OrganizationCandidateQuery,
     ) -> ServiceResult<Vec<OrganizationCandidateBot>> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn candidate_bot_detail(
+        &self,
+        _auth: OrganizationAuth,
+        _organization_code: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationCandidateBotDetail>> {
         Err(service_not_configured("organization service"))
     }
 }

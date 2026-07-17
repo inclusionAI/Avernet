@@ -102,6 +102,10 @@ fn build_api_routes() -> Router<HttpAppState> {
             get(routes::organizations::candidate_bots),
         )
         .route(
+            "/providers/{provider_id}/organization-candidate-bots/{bot_uuid}",
+            get(routes::organizations::candidate_bot_detail),
+        )
+        .route(
             "/organizations/{organization_code}/admin-runs",
             post(routes::admin_invocations::create_admin_run),
         )

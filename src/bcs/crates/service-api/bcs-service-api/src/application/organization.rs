@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use bcs_domain::{Organization, OrganizationMember};
 
 use crate::{
-    OrganizationCandidateBot, OrganizationCandidateBotPage, OrganizationCandidatePageQuery,
-    OrganizationCandidateQuery, OrganizationMemberDetail, OrganizationMemberPage,
+    OrganizationCandidateBot, OrganizationCandidateBotDetail, OrganizationCandidateBotPage,
+    OrganizationCandidatePageQuery, OrganizationCandidateQuery, OrganizationMemberDetail, OrganizationMemberPage,
     OrganizationMemberProfile, OrganizationMemberProfilePatch, ServiceResult,
 };
 use crate::core::OrganizationMemberPageQuery;
@@ -144,6 +144,15 @@ pub trait OrganizationManagementService: Send + Sync {
         auth: OrganizationAuth,
         query: OrganizationCandidateQuery,
     ) -> ServiceResult<Vec<OrganizationCandidateBot>>;
+    async fn candidate_bot_detail(
+        &self,
+        auth: OrganizationAuth,
+        organization_code: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationCandidateBotDetail>> {
+        let _ = (auth, organization_code, bot_uuid);
+        Ok(None)
+    }
     async fn candidate_bots_page(
         &self,
         auth: OrganizationAuth,

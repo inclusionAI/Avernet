@@ -629,6 +629,7 @@ struct ProviderRepoBundle {
     provider_repo: Arc<dyn ProviderRepoPort>,
     provider_credentials: Arc<dyn ProviderCredentialRepoPort>,
     provider_bindings: Arc<dyn ProviderBotBindingRepoPort>,
+    organization_candidates: Arc<dyn bcs_service_api::OrganizationCandidateReadPort>,
 }
 
 fn memory_provider_repos() -> ProviderRepoBundle {
@@ -636,7 +637,8 @@ fn memory_provider_repos() -> ProviderRepoBundle {
     ProviderRepoBundle {
         provider_repo: store.clone(),
         provider_credentials: store.clone(),
-        provider_bindings: store,
+        provider_bindings: store.clone(),
+        organization_candidates: store,
     }
 }
 
@@ -664,7 +666,8 @@ fn db_provider_repos(
     ProviderRepoBundle {
         provider_repo: store.clone(),
         provider_credentials: store.clone(),
-        provider_bindings: store,
+        provider_bindings: store.clone(),
+        organization_candidates: store,
     }
 }
 
@@ -725,6 +728,7 @@ fn build_organization_services(
         organization_repo,
         provider_repos.provider_repo.clone(),
         provider_repos.provider_bindings.clone(),
+        provider_repos.organization_candidates.clone(),
         bot_registry,
     ));
     let organization_management: Arc<dyn OrganizationManagementService> = Arc::new(

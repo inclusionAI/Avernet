@@ -8,9 +8,10 @@ use tracing::warn;
 use bcs_config::resolve_env_str as resolve_env;
 use bcs_db_api::{DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
 use bcs_service_api::{
-    BotCapabilities, ProviderBotBinding, ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord,
-    ProviderBotDiscoverySelector, ProviderCredential, ProviderCredentialRepoPort, ProviderRecord,
-    ProviderRepoPort, ServiceError, ServiceResult,
+    BotCapabilities, OrganizationCandidateReadPage, OrganizationCandidateReadPort,
+    OrganizationCandidateReadQuery, ProviderBotBinding, ProviderBotBindingRepoPort,
+    ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector, ProviderCredential,
+    ProviderCredentialRepoPort, ProviderRecord, ProviderRepoPort, ServiceError, ServiceResult,
 };
 
 pub type ProviderSqlFlavor = DbSqlFlavor;
@@ -32,6 +33,9 @@ impl MemoryProviderStore {
         Self::default()
     }
 }
+
+#[async_trait]
+impl OrganizationCandidateReadPort for MemoryProviderStore {}
 
 #[async_trait]
 impl ProviderRepoPort for MemoryProviderStore {
@@ -983,6 +987,109 @@ impl ProviderBotBindingRepoPort for DbProviderStore {
     }
 }
 
+#[async_trait]
+impl OrganizationCandidateReadPort for DbProviderStore {
+    async fn list_organization_candidates_page(
+        &self,
+        query: OrganizationCandidateReadQuery,
+    ) -> ServiceResult<Option<OrganizationCandidateReadPage>> {
+        if query.provider_ids.is_empty() {
+            return Ok(Some(OrganizationCandidateReadPage {
+                records: Vec::new(),
+                total: 0,
+            }));
+        }
+
+        let from_sql = " FROM bcs_provider_bot_bindings pb \
+            JOIN bcs_providers p \
+              ON p.provider_id = pb.provider_id \
+             AND p.env = pb.env \
+            JOIN bcs_bots b \
+              ON b.bot_uuid = pb.bot_uuid \
+             AND b.env = pb.env \
+            LEFT JOIN bcs_organization_members om \
+              ON om.env = pb.env \
+             AND om.organization_code = ? \
+             AND om.bot_uuid = pb.bot_uuid \
+             AND om.disabled = 0";
+        let mut filter_sql = " WHERE pb.env = ? \
+              AND pb.disabled = 0 \
+              AND p.disabled = 0 \
+              AND b.is_deleted = 0 \
+              AND b.actor_kind = 'bot' \
+              AND om.bot_uuid IS NULL \
+              AND pb.provider_id IN ("
+            .to_string();
+        filter_sql.push_str(
+            &query
+                .provider_ids
+                .iter()
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        filter_sql.push(')');
+
+        let mut params = vec![
+            DbValue::from(query.organization_code.as_str()),
+            DbValue::from(query.env.as_str()),
+        ];
+        params.extend(
+            query
+                .provider_ids
+                .iter()
+                .map(|provider_id| DbValue::from(provider_id.as_str())),
+        );
+        if let Some(q) = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
+            filter_sql.push_str(
+                " AND (LOWER(pb.bot_uuid) LIKE ? \
+                   OR LOWER(b.name) LIKE ? \
+                   OR LOWER(COALESCE(b.bot_info, '')) LIKE ?)",
+            );
+            let pattern = like_pattern(q);
+            for _ in 0..3 {
+                params.push(DbValue::from(pattern.as_str()));
+            }
+        }
+
+        let count_rows = self
+            .query(
+                "count_organization_candidate_bots",
+                DbStatement::with_params(
+                    format!("SELECT COUNT(*) AS total{from_sql}{filter_sql}"),
+                    params.clone(),
+                ),
+            )
+            .await?;
+        let total = count_rows
+            .first()
+            .and_then(|row| row.get_i64("total").ok().flatten())
+            .unwrap_or(0)
+            .max(0) as u64;
+
+        params.push(DbValue::from(query.limit));
+        params.push(DbValue::from(query.offset));
+        let rows = self
+            .query(
+                "list_organization_candidate_bots",
+                DbStatement::with_params(
+                    format!(
+                        "SELECT pb.bot_uuid, pb.provider_id, p.name AS provider_name, \
+                         b.name AS bot_name, b.bot_info{from_sql}{filter_sql} \
+                         ORDER BY pb.bot_uuid LIMIT ? OFFSET ?"
+                    ),
+                    params,
+                ),
+            )
+            .await?;
+
+        Ok(Some(OrganizationCandidateReadPage {
+            records: rows.iter().filter_map(parse_provider_bot_record).collect(),
+            total,
+        }))
+    }
+}
+
 fn parse_provider(row: &DbRow) -> Option<ProviderRecord> {
     Some(ProviderRecord {
         provider_id: optional_string(row, "provider_id")?,
@@ -1282,6 +1389,17 @@ mod tests {
         ))
         .await
         .expect("create bcs_bots");
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_organization_members (
+                env TEXT NOT NULL,
+                organization_code TEXT NOT NULL,
+                bot_uuid TEXT NOT NULL,
+                disabled INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (env, organization_code, bot_uuid)
+            )",
+        ))
+        .await
+        .expect("create bcs_organization_members");
         db
     }
 
@@ -1564,5 +1682,71 @@ mod tests {
             agent_code_records.is_empty(),
             "provider discover SQL must not treat agent_code as a -q search field"
         );
+    }
+
+    #[tokio::test]
+    async fn organization_candidate_read_excludes_active_members_before_paging() {
+        let db = sqlite_provider_db().await;
+        let store = DbProviderStore::sqlite(db.clone());
+        let env = resolve_env();
+
+        store
+            .insert_provider(provider("provider-candidate"))
+            .await
+            .expect("insert provider");
+        for bot_uuid in ["bot-a", "bot-b", "bot-c"] {
+            db.execute(DbStatement::with_params(
+                "INSERT INTO bcs_bots (bot_uuid, env, name) VALUES (?, ?, ?)",
+                vec![
+                    DbValue::from(bot_uuid),
+                    DbValue::from(env.as_str()),
+                    DbValue::from(format!("{bot_uuid} name")),
+                ],
+            ))
+            .await
+            .expect("insert bot");
+            store
+                .insert_binding(ProviderBotBinding {
+                    bot_uuid: bot_uuid.to_string(),
+                    provider_id: "provider-candidate".to_string(),
+                    provider_bot_ref: format!("ref-{bot_uuid}"),
+                    disabled: false,
+                    created_at: 0,
+                    updated_at: 0,
+                })
+                .await
+                .expect("insert binding");
+        }
+        for (bot_uuid, disabled) in [("bot-a", 0_i64), ("bot-c", 1_i64)] {
+            db.execute(DbStatement::with_params(
+                "INSERT INTO bcs_organization_members \
+                 (env, organization_code, bot_uuid, disabled) VALUES (?, ?, ?, ?)",
+                vec![
+                    DbValue::from(env.as_str()),
+                    DbValue::from("promo-2026"),
+                    DbValue::from(bot_uuid),
+                    DbValue::from(disabled),
+                ],
+            ))
+            .await
+            .expect("insert organization member");
+        }
+
+        let page = store
+            .list_organization_candidates_page(OrganizationCandidateReadQuery {
+                env: env.clone(),
+                organization_code: "promo-2026".to_string(),
+                provider_ids: vec!["provider-candidate".to_string()],
+                q: None,
+                offset: 1,
+                limit: 1,
+            })
+            .await
+            .expect("query candidates")
+            .expect("database read model is supported");
+
+        assert_eq!(page.total, 2);
+        assert_eq!(page.records.len(), 1);
+        assert_eq!(page.records[0].bot_uuid, "bot-c");
     }
 }
