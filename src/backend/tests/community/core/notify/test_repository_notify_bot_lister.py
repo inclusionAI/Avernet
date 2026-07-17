@@ -221,6 +221,35 @@ class TestRepositoryNotifyBotLister:
         assert result == [("cbot1", "cbot1", "sbA")]
         collab_repo.list_by_user.assert_called_once()
 
+    def test_collaborator_record_with_empty_owner_id_is_skipped(self):
+        # A collaborator record with an empty owner_id cannot resolve the
+        # owner's binding (device bindings belong to the owner); it must be
+        # short-circuited before any binding/name lookup is attempted.
+        lister, binding_repo, bot_repo, _ = _make_lister(
+            bindings=[],
+            collaborator_records=[
+                _collab("cbot1", "ownerA"),
+                _collab("cbot_empty", ""),  # missing owner_id
+            ],
+            binding_by_bot_owner={
+                ("cbot1", "ownerA"): _binding(
+                    device_id="devA", sandbox_id="sbA", bolt_id="cbot1"
+                ),
+            },
+        )
+
+        result = lister.list_bot_mappings("u001")
+
+        assert result == [("cbot1", "cbot1", "sbA")]
+        # only the valid record triggers a binding lookup; the empty-owner
+        # record is short-circuited.
+        binding_repo.get_active_by_bot_and_owner.assert_called_once_with(
+            bot_id="cbot1", owner_id="ownerA"
+        )
+        bot_repo.get_by_id_and_owner.assert_called_once_with(
+            "cbot1", "ownerA"
+        )
+
     def test_collaborator_bot_name_falls_back_to_bot_id(self):
         # bot_repo raises / returns None → name falls back to bot_id
         lister, binding_repo, bot_repo, _ = _make_lister(

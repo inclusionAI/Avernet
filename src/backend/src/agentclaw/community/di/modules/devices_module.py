@@ -180,6 +180,16 @@ class DevicesModule(Module):
         # Collaborator bots are folded in via the collaborator repo so that
         # the notify endpoint covers bots the user collaboratively manages,
         # mirroring /api/bots/by-owner-or-collaborator.
+        #
+        # collaborator_repo is intentionally a hard (non-optional) dependency:
+        # injector 0.24 does NOT honor `= None` defaults on @inject params
+        # (it always resolves the annotated type), so making it optional-by-
+        # default would not change resolution. It is safe because
+        # BotCollaboratorModule is base-installed for EVERY profile
+        # (di/container.py), so CollaboratorRepositoryProtocol is always
+        # bound whenever this provider is the winning binding. The
+        # singlebox/test columns override notify_bot_lister with
+        # LocalNotifyBotLister (no collaborator dep) instead.
         return RepositoryNotifyBotLister(
             binding_repo=binding_repo,
             bot_repo=bot_repo,

@@ -134,11 +134,16 @@ class RepositoryNotifyBotLister:
             f"[notify_bot_lister] user={user_id} collaborator records="
             f"{len(collaborators)}"
         )
+        # NOTE: each collaborator bot issues 2 DB calls (active binding +
+        # name lookup) → O(2N). Fine for typical collaborator counts; if
+        # /api/v1/notify polling load grows, add batch methods
+        # (get_active_by_bots_and_owners / get_bots_by_ids_and_owners) to
+        # DeviceBindingRepository / BotRepository and resolve in O(1).
         for rec in collaborators:
             bot_id = str(rec.bot_id or "")
             owner_id = str(rec.owner_id or "")
-            if not bot_id or bot_id in seen_bot_ids:
-                # 跳过空 bot_id 以及与 owner 自查重复的 Bot（去重）。
+            if not bot_id or not owner_id or bot_id in seen_bot_ids:
+                # 跳过空 bot_id / 空 owner_id 以及与 owner 自查重复的 Bot（去重）。
                 continue
             try:
                 binding = self._binding_repo.get_active_by_bot_and_owner(
