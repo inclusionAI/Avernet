@@ -87,7 +87,7 @@ X-BCN-Timestamp: <unix-ms>
 | `to_bot.provider_bot_ref` | 同上 | Provider 内部 bot 标识，用于路由到自己的 bot runtime。 |
 | `session_id` | `chat.send` / `chat.inject` / `chat.history` / `chat.abort` | 会话标识，Provider 按它维护上下文。 |
 | `message` | `chat.send` / `chat.inject` | 当前下发消息。 |
-| `timeout_ms` | `chat.send` / `chat.inject` / `chat.history` | BCS 等待 Provider 确认或回调的超时时间。 |
+| `timeout_ms` | `chat.send` / `chat.inject` / `chat.history` | 下游操作超时。对于 `bcs-cli chat` 发起的 A2A 直聊 `chat.send`，BCS 固定下发 2 小时执行预算（`7200000` 毫秒），与 CLI 的轮询超时相互独立。 |
 
 ## 回调 BCS
 

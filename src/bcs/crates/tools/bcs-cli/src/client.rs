@@ -944,14 +944,12 @@ impl BcsClient {
     fn chat_payload(
         message: &str,
         from: Option<&str>,
-        effective_timeout_ms: u64,
         session_id: Option<&str>,
         tags: &[String],
     ) -> serde_json::Value {
         let mut payload = serde_json::json!({
             "message": message,
             "from": from,
-            "timeout_ms": effective_timeout_ms,
         });
         if let Some(sid) = session_id {
             if let Some(obj) = payload.as_object_mut() {
@@ -995,6 +993,8 @@ impl BcsClient {
     ///
     /// BCS looks up the target bot's URL and forwards the message.
     /// This ensures fresh URLs and centralized logging.
+    /// `timeout_ms` only limits this client's HTTP wait and is not included in
+    /// the BCS request body or forwarded as a downstream execution timeout.
     pub async fn chat(
         &self,
         bot_id: &str,
@@ -1030,14 +1030,14 @@ impl BcsClient {
 
         let url = format!("{}/bots/{}/chat", self.base_url, bot_id);
 
-        let payload = Self::chat_payload(message, from, effective_timeout_ms, session_id, tags);
+        let payload = Self::chat_payload(message, from, session_id, tags);
 
         debug!(
             bot_id = %bot_id,
             from = ?from,
             session_id = ?session_id,
             tags = ?Self::normalize_tags(tags),
-            timeout_ms = effective_timeout_ms,
+            client_wait_timeout_ms = effective_timeout_ms,
             message_len = message.len(),
             "Sending chat message via BCS"
         );
@@ -1066,9 +1066,9 @@ impl BcsClient {
     /// Submit a chat run without waiting for the response. Returns immediately
     /// with a `run_id` that can be polled via [`Self::chat_run_status`].
     ///
-    /// `run_timeout_ms` is the server-side wall-clock budget (pending +
-    /// running) before the run is auto-expired. Pass `None` to accept the
-    /// server default (30 min).
+    /// Polling budgets are intentionally not part of this request. The BCS
+    /// server owns the run lifecycle independently from how long this CLI
+    /// waits for status updates.
     pub async fn chat_async(
         &self,
         bot_id: &str,
@@ -1077,8 +1077,6 @@ impl BcsClient {
         session_id: Option<&str>,
         tags: &[String],
         response_mode: Option<&str>,
-        caller_wait_mode: Option<&str>,
-        run_timeout_ms: Option<u64>,
         organization_code: Option<&str>,
     ) -> Result<ChatRunSubmitResponse> {
         let url = format!("{}/bots/{}/chat-async", self.base_url, bot_id);
@@ -1088,8 +1086,6 @@ impl BcsClient {
             session_id,
             tags,
             response_mode,
-            caller_wait_mode,
-            run_timeout_ms,
             organization_code,
         );
 
@@ -1123,20 +1119,12 @@ impl BcsClient {
         session_id: Option<&str>,
         tags: &[String],
         response_mode: Option<&str>,
-        caller_wait_mode: Option<&str>,
-        run_timeout_ms: Option<u64>,
         organization_code: Option<&str>,
     ) -> serde_json::Value {
         let mut payload = serde_json::json!({
             "message": message,
             "from": from,
         });
-        if let Some(ms) = run_timeout_ms {
-            payload
-                .as_object_mut()
-                .unwrap()
-                .insert("timeout_ms".to_string(), serde_json::json!(ms));
-        }
         if let Some(sid) = session_id {
             payload.as_object_mut().unwrap().insert(
                 "session_id".to_string(),
@@ -1155,14 +1143,6 @@ impl BcsClient {
                 "response_mode".to_string(),
                 serde_json::Value::String(mode.to_string()),
             );
-        }
-        if let Some(mode) = caller_wait_mode.map(str::trim).filter(|mode| !mode.is_empty()) {
-            if let Some(object) = payload.as_object_mut() {
-                object.insert(
-                    "caller_wait_mode".to_string(),
-                    serde_json::Value::String(mode.to_string()),
-                );
-            }
         }
         if let Some(code) = organization_code.map(str::trim).filter(|code| !code.is_empty()) {
             if let Some(object) = payload.as_object_mut() {
@@ -1234,8 +1214,8 @@ impl BcsClient {
     /// a JSON value shaped like the legacy [`Self::chat`] response plus a few
     /// additive fields (`run_id`, `state`, `session_id`, `error_message`).
     ///
-    /// `overall_timeout_ms` caps the total wall-clock spent polling. On
-    /// overflow the run is best-effort cancelled and an error is returned.
+    /// `overall_timeout_ms` caps the total wall-clock spent polling. Reaching
+    /// the budget stops only local polling; the server-side run keeps executing.
     /// `poll_wait_ms` controls each long-poll HTTP hop (default 15 s, capped
     /// at the server's configured max).
     pub async fn chat_polling(
@@ -1261,8 +1241,6 @@ impl BcsClient {
                 session_id,
                 tags,
                 response_mode,
-                None,
-                overall_timeout_ms,
                 organization_code,
             )
             .await?;
@@ -1279,11 +1257,11 @@ impl BcsClient {
         loop {
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
-                warn!(run_id = %run_id, "chat_polling: overall timeout, cancelling run");
-                let _ = self.chat_run_cancel(&run_id).await;
+                warn!(run_id = %run_id, "chat_polling: local polling timeout; run left active");
                 return Err(anyhow!(
-                    "chat_polling: overall timeout after {} ms",
-                    overall_timeout.as_millis()
+                    "chat_polling: local polling timeout after {} ms; run {} is still active",
+                    overall_timeout.as_millis(),
+                    run_id,
                 ));
             }
             let wait_ms = remaining.as_millis().min(poll_wait_ms as u128) as u64;
@@ -1319,10 +1297,9 @@ impl BcsClient {
         }
     }
 
-    /// Submit a chat run and detach once the server observes an acknowledgement
-    /// state for the caller's wait mode. For chat schema v2, `submitted` means
-    /// the Provider accepted the request but has not confirmed downstream
-    /// delivery yet, so this waits until `running` (or a legacy `completed`).
+    /// Submit a chat run and detach once BCS reports it as `running` (or a
+    /// legacy `completed`). Detach is a local waiting policy and is not sent to
+    /// the server or Provider.
     ///
     /// `overall_timeout_ms` caps the total wall-clock spent waiting for the
     /// detach acknowledgement. On overflow the run is left running on the
@@ -1351,8 +1328,6 @@ impl BcsClient {
                 session_id,
                 tags,
                 response_mode,
-                Some("detached"),
-                overall_timeout_ms,
                 organization_code,
             )
             .await?;
@@ -1371,11 +1346,12 @@ impl BcsClient {
             if remaining.is_zero() {
                 warn!(
                     run_id = %run_id,
-                    "chat_polling_detach: overall timeout before first ack"
+                    "chat_polling_detach: local timeout before first ack"
                 );
                 return Err(anyhow!(
-                    "chat_polling_detach: timed out after {} ms waiting for detach ack",
-                    overall_timeout.as_millis()
+                    "chat_polling_detach: timed out after {} ms waiting for detach ack; run {} is still active",
+                    overall_timeout.as_millis(),
+                    run_id,
                 ));
             }
             let wait_ms = remaining.as_millis().min(poll_wait_ms as u128) as u64;
@@ -2974,6 +2950,75 @@ mod tests {
         assert_eq!(result["state"], "running");
     }
 
+    #[tokio::test]
+    async fn test_chat_polling_timeout_leaves_server_run_active() {
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{method, path},
+        };
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/bots/bot-target/chat-async"))
+            .respond_with(ResponseTemplate::new(202).set_body_json(serde_json::json!({
+                "run_id": "run-local-timeout",
+                "bot_uuid": "bot-target",
+                "session_id": "session-1",
+                "status": "running",
+                "expires_at_ms": 9_999_999_u64,
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/chat/runs/run-local-timeout"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "run_id": "run-local-timeout",
+                "bot_uuid": "bot-target",
+                "from_bot_id": "bot-source",
+                "session_id": "session-1",
+                "state": "running",
+                "response": {"content": ""},
+                "created_at_ms": 1_u64,
+                "updated_at_ms": 2_u64,
+                "expires_at_ms": 9_999_999_u64,
+                "version": 2_u64,
+                "content_truncated": false,
+                "is_terminal": false,
+            })))
+            .mount(&server)
+            .await;
+
+        let client = BcsClient::new(server.uri());
+        let error = client
+            .chat_polling(
+                "bot-target",
+                "hello",
+                None,
+                None,
+                &[],
+                None,
+                Some(20),
+                Some(5),
+                None,
+            )
+            .await
+            .expect_err("local polling should time out");
+
+        assert!(error.to_string().contains("local polling timeout"));
+        assert!(error.to_string().contains("run-local-timeout is still active"));
+        let requests = server.received_requests().await.unwrap();
+        let submit = requests
+            .iter()
+            .find(|request| request.url.path() == "/bots/bot-target/chat-async")
+            .expect("chat submit request");
+        let payload: serde_json::Value = serde_json::from_slice(&submit.body).unwrap();
+        assert!(payload.get("timeout_ms").is_none());
+        assert!(payload.get("caller_wait_mode").is_none());
+        assert!(requests
+            .iter()
+            .all(|request| request.url.path() != "/chat/runs/run-local-timeout/cancel"));
+    }
+
     #[test]
     fn test_non_chat_headers_omit_chat_version() {
         let client = BcsClient::new("http://localhost:21000");
@@ -3005,58 +3050,41 @@ mod tests {
     }
 
     #[test]
-    fn test_chat_payload_includes_timeout_ms() {
-        let payload = BcsClient::chat_payload("hello", Some("bot_a"), 12_345, None, &[]);
+    fn test_chat_payload_omits_client_wait_timeout() {
+        let payload = BcsClient::chat_payload("hello", Some("bot_a"), None, &[]);
 
         assert_eq!(payload["message"], serde_json::json!("hello"));
         assert_eq!(payload["from"], serde_json::json!("bot_a"));
-        assert_eq!(payload["timeout_ms"], serde_json::json!(12_345));
+        assert!(payload.get("timeout_ms").is_none());
         assert!(payload.get("session_id").is_none());
         assert!(payload.get("tags").is_none());
     }
 
     #[test]
     fn test_chat_payload_includes_session_id_when_present() {
-        let payload = BcsClient::chat_payload("hi", None, 9_000, Some("sess-1"), &[]);
+        let payload = BcsClient::chat_payload("hi", None, Some("sess-1"), &[]);
         assert_eq!(payload["session_id"], serde_json::json!("sess-1"));
     }
 
     #[test]
     fn test_chat_payload_includes_tags_when_present() {
         let tags = vec![" tag1 ".to_string(), "".to_string(), "tag2".to_string()];
-        let payload = BcsClient::chat_payload("hi", None, 9_000, None, &tags);
+        let payload = BcsClient::chat_payload("hi", None, None, &tags);
         assert_eq!(payload["tags"], serde_json::json!(["tag1", "tag2"]));
     }
 
     #[test]
-    fn test_chat_async_payload_includes_caller_wait_mode_when_present() {
+    fn test_chat_async_payload_omits_cli_wait_controls() {
         let payload = BcsClient::chat_async_payload(
             "hi",
             None,
             None,
             &[],
             Some("after-last-tool-call"),
-            Some("detached"),
-            Some(60_000),
             None,
         );
 
-        assert_eq!(payload["caller_wait_mode"], serde_json::json!("detached"));
-    }
-
-    #[test]
-    fn test_chat_async_payload_omits_blank_caller_wait_mode() {
-        let payload = BcsClient::chat_async_payload(
-            "hi",
-            None,
-            None,
-            &[],
-            None,
-            Some("  "),
-            None,
-            None,
-        );
-
+        assert!(payload.get("timeout_ms").is_none());
         assert!(payload.get("caller_wait_mode").is_none());
     }
 
@@ -3067,8 +3095,6 @@ mod tests {
             None,
             None,
             &[],
-            None,
-            None,
             None,
             Some(" promo-2026 "),
         );
@@ -3084,8 +3110,6 @@ mod tests {
             None,
             &[],
             None,
-            None,
-            None,
             Some("  "),
         );
 
@@ -3095,7 +3119,7 @@ mod tests {
     #[test]
     fn test_chat_request_builder_applies_request_timeout() {
         let client = BcsClient::new("http://localhost:21000");
-        let payload = BcsClient::chat_payload("hello", Some("bot_a"), 12_345, None, &[]);
+        let payload = BcsClient::chat_payload("hello", Some("bot_a"), None, &[]);
         let request = client
             .chat_request_builder(
                 "http://localhost:21000/bots/bot-123/chat",
