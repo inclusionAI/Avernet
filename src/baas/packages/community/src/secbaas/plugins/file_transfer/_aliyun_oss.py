@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import oss2
 from secbaas.logger import get_logger
 from secbaas.spi.file_transfer import (
@@ -12,9 +10,6 @@ from secbaas.spi.file_transfer import (
     PartInfo,
 )
 from secbaas.spi.secret import SecretStorePlugin
-
-if TYPE_CHECKING:
-    from secbaas.bootstrap._configs import FileTransferOssConfigSchema
 
 log = get_logger("file_transfer")
 

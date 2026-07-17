@@ -60,7 +60,7 @@ def _real_file_transfer_backend(config, secret_plugin):
     from the ``file_transfer_oss`` configuration section.  Falls back
     to module-level defaults when config values are empty.
     """
-    from secbaas.community.bootstrap._configs import FileTransferOssConfigSchema
+    from .._configs import FileTransferOssConfigSchema
 
     oss_config = FileTransferOssConfigSchema(**config)
     return AliyunOssFileTransferBackend(
