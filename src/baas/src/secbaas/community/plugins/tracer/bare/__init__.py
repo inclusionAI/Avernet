@@ -12,6 +12,8 @@ __all__ = [
 ]
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from secbaas.community.spi.tracer import TracerPlugin
@@ -106,3 +108,23 @@ class BareTracerPlugin(TracerPlugin):
         from opentelemetry import context as otel_context
 
         otel_context.detach(token)
+
+    def inject_context(self, carrier: dict[str, str]) -> None:
+        """Serialize the current trace context into *carrier* as W3C traceparent."""
+        from opentelemetry import propagate
+
+        propagate.inject(carrier)
+
+    def extract_context(self, carrier: dict[str, str]) -> Any:
+        """Deserialize a trace context from *carrier* (W3C traceparent)."""
+        from opentelemetry import propagate
+
+        return propagate.extract(carrier)
+
+    @contextmanager
+    def start_span(self, name: str) -> Iterator[None]:
+        """Start an OTel child span under the current trace context."""
+        from opentelemetry import trace
+
+        with trace.get_tracer(__name__).start_as_current_span(name):
+            yield
