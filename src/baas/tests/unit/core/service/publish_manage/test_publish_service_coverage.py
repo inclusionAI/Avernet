@@ -1569,6 +1569,119 @@ class TestExecuteStageEdgeCases:
 
 
 # ====================================================================
+# execute_stage — callback race condition fix (lines 1890-1907)
+# ====================================================================
+
+
+class TestExecuteStageCallbackRacefix:
+    """When the callback handler (running in a background thread) completes
+    before execute_stage checks batch completion, the callback may have
+    already set the batch to a terminal status (FAILED/COMPLETED).
+    execute_stage must preserve that terminal status instead of
+    overwriting it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_callback_already_set_batch_failed_preserves_status(self):
+        """Callback set batch=FAILED → preserve it and count failures.
+
+        Covers lines 1893, 1894, 1895.
+        """
+        svc = _make_service()
+        pub = _make_publish_record(status="ACTIVE")
+        bot = _make_bot_record()
+        batch = _make_batch_record(status="PENDING")
+        failed_batch = _make_batch_record(status=BatchStatus.FAILED.value)
+
+        svc._publish_repo.get_by_id.return_value = pub
+        svc._bot_repo.get_by_id_including_deleted.return_value = bot
+        svc._bot_repo.get_by_id.return_value = bot
+
+        # list_by_publish_id: return FAILED batch — no RUNNING batches remain
+        svc._publish_batch_repo.list_by_publish_id.return_value = [failed_batch]
+        # get_by_id: re-read returns FAILED (callback already set it)
+        svc._publish_batch_repo.get_by_id.return_value = failed_batch
+
+        # count_records_by_batch_id: no PROCESSING records (inline path),
+        # some FAILED records reported by the callback
+        svc._publish_record_repo.count_records_by_batch_id.return_value = {
+            "PROCESSING": 0,
+            "FAILED": 2,
+        }
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            with patch.object(svc, "_get_pending_batches") as mock_gpb:
+                mock_gpb.side_effect = [
+                    ("PROD_FIRST_BATCH", [batch]),
+                    ("PROD_FIRST_BATCH", []),
+                ]
+                with patch.object(
+                    svc, "_execute_batch", new_callable=AsyncMock
+                ) as mock_exec:
+                    mock_exec.return_value = BatchResult(
+                        success=True, processed_count=2, failed_count=0
+                    )
+
+                    result = await svc.execute_stage("t", 1, "op")
+
+                    # Callback already set batch to FAILED — total_failed was
+                    # incremented by the FAILED count from the callback, so
+                    # all_success = False and the publish is marked FAILED.
+                    assert result.success is False
+
+    @pytest.mark.asyncio
+    async def test_callback_already_set_batch_completed_preserves_status(self):
+        """Callback set batch=COMPLETED → preserve it without overwriting.
+
+        Covers line 1904.
+        """
+        svc = _make_service()
+        pub = _make_publish_record(status="ACTIVE")
+        bot = _make_bot_record()
+        batch = _make_batch_record(status="PENDING")
+        completed_batch = _make_batch_record(status=BatchStatus.COMPLETED.value)
+
+        svc._publish_repo.get_by_id.return_value = pub
+        svc._bot_repo.get_by_id_including_deleted.return_value = bot
+        svc._bot_repo.get_by_id.return_value = bot
+
+        # list_by_publish_id: return COMPLETED batch — no RUNNING batches remain
+        svc._publish_batch_repo.list_by_publish_id.return_value = [completed_batch]
+        # get_by_id: re-read returns COMPLETED (callback already set it)
+        svc._publish_batch_repo.get_by_id.return_value = completed_batch
+
+        # count_records_by_batch_id: no PROCESSING records (inline path)
+        svc._publish_record_repo.count_records_by_batch_id.return_value = {
+            "PROCESSING": 0,
+        }
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            with patch.object(svc, "_get_pending_batches") as mock_gpb:
+                mock_gpb.side_effect = [
+                    ("PROD_FIRST_BATCH", [batch]),
+                    ("PROD_FIRST_BATCH", []),
+                ]
+                with patch.object(
+                    svc, "_execute_batch", new_callable=AsyncMock
+                ) as mock_exec:
+                    mock_exec.return_value = BatchResult(
+                        success=True, processed_count=2, failed_count=0
+                    )
+
+                    result = await svc.execute_stage("t", 1, "op")
+
+                    # Callback already set batch to COMPLETED — nothing
+                    # overwritten, total_failed stays 0, all_success = True.
+                    assert result.success is True
+
+
+# ====================================================================
 # _execute_batch — unknown type dispatch
 # ====================================================================
 
