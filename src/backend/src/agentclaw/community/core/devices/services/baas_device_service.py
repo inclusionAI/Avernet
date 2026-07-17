@@ -518,7 +518,8 @@ class BaasDeviceService(DeviceService):
         if bot is None:
             return False, f"bot not found for binding_id={binding_id}"
 
-        resolved_engine = str(bot.get("active_engine") or "").strip() or DEFAULT_ENGINE_TYPE
+        raw_active_engine = str(bot.get("active_engine") or "").strip() or None
+        resolved_engine = raw_active_engine or DEFAULT_ENGINE_TYPE
         resolved_bot_type = str(bot.get("bot_type") or "")
         resolved_bot_id = str(bot.get("bot_id") or bot_id or "")
         resolved_owner_id = str(bot.get("owner_id") or owner_id or "")
@@ -527,10 +528,42 @@ class BaasDeviceService(DeviceService):
             admins = None
 
         template_type = bot.get("template_type")
+
+        bot_uuid = str(props.get("bot_uuid") or "")
+        if not bot_uuid:
+            return False, "missing bot_uuid in device_props"
+        callback_token = str(props.get("callback_token") or "")
+        device = AllocatedDevice(
+            device_id=binding.device_id,
+            device_provider=binding.device_provider,
+            device_props=props,
+        )
+
         # ac_bots only owns template_type; token/model/runtime live in
         # ac_templates.ext.  Create-init runs from a durable task after the
         # synchronous create path, so reload template_config from TemplateService
         # just like the BaaS restart path does.
+        base_provisioning_ctx = BotProvisioningContext(
+            bot_id=resolved_bot_id,
+            owner_id=resolved_owner_id,
+            active_engine=raw_active_engine,
+            bot_type=resolved_bot_type,
+            template_type=template_type,
+            template_config=None,
+        )
+        provisioning_strategy = (
+            get_engine_provisioning_registry()
+            .resolve_for_context(base_provisioning_ctx)
+        )
+        if (
+            self._template_service is None
+            and provisioning_strategy.should_encrypt_template_token(base_provisioning_ctx)
+        ):
+            return False, (
+                "template_service required for coding bot create init: "
+                f"bot_id={resolved_bot_id}"
+            )
+
         template_config = None
         if self._template_service is not None:
             try:
@@ -548,30 +581,16 @@ class BaasDeviceService(DeviceService):
         provisioning_ctx = BotProvisioningContext(
             bot_id=resolved_bot_id,
             owner_id=resolved_owner_id,
-            active_engine=resolved_engine,
+            active_engine=raw_active_engine,
             bot_type=resolved_bot_type,
             template_type=template_type,
             template_config=template_config,
         )
-        raw_codefuse_token = (
-            get_engine_provisioning_registry()
-            .resolve_for_context(provisioning_ctx)
-            .extract_runtime_token(provisioning_ctx)
-        )
+        raw_codefuse_token = provisioning_strategy.extract_runtime_token(provisioning_ctx)
         codefuse_token = (
             self._vault.decrypt_or_passthrough(raw_codefuse_token)
             if raw_codefuse_token
             else None
-        )
-
-        bot_uuid = str(props.get("bot_uuid") or "")
-        if not bot_uuid:
-            return False, "missing bot_uuid in device_props"
-        callback_token = str(props.get("callback_token") or "")
-        device = AllocatedDevice(
-            device_id=binding.device_id,
-            device_provider=binding.device_provider,
-            device_props=props,
         )
 
         try:

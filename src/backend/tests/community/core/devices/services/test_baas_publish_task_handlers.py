@@ -81,6 +81,76 @@ def _make_restart_handler(
     return handler, baas_device_service
 
 
+def test_read_codefuse_token_supports_personal_coding():
+    template_service = MagicMock()
+    template_service.get_template_config.return_value = {"token": "enc:v1:token"}
+    handler, _ = _make_restart_handler(
+        repo=MagicMock(),
+        bot_repository=MagicMock(),
+        baas_device_service=MagicMock(),
+        template_service=template_service,
+    )
+
+    token = handler._read_codefuse_token(
+        bot_id="bot-001",
+        bot={
+            "owner_id": "owner-001",
+            "active_engine": "aicoding",
+            "bot_type": "service",
+            "template_type": "personalCoding",
+        },
+    )
+
+    assert token == "enc:v1:token"
+    template_service.get_template_config.assert_called_once_with("bot-001")
+
+
+def test_read_codefuse_token_uses_template_type_fallback_when_engine_missing():
+    template_service = MagicMock()
+    template_service.get_template_config.return_value = {"token": "enc:v1:token"}
+    handler, _ = _make_restart_handler(
+        repo=MagicMock(),
+        bot_repository=MagicMock(),
+        baas_device_service=MagicMock(),
+        template_service=template_service,
+    )
+
+    token = handler._read_codefuse_token(
+        bot_id="bot-001",
+        bot={
+            "owner_id": "owner-001",
+            "active_engine": None,
+            "bot_type": "service",
+            "template_type": "personalCoding",
+        },
+    )
+
+    assert token == "enc:v1:token"
+
+
+def test_read_codefuse_token_skips_non_coding_template():
+    template_service = MagicMock()
+    handler, _ = _make_restart_handler(
+        repo=MagicMock(),
+        bot_repository=MagicMock(),
+        baas_device_service=MagicMock(),
+        template_service=template_service,
+    )
+
+    token = handler._read_codefuse_token(
+        bot_id="bot-001",
+        bot={
+            "owner_id": "owner-001",
+            "active_engine": "openclaw",
+            "bot_type": "personal",
+            "template_type": "normalCC",
+        },
+    )
+
+    assert token is None
+    template_service.get_template_config.assert_not_called()
+
+
 def test_create_poll_completes_when_binding_terminal():
     repo = MagicMock()
     baas_service = MagicMock()
@@ -867,7 +937,9 @@ def test_create_init_reads_codefuse_token_from_template_service_and_writes_conta
     bot_query.get_by_binding_id.return_value = {
         "bot_id": "bot-001",
         "owner_id": "owner-001",
-        "active_engine": "aicoding",
+        # Missing active_engine should still use template_type fallback for coding
+        # token provisioning, matching the BaaS restart-poll path.
+        "active_engine": None,
         "bot_type": "service",
         "admins": [],
         "template_type": "applicationCoding",
@@ -902,6 +974,37 @@ def test_create_init_reads_codefuse_token_from_template_service_and_writes_conta
     template_service.get_template_config.assert_called_once_with("bot-001")
     writer.assert_called_once()
     assert writer.call_args.args[1:] == ("BAAS-CTR-001", "plain-token")
+
+
+def test_create_init_requires_template_service_for_coding_template():
+    repo = MagicMock()
+    binding = _make_binding(
+        status=DeviceBindingStatus.PENDING.value,
+        device_props={"publish_id": "1001", "bot_uuid": "BAAS-CTR-001"},
+    )
+    repo.get_by_id.return_value = binding
+    bot_query = MagicMock()
+    bot_query.get_by_binding_id.return_value = {
+        "bot_id": "bot-001",
+        "owner_id": "owner-001",
+        "active_engine": None,
+        "bot_type": "service",
+        "admins": [],
+        "template_type": "personalCoding",
+    }
+    service = _make_baas_device_service(repo=repo, bot_query=bot_query)
+    service._run_container_init = MagicMock()
+
+    ok, message = service.run_create_init_once(
+        binding_id=42,
+        bot_id="bot-001",
+        owner_id="owner-001",
+        publish_id=1001,
+    )
+
+    assert ok is False
+    assert "template_service required" in message
+    service._run_container_init.assert_not_called()
 
 
 def test_create_init_marks_failed_when_init_fails():
