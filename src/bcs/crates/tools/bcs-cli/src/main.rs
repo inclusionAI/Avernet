@@ -2754,13 +2754,11 @@ async fn main() -> Result<()> {
                 let page = client
                     .list_bot_groups(&bot_uuid, offset, batch_size, false)
                     .await?;
-                if page.offset != offset || page.limit != batch_size {
+                if page.offset != offset {
                     return Err(anyhow!(
-                        "Invalid bot groups pagination response: requested offset={} limit={}, received offset={} limit={}",
+                        "Invalid bot groups pagination response: requested offset={}, received offset={}",
                         offset,
-                        batch_size,
-                        page.offset,
-                        page.limit
+                        page.offset
                     ));
                 }
                 let page_groups = page.items;

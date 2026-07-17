@@ -176,6 +176,60 @@ async fn list_groups_rejects_malformed_page_envelope() {
 }
 
 #[tokio::test]
+async fn list_groups_accepts_server_capped_limit() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+    let bot_groups_path = format!("/bots/{}/groups", ctx.session.bot_uuid);
+    Mock::given(method("GET"))
+        .and(path(bot_groups_path))
+        .and(query_param("offset", "0"))
+        .and(query_param("limit", "20"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "items": [{"group_id": "group-1"}],
+            "total": 2,
+            "offset": 0,
+            "limit": 10
+        })))
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("list-groups")
+        .output()
+        .expect("Failed to execute list-groups");
+    assert_success(&output);
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["returned"], 1);
+    assert_eq!(json["has_more"], true);
+    assert!(json["continuation"].is_string());
+}
+
+#[tokio::test]
+async fn list_groups_rejects_mismatched_page_offset() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+    let bot_groups_path = format!("/bots/{}/groups", ctx.session.bot_uuid);
+    Mock::given(method("GET"))
+        .and(path(bot_groups_path))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "items": [],
+            "total": 0,
+            "offset": 1,
+            "limit": 20
+        })))
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("list-groups")
+        .output()
+        .expect("Failed to execute list-groups");
+    assert_failure(&output, None);
+    assert_output_contains(&output, "requested offset=0");
+    assert_output_contains(&output, "received offset=1");
+}
+
+#[tokio::test]
 async fn list_groups_human_output_includes_next_command() {
     let ctx = TestContext::new().await.expect("Failed to create test context");
     let bot_groups_path = format!("/bots/{}/groups", ctx.session.bot_uuid);
