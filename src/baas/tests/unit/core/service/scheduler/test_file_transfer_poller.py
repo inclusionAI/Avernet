@@ -248,7 +248,12 @@ class TestProcessSingleTicket:
         assert result == "oss_not_ready"
 
     def test_pull_file_fails(self):
-        """pull_file raises -> ticket marked FAILED."""
+        """pull_file raises -> error caught, returns 'failed', ticket NOT marked FAILED.
+
+        Transient errors (network issues, etc.) are intentionally NOT marked
+        FAILED — the ticket stays in its current state (UPLOAD_COMPLETED) and
+        will be retried in the next poller cycle.
+        """
         ticket = _make_ticket(status="CREATED")
         poller = _make_poller()
         poller._paas_facade.pull_file.side_effect = RuntimeError("network error")
@@ -258,9 +263,12 @@ class TestProcessSingleTicket:
         result = asyncio.run(poller._process_single_ticket(ticket))
 
         assert result == "failed"
-        poller._ticket_repo.update_status.assert_called_with(
-            "tf-001", "FAILED", "network error"
-        )
+        # Verify no FAILED transition was made — transient errors are retried
+        failed_calls = [
+            c for c in poller._ticket_repo.update_status.call_args_list
+            if c.args[1] == "FAILED"
+        ]
+        assert len(failed_calls) == 0
 
 
 # ── _process_download_ticket tests ───────────────────────────────────
