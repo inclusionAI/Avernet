@@ -73,15 +73,21 @@ class GovernanceWhitelistService:
 
         通知侧 cancel scope = bot_id IN (...) 且 response IS NULL +
         open/muted。工单侧按被关通知的 ``ticket_id`` 集合关 —— 逐条走
-        :meth:`emergency_close` 链路激活领域模型守卫、幂等(不可裸用全量
+        :meth:`admin_close` 链路激活领域模型守卫、幂等(不可裸用全量
         ``bulk_close_open``,会多关已反馈的 scheduled 单)。
+
+        审计口径(本特性):逐 ``(bot_id, owner_id)`` 对写**带实体**审计行 + 1 条批次
+        摘要行,全部共享唯一 ``run_id``(可聚合同一次加白)。摘要行 ``error_msg`` 含
+        真实处置计数。修复旧口径"单条孤儿审计行(bot_id=None/run_id='admin' 公共桶、
+        按被治理实体查不到"的问题。
 
         Returns ``{"whitelisted": N, "cancelled": N}``.
         """
         now = datetime.now()
         cooldown_days = self._config.cooldown_days
+        run_id = f"admin-wl-{uuid.uuid4().hex[:12]}"  # 唯一批次标识,聚合用
 
-        # 1. 逐条 add whitelist (先点查, 仅对不在白名单中的 pair 计数)
+        # 1. 逐条 add whitelist (先点查, 仅对不在白名单中的 pair 计数) + 逐对写审计
         bot_owner_pairs = self._notify_repo.list_distinct_bot_owner(bot_ids)
         whitelisted = 0
         for bot_id, owner_id in bot_owner_pairs:
@@ -91,10 +97,21 @@ class GovernanceWhitelistService:
                 owner_id=owner_id,
                 created_by=operator,
                 whitelist_type="governance",
-                source="emergency",
+                source="admin",
             )
             if not already:
                 whitelisted += 1
+            # 逐对带实体审计行 — 使审计可按被治理实体(bot/owner)检索。
+            self._audit_repo.add_audit(
+                run_id,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                action_taken=AuditAction.ADMIN_WHITELIST,
+                actor_id=operator,
+                error_msg=f"reason={reason}; added={'0' if already else '1'}",
+                source="admin_api",
+                dry_run=0,
+            )
 
         # 2. Pre-collect the ticket_id set scoped to the same filter as the
         # notify bulk-cancel (bot_id IN (...) + response IS NULL + open/muted),
@@ -104,26 +121,31 @@ class GovernanceWhitelistService:
         # 3. Cancel pending + close open/muted notifications (behavior unchanged)
         cancelled = self._notify_repo.bulk_cancel_by_bots(
             bot_ids,
-            close_reason=CloseReason.EMERGENCY_CLOSED,
+            close_reason=CloseReason.ADMIN_CLOSED,
             closed_at=now,
             cooldown_until=now + timedelta(days=cooldown_days),
         )
 
-        # 4. Ticket-side close — per-ticket guard-activated (EMERGENCY_CLOSED),
+        # 4. Ticket-side close — per-ticket guard-activated (ADMIN_CLOSED),
         # idempotent. Aligns the ticket/notify sets (Task 8).
         self._lifecycle_svc.bulk_close_by_ticket_ids(ticket_ids, now=now)
 
+        # 5. 批次摘要行(同 run_id):汇总真实处置计数,供按批次聚合查询。
+        skipped = len(bot_owner_pairs) - whitelisted
         self._audit_repo.add_audit(
-            "emergency",
+            run_id,
             action_taken=AuditAction.ADMIN_WHITELIST,
             actor_id=operator,
-            error_msg=f"reason={reason}; operator={operator}; bot_count={len(bot_ids)}",
+            error_msg=(
+                f"whitelisted={whitelisted}; skipped={skipped}; "
+                f"cancelled={cancelled}; closed={len(ticket_ids)}; reason={reason}"
+            ),
             source="admin_api",
             dry_run=0,
         )
         log.info(
-            "[GovernanceWhitelist] bulk_whitelist by %s: whitelisted=%d, cancelled=%d, tickets_closed_by=%d",
-            operator, whitelisted, cancelled, len(ticket_ids),
+            "[GovernanceWhitelist] bulk_whitelist by %s: run_id=%s whitelisted=%d, cancelled=%d, tickets_closed_by=%d",
+            operator, run_id, whitelisted, cancelled, len(ticket_ids),
         )
         return {"whitelisted": whitelisted, "cancelled": cancelled}
 
@@ -176,6 +198,30 @@ class GovernanceWhitelistService:
     def count_by_type(self, *, whitelist_type: str = "governance") -> int:
         """Count whitelist entries of a given type (delegates to repo)."""
         return self._whitelist_repo.count_by_type(whitelist_type=whitelist_type)
+
+    def list_all(
+        self,
+        *,
+        whitelist_type: str = "governance",
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        include_expired: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[WhitelistEntry], int]:
+        """全量分页查询白名单(delegates to repo)。
+
+        可选 owner_id / bot_id 精确筛选;include_expired=False 默认排除已过期;
+        返回 (领域模型列表, 筛选条件下总数)。
+        """
+        return self._whitelist_repo.list_all(
+            whitelist_type=whitelist_type,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            include_expired=include_expired,
+            limit=limit,
+            offset=offset,
+        )
 
     def add(
         self,

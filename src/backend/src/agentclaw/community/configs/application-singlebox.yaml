@@ -178,6 +178,7 @@ user_config:
   # ── Economy / Governance ──────────────────────────────────────────
   economy_governance:
     dry_run: true
+    cooldown_days: 7
     notify_channel: "tc_card"
     tc_card_id: "card_cb190863"            # Aix 卡片组件 ID (v3 React)
     tc_card_template_id: "7f1e01ed-194a-4c25-916c-0388f67e3517.schema"  # 治理通知卡片壳模板

@@ -205,7 +205,7 @@ class TestCardCallbackResolve:
         assert row.response_remark == "This is wrong"
 
     def test_need_time_writes_to_db(self, session, engine):
-        """response=need_time + repair_deadline → scheduled in DB."""
+        """response=need_time + repair_deadline → waiting_review (待审, no auto mute)."""
         svc = _build_svc(engine)
         _make_notification(session)
 
@@ -214,11 +214,11 @@ class TestCardCallbackResolve:
             repair_deadline=datetime(2026, 7, 15), source="card_callback",
         )
         assert result.success
-        assert result.governance_status == "scheduled"
+        assert result.governance_status == "waiting_review"
 
         row = session.query(GovernanceTicketOrm).filter_by(ticket_id="t-n-001").one()
-        assert row.repair_deadline is not None
-        assert row.mute_until is not None
+        assert row.repair_deadline is not None  # 记录供 approve_scheduled 用
+        assert row.mute_until is None  # 待审不 mute;mute 由 approve_scheduled 决定
 
     def test_whitelist_with_remark_writes_to_db(self, session, engine):
         """response=whitelist + remark → closed in DB + whitelist add."""
@@ -504,7 +504,7 @@ class TestCardCallbackNoAuth:
         assert row.actor_id == "user-explicit"  # explicit user_id used
 
     def test_empty_user_id_need_time_resolves_owner(self, session, engine):
-        """user_id="" + need_time → owner_id resolved, mute_until set."""
+        """user_id="" + need_time → owner_id resolved, waiting_review (no auto mute)."""
         svc = _build_svc(engine)
         _make_notification(session, owner_id="staff-999888")
 
@@ -513,11 +513,11 @@ class TestCardCallbackNoAuth:
             repair_deadline=datetime(2026, 7, 15), source="card_callback",
         )
         assert result.success
-        assert result.governance_status == "scheduled"
+        assert result.governance_status == "waiting_review"
 
         row = session.query(GovernanceTicketOrm).filter_by(ticket_id="t-n-001").one()
         assert row.actor_id == "staff-999888"
-        assert row.mute_until is not None
+        assert row.mute_until is None  # 待审不 mute
 
     def test_empty_user_id_dispute_with_remark_resolves_owner(self, session, engine):
         """user_id="" + dispute + remark → owner_id resolved."""

@@ -255,6 +255,106 @@ class TestListByOwner:
         assert rows[0].expires_at is None
 
 
+# ── list_all ─────────────────────────────────────────────
+
+
+class TestListAll:
+    """GovernanceWhitelistRepository.list_all() — 全量分页 + 筛选 + 过期开关 + total."""
+
+    def test_returns_domain_models_with_total(self, engine, tables):
+        repo, _ = _build_repo(engine)
+        repo.add(bot_id="bot-1", owner_id="user-1", created_by="admin", reason="r1")
+        repo.add(bot_id="bot-2", owner_id="user-2", created_by="admin")
+        rows, total = repo.list_all()
+        assert total == 2
+        assert len(rows) == 2
+        assert all(r.whitelist_type == "governance" for r in rows)
+        # to_dict 序列化含新开的时间元信息字段(Task 1)
+        d = rows[0].to_dict()
+        assert "gmt_create" in d and "gmt_modified" in d
+
+    def test_filters_by_whitelist_type(self, engine, tables):
+        repo, _ = _build_repo(engine)
+        repo.add(bot_id="bot-1", owner_id="user-1", created_by="admin")
+        repo.add(
+            bot_id="bot-2", owner_id="user-1",
+            created_by="admin", whitelist_type="dormant",
+        )
+        rows_gov, total_gov = repo.list_all(whitelist_type="governance")
+        assert total_gov == 1
+        assert rows_gov[0].whitelist_type == "governance"
+        rows_dor, total_dor = repo.list_all(whitelist_type="dormant")
+        assert total_dor == 1
+        assert rows_dor[0].whitelist_type == "dormant"
+
+    def test_filters_by_owner(self, engine, tables):
+        repo, _ = _build_repo(engine)
+        repo.add(bot_id="bot-1", owner_id="user-1", created_by="admin")
+        repo.add(bot_id="bot-2", owner_id="user-2", created_by="admin")
+        rows, total = repo.list_all(owner_id="user-1")
+        assert total == 1
+        assert all(r.owner_id == "user-1" for r in rows)
+
+    def test_filters_by_bot(self, engine, tables):
+        repo, _ = _build_repo(engine)
+        repo.add(bot_id="bot-1", owner_id="user-1", created_by="admin")
+        repo.add(bot_id="bot-2", owner_id="user-1", created_by="admin")
+        rows, total = repo.list_all(bot_id="bot-1")
+        assert total == 1
+        assert all(r.bot_id == "bot-1" for r in rows)
+
+    def test_default_excludes_expired(self, engine, tables):
+        repo, _ = _build_repo(engine)
+        past = datetime.now() - timedelta(days=1)
+        future = datetime.now() + timedelta(days=1)
+        repo.add(bot_id="bot-perm", owner_id="u", created_by="admin")
+        repo.add(bot_id="bot-future", owner_id="u", created_by="admin", expires_at=future)
+        repo.add(bot_id="bot-past", owner_id="u", created_by="admin", expires_at=past)
+        rows, total = repo.list_all()  # include_expired 默认 False
+        bot_ids = {r.bot_id for r in rows}
+        assert total == 2
+        assert "bot-perm" in bot_ids
+        assert "bot-future" in bot_ids
+        assert "bot-past" not in bot_ids
+
+    def test_include_expired_returns_all(self, engine, tables):
+        repo, _ = _build_repo(engine)
+        past = datetime.now() - timedelta(days=1)
+        repo.add(bot_id="bot-perm", owner_id="u", created_by="admin")
+        repo.add(bot_id="bot-past", owner_id="u", created_by="admin", expires_at=past)
+        rows, total = repo.list_all(include_expired=True)
+        assert total == 2
+        assert {r.bot_id for r in rows} == {"bot-perm", "bot-past"}
+
+    def test_pagination(self, engine, tables):
+        repo, _ = _build_repo(engine)
+        for i in range(5):
+            repo.add(bot_id=f"bot-{i}", owner_id="user-1", created_by="admin")
+        page1, total = repo.list_all(limit=2, offset=0)
+        page2, _ = repo.list_all(limit=2, offset=2)
+        assert total == 5
+        assert len(page1) == 2
+        assert len(page2) == 2
+        # 按 gmt_create 倒序:且两页不重叠
+        assert {r.bot_id for r in page1}.isdisjoint({r.bot_id for r in page2})
+
+    def test_empty_db_returns_zero(self, engine, tables):
+        repo, _ = _build_repo(engine)
+        rows, total = repo.list_all()
+        assert rows == []
+        assert total == 0
+
+    def test_combined_filters(self, engine, tables):
+        repo, _ = _build_repo(engine)
+        repo.add(bot_id="bot-1", owner_id="user-1", created_by="admin")
+        repo.add(bot_id="bot-1", owner_id="user-2", created_by="admin")
+        repo.add(bot_id="bot-2", owner_id="user-1", created_by="admin")
+        rows, total = repo.list_all(owner_id="user-1", bot_id="bot-1")
+        assert total == 1
+        assert rows[0].owner_id == "user-1"
+        assert rows[0].bot_id == "bot-1"
+
+
 # ── remove ────────────────────────────────────────────────
 
 

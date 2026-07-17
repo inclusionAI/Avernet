@@ -15,7 +15,8 @@ class WhitelistEntry:
 
     对应 ORM: WhitelistEntryOrm (ac_bot_whitelist)。
     frozen: 白名单条目创建后不可变,修改走删除+重建。
-    sealed 列 (id, env, gmt_create, gmt_modified) 不在本模型上。
+    sealed 列 id/env 不在本模型上;gmt_create/gmt_modified 作为只读元信息
+    (创建/修改时间)开放,供列表序列化展示。
     """
 
     bot_id: str
@@ -25,6 +26,8 @@ class WhitelistEntry:
     reason: str
     created_by: str
     expires_at: datetime | None
+    gmt_create: datetime | None = None
+    gmt_modified: datetime | None = None
 
     # ── 业务 property ──────────────────────────────
 
@@ -37,7 +40,7 @@ class WhitelistEntry:
 
     @classmethod
     def from_orm(cls, obj: object) -> WhitelistEntry:
-        """读翻译: ORM → 领域模型。sealed 列不映射。"""
+        """读翻译: ORM → 领域模型。id/env sealed 列不映射;时间元信息映射。"""
         return cls(
             bot_id=obj.bot_id,
             owner_id=obj.owner_id,
@@ -46,6 +49,8 @@ class WhitelistEntry:
             reason=obj.reason or "",
             created_by=obj.created_by or "",
             expires_at=obj.expires_at,
+            gmt_create=getattr(obj, "gmt_create", None),
+            gmt_modified=getattr(obj, "gmt_modified", None),
         )
 
     def to_orm(self, row: object | None = None) -> object:
@@ -73,4 +78,6 @@ class WhitelistEntry:
             "reason": self.reason,
             "created_by": self.created_by,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "gmt_create": self.gmt_create.isoformat() if self.gmt_create else None,
+            "gmt_modified": self.gmt_modified.isoformat() if self.gmt_modified else None,
         }

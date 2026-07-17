@@ -136,6 +136,7 @@
       "base_url": "https://ecb-pre.teamclaw.com"
     },
     "economy_governance": {
+      "cooldown_days": 7,
       "dry_run": true,
       "iframe_callback_url": "http://localhost:8888/api/economy/governance/card-callback",
       "notify_channel": "tc_card",

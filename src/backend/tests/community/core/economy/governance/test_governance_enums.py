@@ -40,7 +40,7 @@ def test_scan_skip_values():
     assert AuditAction.SCAN_SKIP_COOLDOWN == "scan_skip_cooldown"
 
 
-def test_admin_emergency_values():
+def test_admin_action_values():
     assert AuditAction.ADMIN_CANCEL_PENDING == "admin_cancel_pending"
     assert AuditAction.ADMIN_CLOSE_ALL == "admin_close_all"
     assert AuditAction.ADMIN_PAUSE == "admin_pause"
@@ -56,6 +56,6 @@ def test_all_action_values_are_unique_strings():
         for k, v in vars(AuditAction).items()
         if not k.startswith("_") and isinstance(v, str)
     ]
-    assert len(values) == 52
+    assert len(values) == 54
     assert all(isinstance(v, str) for v in values)
     assert len(set(values)) == len(values)

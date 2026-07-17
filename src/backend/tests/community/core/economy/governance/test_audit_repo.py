@@ -137,3 +137,98 @@ class TestAddAudit:
                 assert float(audit.saving_ratio) == pytest.approx(0.35)
             finally:
                 s.close()
+
+
+# ── list_by_subject (read-side query) ────────────────────────────────
+
+
+class TestListBySubject:
+    """Verify GovernanceAuditRepository.list_by_subject (read query + pagination)."""
+
+    @staticmethod
+    def _seed(engine, rows_spec):
+        """Seed audit rows as (bot_id, owner_id, action_taken, run_id)."""
+        with patch(_ENV_PATCH, return_value="dev"):
+            Session = sessionmaker(bind=engine, expire_on_commit=False)
+            s = Session()
+            try:
+                for bot_id, owner_id, action, run_id in rows_spec:
+                    s.add(AuditLogOrm(
+                        run_id=run_id, bot_id=bot_id, owner_id=owner_id,
+                        action_taken=action, source="daily_scan", env="dev",
+                    ))
+                s.commit()
+            finally:
+                s.close()
+
+    def test_requires_at_least_one_filter(self, engine, tables):
+        """No filter → ValueError (prevents full-table scan; caller → HTTP 400)."""
+        repo = _build_repo(engine)
+        with patch(_ENV_PATCH, return_value="dev"):
+            with pytest.raises(ValueError):
+                repo.list_by_subject()
+
+    def test_filter_by_owner_returns_total_and_rows(self, engine, tables):
+        repo = _build_repo(engine)
+        self._seed(engine, [
+            ("bot-a", "owner-1", "notification_created", "r1"),
+            ("bot-b", "owner-1", "enqueued", "r2"),
+            ("bot-c", "owner-2", "notification_created", "r3"),
+        ])
+        with patch(_ENV_PATCH, return_value="dev"):
+            rows, total = repo.list_by_subject(owner_id="owner-1")
+        assert total == 2
+        assert {r.run_id for r in rows} == {"r1", "r2"}
+        assert all(r.owner_id == "owner-1" for r in rows)
+
+    def test_filter_by_bot_and_action(self, engine, tables):
+        repo = _build_repo(engine)
+        self._seed(engine, [
+            ("bot-a", "owner-1", "admin_whitelisted", "r1"),
+            ("bot-a", "owner-1", "enqueued", "r2"),
+            ("bot-b", "owner-1", "admin_whitelisted", "r3"),
+        ])
+        with patch(_ENV_PATCH, return_value="dev"):
+            rows, total = repo.list_by_subject(bot_id="bot-a", action="admin_whitelisted")
+        assert total == 1
+        assert rows[0].run_id == "r1"
+
+    def test_pagination_offset_and_limit(self, engine, tables):
+        repo = _build_repo(engine)
+        self._seed(engine, [
+            (f"bot-{i}", "owner-1", "enqueued", f"r{i}") for i in range(5)
+        ])
+        with patch(_ENV_PATCH, return_value="dev"):
+            page1, total = repo.list_by_subject(owner_id="owner-1", limit=2, offset=0)
+            page2, _ = repo.list_by_subject(owner_id="owner-1", limit=2, offset=2)
+        assert total == 5
+        assert len(page1) == 2 and len(page2) == 2
+        # DESC by gmt_create; seeds share gmt_create granularity so order is
+        # by insertion — assert the two pages are disjoint instead of positional.
+        assert {r.run_id for r in page1}.isdisjoint({r.run_id for r in page2})
+
+    def test_failure_visibility_logs_owner_and_action(self, engine, tables, caplog):
+        """add_audit exception log should carry owner_id + action_taken for visibility."""
+        import logging
+
+        class _BoomDB:
+            def orm_session(self):
+                class _BoomSession:
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, *exc):
+                        return False
+
+                    def add(self, _row):
+                        raise RuntimeError("boom")
+
+                return _BoomSession()
+
+        repo = GovernanceAuditRepository(db=_BoomDB())
+        with patch(_ENV_PATCH, return_value="dev"):
+            with caplog.at_level(logging.ERROR):
+                repo.add_audit("run-fail", bot_id="bot-x", owner_id="own-x",
+                               action_taken="admin_whitelisted")
+        joined = " ".join(rec.getMessage() for rec in caplog.records)
+        assert "own-x" in joined and "admin_whitelisted" in joined

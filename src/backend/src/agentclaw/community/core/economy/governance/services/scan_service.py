@@ -48,9 +48,10 @@ _MAX_SEND_ATTEMPTS: int = 5
 """Terminal failure threshold — after this many failed sends the notify is
 marked as permanently failed and no further attempts are made."""
 
-_DEFAULT_REMIND_DELAYS_DAYS: tuple[int, ...] = (3, 7, 14)
+_DEFAULT_REMIND_DELAYS_DAYS: tuple[int, ...] = (3, 7)
 """Default reminder rhythm (days after the previous send).
-Indexes correspond to remind_count: [0]=first reminder, [1]=second, etc."""
+Indexes correspond to remind_count: [0]=first reminder, [1]=second, etc.
+首条 3 天,之后每 7 天(一周至少提醒一次)。"""
 
 _DEFAULT_REPEAT_LAST_REMIND_DELAY: bool = True
 """When True, the last delay in _REMIND_DELAYS_DAYS repeats indefinitely;

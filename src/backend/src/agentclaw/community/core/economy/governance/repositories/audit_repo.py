@@ -1,7 +1,7 @@
 """Governance audit repository — ``ac_governance_audit``.
 
 Append-only audit trail for governance operations. Every scan run,
-user feedback, and emergency action writes a row here.
+user feedback, and admin action writes a row here.
 
 Follows the ``DatabasePlugin`` self-managed session pattern
 (see ``harness_patch_record_repository``): each method opens its
@@ -78,6 +78,61 @@ class GovernanceAuditRepository:
                 ))
         except Exception:
             log.exception(
-                "[AuditRepo] best-effort write failed for run_id=%s, bot_id=%s",
-                run_id, bot_id,
+                "[AuditRepo] best-effort write LOST: run_id=%s, bot_id=%s, owner_id=%s, action=%s",
+                run_id, bot_id, owner_id, action_taken,
             )
+
+    def list_by_subject(
+        self,
+        *,
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        action: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list, int]:
+        """Read-side audit query by governed entity (self-managed session).
+
+        Mirrors :meth:`whitelist_repo.list_all`: filters on current ``env``,
+        optional ``owner_id`` / ``bot_id`` / ``action`` (``action_taken``),
+        returns ``(rows, total)`` ordered by ``gmt_create`` DESC with
+        ``offset``/``limit`` pagination.
+
+        Args:
+            owner_id: optional exact owner filter.
+            bot_id: optional exact bot filter.
+            action: optional ``action_taken`` filter (AuditAction value).
+            limit: page size.
+            offset: page offset.
+
+        Returns:
+            ``(AuditLogOrm rows, total count under the same filters)``.
+
+        Raises:
+            ValueError: if all of ``owner_id``/``bot_id``/``action`` are empty
+                (prevents full-table scans; the caller surfaces HTTP 400).
+        """
+        if not any([owner_id, bot_id, action]):
+            raise ValueError(
+                "list_by_subject requires at least one of owner_id/bot_id/action"
+            )
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            filters = [AuditLogOrm.env == _env]
+            if owner_id is not None:
+                filters.append(AuditLogOrm.owner_id == owner_id)
+            if bot_id is not None:
+                filters.append(AuditLogOrm.bot_id == bot_id)
+            if action is not None:
+                filters.append(AuditLogOrm.action_taken == action)
+            total = s.query(AuditLogOrm).filter(*filters).count()
+            rows = (
+                s.query(AuditLogOrm)
+                .filter(*filters)
+                .order_by(AuditLogOrm.gmt_create.desc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+            return rows, total

@@ -1,18 +1,18 @@
 """[编排] Governance admin service — 管理面(§7.5)。
 
 Covers(对 admin_router):
-  - Emergency brake (pause/resume) — cross-pod distributed cache
-  - bulk_whitelist — delegate to :class:`GovernanceWhitelistService`
-  - cancel_pending / close_all_open — emergency bulk operations
+  - Brake (pause/resume) — cross-pod distributed cache
   - pause_ticket — admin pause to waiting_review (§7.5.1)
-  - emergency_close — immediate ticket close without cooldown
-  - delete_records — emergency delete for record_daily / notify_log
-  - delete_whitelist_entry — delegate to :class:`GovernanceWhitelistService`
+  - delete_records — admin delete for record_daily / notify_log
   - deliver_pending / deliver_by_worker — manual delivery pipeline
     (_run_delivery 内部实现,原 delivery_runner 已并回)
 
-审批面(list_review_tickets / get_review_ticket_detail / review_ticket)已按
-路由边界拆至 :class:`GovernanceWorkflowService`(对应 workflow_router)。
+白名单读写不再经本服务转发:admin_router 直连 GovernanceWhitelistService。
+
+关单能力(admin_close / cancel_pending / close_all_open)已按"工单运营 vs 运维"
+边界迁至 :class:`GovernanceWorkflowService`(对应 workflow_router);本服务仅保留
+_deliver/pause/resume 等运维职责。审批面(list_review_tickets /
+get_review_ticket_detail / review_ticket)亦按路由边界拆至 WorkflowService。
 
 All ticket lifecycle transitions land on ``task_record`` — never on
 ``notify_log`` (§4.2.3 读写路由规则). Close paths cancel pending
@@ -34,10 +34,19 @@ from agentclaw.community.core.economy.governance.domain.enums import (
     CloseReason,
     GovernanceStatus,
     NotifyStatus,
+    NotifyType,
 )
 from agentclaw.community.core.economy.governance.services.service_protocols import (
     GovernanceLifecycleServiceProtocol,
     GovernanceWhitelistServiceProtocol,
+)
+from agentclaw.community.core.economy.governance.domain.notification import (
+    FrozenSnapshot,
+    GovernanceNotification,
+)
+from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
+from agentclaw.community.core.economy.governance.domain.ticket import (
+    MutableSnapshot,
 )
 from agentclaw.community.core.economy.governance.services.notify_render_service import (
     NotifyRenderService,
@@ -63,15 +72,15 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 
-_EMERGENCY_KEY_TEMPLATE = "governance:emergency:{env}"
-_EMERGENCY_TTL_SECONDS = 7 * 24 * 3600  # 7 days
+_BRAKE_KEY_TEMPLATE = "governance:brake:{env}"
+_BRAKE_TTL_SECONDS = 7 * 24 * 3600  # 7 days
 
 
 # ── Service I/O dataclasses (P5) ─────────────────────────────────────────
 
 
 @dataclass(frozen=True)
-class EmergencyState:
+class BrakeState:
     """替代 get_state 返回的裸 dict。"""
 
     paused: bool
@@ -96,7 +105,7 @@ class EmergencyState:
 
 @dataclass(frozen=True)
 class TicketActionOutcome:
-    """pause_ticket / review_ticket / emergency_close 统一返回。"""
+    """pause_ticket / review_ticket / admin_close 统一返回。"""
 
     ticket_id: str
     status: GovernanceStatus
@@ -132,7 +141,7 @@ class BulkOperationResult:
 
 
 class GovernanceAdminService:
-    """Backend admin operations — emergency, bulk ops, review (§7.5)."""
+    """Backend admin operations — admin, bulk ops, review (§7.5)."""
 
     @inject
     def __init__(
@@ -156,30 +165,30 @@ class GovernanceAdminService:
         self._notify_sender = notify_sender
         self._lifecycle_svc = lifecycle_svc
         self._render_svc = render_svc
-        self._emergency_key = _EMERGENCY_KEY_TEMPLATE.format(env=get_current_env())
+        self._brake_key = _BRAKE_KEY_TEMPLATE.format(env=get_current_env())
 
     # -- State queries -------------------------------------------------------
 
     def is_paused(self) -> bool:
-        """Check if the emergency brake is active."""
+        """Check if the brake is active."""
         try:
-            raw = self._cache.get(self._emergency_key)
+            raw = self._cache.get(self._brake_key)
             if raw:
                 data = json.loads(raw) if isinstance(raw, str) else raw
                 return data.get("action") == "pause"
         except Exception:
-            log.warning("[GovernanceEmergency] Failed to read emergency state")
+            log.warning("[GovernanceAdmin] Failed to read brake state")
         return False
 
-    def get_state(self) -> EmergencyState:
-        """Query current emergency state."""
+    def get_state(self) -> BrakeState:
+        """Query current brake state."""
         paused_info = self._read_pause_info()
 
         pending_count = self._notify_repo.count_pending()
         open_count = self._notify_repo.count_open_muted()
         whitelist_count = self._whitelist_service.count_by_type()
 
-        return EmergencyState(
+        return BrakeState(
             paused=paused_info.get("action") == "pause",
             reason=paused_info.get("reason"),
             operator=paused_info.get("operator"),
@@ -203,31 +212,31 @@ class GovernanceAdminService:
             "operator": operator,
             "paused_at": now.isoformat(),
         })
-        self._cache.set(self._emergency_key, value, ttl=_EMERGENCY_TTL_SECONDS)
+        self._cache.set(self._brake_key, value, ttl=_BRAKE_TTL_SECONDS)
 
-        self._write_emergency_audit(
+        self._write_admin_audit(
             action_taken=AuditAction.ADMIN_PAUSE,
             actor_id=operator,
             error_msg=f"reason={reason}; operator={operator}",
         )
         log.info(
-            "[GovernanceEmergency] Paused by %s: %s", operator, reason,
+            "[GovernanceAdmin] Paused by %s: %s", operator, reason,
         )
 
     def resume(self, reason: str, operator: str) -> None:
         """Resume normal operation. Deletes distributed cache key. Idempotent if not paused."""
         try:
-            self._cache.delete(self._emergency_key)
+            self._cache.delete(self._brake_key)
         except Exception:
-            log.warning("[GovernanceEmergency] Failed to delete emergency key, may already be gone")
+            log.warning("[GovernanceAdmin] Failed to delete brake key, may already be gone")
 
-        self._write_emergency_audit(
+        self._write_admin_audit(
             action_taken=AuditAction.ADMIN_RESUME,
             actor_id=operator,
             error_msg=f"reason={reason}; operator={operator}",
         )
         log.info(
-            "[GovernanceEmergency] Resumed by %s: %s", operator, reason,
+            "[GovernanceAdmin] Resumed by %s: %s", operator, reason,
         )
 
     def write_brake_skip_audit(self, *, run_id: str, reason: str) -> None:
@@ -247,107 +256,9 @@ class GovernanceAdminService:
             )
         except Exception:
             log.warning(
-                "[GovernanceEmergency] Failed to write brake-skip audit, run_id=%s",
+                "[GovernanceAdmin] Failed to write brake-skip audit, run_id=%s",
                 run_id,
             )
-
-    def bulk_whitelist(
-        self,
-        bot_ids: list[str],
-        reason: str,
-        operator: str,
-    ) -> dict:
-        """Batch whitelist + cancel pending — delegates to WhitelistService."""
-        return self._whitelist_service.bulk_whitelist(bot_ids, reason, operator)
-
-    def cancel_pending(self, reason: str, operator: str) -> BulkOperationResult:
-        """Cancel ALL pending notifications (emergency close) + close the
-        matching ``task_record`` subjects (Task 8 口径对齐).
-
-        通知侧 cancel scope = open/muted 且 response IS NULL。工单侧按被关
-        通知的 ``ticket_id`` 集合关 —— **不可裸用全量** :meth:`bulk_close_open`
-        (会多关已反馈的 scheduled 单)。逐条走 :meth:`emergency_close` 链路
-        激活领域模型守卫、幂等。
-
-        Returns ``BulkOperationResult(affected=N, label="cancelled")``。
-        """
-        now = datetime.now()
-        cooldown_days = self._config.cooldown_days
-
-        # Step 1: pre-collect the ticket_id set scoped to the same filter as
-        # the notify bulk-cancel (only_unresponded=True), before the cancel
-        # mutates rows. 无 None(record_process 创建处恒非空,且查询已剔 None)。
-        ticket_ids = self._notify_repo.list_ticket_ids_open_muted(
-            only_unresponded=True,
-        )
-
-        # Step 2: notify-side bulk cancel (behavior unchanged) — mirrors
-        # notify_status/governance_status/close_reason/closed_at/cooldown_until.
-        cancelled = self._notify_repo.bulk_close_open_muted(
-            close_reason=CloseReason.EMERGENCY_CLOSED,
-            closed_at=now,
-            cooldown_until=now + timedelta(days=cooldown_days),
-            only_unresponded=True,
-        )
-
-        # Step 3: ticket-side close — per-ticket guard-activated, idempotent.
-        # Driver's emergency_close uses EMERGENCY_CLOSED (aligns notify side).
-        self._lifecycle_svc.bulk_close_by_ticket_ids(ticket_ids, now=now)
-
-        self._write_emergency_audit(
-            action_taken=AuditAction.ADMIN_CANCEL_PENDING,
-            actor_id=operator,
-            error_msg=f"reason={reason}; operator={operator}",
-        )
-        log.info(
-            "[GovernanceEmergency] cancel_pending by %s: cancelled=%d, tickets_closed_by=%d",
-            operator, cancelled, len(ticket_ids),
-        )
-        return BulkOperationResult(affected=cancelled, label="cancelled")
-
-    def close_all_open(self, reason: str, operator: str) -> BulkOperationResult:
-        """Close ALL open/muted records, including already-responded ones,
-        + close all open/scheduled ``task_record`` subjects (Task 8 口径对齐).
-
-        Unlike :meth:`cancel_pending` which only touches ``response IS NULL``
-        records, this closes **every** open/muted notification regardless of
-        whether the user has already responded (e.g. ``need_time`` → muted).
-
-        工单侧用全量 :meth:`bulk_close_open`(WHERE status IN (open,scheduled))
-        ——与通知侧 ``governance_status IN (open,muted)`` 口径天然对齐(全量
-        关,不区分反馈)。Existing notify ``response`` / ``response_source`` /
-        ``mute_until`` preserved.
-
-        Returns ``BulkOperationResult(affected=N, label="closed")``。
-        """
-        now = datetime.now()
-        cooldown_days = self._config.cooldown_days
-
-        # Step 1: notify-side bulk close (behavior unchanged).
-        closed = self._notify_repo.bulk_close_open_muted(
-            close_reason=CloseReason.ADMIN_CLOSED,
-            closed_at=now,
-            cooldown_until=now + timedelta(days=cooldown_days),
-            only_unresponded=False,
-        )
-
-        # Step 2: ticket-side full close (ADMIN_CLOSED). bulk_close_open's
-        # WHERE status IN (open,scheduled) + active_worker IS NOT NULL
-        # predicate is the state-legality guard (per-spec bulk exemption).
-        tickets_closed = self._lifecycle_svc.bulk_close_open(
-            close_reason=CloseReason.ADMIN_CLOSED, now=now,
-        )
-
-        self._write_emergency_audit(
-            action_taken=AuditAction.ADMIN_CLOSE_ALL,
-            actor_id=operator,
-            error_msg=f"reason={reason}; operator={operator}",
-        )
-        log.info(
-            "[GovernanceAdmin] close_all_open by %s: notify_closed=%d, tickets_closed=%d",
-            operator, closed, tickets_closed,
-        )
-        return BulkOperationResult(affected=closed, label="closed")
 
     # -- Ticket-level admin operations (§7.5) ----------------------------------
 
@@ -392,55 +303,10 @@ class GovernanceAdminService:
             review_reason="admin_paused",
         )
 
-    def emergency_close(
-        self, ticket_id: str, admin_id: str, reason: str = "",
-    ) -> TicketActionOutcome:
-        """Immediate ticket close without cooldown (§6.3)."""
-        ticket = self._task_repo.find_by_ticket_id(ticket_id)
-        if not ticket:
-            return TicketActionOutcome(
-                ticket_id=ticket_id, status=GovernanceStatus.OPEN,
-                error="Ticket not found", error_code="NOT_FOUND",
-            )
-
-        if ticket.governance_status == GovernanceStatus.CLOSED:
-            return TicketActionOutcome(
-                ticket_id=ticket_id,
-                status=GovernanceStatus.CLOSED,
-                close_reason=ticket.close_reason,
-            )
-
-        now = datetime.now()
-
-        # Advance via driver service (sole driver). Driver orchestrates the
-        # CLOSE + cancel-pending. The audit row (with reason + actor_id=
-        # admin_id) is owned by admin_service below — the driver does not
-        # duplicate it, matching pause_ticket / review_ticket siblings.
-        self._lifecycle_svc.emergency_close(
-            ticket_id, now=now,
-        )
-
-        self._audit_repo.add_audit(
-            "admin-emergency-close",
-            bot_id=ticket.bot_id,
-            owner_id=ticket.owner_id,
-            actor_id=admin_id,
-            action_taken=AuditAction.ADMIN_CLOSE_ALL,
-            source="admin_api",
-            error_msg=f"ticket_id={ticket_id}; reason={reason}",
-            dry_run=0,
-        )
-
-        return TicketActionOutcome(
-            ticket_id=ticket_id,
-            status=GovernanceStatus.CLOSED,
-            close_reason=CloseReason.EMERGENCY_CLOSED,
-        )
-
-    # -- Records delete (emergency) — moved from router ------------------------
+    # -- Records delete (admin) — moved from router ------------------------
 
     def delete_records(self, body: dict, operator: str) -> dict:
-        """Emergency delete for record_daily or notify_log.
+        """Admin delete for record_daily or notify_log.
 
         ``body`` keys: table, dry_run, reason, dt_versions, ids, notification_ids.
         """
@@ -549,23 +415,6 @@ class GovernanceAdminService:
             "deleted": deleted,
             "not_found": not_found,
         }
-
-# ------------------------------------------------------------------
-    # Whitelist delete — delegates to GovernanceWhitelistService
-    # ------------------------------------------------------------------
-
-    def delete_whitelist_entry(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        reason: str,
-        operator: str,
-    ) -> dict:
-        """Delete a single whitelist entry — delegates to WhitelistService."""
-        return self._whitelist_service.delete_whitelist_entry(
-            bot_id=bot_id, owner_id=owner_id, reason=reason, operator=operator,
-        )
 
     # -- Deliver pending — moved from router (scan_and_deliver Phase 2-5) ------
 
@@ -864,28 +713,28 @@ class GovernanceAdminService:
     def _read_pause_info(self) -> dict:
         """Read the pause info from distributed cache."""
         try:
-            raw = self._cache.get(self._emergency_key)
+            raw = self._cache.get(self._brake_key)
             if raw:
                 return json.loads(raw) if isinstance(raw, str) else raw
         except Exception:
             pass
         return {}
 
-    def _write_emergency_audit(
+    def _write_admin_audit(
         self,
         *,
         action_taken: str,
         actor_id: str | None = None,
         error_msg: str = "",
     ) -> None:
-        """Best-effort audit write for emergency operations.
+        """Best-effort audit write for admin operations.
 
         Delegates to :meth:`GovernanceAuditRepository.add_audit` with the
-        emergency-specific ``run_id`` and ``source``.
+        admin-scoped ``run_id`` and ``source``.
         """
         try:
             self._audit_repo.add_audit(
-                "emergency",
+                "admin",
                 action_taken=action_taken,
                 actor_id=actor_id,
                 error_msg=error_msg,
@@ -893,4 +742,227 @@ class GovernanceAdminService:
                 dry_run=0,
             )
         except Exception:
-            log.exception("[GovernanceEmergency] Failed to write audit for %s", action_taken)
+            log.exception("[GovernanceAdmin] Failed to write audit for %s", action_taken)
+
+    # ── Admin remind + force renew (manual ops) ──────────────────────────
+
+    def create_and_send_reminder(
+        self, worker_id: str, operator: str,
+    ) -> dict:
+        """手动补发 reminder:按 worker_id 找 active 工单 → 创建+发送 reminder。
+
+        跳过 remind_at 等待(立 即 create+send,不等 cron tick)。
+        无 active 工单 → raise ValueError(400)。
+        """
+        ticket = self._task_repo.find_active_ticket(worker_id)
+        if ticket is None:
+            raise ValueError(f"no active ticket for worker_id={worker_id}")
+
+        now = datetime.now()
+        run_id = f"admin-remind-{uuid.uuid4().hex[:8]}"
+        notification_id = uuid.uuid4().hex
+        notification_md = self._render_svc.render_reminder_md(ticket, now=now)
+
+        # Create reminder notify_log
+        notify_row = GovernanceNotification.create(
+            notification_id=notification_id,
+            ticket_id=ticket.ticket_id,
+            bot_id=ticket.bot_id,
+            bot_name=ticket.bot_name,
+            owner_id=ticket.owner_id,
+            worker_id=ticket.worker_id,
+            snapshot=FrozenSnapshot(
+                dt_version=ticket.dt_version,
+                decision_at_create=ticket.current_decision or "actionable",
+                triggered_dimensions=ticket.triggered_dimensions,
+                hit_dimensions_count=ticket.hit_dimensions_count,
+                severity=ticket.severity,
+                estimated_saving_tokens=ticket.estimated_saving_tokens,
+                saving_ratio=ticket.saving_ratio,
+                notification_md=notification_md,
+                notification_structured=ticket.notification_structured,
+            ),
+            notify_type=NotifyType.REMINDER,
+            notify_source="admin_api",
+            channel=getattr(self._config, "notify_channel", "markdown"),
+        )
+        self._notify_repo.add_notification(notify_row)
+
+        # Send immediately (跳过 cron tick 等待)
+        from agentclaw.community.plugin_api.notify_sender import NotifyMessage
+        msg = NotifyMessage(
+            title="⚠️ 治理通知提醒",
+            body=notification_md,
+            recipient=ticket.owner_id,
+            deep_link="",
+            extra={},
+        )
+        external_id = self._notify_sender.send(
+            msg, channel=getattr(self._config, "notify_channel", "markdown"),
+        )
+
+        sent = external_id is not None
+        if sent:
+            self._notify_repo.update_delivery_status(
+                notification_id,
+                status=NotifyStatus.SENT,
+                external_id=external_id,
+            )
+        else:
+            self._notify_repo.update_delivery_status(
+                notification_id, status=NotifyStatus.FAILED,
+            )
+
+        # Advance reminder chain: increment remind_count + set next remind_at
+        # 以本次 reminder 为基准推后(同 scan_service _advance_reminder_chain 语义)。
+        remind_delays = getattr(self._config, "remind_delays_days", None)
+        if remind_delays:
+            try:
+                delays = [int(d.strip()) for d in str(remind_delays).split(",")]
+            except (ValueError, TypeError):
+                delays = [3, 7]
+        else:
+            delays = [3, 7]
+        new_count = (ticket.remind_count or 0) + 1
+        idx = min(new_count, len(delays) - 1)
+        next_delay = delays[idx]
+        self._lifecycle_svc.refresh_snapshot(
+            ticket.ticket_id,
+            remind_at=now + timedelta(days=next_delay),
+        )
+        # remind_count lives on the ticket entity (not MutableSnapshot),
+        # so refresh_snapshot can't set it. Update via task_repo directly.
+        self._task_repo.update_remind_count(ticket.ticket_id, new_count)
+
+        # Audit (full: bot_id/owner_id/notification_id/operator)
+        self._audit_repo.add_audit(
+            f"admin-remind-{uuid.uuid4().hex[:8]}",
+            bot_id=ticket.bot_id,
+            owner_id=ticket.owner_id,
+            notification_id=notification_id,
+            actor_id=operator,
+            action_taken=AuditAction.REMIND_SENT if sent else AuditAction.REMIND_FAILED,
+            source="admin_api",
+            error_msg=f"worker_id={worker_id}; sent={sent}",
+            dry_run=0,
+        )
+
+        log.info(
+            "[GovernanceAdmin] Reminder sent by %s: worker=%s, ticket=%s, sent=%s",
+            operator, worker_id, ticket.ticket_id, sent,
+        )
+
+        return {"notification_id": notification_id, "sent": sent}
+
+    def force_renew_with_record(
+        self, record: GovernanceRecord, operator: str,
+    ) -> dict:
+        """强制换新:用 record 关老(stale_replaced) + 建新 first_send。
+
+        无视 gmt_create 7天 + dt_version guard(admin 手动强制)。
+        """
+        worker_key = record.worker_id or f"{record.owner_id}:{record.bot_id}"
+        now = datetime.now()
+        run_id = f"admin-renew-{uuid.uuid4().hex[:8]}"
+
+        # Find + close active ticket (if any)
+        active = self._task_repo.find_active_ticket(worker_key)
+        if active is not None:
+            self._lifecycle_svc.close_for_stale_replace(
+                active.ticket_id, now=now,
+            )
+            self._write_admin_audit(
+                action_taken=AuditAction.STALE_REPLACED,
+                actor_id=operator,
+                error_msg=f"force_renew: old_ticket={active.ticket_id}; worker={worker_key}",
+            )
+
+        # Create new ticket + first_send (inline,参照 _create_new_ticket)
+        ticket_id = uuid.uuid4().hex
+        notification_id = uuid.uuid4().hex
+
+        notification_md = self._render_svc.render_first_notification_md(
+            record,
+            dt_version=record.dt_version,
+            use_reopen_template=False,
+            reopen_ref_time=None,
+        )
+
+        from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
+        ticket_model = GovernanceTicket.create(
+            ticket_id=ticket_id,
+            worker_id=worker_key,
+            bot_id=record.bot_id,
+            owner_id=record.owner_id,
+            bot_name=record.bot_name,
+            snapshot=MutableSnapshot(
+                dt_version=record.dt_version,
+                initial_decision="actionable",
+                current_decision="actionable",
+                triggered_dimensions=record.hit_dimensions,
+                hit_dimensions_count=record.hit_dimensions_count,
+                severity=record.governance_max_priority,
+                estimated_saving_tokens=record.expected_token_saving,
+                saving_ratio=record.saving_ratio,
+                task_summary=record.task_summary,
+                notification_structured=record.notification_structured,
+                analysis_status=record.analysis_status,
+                consecutive_normal_days=0,
+                last_decision_dt_version=record.dt_version,
+                last_seen_at=now,
+                last_sync_at=now,
+                delivery_status="none",
+            ),
+        )
+        self._lifecycle_svc.open_ticket(ticket=ticket_model)
+
+        # Create first_send notify_log
+        notify_row = GovernanceNotification.create(
+            notification_id=notification_id,
+            ticket_id=ticket_id,
+            bot_id=record.bot_id,
+            bot_name=record.bot_name,
+            owner_id=record.owner_id,
+            worker_id=worker_key,
+            snapshot=FrozenSnapshot(
+                dt_version=record.dt_version,
+                decision_at_create="actionable",
+                triggered_dimensions=record.hit_dimensions,
+                hit_dimensions_count=record.hit_dimensions_count,
+                severity=record.governance_max_priority,
+                estimated_saving_tokens=record.expected_token_saving,
+                saving_ratio=record.saving_ratio,
+                notification_md=notification_md,
+                notification_structured=record.notification_structured,
+            ),
+            notify_type=NotifyType.FIRST_SEND,
+            notify_source="admin_api",
+            channel=getattr(self._config, "notify_channel", "markdown"),
+        )
+        self._notify_repo.add_notification(notify_row)
+        self._task_repo.update_delivery_status(ticket_id, "first_send:pending")
+
+        # Audit
+        self._audit_repo.add_audit(
+            run_id,
+            record.bot_id,
+            record.owner_id,
+            notification_id=notification_id,
+            check_result="actionable",
+            governance_decision=record.governance_decision,
+            hit_dimensions=record.hit_dimensions,
+            expected_token_saving=record.expected_token_saving,
+            saving_ratio=record.saving_ratio,
+            action_taken=AuditAction.ENQUEUED,
+            error_msg=f"force_renew by {operator}; old_ticket={active.ticket_id if active else 'none'}",
+            source="admin_api",
+            dry_run=0,
+        )
+
+        log.info(
+            "[GovernanceAdmin] Force renew by %s: worker=%s, old=%s, new=%s",
+            operator, worker_key,
+            active.ticket_id if active else "none", ticket_id,
+        )
+
+        return {"ticket_id": ticket_id, "notification_id": notification_id}
