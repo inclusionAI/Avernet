@@ -15,6 +15,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
     BotInvalidLifecycleStateError,
     BotNotFoundError,
+    BotPermissionError,
     DeviceAllocationError,
     BotNameExistsError,
     BotNameInvalidError,
@@ -1970,3 +1971,87 @@ class TestUpdateBotExtForOthers:
             json={"target_user_id": "u1", "target_bot_id": "b1", "ext_update": {"k": "v"}},
         )
         assert resp.json()["error_code"] == 500
+
+
+# ---------------------------------------------------------------------------
+# PUT /api/bots/{architect_bot_id}/architect-rebind
+# ---------------------------------------------------------------------------
+class TestRebindArchitectBot:
+    def test_success(self, client):
+        tc, svc, _ = client
+        svc.rebind_architect_bot_batch.return_value = {
+            "architect_bot_id": "arch1",
+            "results": [
+                {"bot_id": "c1", "success": True, "changed": True,
+                 "previous_architect_bot_id": "old", "architect_bot_id": "arch1"},
+            ],
+            "total": 1,
+            "succeeded": 1,
+            "failed": 0,
+        }
+        resp = tc.put(
+            "/api/bots/arch1/architect-rebind",
+            json={"coding_bot_ids": ["c1", "c2", "c1"]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["data"]["total"] == 1
+        kwargs = svc.rebind_architect_bot_batch.call_args.kwargs
+        assert kwargs["architect_bot_id"] == "arch1"
+        assert kwargs["coding_bot_ids"] == ["c1", "c2", "c1"]
+        assert kwargs["operator_id"] == "test_user"
+
+    def test_anonymous_user_rejected(self, client):
+        tc, svc, _ = client
+        tc.app.dependency_overrides[get_request_context] = lambda: _make_ctx(user_id="anonymous")
+        resp = tc.put(
+            "/api/bots/arch1/architect-rebind",
+            json={"coding_bot_ids": ["c1"]},
+        )
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 400
+        svc.rebind_architect_bot_batch.assert_not_called()
+
+    def test_empty_coding_ids_rejected_by_request_model(self, client):
+        tc, svc, _ = client
+        # RebindArchitectRequest validator rejects empty/all-blank list -> 422
+        resp = tc.put(
+            "/api/bots/arch1/architect-rebind",
+            json={"coding_bot_ids": ["  ", ""]},
+        )
+        assert resp.status_code == 422
+        svc.rebind_architect_bot_batch.assert_not_called()
+
+    def test_bot_not_found(self, client):
+        tc, svc, _ = client
+        svc.rebind_architect_bot_batch.side_effect = BotNotFoundError("nope")
+        resp = tc.put("/api/bots/arch1/architect-rebind", json={"coding_bot_ids": ["c1"]})
+        data = resp.json()
+        assert data["success"] is False
+        assert data["error_code"] == 404
+
+    def test_permission_error(self, client):
+        tc, svc, _ = client
+        svc.rebind_architect_bot_batch.side_effect = BotPermissionError("forbidden")
+        resp = tc.put("/api/bots/arch1/architect-rebind", json={"coding_bot_ids": ["c1"]})
+        data = resp.json()
+        assert data["success"] is False
+        assert data["error_code"] == 403
+
+    def test_service_error(self, client):
+        tc, svc, _ = client
+        svc.rebind_architect_bot_batch.side_effect = BotServiceError("bad")
+        resp = tc.put("/api/bots/arch1/architect-rebind", json={"coding_bot_ids": ["c1"]})
+        data = resp.json()
+        assert data["success"] is False
+        assert data["error_code"] == 400
+
+    def test_unexpected_exception(self, client):
+        tc, svc, _ = client
+        svc.rebind_architect_bot_batch.side_effect = ValueError("boom")
+        resp = tc.put("/api/bots/arch1/architect-rebind", json={"coding_bot_ids": ["c1"]})
+        data = resp.json()
+        assert data["success"] is False
+        assert data["error_code"] == 500
