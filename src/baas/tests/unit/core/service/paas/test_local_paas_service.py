@@ -2385,7 +2385,7 @@ class TestResolveWsConnInfoRelay:
     async def test_open_ws_relay_command_params_exclude_port(
         self, local_paas_service, mock_repository, mock_connection_manager
     ):
-        """open_ws_relay command params include token/target/port from Plugin, exclude container_id."""
+        """open_ws_relay command params include container_id/token/target, exclude port (v2.1)."""
         import re
 
         mock_record = MagicMock()
@@ -2411,9 +2411,8 @@ class TestResolveWsConnInfoRelay:
         assert isinstance(command, dict)
         assert command["action"] == "open_ws_relay"
         assert "params" in command
-        assert "port" in command["params"]
-        assert command["params"]["port"] == 8080
-        assert "container_id" not in command["params"]
+        assert "container_id" in command["params"]
+        assert command["params"]["container_id"] == "abc123"
         session_id = command["params"]["session_id"]
         assert len(session_id) == 32
         assert re.match(r"^[0-9a-f]{32}$", session_id) is not None

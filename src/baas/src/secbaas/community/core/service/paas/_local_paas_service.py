@@ -862,10 +862,10 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
             command: dict[str, Any] = {
                 "action": "open_ws_relay",
                 "params": {
+                    "container_id": container_id,
                     "session_id": session_id,
                     "token": getattr(conn_info, "token", ""),
                     "target": getattr(conn_info, "target", ""),
-                    "port": port,
                 },
             }
 
