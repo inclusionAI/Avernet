@@ -40,7 +40,7 @@ class AliyunOssFileTransferBackend(FileTransferBackend):
     def __init__(
         self,
         secret_store: SecretStorePlugin,
-        config: FileTransferOssConfigSchema | None = None,
+        config: FileTransferOssConfigSchema | None = None,  # noqa: F821
     ) -> None:
         if config is not None and config.endpoint and config.bucket_name:
             self._endpoint = config.endpoint
