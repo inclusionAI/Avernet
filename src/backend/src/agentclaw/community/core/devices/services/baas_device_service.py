@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any, Protocol, override
 
 from agentclaw.community.core.bot_management.engines import (
     BotProvisioningContext,
@@ -75,6 +75,12 @@ class BaasDeviceServiceError(DeviceServiceError):
         self.message = message
 
 
+class TemplateConfigReader(Protocol):
+    """Minimal template service surface needed by BaaS create-init tasks."""
+
+    def get_template_config(self, bot_id: str) -> dict[str, Any] | None: ...
+
+
 class BaasDeviceService(DeviceService):
     """BaaS 设备服务 - 与 BaaS 层 API 交互。
 
@@ -98,6 +104,7 @@ class BaasDeviceService(DeviceService):
         lifecycle_executor: BaasDeviceLifecycleExecutor | None = None,
         vault: "TokenVault | None" = None,
         task_queue_service: "TaskQueueService | None" = None,
+        template_service: TemplateConfigReader | None = None,
     ):
         super().__init__(
             repository=repository,
@@ -115,6 +122,7 @@ class BaasDeviceService(DeviceService):
         )
         self._container_initializer = BaasContainerInitializer(baas_service)
         self._template_resolver = template_resolver
+        self._template_service = template_service
         logger.info("[BaasDeviceService] Initialized")
 
     # ------------------------------------------------------------------
@@ -519,7 +527,21 @@ class BaasDeviceService(DeviceService):
             admins = None
 
         template_type = bot.get("template_type")
-        template_config = bot.get("template_config")
+        # ac_bots only owns template_type; token/model/runtime live in
+        # ac_templates.ext.  Create-init runs from a durable task after the
+        # synchronous create path, so reload template_config from TemplateService
+        # just like the BaaS restart path does.
+        template_config = None
+        if self._template_service is not None:
+            try:
+                template_config = self._template_service.get_template_config(resolved_bot_id)
+            except Exception as exc:
+                logger.warning(
+                    "[run_create_init_once] failed to reload template config "
+                    "for bot_id=%s: %s",
+                    resolved_bot_id,
+                    exc,
+                )
         if not isinstance(template_config, dict):
             template_config = {}
 
