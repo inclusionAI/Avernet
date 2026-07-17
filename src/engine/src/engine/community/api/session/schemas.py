@@ -33,6 +33,10 @@ class UpdateSessionBody(BaseModel):
     user_id: Optional[str] = None
     agent_id: Optional[str] = None
     permission_mode: Optional[str] = None
+    # DIMA 关联字段（aicoding 引擎使用）。
+    dima_url: Optional[str] = None
+    dima_space_id: Optional[str] = None
+    dima_item_id: Optional[str] = None
     engine: Optional[str] = None
 
 
