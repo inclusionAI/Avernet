@@ -8,6 +8,7 @@ admin_router 抽出来(审批能力迁出 admin_router,运维归运维、审批�
   - GET  /workflow/tickets/detail          单工单详情(ticket_id 走 query)
   - GET  /workflow/tickets/pending-notification  查工单待回复通知(notification_id)
   - POST /workflow/tickets/review          审批动作(ticket_id 走 body,waiting_review 三态流转)
+  - POST /workflow/tickets:delete-cascade 精确级联删单工单 + 连带通知(best-effort,非批量,2026-07-17 从 admin 迁入)
   - GET  /workflow/audit-logs              按 worker 查全部治理审计(只读分页)
 
 数据流转全程走领域模型(``GovernanceTicket`` / ``TicketActionOutcome``),
@@ -33,6 +34,7 @@ from agentclaw.community.adapters.http.economy.schemas import (
     AuditLogItemResponse,
     ReviewTicketDetailResponse,
     ReviewTicketListResponse,
+    TicketDeleteCascadeRequest,
     TicketsCloseAllRequest,
     TicketsCloseRequest,
     WorkflowReviewRequest,
@@ -352,3 +354,32 @@ async def tickets_close_all(
             admin_svc.close_all_open, reason=body.reason, operator=operator,
         )
     return ApiResponse(success=True, data=result.to_dict())
+
+
+# ── Workflow: 级联删工单(2026-07-17 从 admin_router 迁入,工单运营归属) ─
+
+
+@workflow_router.post(
+    "/tickets:delete-cascade",
+    summary="按 ticket_id 精确级联删工单 + 连带通知(best-effort,非批量)",
+)
+async def tickets_delete_cascade(
+    body: TicketDeleteCascadeRequest,
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+) -> ApiResponse:
+    """Precisely delete one ticket + its notify_log rows (best-effort).
+
+    单向(ticket → notify)、单工单(防写放大)、env-scoped。dry_run=true 仅
+    预览连带通知数,不删不写审计;工单不存在返回 ticket_found=False 且不写
+    审计(幂等再调)。best-effort:通知清理失败不阻断工单删除,失败计数计入
+    响应与审计。
+    """
+    data = await asyncio.to_thread(
+        admin_svc.delete_ticket_cascade,
+        ticket_id=body.ticket_id,
+        dry_run=body.dry_run,
+        reason=body.reason,
+        operator=ctx.user_id,
+    )
+    return ApiResponse(success=True, data=data)

@@ -1060,7 +1060,7 @@ def _seed_delete_cascade_happy(world) -> None:
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:delete-cascade",
+    path="/api/economy/governance/workflow/tickets:delete-cascade",
     scenario="ok_dry_run_preview",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -1082,7 +1082,7 @@ def tickets_delete_cascade_dry_run_ok():
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:delete-cascade",
+    path="/api/economy/governance/workflow/tickets:delete-cascade",
     scenario="ok_real_delete_cascade",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -1109,7 +1109,7 @@ def tickets_delete_cascade_real_delete_ok():
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:delete-cascade",
+    path="/api/economy/governance/workflow/tickets:delete-cascade",
     scenario="ok_ticket_not_found",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -1131,7 +1131,7 @@ def tickets_delete_cascade_not_found_ok():
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:delete-cascade",
+    path="/api/economy/governance/workflow/tickets:delete-cascade",
     scenario="error_missing_required",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -1145,7 +1145,7 @@ def tickets_delete_cascade_error_missing_ticket_id():
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:delete-cascade",
+    path="/api/economy/governance/workflow/tickets:delete-cascade",
     scenario="error_missing_reason",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -1159,7 +1159,7 @@ def tickets_delete_cascade_error_missing_reason():
 
 @endpoint_test(
     method="POST",
-    path="/api/economy/governance/admin/tickets:delete-cascade",
+    path="/api/economy/governance/workflow/tickets:delete-cascade",
     scenario="no_auth",
     input=CaseInput(),
     expect=ExpectError(status=401),

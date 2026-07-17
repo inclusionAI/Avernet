@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -54,13 +55,15 @@ log = get_logger(__name__)
 
 
 class GovernanceWorkflowService:
-    """工单运营服务 — list / detail / review / 关单(§7.5.2)。
+    """工单运营服务 — list / detail / review / 关单 / 级联清理(§7.5.2)。
 
     review 三分支走 lifecycle_svc.review_ticket(状态机唯一驱动) + 审批副作用
     (approve_whitelist 加白名单)+ 审计。关单方法(admin_close /
     cancel_pending / close_all_open,从 admin_service 迁入)同走状态机 +
-    audit;依赖复用本服务既有注入(task_repo/audit_repo/config/lifecycle_svc
-    /notify_repo),零依赖补。仅 import admin_service 的
+    audit;级联清理(delete_ticket_cascade:按 ticket_id 精确删单工单 + 连带
+    notify,best-effort)亦归本服务(2026-07-17 从 admin_service 迁入,贴合
+    工单运营边界)。依赖复用本服务既有注入(task_repo/audit_repo/config/
+    lifecycle_svc/notify_repo),零依赖补。仅 import admin_service 的
     TicketActionOutcome / BulkOperationResult 数据类(单向,无循环)。
     """
 
@@ -443,6 +446,143 @@ class GovernanceWorkflowService:
             operator, closed, tickets_closed,
         )
         return BulkOperationResult(affected=closed, label="closed")
+
+    # -- Ticket cascade delete (admin) — precise single-ticket purge --------
+    # Spec: 2026-07-17-records-delete-cascade-notify. Delete one ticket
+    # (task_record_daily) + its belonging notify_log rows (best-effort),
+    # keyed by ticket_id. Explicit dedicated interface — NOT an implicit
+    # cascade inside records:delete, to keep precise semantics + avoid
+    # write amplification (no batch).
+    # 2026-07-17: 从 admin_service 迁入本服务(工单运营边界)。
+
+    def delete_ticket_cascade(
+        self, *, ticket_id: str, dry_run: bool, reason: str, operator: str,
+    ) -> dict:
+        """Precisely delete one ticket + its notify_log rows (best-effort).
+
+        Single-direction cascade (ticket → its notify), keyed by ``ticket_id``.
+        Best-effort: notify cleanup failure does NOT block ticket deletion;
+        the failure count is recorded in the audit + response. Dry-run previews
+        the linked notify count without deleting. Ticket-not-found returns
+        ``ticket_found=False`` and writes no audit (idempotent re-call).
+
+        Args:
+            ticket_id: 工单稳定 UUID (env-scoped lookup).
+            dry_run: True = preview only (no delete, no audit).
+            reason: 写审计的删除原因。
+            operator: 操作人 user_id (actor_id)。
+
+        Returns:
+            dict with keys: ticket_id, ticket_found, dry_run,
+            tickets_deleted, notify_deleted, notify_delete_failed.
+        """
+        ticket = self._task_repo.find_by_ticket_id(ticket_id)
+        if ticket is None:
+            return self._cascade_result(
+                ticket_id=ticket_id, ticket_found=False, dry_run=dry_run,
+                tickets_deleted=0, notify_deleted=0, notify_delete_failed=0,
+            )
+
+        notify_preview = self._notify_repo.count_by_ticket_id(ticket_id)
+        if dry_run:
+            return self._cascade_result(
+                ticket_id=ticket_id, ticket_found=True, dry_run=True,
+                tickets_deleted=0, notify_deleted=notify_preview,
+                notify_delete_failed=0,
+            )
+
+        tickets_deleted = self._task_repo.delete_by_ticket_id(ticket_id)
+        notify_deleted, notify_failed = self._cascade_delete_notify(ticket_id)
+        self._audit_cascade(
+            ticket=ticket, operator=operator, reason=reason,
+            tickets_deleted=tickets_deleted, notify_deleted=notify_deleted,
+            notify_delete_failed=notify_failed,
+        )
+        return self._cascade_result(
+            ticket_id=ticket_id, ticket_found=True, dry_run=False,
+            tickets_deleted=tickets_deleted, notify_deleted=notify_deleted,
+            notify_delete_failed=notify_failed,
+        )
+
+    def _cascade_delete_notify(self, ticket_id: str) -> tuple[int, int]:
+        """Best-effort bulk-delete of notify_log rows for a ticket.
+
+        Returns (deleted_count, failed_count). A SQL exception on the bulk
+        delete is caught: nothing was deleted (single atomic statement), so
+        ``failed_count`` reflects the preview count that could not be cleared.
+        Never raises — caller (delete_ticket_cascade) records the failure.
+
+        The recovery ``count_by_ticket_id`` is itself guarded: if the DB is
+        hard-down (delete failed AND re-count fails), returns the sentinel
+        ``-1`` so the caller still gets a non-raising response; ``-1`` signals
+        "unknown residual — operator must query manually" via the audit.
+        """
+        try:
+            deleted = self._notify_repo.delete_by_ticket_id(ticket_id)
+            return deleted, 0
+        except Exception:
+            log.exception(
+                "[GovernanceAdmin] notify cleanup failed for ticket_id=%s",
+                ticket_id,
+            )
+            try:
+                failed = self._notify_repo.count_by_ticket_id(ticket_id)
+            except Exception:
+                log.exception(
+                    "[GovernanceAdmin] notify re-count also failed "
+                    "for ticket_id=%s; reporting -1 (unknown residual)",
+                    ticket_id,
+                )
+                failed = -1
+            return 0, failed
+
+    def _audit_cascade(
+        self, *, ticket: Any, operator: str, reason: str,
+        tickets_deleted: int, notify_deleted: int, notify_delete_failed: int,
+    ) -> None:
+        """Best-effort audit write for ticket-cascade purge."""
+        run_id = f"cascade-{uuid.uuid4().hex[:8]}"
+        error_msg = (
+            f"reason={reason} "
+            f"ticket_id={ticket.ticket_id} "
+            f"worker_id={ticket.worker_id} "
+            f"bot_id={ticket.bot_id} "
+            f"owner_id={ticket.owner_id} "
+            f"tickets_deleted={tickets_deleted} "
+            f"notify_deleted={notify_deleted} "
+            f"notify_delete_failed={notify_delete_failed}"
+        )
+        try:
+            self._audit_repo.add_audit(
+                run_id,
+                bot_id=ticket.bot_id,
+                owner_id=ticket.owner_id,
+                actor_id=operator,
+                action_taken=AuditAction.TICKET_CASCADE_PURGED,
+                source="admin_api",
+                error_msg=error_msg,
+                dry_run=0,
+            )
+        except Exception:
+            log.exception(
+                "[GovernanceAdmin] audit write failed for %s",
+                AuditAction.TICKET_CASCADE_PURGED,
+            )
+
+    @staticmethod
+    def _cascade_result(
+        *, ticket_id: str, ticket_found: bool, dry_run: bool,
+        tickets_deleted: int, notify_deleted: int, notify_delete_failed: int,
+    ) -> dict:
+        """Build the uniform cascade response dict."""
+        return {
+            "ticket_id": ticket_id,
+            "ticket_found": ticket_found,
+            "dry_run": dry_run,
+            "tickets_deleted": tickets_deleted,
+            "notify_deleted": notify_deleted,
+            "notify_delete_failed": notify_delete_failed,
+        }
 
     # ── 关单:私有 audit helper(随关单方法从 admin_service 迁入) ──────
 

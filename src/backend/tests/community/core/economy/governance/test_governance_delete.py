@@ -727,16 +727,35 @@ def _notify_row(ticket_id: str, notification_id: str) -> dict:
 
 
 class TestDeleteTicketCascadeService:
-    """delete_ticket_cascade — best-effort precise cascade (service layer)."""
+    """delete_ticket_cascade — best-effort precise cascade (service layer).
+
+    delete_ticket_cascade lives on GovernanceWorkflowService (migrated from
+    GovernanceAdminService on 2026-07-17). These tests construct the real
+    workflow service backed by in-memory fakes.
+    """
 
     def _svc(
         self, task_rows: list[dict], notify_rows: list[dict],
-    ) -> FakeAdminService:
+    ) -> GovernanceWorkflowService:
+        from agentclaw.community.core.economy.governance.services.workflow_service import (
+            GovernanceWorkflowService,
+        )
+
         task_repo = FakeTaskRecordRepo()
         task_repo.seed(task_rows)
         notify_repo = FakeNotifyLogRepo()
         notify_repo.seed(notify_rows)
-        return FakeAdminService(task_repo=task_repo, notify_repo=notify_repo)
+        audit_repo = FakeAuditRepo()
+        # cascade only touches repos + audit; lifecycle_svc / whitelist_service
+        # are unused by delete_ticket_cascade, so stubs suffice.
+        return GovernanceWorkflowService(
+            task_repo=task_repo,  # type: ignore[arg-type]
+            audit_repo=audit_repo,  # type: ignore[arg-type]
+            config=FakeGovernanceConfig(),  # type: ignore[arg-type]
+            lifecycle_svc=None,  # type: ignore[arg-type]
+            whitelist_service=None,  # type: ignore[arg-type]
+            notify_repo=notify_repo,  # type: ignore[arg-type]
+        )
 
     def test_dry_run_previews_notify_count_no_delete_no_audit(self):
         svc = self._svc(
@@ -884,20 +903,37 @@ class TestDeleteTicketCascadeService:
 
 
 class TestDeleteCascadeEndpoint:
-    """POST /admin/tickets:delete-cascade — router → admin_svc path."""
+    """POST /workflow/tickets:delete-cascade — router → workflow_svc path.
+
+    delete_ticket_cascade lives on GovernanceWorkflowService (migrated from
+    GovernanceAdminService on 2026-07-17); the handler moved to workflow_router.
+    """
 
     def _call(
         self, body: TicketDeleteCascadeRequest, *,
         task_rows: list[dict] | None = None,
         notify_rows: list[dict] | None = None,
         user_id: str = "operator-1",
-    ) -> tuple[Any, FakeAdminService]:
+    ) -> tuple[Any, "GovernanceWorkflowService"]:
+        from agentclaw.community.adapters.http.economy import workflow_router
+        from agentclaw.community.core.economy.governance.services.workflow_service import (
+            GovernanceWorkflowService,
+        )
+
         task_repo = FakeTaskRecordRepo()
         task_repo.seed(task_rows or [])
         notify_repo = FakeNotifyLogRepo()
         notify_repo.seed(notify_rows or [])
-        admin_svc = FakeAdminService(task_repo=task_repo, notify_repo=notify_repo)
-        resp = _run(admin_router.tickets_delete_cascade(
+        audit_repo = FakeAuditRepo()
+        admin_svc = GovernanceWorkflowService(
+            task_repo=task_repo,  # type: ignore[arg-type]
+            audit_repo=audit_repo,  # type: ignore[arg-type]
+            config=FakeGovernanceConfig(),  # type: ignore[arg-type]
+            lifecycle_svc=None,  # type: ignore[arg-type]
+            whitelist_service=None,  # type: ignore[arg-type]
+            notify_repo=notify_repo,  # type: ignore[arg-type]
+        )
+        resp = _run(workflow_router.tickets_delete_cascade(
             body=body, ctx=_ctx(user_id=user_id), admin_svc=admin_svc,
         ))
         return resp, admin_svc
