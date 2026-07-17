@@ -16,7 +16,7 @@
 - [x] 6. Run targeted suite: `tests/community/core/harness/` +
   `tests/community/architecture/` (shipped-config + no-vendor guards).
 - [x] 7. Run full `tests/community` suite.
-- [ ] 8. Commit to `claude/issue-201-sdd-o845st` and push
+- [x] 8. Commit to `claude/issue-201-sdd-o845st` and push
   (`AVERNET_PRE_PUSH_MERGE_TARGET=origin/REL20260717`).
-- [ ] 9. Open draft PR → base `REL20260717`, `Fixes #201`; subscribe to PR
+- [x] 9. Open draft PR → base `REL20260717`, `Fixes #201`; subscribe to PR
   activity.
