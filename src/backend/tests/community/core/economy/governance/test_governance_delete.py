@@ -277,9 +277,8 @@ class FakeAdminService:
             audit_repo=self._audit_repo,
             task_repo=self._task_repo,  # type: ignore[arg-type]
             config=FakeGovernanceConfig(),  # type: ignore[arg-type]
-            notify_sender=None,  # type: ignore[arg-type]
             lifecycle_svc=self._lifecycle_svc,
-        render_svc=NotifyRenderService(),
+            render_svc=NotifyRenderService(),
         )
 
     def delete_records(self, body: dict, operator: str) -> dict:

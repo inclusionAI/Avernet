@@ -42,8 +42,8 @@ from agentclaw.community.core.economy.governance.repositories.task_record_repo i
 from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
     GovernanceWhitelistRepository,
 )
-from agentclaw.community.core.economy.governance.services.admin_service import (
-    GovernanceAdminService,
+from agentclaw.community.core.economy.governance.services.delivery_service import (
+    GovernanceDeliveryService,
 )
 from agentclaw.community.core.economy.governance.services.record_process_service import (
     GovernanceRecordService,
@@ -175,7 +175,7 @@ class _FakeScanSvc:
 
 
 def _build_admin_svc(engine):
-    """Build GovernanceAdminService with in-memory DB."""
+    """Build GovernanceDeliveryService with in-memory DB."""
     db = _db_from_engine(engine)
     cache = FakeCache()
     notify_repo = NotifyLogRepository(db=db)
@@ -197,16 +197,14 @@ def _build_admin_svc(engine):
         config=FakeGovernanceConfig(),
         lifecycle_svc=lifecycle_svc,
     )
-    svc = GovernanceAdminService(
-        cache=cache,
-        whitelist_service=whitelist_service,
+    svc = GovernanceDeliveryService(
         notify_repo=notify_repo,
         audit_repo=audit_repo,
         task_repo=task_repo,
         config=FakeGovernanceConfig(),
         notify_sender=FakeNotifySender(),
-        lifecycle_svc=lifecycle_svc,
         render_svc=NotifyRenderService(),
+        lifecycle_svc=lifecycle_svc,
     )
     svc._scan_svc = _FakeScanSvc()
     return svc, db

@@ -18,6 +18,7 @@ from agentclaw.community.api.governance_service import (
     GovernanceAdminServiceProtocol,
     GovernanceAuditReadServiceProtocol,
     GovernanceBotServiceProtocol,
+    GovernanceDeliveryServiceProtocol,
     GovernanceFeedbackServiceProtocol,
     GovernanceLifecycleServiceProtocol,
     GovernanceRecordProcessProtocol,
@@ -46,6 +47,9 @@ from agentclaw.community.core.economy.governance.repositories.whitelist_repo imp
 )
 from agentclaw.community.core.economy.governance.services.admin_service import (
     GovernanceAdminService,
+)
+from agentclaw.community.core.economy.governance.services.delivery_service import (
+    GovernanceDeliveryService,
 )
 from agentclaw.community.core.economy.governance.services.audit_read_service import (
     GovernanceAuditReadService,
@@ -252,7 +256,6 @@ class EconomyGovernanceModule(Module):
         audit_repo: GovernanceAuditRepository,
         task_repo: TaskRecordRepository,
         config: EconomyGovernanceConfig,
-        notify_sender: NotifySenderPlugin,
         lifecycle_service: GovernanceLifecycleService,
         render_svc: NotifyRenderService,
     ) -> GovernanceAdminService:
@@ -260,6 +263,34 @@ class EconomyGovernanceModule(Module):
             cache=cache,
             whitelist_service=whitelist_service,
             notify_repo=notify_repo, audit_repo=audit_repo,
+            task_repo=task_repo,
+            config=config,
+            lifecycle_svc=lifecycle_service,
+            render_svc=render_svc,
+        )
+
+    @provider
+    @inject
+    def _delivery_service(
+        self,
+        notify_repo: NotifyLogRepository,
+        audit_repo: GovernanceAuditRepository,
+        task_repo: TaskRecordRepository,
+        config: EconomyGovernanceConfig,
+        notify_sender: NotifySenderPlugin,
+        lifecycle_service: GovernanceLifecycleService,
+        render_svc: NotifyRenderService,
+    ) -> GovernanceDeliveryService:
+        """Construct GovernanceDeliveryService — 投递编排(deliver_*/reminder)。
+
+        从 admin_service 按职责边界抽出的投递域,承接 deliver_pending/
+        deliver_by_worker/create_and_send_reminder(原样迁入,行为零回归)。
+        notify_sender 绑定 profile-specific(corp=DingTalk / community=log-only),
+        与 admin_service 共享同一 NotifySenderPlugin 注入。
+        """
+        return GovernanceDeliveryService(
+            notify_repo=notify_repo,
+            audit_repo=audit_repo,
             task_repo=task_repo,
             config=config,
             notify_sender=notify_sender,
@@ -377,6 +408,16 @@ class EconomyGovernanceModule(Module):
     def _admin_service_protocol(
         self, svc: GovernanceAdminService,
     ) -> GovernanceAdminServiceProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _delivery_service_protocol(
+        self, svc: GovernanceDeliveryService,
+    ) -> GovernanceDeliveryServiceProtocol:
+        """Rule 14 binding:admin_router 的 deliver/remind/scan-and-deliver 端点
+        注入 GovernanceDeliveryServiceProtocol 而非具体类。"""
         return svc
 
     @singleton

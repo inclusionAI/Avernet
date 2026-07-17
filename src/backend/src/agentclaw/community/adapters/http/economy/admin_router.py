@@ -45,6 +45,7 @@ from agentclaw.community.adapters.http.economy.schemas import (
 from agentclaw.community.api.governance_service import (
     GovernanceAdminServiceProtocol,
     GovernanceBotServiceProtocol,
+    GovernanceDeliveryServiceProtocol,
     GovernanceWhitelistServiceProtocol,
 )
 from agentclaw.community.di import Injected
@@ -62,6 +63,7 @@ admin_router = APIRouter(
 )
 
 _AdminSvc = GovernanceAdminServiceProtocol
+_DeliverySvc = GovernanceDeliveryServiceProtocol
 _ScanService = GovernanceBotServiceProtocol
 _WhitelistSvc = GovernanceWhitelistServiceProtocol
 
@@ -100,7 +102,7 @@ def _raise_on_admin_error(result: dict | object) -> None:
 async def tickets_deliver(
     body: TicketsDeliverRequest,
     ctx: RequestContext = Depends(get_request_context),
-    admin_svc: _AdminSvc = Injected(_AdminSvc),
+    delivery_svc: _DeliverySvc = Injected(_DeliverySvc),
 ) -> ApiResponse:
     """Deliver pending notifications scoped to one worker_id。
 
@@ -108,7 +110,7 @@ async def tickets_deliver(
     不跑 cron tick、不重跑状态机(pending 已躺 notify_log)。
     """
     data = await asyncio.to_thread(
-        admin_svc.deliver_by_worker,
+        delivery_svc.deliver_by_worker,
         worker_id=body.worker_id,
         override_recipient=body.override_recipient,
         dry_run=body.dry_run,
@@ -127,7 +129,7 @@ async def tickets_deliver(
 async def tickets_remind(
     body: RemindRequest,
     ctx: RequestContext = Depends(get_request_context),
-    admin_svc: _AdminSvc = Injected(_AdminSvc),
+    delivery_svc: _DeliverySvc = Injected(_DeliverySvc),
 ) -> ApiResponse:
     """手动补发 reminder:按 worker_id 找 active 工单,立即创建+发送 reminder 通知。
 
@@ -135,7 +137,7 @@ async def tickets_remind(
     """
     try:
         result = await asyncio.to_thread(
-            admin_svc.create_and_send_reminder,
+            delivery_svc.create_and_send_reminder,
             worker_id=body.worker_id,
             operator=ctx.user_id,
         )
@@ -404,12 +406,12 @@ async def scan_and_deliver(
         "auto", description="发送通道: auto(跟随DB记录)|markdown|tc_card",
     ),
     scan_svc: _ScanService = Injected(_ScanService),
-    admin_svc: _AdminSvc = Injected(_AdminSvc),
+    delivery_svc: _DeliverySvc = Injected(_DeliverySvc),
 ) -> ApiResponse:
     """Governance management: cron tick → deliver (testing tool).
 
     Phase 1 (cron tick) runs here; Phase 2-5 (read pending, build payloads,
-    send, update DB) are delegated to :meth:`admin_svc.deliver_pending`.
+    send, update DB) are delegated to :meth:`delivery_svc.deliver_pending`.
     """
     # Safety guard: dry_run=false requires a valid numeric staff_id
     if not dry_run and not override_recipient.isdigit():
@@ -430,7 +432,7 @@ async def scan_and_deliver(
 
     # ---- Phase 2-5: delegate to service ----
     data = await asyncio.to_thread(
-        admin_svc.deliver_pending,
+        delivery_svc.deliver_pending,
         scan_svc=scan_svc,
         override_recipient=override_recipient,
         dry_run=dry_run,

@@ -67,6 +67,39 @@ class GovernanceAdminServiceProtocol(Protocol):
     ) -> dict:
         ...
 
+    def force_renew_with_record(
+        self, record: Any, operator: str,
+    ) -> dict:
+        """强制换新:用 record 关老(stale_replaced)+ 建新 first_send。
+
+        无视 gmt_create 7天 + dt_version guard。Returns {ticket_id, notification_id}。
+        """
+        ...
+
+    def write_brake_skip_audit(self, *, run_id: str, reason: str) -> None:
+        """记录"自动定时 tick 因制动被跳过"的 best-effort 审计。
+
+        Args:
+            run_id: 调度层当次 run 标识。
+            reason: 跳过原因(制动生效)。
+        """
+        ...
+
+
+@runtime_checkable
+class GovernanceDeliveryServiceProtocol(Protocol):
+    """Protocol for governance delivery orchestration — 投递编排域。
+
+    从 :class:`GovernanceAdminServiceProtocol` 按职责边界抽出的投递域:
+    把 pending/scheduled 通知按 channel 规则实际投递 + 回写投递状态 + 写审计。
+    admin_router 的 deliver/remind/scan-and-deliver 端点注入本 protocol
+    (对齐 Rule 14:DI 绑 Protocol → Concrete,router import Protocol only)。
+
+    deliver_pending / deliver_by_worker / create_and_send_reminder 由
+    :class:`GovernanceDeliveryService` 实现(Task 2/3 从 admin_service 迁入,
+    签名/行为零变化)。
+    """
+
     def deliver_pending(
         self,
         *,
@@ -98,24 +131,6 @@ class GovernanceAdminServiceProtocol(Protocol):
 
         跳过 remind_at 等待(立即 create+send)。
         Returns {notification_id, sent}。无 active → raise ValueError。
-        """
-        ...
-
-    def force_renew_with_record(
-        self, record: Any, operator: str,
-    ) -> dict:
-        """强制换新:用 record 关老(stale_replaced)+ 建新 first_send。
-
-        无视 gmt_create 7天 + dt_version guard。Returns {ticket_id, notification_id}。
-        """
-        ...
-
-    def write_brake_skip_audit(self, *, run_id: str, reason: str) -> None:
-        """记录"自动定时 tick 因制动被跳过"的 best-effort 审计。
-
-        Args:
-            run_id: 调度层当次 run 标识。
-            reason: 跳过原因(制动生效)。
         """
         ...
 
