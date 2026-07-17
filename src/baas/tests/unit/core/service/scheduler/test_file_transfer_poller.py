@@ -195,8 +195,7 @@ class TestProcessSingleTicket:
         config = _make_config(upload_timeout_seconds=10)
         ticket = _make_ticket(
             status="CREATED",
-            gmt_create=datetime.now(UTC).replace(tzinfo=None)
-            - timedelta(seconds=60),
+            gmt_create=datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=60),
         )
         poller = _make_poller(config=config)
 
@@ -265,7 +264,8 @@ class TestProcessSingleTicket:
         assert result == "failed"
         # Verify no FAILED transition was made — transient errors are retried
         failed_calls = [
-            c for c in poller._ticket_repo.update_status.call_args_list
+            c
+            for c in poller._ticket_repo.update_status.call_args_list
             if c.args[1] == "FAILED"
         ]
         assert len(failed_calls) == 0
@@ -302,8 +302,7 @@ class TestProcessDownloadTicket:
         ticket = _make_ticket(
             status="CREATED",
             direction="DOWNLOAD",
-            gmt_create=datetime.now(UTC).replace(tzinfo=None)
-            - timedelta(seconds=60),
+            gmt_create=datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=60),
         )
         poller = _make_poller(config=config)
 
