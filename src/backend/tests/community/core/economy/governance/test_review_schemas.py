@@ -199,6 +199,45 @@ class TestReviewTicketDetailResponse:
         t3 = _make_ticket(feedback_payload='{"no_ref": true}')
         assert ReviewTicketDetailResponse.from_ticket(t3).feedback_notification_id is None
 
+    def test_available_actions_on_waiting_review_whitelist(self) -> None:
+        """waiting_review + whitelist 反馈 → 同意加白 + reject 动作下发。"""
+        t = _make_ticket(
+            governance_status=GovernanceStatus.WAITING_REVIEW,
+            user_feedback="whitelist",
+        )
+        d = ReviewTicketDetailResponse.from_ticket(t)
+        assert [a.value for a in d.available_actions] == [
+            "approve_whitelist", "reject_for_reopen",
+        ]
+        assert d.available_actions[0].label == "同意加白"
+        assert d.available_actions[1].remark_required is True
+
+    def test_available_actions_on_need_time_uses_approve_scheduled(self) -> None:
+        t = _make_ticket(
+            governance_status=GovernanceStatus.WAITING_REVIEW,
+            user_feedback="need_time",
+        )
+        d = ReviewTicketDetailResponse.from_ticket(t)
+        assert [a.value for a in d.available_actions] == [
+            "approve_scheduled", "reject_for_reopen",
+        ]
+
+    def test_available_actions_empty_when_not_waiting_review(self) -> None:
+        """非 waiting_review(open/scheduled/closed)→ 不下发动作。"""
+        from agentclaw.community.core.economy.governance.domain.enums import GovernanceStatus as GS
+        for status in (GS.OPEN, GS.SCHEDULED, GS.CLOSED):
+            t = _make_ticket(governance_status=status, user_feedback="optimized")
+            assert ReviewTicketDetailResponse.from_ticket(t).available_actions == []
+
+    def test_available_actions_each_has_endpoint(self) -> None:
+        t = _make_ticket(
+            governance_status=GovernanceStatus.WAITING_REVIEW,
+            user_feedback="dispute",
+        )
+        d = ReviewTicketDetailResponse.from_ticket(t)
+        for a in d.available_actions:
+            assert a.endpoint == "POST /api/economy/governance/workflow/tickets/review"
+
 
 class TestWorkflowReviewResponse:
     def test_from_outcome_success(self) -> None:

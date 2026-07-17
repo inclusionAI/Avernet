@@ -16,6 +16,7 @@ import os
 
 from agentclaw.community.api.governance_service import (
     GovernanceAdminServiceProtocol,
+    GovernanceAuditReadServiceProtocol,
     GovernanceBotServiceProtocol,
     GovernanceFeedbackServiceProtocol,
     GovernanceLifecycleServiceProtocol,
@@ -45,6 +46,9 @@ from agentclaw.community.core.economy.governance.repositories.whitelist_repo imp
 )
 from agentclaw.community.core.economy.governance.services.admin_service import (
     GovernanceAdminService,
+)
+from agentclaw.community.core.economy.governance.services.audit_read_service import (
+    GovernanceAuditReadService,
 )
 from agentclaw.community.core.economy.governance.services.feedback_service import (
     GovernanceFeedbackService,
@@ -142,6 +146,16 @@ class EconomyGovernanceModule(Module):
         self, db: DatabasePlugin,
     ) -> GovernanceAuditRepository:
         return GovernanceAuditRepository(db=db)
+
+    @singleton
+    @provider
+    @inject
+    def _audit_read_service(
+        self, audit_repo: GovernanceAuditRepository,
+    ) -> GovernanceAuditReadService:
+        """Construct GovernanceAuditReadService — read-only audit history
+        query scoped by worker (owner:bot). Injects the audit_repo singleton."""
+        return GovernanceAuditReadService(audit_repo=audit_repo)
 
     @singleton
     @provider
@@ -263,6 +277,7 @@ class EconomyGovernanceModule(Module):
         config: EconomyGovernanceConfig,
         lifecycle_service: GovernanceLifecycleService,
         whitelist_service: GovernanceWhitelistService,
+        notify_repo: NotifyLogRepository,
     ) -> GovernanceWorkflowService:
         """Construct GovernanceWorkflowService — 工单审批(从 admin 按路由边界拆出)。
 
@@ -275,6 +290,7 @@ class EconomyGovernanceModule(Module):
             config=config,
             lifecycle_svc=lifecycle_service,
             whitelist_service=whitelist_service,
+            notify_repo=notify_repo,
         )
 
     @singleton
@@ -403,6 +419,16 @@ class EconomyGovernanceModule(Module):
     def _whitelist_service_protocol(
         self, svc: GovernanceWhitelistService,
     ) -> GovernanceWhitelistServiceProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _audit_read_service_protocol(
+        self, svc: GovernanceAuditReadService,
+    ) -> GovernanceAuditReadServiceProtocol:
+        """Rule 14 binding: admin_router 注入 GovernanceAuditReadServiceProtocol
+        而非具体类(只读审计查询,对齐其他 service protocol binding)。"""
         return svc
 
     @singleton

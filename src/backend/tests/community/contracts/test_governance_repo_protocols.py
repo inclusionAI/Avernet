@@ -5,7 +5,7 @@ Repository Protocols and their concrete implementations.  This is the
 minimum bar: every method on the Protocol must exist on the concrete
 class with a compatible signature.
 
-Additionally, the dataclass I/O types (``EmergencyState``,
+Additionally, the dataclass I/O types (``BrakeState``,
 ``TicketActionOutcome``, ``BulkOperationResult``) are verified to
 serialize via ``to_dict()`` without error, and the ``@runtime_checkable``
 check passes for every pair.
@@ -103,13 +103,13 @@ def test_protocol_method_surface(
     )
 
 
-def test_emergency_state_to_dict() -> None:
-    """EmergencyState serialises all fields via to_dict()."""
+def test_brake_state_to_dict() -> None:
+    """BrakeState serialises all fields via to_dict()."""
     from agentclaw.community.core.economy.governance.services.admin_service import (
-        EmergencyState,
+        BrakeState,
     )
 
-    state = EmergencyState(
+    state = BrakeState(
         paused=True,
         reason="test",
         operator="op",
@@ -136,12 +136,12 @@ def test_ticket_action_outcome_to_dict() -> None:
     outcome = TicketActionOutcome(
         ticket_id="t-1",
         status=GovernanceStatus.CLOSED,
-        close_reason="emergency_closed",
+        close_reason="admin_closed",
     )
     d = outcome.to_dict()
     assert d["governance_status"] == "closed"
     assert d["ticket_id"] == "t-1"
-    assert d["close_reason"] == "emergency_closed"
+    assert d["close_reason"] == "admin_closed"
 
 
 def test_ticket_action_outcome_error_path() -> None:

@@ -34,13 +34,14 @@ if TYPE_CHECKING:
         GovernanceTicket,
     )
     from agentclaw.community.core.economy.governance.services.admin_service import (
+        BulkOperationResult,
         TicketActionOutcome,
     )
 
 
 @runtime_checkable
 class GovernanceAdminServiceProtocol(Protocol):
-    """Protocol for governance admin operations (emergency brake + review)."""
+    """Protocol for governance admin operations (brake + review)."""
 
     def is_paused(self) -> bool:
         ...
@@ -54,26 +55,7 @@ class GovernanceAdminServiceProtocol(Protocol):
     def resume(self, reason: str, operator: str) -> None:
         ...
 
-    def bulk_whitelist(
-        self,
-        bot_ids: list[str],
-        reason: str,
-        operator: str,
-    ) -> dict:
-        ...
-
-    def cancel_pending(self, reason: str, operator: str) -> dict:
-        ...
-
-    def close_all_open(self, reason: str, operator: str) -> dict:
-        ...
-
     def pause_ticket(
-        self, ticket_id: str, admin_id: str, reason: str = "",
-    ) -> TicketActionOutcome:
-        ...
-
-    def emergency_close(
         self, ticket_id: str, admin_id: str, reason: str = "",
     ) -> TicketActionOutcome:
         ...
@@ -81,16 +63,6 @@ class GovernanceAdminServiceProtocol(Protocol):
     def delete_records(
         self,
         body: dict,
-        operator: str,
-    ) -> dict:
-        ...
-
-    def delete_whitelist_entry(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        reason: str,
         operator: str,
     ) -> dict:
         ...
@@ -117,6 +89,25 @@ class GovernanceAdminServiceProtocol(Protocol):
         channel: str = "auto",
     ) -> dict:
         """按 worker_id 精准投递该工单 pending 通知(不重跑状态机)。"""
+        ...
+
+    def create_and_send_reminder(
+        self, worker_id: str, operator: str,
+    ) -> dict:
+        """手动补发 reminder:按 worker_id 找 active 工单 → 创建+发送 reminder 通知。
+
+        跳过 remind_at 等待(立即 create+send)。
+        Returns {notification_id, sent}。无 active → raise ValueError。
+        """
+        ...
+
+    def force_renew_with_record(
+        self, record: Any, operator: str,
+    ) -> dict:
+        """强制换新:用 record 关老(stale_replaced)+ 建新 first_send。
+
+        无视 gmt_create 7天 + dt_version guard。Returns {ticket_id, notification_id}。
+        """
         ...
 
     def write_brake_skip_audit(self, *, run_id: str, reason: str) -> None:
@@ -189,6 +180,48 @@ class GovernanceWhitelistServiceProtocol(Protocol):
     def count_by_type(self, *, whitelist_type: str = "governance") -> int:
         ...
 
+    def list_all(
+        self,
+        *,
+        whitelist_type: str = "governance",
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        include_expired: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[Any], int]:
+        """全量分页查询白名单(可选 owner/bot 筛选 + 过期开关 + total)。"""
+        ...
+
+
+@runtime_checkable
+class GovernanceAuditReadServiceProtocol(Protocol):
+    """Protocol for governance audit read-side (worker-scoped history query).
+
+    治理审计表 ``ac_governance_audit`` 无 ``worker_id`` 列;"worker" 在治理领域
+    = ``owner_id:bot_id`` 复合标识(同 ``ac_governance_notify_log.worker_id``)。
+    本协议把"按 worker 查全部审计"翻译为按 ``owner_id``/``bot_id`` 定位审计行。
+    只读、无副作用、不写审计。
+    """
+
+    def list_audit_by_worker(
+        self,
+        *,
+        worker_id: str | None = None,
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        action: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """按 worker 维度查治理审计,返回 ``(审计条目 dict 列表, total)``。
+
+        ``worker_id``(冒号分隔 ``owner:bot``)优先解析并覆盖独立 ``owner_id``/
+        ``bot_id``;``action`` 可选按 ``action_taken`` 过滤。解析后 owner/bot/action
+        皆空抛 ``ValueError``,路由侧 400。条目按 ``gmt_create`` 倒序。
+        """
+        ...
+
 
 @runtime_checkable
 class GovernanceLifecycleServiceProtocol(Protocol):
@@ -243,6 +276,15 @@ class GovernanceLifecycleServiceProtocol(Protocol):
         self, ticket_id: str, *, now: datetime,
     ) -> bool:
         """Whitelist hit → CLOSED(whitelist_filtered) + cancel pending + audit.
+
+        Returns True if the ticket was found and closed, False if not found.
+        """
+        ...
+
+    def close_for_stale_replace(
+        self, ticket_id: str, *, now: datetime,
+    ) -> bool:
+        """未回复换新 → CLOSED(stale_replaced) + cancel pending(不设 cooldown_until)。
 
         Returns True if the ticket was found and closed, False if not found.
         """
@@ -331,10 +373,10 @@ class GovernanceLifecycleServiceProtocol(Protocol):
         """
         ...
 
-    def emergency_close(
+    def admin_close(
         self, ticket_id: str, *, now: datetime,
     ) -> bool:
-        """Any non-CLOSED → CLOSED(emergency_closed) + cancel pending.
+        """Any non-CLOSED → CLOSED(admin_closed) + cancel pending.
 
         The caller (admin_service) owns the audit row (carries the reason +
         actor_id=admin_id) — the driver does not write a duplicate audit,
@@ -348,7 +390,7 @@ class GovernanceLifecycleServiceProtocol(Protocol):
     def bulk_close_open(
         self, *, close_reason: str, now: datetime,
     ) -> int:
-        """Bulk emergency-close all open/scheduled tickets — joint orchestration:
+        """Bulk admin-close all open/scheduled tickets — joint orchestration:
         land ``task_record`` subject CLOSED (ticket machine) + cancel pending
         notifications (notify-delivery machine, one-way side effect). Ticket is
         cause, notify is effect. Returns the number of tickets closed.
@@ -358,7 +400,7 @@ class GovernanceLifecycleServiceProtocol(Protocol):
     def bulk_close_by_ticket_ids(
         self, ticket_ids: list[str], *, now: datetime,
     ) -> int:
-        """Per-ticket emergency-close by ``ticket_id`` set — Task 8 uses this
+        """Per-ticket admin-close by ``ticket_id`` set — Task 8 uses this
         after cancel_pending / bulk_whitelist cancel notify delivery, to close
         the matching ``task_record`` subjects (口径对齐通知侧). Per-ticket
         find→guard→save→cancel chain (domain guard active); does NOT bare-use
@@ -433,11 +475,43 @@ class GovernanceWorkflowServiceProtocol(Protocol):
     def get_review_ticket_detail(
         self, ticket_id: str,
     ) -> GovernanceTicket | None:
-        """评审工单详情(单工单领域模型)。"""
+        """评审工单详情(单工单领域模型,纯本体,不含跨聚合派生)。"""
+        ...
+
+    def build_review_ticket_detail(
+        self, ticket_id: str,
+    ) -> tuple[GovernanceTicket, bool] | None:
+        """组装工单详情视图:工单本体 + 是否在治理白名单中(跨聚合派生位)。
+
+        Returns ``(ticket, in_whitelist)``;工单不存在返回 None;
+        工单缺 bot_id/owner_id 时 in_whitelist=False。
+        """
+        ...
+
+    def get_pending_notification(self, ticket_id: str) -> dict | None:
+        """查工单待回复通知(notification_id + 元信息)。"""
         ...
 
     def review_ticket(
         self, ticket_id: str, action: str, admin_id: str, remark: str = "",
     ) -> TicketActionOutcome:
         """审批:approve_close / approve_whitelist / reject_for_reopen(§7.5.2)。"""
+        ...
+
+    def admin_close(
+        self, ticket_id: str, admin_id: str, reason: str = "",
+    ) -> TicketActionOutcome:
+        """立即关单(无 cooldown),从 admin_service 迁入(工单运营归属)。"""
+        ...
+
+    def cancel_pending(
+        self, reason: str, operator: str,
+    ) -> BulkOperationResult:
+        """取消全部未响应待通知 + 关对应工单(从 admin_service 迁入)。"""
+        ...
+
+    def close_all_open(
+        self, reason: str, operator: str,
+    ) -> BulkOperationResult:
+        """关闭全部 open/muted(含已响应)+ 关全部 open/scheduled 工单(迁入)。"""
         ...

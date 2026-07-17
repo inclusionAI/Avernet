@@ -168,7 +168,7 @@ class TestBulkWhitelist:
             for n in notif_rows:
                 assert n.notify_status == "cancelled"
                 assert n.governance_status == "closed"
-                assert n.close_reason == "emergency_closed"
+                assert n.close_reason == "admin_closed"
                 assert n.cooldown_until is not None
 
         # Verify whitelist entries exist
@@ -179,22 +179,48 @@ class TestBulkWhitelist:
             assert bot_ids == {"bot-a", "bot-b"}
 
     def test_audit_written(self, session, engine):
-        """bulk_whitelist writes a governance audit entry."""
+        """bulk_whitelist writes per-entity audit rows + a batch summary.
+
+        旧口径写 1 条孤儿审计行(bot_id=None, run_id='admin' 公共桶),按被治理
+        实体查不到。新口径:逐 (bot_id, owner_id) 对写带实体的审计行 + 1 条批次
+        摘要行,全部共享唯一 run_id(可聚合同一次加白)。摘要行 error_msg 含真实
+        处置计数(whitelisted/skipped/cancelled/closed)。
+        """
         svc, db = _build_svc(engine)
+        audit_repo = GovernanceAuditRepository(db=db)
         _make_notification(
             session, notification_id="n-1",
             bot_id="bot-x", owner_id="owner-x", governance_status="open",
         )
 
-        svc.bulk_whitelist(
+        result = svc.bulk_whitelist(
             bot_ids=["bot-x"], reason="test", operator="admin-1",
         )
 
         with db.orm_session() as s:
             audits = s.query(AuditLogOrm).all()
             wl_audits = [a for a in audits if a.action_taken == AuditAction.ADMIN_WHITELIST]
-            assert len(wl_audits) >= 1
-            assert wl_audits[0].actor_id == "admin-1"
+            actor_audits = [a for a in wl_audits if a.actor_id == "admin-1"]
+            # Per-entity row carries the governed entity, not an orphan None row.
+            entity_rows = [a for a in actor_audits if a.bot_id == "bot-x" and a.owner_id == "owner-x"]
+            assert len(entity_rows) == 1, "expected one per-entity audit row for bot-x/owner-x"
+            # One batch-summary row (bot_id=None / owner_id=None) carrying real counts.
+            summary_rows = [a for a in actor_audits if a.bot_id is None and a.owner_id is None]
+            assert len(summary_rows) == 1, "expected one batch-summary audit row"
+            summary = summary_rows[0]
+            assert "whitelisted=" in (summary.error_msg or "")
+            assert f"whitelisted={result['whitelisted']}" in (summary.error_msg or "")
+            assert f"cancelled={result['cancelled']}" in (summary.error_msg or "")
+            audit_run_ids = {a.run_id for a in actor_audits}
+            assert len(audit_run_ids) == 1, "all audit rows of one bulk call share one run_id"
+            assert "admin" not in audit_run_ids or next(iter(audit_run_ids)) != "admin", \
+                "run_id must be a unique batch id, not the legacy 'admin' public bucket"
+
+        # Closing the loop with Task 1: the audit row must be retrievable by bot
+        # (the original symptom — bulk-add audit "查不到" by governed entity).
+        rows, total = audit_repo.list_by_subject(bot_id="bot-x")
+        assert total >= 1
+        assert any(r.bot_id == "bot-x" and r.owner_id == "owner-x" for r in rows)
 
     def test_no_matching_bots(self, session, engine):
         """No notifications for requested bots → whitelisted=0, cancelled=0."""
@@ -295,7 +321,7 @@ class TestBulkWhitelistTicketAlignment:
     bot_id IN (...) 且 response IS NULL 口径精确:已反馈的通知/工单不动。"""
 
     def test_closes_task_record_subjects_for_unresponded(self, session, engine):
-        """unresponded open 通知对应工单 → CLOSED(emergency_closed)。"""
+        """unresponded open 通知对应工单 → CLOSED(admin_closed)。"""
         svc, db = _build_svc(engine)
         _make_notification(
             session, notification_id="n-a", bot_id="bot-a", owner_id="owner-a",
@@ -309,7 +335,7 @@ class TestBulkWhitelistTicketAlignment:
         with db.orm_session() as s:
             ticket = s.query(GovernanceTicketOrm).one()
             assert ticket.governance_status == "closed"
-            assert ticket.close_reason == "emergency_closed"
+            assert ticket.close_reason == "admin_closed"
 
     def test_preserves_responded_ticket_subject(self, session, engine):
         """已反馈通知(bot 命中但 response 非 None)不在 cancel scope,

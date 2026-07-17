@@ -14,10 +14,17 @@ from __future__ import annotations
 from datetime import datetime
 
 from agentclaw.community.core.economy.governance.repositories.orm import (
+    GovernanceNotificationOrm,
     GovernanceTicketOrm,
+)
+from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
+    NotifyLogRepository,
 )
 from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
     TaskRecordRepository,
+)
+from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
+    GovernanceWhitelistRepository,
 )
 from tests.community.framework import (
     CaseInput,
@@ -101,6 +108,19 @@ def _seed_detail(world) -> None:
     )
 
 
+def _seed_detail_whitelisted(world) -> None:
+    """Seed a ticket whose (bot_id, owner_id) is also in the whitelist."""
+    _insert_ticket(
+        world, ticket_id="tkt-detail-wl",
+        bot_id="bot-wl-detail", owner_id="owner-wl-detail",
+        governance_status="waiting_review",
+    )
+    world.get(GovernanceWhitelistRepository).add(
+        bot_id="bot-wl-detail", owner_id="owner-wl-detail",
+        created_by="tester",
+    )
+
+
 def _seed_review_waiting(world) -> None:
     """Seed a waiting_review ticket for approve_close."""
     _insert_ticket(
@@ -139,8 +159,19 @@ def _assert_list_waiting_filter(response, world) -> None:
     assert data["total"] >= 1
     for item in data["items"]:
         assert item["governance_status"] == "waiting_review"
+        # 列表行须暴露 id(删除锚键)与 gmt_modified(更新时间,键在即可,值可 None)
+        assert "id" in item, "list item missing field 'id'"
+        assert "gmt_modified" in item, "list item missing field 'gmt_modified'"
     ticket_ids = {item["ticket_id"] for item in data["items"]}
     assert "tkt-list-wait1" in ticket_ids
+    # id 取值经领域模型 from_orm 透传,与 repo 查得的 ORM 主键一致
+    repo = world.get(TaskRecordRepository)
+    expected = repo.find_by_ticket_id("tkt-list-wait1")
+    assert expected is not None
+    matched = next(i for i in data["items"] if i["ticket_id"] == "tkt-list-wait1")
+    assert matched["id"] == expected.id, (
+        f"list item id {matched['id']!r} != ORM id {expected.id!r}"
+    )
 
 
 def _assert_list_pagination(response, world) -> None:
@@ -169,9 +200,18 @@ def _assert_detail_found(response, world) -> None:
     # 详情页特有字段存在(可能为 None,但键必须在)
     for k in (
         "worker_id", "bot_id", "dt_version", "review_reason",
-        "feedback_payload", "gmt_create",
+        "feedback_payload", "gmt_create", "gmt_modified", "id",
     ):
         assert k in data, f"detail response missing field {k!r}"
+    # id 取值经领域模型 from_orm 透传,与 repo 查得的 ORM 主键一致
+    repo = world.get(TaskRecordRepository)
+    expected = repo.find_by_ticket_id("tkt-detail-1")
+    assert expected is not None
+    assert data["id"] == expected.id, (
+        f"detail id {data['id']!r} != ORM id {expected.id!r}"
+    )
+    # 白名单位(单点查询):seed 未加白 → False
+    assert data["in_whitelist"] is False
 
 
 def _assert_review_approved_closed(response, world) -> None:
@@ -304,6 +344,24 @@ def review_detail_ok():
 )
 def review_detail_not_found_error():
     """Error path: detail on missing ticket → 404."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets/detail",
+    scenario="ok_in_whitelist",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"ticket_id": "tkt-detail-wl"},
+    ),
+    seed=_seed_detail_whitelisted,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True, "data": {"in_whitelist": True}},
+    ),
+)
+def review_detail_in_whitelist_ok():
+    """Whitelist path: detail.in_whitelist=True when (bot,owner) whitelisted."""
 
 
 # ---------------------------------------------------------------------------
@@ -471,3 +529,75 @@ def _seed_review_open_ticket(world) -> None:
 )
 def review_action_invalid_status_error():
     """Error path: review on non-waiting_review ticket → 400."""
+
+
+# ---------------------------------------------------------------------------
+# 4. GET /workflow/tickets/pending-notification — query notification_id
+# ---------------------------------------------------------------------------
+
+
+def _seed_ticket_with_notify(world) -> None:
+    """Seed a ticket + a notify_log row so pending-notification finds it."""
+    ticket_id = "tkt-pn-1"
+    _insert_ticket(
+        world, ticket_id=ticket_id,
+        governance_status="open",
+        bot_id="bot-pn",
+    )
+    worker_id = "owner-1:bot-pn"
+    notify_repo = world.get(NotifyLogRepository)
+    notify_repo.insert_notification(
+        GovernanceNotificationOrm(
+            notification_id="nid-pn-test-1",
+            ticket_id=ticket_id,
+            bot_id="bot-pn",
+            bot_name="bot-alpha",
+            owner_id="owner-1",
+            worker_id=worker_id,
+            dt_version="20260705",
+            governance_decision="actionable",
+            governance_cycle_id=ticket_id,
+            governance_status="open",
+            notify_status="sent",
+            notify_type="first_send",
+            notify_source="offline_batch",
+            send_attempt_count=1,
+        ),
+    )
+
+
+def _assert_pending_notification_found(response, world) -> None:
+    data = response.json()
+    assert data["success"] is True
+    assert data["data"]["notification_id"] == "nid-pn-test-1"
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets/pending-notification",
+    scenario="ok",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"ticket_id": "tkt-pn-1"},
+    ),
+    seed=_seed_ticket_with_notify,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(_assert_pending_notification_found,),
+)
+def pending_notification_ok():
+    """Happy path: returns notification_id for ticket with notify_log row."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets/pending-notification",
+    scenario="not_found",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"ticket_id": "tkt-no-notify-999"},
+    ),
+    # No seed — ticket has no notify_log row → 404
+    expect=ExpectError(status=404),
+)
+def pending_notification_not_found_error():
+    """Error path: ticket with no notification → 404."""
