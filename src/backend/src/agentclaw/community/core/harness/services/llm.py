@@ -64,9 +64,16 @@ def _decode_fallback() -> str:
 class LLM:
     """Lightweight LLM utility for harness internal use.
 
-    Sources (highest priority first): explicit constructor param → env var →
-    injected config (``LLMHarnessConfig``, passed by the DI provider) → neutral
-    empty. The neutral shipped code embeds no endpoint / secret name / token.
+    Token sources (highest priority first): explicit constructor param →
+    injected ``SecretResolver`` → ``LLM_AUTH_TOKEN`` env var → encoded fallback
+    (empty in shipped source). The neutral shipped code embeds no endpoint /
+    secret name / token.
+
+    Token resolution is lazy and self-healing: a missing endpoint (or absent
+    ``httpx``) disables the LLM permanently, but a token that cannot be resolved
+    yet — e.g. the secret backend is not reachable at construction time — does
+    NOT latch the LLM off. ``chat()`` re-resolves on demand, so the utility
+    recovers once the backend becomes available without a process restart.
 
     Env vars:
         LLM_BASE_URL — API base URL
@@ -91,40 +98,90 @@ class LLM:
         self._timeout_ms = timeout_ms or int(os.getenv("LLM_TIMEOUT_MS", "180000"))
         self._base_url = (base_url or os.getenv("LLM_BASE_URL", "")).rstrip("/")
 
-        # token resolution: explicit param > Mist > env var > encoded fallback
-        self._token = auth_token or ""
-        if not self._token and self._base_url:
-            mist_name = secret_name or os.getenv("LLM_SECRET_NAME", "")
-            if not mist_name:
-                # No secret name configured — env token or encoded fallback only.
-                self._token = os.getenv("LLM_AUTH_TOKEN", "") or _decode_fallback()
-            else:
-                try:
-                    secret = self._secret_resolver.get_secret(mist_name)
-                    if secret is not None:
-                        self._token = str(secret.secret_value)
-                        logger.info("[LLM] loaded token from secret store: %s", mist_name)
-                    else:
-                        self._token = os.getenv("LLM_AUTH_TOKEN", "") or _decode_fallback()
-                except Exception:
-                    self._token = os.getenv("LLM_AUTH_TOKEN", "") or _decode_fallback()
+        # Resolution inputs kept on the instance so the token can be re-resolved
+        # later (see chat()). Priority is explicit arg > secret store > env var >
+        # encoded fallback; _resolve_token() applies it.
+        self._explicit_token = auth_token or ""
+        self._secret_name = secret_name or os.getenv("LLM_SECRET_NAME", "")
 
-        self._disabled = not self._base_url or not self._token or httpx is None
-        if self._disabled:
+        # Permanent, config-level disable — no endpoint or no httpx means the
+        # feature is off and there is nothing to recover to. A *missing token* is
+        # NOT part of this: the secret backend may simply be unreachable right now
+        # (e.g. layotto not yet ready in a SpawnProcess worker), which is
+        # recoverable and must not latch the LLM off for the worker's lifetime.
+        self._config_disabled = httpx is None or not self._base_url
+
+        # Best-effort eager resolve so the happy path logs "enabled" at init.
+        self._token = self._resolve_token()
+
+        if self._config_disabled:
             logger.warning(
-                "[LLM] LLM is DISABLED: base_url=%r, token=%s, httpx=%s",
+                "[LLM] LLM is DISABLED (feature-off): base_url=%r, httpx=%s",
                 self._base_url,
-                "set" if self._token else "MISSING",
                 "ok" if httpx is not None else "MISSING",
             )
-        else:
+        elif self._token:
             logger.info("[LLM] LLM enabled: base_url=%s, model=%s", self._base_url, self._model)
+        else:
+            # Endpoint is configured but the token is not resolvable yet. Do not
+            # latch disabled — chat() re-resolves on demand and self-heals once the
+            # secret backend becomes reachable.
+            logger.warning(
+                "[LLM] token unresolved at init (base_url=%r) — will retry on first use",
+                self._base_url,
+            )
+
+    def _resolve_token(self) -> str:
+        """Resolve the API token from the first available source.
+
+        Priority: explicit constructor arg > injected ``SecretResolver`` (when a
+        base_url and secret name are configured) > ``LLM_AUTH_TOKEN`` env var >
+        encoded fallback (empty in shipped source). Resolver errors and ``None``
+        results both fall through to the env/fallback tail — never raised — so a
+        transient backend failure yields an empty token that a later call can
+        retry rather than an exception. Returns ``""`` when nothing resolves."""
+        if self._explicit_token:
+            return self._explicit_token
+        if self._base_url and self._secret_name:
+            try:
+                secret = self._secret_resolver.get_secret(self._secret_name)
+                if secret is not None:
+                    logger.info(
+                        "[LLM] loaded token from secret store: %s", self._secret_name
+                    )
+                    return str(secret.secret_value)
+            except Exception as e:
+                logger.warning(
+                    "[LLM] secret store lookup failed for %s (%s) — falling back",
+                    self._secret_name,
+                    type(e).__name__,
+                )
+        return os.getenv("LLM_AUTH_TOKEN", "") or _decode_fallback()
+
+    @property
+    def _disabled(self) -> bool:
+        """Whether ``chat()`` will short-circuit *right now*.
+
+        Reflects current resolvability (config-off, or token not yet resolved),
+        not a latched snapshot — a token that becomes resolvable flips this back
+        to ``False`` on the next check."""
+        return self._config_disabled or not self._token
 
     async def chat(self, system: str | None, user: str) -> str:
         """Send prompt and return text response (OpenAI-compatible API)."""
-        if self._disabled:
+        if self._config_disabled:
             logger.warning("[LLM] chat() called but LLM is disabled, returning [llm disabled]")
             return "[llm disabled]"
+
+        if not self._token:
+            # Endpoint is configured but no token yet — the secret backend may have
+            # been unreachable at init. Retry now (self-heal); a success is cached.
+            self._token = self._resolve_token()
+            if not self._token:
+                logger.warning(
+                    "[LLM] token still unresolved, returning [llm disabled]"
+                )
+                return "[llm disabled]"
 
         messages: list[dict[str, str]] = []
         if system:
