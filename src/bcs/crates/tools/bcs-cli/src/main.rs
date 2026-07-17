@@ -2775,12 +2775,9 @@ async fn main() -> Result<()> {
                 json!({
                     "message": &message,
                     "from": serde_json::Value::Null,
-                    "client_wait_timeout_ms": client_wait_timeout_ms,
                     "session_id": &session_id,
                     "tags": &tags,
                     "response_mode": &response_mode,
-                    "poll_wait_ms": poll_wait_ms,
-                    "detach": detach,
                     "organization_code": &organization_code,
                 })
             );
