@@ -1086,10 +1086,10 @@ class BotService:
                     )
                     if extra_envs:
                         logger.info(
-                            f"[bot_service.create_bot] Setting engine extra_envs for bot {bot_id}: "
-                            f"bot_type={extra_envs.get('BOT_TYPE')}, "
-                            f"devflow={extra_envs.get('AIX_DEVFLOW_INFO', '')}, "
-                            f"repos={extra_envs.get('GIT_ADDRESSES', '[]')}"
+                            "[bot_service.create_bot] Setting engine extra_envs "
+                            "for bot %s: %s",
+                            bot_id,
+                            extra_envs,
                         )
 
                     device_result = service.apply_device(
@@ -1389,10 +1389,10 @@ class BotService:
                     )
                     if extra_envs:
                         logger.info(
-                            f"[bot_service._allocate_device_async] Setting engine extra_envs for restart bot {bot_id}: "
-                            f"bot_type={extra_envs.get('BOT_TYPE')}, "
-                            f"devflow={extra_envs.get('AIX_DEVFLOW_INFO', '')}, "
-                            f"repos={extra_envs.get('GIT_ADDRESSES', '[]')}"
+                            "[bot_service._allocate_device_async] Setting engine "
+                            "extra_envs for restart bot %s: %s",
+                            bot_id,
+                            extra_envs,
                         )
                 except Exception as e:
                     logger.warning(f"[bot_service._allocate_device_async] Failed to build engine extra_envs for bot {bot_id}: {e}")
@@ -3563,11 +3563,10 @@ class BotService:
             )
             if extra_envs:
                 logger.info(
-                    f"[bot_service._restart_bot_baas] Setting engine extra_envs for baas restart bot {bot_id}: "
-                    f"bot_type={extra_envs.get('BOT_TYPE')}, "
-                    f"model={extra_envs.get('RELAY_DEFAULT_MODEL', '')}, "
-                    f"runtime={extra_envs.get('RELAY_DEFAULT_RUNTIME', '')}, "
-                    f"devflow={extra_envs.get('AIX_DEVFLOW_INFO', '')}"
+                    "[bot_service._restart_bot_baas] Setting engine extra_envs "
+                    "for baas restart bot %s: %s",
+                    bot_id,
+                    extra_envs,
                 )
         except Exception as e:
             logger.warning(
