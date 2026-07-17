@@ -944,12 +944,14 @@ impl BcsClient {
     fn chat_payload(
         message: &str,
         from: Option<&str>,
+        effective_timeout_ms: u64,
         session_id: Option<&str>,
         tags: &[String],
     ) -> serde_json::Value {
         let mut payload = serde_json::json!({
             "message": message,
             "from": from,
+            "timeout_ms": effective_timeout_ms,
         });
         if let Some(sid) = session_id {
             if let Some(obj) = payload.as_object_mut() {
@@ -993,8 +995,8 @@ impl BcsClient {
     ///
     /// BCS looks up the target bot's URL and forwards the message.
     /// This ensures fresh URLs and centralized logging.
-    /// `timeout_ms` only limits this client's HTTP wait and is not included in
-    /// the BCS request body or forwarded as a downstream execution timeout.
+    /// `timeout_ms` limits the legacy BCS blocking wait and this client's HTTP
+    /// wait. BCS does not forward it as the downstream execution timeout.
     pub async fn chat(
         &self,
         bot_id: &str,
@@ -1030,14 +1032,14 @@ impl BcsClient {
 
         let url = format!("{}/bots/{}/chat", self.base_url, bot_id);
 
-        let payload = Self::chat_payload(message, from, session_id, tags);
+        let payload = Self::chat_payload(message, from, effective_timeout_ms, session_id, tags);
 
         debug!(
             bot_id = %bot_id,
             from = ?from,
             session_id = ?session_id,
             tags = ?Self::normalize_tags(tags),
-            client_wait_timeout_ms = effective_timeout_ms,
+            timeout_ms = effective_timeout_ms,
             message_len = message.len(),
             "Sending chat message via BCS"
         );
@@ -3050,26 +3052,26 @@ mod tests {
     }
 
     #[test]
-    fn test_chat_payload_omits_client_wait_timeout() {
-        let payload = BcsClient::chat_payload("hello", Some("bot_a"), None, &[]);
+    fn test_chat_payload_includes_legacy_bcs_wait_timeout() {
+        let payload = BcsClient::chat_payload("hello", Some("bot_a"), 12_345, None, &[]);
 
         assert_eq!(payload["message"], serde_json::json!("hello"));
         assert_eq!(payload["from"], serde_json::json!("bot_a"));
-        assert!(payload.get("timeout_ms").is_none());
+        assert_eq!(payload["timeout_ms"], serde_json::json!(12_345));
         assert!(payload.get("session_id").is_none());
         assert!(payload.get("tags").is_none());
     }
 
     #[test]
     fn test_chat_payload_includes_session_id_when_present() {
-        let payload = BcsClient::chat_payload("hi", None, Some("sess-1"), &[]);
+        let payload = BcsClient::chat_payload("hi", None, 9_000, Some("sess-1"), &[]);
         assert_eq!(payload["session_id"], serde_json::json!("sess-1"));
     }
 
     #[test]
     fn test_chat_payload_includes_tags_when_present() {
         let tags = vec![" tag1 ".to_string(), "".to_string(), "tag2".to_string()];
-        let payload = BcsClient::chat_payload("hi", None, None, &tags);
+        let payload = BcsClient::chat_payload("hi", None, 9_000, None, &tags);
         assert_eq!(payload["tags"], serde_json::json!(["tag1", "tag2"]));
     }
 
@@ -3119,7 +3121,7 @@ mod tests {
     #[test]
     fn test_chat_request_builder_applies_request_timeout() {
         let client = BcsClient::new("http://localhost:21000");
-        let payload = BcsClient::chat_payload("hello", Some("bot_a"), None, &[]);
+        let payload = BcsClient::chat_payload("hello", Some("bot_a"), 12_345, None, &[]);
         let request = client
             .chat_request_builder(
                 "http://localhost:21000/bots/bot-123/chat",
