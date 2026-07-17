@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import oss2
 from secbaas.logger import get_logger
 from secbaas.spi.file_transfer import (
@@ -9,12 +13,20 @@ from secbaas.spi.file_transfer import (
 )
 from secbaas.spi.secret import SecretStorePlugin
 
+if TYPE_CHECKING:
+    from secbaas.bootstrap._configs import FileTransferOssConfigSchema
+
 log = get_logger("file_transfer")
 
-# Hardcoded per CONTEXT.md D-05 -- no external config source.
-OSS_ENDPOINT = "https://oss-cn-hangzhou.aliyuncs.com"
-OSS_BUCKET = "secbaas-file-transfer"
-STAGING_ROOT_PATH = "baas-file-transfer"
+# Default values used when config is not provided (backward compatibility).
+_DEFAULT_ENDPOINT = "https://oss-cn-hangzhou.aliyuncs.com"
+_DEFAULT_BUCKET = "secbaas-file-transfer"
+_DEFAULT_STAGING_ROOT = "baas-file-transfer"
+
+# Legacy aliases kept for backward compatibility with external references.
+OSS_ENDPOINT = _DEFAULT_ENDPOINT
+OSS_BUCKET = _DEFAULT_BUCKET
+STAGING_ROOT_PATH = _DEFAULT_STAGING_ROOT
 
 
 class AliyunOssFileTransferBackend(FileTransferBackend):
@@ -23,13 +35,37 @@ class AliyunOssFileTransferBackend(FileTransferBackend):
     Uses oss2 SDK for presigned URL generation and object existence checks.
     AK/SK retrieved from SecretStorePlugin at init time.  Bucket instance
     is created once and reused (singleton pattern via DI container).
+
+    When ``config`` is provided, endpoint, bucket_name, staging_root_path,
+    and AK/SK secret name are read from the ``file_transfer_oss``
+    configuration section.  Otherwise, the module-level defaults are used
+    (backward-compatible with direct instantiation).
     """
 
-    def __init__(self, secret_store: SecretStorePlugin) -> None:
-        access_key_id = secret_store.get_secret("secbaas.oss.access_key_id")
-        access_key_secret = secret_store.get_secret("secbaas.oss.access_key_secret")
+    def __init__(
+        self,
+        secret_store: SecretStorePlugin,
+        config: FileTransferOssConfigSchema | None = None,
+    ) -> None:
+        if config is not None and config.endpoint and config.bucket_name:
+            self._endpoint = config.endpoint
+            self._bucket_name = config.bucket_name
+            self._staging_root_path = (
+                config.staging_root_path or _DEFAULT_STAGING_ROOT
+            )
+            access_key_id, access_key_secret = secret_store.get_kv_secret(
+                config.secret_name
+            )
+        else:
+            self._endpoint = _DEFAULT_ENDPOINT
+            self._bucket_name = _DEFAULT_BUCKET
+            self._staging_root_path = _DEFAULT_STAGING_ROOT
+            access_key_id = secret_store.get_secret("secbaas.oss.access_key_id")
+            access_key_secret = secret_store.get_secret(
+                "secbaas.oss.access_key_secret"
+            )
         auth = oss2.Auth(access_key_id, access_key_secret)
-        self._bucket = oss2.Bucket(auth, OSS_ENDPOINT, OSS_BUCKET)
+        self._bucket = oss2.Bucket(auth, self._endpoint, self._bucket_name)
 
     # ── Staging path construction (D-14) ─────────────────────────────
 
@@ -45,7 +81,8 @@ class AliyunOssFileTransferBackend(FileTransferBackend):
         Pattern: ``{staging_root}/{tenant}[/{subdir}]/{transfer_id}/{filename}``
         """
         subdir_part = f"{subdir}/" if subdir else ""
-        return f"{STAGING_ROOT_PATH}/{tenant}/{subdir_part}{transfer_id}/{filename}"
+        root = self._staging_root_path.rstrip("/")
+        return f"{root}/{tenant}/{subdir_part}{transfer_id}/{filename}"
 
     def build_staging_prefix(
         self,
@@ -57,7 +94,8 @@ class AliyunOssFileTransferBackend(FileTransferBackend):
         The returned prefix ends with ``"/"``.
         """
         subdir_part = f"{subdir}/" if subdir else ""
-        return f"{STAGING_ROOT_PATH}/{tenant}/{subdir_part}"
+        root = self._staging_root_path.rstrip("/")
+        return f"{root}/{tenant}/{subdir_part}"
 
     def generate_upload_url(self, staging_path: str, expire_seconds: int) -> str:
         return self._bucket.sign_url("PUT", staging_path, expire_seconds)
