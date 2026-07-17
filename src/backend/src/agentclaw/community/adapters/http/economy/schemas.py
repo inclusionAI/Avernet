@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from agentclaw.community.core.economy.governance.domain.enums import GovernanceStatus
 from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
+from agentclaw.community.core.economy.governance.domain.ticket import compute_available_actions
 
 if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.domain.ticket import (
@@ -101,6 +103,11 @@ class OfflineBatchRequest(BaseModel):
     total_count: int = Field(0, description="Expected record count for quality check")
 
 
+class RemindRequest(BaseModel):
+    """Request body for admin tickets:remind — 手动补发 reminder。"""
+    worker_id: str = Field(..., min_length=1, description="worker_id (owner_id:bot_id)")
+
+
 class OfflineBatchResponse(BaseModel):
     """Response for offline-batch upsert (§7.2, upgraded)."""
     batch_id: str = ""
@@ -138,7 +145,7 @@ class WorkflowReviewResponse(BaseModel):
         """从 TicketActionOutcome 领域返回值构造响应(显式序列化,非裸 dict)。
 
         Args:
-            outcome: review_ticket / emergency_close 返回的领域 I/O 对象。
+            outcome: review_ticket / admin_close 返回的领域 I/O 对象。
 
         Returns:
             审批响应,status 取 enum 的 value 字符串。
@@ -165,6 +172,7 @@ class ReviewTicketItem(BaseModel):
     """评审工单列表单行 — 字段贴合 governance-admin.html 三栏展示。"""
 
     ticket_id: str | None = None
+    id: int | None = None
     bot_name: str | None = None
     owner_id: str | None = None
     governance_status: str = ""
@@ -174,6 +182,8 @@ class ReviewTicketItem(BaseModel):
     response: str | None = None
     review_reason: str | None = None
     gmt_create: str | None = None
+    gmt_modified: str | None = None
+    delivery_status: str | None = None
 
     @classmethod
     def from_ticket(cls, ticket: GovernanceTicket) -> ReviewTicketItem:
@@ -182,6 +192,7 @@ class ReviewTicketItem(BaseModel):
         status = ticket.governance_status
         return cls(
             ticket_id=ticket.ticket_id,
+            id=ticket.id,
             bot_name=ticket.bot_name,
             owner_id=ticket.owner_id,
             governance_status=status.value if hasattr(status, "value") else str(status or ""),
@@ -191,6 +202,8 @@ class ReviewTicketItem(BaseModel):
             response=ticket.user_feedback,
             review_reason=ticket.review_reason,
             gmt_create=_iso(ticket.gmt_create),
+            gmt_modified=_iso(ticket.gmt_modified),
+            delivery_status=ticket.delivery_status,
         )
 
 
@@ -252,11 +265,25 @@ def _extract_feedback_notification_id(payload_json: str | None) -> str | None:
     return None
 
 
+class TicketActionInfo(BaseModel):
+    """单个可做 review 动作(后端下发,前端动态渲染)。
+
+    后端成动作单一事实源:按用户反馈返回可做动作集 + 差异化 label + endpoint +
+    remark_required。前端据此渲染,不硬编码动作/文案/状态-动作映射。
+    """
+
+    value: str = Field(..., description="动作枚举值(approve_close/approve_scheduled/approve_whitelist/reject_for_reopen)")
+    label: str = Field(..., description="中文展示文案(按用户反馈差异化)")
+    endpoint: str = Field(..., description="POST 端点路径")
+    remark_required: bool = Field(False, description="备注是否必填")
+
+
 class ReviewTicketDetailResponse(BaseModel):
     """评审工单详情 — 列表字段外加详情面板所需全部字段。"""
 
     # 基础信息
     ticket_id: str | None = None
+    id: int | None = None
     worker_id: str | None = None
     bot_id: str | None = None
     owner_id: str | None = None
@@ -277,6 +304,14 @@ class ReviewTicketDetailResponse(BaseModel):
     response_source: str | None = None
     feedback_payload: str | None = None
     feedback_notification_id: str | None = None
+    available_actions: list[TicketActionInfo] = Field(
+        default_factory=list,
+        description="当前可做 review 动作(按用户反馈派生,前端动态渲染)",
+    )
+    # 白名单状态(单点查询,仅详情;列表接口不查以防 N+1)
+    in_whitelist: bool = False
+    # 投递状态(回写自 notify_log)
+    delivery_status: str | None = None
     # 评审 / 生命周期
     review_reason: str | None = None
     review_decision: str | None = None
@@ -294,12 +329,37 @@ class ReviewTicketDetailResponse(BaseModel):
     gmt_modified: str | None = None
 
     @classmethod
-    def from_ticket(cls, ticket: GovernanceTicket) -> ReviewTicketDetailResponse:
-        """从 GovernanceTicket 领域模型构造详情(读 snapshot 委托 + 实体字段,datetime→ISO)。"""
+    def _build_available_actions(cls, ticket: GovernanceTicket) -> list[TicketActionInfo]:
+        """按工单当前状态构造可做 review 动作(仅 waiting_review 下发,其余空)。
+
+        委托领域层 ``compute_available_actions(user_feedback)``(按反馈派生)。
+        非 waiting_review(open/scheduled/closed)不发动作。
+        """
+        if ticket.governance_status != GovernanceStatus.WAITING_REVIEW:
+            return []
+        return [
+            TicketActionInfo(**a) for a in compute_available_actions(ticket.user_feedback)
+        ]
+
+    @classmethod
+    def from_ticket(
+        cls,
+        ticket: GovernanceTicket,
+        *,
+        in_whitelist: bool = False,
+    ) -> ReviewTicketDetailResponse:
+        """从 GovernanceTicket 领域模型构造详情(读 snapshot 委托 + 实体字段,datetime→ISO)。
+
+        Args:
+            ticket: 工单领域模型。
+            in_whitelist: 该工单 (bot_id, owner_id) 是否在治理白名单中
+                (由 service 层单点查询传入,默认 False;列表接口不传以防 N+1)。
+        """
         s = ticket.snapshot
         status = ticket.governance_status
         return cls(
             ticket_id=ticket.ticket_id,
+            id=ticket.id,
             worker_id=ticket.worker_id,
             bot_id=ticket.bot_id,
             owner_id=ticket.owner_id,
@@ -318,6 +378,9 @@ class ReviewTicketDetailResponse(BaseModel):
             response_source=ticket.feedback_source,
             feedback_payload=ticket.feedback_payload,
             feedback_notification_id=_extract_feedback_notification_id(ticket.feedback_payload),
+            available_actions=cls._build_available_actions(ticket),
+            in_whitelist=in_whitelist,
+            delivery_status=ticket.delivery_status,
             review_reason=ticket.review_reason,
             review_decision=ticket.review_decision,
             reviewed_by=ticket.reviewed_by,
@@ -358,7 +421,7 @@ class WhitelistDeleteRequest(BaseModel):
 
 # ---------------------------------------------------------------------------
 # Admin: 制动 (brake) / 工单批量管理 / 白名单批量 / 按 worker 投递
-# 拆自原 5-action EmergencyRequest(action 开关分发多资源),全 body 驱动。
+# 拆自原 5-action 统一 action 端点(action 开关分发多资源,已退场),全 body 驱动。
 # ---------------------------------------------------------------------------
 
 class BrakeToggleRequest(BaseModel):
@@ -374,7 +437,7 @@ class TicketsCloseRequest(BaseModel):
     """Request body for closing one or more governance tickets.
 
     单条/批量统一入参:把要关的 ticket_id 放进列表,handler 循环调
-    ``admin_svc.emergency_close``(已委托 ``lifecycle_svc``,关工单+cancel_pending
+    ``admin_svc.admin_close``(已委托 ``lifecycle_svc``,关工单+cancel_pending
     由 driver 编排)。禁止直调 repo。
     """
     reason: str = Field(..., description="Close reason for audit")
@@ -382,10 +445,10 @@ class TicketsCloseRequest(BaseModel):
 
 
 class TicketsCloseAllRequest(BaseModel):
-    """Request body for closing all active governance tickets (emergency bulk).
+    """Request body for closing all active governance tickets (admin bulk).
 
     handler dispatch 复用状态机收口后的两方法:
-    ``only_unresponded=true`` → ``admin_svc.cancel_pending``(仅未响应,EMERGENCY_CLOSED);
+    ``only_unresponded=true`` → ``admin_svc.cancel_pending``(仅未响应,ADMIN_CLOSED);
     否则 → ``admin_svc.close_all_open``(全量含已响应,ADMIN_CLOSED)。两方法已联合编排
     task_record 工单主体 + notify_log 通知 + audit(状态机 Task 8 口径对齐)。
    cooldown_days 走 config.cool_down_days,无入参。
@@ -426,11 +489,44 @@ class BrakeStateResponse(BaseModel):
     open_count: int = 0
     whitelist_count: int = 0
 # ---------------------------------------------------------------------------
+# Audit log (read-only history query by worker)
+# ---------------------------------------------------------------------------
+
+class AuditLogItemResponse(BaseModel):
+    """Single governance audit row — mirrors ``AuditLogOrm.to_dict()``.
+
+    治理审计记录视图(只读),供前端按 worker 追溯治理动作。
+    字段对齐 ``ac_governance_audit`` 表(AuditLogOrm),无 ``worker_id`` 列
+    ——worker 维度由 owner_id:bot_id 复合定位(见 audit-logs 端点)。
+    """
+
+    id: int | None = None
+    run_id: str | None = None
+    notification_id: str | None = None
+    bot_id: str | None = None
+    owner_id: str | None = None
+    check_result: str | None = None
+    governance_decision: str | None = None
+    hit_dimensions: str | None = None
+    expected_token_saving: int | None = None
+    saving_ratio: float | None = None
+    action_taken: str | None = None
+    source: str | None = None
+    error_msg: str | None = None
+    actor_id: str | None = None
+    server_host: str | None = None
+    dry_run: int | None = None
+    env: str | None = None
+    gmt_create: datetime | None = None
+    gmt_modified: datetime | None = None
+
+
+# ---------------------------------------------------------------------------
 # Records / Notifications delete
 # ---------------------------------------------------------------------------
 
 class RecordsDeleteRequest(BaseModel):
-    """Request body for emergency records / notifications delete."""
+    """Request body for admin records / notifications delete."""
     table: str = Field(..., description="record_daily | notify_log")
     dt_versions: list[str] | None = Field(None, description="按 dt_version 删除 (record_daily)")
     ids: list[int] | None = Field(None, description="按主键 ID 批量删除 (record_daily)")

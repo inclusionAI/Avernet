@@ -77,6 +77,7 @@ def _sample_record(
     owner_id: str = "staff-001",
     bot_id: str = "bot-001",
     governance_decision: str = "actionable",
+    dt_version: str = "20260705",
 ) -> GovernanceRecord:
     """Build a minimal GovernanceRecord for process_record."""
     return GovernanceRecord(
@@ -84,7 +85,7 @@ def _sample_record(
         bot_id=bot_id,
         bot_name="TestBot",
         governance_decision=governance_decision,
-        dt_version="20260705",
+        dt_version=dt_version,
         hit_dimensions="token_usage",
         hit_dimensions_count=3,
         governance_max_priority="high",
@@ -105,6 +106,8 @@ def _make_ticket(
     governance_decision: str = "actionable",
     latest_decision: str = "actionable",
     close_reason: str | None = None,
+    response: str | None = None,
+    gmt_create: datetime | None = None,
     env: str = "dev",
 ) -> GovernanceTicketOrm:
     """Create a test ticket row."""
@@ -119,6 +122,7 @@ def _make_ticket(
         governance_decision=governance_decision,
         latest_decision=latest_decision,
         close_reason=close_reason,
+        response=response,
         env=env,
         bot_id=bot_id,
         owner_id=owner_id,
@@ -127,6 +131,7 @@ def _make_ticket(
         consecutive_normal_days=0,
         remind_count=0,
         last_sync_at=datetime.now(),
+        gmt_create=gmt_create or datetime.now(),
     )
     session.add(row)
     session.commit()
@@ -276,6 +281,110 @@ class TestProcessRecord:
         )
 
         assert result.action == "cooldown_filtered"
+
+
+# --- Tests: feedback_verdict strong-signal consumption (review-feedback-loop) ---
+
+
+class TestFeedbackVerdictConsumption:
+    """建单消费上次工单 feedback_verdict 强信号:通知带提示 + 审计带 verdict/remark。"""
+
+    def _seed_closed_with_verdict(
+        self, session, *, response, review_decision, close_reason="review_rejected",
+        review_remark=None,
+    ):
+        """种一条 closed 工单(带 user feedback + admin review),cooldown 过期。
+        verdict = compute_feedback_verdict(response, review_decision, 'closed')。"""
+        row = GovernanceTicketOrm(
+            ticket_id=uuid.uuid4().hex,
+            worker_id="staff-001:bot-001",
+            active_worker=None,  # closed 释放
+            governance_status="closed",
+            governance_decision="actionable",
+            latest_decision="actionable",
+            close_reason=close_reason,
+            env="dev",
+            bot_id="bot-001",
+            owner_id="staff-001",
+            dt_version="20260705",
+            bot_name="TestBot",
+            consecutive_normal_days=0,
+            remind_count=0,
+            last_sync_at=datetime.now(),
+            response=response,
+            review_decision=review_decision,
+            reviewed_by="admin-1",
+            reviewed_at=datetime.now(),
+            review_remark=review_remark,
+            cooldown_until=datetime.now() - timedelta(days=1),  # 过期,不被 cooldown 过滤
+        )
+        session.add(row)
+        session.commit()
+        return row
+
+    def test_whitelist_denied_strong_signal_hint_and_audit(self, session, engine):
+        """whitelist_denied(用户加白被驳回)→ 新单通知带提示 + 审计带 last_verdict。"""
+        svc, db = _build_svc(engine)
+        self._seed_closed_with_verdict(
+            session, response="whitelist", review_decision="reject_for_reopen",
+            review_remark="加白理由不充分",
+        )
+        result = svc.process_record(
+            _sample_record(), run_id="run-vd", notify_source="offline_batch",
+            dry_run=True,
+        )
+        assert result.action == "would_create"
+        assert "上次用户申请加白已被管理员驳回" in (result.notification_md_preview or "")
+        # 审计(自管 session,经 audit_repo 写入)
+        with db.orm_session() as s:
+            audit = s.query(AuditLogOrm).filter_by(run_id="run-vd").first()
+            assert audit is not None
+            assert "last_verdict=whitelist_denied" in (audit.error_msg or "")
+            assert "last_review_remark=加白理由不充分" in (audit.error_msg or "")
+
+    def test_dispute_accepted_strong_signal(self, session, engine):
+        svc, db = _build_svc(engine)
+        self._seed_closed_with_verdict(
+            session, response="dispute", review_decision="approve_close",
+            close_reason="approve_close",
+        )
+        result = svc.process_record(
+            _sample_record(), run_id="run-vd2", notify_source="offline_batch",
+            dry_run=True,
+        )
+        assert "上次用户申诉已被管理员采纳关单" in (result.notification_md_preview or "")
+        with db.orm_session() as s:
+            audit = s.query(AuditLogOrm).filter_by(run_id="run-vd2").first()
+            assert "last_verdict=dispute_accepted" in (audit.error_msg or "")
+
+    def test_non_strong_signal_no_hint(self, session, engine):
+        """非强信号(confirmed)→ 通知无提示句;审计 last_verdict 仍记录(verdict 非 other)。"""
+        svc, db = _build_svc(engine)
+        self._seed_closed_with_verdict(
+            session, response="optimized", review_decision="approve_close",
+            close_reason="approve_close",
+        )
+        result = svc.process_record(
+            _sample_record(), run_id="run-vd3", notify_source="offline_batch",
+            dry_run=True,
+        )
+        assert "💡" not in (result.notification_md_preview or "")
+        # confirmed 非 other → 审计仍记 last_verdict(但不带提示)
+        with db.orm_session() as s:
+            audit = s.query(AuditLogOrm).filter_by(run_id="run-vd3").first()
+            assert "last_verdict=confirmed" in (audit.error_msg or "")
+
+    def test_no_prior_closed_no_audit_fragment(self, session, engine):
+        """无上一 closed 工单 → 审计 error_msg 不含 last_verdict。"""
+        svc, db = _build_svc(engine)
+        svc.process_record(
+            _sample_record(), run_id="run-vd4", notify_source="offline_batch",
+            dry_run=True,
+        )
+        with db.orm_session() as s:
+            audit = s.query(AuditLogOrm).filter_by(run_id="run-vd4").first()
+            assert audit is not None
+            assert audit.error_msg is None or "last_verdict" not in (audit.error_msg or "")
 
 
 # --- Tests: process_offline_batch ---
@@ -591,6 +700,113 @@ class TestIncrementalIdempotency:
         # 工单 dt 仍 0712(未被旧数据覆盖)
         with db.orm_session() as s:
             assert s.query(GovernanceTicketOrm).first().dt_version == "20260712"
+
+
+# --- Tests: stale-replace (未回复换新) ---
+
+
+class TestStaleReplace:
+    """未回复 + actionable + 开够7天 → 关老换新;否则刷快照不换。"""
+
+    def test_stale_replace_open_8days_unresponded(self, session, engine):
+        """开够8天 + 未回复 + actionable → 关老(stale_replaced) + 建新单 first_send。"""
+        svc, db = _build_svc(engine)
+        old_gmt = datetime.now() - timedelta(days=8)
+        _make_ticket(session, gmt_create=old_gmt, response=None)
+
+        record = _sample_record(dt_version="20260706")
+        result = svc.process_record(record, run_id="run-1", notify_source="offline_batch")
+
+        assert result.action == "enqueued"
+        assert result.entered_governance_scope is True
+
+        with db.orm_session() as s:
+            tickets = s.query(GovernanceTicketOrm).order_by(GovernanceTicketOrm.id).all()
+            assert len(tickets) == 2
+            # 老工单 closed + stale_replaced
+            assert tickets[0].governance_status == "closed"
+            assert tickets[0].close_reason == "stale_replaced"
+            assert tickets[0].cooldown_until is None
+            # 新工单 open
+            assert tickets[1].governance_status == "open"
+            assert tickets[1].dt_version == "20260706"
+
+    def test_no_replace_open_3days_unresponded(self, session, engine):
+        """开了3天 + 未回复 → 刷快照不换(防 spam)。"""
+        svc, db = _build_svc(engine)
+        old_gmt = datetime.now() - timedelta(days=3)
+        old = _make_ticket(session, gmt_create=old_gmt, response=None)
+
+        record = _sample_record(dt_version="20260706")
+        result = svc.process_record(record, run_id="run-1", notify_source="offline_batch")
+
+        # 刷新(refresh),不换
+        assert result.action in ("still_actionable", "enqueued", "")
+        assert result.ticket_id == old.ticket_id
+
+        with db.orm_session() as s:
+            tickets = s.query(GovernanceTicketOrm).all()
+            assert len(tickets) == 1  # 仍是老工单,没新建
+            assert tickets[0].governance_status == "open"
+
+    def test_no_replace_replied_10days(self, session, engine):
+        """已回复(response 非空) + 开10天 → 不换(口径保护)。"""
+        svc, db = _build_svc(engine)
+        old_gmt = datetime.now() - timedelta(days=10)
+        old = _make_ticket(session, gmt_create=old_gmt, response="optimized")
+
+        record = _sample_record(dt_version="20260706")
+        result = svc.process_record(record, run_id="run-1", notify_source="offline_batch")
+
+        with db.orm_session() as s:
+            tickets = s.query(GovernanceTicketOrm).all()
+            assert len(tickets) == 1  # 没新建
+            assert tickets[0].response == "optimized"
+            assert tickets[0].governance_status == "open"
+
+    def test_no_replace_scheduled_status(self, session, engine):
+        """scheduled 状态 + 未回复 → 不换(仅 open 才换)。"""
+        svc, db = _build_svc(engine)
+        old_gmt = datetime.now() - timedelta(days=8)
+        _make_ticket(session, governance_status="scheduled", gmt_create=old_gmt, response=None)
+
+        record = _sample_record(dt_version="20260706")
+        result = svc.process_record(record, run_id="run-1", notify_source="offline_batch")
+
+        with db.orm_session() as s:
+            tickets = s.query(GovernanceTicketOrm).all()
+            assert len(tickets) == 1  # 没新建
+
+    def test_multi_round_stale_replace(self, session, engine):
+        """两轮换新:第一次8天→换新;推进新单gmt_create到8天前→再换新。"""
+        svc, db = _build_svc(engine)
+        old_gmt = datetime.now() - timedelta(days=8)
+        _make_ticket(session, gmt_create=old_gmt, response=None)
+
+        # 第一轮:8天 → 换新
+        record1 = _sample_record(dt_version="20260706")
+        svc.process_record(record1, run_id="run-1", notify_source="offline_batch")
+
+        with db.orm_session() as s:
+            tickets = s.query(GovernanceTicketOrm).order_by(GovernanceTicketOrm.id).all()
+            assert len(tickets) == 2
+            new_ticket = tickets[1]
+            assert new_ticket.governance_status == "open"
+            # 推进新单 gmt_create 到8天前(模拟又过了7天)
+            new_ticket.gmt_create = datetime.now() - timedelta(days=8)
+            s.commit()
+
+        # 第二轮:新单又8天 → 再换新
+        record2 = _sample_record(dt_version="20260707")
+        svc.process_record(record2, run_id="run-2", notify_source="offline_batch")
+
+        with db.orm_session() as s:
+            tickets = s.query(GovernanceTicketOrm).order_by(GovernanceTicketOrm.id).all()
+            assert len(tickets) == 3  # 老老+老+新
+            stale_closed = [t for t in tickets if t.close_reason == "stale_replaced"]
+            assert len(stale_closed) == 2
+            open_tickets = [t for t in tickets if t.governance_status == "open"]
+            assert len(open_tickets) == 1
 
 
 if __name__ == "__main__":

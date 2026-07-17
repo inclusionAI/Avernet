@@ -685,7 +685,7 @@ class TestTicketTransitions:
 
     def test_open_to_closed(self) -> None:
         t = _make_ticket()
-        t.close(close_reason="emergency_closed", closed_at=datetime.now())
+        t.close(close_reason="admin_closed", closed_at=datetime.now())
         assert t.governance_status == GovernanceStatus.CLOSED
         assert t.assignee is None  # closed releases active_worker
 
@@ -1023,13 +1023,13 @@ class TestTicketFromOrm:
         assert t.consecutive_normal_days == 0  # fallback
 
     def test_sealed_not_leaked(self) -> None:
-        """sealed 列(id/env)不泄漏到领域模型;gmt_create/gmt_modified 作为只读元信息保留。"""
+        """sealed 列(env)不泄漏到领域模型;id/gmt_create/gmt_modified 作为只读元信息保留。"""
         t = GovernanceTicket.from_orm(_make_ticket_orm_obj())
-        for attr in ("env", "id"):
+        for attr in ("env",):
             assert not hasattr(t, attr), f"domain should not have sealed attr: {attr}"
-        # gmt_create/gmt_modified 现为领域只读元信息,需可读
-        assert hasattr(t, "gmt_create")
-        assert hasattr(t, "gmt_modified")
+        # id/gmt_create/gmt_modified 现为领域只读元信息,需可读
+        for attr in ("id", "gmt_create", "gmt_modified"):
+            assert hasattr(t, attr)
         assert t.gmt_create == datetime(2026, 7, 9, 8, 0, 0)
 
     def test_saving_ratio_float_conversion(self) -> None:

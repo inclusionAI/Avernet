@@ -262,11 +262,11 @@ class TestAcceptFeedback:
 
 
 # ---------------------------------------------------------------------------
-# pause / review / emergency_close (ticket-review entry)
+# pause / review / admin_close (ticket-review entry)
 # ---------------------------------------------------------------------------
 
 
-class TestPauseReviewEmergency:
+class TestPauseReviewAdmin:
     def test_pause_open_to_waiting_review(self) -> None:
         svc, db, _ = _build_svc()
         _seed_ticket(db, ticket_id="T-pause", status="open")
@@ -287,23 +287,37 @@ class TestPauseReviewEmergency:
         assert t.review_decision == "approve_close"
         assert t.reviewed_by == "admin-1"
 
-    def test_emergency_close_open_to_closed(self) -> None:
+    def test_review_approve_scheduled_to_scheduled(self) -> None:
+        """approve_scheduled → SCHEDULED(不关单),close_reason='schedule_approved'。"""
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-sch", status="waiting_review")
+        assert svc.review_ticket(
+            "T-sch", review_decision="approve_scheduled",
+            reviewed_by="admin-1", review_remark="排期 ok",
+        ) is True
+        t = svc._task_repo.find_by_ticket_id("T-sch")  # noqa: SLF001
+        assert t.governance_status == GovernanceStatus.SCHEDULED
+        assert t.review_decision == "approve_scheduled"
+        assert t.close_reason == "schedule_approved"
+        assert t.reviewed_by == "admin-1"
+
+    def test_admin_close_open_to_closed(self) -> None:
         svc, db, _ = _build_svc()
         _seed_ticket(db, ticket_id="T-emg", status="open")
-        assert svc.emergency_close("T-emg", now=datetime.now()) is True
+        assert svc.admin_close("T-emg", now=datetime.now()) is True
         t = svc._task_repo.find_by_ticket_id("T-emg")  # noqa: SLF001
         assert t.governance_status == GovernanceStatus.CLOSED
-        assert t.close_reason == CloseReason.EMERGENCY_CLOSED
+        assert t.close_reason == CloseReason.ADMIN_CLOSED
 
-    def test_emergency_close_idempotent_on_closed(self) -> None:
+    def test_admin_close_idempotent_on_closed(self) -> None:
         """Already-closed → no-op returns False (idempotent guard in driver)."""
         svc, db, _ = _build_svc()
         _seed_ticket(db, ticket_id="T-emg2", status="closed")
-        assert svc.emergency_close("T-emg2", now=datetime.now()) is False
+        assert svc.admin_close("T-emg2", now=datetime.now()) is False
 
-    def test_emergency_close_not_found(self) -> None:
+    def test_admin_close_not_found(self) -> None:
         svc, _, _ = _build_svc()
-        assert svc.emergency_close("nope", now=datetime.now()) is False
+        assert svc.admin_close("nope", now=datetime.now()) is False
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +332,7 @@ class TestBulkCloseOpen:
         _seed_ticket(db, ticket_id="T-b2", status="scheduled", worker="o2:b2")
         _seed_ticket(db, ticket_id="T-b3", status="closed", worker="o3:b3")
         count = svc.bulk_close_open(
-            close_reason=CloseReason.EMERGENCY_CLOSED, now=datetime.now(),
+            close_reason=CloseReason.ADMIN_CLOSED, now=datetime.now(),
         )
         assert count == 2  # open + scheduled; closed excluded by WHERE
         for tid in ("T-b1", "T-b2", "T-b3"):

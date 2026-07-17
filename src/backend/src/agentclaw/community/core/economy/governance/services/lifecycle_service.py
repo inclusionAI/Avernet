@@ -222,6 +222,32 @@ class GovernanceLifecycleService:
         self._cancel_pending(ticket_id)
         return True
 
+    def close_for_stale_replace(
+        self, ticket_id: str, *, now: datetime,
+    ) -> bool:
+        """未回复换新 → CLOSED(stale_replaced) + cancel pending。
+
+        方案 A 链路同 close_for_whitelist_hit:find → ticket.close() → save →
+        cancel pending。不设 cooldown_until(stale_replace 去抖靠 gmt_create 节奏,
+        与 cooldown 体系隔离)。非法转移被守卫捕获 → audit + False。
+
+        Returns True if found+closed, False if not found。
+        """
+        ticket = self._task_repo.find_by_ticket_id(ticket_id)
+        if ticket is None:
+            return False
+        try:
+            ticket.close(
+                close_reason=CloseReason.STALE_REPLACED, closed_at=now,
+            )
+        except IllegalTicketTransitionError as exc:
+            self._audit_illegal(ticket_id, "close_for_stale_replace", exc)
+            return False
+        if not self._task_repo.save_ticket(ticket):
+            return False
+        self._cancel_pending(ticket_id)
+        return True
+
     # ── Entry: cron tick (scan_service) ────────────────────────────────
 
     def transition_schedule_due(
@@ -425,13 +451,13 @@ class GovernanceLifecycleService:
         self._cancel_pending(ticket_id)
         return True
 
-    def emergency_close(
+    def admin_close(
         self, ticket_id: str, *, now: datetime,
     ) -> bool:
-        """Any non-CLOSED → CLOSED(emergency_closed) + cancel pending.
+        """Any non-CLOSED → CLOSED(admin_closed) + cancel pending.
 
         方案 A 链路:find → 幂等检查(已 CLOSED 返 False)→
-        ``ticket.close(EMERGENCY_CLOSED)``(守卫激活)→ ``save_ticket`` →
+        ``ticket.close(ADMIN_CLOSED)``(守卫激活)→ ``save_ticket`` →
         取消通知。审计由调用方(admin_service)拥有(携带 reason +
         actor_id=admin_id)—— 与 pause_ticket / review_ticket 等
         sibling 方法一致,driver 不重复写审计。
@@ -446,10 +472,10 @@ class GovernanceLifecycleService:
             return False  # already closed — idempotent no-op
         try:
             ticket.close(
-                close_reason=CloseReason.EMERGENCY_CLOSED, closed_at=now,
+                close_reason=CloseReason.ADMIN_CLOSED, closed_at=now,
             )
         except IllegalTicketTransitionError as exc:
-            self._audit_illegal(ticket_id, "emergency_close", exc)
+            self._audit_illegal(ticket_id, "admin_close", exc)
             return False
         if not self._task_repo.save_ticket(ticket):
             return False
@@ -457,7 +483,7 @@ class GovernanceLifecycleService:
         return True
 
     def bulk_close_open(self, *, close_reason: str, now: datetime) -> int:
-        """Bulk emergency-close all open/scheduled tickets — joint orchestration:
+        """Bulk admin-close all open/scheduled tickets — joint orchestration:
         land ``task_record`` CLOSED (ticket machine, via the bulk primitive)
         + cancel pending notifies (notify-delivery machine, one-way side
         effect). Ticket is cause, notify is effect.
@@ -490,11 +516,11 @@ class GovernanceLifecycleService:
     def bulk_close_by_ticket_ids(
         self, ticket_ids: list[str], *, now: datetime,
     ) -> int:
-        """Per-ticket emergency-close by ``ticket_id`` set — Task 8 用:
+        """Per-ticket admin-close by ``ticket_id`` set — Task 8 用:
         cancel_pending / bulk_whitelist 取消通知投递后,按被关通知的
         ``ticket_id`` 集合关对应 ``task_record`` 主体,口径对齐通知侧。
 
-        逐条走 :meth:`emergency_close` 链路(find→守卫激活→save→
+        逐条走 :meth:`admin_close` 链路(find→守卫激活→save→
         cancel_pending),激活领域模型白名单——**不裸用全量**
         :meth:`bulk_close_open`(会多关已反馈的 scheduled 单)。
         幂等:已 CLOSED / not-found / 非法态均返回 False 且不计数。
@@ -508,6 +534,6 @@ class GovernanceLifecycleService:
         """
         closed = 0
         for ticket_id in ticket_ids:
-            if self.emergency_close(ticket_id, now=now):
+            if self.admin_close(ticket_id, now=now):
                 closed += 1
         return closed

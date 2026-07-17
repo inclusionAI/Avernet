@@ -1,4 +1,4 @@
-"""Unit tests for governance emergency delete endpoint.
+"""Unit tests for governance admin delete endpoint.
 
 Covers router-level logic:
   - POST /admin/records/delete
@@ -186,8 +186,8 @@ class FakeGovernanceConfig:
 
 
 class FakeAdminService:
-    """Delegates delete_records / delete_whitelist_entry to real
-    GovernanceAdminService logic backed by in-memory fakes.
+    """Delegates delete_records to real GovernanceAdminService logic
+    backed by in-memory fakes.
 
     This lets the router-level tests exercise the full service path
     (router → admin_svc.delete_records) without a real database.
@@ -251,13 +251,6 @@ class FakeAdminService:
 
     def delete_records(self, body: dict, operator: str) -> dict:
         return self._real_svc.delete_records(body, operator)
-
-    def delete_whitelist_entry(
-        self, *, bot_id: str, owner_id: str, reason: str, operator: str,
-    ) -> dict:
-        return self._real_svc.delete_whitelist_entry(
-            bot_id=bot_id, owner_id=owner_id, reason=reason, operator=operator,
-        )
 
 
 # ===========================================================================

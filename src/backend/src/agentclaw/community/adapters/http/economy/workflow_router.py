@@ -6,7 +6,9 @@ admin_router 抽出来(审批能力迁出 admin_router,运维归运维、审批�
 
   - GET  /workflow/tickets                 工单列表(按治理状态过滤 + 分页)
   - GET  /workflow/tickets/detail          单工单详情(ticket_id 走 query)
+  - GET  /workflow/tickets/pending-notification  查工单待回复通知(notification_id)
   - POST /workflow/tickets/review          审批动作(ticket_id 走 body,waiting_review 三态流转)
+  - GET  /workflow/audit-logs              按 worker 查全部治理审计(只读分页)
 
 数据流转全程走领域模型(``GovernanceTicket`` / ``TicketActionOutcome``),
 router 层用带 ``from_ticket()`` / ``from_outcome()`` 的 Pydantic schema 做
@@ -28,12 +30,16 @@ from agentclaw.community.adapters.http.dependencies import (
 )
 from agentclaw.community.adapters.http.economy.schemas import (
     ApiResponse,
+    AuditLogItemResponse,
     ReviewTicketDetailResponse,
     ReviewTicketListResponse,
+    TicketsCloseAllRequest,
+    TicketsCloseRequest,
     WorkflowReviewRequest,
     WorkflowReviewResponse,
 )
 from agentclaw.community.api.governance_service import (
+    GovernanceAuditReadServiceProtocol,
     GovernanceWorkflowServiceProtocol,
 )
 from agentclaw.community.di import Injected
@@ -163,11 +169,97 @@ async def get_review_ticket_detail(
     只读 GET;工单不存在 → 404。ticket_id 走 query(与 admin 写操作零 path 参数风格统一)。
     """
     del ctx  # RequestContext 仅用于走 AuthPlugin 鉴权链路
-    ticket = await asyncio.to_thread(admin_svc.get_review_ticket_detail, ticket_id)
-    if ticket is None:
+    detail = await asyncio.to_thread(
+        admin_svc.build_review_ticket_detail, ticket_id,
+    )
+    if detail is None:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    data = ReviewTicketDetailResponse.from_ticket(ticket)
+    ticket, in_whitelist = detail
+    data = ReviewTicketDetailResponse.from_ticket(ticket, in_whitelist=in_whitelist)
     return ApiResponse(success=True, data=data.model_dump())
+
+
+# ── Workflow: 待回复通知查询 ─────────────────────────────────────────────
+
+
+@workflow_router.get(
+    "/tickets/pending-notification",
+    summary="查工单待回复通知(notification_id)",
+)
+async def get_pending_notification(
+    ticket_id: str = Query(..., description="工单 ID"),
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+) -> ApiResponse:
+    """查工单当前通知的 notification_id。
+
+    open 工单(用户未反馈)的 notification_id 在 notify_log,不在 task_record。
+    前端 admin review / card-callback 推进状态时需此 ID。
+    优先返回 pending/sending(待回复);无则最近一条 sent。
+    """
+    del ctx  # RequestContext 仅用于走 AuthPlugin 鉴权链路
+    result = await asyncio.to_thread(admin_svc.get_pending_notification, ticket_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No notification found for ticket")
+    return ApiResponse(success=True, data=result)
+
+
+# ── Workflow: 审计查询(只读) ──────────────────────────────────────────────
+
+_AuditReadSvc = GovernanceAuditReadServiceProtocol
+
+
+@workflow_router.get(
+    "/audit-logs",
+    summary="按 worker 查全部治理审计(只读分页,owner/bot/复合 worker_id)",
+)
+async def list_audit_logs(
+    ctx: RequestContext = Depends(get_request_context),
+    audit_read_svc: _AuditReadSvc = Injected(_AuditReadSvc),
+    worker_id: str | None = Query(
+        None, description="复合 worker_id (owner_id:bot_id),优先解析",
+    ),
+    owner_id: str | None = Query(None, description="按 owner_id 精确筛选"),
+    bot_id: str | None = Query(None, description="按 bot_id 精确筛选"),
+    action: str | None = Query(
+        None, description="按 action_taken 过滤(AuditAction 枚举值)",
+    ),
+    limit: int = Query(50, ge=1, le=200, description="分页上限 1~200"),
+    offset: int = Query(0, ge=0, description="分页偏移"),
+) -> ApiResponse:
+    """只读分页治理审计查询。
+
+    按 worker 维度拉取该 worker 全历史治理审计动作(加白/删白/审批/关单/
+    扫描命中/通知发送/反馈),按 ``gmt_create`` 倒序分页,带 ``total``。
+    ``worker_id(owner_id:bot_id)`` 优先解析,覆盖独立的 ``owner_id``/
+    ``bot_id``;``action`` 可选按 ``action_taken`` 过滤。至少需一个过滤维度
+    (worker/owner/bot/action),否则 400(防全表扫)。
+
+    只读:无副作用、不写审计。item 经 ``AuditLogItemResponse`` 序列化(对齐
+    ``AuditLogOrm.to_dict()``)。鉴权走 ``get_request_context``(同他端点)。
+    """
+    del ctx  # RequestContext 仅用于走 AuthPlugin 鉴权链路
+    try:
+        items, total = await asyncio.to_thread(
+            audit_read_svc.list_audit_by_worker,
+            worker_id=worker_id,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            action=action,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return ApiResponse(
+        success=True,
+        data={
+            "items": [AuditLogItemResponse(**it).model_dump(mode="json") for it in items],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        },
+    )
 
 
 # ── Workflow: 审批动作 ────────────────────────────────────────────────────
@@ -198,3 +290,65 @@ async def review_ticket(
     _raise_on_admin_error(result)
     data = WorkflowReviewResponse.from_outcome(result)
     return ApiResponse(success=True, data=data.model_dump())
+
+
+# ── Workflow: 关单(从 admin_router 迁入,工单运营归属) ─────────────────
+
+
+@workflow_router.post(
+    "/tickets:close",
+    summary="关闭工单(单/多,body ticket_ids 循环 admin_close)",
+)
+async def tickets_close(
+    body: TicketsCloseRequest,
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+) -> ApiResponse:
+    """Close one or more governance tickets (admin_close 循环)。
+
+    单条/批量统一入参:handler 循环调 ``admin_svc.admin_close``(已委托
+    ``lifecycle_svc``,关工单 + cancel_pending 由 driver 编排)。禁止直调 repo。
+    """
+    operator = ctx.user_id
+
+    def _close_all():
+        results = []
+        for ticket_id in body.ticket_ids:
+            result = admin_svc.admin_close(
+                ticket_id=ticket_id,
+                admin_id=operator,
+                reason=body.reason,
+            )
+            results.append(result.to_dict())
+        return results
+
+    results = await asyncio.to_thread(_close_all)
+    return ApiResponse(success=True, data=results)
+
+
+@workflow_router.post(
+    "/tickets:close-all",
+    summary="全部关单(dispatch:cancel_pending 仅未响应 / close_all_open 全量)",
+)
+async def tickets_close_all(
+    body: TicketsCloseAllRequest,
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+) -> ApiResponse:
+    """Close all active governance tickets (admin bulk)。
+
+    ``only_unresponded=true`` → ``cancel_pending``(仅未响应,ADMIN_CLOSED,
+    label=cancelled);否则 → ``close_all_open``(全量含已响应,ADMIN_CLOSED,
+    label=closed)。两方法经状态机 Task 8 已联合编排 task_record 主体 +
+    notify_log 通知 + audit。cooldown_days 走 config(无入参)。
+    """
+    operator = ctx.user_id
+    if body.only_unresponded:
+        result = await asyncio.to_thread(
+            admin_svc.cancel_pending, reason=body.reason, operator=operator,
+        )
+    else:
+        result = await asyncio.to_thread(
+            admin_svc.close_all_open, reason=body.reason, operator=operator,
+        )
+    return ApiResponse(success=True, data=result.to_dict())
