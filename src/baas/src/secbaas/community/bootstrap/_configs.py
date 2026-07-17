@@ -196,6 +196,7 @@ class PluginConfig(ConfigSchema):
     bot_service: str = Field(default="stub", pattern=r"^(real|local|stub)$")
 
     engine_adapter: str = Field(default="stub", pattern=r"^(real|stub)$")
+    file_transfer: str = Field(default="noop", pattern=r"^(noop|oss)$")
     database: DatabasePluginConfig = Field(default_factory=DatabasePluginConfig)
     sandbox: SandboxPluginConfig = Field(default_factory=SandboxPluginConfig)
 
