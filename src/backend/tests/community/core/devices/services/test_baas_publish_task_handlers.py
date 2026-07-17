@@ -1,5 +1,5 @@
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.devices.models import AllocatedDevice, DeviceBindingStatus
@@ -47,6 +47,7 @@ def _make_baas_device_service(
     repo: MagicMock,
     bot_query: MagicMock | None = None,
     vault: TokenVault | None = None,
+    template_service: MagicMock | None = None,
 ) -> BaasDeviceService:
     return BaasDeviceService(
         repository=repo,
@@ -57,6 +58,7 @@ def _make_baas_device_service(
         mcp_sync=MagicMock(),
         template_resolver=MagicMock(),
         vault=vault,
+        template_service=template_service,
     )
 
 
@@ -794,12 +796,18 @@ def test_create_init_marks_active_after_init_and_alive():
         "bot_type": "service",
         "admins": ["u1001", "u1002"],
         "template_type": "applicationCoding",
-        "template_config": {"token": encrypted_token},
+        # ac_bots does not own template_config; create-init must reload it from
+        # ac_templates through TemplateService.  Keep this empty to guard the
+        # historical bug where token lookup used the wrong table.
+        "template_config": {},
     }
+    template_service = MagicMock()
+    template_service.get_template_config.return_value = {"token": encrypted_token}
     service = _make_baas_device_service(
         repo=repo,
         bot_query=bot_query,
         vault=TokenVault("master-key-123"),
+        template_service=template_service,
     )
     service._run_container_init = MagicMock()
     service._sync_bot_config_when_device_active = MagicMock()
@@ -813,6 +821,7 @@ def test_create_init_marks_active_after_init_and_alive():
     )
 
     assert ok is True
+    template_service.get_template_config.assert_called_once_with("bot-001")
     service._run_container_init.assert_called_once_with(
         bot_uuid="BAAS-CTR-001",
         device=AllocatedDevice(
@@ -833,6 +842,66 @@ def test_create_init_marks_active_after_init_and_alive():
         status=DeviceBindingStatus.ACTIVE.value,
     )
     repo.update_bot_status_on_device_active.assert_called_once_with(binding_id=42)
+
+
+def test_create_init_reads_codefuse_token_from_template_service_and_writes_container():
+    repo = MagicMock()
+    vault = TokenVault("master-key-123")
+    encrypted_token = vault.encrypt("plain-token")
+    assert encrypted_token.startswith("enc:v1:")
+    binding = _make_binding(
+        status=DeviceBindingStatus.PENDING.value,
+        device_props={
+            "publish_id": "1001",
+            "bot_uuid": "BAAS-CTR-001",
+            "callback_token": "tok-123",
+        },
+    )
+    updated_binding = _make_binding(
+        status=DeviceBindingStatus.ACTIVE.value,
+        device_props=binding.device_props,
+    )
+    repo.get_by_id.side_effect = [binding, updated_binding]
+    repo.get_by_device_id.return_value = binding
+    bot_query = MagicMock()
+    bot_query.get_by_binding_id.return_value = {
+        "bot_id": "bot-001",
+        "owner_id": "owner-001",
+        "active_engine": "aicoding",
+        "bot_type": "service",
+        "admins": [],
+        "template_type": "applicationCoding",
+        # Historical bug guard: ac_bots has no template_config, so this value
+        # must not be the source for CodeFuse token lookup.
+        "template_config": {},
+    }
+    template_service = MagicMock()
+    template_service.get_template_config.return_value = {"token": encrypted_token}
+    service = _make_baas_device_service(
+        repo=repo,
+        bot_query=bot_query,
+        vault=vault,
+        template_service=template_service,
+    )
+    service._sync_bot_config_when_device_active = MagicMock()
+    service._sync_mcps_when_device_active = MagicMock()
+
+    with patch(
+        "agentclaw.community.core.devices.services.baas_device_service.time.sleep",
+    ), patch(
+        "agentclaw.community.core.devices.services.baas_codefuse_writer.write_codefuse_token_baas",
+    ) as writer:
+        ok, message = service.run_create_init_once(
+            binding_id=42,
+            bot_id="bot-001",
+            owner_id="owner-001",
+            publish_id=1001,
+        )
+
+    assert ok is True, message
+    template_service.get_template_config.assert_called_once_with("bot-001")
+    writer.assert_called_once()
+    assert writer.call_args.args[1:] == ("BAAS-CTR-001", "plain-token")
 
 
 def test_create_init_marks_failed_when_init_fails():
