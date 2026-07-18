@@ -532,6 +532,20 @@ class GovernanceRecordService:
                 ),
                 dry_run=0,
             )
+        else:
+            # dry_run 预览也留痕(对齐路 3 _create_observed_ticket 与既有
+            # Step4 stale-skip 分支的 dry_run 审计口径)
+            self._audit_repo.add_audit(
+                run_id, bot_id, owner_id,
+                check_result="actionable",
+                governance_decision=record.governance_decision,
+                hit_dimensions=record.hit_dimensions,
+                action_taken=AuditAction.WHITELIST_OBSERVED,
+                error_msg=(
+                    "stale_dt_version_skipped" if is_stale else None
+                ),
+                dry_run=1,
+            )
 
         return RecordProcessResult(
             worker_key=worker_key,
