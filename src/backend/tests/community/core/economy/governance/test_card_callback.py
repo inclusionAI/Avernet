@@ -35,7 +35,7 @@ from agentclaw.community.core.economy.governance.services.lifecycle_service impo
     GovernanceLifecycleService,
 )
 
-from .conftest import FakeDB, FakeGovernanceConfig, FakeWhitelistService
+from .conftest import FakeDB, FakeGovernanceConfig
 
 
 def _make_notification(session, **overrides):

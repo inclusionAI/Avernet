@@ -192,9 +192,6 @@ class TestResolveEdgeBranches:
             assert ticket.governance_status == "waiting_review"
 
         # 3. 审计 user_whitelisted(申请动作)仍写
-        from agentclaw.community.core.economy.governance.repositories.audit_repo import (
-            GovernanceAuditRepository,
-        )
         from agentclaw.community.core.economy.governance.repositories.orm import (
             AuditLogOrm,
         )
