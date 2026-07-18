@@ -256,3 +256,66 @@ class TestFindLatestClosedPredicate:
 
     def test_no_closed_returns_none(self, repo):
         assert repo.find_latest_closed_by_worker("nobody:here") is None
+
+
+# ── find_observed_ticket → == GovernanceStatus.OBSERVED ────────────────
+
+
+class TestFindObservedTicket:
+    """find_observed_ticket 按 worker_id 取最近 OBSERVED 单(gmt_modified DESC)。
+
+    口径与 find_latest_closed_by_worker 一致用 worker_id(非 active_worker,
+    因加白关单时 active_worker 已置 NULL)。OBSERVED 不设 closed_at,故按
+    gmt_modified 排序。
+    """
+
+    def test_returns_most_recently_modified_observed(self, repo, engine):
+        worker = "ownerZ:botZ"
+        older = datetime(2026, 1, 1)
+        newer = datetime(2026, 6, 1)
+        _insert(
+            engine,
+            _make_ticket(
+                ticket_id="obs-old", worker_id=worker, active_worker=None,
+                governance_status=GovernanceStatus.OBSERVED.value,
+                gmt_modified=older,
+            ),
+            _make_ticket(
+                ticket_id="obs-new", worker_id=worker, active_worker=None,
+                governance_status=GovernanceStatus.OBSERVED.value,
+                gmt_modified=newer,
+            ),
+        )
+        result = repo.find_observed_ticket(worker)
+        assert result is not None
+        assert result.ticket_id == "obs-new"
+
+    def test_only_observed_returned(self, repo, engine):
+        """closed/open 态不被 find_observed 命中。"""
+        worker = "ownerM:botM"
+        _insert(
+            engine,
+            _make_ticket(
+                ticket_id="closed", worker_id=worker, active_worker=None,
+                governance_status="closed",
+            ),
+            _make_ticket(
+                ticket_id="open", worker_id=worker, active_worker=worker,
+                governance_status="open",
+            ),
+        )
+        assert repo.find_observed_ticket(worker) is None
+
+    def test_no_observed_returns_none(self, repo):
+        assert repo.find_observed_ticket("nobody:here") is None
+
+    def test_does_not_leak_other_worker(self, repo, engine):
+        """worker 维度隔离:不返回他 worker 的观察单。"""
+        _insert(
+            engine,
+            _make_ticket(
+                ticket_id="obs-other", worker_id="ownerA:botA", active_worker=None,
+                governance_status=GovernanceStatus.OBSERVED.value,
+            ),
+        )
+        assert repo.find_observed_ticket("ownerB:botB") is None
