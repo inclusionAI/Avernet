@@ -404,6 +404,20 @@ def whitelist_tickets_empty():
     """Empty path: 无 OBSERVED 工单 → items=[] total=0,不报错。"""
 
 
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets:whitelist",
+    scenario="error_invalid_limit",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"limit": "0"},  # limit ge=1,0 违规 → FastAPI 422
+    ),
+    expect=ExpectError(status=422),
+)
+def whitelist_tickets_invalid_limit_error():
+    """Error path: limit < 1 → 422(FastAPI Query 校验)。"""
+
+
 # ---------------------------------------------------------------------------
 # 2. GET /workflow/tickets/detail — detail
 # ---------------------------------------------------------------------------
