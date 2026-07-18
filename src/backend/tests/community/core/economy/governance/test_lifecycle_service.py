@@ -232,6 +232,21 @@ class TestOpenObservedTicket:
         assert persisted is not None
         assert persisted.delivery_status == "none"  # 列默认,未被 first_send 写成 pending
 
+    def test_open_observed_ticket_uses_enter_observed(self) -> None:
+        """open_observed_ticket 复用 enter_observed(单一入口):建单后字段与
+        enter_observed 状态机动作完全一致 — status=OBSERVED + assignee=None +
+        close_reason=None(建单非关单)+ closed_at=None(非关闭)。"""
+        svc, db, _ = _build_svc()
+        ticket = _make_ticket_model(ticket_id="T-obs-enter")
+        svc.open_observed_ticket(ticket=ticket)
+
+        persisted = svc._task_repo.find_by_ticket_id("T-obs-enter")  # noqa: SLF001
+        assert persisted is not None
+        assert persisted.governance_status == GovernanceStatus.OBSERVED
+        assert persisted.assignee is None      # enter_observed 释放
+        assert persisted.close_reason is None   # 建单非关单,close_reason 不设
+        assert persisted.closed_at is None      # OBSERVED 非关闭,不设 closed_at
+
 
 # ---------------------------------------------------------------------------
 # close_for_whitelist_hit (offline-batch entry)

@@ -513,7 +513,7 @@ class GovernanceTicket:
         self.assignee = None  # closed 释放 active_worker
         self.remind_at = None  # 对齐 repo L229,默认 None 清空
 
-    def enter_observed(self, *, close_reason: str) -> None:
+    def enter_observed(self, *, close_reason: str | None = None) -> None:
         """进入白名单观察态(OBSERVED)。
 
         与 :meth:`close` 的关键差异:转 OBSERVED 而非 CLOSED、**不设
@@ -521,12 +521,18 @@ class GovernanceTicket:
         误纳 cooldown 视野)、释放 ``active_worker``(观察不占治理人力)、
         清 ``remind_at``。
 
-        两路入口复用本方法(方案 A 链路同源):
-          - ``review(approve_whitelist)`` 审批加白
-          - ``close_for_whitelist_hit`` scan 兜底关残留活跃单
+        本方法是"转 OBSERVED"状态机动作的**单一入口** —— 状态机动作(转态+
+        释放 assignee+清 remind_at+不设 closed_at+不碰 cooldown)是主职责,
+        ``close_reason`` 是附带语义:关单转态场景传值,建单场景传 None。
+
+        三路入口复用本方法(方案 A 链路同源):
+          - ``review(approve_whitelist)`` 审批加白 → 传 WHITELIST_APPROVED
+          - ``close_for_whitelist_hit`` scan 兜底关残留活跃单 → 传 SCAN_WHITELISTED
+          - ``open_observed_ticket`` off-batch 建观察单(非关单)→ 不传(None)
 
         Args:
-            close_reason: 观察来源(WHITELIST_APPROVED / SCAN_WHITELISTED)。
+            close_reason: 观察来源(WHITELIST_APPROVED / SCAN_WHITELISTED);
+                建单场景传 None(非关单,无关单原因)。
         """
         self.transition_to(GovernanceStatus.OBSERVED)
         self.close_reason = close_reason

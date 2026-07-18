@@ -187,8 +187,9 @@ class GovernanceLifecycleService:
         Returns:
             持久化的 ``ticket_id``。
         """
-        ticket.transition_to(GovernanceStatus.OBSERVED)
-        ticket.assignee = None  # 观察不占治理人力(对齐 enter_observed)
+        # 复用领域单一入口 enter_observed(状态机动作:转 OBSERVED+释放 assignee+
+        # 清 remind_at+不设 closed_at)。建单非关单,不传 close_reason(None)。
+        ticket.enter_observed()
         snapshot = ticket.snapshot
         # 与 open_ticket 同源字段映射,差异:assignee 不 fallback、状态=observed。
         return self._task_repo.add_ticket(
