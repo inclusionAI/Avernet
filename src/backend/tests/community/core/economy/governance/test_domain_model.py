@@ -803,6 +803,57 @@ class TestTicketTransitions:
             t.transition_to(GovernanceStatus.OPEN)
 
 
+class TestTicketObservedTransitions:
+    """OBSERVED(白名单观察态)进出规则。
+
+    进:三活跃态(open/scheduled/waiting_review)→ OBSERVED(加白关单)。
+    出:OBSERVED 仅 → CLOSED(删白收尾);不可回活跃态(删白后由 off-batch
+    重建新 OPEN 单,而非复活同单)。
+    """
+
+    @pytest.mark.parametrize(
+        "from_status",
+        [
+            GovernanceStatus.OPEN,
+            GovernanceStatus.SCHEDULED,
+            GovernanceStatus.WAITING_REVIEW,
+        ],
+    )
+    def test_active_to_observed(self, from_status) -> None:
+        t = _make_ticket(governance_status=from_status)
+        t.transition_to(GovernanceStatus.OBSERVED)
+        assert t.governance_status == GovernanceStatus.OBSERVED
+
+    def test_observed_to_closed(self) -> None:
+        t = _make_ticket(governance_status=GovernanceStatus.OBSERVED, assignee=None)
+        t.transition_to(GovernanceStatus.CLOSED)
+        assert t.governance_status == GovernanceStatus.CLOSED
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            GovernanceStatus.OPEN,
+            GovernanceStatus.SCHEDULED,
+            GovernanceStatus.WAITING_REVIEW,
+            GovernanceStatus.OBSERVED,
+        ],
+    )
+    def test_observed_cannot_revert_to_active(self, target) -> None:
+        """OBSERVED → 活跃态(含自身)皆非法;仅 CLOSED 合法。"""
+        t = _make_ticket(governance_status=GovernanceStatus.OBSERVED, assignee=None)
+        with pytest.raises(IllegalTicketTransitionError):
+            t.transition_to(target)
+
+    def test_observed_in_terminal_statuses(self) -> None:
+        """OBSERVED 归终态族,ACTIVES 不含它(决策已定:closed 族)。"""
+        from agentclaw.community.core.economy.governance.domain.enums import (
+            ACTIVE_STATUSES,
+            TERMINAL_STATUSES,
+        )
+        assert GovernanceStatus.OBSERVED in TERMINAL_STATUSES
+        assert GovernanceStatus.OBSERVED not in ACTIVE_STATUSES
+
+
 # ---------------------------------------------------------------------------
 # GovernanceTicket 业务行为
 # ---------------------------------------------------------------------------

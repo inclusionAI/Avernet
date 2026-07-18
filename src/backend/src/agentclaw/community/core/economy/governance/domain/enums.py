@@ -101,11 +101,18 @@ class AuditAction(str, Enum):
 
 
 class GovernanceStatus(str, Enum):
-    """工单/治理状态 — 用于 GovernanceTicket.governance_status."""
+    """工单/治理状态 — 用于 GovernanceTicket.governance_status.
+
+    OBSERVED = 白名单观察态:bot 进入治理白名单后,其工单转 OBSERVED 而非
+    CLOSED,由后续 offline-batch 持续刷新快照供评审观察,但**不发通知、不占
+    治理人力**。归终态族(ACTIVE_STATUSES 不含它),故 ``find_active_ticket``
+    天然不命中 → delivery/admin 不操作观察单。删白后 OBSERVED → CLOSED 收尾。
+    """
 
     OPEN = "open"
     SCHEDULED = "scheduled"
     WAITING_REVIEW = "waiting_review"
+    OBSERVED = "observed"
     CLOSED = "closed"
 
     def __str__(self) -> str:
@@ -134,9 +141,11 @@ Step1 不含 OBSERVED;Step2 加 OBSERVED 后仍不含(观察态归终态族,
 
 TERMINAL_STATUSES: frozenset[GovernanceStatus] = frozenset({
     GovernanceStatus.CLOSED,
+    GovernanceStatus.OBSERVED,
 })
-"""终态族 — 工单生命周期结束。Step2 加 OBSERVED 后扩为 {CLOSED, OBSERVED}
-(OBSERVED 归终态族:持续刷新但不发通知、不占治理人力)。"""
+"""终态族 — 工单生命周期结束(不再进 active 治理链路)。OBSERVED 归终态族:
+持续刷新快照供评审观察,但不发通知、不占治理人力、不被 find_active_ticket
+命中。"""
 
 
 class NotifyStatus(str, Enum):

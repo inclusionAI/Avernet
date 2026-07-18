@@ -78,15 +78,19 @@ class MutableSnapshot:
 TICKET_TRANSITIONS: dict[GovernanceStatus, frozenset[GovernanceStatus]] = {
     GovernanceStatus.OPEN: frozenset({
         GovernanceStatus.SCHEDULED, GovernanceStatus.WAITING_REVIEW,
-        GovernanceStatus.CLOSED,
+        GovernanceStatus.OBSERVED, GovernanceStatus.CLOSED,
     }),
     GovernanceStatus.SCHEDULED: frozenset({
-        GovernanceStatus.WAITING_REVIEW, GovernanceStatus.CLOSED,
+        GovernanceStatus.WAITING_REVIEW, GovernanceStatus.OBSERVED,
+        GovernanceStatus.CLOSED,
     }),
     GovernanceStatus.WAITING_REVIEW: frozenset({
         GovernanceStatus.OPEN, GovernanceStatus.SCHEDULED,
-        GovernanceStatus.CLOSED,
+        GovernanceStatus.OBSERVED, GovernanceStatus.CLOSED,
     }),
+    # OBSERVED = 白名单观察态。仅可被删白收尾转 CLOSED;不回活跃态
+    # (删白后由 offline-batch 正常 Step6 重建新 OPEN 单,而非复活同单)。
+    GovernanceStatus.OBSERVED: frozenset({GovernanceStatus.CLOSED}),
     GovernanceStatus.CLOSED: frozenset(),
 }
 
