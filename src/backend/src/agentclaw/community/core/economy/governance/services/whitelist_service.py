@@ -229,17 +229,6 @@ class GovernanceWhitelistService:
         )
 
     # 工单维度叠加字段(取最近一条工单的治理快照,服务 admin 复评白名单合理性)。
-    _TICKET_META_KEYS = (
-        "bot_name",
-        "owner_name",
-        "token_baseline",
-        "expected_token_saving",
-        "hit_dimensions",
-        "saving_ratio",
-        "latest_decision",
-        "gmt_create",
-    )
-
     def list_all_with_ticket_meta(
         self,
         *,

@@ -208,6 +208,24 @@ class GovernanceWhitelistServiceProtocol(Protocol):
         """全量分页查询白名单(可选 owner/bot 筛选 + 过期开关 + total)。"""
         ...
 
+    def list_all_with_ticket_meta(
+        self,
+        *,
+        whitelist_type: str = "governance",
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        include_expired: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """白单 + 最近工单维度字段叠加(bot_name/owner_name/token_baseline 等)。
+
+        白单为主表,工单维度取每 worker 最近一条工单快照(见
+        :meth:`TaskRecordRepositoryProtocol.find_latest_tickets_by_worker_keys`);
+        无对应工单的白单叠加字段为 None,条目保留。
+        """
+        ...
+
 
 @runtime_checkable
 class GovernanceAuditReadServiceProtocol(Protocol):
