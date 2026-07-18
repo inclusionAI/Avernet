@@ -308,7 +308,7 @@ class GovernanceLifecycleServiceProtocol(Protocol):
     def close_for_whitelist_hit(
         self, ticket_id: str, *, now: datetime,
     ) -> bool:
-        """Whitelist hit → CLOSED(whitelist_filtered) + cancel pending + audit.
+        """Scan 清理白名单 bot 残留活跃单 → CLOSED(scan_whitelisted) + cancel pending.
 
         Returns True if the ticket was found and closed, False if not found.
         """

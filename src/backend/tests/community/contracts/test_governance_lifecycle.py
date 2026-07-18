@@ -179,7 +179,7 @@ class TestLegalTransitionsEndToEnd:
         assert driver.close_for_whitelist_hit("T-wl", now=datetime.now()) is True
         row = driver._task_repo.find_by_ticket_id("T-wl")  # noqa: SLF001
         assert row.governance_status == GovernanceStatus.CLOSED
-        assert row.close_reason == CloseReason.WHITELIST_FILTERED
+        assert row.close_reason == CloseReason.SCAN_WHITELISTED
 
     def test_accept_feedback_open_to_waiting_review(self):
         driver, db, _ = _build_driver()

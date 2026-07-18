@@ -107,7 +107,7 @@ class RecordProcessResult:
 
     worker_key: str
     entered_governance_scope: bool = False
-    action: str = ""  # enqueued / would_create / still_actionable / whitelist_filtered / cooldown_filtered / whitelist_closed / invalid / error
+    action: str = ""  # enqueued / would_create / still_actionable / scan_whitelisted / cooldown_filtered / invalid / error
     reason: str = ""
     ticket_id: str | None = None
     notification_md_preview: str | None = None
@@ -415,9 +415,10 @@ class GovernanceRecordService:
     ) -> RecordProcessResult:
         """Process whitelist-hit cases (§7.1.4 Step 2).
 
-        - No active ticket → audit whitelist_filtered, skip.
-        - Active ticket exists → close ticket (whitelist_filtered, §7.2.7),
-          cancel pending notify.
+        scan 遇到白名单 bot,只记动作不猜原因:
+        - No active ticket → audit scan_whitelisted, skip.
+        - Active ticket exists → close ticket (scan_whitelisted), cancel pending notify.
+          (批量加白漏关 / 加白与扫描并发竞态的兜底)
         """
         now = datetime.now()
 
@@ -427,19 +428,19 @@ class GovernanceRecordService:
                 self._audit_repo.add_audit(
                     run_id, bot_id, owner_id,
                     check_result="actionable",
-                    action_taken=AuditAction.SCAN_SKIP_WHITELIST,
+                    action_taken=AuditAction.SCAN_WHITELISTED,
                     dry_run=0,
                 )
             return RecordProcessResult(
                 worker_key=worker_key,
                 entered_governance_scope=False,
-                action="whitelist_filtered",
+                action="scan_whitelisted",
                 reason="whitelist_hit_no_active_ticket",
             )
 
-        # Whitelist hit + active ticket → close ticket (§7.2.7) via driver
-        # service (sole driver of the ticket machine). Driver orchestrates
-        # the close + cancel-pending-notify side effect atomically.
+        # Whitelist hit + active ticket → close ticket via driver service
+        # (sole driver of the ticket machine). Driver orchestrates the close
+        # + cancel-pending-notify side effect atomically.
         if not dry_run:
             self._lifecycle_svc.close_for_whitelist_hit(
                 active_ticket.ticket_id, now=now,
@@ -447,14 +448,14 @@ class GovernanceRecordService:
 
             self._audit_repo.add_audit(
                 run_id, bot_id, owner_id,
-                action_taken=AuditAction.WHITELIST_CLOSED,
+                action_taken=AuditAction.SCAN_WHITELISTED,
                 dry_run=0,
             )
 
         return RecordProcessResult(
             worker_key=worker_key,
             entered_governance_scope=False,
-            action="whitelist_closed",
+            action="scan_whitelisted",
             reason="whitelist_hit_active_ticket_closed",
             ticket_id=active_ticket.ticket_id,
         )

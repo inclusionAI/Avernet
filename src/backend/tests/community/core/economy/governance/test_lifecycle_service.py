@@ -196,7 +196,7 @@ class TestCloseForWhitelistHit:
         assert svc.close_for_whitelist_hit("T-wl", now=now) is True
         t = svc._task_repo.find_by_ticket_id("T-wl")  # noqa: SLF001
         assert t.governance_status == GovernanceStatus.CLOSED
-        assert t.close_reason == CloseReason.WHITELIST_FILTERED
+        assert t.close_reason == CloseReason.SCAN_WHITELISTED
 
     def test_not_found_returns_false(self) -> None:
         svc, _, _ = _build_svc()

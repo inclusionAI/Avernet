@@ -217,10 +217,12 @@ class GovernanceLifecycleService:
     def close_for_whitelist_hit(
         self, ticket_id: str, *, now: datetime,
     ) -> bool:
-        """Whitelist hit → CLOSED(whitelist_filtered) + cancel pending + audit.
+        """Scan 清理白名单 bot 残留活跃单 → CLOSED(scan_whitelisted) + cancel pending.
 
-        方案 A 链路:find → ``ticket.close()``(守卫激活)→ ``save_ticket`` →
-        取消通知。非法转移被守卫抛出,驱动服务捕获转审计 + False。
+        只记动作不猜原因:scan 遇到白名单 bot 仍挂着活跃单,顺手关掉(cardinality
+        = ❶批量加白漏关 / 加白与扫描并发竞态的兜底)。方案 A 链路:find →
+        ``ticket.close()``(守卫激活)→ ``save_ticket`` → 取消通知。非法转移被守卫
+        抛出,驱动服务捕获转审计 + False。
 
         Returns True if the ticket was found and closed, False if not found.
         """
@@ -229,7 +231,7 @@ class GovernanceLifecycleService:
             return False
         try:
             ticket.close(
-                close_reason=CloseReason.WHITELIST_FILTERED, closed_at=now,
+                close_reason=CloseReason.SCAN_WHITELISTED, closed_at=now,
             )
         except IllegalTicketTransitionError as exc:
             self._audit_illegal(ticket_id, "close_for_whitelist_hit", exc)

@@ -224,7 +224,7 @@ class TestProcessRecord:
             record, run_id="run-2", notify_source="offline_batch",
         )
 
-        assert result.action == "whitelist_filtered"
+        assert result.action == "scan_whitelisted"
         assert result.entered_governance_scope is False
         # 契约:加白后该 bot 不创建工单、不创建通知(加白核心语义 = 不创建通知)。
         with db.orm_session() as s:

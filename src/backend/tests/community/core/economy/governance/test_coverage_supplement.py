@@ -654,7 +654,7 @@ class TestWhitelistHitWithActiveTicket:
         record = _sample_record(owner_id="staff-004", bot_id="bot-004")
         result = svc.process_record(record, run_id="run-wl-1")
 
-        assert result.action == "whitelist_closed"
+        assert result.action == "scan_whitelisted"
         assert result.ticket_id == "t-whitelist-1"
 
         # Verify ticket closed
@@ -663,7 +663,7 @@ class TestWhitelistHitWithActiveTicket:
                 ticket_id="t-whitelist-1",
             ).one()
             assert ticket.governance_status == "closed"
-            assert ticket.close_reason == "whitelist_filtered"
+            assert ticket.close_reason == "scan_whitelisted"
 
         # Verify notify cancelled
         with db.orm_session() as s:
@@ -675,7 +675,7 @@ class TestWhitelistHitWithActiveTicket:
         # Verify audit
         with db.orm_session() as s:
             audits = s.query(AuditLogOrm).all()
-            assert any(a.action_taken == AuditAction.WHITELIST_CLOSED for a in audits)
+            assert any(a.action_taken == AuditAction.SCAN_WHITELISTED for a in audits)
 
 
 # ══════════════════════════════════════════════════════════════════
