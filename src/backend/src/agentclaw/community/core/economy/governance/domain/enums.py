@@ -63,6 +63,7 @@ class AuditAction(str, Enum):
 
     # ── Whitelist management (new) ──────────────────
     WHITELIST_REMOVED = "whitelist_removed"             # 管理员删除白名单条目
+    WHITELIST_OBSERVED = "whitelist_observed"           # 白名单 bot 观察刷新(off-batch 刷 OBSERVED 单快照,不发通知)
 
     # ── Task record / ticket lifecycle (new) ──────────
     ENQUEUED = "enqueued"                           # 新工单+first_send notify 创建 (§7.1.4)

@@ -63,13 +63,23 @@ def test_admin_action_values():
     assert AuditAction.NOTIFICATIONS_DELETED == "notifications_deleted"
 
 
+def test_whitelist_management_values():
+    """白名单管理类审计动作(含观察刷新 WHITELIST_OBSERVED)。
+
+    WHITELIST_OBSERVED = off-batch 刷 OBSERVED 单快照(持续观察,不发通知);
+    与 SCAN_WHITELISTED(scan 兜底关残留/记加白命中)区分。
+    """
+    assert AuditAction.WHITELIST_REMOVED == "whitelist_removed"
+    assert AuditAction.WHITELIST_OBSERVED == "whitelist_observed"
+
+
 def test_all_action_values_are_unique_strings():
     values = [
         v
         for k, v in vars(AuditAction).items()
         if not k.startswith("_") and isinstance(v, str)
     ]
-    assert len(values) == 54
+    assert len(values) == 55
     assert all(isinstance(v, str) for v in values)
     assert len(set(values)) == len(values)
 
