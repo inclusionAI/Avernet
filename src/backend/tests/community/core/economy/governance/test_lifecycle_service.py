@@ -257,6 +257,49 @@ class TestCloseForWhitelistHit:
 
 
 # ---------------------------------------------------------------------------
+# close_observed_for_removal (whitelist delete 收尾 — OBSERVED→CLOSED)
+# ---------------------------------------------------------------------------
+
+
+class TestCloseObservedForRemoval:
+    """删白收尾:OBSERVED → CLOSED(whitelist_approved) 不设 cooldown + cancel pending。
+
+    四分支钉死:find=None / 非 OBSERVED 态幂等 no-op / 成功转换 / 非法转换。
+    """
+
+    def test_observed_to_closed_success(self) -> None:
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-obs-rm", status="observed")
+        ok = svc.close_observed_for_removal("T-obs-rm", now=datetime.now())
+        assert ok is True
+        t = svc._task_repo.find_by_ticket_id("T-obs-rm")  # noqa: SLF001
+        assert t.governance_status == GovernanceStatus.CLOSED
+        assert t.close_reason == CloseReason.WHITELIST_APPROVED
+        assert t.closed_at is not None
+        assert t.cooldown_until is None  # 删白不设 cooldown
+
+    def test_not_found_returns_false(self) -> None:
+        svc, _, _ = _build_svc()
+        assert svc.close_observed_for_removal("nope", now=datetime.now()) is False
+
+    def test_non_observed_idempotent_noop(self) -> None:
+        """非 OBSERVED 态(closed/活跃)→ 幂等 no-op,不强行转,状态不动。"""
+        svc, db, _ = _build_svc()
+        # closed 单(已终态)→ 不该被删白收尾碰
+        _seed_ticket(db, ticket_id="T-closed-rm", status="closed")
+        assert svc.close_observed_for_removal("T-closed-rm", now=datetime.now()) is False
+        t = svc._task_repo.find_by_ticket_id("T-closed-rm")  # noqa: SLF001
+        assert t.governance_status == GovernanceStatus.CLOSED  # 未被误改
+
+        # open 活跃单 → 也不该被删白收尾碰(观察收尾只动 OBSERVED)
+        # 用不同 worker 避开 active_worker 唯一约束
+        _seed_ticket(db, ticket_id="T-open-rm", status="open", worker="owner-1:bot-2")
+        assert svc.close_observed_for_removal("T-open-rm", now=datetime.now()) is False
+        t2 = svc._task_repo.find_by_ticket_id("T-open-rm")  # noqa: SLF001
+        assert t2.governance_status == GovernanceStatus.OPEN  # 未被误转
+
+
+# ---------------------------------------------------------------------------
 # transition_schedule_due / auto_silence_close (cron entry)
 # ---------------------------------------------------------------------------
 

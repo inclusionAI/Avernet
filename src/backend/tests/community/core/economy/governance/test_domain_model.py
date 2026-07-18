@@ -855,6 +855,47 @@ class TestTicketObservedTransitions:
         assert GovernanceStatus.OBSERVED not in ACTIVE_STATUSES
 
 
+class TestTicketEnterObserved:
+    """enter_observed 领域方法直测 — 两路(approve_whitelist/scan兜底)共用入口。
+
+    钉死与 close 的关键差异:转 OBSERVED(非 CLOSED)、不设 closed_at、释放
+    assignee、清 remind_at、close_reason 透传。这些是 OBSERVED 不发通知/不占
+    人力/不纳 cooldown 视野的基础,任一被改坏都破坏观察态语义。
+    """
+
+    def test_transitions_to_observed_and_sets_close_reason(self) -> None:
+        t = _make_ticket(governance_status=GovernanceStatus.OPEN,
+                         assignee="owner-1:bot-1",
+                         remind_at=datetime(2026, 8, 1, 9, 0, 0))
+        t.enter_observed(close_reason=CloseReason.SCAN_WHITELISTED)
+        assert t.governance_status == GovernanceStatus.OBSERVED
+        assert t.close_reason == CloseReason.SCAN_WHITELISTED
+
+    def test_releases_active_worker(self) -> None:
+        t = _make_ticket(governance_status=GovernanceStatus.OPEN,
+                         assignee="owner-1:bot-1")
+        t.enter_observed(close_reason=CloseReason.SCAN_WHITELISTED)
+        assert t.assignee is None  # 观察不占治理人力
+
+    def test_does_not_set_closed_at(self) -> None:
+        """OBSERVED 非关闭,不设 closed_at(防 find_latest_closed 误纳 cooldown 视野)。"""
+        t = _make_ticket(governance_status=GovernanceStatus.OPEN)
+        t.enter_observed(close_reason=CloseReason.WHITELIST_APPROVED)
+        assert t.closed_at is None
+
+    def test_clears_remind_at(self) -> None:
+        t = _make_ticket(governance_status=GovernanceStatus.OPEN,
+                         remind_at=datetime(2026, 8, 1, 9, 0, 0))
+        t.enter_observed(close_reason=CloseReason.WHITELIST_APPROVED)
+        assert t.remind_at is None
+
+    def test_does_not_touch_cooldown(self) -> None:
+        """enter_observed 不设 cooldown(对齐 close 不设,删白后等 off-batch 重建)。"""
+        t = _make_ticket(governance_status=GovernanceStatus.OPEN, cooldown_until=None)
+        t.enter_observed(close_reason=CloseReason.WHITELIST_APPROVED)
+        assert t.cooldown_until is None
+
+
 # ---------------------------------------------------------------------------
 # GovernanceTicket 业务行为
 # ---------------------------------------------------------------------------
