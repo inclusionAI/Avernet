@@ -59,8 +59,9 @@ def _build_svc(engine):
     # task_record subjects). lifecycle_service no longer depends on a whitelist
     # service (the accept_feedback whitelist-add is owned by feedback_service),
     # so the construction cycle is gone — build the driver directly.
+    task_repo = TaskRecordRepository(db=db)
     lifecycle_svc = GovernanceLifecycleService(
-        task_repo=TaskRecordRepository(db=db),
+        task_repo=task_repo,
         notify_repo=notify_repo,
         audit_repo=audit_repo,
     )
@@ -70,6 +71,7 @@ def _build_svc(engine):
         audit_repo=audit_repo,
         config=config,
         lifecycle_svc=lifecycle_svc,
+        task_repo=task_repo,
     ), db
 
 

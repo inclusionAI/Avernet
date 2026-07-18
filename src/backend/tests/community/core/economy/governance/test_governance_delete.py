@@ -268,6 +268,7 @@ class FakeAdminService:
             audit_repo=self._audit_repo,
             config=FakeGovernanceConfig(),  # type: ignore[arg-type]
             lifecycle_svc=self._lifecycle_svc,
+            task_repo=self._task_repo,  # type: ignore[arg-type]
         )
 
         self._real_svc = GovernanceAdminService(

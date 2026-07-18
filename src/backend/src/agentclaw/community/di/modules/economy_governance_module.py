@@ -189,13 +189,14 @@ class EconomyGovernanceModule(Module):
         audit_repo: GovernanceAuditRepository,
         config: EconomyGovernanceConfig,
         lifecycle_service: GovernanceLifecycleService,
+        task_repo: TaskRecordRepository,
     ) -> GovernanceWhitelistService:
         # Circular DI (whitelist_service ↔ lifecycle_service) is resolved by
         # injector's singleton providers at injection time — no runtime cycle.
         return GovernanceWhitelistService(
             whitelist_repo=whitelist_repo, notify_repo=notify_repo,
             audit_repo=audit_repo, config=config,
-            lifecycle_svc=lifecycle_service,
+            lifecycle_svc=lifecycle_service, task_repo=task_repo,
         )
 
     @singleton

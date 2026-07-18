@@ -38,6 +38,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
         NotifyLogRepository,
     )
+    from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
+        TaskRecordRepository,
+    )
     from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
         GovernanceWhitelistRepository,
     )
@@ -56,12 +59,14 @@ class GovernanceWhitelistService:
         audit_repo: GovernanceAuditRepository,
         config: Any,  # EconomyGovernanceConfig
         lifecycle_svc: GovernanceLifecycleServiceProtocol,
+        task_repo: TaskRecordRepository,
     ) -> None:
         self._whitelist_repo = whitelist_repo
         self._notify_repo = notify_repo
         self._audit_repo = audit_repo
         self._config = config
         self._lifecycle_svc = lifecycle_svc
+        self._task_repo = task_repo
 
     def bulk_whitelist(
         self,

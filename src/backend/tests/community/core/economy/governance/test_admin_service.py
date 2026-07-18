@@ -139,6 +139,7 @@ def _build_svc(engine):
         audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
         lifecycle_svc=lifecycle_svc,
+        task_repo=task_repo,
     )
     svc = GovernanceAdminService(
         cache=cache,
@@ -205,6 +206,7 @@ def _build_workflow_svc(engine):
         audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
         lifecycle_svc=lifecycle_svc,
+        task_repo=task_repo,
     )
     svc = GovernanceWorkflowService(
         task_repo=task_repo,
@@ -1000,6 +1002,7 @@ class TestDeliverByWorker:
             audit_repo=audit_repo,
             config=FakeGovernanceConfig(),
             lifecycle_svc=lifecycle_svc,
+            task_repo=task_repo,
         )
         svc = GovernanceDeliveryService(
             notify_repo=notify_repo,

@@ -196,6 +196,7 @@ def _build_admin_svc(engine):
         audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
         lifecycle_svc=lifecycle_svc,
+        task_repo=task_repo,
     )
     svc = GovernanceDeliveryService(
         notify_repo=notify_repo,
