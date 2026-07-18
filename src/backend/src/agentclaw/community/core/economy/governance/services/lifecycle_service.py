@@ -443,10 +443,12 @@ class GovernanceLifecycleService:
         close_reason: str | None = None,
         cooldown_until: datetime | None = None,
     ) -> bool:
-        """WAITING_REVIEW → CLOSED (three-branch) + cancel pending.
+        """WAITING_REVIEW → CLOSED/OBSERVED (四态分支) + cancel pending。
 
-        方案 A 链路:find → ``ticket.review(...)``(守卫激活,三态分支,
-        清 active_worker + remind_at)→ ``save_ticket`` → 取消通知。
+        方案 A 链路:find → ``ticket.review(...)``(守卫激活,四态分支,
+        清 active_worker + remind_at)→ ``save_ticket`` → 取消通知(pending 按
+        ticket_id 取消,不依赖后置态)。approve_whitelist 转 OBSERVED(白名单
+        观察态),其余 approve_close/reject_for_reopen 转 CLOSED。
 
         Returns True if found, False if not found.
         """

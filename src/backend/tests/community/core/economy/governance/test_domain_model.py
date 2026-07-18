@@ -25,6 +25,7 @@ from agentclaw.community.core.economy.governance.domain.ticket import Governance
 
 from agentclaw.community.core.economy.governance.domain.whitelist import WhitelistEntry
 from agentclaw.community.core.economy.governance.domain.enums import (
+    CloseReason,
     GovernanceStatus,
     NotifyStatus,
     NotifyType,
@@ -968,11 +969,11 @@ class TestTicketReview:
 
     逐字段对齐 repo task_record_repo.review_ticket:
       - approve_close   → close_reason=close_reason|'approve_close', 可带 cooldown_until
-      - approve_whitelist→ close_reason='whitelisted'
+      - approve_whitelist→ OBSERVED, close_reason=WHITELIST_APPROVED, 不设 closed_at
       - reject_for_reopen→ close_reason='review_rejected'
     共性:无条件清 remind_at(L314)、清 active_worker(L320/327/336/341)、
-        closed_at=now(L312/L319/L326/L335)、写 review_decision/reviewed_by/
-        reviewed_at/review_remark。
+        closed_at=now(L312/L319/L326/L335;approve_whitelist 除外)、写 review_decision/
+        reviewed_by/reviewed_at/review_remark。
     """
 
     def test_review_approve_close(self) -> None:
@@ -1001,10 +1002,11 @@ class TestTicketReview:
         t = _make_ticket(governance_status=GovernanceStatus.WAITING_REVIEW,
                          remind_at=datetime(2026, 8, 1, 9, 0, 0))
         t.review(review_decision="approve_whitelist", reviewed_by="admin-1")
-        assert t.governance_status == GovernanceStatus.CLOSED
-        assert t.close_reason == "whitelisted"
-        assert t.assignee is None
+        assert t.governance_status == GovernanceStatus.OBSERVED
+        assert t.close_reason == CloseReason.WHITELIST_APPROVED
+        assert t.assignee is None          # 释放 active_worker(观察不占治理人力)
         assert t.remind_at is None
+        assert t.closed_at is None         # OBSERVED 非关闭,不设 closed_at(防 find_latest_closed 误纳)
 
     def test_review_reject_for_reopen(self) -> None:
         """打回 → 仍 CLOSED(review_rejected),释放 active_worker,下个 scan 重建 open 单。"""

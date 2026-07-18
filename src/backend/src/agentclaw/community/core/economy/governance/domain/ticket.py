@@ -13,6 +13,7 @@ from typing import Any
 
 from agentclaw.community.core.economy.governance.domain.base import _iso
 from agentclaw.community.core.economy.governance.domain.enums import (
+    CloseReason,
     GovernanceStatus,
     Response,
     TicketAction,
@@ -551,7 +552,9 @@ class GovernanceTicket:
                               可带 cooldown_until
           approve_scheduled → SCHEDULED(同意排期,不关单),close_reason='schedule_approved',
                               保留 repair_deadline;不释放 active_worker(仍 active 观察)
-          approve_whitelist → CLOSED,close_reason='whitelisted'
+          approve_whitelist → OBSERVED,close_reason=WHITELIST_APPROVED(白名单观察态:
+                              释放 active_worker、不设 closed_at,由后续 off-batch
+                              持续刷新快照,不发通知、不占治理人力)
           reject_for_reopen → CLOSED,close_reason='review_rejected'(打回仍关闭,
                               下个 scan 重建 open 单)
         """
@@ -568,7 +571,16 @@ class GovernanceTicket:
             self.close_reason = close_reason or "schedule_approved"
             return
 
-        # 其余三态 → CLOSED
+        if review_decision == "approve_whitelist":
+            # 加白 → OBSERVED(白名单观察态,归终态族不发通知)。释放 active_worker
+            # (观察不占治理人力);**不设 closed_at**(OBSERVED 非关闭,设了会让
+            # find_latest_closed_by_worker 误纳 cooldown 视野)。
+            self.transition_to(GovernanceStatus.OBSERVED)
+            self.assignee = None
+            self.close_reason = close_reason or CloseReason.WHITELIST_APPROVED
+            return
+
+        # 其余两态(approve_close / reject_for_reopen)→ CLOSED
         self.transition_to(GovernanceStatus.CLOSED)
         self.closed_at = now
         self.assignee = None   # 释放 active_worker
@@ -576,8 +588,6 @@ class GovernanceTicket:
             self.close_reason = close_reason or "approve_close"
             if cooldown_until is not None:
                 self.cooldown_until = cooldown_until
-        elif review_decision == "approve_whitelist":
-            self.close_reason = close_reason or "whitelisted"
         elif review_decision == "reject_for_reopen":
             self.close_reason = close_reason or "review_rejected"
         else:
