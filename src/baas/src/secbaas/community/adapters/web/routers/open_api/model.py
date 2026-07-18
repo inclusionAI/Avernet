@@ -73,7 +73,7 @@ class MessageRequest(BaseModel):
     message: str = Field(..., description="用户消息内容", min_length=1)
     bot_id: str = Field(..., description="Bot 唯一标识", min_length=1)
     callback_url: str | None = Field(default=None, description="Callback URL")
-    message_id: str | None = Field(..., description="Message ID")
+    message_id: str | None = Field(default=None, description="Message ID")
     metadata: dict[str, Any] | None = Field(
         default=None,
         description=(

@@ -23,7 +23,7 @@ import os
 import socket
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator
 from dataclasses import dataclass
 from typing import Any
 
@@ -51,7 +51,7 @@ logger = get_logger("core-bot-run")
 
 
 @contextlib.contextmanager
-def _trace_context_from_meta(meta: dict[str, Any]) -> Iterator[None]:
+def _trace_context_from_meta(meta: dict[str, Any] | None) -> Generator[None]:
     """从队列工作项 meta 中恢复 trace context 并创建 child span。
 
     1. extract_context 从 meta["traceparent"] 反序列化 trace context
@@ -60,12 +60,17 @@ def _trace_context_from_meta(meta: dict[str, Any]) -> Iterator[None]:
     退出时自动关闭 span 并 detach context。
     """
     tracer = get_tracer_plugin()
-    trace_ctx = tracer.extract_context(meta.get("traceparent") or {})
-    trace_token = tracer.attach_context(trace_ctx) if trace_ctx is not None else None
-    with tracer.start_span("bot_queue_worker.execute"):
-        yield
-    if trace_token is not None:
-        tracer.detach_context(trace_token)
+    carrier = (meta or {}).get("traceparent") or {}
+    trace_ctx = tracer.extract_context(carrier)
+    trace_token = (
+        tracer.attach_context(trace_ctx) if trace_ctx is not None else None
+    )
+    try:
+        with tracer.start_span("bot_queue_worker.execute"):
+            yield
+    finally:
+        if trace_token is not None:
+            tracer.detach_context(trace_token)
 
 
 @dataclass

@@ -163,7 +163,6 @@ class ClawBotService(BotService):
                     session_id=session_id,
                     user_id=user_id,
                     metadata=metadata,
-                    run_id=run_id,
                 )
         except BotServiceError:
             raise
