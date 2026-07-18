@@ -464,6 +464,21 @@ class GovernanceLifecycleServiceProtocol(Protocol):
         """
         ...
 
+    def bulk_observe_by_ticket_ids(
+        self,
+        ticket_ids: list[str],
+        *,
+        now: datetime,
+        close_reason: str = ...,
+    ) -> int:
+        """Per-ticket observe (→OBSERVED) by ``ticket_id`` set — 批量加白收口。
+
+        批量加白把对应工单转 OBSERVED(加白语义),逐条走 observe_for_whitelist
+        守卫激活,幂等。close_reason 默认 WHITELIST_APPROVED。Returns 实际转
+        OBSERVED 的工单数。
+        """
+        ...
+
 
 @runtime_checkable
 class NotifyLifecycleServiceProtocol(Protocol):

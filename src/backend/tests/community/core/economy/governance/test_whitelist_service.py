@@ -327,7 +327,11 @@ class TestBulkWhitelistTicketAlignment:
     bot_id IN (...) 且 response IS NULL 口径精确:已反馈的通知/工单不动。"""
 
     def test_closes_task_record_subjects_for_unresponded(self, session, engine):
-        """unresponded open 通知对应工单 → CLOSED(admin_closed)。"""
+        """unresponded open 通知对应工单 → OBSERVED(whitelist_approved)。
+
+        加白语义:批量加白把活跃单转 OBSERVED(持续观察画像,非 CLOSED)。
+        通知侧 close_reason 仍 admin_closed(通知关停原因,独立列)。
+        """
         svc, db = _build_svc(engine)
         _make_notification(
             session, notification_id="n-a", bot_id="bot-a", owner_id="owner-a",
@@ -340,8 +344,11 @@ class TestBulkWhitelistTicketAlignment:
 
         with db.orm_session() as s:
             ticket = s.query(GovernanceTicketOrm).one()
-            assert ticket.governance_status == "closed"
-            assert ticket.close_reason == "admin_closed"
+            assert ticket.governance_status == GovernanceStatus.OBSERVED.value
+            assert ticket.close_reason == CloseReason.WHITELIST_APPROVED.value
+            # 通知侧 close_reason 独立(通知关停原因 ≠ 工单转态原因)
+            notify = s.query(GovernanceNotificationOrm).one()
+            assert notify.close_reason == CloseReason.ADMIN_CLOSED.value
 
     def test_preserves_responded_ticket_subject(self, session, engine):
         """已反馈通知(bot 命中但 response 非 None)不在 cancel scope,

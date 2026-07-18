@@ -657,3 +657,38 @@ class GovernanceLifecycleService:
             if self.admin_close(ticket_id, now=now):
                 closed += 1
         return closed
+
+    def bulk_observe_by_ticket_ids(
+        self,
+        ticket_ids: list[str],
+        *,
+        now: datetime,
+        close_reason: str = CloseReason.WHITELIST_APPROVED,
+    ) -> int:
+        """Per-ticket observe (→OBSERVED) by ``ticket_id`` set — 批量加白收口。
+
+        批量加白(whitelist_service.bulk_whitelist)取消通知投递后,把对应工单转
+        OBSERVED(加白语义),而非 admin_close 的 CLOSED(运维关单语义)。逐条走
+        :meth:`observe_for_whitelist` 守卫激活,幂等:已 OBSERVED/CLOSED/not-found/
+        非法态均返 False 不计(对齐 bulk_close_by_ticket_ids 范式)。
+
+        close_reason 默认 WHITELIST_APPROVED(批量加白 admin 主动,语义同审批加白);
+        scan 兜底等其它加白入口走单条 observe_for_whitelist 传 SCAN_WHITELISTED。
+
+        Args:
+            ticket_ids: 待转观察的 ticket_id 集合(已剔 None)。
+            now: 时间戳(observe_for_whitelist 内 del now,OBSERVED 不设 closed_at;
+                保留签名兼容)。
+            close_reason: 观察来源,默认 WHITELIST_APPROVED。
+
+        Returns:
+            实际转 OBSERVED 的工单数(不含幂等跳过的)。
+        """
+        del now  # observe_for_whitelist 内已 del;签名保留兼容现有调用方
+        observed = 0
+        for ticket_id in ticket_ids:
+            if self.observe_for_whitelist(
+                ticket_id, close_reason=close_reason, now=datetime.now(),
+            ):
+                observed += 1
+        return observed

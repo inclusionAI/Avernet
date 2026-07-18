@@ -319,6 +319,60 @@ class TestCloseObservedForRemoval:
 
 
 # ---------------------------------------------------------------------------
+# bulk_observe_by_ticket_ids (批量加白→转 OBSERVED,单一驱动收口)
+# ---------------------------------------------------------------------------
+
+
+class TestBulkObserveByTicketIds:
+    """批量加白收口:逐条 observe_for_whitelist 守卫激活,幂等。
+
+    钉死:批量转 OBSERVED + close_reason=WHITELIST_APPROVED + 幂等(已 OBSERVED/
+    CLOSED/not-found 不计)+ 不设 closed_at。
+    """
+
+    def test_observes_active_tickets(self) -> None:
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-bo1", status="open", worker="o1:b1")
+        _seed_ticket(db, ticket_id="T-bo2", status="scheduled", worker="o2:b2")
+        count = svc.bulk_observe_by_ticket_ids(
+            ["T-bo1", "T-bo2"], now=datetime.now(),
+        )
+        assert count == 2
+        for tid in ("T-bo1", "T-bo2"):
+            t = svc._task_repo.find_by_ticket_id(tid)  # noqa: SLF001
+            assert t.governance_status == GovernanceStatus.OBSERVED
+            assert t.close_reason == CloseReason.WHITELIST_APPROVED
+            assert t.closed_at is None
+
+    def test_idempotent_on_already_observed(self) -> None:
+        """含已 OBSERVED 单 → 经 enter_observed 守卫(非法转换)返 False 不计,不重转。"""
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-bo-open", status="open", worker="o1:b1")
+        _seed_ticket(db, ticket_id="T-bo-obs", status="observed", worker="o2:b2")
+        count = svc.bulk_observe_by_ticket_ids(
+            ["T-bo-open", "T-bo-obs"], now=datetime.now(),
+        )
+        assert count == 1  # 仅 open 单转,已 OBSERVED 单幂等跳过
+
+    def test_not_found_not_counted(self) -> None:
+        svc, _, _ = _build_svc()
+        assert svc.bulk_observe_by_ticket_ids(
+            ["nope"], now=datetime.now(),
+        ) == 0
+
+    def test_closed_not_reobserved(self) -> None:
+        """已 CLOSED 单 → OBSERVED 守卫拒绝(CLOSED 终态空出度),幂等不计。"""
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-bo-closed", status="closed", worker="o1:b1")
+        count = svc.bulk_observe_by_ticket_ids(
+            ["T-bo-closed"], now=datetime.now(),
+        )
+        assert count == 0
+        t = svc._task_repo.find_by_ticket_id("T-bo-closed")  # noqa: SLF001
+        assert t.governance_status == GovernanceStatus.CLOSED  # 未被误改
+
+
+# ---------------------------------------------------------------------------
 # transition_schedule_due / auto_silence_close (cron entry)
 # ---------------------------------------------------------------------------
 
