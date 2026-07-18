@@ -48,7 +48,7 @@ class AuditAction(str, Enum):
 
     # ── Scan skip ─────────────────────────────────────
     SCAN_SKIP_NOT_READY = "scan_skip_not_ready"     # Data not ready (was: data_not_ready)
-    SCAN_SKIP_WHITELIST = "scan_skip_whitelist"     # Whitelist filtered (was: whitelist_filtered)
+    SCAN_WHITELISTED = "scan_whitelisted"   # scan 遇到白名单 bot: 清理残留活跃单或无单跳过 (只记动作, 不猜原因; 合并原 scan_skip_whitelist + whitelist_closed)
     SCAN_SKIP_MUTED = "scan_skip_muted"             # Already in mute period (was: muted)
     SCAN_SKIP_COOLDOWN = "scan_skip_cooldown"       # Cooldown period (was: cooldown_filtered)
 
@@ -66,7 +66,6 @@ class AuditAction(str, Enum):
 
     # ── Task record / ticket lifecycle (new) ──────────
     ENQUEUED = "enqueued"                           # 新工单+first_send notify 创建 (§7.1.4)
-    WHITELIST_CLOSED = "whitelist_closed"           # 白名单命中关闭 active 工单 (§7.2.7)
     COOLDOWN_FILTERED = "cooldown_filtered"         # cooldown 期内跳过建单 (§7.1.4 Step 5)
     STILL_ACTIONABLE = "still_actionable"           # 仍有 active 工单, 刷新快照 (§7.1.4 Step 4)
     AUTO_SILENCED = "auto_silenced"                 # 不在治理范围, 自动静默 (§7.2.6)
@@ -141,7 +140,8 @@ class CloseReason(str, Enum):
 
     ADMIN_CLOSED = "admin_closed"
     AUTO_SILENCED_NORMAL = "auto_silenced_normal"
-    WHITELIST_FILTERED = "whitelist_filtered"
+    SCAN_WHITELISTED = "scan_whitelisted"          # scan 清理白名单 bot 残留活跃单 (只记动作, 不猜原因)
+    WHITELIST_APPROVED = "whitelist_approved"      # owner 申请加白 → admin 审阅同意关单 (source=admin_review)
     USER_OPTIMIZED_APPROVED = "user_optimized_approved"
     REVIEW_REJECTED = "review_rejected"
     STALE_REPLACED = "stale_replaced"

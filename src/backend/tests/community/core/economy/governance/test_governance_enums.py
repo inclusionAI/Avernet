@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from agentclaw.community.core.economy.governance.domain.enums import (
     AuditAction,
+    CloseReason,
 )
 
 
@@ -35,9 +36,18 @@ def test_system_auto_values():
 
 def test_scan_skip_values():
     assert AuditAction.SCAN_SKIP_NOT_READY == "scan_skip_not_ready"
-    assert AuditAction.SCAN_SKIP_WHITELIST == "scan_skip_whitelist"
+    assert AuditAction.SCAN_WHITELISTED == "scan_whitelisted"
     assert AuditAction.SCAN_SKIP_MUTED == "scan_skip_muted"
     assert AuditAction.SCAN_SKIP_COOLDOWN == "scan_skip_cooldown"
+
+
+def test_close_reason_values():
+    assert CloseReason.ADMIN_CLOSED == "admin_closed"
+    assert CloseReason.SCAN_WHITELISTED == "scan_whitelisted"
+    assert CloseReason.WHITELIST_APPROVED == "whitelist_approved"
+    assert CloseReason.USER_OPTIMIZED_APPROVED == "user_optimized_approved"
+    assert CloseReason.REVIEW_REJECTED == "review_rejected"
+    assert CloseReason.STALE_REPLACED == "stale_replaced"
 
 
 def test_admin_action_values():
@@ -56,6 +66,6 @@ def test_all_action_values_are_unique_strings():
         for k, v in vars(AuditAction).items()
         if not k.startswith("_") and isinstance(v, str)
     ]
-    assert len(values) == 55
+    assert len(values) == 54
     assert all(isinstance(v, str) for v in values)
     assert len(set(values)) == len(values)

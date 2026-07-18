@@ -270,7 +270,7 @@ class AuditLogOrm(Base):
     hit_dimensions = Column(String(512))
     expected_token_saving = Column(BigInteger, nullable=True)
     saving_ratio = Column(Numeric(10, 4), nullable=True)
-    action_taken = Column(String(64))  # enqueued/whitelist_filtered/muted/cooldown_filtered/auto_resolved/mute_expired/out_of_scope/reminded/expired_unresolved/data_not_ready/error/user_resolved/admin_*
+    action_taken = Column(String(64))  # enqueued/scan_whitelisted/muted/cooldown_filtered/auto_resolved/mute_expired/out_of_scope/reminded/expired_unresolved/data_not_ready/error/user_resolved/admin_*
     source = Column(String(32), default="daily_scan")
     error_msg = Column(Text, nullable=True)
     actor_id = Column(String(64), nullable=True, comment="实际操作人ID — owner自操作=owner_id，admin代操作=admin_id，系统行为=NULL")
