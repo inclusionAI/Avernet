@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from agentclaw.community.core.economy.governance.domain.enums import (
+    ACTIVE_STATUSES,
+    GovernanceStatus,
+)
 from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
 from agentclaw.community.core.economy.governance.repositories.orm import GovernanceTicketOrm
 from agentclaw.community.utils.env_utils import get_current_env
@@ -21,7 +25,8 @@ class TaskRecordQueryMixin:
     ) -> GovernanceTicket | None:
         """Find the active ticket for an active_worker (owner_id:bot_id).
 
-        Active = governance_status IN ('open', 'scheduled', 'waiting_review').
+        Active = governance_status IN ACTIVE_STATUSES
+        (open / scheduled / waiting_review)。
 
         Returns:
             :class:`GovernanceTicket` or ``None`` if no active ticket exists.
@@ -32,9 +37,7 @@ class TaskRecordQueryMixin:
                 s.query(GovernanceTicketOrm)
                 .filter(
                     GovernanceTicketOrm.active_worker == active_worker,
-                    GovernanceTicketOrm.governance_status.in_(
-                        ("open", "scheduled", "waiting_review"),
-                    ),
+                    GovernanceTicketOrm.governance_status.in_(ACTIVE_STATUSES),
                     GovernanceTicketOrm.env == _env,
                 )
                 .one_or_none()
@@ -77,7 +80,7 @@ class TaskRecordQueryMixin:
                 s.query(GovernanceTicketOrm)
                 .filter(
                     GovernanceTicketOrm.worker_id == worker_id,
-                    GovernanceTicketOrm.governance_status == "closed",
+                    GovernanceTicketOrm.governance_status == GovernanceStatus.CLOSED,
                     GovernanceTicketOrm.env == _env,
                 )
                 .order_by(
@@ -143,7 +146,7 @@ class TaskRecordQueryMixin:
             rows = (
                 s.query(GovernanceTicketOrm)
                 .filter(
-                    GovernanceTicketOrm.governance_status == "open",
+                    GovernanceTicketOrm.governance_status == GovernanceStatus.OPEN,
                     GovernanceTicketOrm.active_worker.isnot(None),
                     GovernanceTicketOrm.env == _env,
                 )
@@ -166,7 +169,7 @@ class TaskRecordQueryMixin:
             rows = (
                 s.query(GovernanceTicketOrm)
                 .filter(
-                    GovernanceTicketOrm.governance_status == "scheduled",
+                    GovernanceTicketOrm.governance_status == GovernanceStatus.SCHEDULED,
                     GovernanceTicketOrm.mute_until <= now,
                     GovernanceTicketOrm.mute_until.isnot(None),
                     GovernanceTicketOrm.env == _env,
@@ -196,7 +199,7 @@ class TaskRecordQueryMixin:
             rows = (
                 s.query(GovernanceTicketOrm)
                 .filter(
-                    GovernanceTicketOrm.governance_status == "open",
+                    GovernanceTicketOrm.governance_status == GovernanceStatus.OPEN,
                     GovernanceTicketOrm.latest_decision == "normal",
                     GovernanceTicketOrm.consecutive_normal_days
                     >= min_consecutive_days,
@@ -223,7 +226,7 @@ class TaskRecordQueryMixin:
             rows = (
                 s.query(GovernanceTicketOrm)
                 .filter(
-                    GovernanceTicketOrm.governance_status == "open",
+                    GovernanceTicketOrm.governance_status == GovernanceStatus.OPEN,
                     GovernanceTicketOrm.latest_decision == "actionable",
                     GovernanceTicketOrm.remind_at <= now,
                     GovernanceTicketOrm.remind_at.isnot(None),
@@ -349,9 +352,7 @@ class TaskRecordQueryMixin:
             return (
                 s.query(GovernanceTicketOrm)
                 .filter(
-                    GovernanceTicketOrm.governance_status.in_(
-                        ("open", "scheduled", "waiting_review"),
-                    ),
+                    GovernanceTicketOrm.governance_status.in_(ACTIVE_STATUSES),
                     GovernanceTicketOrm.active_worker.isnot(None),
                     GovernanceTicketOrm.env == _env,
                 )
