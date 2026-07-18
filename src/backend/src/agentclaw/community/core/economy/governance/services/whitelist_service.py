@@ -179,6 +179,12 @@ class GovernanceWhitelistService:
             whitelist_type="governance",
         )
 
+        # 删白收尾:把该 worker 现存 OBSERVED 观察单转 CLOSED(终态归档,
+        # 不再被 off-batch 刷新)。best-effort:无观察单则跳过;失败不阻断删白。
+        observed_closed = self._close_observed_for_whitelist_removal(
+            bot_id=bot_id, owner_id=owner_id,
+        )
+
         audit_run_id = f"wl-del-{uuid.uuid4().hex[:8]}"
         try:
             self._audit_repo.add_audit(
@@ -188,13 +194,48 @@ class GovernanceWhitelistService:
                 actor_id=operator,
                 action_taken=AuditAction.WHITELIST_REMOVED,
                 source="admin_api",
-                error_msg=f"reason={reason} bot_id={bot_id} owner_id={owner_id} deleted={deleted}",
+                error_msg=(
+                    f"reason={reason} bot_id={bot_id} owner_id={owner_id} "
+                    f"deleted={deleted} observed_closed={observed_closed}"
+                ),
                 dry_run=0,
             )
         except Exception:
             log.exception("[WhitelistDelete] Failed to write audit")
 
-        return {"deleted": deleted, "bot_id": bot_id, "owner_id": owner_id}
+        return {
+            "deleted": deleted,
+            "bot_id": bot_id,
+            "owner_id": owner_id,
+            "observed_closed": observed_closed,
+        }
+
+    def _close_observed_for_whitelist_removal(
+        self, *, bot_id: str, owner_id: str,
+    ) -> bool:
+        """删白收尾:找该 worker 的 OBSERVED 单转 CLOSED(best-effort)。
+
+        工单维度用 worker_id(``owner_id:bot_id``,与 record_process_service
+        fallback 合成口径一致)。无观察单或多条不同 worker_id 复合形式时只处理
+        标准形式这条;失败不抛(不阻断删白主流程)。
+
+        Returns:
+            True 若找到并成功收尾;False 若无观察单或收尾失败。
+        """
+        worker_id = f"{owner_id}:{bot_id}"
+        try:
+            observed = self._task_repo.find_observed_ticket(worker_id)
+            if observed is None:
+                return False
+            return self._lifecycle_svc.close_observed_for_removal(
+                observed.ticket_id, now=datetime.now(),
+            )
+        except Exception:
+            log.exception(
+                "[WhitelistDelete] best-effort close_observed_for_removal "
+                "failed: bot_id=%s owner_id=%s", bot_id, owner_id,
+            )
+            return False
 
     # ------------------------------------------------------------------
     # Thin delegates — expose repo-level single-point operations.

@@ -293,6 +293,42 @@ class GovernanceLifecycleService:
         self._cancel_pending(ticket_id)
         return True
 
+    def close_observed_for_removal(
+        self, ticket_id: str, *, now: datetime,
+    ) -> bool:
+        """删白收尾:OBSERVED → CLOSED(whitelist_approved) 终态 + cancel pending。
+
+        管理员删除白名单条目时,把该 worker 的现存观察单收尾为 CLOSED(归档为
+        终态,不再被 offline-batch 刷新)。best-effort:无观察单则跳过(返 False)。
+        不设 cooldown(删白后等 off-batch 正常 Step6 重建新单,非删白即复活)。
+
+        方案 A 链路:find → ``ticket.close()``(OBSERVED→CLOSED 合法,守卫激活)
+        → ``save_ticket`` → 取消待通知(观察单本无 pending,best-effort 幂等 no-op)。
+
+        审计归属:同 ``admin_close`` 约定,删白审计(WHITELIST_REMOVED)由调用方
+        (whitelist_service)持有,驱动不重复写。
+
+        Returns True if the ticket was found and closed, False if not found
+        (或已非 OBSERVED — 幂等 no-op)。
+        """
+        ticket = self._task_repo.find_by_ticket_id(ticket_id)
+        if ticket is None:
+            return False
+        if ticket.governance_status != GovernanceStatus.OBSERVED:
+            # 非观察态(已 CLOSED/活跃)→ 幂等 no-op,不强行转
+            return False
+        try:
+            ticket.close(
+                close_reason=CloseReason.WHITELIST_APPROVED, closed_at=now,
+            )
+        except IllegalTicketTransitionError as exc:
+            self._audit_illegal(ticket_id, "close_observed_for_removal", exc)
+            return False
+        if not self._task_repo.save_ticket(ticket):
+            return False
+        self._cancel_pending(ticket_id)  # best-effort:观察单本无 pending,幂等
+        return True
+
     def close_for_stale_replace(
         self, ticket_id: str, *, now: datetime,
     ) -> bool:

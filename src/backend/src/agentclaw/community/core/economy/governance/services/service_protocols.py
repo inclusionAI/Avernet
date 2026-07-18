@@ -326,6 +326,16 @@ class GovernanceLifecycleServiceProtocol(Protocol):
         """
         ...
 
+    def close_observed_for_removal(
+        self, ticket_id: str, *, now: datetime,
+    ) -> bool:
+        """删白收尾:OBSERVED → CLOSED(whitelist_approved)终态 + cancel pending(best-effort)。
+
+        不设 cooldown(等 off-batch 正常重建)。非 OBSERVED 态返 False(幂等 no-op)。
+        审计由调用方(whitelist_service)持有。
+        """
+        ...
+
     def close_for_stale_replace(
         self, ticket_id: str, *, now: datetime,
     ) -> bool:
