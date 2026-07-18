@@ -58,6 +58,12 @@ class TaskRecordRepositoryProtocol(Protocol):
         """Find most recently closed ticket for a worker (cooldown check)."""
         ...
 
+    def find_latest_tickets_by_worker_keys(
+        self, worker_keys: list[str],
+    ) -> dict[str, GovernanceTicket]:
+        """Batch: most-recent ticket per worker_key (any status/close_reason)."""
+        ...
+
     # ── 存 ──
     def add_ticket(self, row: Any) -> str:
         """Insert a new ticket row. Returns ticket_id."""

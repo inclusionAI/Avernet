@@ -88,6 +88,46 @@ class TaskRecordQueryMixin:
             )
             return GovernanceTicket.from_orm(obj) if obj else None
 
+    def find_latest_tickets_by_worker_keys(
+        self, worker_keys: list[str],
+    ) -> dict[str, GovernanceTicket]:
+        """Batch: most-recent ticket per worker_key (any status/close_reason).
+
+        一条 IN 查询取所有候选(按 ``gmt_create`` DESC)+ Python 侧 group by
+        ``worker_id`` 各取首条,避免每 worker point query(N+1)。
+
+        用 ``worker_id``((始终 ``owner_id:bot_id``)而非 ``active_worker``
+        (closed 后置 NULL)—— 含历史 closed 工单,正是白单叠加所需。
+
+        Args:
+            worker_keys: ``owner_id:bot_id`` 形式的 worker key 集合。
+
+        Returns:
+            ``{worker_key: 最近一条 GovernanceTicket}``;无工单的 worker
+            不出现在 dict。空输入短路返回 ``{}``。
+        """
+        if not worker_keys:
+            return {}
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            rows = (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.worker_id.in_(worker_keys),
+                    GovernanceTicketOrm.env == _env,
+                )
+                .order_by(GovernanceTicketOrm.gmt_create.desc())
+                .all()
+            )
+        latest: dict[str, GovernanceTicket] = {}
+        for row in rows:
+            # gmt_create DESC 已排序,首次见到的 worker_id 即该 worker 最近一条。
+            if row.worker_id in latest:
+                continue
+            latest[row.worker_id] = GovernanceTicket.from_orm(row)
+        return latest
+
     def list_active_open_tickets(
         self,
     ) -> list[GovernanceTicket]:

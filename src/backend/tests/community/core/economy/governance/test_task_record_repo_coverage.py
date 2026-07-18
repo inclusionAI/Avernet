@@ -261,6 +261,54 @@ class TestFindLatestClosedByWorker:
         assert repo.find_latest_closed_by_worker("w:cls2") is None
 
 
+class TestFindLatestTicketsByWorkerKeys:
+    """find_latest_tickets_by_worker_keys(worker_keys) → dict[worker, latest ticket]"""
+
+    def test_picks_most_recent_per_worker(self, repo, engine):
+        now = datetime.now()
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            # w:wl1 有两条(含 closed),应取 gmt_create 最新那条
+            s.add(_make_ticket(
+                ticket_id="tkt-wl1-old", worker_id="w:wl1",
+                active_worker=None, governance_status="closed",
+                close_reason="user_close", gmt_create=now - timedelta(days=2),
+            ))
+            s.add(_make_ticket(
+                ticket_id="tkt-wl1-new", worker_id="w:wl1",
+                active_worker="w:wl1", governance_status="open",
+                gmt_create=now,
+            ))
+            s.add(_make_ticket(
+                ticket_id="tkt-wl2", worker_id="w:wl2",
+                active_worker="w:wl2", governance_status="open",
+                gmt_create=now - timedelta(hours=1),
+            ))
+            s.commit()
+
+        result = repo.find_latest_tickets_by_worker_keys(["w:wl1", "w:wl2"])
+        assert set(result.keys()) == {"w:wl1", "w:wl2"}
+        assert result["w:wl1"].ticket_id == "tkt-wl1-new"  # gmt_create DESC 取最新
+        assert result["w:wl2"].ticket_id == "tkt-wl2"
+
+    def test_empty_worker_keys(self, repo):
+        assert repo.find_latest_tickets_by_worker_keys([]) == {}
+
+    def test_worker_without_ticket_absent(self, repo, engine):
+        now = datetime.now()
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(
+                ticket_id="tkt-x", worker_id="w:x",
+                active_worker="w:x", gmt_create=now,
+            ))
+            s.commit()
+
+        result = repo.find_latest_tickets_by_worker_keys(["w:x", "w:nobody"])
+        assert "w:x" in result
+        assert "w:nobody" not in result  # 无工单的 worker 不在 dict
+
+
 class TestListScheduledDue:
     """list_scheduled_due(now) — tickets with mute_until <= now."""
 
