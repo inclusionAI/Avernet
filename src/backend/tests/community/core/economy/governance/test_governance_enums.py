@@ -6,8 +6,11 @@ Exercises every ``AuditAction`` class constant so all definition lines in
 from __future__ import annotations
 
 from agentclaw.community.core.economy.governance.domain.enums import (
+    ACTIVE_STATUSES,
+    TERMINAL_STATUSES,
     AuditAction,
     CloseReason,
+    GovernanceStatus,
 )
 
 
@@ -69,3 +72,26 @@ def test_all_action_values_are_unique_strings():
     assert len(values) == 54
     assert all(isinstance(v, str) for v in values)
     assert len(set(values)) == len(values)
+
+
+def test_status_constants():
+    """状态族常量是 ticket 侧 governance_status 谓词的公共来源。
+
+    Step1 基线:ACTIVE_STATUSES = 三活跃态;TERMINAL_STATUSES = {CLOSED}。
+    二者无交集(同一工单不会同时属于活跃与终态)。Step2 扩 TERMINAL 含 OBSERVED
+    时,本测试需同步更新(OBSERVED 必须 ∈ TERMINAL、∉ ACTIVE)。
+    """
+    assert GovernanceStatus.OPEN in ACTIVE_STATUSES
+    assert GovernanceStatus.SCHEDULED in ACTIVE_STATUSES
+    assert GovernanceStatus.WAITING_REVIEW in ACTIVE_STATUSES
+    assert GovernanceStatus.CLOSED not in ACTIVE_STATUSES
+
+    assert GovernanceStatus.CLOSED in TERMINAL_STATUSES
+    assert GovernanceStatus.OPEN not in TERMINAL_STATUSES
+
+    # 活跃与终态互斥(状态机基本不变式)
+    assert ACTIVE_STATUSES.isdisjoint(TERMINAL_STATUSES)
+
+    # frozenset 不可变,防误改
+    assert isinstance(ACTIVE_STATUSES, frozenset)
+    assert isinstance(TERMINAL_STATUSES, frozenset)

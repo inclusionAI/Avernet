@@ -112,6 +112,33 @@ class GovernanceStatus(str, Enum):
         return self.value
 
 
+# ── ticket 侧 governance_status 谓词的公共来源 ──────────────────────────
+# 收口判据:多态集合查询(语义集合,会因加态而变,散落重复)引这些常量;单态
+# 精确查询(== 某态,加态不影响它)只换枚举不引常量。
+#
+# 为什么存在:加新状态(如 OBSERVED)时,只需改这里一处,所有"活跃态/终态"
+# 集合消费方自动同步,避免散落在 repo 各处的 in_(...) 谓词逐一改、漏一处
+# 即静默 bug。
+#
+# 范围:仅用于 ticket 侧(``GovernanceTicketOrm.governance_status``)。
+# 通知表 ``GovernanceNotificationOrm`` 也有同名列 governance_status,但语义
+# 不同(建通知时工单状态快照),通知侧谓词不引此常量,避免两个不同概念混着改。
+ACTIVE_STATUSES: frozenset[GovernanceStatus] = frozenset({
+    GovernanceStatus.OPEN,
+    GovernanceStatus.SCHEDULED,
+    GovernanceStatus.WAITING_REVIEW,
+})
+"""活跃态集合 — 工单仍在治理链路中(可投递/可刷新/可 review)。
+Step1 不含 OBSERVED;Step2 加 OBSERVED 后仍不含(观察态归终态族,
+不发通知、不被 find_active_ticket 命中)。"""
+
+TERMINAL_STATUSES: frozenset[GovernanceStatus] = frozenset({
+    GovernanceStatus.CLOSED,
+})
+"""终态族 — 工单生命周期结束。Step2 加 OBSERVED 后扩为 {CLOSED, OBSERVED}
+(OBSERVED 归终态族:持续刷新但不发通知、不占治理人力)。"""
+
+
 class NotifyStatus(str, Enum):
     """通知投递状态 — 用于 GovernanceNotification.notify_status."""
 
