@@ -228,6 +228,73 @@ class GovernanceWhitelistService:
             offset=offset,
         )
 
+    # 工单维度叠加字段(取最近一条工单的治理快照,服务 admin 复评白名单合理性)。
+    _TICKET_META_KEYS = (
+        "bot_name",
+        "owner_name",
+        "token_baseline",
+        "expected_token_saving",
+        "hit_dimensions",
+        "saving_ratio",
+        "latest_decision",
+        "gmt_create",
+    )
+
+    def list_all_with_ticket_meta(
+        self,
+        *,
+        whitelist_type: str = "governance",
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        include_expired: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """list_all + 按 (bot_id, owner_id) 批量叠加最近工单维度字段。
+
+        白单为主表(白名单唯一权威来源);治理维度字段(bot_name/owner_name/
+        token_baseline/expected_token_saving/hit_dimensions/saving_ratio/
+        latest_decision/latest_ticket_gmt_create)取自该 worker **最近一条**
+        governance 工单的快照(``find_latest_tickets_by_worker_keys`` 一次 IN
+        查询 + Python 侧 group,无 N+1)。治理快照按监控刷新,反映 bot 当前
+        状态,服务于 admin 复评「bot 是否持续恶化、建议是否合理」。
+
+        Args: 同 :meth:`list_all`。
+
+        Returns:
+            ``(items, total)``:items 为 dict 列表(白单元数据 + 工单维度叠加),
+            total 为筛选条件下的白单总数(分页配套)。
+        """
+        entries, total = self._whitelist_repo.list_all(
+            whitelist_type=whitelist_type,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            include_expired=include_expired,
+            limit=limit,
+            offset=offset,
+        )
+        # worker_key 集合 → 批量取最近一条工单
+        worker_keys = [f"{e.owner_id}:{e.bot_id}" for e in entries]
+        latest_tickets = self._task_repo.find_latest_tickets_by_worker_keys(
+            worker_keys,
+        )
+        items: list[dict] = []
+        for entry in entries:
+            item = entry.to_dict()
+            ticket = latest_tickets.get(f"{entry.owner_id}:{entry.bot_id}")
+            ticket_dict = ticket.to_dict() if ticket is not None else {}
+            # 工单 gmt_create 转译为 latest_ticket_gmt_create,避免与白单无该字段歧义。
+            item["bot_name"] = ticket_dict.get("bot_name")
+            item["owner_name"] = ticket_dict.get("owner_name")
+            item["token_baseline"] = ticket_dict.get("token_baseline")
+            item["expected_token_saving"] = ticket_dict.get("expected_token_saving")
+            item["hit_dimensions"] = ticket_dict.get("hit_dimensions")
+            item["saving_ratio"] = ticket_dict.get("saving_ratio")
+            item["latest_decision"] = ticket_dict.get("latest_decision")
+            item["latest_ticket_gmt_create"] = ticket_dict.get("gmt_create")
+            items.append(item)
+        return items, total
+
     def add(
         self,
         *,

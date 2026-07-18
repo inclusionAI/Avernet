@@ -412,3 +412,120 @@ class TestDeleteWhitelistEntry:
             wl_audits = [a for a in audits if a.action_taken == AuditAction.WHITELIST_REMOVED]
             assert len(wl_audits) >= 1
             assert wl_audits[0].actor_id == "admin-1"
+
+
+class TestListAllWithTicketMeta:
+    """list_all_with_ticket_meta: 白单 + 最近工单维度字段叠加。"""
+
+    @staticmethod
+    def _make_ticket_meta(
+        session, *, ticket_id, bot_id, owner_id, gmt_create,
+        token_baseline=100, expected_token_saving=50, hit_dimensions="ctx",
+        saving_ratio=0.5, latest_decision="actionable",
+        governance_status="closed",
+    ):
+        """插一条带治理快照字段的工单(worker_id=owner_id:bot_id)。"""
+        worker = f"{owner_id}:{bot_id}"
+        row = GovernanceTicketOrm(
+            ticket_id=ticket_id,
+            worker_id=worker,
+            active_worker=worker if governance_status != "closed" else None,
+            bot_id=bot_id,
+            bot_name=f"Bot-{bot_id}",
+            owner_id=owner_id,
+            dt_version="20260629",
+            governance_decision="actionable",
+            governance_status=governance_status,
+            latest_decision=latest_decision,
+            hit_dimensions=hit_dimensions,
+            expected_token_saving=expected_token_saving,
+            saving_ratio=saving_ratio,
+            token_baseline=token_baseline,
+            last_sync_at=datetime.now(),
+            gmt_create=gmt_create,
+        )
+        session.add(row)
+        session.commit()
+        return row
+
+    def test_overlays_latest_ticket_fields(self, session, engine):
+        """白单有对应工单 → 叠加最近一条工单维度字段。"""
+        from agentclaw.community.core.economy.governance.repositories.orm import (
+            GovernanceTicketOrm,
+        )  # noqa: F401 — already imported above, kept for clarity
+        svc, db = _build_svc(engine)
+        now = datetime.now()
+        _make_whitelist(session, bot_id="bot-a", owner_id="owner-a")
+        # 该 worker 两条工单,gmt_create 新的应胜出
+        self._make_ticket_meta(
+            session, ticket_id="tkt-a-old", bot_id="bot-a", owner_id="owner-a",
+            gmt_create=now - timedelta(days=2), token_baseline=80,
+            expected_token_saving=20, saving_ratio=0.2,
+        )
+        self._make_ticket_meta(
+            session, ticket_id="tkt-a-new", bot_id="bot-a", owner_id="owner-a",
+            gmt_create=now, token_baseline=120,
+            expected_token_saving=60, saving_ratio=0.5, hit_dimensions="ctx,mem",
+        )
+
+        items, total = svc.list_all_with_ticket_meta(
+            whitelist_type="governance",
+        )
+        assert total == 1
+        assert len(items) == 1
+        item = items[0]
+        # 白单元数据保留
+        assert item["bot_id"] == "bot-a"
+        assert item["owner_id"] == "owner-a"
+        assert item["source"] == "manual"
+        # 工单维度叠加 = 最近那条(tkt-a-new)
+        assert item["bot_name"] == "Bot-bot-a"
+        assert item["token_baseline"] == 120
+        assert item["expected_token_saving"] == 60
+        assert item["hit_dimensions"] == "ctx,mem"
+        assert item["saving_ratio"] == 0.5
+        assert item["latest_decision"] == "actionable"
+        assert item["latest_ticket_gmt_create"] is not None
+
+    def test_no_ticket_degrades_to_none(self, session, engine):
+        """白单无对应工单 → 工单维度字段 None,条目不丢。"""
+        svc, db = _build_svc(engine)
+        _make_whitelist(session, bot_id="bot-b", owner_id="owner-b")
+
+        items, total = svc.list_all_with_ticket_meta(
+            whitelist_type="governance",
+        )
+        assert total == 1
+        item = items[0]
+        assert item["bot_id"] == "bot-b"
+        assert item["source"] == "manual"
+        # 无工单 → 工单维度全 None,条目保留
+        assert item["bot_name"] is None
+        assert item["owner_name"] is None
+        assert item["token_baseline"] is None
+        assert item["expected_token_saving"] is None
+        assert item["hit_dimensions"] is None
+        assert item["saving_ratio"] is None
+        assert item["latest_decision"] is None
+        assert item["latest_ticket_gmt_create"] is None
+
+    def test_no_key_collision_whitelist_vs_ticket(self, session, engine):
+        """白单元数据(source/reason)与工单维度字段无命名冲突,各用原名。"""
+        svc, db = _build_svc(engine)
+        now = datetime.now()
+        _make_whitelist(
+            session, bot_id="bot-c", owner_id="owner-c",
+            source="admin", reason="manual override",
+        )
+        self._make_ticket_meta(
+            session, ticket_id="tkt-c", bot_id="bot-c", owner_id="owner-c",
+            gmt_create=now,
+        )
+        items, _ = svc.list_all_with_ticket_meta(whitelist_type="governance")
+        item = items[0]
+        # 白单 source/reason 原样保留,不被工单维度覆盖
+        assert item["source"] == "admin"
+        assert item["reason"] == "manual override"
+        # 工单维度叠加键存在
+        assert item["bot_name"] == "Bot-bot-c"
+        assert item["token_baseline"] == 100
