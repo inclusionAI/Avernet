@@ -527,6 +527,15 @@ class GovernanceWorkflowServiceProtocol(Protocol):
         """评审工单列表(跨 owner, 按治理状态过滤, 分页)。返回领域模型 + 总数。"""
         ...
 
+    def list_whitelist_observed_tickets(
+        self, *, offset: int = 0, limit: int = 50,
+    ) -> tuple[list[GovernanceTicket], int]:
+        """白单观察工单视图:当前 OBSERVED 态工单(加白中 bot 最新治理画像)。
+
+        薄包装,转调 list_review_tickets([observed])。语义入口。
+        """
+        ...
+
     def get_review_ticket_detail(
         self, ticket_id: str,
     ) -> GovernanceTicket | None:

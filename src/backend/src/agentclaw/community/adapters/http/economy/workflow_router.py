@@ -192,6 +192,39 @@ async def list_review_tickets(
     return ApiResponse(success=True, data=data.model_dump())
 
 
+@workflow_router.get(
+    "/tickets:whitelist",
+    summary="白单观察工单视图(OBSERVED)",
+)
+async def list_whitelist_tickets(
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+    offset: int = Query(0, ge=0, description="分页偏移"),
+    limit: int = Query(50, ge=1, le=200, description="分页上限(<=200)"),
+) -> ApiResponse:
+    """当前处于 OBSERVED 观察态的工单(加白中 bot 的最新治理画像)。
+
+    只读 GET,复用工单列表 item 结构,按 gmt_create 倒序分页。
+    item = 纯工单(ReviewTicketItem),含治理画像(token_baseline/hit_dimensions/
+    saving_ratio/latest_decision/dt_version 等);不并白单元数据(来源/过期
+    另查 /admin/whitelist)。无 OBSERVED 工单时 items=[] total=0。
+    """
+    del ctx  # RequestContext 仅用于走 AuthPlugin 鉴权链路
+    tickets, total = await asyncio.to_thread(
+        admin_svc.list_whitelist_observed_tickets,
+        offset=offset,
+        limit=limit,
+    )
+    data = ReviewTicketListResponse.from_tickets(
+        tickets,
+        total=total,
+        limit=limit,
+        offset=offset,
+        status_filter=["observed"],
+    )
+    return ApiResponse(success=True, data=data.model_dump())
+
+
 # ── Workflow: 单工单详情 ──────────────────────────────────────────────────
 
 

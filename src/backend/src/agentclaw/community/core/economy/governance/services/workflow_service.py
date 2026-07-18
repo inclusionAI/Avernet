@@ -120,6 +120,27 @@ class GovernanceWorkflowService:
         )
         return tickets, total
 
+    def list_whitelist_observed_tickets(
+        self, *, offset: int = 0, limit: int = 50,
+    ) -> tuple[list[GovernanceTicket], int]:
+        """白单观察工单视图:当前处于 OBSERVED 观察态的工单(加白中 bot 最新治理画像)。
+
+        薄包装,语义入口 — 转调 :meth:`list_review_tickets` 显式传 ``[observed]``,
+        复用既有查询/分页/counts 口径,凸出「白单观察工单视图」语义,不重写逻辑。
+        OBSERVED 态归终态族(`ACTIVE_STATUSES` 不含),默认活跃列表不混入观察单,
+        故白单视图必须由本入口显式筛 observed。
+
+        Args:
+            offset: 分页偏移。
+            limit: 分页上限。
+
+        Returns:
+            ``(OBSERVED 工单列表, 总数)``;无观察单时 ``([], 0)``。
+        """
+        return self.list_review_tickets(
+            [GovernanceStatus.OBSERVED.value], offset=offset, limit=limit,
+        )
+
     def get_review_ticket_detail(
         self, ticket_id: str,
     ) -> GovernanceTicket | None:
