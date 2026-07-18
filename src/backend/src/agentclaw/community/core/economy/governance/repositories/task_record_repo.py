@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from agentclaw.community.core.economy.governance.domain.enums import GovernanceStatus
 from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
 from agentclaw.community.core.economy.governance.repositories.orm import GovernanceTicketOrm
 from agentclaw.community.core.economy.governance.repositories.task_record_query import (
@@ -222,13 +223,15 @@ class TaskRecordRepository(TaskRecordQueryMixin):
             count = (
                 s.query(GovernanceTicketOrm)
                 .filter(
-                    GovernanceTicketOrm.governance_status.in_(("open", "scheduled")),
+                    GovernanceTicketOrm.governance_status.in_(
+                        (GovernanceStatus.OPEN, GovernanceStatus.SCHEDULED),
+                    ),
                     GovernanceTicketOrm.active_worker.isnot(None),
                     GovernanceTicketOrm.env == _env,
                 )
                 .update(
                     {
-                        GovernanceTicketOrm.governance_status: "closed",
+                        GovernanceTicketOrm.governance_status: GovernanceStatus.CLOSED,
                         GovernanceTicketOrm.close_reason: close_reason,
                         GovernanceTicketOrm.closed_at: closed_at,
                         GovernanceTicketOrm.active_worker: None,
