@@ -289,17 +289,19 @@ async def list_whitelist(
     limit: int = Query(50, ge=1, le=200, description="分页上限 1~200"),
     offset: int = Query(0, ge=0, description="分页偏移"),
 ) -> ApiResponse:
-    """只读分页白名单列表。
+    """只读分页白名单列表(含最近工单维度字段)。
 
-    复用 ``whitelist_service.list_all``(可选 owner/bot 精确筛选 + 过期开关 +
-    total)。default 排除已过期项。只读:无 audit、无副作用;鉴权走
-    ``get_request_context``(同他端点)。item 经领域模型 ``to_dict()`` 序列化
-    (含 bot_id/owner_id/whitelist_type/source/reason/created_by/expires_at
-    /gmt_create/gmt_modified)。
+    复用 ``whitelist_service.list_all_with_ticket_meta``:白单元数据
+    (bot_id/owner_id/whitelist_type/source/reason/created_by/expires_at
+    /gmt_create/gmt_modified)+ 最近一条工单维度叠加(bot_name/owner_name
+    /token_baseline/expected_token_saving/hit_dimensions/saving_ratio
+    /latest_decision/latest_ticket_gmt_create)。default 排除已过期项。
+    只读:无 audit、无副作用;鉴权走 ``get_request_context``。无对应工单的白单
+    叠加字段为 None,条目保留。
     """
     del ctx  # RequestContext 仅用于走 AuthPlugin 鉴权链路
-    entries, total = await asyncio.to_thread(
-        whitelist_svc.list_all,
+    items, total = await asyncio.to_thread(
+        whitelist_svc.list_all_with_ticket_meta,
         whitelist_type=whitelist_type,
         owner_id=owner_id,
         bot_id=bot_id,
@@ -310,7 +312,7 @@ async def list_whitelist(
     return ApiResponse(
         success=True,
         data={
-            "items": [e.to_dict() for e in entries],
+            "items": items,
             "total": total,
             "limit": limit,
             "offset": offset,

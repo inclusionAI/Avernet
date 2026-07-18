@@ -779,6 +779,60 @@ def whitelist_get_no_auth():
     """Error path: 无鉴权 -> 401。"""
 
 
+def _seed_whitelist_list_with_ticket(world) -> None:
+    """白单 + 对应工单(带治理快照)→ 端点应叠加工单维度字段。
+
+    bot-wl-1/user-wl-1 有白单 + 一条工单(token_baseline=200),bot-wl-2 仅
+    白单无工单(降级 None)。"""
+    from datetime import datetime, timedelta
+
+    wl_repo = world.get(GovernanceWhitelistRepository)
+    wl_repo.add(
+        bot_id="bot-wl-1", owner_id="user-wl-1", reason="r1", created_by="88888",
+    )
+    wl_repo.add(
+        bot_id="bot-wl-2", owner_id="user-wl-2", reason="r2", created_by="88888",
+    )
+    # bot-wl-1 有一条工单(token_baseline=200, latest_decision=actionable)
+    ticket_repo = world.get(TaskRecordRepository)
+    worker_id = "user-wl-1:bot-wl-1"
+    ticket_repo.insert_ticket(
+        GovernanceTicketOrm(
+            worker_id=worker_id,
+            bot_id="bot-wl-1",
+            owner_id="user-wl-1",
+            bot_name="BotWL1",
+            owner_name="OwnerOne",
+            dt_version="20260705",
+            governance_decision="actionable",
+            latest_decision="actionable",
+            governance_status="closed",
+            ticket_id="tkt-wl-overlay-1",
+            active_worker=None,
+            token_baseline=200,
+            expected_token_saving=80,
+            hit_dimensions="ctx",
+            saving_ratio=0.4,
+            last_sync_at=datetime.now() - timedelta(days=1),
+        ),
+    )
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/admin/whitelist",
+    scenario="ok_overlays_ticket_meta",
+    input=CaseInput(headers=_USER_HEADER),
+    seed=_seed_whitelist_list_with_ticket,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True, "data": {"total": 2}},
+    ),
+)
+def whitelist_get_ok_overlays_ticket_meta():
+    """白单有对应工单 → item 含工单维度字段(bot_name/token_baseline 等)。"""
+
+
 # ---------------------------------------------------------------------------
 # 13. /workflow/audit-logs (GET — 按 worker 只读分页查治理审计; endpoint lives in workflow_router)
 #     Defined in workflow_router.py; cases kept here alongside the other governance endpoint suites.
