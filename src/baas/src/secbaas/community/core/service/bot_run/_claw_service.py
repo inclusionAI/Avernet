@@ -544,7 +544,6 @@ class ClawBotService(BotService):
                 title=metadata.get("title", None),
                 user_id=user_id,
                 model=metadata.get("model", None),
-                uuid=run_id,
             )
             adapter_session_id = adapter_session.id
             if not adapter_session_id.startswith("agent:main:"):
