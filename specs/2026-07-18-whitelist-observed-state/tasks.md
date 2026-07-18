@@ -4,7 +4,7 @@
 
 ---
 
-## Step 1 — 谓词收口(纯重构,零行为变化)
+## Step 1 — 谓词收口(纯重构,零行为变化) ✅ 已落地
 
 ### Task 1: 加状态族常量
 - **Goal:** 在 `domain/enums.py` 引入 `ACTIVE_STATUSES`/`TERMINAL_STATUSES` 命名常量,作为 ticket 侧 `governance_status` 谓词的公共来源。
@@ -16,7 +16,7 @@
   - [x] 单测 `test_status_constants` 断言 OPEN∈ACTIVE、CLOSED∈TERMINAL、二者无交集。
 - **Depends on:** —
 
-### Task 2: 收口 task_record_query.py 谓词
+### ✅ Task 2: 收口 task_record_query.py 谓词
 - **Goal:** 将该文件 `GovernanceTicketOrm.governance_status` 的**多态集合查询**改为引用 Task1 常量,**单态精确查询**只换枚举不引常量。行为零变化。
 - **Files:** `src/agentclaw/community/core/economy/governance/repositories/task_record_query.py`
 - **收口判据(逐处套用):**
@@ -24,30 +24,30 @@
   - **单态精确查询**("就是等于某态",加态不影响它) → **只换枚举,不引常量**。例:`== "open"` → `== GovernanceStatus.OPEN`。理由:`== open` 一秒可读,包成 `in_(OPEN_ONLY)` 是为统一而统一,损可读性无收益。
   - **调用方传入的 `statuses` 参数** → 查每个调用方:传 FIXED 集则引常量,动态集则保留。
 - **Done when:**
-  - [ ] L35 `find_active_ticket` 的 `in_("open","scheduled","waiting_review")` → `in_(ACTIVE_STATUSES)`(多态集合,引常量)。
-  - [ ] L146/L199/L226 `=="open"`、L169 `=="scheduled"`、L80 `=="closed"`:单态精确查询 → 只换枚举(`==GovernanceStatus.OPEN` 等),不引常量。L80 同理 `==GovernanceStatus.CLOSED`。
-  - [ ] L257/298/335/352 `in_(statuses)`:按"调用方传入参数"判据逐个查调用方,FIXED 集引常量,动态保留。
-  - [ ] 每处改动旁注明判据归类(多态引常量 / 单态换枚举 / 传参保留),便于 review。
-  - [ ] `test_status_predicate_refactor.py` 新增:对 `find_active_ticket`/`find_latest_closed_by_worker` 用随机数据断言改前后结果集(按 ticket_id 排序)逐行一致。
+  - [x] L35 `find_active_ticket` 的 `in_("open","scheduled","waiting_review")` → `in_(ACTIVE_STATUSES)`(多态集合,引常量)。
+  - [x] L146/L199/L226 `=="open"`、L169 `=="scheduled"`、L80 `=="closed"`:单态精确查询 → 只换枚举(`==GovernanceStatus.OPEN` 等),不引常量。L80 同理 `==GovernanceStatus.CLOSED`。
+  - [x] L257/298/335/352 `in_(statuses)`:按"调用方传入参数"判据逐个查调用方,FIXED 集引常量,动态保留。
+  - [x] 每处改动旁注明判据归类(多态引常量 / 单态换枚举 / 传参保留),便于 review。
+  - [x] `test_status_predicate_refactor.py` 新增:对 `find_active_ticket`/`find_latest_closed_by_worker` 用随机数据断言改前后结果集(按 ticket_id 排序)逐行一致。
 - **Depends on:** Task 1
 
-### Task 3: 收口 task_record_repo.py 谓词
+### ✅ Task 3: 收口 task_record_repo.py 谓词
 - **Goal:** 将该文件 `governance_status` SQL 谓词改为引用常量,行为零变化。
 - **Files:** `src/agentclaw/community/core/economy/governance/repositories/task_record_repo.py`
 - **Done when:**
-  - [ ] L225 `in_(("open","scheduled"))` → `in_(...)` 引适当常量或显式枚举(确认该查询语义:open/scheduled 活跃累积,不含 waiting_review → 不能用 ACTIVE_STATUSES,需新建子集常量 `OPEN_OR_SCHEDULED` 或保留显式)。**核查后定**。
-  - [ ] L231 `:"closed"` 写入 → `:GovernanceStatus.CLOSED`。
-  - [ ] 回归断言该查询改前后结果集一致。
+  - [x] L225 `in_(("open","scheduled"))` → `in_(...)` 引适当常量或显式枚举(确认该查询语义:open/scheduled 活跃累积,不含 waiting_review → 不能用 ACTIVE_STATUSES,需新建子集常量 `OPEN_OR_SCHEDULED` 或保留显式)。**核查后定**。
+  - [x] L231 `:"closed"` 写入 → `:GovernanceStatus.CLOSED`。
+  - [x] 回归断言该查询改前后结果集一致。
 - **Depends on:** Task 1
 
-### Task 4: Step1 回归验证 + 提交
+### ✅ Task 4: Step1 回归验证 + 提交
 - **Goal:** 确认 Step1 零行为变化,全量测试绿,单独 commit。
 - **Files:** —
 - **Done when:**
-  - [ ] `cd ocb-public/src/backend && DEPLOY_PROFILE=test uv run pytest tests/community -q` 全绿,计数与基线一致(8132±)。
-  - [ ] `test_status_predicate_refactor.py` 全过。
-  - [ ] 单独 commit: `refactor(governance): 收口 ticket governance_status SQL 谓词到命名常量`。
-  - [ ] commit 不含任何 OBSERVED 相关改动(纯重构)。
+  - [x] `cd ocb-public/src/backend && DEPLOY_PROFILE=test uv run pytest tests/community -q` 全绿,计数与基线一致(8132±)。
+  - [x] `test_status_predicate_refactor.py` 全过。
+  - [x] 单独 commit: `refactor(governance): 收口 ticket governance_status SQL 谓词到命名常量`。
+  - [x] commit 不含任何 OBSERVED 相关改动(纯重构)。
 - **Depends on:** Task 2, Task 3
 
 ---
