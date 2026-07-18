@@ -296,6 +296,18 @@ class GovernanceLifecycleServiceProtocol(Protocol):
         """
         ...
 
+    def open_observed_ticket(self, *, ticket: GovernanceTicket) -> str:
+        """New ticket → OBSERVED(白名单观察):建观察单瘦路径。
+
+        白名单 bot offline-batch 命中、无活跃单无现存观察单时新建 OBSERVED 工单
+        承载持续刷新画像。不发通知(不建 notify_log、不设 delivery_status)、
+        不占治理人力(assignee=None)。审计由调用方持有。
+
+        Returns:
+            持久化的 ``ticket_id``。
+        """
+        ...
+
     def refresh_snapshot(self, ticket_id: str, **snapshot_fields: Any) -> bool:
         """Refresh an active ticket's mutable snapshot (non-state-transition).
 

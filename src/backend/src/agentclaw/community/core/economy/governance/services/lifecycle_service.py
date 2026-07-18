@@ -169,6 +169,57 @@ class GovernanceLifecycleService:
         )
         return ticket_id
 
+    def open_observed_ticket(self, *, ticket: GovernanceTicket) -> str:
+        """New ticket → OBSERVED(白名单观察):建观察单瘦路径。
+
+        白名单 bot 在 offline-batch 命中、且无活跃单也无现存观察单时,用当前
+        record 快照**新建**一条 OBSERVED 工单承载持续刷新的治理画像。与
+        :meth:`open_ticket` 关键差异:状态 OPEN→OBSERVED(经守卫);不设
+        close_reason(非关单转态);**assignee 直传 None 不 fallback** worker_id
+        (观察不占治理人力);**不建 notify_log、不设 delivery_status**(观察单
+        不发通知,"白名单不发通知"不变式核心)。
+
+        审计归属:同 ``open_ticket``,ENQUEUED/观察审计由调用方持有,不重复写。
+
+        Args:
+            ticket: ``GovernanceTicket.create(...)`` 构造的 OPEN 模型。
+
+        Returns:
+            持久化的 ``ticket_id``。
+        """
+        ticket.transition_to(GovernanceStatus.OBSERVED)
+        ticket.assignee = None  # 观察不占治理人力(对齐 enter_observed)
+        snapshot = ticket.snapshot
+        # 与 open_ticket 同源字段映射,差异:assignee 不 fallback、状态=observed。
+        return self._task_repo.add_ticket(
+            ticket_id=ticket.ticket_id or "",
+            worker_id=ticket.worker_id,
+            assignee=ticket.assignee,  # None — 观察不占人力,不 fallback worker_id
+            bot_id=ticket.bot_id or "",
+            owner_id=ticket.owner_id or "",
+            dt_version=snapshot.dt_version,
+            initial_decision=snapshot.initial_decision,
+            current_decision=snapshot.current_decision or "actionable",
+            triggered_dimensions=snapshot.triggered_dimensions,
+            hit_dimensions_count=snapshot.hit_dimensions_count,
+            severity=snapshot.severity,
+            estimated_saving_tokens=snapshot.estimated_saving_tokens,
+            saving_ratio=snapshot.saving_ratio,
+            bot_name=ticket.bot_name,
+            owner_name=ticket.owner_name,
+            token_baseline=snapshot.token_baseline,
+            task_summary=snapshot.task_summary,
+            notification_structured=snapshot.notification_structured,
+            analysis_status=snapshot.analysis_status,
+            governance_status=ticket.governance_status.value,
+            consecutive_normal_days=snapshot.consecutive_normal_days,
+            remind_at=ticket.remind_at,
+            remind_count=ticket.remind_count,
+            last_seen_at=snapshot.last_seen_at,
+            last_sync_at=snapshot.last_sync_at,
+            last_decision_dt_version=snapshot.last_decision_dt_version,
+        )
+
     def refresh_snapshot(self, ticket_id: str, **snapshot_fields: object) -> bool:
         """Refresh an active ticket's mutable snapshot (non-state-transition).
 

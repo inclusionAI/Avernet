@@ -184,6 +184,56 @@ class TestOpenTicket:
 
 
 # ---------------------------------------------------------------------------
+# open_observed_ticket (offline-batch entry — 白名单观察单新建)
+# ---------------------------------------------------------------------------
+
+
+class TestOpenObservedTicket:
+    """建观察单瘦路径:OBSERVED 状态、assignee=None、不建 notify_log。
+
+    "白名单不发通知"不变式的核心落点 — 本方法是观察单的唯一来源(三路之一:
+    off-batch 命中无活跃单新建),若它建了 notify 行,整条链路上的不发通知
+    语义就破了。钉死零 notify。
+    """
+
+    def test_observed_row_persisted_with_observed_status(self) -> None:
+        svc, db, _ = _build_svc()
+        ticket = _make_ticket_model(ticket_id="T-obs-new")
+        returned_id = svc.open_observed_ticket(ticket=ticket)
+
+        assert returned_id == "T-obs-new"
+        persisted = svc._task_repo.find_by_ticket_id("T-obs-new")  # noqa: SLF001
+        assert persisted is not None
+        assert persisted.governance_status == GovernanceStatus.OBSERVED
+        assert persisted.assignee is None  # 观察不占治理人力
+        assert persisted.close_reason is None  # 非关单转态,不设 close_reason
+
+    def test_no_notify_log_row_created(self) -> None:
+        """关键不变式:建观察单不创建任何 notify_log 行(不发通知)。"""
+        svc, db, engine = _build_svc()
+        ticket = _make_ticket_model(ticket_id="T-obs-nonotify")
+        svc.open_observed_ticket(ticket=ticket)
+
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            count = s.query(GovernanceNotificationOrm).filter_by(
+                ticket_id="T-obs-nonotify",
+            ).count()
+        assert count == 0  # 零 notify — 白名单不发通知
+
+    def test_delivery_status_not_written(self) -> None:
+        """观察单不调 update_delivery_status:delivery_status 保持列默认 'none'
+        (不被 first_send 写成 pending)。"""
+        svc, db, _, = _build_svc()
+        ticket = _make_ticket_model(ticket_id="T-obs-nodelivery")
+        svc.open_observed_ticket(ticket=ticket)
+
+        persisted = svc._task_repo.find_by_ticket_id("T-obs-nodelivery")  # noqa: SLF001
+        assert persisted is not None
+        assert persisted.delivery_status == "none"  # 列默认,未被 first_send 写成 pending
+
+
+# ---------------------------------------------------------------------------
 # close_for_whitelist_hit (offline-batch entry)
 # ---------------------------------------------------------------------------
 
