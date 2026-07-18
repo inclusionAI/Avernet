@@ -27,6 +27,7 @@ from agentclaw.community.core.economy.governance.repositories.notify_log_repo im
 )
 from agentclaw.community.core.economy.governance.repositories.orm import (
     Base,
+    GovernanceNotificationOrm,
     GovernanceTicketOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
@@ -288,6 +289,65 @@ class TestAcceptFeedback:
         ) is True
         t = svc._task_repo.find_by_ticket_id("T-wlfb")  # noqa: SLF001
         assert t.governance_status == GovernanceStatus.WAITING_REVIEW
+
+    def test_accept_feedback_cancels_pending_notify(self) -> None:
+        """契约:转 waiting_review 时取消该工单的 pending 通知(待审静默)。
+
+        待审静默普适于三入口(用户反馈/admin 暂停/排期到期),均经
+        ``_cancel_pending``。本 test 用用户反馈入口固化:一张 open 工单
+        挂一条 PENDING 通知 → accept_feedback 转态后该通知变 cancelled。
+        """
+        from contextlib import contextmanager
+
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-silence", status="open",
+                     worker="owner-s:bot-s")
+
+        @contextmanager
+        def _sess():
+            sf = db._sf  # noqa: SLF001 — test access to FakeDB session factory
+            s = sf()
+            try:
+                yield s
+                s.commit()
+            except Exception:
+                s.rollback()
+                raise
+            finally:
+                s.close()
+
+        with _sess() as s:
+            s.add(GovernanceNotificationOrm(
+                notification_id="N-silence-pending",
+                ticket_id="T-silence",
+                bot_id="bot-s",
+                owner_id="owner-s",
+                worker_id="owner-s:bot-s",
+                dt_version="20260711",
+                governance_decision="actionable",
+                governance_cycle_id="cycle-s",
+                governance_status="open",
+                notify_status="pending",
+                notify_type="first_send",
+                notify_source="offline_batch",
+                latest_decision="actionable",
+            ))
+        assert svc.accept_feedback(
+            "T-silence",
+            user_feedback="optimized",
+            feedback_at=datetime.now(),
+            feedback_source="http_api",
+            target_status=GovernanceStatus.WAITING_REVIEW,
+            review_reason="user_optimized",
+            actor_id="owner-s",
+        ) is True
+        with _sess() as s:
+            row = (
+                s.query(GovernanceNotificationOrm)
+                .filter_by(notification_id="N-silence-pending")
+                .one()
+            )
+            assert row.notify_status == "cancelled"
 
 
 # ---------------------------------------------------------------------------

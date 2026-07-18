@@ -226,6 +226,46 @@ class TestProcessRecord:
 
         assert result.action == "whitelist_filtered"
         assert result.entered_governance_scope is False
+        # 契约:加白后该 bot 不创建工单、不创建通知(加白核心语义 = 不创建通知)。
+        with db.orm_session() as s:
+            assert s.query(GovernanceTicketOrm).count() == 0
+            assert s.query(GovernanceNotificationOrm).count() == 0
+
+    def test_whitelist_remove_restores_ticket_and_notify(self, session, engine):
+        """契约:移除白名单 → 下次 batch 自然走正常建单 + 发通知。
+
+        移除纯删条目(无补发/补建/主动 scan),靠下次 offline-batch 恢复。
+        """
+        from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
+            GovernanceWhitelistRepository,
+        )
+        svc, db = _build_svc(engine)
+        whitelist_repo = GovernanceWhitelistRepository(db=db)
+        whitelist_repo.add(
+            bot_id="bot-001", owner_id="staff-001",
+            created_by="admin", whitelist_type="governance",
+        )
+        record = _sample_record()
+
+        # 1. 加白期间:跳过,无工单无通知
+        svc.process_record(record, run_id="run-1", notify_source="offline_batch")
+        with db.orm_session() as s:
+            assert s.query(GovernanceTicketOrm).count() == 0
+            assert s.query(GovernanceNotificationOrm).count() == 0
+
+        # 2. 移除白名单(纯删,无补发/补建)
+        removed = whitelist_repo.remove(
+            bot_id="bot-001", owner_id="staff-001",
+            whitelist_type="governance",
+        )
+        assert removed is True
+
+        # 3. 下次 batch:is_whitelisted=False → 正常建单 + 发通知
+        result = svc.process_record(record, run_id="run-2", notify_source="offline_batch")
+        assert result.entered_governance_scope is True
+        with db.orm_session() as s:
+            assert s.query(GovernanceTicketOrm).count() == 1
+            assert s.query(GovernanceNotificationOrm).count() >= 1
 
     def test_dry_run_no_writes(self, session, engine):
         """dry_run=True → no DB writes, preview returned."""
