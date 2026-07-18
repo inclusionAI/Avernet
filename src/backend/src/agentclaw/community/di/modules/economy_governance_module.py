@@ -166,7 +166,6 @@ class EconomyGovernanceModule(Module):
     @inject
     def _feedback_service(
         self,
-        whitelist_service: GovernanceWhitelistService,
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         task_repo: TaskRecordRepository,
@@ -174,7 +173,7 @@ class EconomyGovernanceModule(Module):
         lifecycle_service: GovernanceLifecycleService,
     ) -> GovernanceFeedbackService:
         return GovernanceFeedbackService(
-            whitelist_service=whitelist_service, notify_repo=notify_repo,
+            notify_repo=notify_repo,
             audit_repo=audit_repo, task_repo=task_repo, config=config,
             lifecycle_svc=lifecycle_service,
         )

@@ -28,7 +28,6 @@ from agentclaw.community.core.economy.governance.domain.enums import (
 )
 from agentclaw.community.core.economy.governance.services.service_protocols import (
     GovernanceLifecycleServiceProtocol,
-    GovernanceWhitelistServiceProtocol,
 )
 
 
@@ -361,19 +360,12 @@ class GovernanceFeedbackService:
     @inject
     def __init__(
         self,
-        whitelist_service: GovernanceWhitelistServiceProtocol,
         notify_repo: NotifyLogRepository,
         audit_repo: GovernanceAuditRepository,
         task_repo: TaskRecordRepository,
         config: Any,  # EconomyGovernanceConfig
         lifecycle_svc: GovernanceLifecycleServiceProtocol,
     ) -> None:
-        # ``whitelist_service`` / ``notify_repo`` retained as injected deps
-        # (constructor signature stable across migration); the resolve path
-        # now delegates whitelist-add + cancel-pending to lifecycle_svc, so
-        # these are read only by future admin/review paths. Group C cleanup
-        # may drop them if confirmed unused.
-        self._whitelist_service = whitelist_service
         self._notify_repo = notify_repo
         self._audit_repo = audit_repo
         self._task_repo = task_repo
@@ -570,25 +562,10 @@ class GovernanceFeedbackService:
                 notification_id=notification_id,
             )
 
-        # Whitelist feedback → add to the whitelist table. Owned by
-        # feedback_service (not the driver) to keep lifecycle_service free of
-        # a whitelist_service dependency (breaks the whitelist↔lifecycle DI
-        # cycle). Source & created_by carry the rich feedback semantics
-        # (effective_user_id = owner; original source e.g. card_callback).
-        if response == Response.WHITELIST:
-            try:
-                self._whitelist_service.add(
-                    bot_id=ticket.bot_id,
-                    owner_id=ticket.owner_id,
-                    created_by=effective_user_id,
-                    whitelist_type="governance",
-                    source=source,
-                )
-            except Exception:
-                log.exception(
-                    "[GovernanceFeedback] Failed to add whitelist for bot_id=%s",
-                    ticket.bot_id,
-                )
+        # 用户反馈选加白(whitelist):只转 waiting_review 待审,不直接写白单。
+        # 加白唯一入口收敛为 admin 两条路径(批量加白 / 审阅加白 approve_whitelist);
+        # 反馈直接 add 会绕过审阅,且与「待审静默」语义矛盾(待审单会被 scan 抢关)。
+        # 用户反馈加白的申请动作仍由下方 _RESPONSE_AUDIT_MAP 记 user_whitelisted 审计。
 
         # Audit (§7.4.3) — feedback_service keeps its per-response audit
         # (USER_OPTIMIZED / USER_NEED_TIME / USER_DISPUTE / USER_WHITELIST),
