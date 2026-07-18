@@ -293,3 +293,135 @@ async def test_disabled_worker_does_not_start(repo, queue):
     await asyncio.sleep(0.05)
     assert ex.executed == []
     await worker.stop()
+
+
+# ── trace context propagation tests ───────────────────────────────
+
+
+from unittest.mock import MagicMock, patch  # noqa: E402
+
+from secbaas.community.core.service.bot_run._worker import (  # noqa: E402
+    _trace_context_from_meta,
+)
+
+
+def test_trace_context_from_meta_none_meta():
+    """meta=None should not raise — tracer.extract returns None, no attach."""
+    mock_tracer = MagicMock()
+    mock_tracer.extract_context.return_value = None
+    with patch(
+        "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
+        return_value=mock_tracer,
+    ):
+        with _trace_context_from_meta(None):
+            pass
+    mock_tracer.extract_context.assert_called_once_with({})
+    mock_tracer.attach_context.assert_not_called()
+    mock_tracer.detach_context.assert_not_called()
+
+
+def test_trace_context_from_meta_with_carrier():
+    """Valid carrier → extract returns ctx → attach/detach called."""
+    sentinel_ctx = object()
+    sentinel_token = object()
+    mock_tracer = MagicMock()
+    mock_tracer.extract_context.return_value = sentinel_ctx
+    mock_tracer.attach_context.return_value = sentinel_token
+    mock_tracer.start_span.return_value.__enter__ = MagicMock(return_value=None)
+    mock_tracer.start_span.return_value.__exit__ = MagicMock(return_value=False)
+    with patch(
+        "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
+        return_value=mock_tracer,
+    ):
+        with _trace_context_from_meta({"traceparent": {"traceparent": "00-x-y-03"}}):
+            mock_tracer.attach_context.assert_called_once_with(sentinel_ctx)
+        mock_tracer.detach_context.assert_called_once_with(sentinel_token)
+
+
+def test_trace_context_from_meta_detaches_on_exception():
+    """detach_context must run even if yield block raises."""
+    sentinel_ctx = object()
+    sentinel_token = object()
+    mock_tracer = MagicMock()
+    mock_tracer.extract_context.return_value = sentinel_ctx
+    mock_tracer.attach_context.return_value = sentinel_token
+    mock_tracer.start_span.return_value.__enter__ = MagicMock(return_value=None)
+    mock_tracer.start_span.return_value.__exit__ = MagicMock(return_value=False)
+    with patch(
+        "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
+        return_value=mock_tracer,
+    ):
+        with pytest.raises(RuntimeError, match="boom"):
+            with _trace_context_from_meta({"traceparent": {"traceparent": "00-x-y-03"}}):
+                raise RuntimeError("boom")
+    mock_tracer.detach_context.assert_called_once_with(sentinel_token)
+
+
+async def test_run_one_executes_with_trace_context(repo, queue):
+    """_run_one should call executor within a trace context span."""
+    run_id = _insert(repo, queue, "bot-1")
+    ex = _CompletingExecutor(repo)
+    worker = _worker(queue, repo, ex)
+
+    mock_tracer = MagicMock()
+    mock_tracer.extract_context.return_value = None
+    mock_tracer.start_span.return_value.__enter__ = MagicMock(return_value=None)
+    mock_tracer.start_span.return_value.__exit__ = MagicMock(return_value=False)
+    with patch(
+        "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
+        return_value=mock_tracer,
+    ):
+        # claim first so mark_done works
+        record = queue.claim_pending_by_bot(
+            "bot-1", "worker-1", candidates=5
+        )
+        await worker._run_one(record)
+
+    assert run_id in ex.executed
+    assert repo.get_by_run_id(run_id).status == "COMPLETED"
+    mock_tracer.extract_context.assert_called_once_with({})
+    mock_tracer.start_span.assert_called_once_with("bot_queue_worker.execute")
+
+
+async def test_run_one_timeout_marks_failed_with_trace(repo, queue):
+    """_run_one timeout path should still run within trace context."""
+    _insert(repo, queue, "bot-1")
+    ex = _CompletingExecutor(repo)
+    worker = _worker(queue, repo, ex)
+
+    mock_tracer = MagicMock()
+    mock_tracer.extract_context.return_value = None
+    mock_tracer.start_span.return_value.__enter__ = MagicMock(return_value=None)
+    mock_tracer.start_span.return_value.__exit__ = MagicMock(return_value=False)
+    with patch(
+        "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
+        return_value=mock_tracer,
+    ):
+        record = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+        record.meta["timeout"] = -1
+        await worker._run_one(record)
+
+    rec = repo.get_by_run_id(record.run_id)
+    assert rec.status == "FAILED"
+    mock_tracer.start_span.assert_called_once_with("bot_queue_worker.execute")
+
+
+async def test_run_one_executor_exception_with_trace(repo, queue):
+    """_run_one exception path should still run within trace context."""
+    _insert(repo, queue, "bot-1")
+    ex = _RaisingExecutor()
+    worker = _worker(queue, repo, ex)
+
+    mock_tracer = MagicMock()
+    mock_tracer.extract_context.return_value = None
+    mock_tracer.start_span.return_value.__enter__ = MagicMock(return_value=None)
+    mock_tracer.start_span.return_value.__exit__ = MagicMock(return_value=False)
+    with patch(
+        "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
+        return_value=mock_tracer,
+    ):
+        record = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+        await worker._run_one(record)
+
+    assert repo.get_by_run_id(record.run_id).status == "FAILED"
+    mock_tracer.start_span.assert_called_once_with("bot_queue_worker.execute")
