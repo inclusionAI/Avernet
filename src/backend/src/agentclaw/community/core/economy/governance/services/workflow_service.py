@@ -234,7 +234,7 @@ class GovernanceWorkflowService:
             close_reason = "schedule_approved"
             cooldown_until = None
         elif action == "approve_whitelist":
-            close_reason = "whitelist_approved"
+            close_reason = CloseReason.WHITELIST_APPROVED
             cooldown_until = None
             try:
                 self._whitelist_service.add(
