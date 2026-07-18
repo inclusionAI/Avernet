@@ -539,6 +539,36 @@ class TestBulkCloseOpen:
             t = svc._task_repo.find_by_ticket_id(tid)  # noqa: SLF001
             assert t.governance_status == GovernanceStatus.CLOSED
 
+    def test_bulk_close_does_not_touch_waiting_review_or_observed(self) -> None:
+        """bulk_close_open 的 SQL WHERE 谓词 (open,scheduled) 钉死 — waiting_review /
+        observed 单不被 batch 关(防 WHERE 被改宽误含)。
+
+        守护:若有人把 WHERE 谓词放宽(如误引 ACTIVE_STATUSES 含 waiting_review,
+        或误含 observed),本测试能抓。
+        """
+        svc, db, _ = _build_svc()
+        # 五态各一条,不同 worker 避 active_worker 唯一约束
+        _seed_ticket(db, ticket_id="T-wl-open", status="open", worker="o1:b1")
+        _seed_ticket(db, ticket_id="T-wl-sched", status="scheduled", worker="o2:b2")
+        _seed_ticket(db, ticket_id="T-wl-wr", status="waiting_review", worker="o3:b3")
+        _seed_ticket(db, ticket_id="T-wl-obs", status="observed", worker="o4:b4")
+        _seed_ticket(db, ticket_id="T-wl-closed", status="closed", worker="o5:b5")
+
+        count = svc.bulk_close_open(
+            close_reason=CloseReason.ADMIN_CLOSED, now=datetime.now(),
+        )
+        assert count == 2  # 仅 open + scheduled
+
+        # waiting_review 不被 batch 关 — 仍原态,close_reason 未被设成 admin_closed
+        wr = svc._task_repo.find_by_ticket_id("T-wl-wr")  # noqa: SLF001
+        assert wr.governance_status == GovernanceStatus.WAITING_REVIEW
+        assert wr.close_reason != CloseReason.ADMIN_CLOSED.value
+
+        # observed 不被 batch 关 — 仍原态,close_reason 未被设成 admin_closed
+        obs = svc._task_repo.find_by_ticket_id("T-wl-obs")  # noqa: SLF001
+        assert obs.governance_status == GovernanceStatus.OBSERVED
+        assert obs.close_reason != CloseReason.ADMIN_CLOSED.value
+
 
 # ---------------------------------------------------------------------------
 # refresh_snapshot / advance_reminder (non-state-transition)

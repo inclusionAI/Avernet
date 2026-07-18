@@ -895,6 +895,41 @@ class TestTicketEnterObserved:
         t.enter_observed(close_reason=CloseReason.WHITELIST_APPROVED)
         assert t.cooldown_until is None
 
+    # ── 不变式反向断言(I2/I4,状态机评估 audit-report ②缺口)───────────────
+
+    def test_close_sets_closed_at_nonnull(self) -> None:
+        """I2:关闭态 closed_at 必非空(close() 后必设)。防 close() 漏设 closed_at
+        被改坏无人抓(原只靠 docstring 默契)。"""
+        t = _make_ticket(governance_status=GovernanceStatus.OPEN)
+        t.close(close_reason=CloseReason.ADMIN_CLOSED, closed_at=datetime(2026, 7, 18))
+        assert t.closed_at is not None
+        assert t.governance_status == GovernanceStatus.CLOSED
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            GovernanceStatus.OPEN,
+            GovernanceStatus.SCHEDULED,
+            GovernanceStatus.WAITING_REVIEW,
+        ],
+    )
+    def test_active_states_have_active_worker(self, status) -> None:
+        """I4:ACTIVE 态 active_worker(assignee)必非空。
+
+        防谁 create/refresh 时把活跃态 assignee 设成 None 被改坏(原无测试,
+        靠 find_active_ticket SQL 隐含,非状态不变式)。
+        """
+        t = _make_ticket(governance_status=status, assignee="owner-1:bot-1")
+        assert t.assignee is not None
+
+    def test_close_releases_active_worker(self) -> None:
+        """I4 反向:close() 后 assignee 必 None(关闭态不占人力)。"""
+        t = _make_ticket(
+            governance_status=GovernanceStatus.OPEN, assignee="owner-1:bot-1",
+        )
+        t.close(close_reason=CloseReason.ADMIN_CLOSED, closed_at=datetime.now())
+        assert t.assignee is None
+
 
 # ---------------------------------------------------------------------------
 # GovernanceTicket 业务行为
