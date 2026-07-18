@@ -527,7 +527,7 @@ class GovernanceTicket:
 
         三路入口复用本方法(方案 A 链路同源):
           - ``review(approve_whitelist)`` 审批加白 → 传 WHITELIST_APPROVED
-          - ``close_for_whitelist_hit`` scan 兜底关残留活跃单 → 传 SCAN_WHITELISTED
+          - ``observe_for_whitelist`` scan 兜底关残留活跃单 → 传 SCAN_WHITELISTED
           - ``open_observed_ticket`` off-batch 建观察单(非关单)→ 不传(None)
 
         Args:

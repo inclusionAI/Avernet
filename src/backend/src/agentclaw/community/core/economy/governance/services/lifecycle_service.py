@@ -266,15 +266,19 @@ class GovernanceLifecycleService:
             ticket.remind_at = remind_at  # type: ignore[assignment]
         return self._task_repo._save_ticket_with_snapshot(ticket)  # noqa: SLF001 — primitive
 
-    def close_for_whitelist_hit(
-        self, ticket_id: str, *, now: datetime,
+    def observe_for_whitelist(
+        self, ticket_id: str, *, close_reason: str, now: datetime,
     ) -> bool:
-        """Scan 清理白名单 bot 残留活跃单 → OBSERVED(scan_whitelisted) + cancel pending.
+        """加白→转 OBSERVED 单条语义方法(四条加白入口的统一收口)。
 
-        只记动作不猜原因:scan 遇到白名单 bot 仍挂着活跃单,顺手转观察态(cardinality
-        = ❶批量加白漏关 / 加白与扫描并发竞态的兜底)。方案 A 链路:find →
-        ``ticket.enter_observed()``(守卫激活,与 approve_whitelist 同源)→
-        ``save_ticket`` → 取消通知。非法转移被守卫抛出,驱动服务捕获转审计 + False。
+        把活跃单转 OBSERVED(持续观察画像,不发通知)+ 释放 active_worker +
+        不设 closed_at + 取消 pending 通知(best-effort)。方案 A 链路:find →
+        ``ticket.enter_observed(close_reason)``(守卫激活)→ ``save_ticket`` →
+        取消通知。非法转移被守卫抛出,驱动服务捕获转审计 + False。
+
+        四条加白入口经此(scan 兜底传 SCAN_WHITELISTED;批量加白经
+        :meth:`bulk_observe_by_ticket_ids` 传 WHITELIST_APPROVED;审批加白走
+        review 的 enter_observed 不经此;off-batch 建单走 open_observed_ticket)。
 
         now 仍接受(调用方签名稳定),转 OBSERVED 不使用它(OBSERVED 不设 closed_at)。
 
@@ -285,9 +289,9 @@ class GovernanceLifecycleService:
         if ticket is None:
             return False
         try:
-            ticket.enter_observed(close_reason=CloseReason.SCAN_WHITELISTED)
+            ticket.enter_observed(close_reason=close_reason)
         except IllegalTicketTransitionError as exc:
-            self._audit_illegal(ticket_id, "close_for_whitelist_hit", exc)
+            self._audit_illegal(ticket_id, "observe_for_whitelist", exc)
             return False
         if not self._task_repo.save_ticket(ticket):
             return False
@@ -335,7 +339,7 @@ class GovernanceLifecycleService:
     ) -> bool:
         """未回复换新 → CLOSED(stale_replaced) + cancel pending。
 
-        方案 A 链路同 close_for_whitelist_hit:find → ticket.close() → save →
+        方案 A 链路同 observe_for_whitelist:find → ticket.close() → save →
         cancel pending。不设 cooldown_until(stale_replace 去抖靠 gmt_create 节奏,
         与 cooldown 体系隔离)。非法转移被守卫捕获 → audit + False。
 

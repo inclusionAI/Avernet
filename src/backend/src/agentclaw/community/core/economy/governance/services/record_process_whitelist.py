@@ -1,7 +1,7 @@
 """Whitelist-observation mixin — 抽自 record_process_service(R9 行门禁)。
 
 白名单命中后的三路处理(均不发通知):
-  - 路 1 有活跃单 → scan 兜底转 OBSERVED(close_for_whitelist_hit)
+  - 路 1 有活跃单 → scan 兜底转 OBSERVED(observe_for_whitelist)
   - 路 2 有现存观察单 → 复用 refresh_snapshot 刷新快照(状态不变、dt_version guard)
   - 路 3 无活跃无观察单 → 新建 OBSERVED 单(open_observed_ticket,不建 notify)
 
@@ -15,7 +15,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 import uuid
 
-from agentclaw.community.core.economy.governance.domain.enums import AuditAction
+from agentclaw.community.core.economy.governance.domain.enums import (
+    AuditAction,
+    CloseReason,
+)
 from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
 from agentclaw.community.core.economy.governance.domain.ticket import (
     GovernanceTicket,
@@ -54,7 +57,7 @@ class WhitelistObservationMixin:
         白名单 bot 命中线下治理数据,按工单现状三路处理(均不发通知):
 
         - 路 1 有活跃单(open/scheduled/waiting_review)→ scan 兜底转 OBSERVED
-          (close_for_whitelist_hit,审计 SCAN_WHITELISTED)。批量加白漏关 / 加白
+          (observe_for_whitelist,审计 SCAN_WHITELISTED)。批量加白漏关 / 加白
           与扫描并发竞态的兜底。
         - 路 2 无活跃单但有现存 OBSERVED 单 → 复用 refresh_snapshot 刷新其快照
           (状态不变、dt_version 严格更新 guard、审计 WHITELIST_OBSERVED)。这就是
@@ -69,8 +72,10 @@ class WhitelistObservationMixin:
         # 路 1:有活跃单 → scan 兜底转 OBSERVED(原逻辑,行为不变只是目标改 OBSERVED)
         if active_ticket is not None:
             if not dry_run:
-                self._lifecycle_svc.close_for_whitelist_hit(
-                    active_ticket.ticket_id, now=now,
+                self._lifecycle_svc.observe_for_whitelist(
+                    active_ticket.ticket_id,
+                    close_reason=CloseReason.SCAN_WHITELISTED,
+                    now=now,
                 )
                 self._audit_repo.add_audit(
                     run_id, bot_id, owner_id,

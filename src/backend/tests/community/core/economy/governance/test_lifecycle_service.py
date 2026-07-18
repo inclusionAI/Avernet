@@ -249,17 +249,19 @@ class TestOpenObservedTicket:
 
 
 # ---------------------------------------------------------------------------
-# close_for_whitelist_hit (offline-batch entry)
+# observe_for_whitelist (加白→转 OBSERVED 单条语义,offline-batch 路1 entry)
 # ---------------------------------------------------------------------------
 
 
-class TestCloseForWhitelistHit:
+class TestObserveForWhitelist:
     def test_observes_open_ticket(self) -> None:
         """scan 兜底关残留活跃单 → OBSERVED(scan_whitelisted),不设 closed_at。"""
         svc, db, _ = _build_svc()
         _seed_ticket(db, ticket_id="T-wl", status="open")
         now = datetime.now()
-        assert svc.close_for_whitelist_hit("T-wl", now=now) is True
+        assert svc.observe_for_whitelist(
+            "T-wl", close_reason=CloseReason.SCAN_WHITELISTED, now=now,
+        ) is True
         t = svc._task_repo.find_by_ticket_id("T-wl")  # noqa: SLF001
         assert t.governance_status == GovernanceStatus.OBSERVED
         assert t.close_reason == CloseReason.SCAN_WHITELISTED
@@ -268,7 +270,9 @@ class TestCloseForWhitelistHit:
 
     def test_not_found_returns_false(self) -> None:
         svc, _, _ = _build_svc()
-        assert svc.close_for_whitelist_hit("nope", now=datetime.now()) is False
+        assert svc.observe_for_whitelist(
+            "nope", close_reason=CloseReason.SCAN_WHITELISTED, now=datetime.now(),
+        ) is False
 
 
 # ---------------------------------------------------------------------------
