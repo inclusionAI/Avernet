@@ -24,7 +24,11 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.base import Base
-from agentclaw.community.core.economy.governance.domain.enums import AuditAction
+from agentclaw.community.core.economy.governance.domain.enums import (
+    AuditAction,
+    CloseReason,
+    GovernanceStatus,
+)
 from agentclaw.community.core.economy.governance.repositories.orm import (
     AuditLogOrm,
     GovernanceNotificationOrm,
@@ -604,10 +608,10 @@ class TestActiveTicketRefresh:
 
 
 class TestWhitelistHitWithActiveTicket:
-    """_handle_whitelist_hit with active ticket — close + cancel (lines 374-408)."""
+    """_handle_whitelist_hit with active ticket — observe + cancel (lines 374-408)."""
 
     def test_whitelist_hit_closes_active_ticket(self, session, engine):
-        """Whitelist hit + active ticket → ticket closed, notify cancelled."""
+        """Whitelist hit + active ticket → ticket observed(OBSERVED), notify cancelled."""
         svc, db = _build_record_svc(engine)
 
         # Create active ticket
@@ -657,13 +661,14 @@ class TestWhitelistHitWithActiveTicket:
         assert result.action == "scan_whitelisted"
         assert result.ticket_id == "t-whitelist-1"
 
-        # Verify ticket closed
+        # Verify ticket observed (OBSERVED, not closed — 白名单观察态)
         with db.orm_session() as s:
             ticket = s.query(GovernanceTicketOrm).filter_by(
                 ticket_id="t-whitelist-1",
             ).one()
-            assert ticket.governance_status == "closed"
-            assert ticket.close_reason == "scan_whitelisted"
+            assert ticket.governance_status == GovernanceStatus.OBSERVED.value
+            assert ticket.close_reason == CloseReason.SCAN_WHITELISTED.value
+            assert ticket.closed_at is None  # OBSERVED 非关闭
 
         # Verify notify cancelled
         with db.orm_session() as s:

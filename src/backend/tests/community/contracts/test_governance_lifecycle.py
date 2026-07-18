@@ -173,13 +173,14 @@ class TestLegalTransitionsEndToEnd:
         assert row.governance_status == GovernanceStatus.CLOSED
         assert row.close_reason == CloseReason.AUTO_SILENCED_NORMAL
 
-    def test_close_for_whitelist_hit_open_to_closed(self):
+    def test_close_for_whitelist_hit_open_to_observed(self):
         driver, db, _ = _build_driver()
         _seed_ticket(db, ticket_id="T-wl", status="open")
         assert driver.close_for_whitelist_hit("T-wl", now=datetime.now()) is True
         row = driver._task_repo.find_by_ticket_id("T-wl")  # noqa: SLF001
-        assert row.governance_status == GovernanceStatus.CLOSED
+        assert row.governance_status == GovernanceStatus.OBSERVED
         assert row.close_reason == CloseReason.SCAN_WHITELISTED
+        assert row.closed_at is None  # OBSERVED 非关闭,不设 closed_at
 
     def test_accept_feedback_open_to_waiting_review(self):
         driver, db, _ = _build_driver()

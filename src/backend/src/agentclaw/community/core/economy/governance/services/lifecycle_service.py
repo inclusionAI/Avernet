@@ -217,22 +217,23 @@ class GovernanceLifecycleService:
     def close_for_whitelist_hit(
         self, ticket_id: str, *, now: datetime,
     ) -> bool:
-        """Scan 清理白名单 bot 残留活跃单 → CLOSED(scan_whitelisted) + cancel pending.
+        """Scan 清理白名单 bot 残留活跃单 → OBSERVED(scan_whitelisted) + cancel pending.
 
-        只记动作不猜原因:scan 遇到白名单 bot 仍挂着活跃单,顺手关掉(cardinality
+        只记动作不猜原因:scan 遇到白名单 bot 仍挂着活跃单,顺手转观察态(cardinality
         = ❶批量加白漏关 / 加白与扫描并发竞态的兜底)。方案 A 链路:find →
-        ``ticket.close()``(守卫激活)→ ``save_ticket`` → 取消通知。非法转移被守卫
-        抛出,驱动服务捕获转审计 + False。
+        ``ticket.enter_observed()``(守卫激活,与 approve_whitelist 同源)→
+        ``save_ticket`` → 取消通知。非法转移被守卫抛出,驱动服务捕获转审计 + False。
 
-        Returns True if the ticket was found and closed, False if not found.
+        now 仍接受(调用方签名稳定),转 OBSERVED 不使用它(OBSERVED 不设 closed_at)。
+
+        Returns True if the ticket was found and observed, False if not found.
         """
+        del now  # OBSERVED 不设 closed_at(与 enter_observed 一致);签名保留兼容现有调用方
         ticket = self._task_repo.find_by_ticket_id(ticket_id)
         if ticket is None:
             return False
         try:
-            ticket.close(
-                close_reason=CloseReason.SCAN_WHITELISTED, closed_at=now,
-            )
+            ticket.enter_observed(close_reason=CloseReason.SCAN_WHITELISTED)
         except IllegalTicketTransitionError as exc:
             self._audit_illegal(ticket_id, "close_for_whitelist_hit", exc)
             return False

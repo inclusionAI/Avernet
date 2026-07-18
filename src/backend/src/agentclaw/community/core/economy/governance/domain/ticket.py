@@ -513,6 +513,26 @@ class GovernanceTicket:
         self.assignee = None  # closed 释放 active_worker
         self.remind_at = None  # 对齐 repo L229,默认 None 清空
 
+    def enter_observed(self, *, close_reason: str) -> None:
+        """进入白名单观察态(OBSERVED)。
+
+        与 :meth:`close` 的关键差异:转 OBSERVED 而非 CLOSED、**不设
+        ``closed_at``(OBSERVED 非关闭,设了会被 ``find_latest_closed_by_worker``
+        误纳 cooldown 视野)、释放 ``active_worker``(观察不占治理人力)、
+        清 ``remind_at``。
+
+        两路入口复用本方法(方案 A 链路同源):
+          - ``review(approve_whitelist)`` 审批加白
+          - ``close_for_whitelist_hit`` scan 兜底关残留活跃单
+
+        Args:
+            close_reason: 观察来源(WHITELIST_APPROVED / SCAN_WHITELISTED)。
+        """
+        self.transition_to(GovernanceStatus.OBSERVED)
+        self.close_reason = close_reason
+        self.assignee = None  # 释放 active_worker(观察不占治理人力)
+        self.remind_at = None
+
     def pause(self, *, review_reason: str) -> None:
         """暂停工单 — 进入 waiting_review。
 
@@ -572,12 +592,12 @@ class GovernanceTicket:
             return
 
         if review_decision == "approve_whitelist":
-            # 加白 → OBSERVED(白名单观察态,归终态族不发通知)。释放 active_worker
-            # (观察不占治理人力);**不设 closed_at**(OBSERVED 非关闭,设了会让
-            # find_latest_closed_by_worker 误纳 cooldown 视野)。
-            self.transition_to(GovernanceStatus.OBSERVED)
-            self.assignee = None
-            self.close_reason = close_reason or CloseReason.WHITELIST_APPROVED
+            # 加白 → OBSERVED(白名单观察态):释放 active_worker、不设 closed_at、
+            # 清 remind_at(详见 enter_observed)。后续 off-batch 持续刷新快照,
+            # 不发通知、不占治理人力。
+            self.enter_observed(
+                close_reason=close_reason or CloseReason.WHITELIST_APPROVED,
+            )
             return
 
         # 其余两态(approve_close / reject_for_reopen)→ CLOSED
