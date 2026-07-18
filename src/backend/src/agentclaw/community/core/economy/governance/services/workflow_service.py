@@ -286,10 +286,7 @@ class GovernanceWorkflowService:
             dry_run=0,
         )
 
-        outcome_status = (
-            GovernanceStatus.SCHEDULED if action == "approve_scheduled"
-            else GovernanceStatus.CLOSED
-        )
+        outcome_status = self._review_outcome_status(action)
         return TicketActionOutcome(
             ticket_id=ticket_id,
             status=outcome_status,
@@ -298,6 +295,20 @@ class GovernanceWorkflowService:
 
     # ── 关单方法(从 admin_service 迁入,工单运营面归属) ─────────────────
 
+
+    @staticmethod
+    def _review_outcome_status(action: str) -> GovernanceStatus:
+        """review_ticket 返回值的状态映射(action → 工单终态)。
+
+        与领域层 ``GovernanceTicket.review()`` 的四态分支保持一致(单一事实源
+        在领域模型,此处仅镜像用于 API 响应)。approve_whitelist → OBSERVED
+        (白名单观察态);approve_scheduled → SCHEDULED;其余 → CLOSED。
+        """
+        if action == "approve_scheduled":
+            return GovernanceStatus.SCHEDULED
+        if action == "approve_whitelist":
+            return GovernanceStatus.OBSERVED
+        return GovernanceStatus.CLOSED
 
     def admin_close(
         self, ticket_id: str, admin_id: str, reason: str = "",

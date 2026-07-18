@@ -226,11 +226,11 @@ def _assert_review_approved_closed(response, world) -> None:
 
 
 def _assert_review_whitelist_added(response, world) -> None:
-    """approve_whitelist adds a whitelist entry + closes the ticket."""
+    """approve_whitelist adds a whitelist entry + observes the ticket (OBSERVED)."""
     repo = world.get(TaskRecordRepository)
     ticket = repo.find_by_ticket_id("tkt-review-wl")
     assert ticket is not None
-    assert ticket.governance_status == "closed"
+    assert ticket.governance_status == "observed"
 
 
 def _assert_review_reject_not_closed(response, world) -> None:
