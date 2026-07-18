@@ -331,6 +331,10 @@ class ReviewTicketDetailResponse(BaseModel):
     # 投递状态(回写自 notify_log):单值四态 + 最近一次通知时间
     delivery_status: str | None = None
     last_notified_at: str | None = None
+    # 最新治理快照通知正文(结构化 JSON,task_record 当前快照;refresh 时更新;
+    # 前端 renderGovernanceCard 据 meta/hit_dimensions/action_items 渲染治理卡片)。
+    # 配合下方 dt_version 标识该正文对应的数据版本日期。
+    notification_structured: str | None = None
     # 评审 / 生命周期
     review_reason: str | None = None
     review_decision: str | None = None
@@ -403,6 +407,7 @@ class ReviewTicketDetailResponse(BaseModel):
             in_whitelist=in_whitelist,
             delivery_status=ticket.delivery_status,
             last_notified_at=_iso(ticket.last_notified_at),
+            notification_structured=ticket.notification_structured,
             review_reason=ticket.review_reason,
             review_decision=ticket.review_decision,
             reviewed_by=ticket.reviewed_by,
