@@ -61,9 +61,9 @@ workflow_router = APIRouter(
 _AdminSvc = GovernanceWorkflowServiceProtocol
 
 # 评审允许的治理状态过滤值(open / scheduled = 活跃, waiting_review = 待审阅,
-# closed = 已关闭)。
+# closed = 已关闭, observed = 白名单观察态)。
 _ALLOWED_REVIEW_STATUSES = frozenset(
-    {"open", "scheduled", "waiting_review", "closed"}
+    {"open", "scheduled", "waiting_review", "closed", "observed"}
 )
 
 # 投递状态过滤值(pending / sent / failed / cancelled)。

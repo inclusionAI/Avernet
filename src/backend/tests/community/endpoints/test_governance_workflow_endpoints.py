@@ -98,6 +98,11 @@ def _seed_list_mixed(world) -> None:
         world, ticket_id="tkt-list-sched1",
         governance_status="scheduled", owner_id="owner-3", bot_id="bot-4",
     )
+    # owner-4: observed(白名单观察态,active_worker=None)
+    _insert_ticket(
+        world, ticket_id="tkt-list-obs1",
+        governance_status="observed", owner_id="owner-4", bot_id="bot-5",
+    )
 
 
 def _seed_detail(world) -> None:
@@ -172,6 +177,20 @@ def _assert_list_waiting_filter(response, world) -> None:
     assert matched["id"] == expected.id, (
         f"list item id {matched['id']!r} != ORM id {expected.id!r}"
     )
+
+
+def _assert_list_observed_filter(response, world) -> None:
+    """observed filter 返回观察态工单(评审据此查看白名单 bot 最新画像,Task 13)。"""
+    del world
+    body = response.json()
+    assert body["success"] is True
+    data = body["data"]
+    assert data["status_filter"] == ["observed"]
+    assert data["total"] >= 1
+    for item in data["items"]:
+        assert item["governance_status"] == "observed"
+    ticket_ids = {item["ticket_id"] for item in data["items"]}
+    assert "tkt-list-obs1" in ticket_ids
 
 
 def _assert_list_pagination(response, world) -> None:
@@ -277,6 +296,22 @@ def review_list_default_ok():
 )
 def review_list_filter_waiting_ok():
     """Happy path: statuses=waiting_review filters to waiting ticket only."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets",
+    scenario="ok_filter_observed",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"statuses": "observed"},
+    ),
+    seed=_seed_list_mixed,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(_assert_list_observed_filter,),
+)
+def review_list_filter_observed_ok():
+    """Happy path: statuses=observed 筛出白名单观察态工单(Task 13 可见性)。"""
 
 
 @endpoint_test(

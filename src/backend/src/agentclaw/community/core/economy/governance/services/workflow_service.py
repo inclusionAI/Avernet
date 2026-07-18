@@ -92,9 +92,11 @@ class GovernanceWorkflowService:
         """评审工单列表:按治理状态过滤(跨 owner)、分页,返回领域模型 + 总数。
 
         Args:
-            statuses: 治理状态白名单(open/scheduled/waiting_review/closed);
-                None 时默认全部活跃态(open/scheduled/waiting_review);
+            statuses: 治理状态白名单(open/scheduled/waiting_review/closed/observed);
+                None 时默认全部活跃态(open/scheduled/waiting_review,不含 observed);
                 [] 显式表示无任何状态匹配 → 返回空(repo 层空列表短路)。
+                observed = 白名单观察态,评审需显式传 status=observed 才能筛出
+                观察单(默认不混入活跃列表,避免污染待办视图)。
             offset: 分页偏移。
             limit: 分页上限。
             delivery_statuses: 投递状态白名单(pending/sent/failed/cancelled);
