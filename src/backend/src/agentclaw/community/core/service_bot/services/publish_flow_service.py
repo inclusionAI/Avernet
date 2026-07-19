@@ -13,6 +13,7 @@ from injector import inject
 from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
     BotPublishRecord,
+    PublishOperationKind,
     PublishOperationState,
 )
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
@@ -99,8 +100,8 @@ from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
-    from agentclaw.community.core.service_bot.repository.publish_operation_protocol import (
-        PublishOperationRepositoryProtocol,
+    from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
+        PublishOperationRepository,
     )
     from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion import (
         TeclawFilePromotion,
@@ -184,7 +185,7 @@ class PublishFlowService(
         device_binding_repo: "DeviceBindingRepository",
         channel_overrides_reader: "ChannelEngineOverridesReader",
         task_queue_service: TaskQueueService,
-        publish_operation_repo: "PublishOperationRepositoryProtocol",
+        publish_operation_repo: PublishOperationRepository,
     ):
         """Initialize the flow processing service.
 
@@ -819,7 +820,7 @@ class PublishFlowService(
         superseded by a new version — the in-flight ops are no longer the current
         intent, so a fresh attempt must open new ops rather than resume these."""
         terminal = {s.value for s in PublishOperationState.terminal()}
-        for op in self._publish_operation_repo.list_by_publish(publish_id):
+        for op in self._publish_operation_repo.list_by_publish_id(publish_id):
             if op.state not in terminal:
                 self._publish_operation_repo.abandon(op.id, reason)
 
@@ -880,11 +881,12 @@ class PublishFlowService(
         * ``retry`` chooses BaaS-restart only for a completed release (a BaaS-side
           failure); a partial release re-runs the release work instead.
 
-        Ledger-driven (#197): the latest online-stage op is ``COMPLETED``. The
-        ``ext.publish.online`` marker (written in the release's ext step, one step
-        before ``complete_operation``) is the fallback — it covers both the tiny
-        record-ext→complete window and records that predate the ledger."""
-        for kind in ("online_first_release", "online_upgrade"):
+        Ledger-driven (#197): the latest online-stage release op (first-release or
+        upgrade) is ``COMPLETED``. The ``ext.publish.online`` marker (written in the
+        release's ext step, one step before ``complete_operation``) is a transitional
+        fallback — it covers both the tiny record-ext→complete window and any record
+        that predates the ledger during rollout."""
+        for kind in (PublishOperationKind.FIRST_RELEASE, PublishOperationKind.UPGRADE):
             op = self._publish_operation_repo.get_latest_by_kind(
                 publish_id, kind, PublishStage.ONLINE.value
             )

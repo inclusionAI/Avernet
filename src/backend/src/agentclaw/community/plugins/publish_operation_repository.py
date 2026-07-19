@@ -1,6 +1,6 @@
 """Unified publish operation ledger repository (prod OceanBase + local SQLite).
 
-One ORM body behind :class:`PublishOperationRepositoryProtocol`, mirroring
+One ORM body behind :class:`PublishOperationRepository` (the ABC), mirroring
 ``BotPublishRepository``: the only per-environment difference is the injected
 :class:`DatabasePlugin`, whose ``orm_session()`` yields a SQLAlchemy ``Session``
 in both runtimes.
@@ -27,6 +27,9 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationRecord,
     PublishOperationState,
 )
+from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
+    PublishOperationRepository,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
@@ -36,8 +39,8 @@ logger = get_logger()
 _TERMINAL = [s.value for s in PublishOperationState.terminal()]
 
 
-class PublishOperationRepository:
-    """Unified ORM ``PublishOperationRepositoryProtocol`` implementation."""
+class OrmPublishOperationRepository(PublishOperationRepository):
+    """Unified ORM implementation of the ``PublishOperationRepository`` ABC."""
 
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
@@ -119,7 +122,7 @@ class PublishOperationRepository:
             )
             return row.to_record() if row else None
 
-    def list_by_publish(self, publish_id: int) -> List[PublishOperationRecord]:
+    def list_by_publish_id(self, publish_id: int) -> List[PublishOperationRecord]:
         with self._db.orm_session() as db:
             rows = (
                 db.query(self.Model)
@@ -180,20 +183,15 @@ class PublishOperationRepository:
         )
 
     def complete(self, op_id: int) -> Optional[PublishOperationRecord]:
-        # ID_RECORDED is the normal pre-complete state for BaaS ops (a workflow id
-        # was recorded). PENDING is also allowed for non-BaaS ops (e.g.
-        # approval_create) whose outcome (a puid) lives in ``result`` rather than
-        # ``baas_publish_id``, so they never pass through ID_RECORDED (#197).
+        # Every runner-driven op records a workflow id (→ ID_RECORDED) before it
+        # completes, so ID_RECORDED is the only valid pre-complete source.
         return self._cas_update(
             op_id,
             {
                 self.Model.state: PublishOperationState.COMPLETED.value,
                 self.Model.gmt_modified: func.now(),
             },
-            allowed_sources=[
-                PublishOperationState.ID_RECORDED.value,
-                PublishOperationState.PENDING.value,
-            ],
+            allowed_sources=[PublishOperationState.ID_RECORDED.value],
         )
 
     def fail(self, op_id: int, error: str) -> Optional[PublishOperationRecord]:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
+    PublishOperationKind,
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
@@ -110,7 +111,7 @@ class RollbackOpsMixin:
         # adopt-by-query on resume, never a second rollback deploy).
         op = self._operation_runner.open_operation(
             publish_id=target_publish_id,
-            kind="rollback_deploy",
+            kind=PublishOperationKind.ROLLBACK_DEPLOY,
             stage=PublishStage.ONLINE.value,
             bot_uuid=bot_uuid,
             operator=operator,
@@ -217,7 +218,7 @@ class RollbackOpsMixin:
 
         bot_uuid = binding.device_id
         # Deterministic, correlation-only request id (stable across retries).
-        request_id = f"offline_destroy.pub{publish_id}.{stage_enum.value}"
+        request_id = f"offline_destroy.pub_{publish_id}.{stage_enum.value}"
 
         # stop_bot raises BaasServiceError on a real failure → propagates out of the
         # handler's asyncio.run → the queue retries (no longer masked as done).

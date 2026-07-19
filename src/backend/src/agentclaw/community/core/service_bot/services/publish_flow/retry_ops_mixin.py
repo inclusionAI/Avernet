@@ -24,6 +24,18 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
+# The pre-failure statuses a FAILED record may be retried from. A record rolls
+# back to exactly its ``ext.source_status``; anything outside this set is not a
+# retryable scenario.
+_RETRYABLE_SOURCE_STATUSES = frozenset({
+    PublishStatus.BUILDING,
+    PublishStatus.BUILT,
+    PublishStatus.VALIDATE_PUB,
+    PublishStatus.VALIDATING,
+    PublishStatus.ONLINE_PUB,
+    PublishStatus.SUCCESS,
+})
+
 
 class RetryOpsMixin:
     """Failed-flow retry orchestration, mixed into PublishFlowService."""
@@ -80,26 +92,14 @@ class RetryOpsMixin:
                 f"Publish record is missing pre-failure status info (source_status); cannot retry: publish_id={publish_id}"
             )
 
-        # Step 4: Determine the rollback target status and retry action based on
-        # source_status. A build failure rolls back to BUILDING (not DRAFT): the
-        # user-driven DRAFT -> BUILDING advance already happened, and the verify_flow
-        # task rebuilds from BUILDING.
-        retry_map = {
-            PublishStatus.BUILDING.value: PublishStatus.BUILDING,
-            PublishStatus.BUILT.value: PublishStatus.BUILT,
-            PublishStatus.VALIDATE_PUB.value: PublishStatus.VALIDATE_PUB,
-            PublishStatus.VALIDATING.value: PublishStatus.VALIDATING,
-            PublishStatus.ONLINE_PUB.value: PublishStatus.ONLINE_PUB,
-            PublishStatus.SUCCESS.value: PublishStatus.SUCCESS,
-        }
+        # Step 4: the record rolls back to its pre-failure status (identity of
+        # source_status), validated against the retryable set.
+        rollback_status = self._resolve_retry_rollback_status(source_status, publish_id)
 
-        rollback_status = retry_map.get(source_status)
-        if not rollback_status:
-            raise PublishFlowServiceError(
-                f"Unsupported retry scenario: source_status={source_status}, publish_id={publish_id}"
-            )
-
-        # Step 5: Roll back the status (FAILED -> rollback_status) and set the retry flag
+        # Step 5: roll back FAILED -> rollback_status and set the retry flag.
+        # ``retry=True`` tells the progress poll to redirect to
+        # ``sync_restart_progress`` (restart mode); the restart branch clears it
+        # again if the restart never actually submits.
         ext["retry"] = True
         try:
             self._update_publish_status(
@@ -112,95 +112,131 @@ class RetryOpsMixin:
             raise PublishFlowServiceError(
                 f"Status rollback failed: {rollback_status.value}, error={e}"
             )
-
         logger.info(
-            f"[PublishFlowService.retry] Status rolled back: "
-            f"publish_id={publish_id}, FAILED -> {rollback_status.value}"
+            "[PublishFlowService.retry] Status rolled back: publish_id=%s, FAILED -> %s",
+            publish_id, rollback_status.value,
         )
 
-        # Step 6: Execute the retry action. Directly enqueue the corresponding task
-        # (no longer via process(), because /process is already read-only for BUILT;
-        # a BUILT retry must re-drive verify_flow).
-        #
-        # A BaaS-level restart applies when the release already reached the BaaS
-        # layer and *it* failed: the *_PUB wait states, SUCCESS, and an ONLINE_PUB
-        # whose online release was already recorded (poll failure). An ONLINE_PUB
-        # whose release was never recorded means the release *work* itself failed,
-        # so re-run it via the online_release task instead.
-        restart = rollback_status in (
-            PublishStatus.VALIDATE_PUB,
-            PublishStatus.SUCCESS,
-        ) or (
+        # Step 6: dispatch by how far the failed attempt had progressed.
+        if self._retry_uses_baas_restart(publish_id, rollback_status):
+            return await self._retry_via_restart(publish_id, operator, rollback_status)
+        if rollback_status in (PublishStatus.VALIDATING, PublishStatus.ONLINE_PUB):
+            return self._retry_via_online_release(publish_id, operator, rollback_status)
+        return self._retry_via_verify_flow(publish_id, operator, rollback_status)
+
+    def _resolve_retry_rollback_status(
+        self, source_status: str, publish_id: int
+    ) -> PublishStatus:
+        """The status to roll a FAILED record back to *is* its pre-failure status
+        (``ext.source_status``); this just validates it against the retryable set.
+
+        A build failure rolls back to BUILDING (not DRAFT): the user-driven
+        DRAFT->BUILDING advance already happened and ``verify_flow`` rebuilds from
+        there."""
+        try:
+            rollback_status = PublishStatus(source_status)
+        except ValueError:
+            rollback_status = None
+        if rollback_status not in _RETRYABLE_SOURCE_STATUSES:
+            raise PublishFlowServiceError(
+                f"Unsupported retry scenario: source_status={source_status}, publish_id={publish_id}"
+            )
+        return rollback_status
+
+    def _retry_uses_baas_restart(
+        self, publish_id: int, rollback_status: PublishStatus
+    ) -> bool:
+        """A BaaS-level restart is the retry when the mutation already reached BaaS
+        and *it* failed:
+
+        * ``VALIDATE_PUB`` — the verify publish was in its BaaS wait;
+        * ``SUCCESS`` — a *restart* of a live online bot failed (a SUCCESS record
+          only reaches FAILED via a failed restart-sync), so retry re-restarts it;
+        * ``ONLINE_PUB`` whose online release the ledger records as done — a
+          BaaS-wait failure, so restart. An ONLINE_PUB whose release was never
+          recorded means the release *work* itself failed → re-run it instead.
+        """
+        if rollback_status in (PublishStatus.VALIDATE_PUB, PublishStatus.SUCCESS):
+            return True
+        return (
             rollback_status == PublishStatus.ONLINE_PUB
             and self.is_online_release_recorded(publish_id)
         )
-        if restart:
-            # BaaS publish failed; re-deploy via the restart work. Run
-            # execute_restart INLINE (not the durable RESTART_TASK enqueue that the
-            # /restart endpoint uses): the #162 poll enqueued below and the restart
-            # task would otherwise be claimed in the same worker batch and run
-            # concurrently, so the poll could read ext.restart before the task wrote
-            # it. Running inline writes ext.restart + re-delivers synchronously, so
-            # the poll then self-drives the record out of its *_PUB wait state. The
-            # runner inside execute_restart still gives crash-safe, idempotent
-            # issuance (adopt-by-query on a user re-retry).
-            stage = self._determine_restart_stage(rollback_status)
-            try:
-                restart_result = await self.execute_restart(
-                    publish_id=publish_id,
-                    stage=stage.value,
-                    operator=operator,
-                )
-            except Exception as e:
-                logger.warning(
-                    "[PublishFlowService.retry] execute_restart failed: "
-                    "publish_id=%s stage=%s error=%s",
-                    publish_id, stage.value if stage else None, e,
-                )
-                restart_result = {"success": False, "message": str(e)}
-            success = restart_result.get("success", False)
-            if success:
-                # (#162) The BaaS-restart branch parks the record in its *_PUB wait
-                # state without passing through verify_flow/online_release, so it
-                # advanced only via user /sync polling (retry redirect) or an explicit
-                # /restart_status poll. Enqueue the durable poll so the retried
-                # restart self-drives: the poll's retry-flag redirect routes it
-                # through sync_restart_progress and leaves the *_PUB state.
-                enqueue_progress_poll(self._task_queue_service, publish_id=publish_id)
-            else:
-                self._mutate_and_update_ext(
-                    publish_id=publish_id,
-                    mutator=self._clear_retry_flag,
-                )
-            return PublishFlowResult(
-                publish_id=publish_id,
-                status=rollback_status,
-                action="restart",
-                message="Retry submitted (BaaS restart)" if success else f"Retry failed: {restart_result.get('message', 'Unknown error')}",
+
+    async def _retry_via_restart(
+        self, publish_id: int, operator: str, rollback_status: PublishStatus
+    ) -> PublishFlowResult:
+        """Re-deploy via the restart work, run INLINE (not the durable RESTART_TASK
+        the /restart endpoint enqueues): the #162 poll enqueued below and the
+        restart task would otherwise be claimed in the same worker batch and run
+        concurrently, so the poll could read ext.restart before the task wrote it.
+        Inline writes ext.restart + re-delivers synchronously so the poll self-drives
+        the record out of its *_PUB wait state; execute_restart's runner still gives
+        crash-safe idempotent issuance (adopt-by-query on a user re-retry)."""
+        stage = self._determine_restart_stage(rollback_status)
+        try:
+            restart_result = await self.execute_restart(
+                publish_id=publish_id, stage=stage.value, operator=operator,
             )
-        elif rollback_status in (PublishStatus.VALIDATING, PublishStatus.ONLINE_PUB):
-            # Online release retry: re-open ONLINE_PUB (idempotent if already there)
-            # and re-enqueue the online_release task, which re-runs the release work.
-            self._advance_status(
-                publish_id, PublishStatus.ONLINE_PUB, PublishStatus.VALIDATING
+        except Exception as e:
+            logger.warning(
+                "[PublishFlowService.retry] execute_restart failed: publish_id=%s stage=%s error=%s",
+                publish_id, stage.value if stage else None, e,
             )
-            enqueue_online_release(
-                self._task_queue_service, publish_id=publish_id, operator=operator
-            )
+            restart_result = {"success": False, "message": str(e)}
+        success = restart_result.get("success", False)
+        if success:
+            # The durable poll (retry-flag redirect → sync_restart_progress) drives
+            # the record out of its *_PUB wait state.
+            enqueue_progress_poll(self._task_queue_service, publish_id=publish_id)
         else:
-            # BUILDING / BUILT: re-enqueue the verify_flow task (the build sub-step
-            # is skipped when already BUILT).
-            if rollback_status == PublishStatus.BUILDING:
-                # A rebuild changes the artifact, so any release op from the failed
-                # attempt is superseded — abandon it (#197 abandonment) so the fresh
-                # attempt opens new ledger ops rather than resuming/adopting a stale
-                # workflow built from the old artifact.
-                self._abandon_inflight_operations(
-                    publish_id, reason="retry rebuild — superseded"
-                )
-            enqueue_verify_flow(
-                self._task_queue_service, publish_id=publish_id, operator=operator
+            # The restart never submitted → clear the retry flag so a stray poll does
+            # not keep redirecting to a restart-sync that will never find a workflow.
+            self._mutate_and_update_ext(
+                publish_id=publish_id, mutator=self._clear_retry_flag
             )
+        return PublishFlowResult(
+            publish_id=publish_id,
+            status=rollback_status,
+            action="restart",
+            message="Retry submitted (BaaS restart)" if success else f"Retry failed: {restart_result.get('message', 'Unknown error')}",
+        )
+
+    def _retry_via_online_release(
+        self, publish_id: int, operator: str, rollback_status: PublishStatus
+    ) -> PublishFlowResult:
+        """Re-open ONLINE_PUB (idempotent if already there) and re-enqueue the
+        online_release task, which re-runs the release work."""
+        self._advance_status(
+            publish_id, PublishStatus.ONLINE_PUB, PublishStatus.VALIDATING
+        )
+        enqueue_online_release(
+            self._task_queue_service, publish_id=publish_id, operator=operator
+        )
+        return self._retry_submitted_result(publish_id, rollback_status)
+
+    def _retry_via_verify_flow(
+        self, publish_id: int, operator: str, rollback_status: PublishStatus
+    ) -> PublishFlowResult:
+        """BUILDING / BUILT: re-enqueue verify_flow (the build sub-step is skipped
+        when already BUILT)."""
+        if rollback_status == PublishStatus.BUILDING:
+            # A rebuild changes the artifact, so any release op from the failed
+            # attempt is superseded — abandon it so the fresh attempt opens new
+            # ledger ops rather than resuming/adopting a stale workflow built from
+            # the old artifact.
+            self._abandon_inflight_operations(
+                publish_id, reason="retry rebuild — superseded"
+            )
+        enqueue_verify_flow(
+            self._task_queue_service, publish_id=publish_id, operator=operator
+        )
+        return self._retry_submitted_result(publish_id, rollback_status)
+
+    @staticmethod
+    def _retry_submitted_result(
+        publish_id: int, rollback_status: PublishStatus
+    ) -> PublishFlowResult:
         return PublishFlowResult(
             publish_id=publish_id,
             status=rollback_status,

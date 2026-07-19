@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from agentclaw.community.core.service_bot.repository.models import (
+    PublishOperationKind,
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
@@ -78,7 +79,7 @@ class EvalPublishMixin:
         # orphan observable. The workflow id + bot_uuid land in the ledger.
         op = self._operation_runner.open_operation(
             publish_id=publish_id,
-            kind="eval_publish",
+            kind=PublishOperationKind.EVAL_PUBLISH,
             stage=publish_stage.value,
             operator=operator,
             params={"biz_id": biz_id} if biz_id else None,
@@ -199,7 +200,7 @@ class EvalPublishMixin:
 
         op = self._operation_runner.open_operation(
             publish_id=publish_id,
-            kind="eval_teardown",
+            kind=PublishOperationKind.EVAL_TEARDOWN,
             stage=PublishStage.EVAL.value,
             bot_uuid=bot_uuid,
             operator=operator,

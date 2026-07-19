@@ -1924,14 +1924,14 @@ class TestRollbackPublish:
         # target UPGRADED→SUCCESS，均在同一事务内。
         assert mock_repo.rollback_flip.call_count == 1
         flip_kwargs = mock_repo.rollback_flip.call_args.kwargs
-        assert flip_kwargs["current_id"] == 3
-        assert flip_kwargs["current_source_status"] == PublishStatus.SUCCESS.value
-        assert flip_kwargs["current_target_status"] == PublishStatus.DRAFT.value
-        assert "rollback" in flip_kwargs["current_ext"]
-        assert flip_kwargs["target_id"] == 2
-        assert flip_kwargs["target_source_status"] == PublishStatus.UPGRADED.value
-        assert flip_kwargs["target_target_status"] == PublishStatus.SUCCESS.value
-        assert flip_kwargs["target_ext"]["rollback_restored_from"] == 3
+        assert flip_kwargs["demoted_publish_id"] == 3
+        assert flip_kwargs["demoted_from_status"] == PublishStatus.SUCCESS.value
+        assert flip_kwargs["demoted_to_status"] == PublishStatus.DRAFT.value
+        assert "rollback" in flip_kwargs["demoted_ext"]
+        assert flip_kwargs["restored_publish_id"] == 2
+        assert flip_kwargs["restored_from_status"] == PublishStatus.UPGRADED.value
+        assert flip_kwargs["restored_to_status"] == PublishStatus.SUCCESS.value
+        assert flip_kwargs["restored_ext"]["rollback_restored_from"] == 3
 
         # 验证 execute_rollback 被调用
         mock_flow_service.execute_rollback.assert_awaited_once_with(
@@ -2050,11 +2050,11 @@ class TestRollbackPublish:
 
         # (#197) 验证原子翻转保留了两条记录已有的 ext 字段
         flip_kwargs = mock_repo.rollback_flip.call_args.kwargs
-        current_ext = flip_kwargs["current_ext"]
+        current_ext = flip_kwargs["demoted_ext"]
         assert current_ext["existing_key"] == "existing_value"
         assert "rollback" in current_ext
 
-        target_ext = flip_kwargs["target_ext"]
+        target_ext = flip_kwargs["restored_ext"]
         assert target_ext["target_key"] == "target_value"
         assert target_ext["migration_path"] == "/tmp/build"
         assert target_ext["rollback_restored_from"] == 3

@@ -54,7 +54,7 @@ def _real_ledger():
         PublishOperationModel,
     )
     from agentclaw.community.plugins.publish_operation_repository import (
-        PublishOperationRepository,
+        OrmPublishOperationRepository as PublishOperationRepository,
     )
 
     engine = create_engine(
@@ -1924,7 +1924,7 @@ async def test_scale_bot_success_prefers_bot_ext_device_count():
     assert kwargs["target_count"] == 3
     assert kwargs["auto_approve_publish"] is True
     # (#197) request_id is now the runner's deterministic op id (wall-clock id gone).
-    assert kwargs["request_id"] == "pub10.scale.online.a1"
+    assert kwargs["request_id"] == "pub_10.scale.online.a1"
     publish_service.update_publish_ext.assert_called_once_with(
         publish_id=10,
         ext={"binding": {"online": 123}, "scale": {"publish_id": 888}},
@@ -1972,7 +1972,7 @@ async def test_scale_bot_falls_back_to_common_config_default_device_count():
     assert kwargs["owner_id"] == "u1"
     assert kwargs["target_count"] == 2
     assert kwargs["auto_approve_publish"] is True
-    assert kwargs["request_id"] == "pub13.scale.online.a1"
+    assert kwargs["request_id"] == "pub_13.scale.online.a1"
 
 
 @pytest.mark.unit

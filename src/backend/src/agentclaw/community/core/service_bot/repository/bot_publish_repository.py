@@ -1,6 +1,7 @@
-"""BotPublish Repository Protocol - 业务层内部抽象。
+"""BotPublish repository protocol — business-layer internal abstraction.
 
-定义 BotPublish 数据访问的接口，供 Service 层依赖注入使用。
+Defines the BotPublish data-access interface consumed by the service layer via
+dependency injection.
 """
 from typing import Dict, Any, List, Optional, Protocol
 
@@ -8,10 +9,10 @@ from agentclaw.community.core.service_bot.repository.models import BotPublishRec
 
 
 class BotPublishRepositoryProtocol(Protocol):
-    """Bot发布记录数据访问接口。
+    """Bot publish-record data-access interface.
 
-    所有方法使用字典或 Pydantic 模型作为输入输出，
-    具体实现由 plugins 提供。
+    All methods take/return dicts or Pydantic models; the concrete implementation
+    is provided by plugins.
 
     Implementation: a single unified ORM body
     (plugins.bot_publish_repository.BotPublishRepository) runs on
@@ -24,21 +25,20 @@ class BotPublishRepositoryProtocol(Protocol):
     # ========================================================================
 
     def insert(self, data: Dict[str, Any]) -> BotPublishRecord:
-        """
-        创建发布记录。
+        """Create a publish record.
 
         Args:
-            data: 包含发布记录字段的字典
-                - source_bot_pk: ac_bots 表主键
-                - source_bot_id: 源 bot_id
-                - publish_bot_id: 发布后的 bot_id
-                - name: bot名称
-                - owner_id: 工号
-                - permission_owner: 权限归属
-                - ... 其他可选字段
+            data: dict of publish-record fields
+                - source_bot_pk: ac_bots table primary key
+                - source_bot_id: source bot_id
+                - publish_bot_id: post-publish bot_id
+                - name: bot name
+                - owner_id: staff id
+                - permission_owner: permission owner
+                - ... other optional fields
 
         Returns:
-            创建的 BotPublishRecord
+            The created BotPublishRecord.
         """
         ...
 
@@ -47,14 +47,13 @@ class BotPublishRepositoryProtocol(Protocol):
     # ========================================================================
 
     def get_by_id(self, publish_id: int) -> Optional[BotPublishRecord]:
-        """
-        根据ID获取发布记录。
+        """Get a publish record by id.
 
         Args:
-            publish_id: 记录ID
+            publish_id: record id
 
         Returns:
-            BotPublishRecord，不存在返回None
+            BotPublishRecord, or None if not found.
         """
         ...
 
@@ -65,17 +64,16 @@ class BotPublishRepositoryProtocol(Protocol):
         env: str,
         publish_status: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
-        """
-        根据 publish_bot_id 和 owner_id 获取最新版本记录。
+        """Get the latest-version record by publish_bot_id and owner_id.
 
         Args:
-            publish_bot_id: 发布后的 bot_id
-            owner_id: 工号
-            env: 环境
-            publish_status: 发布状态过滤（可选）
+            publish_bot_id: post-publish bot_id
+            owner_id: staff id
+            env: environment
+            publish_status: optional publish-status filter
 
         Returns:
-            BotPublishRecord，不存在返回None
+            BotPublishRecord, or None if not found.
         """
         ...
 
@@ -84,18 +82,19 @@ class BotPublishRepositoryProtocol(Protocol):
         publish_bot_id: str,
         env: str,
     ) -> Optional[BotPublishRecord]:
-        """根据 publish_bot_id 获取 DRAFT 行（不按 owner_id 过滤）。
+        """Get the DRAFT row by publish_bot_id (not filtered by owner_id).
 
-        publish_bot_id 唯一标识一个 bot，故无需 owner_id —— 这避免了调用方
-        owner_id 与建单 owner_id 不一致（如 org bot 的 entity_id != 工号）时
-        静默查不到的问题。仅用于 record_draft_artifact。
+        publish_bot_id uniquely identifies a bot, so owner_id is not needed — this
+        avoids a silent miss when the caller's owner_id differs from the record's
+        creation owner_id (e.g. an org bot whose entity_id != staff id). Used only
+        by record_draft_artifact.
 
         Args:
-            publish_bot_id: 发布后的 bot_id（草稿期 == 源 bot_id）
-            env: 环境
+            publish_bot_id: post-publish bot_id (== source bot_id during draft)
+            env: environment
 
         Returns:
-            DRAFT 状态的 BotPublishRecord，不存在返回 None
+            The DRAFT BotPublishRecord, or None if not found.
         """
         ...
 
@@ -106,17 +105,16 @@ class BotPublishRepositoryProtocol(Protocol):
         version: int,
         env: str,
     ) -> Optional[BotPublishRecord]:
-        """
-        根据 publish_bot_id、owner_id 和 version 获取记录。
+        """Get a record by publish_bot_id, owner_id and version.
 
         Args:
-            publish_bot_id: 发布后的 bot_id
-            owner_id: 工号
-            version: 版本号
-            env: 环境
+            publish_bot_id: post-publish bot_id
+            owner_id: staff id
+            version: version number
+            env: environment
 
         Returns:
-            BotPublishRecord，不存在返回None
+            BotPublishRecord, or None if not found.
         """
         ...
 
@@ -126,16 +124,15 @@ class BotPublishRepositoryProtocol(Protocol):
         env: str,
         status: Optional[str] = None,
     ) -> List[BotPublishRecord]:
-        """
-        查询用户的发布记录列表。
+        """List a user's publish records.
 
         Args:
-            owner_id: 工号
-            env: 环境
-            status: 状态过滤（可选）
+            owner_id: staff id
+            env: environment
+            status: optional status filter
 
         Returns:
-            BotPublishRecord 列表
+            List of BotPublishRecord.
         """
         ...
 
@@ -144,15 +141,14 @@ class BotPublishRepositoryProtocol(Protocol):
         source_bot_pk: int,
         env: str,
     ) -> List[BotPublishRecord]:
-        """
-        查询源 bot 的发布记录列表。
+        """List the publish records of a source bot.
 
         Args:
-            source_bot_pk: ac_bots 表主键
-            env: 环境
+            source_bot_pk: ac_bots table primary key
+            env: environment
 
         Returns:
-            BotPublishRecord 列表
+            List of BotPublishRecord.
         """
         ...
 
@@ -161,15 +157,14 @@ class BotPublishRepositoryProtocol(Protocol):
         status: str,
         env: str,
     ) -> List[BotPublishRecord]:
-        """
-        根据状态查询发布记录列表。
+        """List publish records by status.
 
         Args:
-            status: 发布状态
-            env: 环境
+            status: publish status
+            env: environment
 
         Returns:
-            BotPublishRecord 列表
+            List of BotPublishRecord.
         """
         ...
 
@@ -180,7 +175,7 @@ class BotPublishRepositoryProtocol(Protocol):
         status: str,
         env: str,
     ) -> Optional[BotPublishRecord]:
-        """按 source_bot_id + owner_id + status 查询最新发布记录。"""
+        """Get the latest publish record by source_bot_id + owner_id + status."""
         ...
 
     def get_latest_success_by_source_bot_id(
@@ -188,18 +183,19 @@ class BotPublishRepositoryProtocol(Protocol):
         source_bot_id: str,
         env: str,
     ) -> Optional[BotPublishRecord]:
-        """按 source_bot_id 查询最新一条 status=success 的发布记录（owner 无关）。
+        """Get the latest status=success publish record by source_bot_id (owner-agnostic).
 
-        供多实例入口 bot_id → 运行态 binding_id 解析用：取该记录
-        ``ext.binding.online``。刻意不按 owner_id 过滤 —— org bot 的
-        entity_id 可能与建单 owner_id（工号）不一致，owner 过滤会静默查不到。
+        Used to resolve a multi-instance entry bot_id → runtime binding_id: reads
+        that record's ``ext.binding.online``. Deliberately NOT filtered by owner_id —
+        an org bot's entity_id may differ from the creation owner_id (staff id), and
+        an owner filter would silently miss it.
 
         Args:
-            source_bot_id: 源 bot_id
-            env: 环境
+            source_bot_id: source bot_id
+            env: environment
 
         Returns:
-            最新 success 发布记录，不存在返回 None
+            The latest success publish record, or None if not found.
         """
         ...
 
@@ -207,17 +203,17 @@ class BotPublishRepositoryProtocol(Protocol):
         self,
         last_pub_id: int,
     ) -> Optional[BotPublishRecord]:
-        """
-        根据上次发布成功 ID 查询发布记录（幂等性支持）。
+        """Get a publish record by its last-successful-publish id (idempotency support).
 
         Args:
-            last_pub_id: 上次发布成功的记录 ID
+            last_pub_id: the last successfully-published record id
 
         Returns:
-            BotPublishRecord，不存在返回 None
+            BotPublishRecord, or None if not found.
 
         Note:
-            用于升级操作的幂等查询，确保重试时不会重复创建新发布单。
+            Used for the idempotent lookup in upgrade operations, ensuring a retry
+            does not create a duplicate publish record.
         """
         ...
 
@@ -231,16 +227,16 @@ class BotPublishRepositoryProtocol(Protocol):
         target_status: str,
         source_status: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
-        """
-        更新发布状态。
+        """Update the publish status.
 
         Args:
-            publish_id: 记录ID
-            target_status: 目标状态
-            source_status: 源状态（可选），传入时只有当前状态等于源状态才能更新成功
+            publish_id: record id
+            target_status: target status
+            source_status: optional source status; when given, the update succeeds
+                only if the current status equals it (optimistic lock / CAS)
 
         Returns:
-            更新后的 BotPublishRecord，源状态不匹配时返回 None
+            The updated BotPublishRecord, or None if the source status did not match.
         """
         ...
 
@@ -251,41 +247,45 @@ class BotPublishRepositoryProtocol(Protocol):
         ext: Dict[str, Any],
         source_status: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
-        """
-        更新发布状态和扩展字段（乐观锁）。
+        """Update the publish status and ext field (optimistic lock).
 
         Args:
-            publish_id: 记录ID
-            target_status: 目标状态
-            ext: 扩展字段字典
-            source_status: 源状态（可选），传入时只有当前状态等于源状态才能更新成功
+            publish_id: record id
+            target_status: target status
+            ext: ext (extension) field dict
+            source_status: optional source status; when given, the update succeeds
+                only if the current status equals it (optimistic lock / CAS)
 
         Returns:
-            更新后的 BotPublishRecord，源状态不匹配时返回 None
+            The updated BotPublishRecord, or None if the source status did not match.
         """
         ...
 
     def rollback_flip(
         self,
         *,
-        current_id: int,
-        current_ext: Dict[str, Any],
-        current_source_status: str,
-        current_target_status: str,
-        target_id: int,
-        target_ext: Dict[str, Any],
-        target_source_status: str,
-        target_target_status: str,
+        demoted_publish_id: int,
+        demoted_ext: Dict[str, Any],
+        demoted_from_status: str,
+        demoted_to_status: str,
+        restored_publish_id: int,
+        restored_ext: Dict[str, Any],
+        restored_from_status: str,
+        restored_to_status: str,
     ) -> tuple[bool, bool]:
-        """原子地翻转回滚的两条发布单状态（同一事务）。
+        """Atomically flip the two publish records of a rollback (one transaction).
 
-        current: source→target（如 SUCCESS→DRAFT），写入 current_ext。
-        target:  source→target（如 UPGRADED→SUCCESS），写入 target_ext。
-        两条 UPDATE 在同一事务内提交，避免“翻转一半”导致 can_rollback 永久拒绝
-        的半回滚死局（#197）。均为乐观锁 CAS。
+        A rollback demotes the currently-live version and restores the previous one:
+
+        - ``demoted``: ``from -> to`` (e.g. SUCCESS -> DRAFT), writing ``demoted_ext``;
+        - ``restored``: ``from -> to`` (e.g. UPGRADED -> SUCCESS), writing ``restored_ext``.
+
+        Both UPDATEs commit in the same transaction to avoid a "half-flip" (one row
+        moved, the other not) that would leave ``can_rollback`` permanently
+        refusing (#197). Each is an optimistic-lock CAS.
 
         Returns:
-            (current_ok, target_ok): 各自 CAS 是否命中。
+            ``(demoted_ok, restored_ok)``: whether each CAS matched.
         """
         ...
 
@@ -295,16 +295,15 @@ class BotPublishRepositoryProtocol(Protocol):
         version: int,
         status: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
-        """
-        更新版本号（可选更新状态）。
+        """Update the version number (and optionally the status).
 
         Args:
-            publish_id: 记录ID
-            version: 新版本号
-            status: 新状态（可选）
+            publish_id: record id
+            version: new version number
+            status: optional new status
 
         Returns:
-            更新后的 BotPublishRecord
+            The updated BotPublishRecord.
         """
         ...
 
@@ -313,15 +312,14 @@ class BotPublishRepositoryProtocol(Protocol):
         publish_id: int,
         last_pub_id: int,
     ) -> Optional[BotPublishRecord]:
-        """
-        更新上次发布成功ID。
+        """Update the last-successful-publish id.
 
         Args:
-            publish_id: 记录ID
-            last_pub_id: 上次发布成功ID
+            publish_id: record id
+            last_pub_id: last successfully-published id
 
         Returns:
-            更新后的 BotPublishRecord
+            The updated BotPublishRecord.
         """
         ...
 
@@ -330,13 +328,12 @@ class BotPublishRepositoryProtocol(Protocol):
     # ========================================================================
 
     def delete(self, publish_id: int) -> bool:
-        """
-        删除发布记录。
+        """Delete a publish record.
 
         Args:
-            publish_id: 记录ID
+            publish_id: record id
 
         Returns:
-            是否成功
+            Whether the delete succeeded.
         """
         ...

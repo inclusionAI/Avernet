@@ -150,37 +150,39 @@ class PublishRollbackMixin:
                 f"Target publish record not found: last_pub_id={current_record.last_pub_id}"
             )
 
-        # 3+4. (#197) 原子地翻转两条记录（同一事务），避免“翻转一半”导致
-        # can_rollback 永久拒绝的半回滚死局。current: SUCCESS→DRAFT（记 ext.rollback）；
-        # target: UPGRADED→SUCCESS（标 rollback_restored_from）。
-        current_ext = current_record.ext or {}
-        current_ext["rollback"] = {
+        # 3+4. (#197) Atomically flip both records (one transaction) to avoid a
+        # "half-flip" that would leave can_rollback permanently refusing. The
+        # demoted (currently-live) record goes SUCCESS→DRAFT (recording
+        # ext.rollback); the restored (previous) record goes UPGRADED→SUCCESS
+        # (marking rollback_restored_from).
+        demoted_ext = current_record.ext or {}
+        demoted_ext["rollback"] = {
             "rolled_back_at": datetime.now().isoformat(),
             "rolled_back_by": operator,
             "rollback_reason": reason,
             "target_publish_id": current_record.last_pub_id,
         }
-        target_ext = target_record.ext or {}
-        target_ext["rollback_restored_from"] = publish_id
+        restored_ext = target_record.ext or {}
+        restored_ext["rollback_restored_from"] = publish_id
 
-        current_ok, target_ok = self._repo.rollback_flip(
-            current_id=publish_id,
-            current_ext=current_ext,
-            current_source_status=PublishStatus.SUCCESS.value,
-            current_target_status=PublishStatus.DRAFT.value,
-            target_id=current_record.last_pub_id,
-            target_ext=target_ext,
-            target_source_status=PublishStatus.UPGRADED.value,
-            target_target_status=PublishStatus.SUCCESS.value,
+        demoted_ok, restored_ok = self._repo.rollback_flip(
+            demoted_publish_id=publish_id,
+            demoted_ext=demoted_ext,
+            demoted_from_status=PublishStatus.SUCCESS.value,
+            demoted_to_status=PublishStatus.DRAFT.value,
+            restored_publish_id=current_record.last_pub_id,
+            restored_ext=restored_ext,
+            restored_from_status=PublishStatus.UPGRADED.value,
+            restored_to_status=PublishStatus.SUCCESS.value,
         )
-        if not (current_ok and target_ok):
+        if not (demoted_ok and restored_ok):
             raise BotPublishServiceError(
-                f"回滚状态翻转失败（并发或状态不符）: current_ok={current_ok}, "
-                f"target_ok={target_ok}, publish_id={publish_id}"
+                f"回滚状态翻转失败（并发或状态不符）: demoted_ok={demoted_ok}, "
+                f"restored_ok={restored_ok}, publish_id={publish_id}"
             )
         logger.info(
-            f"[rollback_publish] Atomically flipped: current({publish_id}) SUCCESS→DRAFT, "
-            f"target({current_record.last_pub_id}) UPGRADED→SUCCESS"
+            f"[rollback_publish] Atomically flipped: demoted({publish_id}) SUCCESS→DRAFT, "
+            f"restored({current_record.last_pub_id}) UPGRADED→SUCCESS"
         )
 
         # 5. 执行回滚部署（通过 PublishFlowService）

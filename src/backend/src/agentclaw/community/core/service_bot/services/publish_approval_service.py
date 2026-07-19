@@ -181,23 +181,15 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
 
         publish_record = self._archive_if_terminal(publish_record)
 
-        # (#197) Intent-first: persist an approval_create op BEFORE calling the
-        # workflow plugin, so a crash after start_approval but before the puid is
-        # saved leaves the orphaned approval instance observable as a PENDING op
-        # (the approval-workflow plugin is not a BaaS bot, so there is nothing to
-        # adopt-by-query — the accepted bounded orphan mirrors a creation). The
-        # puid lands in the op's result on success; a start failure abandons it.
+        # Approval does NOT go through the operation ledger: ``start_approval`` opens
+        # an antprocess approval instance (the approval-workflow plugin), not a BaaS
+        # workflow, so there is nothing to adopt-by-query and the ledger's crash-safe
+        # resolution does not apply. Idempotency here is the caller's PROCESSING
+        # guard (``check_and_process_*`` returns the existing approval) plus the puid
+        # persisted in ``ext.approval``. A crash after ``start_approval`` but before
+        # the ext write is a bounded orphan either way (a re-run opens a new approval
+        # instance); a ledger row would only observe it, not prevent it.
         biz_id = f"{publish_record.id}{action}{timestamp}"
-        runner = self._publish_flow_service_provider()._operation_runner
-        op = runner.open_operation(
-            publish_id=publish_record.id,
-            kind="approval_create",
-            stage=action,
-            operator=operator,
-            params={"biz_id": biz_id},
-        )
-
-        # Create approval via the workflow plugin
         approval_result = self._start_approval_workflow(
             publish_record, action=action, operator=operator, biz_id=biz_id
         )
@@ -209,7 +201,6 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
                 publish_record.id,
                 error_msg,
             )
-            runner.abandon_operation(op, f"start_approval failed: {error_msg}")
             return ApprovalResult(
                 should_approval=True,
                 status="ERROR",
@@ -219,8 +210,6 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
 
         return self._finalize_new_approval(
             publish_record,
-            op=op,
-            runner=runner,
             approval_result=approval_result,
             action=action,
             operator=operator,
@@ -230,17 +219,12 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         self,
         publish_record: BotPublishRecord,
         *,
-        op,
-        runner,
         approval_result: Dict[str, Any],
         action: str,
         operator: str,
     ) -> ApprovalResult:
-        """Record the puid on the op (ledger is the source of truth for which
-        approval instance is ours), write ``ext.approval``, complete the op, and
-        return the PROCESSING result."""
+        """Write ``ext.approval`` (with the puid) and return the PROCESSING result."""
         puid = approval_result.get("puid")
-        runner.record_step_result(op, {"puid": puid})
 
         new_approval = {
             "puid": puid,
@@ -254,7 +238,6 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         ext = publish_record.ext or {}
         ext["approval"] = new_approval
         self._publish_service.update_publish_ext(publish_record.id, ext)
-        runner.complete_operation(op)
 
         logger.info(
             "[_create_new_approval] created: publish_id=%s, puid=%s",

@@ -5,6 +5,7 @@ from typing import Any
 
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
+    PublishOperationKind,
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
@@ -96,7 +97,7 @@ class ScaleMixin:
         # request id is passed to BaaS as the correlation id.
         op = self._operation_runner.open_operation(
             publish_id=publish_id,
-            kind="scale",
+            kind=PublishOperationKind.SCALE,
             stage=PublishStage.ONLINE.value,
             bot_uuid=bot_uuid,
             operator=operator,

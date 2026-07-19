@@ -1,9 +1,11 @@
-"""Bot Publish 模型定义。
+"""Bot Publish model definitions.
 
-包含：
-- Pydantic 业务模型（用于 API 层）
-- SQLAlchemy ORM 模型（用于数据库持久化）
+Contains:
+- Pydantic business models (for the API layer)
+- SQLAlchemy ORM models (for database persistence)
 """
+from __future__ import annotations
+
 import json
 from datetime import datetime
 from enum import StrEnum
@@ -237,30 +239,55 @@ class BotPublishModel(Base):
 
 
 class PublishOperationKind(StrEnum):
-    """The distinct BaaS-mutating operations tracked in the ledger."""
+    """The distinct BaaS-mutating operations tracked in the ledger.
 
-    VERIFY_FIRST_RELEASE = "verify_first_release"
-    VERIFY_UPGRADE = "verify_upgrade"
-    ONLINE_FIRST_RELEASE = "online_first_release"
-    ONLINE_UPGRADE = "online_upgrade"
+    Verify vs online is captured by the separate ``stage`` column, so a single
+    kind spans both stages (e.g. ``FIRST_RELEASE`` at ``stage=verify`` or
+    ``stage=online``) — the ``(publish_id, operation_kind, stage, attempt)`` key
+    keeps them distinct without needing per-stage kinds.
+    """
+
+    FIRST_RELEASE = "first_release"
+    UPGRADE = "upgrade"
     RESTART = "restart"
     SCALE = "scale"
-    OFFLINE_DESTROY = "offline_destroy"
     ROLLBACK_DEPLOY = "rollback_deploy"
-    DESTROY_STAGE = "destroy_stage"
     EVAL_PUBLISH = "eval_publish"
     EVAL_TEARDOWN = "eval_teardown"
-    APPROVAL_CREATE = "approval_create"
 
     @classmethod
-    def creation_kinds(cls) -> set["PublishOperationKind"]:
+    def creation_kinds(cls) -> set[PublishOperationKind]:
         """Kinds that create a *new* BaaS bot (no existing bot_uuid to query
         workflows under) — the bounded-orphan window applies only to these."""
-        return {
-            cls.VERIFY_FIRST_RELEASE,
-            cls.ONLINE_FIRST_RELEASE,
-            cls.EVAL_PUBLISH,
-        }
+        return {cls.FIRST_RELEASE, cls.EVAL_PUBLISH}
+
+    @property
+    def baas_publish_types(self) -> frozenset[str]:
+        """The BaaS ``publish_type`` value(s) an adopt-by-query may match for this
+        kind (the adoption type-fence).
+
+        A single kind maps to *several* types because the same logical operation
+        can surface as different BaaS workflows: an ``UPGRADE`` is normally an
+        ``UPDATE`` but falls back to a ``CREATE`` when the target bot is gone; a
+        ``SCALE`` is a ``SCALE_UP`` or ``SCALE_DOWN``. The fence stays permissive
+        (a set, not a single value) so a legitimately-ours in-doubt workflow is
+        never rejected on type.
+        """
+        return _KIND_BAAS_PUBLISH_TYPES[self]
+
+
+# The BaaS publish_type(s) each kind's workflow can carry — the adopt-by-query
+# type fence, co-located with the kind it describes (exposed via
+# ``PublishOperationKind.baas_publish_types``).
+_KIND_BAAS_PUBLISH_TYPES: Dict[PublishOperationKind, frozenset[str]] = {
+    PublishOperationKind.FIRST_RELEASE: frozenset({"CREATE"}),
+    PublishOperationKind.UPGRADE: frozenset({"UPDATE", "CREATE"}),
+    PublishOperationKind.RESTART: frozenset({"UPDATE", "RESTART", "CREATE"}),
+    PublishOperationKind.SCALE: frozenset({"SCALE_UP", "SCALE_DOWN", "SCALE"}),
+    PublishOperationKind.ROLLBACK_DEPLOY: frozenset({"UPDATE", "CREATE"}),
+    PublishOperationKind.EVAL_PUBLISH: frozenset({"CREATE"}),
+    PublishOperationKind.EVAL_TEARDOWN: frozenset({"DESTROY", "STOP"}),
+}
 
 
 class PublishOperationState(StrEnum):
@@ -280,29 +307,29 @@ class PublishOperationState(StrEnum):
     ABANDONED = "abandoned"
 
     @classmethod
-    def terminal(cls) -> set["PublishOperationState"]:
+    def terminal(cls) -> set[PublishOperationState]:
         return {cls.COMPLETED, cls.FAILED, cls.ABANDONED}
 
 
 class PublishOperationRecord(BaseModel):
     """Business model for one ``ac_publish_operation`` row."""
 
-    id: Optional[int] = Field(default=None, description="主键ID")
-    publish_id: int = Field(..., description="agentclaw 发布单 id（eval_teardown 按 bot_uuid 时为 0）")
-    operation_kind: str = Field(..., description="PublishOperationKind")
-    stage: str = Field(default="", description="verify/online/eval/''")
-    attempt: int = Field(default=1, description="重试代数；abandon 后 +1 开新行")
-    state: str = Field(default=PublishOperationState.PENDING, description="PublishOperationState")
-    request_id: str = Field(..., description="确定性请求 id（关联/审计用，非幂等键）")
-    bot_uuid: str = Field(default="", description="目标 BaaS bot（创建类在拿到前为空）")
-    baas_publish_id: Optional[int] = Field(default=None, description="BaaS 工作流 id，ID_RECORDED 时写入")
-    params: Optional[Dict[str, Any]] = Field(default=None, description="重发所需入参")
-    result: Optional[Dict[str, Any]] = Field(default=None, description="步骤结果（binding id / draft id / puid 等）")
-    last_error: Optional[str] = Field(default=None, description="最后一次步骤失败信息")
-    operator: str = Field(default="", description="操作人")
-    env: str = Field(default="dev", description="环境: prod/pre/dev")
-    gmt_create: datetime = Field(default_factory=datetime.now, description="创建时间")
-    gmt_modified: datetime = Field(default_factory=datetime.now, description="修改时间")
+    id: Optional[int] = Field(default=None, description="Primary key id")
+    publish_id: int = Field(..., description="agentclaw publish-record id (0 for a bot_uuid-only eval_teardown)")
+    operation_kind: str = Field(..., description="PublishOperationKind value")
+    stage: str = Field(default="", description="verify / online / eval / '' (empty)")
+    attempt: int = Field(default=1, description="Retry generation; a fresh row (+1) is opened after abandon")
+    state: str = Field(default=PublishOperationState.PENDING, description="PublishOperationState value")
+    request_id: str = Field(..., description="Deterministic request id (correlation/audit only, not an idempotency key)")
+    bot_uuid: str = Field(default="", description="Target BaaS bot (empty for creation kinds until issued)")
+    baas_publish_id: Optional[int] = Field(default=None, description="BaaS workflow id, written at ID_RECORDED")
+    params: Optional[Dict[str, Any]] = Field(default=None, description="Inputs needed to re-issue")
+    result: Optional[Dict[str, Any]] = Field(default=None, description="Step results (binding id / draft id / puid, etc.)")
+    last_error: Optional[str] = Field(default=None, description="Last step-failure message")
+    operator: str = Field(default="", description="Operator")
+    env: str = Field(default="dev", description="Environment: prod/pre/dev")
+    gmt_create: datetime = Field(default_factory=datetime.now, description="Creation time")
+    gmt_modified: datetime = Field(default_factory=datetime.now, description="Modification time")
 
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat()}
@@ -320,34 +347,34 @@ class PublishOperationModel(Base):
         nullable=False,
     )
 
-    publish_id = Column(AutoIncrementBigInteger, nullable=False, comment="agentclaw 发布单 id")
-    operation_kind = Column(String(64), nullable=False, comment="PublishOperationKind")
-    stage = Column(String(16), nullable=False, default="", comment="verify/online/eval/''")
-    attempt = Column(Integer, nullable=False, default=1, comment="重试代数")
+    publish_id = Column(AutoIncrementBigInteger, nullable=False, comment="agentclaw publish-record id")
+    operation_kind = Column(String(64), nullable=False, comment="PublishOperationKind value")
+    stage = Column(String(16), nullable=False, default="", comment="verify/online/eval/'' (empty)")
+    attempt = Column(Integer, nullable=False, default=1, comment="Retry generation")
     state = Column(
         String(32),
         nullable=False,
         default=PublishOperationState.PENDING.value,
         comment="pending/id_recorded/completed/failed/abandoned",
     )
-    request_id = Column(String(128), nullable=False, comment="确定性请求 id（关联/审计）")
-    bot_uuid = Column(String(128), nullable=False, default="", comment="目标 BaaS bot")
-    baas_publish_id = Column(AutoIncrementBigInteger, nullable=True, comment="BaaS 工作流 id")
-    params = Column(Text, nullable=True, comment="重发入参 JSON")
-    result = Column(Text, nullable=True, comment="步骤结果 JSON")
-    last_error = Column(Text, nullable=True, comment="最后失败信息")
-    operator = Column(String(128), nullable=False, default="", comment="操作人")
+    request_id = Column(String(128), nullable=False, comment="Deterministic request id (correlation/audit)")
+    bot_uuid = Column(String(128), nullable=False, default="", comment="Target BaaS bot")
+    baas_publish_id = Column(AutoIncrementBigInteger, nullable=True, comment="BaaS workflow id")
+    params = Column(Text, nullable=True, comment="Re-issue inputs (JSON)")
+    result = Column(Text, nullable=True, comment="Step results (JSON)")
+    last_error = Column(Text, nullable=True, comment="Last failure message")
+    operator = Column(String(128), nullable=False, default="", comment="Operator")
 
     env = Column(String(32), nullable=False, default=get_current_env, comment="prod/pre/dev")
-    gmt_create = Column(DateTime, default=func.now(), nullable=False, comment="创建时间")
+    gmt_create = Column(DateTime, default=func.now(), nullable=False, comment="Creation time")
     gmt_modified = Column(
-        DateTime, default=func.now(), onupdate=func.now(), nullable=False, comment="修改时间"
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False, comment="Modification time"
     )
 
     __table_args__ = (
         # The operation identity a re-run uses to find-or-create its intent row.
         Index(
-            "uk_op",
+            "uk_publish_id_operation_kind_stage_attempt",
             "publish_id",
             "operation_kind",
             "stage",
@@ -355,9 +382,9 @@ class PublishOperationModel(Base):
             unique=True,
         ),
         # "any in-flight op for this record?" scans.
-        Index("idx_pub_state", "publish_id", "state"),
+        Index("idx_publish_id_state", "publish_id", "state"),
         # Orphan sweeps / adopt-by-query differencing by target bot.
-        Index("idx_bot", "bot_uuid"),
+        Index("idx_bot_uuid", "bot_uuid"),
     )
 
     def to_record(self) -> PublishOperationRecord:

@@ -65,8 +65,8 @@ from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
     BotPublishRepositoryProtocol,
 )
-from agentclaw.community.core.service_bot.repository.publish_operation_protocol import (
-    PublishOperationRepositoryProtocol,
+from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
+    PublishOperationRepository,
 )
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
@@ -114,7 +114,7 @@ from agentclaw.community.plugins.bot_publish_repository import (
     BotPublishRepository as UnifiedBotPublishRepository,
 )
 from agentclaw.community.plugins.publish_operation_repository import (
-    PublishOperationRepository as UnifiedPublishOperationRepository,
+    OrmPublishOperationRepository,
 )
 from agentclaw.community.utils import env_utils
 
@@ -143,8 +143,8 @@ class ServiceBotModule(Module):
         # Publish operation ledger repository — same unified-ORM pattern; the
         # crash-safe operation ledger (ac_publish_operation).
         binder.bind(
-            PublishOperationRepositoryProtocol,
-            to=UnifiedPublishOperationRepository,
+            PublishOperationRepository,
+            to=OrmPublishOperationRepository,
             scope=singleton,
         )
 
@@ -424,7 +424,7 @@ class ServiceBotModule(Module):
         oss_storage: ObjectStoragePlugin,
         channel_overrides_reader: ChannelEngineOverridesReader,
         task_queue_service: TaskQueueService,
-        publish_operation_repo: PublishOperationRepositoryProtocol,
+        publish_operation_repo: PublishOperationRepository,
     ) -> PublishFlowService:
         """Construct ``PublishFlowService``.
 

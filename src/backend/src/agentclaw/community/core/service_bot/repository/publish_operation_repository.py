@@ -1,46 +1,49 @@
-"""Publish operation ledger repository protocol — business-layer abstraction.
+"""Publish operation ledger repository — abstract base class.
 
 Defines data access for ``ac_publish_operation`` (the crash-safe operation
 ledger). The concrete unified ORM implementation
-(``plugins.publish_operation_repository.PublishOperationRepository``) satisfies
-this Protocol structurally and runs on both prod OceanBase and local SQLite via
-the injected ``DatabasePlugin``.
+(``plugins.publish_operation_repository.OrmPublishOperationRepository``) subclasses
+this ABC and runs on both prod OceanBase and local SQLite via the injected
+``DatabasePlugin``.
 
 State transitions are single optimistic-lock UPDATEs (``WHERE id=? AND
 state=?``) — the same CAS idiom as ``BotPublishRepository.update_status`` — so a
 transition that loses the race (wrong source state) returns ``None`` rather than
-clobbering. Field writes that carry no state change (``update_result`` /
-``update_error``) are blind column overwrites within a held operation.
+clobbering. Field writes that carry no state change (``update_result``) are blind
+column overwrites within a held operation.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Protocol
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional
 
 from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationRecord,
 )
 
 
-class PublishOperationRepositoryProtocol(Protocol):
+class PublishOperationRepository(ABC):
     """Data access for the publish operation ledger."""
 
     # ── insert ──────────────────────────────────────────────────────────
+    @abstractmethod
     def insert(self, data: Dict[str, Any]) -> PublishOperationRecord:
         """Persist a new ``PENDING`` intent row and return it.
 
         ``data`` carries: ``publish_id``, ``operation_kind``, ``stage``,
         ``attempt`` (default 1), ``request_id``, ``operator``, and optionally
         ``bot_uuid`` / ``params`` / ``state`` / ``baas_publish_id`` / ``env``.
-        Conflicts on ``uk_op`` are the caller's responsibility to avoid (the
-        runner's ``open_operation`` does get-or-insert).
+        Conflicts on the operation-identity unique index are the caller's
+        responsibility to avoid (the runner's ``open_operation`` does
+        get-or-insert).
         """
-        ...
 
     # ── queries ─────────────────────────────────────────────────────────
+    @abstractmethod
     def get_by_id(self, op_id: int) -> Optional[PublishOperationRecord]:
         """Return the operation by id, or ``None``."""
-        ...
 
+    @abstractmethod
     def get_by_key(
         self,
         publish_id: int,
@@ -49,8 +52,8 @@ class PublishOperationRepositoryProtocol(Protocol):
         attempt: int,
     ) -> Optional[PublishOperationRecord]:
         """Return the operation with this exact identity, or ``None``."""
-        ...
 
+    @abstractmethod
     def get_latest_by_kind(
         self,
         publish_id: int,
@@ -60,17 +63,17 @@ class PublishOperationRepositoryProtocol(Protocol):
         """Return the highest-``attempt`` operation of this kind/stage, or
         ``None`` — the row a re-entry (retry / restart / progress read) resumes.
         """
-        ...
 
-    def list_by_publish(self, publish_id: int) -> List[PublishOperationRecord]:
+    @abstractmethod
+    def list_by_publish_id(self, publish_id: int) -> List[PublishOperationRecord]:
         """Return every operation row for a publish record (any state)."""
-        ...
 
+    @abstractmethod
     def list_by_bot(self, bot_uuid: str, env: str) -> List[PublishOperationRecord]:
         """Return every operation row targeting ``bot_uuid`` in ``env`` — the
         ledger-known-ids side of adopt-by-query differencing."""
-        ...
 
+    @abstractmethod
     def max_attempt(
         self,
         publish_id: int,
@@ -79,9 +82,9 @@ class PublishOperationRepositoryProtocol(Protocol):
     ) -> int:
         """Return the highest ``attempt`` for this kind/stage (0 if none) — so a
         reissue after ``abandon`` opens ``attempt + 1``."""
-        ...
 
     # ── CAS state transitions ───────────────────────────────────────────
+    @abstractmethod
     def record_workflow(
         self,
         op_id: int,
@@ -92,23 +95,23 @@ class PublishOperationRepositoryProtocol(Protocol):
         """Atomically persist the BaaS workflow id and flip
         ``PENDING -> ID_RECORDED`` (and ``bot_uuid`` when a creation resolved
         it). Returns ``None`` if the row was not ``PENDING`` (lost the CAS)."""
-        ...
 
+    @abstractmethod
     def complete(self, op_id: int) -> Optional[PublishOperationRecord]:
-        """CAS ``ID_RECORDED -> COMPLETED``. ``None`` if not ``ID_RECORDED``."""
-        ...
+        """CAS ``ID_RECORDED`` -> ``COMPLETED``. ``None`` if not ``ID_RECORDED``."""
 
+    @abstractmethod
     def fail(self, op_id: int, error: str) -> Optional[PublishOperationRecord]:
         """Mark a non-terminal operation ``FAILED`` with ``error``. ``None`` if
         already terminal."""
-        ...
 
+    @abstractmethod
     def abandon(self, op_id: int, reason: str) -> Optional[PublishOperationRecord]:
         """Mark a non-terminal operation ``ABANDONED`` (superseded). ``None`` if
         already terminal."""
-        ...
 
     # ── field updates (within a held operation; no state change) ────────
+    @abstractmethod
     def update_result(
         self,
         op_id: int,
@@ -116,4 +119,3 @@ class PublishOperationRepositoryProtocol(Protocol):
     ) -> Optional[PublishOperationRecord]:
         """Blind-overwrite the ``result`` JSON (caller does read-modify-write).
         Records step outputs (binding id, draft id, puid). ``None`` if absent."""
-        ...

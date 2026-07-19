@@ -18,7 +18,7 @@ from agentclaw.community.core.service_bot.repository.models import (  # noqa: F4
     PublishOperationState,
 )
 from agentclaw.community.plugins.publish_operation_repository import (
-    PublishOperationRepository,
+    OrmPublishOperationRepository as PublishOperationRepository,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
     PublishOperationError,
@@ -93,8 +93,8 @@ def _runner(ledger, baas, checkpoint=None):
     )
 
 
-UPGRADE = PublishOperationKind.ONLINE_UPGRADE.value
-CREATE = PublishOperationKind.ONLINE_FIRST_RELEASE.value
+UPGRADE = PublishOperationKind.UPGRADE.value
+CREATE = PublishOperationKind.FIRST_RELEASE.value
 
 
 def run(coro):
@@ -120,21 +120,12 @@ def test_open_after_terminal_opens_next_attempt(ledger, baas):
     assert op2.attempt == 2
 
 
-def test_open_legacy_backfill_seeds_id_recorded(ledger, baas):
-    r = _runner(ledger, baas)
-    op = r.open_operation(
-        publish_id=1, kind=UPGRADE, stage="online", bot_uuid="b",
-        legacy_baas_publish_id=777,
-    )
-    assert op.state == PublishOperationState.ID_RECORDED.value
-    assert op.baas_publish_id == 777
-
-
 # ── acquire: already recorded ───────────────────────────────────────────────
 def test_acquire_noop_when_already_recorded(ledger, baas):
     r = _runner(ledger, baas)
-    op = r.open_operation(publish_id=1, kind=UPGRADE, stage="online",
-                          bot_uuid="b", legacy_baas_publish_id=777)
+    op = r.open_operation(publish_id=1, kind=UPGRADE, stage="online", bot_uuid="b")
+    ledger.record_workflow(op.id, baas_publish_id=777, bot_uuid="b")
+    op = ledger.get_by_id(op.id)
     calls = []
 
     async def issue():
@@ -312,8 +303,8 @@ def test_known_ids_excluded_from_adoption(ledger, baas):
 # ── finalize ────────────────────────────────────────────────────────────────
 def test_finalize_transitions(ledger, baas):
     r = _runner(ledger, baas)
-    op = r.open_operation(publish_id=1, kind=UPGRADE, stage="online",
-                          bot_uuid="b", legacy_baas_publish_id=1)
+    op = r.open_operation(publish_id=1, kind=UPGRADE, stage="online", bot_uuid="b")
+    ledger.record_workflow(op.id, baas_publish_id=1)
     assert r.complete_operation(op).state == PublishOperationState.COMPLETED.value
 
     op2 = r.open_operation(publish_id=2, kind=UPGRADE, stage="online", bot_uuid="b")

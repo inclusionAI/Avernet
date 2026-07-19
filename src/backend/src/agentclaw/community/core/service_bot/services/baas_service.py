@@ -1935,18 +1935,27 @@ class BaasService:  # pragma: no cover
             raise BaasServiceError(f"Failed to list bots: {e}")
 
     def list_bot_publishes(self, bot_uuid: str) -> List[Dict[str, Any]]:
-        """列出某个 bot_uuid 关联的全部发布工作流（含终态），新的在前。
+        """List every publish workflow associated with a bot_uuid (including
+        terminal ones), newest first.
 
-        对应 BaaS: ``GET /api/v1/bots/{bot_uuid}/publishes``。供幂等恢复的
-        adopt-by-query 差集使用：把返回的 workflow id 与本地账本已认领的 id 做
-        差集，未认领的即本次 in-doubt 工作流。
+        Maps to BaaS ``GET /api/v1/bots/{bot_uuid}/publishes``. Used by the
+        idempotent-recovery adopt-by-query differencing: the returned workflow ids
+        are differenced against the ids the local ledger has already claimed, and an
+        unclaimed one is this operation's in-doubt workflow.
 
-        每个元素含: ``id`` (workflow id)、``bot_id``、``publish_type``、
-        ``status``、``gmt_create``。bot_uuid 未知（404）时返回 ``[]`` —— 差集
-        视其为“无匹配 → 直接下发”，故 404 不作为错误抛出。
+        Each element carries: ``id`` (workflow id), ``bot_id``, ``publish_type``,
+        ``status``, ``gmt_create``.
+
+        A 404 (bot_uuid unknown) is deliberately mapped to ``[]`` rather than
+        raised: this endpoint is bot-scoped, so a 404 means "this bot has no
+        publish workflows" — which is exactly the "no candidate to adopt" signal
+        adopt-by-query needs. It is load-bearing for the destroyed-bot cases: e.g.
+        an upgrade whose target bot is gone snapshots an empty baseline here and
+        then falls back to a first-release on the ``BOT_NOT_FOUND`` from the issue;
+        raising on the 404 would break that fallback. Non-404 failures still raise.
 
         Raises:
-            BaasServiceError: 非 404 的调用失败。
+            BaasServiceError: on any non-404 call failure.
         """
         try:
             data = self._get_bots_api(

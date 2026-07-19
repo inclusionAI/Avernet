@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from agentclaw.community.core.service_bot.repository.models import (
+    PublishOperationKind,
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
@@ -222,7 +223,7 @@ class RestartMixin:
 
         op = self._operation_runner.open_operation(
             publish_id=publish_id,
-            kind="restart",
+            kind=PublishOperationKind.RESTART,
             stage=stage_enum.value,
             bot_uuid=bot_uuid,
             operator=operator,

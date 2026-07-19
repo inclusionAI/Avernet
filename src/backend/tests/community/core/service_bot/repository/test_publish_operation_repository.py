@@ -20,7 +20,7 @@ from agentclaw.community.core.service_bot.repository.models import (  # noqa: F4
     PublishOperationState,
 )
 from agentclaw.community.plugins.publish_operation_repository import (
-    PublishOperationRepository,
+    OrmPublishOperationRepository as PublishOperationRepository,
 )
 
 ENV = "dev"
@@ -56,7 +56,7 @@ def repo():
     return PublishOperationRepository(InMemorySqliteDB(engine))
 
 
-def _intent(repo, *, publish_id=1, kind=PublishOperationKind.ONLINE_UPGRADE.value,
+def _intent(repo, *, publish_id=1, kind=PublishOperationKind.UPGRADE.value,
             stage="online", attempt=1, request_id="req-1", bot_uuid="", params=None,
             operator="op", env=ENV):
     return repo.insert(
@@ -98,9 +98,9 @@ def test_uk_op_conflict_rejected(repo):
 def test_get_by_key_and_latest_by_kind(repo):
     _intent(repo, publish_id=5, attempt=1)
     _intent(repo, publish_id=5, attempt=2)
-    exact = repo.get_by_key(5, PublishOperationKind.ONLINE_UPGRADE.value, "online", 1)
+    exact = repo.get_by_key(5, PublishOperationKind.UPGRADE.value, "online", 1)
     assert exact.attempt == 1
-    latest = repo.get_latest_by_kind(5, PublishOperationKind.ONLINE_UPGRADE.value, "online")
+    latest = repo.get_latest_by_kind(5, PublishOperationKind.UPGRADE.value, "online")
     assert latest.attempt == 2
 
 
@@ -115,7 +115,7 @@ def test_list_by_publish_and_bot(repo):
     _intent(repo, publish_id=11, attempt=1, bot_uuid="bot-a")
     _intent(repo, publish_id=11, attempt=2, bot_uuid="bot-b")
     _intent(repo, publish_id=12, attempt=1, bot_uuid="bot-a")
-    by_pub = repo.list_by_publish(11)
+    by_pub = repo.list_by_publish_id(11)
     assert len(by_pub) == 2
     by_bot = repo.list_by_bot("bot-a", ENV)
     assert {o.publish_id for o in by_bot} == {11, 12}
@@ -141,18 +141,6 @@ def test_complete_cas(repo):
     done = repo.complete(op.id)
     assert done.state == PublishOperationState.COMPLETED.value
     # idempotent re-complete loses the CAS.
-    assert repo.complete(op.id) is None
-
-
-def test_complete_from_pending_for_non_baas_op(repo):
-    # #197: non-BaaS ops (e.g. approval_create) never record a workflow id — their
-    # outcome lives in result — so complete is also allowed straight from PENDING.
-    op = _intent(repo, publish_id=2, request_id="req-2")
-    assert op.state == PublishOperationState.PENDING.value
-    done = repo.complete(op.id)
-    assert done is not None
-    assert done.state == PublishOperationState.COMPLETED.value
-    # still idempotent — a terminal row can't re-complete.
     assert repo.complete(op.id) is None
 
 

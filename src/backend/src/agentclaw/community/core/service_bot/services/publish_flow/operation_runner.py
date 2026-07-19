@@ -25,11 +25,12 @@ from __future__ import annotations
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from agentclaw.community.core.service_bot.repository.models import (
+    PublishOperationKind,
     PublishOperationRecord,
     PublishOperationState,
 )
-from agentclaw.community.core.service_bot.repository.publish_operation_protocol import (
-    PublishOperationRepositoryProtocol,
+from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
+    PublishOperationRepository,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
@@ -41,43 +42,24 @@ _BASELINE_KEY = "_baseline_workflow_id"
 
 def operation_request_id(
     publish_id: int,
-    operation_kind: str,
+    operation_kind: PublishOperationKind,
     stage: str,
     attempt: int,
 ) -> str:
     """Deterministic, correlation-only request id for a logical operation.
 
-    Form: ``pub{publish_id}.{kind}[.{stage}].a{attempt}`` (an empty ``stage`` is
+    Form: ``pub_{publish_id}.{kind}[.{stage}].a{attempt}`` (an empty ``stage`` is
     omitted rather than left as a double dot). Stable across re-runs of the same
     operation and distinct across different operations/attempts, so a BaaS log
     line traces back to the exact ledger step that issued it. BaaS treats this as
     an opaque string — it is never a dedup/idempotency key (verified: request_id
-    is correlation-only server-side). Fits ``varchar(128)``: the kinds are ≤22
-    chars, so even a 12-digit publish_id stays well under the limit.
+    is correlation-only server-side). Fits ``varchar(128)`` comfortably.
     """
-    parts = [f"pub{publish_id}", operation_kind]
+    parts = [f"pub_{publish_id}", str(operation_kind)]
     if stage:
         parts.append(stage)
     parts.append(f"a{attempt}")
     return ".".join(parts)
-
-
-# Which BaaS publish_type(s) each operation kind issues — the adopt-by-query
-# type fence. Kept permissive (a set) because a few kinds map to more than one
-# server type (create's fallback, restart's BOT_NOT_FOUND fallback to create).
-_KIND_PUBLISH_TYPES: Dict[str, set[str]] = {
-    "verify_first_release": {"CREATE"},
-    "online_first_release": {"CREATE"},
-    "eval_publish": {"CREATE"},
-    "verify_upgrade": {"UPDATE", "CREATE"},
-    "online_upgrade": {"UPDATE", "CREATE"},
-    "rollback_deploy": {"UPDATE", "CREATE"},
-    "restart": {"UPDATE", "RESTART", "CREATE"},
-    "scale": {"SCALE_UP", "SCALE_DOWN", "SCALE"},
-    "offline_destroy": {"STOP", "DESTROY"},
-    "destroy_stage": {"STOP", "DESTROY"},
-    "eval_teardown": {"DESTROY", "STOP"},
-}
 
 
 class PublishOperationError(Exception):
@@ -94,7 +76,7 @@ class PublishOperationRunner:
     def __init__(
         self,
         *,
-        ledger: PublishOperationRepositoryProtocol,
+        ledger: PublishOperationRepository,
         baas_service: Any,
         checkpoint: Callable[[str], None] = lambda _name: None,
     ) -> None:
@@ -107,22 +89,30 @@ class PublishOperationRunner:
         self,
         *,
         publish_id: int,
-        kind: str,
+        kind: PublishOperationKind,
         stage: str = "",
         params: Optional[Dict[str, Any]] = None,
         bot_uuid: str = "",
         operator: str = "",
-        legacy_baas_publish_id: Optional[int] = None,
     ) -> PublishOperationRecord:
         """Return the intent row for this logical operation, creating it if none
         is in flight.
 
-        Resumes the latest non-terminal attempt (crash-resume of the same
-        operation). Otherwise opens a fresh attempt (``max_attempt + 1``) — a
-        genuinely new invocation, or a reissue after abandon/fail. On the very
-        first attempt, a supplied ``legacy_baas_publish_id`` (read from a
-        pre-ledger record's ext marker) seeds the row straight to ``ID_RECORDED``
-        so ledger-driven reads see the already-issued workflow.
+        Two cases, keyed on the latest row for ``(publish_id, kind, stage)``:
+
+        * the latest is **non-terminal** → a crash-resume of the *same* in-flight
+          operation; that row is returned as-is so ``acquire_workflow`` picks up
+          where it left off (adopt-by-query or issue-once).
+        * the latest is **terminal** (or absent) → the previous same-kind
+          operation already finished, so this call is a *genuinely new* invocation
+          of that operation (e.g. the user scales again, or a rebuild reissues
+          after ABANDONED). A fresh attempt (``latest.attempt + 1``) is opened.
+
+        Note: because a terminal COMPLETED latest opens a new attempt, a durable
+        task that is redelivered *after* its op completed but before the queue
+        recorded the completion would open a new attempt and re-issue. Handlers
+        whose operation is not otherwise status-gated guard that window explicitly
+        (e.g. the offline destroy short-circuits on an already-RELEASED binding).
         """
         latest = self._ledger.get_latest_by_kind(publish_id, kind, stage)
         if latest is not None and latest.state not in {
@@ -131,10 +121,9 @@ class PublishOperationRunner:
             return latest
 
         attempt = (latest.attempt + 1) if latest is not None else 1
-        seed_legacy = attempt == 1 and legacy_baas_publish_id is not None
         data: Dict[str, Any] = {
             "publish_id": publish_id,
-            "operation_kind": kind,
+            "operation_kind": str(kind),
             "stage": stage,
             "attempt": attempt,
             "request_id": operation_request_id(publish_id, kind, stage, attempt),
@@ -143,9 +132,6 @@ class PublishOperationRunner:
             "params": params,
             "env": get_current_env(),
         }
-        if seed_legacy:
-            data["state"] = PublishOperationState.ID_RECORDED.value
-            data["baas_publish_id"] = legacy_baas_publish_id
         return self._ledger.insert(data)
 
     # ── acquire (get the workflow id: memory / adopt / issue) ────────────
@@ -218,13 +204,13 @@ class PublishOperationRunner:
             for o in self._ledger.list_by_bot(op.bot_uuid, op.env)
             if o.baas_publish_id is not None
         }
-        expected_types = _KIND_PUBLISH_TYPES.get(op.operation_kind)
+        expected_types = PublishOperationKind(op.operation_kind).baas_publish_types
         candidates: List[Dict[str, Any]] = [
             w
             for w in workflows
             if int(w["id"]) > baseline
             and int(w["id"]) not in known_ids
-            and (expected_types is None or w.get("publish_type") in expected_types)
+            and w.get("publish_type") in expected_types
         ]
         if not candidates:
             return None

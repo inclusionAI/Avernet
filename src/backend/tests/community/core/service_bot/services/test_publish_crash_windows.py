@@ -26,7 +26,7 @@ from agentclaw.community.core.service_bot.repository.models import (  # noqa: F4
     PublishStatus,
 )
 from agentclaw.community.plugins.publish_operation_repository import (
-    PublishOperationRepository,
+    OrmPublishOperationRepository as PublishOperationRepository,
 )
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowService,
@@ -211,7 +211,7 @@ async def test_first_release_crash_after_binding_reuses_binding_on_resume():
     assert len(ext_calls) == 2                           # ext retried and succeeded
 
     # The op converged to COMPLETED with the single workflow id recorded.
-    op = ledger.get_latest_by_kind(1, "verify_first_release", "verify")
+    op = ledger.get_latest_by_kind(1, "first_release", "verify")
     assert op.state == PublishOperationState.COMPLETED.value
     assert op.baas_publish_id == 901
     assert op.result["binding_id"] == 55
@@ -253,7 +253,7 @@ async def test_first_release_creation_orphan_window_reissues_and_is_visible():
         )
     # One bot already created on BaaS but not recorded → the orphan.
     assert build_service.release_async.await_count == 1
-    op = ledger.get_latest_by_kind(1, "verify_first_release", "verify")
+    op = ledger.get_latest_by_kind(1, "first_release", "verify")
     assert op.state == PublishOperationState.PENDING.value  # in-flight → observable
 
     svc._operation_runner._checkpoint = lambda _n: None
@@ -263,7 +263,7 @@ async def test_first_release_creation_orphan_window_reissues_and_is_visible():
     )
     # Re-issued (accepted creation orphan); the op now records the second workflow.
     assert build_service.release_async.await_count == 2
-    op = ledger.get_latest_by_kind(1, "verify_first_release", "verify")
+    op = ledger.get_latest_by_kind(1, "first_release", "verify")
     assert op.state == PublishOperationState.COMPLETED.value
     assert op.baas_publish_id == 902  # the second (recorded) workflow
 
@@ -325,7 +325,7 @@ async def test_upgrade_crash_after_issue_resume_adopts_not_reissues():
     await _run_online_upgrade(svc, record)
     # Existing-bot → adopt the in-doubt workflow; NO second upgrade.
     assert build_service.upgrade_async.await_count == 1
-    op = ledger.get_latest_by_kind(1, "online_upgrade", "online")
+    op = ledger.get_latest_by_kind(1, "upgrade", "online")
     assert op.state == PublishOperationState.COMPLETED.value
     assert op.baas_publish_id == 901
 
@@ -354,9 +354,9 @@ async def test_upgrade_bot_not_found_abandons_and_falls_back():
     await _run_online_upgrade(svc, record)
 
     # Upgrade op abandoned; the first-release fallback opened its own op + created.
-    up = ledger.get_latest_by_kind(1, "online_upgrade", "online")
+    up = ledger.get_latest_by_kind(1, "upgrade", "online")
     assert up.state == PublishOperationState.ABANDONED.value
-    fr = ledger.get_latest_by_kind(1, "online_first_release", "online")
+    fr = ledger.get_latest_by_kind(1, "first_release", "online")
     assert fr.state == PublishOperationState.COMPLETED.value
     build_service.release_async.assert_awaited_once()
 
@@ -377,7 +377,7 @@ def test_is_online_release_recorded_reads_ledger():
     # yet written) is NOT "recorded": the crash-resume guard must let the release
     # re-enter and finish, not skip it (Group B review Finding 1).
     op = svc._operation_runner.open_operation(
-        publish_id=1, kind="online_first_release", stage="online"
+        publish_id=1, kind="first_release", stage="online"
     )
     ledger.record_workflow(op.id, baas_publish_id=901, bot_uuid="BOT-x")
     assert svc.is_online_release_recorded(1) is False
@@ -403,10 +403,10 @@ def test_abandon_inflight_operations_marks_nonterminal():
     svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock())
 
     pending = svc._operation_runner.open_operation(
-        publish_id=1, kind="verify_first_release", stage="verify"
+        publish_id=1, kind="first_release", stage="verify"
     )
     recorded = svc._operation_runner.open_operation(
-        publish_id=1, kind="online_first_release", stage="online"
+        publish_id=1, kind="first_release", stage="online"
     )
     ledger.record_workflow(recorded.id, baas_publish_id=901, bot_uuid="B")
     done = svc._operation_runner.open_operation(
@@ -526,7 +526,7 @@ async def test_scale_crash_after_call_resume_adopts_not_rescales():
     assert op.state == PublishOperationState.COMPLETED.value
     assert op.baas_publish_id == 901
     # The BaaS call carried the runner's deterministic request id, not a wall clock.
-    assert baas.scale_bot.call_args.kwargs["request_id"] == "pub1.scale.online.a1"
+    assert baas.scale_bot.call_args.kwargs["request_id"] == "pub_1.scale.online.a1"
 
 
 # ── eval publish/teardown: crash windows ──────────────────────────────────────
@@ -616,7 +616,7 @@ async def test_eval_teardown_crash_after_issue_resume_adopts():
     op = ledger.get_latest_by_kind(7, "eval_teardown", "eval")
     assert op.state == PublishOperationState.COMPLETED.value
     assert op.baas_publish_id == 901
-    assert baas.destroy_bot.call_args.kwargs["request_id"] == "pub7.eval_teardown.eval.a1"
+    assert baas.destroy_bot.call_args.kwargs["request_id"] == "pub_7.eval_teardown.eval.a1"
 
 
 # ── rollback deploy: crash windows (existing-bot adopt) ───────────────────────
@@ -697,7 +697,7 @@ async def test_offline_destroy_stop_then_releases_binding():
     assert result["success"] is True
     assert baas.stop_bot.call_count == 1
     # Deterministic, correlation-only request id (stable across retries).
-    assert baas.stop_bot.call_args.kwargs["request_id"] == "offline_destroy.pub5.online"
+    assert baas.stop_bot.call_args.kwargs["request_id"] == "offline_destroy.pub_5.online"
     svc._release_binding.assert_called_once()
 
 
@@ -733,69 +733,3 @@ async def test_offline_destroy_stop_failure_propagates_for_retry():
     with pytest.raises(RuntimeError):
         await svc.execute_offline_destroy(publish_id=5, stage="online", operator="op")
     svc._release_binding.assert_not_called()
-
-
-# ── approval create: intent-first orphan window ───────────────────────────────
-@pytest.mark.asyncio
-async def test_approval_create_intent_first_orphan_visible_then_recorded():
-    # The approval-workflow plugin is not a BaaS bot, so a crash after start_approval
-    # but before the puid/ext is persisted cannot be adopted — the intent-first
-    # approval_create op makes that orphaned approval instance observable (PENDING),
-    # and the re-run re-creates (accepted creation orphan) recording the second puid.
-    from unittest.mock import MagicMock
-    from agentclaw.community.core.service_bot.services.publish_approval_service import (
-        PublishApprovalService,
-    )
-
-    ledger = _ledger()
-    baas = FakeBaas()
-    flow = _flow(ledger=ledger, baas=baas, build_service=Mock(), publish_service=Mock())
-
-    record = _record(PublishStatus.VALIDATING.value)
-    record.owner_id = "owner"
-    publish_service = MagicMock()
-    publish_service.get_publish_by_id.return_value = record
-
-    bot_service = MagicMock()
-    bot_service.get_bot.return_value = {
-        "ext": {"service_bot_config": {"should_approval": True}}
-    }
-
-    puids = iter(["PUID-A", "PUID-B"])
-    process_service = MagicMock()
-    process_service.start_approval.side_effect = lambda **kw: {
-        "success": True, "puid": next(puids), "approval_url": "u"
-    }
-
-    # First ext write crashes (after start_approval + puid recorded on the op).
-    ext_calls = []
-
-    def update_ext(pid, ext):
-        ext_calls.append(ext)
-        if len(ext_calls) == 1:
-            raise RuntimeError("crash after start_approval, before ext persist")
-
-    publish_service.update_publish_ext = MagicMock(side_effect=update_ext)
-
-    approval = PublishApprovalService(
-        publish_service=publish_service,
-        publish_flow_service_provider=lambda: flow,
-        process_service=process_service,
-        bot_service=bot_service,
-        task_queue_service=MagicMock(),
-    )
-
-    with pytest.raises(RuntimeError):
-        await approval._create_new_approval(record, action="online", operator="collab")
-    assert process_service.start_approval.call_count == 1
-    op = ledger.get_latest_by_kind(1, "approval_create", "online")
-    assert op.state == PublishOperationState.PENDING.value  # in-flight → observable
-
-    # Re-run: resumes the PENDING op, re-creates the approval (orphan accepted),
-    # records the second puid, and completes.
-    result = await approval._create_new_approval(record, action="online", operator="collab")
-    assert result.status == "PROCESSING"
-    assert process_service.start_approval.call_count == 2
-    op = ledger.get_latest_by_kind(1, "approval_create", "online")
-    assert op.state == PublishOperationState.COMPLETED.value
-    assert op.result["puid"] == "PUID-B"

@@ -19,7 +19,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
+from agentclaw.community.core.service_bot.repository.models import (
+    BotPublishRecord,
+    PublishOperationKind,
+    PublishStatus,
+)
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
@@ -84,10 +88,6 @@ class StageSpec:
     # Historical quirk preserved: the verify first-release does NOT pass a
     # ``version`` to ``release_async`` (defaults to "1"); the online one does.
     first_release_passes_version: bool
-    # Ledger operation kinds (#197): the first-release and upgrade op kinds for
-    # this stage, used by the operation runner for crash-safe issuance.
-    first_release_kind: str
-    upgrade_kind: str
 
 
 VERIFY_SPEC = StageSpec(
@@ -98,8 +98,6 @@ VERIFY_SPEC = StageSpec(
     first_release_message="Released to the verify environment",
     upgrade_message="Upgraded and released to the verify environment",
     first_release_passes_version=False,
-    first_release_kind="verify_first_release",
-    upgrade_kind="verify_upgrade",
 )
 
 # The online release runs *within* ONLINE_PUB: the user-driven ``process`` owns the
@@ -115,8 +113,6 @@ ONLINE_SPEC = StageSpec(
     first_release_message="Publish submitted",
     upgrade_message="Upgrade publish submitted",
     first_release_passes_version=True,
-    first_release_kind="online_first_release",
-    upgrade_kind="online_upgrade",
 )
 
 
@@ -136,7 +132,7 @@ class ReleaseStageRunner:
         baas_service: BaasService,
         provider_behaviors: ProviderBehaviorRouter,
         ops: ReleaseRecordOps,
-        operation_runner: "PublishOperationRunner",
+        operation_runner: PublishOperationRunner,
     ) -> None:
         self._ext_state = ext_state
         self._build_service = build_service
@@ -177,7 +173,7 @@ class ReleaseStageRunner:
         # its returned bot_uuid rather than creating a second one).
         op = self._operation_runner.open_operation(
             publish_id=publish_id,
-            kind=spec.first_release_kind,
+            kind=PublishOperationKind.FIRST_RELEASE,
             stage=spec.stage.value,
             operator=operator,
         )
@@ -277,7 +273,7 @@ class ReleaseStageRunner:
         # the op is abandoned and the first-release fallback opens its own op.
         op = self._operation_runner.open_operation(
             publish_id=publish_id,
-            kind=spec.upgrade_kind,
+            kind=PublishOperationKind.UPGRADE,
             stage=spec.stage.value,
             bot_uuid=bot_uuid,
             operator=operator,
