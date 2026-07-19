@@ -42,12 +42,12 @@ lifetime, with no recovery and no error surfaced to callers — they just receiv
 - A **genuine config-off** state — no `base_url`, or `httpx` not importable —
   still disables the LLM exactly as today (feature-off is intentional and
   permanent; there is nothing to recover to).
-- The token resolution **priority is unchanged**: explicit constructor arg →
-  injected `SecretResolver` (when a `base_url` and secret name are configured) →
-  `LLM_AUTH_TOKEN` env var → encoded fallback (empty in shipped source).
+- The token is resolved **solely through the injected `SecretResolver`**, keyed
+  by the DI-provided `secret_name`, falling back to the encoded fallback (empty
+  in shipped source). The constructor reads **no process environment**: endpoint,
+  secret key, model, and timeout all arrive explicitly from the DI wiring.
 - **No credential may be committed** to shipped source. The neutralized
-  `_FALLBACK_TOKEN_B64 = ""` stays empty; `LLM_AUTH_TOKEN` remains the
-  deployment-supplied, worker-visible fallback. The fix is resilience, not a
+  `_FALLBACK_TOKEN_B64 = ""` stays empty. The fix is resilience, not a
   re-embedded secret.
 
 ## Non-goals / unchanged behavior
@@ -55,10 +55,21 @@ lifetime, with no recovery and no error surfaced to callers — they just receiv
 - The corp `ProdSecretResolver` / layotto path is **not** in this repo (corp
   overlay) and is not modified. This change makes the harness LLM *tolerant* of
   that path failing transiently; a permanent worker-side backend outage is a
-  deploy concern addressed by setting `LLM_AUTH_TOKEN`.
+  deploy concern (the corp env overlay wires a worker-reachable `secret_name`).
 - `chat()` request/retry/semaphore/sofa-tracer-bypass behavior is unchanged.
 - The `[llm disabled]` sentinel returned to callers is unchanged.
-- No change to the DI provider signature or `LLMHarnessConfig`.
+
+## Constructor hardening (follow-up in the same change)
+
+Per review, the constructor was tightened alongside the self-heal fix:
+
+- `base_url` and `secret_name` are required `str` (the DI provider always
+  supplies them from `LLMHarnessConfig`), not `str | None`.
+- `model` / `timeout_ms` carry literal defaults (`"GLM-5.1"` / `180_000`); the
+  `LLM_MODEL` / `LLM_TIMEOUT_MS` env reads are gone.
+- The `auth_token` param and the `LLM_BASE_URL` / `LLM_SECRET_NAME` /
+  `LLM_AUTH_TOKEN` env reads are removed; the DI provider passes
+  `llm_config.base_url` / `llm_config.secret_name` directly.
 
 ## Acceptance criteria
 
@@ -66,13 +77,15 @@ lifetime, with no recovery and no error surfaced to callers — they just receiv
    `get_secret` call but succeeds on a later call: the LLM is **not** permanently
    disabled, and a subsequent `chat()` resolves the real token and issues the
    request (regression test, red on unfixed HEAD).
-2. Given a `base_url` but no resolvable token from any source: `chat()` returns
-   `[llm disabled]` and makes no HTTP request (unchanged), but the instance keeps
-   re-attempting resolution on later calls rather than latching.
-3. Given no `base_url` (or `httpx is None`): the LLM is disabled permanently, as
-   today.
-4. Token resolution priority (explicit → resolver → env → fallback) is preserved:
-   the two existing `test_llm_secret_resolver.py` cases still pass.
+2. Given a `base_url` but the secret absent from the resolver: `chat()` returns
+   `[llm disabled]` and makes no HTTP request, but the instance keeps
+   re-attempting resolution on later calls rather than latching — once the backend
+   serves the secret, the next `chat()` sends.
+3. Given empty `base_url` (or `httpx is None`): the LLM is disabled permanently,
+   and the resolver is never consulted.
+4. The constructor reads no env var and resolves the token only through the
+   `SecretResolver`; the priority-chain cases in `test_llm_secret_resolver.py`
+   pass.
 5. No committed credential in shipped source: `test_shipped_config_no_corp_identifiers.py`
    and `test_no_data_infra_vendor_in_core.py` stay green.
 6. Full `tests/community` suite green.

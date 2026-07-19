@@ -20,3 +20,17 @@
   (`AVERNET_PRE_PUSH_MERGE_TARGET=origin/REL20260717`).
 - [x] 9. Open draft PR → base `REL20260717`, `Fixes #201`; subscribe to PR
   activity.
+
+## Review follow-up (constructor hardening)
+
+- [x] 10. `llm.py`: `base_url` / `secret_name` required `str`; `model` /
+  `timeout_ms` literal defaults; drop `auth_token` param and all `LLM_*` env
+  reads (token resolved only via `SecretResolver`); remove `import os`.
+- [x] 11. `harness_module._llm`: pass `llm_config.base_url` / `secret_name`
+  directly (no env, no `or None`).
+- [x] 12. Refresh stale `LLM_*` env-var docs in `di/config.py`,
+  `application-community.yaml`, and the commented router block.
+- [x] 13. Update tests for the new signature (required `base_url`, resolver-only
+  token, no env); keep red→green recovery/retry coverage.
+- [x] 14. Re-run targeted + full `tests/community`; ruff clean; commit & push;
+  PR updates in place.
