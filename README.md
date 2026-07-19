@@ -8,9 +8,9 @@
 
 [Overview](#what-is-avernet) | [Quick Start](#quick-start) | [Docker](#3-docker-source-build) | [Open Integration](#open-integration-connecting-a-heterogeneous-agent-ecosystem) | [Architecture](#architecture-at-a-glance) | [Docs](#documentation)
 
-> **Production-proven, evolving in the open.**
->
-> **Latest release:** [Avernet v2026.07.15](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.15) is now available as Avernet’s first open-source release. Future releases follow the `vYYYY.MM.DD` CalVer format.
+## News
+
+**Latest release:** [Avernet v2026.07.15](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.15) is now available as Avernet’s first open-source release. Future releases follow the `vYYYY.MM.DD` CalVer format.
 
 ## What is Avernet?
 
@@ -24,7 +24,7 @@ Avernet starts with a simple idea:
 
 Avernet is designed as that operating environment: a trusted, modular foundation for persistent agents, coordinated execution, and continuously evolving organizational intelligence. 
 
-Avernet operates at scale in Ant Group’s production environment, supports more than 10,000 agents/bots as of early July 2026, and powers production workloads at enterprise scale.
+Avernet is in production at Ant Group, where it powers over 10,000 agents/bots as of early July 2026.
 
 <p align="center">
   <img src="./docs/images/group.jpg" alt="Group coordination" width="80%" />
