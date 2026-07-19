@@ -87,18 +87,14 @@ class HarnessModule(Module):
     def _llm(
         self, llm_config: LLMHarnessConfig, secret_resolver: SecretResolver
     ) -> LLM:
-        """Construct the harness LLM. Source priority: LLM_* env vars >
-        injected LLMHarnessConfig (the ``llm`` yaml block) > neutral empty
-        (disabled). The neutral shipped code embeds no endpoint / secret name.
-
-        The API token is resolved through the injected ``SecretResolver`` seam
-        (corp → Mist, community → env), so the harness names no corp secret
-        client."""
-        import os
-
+        """Construct the harness LLM from the injected ``LLMHarnessConfig`` (the
+        ``llm`` yaml block): a neutral empty ``base_url`` leaves it disabled
+        (feature-off). The API token is resolved through the injected
+        ``SecretResolver`` seam (corp → Mist, community → env) by the config's
+        ``secret_name``, so the harness names no corp secret client."""
         return LLM(
-            base_url=os.getenv("LLM_BASE_URL") or llm_config.base_url or None,
-            secret_name=os.getenv("LLM_SECRET_NAME") or llm_config.secret_name or None,
+            base_url=llm_config.base_url,
+            secret_name=llm_config.secret_name,
             secret_resolver=secret_resolver,
         )
 

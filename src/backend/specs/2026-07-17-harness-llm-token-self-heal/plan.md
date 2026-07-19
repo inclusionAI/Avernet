@@ -19,25 +19,24 @@ permanent feature-off, and it sticks for the worker's lifetime.
 
 **1. Separate the two states.**
 
-- Store resolution inputs on the instance so the token can be re-resolved later:
-  `self._explicit_token` (the `auth_token` arg), and `self._secret_name`
-  (`secret_name` arg or `LLM_SECRET_NAME` env).
+- Store the token's secret key on the instance so the token can be re-resolved
+  later: `self._secret_name` (the required `secret_name` arg).
 - Compute a permanent config flag once:
   `self._config_disabled = httpx is None or not self._base_url`.
 
 **2. Extract resolution into `_resolve_token() -> str`.**
 
-Moves the existing chain out of `__init__`, unchanged in priority:
+Resolves the token solely through the injected `SecretResolver`, keyed by
+`secret_name`:
 
 ```
-explicit arg
-  → (base_url and secret_name) ? SecretResolver.get_secret(secret_name) : skip
-  → LLM_AUTH_TOKEN env
+(base_url and secret_name) ? SecretResolver.get_secret(secret_name) : skip
   → _decode_fallback()   # empty in shipped source
 ```
 
-Resolver exceptions and `None` results both fall through to env/fallback (same as
-today). Returns `""` when nothing resolves.
+Resolver exceptions and `None` results both fall through to the fallback (never
+raised). Returns `""` when nothing resolves. The constructor reads no env var —
+endpoint/secret key/model/timeout all arrive from the DI provider.
 
 **3. Best-effort eager resolve + honest logging in `__init__`.**
 
@@ -79,23 +78,46 @@ resolvability rather than a latched snapshot.
 No change to `_decode_fallback`, `_FALLBACK_TOKEN_B64` (stays `""`), the retry
 loop, the semaphore, or the sofa-tracer bypass.
 
+**6. Constructor hardening (review follow-up).** Drop the `str | None` / env-read
+surface: `base_url` and `secret_name` become required `str` (the DI provider
+always supplies them); `model` / `timeout_ms` get literal defaults
+(`"GLM-5.1"` / `180_000`); the `auth_token` param and all `LLM_*` env reads are
+removed. `import os` drops out of the module.
+
+### `di/modules/harness_module.py` — `_llm` provider
+
+Pass config values directly, no env override and no `or None`:
+
+```python
+return LLM(
+    base_url=llm_config.base_url,
+    secret_name=llm_config.secret_name,
+    secret_resolver=secret_resolver,
+)
+```
+
+Stale `LLM_*` env-var mentions in `di/config.py`, `application-community.yaml`,
+and a commented router block are updated to describe the resolver path.
+
 ### Tests — `tests/community/core/harness/test_llm_secret_resolver.py`
 
-- **Keep** the two existing cases (resolver-hit, resolver-None→env) — they pin the
-  unchanged priority chain.
-- **Add** `test_llm_recovers_when_resolver_becomes_available`: a resolver stub
-  whose `get_secret` raises on call 1 and returns a real secret on call 2. Assert
-  the instance is not latched disabled after init, then drive `chat()` (with the
-  HTTP send stubbed) and assert the token resolved to the real value and the
-  request carried `Authorization: Bearer <real>`.
-- **Add** `test_llm_config_off_stays_disabled`: no `base_url` → `chat()` returns
+- **Keep** `test_llm_loads_token_from_secret_resolver` (resolver-hit).
+- **Rework** the resolver-None case into
+  `test_llm_token_empty_when_resolver_absent_no_baked_fallback`: resolver returns
+  `None`, no baked fallback → empty token / disabled, resolver consulted exactly
+  once (proves no env read).
+- **Add** `test_llm_recovers_when_resolver_becomes_available`: a resolver whose
+  `get_secret` raises on call 1 and returns a real secret on call 2. Assert not
+  latched after init, then drive `chat()` (HTTP send stubbed) and assert the token
+  resolved and the request carried `Authorization: Bearer <real>`.
+- **Add** `test_llm_config_off_stays_disabled`: `base_url=""` → `chat()` returns
   `[llm disabled]`, resolver never consulted.
-- **Add** `test_llm_missing_token_retries_not_latched`: `base_url` set, resolver
-  always returns `None`, no env token → first `chat()` returns `[llm disabled]`;
-  set `LLM_AUTH_TOKEN`; next `chat()` resolves and sends. Proves no latch.
+- **Add** `test_llm_missing_token_retries_not_latched`: resolver returns `None`
+  until a flag flips → first `chat()` returns `[llm disabled]`; flip the backend
+  on; next `chat()` resolves and sends. Proves no latch, no env.
 
-All new tests are red on unfixed HEAD (latched `_disabled`) and green with the
-fix.
+All recovery/retry tests are red on unfixed HEAD (latched `_disabled`) and green
+with the fix.
 
 ## Risk / blast radius
 
