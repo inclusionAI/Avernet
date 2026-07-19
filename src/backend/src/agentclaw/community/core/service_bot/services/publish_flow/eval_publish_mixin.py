@@ -80,7 +80,7 @@ class EvalPublishMixin:
         op = self._operation_runner.open_operation(
             publish_id=publish_id,
             kind=PublishOperationKind.EVAL_PUBLISH,
-            stage=publish_stage.value,
+            stage=publish_stage,
             operator=operator,
             params={"biz_id": biz_id} if biz_id else None,
         )
@@ -201,7 +201,7 @@ class EvalPublishMixin:
         op = self._operation_runner.open_operation(
             publish_id=publish_id,
             kind=PublishOperationKind.EVAL_TEARDOWN,
-            stage=PublishStage.EVAL.value,
+            stage=PublishStage.EVAL,
             bot_uuid=bot_uuid,
             operator=operator,
         )

@@ -174,7 +174,7 @@ class ReleaseStageRunner:
         op = self._operation_runner.open_operation(
             publish_id=publish_id,
             kind=PublishOperationKind.FIRST_RELEASE,
-            stage=spec.stage.value,
+            stage=spec.stage,
             operator=operator,
         )
 
@@ -274,7 +274,7 @@ class ReleaseStageRunner:
         op = self._operation_runner.open_operation(
             publish_id=publish_id,
             kind=PublishOperationKind.UPGRADE,
-            stage=spec.stage.value,
+            stage=spec.stage,
             bot_uuid=bot_uuid,
             operator=operator,
         )

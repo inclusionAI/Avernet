@@ -32,6 +32,7 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
     PublishOperationRepository,
 )
+from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -69,8 +70,9 @@ class PublishOperationError(Exception):
 class PublishOperationRunner:
     """Runs a BaaS mutation as resumable ledger steps.
 
-    ``checkpoint`` is a no-op in production; the crash-window test harness injects
-    a hook that raises at a named step to simulate a mid-operation crash.
+    ``_checkpoint`` is a no-op in production and is not a constructor parameter;
+    the crash-window test harness assigns it after construction to inject a hook
+    that raises at a named step, simulating a mid-operation crash.
     """
 
     def __init__(
@@ -78,11 +80,10 @@ class PublishOperationRunner:
         *,
         ledger: PublishOperationRepository,
         baas_service: Any,
-        checkpoint: Callable[[str], None] = lambda _name: None,
     ) -> None:
         self._ledger = ledger
         self._baas = baas_service
-        self._checkpoint = checkpoint
+        self._checkpoint: Callable[[str], None] = lambda _name: None
 
     # ── open (find-or-create the intent) ─────────────────────────────────
     def open_operation(
@@ -90,13 +91,17 @@ class PublishOperationRunner:
         *,
         publish_id: int,
         kind: PublishOperationKind,
-        stage: str = "",
+        stage: PublishStage,
         params: Optional[Dict[str, Any]] = None,
-        bot_uuid: str = "",
-        operator: str = "",
+        bot_uuid: Optional[str] = None,
+        operator: str = "system",
     ) -> PublishOperationRecord:
         """Return the intent row for this logical operation, creating it if none
         is in flight.
+
+        ``bot_uuid`` is ``None`` for a creation kind (first release / eval), whose
+        target bot does not exist yet — it is persisted as the column's empty-string
+        default (the column is non-nullable) and filled in once the create returns.
 
         Two cases, keyed on the latest row for ``(publish_id, kind, stage)``:
 
@@ -108,13 +113,16 @@ class PublishOperationRunner:
           of that operation (e.g. the user scales again, or a rebuild reissues
           after ABANDONED). A fresh attempt (``latest.attempt + 1``) is opened.
 
-        Note: because a terminal COMPLETED latest opens a new attempt, a durable
-        task that is redelivered *after* its op completed but before the queue
-        recorded the completion would open a new attempt and re-issue. Handlers
-        whose operation is not otherwise status-gated guard that window explicitly
-        (e.g. the offline destroy short-circuits on an already-RELEASED binding).
+        Redelivery caveat: opening a new attempt on a terminal COMPLETED latest is
+        what lets a genuinely new invocation re-run — but the durable task queue is
+        at-least-once, so a task that already drove its op to COMPLETED and then
+        crashed *before the queue recorded that task as done* is redelivered. On
+        that redelivery this method sees the COMPLETED latest, opens a fresh
+        attempt, and re-issues the BaaS mutation. Operations that are not otherwise
+        status-gated must guard that window themselves (e.g. the offline destroy
+        short-circuits when the binding is already RELEASED).
         """
-        latest = self._ledger.get_latest_by_kind(publish_id, kind, stage)
+        latest = self._ledger.get_latest_by_kind(publish_id, kind, stage.value)
         if latest is not None and latest.state not in {
             s.value for s in PublishOperationState.terminal()
         }:
@@ -124,10 +132,10 @@ class PublishOperationRunner:
         data: Dict[str, Any] = {
             "publish_id": publish_id,
             "operation_kind": str(kind),
-            "stage": stage,
+            "stage": stage.value,
             "attempt": attempt,
-            "request_id": operation_request_id(publish_id, kind, stage, attempt),
-            "bot_uuid": bot_uuid,
+            "request_id": operation_request_id(publish_id, kind, stage.value, attempt),
+            "bot_uuid": bot_uuid or "",
             "operator": operator,
             "params": params,
             "env": get_current_env(),

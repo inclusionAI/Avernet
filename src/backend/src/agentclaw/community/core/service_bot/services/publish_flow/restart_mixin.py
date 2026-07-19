@@ -224,7 +224,7 @@ class RestartMixin:
         op = self._operation_runner.open_operation(
             publish_id=publish_id,
             kind=PublishOperationKind.RESTART,
-            stage=stage_enum.value,
+            stage=stage_enum,
             bot_uuid=bot_uuid,
             operator=operator,
         )

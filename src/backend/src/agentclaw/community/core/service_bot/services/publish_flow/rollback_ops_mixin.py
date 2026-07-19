@@ -112,7 +112,7 @@ class RollbackOpsMixin:
         op = self._operation_runner.open_operation(
             publish_id=target_publish_id,
             kind=PublishOperationKind.ROLLBACK_DEPLOY,
-            stage=PublishStage.ONLINE.value,
+            stage=PublishStage.ONLINE,
             bot_uuid=bot_uuid,
             operator=operator,
         )

@@ -31,6 +31,7 @@ from agentclaw.community.plugins.publish_operation_repository import (
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowService,
 )
+from agentclaw.community.core.service_bot.types import PublishStage
 
 
 # ── ledger + fakes ────────────────────────────────────────────────────────────
@@ -377,7 +378,7 @@ def test_is_online_release_recorded_reads_ledger():
     # yet written) is NOT "recorded": the crash-resume guard must let the release
     # re-enter and finish, not skip it (Group B review Finding 1).
     op = svc._operation_runner.open_operation(
-        publish_id=1, kind="first_release", stage="online"
+        publish_id=1, kind="first_release", stage=PublishStage.ONLINE
     )
     ledger.record_workflow(op.id, baas_publish_id=901, bot_uuid="BOT-x")
     assert svc.is_online_release_recorded(1) is False
@@ -403,14 +404,14 @@ def test_abandon_inflight_operations_marks_nonterminal():
     svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock())
 
     pending = svc._operation_runner.open_operation(
-        publish_id=1, kind="first_release", stage="verify"
+        publish_id=1, kind="first_release", stage=PublishStage.VERIFY
     )
     recorded = svc._operation_runner.open_operation(
-        publish_id=1, kind="first_release", stage="online"
+        publish_id=1, kind="first_release", stage=PublishStage.ONLINE
     )
     ledger.record_workflow(recorded.id, baas_publish_id=901, bot_uuid="B")
     done = svc._operation_runner.open_operation(
-        publish_id=1, kind="restart", stage="online"
+        publish_id=1, kind="restart", stage=PublishStage.ONLINE
     )
     ledger.record_workflow(done.id, baas_publish_id=902, bot_uuid="B")
     ledger.complete(done.id)
