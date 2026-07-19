@@ -119,10 +119,38 @@ and a commented router block are updated to describe the resolver path.
 All recovery/retry tests are red on unfixed HEAD (latched `_disabled`) and green
 with the fix.
 
+## Review follow-up 2 — inject the shared `HttpClient`, drop config-disable
+
+Per review, route HTTP through the DI transport seam and delete the tracer
+workaround and the config-disable concept:
+
+- `LLM.__init__` takes `http_client: HttpClient` (the `general` sync client,
+  `Annotated[HttpClient, QUALIFIER_GENERAL]`). The module-level
+  `try/except import httpx`, the `_ORIGINAL_ASYNC_SEND` / `sofa_tracer` bypass,
+  and the `httpx.AsyncClient` path are all removed — the sync `httpx.Client`
+  the plugin uses is not tracer-patched, so there is nothing to work around.
+- `_do_request` becomes `await asyncio.to_thread(self._http.post, url, json=…,
+  headers=…, timeout=…)` — the sync call runs off the event loop; the semaphore
+  and retry loop are unchanged. The `general` client has an empty base_url, so we
+  pass the absolute `f"{base_url}/v1/chat/completions"`.
+- The config-disable states are gone: `httpx is None` can't happen (plugin always
+  injected), and feature-off collapses into the token path — an unconfigured
+  deployment resolves no secret, so `chat()` returns `[llm disabled]` on the
+  empty-token check. `_config_disabled` and the `_disabled` property are deleted;
+  `_resolve_token` drops its `base_url`/`secret_name` guard.
+- `harness_module._llm` `@inject`s the qualified client and passes `http_client=`.
+  `core/harness/README.md` declares the new `plugin_api.http_client` dependency
+  (module-boundary manifest).
+
+Tests move onto a recording `HttpClient` double so `chat()` exercises the real
+`_do_request` / `to_thread` path; `test_all_bindings_resolve` still eagerly
+resolves the harness LLM in the full injector.
+
 ## Risk / blast radius
 
-- Behavior change is strictly a **superset** of today's success path plus a new
-  recovery path; the disabled sentinel and priority order are preserved.
+- Behavior change is strictly a **superset** of today's success path plus the
+  recovery path; the `[llm disabled]` sentinel is preserved.
 - The only added cost is a re-resolution attempt per `chat()` **while** the token
   is unresolved (bounded: stops the moment resolution succeeds and caches).
-- No shipped credential; architecture guards unaffected.
+- No shipped credential; architecture guards unaffected. The harness no longer
+  reads any `LLM_*` env var, and no longer constructs `httpx` directly.

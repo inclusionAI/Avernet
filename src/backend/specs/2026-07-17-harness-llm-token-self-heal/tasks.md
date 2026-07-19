@@ -34,3 +34,23 @@
   token, no env); keep red→green recovery/retry coverage.
 - [x] 14. Re-run targeted + full `tests/community`; ruff clean; commit & push;
   PR updates in place.
+
+## Review follow-up 2 (inject the shared HttpClient; drop config-disable)
+
+- [x] 15. `llm.py`: inject `HttpClient` (the `general` sync client); delete the
+  `try/except import httpx`, the `_ORIGINAL_ASYNC_SEND` / sofa_tracer bypass, and
+  the `httpx.AsyncClient` path. `_do_request` now calls `self._http.post(...)` via
+  `asyncio.to_thread`.
+- [x] 16. Remove the config-disable concept entirely (`_config_disabled` /
+  `_disabled` gone). `chat()` short-circuits only while the token is unresolved
+  (the #201 self-heal), returning the unchanged `[llm disabled]` sentinel.
+- [x] 17. `_resolve_token`: drop the `base_url`/`secret_name` guard (DI always
+  provides them); resolve straight through the `SecretResolver`.
+- [x] 18. `harness_module._llm`: `@inject` the
+  `Annotated[HttpClient, QUALIFIER_GENERAL]` and pass `http_client=`.
+- [x] 19. Declare `plugin_api.http_client` in `core/harness/README.md`
+  (module-boundary manifest); refresh `di/config.py` docstring.
+- [x] 20. Rework tests onto a recording `HttpClient` double (exercise the real
+  `_do_request`/`to_thread` path); keep recovery/retry coverage. Verify the full
+  injector still eagerly resolves the harness LLM (`test_all_bindings_resolve`).
+- [x] 21. ruff clean; full `tests/community` green; commit & push; PR updates.

@@ -108,7 +108,8 @@ class LLMHarnessConfig:
     secret name, or token. Each corp env overlay sets its own ``base_url`` /
     ``secret_name`` via the ``llm`` yaml block; a community deployment sets its
     own. The token is resolved from ``secret_name`` through the injected
-    ``SecretResolver``. Empty base_url = the harness LLM is disabled (feature-off).
+    ``SecretResolver``; with the defaults empty, no token resolves and the
+    harness LLM stays inert (``chat()`` returns ``[llm disabled]``).
     """
 
     base_url: str = ""
