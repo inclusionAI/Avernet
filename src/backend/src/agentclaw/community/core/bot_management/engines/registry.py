@@ -50,21 +50,28 @@ class EngineProvisioningRegistry:
         return self._default
 
 
-# Module-level singleton: built once, reused for every call.  An explicit
-# global (instead of functools.lru_cache) makes the single-instance contract
-# obvious and avoids any import-time caching surprises.
-_REGISTRY: EngineProvisioningRegistry | None = None
+def _build_default_registry() -> EngineProvisioningRegistry:
+    """Assemble the process-wide strategy registry with all known engines.
+
+    Pure and side-effect free: it only instantiates lightweight strategy
+    objects.  Built eagerly at import so the single-instance contract is
+    obvious and no lazy double-checked-locking is needed.
+    """
+    registry = EngineProvisioningRegistry()
+    registry.register(AicodingProvisioningStrategy("aicoding"))
+    registry.register(AicodingProvisioningStrategy("claude_code"))
+    for engine_type in ("openclaw", "teclaw", "hermes"):
+        registry.register(DefaultProvisioningStrategy(engine_type))
+    return registry
+
+
+# Eager module-level singleton: built exactly once at import.  The registry is
+# bootstrap state (a fixed set of strategies), so there is no need for lazy DCL.
+_REGISTRY: EngineProvisioningRegistry = _build_default_registry()
 
 
 def get_engine_provisioning_registry() -> EngineProvisioningRegistry:
-    global _REGISTRY
-    if _REGISTRY is None:
-        registry = EngineProvisioningRegistry()
-        registry.register(AicodingProvisioningStrategy("aicoding"))
-        registry.register(AicodingProvisioningStrategy("claude_code"))
-        for engine_type in ("openclaw", "teclaw", "hermes"):
-            registry.register(DefaultProvisioningStrategy(engine_type))
-        _REGISTRY = registry
+    """Return the process-wide strategy registry."""
     return _REGISTRY
 
 

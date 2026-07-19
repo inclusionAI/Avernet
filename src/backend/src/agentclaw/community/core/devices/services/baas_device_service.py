@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Protocol, override
 
 from agentclaw.community.core.bot_management.engines import (
@@ -578,14 +579,9 @@ class BaasDeviceService(DeviceService):
         if not isinstance(template_config, dict):
             template_config = {}
 
-        provisioning_ctx = BotProvisioningContext(
-            bot_id=resolved_bot_id,
-            owner_id=resolved_owner_id,
-            active_engine=raw_active_engine,
-            bot_type=resolved_bot_type,
-            template_type=template_type,
-            template_config=template_config,
-        )
+        # Reuse the base ctx, swapping in the freshly loaded template_config
+        # (same bot/engine/template_type as base_provisioning_ctx above).
+        provisioning_ctx = replace(base_provisioning_ctx, template_config=template_config)
         raw_codefuse_token = provisioning_strategy.extract_runtime_token(provisioning_ctx)
         codefuse_token = (
             self._vault.decrypt_or_passthrough(raw_codefuse_token)
