@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Callable
 
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
+from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
@@ -162,6 +163,13 @@ class PublishRollbackMixin:
             "rollback_reason": reason,
             "target_publish_id": current_record.last_pub_id,
         }
+        # Clear this version's online release refs before it re-enters DRAFT. The refs
+        # (ext.publish.online = BaaS publish id, ext.binding.online = device binding)
+        # must not leak across a later re-publish lifecycle.
+        for section in ("publish", "binding"):
+            refs = demoted_ext.get(section)
+            if isinstance(refs, dict):
+                refs.pop(PublishStage.ONLINE.value, None)
         restored_ext = target_record.ext or {}
         restored_ext["rollback_restored_from"] = publish_id
 
