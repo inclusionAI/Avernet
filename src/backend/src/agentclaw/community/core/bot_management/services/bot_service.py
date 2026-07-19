@@ -335,6 +335,62 @@ class BotService:
         self._baas_template_resolver = baas_template_resolver
         self._task_queue_service = task_queue_service
 
+    def _build_engine_extra_envs(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        active_engine: str,
+        bot_type: str,
+        template_type: "str | None",
+        template_config: "Optional[Dict[str, Any]]",
+        log_context: str,
+    ) -> "Optional[Dict[str, Any]]":
+        """Build engine-specific extra_envs via the provisioning strategy.
+
+        Centralizes the create / restart / start provisioning so each call site
+        only supplies the metadata it actually has.  Fails soft: any strategy
+        error is logged and treated as "no extra envs" so device allocation is
+        never blocked by the engine layer.  Logging is engine-agnostic (logs the
+        whole ``extra_envs`` dict) so new engine strategies are picked up without
+        touching bot_service.
+        """
+        try:
+            from agentclaw.community.core.bot_management.engines import (
+                BotProvisioningContext,
+                get_engine_provisioning_registry,
+            )
+
+            ctx = BotProvisioningContext(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                active_engine=active_engine,
+                bot_type=bot_type,
+                template_type=template_type,
+                template_config=template_config,
+            )
+            extra_envs = (
+                get_engine_provisioning_registry()
+                .resolve_for_context(ctx)
+                .build_extra_envs(ctx)
+            )
+            if extra_envs:
+                logger.info(
+                    "[%s] Setting engine extra_envs for bot %s: %s",
+                    log_context,
+                    bot_id,
+                    extra_envs,
+                )
+            return extra_envs
+        except Exception as e:
+            logger.warning(
+                "[%s] Failed to build engine extra_envs for bot %s: %s",
+                log_context,
+                bot_id,
+                e,
+            )
+            return None
+
     def _attach_template_uid_context(
         self,
         *,
@@ -1066,31 +1122,15 @@ class BotService:
                         template_type=template_type,
                         template_config=template_config,
                     )
-                    from agentclaw.community.core.bot_management.engines import (
-                        BotProvisioningContext,
-                        get_engine_provisioning_registry,
-                    )
-
-                    provisioning_ctx = BotProvisioningContext(
+                    extra_envs = self._build_engine_extra_envs(
                         bot_id=str(bot_id),
                         owner_id=user_id,
                         active_engine=resolved_active_engine,
                         bot_type=resolved_bot_type,
                         template_type=template_type,
                         template_config=template_config,
+                        log_context="bot_service.create_bot",
                     )
-                    extra_envs = (
-                        get_engine_provisioning_registry()
-                        .resolve_for_context(provisioning_ctx)
-                        .build_extra_envs(provisioning_ctx)
-                    )
-                    if extra_envs:
-                        logger.info(
-                            "[bot_service.create_bot] Setting engine extra_envs "
-                            "for bot %s: %s",
-                            bot_id,
-                            extra_envs,
-                        )
 
                     device_result = service.apply_device(
                         apply_reason=f"Create bot: {resolved_bot_name or bot_id}",
@@ -1367,35 +1407,15 @@ class BotService:
                     )
 
                 # Engine strategy 重启场景：传入额外的环境变量。
-                extra_envs = None
-                try:
-                    from agentclaw.community.core.bot_management.engines import (
-                        BotProvisioningContext,
-                        get_engine_provisioning_registry,
-                    )
-
-                    provisioning_ctx = BotProvisioningContext(
-                        bot_id=str(bot_id),
-                        owner_id=owner_id or user_id,
-                        active_engine=active_engine,
-                        bot_type=resolved_bot_type,
-                        template_type=bot_template_type,
-                        template_config=resolved_template_config,
-                    )
-                    extra_envs = (
-                        get_engine_provisioning_registry()
-                        .resolve_for_context(provisioning_ctx)
-                        .build_extra_envs(provisioning_ctx)
-                    )
-                    if extra_envs:
-                        logger.info(
-                            "[bot_service._allocate_device_async] Setting engine "
-                            "extra_envs for restart bot %s: %s",
-                            bot_id,
-                            extra_envs,
-                        )
-                except Exception as e:
-                    logger.warning(f"[bot_service._allocate_device_async] Failed to build engine extra_envs for bot {bot_id}: {e}")
+                extra_envs = self._build_engine_extra_envs(
+                    bot_id=str(bot_id),
+                    owner_id=owner_id or user_id,
+                    active_engine=active_engine,
+                    bot_type=resolved_bot_type,
+                    template_type=bot_template_type,
+                    template_config=resolved_template_config,
+                    log_context="bot_service._allocate_device_async",
+                )
 
                 # Call device service to allocate device
                 # This creates a record in ac_entity_device_binding table
@@ -2054,9 +2074,11 @@ class BotService:
 
                 token_ctx = BotProvisioningContext(
                     bot_id=bot_id,
+                    # owner_id/active_engine/bot_type are str by contract; coerce
+                    # legacy None values to "" so strategies see a stable type.
                     owner_id=bot.get("owner_id") or user_id,
-                    active_engine=bot.get("active_engine"),
-                    bot_type=bot.get("bot_type"),
+                    active_engine=bot.get("active_engine") or "",
+                    bot_type=bot.get("bot_type") or "",
                     template_type=bot.get("template_type"),
                     template_config=template_config if isinstance(template_config, dict) else None,
                 )
@@ -3540,39 +3562,16 @@ class BotService:
         # BOT_TYPE=model/runtime 即便在 update_bot 改过也不生效。引擎口径与 create_bot
         # 对齐（claude_code + aicoding），门控不命中时 extra_envs/template_config 保持
         # None，upgrade 行为与改动前完全一致（envs 退化为 AGENTCLAW_ENGINE 单值）。
-        extra_envs: Optional[Dict[str, Any]] = None
         device_template_config: Optional[Dict[str, Any]] = None
-        try:
-            from agentclaw.community.core.bot_management.engines import (
-                BotProvisioningContext,
-                get_engine_provisioning_registry,
-            )
-
-            provisioning_ctx = BotProvisioningContext(
-                bot_id=str(bot_id),
-                owner_id=user_id,
-                active_engine=active_engine,
-                bot_type=bot.get("bot_type", ""),
-                template_type=bot_template_type,
-                template_config=resolved_template_config,
-            )
-            extra_envs = (
-                get_engine_provisioning_registry()
-                .resolve_for_context(provisioning_ctx)
-                .build_extra_envs(provisioning_ctx)
-            )
-            if extra_envs:
-                logger.info(
-                    "[bot_service._restart_bot_baas] Setting engine extra_envs "
-                    "for baas restart bot %s: %s",
-                    bot_id,
-                    extra_envs,
-                )
-        except Exception as e:
-            logger.warning(
-                "[bot_service._restart_bot_baas] Failed to build engine extra_envs for bot %s: %s",
-                bot_id, e,
-            )
+        extra_envs: Optional[Dict[str, Any]] = self._build_engine_extra_envs(
+            bot_id=str(bot_id),
+            owner_id=user_id,
+            active_engine=active_engine,
+            bot_type=bot.get("bot_type", ""),
+            template_type=bot_template_type,
+            template_config=resolved_template_config,
+            log_context="bot_service._restart_bot_baas",
+        )
         if extra_envs:
             # 与 _allocate_device_async 对齐：附加 template_uid 上下文给 BaaS device 层。
             # 解析失败仅记 warning 不阻断（_attach_template_uid_context 内部已兜底）。

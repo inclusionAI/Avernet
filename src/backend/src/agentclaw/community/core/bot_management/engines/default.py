@@ -1,10 +1,10 @@
 """Default no-op provisioning strategy."""
 from __future__ import annotations
 
-from .provisioning import BotProvisioningContext
+from .provisioning import BotProvisioningContext, EngineProvisioningStrategy
 
 
-class DefaultProvisioningStrategy:
+class DefaultProvisioningStrategy(EngineProvisioningStrategy):
     """No-op strategy for engines without special provisioning rules."""
 
     def __init__(self, engine_type: str = "default") -> None:

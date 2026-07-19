@@ -79,3 +79,54 @@ def test_explicit_non_coding_engine_takes_precedence_over_coding_template():
     assert strategy.build_extra_envs(ctx) is None
     assert strategy.should_encrypt_template_token(ctx) is False
     assert strategy.extract_runtime_token(ctx) is None
+
+
+def test_register_duplicate_engine_raises():
+    """Duplicate registration must fail loudly rather than silently overwrite."""
+    from agentclaw.community.core.bot_management.engines.registry import (
+        EngineProvisioningRegistry,
+    )
+    from agentclaw.community.core.bot_management.engines.default import (
+        DefaultProvisioningStrategy,
+    )
+
+    registry = EngineProvisioningRegistry()
+    registry.register(DefaultProvisioningStrategy("custom"))
+    try:
+        registry.register(DefaultProvisioningStrategy("custom"))
+    except ValueError:
+        return
+    raise AssertionError("expected ValueError on duplicate registration")
+
+
+def test_registry_is_singleton_across_calls():
+    """The module accessor must hand back the same registry instance each call."""
+    a = get_engine_provisioning_registry()
+    b = get_engine_provisioning_registry()
+    assert a is b
+
+
+def test_unknown_engine_falls_back_to_default():
+    """Engines without an explicit strategy (here: moltis) get the default no-op.
+
+    moltis is intentionally not registered in the provisioning registry; it
+    must still resolve to the default no-op strategy so legacy call sites keep
+    working.
+    """
+    ctx = BotProvisioningContext(active_engine="moltis", template_type=None)
+    strategy = get_engine_provisioning_registry().resolve_for_context(ctx)
+
+    assert strategy.build_extra_envs(ctx) is None
+    assert strategy.should_encrypt_template_token(ctx) is False
+    assert strategy.extract_runtime_token(ctx) is None
+
+
+def test_resolve_accepts_str_only_and_recognizes_known_engines():
+    """resolve() takes a real engine string; unknown -> default, known -> that engine."""
+    from agentclaw.community.core.bot_management.engines.registry import (
+        EngineProvisioningRegistry,
+    )
+
+    registry = EngineProvisioningRegistry()
+    # resolve is strict str API (no Optional[None]); unknown -> default.
+    assert registry.resolve("does-not-exist").engine_type == "default"

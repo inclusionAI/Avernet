@@ -1,8 +1,6 @@
 """Composition root for engine provisioning strategies."""
 from __future__ import annotations
 
-from functools import lru_cache
-
 from .aicoding.strategy import AicodingProvisioningStrategy, CODING_TEMPLATE_TYPES
 from .default import DefaultProvisioningStrategy
 from .provisioning import BotProvisioningContext, EngineProvisioningStrategy
@@ -14,11 +12,23 @@ class EngineProvisioningRegistry:
         self._default = DefaultProvisioningStrategy()
 
     def register(self, strategy: EngineProvisioningStrategy) -> None:
-        self._strategies[strategy.engine_type] = strategy
+        engine_type = strategy.engine_type
+        if engine_type in self._strategies:
+            # Guard against accidental double registration which would silently
+            # overwrite a previously installed strategy.
+            raise ValueError(
+                f"engine provisioning strategy already registered: {engine_type}"
+            )
+        self._strategies[engine_type] = strategy
 
-    def resolve(self, engine_type: str | None) -> EngineProvisioningStrategy:
-        if not engine_type:
-            return self._default
+    def resolve(self, engine_type: str) -> EngineProvisioningStrategy:
+        """Resolve the strategy for a known engine type.
+
+        Unknown engine types fall back to the default no-op strategy.  Call
+        sites that may not have ``active_engine`` at all (legacy / partial
+        metadata) should use ``resolve_for_context`` instead of passing a
+        sentinel here.
+        """
         return self._strategies.get(engine_type, self._default)
 
     def resolve_for_context(
@@ -26,10 +36,12 @@ class EngineProvisioningRegistry:
     ) -> EngineProvisioningStrategy:
         """Resolve a strategy for legacy call sites with partial metadata.
 
-        Prefer ``active_engine``.  If older call sites only pass template_type,
-        route known coding templates to the coding strategy so historical
-        TemplateService signatures continue to work while keeping the rule in
-        one place.
+        Prefer ``active_engine``.  If older call sites only pass
+        ``template_type``, route known coding templates to the coding strategy
+        so historical TemplateService signatures keep working while keeping the
+        rule in one place.  An explicit (non-empty) engine always wins over a
+        coding ``template_type``, so dirty data such as ``openclaw`` +
+        ``personalCoding`` does not accidentally get AICoding provisioning.
         """
         if ctx.active_engine:
             return self.resolve(ctx.active_engine)
@@ -38,14 +50,22 @@ class EngineProvisioningRegistry:
         return self._default
 
 
-@lru_cache(maxsize=1)
+# Module-level singleton: built once, reused for every call.  An explicit
+# global (instead of functools.lru_cache) makes the single-instance contract
+# obvious and avoids any import-time caching surprises.
+_REGISTRY: EngineProvisioningRegistry | None = None
+
+
 def get_engine_provisioning_registry() -> EngineProvisioningRegistry:
-    registry = EngineProvisioningRegistry()
-    registry.register(AicodingProvisioningStrategy("aicoding"))
-    registry.register(AicodingProvisioningStrategy("claude_code"))
-    for engine_type in ("openclaw", "teclaw", "moltis", "hermes"):
-        registry.register(DefaultProvisioningStrategy(engine_type))
-    return registry
+    global _REGISTRY
+    if _REGISTRY is None:
+        registry = EngineProvisioningRegistry()
+        registry.register(AicodingProvisioningStrategy("aicoding"))
+        registry.register(AicodingProvisioningStrategy("claude_code"))
+        for engine_type in ("openclaw", "teclaw", "hermes"):
+            registry.register(DefaultProvisioningStrategy(engine_type))
+        _REGISTRY = registry
+    return _REGISTRY
 
 
 __all__ = [

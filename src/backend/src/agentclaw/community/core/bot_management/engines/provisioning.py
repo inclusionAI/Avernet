@@ -6,52 +6,70 @@ special template/env/token rules in their own strategy modules.
 """
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, Optional
 
 
 @dataclass(frozen=True)
 class BotProvisioningContext:
     """Common inputs used by engine provisioning strategies.
 
-    All fields are optional except ``bot_id`` because many legacy call sites only
-    know a subset of bot metadata.  Strategies must be defensive and return
-    no-op results when they cannot prove a rule applies.
+    ``bot_id`` / ``owner_id`` / ``active_engine`` / ``bot_type`` are ``str``
+    (default empty string) so strategies always see a stable type.  An empty
+    value means the legacy / partial call site did not provide it and the
+    strategy must treat its rule as not-applicable (no-op).
+
+    ``template_type`` / ``template_config`` are legitimately ``Optional``:
+    only template-backed coding engines (``aicoding`` / ``claude_code``) need
+    them.  For engines without a coding template they stay ``None`` and are
+    intentionally not provisioned.
     """
 
     bot_id: str = ""
-    owner_id: Optional[str] = None
-    active_engine: Optional[str] = None
-    bot_type: Optional[str] = None
+    owner_id: str = ""
+    active_engine: str = ""
+    bot_type: str = ""
+    # ``None`` for non-template engines (openclaw / teclaw / hermes / ...).
+    # Coding engines set this to ``applicationCoding`` / ``personalCoding``.
     template_type: Optional[str] = None
+    # ``None`` together with ``template_type`` for non-template engines.
+    # Coding engines read overrides (model / runtime / token / repos /
+    # devflow) from here.
     template_config: Optional[Dict[str, Any]] = None
 
 
-@runtime_checkable
-class EngineProvisioningStrategy(Protocol):
-    """Per-engine provisioning hooks used by public services."""
+class EngineProvisioningStrategy(ABC):
+    """Per-engine provisioning hooks used by public services.
+
+    Concrete engines subclass this ABC instead of an ad-hoc Protocol so missing
+    hooks are caught at import time and the contract is explicit (no duck-typing
+    benefit here since we always own the implementations).
+    """
 
     @property
-    def engine_type(self) -> str: ...
+    @abstractmethod
+    def engine_type(self) -> str:
+        """Stable identifier this strategy is registered under."""
 
+    @abstractmethod
     def build_extra_envs(self, ctx: BotProvisioningContext) -> Dict[str, str] | None:
         """Return extra env vars to inject into the runtime container."""
-        ...
 
+    @abstractmethod
     def should_encrypt_template_token(self, ctx: BotProvisioningContext) -> bool:
         """Whether ``template_config['token']`` should be encrypted before persist."""
-        ...
 
+    @abstractmethod
     def extract_runtime_token(self, ctx: BotProvisioningContext) -> str | None:
         """Return the token value that should be forwarded to container init."""
-        ...
 
+    @abstractmethod
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
         """Post-create hook. Default strategies should no-op."""
-        ...
 
+    @abstractmethod
     def on_template_updated(
         self, ctx: BotProvisioningContext, *, token_changed: bool
     ) -> None:
         """Post-template-update hook. Default strategies should no-op."""
-        ...

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Dict
 
-from ..provisioning import BotProvisioningContext
+from ..provisioning import BotProvisioningContext, EngineProvisioningStrategy
 
 
 CODING_TEMPLATE_TYPES = frozenset({"applicationCoding", "personalCoding"})
@@ -19,7 +19,7 @@ BOT_TYPE_ENV_MAP = {
 }
 
 
-class AicodingProvisioningStrategy:
+class AicodingProvisioningStrategy(EngineProvisioningStrategy):
     """Provisioning strategy shared by ``aicoding`` and ``claude_code`` engines."""
 
     def __init__(self, engine_type: str) -> None:
