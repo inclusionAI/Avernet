@@ -15,6 +15,9 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
+    to_baas_request_id,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     enqueue_progress_poll,
 )
@@ -217,8 +220,11 @@ class RollbackOpsMixin:
             return {"success": True, "message": f"Already released: binding_id={binding_id}"}
 
         bot_uuid = binding.device_id
-        # Deterministic, correlation-only request id (stable across retries).
-        request_id = f"offline_destroy.pub_{publish_id}.{stage_enum.value}"
+        # Deterministic, correlation-only request id (stable across retries),
+        # folded into BaaS's request_id contract (^[A-Za-z0-9_-]{32,64}$).
+        request_id = to_baas_request_id(
+            f"offline_destroy_pub_{publish_id}_{stage_enum.value}"
+        )
 
         # stop_bot raises BaasServiceError on a real failure → propagates out of the
         # handler's asyncio.run → the queue retries (no longer masked as done).

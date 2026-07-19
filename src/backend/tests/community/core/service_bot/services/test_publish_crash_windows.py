@@ -32,6 +32,10 @@ from agentclaw.community.plugins.publish_operation_repository import (
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowService,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
+    operation_request_id,
+    to_baas_request_id,
+)
 from agentclaw.community.core.service_bot.types import PublishStage
 
 
@@ -515,7 +519,7 @@ async def test_scale_crash_after_call_resume_adopts_not_rescales():
     assert op.state == PublishOperationState.COMPLETED.value
     assert op.baas_publish_id == 901
     # The BaaS call carried the runner's deterministic request id, not a wall clock.
-    assert baas.scale_bot.call_args.kwargs["request_id"] == "pub_1.scale.online.a1"
+    assert baas.scale_bot.call_args.kwargs["request_id"] == operation_request_id(1, "scale", "online", 1)
 
 
 # ── eval publish/teardown: crash windows ──────────────────────────────────────
@@ -589,7 +593,7 @@ async def test_eval_teardown_crash_after_issue_resume_adopts():
     op = ledger.get_latest_by_kind(7, "eval_teardown", "eval")
     assert op.state == PublishOperationState.COMPLETED.value
     assert op.baas_publish_id == 901
-    assert baas.destroy_bot.call_args.kwargs["request_id"] == "pub_7.eval_teardown.eval.a1"
+    assert baas.destroy_bot.call_args.kwargs["request_id"] == operation_request_id(7, "eval_teardown", "eval", 1)
 
 
 # ── rollback deploy: crash windows (existing-bot adopt) ───────────────────────
@@ -662,7 +666,7 @@ async def test_offline_destroy_stop_then_releases_binding():
     assert result["success"] is True
     assert baas.stop_bot.call_count == 1
     # Deterministic, correlation-only request id (stable across retries).
-    assert baas.stop_bot.call_args.kwargs["request_id"] == "offline_destroy.pub_5.online"
+    assert baas.stop_bot.call_args.kwargs["request_id"] == to_baas_request_id("offline_destroy_pub_5_online")
     svc._release_binding.assert_called_once()
 
 
