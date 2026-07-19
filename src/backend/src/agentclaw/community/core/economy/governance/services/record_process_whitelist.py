@@ -71,17 +71,19 @@ class WhitelistObservationMixin:
 
         # 路 1:有活跃单 → scan 兜底转 OBSERVED(原逻辑,行为不变只是目标改 OBSERVED)
         if active_ticket is not None:
+            # 状态机推进(observe_for_whitelist)仅非 dry_run 才执行;
+            # 但审计留痕对齐路 2/3:dry_run 也记 dry_run=1 预览审计。
             if not dry_run:
                 self._lifecycle_svc.observe_for_whitelist(
                     active_ticket.ticket_id,
                     close_reason=CloseReason.SCAN_WHITELISTED,
                     now=now,
                 )
-                self._audit_repo.add_audit(
-                    run_id, bot_id, owner_id,
-                    action_taken=AuditAction.SCAN_WHITELISTED,
-                    dry_run=0,
-                )
+            self._audit_repo.add_audit(
+                run_id, bot_id, owner_id,
+                action_taken=AuditAction.SCAN_WHITELISTED,
+                dry_run=0 if not dry_run else 1,
+            )
             return RecordProcessResult(
                 worker_key=worker_key,
                 entered_governance_scope=False,
@@ -160,33 +162,21 @@ class WhitelistObservationMixin:
                 last_decision_dt_version=dt_version,
             )
 
+        # 留痕:无论 dry_run 或实际刷新都记一条 WHITELIST_OBSERVED 审计
+        # (dry_run 预览也留痕,对齐路 3 _create_observed_ticket 与既有 Step4
+        # stale-skip 分支的 dry_run 审计口径)。两分支参数一致,合并单次调用。
         audit_dry_run = 0 if not dry_run else 1
-        if not dry_run:
-            self._audit_repo.add_audit(
-                run_id, bot_id, owner_id,
-                check_result="actionable",
-                governance_decision=record.governance_decision,
-                hit_dimensions=record.hit_dimensions,
-                action_taken=AuditAction.WHITELIST_OBSERVED,
-                error_msg=(
-                    "stale_dt_version_skipped" if is_stale else None
-                ),
-                dry_run=audit_dry_run,
-            )
-        else:
-            # dry_run 预览也留痕(对齐路 3 _create_observed_ticket 与既有
-            # Step4 stale-skip 分支的 dry_run 审计口径)
-            self._audit_repo.add_audit(
-                run_id, bot_id, owner_id,
-                check_result="actionable",
-                governance_decision=record.governance_decision,
-                hit_dimensions=record.hit_dimensions,
-                action_taken=AuditAction.WHITELIST_OBSERVED,
-                error_msg=(
-                    "stale_dt_version_skipped" if is_stale else None
-                ),
-                dry_run=audit_dry_run,
-            )
+        self._audit_repo.add_audit(
+            run_id, bot_id, owner_id,
+            check_result="actionable",
+            governance_decision=record.governance_decision,
+            hit_dimensions=record.hit_dimensions,
+            action_taken=AuditAction.WHITELIST_OBSERVED,
+            error_msg=(
+                "stale_dt_version_skipped" if is_stale else None
+            ),
+            dry_run=audit_dry_run,
+        )
 
         return RecordProcessResult(
             worker_key=worker_key,

@@ -11,11 +11,13 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
-from agentclaw.community.core.economy.governance.domain.base import _iso
+from agentclaw.community.core.economy.governance.domain.base import (
+    _iso,
+    _normalize_delivery_status,
+)
 from agentclaw.community.core.economy.governance.domain.enums import (
     CloseReason,
     GovernanceStatus,
-    Response,
     TicketAction,
 )
 
@@ -633,6 +635,21 @@ class GovernanceTicket:
         """
         self._snapshot = replace(self._snapshot, **fields)
 
+    def update_token_baseline(self, value: int | None) -> None:
+        """覆盖 guard 更新 token_baseline — 仅当传入非 None 时刷新。
+
+        与 :meth:`refresh_snapshot` 的差异:refresh_snapshot 走 ``replace`` 会把
+        ``token_baseline=None`` 无条件 erase 既有值;该方法 guard 非 None 才更新,
+        保留既单(供 offline-batch 只在 有新基线数据 时覆盖,无则不动)。
+        服务层应调本方法而非直戳 ``_snapshot``(DDD 封装)。
+
+        Args:
+            value: 新 token_baseline;None 时 no-op(保持既有)。
+        """
+        if value is None:
+            return
+        self._snapshot = replace(self._snapshot, token_baseline=value)
+
     # ── 工厂 ─────────────────────────────────────────────
 
     @classmethod
@@ -737,7 +754,7 @@ class GovernanceTicket:
                 last_decision_dt_version=obj.last_decision_dt_version,
                 last_seen_at=obj.last_seen_at,
                 last_sync_at=obj.last_sync_at,
-                delivery_status=getattr(obj, "delivery_status", None) or "pending",
+                delivery_status=_normalize_delivery_status(getattr(obj, "delivery_status", None)),
                 last_notified_at=getattr(obj, "last_notified_at", None),
             ),
             # 生命周期态

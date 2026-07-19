@@ -41,7 +41,6 @@ suite + grep guard, not ``test_protocol_contracts.py``.
 """
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import datetime
 
 from agentclaw.community.core.economy.governance.domain.enums import (
@@ -261,7 +260,7 @@ class GovernanceLifecycleService:
         if owner_name is not None:
             ticket.owner_name = owner_name
         if token_baseline is not None:
-            ticket._snapshot = replace(ticket._snapshot, token_baseline=token_baseline)
+            ticket.update_token_baseline(token_baseline)
         if remind_at != "":  # type: ignore[comparison-overlap]
             ticket.remind_at = remind_at  # type: ignore[assignment]
         return self._task_repo._save_ticket_with_snapshot(ticket)  # noqa: SLF001 — primitive

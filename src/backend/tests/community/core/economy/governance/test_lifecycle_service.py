@@ -222,15 +222,24 @@ class TestOpenObservedTicket:
         assert count == 0  # 零 notify — 白名单不发通知
 
     def test_delivery_status_not_written(self) -> None:
-        """观察单不调 update_delivery_status:delivery_status 保持列默认 'none'
-        (不被 first_send 写成 pending)。"""
-        svc, db, _, = _build_svc()
+        """观察单不调 update_delivery_status:delivery_status 列保持默认 'none'
+        (未被 first_send 写成 pending)。领域模型读时归一 none→pending(读侧),但
+        列本身没被写 — 用 ORM 直查列值验证。"""
+        svc, db, engine = _build_svc()
         ticket = _make_ticket_model(ticket_id="T-obs-nodelivery")
         svc.open_observed_ticket(ticket=ticket)
 
+        # ORM 直查列 raw 值(未经 from_orm 归一化):列默认 'none',没被写
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            row = s.query(GovernanceTicketOrm).filter_by(
+                ticket_id="T-obs-nodelivery",
+            ).one()
+            assert row.delivery_status == "none"  # 列默认,未被 first_send 写成 pending
+        # 领域模型读时把 none 归一为 pending(读侧归一,非写入)
         persisted = svc._task_repo.find_by_ticket_id("T-obs-nodelivery")  # noqa: SLF001
         assert persisted is not None
-        assert persisted.delivery_status == "none"  # 列默认,未被 first_send 写成 pending
+        assert persisted.delivery_status == "pending"
 
     def test_open_observed_ticket_uses_enter_observed(self) -> None:
         """open_observed_ticket 复用 enter_observed(单一入口):建单后字段与
