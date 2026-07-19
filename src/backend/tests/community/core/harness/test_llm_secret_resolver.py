@@ -1,11 +1,11 @@
-"""Coverage for the harness-LLM secret-resolver seam and self-healing token.
+"""Coverage for the harness-LLM secret-resolver seam.
 
 The harness ``LLM`` reads its API token through an injected ``SecretResolver``
 (corp=mist, community=env seam) keyed by ``secret_name``, and issues HTTP through
-an injected ``HttpClient`` (the shared ``general`` sync client) — it reads no
-process environment. These tests exercise the resolved-secret path, the absent
-fallback, and — for #201 — the lazy resolution that keeps a transient
-secret-backend failure from latching the LLM off for the worker's lifetime.
+an injected ``HttpClient`` (the shared ``general`` sync client). It reads no
+process environment and bakes in no fallback credential: the token is resolved
+once, at construction. When it does not resolve (``None``), ``chat()`` returns
+``[llm disabled]`` and never re-resolves.
 """
 from __future__ import annotations
 
@@ -34,33 +34,15 @@ class _StubResolver:
         return self._secret
 
 
-class _FlakyResolver:
-    """Raises on the first ``get_secret`` (backend not ready), then succeeds —
-    the prod SpawnProcess symptom in #201."""
+class _RaisingResolver:
+    """``get_secret`` always raises — the secret backend is unreachable."""
 
-    def __init__(self, secret):
-        self._secret = secret
+    def __init__(self):
         self.calls = 0
 
     def get_secret(self, name):
         self.calls += 1
-        if self.calls == 1:
-            raise RuntimeError("mist parse error")
-        return self._secret
-
-
-class _TogglingResolver:
-    """Returns ``None`` (secret absent) until ``available`` is flipped on — the
-    backend comes up after boot."""
-
-    def __init__(self, secret):
-        self._secret = secret
-        self.available = False
-        self.calls = 0
-
-    def get_secret(self, name):
-        self.calls += 1
-        return self._secret if self.available else None
+        raise RuntimeError("mist parse error")
 
 
 class _FakeResponse:
@@ -114,64 +96,45 @@ def test_llm_loads_token_from_secret_resolver():
     assert llm._token == "tok-xyz"
 
 
-def test_llm_token_empty_when_resolver_absent_no_baked_fallback():
-    """Resolver reports the secret absent and shipped source bakes no fallback →
-    empty token, sourced solely from the resolver (no env read)."""
+def test_llm_token_none_when_resolver_absent_no_baked_fallback():
+    """Secret absent and shipped source bakes no fallback → ``None`` token,
+    sourced solely from the resolver (one lookup, no env read)."""
     resolver = _StubResolver(None)
     llm = _make_llm(resolver)
-    assert llm._token == ""
-    assert resolver.calls == 1  # consulted the resolver, nothing else
+    assert llm._token is None
+    assert resolver.calls == 1
+
+
+def test_llm_token_none_when_resolver_raises():
+    """A resolver failure at construction disables the LLM without crashing and
+    without any baked fallback."""
+    resolver = _RaisingResolver()
+    llm = _make_llm(resolver)
+    assert llm._token is None
+    assert resolver.calls == 1
 
 
 @pytest.mark.asyncio
-async def test_llm_recovers_when_resolver_becomes_available():
-    """A transient resolver failure at init must not latch the LLM off: the next
-    chat() re-resolves and the request carries the real token (#201)."""
-    resolver = _FlakyResolver(_Secret(secret_user="u", secret_value="real-tok"))
+async def test_llm_disabled_returns_sentinel_and_never_re_resolves():
+    """No token → chat() returns the sentinel, makes no HTTP call, and does NOT
+    consult the resolver again (resolution happens once, at construction)."""
+    resolver = _StubResolver(None)
     http = _RecordingHttpClient()
     llm = _make_llm(resolver, http)
-
-    # Eager resolve raised → no token yet, but this is recoverable, not latched.
-    assert llm._token == ""
+    assert resolver.calls == 1
 
     out = await llm.chat(system=None, user="hi")
 
-    assert out == "ok-response"
-    assert llm._token == "real-tok"
-    assert resolver.calls == 2  # once eager (raised), once on chat()
-    assert len(http.calls) == 1
-    call = http.calls[0]
-    assert call["url"] == "http://llm.local/v1/chat/completions"
-    assert call["headers"]["Authorization"] == "Bearer real-tok"
-
-
-@pytest.mark.asyncio
-async def test_llm_missing_token_retries_not_latched():
-    """Secret absent at boot → [llm disabled] with no HTTP, but NOT latched: once
-    the backend serves the secret the next chat() resolves it and sends."""
-    resolver = _TogglingResolver(_Secret(secret_user="u", secret_value="late-tok"))
-    http = _RecordingHttpClient()
-    llm = _make_llm(resolver, http)
-    assert llm._token == ""
-
-    first = await llm.chat(system=None, user="hi")
-    assert first == "[llm disabled]"
-    assert http.calls == []  # no token → no HTTP
-
-    # Backend becomes reachable after boot.
-    resolver.available = True
-    second = await llm.chat(system=None, user="hi")
-
-    assert second == "ok-response"
-    assert llm._token == "late-tok"
-    assert len(http.calls) == 1
-    assert http.calls[0]["headers"]["Authorization"] == "Bearer late-tok"
+    assert out == "[llm disabled]"
+    assert http.calls == []          # no HTTP attempted
+    assert resolver.calls == 1       # no re-resolution
 
 
 @pytest.mark.asyncio
 async def test_llm_sends_request_body_and_timeout():
-    """Happy path: token resolved at init → chat() posts the OpenAI-shaped body
-    with the configured model and timeout, through the injected HttpClient."""
+    """Happy path: token resolved at construction → chat() posts the
+    OpenAI-shaped body with the configured model and timeout, through the injected
+    HttpClient, to the absolute URL."""
     resolver = _StubResolver(_Secret(secret_user="u", secret_value="tok"))
     http = _RecordingHttpClient(content="hello")
     llm = LLM(
@@ -189,6 +152,7 @@ async def test_llm_sends_request_body_and_timeout():
     call = http.calls[0]
     assert call["url"] == "http://llm.local/v1/chat/completions"
     assert call["timeout"] == 5.0
+    assert call["headers"]["Authorization"] == "Bearer tok"
     assert call["json"]["model"] == "GLM-5.1"
     assert call["json"]["messages"] == [
         {"role": "system", "content": "sys"},
