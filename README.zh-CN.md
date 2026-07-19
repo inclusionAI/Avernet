@@ -10,7 +10,7 @@
 
 ## 最新动态
 
-**最新版本：** Avernet 的首个开源发行版 [Avernet v2026.07.15](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.15) 现已发布。后续版本采用 `vYYYY.MM.DD` 的 CalVer 格式。
+**最新版本：** Avernet 的首个开源发行版 [Avernet v2026.07.15](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.15) 现已发布。后续版本采用 `vYYYY.MM.DD` 的 CalVer 格式。本 README 将随公开能力的演进持续更新。
 
 ## Avernet 是什么
 

@@ -10,7 +10,7 @@
 
 ## News
 
-**Latest release:** [Avernet v2026.07.15](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.15) is now available as Avernet’s first open-source release. Future releases follow the `vYYYY.MM.DD` CalVer format.
+**Latest release:** [Avernet v2026.07.15](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.15) is now available as Avernet’s first open-source release. Future releases follow the `vYYYY.MM.DD` CalVer format. This README will be updated as public capabilities evolve.
 
 ## What is Avernet?
 
