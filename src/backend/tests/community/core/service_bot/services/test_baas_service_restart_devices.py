@@ -57,7 +57,7 @@ class TestBaasServiceRestartDevices:
         http.set_response("post", _resp({"publish_id": 42}))
 
         result = service.restart_devices(
-            "BOT-1", ["DEVICE-001"], operator="staff-1", request_id="restart_dev.b1.DEVICE-001"
+            "BOT-1", ["DEVICE-001"], operator="staff-1", request_id="restart_dev_b1_DEVICE-001"
         )
 
         assert result["publish_id"] == 42
@@ -70,7 +70,7 @@ class TestBaasServiceRestartDevices:
             "BOT-1",
             ["DEVICE-001", "DEVICE-002"],
             operator="staff-1",
-            request_id="restart_dev.b9.DEVICE-001",
+            request_id="restart_dev_b9_DEVICE-001",
         )
 
         call = http.calls_to("post")[0]
@@ -80,7 +80,7 @@ class TestBaasServiceRestartDevices:
         assert body["operator"] == "staff-1"
         assert body["auto_approve_publish"] is True
         # (#197) request_id is the caller-supplied deterministic id, passed through verbatim.
-        assert body["request_id"] == "restart_dev.b9.DEVICE-001"
+        assert body["request_id"] == "restart_dev_b9_DEVICE-001"
         assert call.kwargs["params"] == {"tenant": "tnt"}
 
     def test_baas_business_error_code_raises(self):

@@ -1,8 +1,9 @@
 """Crash-window tests for the publish operation pipeline (#197).
 
 Each test drives an operation against a REAL operation-ledger repository (SQLite)
-plus a scripted fake BaaS, simulates a crash between two steps (via the runner's
-checkpoint hook or a one-shot side effect), re-runs, and asserts convergence: the
+plus a scripted fake BaaS, simulates a crash between two steps (by interrupting a
+real seam — the ``issue`` callable or ``record_workflow`` — via ``_crash_before_record``
+or a one-shot side effect), re-runs, and asserts convergence: the
 BaaS mutation is issued the expected number of times, the workflow id lands in the
 ledger, and follow-up steps (binding) are not duplicated.
 
@@ -60,6 +61,27 @@ def _ledger():
     )
     Base.metadata.create_all(engine)
     return PublishOperationRepository(_DB(engine))
+
+
+def _crash_before_record(ledger):
+    """Simulate a crash in the window AFTER the BaaS workflow is issued but BEFORE
+    its id is recorded in the ledger.
+
+    Interrupts the real seam — the ledger's ``record_workflow`` raises on its first
+    call, then behaves normally on resume — instead of a production hook: ``issue``
+    has already created the BaaS workflow (an in-doubt orphan), and the process
+    dies before the ledger write. On resume the op is still PENDING, so an existing
+    bot adopts the in-doubt workflow and a creation re-issues (accepted orphan)."""
+    real = ledger.record_workflow
+    state = {"crashed": False}
+
+    def wrapper(*args, **kwargs):
+        if not state["crashed"]:
+            state["crashed"] = True
+            raise RuntimeError("pod died after issue, before record")
+        return real(*args, **kwargs)
+
+    ledger.record_workflow = wrapper
 
 
 class FakeBaas:
@@ -134,7 +156,14 @@ async def test_first_release_crash_before_issue_issues_once_on_resume():
     baas = FakeBaas()
     build_service = Mock()
 
+    crashed = []
+
     async def release_async(**kw):
+        # Crash in the pre-record window: the first attempt dies before the BaaS
+        # create lands (no workflow created), so a resume must issue exactly once.
+        if not crashed:
+            crashed.append(1)
+            raise RuntimeError("pod died before issue")
         wid = baas.issue("BOT-new", "CREATE")
         return {"bot_uuid": "BOT-new", "publish_id": wid}
 
@@ -143,30 +172,21 @@ async def test_first_release_crash_before_issue_issues_once_on_resume():
     svc.create_release_binding = Mock(return_value=55)
     svc.record_release_ext = Mock()
 
-    crashed = []
-
-    def checkpoint(name):
-        if name == "before_issue" and not crashed:
-            crashed.append(1)
-            raise RuntimeError("pod died before issue")
-
-    svc._operation_runner._checkpoint = checkpoint
-
     record = _record(PublishStatus.BUILT.value)
     with pytest.raises(RuntimeError):
         await svc._execute_verify_first_release(
             publish_record=record, operator="op", migration_path="/m",
             bot={"bot_id": "b2", "owner_id": "u1"},
         )
-    # nothing issued yet
-    assert build_service.release_async.await_count == 0
+    # The create never landed → no BaaS workflow exists for the new bot.
+    assert baas.list_bot_publishes("BOT-new") == []
 
-    svc._operation_runner._checkpoint = lambda _n: None
     await svc._execute_verify_first_release(
         publish_record=record, operator="op", migration_path="/m",
         bot={"bot_id": "b2", "owner_id": "u1"},
     )
-    assert build_service.release_async.await_count == 1  # issued exactly once
+    # Resume issued exactly one durable workflow (no duplicate); binding created once.
+    assert len(baas.list_bot_publishes("BOT-new")) == 1
     svc.create_release_binding.assert_called_once()
 
 
@@ -237,14 +257,7 @@ async def test_first_release_creation_orphan_window_reissues_and_is_visible():
     svc.create_release_binding = Mock(return_value=55)
     svc.record_release_ext = Mock()
 
-    crashed = []
-
-    def checkpoint(name):
-        if name == "after_issue" and not crashed:
-            crashed.append(1)
-            raise RuntimeError("pod died after create, before record")
-
-    svc._operation_runner._checkpoint = checkpoint
+    _crash_before_record(ledger)
 
     record = _record(PublishStatus.BUILT.value)
     with pytest.raises(RuntimeError):
@@ -257,7 +270,6 @@ async def test_first_release_creation_orphan_window_reissues_and_is_visible():
     op = ledger.get_latest_by_kind(1, "first_release", "verify")
     assert op.state == PublishOperationState.PENDING.value  # in-flight → observable
 
-    svc._operation_runner._checkpoint = lambda _n: None
     await svc._execute_verify_first_release(
         publish_record=record, operator="op", migration_path="/m",
         bot={"bot_id": "b2", "owner_id": "u1"},
@@ -307,14 +319,7 @@ async def test_upgrade_crash_after_issue_resume_adopts_not_reissues():
     build_service.upgrade_async = AsyncMock(side_effect=upgrade_async)
     svc = _upgrade_flow(ledger, baas, build_service)
 
-    crashed = []
-
-    def checkpoint(name):
-        if name == "after_issue" and not crashed:
-            crashed.append(1)
-            raise RuntimeError("crash after upgrade issued, before record")
-
-    svc._operation_runner._checkpoint = checkpoint
+    _crash_before_record(ledger)
 
     record = _record(PublishStatus.VALIDATING.value)
     record.last_pub_id = 10
@@ -322,7 +327,6 @@ async def test_upgrade_crash_after_issue_resume_adopts_not_reissues():
         await _run_online_upgrade(svc, record)
     assert build_service.upgrade_async.await_count == 1  # issued once, unrecorded
 
-    svc._operation_runner._checkpoint = lambda _n: None
     await _run_online_upgrade(svc, record)
     # Existing-bot → adopt the in-doubt workflow; NO second upgrade.
     assert build_service.upgrade_async.await_count == 1
@@ -453,20 +457,12 @@ async def test_restart_crash_after_issue_resume_adopts():
     record.ext = {"binding": {"online": 42}, "migration_path": "/m"}
     svc = _restart_flow(ledger, baas, build_service, record)
 
-    crashed = []
-
-    def checkpoint(name):
-        if name == "after_issue" and not crashed:
-            crashed.append(1)
-            raise RuntimeError("crash after restart issued, before record")
-
-    svc._operation_runner._checkpoint = checkpoint
+    _crash_before_record(ledger)
 
     with pytest.raises(RuntimeError):
         await svc.execute_restart(publish_id=1, stage="online", operator="op")
     assert build_service.upgrade_async.await_count == 1
 
-    svc._operation_runner._checkpoint = lambda _n: None
     result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
     # Existing bot → adopt the in-doubt workflow; no second restart issued.
     assert build_service.upgrade_async.await_count == 1
@@ -504,20 +500,12 @@ async def test_scale_crash_after_call_resume_adopts_not_rescales():
     record = _record(PublishStatus.SUCCESS.value)
     svc = _scale_flow(ledger, baas, record)
 
-    crashed = []
-
-    def checkpoint(name):
-        if name == "after_issue" and not crashed:
-            crashed.append(1)
-            raise RuntimeError("crash after scale call, before record")
-
-    svc._operation_runner._checkpoint = checkpoint
+    _crash_before_record(ledger)
 
     with pytest.raises(RuntimeError):
         await svc.scale_bot(publish_id=1, operator="op")
     assert baas.scale_bot.call_count == 1  # scaled once, unrecorded
 
-    svc._operation_runner._checkpoint = lambda _n: None
     result = await svc.scale_bot(publish_id=1, operator="op")
     # Existing bot → adopt the in-doubt SCALE workflow; NO second scale call.
     assert baas.scale_bot.call_count == 1
@@ -557,14 +545,7 @@ async def test_eval_publish_creation_orphan_visible_as_pending_op():
     record = _record(PublishStatus.SUCCESS.value)
     svc = _eval_flow(ledger, baas, build_service, record)
 
-    crashed = []
-
-    def checkpoint(name):
-        if name == "after_issue" and not crashed:
-            crashed.append(1)
-            raise RuntimeError("crash after eval create, before record")
-
-    svc._operation_runner._checkpoint = checkpoint
+    _crash_before_record(ledger)
 
     with pytest.raises(RuntimeError):
         await svc.eval_publish(1, "op", biz_id="biz-1")
@@ -572,7 +553,6 @@ async def test_eval_publish_creation_orphan_visible_as_pending_op():
     op = ledger.get_latest_by_kind(1, "eval_publish", "eval")
     assert op.state == PublishOperationState.PENDING.value  # in-flight → observable
 
-    svc._operation_runner._checkpoint = lambda _n: None
     result = await svc.eval_publish(1, "op", biz_id="biz-1")
     assert build_service.release_async.await_count == 2  # re-issued (creation orphan)
     assert result["success"] is True
@@ -595,20 +575,12 @@ async def test_eval_teardown_crash_after_issue_resume_adopts():
 
     baas.destroy_bot = Mock(side_effect=destroy_bot)
 
-    crashed = []
-
-    def checkpoint(name):
-        if name == "after_issue" and not crashed:
-            crashed.append(1)
-            raise RuntimeError("crash after eval destroy, before record")
-
-    svc._operation_runner._checkpoint = checkpoint
+    _crash_before_record(ledger)
 
     with pytest.raises(RuntimeError):
         await svc.execute_eval_teardown(publish_id=7, bot_uuid="BOT-eval", operator="op")
     assert baas.destroy_bot.call_count == 1  # destroyed once, unrecorded
 
-    svc._operation_runner._checkpoint = lambda _n: None
     result = await svc.execute_eval_teardown(publish_id=7, bot_uuid="BOT-eval", operator="op")
     # Existing bot → adopt the in-doubt DESTROY workflow; NO second destroy.
     assert baas.destroy_bot.call_count == 1
@@ -650,20 +622,12 @@ async def test_rollback_deploy_crash_after_issue_resume_adopts():
     svc._bot_service.get_bot = Mock(return_value={"bot_id": "b", "entity_id": "u"})
     svc._update_publish_status = Mock()
 
-    crashed = []
-
-    def checkpoint(name):
-        if name == "after_issue" and not crashed:
-            crashed.append(1)
-            raise RuntimeError("crash after rollback deploy issued, before record")
-
-    svc._operation_runner._checkpoint = checkpoint
+    _crash_before_record(ledger)
 
     with pytest.raises(RuntimeError):
         await svc.execute_rollback(current_publish_id=1, target_publish_id=2, operator="op")
     assert build_service.upgrade_async.await_count == 1  # issued once, unrecorded
 
-    svc._operation_runner._checkpoint = lambda _n: None
     result = await svc.execute_rollback(current_publish_id=1, target_publish_id=2, operator="op")
     # Existing bot → adopt the in-doubt rollback workflow; NO second deploy.
     assert build_service.upgrade_async.await_count == 1

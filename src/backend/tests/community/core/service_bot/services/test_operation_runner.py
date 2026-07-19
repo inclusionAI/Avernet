@@ -2,7 +2,7 @@
 
 Covers open/resume, adopt-by-query (landed / already-terminal / no-match /
 pre-ledger fence / type fence / ambiguous), the creation path, and crash-resume
-via the checkpoint hook.
+(by interrupting the real ``record_workflow`` seam).
 """
 import asyncio
 from contextlib import contextmanager
@@ -86,14 +86,11 @@ def baas():
     return FakeBaas()
 
 
-def _runner(ledger, baas, checkpoint=None):
-    r = PublishOperationRunner(
+def _runner(ledger, baas):
+    return PublishOperationRunner(
         ledger=ledger,
         baas_service=baas,
     )
-    if checkpoint is not None:
-        r._checkpoint = checkpoint
-    return r
 
 
 UPGRADE = PublishOperationKind.UPGRADE.value
@@ -174,15 +171,7 @@ def test_acquire_existing_bot_first_issue(ledger, baas):
 
 # ── crash after issue, before record → resume adopts (not re-issue) ─────────
 def test_crash_after_issue_resume_adopts(ledger, baas):
-    calls = []
-
-    def checkpoint(name):
-        # First attempt: crash right after the BaaS call landed.
-        if name == "after_issue" and not calls:
-            calls.append("crashed")
-            raise RuntimeError("pod died after issue")
-
-    r = _runner(ledger, baas, checkpoint=checkpoint)
+    r = _runner(ledger, baas)
     op = r.open_operation(publish_id=1, kind=UPGRADE, stage=PublishStage.ONLINE, bot_uuid="b")
 
     issue_count = []
@@ -191,6 +180,19 @@ def test_crash_after_issue_resume_adopts(ledger, baas):
         wid = baas.issue("b", publish_type="UPDATE")
         issue_count.append(wid)
         return {"publish_id": wid}
+
+    # Crash right after the BaaS call landed but before the ledger records the id:
+    # record_workflow raises on its first call, then behaves normally on resume.
+    real_record = ledger.record_workflow
+    crashed = []
+
+    def record_once_then_crash(*a, **k):
+        if not crashed:
+            crashed.append(1)
+            raise RuntimeError("pod died after issue")
+        return real_record(*a, **k)
+
+    ledger.record_workflow = record_once_then_crash
 
     with pytest.raises(RuntimeError):
         run(r.acquire_workflow(op, issue))

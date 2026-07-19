@@ -422,7 +422,7 @@ def test_restart_device_success_returns_publish_id():
         "bot-uuid-abc",
         device_uuids=["DEVICE-001"],
         operator="owner-001",
-        request_id="restart_dev.b1001.DEVICE-001",
+        request_id="restart_dev_b1001_DEVICE-001",
     )
 
 

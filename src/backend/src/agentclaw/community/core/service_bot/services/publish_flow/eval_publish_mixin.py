@@ -147,7 +147,6 @@ class EvalPublishMixin:
         *,
         operator: str = "system",
         publish_id: int = 0,
-        request_bot: dict | None = None,
     ) -> dict:
         """Tear down the eval environment (#197: enqueue the durable teardown).
 

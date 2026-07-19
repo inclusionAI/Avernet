@@ -384,7 +384,9 @@ class DeviceInstanceService:
         # (#197) Deterministic, correlation-only request id (was uuid4): stable
         # across retries of the same logical restart so a BaaS log line traces
         # back to the exact binding + device. request_id is not a BaaS dedup key.
-        request_id = f"restart_dev.b{binding_id}.{device_uuid}"
+        # Must satisfy BaaS's request_id contract (32-64 chars, ^[A-Za-z0-9_-]$):
+        # underscores, not dots — device_uuid ("BOT-"+32 hex) keeps it in range.
+        request_id = f"restart_dev_b{binding_id}_{device_uuid}"
         data = baas_service.restart_devices(
             bot_uuid,
             device_uuids=[device_uuid],

@@ -70,9 +70,9 @@ class PublishOperationError(Exception):
 class PublishOperationRunner:
     """Runs a BaaS mutation as resumable ledger steps.
 
-    ``_checkpoint`` is a no-op in production and is not a constructor parameter;
-    the crash-window test harness assigns it after construction to inject a hook
-    that raises at a named step, simulating a mid-operation crash.
+    Crash-safety is exercised by the crash-window tests, which interrupt the real
+    seams (the ``issue`` callable, ``record_workflow``, follow-up steps) rather
+    than any production hook.
     """
 
     def __init__(
@@ -83,7 +83,6 @@ class PublishOperationRunner:
     ) -> None:
         self._ledger = ledger
         self._baas = baas_service
-        self._checkpoint: Callable[[str], None] = lambda _name: None
 
     # ── open (find-or-create the intent) ─────────────────────────────────
     def open_operation(
@@ -155,7 +154,6 @@ class PublishOperationRunner:
         called at most once per real issuance — never when the id is already
         recorded or successfully adopted.
         """
-        self._checkpoint("before_acquire")
         if op.baas_publish_id is not None:
             return op
 
@@ -164,9 +162,7 @@ class PublishOperationRunner:
             if adopted is not None:
                 return adopted
 
-        self._checkpoint("before_issue")
         result = await issue()
-        self._checkpoint("after_issue")
 
         baas_publish_id = result.get("publish_id")
         new_bot_uuid = result.get("bot_uuid")
