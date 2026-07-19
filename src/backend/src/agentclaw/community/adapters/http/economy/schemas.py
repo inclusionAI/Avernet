@@ -177,6 +177,7 @@ class ReviewTicketItem(BaseModel):
 
     ticket_id: str | None = None
     id: int | None = None
+    worker_id: str | None = None
     bot_id: str | None = None
     bot_name: str | None = None
     owner_id: str | None = None
@@ -203,6 +204,7 @@ class ReviewTicketItem(BaseModel):
         return cls(
             ticket_id=ticket.ticket_id,
             id=ticket.id,
+            worker_id=ticket.worker_id,
             bot_id=ticket.bot_id,
             bot_name=ticket.bot_name,
             owner_id=ticket.owner_id,
