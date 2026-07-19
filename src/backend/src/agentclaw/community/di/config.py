@@ -106,9 +106,9 @@ class LLMHarnessConfig:
 
     Neutral defaults empty — the neutral shipped code embeds no LLM endpoint,
     secret name, or token. Each corp env overlay sets its own ``base_url`` /
-    ``secret_name``; a community deployment sets its own (or uses the
-    ``LLM_BASE_URL`` / ``LLM_SECRET_NAME`` / ``LLM_AUTH_TOKEN`` env vars). Empty
-    base_url = the harness LLM is disabled (feature-off).
+    ``secret_name`` via the ``llm`` yaml block; a community deployment sets its
+    own. The token is resolved from ``secret_name`` through the injected
+    ``SecretResolver``. Empty base_url = the harness LLM is disabled (feature-off).
     """
 
     base_url: str = ""
