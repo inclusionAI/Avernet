@@ -146,11 +146,32 @@ Tests move onto a recording `HttpClient` double so `chat()` exercises the real
 `_do_request` / `to_thread` path; `test_all_bindings_resolve` still eagerly
 resolves the harness LLM in the full injector.
 
+## Review follow-up 3 — drop the fallback and the re-resolve; direct imports
+
+Final shape after review. The self-healing re-resolve is removed as unnecessary,
+and the baked fallback is deleted outright:
+
+- **No re-resolve.** The LLM `@singleton` is bound lazily and is *not* in
+  `eager_check_critical_bindings`, so it is constructed on first use — after boot,
+  when the injected `SecretResolver` is ready. The resolver therefore succeeds at
+  construction in the normal path, and since the injected resolver returns the
+  same answer on every call, re-resolving in `chat()` cannot change the outcome.
+  `chat()` now only checks the token and returns `[llm disabled]` when it is None.
+- **No fallback.** `_FALLBACK_TOKEN_B64` / `_decode_fallback` / `import base64`
+  are deleted. `_resolve_token` returns `str | None` (None = secret absent or the
+  lookup raised). A baked fallback is a committed credential by another name;
+  removing it means an unresolved secret simply disables the LLM.
+- **Direct imports.** `HttpClient` / `SecretResolver` move out of the
+  `TYPE_CHECKING` guard to real module-level imports — verified acyclic
+  (`plugin_api.{http_client,secret_resolver}` import only `plugin_api.base`).
+
 ## Risk / blast radius
 
-- Behavior change is strictly a **superset** of today's success path plus the
-  recovery path; the `[llm disabled]` sentinel is preserved.
-- The only added cost is a re-resolution attempt per `chat()` **while** the token
-  is unresolved (bounded: stops the moment resolution succeeds and caches).
-- No shipped credential; architecture guards unaffected. The harness no longer
-  reads any `LLM_*` env var, and no longer constructs `httpx` directly.
+- The `[llm disabled]` sentinel and the request path are preserved; the only
+  behavioral change vs the previous round is that a construction-time miss is no
+  longer retried on later `chat()` calls (by design — retrying the injected
+  resolver can't change its answer).
+- `_token` is `str | None`; None is an intentional "disabled" state, so the
+  optional type is contract-faithful (not a stray `T | None`).
+- No shipped credential; architecture guards unaffected. The harness reads no
+  `LLM_*` env var and constructs no `httpx` client directly.
