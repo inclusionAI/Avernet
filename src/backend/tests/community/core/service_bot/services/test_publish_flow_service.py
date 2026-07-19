@@ -2960,6 +2960,23 @@ def test_sync_restart_progress_success_dispatches_handle_success():
     svc._handle_sync_success.assert_called_once()
 
 
+def test_sync_restart_progress_reads_workflow_id_from_ledger_when_ext_missing():
+    # (#197) The operation ledger is the source of truth: even with no ext.restart
+    # marker (e.g. a failed best-effort ext write), the restart workflow id is
+    # still found via the ledger op, so restart status stays queryable.
+    record = _make_publish_record(status=PublishStatus.ONLINE_PUB.value, ext={})
+    svc, _ = _svc_with_record(record)
+    svc._publish_operation_repo.get_latest_by_kind = Mock(
+        return_value=Mock(baas_publish_id=700)
+    )
+    svc.get_baas_publish_progress = Mock(return_value={"status": "SUCCESS"})
+    sentinel = Mock()
+    svc._handle_sync_success = Mock(return_value=sentinel)
+
+    assert svc.sync_restart_progress(publish_id=1) is sentinel
+    svc.get_baas_publish_progress.assert_called_once_with(baas_publish_id=700)
+
+
 def test_sync_restart_progress_stable_status_still_fails_on_baas_failed():
     # VALIDATING is a stable state → no forward advance, but a BaaS FAILED still
     # routes to _handle_sync_failure.

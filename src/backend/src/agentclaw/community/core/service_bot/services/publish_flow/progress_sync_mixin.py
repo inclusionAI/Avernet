@@ -14,6 +14,7 @@ from typing import Dict, Literal
 
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
+    PublishOperationKind,
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
@@ -459,7 +460,7 @@ class ProgressSyncMixin:
         # fall back to the dual-written ext.scale marker for pre-ledger records.
         scale_publish_id = None
         scale_op = self._publish_operation_repo.get_latest_by_kind(
-            publish_id, "scale", PublishStage.ONLINE.value
+            publish_id, PublishOperationKind.SCALE.value, PublishStage.ONLINE.value
         )
         if scale_op is not None and scale_op.baas_publish_id is not None:
             scale_publish_id = scale_op.baas_publish_id
@@ -540,10 +541,20 @@ class ProgressSyncMixin:
                 message=f"Current status {current_status} does not support querying restart progress",
             )
 
-        # Step 3: Get the BaaS-layer restart publish record ID from ext
+        # Step 3: Get the BaaS-layer restart publish record ID.
+        # (#197) Prefer the ledger's restart op workflow id (source of truth); fall
+        # back to the dual-written ext.restart marker. execute_restart writes that
+        # marker best-effort, so a failed ext write must not leave restart status
+        # unqueryable when the ledger already holds the workflow id.
         ext = publish_record.ext or {}
-        restart_info = ext.get("restart", {})
-        restart_publish_id = restart_info.get(stage.value)
+        restart_publish_id = None
+        restart_op = self._publish_operation_repo.get_latest_by_kind(
+            publish_id, PublishOperationKind.RESTART.value, stage.value
+        )
+        if restart_op is not None and restart_op.baas_publish_id is not None:
+            restart_publish_id = restart_op.baas_publish_id
+        if not restart_publish_id:
+            restart_publish_id = (ext.get("restart", {}) or {}).get(stage.value)
 
         if not restart_publish_id:
             logger.warning(
