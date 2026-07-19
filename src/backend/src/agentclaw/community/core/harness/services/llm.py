@@ -8,21 +8,13 @@ patch — so there is no SpawnProcess ``AsyncClient.send`` hook to work around.
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from agentclaw.community.plugin_api.http_client import HttpClient
-    from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+from agentclaw.community.plugin_api.http_client import HttpClient
+from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 
 logger = logging.getLogger(__name__)
-
-# ── encoded fallback token ──────────────────────────────────
-# Empty by default — the neutral shipped code embeds no credential. A private
-# build that wants a baked-in fallback token can base64-encode one here; empty
-# string means no fallback (the token comes from the SecretResolver).
-_FALLBACK_TOKEN_B64: str = ""
 
 # ── concurrency limiter ────────────────────────────────────
 _MAX_CONCURRENT_LLM_CALLS = 5
@@ -33,32 +25,23 @@ _MAX_RETRIES = 3
 _RETRY_DELAYS = [2.0, 5.0, 10.0]  # seconds between retries
 
 
-def _decode_fallback() -> str:
-    if not _FALLBACK_TOKEN_B64:
-        return ""
-    try:
-        return base64.b64decode(_FALLBACK_TOKEN_B64).decode("utf-8")
-    except Exception:
-        return ""
-
-
 class LLM:
     """Lightweight LLM utility for harness internal use.
 
     Endpoint (``base_url``), the token's secret key (``secret_name``), the HTTP
     transport (``http_client``), and the ``SecretResolver`` are all injected by
-    the DI provider — this class reads no process environment. ``base_url`` /
-    ``secret_name`` come from ``LLMHarnessConfig`` (the ``llm`` yaml block); the
-    token is resolved through the ``SecretResolver`` by that ``secret_name``
-    (corp → Mist, community → env seam), falling back to the encoded fallback
-    (empty in shipped source).
+    the DI provider — this class reads no process environment and bakes in no
+    credential. ``base_url`` / ``secret_name`` come from ``LLMHarnessConfig`` (the
+    ``llm`` yaml block); the token is resolved once, at construction, through the
+    ``SecretResolver`` by that ``secret_name`` (corp → Mist, community → env seam).
 
-    Token resolution is lazy and self-healing: the token may not be resolvable at
-    construction time — e.g. the secret backend is not reachable yet in a
-    SpawnProcess worker — but that does NOT latch the LLM off. ``chat()``
-    re-resolves on demand, so the utility recovers once the backend becomes
-    available without a process restart; only while the token is still empty does
-    ``chat()`` short-circuit with the ``[llm disabled]`` sentinel.
+    The provider binds this as a lazy ``@singleton``, so construction happens on
+    first use — well after boot, when the ``SecretResolver`` is ready — not during
+    early startup. If the secret resolves, ``chat()`` sends; if it does not
+    (``token is None``), ``chat()`` short-circuits with the ``[llm disabled]``
+    sentinel. There is no re-resolution and no baked fallback: the injected
+    resolver behaves the same on every call, so retrying can only repeat the same
+    answer.
     """
 
     def __init__(
@@ -66,8 +49,8 @@ class LLM:
         base_url: str,
         secret_name: str,
         *,
-        secret_resolver: "SecretResolver",
-        http_client: "HttpClient",
+        secret_resolver: SecretResolver,
+        http_client: HttpClient,
         model: str = "GLM-5.1",
         timeout_ms: int = 180_000,
     ):
@@ -76,33 +59,28 @@ class LLM:
         self._model = model
         self._timeout_ms = timeout_ms
         self._base_url = base_url.rstrip("/")
-
-        # The token's secret-registry key. The token is resolved lazily from it
-        # (see _resolve_token) so it can be re-fetched later — chat() retries when
-        # the value is still missing.
         self._secret_name = secret_name
 
-        # Best-effort eager resolve so the happy path logs "enabled" at init.
+        # Resolve the token once, here. None ⇒ the LLM is disabled (chat() returns
+        # the sentinel); there is no fallback and no later retry.
         self._token = self._resolve_token()
 
         if self._token:
             logger.info("[LLM] LLM enabled: base_url=%s, model=%s", self._base_url, self._model)
         else:
-            # Token not resolvable yet. Do NOT latch off — chat() re-resolves on
-            # demand and self-heals once the secret backend becomes reachable.
             logger.warning(
-                "[LLM] token unresolved at init (base_url=%r) — will retry on first use",
+                "[LLM] LLM disabled: no token resolved for secret %r (base_url=%r)",
+                self._secret_name,
                 self._base_url,
             )
 
-    def _resolve_token(self) -> str:
+    def _resolve_token(self) -> str | None:
         """Resolve the API token through the injected ``SecretResolver``.
 
-        Looked up by ``secret_name`` (the token's secret-registry key, injected
-        by the DI provider); resolver errors and ``None`` results both fall
-        through to the encoded fallback (empty in shipped source) — never raised —
-        so a transient backend failure yields an empty token that a later call can
-        retry rather than an exception. Returns ``""`` when nothing resolves."""
+        Looked up by ``secret_name`` (the token's secret-registry key, injected by
+        the DI provider). Returns the token string, or ``None`` when the secret is
+        absent or the lookup raises — no baked fallback (a committed credential is
+        never shipped), so an unresolved token simply disables the LLM."""
         try:
             secret = self._secret_resolver.get_secret(self._secret_name)
             if secret is not None:
@@ -112,23 +90,17 @@ class LLM:
                 return str(secret.secret_value)
         except Exception as e:
             logger.warning(
-                "[LLM] secret store lookup failed for %s (%s) — falling back",
+                "[LLM] secret store lookup failed for %s (%s)",
                 self._secret_name,
                 type(e).__name__,
             )
-        return _decode_fallback()
+        return None
 
     async def chat(self, system: str | None, user: str) -> str:
         """Send prompt and return text response (OpenAI-compatible API)."""
         if not self._token:
-            # No token yet — the secret backend may have been unreachable at init.
-            # Retry now (self-heal); a success is cached for later calls.
-            self._token = self._resolve_token()
-            if not self._token:
-                logger.warning(
-                    "[LLM] token unresolved, returning [llm disabled]"
-                )
-                return "[llm disabled]"
+            logger.warning("[LLM] chat() called but no token resolved, returning [llm disabled]")
+            return "[llm disabled]"
 
         messages: list[dict[str, str]] = []
         if system:

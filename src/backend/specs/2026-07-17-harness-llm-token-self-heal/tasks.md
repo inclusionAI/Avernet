@@ -54,3 +54,18 @@
   `_do_request`/`to_thread` path); keep recovery/retry coverage. Verify the full
   injector still eagerly resolves the harness LLM (`test_all_bindings_resolve`).
 - [x] 21. ruff clean; full `tests/community` green; commit & push; PR updates.
+
+## Review follow-up 3 (no fallback, no re-resolve, direct imports)
+
+- [x] 22. Import `HttpClient` / `SecretResolver` directly (no `TYPE_CHECKING`) —
+  verified no import cycle (`plugin_api.{http_client,secret_resolver}` →
+  `plugin_api.base` only).
+- [x] 23. Delete `_FALLBACK_TOKEN_B64` / `_decode_fallback` / `import base64`;
+  `_resolve_token` returns `str | None` (None = unresolved, no baked credential).
+- [x] 24. Remove the `chat()` re-resolve — resolution happens once at (lazy)
+  construction; `chat()` only checks the token and returns `[llm disabled]` when
+  it is None. Confirmed the LLM `@singleton` is not in
+  `eager_check_critical_bindings`, so construction is post-boot.
+- [x] 25. Rework tests: absent/raising resolver → `_token is None`; disabled
+  `chat()` makes no HTTP and does not re-resolve; happy-path request-shape assert.
+- [x] 26. ruff clean; full `tests/community` green; commit & push; PR updates.
