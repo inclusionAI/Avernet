@@ -15,10 +15,14 @@ from typing import Any, Dict, Optional
 class BotProvisioningContext:
     """Common inputs used by engine provisioning strategies.
 
-    ``bot_id`` / ``owner_id`` / ``active_engine`` / ``bot_type`` are ``str``
-    (default empty string) so strategies always see a stable type.  An empty
-    value means the legacy / partial call site did not provide it and the
-    strategy must treat its rule as not-applicable (no-op).
+    ``bot_id`` / ``owner_id`` / ``bot_type`` are required ``str`` (no defaults)
+    so call sites must pass them explicitly — safer than silent empty defaults.
+    Pass ``""`` at legacy sites that genuinely lack the value (e.g. TemplateService
+    only knows ``template_type``).
+
+    ``active_engine`` is ``Optional[str]`` because it is not always resolvable at
+    legacy call sites; ``resolve_for_context`` falls back to ``template_type`` /
+    default when it is ``None``.
 
     ``template_type`` / ``template_config`` are legitimately ``Optional``:
     only template-backed coding engines (``aicoding`` / ``claude_code``) need
@@ -26,10 +30,10 @@ class BotProvisioningContext:
     intentionally not provisioned.
     """
 
-    bot_id: str = ""
-    owner_id: str = ""
-    active_engine: str = ""
-    bot_type: str = ""
+    bot_id: str
+    owner_id: str
+    bot_type: str
+    active_engine: Optional[str] = None
     # ``None`` for non-template engines (openclaw / teclaw / hermes / ...).
     # Coding engines set this to ``applicationCoding`` / ``personalCoding``.
     template_type: Optional[str] = None

@@ -44,10 +44,7 @@ from agentclaw.community.core.devices.errors import (
     InvalidDeviceStatusError,
 )
 from agentclaw.community.core.bot_management.token_vault import TokenVault
-from agentclaw.community.core.bot_management.engines import (
-    BotProvisioningContext,
-    get_engine_provisioning_registry,
-)
+from agentclaw.community.core.bot_management.engines import resolve_provisioning
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
@@ -698,7 +695,7 @@ class DeviceService:
         # 与 token 写入失败同语义（failure-closed），避免同步段抛错导致 binding 已落库但
         # apply_device 返回 500 的状态机不一致。token 全程 in-memory 不进 device_props；
         # get_template_config 不解密 → API 返回密文脱敏。
-        _provisioning_ctx = BotProvisioningContext(
+        _provisioning_ctx, _provisioning_strategy = resolve_provisioning(
             bot_id=resolved_bot_id,
             owner_id=resolved_owner_id,
             active_engine=resolved_engine,
@@ -706,11 +703,7 @@ class DeviceService:
             template_type=template_type,
             template_config=template_config,
         )
-        _raw_codefuse_token = (
-            get_engine_provisioning_registry()
-            .resolve_for_context(_provisioning_ctx)
-            .extract_runtime_token(_provisioning_ctx)
-        )
+        _raw_codefuse_token = _provisioning_strategy.extract_runtime_token(_provisioning_ctx)
 
         def start_service_async():
             try:

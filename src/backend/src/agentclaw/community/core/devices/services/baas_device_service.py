@@ -7,10 +7,7 @@ import time
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Protocol, override
 
-from agentclaw.community.core.bot_management.engines import (
-    BotProvisioningContext,
-    get_engine_provisioning_registry,
-)
+from agentclaw.community.core.bot_management.engines import resolve_provisioning
 from agentclaw.community.core.devices.errors import DeviceServiceError
 from agentclaw.community.core.devices.models import (
     AllocatedDevice,
@@ -544,17 +541,13 @@ class BaasDeviceService(DeviceService):
         # ac_templates.ext.  Create-init runs from a durable task after the
         # synchronous create path, so reload template_config from TemplateService
         # just like the BaaS restart path does.
-        base_provisioning_ctx = BotProvisioningContext(
+        base_provisioning_ctx, provisioning_strategy = resolve_provisioning(
             bot_id=resolved_bot_id,
             owner_id=resolved_owner_id,
             active_engine=raw_active_engine,
             bot_type=resolved_bot_type,
             template_type=template_type,
             template_config=None,
-        )
-        provisioning_strategy = (
-            get_engine_provisioning_registry()
-            .resolve_for_context(base_provisioning_ctx)
         )
         if (
             self._template_service is None

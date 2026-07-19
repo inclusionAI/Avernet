@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from typing import Any, Callable, Optional
 
-from agentclaw.community.core.bot_management.engines import (
-    BotProvisioningContext,
-    get_engine_provisioning_registry,
-)
+from agentclaw.community.core.bot_management.engines import resolve_provisioning
 from agentclaw.community.core.bot_management.utils import clear_baas_publish_failure_ext
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
@@ -512,15 +510,14 @@ class BaasRestartPublishPollHandler:
     def _read_codefuse_token(self, *, bot_id: str, bot: Any) -> str | None:
         if not isinstance(bot, dict):
             return None
-        base_ctx = BotProvisioningContext(
+        base_ctx, strategy = resolve_provisioning(
             bot_id=bot_id,
-            owner_id=bot.get("owner_id"),
+            owner_id=bot.get("owner_id") or "",
             active_engine=bot.get("active_engine"),
-            bot_type=bot.get("bot_type"),
+            bot_type=bot.get("bot_type") or "",
             template_type=bot.get("template_type"),
             template_config=None,
         )
-        strategy = get_engine_provisioning_registry().resolve_for_context(base_ctx)
         # Fast no-op for engines/templates that never deploy runtime tokens.
         if not strategy.should_encrypt_template_token(base_ctx):
             return None
@@ -538,14 +535,7 @@ class BaasRestartPublishPollHandler:
             return None
         if not isinstance(template_config, dict):
             return None
-        ctx = BotProvisioningContext(
-            bot_id=bot_id,
-            owner_id=bot.get("owner_id"),
-            active_engine=bot.get("active_engine"),
-            bot_type=bot.get("bot_type"),
-            template_type=bot.get("template_type"),
-            template_config=template_config,
-        )
+        ctx = replace(base_ctx, template_config=template_config)
         return strategy.extract_runtime_token(ctx)
 
 

@@ -340,7 +340,7 @@ class BotService:
         *,
         bot_id: str,
         owner_id: str,
-        active_engine: str,
+        active_engine: "str | None",
         bot_type: str,
         template_type: "str | None",
         template_config: "Optional[Dict[str, Any]]",
@@ -357,11 +357,10 @@ class BotService:
         """
         try:
             from agentclaw.community.core.bot_management.engines import (
-                BotProvisioningContext,
-                get_engine_provisioning_registry,
+                resolve_provisioning,
             )
 
-            ctx = BotProvisioningContext(
+            ctx, strategy = resolve_provisioning(
                 bot_id=bot_id,
                 owner_id=owner_id,
                 active_engine=active_engine,
@@ -369,11 +368,7 @@ class BotService:
                 template_type=template_type,
                 template_config=template_config,
             )
-            extra_envs = (
-                get_engine_provisioning_registry()
-                .resolve_for_context(ctx)
-                .build_extra_envs(ctx)
-            )
+            extra_envs = strategy.build_extra_envs(ctx)
             if extra_envs:
                 logger.info(
                     "[%s] Setting engine extra_envs for bot %s: %s",
@@ -385,6 +380,53 @@ class BotService:
         except Exception as e:
             logger.warning(
                 "[%s] Failed to build engine extra_envs for bot %s: %s",
+                log_context,
+                bot_id,
+                e,
+            )
+            return None
+
+    def _extract_engine_runtime_token(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        active_engine: "str | None",
+        bot_type: str,
+        template_type: "str | None",
+        template_config: "Optional[Dict[str, Any]]",
+        log_context: str,
+    ) -> "Optional[str]":
+        """Resolve the engine runtime token (symmetric to ``_build_engine_extra_envs``).
+
+        Used by the update_bot token-refresh path so it shares the same
+        ``resolve_provisioning`` entry point instead of rebuilding context +
+        strategy inline.  Fails soft (returns None).
+        """
+        try:
+            from agentclaw.community.core.bot_management.engines import (
+                resolve_provisioning,
+            )
+
+            ctx, strategy = resolve_provisioning(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                active_engine=active_engine,
+                bot_type=bot_type,
+                template_type=template_type,
+                template_config=template_config,
+            )
+            token = strategy.extract_runtime_token(ctx)
+            if token:
+                logger.info(
+                    "[%s] Resolved engine runtime token for bot %s",
+                    log_context,
+                    bot_id,
+                )
+            return token
+        except Exception as e:
+            logger.warning(
+                "[%s] Failed to extract engine runtime token for bot %s: %s",
                 log_context,
                 bot_id,
                 e,
@@ -2067,26 +2109,19 @@ class BotService:
                 # Runtime token 变化时按引擎策略刷新运行中容器。仅当本次入参
                 # 携带 token 字段且与旧值解密后不同才触发；异步执行，失败只告警
                 # 不阻断主流程。
-                from agentclaw.community.core.bot_management.engines import (
-                    BotProvisioningContext,
-                    get_engine_provisioning_registry,
-                )
-
-                token_ctx = BotProvisioningContext(
+                runtime_token = self._extract_engine_runtime_token(
                     bot_id=bot_id,
-                    # owner_id/active_engine/bot_type are str by contract; coerce
-                    # legacy None values to "" so strategies see a stable type.
                     owner_id=bot.get("owner_id") or user_id,
-                    active_engine=bot.get("active_engine") or "",
+                    active_engine=bot.get("active_engine"),
                     bot_type=bot.get("bot_type") or "",
                     template_type=bot.get("template_type"),
                     template_config=template_config if isinstance(template_config, dict) else None,
+                    log_context="bot_service.update_bot",
                 )
-                token_strategy = get_engine_provisioning_registry().resolve_for_context(token_ctx)
                 if (
                     isinstance(template_config, dict)
                     and "token" in template_config
-                    and token_strategy.extract_runtime_token(token_ctx) is not None
+                    and runtime_token is not None
                 ):
                     self._maybe_refresh_codefuse_token_async(
                         bot_id=bot_id,

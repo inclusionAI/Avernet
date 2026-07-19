@@ -1,6 +1,8 @@
 """Composition root for engine provisioning strategies."""
 from __future__ import annotations
 
+from typing import Any
+
 from .aicoding.strategy import AicodingProvisioningStrategy, CODING_TEMPLATE_TYPES
 from .default import DefaultProvisioningStrategy
 from .provisioning import BotProvisioningContext, EngineProvisioningStrategy
@@ -75,8 +77,41 @@ def get_engine_provisioning_registry() -> EngineProvisioningRegistry:
     return _REGISTRY
 
 
+def resolve_provisioning(
+    *,
+    bot_id: str,
+    owner_id: str,
+    bot_type: str,
+    active_engine: str | None = None,
+    template_type: str | None = None,
+    template_config: dict[str, Any] | None = None,
+) -> tuple[BotProvisioningContext, EngineProvisioningStrategy]:
+    """Build the provisioning context and resolve the engine strategy.
+
+    Single entry point so ``BotProvisioningContext`` construction + strategy
+    resolution live in one place.  Every service call site (BotService,
+    BaasDeviceService, TemplateService, utils) goes through here instead of
+    repeating ``BotProvisioningContext(...)`` + ``resolve_for_context(...)``.
+
+    Returns the built context together with the resolved strategy so the caller
+    can invoke the specific hook it needs (``build_extra_envs`` /
+    ``extract_runtime_token`` / ``should_encrypt_template_token``).
+    """
+    ctx = BotProvisioningContext(
+        bot_id=bot_id,
+        owner_id=owner_id,
+        bot_type=bot_type,
+        active_engine=active_engine,
+        template_type=template_type,
+        template_config=template_config,
+    )
+    strategy = get_engine_provisioning_registry().resolve_for_context(ctx)
+    return ctx, strategy
+
+
 __all__ = [
     "BotProvisioningContext",
     "EngineProvisioningRegistry",
     "get_engine_provisioning_registry",
+    "resolve_provisioning",
 ]

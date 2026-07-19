@@ -26,10 +26,7 @@ from injector import inject
 
 from agentclaw.community.core.bot_management.token_vault import CIPHER_PREFIX, TokenVault
 from agentclaw.community.core.bot_management.repository.template_repository_protocol import TemplateRepository
-from agentclaw.community.core.bot_management.engines import (
-    BotProvisioningContext,
-    get_engine_provisioning_registry,
-)
+from agentclaw.community.core.bot_management.engines import resolve_provisioning
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -104,11 +101,17 @@ class TemplateService:
         ``resolve_for_context`` 做兼容解析；coding 模板规则集中在
         AicodingProvisioningStrategy，TemplateService 不再硬编码具体模板。
         """
-        ctx = BotProvisioningContext(
+        # Legacy call chain only passes template_type; pass empty identity
+        # fields (required by BotProvisioningContext) — should_encrypt only
+        # consults template_type/template_config.
+        ctx, strategy = resolve_provisioning(
+            bot_id="",
+            owner_id="",
+            bot_type="",
+            active_engine=None,
             template_type=template_type,
             template_config=template_config,
         )
-        strategy = get_engine_provisioning_registry().resolve_for_context(ctx)
         if not strategy.should_encrypt_template_token(ctx):
             return template_config
         token = template_config.get("token")
