@@ -2046,6 +2046,62 @@ class TestRollbackPublish:
         assert second_ext["migration_path"] == "/tmp/build"
         assert second_ext["rollback_restored_from"] == 3
 
+    @pytest.mark.asyncio
+    async def test_rollback_publish_clears_online_release_refs(self):
+        """回滚后当前版本回到 DRAFT，应清除其线上发布/绑定引用。
+
+        否则再次发布时 is_online_release_recorded() 会因残留的 ext.publish.online
+        判定为已发布，从而跳过 execute_release_phase（不再执行 upgrade 把共享的线上
+        bot/binding 指向本版本）。清除后，重新发布才会真正重新执行 upgrade。
+        """
+        mock_repo = Mock()
+        current_record = _create_mock_record(
+            record_id=3,
+            status=PublishStatus.SUCCESS,
+            version=3,
+            last_pub_id=2,
+            ext={
+                "existing_key": "existing_value",
+                # 本版本上线时写入的引用（应被清除）
+                "publish": {"online": 9001, "verify": 8001},
+                "binding": {"online": 501, "verify": 401},
+            },
+        )
+        target_record = _create_mock_record(
+            record_id=2,
+            status=PublishStatus.UPGRADED,
+            version=2,
+            ext={"migration_path": "/tmp/build"},
+        )
+
+        mock_repo.get_by_id.side_effect = [current_record, target_record, current_record, target_record]
+        mock_repo.get_by_last_pub_id.return_value = None
+        mock_repo.update_status_with_ext.return_value = current_record
+
+        mock_flow_service = MagicMock()
+        mock_flow_service.execute_rollback = AsyncMock(return_value=MagicMock(
+            status=PublishStatus.ONLINE_PUB,
+            message="回滚发布已提交",
+        ))
+        service = _make_service(
+            bot_publish_repo=mock_repo,
+            publish_flow_service_provider=lambda: mock_flow_service,
+        )
+
+        await service.rollback_publish(publish_id=3, operator="user_001")
+
+        first_call = mock_repo.update_status_with_ext.call_args_list[0]
+        first_ext = first_call[0][2]  # ext 是第三个位置参数
+
+        # 线上发布/绑定引用被清除（一并清除，保持一致）
+        assert first_ext.get("publish", {}).get("online") is None
+        assert first_ext.get("binding", {}).get("online") is None
+        # verify 阶段引用及其他字段保留
+        assert first_ext["publish"]["verify"] == 8001
+        assert first_ext["binding"]["verify"] == 401
+        assert first_ext["existing_key"] == "existing_value"
+        assert "rollback" in first_ext
+
 
 class TestGetBotStageBindingInfo:
     def test_personal_bot_success(self):

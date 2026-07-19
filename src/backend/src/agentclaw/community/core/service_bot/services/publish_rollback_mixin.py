@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Callable
 
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
+from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
@@ -158,6 +159,19 @@ class PublishRollbackMixin:
             "rollback_reason": reason,
             "target_publish_id": current_record.last_pub_id,
         }
+        # Clear this version's online release refs before it re-enters DRAFT. The refs
+        # (ext.publish.online = BaaS publish id, ext.binding.online = device binding)
+        # are from this version's earlier go-live; left in place, a later re-publish
+        # would see is_online_release_recorded() == True and skip execute_release_phase
+        # — the upgrade that re-points the shared online bot/binding at this version —
+        # so production would never actually change. Drop both together so the record
+        # is consistently un-published (never one without the other). The shared binding
+        # still lives on the rollback target's record, so the next upgrade re-resolves
+        # it from last_pub_id.
+        for _section in ("publish", "binding"):
+            _refs = current_ext.get(_section)
+            if isinstance(_refs, dict):
+                _refs.pop(PublishStage.ONLINE.value, None)
         self.update_publish_status_with_ext(
             publish_id=publish_id,
             target_status=PublishStatus.DRAFT,
