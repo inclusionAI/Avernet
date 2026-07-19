@@ -1,8 +1,9 @@
 """Single-file async LLM client for Harness.
 
-No ABC, no local/prod split — just one class. Disabled when env vars are missing.
-Uses OpenAI-compatible /v1/chat/completions endpoint format.
-Bypasses sofa_tracer monkey-patch to avoid "Error in httpx send hook" in SpawnProcess.
+No ABC, no local/prod split — just one class. Uses the OpenAI-compatible
+/v1/chat/completions endpoint format. HTTP goes through the injected
+``HttpClient`` seam (the ``general`` sync client), which sofa_tracer does not
+patch — so there is no SpawnProcess ``AsyncClient.send`` hook to work around.
 """
 from __future__ import annotations
 
@@ -12,35 +13,16 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from agentclaw.community.plugin_api.http_client import HttpClient
     from agentclaw.community.plugin_api.secret_resolver import SecretResolver
-
-try:
-    import httpx
-except ImportError:  # pragma: no cover
-    httpx = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
 # ── encoded fallback token ──────────────────────────────────
-# Empty by default — the neutral shipped code embeds no credential. A deployment
-# that wants a baked-in fallback token can set the LLM_AUTH_TOKEN env var (or, for
-# a private build, base64-encode a token here). Empty string means no fallback.
+# Empty by default — the neutral shipped code embeds no credential. A private
+# build that wants a baked-in fallback token can base64-encode one here; empty
+# string means no fallback (the token comes from the SecretResolver).
 _FALLBACK_TOKEN_B64: str = ""
-
-# ── bypass sofa_tracer monkey-patch ────────────────────────
-# sofa_tracer patches httpx.AsyncClient.send globally, which fails in
-# SpawnProcess contexts with "Error in httpx send hook". We save the
-# original send before any patches are applied and use it directly.
-_ORIGINAL_ASYNC_SEND = None
-if httpx is not None:
-    _ORIGINAL_ASYNC_SEND = httpx.AsyncClient.send
-    try:
-        from sofa_tracer.client_hooks.httpx import (
-            _HTTPX_AsyncClient_send as _tracer_original_send,
-        )
-        _ORIGINAL_ASYNC_SEND = _tracer_original_send
-    except ImportError:
-        pass
 
 # ── concurrency limiter ────────────────────────────────────
 _MAX_CONCURRENT_LLM_CALLS = 5
@@ -63,19 +45,20 @@ def _decode_fallback() -> str:
 class LLM:
     """Lightweight LLM utility for harness internal use.
 
-    Endpoint (``base_url``) and the token's secret key (``secret_name``) are
-    injected by the DI provider from ``LLMHarnessConfig`` (the ``llm`` yaml
-    block); the token itself is resolved through the injected ``SecretResolver``
-    by that ``secret_name`` (corp → Mist, community → env seam), falling back to
-    the encoded fallback (empty in shipped source). The neutral shipped code
-    embeds no endpoint / secret name / token, and this class reads no process
-    environment — every value arrives explicitly from the DI wiring.
+    Endpoint (``base_url``), the token's secret key (``secret_name``), the HTTP
+    transport (``http_client``), and the ``SecretResolver`` are all injected by
+    the DI provider — this class reads no process environment. ``base_url`` /
+    ``secret_name`` come from ``LLMHarnessConfig`` (the ``llm`` yaml block); the
+    token is resolved through the ``SecretResolver`` by that ``secret_name``
+    (corp → Mist, community → env seam), falling back to the encoded fallback
+    (empty in shipped source).
 
-    Token resolution is lazy and self-healing: a missing endpoint (or absent
-    ``httpx``) disables the LLM permanently, but a token that cannot be resolved
-    yet — e.g. the secret backend is not reachable at construction time — does
-    NOT latch the LLM off. ``chat()`` re-resolves on demand, so the utility
-    recovers once the backend becomes available without a process restart.
+    Token resolution is lazy and self-healing: the token may not be resolvable at
+    construction time — e.g. the secret backend is not reachable yet in a
+    SpawnProcess worker — but that does NOT latch the LLM off. ``chat()``
+    re-resolves on demand, so the utility recovers once the backend becomes
+    available without a process restart; only while the token is still empty does
+    ``chat()`` short-circuit with the ``[llm disabled]`` sentinel.
     """
 
     def __init__(
@@ -84,10 +67,12 @@ class LLM:
         secret_name: str,
         *,
         secret_resolver: "SecretResolver",
+        http_client: "HttpClient",
         model: str = "GLM-5.1",
         timeout_ms: int = 180_000,
     ):
         self._secret_resolver = secret_resolver
+        self._http = http_client
         self._model = model
         self._timeout_ms = timeout_ms
         self._base_url = base_url.rstrip("/")
@@ -97,28 +82,14 @@ class LLM:
         # the value is still missing.
         self._secret_name = secret_name
 
-        # Permanent, config-level disable — no endpoint or no httpx means the
-        # feature is off and there is nothing to recover to. A *missing token* is
-        # NOT part of this: the secret backend may simply be unreachable right now
-        # (e.g. layotto not yet ready in a SpawnProcess worker), which is
-        # recoverable and must not latch the LLM off for the worker's lifetime.
-        self._config_disabled = httpx is None or not self._base_url
-
         # Best-effort eager resolve so the happy path logs "enabled" at init.
         self._token = self._resolve_token()
 
-        if self._config_disabled:
-            logger.warning(
-                "[LLM] LLM is DISABLED (feature-off): base_url=%r, httpx=%s",
-                self._base_url,
-                "ok" if httpx is not None else "MISSING",
-            )
-        elif self._token:
+        if self._token:
             logger.info("[LLM] LLM enabled: base_url=%s, model=%s", self._base_url, self._model)
         else:
-            # Endpoint is configured but the token is not resolvable yet. Do not
-            # latch disabled — chat() re-resolves on demand and self-heals once the
-            # secret backend becomes reachable.
+            # Token not resolvable yet. Do NOT latch off — chat() re-resolves on
+            # demand and self-heals once the secret backend becomes reachable.
             logger.warning(
                 "[LLM] token unresolved at init (base_url=%r) — will retry on first use",
                 self._base_url,
@@ -132,44 +103,30 @@ class LLM:
         through to the encoded fallback (empty in shipped source) — never raised —
         so a transient backend failure yields an empty token that a later call can
         retry rather than an exception. Returns ``""`` when nothing resolves."""
-        if self._base_url and self._secret_name:
-            try:
-                secret = self._secret_resolver.get_secret(self._secret_name)
-                if secret is not None:
-                    logger.info(
-                        "[LLM] loaded token from secret store: %s", self._secret_name
-                    )
-                    return str(secret.secret_value)
-            except Exception as e:
-                logger.warning(
-                    "[LLM] secret store lookup failed for %s (%s) — falling back",
-                    self._secret_name,
-                    type(e).__name__,
+        try:
+            secret = self._secret_resolver.get_secret(self._secret_name)
+            if secret is not None:
+                logger.info(
+                    "[LLM] loaded token from secret store: %s", self._secret_name
                 )
+                return str(secret.secret_value)
+        except Exception as e:
+            logger.warning(
+                "[LLM] secret store lookup failed for %s (%s) — falling back",
+                self._secret_name,
+                type(e).__name__,
+            )
         return _decode_fallback()
-
-    @property
-    def _disabled(self) -> bool:
-        """Whether ``chat()`` will short-circuit *right now*.
-
-        Reflects current resolvability (config-off, or token not yet resolved),
-        not a latched snapshot — a token that becomes resolvable flips this back
-        to ``False`` on the next check."""
-        return self._config_disabled or not self._token
 
     async def chat(self, system: str | None, user: str) -> str:
         """Send prompt and return text response (OpenAI-compatible API)."""
-        if self._config_disabled:
-            logger.warning("[LLM] chat() called but LLM is disabled, returning [llm disabled]")
-            return "[llm disabled]"
-
         if not self._token:
-            # Endpoint is configured but no token yet — the secret backend may have
-            # been unreachable at init. Retry now (self-heal); a success is cached.
+            # No token yet — the secret backend may have been unreachable at init.
+            # Retry now (self-heal); a success is cached for later calls.
             self._token = self._resolve_token()
             if not self._token:
                 logger.warning(
-                    "[LLM] token still unresolved, returning [llm disabled]"
+                    "[LLM] token unresolved, returning [llm disabled]"
                 )
                 return "[llm disabled]"
 
@@ -220,25 +177,23 @@ class LLM:
         logger.error("[LLM] all retries exhausted: %s", last_err)
         return "[llm disabled]"
 
-    async def _do_request(
-        self,
-        body: dict[str, Any],
-        headers: dict[str, str],
-        use_original_send: bool = False,
-    ) -> str:
-        """Execute the HTTP request, bypassing sofa_tracer when possible."""
-        timeout = httpx.Timeout(self._timeout_ms / 1000.0)
+    async def _do_request(self, body: dict[str, Any], headers: dict[str, str]) -> str:
+        """Execute the HTTP request via the injected sync ``HttpClient``.
 
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            url = f"{self._base_url}/v1/chat/completions"
-            # Always prefer original send to bypass sofa_tracer in SpawnProcess
-            if _ORIGINAL_ASYNC_SEND is not None:
-                request = client.build_request("POST", url, json=body, headers=headers)
-                resp = await _ORIGINAL_ASYNC_SEND(client, request)
-            else:
-                resp = await client.post(url, json=body, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
+        The client is synchronous (``httpx.Client``, which sofa_tracer does not
+        patch); run it off the event loop via ``asyncio.to_thread`` so the
+        (potentially long) call does not block. The ``general`` client has an
+        empty base_url, so we pass the full absolute URL."""
+        url = f"{self._base_url}/v1/chat/completions"
+        resp = await asyncio.to_thread(
+            self._http.post,
+            url,
+            json=body,
+            headers=headers,
+            timeout=self._timeout_ms / 1000.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
 
         choices = data.get("choices", [])
         if choices:
