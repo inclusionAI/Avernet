@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-import os
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -64,45 +63,39 @@ def _decode_fallback() -> str:
 class LLM:
     """Lightweight LLM utility for harness internal use.
 
-    Token sources (highest priority first): explicit constructor param →
-    injected ``SecretResolver`` → ``LLM_AUTH_TOKEN`` env var → encoded fallback
-    (empty in shipped source). The neutral shipped code embeds no endpoint /
-    secret name / token.
+    Endpoint (``base_url``) and the token's secret key (``secret_name``) are
+    injected by the DI provider from ``LLMHarnessConfig`` (the ``llm`` yaml
+    block); the token itself is resolved through the injected ``SecretResolver``
+    by that ``secret_name`` (corp → Mist, community → env seam), falling back to
+    the encoded fallback (empty in shipped source). The neutral shipped code
+    embeds no endpoint / secret name / token, and this class reads no process
+    environment — every value arrives explicitly from the DI wiring.
 
     Token resolution is lazy and self-healing: a missing endpoint (or absent
     ``httpx``) disables the LLM permanently, but a token that cannot be resolved
     yet — e.g. the secret backend is not reachable at construction time — does
     NOT latch the LLM off. ``chat()`` re-resolves on demand, so the utility
     recovers once the backend becomes available without a process restart.
-
-    Env vars:
-        LLM_BASE_URL — API base URL
-        LLM_AUTH_TOKEN — fallback API key
-        LLM_MODEL      — default model, e.g. GLM-5.1
-        LLM_TIMEOUT_MS — request timeout in ms, default 60000
-        LLM_SECRET_NAME — secret-store name for the API key
     """
 
     def __init__(
         self,
-        base_url: str | None = None,
-        auth_token: str | None = None,
-        model: str | None = None,
-        timeout_ms: int | None = None,
-        secret_name: str | None = None,
+        base_url: str,
+        secret_name: str,
         *,
         secret_resolver: "SecretResolver",
+        model: str = "GLM-5.1",
+        timeout_ms: int = 180_000,
     ):
         self._secret_resolver = secret_resolver
-        self._model = model or os.getenv("LLM_MODEL", "GLM-5.1")
-        self._timeout_ms = timeout_ms or int(os.getenv("LLM_TIMEOUT_MS", "180000"))
-        self._base_url = (base_url or os.getenv("LLM_BASE_URL", "")).rstrip("/")
+        self._model = model
+        self._timeout_ms = timeout_ms
+        self._base_url = base_url.rstrip("/")
 
-        # Resolution inputs kept on the instance so the token can be re-resolved
-        # later (see chat()). Priority is explicit arg > secret store > env var >
-        # encoded fallback; _resolve_token() applies it.
-        self._explicit_token = auth_token or ""
-        self._secret_name = secret_name or os.getenv("LLM_SECRET_NAME", "")
+        # The token's secret-registry key. The token is resolved lazily from it
+        # (see _resolve_token) so it can be re-fetched later — chat() retries when
+        # the value is still missing.
+        self._secret_name = secret_name
 
         # Permanent, config-level disable — no endpoint or no httpx means the
         # feature is off and there is nothing to recover to. A *missing token* is
@@ -132,16 +125,13 @@ class LLM:
             )
 
     def _resolve_token(self) -> str:
-        """Resolve the API token from the first available source.
+        """Resolve the API token through the injected ``SecretResolver``.
 
-        Priority: explicit constructor arg > injected ``SecretResolver`` (when a
-        base_url and secret name are configured) > ``LLM_AUTH_TOKEN`` env var >
-        encoded fallback (empty in shipped source). Resolver errors and ``None``
-        results both fall through to the env/fallback tail — never raised — so a
-        transient backend failure yields an empty token that a later call can
+        Looked up by ``secret_name`` (the token's secret-registry key, injected
+        by the DI provider); resolver errors and ``None`` results both fall
+        through to the encoded fallback (empty in shipped source) — never raised —
+        so a transient backend failure yields an empty token that a later call can
         retry rather than an exception. Returns ``""`` when nothing resolves."""
-        if self._explicit_token:
-            return self._explicit_token
         if self._base_url and self._secret_name:
             try:
                 secret = self._secret_resolver.get_secret(self._secret_name)
@@ -156,7 +146,7 @@ class LLM:
                     self._secret_name,
                     type(e).__name__,
                 )
-        return os.getenv("LLM_AUTH_TOKEN", "") or _decode_fallback()
+        return _decode_fallback()
 
     @property
     def _disabled(self) -> bool:

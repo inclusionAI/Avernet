@@ -1,7 +1,8 @@
-"""Coverage for the B11 Phase-A harness-LLM secret-resolver seam.
+"""Coverage for the harness-LLM secret-resolver seam.
 
 The harness ``LLM`` reads its API token through an injected ``SecretResolver``
-(corp=mist, community=env) instead of importing layotto directly. These tests
+(corp=mist, community=env seam) keyed by ``secret_name`` — it reads no process
+environment; endpoint and secret key arrive from the DI provider. These tests
 exercise the resolved-secret path, the None fallback, and — for #201 — the
 lazy, self-healing resolution that keeps a transient secret-backend failure
 from latching the LLM off for the worker's lifetime.
@@ -48,6 +49,20 @@ class _FlakyResolver:
         return self._secret
 
 
+class _TogglingResolver:
+    """Returns ``None`` (secret absent) until ``available`` is flipped on — the
+    backend comes up after boot."""
+
+    def __init__(self, secret):
+        self._secret = secret
+        self.available = False
+        self.calls = 0
+
+    def get_secret(self, name):
+        self.calls += 1
+        return self._secret if self.available else None
+
+
 @pytest.fixture(autouse=True)
 def _fresh_semaphore(monkeypatch):
     """Bind a fresh module semaphore per test so the concurrency limiter is never
@@ -80,21 +95,24 @@ def test_llm_loads_token_from_secret_resolver():
     assert llm._token == "tok-xyz"
 
 
-def test_llm_falls_back_to_env_when_resolver_returns_none(monkeypatch):
-    monkeypatch.setenv("LLM_AUTH_TOKEN", "env-tok")
+def test_llm_token_empty_when_resolver_absent_no_baked_fallback():
+    """Resolver reports the secret absent and shipped source bakes no fallback →
+    empty token (disabled), sourced solely from the resolver (no env read)."""
+    resolver = _StubResolver(None)
     llm = LLM(
         base_url="http://llm.local",
         secret_name="llm-key",
-        secret_resolver=_StubResolver(None),
+        secret_resolver=resolver,
     )
-    assert llm._token == "env-tok"
+    assert llm._token == ""
+    assert llm._disabled is True
+    assert resolver.calls == 1  # consulted the resolver, nothing else
 
 
 @pytest.mark.asyncio
-async def test_llm_recovers_when_resolver_becomes_available(monkeypatch):
+async def test_llm_recovers_when_resolver_becomes_available():
     """A transient resolver failure at init must not latch the LLM off: the next
     chat() re-resolves and the request carries the real token (#201)."""
-    monkeypatch.delenv("LLM_AUTH_TOKEN", raising=False)
     resolver = _FlakyResolver(_Secret(secret_user="u", secret_value="real-tok"))
     llm = LLM(
         base_url="http://llm.local",
@@ -119,11 +137,10 @@ async def test_llm_recovers_when_resolver_becomes_available(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_llm_config_off_stays_disabled(monkeypatch):
-    """No base_url → permanently disabled; the resolver is never consulted."""
-    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+async def test_llm_config_off_stays_disabled():
+    """Empty base_url → permanently disabled; the resolver is never consulted."""
     resolver = _StubResolver(_Secret(secret_user="u", secret_value="tok"))
-    llm = LLM(secret_name="llm-key", secret_resolver=resolver)
+    llm = LLM(base_url="", secret_name="llm-key", secret_resolver=resolver)
 
     assert llm._config_disabled is True
     captured = _capture_request(llm)
@@ -135,11 +152,10 @@ async def test_llm_config_off_stays_disabled(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_llm_missing_token_retries_not_latched(monkeypatch):
-    """Token unresolvable from every source → disabled sentinel, but NOT latched:
-    once a deploy supplies LLM_AUTH_TOKEN the next chat() picks it up."""
-    monkeypatch.delenv("LLM_AUTH_TOKEN", raising=False)
-    resolver = _StubResolver(None)  # always absent
+async def test_llm_missing_token_retries_not_latched():
+    """Secret absent at boot → disabled sentinel, but NOT latched: once the
+    backend serves the secret the next chat() resolves it and sends."""
+    resolver = _TogglingResolver(_Secret(secret_user="u", secret_value="late-tok"))
     llm = LLM(
         base_url="http://llm.local",
         secret_name="llm-key",
@@ -152,10 +168,10 @@ async def test_llm_missing_token_retries_not_latched(monkeypatch):
     assert first == "[llm disabled]"
     assert "headers" not in captured  # no token → no HTTP
 
-    # Deployment supplies the fallback env token after boot.
-    monkeypatch.setenv("LLM_AUTH_TOKEN", "late-env-tok")
+    # Backend becomes reachable after boot.
+    resolver.available = True
     second = await llm.chat(system=None, user="hi")
 
     assert second == "ok-response"
-    assert llm._token == "late-env-tok"
-    assert captured["headers"]["Authorization"] == "Bearer late-env-tok"
+    assert llm._token == "late-tok"
+    assert captured["headers"]["Authorization"] == "Bearer late-tok"

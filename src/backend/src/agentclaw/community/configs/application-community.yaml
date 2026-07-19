@@ -151,8 +151,8 @@ user_config:
 
   # Harness-internal LLM utility. Left unset = disabled (feature-off). The
   # harness is an internal dev/diagnostic tool; a community deployment that wants
-  # it sets its own OpenAI-compatible endpoint + secret name here (or via the
-  # LLM_BASE_URL / LLM_SECRET_NAME / LLM_AUTH_TOKEN env vars).
+  # it sets its own OpenAI-compatible endpoint + secret name here. The token is
+  # resolved from secret_name through the configured SecretResolver.
   # TODO(community):
   #   llm:
   #     base_url: "https://your-openai-compatible-endpoint"
