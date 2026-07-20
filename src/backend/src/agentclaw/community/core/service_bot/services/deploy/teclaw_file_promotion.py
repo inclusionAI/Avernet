@@ -59,7 +59,7 @@ _EXCLUDED_DIR_SEGMENTS = frozenset({"node_modules"})
 
 def _has_excluded_segment(engine_path: str) -> bool:
     """True if any path segment of ``engine_path`` names an excluded directory."""
-    return any(seg in _EXCLUDED_DIR_SEGMENTS for seg in engine_path.split("/"))
+    return not _EXCLUDED_DIR_SEGMENTS.isdisjoint(engine_path.split("/"))
 
 
 class TeclawFilePromotionError(Exception):
@@ -142,13 +142,10 @@ class TeclawFilePromotion:
                 # Regenerable dependency/build dirs (``node_modules``) are not
                 # content and their symlinked entries (``*.js.map`` etc.) list but
                 # do not read — skip them so promotion neither bloats OSS nor
-                # hard-fails on an unreadable non-content file.
+                # hard-fails on an unreadable non-content file. No per-file log: a
+                # node_modules tree can hold tens of thousands of entries; the
+                # end-of-sweep summary covers what was actually staged.
                 if _has_excluded_segment(engine_path):
-                    logger.debug(
-                        "[TeclawFilePromotion] skipping excluded path %r "
-                        "(regenerable dependency/build dir, not a content snapshot)",
-                        engine_path,
-                    )
                     continue
                 logical = engine_path.lstrip("/")  # "workspace/sub/x.csv"
                 content = await device_fs.read_file(logical)
