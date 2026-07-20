@@ -317,20 +317,10 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             staging_path,
         )
 
-        # D-09: Immediately trigger device upload via paas_facade
-        await self._paas_facade.push_file(
-            paas_device_id=paas_device_id,
-            device_path=device_path,
-            target_url=target_url,
-        )
-
-        logger.info(
-            "Push file triggered: paas_device_id=%s, device_path=%s",
-            paas_device_id,
-            device_path,
-        )
-
-        # Create ticket
+        # Create ticket FIRST: if push_file fails after ticket creation,
+        # the poller will time out the CREATED ticket → FAILED, providing
+        # clean lifecycle management. The opposite order (push_file first,
+        # then create_ticket) risks orphaned OSS objects if create_ticket fails.
         await asyncio.to_thread(
             self._ticket_repo.create_ticket,
             transfer_id=transfer_id,
@@ -346,6 +336,19 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         )
 
         logger.info("Ticket created: transfer_id=%s, direction=DOWNLOAD", transfer_id)
+
+        # D-09: Trigger device upload via paas_facade
+        await self._paas_facade.push_file(
+            paas_device_id=paas_device_id,
+            device_path=device_path,
+            target_url=target_url,
+        )
+
+        logger.info(
+            "Push file triggered: paas_device_id=%s, device_path=%s",
+            paas_device_id,
+            device_path,
+        )
 
         expires_at = (datetime.utcnow() + timedelta(seconds=expire_seconds)).isoformat()
         return GetDownloadUrlResponse(

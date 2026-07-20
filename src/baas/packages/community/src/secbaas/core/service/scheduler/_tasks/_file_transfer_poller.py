@@ -166,7 +166,8 @@ class FileTransferPoller:
         transfer_id = ticket.transfer_id
 
         # Defensive guard: terminal states should never reach the poller
-        # through list_pending_uploads(["CREATED", "UPLOADING"]), but check
+        # through list_pending_uploads (which includes CREATED/UPLOADING/
+        # UPLOAD_COMPLETED/PUSHING for recovery), but check
         # anyway to prevent accidental processing of stale tickets
         # (e.g., race with cancel API).
         if ticket.status in ("CANCELLED", "DELETED", "FAILED", "DONE"):
@@ -320,7 +321,8 @@ class FileTransferPoller:
         transfer_id = ticket.transfer_id
 
         # Defensive guard: terminal states should never reach the poller
-        # through list_pending_uploads(["CREATED", "UPLOADING"]), but check
+        # through list_pending_uploads (which includes CREATED/UPLOADING/
+        # UPLOAD_COMPLETED/PUSHING for recovery), but check
         # anyway to prevent accidental processing of stale tickets.
         if ticket.status in ("CANCELLED", "DELETED", "FAILED", "DONE"):
             log.info(
