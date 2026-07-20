@@ -1,8 +1,9 @@
 """WorkspaceService — file tree + git diff + file preview for AICoding sessions.
 
 Composes :class:`engine.community.core.file.protocol.FileService` and
-:class:`engine.community.core.bash.protocol.BashService` to serve the four
-``/api/aicoding/sessions/*`` endpoints.
+:class:`engine.community.core.bash.protocol.BashService` for workspace file
+and git operations.  The file-tree endpoint scans the container-local AICoding
+workspace directly so it can prune root-level OSS mounts before traversal.
 
 The container workspace base path is ``/home/admin/.aicoding/workspace``
 (matches the relay ``DEFAULT_CWD`` and the AiCodingFileService
@@ -44,6 +45,12 @@ CONTAINER_WORKSPACE_BASE = "/home/admin/.aicoding/workspace"
 # 10 MiB cap for inline preview to keep responses bounded.
 PREVIEW_MAX_BYTES = 10 * 1024 * 1024
 
+# AICoding workspace infrastructure directories that must never be exposed by
+# the file-tree endpoint.  ``skills`` contains the OSS-mounted skills-repo and
+# ``.repos`` contains shared worktree internals; both are root-only exclusions
+# so project-local directories with the same names remain visible.
+_FILE_TREE_ROOT_EXCLUDED_DIRS = {"skills", ".repos"}
+
 
 def _resolve_workspace_base() -> str:
     """读取 workspace base。env 优先，未设置回落到硬编码。
@@ -52,6 +59,74 @@ def _resolve_workspace_base() -> str:
     """
     raw = os.getenv("RELAY_DEFAULT_CWD", "").strip()
     return raw or CONTAINER_WORKSPACE_BASE
+
+
+def _scan_file_tree_entries(workspace: str) -> list[dict]:
+    """Return file-tree entries while pruning AICoding infrastructure mounts.
+
+    The root ``skills`` directory contains an OSS-mounted ``skills-repo``.  On
+    ossfs, merely walking that mount performs remote object listings and can
+    take several seconds.  Pruning ``dirs`` in-place prevents ``os.walk`` from
+    entering it at all.  ``.repos`` is likewise internal worktree storage.
+
+    A file may disappear between directory listing and ``stat`` on eventually
+    consistent mounts.  Such a race must not fail the entire file-tree request;
+    the node is retained with an unknown size instead.
+    """
+    workspace_norm = os.path.normpath(workspace)
+    entries: list[dict] = []
+
+    for root, dirs, filenames in os.walk(
+        workspace_norm,
+        topdown=True,
+        followlinks=False,
+    ):
+        root_norm = os.path.normpath(root)
+        at_workspace_root = root_norm == workspace_norm
+        dirs[:] = [
+            dirname
+            for dirname in dirs
+            if dirname not in _FILTERED_DIRS
+            and not (
+                at_workspace_root
+                and dirname in _FILE_TREE_ROOT_EXCLUDED_DIRS
+            )
+        ]
+
+        for dirname in dirs:
+            full_path = os.path.join(root, dirname)
+            entries.append(
+                {
+                    "name": dirname,
+                    "path": full_path,
+                    "relative_path": os.path.relpath(full_path, workspace_norm),
+                    "is_dir": True,
+                    "size": 0,
+                }
+            )
+
+        for filename in filenames:
+            full_path = os.path.join(root, filename)
+            try:
+                size: int | None = os.stat(full_path).st_size
+            except OSError as exc:
+                log.debug(
+                    "file-tree stat skipped for %s: %s",
+                    full_path,
+                    exc,
+                )
+                size = None
+            entries.append(
+                {
+                    "name": filename,
+                    "path": full_path,
+                    "relative_path": os.path.relpath(full_path, workspace_norm),
+                    "is_dir": False,
+                    "size": size,
+                }
+            )
+
+    return entries
 
 
 def _strip_trailing_sep(path: str) -> str:
@@ -205,24 +280,21 @@ class WorkspaceService:
     # ── file tree ─────────────────────────────────────────────────────
 
     async def list_file_tree(
-        self, session_id: str, cwd: str | None = None
+        self, session_id: str | None, cwd: str | None = None
     ) -> list[FileTreeNode]:
-        """List workspace files recursively, grouped by project."""
-        workspace = self.ensure_workspace_exists(session_id, cwd)
-        result = await self._file.list_dir(
-            workspace, recursive=True, exclude_dirs=_FILTERED_DIRS
+        """List workspace files recursively, excluding AICoding mounts."""
+        normalized_session_id = (
+            (session_id.strip() or None) if session_id else None
         )
-        entries = [
-            {
-                "name": f.name,
-                "path": f.path,
-                "relative_path": f.relative_path,
-                "is_dir": f.is_dir,
-                "size": f.size,
-            }
-            for f in result.files
-        ]
-        return build_file_tree(entries)
+        normalized_cwd = (cwd.strip() or None) if cwd else None
+        if not normalized_session_id and not normalized_cwd:
+            raise ValueError("session_id and cwd cannot both be empty")
+
+        workspace = self.ensure_workspace_exists(
+            normalized_session_id or "",
+            normalized_cwd,
+        )
+        return build_file_tree(_scan_file_tree_entries(workspace))
 
     # ── file preview ──────────────────────────────────────────────────
 
