@@ -139,7 +139,9 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             subdir=staging_subdir,
         )
 
-        expires_at = (datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=expire_seconds)).isoformat()
+        expires_at = (
+            datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=expire_seconds)
+        ).isoformat()
 
         # Validate file_size before routing (applies to both SINGLE and MULTIPART)
         if file_size < 0:
@@ -350,7 +352,9 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             device_path,
         )
 
-        expires_at = (datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=expire_seconds)).isoformat()
+        expires_at = (
+            datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=expire_seconds)
+        ).isoformat()
         return GetDownloadUrlResponse(
             transfer_id=transfer_id,
             expires_at=expires_at,
@@ -559,9 +563,9 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
                 # to avoid double-slash paths.
                 user_sub = prefix
                 if user_sub.startswith("file-transfers/"):
-                    user_sub = user_sub[len("file-transfers/"):]
+                    user_sub = user_sub[len("file-transfers/") :]
                 elif user_sub.startswith("baas-file-transfer/"):
-                    user_sub = user_sub[len("baas-file-transfer/"):]
+                    user_sub = user_sub[len("baas-file-transfer/") :]
                 elif user_sub in ("file-transfers", "baas-file-transfer"):
                     user_sub = ""
                 user_sub = user_sub.strip("/")
@@ -711,7 +715,9 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             expire_seconds,
         )
 
-        expires_at = (datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=expire_seconds)).isoformat()
+        expires_at = (
+            datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=expire_seconds)
+        ).isoformat()
         return ShareLinkResponse(
             share_url=share_url,
             transfer_id=transfer_id,
