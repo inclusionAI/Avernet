@@ -21,6 +21,7 @@ from agentclaw.community.adapters.http.dependencies import RequestContext
 from agentclaw.community.adapters.http.economy import admin_router
 from agentclaw.community.adapters.http.economy.schemas import (
     RecordsDeleteRequest,
+    TicketDeleteCascadeRequest,
 )
 from agentclaw.community.core.economy.governance.services.notify_render_service import (
     NotifyRenderService,
@@ -77,6 +78,30 @@ class FakeTaskRecordRepo:
         self._deleted_ids.append(ids)
         return before - len(self._rows), not_found
 
+    def find_by_ticket_id(self, ticket_id: str, **kw: Any) -> Any:
+        """Fake: return a lightweight ticket-shaped object or None.
+
+        The real repo returns a domain GovernanceTicket; the cascade service
+        only reads ticket_id/worker_id/bot_id/owner_id, so SimpleNamespace
+        suffices.
+        """
+        from types import SimpleNamespace
+
+        row = next((r for r in self._rows if r["ticket_id"] == ticket_id), None)
+        if row is None:
+            return None
+        return SimpleNamespace(
+            ticket_id=row["ticket_id"],
+            worker_id=row.get("worker_id", "w:1"),
+            bot_id=row.get("bot_id"),
+            owner_id=row.get("owner_id"),
+        )
+
+    def delete_by_ticket_id(self, ticket_id: str, **kw: Any) -> int:
+        before = len(self._rows)
+        self._rows = [r for r in self._rows if r["ticket_id"] != ticket_id]
+        return before - len(self._rows)
+
 
 class FakeNotifyLogRepo:
     """In-memory fake of NotifyLogRepository for delete operations."""
@@ -106,6 +131,14 @@ class FakeNotifyLogRepo:
         before = len(self._rows)
         self._rows = [r for r in self._rows if r["notification_id"] not in notification_ids]
         return before - len(self._rows), not_found
+
+    def count_by_ticket_id(self, ticket_id: str, **kw: Any) -> int:
+        return sum(1 for r in self._rows if r["ticket_id"] == ticket_id)
+
+    def delete_by_ticket_id(self, ticket_id: str, **kw: Any) -> int:
+        before = len(self._rows)
+        self._rows = [r for r in self._rows if r["ticket_id"] != ticket_id]
+        return before - len(self._rows)
 
 
 class FakeAuditRepo:
@@ -235,6 +268,7 @@ class FakeAdminService:
             audit_repo=self._audit_repo,
             config=FakeGovernanceConfig(),  # type: ignore[arg-type]
             lifecycle_svc=self._lifecycle_svc,
+            task_repo=self._task_repo,  # type: ignore[arg-type]
         )
 
         self._real_svc = GovernanceAdminService(
@@ -244,13 +278,20 @@ class FakeAdminService:
             audit_repo=self._audit_repo,
             task_repo=self._task_repo,  # type: ignore[arg-type]
             config=FakeGovernanceConfig(),  # type: ignore[arg-type]
-            notify_sender=None,  # type: ignore[arg-type]
             lifecycle_svc=self._lifecycle_svc,
-        render_svc=NotifyRenderService(),
+            render_svc=NotifyRenderService(),
         )
 
     def delete_records(self, body: dict, operator: str) -> dict:
         return self._real_svc.delete_records(body, operator)
+
+    def delete_ticket_cascade(
+        self, *, ticket_id: str, dry_run: bool, reason: str, operator: str,
+    ) -> dict:
+        return self._real_svc.delete_ticket_cascade(
+            ticket_id=ticket_id, dry_run=dry_run, reason=reason,
+            operator=operator,
+        )
 
 
 # ===========================================================================
@@ -655,3 +696,311 @@ class TestDeleteEndpointValidationCornerCases:
         )
         resp = self._call(body, notify_repo=repo)
         assert resp.success is True
+
+
+# ===========================================================================
+# Service-level tests — delete_ticket_cascade (ticket-cascade SDD Task 2)
+# ===========================================================================
+
+
+def _ticket_row(ticket_id: str, **overrides: Any) -> dict:
+    base = {
+        "id": abs(hash(ticket_id)) % 10**9,
+        "ticket_id": ticket_id,
+        "dt_version": "20260710",
+        "bot_id": "bot-1",
+        "owner_id": "owner-1",
+        "worker_id": "owner-1:bot-1",
+    }
+    base.update(overrides)
+    return base
+
+
+def _notify_row(ticket_id: str, notification_id: str) -> dict:
+    return {
+        "notification_id": notification_id,
+        "ticket_id": ticket_id,
+        "bot_id": "bot-1",
+        "owner_id": "owner-1",
+        "worker_id": "owner-1:bot-1",
+    }
+
+
+class TestDeleteTicketCascadeService:
+    """delete_ticket_cascade — best-effort precise cascade (service layer).
+
+    delete_ticket_cascade lives on GovernanceWorkflowService (migrated from
+    GovernanceAdminService on 2026-07-17). These tests construct the real
+    workflow service backed by in-memory fakes.
+    """
+
+    def _svc(
+        self, task_rows: list[dict], notify_rows: list[dict],
+    ) -> GovernanceWorkflowService:
+        from agentclaw.community.core.economy.governance.services.workflow_service import (
+            GovernanceWorkflowService,
+        )
+
+        task_repo = FakeTaskRecordRepo()
+        task_repo.seed(task_rows)
+        notify_repo = FakeNotifyLogRepo()
+        notify_repo.seed(notify_rows)
+        audit_repo = FakeAuditRepo()
+        # cascade only touches repos + audit; lifecycle_svc / whitelist_service
+        # are unused by delete_ticket_cascade, so stubs suffice.
+        return GovernanceWorkflowService(
+            task_repo=task_repo,  # type: ignore[arg-type]
+            audit_repo=audit_repo,  # type: ignore[arg-type]
+            config=FakeGovernanceConfig(),  # type: ignore[arg-type]
+            lifecycle_svc=None,  # type: ignore[arg-type]
+            whitelist_service=None,  # type: ignore[arg-type]
+            notify_repo=notify_repo,  # type: ignore[arg-type]
+        )
+
+    def test_dry_run_previews_notify_count_no_delete_no_audit(self):
+        svc = self._svc(
+            [_ticket_row("tkt-1")],
+            [_notify_row("tkt-1", "n-a"), _notify_row("tkt-1", "n-b")],
+        )
+        result = svc.delete_ticket_cascade(
+            ticket_id="tkt-1", dry_run=True, reason="preview", operator="op-1",
+        )
+        assert result == {
+            "ticket_id": "tkt-1", "ticket_found": True, "dry_run": True,
+            "tickets_deleted": 0, "notify_deleted": 2, "notify_delete_failed": 0,
+        }
+        # nothing deleted, no audit on dry-run
+        assert len(svc._task_repo._rows) == 1
+        assert len(svc._notify_repo._rows) == 2
+        assert svc._audit_repo.audits == []
+
+    def test_real_delete_cascades_ticket_and_notify_with_audit(self):
+        svc = self._svc(
+            [_ticket_row("tkt-1")],
+            [_notify_row("tkt-1", "n-a"), _notify_row("tkt-1", "n-b"),
+             _notify_row("tkt-2", "n-c")],  # unrelated ticket's notify
+        )
+        result = svc.delete_ticket_cascade(
+            ticket_id="tkt-1", dry_run=False, reason="purge", operator="op-1",
+        )
+        assert result["ticket_found"] is True
+        assert result["tickets_deleted"] == 1
+        assert result["notify_deleted"] == 2
+        assert result["notify_delete_failed"] == 0
+        # ticket + its 2 notify gone; tkt-2's notify untouched
+        assert svc._task_repo._rows == []
+        assert {r["notification_id"] for r in svc._notify_repo._rows} == {"n-c"}
+        # audit written with cascade action + structured counts
+        audits = [a for a in svc._audit_repo.audits
+                  if a["action_taken"] == "ticket_cascade_purged"]
+        assert len(audits) == 1
+        assert audits[0]["actor_id"] == "op-1"
+        assert audits[0]["bot_id"] == "bot-1"
+        assert "tickets_deleted=1" in audits[0]["error_msg"]
+        assert "notify_deleted=2" in audits[0]["error_msg"]
+        assert "reason=purge" in audits[0]["error_msg"]
+
+    def test_ticket_not_found_returns_false_no_delete_no_audit(self):
+        svc = self._svc([], [])
+        result = svc.delete_ticket_cascade(
+            ticket_id="nope", dry_run=False, reason="x", operator="op-1",
+        )
+        assert result == {
+            "ticket_id": "nope", "ticket_found": False, "dry_run": False,
+            "tickets_deleted": 0, "notify_deleted": 0, "notify_delete_failed": 0,
+        }
+        assert svc._audit_repo.audits == []
+
+    def test_ticket_with_no_notify_deletes_ticket_with_audit(self):
+        svc = self._svc([_ticket_row("tkt-1")], [])
+        result = svc.delete_ticket_cascade(
+            ticket_id="tkt-1", dry_run=False, reason="x", operator="op-1",
+        )
+        assert result["tickets_deleted"] == 1
+        assert result["notify_deleted"] == 0
+        assert result["notify_delete_failed"] == 0
+        assert len(svc._task_repo._rows) == 0
+        audits = [a for a in svc._audit_repo.audits
+                  if a["action_taken"] == "ticket_cascade_purged"]
+        assert len(audits) == 1
+        assert "notify_deleted=0" in audits[0]["error_msg"]
+
+    def test_best_effort_notify_failure_still_deletes_ticket(self, monkeypatch):
+        svc = self._svc(
+            [_ticket_row("tkt-1")],
+            [_notify_row("tkt-1", "n-a"), _notify_row("tkt-1", "n-b")],
+        )
+        # make notify delete raise — tickets must still be deleted
+        def _boom(ticket_id: str, **kw: Any) -> int:
+            raise RuntimeError("db down")
+        monkeypatch.setattr(svc._notify_repo, "delete_by_ticket_id", _boom)
+
+        result = svc.delete_ticket_cascade(
+            ticket_id="tkt-1", dry_run=False, reason="x", operator="op-1",
+        )
+        # ticket deleted despite notify failure
+        assert result["ticket_found"] is True
+        assert result["tickets_deleted"] == 1
+        assert result["notify_deleted"] == 0
+        assert result["notify_delete_failed"] == 2  # count_by_ticket_id still works
+        assert len(svc._task_repo._rows) == 0
+        # notify rows NOT deleted (delete raised)
+        assert len(svc._notify_repo._rows) == 2
+        # audit still written with failure count
+        audits = [a for a in svc._audit_repo.audits
+                  if a["action_taken"] == "ticket_cascade_purged"]
+        assert len(audits) == 1
+        assert "notify_delete_failed=2" in audits[0]["error_msg"]
+
+    def test_best_effort_double_failure_reports_sentinel_and_never_raises(self, monkeypatch):
+        """DB hard-down: delete_by_ticket_id raises AND the recovery re-count raises.
+
+        Contract: must NOT raise; report notify_delete_failed=-1 (sentinel for
+        "unknown residual — operator must query manually"); ticket already
+        deleted; audit written with the sentinel.
+
+        The preview count (called before the dry_run branch) must still succeed —
+        only the recovery re-count inside _cascade_delete_notify fails. A call
+        counter lets the first count succeed and the second raise.
+        """
+        svc = self._svc(
+            [_ticket_row("tkt-1")],
+            [_notify_row("tkt-1", "n-a"), _notify_row("tkt-1", "n-b")],
+        )
+
+        def _delete_boom(ticket_id: str, **kw: Any) -> int:
+            raise RuntimeError("db down")
+        _count_n = {"n": 0}
+
+        def _count_fail_second(ticket_id: str, **kw: Any) -> int:
+            _count_n["n"] += 1
+            if _count_n["n"] == 1:
+                return 2  # preview count succeeds
+            raise RuntimeError("db still down")  # recovery re-count fails
+
+        monkeypatch.setattr(svc._notify_repo, "delete_by_ticket_id", _delete_boom)
+        monkeypatch.setattr(svc._notify_repo, "count_by_ticket_id", _count_fail_second)
+
+        # must not raise
+        result = svc.delete_ticket_cascade(
+            ticket_id="tkt-1", dry_run=False, reason="x", operator="op-1",
+        )
+        assert result["ticket_found"] is True
+        assert result["tickets_deleted"] == 1  # ticket deleted before notify attempt
+        assert result["notify_deleted"] == 0
+        assert result["notify_delete_failed"] == -1  # sentinel from double failure
+        assert len(svc._task_repo._rows) == 0
+        assert _count_n["n"] == 2  # preview + recovery both attempted
+        audits = [a for a in svc._audit_repo.audits
+                  if a["action_taken"] == "ticket_cascade_purged"]
+        assert len(audits) == 1
+        assert "notify_delete_failed=-1" in audits[0]["error_msg"]
+
+
+# ===========================================================================
+# Endpoint tests — POST /admin/tickets:delete-cascade (ticket-cascade SDD Task 3)
+# ===========================================================================
+
+
+class TestDeleteCascadeEndpoint:
+    """POST /workflow/tickets:delete-cascade — router → workflow_svc path.
+
+    delete_ticket_cascade lives on GovernanceWorkflowService (migrated from
+    GovernanceAdminService on 2026-07-17); the handler moved to workflow_router.
+    """
+
+    def _call(
+        self, body: TicketDeleteCascadeRequest, *,
+        task_rows: list[dict] | None = None,
+        notify_rows: list[dict] | None = None,
+        user_id: str = "operator-1",
+    ) -> tuple[Any, "GovernanceWorkflowService"]:
+        from agentclaw.community.adapters.http.economy import workflow_router
+        from agentclaw.community.core.economy.governance.services.workflow_service import (
+            GovernanceWorkflowService,
+        )
+
+        task_repo = FakeTaskRecordRepo()
+        task_repo.seed(task_rows or [])
+        notify_repo = FakeNotifyLogRepo()
+        notify_repo.seed(notify_rows or [])
+        audit_repo = FakeAuditRepo()
+        admin_svc = GovernanceWorkflowService(
+            task_repo=task_repo,  # type: ignore[arg-type]
+            audit_repo=audit_repo,  # type: ignore[arg-type]
+            config=FakeGovernanceConfig(),  # type: ignore[arg-type]
+            lifecycle_svc=None,  # type: ignore[arg-type]
+            whitelist_service=None,  # type: ignore[arg-type]
+            notify_repo=notify_repo,  # type: ignore[arg-type]
+        )
+        resp = _run(workflow_router.tickets_delete_cascade(
+            body=body, ctx=_ctx(user_id=user_id), admin_svc=admin_svc,
+        ))
+        return resp, admin_svc
+
+    def test_dry_run_preview_returns_notify_count_no_delete(self):
+        resp, svc = self._call(
+            TicketDeleteCascadeRequest(ticket_id="tkt-1", dry_run=True, reason="preview"),
+            task_rows=[_ticket_row("tkt-1")],
+            notify_rows=[_notify_row("tkt-1", "n-a"), _notify_row("tkt-1", "n-b")],
+        )
+        assert resp.success is True
+        assert resp.data == {
+            "ticket_id": "tkt-1", "ticket_found": True, "dry_run": True,
+            "tickets_deleted": 0, "notify_deleted": 2, "notify_delete_failed": 0,
+        }
+        # nothing deleted, no audit on dry-run
+        assert len(svc._task_repo._rows) == 1
+        assert len(svc._notify_repo._rows) == 2
+        assert svc._audit_repo.audits == []
+
+    def test_real_delete_cascades_both_with_audit_and_precise_scope(self):
+        resp, svc = self._call(
+            TicketDeleteCascadeRequest(ticket_id="tkt-1", dry_run=False, reason="purge"),
+            task_rows=[_ticket_row("tkt-1"), _ticket_row("tkt-2")],
+            notify_rows=[_notify_row("tkt-1", "n-a"), _notify_row("tkt-1", "n-b"),
+                         _notify_row("tkt-2", "n-c")],
+        )
+        assert resp.success is True
+        assert resp.data["ticket_found"] is True
+        assert resp.data["tickets_deleted"] == 1
+        assert resp.data["notify_deleted"] == 2
+        assert resp.data["notify_delete_failed"] == 0
+        # precision cascade: only tkt-1 ticket + its 2 notify gone; tkt-2 untouched
+        assert {r["ticket_id"] for r in svc._task_repo._rows} == {"tkt-2"}
+        assert {r["notification_id"] for r in svc._notify_repo._rows} == {"n-c"}
+        audits = [a for a in svc._audit_repo.audits
+                  if a["action_taken"] == "ticket_cascade_purged"]
+        assert len(audits) == 1
+        assert audits[0]["actor_id"] == "operator-1"
+
+    def test_ticket_not_found_returns_false_no_change(self):
+        resp, svc = self._call(
+            TicketDeleteCascadeRequest(ticket_id="nope", dry_run=False, reason="x"),
+            task_rows=[_ticket_row("tkt-1")],
+            notify_rows=[_notify_row("tkt-1", "n-a")],
+        )
+        assert resp.success is True
+        assert resp.data == {
+            "ticket_id": "nope", "ticket_found": False, "dry_run": False,
+            "tickets_deleted": 0, "notify_deleted": 0, "notify_delete_failed": 0,
+        }
+        assert len(svc._task_repo._rows) == 1
+        assert len(svc._notify_repo._rows) == 1
+        assert svc._audit_repo.audits == []
+
+    def test_ticket_with_no_notify_deletes_ticket_with_audit(self):
+        resp, svc = self._call(
+            TicketDeleteCascadeRequest(ticket_id="tkt-1", dry_run=False, reason="orphan"),
+            task_rows=[_ticket_row("tkt-1")],
+            notify_rows=[],
+        )
+        assert resp.success is True
+        assert resp.data["tickets_deleted"] == 1
+        assert resp.data["notify_deleted"] == 0
+        assert resp.data["notify_delete_failed"] == 0
+        assert len(svc._task_repo._rows) == 0
+        audits = [a for a in svc._audit_repo.audits
+                  if a["action_taken"] == "ticket_cascade_purged"]
+        assert len(audits) == 1
+        assert "notify_deleted=0" in audits[0]["error_msg"]

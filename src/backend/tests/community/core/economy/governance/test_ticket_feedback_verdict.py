@@ -26,7 +26,7 @@ def _make_ticket(**overrides) -> GovernanceTicket:
         last_decision_dt_version=None, last_seen_at=None, last_sync_at=None,
     )
     defaults = dict(
-        ticket_id="T-001", worker_id="o:b", bot_id="b", owner_id="o", bot_name="B",
+        ticket_id="T-001", worker_id="o:b", bot_id="b", owner_id="o", owner_name=None, bot_name="B",
         _snapshot=snapshot, governance_status=GovernanceStatus.WAITING_REVIEW,
         assignee=None, user_feedback=None, feedback_at=None, feedback_remark=None,
         feedback_source=None, close_reason=None, closed_at=None, cooldown_until=None,

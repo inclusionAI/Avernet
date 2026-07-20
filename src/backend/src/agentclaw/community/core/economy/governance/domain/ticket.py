@@ -11,10 +11,13 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
-from agentclaw.community.core.economy.governance.domain.base import _iso
+from agentclaw.community.core.economy.governance.domain.base import (
+    _iso,
+    _normalize_delivery_status,
+)
 from agentclaw.community.core.economy.governance.domain.enums import (
+    CloseReason,
     GovernanceStatus,
-    Response,
     TicketAction,
 )
 
@@ -43,6 +46,7 @@ class MutableSnapshot:
       - severity                 ← orm.governance_max_priority
       - estimated_saving_tokens  ← orm.expected_token_saving
       - saving_ratio             ← orm.saving_ratio
+      - token_baseline          ← orm.token_baseline (guard: 非 None 才刷新, 见 lifecycle_service)
       - task_summary             ← orm.task_summary
       - notification_structured  ← orm.notification_structured
       - analysis_status          ← orm.analysis_status
@@ -67,7 +71,9 @@ class MutableSnapshot:
     last_decision_dt_version: str | None
     last_seen_at: datetime | None
     last_sync_at: datetime | None
-    delivery_status: str = "none"  # 最近通知投递状态: none/first_send:sent/reminder:failed/...
+    delivery_status: str = "pending"  # 最近通知投递状态单值: pending/sent/failed/cancelled
+    last_notified_at: datetime | None = None  # 最近一次成功通知时间(首投/reminder sent时刷)
+    token_baseline: int | None = None
 
 
 # ── 状态机转换表(工单) ─────────────────────────
@@ -75,15 +81,19 @@ class MutableSnapshot:
 TICKET_TRANSITIONS: dict[GovernanceStatus, frozenset[GovernanceStatus]] = {
     GovernanceStatus.OPEN: frozenset({
         GovernanceStatus.SCHEDULED, GovernanceStatus.WAITING_REVIEW,
-        GovernanceStatus.CLOSED,
+        GovernanceStatus.OBSERVED, GovernanceStatus.CLOSED,
     }),
     GovernanceStatus.SCHEDULED: frozenset({
-        GovernanceStatus.WAITING_REVIEW, GovernanceStatus.CLOSED,
+        GovernanceStatus.WAITING_REVIEW, GovernanceStatus.OBSERVED,
+        GovernanceStatus.CLOSED,
     }),
     GovernanceStatus.WAITING_REVIEW: frozenset({
         GovernanceStatus.OPEN, GovernanceStatus.SCHEDULED,
-        GovernanceStatus.CLOSED,
+        GovernanceStatus.OBSERVED, GovernanceStatus.CLOSED,
     }),
+    # OBSERVED = 白名单观察态。仅可被删白收尾转 CLOSED;不回活跃态
+    # (删白后由 offline-batch 正常 Step6 重建新 OPEN 单,而非复活同单)。
+    GovernanceStatus.OBSERVED: frozenset({GovernanceStatus.CLOSED}),
     GovernanceStatus.CLOSED: frozenset(),
 }
 
@@ -235,6 +245,7 @@ class GovernanceTicket:
     worker_id: str
     bot_id: str | None
     owner_id: str | None
+    owner_name: str | None
     bot_name: str | None
     _snapshot: MutableSnapshot
 
@@ -350,8 +361,20 @@ class GovernanceTicket:
 
     @property
     def delivery_status(self) -> str:
-        """最近通知投递状态 — 快照委托(none/first_send:sent/reminder:failed/...)。"""
+        """最近通知投递状态单值 — 快照委托。
+
+        活动4态: pending/sent/failed/cancelled。
+        none为列默认哨兵(历史遗留),读时经懒补全归一为pending。
+        """
         return self._snapshot.delivery_status
+
+    @property
+    def last_notified_at(self) -> datetime | None:
+        """最近一次成功通知时间 — 快照委托。
+
+        首投/reminder 投递成功(sent)时刷新;失败/取消不动。
+        """
+        return self._snapshot.last_notified_at
 
     # ── 业务 property ──────────────────────────────
 
@@ -492,6 +515,32 @@ class GovernanceTicket:
         self.assignee = None  # closed 释放 active_worker
         self.remind_at = None  # 对齐 repo L229,默认 None 清空
 
+    def enter_observed(self, *, close_reason: str | None = None) -> None:
+        """进入白名单观察态(OBSERVED)。
+
+        与 :meth:`close` 的关键差异:转 OBSERVED 而非 CLOSED、**不设
+        ``closed_at``(OBSERVED 非关闭,设了会被 ``find_latest_closed_by_worker``
+        误纳 cooldown 视野)、释放 ``active_worker``(观察不占治理人力)、
+        清 ``remind_at``。
+
+        本方法是"转 OBSERVED"状态机动作的**单一入口** —— 状态机动作(转态+
+        释放 assignee+清 remind_at+不设 closed_at+不碰 cooldown)是主职责,
+        ``close_reason`` 是附带语义:关单转态场景传值,建单场景传 None。
+
+        三路入口复用本方法(方案 A 链路同源):
+          - ``review(approve_whitelist)`` 审批加白 → 传 WHITELIST_APPROVED
+          - ``observe_for_whitelist`` scan 兜底关残留活跃单 → 传 SCAN_WHITELISTED
+          - ``open_observed_ticket`` off-batch 建观察单(非关单)→ 不传(None)
+
+        Args:
+            close_reason: 观察来源(WHITELIST_APPROVED / SCAN_WHITELISTED);
+                建单场景传 None(非关单,无关单原因)。
+        """
+        self.transition_to(GovernanceStatus.OBSERVED)
+        self.close_reason = close_reason
+        self.assignee = None  # 释放 active_worker(观察不占治理人力)
+        self.remind_at = None
+
     def pause(self, *, review_reason: str) -> None:
         """暂停工单 — 进入 waiting_review。
 
@@ -531,7 +580,9 @@ class GovernanceTicket:
                               可带 cooldown_until
           approve_scheduled → SCHEDULED(同意排期,不关单),close_reason='schedule_approved',
                               保留 repair_deadline;不释放 active_worker(仍 active 观察)
-          approve_whitelist → CLOSED,close_reason='whitelisted'
+          approve_whitelist → OBSERVED,close_reason=WHITELIST_APPROVED(白名单观察态:
+                              释放 active_worker、不设 closed_at,由后续 off-batch
+                              持续刷新快照,不发通知、不占治理人力)
           reject_for_reopen → CLOSED,close_reason='review_rejected'(打回仍关闭,
                               下个 scan 重建 open 单)
         """
@@ -548,7 +599,16 @@ class GovernanceTicket:
             self.close_reason = close_reason or "schedule_approved"
             return
 
-        # 其余三态 → CLOSED
+        if review_decision == "approve_whitelist":
+            # 加白 → OBSERVED(白名单观察态):释放 active_worker、不设 closed_at、
+            # 清 remind_at(详见 enter_observed)。后续 off-batch 持续刷新快照,
+            # 不发通知、不占治理人力。
+            self.enter_observed(
+                close_reason=close_reason or CloseReason.WHITELIST_APPROVED,
+            )
+            return
+
+        # 其余两态(approve_close / reject_for_reopen)→ CLOSED
         self.transition_to(GovernanceStatus.CLOSED)
         self.closed_at = now
         self.assignee = None   # 释放 active_worker
@@ -556,8 +616,6 @@ class GovernanceTicket:
             self.close_reason = close_reason or "approve_close"
             if cooldown_until is not None:
                 self.cooldown_until = cooldown_until
-        elif review_decision == "approve_whitelist":
-            self.close_reason = close_reason or "whitelisted"
         elif review_decision == "reject_for_reopen":
             self.close_reason = close_reason or "review_rejected"
         else:
@@ -577,6 +635,21 @@ class GovernanceTicket:
         """
         self._snapshot = replace(self._snapshot, **fields)
 
+    def update_token_baseline(self, value: int | None) -> None:
+        """覆盖 guard 更新 token_baseline — 仅当传入非 None 时刷新。
+
+        与 :meth:`refresh_snapshot` 的差异:refresh_snapshot 走 ``replace`` 会把
+        ``token_baseline=None`` 无条件 erase 既有值;该方法 guard 非 None 才更新,
+        保留既单(供 offline-batch 只在 有新基线数据 时覆盖,无则不动)。
+        服务层应调本方法而非直戳 ``_snapshot``(DDD 封装)。
+
+        Args:
+            value: 新 token_baseline;None 时 no-op(保持既有)。
+        """
+        if value is None:
+            return
+        self._snapshot = replace(self._snapshot, token_baseline=value)
+
     # ── 工厂 ─────────────────────────────────────────────
 
     @classmethod
@@ -587,6 +660,7 @@ class GovernanceTicket:
         worker_id: str,
         bot_id: str | None,
         owner_id: str | None,
+        owner_name: str | None,
         bot_name: str | None,
         snapshot: MutableSnapshot,
         assignee: str | None = None,
@@ -598,6 +672,7 @@ class GovernanceTicket:
             worker_id: owner_id:bot_id。
             bot_id: Bot ID。
             owner_id: 负责人 ID。
+            owner_name: 负责人显示名(展示用,可空)。
             bot_name: Bot 名称。
             snapshot: 可变快照(创建时一次性写入)。
             assignee: 工单持有人(active=worker_id; closed=None)。
@@ -610,6 +685,7 @@ class GovernanceTicket:
             worker_id=worker_id,
             bot_id=bot_id,
             owner_id=owner_id,
+            owner_name=owner_name,
             bot_name=bot_name,
             _snapshot=snapshot,
             governance_status=GovernanceStatus.OPEN,
@@ -658,6 +734,7 @@ class GovernanceTicket:
             worker_id=obj.worker_id,
             bot_id=obj.bot_id,
             owner_id=obj.owner_id,
+            owner_name=obj.owner_name,
             bot_name=obj.bot_name,
             # 可变快照
             _snapshot=MutableSnapshot(
@@ -669,6 +746,7 @@ class GovernanceTicket:
                 severity=obj.governance_max_priority,
                 estimated_saving_tokens=obj.expected_token_saving,
                 saving_ratio=_saving_ratio,
+                token_baseline=obj.token_baseline,
                 task_summary=obj.task_summary,
                 notification_structured=obj.notification_structured,
                 analysis_status=obj.analysis_status,
@@ -676,7 +754,8 @@ class GovernanceTicket:
                 last_decision_dt_version=obj.last_decision_dt_version,
                 last_seen_at=obj.last_seen_at,
                 last_sync_at=obj.last_sync_at,
-                delivery_status=getattr(obj, "delivery_status", None) or "none",
+                delivery_status=_normalize_delivery_status(getattr(obj, "delivery_status", None)),
+                last_notified_at=getattr(obj, "last_notified_at", None),
             ),
             # 生命周期态
             governance_status=GovernanceStatus(obj.governance_status or "open"),
@@ -726,6 +805,7 @@ class GovernanceTicket:
         row.worker_id = self.worker_id
         row.bot_id = self.bot_id
         row.owner_id = self.owner_id
+        row.owner_name = self.owner_name
         row.bot_name = self.bot_name
         # 可变快照
         s = self._snapshot
@@ -736,6 +816,7 @@ class GovernanceTicket:
         row.hit_dimensions_count = s.hit_dimensions_count
         row.governance_max_priority = s.severity
         row.expected_token_saving = s.estimated_saving_tokens
+        row.token_baseline = s.token_baseline
         row.saving_ratio = s.saving_ratio
         row.task_summary = s.task_summary
         row.notification_structured = s.notification_structured
@@ -766,6 +847,7 @@ class GovernanceTicket:
         row.feedback_payload = self.feedback_payload
         row.actor_id = self.actor_id
         row.delivery_status = self.delivery_status
+        row.last_notified_at = self.last_notified_at
         return row
 
     def apply_to(self, row: object) -> None:
@@ -797,6 +879,7 @@ class GovernanceTicket:
         row.feedback_payload = self.feedback_payload
         row.actor_id = self.actor_id
         row.delivery_status = self.delivery_status
+        row.last_notified_at = self.last_notified_at
 
     def to_dict(self) -> dict:
         """API 序列化 — router 直接 ``data=[t.to_dict() for t in items]``。
@@ -812,6 +895,7 @@ class GovernanceTicket:
             "bot_id": self.bot_id,
             "bot_name": self.bot_name,
             "owner_id": self.owner_id,
+            "owner_name": self.owner_name,
             "dt_version": s.dt_version,
             "governance_decision": s.initial_decision,
             "latest_decision": s.current_decision,
@@ -819,6 +903,7 @@ class GovernanceTicket:
             "hit_dimensions_count": s.hit_dimensions_count,
             "governance_max_priority": s.severity,
             "expected_token_saving": s.estimated_saving_tokens,
+            "token_baseline": s.token_baseline,
             "saving_ratio": s.saving_ratio,
             "task_summary": s.task_summary,
             "notification_structured": s.notification_structured,

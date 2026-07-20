@@ -90,6 +90,7 @@ def _sample_ticket(*, last_sync_at: datetime | None = None) -> GovernanceTicket:
         worker_id="staff-001:bot-001",
         bot_id="bot-001",
         owner_id="staff-001",
+        owner_name=None,
         bot_name="TestBot",
         snapshot=snapshot,
     )

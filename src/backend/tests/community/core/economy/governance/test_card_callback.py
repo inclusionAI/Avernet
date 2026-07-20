@@ -35,7 +35,7 @@ from agentclaw.community.core.economy.governance.services.lifecycle_service impo
     GovernanceLifecycleService,
 )
 
-from .conftest import FakeDB, FakeGovernanceConfig, FakeWhitelistService
+from .conftest import FakeDB, FakeGovernanceConfig
 
 
 def _make_notification(session, **overrides):
@@ -97,14 +97,12 @@ def _build_svc(engine):
     notify_repo = NotifyLogRepository(db=db)
     task_repo = TaskRecordRepository(db=db)
     audit_repo = GovernanceAuditRepository(db=db)
-    wl_svc = FakeWhitelistService()
     lifecycle_svc = GovernanceLifecycleService(
         task_repo=task_repo,
         notify_repo=notify_repo,
         audit_repo=audit_repo,
     )
     feedback_svc = GovernanceFeedbackService(
-        whitelist_service=wl_svc,
         notify_repo=notify_repo,
         task_repo=task_repo,
         audit_repo=audit_repo,
@@ -426,57 +424,36 @@ class TestCardCallbackNoAuth:
         assert card_audits[-1].actor_id == "staff-339245"
 
     def test_empty_user_id_whitelist_uses_owner(self, session, engine):
-        """user_id="" → whitelist add created_by = log_row.owner_id."""
-        wl_calls: list[dict] = []
+        """Spec B:user_id="" → 反馈仅转 waiting_review,不直接加白。
 
-        class _TrackingWhitelistService:
-            def bulk_whitelist(self, bot_ids, reason, operator):
-                return {"whitelisted": len(bot_ids), "cancelled": 0}
-
-            def delete_whitelist_entry(self, *, bot_id, owner_id, reason, operator):
-                return {"deleted": False, "bot_id": bot_id, "owner_id": owner_id}
-
-            def count_by_type(self, **kwargs):
-                return 0
-
-            def add(self, *, bot_id, owner_id, created_by, **kwargs):
-                wl_calls.append({"bot_id": bot_id, "owner_id": owner_id, "created_by": created_by})
-                from agentclaw.community.core.economy.governance.domain.whitelist import WhitelistEntry
-                return WhitelistEntry(
-                    bot_id=bot_id, owner_id=owner_id,
-                    whitelist_type=kwargs.get("whitelist_type", "governance"),
-                    source=kwargs.get("source", "manual"),
-                    reason=kwargs.get("reason", ""),
-                    created_by=created_by, expires_at=None,
-                )
-
-        Session = sessionmaker(bind=engine, expire_on_commit=False)
-        db = FakeDB(lambda: Session(bind=engine))
-        wl_svc = _TrackingWhitelistService()
-        notify_repo = NotifyLogRepository(db=db)
-        task_repo = TaskRecordRepository(db=db)
-        audit_repo = GovernanceAuditRepository(db=db)
-        # whitelist-add is owned by feedback_service (lifecycle_service has no
-        # whitelist dep), so wire the tracker into the feedback_service so the
-        # created_by assertion sees feedback_service's add.
-        lifecycle_svc = GovernanceLifecycleService(
-            task_repo=task_repo,
-            notify_repo=notify_repo,
-            audit_repo=audit_repo,
+        审计 user_whitelisted 的 actor_id 落 log_row.owner_id(空 user_id 用 owner);
+        白单表无该 bot 条目(加白改由 admin approve_whitelist 唯一负责)。
+        """
+        from agentclaw.community.core.economy.governance.domain.enums import AuditAction
+        from agentclaw.community.core.economy.governance.repositories.orm import (
+            AuditLogOrm,
+            GovernanceTicketOrm,
+            WhitelistEntryOrm,
         )
-        svc = GovernanceFeedbackService(
-            whitelist_service=wl_svc,
-            notify_repo=notify_repo,
-            task_repo=task_repo,
-            audit_repo=audit_repo,
-            config=FakeGovernanceConfig(),
-            lifecycle_svc=lifecycle_svc,
-        )
+
+        svc = _build_svc(engine)
         _make_notification(session, owner_id="staff-350361", notification_id="wl-1")
 
-        svc.resolve("wl-1", "whitelist", "", remark="needed", source="card_callback")
-        assert len(wl_calls) == 1
-        assert wl_calls[0]["created_by"] == "staff-350361"
+        result = svc.resolve("wl-1", "whitelist", "", remark="needed", source="card_callback")
+        assert result.success
+
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            # 1. 白单表无条目(反馈不直接加白)
+            assert s.query(WhitelistEntryOrm).count() == 0
+            # 2. 工单转待审
+            ticket = s.query(GovernanceTicketOrm).filter_by(ticket_id="t-wl-1").one()
+            assert ticket.governance_status == "waiting_review"
+            # 3. user_whitelisted 审计 actor_id = owner(空 user_id 用 owner)
+            audits = [a for a in s.query(AuditLogOrm).all()
+                      if a.action_taken == AuditAction.USER_WHITELIST]
+            assert len(audits) >= 1
+            assert audits[0].actor_id == "staff-350361"
 
     def test_actor_id_overrides_empty_user_id(self, session, engine):
         """user_id="" + actor_id="admin" → actor_id takes precedence."""

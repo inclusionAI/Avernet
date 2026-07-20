@@ -13,8 +13,14 @@ analysis_daily is a process-level intermediate; only task_record_daily (the
 scan + notification core fields) is upserted into the online DB.
 
 Pipeline bookkeeping fields (task_create_key, analysis_ref,
-estimated_improvement_range, baseline_tokens) are NOT stored — they
-are ODPS internals that the online side never needs.
+estimated_improvement_range) are NOT stored — they are ODPS internals
+that the online side never needs.
+
+``token_baseline`` is an *exception*: originally a pipeline-internal
+bookkeeping field, it is now stored online as a display field on the
+governance ticket (operations needs baseline token consumption visible
+in the ticket list/detail). Mutated only via the offline-batch snapshot
+refresh path.
 
 Env isolation: all 4 tables carry an ``env`` column (default ``get_current_env``)
 so that dev / pre / prod sharing the same MySQL database do not read or
@@ -264,7 +270,7 @@ class AuditLogOrm(Base):
     hit_dimensions = Column(String(512))
     expected_token_saving = Column(BigInteger, nullable=True)
     saving_ratio = Column(Numeric(10, 4), nullable=True)
-    action_taken = Column(String(64))  # enqueued/whitelist_filtered/muted/cooldown_filtered/auto_resolved/mute_expired/out_of_scope/reminded/expired_unresolved/data_not_ready/error/user_resolved/admin_*
+    action_taken = Column(String(64))  # enqueued/scan_whitelisted/muted/cooldown_filtered/auto_resolved/mute_expired/out_of_scope/reminded/expired_unresolved/data_not_ready/error/user_resolved/admin_*
     source = Column(String(32), default="daily_scan")
     error_msg = Column(Text, nullable=True)
     actor_id = Column(String(64), nullable=True, comment="实际操作人ID — owner自操作=owner_id，admin代操作=admin_id，系统行为=NULL")
@@ -403,6 +409,7 @@ class GovernanceTicketOrm(Base):
     worker_id = Column(String(160), nullable=False)  # 工单身份: owner_id:bot_id (禁止 device worker_id)
     bot_id = Column(String(64))
     owner_id = Column(String(64), nullable=True, comment="负责人ID")
+    owner_name = Column(String(256), nullable=True, comment="Bot owner display name")
     dt_version = Column(String(8), nullable=False, comment="工单当前所基于的最新数据版本")
     governance_decision = Column(
         String(32),
@@ -415,6 +422,7 @@ class GovernanceTicketOrm(Base):
     hit_dimensions_count = Column(Integer)
     governance_max_priority = Column(String(8))  # P0/P1
     expected_token_saving = Column(BigInteger, nullable=True)
+    token_baseline = Column(BigInteger, nullable=True, comment="Token consumption baseline")
     saving_ratio = Column(Numeric(10, 4), nullable=True)
     task_summary = Column(Text, nullable=True)
     notification_structured = Column(Text, nullable=True, comment="最新快照: 原始 JSON 结构")
@@ -475,7 +483,8 @@ class GovernanceTicketOrm(Base):
     # --- 其它 ---
     feedback_payload = Column(Text, nullable=True, comment="结构化反馈 JSON")
     actor_id = Column(String(64), nullable=True, comment="实际操作人ID")
-    delivery_status = Column(String(32), default="none", comment="最近通知投递状态: none/first_send:sent/reminder:failed/...")
+    delivery_status = Column(String(32), default="none", comment="最近通知投递状态单值: pending/sent/failed/cancelled;none 为列默认哨兵(历史遗留)")
+    last_notified_at = Column(TIMESTAMP, nullable=True, default=None, comment="最近一次成功通知时间(首投/reminder sent 时刷新;失败/取消不动)")
 
     def to_dict(self) -> dict:
         """Convert to plain dict — safe to use after session closes.
@@ -497,12 +506,14 @@ class GovernanceTicketOrm(Base):
             "bot_id": self.bot_id,
             "bot_name": self.bot_name,
             "owner_id": self.owner_id,
+            "owner_name": self.owner_name,
             "dt_version": self.dt_version,
             "governance_decision": self.governance_decision,
             "hit_dimensions": self.hit_dimensions,
             "hit_dimensions_count": self.hit_dimensions_count,
             "governance_max_priority": self.governance_max_priority,
             "expected_token_saving": self.expected_token_saving,
+            "token_baseline": self.token_baseline,
             "saving_ratio": float(self.saving_ratio) if self.saving_ratio else None,
             "task_summary": self.task_summary,
             "notification_structured": self.notification_structured,
@@ -531,6 +542,8 @@ class GovernanceTicketOrm(Base):
             "remind_count": self.remind_count,
             "feedback_payload": self.feedback_payload,
             "actor_id": self.actor_id,
+            "delivery_status": self.delivery_status,
+            "last_notified_at": self.last_notified_at,
             "last_sync_at": self.last_sync_at,
             "env": self.env,
             "gmt_create": self.gmt_create,

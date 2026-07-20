@@ -24,7 +24,11 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.base import Base
-from agentclaw.community.core.economy.governance.domain.enums import AuditAction
+from agentclaw.community.core.economy.governance.domain.enums import (
+    AuditAction,
+    CloseReason,
+    GovernanceStatus,
+)
 from agentclaw.community.core.economy.governance.repositories.orm import (
     AuditLogOrm,
     GovernanceNotificationOrm,
@@ -42,8 +46,8 @@ from agentclaw.community.core.economy.governance.repositories.task_record_repo i
 from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
     GovernanceWhitelistRepository,
 )
-from agentclaw.community.core.economy.governance.services.admin_service import (
-    GovernanceAdminService,
+from agentclaw.community.core.economy.governance.services.delivery_service import (
+    GovernanceDeliveryService,
 )
 from agentclaw.community.core.economy.governance.services.record_process_service import (
     GovernanceRecordService,
@@ -175,7 +179,7 @@ class _FakeScanSvc:
 
 
 def _build_admin_svc(engine):
-    """Build GovernanceAdminService with in-memory DB."""
+    """Build GovernanceDeliveryService with in-memory DB."""
     db = _db_from_engine(engine)
     cache = FakeCache()
     notify_repo = NotifyLogRepository(db=db)
@@ -196,17 +200,16 @@ def _build_admin_svc(engine):
         audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
         lifecycle_svc=lifecycle_svc,
+        task_repo=task_repo,
     )
-    svc = GovernanceAdminService(
-        cache=cache,
-        whitelist_service=whitelist_service,
+    svc = GovernanceDeliveryService(
         notify_repo=notify_repo,
         audit_repo=audit_repo,
         task_repo=task_repo,
         config=FakeGovernanceConfig(),
         notify_sender=FakeNotifySender(),
-        lifecycle_svc=lifecycle_svc,
         render_svc=NotifyRenderService(),
+        lifecycle_svc=lifecycle_svc,
     )
     svc._scan_svc = _FakeScanSvc()
     return svc, db
@@ -605,10 +608,10 @@ class TestActiveTicketRefresh:
 
 
 class TestWhitelistHitWithActiveTicket:
-    """_handle_whitelist_hit with active ticket — close + cancel (lines 374-408)."""
+    """_handle_whitelist_hit with active ticket — observe + cancel (lines 374-408)."""
 
     def test_whitelist_hit_closes_active_ticket(self, session, engine):
-        """Whitelist hit + active ticket → ticket closed, notify cancelled."""
+        """Whitelist hit + active ticket → ticket observed(OBSERVED), notify cancelled."""
         svc, db = _build_record_svc(engine)
 
         # Create active ticket
@@ -655,16 +658,17 @@ class TestWhitelistHitWithActiveTicket:
         record = _sample_record(owner_id="staff-004", bot_id="bot-004")
         result = svc.process_record(record, run_id="run-wl-1")
 
-        assert result.action == "whitelist_closed"
+        assert result.action == "scan_whitelisted"
         assert result.ticket_id == "t-whitelist-1"
 
-        # Verify ticket closed
+        # Verify ticket observed (OBSERVED, not closed — 白名单观察态)
         with db.orm_session() as s:
             ticket = s.query(GovernanceTicketOrm).filter_by(
                 ticket_id="t-whitelist-1",
             ).one()
-            assert ticket.governance_status == "closed"
-            assert ticket.close_reason == "whitelist_filtered"
+            assert ticket.governance_status == GovernanceStatus.OBSERVED.value
+            assert ticket.close_reason == CloseReason.SCAN_WHITELISTED.value
+            assert ticket.closed_at is None  # OBSERVED 非关闭
 
         # Verify notify cancelled
         with db.orm_session() as s:
@@ -676,7 +680,7 @@ class TestWhitelistHitWithActiveTicket:
         # Verify audit
         with db.orm_session() as s:
             audits = s.query(AuditLogOrm).all()
-            assert any(a.action_taken == AuditAction.WHITELIST_CLOSED for a in audits)
+            assert any(a.action_taken == AuditAction.SCAN_WHITELISTED for a in audits)
 
 
 # ══════════════════════════════════════════════════════════════════
