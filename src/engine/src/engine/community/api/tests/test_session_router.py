@@ -353,6 +353,17 @@ class TestUpdateSession:
         req = mock_session_api.update.call_args[0][0]
         assert req.runtime is None
 
+    def test_pr_id_forwarded_to_update_request(self, client, mock_session_api):
+        client.post("/api/sessions/sess-1/update?pr_id=pr-123&title=Fix")
+        req = mock_session_api.update.call_args[0][0]
+        assert req.pr_id == "pr-123"
+        assert req.title == "Fix"
+
+    def test_pr_id_defaults_to_none_on_update(self, client, mock_session_api):
+        client.post("/api/sessions/sess-1/update?title=Hi")
+        req = mock_session_api.update.call_args[0][0]
+        assert req.pr_id is None
+
     def test_runtime_in_update_response(self, client, mock_session_api):
         mock_session_api.update.return_value = _make_session(runtime="codefuse-antcc")
         resp = client.post("/api/sessions/sess-1/update?runtime=codefuse-antcc")

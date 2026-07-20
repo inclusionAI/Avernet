@@ -90,6 +90,7 @@ class SessionUpdateRequest(BaseModel):
     user_id: str | None = None
     agent_id: str | None = None
     permission_mode: str | None = None
+    pr_id: str | None = None
 
 
 class SessionHistoryRequest(BaseModel):
