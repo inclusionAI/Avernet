@@ -16,12 +16,17 @@ from agentclaw.community.core.service_bot.types import PublishStage
 @pytest.mark.unit
 def test_enrich_adds_keys_with_stage_value() -> None:
     out = enrich_engine_ext(
-        {"memory_ref": "nas://m"}, bot_id="b7", owner_id="u1", stage=PublishStage.DRAFT
+        {"memory_ref": "nas://m"},
+        bot_id="b7",
+        owner_id="u1",
+        bot_name="Support Bot",
+        stage=PublishStage.DRAFT,
     )
     assert out == {
         "memory_ref": "nas://m",
         "bot_id": "b7",
         "owner_id": "u1",
+        "bot_name": "Support Bot",
         "stage": "draft",
     }
 
@@ -29,19 +34,29 @@ def test_enrich_adds_keys_with_stage_value() -> None:
 @pytest.mark.unit
 def test_enrich_backend_keys_win_collision_and_default_none() -> None:
     out = enrich_engine_ext(
-        {"bot_id": "ENGINE", "stage": "x", "keep": "me"},
+        {"bot_id": "ENGINE", "bot_name": "ENGINE", "stage": "x", "keep": "me"},
         bot_id=None,
         owner_id=None,
+        bot_name=None,
         stage=PublishStage.VERIFY,
     )
-    assert out == {"keep": "me", "bot_id": "", "owner_id": "", "stage": "canary"}
+    assert out == {
+        "keep": "me",
+        "bot_id": "",
+        "owner_id": "",
+        "bot_name": "",
+        "stage": "canary",
+    }
 
 
 @pytest.mark.unit
 def test_enrich_stringifies_bot_id_and_does_not_mutate_input() -> None:
     src = {"a": 1}
-    out = enrich_engine_ext(src, bot_id=7, owner_id="u1", stage=PublishStage.ONLINE)
+    out = enrich_engine_ext(
+        src, bot_id=7, owner_id="u1", bot_name="Bot 7", stage=PublishStage.ONLINE
+    )
     assert out["bot_id"] == "7"
+    assert out["bot_name"] == "Bot 7"
     assert out["stage"] == "release"
     assert src == {"a": 1}  # input untouched
 
