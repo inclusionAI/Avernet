@@ -722,9 +722,7 @@ class TestEnqueueWork:
         that gets written into meta["traceparent"]."""
         carrier = {"traceparent": "00-abc-def-03"}
         mock_tracer = MagicMock()
-        mock_tracer.inject_context = MagicMock(
-            side_effect=lambda c: c.update(carrier)
-        )
+        mock_tracer.inject_context = MagicMock(side_effect=lambda c: c.update(carrier))
         d = _make_dispatcher()
         with patch(
             "secbaas.community.core.service.bot_run."
@@ -741,9 +739,7 @@ class TestEnqueueWork:
         is created with traceparent."""
         carrier = {"traceparent": "00-abc-def-03"}
         mock_tracer = MagicMock()
-        mock_tracer.inject_context = MagicMock(
-            side_effect=lambda c: c.update(carrier)
-        )
+        mock_tracer.inject_context = MagicMock(side_effect=lambda c: c.update(carrier))
         d = _make_dispatcher()
         with patch(
             "secbaas.community.core.service.bot_run."
