@@ -142,7 +142,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         expires_at = (datetime.utcnow() + timedelta(seconds=expire_seconds)).isoformat()
 
         # Validate file_size before routing (applies to both SINGLE and MULTIPART)
-        if file_size < 0:
+        if file_size <= 0:
             raise ValueError(f"file_size must be non-negative, got {file_size}")
 
         # D-01/D-02: SINGLE/MULTIPART routing
