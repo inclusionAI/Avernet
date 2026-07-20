@@ -492,11 +492,15 @@ class ArcaPaasService(PaasService):
             )
         except ArcaSandboxError as e:
             error_str = str(e).lower()
-            # Only "not found" / "does not exist" are idempotent.
-            # "failed to connect" is NOT idempotent — it may be a transient
-            # network error and the sandbox is still running.
+            # ARCA reports an externally reclaimed sandbox as either "not
+            # found", "does not exist", or "sandbox destroyed". All three
+            # mean there is no resource left to destroy. Other connection
+            # failures remain non-idempotent because the sandbox may still be
+            # running.
             if "sandbox" in error_str and (
-                "not found" in error_str or "does not exist" in error_str
+                "not found" in error_str
+                or "does not exist" in error_str
+                or "destroyed" in error_str
             ):
                 self._logger.warning(
                     "Sandbox %s not found during destroy, "
