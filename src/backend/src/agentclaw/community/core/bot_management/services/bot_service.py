@@ -3091,6 +3091,62 @@ class BotService:
 
         return str(provider), str(binding_status) if binding_status else None
 
+    def _resolve_historical_unbound_restart_provider(
+        self,
+        *,
+        bot_id: str,
+        entity_id: str,
+        entity_type: str,
+        env: str,
+    ) -> str | None:
+        """Return a safe provider for a failed bot whose current binding is lost."""
+        page = 1
+        page_size = 100
+        while True:
+            total, bindings = self._device_binding_repo.list_bindings(
+                env=env,
+                entity_id=entity_id,
+                entity_type=entity_type,
+                status=None,
+                page=page,
+                page_size=page_size,
+            )
+            for binding in bindings:
+                if (binding.device_props or {}).get("bolt_id") != bot_id:
+                    continue
+
+                status = str(binding.status or "").upper()
+                if status not in {
+                    DeviceBindingStatus.RELEASED.value,
+                    DeviceBindingStatus.FAILED.value,
+                    DeviceBindingStatus.STOPPED.value,
+                }:
+                    logger.warning(
+                        "[bot_service.restart_bot] reject unbound recovery with live historical binding: "
+                        "bot_id=%s binding_id=%s binding_status=%s",
+                        bot_id,
+                        binding.id,
+                        status or "UNKNOWN",
+                    )
+                    return None
+
+                provider = str(binding.device_provider or "")
+                if provider:
+                    logger.info(
+                        "[bot_service.restart_bot] recover failed unbound bot from historical provider: "
+                        "bot_id=%s binding_id=%s provider=%s binding_status=%s",
+                        bot_id,
+                        binding.id,
+                        provider,
+                        status,
+                    )
+                    return provider
+                return None
+
+            if not bindings or page * page_size >= total:
+                return None
+            page += 1
+
     @staticmethod
     def _activation_in_progress_result(bot: Dict[str, Any]) -> Dict[str, Any]:
         """Return an idempotent response without mutating lifecycle state."""
@@ -3303,10 +3359,11 @@ class BotService:
         # current binding exists, preserve its provider so an existing ARCA bot
         # cannot be migrated to BaaS merely because the owner later entered the
         # create whitelist. An ACTIVE bot without a binding retains the legacy
-        # fallback to normal allocation. A FAILED bot without a binding cannot
-        # safely recover because its historical provider is unknown.
+        # fallback to normal allocation. FAILED bots require a trustworthy
+        # historical provider because their current binding may be lost.
         current_device_provider = None
         binding_id = bot.get("binding_id")
+        recovered_without_binding = False
         if binding_id:
             current_device_provider, binding_status = (
                 self._resolve_current_device_restart_context(
@@ -3348,16 +3405,24 @@ class BotService:
                 f"device_provider={current_device_provider}"
             )
         elif bot_status == "FAILED":
-            logger.warning(
-                "[bot_service.restart_bot] reject failed bot without binding: "
-                "bot_id=%s user_id=%s",
-                bot_id,
-                user_id,
-            )
-            raise BotInvalidLifecycleStateError(
+            current_device_provider = self._resolve_historical_unbound_restart_provider(
                 bot_id=bot_id,
-                current_status="FAILED_WITHOUT_BINDING",
+                entity_id=str(entity_id),
+                entity_type=bot.get("entity_type", "staff"),
+                env=env,
             )
+            if not current_device_provider:
+                logger.warning(
+                    "[bot_service.restart_bot] reject failed bot without recoverable binding: "
+                    "bot_id=%s user_id=%s",
+                    bot_id,
+                    user_id,
+                )
+                raise BotInvalidLifecycleStateError(
+                    bot_id=bot_id,
+                    current_status="FAILED_WITHOUT_BINDING",
+                )
+            recovered_without_binding = True
         else:
             logger.info(
                 f"[bot_service.restart_bot] no binding provider to preserve: "
@@ -3404,7 +3469,11 @@ class BotService:
         lock_key = (env, entity_id, bot_id, lock.lock_token)
         handed_off = False
         try:
-            if current_device_provider == "baas" and self._baas_service_provider is not None:
+            if (
+                binding_id
+                and current_device_provider == "baas"
+                and self._baas_service_provider is not None
+            ):
                 # BaaS 原地重启：不 destroy、不 release binding，bot_uuid/device_uuid 不变,
                 # session NAS 目录复用，历史 session 留存。arca 永不进此支(provider 取自 binding 表)。
                 # 同步完成、无 async 接管，handed_off 保持 False → finally 当场释放锁。
@@ -3413,7 +3482,14 @@ class BotService:
                 )
                 logger.info(f"[bot_service.restart_bot] Bot {bot_id} in-place restart via BaaS, binding preserved")
                 return updated_bot
-            release_ok = self.stop_bot(bot_id=bot_id, user_id=user_id, nick_name=nick_name, release_reason=f"Bot {bot_id} restarted")
+            release_ok = True
+            if not recovered_without_binding:
+                release_ok = self.stop_bot(
+                    bot_id=bot_id,
+                    user_id=user_id,
+                    nick_name=nick_name,
+                    release_reason=f"Bot {bot_id} restarted",
+                )
             updated_bot = self.start_bot(
                 bot_id=bot_id,
                 user_id=user_id,

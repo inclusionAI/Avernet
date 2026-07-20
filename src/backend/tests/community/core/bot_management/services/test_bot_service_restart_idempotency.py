@@ -356,10 +356,124 @@ class TestRestartGuardOrchestration:
         stop.assert_not_called()
         start.assert_not_called()
 
-    def test_failed_bot_without_binding_is_rejected(self):
-        """A failed bot without provider history must not re-enter create rollout."""
+    def test_failed_bot_without_binding_restarts_with_historical_provider(self):
+        """A failed unbound bot allocates a replacement from its own history."""
         repo = FakeRestartLockRepo()
-        svc = _make_service(repo)
+        binding_repo = MagicMock()
+        binding_repo.list_bindings.return_value = (
+            2,
+            [
+                SimpleNamespace(
+                    id=43,
+                    device_provider="arca",
+                    device_props={"bolt_id": "another-bot"},
+                    status=DeviceBindingStatus.RELEASED.value,
+                ),
+                SimpleNamespace(
+                    id=42,
+                    device_provider="arca",
+                    device_props={"bolt_id": "bot001"},
+                    status=DeviceBindingStatus.RELEASED.value,
+                ),
+            ],
+        )
+        svc = _make_service(repo, device_binding_repo=binding_repo)
+        bot = _make_bot(status="FAILED", binding_id=None)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot", return_value=bot) as start:
+            result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result == bot
+        binding_repo.list_bindings.assert_called_once_with(
+            env="dev",
+            entity_id="staff_user001",
+            entity_type="staff",
+            status=None,
+            page=1,
+            page_size=100,
+        )
+        stop.assert_not_called()
+        start.assert_called_once()
+        assert start.call_args.kwargs["device_provider"] == "arca"
+
+    def test_failed_bot_without_binding_is_rejected_without_historical_provider(self):
+        """A failed bot without trusted provider history must not re-enter rollout."""
+        repo = FakeRestartLockRepo()
+        binding_repo = MagicMock()
+        binding_repo.list_bindings.return_value = (0, [])
+        svc = _make_service(repo, device_binding_repo=binding_repo)
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(
+            status="FAILED",
+            binding_id=None,
+        )
+
+        with patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot") as start:
+            with pytest.raises(BotInvalidLifecycleStateError) as exc_info:
+                svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert exc_info.value.current_status == "FAILED_WITHOUT_BINDING"
+        assert repo.acquire_calls == 0
+        stop.assert_not_called()
+        start.assert_not_called()
+
+    def test_failed_bot_without_binding_allocates_new_baas_device_from_history(self):
+        """Historical BaaS provider creates a new binding, never an in-place upgrade."""
+        repo = FakeRestartLockRepo()
+        binding_repo = MagicMock()
+        binding_repo.list_bindings.return_value = (
+            1,
+            [
+                SimpleNamespace(
+                    id=42,
+                    device_provider="baas",
+                    device_props={"bolt_id": "bot001"},
+                    status=DeviceBindingStatus.FAILED.value,
+                ),
+            ],
+        )
+        svc = _make_service(
+            repo,
+            device_binding_repo=binding_repo,
+            baas_service_provider=lambda: MagicMock(),
+        )
+        bot = _make_bot(status="FAILED", binding_id=None)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch.object(svc, "_restart_bot_baas") as restart_baas, \
+             patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot", return_value=bot) as start:
+            result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result == bot
+        restart_baas.assert_not_called()
+        stop.assert_not_called()
+        assert start.call_args.kwargs["device_provider"] == "baas"
+
+    def test_failed_bot_without_binding_rejects_live_historical_binding(self):
+        """An unbound bot must not duplicate a provider that is still live."""
+        repo = FakeRestartLockRepo()
+        binding_repo = MagicMock()
+        binding_repo.list_bindings.return_value = (
+            2,
+            [
+                SimpleNamespace(
+                    id=43,
+                    device_provider="arca",
+                    device_props={"bolt_id": "bot001"},
+                    status=DeviceBindingStatus.ACTIVE.value,
+                ),
+                SimpleNamespace(
+                    id=42,
+                    device_provider="arca",
+                    device_props={"bolt_id": "bot001"},
+                    status=DeviceBindingStatus.RELEASED.value,
+                ),
+            ],
+        )
+        svc = _make_service(repo, device_binding_repo=binding_repo)
         svc._repository.get_by_id_and_owner.return_value = _make_bot(
             status="FAILED",
             binding_id=None,
