@@ -94,11 +94,19 @@ class TracerPlugin(Protocol):
         ...
 
     @contextmanager
-    def start_span(self, name: str) -> Iterator[None]:
-        """Start a new child span under the current trace context.
+    def start_span(self, name: str, *, child_of: Any = None) -> Iterator[None]:
+        """Start a new span, optionally as a child of *child_of*.
 
-        Should be called *after* :meth:`attach_context` so the new span is
-        a child of the propagated parent.  When no trace context is active,
-        implementations may either start a root span or yield as a no-op.
+        When *child_of* is provided it must be a context object previously
+        returned by :meth:`extract_context` (or a backend-specific parent
+        context); the new span is created as its child without needing to
+        :meth:`attach_context` first.  When *child_of* is ``None`` the span
+        is created under the currently active context (or becomes a root
+        span if none is active).
+
+        Implementations should accept *child_of* by keyword.  SOFA backends
+        treat it as a ``SofaSpanContext`` (the value returned by
+        ``extract_context``); OTel backends treat it as an OTel ``context``
+        (the value returned by ``opentelemetry.propagate.extract``).
         """
         yield None
