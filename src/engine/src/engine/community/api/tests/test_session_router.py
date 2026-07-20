@@ -373,62 +373,25 @@ class TestUpdateSession:
         assert "last_message" in data
         assert data["last_message"]["id"] == "msg-1"
 
-    def test_dima_query_params_forwarded(self, client, mock_session_api):
-        """dima_url/dima_space_id/dima_item_id 查询参数应解析并透传进 SessionUpdateRequest。"""
-        resp = client.post(
+    def test_ext_info_json_forwarded_to_update_request(self, client, mock_session_api):
+        """ext_info 查询参数（JSON 字符串）应解析为 dict 透传进 SessionUpdateRequest。"""
+        import json as _json
+        payload = {"workItem": {"id": "W1"}, "pr": "pr-123"}
+        client.post(
             "/api/sessions/sess-1/update",
-            params={
-                "dima_url": "https://project.alipay.com/workItem?workItemId=W1",
-                "dima_space_id": "W26001118999",
-                "dima_item_id": "W1",
-            },
+            params={"ext_info": _json.dumps(payload), "title": "Fix"},
         )
-        assert resp.status_code == 200
         req = mock_session_api.update.call_args[0][0]
-        assert req.dima_url == "https://project.alipay.com/workItem?workItemId=W1"
-        assert req.dima_space_id == "W26001118999"
-        assert req.dima_item_id == "W1"
-        # 既有字段不受影响
-        assert req.title is None
-        assert req.model is None
-
-    def test_dima_fields_default_to_none_when_omitted(self, client, mock_session_api):
-        """未传 dima 字段时默认 None。"""
-        client.post("/api/sessions/sess-1/update?title=Chat")
-        req = mock_session_api.update.call_args[0][0]
-        assert req.dima_url is None
-        assert req.dima_space_id is None
-        assert req.dima_item_id is None
-
-    def test_dima_ext_info_serialized_in_update_response(self, client, mock_session_api):
-        """更新后返回的 Session.ext_info（含 dima 字段）应被序列化进响应。"""
-        sess = _make_session("sess-1")
-        sess.ext_info = {
-            "dimaUrl": "https://project.alipay.com/workItem?workItemId=W1",
-            "dimaSpaceId": "W26001118999",
-            "dimaItemId": "W1",
-        }
-        mock_session_api.update.return_value = sess
-        resp = client.post(
-            "/api/sessions/sess-1/update",
-            params={"dima_item_id": "W1"},
-        )
-        assert resp.status_code == 200
-        data = resp.json()["data"]
-        assert "ext_info" in data
-        assert data["ext_info"]["dimaItemId"] == "W1"
-        assert data["ext_info"]["dimaSpaceId"] == "W26001118999"
-        assert data["ext_info"]["dimaUrl"] == "https://project.alipay.com/workItem?workItemId=W1"
-
-    def test_pr_id_query_param_forwarded(self, client, mock_session_api):
-        """pr_id 查询参数应解析并透传进 SessionUpdateRequest。"""
-        client.post("/api/sessions/sess-1/update?pr_id=pr-123&title=Fix")
-        req = mock_session_api.update.call_args[0][0]
-        assert req.pr_id == "pr-123"
+        assert req.ext_info == payload
         assert req.title == "Fix"
 
-    def test_pr_id_defaults_to_none_when_omitted(self, client, mock_session_api):
-        """未传 pr_id 时默认 None。"""
+    def test_ext_info_invalid_json_returns_400(self, client, mock_session_api):
+        """ext_info 非 JSON 应返回 400。"""
+        resp = client.post("/api/sessions/sess-1/update?ext_info=not-json")
+        assert resp.status_code == 400
+
+    def test_ext_info_defaults_to_none_when_omitted(self, client, mock_session_api):
+        """未传 ext_info 时默认 None。"""
         client.post("/api/sessions/sess-1/update?title=Hi")
         req = mock_session_api.update.call_args[0][0]
-        assert req.pr_id is None
+        assert req.ext_info is None

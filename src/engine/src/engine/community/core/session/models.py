@@ -90,13 +90,9 @@ class SessionUpdateRequest(BaseModel):
     user_id: str | None = None
     agent_id: str | None = None
     permission_mode: str | None = None
-    # DIMA 关联字段（aicoding 引擎使用；透传给 relay sessions.patch，
-    # 运行时映射为顶层 dimaUrl/dimaSpaceId/dimaItemId）。
-    dima_url: str | None = None
-    dima_space_id: str | None = None
-    dima_item_id: str | None = None
-    # PR 关联 ID（aicoding 引擎使用；透传给 relay sessions.patch 顶层 prId）。
-    pr_id: str | None = None
+    # 引擎特定的扩展字段（驼峰命名，透传给各引擎实现）。OSS 层不定义具体
+    # 内部词汇，由 corp 引擎自行解析（例如 aicoding 从中提取工作项/PR 关联）。
+    ext_info: dict[str, Any] | None = None
 
 
 class SessionHistoryRequest(BaseModel):
