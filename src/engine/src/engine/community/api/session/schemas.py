@@ -24,4 +24,22 @@ class CreateSessionBody(BaseModel):
     payload: Optional[dict[str, Any]] = None
 
 
-__all__ = ["CreateSessionBody"]
+class UpdateSessionBody(BaseModel):
+    """更新会话请求体"""
+    title: Optional[str] = None
+    model: Optional[str] = None
+    runtime: Optional[str] = None
+    cwd: Optional[str] = None
+    user_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    permission_mode: Optional[str] = None
+    # DIMA 关联字段（aicoding 引擎使用）。
+    dima_url: Optional[str] = None
+    dima_space_id: Optional[str] = None
+    dima_item_id: Optional[str] = None
+    # PR 关联 ID（aicoding 引擎使用）。
+    pr_id: Optional[str] = None
+    engine: Optional[str] = None
+
+
+__all__ = ["CreateSessionBody", "UpdateSessionBody"]
