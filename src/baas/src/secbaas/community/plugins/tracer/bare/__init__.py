@@ -122,9 +122,9 @@ class BareTracerPlugin(TracerPlugin):
         return propagate.extract(carrier)
 
     @contextmanager
-    def start_span(self, name: str) -> Iterator[None]:
-        """Start an OTel child span under the current trace context."""
+    def start_span(self, name: str, *, child_of: Any = None) -> Iterator[None]:
+        """Start an OTel span; *child_of* is an OTel context from extract_context."""
         from opentelemetry import trace
 
-        with trace.get_tracer(__name__).start_as_current_span(name):
+        with trace.get_tracer(__name__).start_as_current_span(name, context=child_of):
             yield
