@@ -187,6 +187,39 @@ class TestDestroyDeviceWithStorage:
         assert mock_plugin.connect_sync_sandbox.call_count == 2
         mock_plugin.delete_storage.assert_not_called()
 
+    def test__destroy_device_sync__destroyed_sandbox_connection_is_idempotent(
+        self, arca_credentials, mock_plugin, caplog
+    ):
+        """An ARCA-scheduled sandbox deletion is equivalent to not found."""
+        mock_plugin.connect_sync_sandbox.side_effect = ArcaSandboxError(
+            "Failed to connect sync sandbox: sandbox destroyed"
+        )
+        service = ArcaPaasService(
+            credentials=arca_credentials, arca_sandbox_plugin=mock_plugin
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = service._destroy_device_sync("destroyed-device-id")
+
+        assert result is True
+        assert mock_plugin.connect_sync_sandbox.call_count == 2
+        mock_plugin.delete_storage.assert_not_called()
+        assert "treating as successful (already destroyed)" in caplog.text
+
+    def test__destroy_device_sync__connection_failure_is_not_idempotent(
+        self, arca_credentials, mock_plugin
+    ):
+        """A connection failure without an explicit destroyed state must surface."""
+        mock_plugin.connect_sync_sandbox.side_effect = ArcaSandboxError(
+            "Failed to connect sync sandbox: connection refused"
+        )
+        service = ArcaPaasService(
+            credentials=arca_credentials, arca_sandbox_plugin=mock_plugin
+        )
+
+        with pytest.raises(PaasError, match="connection refused"):
+            service._destroy_device_sync("unreachable-device-id")
+
     def test__destroy_device_sync__delete_storage_exception_is_best_effort(
         self, arca_credentials, mock_plugin, mock_sandbox, caplog
     ):
