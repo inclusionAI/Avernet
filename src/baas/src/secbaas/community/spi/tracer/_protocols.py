@@ -9,6 +9,8 @@ OpenTelemetry).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, Protocol
 
 
@@ -72,3 +74,31 @@ class TracerPlugin(Protocol):
             token: The value returned by :meth:`attach_context`.
         """
         ...
+
+    def inject_context(self, carrier: dict[str, str]) -> None:
+        """Serialize the current trace context into *carrier* (W3C traceparent).
+
+        Used to propagate trace context across process boundaries (e.g. writing
+        a traceparent string into a DB column for a Worker in another process
+        to pick up).  When no valid span is active, *carrier* is left unchanged.
+        """
+        ...
+
+    def extract_context(self, carrier: dict[str, str]) -> Any:
+        """Deserialize a trace context from *carrier* (W3C traceparent).
+
+        Inverse of :meth:`inject_context`.  Returns an opaque context object
+        suitable for passing to :meth:`attach_context`, or ``None`` when the
+        carrier contains no valid trace data.
+        """
+        ...
+
+    @contextmanager
+    def start_span(self, name: str) -> Iterator[None]:
+        """Start a new child span under the current trace context.
+
+        Should be called *after* :meth:`attach_context` so the new span is
+        a child of the propagated parent.  When no trace context is active,
+        implementations may either start a root span or yield as a no-op.
+        """
+        yield None

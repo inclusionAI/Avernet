@@ -1896,7 +1896,10 @@ class DefaultPublishService(PublishService):
                         f"Batch {batch.id} already FAILED via callback "
                         f"({failed_in_batch} failed records), preserving callback result"
                     )
-                elif current_batch and current_batch.status == BatchStatus.COMPLETED.value:
+                elif (
+                    current_batch
+                    and current_batch.status == BatchStatus.COMPLETED.value
+                ):
                     # Callback already set batch to COMPLETED — nothing to do
                     logger.info(
                         f"Batch {batch.id} already COMPLETED via callback, "
