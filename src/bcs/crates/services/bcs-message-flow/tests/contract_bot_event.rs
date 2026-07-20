@@ -3904,6 +3904,7 @@ fn test_session(id: &str, group_id: &str, kind: SessionKind) -> Session {
         meta: None,
         current_msg_seq: 0,
         participant_join_seq: None,
+        collected_at: None,
     }
 }
 

@@ -1333,6 +1333,7 @@ fn test_session(
         updated_at: 1,
         completed_at: None,
         meta: None,
+        collected_at: None,
     }
 }
 

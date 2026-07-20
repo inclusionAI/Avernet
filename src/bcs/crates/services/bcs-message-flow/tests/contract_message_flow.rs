@@ -340,6 +340,7 @@ fn test_session(session_id: &str, group_id: &str, participants: Vec<Participant>
         meta: None,
         current_msg_seq: 0,
         participant_join_seq: None,
+        collected_at: None,
     }
 }
 

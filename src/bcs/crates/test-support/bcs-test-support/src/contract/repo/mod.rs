@@ -798,6 +798,12 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
         .await;
     assert_eq!(collected.len(), 1);
     assert_eq!(collected[0].id, collect_session.id);
+    // collected_at is surfaced on the collected-list context (COALESCE fallback
+    // to created_at guarantees Some here).
+    assert!(
+        collected[0].collected_at.is_some(),
+        "collected list must surface collected_at"
+    );
 
     // per-bot isolation: other participant sees nothing
     assert!(repo

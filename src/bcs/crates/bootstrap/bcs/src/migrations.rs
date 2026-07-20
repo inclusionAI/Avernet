@@ -323,7 +323,8 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         bot_uuid TEXT NOT NULL,
         role TEXT NOT NULL,
         env TEXT NOT NULL DEFAULT 'prod',
-        collected INTEGER NOT NULL DEFAULT 0
+        collected INTEGER NOT NULL DEFAULT 0,
+        collected_at TEXT
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_session_participants_env_session_bot ON bcs_session_participants(env, session_id, bot_uuid)",
     "CREATE INDEX IF NOT EXISTS idx_session_participants_bot ON bcs_session_participants(env, bot_uuid)",
@@ -679,6 +680,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 4,
         name: "add_session_collection",
     },
+    SqliteMigration {
+        version: 5,
+        name: "add_session_collection_timestamp",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -816,9 +821,21 @@ async fn ensure_sqlite_session_collected_column(db: &dyn DbPlugin) -> DbResult<(
         ))
         .await?;
     }
+    // collected_at: collected event timestamp (nullable). Added in the same
+    // repair pass so legacy DBs gain both columns without a separate run.
+    if !columns.iter().any(|column| column == "collected_at") {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_session_participants ADD COLUMN collected_at TEXT",
+        ))
+        .await?;
+    }
+    // The composite index covers (env, group_id, bot_uuid, collected) as a prefix
+    // and so also serves any query the former idx_collected did — keep only this
+    // one to avoid redundant write overhead. collected_at trailing lets the same
+    // index satisfy the collected-list ORDER BY.
     db.execute(DbStatement::new(
-        "CREATE INDEX IF NOT EXISTS idx_collected \
-         ON bcs_session_participants(env, group_id, bot_uuid, collected)",
+        "CREATE INDEX IF NOT EXISTS idx_collected_at \
+         ON bcs_session_participants(env, group_id, bot_uuid, collected, collected_at)",
     ))
     .await?;
     Ok(())
@@ -880,6 +897,9 @@ async fn apply_sqlite_migration_body(
         // collected column is added by ensure_sqlite_session_collected_column in
         // run_sqlite_bootstrap_tables; version 4 only records progress.
         4 => Ok(()),
+        // collected_at column is added by ensure_sqlite_session_collected_column
+        // in run_sqlite_bootstrap_tables; version 5 only records progress.
+        5 => Ok(()),
         _ => Ok(()),
     }
 }
@@ -1100,7 +1120,12 @@ mod tests {
                     "sqlite".to_string()
                 ),
                 (3, "add_organizations".to_string(), "sqlite".to_string()),
-                (4, "add_session_collection".to_string(), "sqlite".to_string())
+                (4, "add_session_collection".to_string(), "sqlite".to_string()),
+                (
+                    5,
+                    "add_session_collection_timestamp".to_string(),
+                    "sqlite".to_string()
+                )
             ]
         );
         Ok(())
@@ -1112,7 +1137,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 4);
+        assert_eq!(report.pending_versions.len(), 5);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1126,6 +1151,11 @@ mod tests {
         assert_eq!(report.pending_versions[2].name, "add_organizations");
         assert_eq!(report.pending_versions[3].version, 4);
         assert_eq!(report.pending_versions[3].name, "add_session_collection");
+        assert_eq!(report.pending_versions[4].version, 5);
+        assert_eq!(
+            report.pending_versions[4].name,
+            "add_session_collection_timestamp"
+        );
         Ok(())
     }
 
@@ -1146,7 +1176,12 @@ mod tests {
                     "sqlite".to_string()
                 ),
                 (3, "add_organizations".to_string(), "sqlite".to_string()),
-                (4, "add_session_collection".to_string(), "sqlite".to_string())
+                (4, "add_session_collection".to_string(), "sqlite".to_string()),
+                (
+                    5,
+                    "add_session_collection_timestamp".to_string(),
+                    "sqlite".to_string()
+                )
             ]
         );
         Ok(())
@@ -1279,6 +1314,14 @@ mod collection_migration_tests {
     }
 
     #[tokio::test]
+    async fn fresh_db_has_session_participants_collected_at_column() {
+        let db = fresh_db().await;
+        let cols = sqlite_table_columns(&db, "bcs_session_participants").await.unwrap();
+        assert!(cols.iter().any(|c| c == "collected_at"),
+            "bcs_session_participants must have a collected_at column on fresh DB; got {cols:?}");
+    }
+
+    #[tokio::test]
     async fn ensure_function_adds_collected_to_legacy_table() {
         let db = LocalSqliteDbPlugin::new().expect("open in-memory sqlite");
         db.execute(DbStatement::new(
@@ -1297,5 +1340,7 @@ mod collection_migration_tests {
         let cols = sqlite_table_columns(&db, "bcs_session_participants").await.unwrap();
         assert!(cols.iter().any(|c| c == "collected"),
             "ensure function must add collected to legacy bcs_session_participants; got {cols:?}");
+        assert!(cols.iter().any(|c| c == "collected_at"),
+            "ensure function must add collected_at to legacy bcs_session_participants; got {cols:?}");
     }
 }
