@@ -90,11 +90,6 @@ class SessionUpdateRequest(BaseModel):
     user_id: str | None = None
     agent_id: str | None = None
     permission_mode: str | None = None
-    # DIMA 关联字段（aicoding 引擎使用；透传给 relay sessions.patch，
-    # 运行时映射为顶层 dimaUrl/dimaSpaceId/dimaItemId）。
-    dima_url: str | None = None
-    dima_space_id: str | None = None
-    dima_item_id: str | None = None
 
 
 class SessionHistoryRequest(BaseModel):
