@@ -459,6 +459,24 @@ class TestDeleteBot:
         assert result is True
         mock_device_service.release_device.assert_called_once()
 
+    def test_releases_failed_device_before_deleting(self):
+        svc = _make_service()
+        bot = _make_bot(binding_id=42)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        mock_binding = MagicMock()
+        mock_binding.status = DeviceBindingStatus.FAILED.value
+        mock_device_service = MagicMock()
+        mock_device_service.get_device.return_value = mock_binding
+        svc._device_service_provider = lambda: mock_device_service
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        result = svc.delete_bot("bot001", "user001")
+
+        assert result is True
+        mock_device_service.release_device.assert_called_once()
+
     def test_device_release_failure_blocks_deletion(self):
         svc = _make_service()
         bot = _make_bot(binding_id=42)
