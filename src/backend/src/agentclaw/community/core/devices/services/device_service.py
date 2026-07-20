@@ -44,6 +44,7 @@ from agentclaw.community.core.devices.errors import (
     InvalidDeviceStatusError,
 )
 from agentclaw.community.core.bot_management.token_vault import TokenVault
+from agentclaw.community.core.bot_management.engines import resolve_provisioning
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
@@ -689,16 +690,20 @@ class DeviceService:
             return record
 
         # 5. Start service asynchronously
-        # 仅 applicationCoding bot 透传 CodeFuse token（从 ext 读回密文，启动时解密为明文）。
+        # Token 透传由引擎策略决定（例如 coding bot 的 CodeFuse token）。
         # 解密在异步闭包内：密文损坏/密钥错配时由 start_service 的 except 承接为 FAILED，
         # 与 token 写入失败同语义（failure-closed），避免同步段抛错导致 binding 已落库但
         # apply_device 返回 500 的状态机不一致。token 全程 in-memory 不进 device_props；
         # get_template_config 不解密 → API 返回密文脱敏。
-        _raw_codefuse_token = (
-            (template_config or {}).get("token")
-            if (template_type or "") == "applicationCoding"
-            else None
+        _provisioning_ctx, _provisioning_strategy = resolve_provisioning(
+            bot_id=resolved_bot_id,
+            owner_id=resolved_owner_id,
+            active_engine=resolved_engine,
+            bot_type=bot_type,
+            template_type=template_type,
+            template_config=template_config,
         )
+        _raw_codefuse_token = _provisioning_strategy.extract_runtime_token(_provisioning_ctx)
 
         def start_service_async():
             try:

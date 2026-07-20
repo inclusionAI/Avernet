@@ -228,6 +228,7 @@ class DevicesModule(Module):
         mcp_sync_service: MCPSyncService,
         token_vault: TokenVault,
         task_queue_service: TaskQueueService,
+        template_service: TemplateService,
     ) -> BaasDeviceService:
         # Explicit provider: BaasDeviceService takes ``bot_query`` /
         # ``bot_sync`` / ``mcp_sync`` typed as Protocols, which
@@ -245,6 +246,7 @@ class DevicesModule(Module):
             template_resolver=SystemConfigBaasTemplateResolver(system_config_service),
             vault=token_vault,
             task_queue_service=task_queue_service,
+            template_service=template_service,
         )
 
     @singleton

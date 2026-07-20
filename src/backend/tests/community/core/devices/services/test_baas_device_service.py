@@ -71,6 +71,7 @@ def _make_service(
     template_resolver=None,
     vault=None,
     task_queue_service=None,
+    template_service=None,
 ) -> BaasDeviceService:
     repo = repo or MagicMock()
     bot_query = bot_query or MagicMock()
@@ -94,6 +95,7 @@ def _make_service(
         template_resolver=template_resolver,
         vault=vault,
         task_queue_service=task_queue_service,
+        template_service=template_service,
     )
 
 

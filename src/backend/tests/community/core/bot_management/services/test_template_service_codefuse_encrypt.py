@@ -31,10 +31,18 @@ class TestCreateTemplateEncryptsToken:
         assert svc._vault.decrypt_or_passthrough(stored["token"]) == "abcdef0123456789"
         assert stored["other"] == "x"
 
-    def test_non_applicationCoding_not_encrypted(self):
+    def test_personalCoding_token_encrypted(self):
         svc, repo = _make_service()
         cfg = {"token": "abcdef0123456789"}
         svc.create_template(bot_id="B1", template_config=cfg, template_type="personalCoding")
+        stored = repo.insert.call_args.args[0]["ext"]
+        assert stored["token"].startswith(CIPHER_PREFIX)
+        assert svc._vault.decrypt_or_passthrough(stored["token"]) == "abcdef0123456789"
+
+    def test_non_coding_not_encrypted(self):
+        svc, repo = _make_service()
+        cfg = {"token": "abcdef0123456789"}
+        svc.create_template(bot_id="B1", template_config=cfg, template_type="normalCC")
         stored = repo.insert.call_args.args[0]["ext"]
         assert stored["token"] == "abcdef0123456789"
 
