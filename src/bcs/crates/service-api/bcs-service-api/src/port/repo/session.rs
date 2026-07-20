@@ -103,4 +103,19 @@ pub trait SessionRepoPort: Send + Sync {
     ) -> Vec<Session> {
         Vec::new()
     }
+
+    /// Batch lookup of collect-event timestamps. For each session_id in
+    /// `session_ids` that `bot_uuid` has collected (collected = 1), return
+    /// `(session_id, collected_at_ms)`. Sessions not collected (or with no
+    /// side-table row for that bot) are omitted from the result.
+    ///
+    /// Used by the session-list HTTP layer to surface per-session collected
+    /// state for a given participant without a per-row query.
+    async fn collected_at_map(
+        &self,
+        _session_ids: &[&str],
+        _bot_uuid: &str,
+    ) -> Vec<(String, u64)> {
+        Vec::new()
+    }
 }

@@ -804,6 +804,19 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
         collected[0].collected_at.is_some(),
         "collected list must surface collected_at"
     );
+    // Batch map lookup matches the collected-list view: only the collected
+    // session appears, with a collected_at timestamp.
+    let map = repo
+        .collected_at_map(&[collect_session.id.as_str()], "bot-collector")
+        .await;
+    assert_eq!(map.len(), 1);
+    assert_eq!(map[0].0, collect_session.id);
+    assert!(map[0].1 > 0, "collected_at_map must return a timestamp");
+    // A bot that has not collected gets an empty map.
+    let empty = repo
+        .collected_at_map(&[collect_session.id.as_str()], "bot-other")
+        .await;
+    assert!(empty.is_empty(), "collected_at_map must be empty for non-collector");
 
     // per-bot isolation: other participant sees nothing
     assert!(repo

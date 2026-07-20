@@ -1183,10 +1183,20 @@ impl SessionRepoPort for MySqlSessionStore {
                 "participant {bot_uuid} not in session {session_id}"
             )));
         }
+        // First-collect-writes-time, repeat-collect-keeps-it (idempotent), expressed
+        // via the NULL-ness of collected_at itself: COALESCE writes `now` only when
+        // collected_at is NULL (never collected, or cleared by a prior uncollect) and
+        // preserves the existing value otherwise. This is dialect-portable: do NOT
+        // rewrite as `CASE WHEN collected = 0 THEN now ...` — MySQL evaluates a single
+        // UPDATE's SET left-to-right (so `collected` is already 1 by the time the CASE
+        // reads it) while SQLite evaluates all SET RHS against the pre-update row, so
+        // the CASE form silently never sets collected_at on MySQL while working on
+        // SQLite. Relying on collected_at's own NULL-ness avoids any cross-column
+        // old-value dependency.
         let update_sql = format!(
             "UPDATE bcs_session_participants \
              SET collected = 1, \
-                 collected_at = CASE WHEN collected = 0 THEN {} ELSE collected_at END \
+                 collected_at = COALESCE(collected_at, {}) \
              WHERE env = ? AND session_id = ? AND bot_uuid = ?",
             self.flavor.now()
         );
@@ -1303,5 +1313,51 @@ impl SessionRepoPort for MySqlSessionStore {
             }
         };
         rows.iter().filter_map(|r| row_to_session(r).ok()).collect()
+    }
+
+    async fn collected_at_map(
+        &self,
+        session_ids: &[&str],
+        bot_uuid: &str,
+    ) -> Vec<(String, u64)> {
+        if session_ids.is_empty() {
+            return Vec::new();
+        }
+        // CAST the timestamp to an integer for the same reason as the
+        // collected-list query: UNIX_TIMESTAMP(datetime(3)) is a DOUBLE on
+        // MySQL and would not decode to i64. SQLite's strftime is already INTEGER.
+        let collected_at_expr = match self.flavor {
+            DbSqlFlavor::Mysql => "CAST((UNIX_TIMESTAMP(collected_at))*1000 AS SIGNED)",
+            DbSqlFlavor::Sqlite => "CAST(strftime('%s', collected_at) AS INTEGER)*1000",
+        };
+        let placeholders = vec!["?"; session_ids.len()].join(", ");
+        let sql = format!(
+            "SELECT session_id, {ts} AS collected_at_ms FROM bcs_session_participants \
+             WHERE env = ? AND bot_uuid = ? AND collected = 1 \
+             AND session_id IN ({placeholders})",
+            ts = collected_at_expr,
+            placeholders = placeholders,
+        );
+        let mut params: Vec<DbValue> =
+            vec![DbValue::from(self.env.as_str()), DbValue::from(bot_uuid)];
+        for sid in session_ids {
+            params.push(DbValue::from(*sid));
+        }
+        let rows = match self.db.query(DbStatement::with_params(&sql, params)).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "collected_at_map query failed");
+                return Vec::new();
+            }
+        };
+        rows.iter()
+            .filter_map(|r| {
+                let sid: String = db_get_column(r, "session_id").ok()?;
+                let ts: i64 = db_get_column_opt::<i64>(r, "collected_at_ms")
+                    .ok()
+                    .flatten()?;
+                Some((sid, ts.max(0) as u64))
+            })
+            .collect()
     }
 }

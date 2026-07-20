@@ -555,6 +555,24 @@ impl SessionRepoPort for MemorySessionRepo {
         v.sort_by_key(|s| std::cmp::Reverse(s.collected_at.unwrap_or(s.created_at)));
         v.into_iter().skip(offset as usize).take(limit as usize).collect()
     }
+
+    async fn collected_at_map(
+        &self,
+        session_ids: &[&str],
+        bot_uuid: &str,
+    ) -> Vec<(String, u64)> {
+        let st = self.state.read().await;
+        session_ids
+            .iter()
+            .filter_map(|sid| {
+                let ts = st
+                    .collected
+                    .get(&(sid.to_string(), bot_uuid.to_string()))
+                    .copied()?;
+                Some((sid.to_string(), ts))
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
