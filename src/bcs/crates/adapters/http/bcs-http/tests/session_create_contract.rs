@@ -328,6 +328,7 @@ impl SessionManagementService for MockSessions {
             updated_at: 1,
             completed_at: None,
             meta: cmd.params.meta.clone(),
+            collected_at: None,
         };
         self.create_calls.lock().await.push(cmd);
         Ok(CreateOrReactivateOutcome {

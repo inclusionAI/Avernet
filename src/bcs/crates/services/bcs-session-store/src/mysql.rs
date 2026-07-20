@@ -120,6 +120,7 @@ impl MySqlSessionStore {
             created_at: now,
             updated_at: now,
             completed_at: None,
+            collected_at: None,
         };
 
         let kind_str = kind_to_string(session_kind);
@@ -371,6 +372,15 @@ fn row_to_session(row: &DbRow) -> ServiceResult<Session> {
         created_at: column_u64(row, "gmt_create_ms"),
         updated_at: column_u64(row, "gmt_modified_ms"),
         completed_at,
+        // `collected_at_ms` is only selected by the collected-list query; other
+        // queries omit the column entirely (db_get_column_opt → Ok(None)). Be
+        // tolerant of decode failures too (e.g. a fractional datetime producing
+        // a DOUBLE on some backends) so a non-integer value never fails the
+        // whole row — collected_at is best-effort, not load-bearing.
+        collected_at: db_get_column_opt::<i64>(row, "collected_at_ms")
+            .ok()
+            .flatten()
+            .map(|v| v.max(0) as u64),
         meta: parse_json("meta", row)?,
         current_msg_seq: db_get_column_opt::<i64>(row, "current_msg_seq")
             .map_err(|e| ServiceError::InternalError(format!("current_msg_seq: {e}")))?
@@ -1173,9 +1183,13 @@ impl SessionRepoPort for MySqlSessionStore {
                 "participant {bot_uuid} not in session {session_id}"
             )));
         }
-        let update_sql = "UPDATE bcs_session_participants \
-                          SET collected = 1 \
-                          WHERE env = ? AND session_id = ? AND bot_uuid = ?";
+        let update_sql = format!(
+            "UPDATE bcs_session_participants \
+             SET collected = 1, \
+                 collected_at = CASE WHEN collected = 0 THEN {} ELSE collected_at END \
+             WHERE env = ? AND session_id = ? AND bot_uuid = ?",
+            self.flavor.now()
+        );
         self.db
             .execute(DbStatement::with_params(
                 update_sql,
@@ -1194,8 +1208,9 @@ impl SessionRepoPort for MySqlSessionStore {
         // Idempotent: the only caller-facing error is session-not-found, which
         // the application layer checks via get() before calling. Here we run the
         // UPDATE regardless of whether a side-table row / collected flag exists.
+        // Clearing collected_at means a later re-collect records a fresh event time.
         let sql = "UPDATE bcs_session_participants \
-                   SET collected = 0 \
+                   SET collected = 0, collected_at = NULL \
                    WHERE env = ? AND session_id = ? AND bot_uuid = ?";
         self.db
             .execute(DbStatement::with_params(
@@ -1251,13 +1266,31 @@ impl SessionRepoPort for MySqlSessionStore {
         params.push(DbValue::U64(limit));
         params.push(DbValue::U64(offset));
 
-        let select_cols = self.select_cols_prefixed();
+        // Collected-list-specific column list: base prefixed columns plus the
+        // collect-event timestamp. We do NOT reuse select_cols_prefixed here
+        // (it omits collected_at); and we CAST the timestamp to an integer so
+        // MySQL's UNIX_TIMESTAMP(datetime(3)) — which returns a DOUBLE due to
+        // fractional seconds — decodes cleanly to i64 instead of failing
+        // row_to_session. SQLite's strftime already yields INTEGER.
+        let collected_at_expr = match self.flavor {
+            DbSqlFlavor::Mysql => format!(
+                "CAST((UNIX_TIMESTAMP(sp.collected_at))*1000 AS SIGNED)"
+            ),
+            DbSqlFlavor::Sqlite => format!(
+                "CAST(strftime('%s', sp.collected_at) AS INTEGER)*1000"
+            ),
+        };
+        let select_cols = format!(
+            "{}, {} AS collected_at_ms",
+            self.select_cols_prefixed(),
+            collected_at_expr,
+        );
         let sql = format!(
             "SELECT {select_cols} FROM bcs_group_sessions s \
              JOIN bcs_session_participants sp \
                ON sp.env = s.env AND sp.session_id = s.session_id \
              WHERE {where_clause} \
-             ORDER BY s.gmt_create DESC LIMIT ? OFFSET ?",
+             ORDER BY COALESCE(sp.collected_at, s.gmt_create) DESC LIMIT ? OFFSET ?",
             select_cols = select_cols,
             where_clause = conditions.join(" AND "),
         );

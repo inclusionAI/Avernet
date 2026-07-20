@@ -193,6 +193,7 @@ async fn test_app(
         updated_at: 1,
         completed_at: None,
         meta: None,
+        collected_at: None,
     };
 
     let sessions = Arc::new(RecordingSessions {

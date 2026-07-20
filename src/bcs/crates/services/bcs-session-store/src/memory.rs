@@ -44,7 +44,9 @@ fn initial_callback_status(kind: SessionKind) -> Option<String> {
 #[derive(Default)]
 struct MemoryState {
     sessions: HashMap<String, Session>,
-    collected: std::collections::HashSet<(String, String)>,
+    /// (session_id, bot_uuid) -> 收藏事件时间（epoch ms）。
+    /// 仅在 collect 时插入（幂等：已存在则保留原时间，不刷新），uncollect 移除。
+    collected: HashMap<(String, String), u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +136,7 @@ impl SessionRepoPort for MemorySessionRepo {
                 created_at: now,
                 updated_at: now,
                 completed_at: None,
+                collected_at: None,
             };
             st.sessions.insert(id.clone(), sess.clone());
             return Ok(sess);
@@ -171,6 +174,7 @@ impl SessionRepoPort for MemorySessionRepo {
                 created_at: now,
                 updated_at: now,
                 completed_at: None,
+                collected_at: None,
             };
             st.sessions.insert(id.clone(), sess.clone());
             return Ok(sess);
@@ -401,7 +405,7 @@ impl SessionRepoPort for MemorySessionRepo {
         let updated = sess.clone();
         // collection mark is per-participant; leaving drops it
         st.collected
-            .retain(|(sid, bid)| !(sid == session_id && bid == bot_uuid));
+            .retain(|key, _| !(key.0 == session_id && key.1 == bot_uuid));
         Ok(updated)
     }
 
@@ -472,7 +476,7 @@ impl SessionRepoPort for MemorySessionRepo {
         let mut st = self.state.write().await;
         let existed = st.sessions.remove(session_id).is_some();
         if existed {
-            st.collected.retain(|(sid, _)| sid != session_id);
+            st.collected.retain(|key, _| key.0 != session_id);
         }
         Ok(existed)
     }
@@ -488,7 +492,11 @@ impl SessionRepoPort for MemorySessionRepo {
                 "participant {bot_uuid} not in session {session_id}"
             )));
         }
-        st.collected.insert((session_id.to_string(), bot_uuid.to_string()));
+        // Idempotent on the timestamp: a repeat collect keeps the original event time
+        // (entry().or_insert) so the list ordering reflects first-collection time.
+        st.collected
+            .entry((session_id.to_string(), bot_uuid.to_string()))
+            .or_insert(now_ms());
         Ok(())
     }
 
@@ -519,7 +527,7 @@ impl SessionRepoPort for MemorySessionRepo {
             .filter(|s| s.group_id == group_id)
             .filter(|s| {
                 st.collected
-                    .contains(&(s.id.clone(), bot_uuid.to_string()))
+                    .contains_key(&(s.id.clone(), bot_uuid.to_string()))
             })
             .filter(|s| status.map(|want| s.status == want).unwrap_or(true))
             .filter(|s| {
@@ -532,8 +540,19 @@ impl SessionRepoPort for MemorySessionRepo {
                 })
             })
             .cloned()
+            .map(|mut s| {
+                // Surface the collect-event time on the returned session; fall
+                // back to created_at (COALESCE semantics) for Ordering safety.
+                s.collected_at = st
+                    .collected
+                    .get(&(s.id.clone(), bot_uuid.to_string()))
+                    .copied()
+                    .or(Some(s.created_at));
+                s
+            })
             .collect();
-        v.sort_by_key(|s| std::cmp::Reverse(s.created_at));
+        // 由近到远：collected_at（已 or_insert 兜底为 created_at）降序。
+        v.sort_by_key(|s| std::cmp::Reverse(s.collected_at.unwrap_or(s.created_at)));
         v.into_iter().skip(offset as usize).take(limit as usize).collect()
     }
 }

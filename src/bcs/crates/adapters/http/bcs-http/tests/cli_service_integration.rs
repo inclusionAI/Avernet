@@ -98,6 +98,7 @@ impl SessionManagementService for MockServiceSessions {
             updated_at: 1_700_000_000_000,
             completed_at: None,
             meta: cmd.params.meta.clone(),
+            collected_at: None,
         };
         *self.last.lock().await = Some(session.clone());
         Ok(CreateOrReactivateOutcome { session, created: true })

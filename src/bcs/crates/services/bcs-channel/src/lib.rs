@@ -3728,6 +3728,7 @@ mod tests {
                 updated_at: 1,
                 completed_at: None,
                 meta: params.meta,
+                collected_at: None,
             };
             self.sessions.lock().await.insert(id, session.clone());
             Ok(session)
