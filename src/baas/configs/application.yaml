@@ -178,6 +178,7 @@ user_config:
       - "operator-001"
       - "operator-002"
       - "operator-003"
+      - "000001"
 
   # 部署环境探测配置
   env:

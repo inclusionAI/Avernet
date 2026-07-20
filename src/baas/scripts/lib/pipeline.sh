@@ -22,7 +22,7 @@ run_ci_pipeline() {
         return 1
     fi
 
-    for fn in run_ci_tests run_e2e_tests; do
+    for fn in run_e2e_boot_tests run_e2e_asgi_tests run_ci_tests; do
         if ! $fn; then
             FAILED_STAGES+=("$fn")
         fi

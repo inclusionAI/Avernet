@@ -115,20 +115,10 @@ warn_unreachable = false
 check_untyped_defs = true
 
 # --- 测试工具 Pytest 配置 ---
+# Marker declarations are in pytest.ini (single source of truth)
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
-asyncio_mode = "auto"
 addopts = "--reruns 2 --reruns-delay 1"
-markers = [
-  "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
-  "e2e: marks tests as end-to-end API tests (requires running app)",
-  "requires_app: marks tests that require a running application instance",
-  "baseline: marks e2e tests for consolidated baseline test suite",
-  "mock_paas_hook_failure: marks e2e tests for mock hook execution failure",
-  "mock_paas_create_failure: marks e2e tests for mock device creation failure",
-  "mock_paas_destroy_failure: marks e2e tests for mock device destroy failure",
-  "mock_paas_device_not_found: marks e2e tests for mock device not found (idempotent destroy)",
-]
 
 # --- 构建后端定义 ---
 [build-system]
