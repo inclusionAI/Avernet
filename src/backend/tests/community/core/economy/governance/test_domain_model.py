@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import json
 from dataclasses import FrozenInstanceError
 from datetime import datetime
 from types import SimpleNamespace
@@ -24,15 +25,87 @@ from agentclaw.community.core.economy.governance.domain.ticket import Governance
 
 from agentclaw.community.core.economy.governance.domain.whitelist import WhitelistEntry
 from agentclaw.community.core.economy.governance.domain.enums import (
+    CloseReason,
     GovernanceStatus,
     NotifyStatus,
     NotifyType,
 )
+from agentclaw.community.core.economy.governance.domain.base import (
+    _normalize_delivery_status,
+)
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# delivery_status 归一(domain.base 单值归一助手)
 # ---------------------------------------------------------------------------
+
+
+class TestDeliveryStatusNormalize:
+    """_normalize_delivery_status — 四态直通 + 旧值归一。"""
+
+    # ── 四态直通 ──────────────────────────────────────────────────────────
+
+    def test_normalize_pending(self) -> None:
+        assert _normalize_delivery_status("pending") == "pending"
+
+    def test_normalize_sent(self) -> None:
+        assert _normalize_delivery_status("sent") == "sent"
+
+    def test_normalize_failed(self) -> None:
+        assert _normalize_delivery_status("failed") == "failed"
+
+    def test_normalize_cancelled(self) -> None:
+        assert _normalize_delivery_status("cancelled") == "cancelled"
+
+    # ── 哨兵/空值 → pending ──────────────────────────────────────────────
+
+    def test_normalize_none(self) -> None:
+        assert _normalize_delivery_status(None) == "pending"
+
+    def test_normalize_empty_string(self) -> None:
+        assert _normalize_delivery_status("") == "pending"
+
+    def test_normalize_whitespace(self) -> None:
+        assert _normalize_delivery_status("   ") == "pending"
+
+    def test_normalize_none_sentinel(self) -> None:
+        assert _normalize_delivery_status("none") == "pending"
+
+    # ── 旧拼接格式归一 ───────────────────────────────────────────────────
+
+    def test_normalize_legacy_first_send_sent(self) -> None:
+        assert _normalize_delivery_status("first_send:sent") == "sent"
+
+    def test_normalize_legacy_reminder_failed(self) -> None:
+        assert _normalize_delivery_status("reminder:failed") == "failed"
+
+    def test_normalize_legacy_with_invalid_status(self) -> None:
+        assert _normalize_delivery_status("first_send:unknown") == "pending"
+
+    def test_normalize_legacy_empty_after_colon(self) -> None:
+        assert _normalize_delivery_status("first_send:") == "pending"
+
+    # ── 旧 JSON 格式归一 ────────────────────────────────────────────────
+
+    def test_normalize_json_sent(self) -> None:
+        json_str = '{"notify_type":"first_send","notify_status":"sent","sent_at":null}'
+        assert _normalize_delivery_status(json_str) == "sent"
+
+    def test_normalize_json_failed_with_error(self) -> None:
+        json_str = '{"notify_type":"reminder","notify_status":"failed","error":"钉钉限流"}'
+        assert _normalize_delivery_status(json_str) == "failed"
+
+    def test_normalize_json_missing_status(self) -> None:
+        json_str = '{"notify_type":"first_send"}'
+        assert _normalize_delivery_status(json_str) == "pending"
+
+    def test_normalize_json_invalid(self) -> None:
+        assert _normalize_delivery_status("{not valid") == "pending"
+
+    # ── 未知值 → pending ────────────────────────────────────────────────
+
+    def test_normalize_unknown_value(self) -> None:
+        assert _normalize_delivery_status("something_unknown") == "pending"
 
 
 def _make_snapshot(**overrides) -> FrozenSnapshot:
@@ -494,6 +567,7 @@ def _make_ticket(**overrides) -> GovernanceTicket:
         worker_id="owner-1:bot-1",
         bot_id="bot-1",
         owner_id="owner-1",
+        owner_name=None,
         bot_name="TestBot",
         _snapshot=snapshot,
         governance_status=GovernanceStatus.OPEN,
@@ -528,6 +602,7 @@ def _make_ticket_orm_obj(**overrides) -> SimpleNamespace:
         worker_id="owner-1:bot-1",
         bot_id="bot-1",
         owner_id="owner-1",
+        owner_name="Owner One",
         bot_name="TestBot",
         dt_version="20260709",
         governance_decision="actionable",
@@ -536,6 +611,7 @@ def _make_ticket_orm_obj(**overrides) -> SimpleNamespace:
         governance_max_priority="P1",
         expected_token_saving=5000,
         saving_ratio=0.5,
+        token_baseline=123456,
         task_summary="summary",
         notification_structured='{"dims": ["cost"]}',
         analysis_status="done",
@@ -566,6 +642,7 @@ def _make_ticket_orm_obj(**overrides) -> SimpleNamespace:
         actor_id=None,
         gmt_create=datetime(2026, 7, 9, 8, 0, 0),
         gmt_modified=datetime(2026, 7, 9, 9, 0, 0),
+        delivery_status="none",
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -618,6 +695,7 @@ class TestTicketCreateFactory:
             worker_id="u1:bot1",
             bot_id="bot1",
             owner_id="u1",
+            owner_name=None,
             bot_name="Bot",
             snapshot=snap,
         )
@@ -637,6 +715,7 @@ class TestTicketCreateFactory:
             worker_id="u1:bot1",
             bot_id="bot1",
             owner_id="u1",
+            owner_name=None,
             bot_name="Bot",
             snapshot=snap,
             assignee="custom-assignee",
@@ -654,6 +733,7 @@ class TestTicketCreateFactory:
             worker_id="u1:bot1",
             bot_id="bot1",
             owner_id="u1",
+            owner_name=None,
             bot_name="Bot",
             snapshot=snap,
         )
@@ -722,6 +802,133 @@ class TestTicketTransitions:
         t = _make_ticket(governance_status=GovernanceStatus.CLOSED, assignee=None)
         with pytest.raises(IllegalTicketTransitionError, match="closed.*open"):
             t.transition_to(GovernanceStatus.OPEN)
+
+
+class TestTicketObservedTransitions:
+    """OBSERVED(白名单观察态)进出规则。
+
+    进:三活跃态(open/scheduled/waiting_review)→ OBSERVED(加白关单)。
+    出:OBSERVED 仅 → CLOSED(删白收尾);不可回活跃态(删白后由 off-batch
+    重建新 OPEN 单,而非复活同单)。
+    """
+
+    @pytest.mark.parametrize(
+        "from_status",
+        [
+            GovernanceStatus.OPEN,
+            GovernanceStatus.SCHEDULED,
+            GovernanceStatus.WAITING_REVIEW,
+        ],
+    )
+    def test_active_to_observed(self, from_status) -> None:
+        t = _make_ticket(governance_status=from_status)
+        t.transition_to(GovernanceStatus.OBSERVED)
+        assert t.governance_status == GovernanceStatus.OBSERVED
+
+    def test_observed_to_closed(self) -> None:
+        t = _make_ticket(governance_status=GovernanceStatus.OBSERVED, assignee=None)
+        t.transition_to(GovernanceStatus.CLOSED)
+        assert t.governance_status == GovernanceStatus.CLOSED
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            GovernanceStatus.OPEN,
+            GovernanceStatus.SCHEDULED,
+            GovernanceStatus.WAITING_REVIEW,
+            GovernanceStatus.OBSERVED,
+        ],
+    )
+    def test_observed_cannot_revert_to_active(self, target) -> None:
+        """OBSERVED → 活跃态(含自身)皆非法;仅 CLOSED 合法。"""
+        t = _make_ticket(governance_status=GovernanceStatus.OBSERVED, assignee=None)
+        with pytest.raises(IllegalTicketTransitionError):
+            t.transition_to(target)
+
+    def test_observed_in_terminal_statuses(self) -> None:
+        """OBSERVED 归终态族,ACTIVES 不含它(决策已定:closed 族)。"""
+        from agentclaw.community.core.economy.governance.domain.enums import (
+            ACTIVE_STATUSES,
+            TERMINAL_STATUSES,
+        )
+        assert GovernanceStatus.OBSERVED in TERMINAL_STATUSES
+        assert GovernanceStatus.OBSERVED not in ACTIVE_STATUSES
+
+
+class TestTicketEnterObserved:
+    """enter_observed 领域方法直测 — 两路(approve_whitelist/scan兜底)共用入口。
+
+    钉死与 close 的关键差异:转 OBSERVED(非 CLOSED)、不设 closed_at、释放
+    assignee、清 remind_at、close_reason 透传。这些是 OBSERVED 不发通知/不占
+    人力/不纳 cooldown 视野的基础,任一被改坏都破坏观察态语义。
+    """
+
+    def test_transitions_to_observed_and_sets_close_reason(self) -> None:
+        t = _make_ticket(governance_status=GovernanceStatus.OPEN,
+                         assignee="owner-1:bot-1",
+                         remind_at=datetime(2026, 8, 1, 9, 0, 0))
+        t.enter_observed(close_reason=CloseReason.SCAN_WHITELISTED)
+        assert t.governance_status == GovernanceStatus.OBSERVED
+        assert t.close_reason == CloseReason.SCAN_WHITELISTED
+
+    def test_releases_active_worker(self) -> None:
+        t = _make_ticket(governance_status=GovernanceStatus.OPEN,
+                         assignee="owner-1:bot-1")
+        t.enter_observed(close_reason=CloseReason.SCAN_WHITELISTED)
+        assert t.assignee is None  # 观察不占治理人力
+
+    def test_does_not_set_closed_at(self) -> None:
+        """OBSERVED 非关闭,不设 closed_at(防 find_latest_closed 误纳 cooldown 视野)。"""
+        t = _make_ticket(governance_status=GovernanceStatus.OPEN)
+        t.enter_observed(close_reason=CloseReason.WHITELIST_APPROVED)
+        assert t.closed_at is None
+
+    def test_clears_remind_at(self) -> None:
+        t = _make_ticket(governance_status=GovernanceStatus.OPEN,
+                         remind_at=datetime(2026, 8, 1, 9, 0, 0))
+        t.enter_observed(close_reason=CloseReason.WHITELIST_APPROVED)
+        assert t.remind_at is None
+
+    def test_does_not_touch_cooldown(self) -> None:
+        """enter_observed 不设 cooldown(对齐 close 不设,删白后等 off-batch 重建)。"""
+        t = _make_ticket(governance_status=GovernanceStatus.OPEN, cooldown_until=None)
+        t.enter_observed(close_reason=CloseReason.WHITELIST_APPROVED)
+        assert t.cooldown_until is None
+
+    # ── 不变式反向断言(I2/I4,状态机评估 audit-report ②缺口)───────────────
+
+    def test_close_sets_closed_at_nonnull(self) -> None:
+        """I2:关闭态 closed_at 必非空(close() 后必设)。防 close() 漏设 closed_at
+        被改坏无人抓(原只靠 docstring 默契)。"""
+        t = _make_ticket(governance_status=GovernanceStatus.OPEN)
+        t.close(close_reason=CloseReason.ADMIN_CLOSED, closed_at=datetime(2026, 7, 18))
+        assert t.closed_at is not None
+        assert t.governance_status == GovernanceStatus.CLOSED
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            GovernanceStatus.OPEN,
+            GovernanceStatus.SCHEDULED,
+            GovernanceStatus.WAITING_REVIEW,
+        ],
+    )
+    def test_active_states_have_active_worker(self, status) -> None:
+        """I4:ACTIVE 态 active_worker(assignee)必非空。
+
+        防谁 create/refresh 时把活跃态 assignee 设成 None 被改坏(原无测试,
+        靠 find_active_ticket SQL 隐含,非状态不变式)。
+        """
+        t = _make_ticket(governance_status=status, assignee="owner-1:bot-1")
+        assert t.assignee is not None
+
+    def test_close_releases_active_worker(self) -> None:
+        """I4 反向:close() 后 assignee 必 None(关闭态不占人力)。"""
+        t = _make_ticket(
+            governance_status=GovernanceStatus.OPEN, assignee="owner-1:bot-1",
+        )
+        t.close(close_reason=CloseReason.ADMIN_CLOSED, closed_at=datetime.now())
+        assert t.assignee is None
 
 
 # ---------------------------------------------------------------------------
@@ -838,11 +1045,11 @@ class TestTicketReview:
 
     逐字段对齐 repo task_record_repo.review_ticket:
       - approve_close   → close_reason=close_reason|'approve_close', 可带 cooldown_until
-      - approve_whitelist→ close_reason='whitelisted'
+      - approve_whitelist→ OBSERVED, close_reason=WHITELIST_APPROVED, 不设 closed_at
       - reject_for_reopen→ close_reason='review_rejected'
     共性:无条件清 remind_at(L314)、清 active_worker(L320/327/336/341)、
-        closed_at=now(L312/L319/L326/L335)、写 review_decision/reviewed_by/
-        reviewed_at/review_remark。
+        closed_at=now(L312/L319/L326/L335;approve_whitelist 除外)、写 review_decision/
+        reviewed_by/reviewed_at/review_remark。
     """
 
     def test_review_approve_close(self) -> None:
@@ -871,10 +1078,11 @@ class TestTicketReview:
         t = _make_ticket(governance_status=GovernanceStatus.WAITING_REVIEW,
                          remind_at=datetime(2026, 8, 1, 9, 0, 0))
         t.review(review_decision="approve_whitelist", reviewed_by="admin-1")
-        assert t.governance_status == GovernanceStatus.CLOSED
-        assert t.close_reason == "whitelisted"
-        assert t.assignee is None
+        assert t.governance_status == GovernanceStatus.OBSERVED
+        assert t.close_reason == CloseReason.WHITELIST_APPROVED
+        assert t.assignee is None          # 释放 active_worker(观察不占治理人力)
         assert t.remind_at is None
+        assert t.closed_at is None         # OBSERVED 非关闭,不设 closed_at(防 find_latest_closed 误纳)
 
     def test_review_reject_for_reopen(self) -> None:
         """打回 → 仍 CLOSED(review_rejected),释放 active_worker,下个 scan 重建 open 单。"""
@@ -1031,6 +1239,11 @@ class TestTicketFromOrm:
         for attr in ("id", "gmt_create", "gmt_modified"):
             assert hasattr(t, attr)
         assert t.gmt_create == datetime(2026, 7, 9, 8, 0, 0)
+
+    def test_delivery_status_single_value(self) -> None:
+        """delivery_status 单值四态直通。"""
+        t = GovernanceTicket.from_orm(_make_ticket_orm_obj(delivery_status="sent"))
+        assert t.delivery_status == "sent"
 
     def test_saving_ratio_float_conversion(self) -> None:
         """Numeric → float 转换。"""

@@ -107,7 +107,7 @@ class RecordProcessResult:
 
     worker_key: str
     entered_governance_scope: bool = False
-    action: str = ""  # enqueued / would_create / still_actionable / whitelist_filtered / cooldown_filtered / whitelist_closed / invalid / error
+    action: str = ""  # enqueued / would_create / still_actionable / scan_whitelisted / cooldown_filtered / invalid / error
     reason: str = ""
     ticket_id: str | None = None
     notification_md_preview: str | None = None
@@ -126,10 +126,19 @@ class OfflineBatchResult:
     errors: int = 0
 
 
+# 白名单观察三路分发(路1 scan兜底 / 路2 刷新观察单 / 路3 建观察单)抽至 mixin
+# (R9 行门禁)。import 置于 RecordProcessResult/OfflineBatchResult 定义之后,
+# 避免 mixin 模块顶层回 import 本模块时的循环依赖(部分加载时此二 dataclass
+# 已就绪)。
+from agentclaw.community.core.economy.governance.services.record_process_whitelist import (  # noqa: E402
+    WhitelistObservationMixin,
+)
+
+
 # ── Service ──────────────────────────────────────────────────────────────
 
 
-class GovernanceRecordService:
+class GovernanceRecordService(WhitelistObservationMixin):
     """Single-record process and offline-batch processing.
 
     Follows §7.1.4 (process_record) and §7.2 (process_offline_batch)
@@ -223,9 +232,10 @@ class GovernanceRecordService:
                 worker_key=worker_key,
                 owner_id=owner_id,
                 bot_id=bot_id,
-                dt_version=dt_version,
+                record=record,
                 run_id=run_id,
                 dry_run=dry_run,
+                notify_source=notify_source,
             )
 
         # Step 4: Active ticket exists → refresh snapshot (§7.1.4 Step 4)
@@ -399,65 +409,9 @@ class GovernanceRecordService:
         return result
 
     # ------------------------------------------------------------------
-    # Internal: Whitelist handling (§7.1.4 Step 2)
+    # Whitelist 三路分发(_handle_whitelist_hit + 路2 刷新 + 路3 建单)已抽至
+    # WhitelistObservationMixin(R9 行门禁),见 record_process_whitelist.py。
     # ------------------------------------------------------------------
-
-    def _handle_whitelist_hit(
-        self,
-        *,
-        active_ticket: GovernanceTicket | None,
-        worker_key: str,
-        owner_id: str,
-        bot_id: str,
-        dt_version: str,
-        run_id: str,
-        dry_run: bool,
-    ) -> RecordProcessResult:
-        """Process whitelist-hit cases (§7.1.4 Step 2).
-
-        - No active ticket → audit whitelist_filtered, skip.
-        - Active ticket exists → close ticket (whitelist_filtered, §7.2.7),
-          cancel pending notify.
-        """
-        now = datetime.now()
-
-        if active_ticket is None:
-            # Whitelist hit, no active ticket → only audit
-            if not dry_run:
-                self._audit_repo.add_audit(
-                    run_id, bot_id, owner_id,
-                    check_result="actionable",
-                    action_taken=AuditAction.SCAN_SKIP_WHITELIST,
-                    dry_run=0,
-                )
-            return RecordProcessResult(
-                worker_key=worker_key,
-                entered_governance_scope=False,
-                action="whitelist_filtered",
-                reason="whitelist_hit_no_active_ticket",
-            )
-
-        # Whitelist hit + active ticket → close ticket (§7.2.7) via driver
-        # service (sole driver of the ticket machine). Driver orchestrates
-        # the close + cancel-pending-notify side effect atomically.
-        if not dry_run:
-            self._lifecycle_svc.close_for_whitelist_hit(
-                active_ticket.ticket_id, now=now,
-            )
-
-            self._audit_repo.add_audit(
-                run_id, bot_id, owner_id,
-                action_taken=AuditAction.WHITELIST_CLOSED,
-                dry_run=0,
-            )
-
-        return RecordProcessResult(
-            worker_key=worker_key,
-            entered_governance_scope=False,
-            action="whitelist_closed",
-            reason="whitelist_hit_active_ticket_closed",
-            ticket_id=active_ticket.ticket_id,
-        )
 
     # ------------------------------------------------------------------
     # Internal: Active ticket refresh (§7.1.4 Step 4)
@@ -583,11 +537,13 @@ class GovernanceRecordService:
                 ticket.ticket_id,
                 dt_version=dt_version,
                 bot_name=record.bot_name,
+                owner_name=record.owner_name,
                 triggered_dimensions=record.hit_dimensions,
                 hit_dimensions_count=record.hit_dimensions_count,
                 severity=record.governance_max_priority,
                 estimated_saving_tokens=record.expected_token_saving,
                 saving_ratio=record.saving_ratio,
+                token_baseline=record.token_baseline,
                 task_summary=record.task_summary,
                 notification_structured=record.notification_structured,
                 analysis_status=record.analysis_status,
@@ -767,6 +723,7 @@ class GovernanceRecordService:
             worker_id=worker_key,
             bot_id=bot_id,
             owner_id=owner_id_val,
+            owner_name=record.owner_name,
             bot_name=record.bot_name,
             snapshot=MutableSnapshot(
                 dt_version=dt_version,
@@ -777,6 +734,7 @@ class GovernanceRecordService:
                 severity=record.governance_max_priority,
                 estimated_saving_tokens=record.expected_token_saving,
                 saving_ratio=record.saving_ratio,
+                token_baseline=record.token_baseline,
                 task_summary=record.task_summary,
                 notification_structured=record.notification_structured,
                 analysis_status=record.analysis_status,
@@ -784,7 +742,6 @@ class GovernanceRecordService:
                 last_decision_dt_version=dt_version,
                 last_seen_at=now,
                 last_sync_at=now,
-                delivery_status="none",  # 工单刚建,尚无通知投递
             ),
         )
         # Remind chained by scan after first_send; None until then (§7.3.3).
@@ -816,8 +773,11 @@ class GovernanceRecordService:
         )
         # env auto-filled by ORM default=get_current_env (not in constructor)
         self._notify_repo.add_notification(notify_row)
-        # 回写工单投递状态:first_send:pending(通知已建待发)
-        self._task_repo.update_delivery_status(ticket_id, "first_send:pending")
+        # 回写工单投递状态:pending(通知已建待发)
+        self._task_repo.update_delivery_status(
+            ticket_id,
+            "pending",
+        )
 
         # Audit enqueued (self-managed session)
         self._audit_repo.add_audit(

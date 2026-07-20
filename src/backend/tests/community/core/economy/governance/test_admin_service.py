@@ -32,6 +32,9 @@ from agentclaw.community.core.economy.governance.repositories.whitelist_repo imp
 from agentclaw.community.core.economy.governance.services.admin_service import (
     GovernanceAdminService,
 )
+from agentclaw.community.core.economy.governance.services.delivery_service import (
+    GovernanceDeliveryService,
+)
 from agentclaw.community.core.economy.governance.services.notify_render_service import (
     NotifyRenderService,
 )
@@ -136,6 +139,7 @@ def _build_svc(engine):
         audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
         lifecycle_svc=lifecycle_svc,
+        task_repo=task_repo,
     )
     svc = GovernanceAdminService(
         cache=cache,
@@ -144,11 +148,39 @@ def _build_svc(engine):
         audit_repo=audit_repo,
         task_repo=task_repo,
         config=FakeGovernanceConfig(),
-        notify_sender=FakeNotifySender(),
         lifecycle_svc=lifecycle_svc,
         render_svc=NotifyRenderService(),
     )
     return svc, db, cache
+
+
+def _build_delivery_svc(engine):
+    """Build delivery service with in-memory DB + fake notify sender.
+
+    投递编排域从 admin_service 抽出(admin-split SDD)后的专用构造器,复用与
+    ``_build_svc`` 相同的 repo/lifecycle/render 注入,仅返回
+    GovernanceDeliveryService(admin_service 不再持有投递方法)。
+    """
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    db = FakeDB(lambda: Session(bind=engine))
+    notify_repo = NotifyLogRepository(db=db)
+    task_repo = TaskRecordRepository(db=db)
+    audit_repo = GovernanceAuditRepository(db=db)
+    lifecycle_svc = GovernanceLifecycleService(
+        task_repo=task_repo,
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+    )
+    svc = GovernanceDeliveryService(
+        notify_repo=notify_repo,
+        audit_repo=audit_repo,
+        task_repo=task_repo,
+        config=FakeGovernanceConfig(),
+        notify_sender=FakeNotifySender(),
+        render_svc=NotifyRenderService(),
+        lifecycle_svc=lifecycle_svc,
+    )
+    return svc, db, None
 
 
 def _build_workflow_svc(engine):
@@ -174,6 +206,7 @@ def _build_workflow_svc(engine):
         audit_repo=audit_repo,
         config=FakeGovernanceConfig(),
         lifecycle_svc=lifecycle_svc,
+        task_repo=task_repo,
     )
     svc = GovernanceWorkflowService(
         task_repo=task_repo,
@@ -590,7 +623,7 @@ class TestAdminClose:
 
         with db.orm_session() as s:
             ticket = s.query(GovernanceTicketOrm).first()
-            assert ticket.cooldown_until is None
+            assert ticket.cooldown_until is not None  # admin_close 现在设 cooldown
             assert ticket.active_worker is None
 
     def test_waiting_review_to_closed(self, session, engine):
@@ -758,6 +791,28 @@ class TestBuildReviewTicketDetail:
         svc, _ = _build_workflow_svc(engine)
         assert svc.build_review_ticket_detail("nonexistent") is None
 
+    def test_non_none_delivery_status_unchanged(self, session, engine):
+        """delivery_status 四态时不触发补查,避免过度查询。"""
+        svc, db = _build_workflow_svc(engine)
+        _make_task_record(
+            session,
+            ticket_id="t-existing",
+            delivery_status="sent",
+        )
+        _make_notification(
+            session,
+            notification_id="n-existing",
+            ticket_id="t-existing",
+            notify_status="failed",  # 与工单状态不一致
+            notify_type="reminder",
+        )
+
+        result = svc.build_review_ticket_detail("t-existing")
+        assert result is not None
+        ticket, _ = result
+        # 四态不触发补查,保持原值
+        assert ticket.delivery_status == "sent"
+
 
 class TestDeliverByWorker:
     """deliver_by_worker: 按 worker_id 精准投递 pending 通知(不重跑状态机)。
@@ -768,7 +823,7 @@ class TestDeliverByWorker:
 
     def test_dry_run_builds_without_sending(self, session, engine):
         """dry_run=true:只构建投递清单,不发钉钉、不更新 notify_status、不写审计。"""
-        svc, _, _ = _build_svc(engine)
+        svc, _, _ = _build_delivery_svc(engine)
         _make_notification(
             session, notification_id="n-a1", worker_id="ownerA:botA",
             bot_id="botA", owner_id="ownerA", notify_status="pending",
@@ -795,7 +850,7 @@ class TestDeliverByWorker:
 
     def test_live_send_updates_status_and_audits(self, session, engine):
         """非 dry_run:发送成功 → notify_status=sent + 审计 NOTIFICATION_SENT。"""
-        svc, db, _ = _build_svc(engine)
+        svc, db, _ = _build_delivery_svc(engine)
         _make_notification(
             session, notification_id="n-live", worker_id="ownerA:botA",
             bot_id="botA", owner_id="ownerA", notify_status="pending",
@@ -822,7 +877,7 @@ class TestDeliverByWorker:
 
     def test_worker_id_filter_excludes_other_workers(self, session, engine):
         """只投递指定 worker 的 pending,其它 worker 的不动。"""
-        svc, _, _ = _build_svc(engine)
+        svc, _, _ = _build_delivery_svc(engine)
         _make_notification(
             session, notification_id="n-a", worker_id="ownerA:botA",
             bot_id="botA", owner_id="ownerA", notify_status="pending",
@@ -846,7 +901,7 @@ class TestDeliverByWorker:
 
     def test_empty_worker_returns_zero(self, session, engine):
         """该 worker 无 pending → total=0,sent_count=0,results 空。"""
-        svc, _, _ = _build_svc(engine)
+        svc, _, _ = _build_delivery_svc(engine)
         _make_notification(
             session, notification_id="n-x", worker_id="ownerX:botX",
             bot_id="botX", owner_id="ownerX", notify_status="pending",
@@ -862,7 +917,7 @@ class TestDeliverByWorker:
 
     def test_no_override_recipient_falls_back_to_owner(self, session, engine):
         """不传 override_recipient → 逐条按通知 owner 兜底发送(FakeNotifySender 记录)。"""
-        svc, _, _ = _build_svc(engine)
+        svc, _, _ = _build_delivery_svc(engine)
         _make_notification(
             session, notification_id="n-fb", worker_id="ownerA:botA",
             bot_id="botA", owner_id="ownerA", notify_status="pending",
@@ -876,3 +931,121 @@ class TestDeliverByWorker:
         # FakeNotifySender.send 返回 fake-msg-{recipient},recipient 应为 owner 兜底
         assert result["results"][0]["external_message_id"] == "fake-msg-ownerA"
         assert result["results"][0]["sent_to"] == "ownerA"
+
+    def test_updates_ticket_delivery_status_on_success(self, session, engine):
+        """发送成功后应更新 task_record 的 delivery_status 为 {notify_type}:sent。"""
+        svc, db, _ = _build_delivery_svc(engine)
+        # 创建工单和 first_send 通知
+        ticket_id = "t-deliver-status"
+        notification_id = "n-deliver-status"
+        _make_task_record(
+            session,
+            ticket_id=ticket_id,
+            worker_id="ownerA:botA",
+            bot_id="botA",
+            owner_id="ownerA",
+            delivery_status="first_send:pending",  # 初始状态
+        )
+        _make_notification(
+            session,
+            notification_id=notification_id,
+            ticket_id=ticket_id,
+            worker_id="ownerA:botA",
+            bot_id="botA",
+            owner_id="ownerA",
+            notify_status="pending",
+            notify_type="first_send",  # 首次通知
+        )
+
+        result = svc.deliver_by_worker(
+            worker_id="ownerA:botA", override_recipient="9999", dry_run=False,
+        )
+
+        assert result["sent_count"] == 1
+        assert result["results"][0]["success"] is True
+
+        # 验证 notify_log 的 notify_status 已更新为 sent
+        notify_rows = session.query(GovernanceNotificationOrm).filter_by(
+            notification_id=notification_id,
+        ).all()
+        assert notify_rows[0].notify_status == "sent"
+
+        # 验证 task_record 的 delivery_status 已更新为 sent 单值
+        with db.orm_session() as s:
+            ticket = s.query(GovernanceTicketOrm).filter_by(
+                ticket_id=ticket_id,
+            ).one()
+            assert ticket.delivery_status == "sent"
+
+    def test_updates_ticket_delivery_status_on_failure(self, session, engine):
+        """发送失败后应更新 task_record 的 delivery_status 为 {notify_type}:failed。"""
+        # 构造发送失败场景: FakeNotifySender.send 返回 None
+        class FailingNotifySender:
+            def send(self, msg, channel="markdown"):
+                return None  # 模拟发送失败
+
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        db = FakeDB(lambda: Session(bind=engine))
+        cache = FakeCache()
+        notify_repo = NotifyLogRepository(db=db)
+        task_repo = TaskRecordRepository(db=db)
+        audit_repo = GovernanceAuditRepository(db=db)
+        whitelist_repo = GovernanceWhitelistRepository(db=db)
+        lifecycle_svc = GovernanceLifecycleService(
+            task_repo=task_repo,
+            notify_repo=notify_repo,
+            audit_repo=audit_repo,
+        )
+        whitelist_service = GovernanceWhitelistService(
+            whitelist_repo=whitelist_repo,
+            notify_repo=notify_repo,
+            audit_repo=audit_repo,
+            config=FakeGovernanceConfig(),
+            lifecycle_svc=lifecycle_svc,
+            task_repo=task_repo,
+        )
+        svc = GovernanceDeliveryService(
+            notify_repo=notify_repo,
+            audit_repo=audit_repo,
+            task_repo=task_repo,
+            config=FakeGovernanceConfig(),
+            notify_sender=FailingNotifySender(),  # 注入失败 sender
+            render_svc=NotifyRenderService(),
+            lifecycle_svc=lifecycle_svc,
+        )
+
+        # 创建工单和 first_send 通知
+        ticket_id = "t-deliver-fail"
+        notification_id = "n-deliver-fail"
+        _make_task_record(
+            session,
+            ticket_id=ticket_id,
+            worker_id="ownerA:botA",
+            bot_id="botA",
+            owner_id="ownerA",
+            delivery_status="first_send:pending",
+        )
+        _make_notification(
+            session,
+            notification_id=notification_id,
+            ticket_id=ticket_id,
+            worker_id="ownerA:botA",
+            bot_id="botA",
+            owner_id="ownerA",
+            notify_status="pending",
+            notify_type="first_send",
+        )
+
+        result = svc.deliver_by_worker(
+            worker_id="ownerA:botA", override_recipient="9999", dry_run=False,
+        )
+
+        assert result["sent_count"] == 0
+        assert result["results"][0]["success"] is False
+
+        # 验证 task_record 的 delivery_status 已更新为 failed 单值
+        with db.orm_session() as s:
+            ticket = s.query(GovernanceTicketOrm).filter_by(
+                ticket_id=ticket_id,
+            ).one()
+            assert ticket.delivery_status == "failed"

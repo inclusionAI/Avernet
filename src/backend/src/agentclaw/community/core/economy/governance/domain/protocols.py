@@ -58,6 +58,16 @@ class TaskRecordRepositoryProtocol(Protocol):
         """Find most recently closed ticket for a worker (cooldown check)."""
         ...
 
+    def find_observed_ticket(self, worker_id: str) -> GovernanceTicket | None:
+        """Find the active OBSERVED ticket for a worker (whitelist observation)."""
+        ...
+
+    def find_latest_tickets_by_worker_keys(
+        self, worker_keys: list[str],
+    ) -> dict[str, GovernanceTicket]:
+        """Batch: most-recent ticket per worker_key (any status/close_reason)."""
+        ...
+
     # ── 存 ──
     def add_ticket(self, row: Any) -> str:
         """Insert a new ticket row. Returns ticket_id."""
@@ -81,14 +91,19 @@ class TaskRecordRepositoryProtocol(Protocol):
         *,
         offset: int = 0,
         limit: int = 50,
+        delivery_statuses: list[str] | None = None,
     ) -> list[GovernanceTicket]:
         """All tickets in given statuses (cross-owner), newest first, paged.
 
-        评审场景按治理状态过滤工单,跨 owner。
+        评审场景按治理状态过滤工单,跨 owner;可选按投递状态过滤。
         """
         ...
 
-    def count_tickets_by_statuses(self, statuses: list[str]) -> int:
+    def count_tickets_by_statuses(
+        self,
+        statuses: list[str],
+        delivery_statuses: list[str] | None = None,
+    ) -> int:
         """Count tickets in given statuses (cross-owner; list 配套统计)。"""
         ...
 

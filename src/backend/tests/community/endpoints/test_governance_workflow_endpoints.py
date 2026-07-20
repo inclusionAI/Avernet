@@ -98,6 +98,11 @@ def _seed_list_mixed(world) -> None:
         world, ticket_id="tkt-list-sched1",
         governance_status="scheduled", owner_id="owner-3", bot_id="bot-4",
     )
+    # owner-4: observed(白名单观察态,active_worker=None)
+    _insert_ticket(
+        world, ticket_id="tkt-list-obs1",
+        governance_status="observed", owner_id="owner-4", bot_id="bot-5",
+    )
 
 
 def _seed_detail(world) -> None:
@@ -174,6 +179,20 @@ def _assert_list_waiting_filter(response, world) -> None:
     )
 
 
+def _assert_list_observed_filter(response, world) -> None:
+    """observed filter 返回观察态工单(评审据此查看白名单 bot 最新画像,Task 13)。"""
+    del world
+    body = response.json()
+    assert body["success"] is True
+    data = body["data"]
+    assert data["status_filter"] == ["observed"]
+    assert data["total"] >= 1
+    for item in data["items"]:
+        assert item["governance_status"] == "observed"
+    ticket_ids = {item["ticket_id"] for item in data["items"]}
+    assert "tkt-list-obs1" in ticket_ids
+
+
 def _assert_list_pagination(response, world) -> None:
     """limit=1 page returns <=1 item; total unaffected by window."""
     body = response.json()
@@ -182,6 +201,39 @@ def _assert_list_pagination(response, world) -> None:
     assert data["offset"] == 0
     assert len(data["items"]) <= 1
     assert data["total"] >= 3  # at least open1 + wait1 + closed1 + sched1
+
+
+def _assert_whitelist_endpoint(response, world) -> None:
+    """tickets:whitelist 端点返回 OBSERVED 工单(纯工单 item,含治理画像字段)。"""
+    del world
+    body = response.json()
+    assert body["success"] is True
+    data = body["data"]
+    # status_filter 标识白单视图 = observed
+    assert data["status_filter"] == ["observed"]
+    assert data["total"] >= 1
+    for item in data["items"]:
+        # 全是 OBSERVED 观察态(加白中 bot)
+        assert item["governance_status"] == "observed"
+        # item 是纯工单(ReviewTicketItem),含治理画像字段(供 admin 评估是否继续留白;
+        # 不并白单元数据。dt_version 在详情 schema 暴露,列表 item 无此字段,不在此断言)
+        assert "token_baseline" in item
+        assert "hit_dimensions" in item
+        assert "saving_ratio" in item
+        assert "latest_decision" in item
+    ticket_ids = {item["ticket_id"] for item in data["items"]}
+    assert "tkt-list-obs1" in ticket_ids
+
+
+def _assert_whitelist_endpoint_empty(response, world) -> None:
+    """无 OBSERVED 工单时 tickets:whitelist 返回空列表 + total=0,不报错。"""
+    del world
+    body = response.json()
+    assert body["success"] is True
+    data = body["data"]
+    assert data["status_filter"] == ["observed"]
+    assert data["total"] == 0
+    assert data["items"] == []
 
 
 def _assert_list_invalid_status_400(response, world) -> None:
@@ -226,11 +278,11 @@ def _assert_review_approved_closed(response, world) -> None:
 
 
 def _assert_review_whitelist_added(response, world) -> None:
-    """approve_whitelist adds a whitelist entry + closes the ticket."""
+    """approve_whitelist adds a whitelist entry + observes the ticket (OBSERVED)."""
     repo = world.get(TaskRecordRepository)
     ticket = repo.find_by_ticket_id("tkt-review-wl")
     assert ticket is not None
-    assert ticket.governance_status == "closed"
+    assert ticket.governance_status == "observed"
 
 
 def _assert_review_reject_not_closed(response, world) -> None:
@@ -282,6 +334,22 @@ def review_list_filter_waiting_ok():
 @endpoint_test(
     method="GET",
     path="/api/economy/governance/workflow/tickets",
+    scenario="ok_filter_observed",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"statuses": "observed"},
+    ),
+    seed=_seed_list_mixed,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(_assert_list_observed_filter,),
+)
+def review_list_filter_observed_ok():
+    """Happy path: statuses=observed 筛出白名单观察态工单(Task 13 可见性)。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets",
     scenario="ok_pagination",
     input=CaseInput(
         headers=_USER_HEADER,
@@ -308,6 +376,100 @@ def review_list_pagination_ok():
 )
 def review_list_invalid_status_error():
     """Error path: invalid status value → 400."""
+
+
+def _seed_delivery_variants(world) -> None:
+    """Seed open tickets with different delivery_status 列值(含 none 历史哨兵)。"""
+    repo = world.get(TaskRecordRepository)
+    # 列默认 none(未建通知 — 新工单/OBSERVED 不建 notify 保持 none)
+    repo.insert_ticket(GovernanceTicketOrm(
+        ticket_id="tkt-deliv-none", worker_id="owner-d:bot-none",
+        bot_id="bot-none", owner_id="owner-d", bot_name="BotNone",
+        dt_version="20260705", governance_decision="actionable",
+        governance_status="open", active_worker="owner-d:bot-none",
+        delivery_status="none", last_sync_at=datetime.now(),
+    ))
+    # pending(已建 first_send 待发)
+    repo.insert_ticket(GovernanceTicketOrm(
+        ticket_id="tkt-deliv-pending", worker_id="owner-d:bot-pend",
+        bot_id="bot-pend", owner_id="owner-d", bot_name="BotPending",
+        dt_version="20260705", governance_decision="actionable",
+        governance_status="open", active_worker="owner-d:bot-pend",
+        delivery_status="pending", last_sync_at=datetime.now(),
+    ))
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets",
+    scenario="ok_delivery_none_not_422",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"statuses": "open", "delivery_status": "none"},
+    ),
+    seed=_seed_delivery_variants,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+)
+def review_list_delivery_none_ok():
+    """delivery_status=none(历史哨兵)不再 422,返回列值 none 的工单。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets",
+    scenario="ok_delivery_multi_value",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={
+            "statuses": "open",
+            "delivery_status": ["pending", "none"],
+        },
+    ),
+    seed=_seed_delivery_variants,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+)
+def review_list_delivery_multi_value_ok():
+    """多值 delivery_status(pending+none)IN 匹配两值,返回两类工单。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets:whitelist",
+    scenario="ok_whitelist_view",
+    input=CaseInput(headers=_USER_HEADER),
+    seed=_seed_list_mixed,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(_assert_whitelist_endpoint,),
+)
+def whitelist_tickets_ok():
+    """Happy path: tickets:whitelist 返回 OBSERVED 观察态工单(白单 bot 最新治理画像)。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets:whitelist",
+    scenario="ok_whitelist_empty",
+    input=CaseInput(headers=_USER_HEADER),
+    seed=_seed_detail,  # 仅一条 waiting_review,无 OBSERVED
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(_assert_whitelist_endpoint_empty,),
+)
+def whitelist_tickets_empty():
+    """Empty path: 无 OBSERVED 工单 → items=[] total=0,不报错。"""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets:whitelist",
+    scenario="error_invalid_limit",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"limit": "0"},  # limit ge=1,0 违规 → FastAPI 422
+    ),
+    expect=ExpectError(status=422),
+)
+def whitelist_tickets_invalid_limit_error():
+    """Error path: limit < 1 → 422(FastAPI Query 校验)。"""
 
 
 # ---------------------------------------------------------------------------

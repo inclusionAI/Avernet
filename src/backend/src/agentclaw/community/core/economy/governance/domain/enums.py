@@ -48,7 +48,7 @@ class AuditAction(str, Enum):
 
     # ── Scan skip ─────────────────────────────────────
     SCAN_SKIP_NOT_READY = "scan_skip_not_ready"     # Data not ready (was: data_not_ready)
-    SCAN_SKIP_WHITELIST = "scan_skip_whitelist"     # Whitelist filtered (was: whitelist_filtered)
+    SCAN_WHITELISTED = "scan_whitelisted"   # scan 遇到白名单 bot: 清理残留活跃单或无单跳过 (只记动作, 不猜原因; 合并原 scan_skip_whitelist + whitelist_closed)
     SCAN_SKIP_MUTED = "scan_skip_muted"             # Already in mute period (was: muted)
     SCAN_SKIP_COOLDOWN = "scan_skip_cooldown"       # Cooldown period (was: cooldown_filtered)
 
@@ -63,10 +63,10 @@ class AuditAction(str, Enum):
 
     # ── Whitelist management (new) ──────────────────
     WHITELIST_REMOVED = "whitelist_removed"             # 管理员删除白名单条目
+    WHITELIST_OBSERVED = "whitelist_observed"           # 白名单 bot 观察刷新(off-batch 刷 OBSERVED 单快照,不发通知)
 
     # ── Task record / ticket lifecycle (new) ──────────
     ENQUEUED = "enqueued"                           # 新工单+first_send notify 创建 (§7.1.4)
-    WHITELIST_CLOSED = "whitelist_closed"           # 白名单命中关闭 active 工单 (§7.2.7)
     COOLDOWN_FILTERED = "cooldown_filtered"         # cooldown 期内跳过建单 (§7.1.4 Step 5)
     STILL_ACTIONABLE = "still_actionable"           # 仍有 active 工单, 刷新快照 (§7.1.4 Step 4)
     AUTO_SILENCED = "auto_silenced"                 # 不在治理范围, 自动静默 (§7.2.6)
@@ -90,6 +90,7 @@ class AuditAction(str, Enum):
     # ── Admin delete ───────────────────────────────────
     RECORDS_DELETED = "records_deleted"                     # 管理员删除 task_record 行
     NOTIFICATIONS_DELETED = "notifications_deleted"         # 管理员删除 notify_log 行
+    TICKET_CASCADE_PURGED = "ticket_cascade_purged"         # 管理员按 ticket_id 级联删工单+归属通知
 
     # ── Point-to-point delivery (manual testing tool) ────
     POINT_TO_POINT_NOTIFY_CREATED = "point_to_point_notify_created"      # p2p 自动创建了通知
@@ -101,15 +102,51 @@ class AuditAction(str, Enum):
 
 
 class GovernanceStatus(str, Enum):
-    """工单/治理状态 — 用于 GovernanceTicket.governance_status."""
+    """工单/治理状态 — 用于 GovernanceTicket.governance_status.
+
+    OBSERVED = 白名单观察态:bot 进入治理白名单后,其工单转 OBSERVED 而非
+    CLOSED,由后续 offline-batch 持续刷新快照供评审观察,但**不发通知、不占
+    治理人力**。归终态族(ACTIVE_STATUSES 不含它),故 ``find_active_ticket``
+    天然不命中 → delivery/admin 不操作观察单。删白后 OBSERVED → CLOSED 收尾。
+    """
 
     OPEN = "open"
     SCHEDULED = "scheduled"
     WAITING_REVIEW = "waiting_review"
+    OBSERVED = "observed"
     CLOSED = "closed"
 
     def __str__(self) -> str:
         return self.value
+
+
+# ── ticket 侧 governance_status 谓词的公共来源 ──────────────────────────
+# 收口判据:多态集合查询(语义集合,会因加态而变,散落重复)引这些常量;单态
+# 精确查询(== 某态,加态不影响它)只换枚举不引常量。
+#
+# 为什么存在:加新状态(如 OBSERVED)时,只需改这里一处,所有"活跃态/终态"
+# 集合消费方自动同步,避免散落在 repo 各处的 in_(...) 谓词逐一改、漏一处
+# 即静默 bug。
+#
+# 范围:仅用于 ticket 侧(``GovernanceTicketOrm.governance_status``)。
+# 通知表 ``GovernanceNotificationOrm`` 也有同名列 governance_status,但语义
+# 不同(建通知时工单状态快照),通知侧谓词不引此常量,避免两个不同概念混着改。
+ACTIVE_STATUSES: frozenset[GovernanceStatus] = frozenset({
+    GovernanceStatus.OPEN,
+    GovernanceStatus.SCHEDULED,
+    GovernanceStatus.WAITING_REVIEW,
+})
+"""活跃态集合 — 工单仍在治理链路中(可投递/可刷新/可 review)。
+Step1 不含 OBSERVED;Step2 加 OBSERVED 后仍不含(观察态归终态族,
+不发通知、不被 find_active_ticket 命中)。"""
+
+TERMINAL_STATUSES: frozenset[GovernanceStatus] = frozenset({
+    GovernanceStatus.CLOSED,
+    GovernanceStatus.OBSERVED,
+})
+"""终态族 — 工单生命周期结束(不再进 active 治理链路)。OBSERVED 归终态族:
+持续刷新快照供评审观察,但不发通知、不占治理人力、不被 find_active_ticket
+命中。"""
 
 
 class NotifyStatus(str, Enum):
@@ -140,7 +177,8 @@ class CloseReason(str, Enum):
 
     ADMIN_CLOSED = "admin_closed"
     AUTO_SILENCED_NORMAL = "auto_silenced_normal"
-    WHITELIST_FILTERED = "whitelist_filtered"
+    SCAN_WHITELISTED = "scan_whitelisted"          # scan 清理白名单 bot 残留活跃单 (只记动作, 不猜原因)
+    WHITELIST_APPROVED = "whitelist_approved"      # owner 申请加白 → admin 审阅同意关单 (source=admin_review)
     USER_OPTIMIZED_APPROVED = "user_optimized_approved"
     REVIEW_REJECTED = "review_rejected"
     STALE_REPLACED = "stale_replaced"
