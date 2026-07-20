@@ -2924,6 +2924,7 @@ class BotService:
                 if binding and binding.status in [
                     DeviceBindingStatus.ACTIVE.value,
                     DeviceBindingStatus.PENDING.value,
+                    DeviceBindingStatus.FAILED.value,
                     DeviceBindingStatus.STOPPED.value,
                 ]:
                     # Release the device
