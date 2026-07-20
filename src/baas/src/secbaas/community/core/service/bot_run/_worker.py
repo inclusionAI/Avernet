@@ -52,12 +52,15 @@ logger = get_logger("core-bot-run")
 
 @contextlib.contextmanager
 def _trace_context_from_meta(meta: dict[str, Any] | None) -> Generator[None]:
-    """从队列工作项 meta 中恢复 trace context 并创建 child span。
+    """从队列工作项 meta 中恢复 trace context。
 
     1. extract_context 从 meta["traceparent"] 反序列化 trace context
     2. attach_context 激活（若无有效 trace 则跳过）
-    3. start_span 创建 child span
-    退出时自动关闭 span 并 detach context。
+    退出时 detach context 恢复之前的 trace scope。
+
+    注：此处不再调用 tracer.start_span 创建 child span。SOFA tracer 要求
+    operation_name 为已注册的 span code（http_server/http_client），业务名
+    会抛 SpanCodeNotFoundException。child span 能力待后续迭代在插件层适配后恢复。
     """
     tracer = get_tracer_plugin()
     carrier = (meta or {}).get("traceparent") or {}
@@ -66,8 +69,7 @@ def _trace_context_from_meta(meta: dict[str, Any] | None) -> Generator[None]:
         tracer.attach_context(trace_ctx) if trace_ctx is not None else None
     )
     try:
-        with tracer.start_span("bot_queue_worker.execute"):
-            yield
+        yield
     finally:
         if trace_token is not None:
             tracer.detach_context(trace_token)
