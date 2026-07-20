@@ -19,8 +19,10 @@ files/diff / worktree-status / runs / phases / runs/pull-requests /
 runs/issues) accept an optional ``cwd`` query parameter: when provided it is
 validated (``WorkspaceService.validate_cwd`` / ``_validate_cwd_prefix``) and used directly
 as the session workspace root; when omitted, the legacy ``base/{session_id}``
-derivation serves as a fallback (full backwards compatibility). ``session_id``
-stays required for response correlation and fallback.
+derivation serves as a fallback (full backwards compatibility). For
+``file-tree`` only, ``session_id`` and ``cwd`` are alternative workspace
+locators and at least one must be non-empty; the other endpoints continue to
+require ``session_id``.
 
 Each handler composes a fresh
 :class:`engine.community.core.aicoding.workspace_service.WorkspaceService` over
@@ -136,18 +138,31 @@ def _diff_node_to_schema(node: DiffTreeNode) -> DiffTreeNodeSchema:
 
 @router.get("/file-tree", response_model=FileTreeResponse)
 async def list_file_tree(
-    session_id: str = Query(..., description="AICoding session ID"),
+    session_id: str | None = Query(
+        None,
+        description="可选：AICoding session ID；与 cwd 至少提供一个",
+    ),
     cwd: str | None = Query(
         None,
-        description="可选：前端直传工作目录绝对路径，"
-        "缺省回退 base/{session_id}",
+        description="可选：前端直传工作目录绝对路径；与 session_id 至少提供一个",
     ),
 ) -> FileTreeResponse:
     """Return the full workspace tree (recursive, filtered, sorted)."""
+    normalized_session_id = session_id.strip() if session_id else None
+    normalized_cwd = cwd.strip() if cwd else None
+    if not normalized_session_id and not normalized_cwd:
+        raise HTTPException(
+            status_code=400,
+            detail="session_id and cwd cannot both be empty",
+        )
+
     check_capability(Capability.FILE_LIST)
     service = _workspace_service()
     try:
-        tree = await service.list_file_tree(session_id, cwd)
+        tree = await service.list_file_tree(
+            normalized_session_id,
+            normalized_cwd,
+        )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except NotADirectoryError as e:
@@ -159,7 +174,7 @@ async def list_file_tree(
 
     return FileTreeResponse(
         success=True,
-        session_id=session_id,
+        session_id=normalized_session_id,
         tree=[_file_node_to_schema(n) for n in tree],
     )
 

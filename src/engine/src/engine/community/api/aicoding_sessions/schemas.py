@@ -16,7 +16,7 @@ class FileTreeNodeSchema(BaseModel):
 
 class FileTreeResponse(BaseModel):
     success: bool = True
-    session_id: str
+    session_id: Optional[str] = None
     tree: List[FileTreeNodeSchema] = Field(default_factory=list)
 
 

@@ -64,7 +64,9 @@ class FakeWorkspaceService:
     get_file_diff_raise: Optional[BaseException] = None
     calls: list[tuple[str, dict]] = field(default_factory=list)
 
-    async def list_file_tree(self, session_id: str, cwd: str | None = None):
+    async def list_file_tree(
+        self, session_id: str | None, cwd: str | None = None
+    ):
         self.calls.append(("list_file_tree", {"session_id": session_id, "cwd": cwd}))
         if self.list_file_tree_raise:
             raise self.list_file_tree_raise
@@ -270,6 +272,63 @@ def test_file_tree_success(client, workspace_svc):
     assert body["session_id"] == "s1"
     assert body["tree"][0]["name"] == "project-fe"
     assert body["tree"][0]["children"][0]["name"] == "README.md"
+
+
+def test_file_tree_accepts_cwd_without_session_id(client, workspace_svc):
+    workspace_svc.list_file_tree_return = []
+    cwd = "/home/admin/.aicoding/workspace/direct"
+
+    resp = client.get(
+        "/api/aicoding/sessions/file-tree",
+        params={"cwd": cwd},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["session_id"] is None
+    assert workspace_svc.calls[-1] == (
+        "list_file_tree",
+        {"session_id": None, "cwd": cwd},
+    )
+
+
+def test_file_tree_normalizes_optional_locators(client, workspace_svc):
+    workspace_svc.list_file_tree_return = []
+
+    resp = client.get(
+        "/api/aicoding/sessions/file-tree",
+        params={
+            "session_id": "  s1  ",
+            "cwd": "  /home/admin/.aicoding/workspace/s1  ",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["session_id"] == "s1"
+    assert workspace_svc.calls[-1][1] == {
+        "session_id": "s1",
+        "cwd": "/home/admin/.aicoding/workspace/s1",
+    }
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {},
+        {"session_id": ""},
+        {"cwd": "   "},
+        {"session_id": "  ", "cwd": "\t"},
+    ],
+)
+def test_file_tree_rejects_empty_session_id_and_cwd(
+    client,
+    workspace_svc,
+    params,
+):
+    resp = client.get("/api/aicoding/sessions/file-tree", params=params)
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "session_id and cwd cannot both be empty"
+    assert workspace_svc.calls == []
 
 
 @pytest.mark.parametrize(
