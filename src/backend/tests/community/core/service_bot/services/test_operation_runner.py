@@ -141,6 +141,7 @@ def test_acquire_noop_when_already_recorded(ledger, baas):
 def test_acquire_creation_issues_and_records_bot_uuid(ledger, baas):
     r = _runner(ledger, baas)
     op = r.open_operation(publish_id=1, kind=CREATE, stage=PublishStage.ONLINE)  # no bot_uuid
+    assert op.bot_uuid is None  # creation kind: no target bot yet → NULL, not ""
 
     async def issue():
         wid = baas.issue("new-bot", publish_type="CREATE")

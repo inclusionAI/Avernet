@@ -118,8 +118,8 @@ class PublishOperationRunner:
         is in flight.
 
         ``bot_uuid`` is ``None`` for a creation kind (first release / eval), whose
-        target bot does not exist yet — it is persisted as the column's empty-string
-        default (the column is non-nullable) and filled in once the create returns.
+        target bot does not exist yet — it is persisted as ``NULL`` and filled in
+        once the create returns.
 
         Two cases, keyed on the latest row for ``(publish_id, kind, stage)``:
 
@@ -153,7 +153,7 @@ class PublishOperationRunner:
             "stage": stage.value,
             "attempt": attempt,
             "request_id": operation_request_id(publish_id, kind, stage.value, attempt),
-            "bot_uuid": bot_uuid or "",
+            "bot_uuid": bot_uuid,
             "operator": operator,
             "params": params,
             "env": get_current_env(),

@@ -321,7 +321,7 @@ class PublishOperationRecord(BaseModel):
     attempt: int = Field(default=1, description="Retry generation; a fresh row (+1) is opened after abandon")
     state: str = Field(default=PublishOperationState.PENDING, description="PublishOperationState value")
     request_id: str = Field(..., description="Deterministic request id (correlation/audit only, not an idempotency key)")
-    bot_uuid: str = Field(default="", description="Target BaaS bot (empty for creation kinds until issued)")
+    bot_uuid: Optional[str] = Field(default=None, description="Target BaaS bot (None for creation kinds until the bot is created)")
     baas_publish_id: Optional[int] = Field(default=None, description="BaaS workflow id, written at ID_RECORDED")
     params: Optional[Dict[str, Any]] = Field(default=None, description="Inputs needed to re-issue")
     result: Optional[Dict[str, Any]] = Field(default=None, description="Step results (binding id / draft id / puid, etc.)")
@@ -358,7 +358,7 @@ class PublishOperationModel(Base):
         comment="pending/id_recorded/completed/failed/abandoned",
     )
     request_id = Column(String(128), nullable=False, comment="Deterministic request id (correlation/audit)")
-    bot_uuid = Column(String(128), nullable=False, default="", comment="Target BaaS bot")
+    bot_uuid = Column(String(128), nullable=True, comment="Target BaaS bot (NULL for creation kinds until the bot is created)")
     baas_publish_id = Column(AutoIncrementBigInteger, nullable=True, comment="BaaS workflow id")
     params = Column(Text, nullable=True, comment="Re-issue inputs (JSON)")
     result = Column(Text, nullable=True, comment="Step results (JSON)")

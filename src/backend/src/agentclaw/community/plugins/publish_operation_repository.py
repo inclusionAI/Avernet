@@ -59,7 +59,7 @@ class OrmPublishOperationRepository(PublishOperationRepository):
                 attempt=data.get("attempt", 1),
                 state=data.get("state", PublishOperationState.PENDING.value),
                 request_id=data["request_id"],
-                bot_uuid=data.get("bot_uuid", ""),
+                bot_uuid=data.get("bot_uuid"),
                 baas_publish_id=data.get("baas_publish_id"),
                 params=json.dumps(params, ensure_ascii=False) if params is not None else None,
                 result=json.dumps(result, ensure_ascii=False) if result is not None else None,
