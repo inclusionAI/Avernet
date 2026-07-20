@@ -196,7 +196,7 @@ class PluginConfig(ConfigSchema):
     bot_service: str = Field(default="stub", pattern=r"^(real|local|stub)$")
 
     engine_adapter: str = Field(default="stub", pattern=r"^(real|stub)$")
-    file_transfer: str = Field(default="noop", pattern=r"^(noop|oss)$")
+    file_transfer: str = Field(default="stub", pattern=r"^(real|stub)$")
     database: DatabasePluginConfig = Field(default_factory=DatabasePluginConfig)
     sandbox: SandboxPluginConfig = Field(default_factory=SandboxPluginConfig)
 
@@ -219,6 +219,7 @@ class FileTransferOssConfigSchema(ConfigSchema):
     config_section = "file_transfer_oss"
     endpoint: str = Field(default="")
     bucket_name: str = Field(default="")
+    region: str = Field(default="")
     staging_root_path: str = Field(default="baas-file-transfer")
     secret_name: str = Field(default="")
 
