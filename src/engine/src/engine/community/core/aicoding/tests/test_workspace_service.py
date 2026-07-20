@@ -971,7 +971,7 @@ async def test_list_file_tree_uses_cwd_as_workspace_root(
     file_plugin = FakeFilePlugin()
     service = _make_service(file_plugin=file_plugin)
 
-    tree = await service.list_file_tree(None, cwd=str(custom))
+    tree = await service.list_file_tree("   ", cwd=str(custom))
 
     assert [node.name for node in tree] == ["cwd-only.txt"]
     assert file_plugin.calls == []

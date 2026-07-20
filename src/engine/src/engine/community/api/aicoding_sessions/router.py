@@ -148,8 +148,8 @@ async def list_file_tree(
     ),
 ) -> FileTreeResponse:
     """Return the full workspace tree (recursive, filtered, sorted)."""
-    normalized_session_id = session_id.strip() if session_id else None
-    normalized_cwd = cwd.strip() if cwd else None
+    normalized_session_id = (session_id.strip() or None) if session_id else None
+    normalized_cwd = (cwd.strip() or None) if cwd else None
     if not normalized_session_id and not normalized_cwd:
         raise HTTPException(
             status_code=400,

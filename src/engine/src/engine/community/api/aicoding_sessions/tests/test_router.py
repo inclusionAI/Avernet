@@ -274,13 +274,13 @@ def test_file_tree_success(client, workspace_svc):
     assert body["tree"][0]["children"][0]["name"] == "README.md"
 
 
-def test_file_tree_accepts_cwd_without_session_id(client, workspace_svc):
+def test_file_tree_accepts_cwd_with_blank_session_id(client, workspace_svc):
     workspace_svc.list_file_tree_return = []
     cwd = "/home/admin/.aicoding/workspace/direct"
 
     resp = client.get(
         "/api/aicoding/sessions/file-tree",
-        params={"cwd": cwd},
+        params={"session_id": "   ", "cwd": cwd},
     )
 
     assert resp.status_code == 200

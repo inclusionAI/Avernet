@@ -283,8 +283,10 @@ class WorkspaceService:
         self, session_id: str | None, cwd: str | None = None
     ) -> list[FileTreeNode]:
         """List workspace files recursively, excluding AICoding mounts."""
-        normalized_session_id = session_id.strip() if session_id else None
-        normalized_cwd = cwd.strip() if cwd else None
+        normalized_session_id = (
+            (session_id.strip() or None) if session_id else None
+        )
+        normalized_cwd = (cwd.strip() or None) if cwd else None
         if not normalized_session_id and not normalized_cwd:
             raise ValueError("session_id and cwd cannot both be empty")
 
