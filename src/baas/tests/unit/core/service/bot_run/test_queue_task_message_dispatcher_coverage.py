@@ -717,6 +717,43 @@ class TestEnqueueWork:
             run_id="run-1", bot_id="bot-1", session_id=None, meta=None
         )
 
+    def test_enqueue_injects_traceparent_when_tracer_active(self):
+        """When a trace span is active, inject_context produces a carrier
+        that gets written into meta["traceparent"]."""
+        carrier = {"traceparent": "00-abc-def-03"}
+        mock_tracer = MagicMock()
+        mock_tracer.inject_context = MagicMock(
+            side_effect=lambda c: c.update(carrier)
+        )
+        d = _make_dispatcher()
+        with patch(
+            "secbaas.community.core.service.bot_run."
+            "_queue_task_message_dispatcher.get_tracer_plugin",
+            return_value=mock_tracer,
+        ):
+            d._enqueue_work("run-1", "bot-1", "sess-1", meta={"k": "v"})
+        args = d._queue_repository.insert_queue.call_args
+        assert args.kwargs["meta"]["traceparent"] == carrier
+        assert args.kwargs["meta"]["k"] == "v"
+
+    def test_enqueue_injects_traceparent_into_none_meta(self):
+        """When meta is None and tracer produces a carrier, a fresh dict
+        is created with traceparent."""
+        carrier = {"traceparent": "00-abc-def-03"}
+        mock_tracer = MagicMock()
+        mock_tracer.inject_context = MagicMock(
+            side_effect=lambda c: c.update(carrier)
+        )
+        d = _make_dispatcher()
+        with patch(
+            "secbaas.community.core.service.bot_run."
+            "_queue_task_message_dispatcher.get_tracer_plugin",
+            return_value=mock_tracer,
+        ):
+            d._enqueue_work("run-1", "bot-1", None)
+        args = d._queue_repository.insert_queue.call_args
+        assert args.kwargs["meta"] == {"traceparent": carrier}
+
 
 class TestBuildMetadata:
     def test_no_context_no_session(self):
