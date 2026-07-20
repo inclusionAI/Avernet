@@ -1,0 +1,282 @@
+# Micro-merchant event orchestration collaboration template.
+# This YAML describes only the collaboration strategy. It does not store concrete bot ids.
+# When creating a group, bind the logical roles below to actual bots via CreateGroupRequest.participant_bindings.
+
+name: Micro-Merchant Event Orchestration
+
+metadata:
+  description: The event planner coordinates the full runbook, rental and merchant roles provide goods, booth needs, and delivery requirements in parallel, the decorator and delivery runner plan execution in parallel, and the planner synthesizes the final event runbook.
+  labels:
+    scenario: micro_merchant_event
+
+participants:
+  event_planner:
+    display_name: Event Planner
+    description: Clarifies the event goal, decomposes the overall flow, gathers all role outputs, and produces the final event runbook.
+    required: true
+
+  event_rental:
+    display_name: Event Rental
+    description: Plans rental booth items, checks quantities and specs, and provides loading, return, and liability requirements.
+    required: true
+
+  onsite_decorator:
+    display_name: Onsite Decorator
+    description: Plans booth layout, onsite display, setup sequence, traffic flow, and teardown.
+    required: true
+
+  flower_shop:
+    display_name: Flower Shop
+    description: Provides floral goods and identifies display, freshness, and transport protection requirements.
+    required: true
+
+  convenience_store:
+    display_name: Convenience Store
+    description: Provides onsite supply and emergency goods, plus display, restock, and delivery requirements.
+    required: true
+
+  coffee_shop:
+    display_name: Coffee Shop
+    description: Provides beverage goods and identifies service throughput, temperature control, power, and delivery requirements.
+    required: true
+
+  bakery_shop:
+    display_name: Bakery Shop
+    description: Provides bakery and dessert goods, plus storage, tabletop display, and damage-prevention delivery requirements.
+    required: true
+
+  delivery_runner:
+    display_name: Delivery Runner
+    description: Plans multi-merchant pickup, routing, delivery windows, onsite handoff, and exception handling.
+    required: true
+
+runtime:
+  kind: state_machine
+  state_machine:
+    defaults:
+      node_timeout_ms: 120000
+      max_attempts: 2
+
+    nodes:
+      frame_event_brief:
+        kind: bot_task
+        display_name: Frame Event Brief
+        node_timeout_ms: 90000
+        assignee:
+          type: bot_binding
+          binding: event_planner
+        instruction: |
+          You are the event planner. Convert the user input into a shared event brief for the merchant collaboration.
+
+          The brief must include:
+          1. Event goal, headcount, time, location, and budget assumptions.
+          2. Main zones such as booths, tea break, interaction area, check-in, or photo spot.
+          3. The information each role should add in parallel.
+          4. Known risks and questions that need early confirmation.
+
+          Output only the event brief, not the final runbook.
+        transitions:
+          complete:
+            targets:
+              - plan_rental_equipment
+              - propose_flower_goods
+              - propose_convenience_goods
+              - propose_coffee_goods
+              - propose_bakery_goods
+
+      plan_rental_equipment:
+        kind: bot_task
+        display_name: Plan Rental Items
+        assignee:
+          type: bot_binding
+          binding: event_rental
+        instruction: |
+          You are event rental. Based on the event brief, provide the booth item rental plan.
+
+          Return:
+          1. Recommended rental items, quantities, specs, and substitutes.
+          2. Booth footprint, load-bearing, power, or safety requirements for each item type.
+          3. Loading, delivery, return, deposit, and damage-liability notes.
+          4. What the onsite decorator and delivery runner need to coordinate.
+        transitions:
+          complete:
+            targets:
+              - consolidate_supply_plan
+
+      propose_flower_goods:
+        kind: bot_task
+        display_name: Flower Goods And Needs
+        assignee:
+          type: bot_binding
+          binding: flower_shop
+        instruction: |
+          You are the flower shop. Based on the event brief, provide floral goods and booth/logistics requirements.
+
+          Return:
+          1. Bouquets, table flowers, check-in flowers, photo-spot flowers, or other floral goods with quantities.
+          2. Display footprint, vessels, table height, shade, hydration, and placement requirements.
+          3. Order cutoff, production time, delivery window, fragile protection, and freshness requirements.
+          4. Acceptable substitute flowers and out-of-stock fallback options.
+        transitions:
+          complete:
+            targets:
+              - consolidate_supply_plan
+
+      propose_convenience_goods:
+        kind: bot_task
+        display_name: Convenience Goods And Needs
+        assignee:
+          type: bot_binding
+          binding: convenience_store
+        instruction: |
+          You are the convenience store. Based on the event brief, provide onsite supply and emergency goods with booth/logistics requirements.
+
+          Return:
+          1. Goods and quantities such as water, tissues, tableware, tape, rain gear, charging cables, and snacks.
+          2. Display method, restock frequency, backup box position, and pickup flow.
+          3. Delivery window, packaging, heavy-item handling, and conditions for emergency restock.
+          4. Emergency items that must be prioritized.
+        transitions:
+          complete:
+            targets:
+              - consolidate_supply_plan
+
+      propose_coffee_goods:
+        kind: bot_task
+        display_name: Coffee Goods And Needs
+        assignee:
+          type: bot_binding
+          binding: coffee_shop
+        instruction: |
+          You are the coffee shop. Based on the event brief, provide beverage goods and booth/logistics requirements.
+
+          Return:
+          1. Coffee, tea, hot/cold ratio, cup count, and serving batches.
+          2. Serving counter, heat/cold storage, power, trash collection, and queue-flow needs.
+          3. Delivery window, insulated boxes or ice packs, spill-proof packaging, and onsite handoff method.
+          4. Caffeine, allergy, or child-friendly beverage alternatives.
+        transitions:
+          complete:
+            targets:
+              - consolidate_supply_plan
+
+      propose_bakery_goods:
+        kind: bot_task
+        display_name: Bakery Goods And Needs
+        assignee:
+          type: bot_binding
+          binding: bakery_shop
+        instruction: |
+          You are the bakery shop. Based on the event brief, provide bakery and dessert goods with booth/logistics requirements.
+
+          Return:
+          1. Cakes, bread, dessert table items, gift packs, and quantities.
+          2. Tabletop footprint, trays, labels, allergen notices, and dust protection.
+          3. Storage temperature, cutting time, delivery window, anti-crush/anti-shake packaging, and breakage recovery plan.
+          4. Display pairing suggestions with the coffee shop or flower shop.
+        transitions:
+          complete:
+            targets:
+              - consolidate_supply_plan
+
+      consolidate_supply_plan:
+        kind: bot_task
+        display_name: Consolidate Supply Plan
+        node_timeout_ms: 180000
+        max_attempts: 3
+        assignee:
+          type: bot_binding
+          binding: event_planner
+        instruction: |
+          You are the event planner. Consolidate the rental plan and four merchant outputs into the first-layer supply plan.
+
+          Return:
+          1. Goods, rental items, and services grouped by event zone.
+          2. Booth, equipment, power, temperature-control, and display needs from each merchant.
+          3. Pickup, delivery, freshness, damage-prevention, and onsite handoff requirements.
+          4. Inputs the onsite decorator and delivery runner should handle in parallel next.
+          5. Conflicts or gaps that still need user confirmation.
+        transitions:
+          complete:
+            targets:
+              - design_booth_setup_plan
+              - plan_delivery_route
+
+      design_booth_setup_plan:
+        kind: bot_task
+        display_name: Design Booth Setup Plan
+        assignee:
+          type: bot_binding
+          binding: onsite_decorator
+        instruction: |
+          You are the onsite decorator. Based on the event brief and supply plan, design the full setup plan.
+
+          Return:
+          1. Zone layout, booth sequence, traffic flow, and check-in/photo/tea-break placement.
+          2. Placement, display method, and dependency sequence for each rental item and merchant good.
+          3. Setup timeline, crew actions, onsite acceptance points, and teardown order.
+          4. Unloading points, priorities, and handoff notes for the delivery runner.
+        transitions:
+          complete:
+            targets:
+              - align_setup_and_delivery
+
+      plan_delivery_route:
+        kind: bot_task
+        display_name: Plan Delivery Route
+        assignee:
+          type: bot_binding
+          binding: delivery_runner
+        instruction: |
+          You are the delivery runner. Based on the event brief and supply plan, plan the full delivery operation.
+
+          Return:
+          1. Multi-merchant pickup order, route, estimated times, and backup route.
+          2. Cold-chain, insulation, anti-crush, anti-spill, fragile protection, and heavy-item handling.
+          3. Delivery batches, onsite unloading points, contacts, and proof-of-handoff method.
+          4. Exception handling for delay, damage, missing goods, or last-minute additions.
+        transitions:
+          complete:
+            targets:
+              - align_setup_and_delivery
+
+      align_setup_and_delivery:
+        kind: bot_task
+        display_name: Align Setup And Delivery
+        node_timeout_ms: 150000
+        assignee:
+          type: bot_binding
+          binding: onsite_decorator
+        instruction: |
+          You are the onsite decorator. Combine the setup plan and delivery plan into the second-layer execution alignment.
+
+          Return:
+          1. Mapping between delivery batches and setup actions.
+          2. Priority for items to place immediately, hold temporarily, keep cold, protect as fragile, or move as heavy goods.
+          3. Time, space, or crew-action conflicts.
+          4. An onsite execution table for the event planner to synthesize.
+        transitions:
+          complete:
+            targets:
+              - finalize_event_runbook
+
+      finalize_event_runbook:
+        kind: bot_task
+        display_name: Finalize Event Runbook
+        node_timeout_ms: 180000
+        max_attempts: 3
+        assignee:
+          type: bot_binding
+          binding: event_planner
+        instruction: |
+          You are the event planner. Combine all upstream results into a user-facing event runbook.
+
+          The final runbook must include:
+          1. Overall event flow and timeline.
+          2. Rental item list, merchant goods list, booth layout, and setup actions.
+          3. Role responsibilities, deliverables, deadlines, and onsite handoff points.
+          4. Delivery route, delivery batches, temperature/fragile/heavy-item handling, and exception plan.
+          5. Questions the user still needs to confirm.
+
+          Do not expose the internal collaboration process. Output only the final runbook.
+        final_output: true

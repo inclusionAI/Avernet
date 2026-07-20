@@ -714,6 +714,8 @@ runtime:
                 "write-and-review",
                 "parallel-expert-review",
                 "solution-and-risk-review",
+                "world-cup-preview-media-copy",
+                "micro-merchant-event-orchestration",
                 "single-bot-guided-answer",
             ]
         );
@@ -748,6 +750,8 @@ runtime:
             vec![
                 "parallel-expert-review",
                 "solution-and-risk-review",
+                "world-cup-preview-media-copy",
+                "micro-merchant-event-orchestration",
                 "single-bot-guided-answer",
                 "write-and-review",
             ]
@@ -797,9 +801,14 @@ runtime:
             vec![
                 "parallel-expert-review",
                 "solution-and-risk-review",
+                "world-cup-preview-media-copy",
+                "micro-merchant-event-orchestration",
             ]
         );
-        assert_eq!(response.templates[0].name, "Parallel Expert Review");
+        assert_eq!(
+            response.templates[0].name,
+            "Parallel Expert Review"
+        );
 
         Ok(())
     }
