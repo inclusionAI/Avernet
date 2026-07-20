@@ -103,6 +103,8 @@ class FakeRunStatusService:
     phase_raise: Optional[BaseException] = None
     pr_return: Any = None
     pr_raise: Optional[BaseException] = None
+    issue_return: Any = None
+    issue_raise: Optional[BaseException] = None
     calls: list[tuple[str, dict]] = field(default_factory=list)
 
     async def enrich_with_run_status(self, sessions):
@@ -137,6 +139,14 @@ class FakeRunStatusService:
         if self.pr_raise:
             raise self.pr_raise
         return self.pr_return or []
+
+    async def get_session_issues(self, session_id: str, cwd: str | None = None):
+        self.calls.append(
+            ("get_session_issues", {"session_id": session_id, "cwd": cwd})
+        )
+        if self.issue_raise:
+            raise self.issue_raise
+        return self.issue_return or []
 
 
 @dataclass
@@ -658,6 +668,57 @@ def test_pull_requests_propagates_500_on_aix_failure(client, runstatus_svc):
     )
     resp = client.get(
         "/api/aicoding/sessions/runs/pull-requests",
+        params={"session_id": "s1"},
+    )
+    assert resp.status_code == 500
+    assert "boom" in resp.json()["detail"]
+
+
+# ── /runs/issues ────────────────────────────────────────────────────────────
+
+
+def test_issues_success(client, runstatus_svc):
+    runstatus_svc.issue_return = [
+        {
+            "runId": "r-issue-1",
+            "kind": "issue",
+            "provider": "generic",
+            "url": (
+                "https://issues.example.com/"
+                "work-items/2026071700117528182"
+            ),
+            "title": "评测实例增加字段：运行时长",
+            "at": 1784295500923,
+            "projectDir": (
+                "/home/admin/.aicoding/workspace/"
+                "07644ab3-1f06-4516-93c4-a68e0b0485f7"
+            ),
+        }
+    ]
+    resp = client.get(
+        "/api/aicoding/sessions/runs/issues",
+        params={"session_id": "s1"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["issues"][0]["kind"] == "issue"
+    assert body["issues"][0]["provider"] == "generic"
+    assert body["issues"][0]["runId"] == "r-issue-1"
+    assert body["issues"][0]["projectDir"].endswith(
+        "07644ab3-1f06-4516-93c4-a68e0b0485f7"
+    )
+    assert runstatus_svc.calls[-1] == (
+        "get_session_issues",
+        {"session_id": "s1", "cwd": None},
+    )
+
+
+def test_issues_propagates_500_on_aix_failure(client, runstatus_svc):
+    runstatus_svc.issue_raise = HTTPException(
+        status_code=500, detail="aix run output list failed: boom"
+    )
+    resp = client.get(
+        "/api/aicoding/sessions/runs/issues",
         params={"session_id": "s1"},
     )
     assert resp.status_code == 500
