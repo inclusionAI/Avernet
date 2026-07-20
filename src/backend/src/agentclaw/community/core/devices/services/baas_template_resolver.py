@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
+from agentclaw.community.core.bot_management.engines.aicoding import CODING_TEMPLATE_TYPES
 from agentclaw.community.core.devices.errors import DeviceServiceError
 from agentclaw.community.log import get_logger
 
@@ -18,7 +19,6 @@ logger = get_logger()
 BAAS_TEMPLATE_MAPPING_CATEGORY = "system"
 BAAS_TEMPLATE_UID_ROUTING_CONFIG_KEY = "baas_template_uid_routing_config"
 PERSONAL_BOT_TEST_TEMPLATE_WHITELIST_CONFIG_KEY = "personal_bot_test_template_whitelist"
-CODING_TEMPLATE_TYPES = {"personalCoding", "applicationCoding"}
 
 
 @dataclass(frozen=True)

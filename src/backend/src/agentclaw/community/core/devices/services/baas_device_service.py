@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import time
-from typing import TYPE_CHECKING, Any, override
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any, Protocol, override
 
+from agentclaw.community.core.bot_management.engines import resolve_provisioning
 from agentclaw.community.core.devices.errors import DeviceServiceError
 from agentclaw.community.core.devices.models import (
     AllocatedDevice,
@@ -71,6 +73,12 @@ class BaasDeviceServiceError(DeviceServiceError):
         self.message = message
 
 
+class TemplateConfigReader(Protocol):
+    """Minimal template service surface needed by BaaS create-init tasks."""
+
+    def get_template_config(self, bot_id: str) -> dict[str, Any] | None: ...
+
+
 class BaasDeviceService(DeviceService):
     """BaaS 设备服务 - 与 BaaS 层 API 交互。
 
@@ -94,6 +102,7 @@ class BaasDeviceService(DeviceService):
         lifecycle_executor: BaasDeviceLifecycleExecutor | None = None,
         vault: "TokenVault | None" = None,
         task_queue_service: "TaskQueueService | None" = None,
+        template_service: TemplateConfigReader | None = None,
     ):
         super().__init__(
             repository=repository,
@@ -111,6 +120,7 @@ class BaasDeviceService(DeviceService):
         )
         self._container_initializer = BaasContainerInitializer(baas_service)
         self._template_resolver = template_resolver
+        self._template_service = template_service
         logger.info("[BaasDeviceService] Initialized")
 
     # ------------------------------------------------------------------
@@ -506,7 +516,8 @@ class BaasDeviceService(DeviceService):
         if bot is None:
             return False, f"bot not found for binding_id={binding_id}"
 
-        resolved_engine = str(bot.get("active_engine") or "").strip() or DEFAULT_ENGINE_TYPE
+        raw_active_engine = str(bot.get("active_engine") or "").strip() or None
+        resolved_engine = raw_active_engine or DEFAULT_ENGINE_TYPE
         resolved_bot_type = str(bot.get("bot_type") or "")
         resolved_bot_id = str(bot.get("bot_id") or bot_id or "")
         resolved_owner_id = str(bot.get("owner_id") or owner_id or "")
@@ -515,20 +526,6 @@ class BaasDeviceService(DeviceService):
             admins = None
 
         template_type = bot.get("template_type")
-        template_config = bot.get("template_config")
-        if not isinstance(template_config, dict):
-            template_config = {}
-
-        raw_codefuse_token = (
-            template_config.get("token")
-            if template_type == "applicationCoding"
-            else None
-        )
-        codefuse_token = (
-            self._vault.decrypt_or_passthrough(raw_codefuse_token)
-            if raw_codefuse_token
-            else None
-        )
 
         bot_uuid = str(props.get("bot_uuid") or "")
         if not bot_uuid:
@@ -538,6 +535,51 @@ class BaasDeviceService(DeviceService):
             device_id=binding.device_id,
             device_provider=binding.device_provider,
             device_props=props,
+        )
+
+        # ac_bots only owns template_type; token/model/runtime live in
+        # ac_templates.ext.  Create-init runs from a durable task after the
+        # synchronous create path, so reload template_config from TemplateService
+        # just like the BaaS restart path does.
+        base_provisioning_ctx, provisioning_strategy = resolve_provisioning(
+            bot_id=resolved_bot_id,
+            owner_id=resolved_owner_id,
+            active_engine=raw_active_engine,
+            bot_type=resolved_bot_type,
+            template_type=template_type,
+            template_config=None,
+        )
+        if (
+            self._template_service is None
+            and provisioning_strategy.should_encrypt_template_token(base_provisioning_ctx)
+        ):
+            return False, (
+                "template_service required for coding bot create init: "
+                f"bot_id={resolved_bot_id}"
+            )
+
+        template_config = None
+        if self._template_service is not None:
+            try:
+                template_config = self._template_service.get_template_config(resolved_bot_id)
+            except Exception as exc:
+                logger.warning(
+                    "[run_create_init_once] failed to reload template config "
+                    "for bot_id=%s: %s",
+                    resolved_bot_id,
+                    exc,
+                )
+        if not isinstance(template_config, dict):
+            template_config = {}
+
+        # Reuse the base ctx, swapping in the freshly loaded template_config
+        # (same bot/engine/template_type as base_provisioning_ctx above).
+        provisioning_ctx = replace(base_provisioning_ctx, template_config=template_config)
+        raw_codefuse_token = provisioning_strategy.extract_runtime_token(provisioning_ctx)
+        codefuse_token = (
+            self._vault.decrypt_or_passthrough(raw_codefuse_token)
+            if raw_codefuse_token
+            else None
         )
 
         try:
