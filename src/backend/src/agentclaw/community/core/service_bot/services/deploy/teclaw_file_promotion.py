@@ -22,6 +22,9 @@ Reads go through the source bot's :class:`DeviceFileSystem` using
 namespace-relative logical paths (``"workspace"`` / ``"identity"`` for listing,
 ``"workspace/<rel>"`` for reading), which the teclaw mapper turns into the
 engine-relative ``/workspace`` · ``/identity`` form.
+
+Regenerable dependency/build directories (``node_modules``) are excluded from the
+sweep — see ``_EXCLUDED_DIR_SEGMENTS``.
 """
 from __future__ import annotations
 
@@ -42,6 +45,21 @@ _NAMESPACES = (WORKSPACE_NS, IDENTITY_NS)
 
 # The composer store id whose base is ``teclaw/{env}/bolt_data``.
 _BOT_DATA_STORE = "bot-data"
+
+# Regenerable dependency/build directories that must never be part of a content
+# snapshot. They are large, symlink-heavy (symlinks cannot round-trip through
+# per-file OSS staging), and reinstalled at container build — they are not user
+# content to carry across publish stages. Sweeping into them also makes promotion
+# fragile: ``node_modules`` routinely holds entries (e.g. ``*.js.map`` files and
+# package symlinks) that ``list_dir`` reports but the engine cannot ``read_file``,
+# which the source-of-truth contract below turns into a hard build failure.
+# Skipping them by path segment (at any depth) avoids both problems.
+_EXCLUDED_DIR_SEGMENTS = frozenset({"node_modules"})
+
+
+def _has_excluded_segment(engine_path: str) -> bool:
+    """True if any path segment of ``engine_path`` names an excluded directory."""
+    return not _EXCLUDED_DIR_SEGMENTS.isdisjoint(engine_path.split("/"))
 
 
 class TeclawFilePromotionError(Exception):
@@ -120,6 +138,14 @@ class TeclawFilePromotion:
                         "[TeclawFilePromotion] listing for ns=%s returned "
                         "out-of-namespace path %r; skipping", ns, engine_path,
                     )
+                    continue
+                # Regenerable dependency/build dirs (``node_modules``) are not
+                # content and their symlinked entries (``*.js.map`` etc.) list but
+                # do not read — skip them so promotion neither bloats OSS nor
+                # hard-fails on an unreadable non-content file. No per-file log: a
+                # node_modules tree can hold tens of thousands of entries; the
+                # end-of-sweep summary covers what was actually staged.
+                if _has_excluded_segment(engine_path):
                     continue
                 logical = engine_path.lstrip("/")  # "workspace/sub/x.csv"
                 content = await device_fs.read_file(logical)
