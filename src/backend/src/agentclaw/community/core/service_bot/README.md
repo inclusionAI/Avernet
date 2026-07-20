@@ -48,3 +48,38 @@ internal_dependencies:
 ### Change impact
 
 Publication path is the user-visible go-live for bots — bugs here block customers from publishing.
+
+## Publish operation ledger (#197)
+
+Every BaaS mutation in the publish pipeline (verify/online release, upgrade,
+restart, scale, offline/destroy, rollback deploy, eval publish/teardown,
+approval create) is recorded in the **`ac_publish_operation`** ledger so a crash
+can resume at the first incomplete step instead of re-issuing. The intent row is
+persisted **before** the BaaS call; the returned workflow id is persisted after.
+
+`PublishOperationRunner` drives each mutation as
+`open_operation → acquire_workflow → complete/fail/abandon` (see
+`services/publish_flow/operation_runner.py` and
+`specs/2026-07-15-publish-service-idempotency/`).
+
+**States** (`PublishOperationState`):
+
+| State | Meaning |
+|-------|---------|
+| `PENDING` | Intent persisted; the BaaS workflow id is not yet recorded. On resume the runner adopts an in-doubt workflow (existing bot → adopt-by-query) or re-issues (a creation's bounded, observable orphan). |
+| `ID_RECORDED` | The BaaS workflow id (or, for approval-create, the puid) is recorded; follow-up steps (binding/ext) may still be pending. |
+| `COMPLETED` | Terminal — the operation and its follow-up steps finished. Also reachable directly from `PENDING` for non-BaaS ops (e.g. `approval_create`) whose outcome lives in `result` rather than `baas_publish_id`. |
+| `FAILED` | Terminal — a step failed unrecoverably (error in `last_error`). |
+| `ABANDONED` | Terminal — superseded (a rebuild changed the artifact, or an upgrade fell back to a create), so the row is retired and a fresh attempt opens a new op. |
+
+**Adopt-by-query.** For mutations on an *existing* bot, a crash after the BaaS
+call but before the id is recorded is resolved on resume by listing the bot's
+BaaS workflows and adopting the single one that is ours (matching publish type,
+unclaimed by any ledger row, and past a monotonic workflow-id high-water mark
+snapshotted at first acquire). Creations (no bot to query) instead accept a
+bounded orphan that the in-flight `PENDING` op makes observable.
+
+**All-auto approval.** Every mutation payload sets `auto_approve_publish=True`;
+there is no client-side approve call in this pipeline. Approval workflows for
+publish/unpublish (owner `should_approval`) are a separate concern handled by
+`PublishApprovalService`, whose AGREED callback enqueues a durable trigger task.

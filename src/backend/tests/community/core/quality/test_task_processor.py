@@ -330,7 +330,7 @@ class TestTaskProcessor:
 
         assert result.status == "success"
         mock_publish_flow_service.eval_teardown.assert_called_once_with(
-            "bot-uuid-to-teardown", operator="operator-001"
+            "bot-uuid-to-teardown", operator="operator-001", publish_id=0
         )
 
     @pytest.mark.asyncio
@@ -817,7 +817,7 @@ class TestTaskProcessor:
 
         # Verify teardown was called to release environment
         mock_publish_flow_service.eval_teardown.assert_called_once_with(
-            "bot-uuid-456", operator="operator-001"
+            "bot-uuid-456", operator="operator-001", publish_id=0
         )
         # Verify ext was updated with error before teardown
         mock_repo.update_ext.assert_called_once()
@@ -1200,7 +1200,7 @@ class TestTaskProcessor:
         assert mock_repo.update_status.call_count == 2
         # Verify eval_teardown was called
         mock_publish_flow_service.eval_teardown.assert_called_once_with(
-            "bot-uuid-123", operator="operator-001"
+            "bot-uuid-123", operator="operator-001", publish_id=0
         )
 
     def test_to_task_executed_failed_transitions_to_failed(
@@ -1254,7 +1254,7 @@ class TestTaskProcessor:
         assert "set_task_uuid=test-task-uuid" in ext_call_arg["error_msg"]
         # Verify eval_teardown was called
         mock_publish_flow_service.eval_teardown.assert_called_once_with(
-            "bot-uuid-123", operator="operator-001"
+            "bot-uuid-123", operator="operator-001", publish_id=0
         )
 
     def test_to_task_executed_missing_set_task_uuid_raises_error(
@@ -1316,7 +1316,7 @@ class TestTaskProcessor:
 
         assert result.status == "success"
         mock_publish_flow_service.eval_teardown.assert_called_once_with(
-            "bot-uuid-123", operator="operator-001"
+            "bot-uuid-123", operator="operator-001", publish_id=0
         )
         mock_repo.update_status.assert_called_once_with(
             1, "success", {"bot_uuid": "bot-uuid-123", "destroy_publish_id": "destroy-456", "source_status": "task_executed"}
@@ -1362,7 +1362,7 @@ class TestTaskProcessor:
 
         assert result.status == "failed"
         mock_publish_flow_service.eval_teardown.assert_called_once_with(
-            "bot-uuid-123", operator="operator-001"
+            "bot-uuid-123", operator="operator-001", publish_id=0
         )
         # Verify destroy_publish_id is saved
         call_args = mock_repo.update_status.call_args

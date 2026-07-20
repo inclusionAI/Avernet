@@ -534,40 +534,25 @@ class BotBuildService:
                 f"target_bot_uuid={bot_uuid}, publish_id={publish_id}"
             )
 
-            # 自动审批发布单，立即启动 Bot 创建
-            if publish_id:
+            # All-auto approval (#197): the BaaS workflow is auto-approved
+            # server-side (auto_approve_publish=True in the create payload) — the
+            # client no longer sends an approve here. The teclaw MCP outbound rule
+            # push is a *separate* side effect (not approval): it must still run
+            # once a teclaw create returns a bot_uuid. Best-effort; a failure does
+            # not fail the release.
+            if is_teclaw_release and bot_uuid:
                 try:
-                    self._baas_service.approve_publish(
-                        publish_id=publish_id,
-                        operator=user_id,
-                        request_id=request_id,
-                        comment="自动审批",
+                    self._baas_service.update_teclaw_outbound_rule_by_bot_uuid(
+                        bot_uuid,
+                        agent_pass_token=agent_pass_token,
                     )
-                    logger.info(
-                        f"[BotBuildService.release] Approved publish: "
-                        f"publish_id={publish_id}, bot_uuid={bot_uuid}"
-                    )
-                    if is_teclaw_release and bot_uuid:
-                        try:
-                            self._baas_service.update_teclaw_outbound_rule_by_bot_uuid(
-                                bot_uuid,
-                                agent_pass_token=agent_pass_token,
-                            )
-                        except Exception as update_err:
-                            logger.warning(
-                                "[BotBuildService.release] Teclaw outbound rule update failed: "
-                                "bot_id=%s, bot_uuid=%s, error=%s",
-                                bot_id,
-                                bot_uuid,
-                                update_err,
-                            )
-                except Exception as approve_err:
-                    logger.error(
-                        f"[BotBuildService.release] Approve publish failed: "
-                        f"publish_id={publish_id}, bot_uuid={bot_uuid}, error={approve_err}"
-                    )
-                    raise BotBuildServiceError(
-                        f"Bot release approve failed: publish_id={publish_id}, error={approve_err}"
+                except Exception as update_err:
+                    logger.warning(
+                        "[BotBuildService.release] Teclaw outbound rule update failed: "
+                        "bot_id=%s, bot_uuid=%s, error=%s",
+                        bot_id,
+                        bot_uuid,
+                        update_err,
                     )
 
             return new_bot

@@ -168,6 +168,30 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
         return items
 
     @with_orm_session
+    def list_by_bot_uuid_including_deleted(
+        self, bot_uuid: str, tenant: str, env: str
+    ) -> list[BotRecord]:
+        log.info(
+            "list_by_bot_uuid_including_deleted: bot_uuid=%s, tenant=%s, env=%s",
+            bot_uuid,
+            tenant,
+            env,
+        )
+        rows = (
+            self._session.query(BotModel)
+            .filter(
+                BotModel.bot_uuid == bot_uuid,
+                BotModel.tenant == tenant,
+                BotModel.env == env,
+            )
+            .order_by(BotModel.id.desc())
+            .all()
+        )
+        items = [r.to_record() for r in rows]
+        log.info("[bot:list_by_bot_uuid_including_deleted] result: %s rows", len(items))
+        return items
+
+    @with_orm_session
     def get_active_by_bot_uuid(
         self, bot_uuid: str, tenant: str, env: str
     ) -> BotRecord | None:

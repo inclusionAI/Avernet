@@ -57,7 +57,11 @@ class TestBaasServiceHttpMethods:
         call = http.calls_to("post")[0]
         assert call.args[0] == "/api/v1/bots/BOT-1/destroy"
         assert call.kwargs["params"] == {"tenant": "tnt"}
-        assert call.kwargs["json"] == {"operator": "op", "request_id": "req-1"}
+        assert call.kwargs["json"] == {
+            "operator": "op",
+            "request_id": "req-1",
+            "auto_approve_publish": True,
+        }
 
     def test_restart_bot(self):
         service, http = _make_service()

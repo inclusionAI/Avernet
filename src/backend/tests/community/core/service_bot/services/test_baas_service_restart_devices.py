@@ -8,7 +8,6 @@ without any network.
 """
 from __future__ import annotations
 
-import re
 from unittest.mock import MagicMock
 
 import httpx
@@ -57,7 +56,9 @@ class TestBaasServiceRestartDevices:
         service, http = _make_service()
         http.set_response("post", _resp({"publish_id": 42}))
 
-        result = service.restart_devices("BOT-1", ["DEVICE-001"], operator="staff-1")
+        result = service.restart_devices(
+            "BOT-1", ["DEVICE-001"], operator="staff-1", request_id="restart_dev_b1_DEVICE-001"
+        )
 
         assert result["publish_id"] == 42
 
@@ -66,7 +67,10 @@ class TestBaasServiceRestartDevices:
         http.set_response("post", _resp({"publish_id": 7}))
 
         service.restart_devices(
-            "BOT-1", ["DEVICE-001", "DEVICE-002"], operator="staff-1"
+            "BOT-1",
+            ["DEVICE-001", "DEVICE-002"],
+            operator="staff-1",
+            request_id="restart_dev_b9_DEVICE-001",
         )
 
         call = http.calls_to("post")[0]
@@ -75,8 +79,8 @@ class TestBaasServiceRestartDevices:
         assert body["device_uuids"] == ["DEVICE-001", "DEVICE-002"]
         assert body["operator"] == "staff-1"
         assert body["auto_approve_publish"] is True
-        assert 32 <= len(body["request_id"]) <= 64
-        assert re.match(r"^[a-zA-Z0-9_-]+$", body["request_id"])
+        # (#197) request_id is the caller-supplied deterministic id, passed through verbatim.
+        assert body["request_id"] == "restart_dev_b9_DEVICE-001"
         assert call.kwargs["params"] == {"tenant": "tnt"}
 
     def test_baas_business_error_code_raises(self):
@@ -87,7 +91,9 @@ class TestBaasServiceRestartDevices:
         http.set_response("post", response)
 
         with pytest.raises(BaasServiceError, match="publish conflict"):
-            service.restart_devices("BOT-1", ["DEVICE-001"], operator="staff-1")
+            service.restart_devices(
+                "BOT-1", ["DEVICE-001"], operator="staff-1", request_id="rid-1"
+            )
 
     def test_http_status_error_raises_baas_error(self):
         service, http = _make_service()
@@ -101,4 +107,6 @@ class TestBaasServiceRestartDevices:
         http.set_response("post", response)
 
         with pytest.raises(BaasServiceError, match="500"):
-            service.restart_devices("BOT-1", ["DEVICE-001"], operator="staff-1")
+            service.restart_devices(
+                "BOT-1", ["DEVICE-001"], operator="staff-1", request_id="rid-1"
+            )

@@ -65,6 +65,9 @@ from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
     BotPublishRepositoryProtocol,
 )
+from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
+    PublishOperationRepository,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
@@ -110,6 +113,9 @@ from agentclaw.community.core.service_bot.repository.config_artifact_offload imp
 from agentclaw.community.plugins.bot_publish_repository import (
     BotPublishRepository as UnifiedBotPublishRepository,
 )
+from agentclaw.community.plugins.publish_operation_repository import (
+    OrmPublishOperationRepository,
+)
 from agentclaw.community.utils import env_utils
 
 logger = get_logger()
@@ -132,6 +138,13 @@ class ServiceBotModule(Module):
         binder.bind(
             BotPublishRepositoryProtocol,
             to=UnifiedBotPublishRepository,
+            scope=singleton,
+        )
+        # Publish operation ledger repository — same unified-ORM pattern; the
+        # crash-safe operation ledger (ac_publish_operation).
+        binder.bind(
+            PublishOperationRepository,
+            to=OrmPublishOperationRepository,
             scope=singleton,
         )
 
@@ -411,6 +424,7 @@ class ServiceBotModule(Module):
         oss_storage: ObjectStoragePlugin,
         channel_overrides_reader: ChannelEngineOverridesReader,
         task_queue_service: TaskQueueService,
+        publish_operation_repo: PublishOperationRepository,
     ) -> PublishFlowService:
         """Construct ``PublishFlowService``.
 
@@ -434,6 +448,7 @@ class ServiceBotModule(Module):
             teclaw_file_promotion=TeclawFilePromotion(oss_storage=oss_storage),
             channel_overrides_reader=channel_overrides_reader,
             task_queue_service=task_queue_service,
+            publish_operation_repo=publish_operation_repo,
         )
 
     @singleton
@@ -441,6 +456,7 @@ class ServiceBotModule(Module):
     @inject
     def publish_task_lifecycle(
         self,
+        injector: Injector,
         registry: HandlerRegistry,
         flow: PublishFlowService,
         task_queue_service: TaskQueueService,
@@ -449,11 +465,15 @@ class ServiceBotModule(Module):
         ``HandlerRegistry``. A singleton ``Lifecycle`` so discovery runs its
         ``bootstrap()`` before ``TaskWorker.startup()`` claims (mirrors
         ``baas_publish_task_lifecycle`` in ``DevicesModule``).
+
+        The approval trigger handler resolves ``PublishApprovalService`` lazily to
+        break its DI cycle with ``PublishFlowService``.
         """
         return PublishTaskLifecycle(
             registry=registry,
             flow=flow,
             task_queue_service=task_queue_service,
+            approval_service_provider=lambda: injector.get(PublishApprovalService),
         )
 
     @singleton
@@ -501,6 +521,7 @@ class ServiceBotModule(Module):
         publish_service: BotPublishService,
         process_service: ApprovalWorkflowPlugin,
         bot_service: BotService,
+        task_queue_service: TaskQueueService,
     ) -> PublishApprovalService:
         """Construct ``PublishApprovalService`` with lazy publish flow service provider.
 
@@ -513,6 +534,7 @@ class ServiceBotModule(Module):
             publish_flow_service_provider=lambda: injector.get(PublishFlowService),
             process_service=process_service,
             bot_service=bot_service,
+            task_queue_service=task_queue_service,
         )
 
     @singleton
