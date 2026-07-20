@@ -245,6 +245,39 @@ def _assert_whitelist_deleted(response, world) -> None:
     assert len(data) >= 1, f"Expected at least 1 deletion result, got {data}"
 
 
+def _assert_dry_run_no_delete(response, world) -> None:
+    """dry_run=True 预览:工单 + 两通知 + 无关工单/通知均未删除。"""
+    task_repo = world.get(TaskRecordRepository)
+    notify_repo = world.get(NotifyLogRepository)
+    assert task_repo.find_by_ticket_id("tkt-cascade-1") is not None
+    assert task_repo.find_by_ticket_id("tkt-cascade-2") is not None
+    remaining = [
+        n for n in notify_repo.list_by_ticket("tkt-cascade-1", only_pending=False)
+    ]
+    assert len(remaining) == 2, f"dry_run 不应删通知,剩余 {len(remaining)}"
+
+
+def _assert_real_delete_precise_cascade(response, world) -> None:
+    """真删:tkt-cascade-1 工单+2 通知删;tkt-cascade-2 无关工单/通知保留。"""
+    task_repo = world.get(TaskRecordRepository)
+    notify_repo = world.get(NotifyLogRepository)
+    assert task_repo.find_by_ticket_id("tkt-cascade-1") is None, "工单应已删"
+    assert task_repo.find_by_ticket_id("tkt-cascade-2") is not None, "无关工单不应被动"
+    assert (
+        len(notify_repo.list_by_ticket("tkt-cascade-1", only_pending=False)) == 0
+    ), "归属通知应已删"
+    assert (
+        len(notify_repo.list_by_ticket("tkt-cascade-2", only_pending=False)) == 1
+    ), "无关通知不应被误删"
+
+
+def _assert_not_found_no_change(response, world) -> None:
+    """工单不存在:数据无变化(两工单都在)。"""
+    task_repo = world.get(TaskRecordRepository)
+    assert task_repo.find_by_ticket_id("tkt-cascade-1") is not None
+    assert task_repo.find_by_ticket_id("tkt-cascade-2") is not None
+
+
 def _assert_brake_paused(response, world) -> None:
     """GET /admin/brake 返回 paused=True(seeded)。"""
     body = response.json()
@@ -746,6 +779,60 @@ def whitelist_get_no_auth():
     """Error path: 无鉴权 -> 401。"""
 
 
+def _seed_whitelist_list_with_ticket(world) -> None:
+    """白单 + 对应工单(带治理快照)→ 端点应叠加工单维度字段。
+
+    bot-wl-1/user-wl-1 有白单 + 一条工单(token_baseline=200),bot-wl-2 仅
+    白单无工单(降级 None)。"""
+    from datetime import datetime, timedelta
+
+    wl_repo = world.get(GovernanceWhitelistRepository)
+    wl_repo.add(
+        bot_id="bot-wl-1", owner_id="user-wl-1", reason="r1", created_by="88888",
+    )
+    wl_repo.add(
+        bot_id="bot-wl-2", owner_id="user-wl-2", reason="r2", created_by="88888",
+    )
+    # bot-wl-1 有一条工单(token_baseline=200, latest_decision=actionable)
+    ticket_repo = world.get(TaskRecordRepository)
+    worker_id = "user-wl-1:bot-wl-1"
+    ticket_repo.insert_ticket(
+        GovernanceTicketOrm(
+            worker_id=worker_id,
+            bot_id="bot-wl-1",
+            owner_id="user-wl-1",
+            bot_name="BotWL1",
+            owner_name="OwnerOne",
+            dt_version="20260705",
+            governance_decision="actionable",
+            latest_decision="actionable",
+            governance_status="closed",
+            ticket_id="tkt-wl-overlay-1",
+            active_worker=None,
+            token_baseline=200,
+            expected_token_saving=80,
+            hit_dimensions="ctx",
+            saving_ratio=0.4,
+            last_sync_at=datetime.now() - timedelta(days=1),
+        ),
+    )
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/admin/whitelist",
+    scenario="ok_overlays_ticket_meta",
+    input=CaseInput(headers=_USER_HEADER),
+    seed=_seed_whitelist_list_with_ticket,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True, "data": {"total": 2}},
+    ),
+)
+def whitelist_get_ok_overlays_ticket_meta():
+    """白单有对应工单 → item 含工单维度字段(bot_name/token_baseline 等)。"""
+
+
 # ---------------------------------------------------------------------------
 # 13. /workflow/audit-logs (GET — 按 worker 只读分页查治理审计; endpoint lives in workflow_router)
 #     Defined in workflow_router.py; cases kept here alongside the other governance endpoint suites.
@@ -996,4 +1083,140 @@ def tickets_offline_renew_error_missing():
     expect=ExpectError(status=401),
 )
 def tickets_offline_renew_no_auth():
+    """Error path: 无鉴权 → 401。"""
+
+
+# ---------------------------------------------------------------------------
+# 16. /admin/tickets:delete-cascade (精确级联删工单 + 归属通知)
+# ---------------------------------------------------------------------------
+
+
+def _seed_delete_cascade_happy(world) -> None:
+    """Seed one ticket + two notify rows + one unrelated ticket/notify 验证精确级联。"""
+    _insert_ticket(world, ticket_id="tkt-cascade-1", governance_status="open",
+                   bot_id="bot-cascade", owner_id="owner-cascade")
+    _insert_notify_log(
+        world, ticket_id="tkt-cascade-1", bot_id="bot-cascade", owner_id="owner-cascade",
+        notify_status="sent", governance_status="open",
+    )
+    _insert_notify_log(
+        world, ticket_id="tkt-cascade-1", bot_id="bot-cascade", owner_id="owner-cascade",
+        notify_status="pending", governance_status="open",
+    )
+    # 无关工单/通知:不应被动
+    _insert_ticket(world, ticket_id="tkt-cascade-2", governance_status="open",
+                   bot_id="bot-other", owner_id="owner-other")
+    _insert_notify_log(
+        world, ticket_id="tkt-cascade-2", bot_id="bot-other", owner_id="owner-other",
+        notify_status="sent", governance_status="open",
+    )
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/workflow/tickets:delete-cascade",
+    scenario="ok_dry_run_preview",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        json_body={"ticket_id": "tkt-cascade-1", "reason": "preview"},
+    ),
+    seed=_seed_delete_cascade_happy,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "data": {"ticket_found": True, "dry_run": True, "notify_deleted": 2},
+        },
+    ),
+    extra_assertions=(_assert_dry_run_no_delete,),
+)
+def tickets_delete_cascade_dry_run_ok():
+    """Happy path: dry_run 预览工单+2 通知数,数据未动。"""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/workflow/tickets:delete-cascade",
+    scenario="ok_real_delete_cascade",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        json_body={"ticket_id": "tkt-cascade-1", "dry_run": False, "reason": "purge"},
+    ),
+    seed=_seed_delete_cascade_happy,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "data": {
+                "ticket_found": True,
+                "dry_run": False,
+                "tickets_deleted": 1,
+                "notify_deleted": 2,
+            },
+        },
+    ),
+    extra_assertions=(_assert_real_delete_precise_cascade,),
+)
+def tickets_delete_cascade_real_delete_ok():
+    """Happy path: 真删 → 删工单+2 通知,无关工单/通知不动(精确级联)。"""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/workflow/tickets:delete-cascade",
+    scenario="ok_ticket_not_found",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        json_body={"ticket_id": "tkt-nonexistent-999", "dry_run": False, "reason": "x"},
+    ),
+    seed=_seed_delete_cascade_happy,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "data": {"ticket_found": False, "tickets_deleted": 0, "notify_deleted": 0},
+        },
+    ),
+    extra_assertions=(_assert_not_found_no_change,),
+)
+def tickets_delete_cascade_not_found_ok():
+    """工单不存在 → 200 + ticket_found=False,数据无变化。"""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/workflow/tickets:delete-cascade",
+    scenario="error_missing_required",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        json_body={"reason": "missing ticket_id"},
+    ),
+    expect=ExpectError(status=422),
+)
+def tickets_delete_cascade_error_missing_ticket_id():
+    """Error path: 缺 ticket_id → 422 (Pydantic min_length=1)。"""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/workflow/tickets:delete-cascade",
+    scenario="error_missing_reason",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        json_body={"ticket_id": "tkt-cascade-1"},
+    ),
+    expect=ExpectError(status=422),
+)
+def tickets_delete_cascade_error_missing_reason():
+    """Error path: 缺 reason → 422 (Pydantic min_length=1)。"""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/workflow/tickets:delete-cascade",
+    scenario="no_auth",
+    input=CaseInput(),
+    expect=ExpectError(status=401),
+)
+def tickets_delete_cascade_no_auth():
     """Error path: 无鉴权 → 401。"""

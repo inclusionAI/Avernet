@@ -8,6 +8,7 @@ admin_router 抽出来(审批能力迁出 admin_router,运维归运维、审批�
   - GET  /workflow/tickets/detail          单工单详情(ticket_id 走 query)
   - GET  /workflow/tickets/pending-notification  查工单待回复通知(notification_id)
   - POST /workflow/tickets/review          审批动作(ticket_id 走 body,waiting_review 三态流转)
+  - POST /workflow/tickets:delete-cascade 精确级联删单工单 + 连带通知(best-effort,非批量,2026-07-17 从 admin 迁入)
   - GET  /workflow/audit-logs              按 worker 查全部治理审计(只读分页)
 
 数据流转全程走领域模型(``GovernanceTicket`` / ``TicketActionOutcome``),
@@ -33,6 +34,7 @@ from agentclaw.community.adapters.http.economy.schemas import (
     AuditLogItemResponse,
     ReviewTicketDetailResponse,
     ReviewTicketListResponse,
+    TicketDeleteCascadeRequest,
     TicketsCloseAllRequest,
     TicketsCloseRequest,
     WorkflowReviewRequest,
@@ -59,9 +61,18 @@ workflow_router = APIRouter(
 _AdminSvc = GovernanceWorkflowServiceProtocol
 
 # 评审允许的治理状态过滤值(open / scheduled = 活跃, waiting_review = 待审阅,
-# closed = 已关闭)。
+# closed = 已关闭, observed = 白名单观察态)。
 _ALLOWED_REVIEW_STATUSES = frozenset(
-    {"open", "scheduled", "waiting_review", "closed"}
+    {"open", "scheduled", "waiting_review", "closed", "observed"}
+)
+
+# 投递状态核心正规状态集(pending / sent / failed / cancelled)。
+# 核心四态由 notify 生命周期驱动写入;非闭集 — 不阻历史遗留/扩展值(如 none
+# 列默认哨兵、first_send:sent 旧拼接格式),前端按需传任意列原始值精确查。
+# delivery_status 的状态由 notify 驱动写入;各种状态查询由前端组合,后端只精确
+# 匹配不做扩展/归一,保持后端逻辑干净。
+_ALLOWED_DELIVERY_STATUSES = frozenset(
+    {"pending", "sent", "failed", "cancelled"}
 )
 
 
@@ -107,6 +118,25 @@ def _validate_status_filter(statuses: list[str] | None) -> list[str] | None:
     return statuses
 
 
+def _validate_delivery_status_filter(delivery_statuses: list[str] | None) -> list[str] | None:
+    """校验 ``delivery_status`` query 取值,返回归一化后的列表。
+
+    语义守恒(只做 None/[] 短路,不做枚举校验):
+      - None  = 缺省 → 不过滤投递态
+      - []    = 显式空过滤 → 空结果路径
+      - 非空  = 直通(不拦非核心值;前端可传 none 历史哨兵 / first_send:sent 旧格式
+        等任意列原始值,SQL 精确匹配 IN(...))
+
+    核心正规状态集 ``_ALLOWED_DELIVERY_STATUSES`` 仅作文档/校验参考(非闭集)。
+    delivery_status 状态由 notify 驱动写入;查询组合由前端做,后端精确匹配不扩展。
+    """
+    if delivery_statuses is None:
+        return None
+    if len(delivery_statuses) == 0:
+        return []
+    return delivery_statuses
+
+
 # ── Workflow: 工单列表 ────────────────────────────────────────────────────
 
 
@@ -124,6 +154,13 @@ async def list_review_tickets(
             "缺省 = 全部活跃态(open+scheduled+waiting_review)"
         ),
     ),
+    delivery_status: list[str] | None = Query(
+        default=None,
+        description=(
+            "投递状态过滤(允许: pending / sent / failed / cancelled);"
+            "缺省 = 不过滤"
+        ),
+    ),
     offset: int = Query(0, ge=0, description="分页偏移"),
     limit: int = Query(50, ge=1, le=200, description="分页上限(<=200)"),
 ) -> ApiResponse:
@@ -133,11 +170,13 @@ async def list_review_tickets(
     """
     del ctx  # RequestContext 仅用于走 AuthPlugin 鉴权链路
     normalized = _validate_status_filter(statuses)
+    delivery_normalized = _validate_delivery_status_filter(delivery_status)
     tickets, total = await asyncio.to_thread(
         admin_svc.list_review_tickets,
         normalized,
         offset=offset,
         limit=limit,
+        delivery_statuses=delivery_normalized,
     )
     status_filter = normalized if normalized is not None else [
         "open", "scheduled", "waiting_review",
@@ -148,6 +187,39 @@ async def list_review_tickets(
         limit=limit,
         offset=offset,
         status_filter=status_filter,
+    )
+    return ApiResponse(success=True, data=data.model_dump())
+
+
+@workflow_router.get(
+    "/tickets:whitelist",
+    summary="白单观察工单视图(OBSERVED)",
+)
+async def list_whitelist_tickets(
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+    offset: int = Query(0, ge=0, description="分页偏移"),
+    limit: int = Query(50, ge=1, le=200, description="分页上限(<=200)"),
+) -> ApiResponse:
+    """当前处于 OBSERVED 观察态的工单(加白中 bot 的最新治理画像)。
+
+    只读 GET,复用工单列表 item 结构,按 gmt_create 倒序分页。
+    item = 纯工单(ReviewTicketItem),含治理画像(token_baseline/hit_dimensions/
+    saving_ratio/latest_decision/dt_version 等);不并白单元数据(来源/过期
+    另查 /admin/whitelist)。无 OBSERVED 工单时 items=[] total=0。
+    """
+    del ctx  # RequestContext 仅用于走 AuthPlugin 鉴权链路
+    tickets, total = await asyncio.to_thread(
+        admin_svc.list_whitelist_observed_tickets,
+        offset=offset,
+        limit=limit,
+    )
+    data = ReviewTicketListResponse.from_tickets(
+        tickets,
+        total=total,
+        limit=limit,
+        offset=offset,
+        status_filter=["observed"],
     )
     return ApiResponse(success=True, data=data.model_dump())
 
@@ -352,3 +424,32 @@ async def tickets_close_all(
             admin_svc.close_all_open, reason=body.reason, operator=operator,
         )
     return ApiResponse(success=True, data=result.to_dict())
+
+
+# ── Workflow: 级联删工单(2026-07-17 从 admin_router 迁入,工单运营归属) ─
+
+
+@workflow_router.post(
+    "/tickets:delete-cascade",
+    summary="按 ticket_id 精确级联删工单 + 连带通知(best-effort,非批量)",
+)
+async def tickets_delete_cascade(
+    body: TicketDeleteCascadeRequest,
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+) -> ApiResponse:
+    """Precisely delete one ticket + its notify_log rows (best-effort).
+
+    单向(ticket → notify)、单工单(防写放大)、env-scoped。dry_run=true 仅
+    预览连带通知数,不删不写审计;工单不存在返回 ticket_found=False 且不写
+    审计(幂等再调)。best-effort:通知清理失败不阻断工单删除,失败计数计入
+    响应与审计。
+    """
+    data = await asyncio.to_thread(
+        admin_svc.delete_ticket_cascade,
+        ticket_id=body.ticket_id,
+        dry_run=body.dry_run,
+        reason=body.reason,
+        operator=ctx.user_id,
+    )
+    return ApiResponse(success=True, data=data)

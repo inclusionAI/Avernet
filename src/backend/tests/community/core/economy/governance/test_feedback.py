@@ -29,7 +29,7 @@ from agentclaw.community.core.economy.governance.services.lifecycle_service impo
     GovernanceLifecycleService,
 )
 
-from .conftest import FakeDB, FakeGovernanceConfig, FakeWhitelistService
+from .conftest import FakeDB, FakeGovernanceConfig
 
 
 def _build_svc(engine):
@@ -44,7 +44,6 @@ def _build_svc(engine):
         audit_repo=audit_repo,
     )
     svc = GovernanceFeedbackService(
-        whitelist_service=FakeWhitelistService(),
         notify_repo=notify_repo,
         task_repo=task_repo,
         audit_repo=audit_repo,

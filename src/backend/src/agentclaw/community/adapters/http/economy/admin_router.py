@@ -45,6 +45,7 @@ from agentclaw.community.adapters.http.economy.schemas import (
 from agentclaw.community.api.governance_service import (
     GovernanceAdminServiceProtocol,
     GovernanceBotServiceProtocol,
+    GovernanceDeliveryServiceProtocol,
     GovernanceWhitelistServiceProtocol,
 )
 from agentclaw.community.di import Injected
@@ -62,6 +63,7 @@ admin_router = APIRouter(
 )
 
 _AdminSvc = GovernanceAdminServiceProtocol
+_DeliverySvc = GovernanceDeliveryServiceProtocol
 _ScanService = GovernanceBotServiceProtocol
 _WhitelistSvc = GovernanceWhitelistServiceProtocol
 
@@ -100,7 +102,7 @@ def _raise_on_admin_error(result: dict | object) -> None:
 async def tickets_deliver(
     body: TicketsDeliverRequest,
     ctx: RequestContext = Depends(get_request_context),
-    admin_svc: _AdminSvc = Injected(_AdminSvc),
+    delivery_svc: _DeliverySvc = Injected(_DeliverySvc),
 ) -> ApiResponse:
     """Deliver pending notifications scoped to one worker_id。
 
@@ -108,7 +110,7 @@ async def tickets_deliver(
     不跑 cron tick、不重跑状态机(pending 已躺 notify_log)。
     """
     data = await asyncio.to_thread(
-        admin_svc.deliver_by_worker,
+        delivery_svc.deliver_by_worker,
         worker_id=body.worker_id,
         override_recipient=body.override_recipient,
         dry_run=body.dry_run,
@@ -127,7 +129,7 @@ async def tickets_deliver(
 async def tickets_remind(
     body: RemindRequest,
     ctx: RequestContext = Depends(get_request_context),
-    admin_svc: _AdminSvc = Injected(_AdminSvc),
+    delivery_svc: _DeliverySvc = Injected(_DeliverySvc),
 ) -> ApiResponse:
     """手动补发 reminder:按 worker_id 找 active 工单,立即创建+发送 reminder 通知。
 
@@ -135,7 +137,7 @@ async def tickets_remind(
     """
     try:
         result = await asyncio.to_thread(
-            admin_svc.create_and_send_reminder,
+            delivery_svc.create_and_send_reminder,
             worker_id=body.worker_id,
             operator=ctx.user_id,
         )
@@ -287,17 +289,19 @@ async def list_whitelist(
     limit: int = Query(50, ge=1, le=200, description="分页上限 1~200"),
     offset: int = Query(0, ge=0, description="分页偏移"),
 ) -> ApiResponse:
-    """只读分页白名单列表。
+    """只读分页白名单列表(含最近工单维度字段)。
 
-    复用 ``whitelist_service.list_all``(可选 owner/bot 精确筛选 + 过期开关 +
-    total)。default 排除已过期项。只读:无 audit、无副作用;鉴权走
-    ``get_request_context``(同他端点)。item 经领域模型 ``to_dict()`` 序列化
-    (含 bot_id/owner_id/whitelist_type/source/reason/created_by/expires_at
-    /gmt_create/gmt_modified)。
+    复用 ``whitelist_service.list_all_with_ticket_meta``:白单元数据
+    (bot_id/owner_id/whitelist_type/source/reason/created_by/expires_at
+    /gmt_create/gmt_modified)+ 最近一条工单维度叠加(bot_name/owner_name
+    /token_baseline/expected_token_saving/hit_dimensions/saving_ratio
+    /latest_decision/latest_ticket_gmt_create)。default 排除已过期项。
+    只读:无 audit、无副作用;鉴权走 ``get_request_context``。无对应工单的白单
+    叠加字段为 None,条目保留。
     """
     del ctx  # RequestContext 仅用于走 AuthPlugin 鉴权链路
-    entries, total = await asyncio.to_thread(
-        whitelist_svc.list_all,
+    items, total = await asyncio.to_thread(
+        whitelist_svc.list_all_with_ticket_meta,
         whitelist_type=whitelist_type,
         owner_id=owner_id,
         bot_id=bot_id,
@@ -308,7 +312,7 @@ async def list_whitelist(
     return ApiResponse(
         success=True,
         data={
-            "items": [e.to_dict() for e in entries],
+            "items": items,
             "total": total,
             "limit": limit,
             "offset": offset,
@@ -347,6 +351,10 @@ async def delete_records(
 
     data = await asyncio.to_thread(admin_svc.delete_records, body.model_dump(), operator=ctx.user_id)
     return ApiResponse(success=True, data=data)
+
+
+# ── Tickets: delete-cascade 已迁至 workflow_router(/workflow/tickets:delete-cascade,
+#    工单运营边界)2026-07-17。─────────────────────────────────────────────
 
 
 # ── Trigger scan / cron tick ──────────────────────────────────────────────
@@ -400,12 +408,12 @@ async def scan_and_deliver(
         "auto", description="发送通道: auto(跟随DB记录)|markdown|tc_card",
     ),
     scan_svc: _ScanService = Injected(_ScanService),
-    admin_svc: _AdminSvc = Injected(_AdminSvc),
+    delivery_svc: _DeliverySvc = Injected(_DeliverySvc),
 ) -> ApiResponse:
     """Governance management: cron tick → deliver (testing tool).
 
     Phase 1 (cron tick) runs here; Phase 2-5 (read pending, build payloads,
-    send, update DB) are delegated to :meth:`admin_svc.deliver_pending`.
+    send, update DB) are delegated to :meth:`delivery_svc.deliver_pending`.
     """
     # Safety guard: dry_run=false requires a valid numeric staff_id
     if not dry_run and not override_recipient.isdigit():
@@ -426,7 +434,7 @@ async def scan_and_deliver(
 
     # ---- Phase 2-5: delegate to service ----
     data = await asyncio.to_thread(
-        admin_svc.deliver_pending,
+        delivery_svc.deliver_pending,
         scan_svc=scan_svc,
         override_recipient=override_recipient,
         dry_run=dry_run,

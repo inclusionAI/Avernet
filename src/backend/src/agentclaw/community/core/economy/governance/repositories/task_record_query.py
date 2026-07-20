@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from agentclaw.community.core.economy.governance.domain.enums import (
+    ACTIVE_STATUSES,
+    GovernanceStatus,
+)
 from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
 from agentclaw.community.core.economy.governance.repositories.orm import GovernanceTicketOrm
 from agentclaw.community.utils.env_utils import get_current_env
@@ -21,7 +25,8 @@ class TaskRecordQueryMixin:
     ) -> GovernanceTicket | None:
         """Find the active ticket for an active_worker (owner_id:bot_id).
 
-        Active = governance_status IN ('open', 'scheduled', 'waiting_review').
+        Active = governance_status IN ACTIVE_STATUSES
+        (open / scheduled / waiting_review)。
 
         Returns:
             :class:`GovernanceTicket` or ``None`` if no active ticket exists.
@@ -32,9 +37,7 @@ class TaskRecordQueryMixin:
                 s.query(GovernanceTicketOrm)
                 .filter(
                     GovernanceTicketOrm.active_worker == active_worker,
-                    GovernanceTicketOrm.governance_status.in_(
-                        ("open", "scheduled", "waiting_review"),
-                    ),
+                    GovernanceTicketOrm.governance_status.in_(ACTIVE_STATUSES),
                     GovernanceTicketOrm.env == _env,
                 )
                 .one_or_none()
@@ -77,7 +80,7 @@ class TaskRecordQueryMixin:
                 s.query(GovernanceTicketOrm)
                 .filter(
                     GovernanceTicketOrm.worker_id == worker_id,
-                    GovernanceTicketOrm.governance_status == "closed",
+                    GovernanceTicketOrm.governance_status == GovernanceStatus.CLOSED,
                     GovernanceTicketOrm.env == _env,
                 )
                 .order_by(
@@ -87,6 +90,78 @@ class TaskRecordQueryMixin:
                 .first()
             )
             return GovernanceTicket.from_orm(obj) if obj else None
+
+    def find_observed_ticket(
+        self, worker_id: str,
+    ) -> GovernanceTicket | None:
+        """Find the active OBSERVED ticket for a worker (whitelist observation).
+
+        白名单观察态:bot 进白名单后由审批加白或 scan 兜底转入 OBSERVED,或由
+        offline-batch 命中白名单时新建。本查询按 ``worker_id`` 取该 worker 最近
+        的一条观察单(同 ``find_latest_closed_by_worker`` 的 worker_id 口径,
+        **非** active_worker —— 加白关单时 active_worker 已释放置 NULL)。
+
+        排序 ``gmt_modified DESC``(非 closed_at,因 OBSERVED 不设 closed_at);
+        最新刷新的观察单排前,供 offline-batch 刷新与删白收尾定位。
+
+        Returns:
+            :class:`GovernanceTicket` or ``None`` if no observed ticket exists.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            obj = (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.worker_id == worker_id,
+                    GovernanceTicketOrm.governance_status == GovernanceStatus.OBSERVED,
+                    GovernanceTicketOrm.env == _env,
+                )
+                .order_by(
+                    GovernanceTicketOrm.gmt_modified.desc(),
+                )
+                .first()
+            )
+            return GovernanceTicket.from_orm(obj) if obj else None
+
+    def find_latest_tickets_by_worker_keys(
+        self, worker_keys: list[str],
+    ) -> dict[str, GovernanceTicket]:
+        """Batch: most-recent ticket per worker_key (any status/close_reason).
+
+        一条 IN 查询取所有候选(按 ``gmt_create`` DESC)+ Python 侧 group by
+        ``worker_id`` 各取首条,避免每 worker point query(N+1)。
+
+        用 ``worker_id``((始终 ``owner_id:bot_id``)而非 ``active_worker``
+        (closed 后置 NULL)—— 含历史 closed 工单,正是白单叠加所需。
+
+        Args:
+            worker_keys: ``owner_id:bot_id`` 形式的 worker key 集合。
+
+        Returns:
+            ``{worker_key: 最近一条 GovernanceTicket}``;无工单的 worker
+            不出现在 dict。空输入短路返回 ``{}``。
+        """
+        if not worker_keys:
+            return {}
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            rows = (
+                s.query(GovernanceTicketOrm)
+                .filter(
+                    GovernanceTicketOrm.worker_id.in_(worker_keys),
+                    GovernanceTicketOrm.env == _env,
+                )
+                .order_by(GovernanceTicketOrm.gmt_create.desc())
+                .all()
+            )
+        latest: dict[str, GovernanceTicket] = {}
+        for row in rows:
+            # gmt_create DESC 已排序,首次见到的 worker_id 即该 worker 最近一条。
+            if row.worker_id in latest:
+                continue
+            latest[row.worker_id] = GovernanceTicket.from_orm(row)
+        return latest
 
     def list_active_open_tickets(
         self,
@@ -103,7 +178,7 @@ class TaskRecordQueryMixin:
             rows = (
                 s.query(GovernanceTicketOrm)
                 .filter(
-                    GovernanceTicketOrm.governance_status == "open",
+                    GovernanceTicketOrm.governance_status == GovernanceStatus.OPEN,
                     GovernanceTicketOrm.active_worker.isnot(None),
                     GovernanceTicketOrm.env == _env,
                 )
@@ -126,7 +201,7 @@ class TaskRecordQueryMixin:
             rows = (
                 s.query(GovernanceTicketOrm)
                 .filter(
-                    GovernanceTicketOrm.governance_status == "scheduled",
+                    GovernanceTicketOrm.governance_status == GovernanceStatus.SCHEDULED,
                     GovernanceTicketOrm.mute_until <= now,
                     GovernanceTicketOrm.mute_until.isnot(None),
                     GovernanceTicketOrm.env == _env,
@@ -156,7 +231,7 @@ class TaskRecordQueryMixin:
             rows = (
                 s.query(GovernanceTicketOrm)
                 .filter(
-                    GovernanceTicketOrm.governance_status == "open",
+                    GovernanceTicketOrm.governance_status == GovernanceStatus.OPEN,
                     GovernanceTicketOrm.latest_decision == "normal",
                     GovernanceTicketOrm.consecutive_normal_days
                     >= min_consecutive_days,
@@ -183,7 +258,7 @@ class TaskRecordQueryMixin:
             rows = (
                 s.query(GovernanceTicketOrm)
                 .filter(
-                    GovernanceTicketOrm.governance_status == "open",
+                    GovernanceTicketOrm.governance_status == GovernanceStatus.OPEN,
                     GovernanceTicketOrm.latest_decision == "actionable",
                     GovernanceTicketOrm.remind_at <= now,
                     GovernanceTicketOrm.remind_at.isnot(None),
@@ -230,6 +305,7 @@ class TaskRecordQueryMixin:
         *,
         offset: int = 0,
         limit: int = 50,
+        delivery_statuses: list[str] | None = None,
     ) -> list[GovernanceTicket]:
         """All tickets in the given statuses (cross-owner), newest first, paged.
 
@@ -239,21 +315,29 @@ class TaskRecordQueryMixin:
             statuses: 治理状态白名单(open/scheduled/waiting_review/closed)。
             offset: 分页偏移。
             limit: 分页上限。
+            delivery_statuses: 投递状态白名单(pending/sent/failed/cancelled),
+                None 不过滤,空列表短路返回空列表(对齐 statuses 行为)。
 
         Returns:
             List of :class:`GovernanceTicket` (gmt_create 由 from_orm 灌入)。
         """
         if not statuses:
             return []
+        if delivery_statuses is not None and not delivery_statuses:
+            return []
         _env = get_current_env()
         with self._db.orm_session() as s:
-            rows = (
+            q = (
                 s.query(GovernanceTicketOrm)
                 .filter(
                     GovernanceTicketOrm.governance_status.in_(statuses),
                     GovernanceTicketOrm.env == _env,
                 )
-                .order_by(GovernanceTicketOrm.gmt_create.desc())
+            )
+            if delivery_statuses:
+                q = q.filter(GovernanceTicketOrm.delivery_status.in_(delivery_statuses))
+            rows = (
+                q.order_by(GovernanceTicketOrm.gmt_create.desc())
                 .offset(offset)
                 .limit(limit)
                 .all()
@@ -263,27 +347,33 @@ class TaskRecordQueryMixin:
     def count_tickets_by_statuses(
         self,
         statuses: list[str],
+        delivery_statuses: list[str] | None = None,
     ) -> int:
         """Count all tickets in the given statuses (cross-owner, paged-list 配套)。
 
         Args:
             statuses: 治理状态白名单。
+            delivery_statuses: 投递状态白名单,None 不过滤,空列表短路返回 0。
 
         Returns:
             满足条件的工单总数(与 list_tickets_by_statuses 同阶过滤)。
         """
         if not statuses:
             return 0
+        if delivery_statuses is not None and not delivery_statuses:
+            return 0
         _env = get_current_env()
         with self._db.orm_session() as s:
-            return (
+            q = (
                 s.query(GovernanceTicketOrm)
                 .filter(
                     GovernanceTicketOrm.governance_status.in_(statuses),
                     GovernanceTicketOrm.env == _env,
                 )
-                .count()
             )
+            if delivery_statuses:
+                q = q.filter(GovernanceTicketOrm.delivery_status.in_(delivery_statuses))
+            return q.count()
 
     def count_active_open(
         self,
@@ -294,9 +384,7 @@ class TaskRecordQueryMixin:
             return (
                 s.query(GovernanceTicketOrm)
                 .filter(
-                    GovernanceTicketOrm.governance_status.in_(
-                        ("open", "scheduled", "waiting_review"),
-                    ),
+                    GovernanceTicketOrm.governance_status.in_(ACTIVE_STATUSES),
                     GovernanceTicketOrm.active_worker.isnot(None),
                     GovernanceTicketOrm.env == _env,
                 )

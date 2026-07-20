@@ -25,6 +25,7 @@ from injector import inject
 from agentclaw.community.core.economy.governance.domain.enums import (
     AuditAction,
     GovernanceStatus,
+    NotifyStatus,
     NotifyType,
 )
 from agentclaw.community.core.economy.governance.domain.notification import FrozenSnapshot, GovernanceNotification
@@ -362,6 +363,18 @@ class GovernanceBotService:
                         sent_at=now,
                     )
                     summary.sent_count += 1
+
+                    # 回写工单投递态(scanf 投递成功 → task_record.delivery_status=sent
+                    # + last_notified_at)。first_send/reminder 都经此统一成功分支,
+                    # notify_log 已由 mark_sent 刷新,此处补刷 task_record 让列表/详情
+                    # 的 delivery_status 与真实投递一致(不再靠读时反推)。
+                    if notify_row.ticket_id:
+                        self._task_repo.update_delivery_status(
+                            notify_row.ticket_id, NotifyStatus.SENT.value,
+                        )
+                        self._task_repo.update_last_notified_at(
+                            notify_row.ticket_id, now,
+                        )
 
                     # Audit: notification_sent (first_send or reminder)
                     audit_action = (

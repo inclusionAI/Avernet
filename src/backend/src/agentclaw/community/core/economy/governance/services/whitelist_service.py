@@ -38,6 +38,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
         NotifyLogRepository,
     )
+    from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
+        TaskRecordRepository,
+    )
     from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
         GovernanceWhitelistRepository,
     )
@@ -56,12 +59,14 @@ class GovernanceWhitelistService:
         audit_repo: GovernanceAuditRepository,
         config: Any,  # EconomyGovernanceConfig
         lifecycle_svc: GovernanceLifecycleServiceProtocol,
+        task_repo: TaskRecordRepository,
     ) -> None:
         self._whitelist_repo = whitelist_repo
         self._notify_repo = notify_repo
         self._audit_repo = audit_repo
         self._config = config
         self._lifecycle_svc = lifecycle_svc
+        self._task_repo = task_repo
 
     def bulk_whitelist(
         self,
@@ -126,9 +131,10 @@ class GovernanceWhitelistService:
             cooldown_until=now + timedelta(days=cooldown_days),
         )
 
-        # 4. Ticket-side close — per-ticket guard-activated (ADMIN_CLOSED),
-        # idempotent. Aligns the ticket/notify sets (Task 8).
-        self._lifecycle_svc.bulk_close_by_ticket_ids(ticket_ids, now=now)
+        # 4. Ticket-side observe → OBSERVED (加白语义,非运维关单的 CLOSED)。
+        # 逐条经 observe_for_whitelist 守卫激活,幂等。通知侧用 ADMIN_CLOSED
+        # (通知关停原因,独立列),工单侧转 OBSERVED(close_reason=WHITELIST_APPROVED)。
+        self._lifecycle_svc.bulk_observe_by_ticket_ids(ticket_ids, now=now)
 
         # 5. 批次摘要行(同 run_id):汇总真实处置计数,供按批次聚合查询。
         skipped = len(bot_owner_pairs) - whitelisted
@@ -174,6 +180,12 @@ class GovernanceWhitelistService:
             whitelist_type="governance",
         )
 
+        # 删白收尾:把该 worker 现存 OBSERVED 观察单转 CLOSED(终态归档,
+        # 不再被 off-batch 刷新)。best-effort:无观察单则跳过;失败不阻断删白。
+        observed_closed = self._close_observed_for_whitelist_removal(
+            bot_id=bot_id, owner_id=owner_id,
+        )
+
         audit_run_id = f"wl-del-{uuid.uuid4().hex[:8]}"
         try:
             self._audit_repo.add_audit(
@@ -183,13 +195,48 @@ class GovernanceWhitelistService:
                 actor_id=operator,
                 action_taken=AuditAction.WHITELIST_REMOVED,
                 source="admin_api",
-                error_msg=f"reason={reason} bot_id={bot_id} owner_id={owner_id} deleted={deleted}",
+                error_msg=(
+                    f"reason={reason} bot_id={bot_id} owner_id={owner_id} "
+                    f"deleted={deleted} observed_closed={observed_closed}"
+                ),
                 dry_run=0,
             )
         except Exception:
             log.exception("[WhitelistDelete] Failed to write audit")
 
-        return {"deleted": deleted, "bot_id": bot_id, "owner_id": owner_id}
+        return {
+            "deleted": deleted,
+            "bot_id": bot_id,
+            "owner_id": owner_id,
+            "observed_closed": observed_closed,
+        }
+
+    def _close_observed_for_whitelist_removal(
+        self, *, bot_id: str, owner_id: str,
+    ) -> bool:
+        """删白收尾:找该 worker 的 OBSERVED 单转 CLOSED(best-effort)。
+
+        工单维度用 worker_id(``owner_id:bot_id``,与 record_process_service
+        fallback 合成口径一致)。无观察单或多条不同 worker_id 复合形式时只处理
+        标准形式这条;失败不抛(不阻断删白主流程)。
+
+        Returns:
+            True 若找到并成功收尾;False 若无观察单或收尾失败。
+        """
+        worker_id = f"{owner_id}:{bot_id}"
+        try:
+            observed = self._task_repo.find_observed_ticket(worker_id)
+            if observed is None:
+                return False
+            return self._lifecycle_svc.close_observed_for_removal(
+                observed.ticket_id, now=datetime.now(),
+            )
+        except Exception:
+            log.exception(
+                "[WhitelistDelete] best-effort close_observed_for_removal "
+                "failed: bot_id=%s owner_id=%s", bot_id, owner_id,
+            )
+            return False
 
     # ------------------------------------------------------------------
     # Thin delegates — expose repo-level single-point operations.
@@ -222,6 +269,62 @@ class GovernanceWhitelistService:
             limit=limit,
             offset=offset,
         )
+
+    # 工单维度叠加字段(取最近一条工单的治理快照,服务 admin 复评白名单合理性)。
+    def list_all_with_ticket_meta(
+        self,
+        *,
+        whitelist_type: str = "governance",
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        include_expired: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """list_all + 按 (bot_id, owner_id) 批量叠加最近工单维度字段。
+
+        白单为主表(白名单唯一权威来源);治理维度字段(bot_name/owner_name/
+        token_baseline/expected_token_saving/hit_dimensions/saving_ratio/
+        latest_decision/latest_ticket_gmt_create)取自该 worker **最近一条**
+        governance 工单的快照(``find_latest_tickets_by_worker_keys`` 一次 IN
+        查询 + Python 侧 group,无 N+1)。治理快照按监控刷新,反映 bot 当前
+        状态,服务于 admin 复评「bot 是否持续恶化、建议是否合理」。
+
+        Args: 同 :meth:`list_all`。
+
+        Returns:
+            ``(items, total)``:items 为 dict 列表(白单元数据 + 工单维度叠加),
+            total 为筛选条件下的白单总数(分页配套)。
+        """
+        entries, total = self._whitelist_repo.list_all(
+            whitelist_type=whitelist_type,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            include_expired=include_expired,
+            limit=limit,
+            offset=offset,
+        )
+        # worker_key 集合 → 批量取最近一条工单
+        worker_keys = [f"{e.owner_id}:{e.bot_id}" for e in entries]
+        latest_tickets = self._task_repo.find_latest_tickets_by_worker_keys(
+            worker_keys,
+        )
+        items: list[dict] = []
+        for entry in entries:
+            item = entry.to_dict()
+            ticket = latest_tickets.get(f"{entry.owner_id}:{entry.bot_id}")
+            ticket_dict = ticket.to_dict() if ticket is not None else {}
+            # 工单 gmt_create 转译为 latest_ticket_gmt_create,避免与白单无该字段歧义。
+            item["bot_name"] = ticket_dict.get("bot_name")
+            item["owner_name"] = ticket_dict.get("owner_name")
+            item["token_baseline"] = ticket_dict.get("token_baseline")
+            item["expected_token_saving"] = ticket_dict.get("expected_token_saving")
+            item["hit_dimensions"] = ticket_dict.get("hit_dimensions")
+            item["saving_ratio"] = ticket_dict.get("saving_ratio")
+            item["latest_decision"] = ticket_dict.get("latest_decision")
+            item["latest_ticket_gmt_create"] = ticket_dict.get("gmt_create")
+            items.append(item)
+        return items, total
 
     def add(
         self,
