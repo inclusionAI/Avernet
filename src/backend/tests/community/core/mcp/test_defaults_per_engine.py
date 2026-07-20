@@ -167,6 +167,7 @@ from agentclaw.community.core.mcp.services._defaults import (
 _EXPECTED_CLI_CODES = (
     "adev-cli", "acli", "antcode-cli", "linke-cli",
     "linkw-cli", "qmx-invoke-cli", "serverless", "derisk-cli",
+    "yuque-cli",
 )
 
 
@@ -221,6 +222,27 @@ def test_default_cli_items_none_engine_returns_empty():
     assert get_default_cli_items(None) == []
     assert get_default_cli_items(None, "personalCoding") == []
     assert get_default_cli_items("") == []
+
+
+def test_yuque_cli_is_default_entry():
+    """yuque-cli is the newest default entry: full shape, last position, no dupes."""
+    items = get_default_cli_items("aicoding")
+    yuque = [it for it in items if it["cli_code"] == "yuque-cli"]
+    assert len(yuque) == 1
+    assert yuque[0] == {
+        "cli_code": "yuque-cli",
+        "cli_name": "yuque-cli",
+        "cli_desc": "yuque cli",
+    }
+    codes = [it["cli_code"] for it in items]
+    # appended last (stable ordering matters for downstream passport merge).
+    assert codes[-1] == "yuque-cli"
+    assert len(codes) == len(set(codes))
+    # the claude_code coding templates share the same aicoding link, so the
+    # new entry flows through that path too.
+    codes_cc = [it["cli_code"] for it in get_default_cli_items("claude_code", "applicationCoding")]
+    assert "yuque-cli" in codes_cc
+    assert codes_cc[-1] == "yuque-cli"
 
 
 def test_default_cli_items_returns_copy():
