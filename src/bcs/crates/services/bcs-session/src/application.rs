@@ -256,4 +256,12 @@ impl SessionManagementService for SessionManagementServiceImpl {
             .list_collected_by_group(group_id, bot_uuid, status, title_contains, offset, limit)
             .await)
     }
+
+    async fn collected_at_map(
+        &self,
+        session_ids: &[&str],
+        bot_uuid: &str,
+    ) -> Result<Vec<(String, u64)>, SessionUseCaseError> {
+        Ok(self.repo.collected_at_map(session_ids, bot_uuid).await)
+    }
 }

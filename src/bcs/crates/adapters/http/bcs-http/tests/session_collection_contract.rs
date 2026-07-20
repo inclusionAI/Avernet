@@ -291,6 +291,23 @@ impl SessionManagementService for CollectionMock {
         out.sort_by_key(|s| std::cmp::Reverse(s.collected_at.unwrap_or(s.created_at)));
         Ok(out)
     }
+
+    async fn collected_at_map(
+        &self,
+        session_ids: &[&str],
+        bot_uuid: &str,
+    ) -> Result<Vec<(String, u64)>, SessionUseCaseError> {
+        let collected = self.collected.lock().await;
+        Ok(session_ids
+            .iter()
+            .filter_map(|sid| {
+                let ts = collected
+                    .get(&(sid.to_string(), bot_uuid.to_string()))
+                    .copied()?;
+                Some((sid.to_string(), ts))
+            })
+            .collect())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -408,6 +425,8 @@ async fn collect_and_list_collected_via_bot_token() {
     let items = body["items"].as_array().expect("items array");
     assert_eq!(items.len(), 1, "collected list must contain the session");
     assert_eq!(items[0]["session_id"], sid);
+    // collected=true branch surfaces collected=true on each item.
+    assert_eq!(items[0]["collected"], true);
 
     // Repeat collect — idempotent (still 200).
     let response = app
@@ -598,6 +617,121 @@ async fn collected_list_ordered_by_collect_event_desc() {
     let ts_b = items[0]["collected_at"].as_u64().expect("B collected_at");
     let ts_a = items[1]["collected_at"].as_u64().expect("A collected_at");
     assert!(ts_b > ts_a, "B (collected later) must outrank A: {ts_b} > {ts_a}");
+}
+
+/// 2d. Ordinary list (no collected=true) with `participant` surfaces
+///     per-session collected state: collected=true + collected_at for the
+///     collected session, collected=false for the uncollected one. Without
+///     `participant`, neither field is present.
+#[tokio::test]
+async fn ordinary_list_with_participant_surfaces_collected_fields() {
+    let (app, mock, _temp_dir, _registry) = test_app().await;
+
+    let sid_collected = "group-1:cccc1111";
+    let sid_uncollected = "group-1:dddd2222";
+    for sid in [sid_collected, sid_uncollected] {
+        mock.sessions.lock().await.push(Session {
+            id: sid.to_string(),
+            group_id: "group-1".to_string(),
+            session_title: Some(sid.to_string()),
+            env: None,
+            status: SessionStatus::Running,
+            session_kind: SessionKind::Chat,
+            participants: vec![Participant::bot("driver-bot", ParticipantRole::Driver)],
+            group_version: Some(1),
+            caller_id: None,
+            input: None,
+            output: None,
+            error_message: None,
+            callback_status: None,
+            activation_count: 1,
+            caller_principal: None,
+            created_by: None,
+            created_at: 1,
+            updated_at: 1,
+            completed_at: None,
+            meta: None,
+            current_msg_seq: 0,
+            participant_join_seq: None,
+            collected_at: None,
+        });
+    }
+    // Collect only sid_collected as driver-bot.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/sessions/{sid_collected}/collect"))
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer driver-token")
+                .body(Body::from(json!({}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Ordinary list WITH participant=driver-bot -> each item has a `collected`
+    // bool; the collected one also has collected_at.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/groups/group-1/sessions?participant=driver-bot")
+                .header("authorization", "Bearer driver-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+            .unwrap();
+    let items = body["items"].as_array().expect("items array");
+    let by_id: HashMap<&str, &Value> = items
+        .iter()
+        .map(|it| (it["id"].as_str().unwrap(), it))
+        .collect();
+    let collected_item = by_id.get(sid_collected).unwrap();
+    assert_eq!(collected_item["collected"], true);
+    assert!(collected_item["collected_at"].is_u64(), "collected item has collected_at");
+    let uncollected_item = by_id.get(sid_uncollected).unwrap();
+    assert_eq!(uncollected_item["collected"], false);
+    assert!(
+        uncollected_item.get("collected_at").is_none() || uncollected_item["collected_at"].is_null(),
+        "uncollected item must not surface collected_at"
+    );
+
+    // Ordinary list WITHOUT participant -> no `collected` field on any item.
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/groups/group-1/sessions")
+                .header("authorization", "Bearer driver-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+            .unwrap();
+    let items = body["items"].as_array().expect("items array");
+    for it in items {
+        assert!(
+            it.get("collected").is_none(),
+            "without participant, collected must not be present; got {it}"
+        );
+        assert!(
+            it.get("collected_at").is_none(),
+            "without participant, collected_at must not be present; got {it}"
+        );
+    }
 }
 
 /// 3. DELETE /sessions/{sid}/collect → 200 `{collected:false}`;

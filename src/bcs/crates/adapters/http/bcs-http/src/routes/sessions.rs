@@ -606,7 +606,15 @@ pub async fn list_sessions_for_group(
         };
         let items: Vec<Value> = collected_sessions
             .iter()
-            .map(|s| session_to_json(s))
+            .map(|s| {
+                let mut v = session_to_json(s);
+                if let Some(obj) = v.as_object_mut() {
+                    // This branch only returns collected sessions, so every item
+                    // is collected=true. collected_at was populated by the store.
+                    obj.insert("collected".into(), Value::Bool(true));
+                }
+                v
+            })
             .collect();
         return Json(serde_json::json!({
             "items": items,
@@ -763,6 +771,45 @@ pub async fn list_sessions_for_group(
         }
     } else {
         visible.iter().map(|s| session_to_json(s)).collect()
+    };
+
+    // When the request explicitly specifies a participant, surface that
+    // participant's per-session collected state on each item: collected (bool)
+    // for every item, and collected_at (epoch ms) for the collected ones. When
+    // no participant is given, neither field is added.
+    let items: Vec<Value> = if let Some(p) = params.participant.as_deref() {
+        let ids: Vec<&str> = items
+            .iter()
+            .filter_map(|v| v.get("id").and_then(|i| i.as_str()))
+            .collect();
+        let collected_map: std::collections::HashMap<String, u64> = state
+            .services
+            .session_management
+            .collected_at_map(&ids, p)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        items
+            .into_iter()
+            .map(|mut v| {
+                if let Some(obj) = v.as_object_mut() {
+                    // Query the map by &str directly (String: Borrow<str>),
+                    // avoiding a per-item String allocation.
+                    if let Some(sid) = obj.get("id").and_then(|i| i.as_str()) {
+                        if let Some(ts) = collected_map.get(sid) {
+                            obj.insert("collected".into(), Value::Bool(true));
+                            obj.insert("collected_at".into(), Value::from(*ts));
+                        } else {
+                            obj.insert("collected".into(), Value::Bool(false));
+                        }
+                    }
+                }
+                v
+            })
+            .collect()
+    } else {
+        items
     };
 
     Json(serde_json::json!({
