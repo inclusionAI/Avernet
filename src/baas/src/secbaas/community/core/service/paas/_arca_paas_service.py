@@ -500,7 +500,7 @@ class ArcaPaasService(PaasService):
             if "sandbox" in error_str and (
                 "not found" in error_str
                 or "does not exist" in error_str
-                or "destroyed" in error_str
+                or "sandbox destroyed" in error_str
             ):
                 self._logger.warning(
                     "Sandbox %s not found during destroy, "
