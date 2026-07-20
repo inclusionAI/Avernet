@@ -24,7 +24,9 @@ Avernet is designed as that operating environment: a trusted, modular foundation
 
 Avernet is in production at Ant Group, where it powers over 10,000 agents/bots as of early July 2026.
 
-https://github.com/user-attachments/assets/b275e7ff-b9b1-4982-8418-fdbdeda24f1c
+
+
+https://github.com/user-attachments/assets/d4bd3c06-3924-4a51-8c9b-aa285ef35bcd
 
 
 
