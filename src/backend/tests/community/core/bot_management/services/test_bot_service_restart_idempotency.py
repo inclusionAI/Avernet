@@ -381,11 +381,12 @@ class TestRestartGuardOrchestration:
         bot = _make_bot(status="FAILED", binding_id=None)
         svc._repository.get_by_id_and_owner.return_value = bot
 
+        pending_bot = {**bot, "status": "PENDING"}
         with patch.object(svc, "stop_bot") as stop, \
-             patch.object(svc, "start_bot", return_value=bot) as start:
+             patch.object(svc, "start_bot", return_value=pending_bot) as start:
             result = svc.restart_bot(bot_id="bot001", user_id="user001")
 
-        assert result == bot
+        assert result == pending_bot
         binding_repo.list_bindings.assert_called_once_with(
             env="dev",
             entity_id="staff_user001",
@@ -395,6 +396,15 @@ class TestRestartGuardOrchestration:
             page_size=100,
         )
         stop.assert_not_called()
+        svc._repository.update_by_owner.assert_called_once_with(
+            "bot001",
+            "user001",
+            {
+                "status": "PENDING",
+                "binding_id": None,
+                "device_id": None,
+            },
+        )
         start.assert_called_once()
         assert start.call_args.kwargs["device_provider"] == "arca"
 
