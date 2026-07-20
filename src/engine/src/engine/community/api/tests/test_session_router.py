@@ -372,3 +372,26 @@ class TestUpdateSession:
         data = resp.json()["data"]
         assert "last_message" in data
         assert data["last_message"]["id"] == "msg-1"
+
+    def test_ext_info_json_forwarded_to_update_request(self, client, mock_session_api):
+        """ext_info 查询参数（JSON 字符串）应解析为 dict 透传进 SessionUpdateRequest。"""
+        import json as _json
+        payload = {"workItem": {"id": "W1"}, "pr": "pr-123"}
+        client.post(
+            "/api/sessions/sess-1/update",
+            params={"ext_info": _json.dumps(payload), "title": "Fix"},
+        )
+        req = mock_session_api.update.call_args[0][0]
+        assert req.ext_info == payload
+        assert req.title == "Fix"
+
+    def test_ext_info_invalid_json_returns_400(self, client, mock_session_api):
+        """ext_info 非 JSON 应返回 400。"""
+        resp = client.post("/api/sessions/sess-1/update?ext_info=not-json")
+        assert resp.status_code == 400
+
+    def test_ext_info_defaults_to_none_when_omitted(self, client, mock_session_api):
+        """未传 ext_info 时默认 None。"""
+        client.post("/api/sessions/sess-1/update?title=Hi")
+        req = mock_session_api.update.call_args[0][0]
+        assert req.ext_info is None

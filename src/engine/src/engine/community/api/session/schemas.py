@@ -33,6 +33,8 @@ class UpdateSessionBody(BaseModel):
     user_id: Optional[str] = None
     agent_id: Optional[str] = None
     permission_mode: Optional[str] = None
+    # 引擎特定扩展字段（OSS 层不感知具体内部词汇）。
+    ext_info: Optional[dict[str, Any]] = None
     engine: Optional[str] = None
 
 
