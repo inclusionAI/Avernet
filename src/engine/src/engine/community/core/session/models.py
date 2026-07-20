@@ -90,6 +90,9 @@ class SessionUpdateRequest(BaseModel):
     user_id: str | None = None
     agent_id: str | None = None
     permission_mode: str | None = None
+    # 引擎特定的扩展字段（驼峰命名，透传给各引擎实现）。OSS 层不定义具体
+    # 内部词汇，由 corp 引擎自行解析（例如 aicoding 从中提取工作项/PR 关联）。
+    ext_info: dict[str, Any] | None = None
 
 
 class SessionHistoryRequest(BaseModel):
