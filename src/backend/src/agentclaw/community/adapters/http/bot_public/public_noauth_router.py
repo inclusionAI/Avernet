@@ -1,13 +1,10 @@
-"""Bot Public No-Auth Router.
+"""Bot Public Router.
 
-提供免鉴权版本的 Bot 相关接口：
-- GET /api/public/bots/{bot_id}/appcoding-bots - 获取架构师 bot 关联的 coding bots（免鉴权）
-- PATCH /api/public/bots/{bot_id}/ext - 更新 bot ext 字段（免鉴权，限制字段）
-
-注意：
-- 这些接口不检查用户身份，任何人均可访问
-- /ext 接口限制只能更新特定白名单字段，敏感操作仍需鉴权版本
+提供 Bot 相关接口：
+- GET /api/public/bots/{bot_id}/appcoding-bots - 获取架构师 bot 关联的 coding bots
+- PATCH /api/public/bots/{bot_id}/ext - 更新 bot ext 字段（限制字段）
 """
+import json
 from typing import Any, Optional
 
 from fastapi import APIRouter, Path, Request
@@ -39,7 +36,7 @@ class ApiResponse(BaseModel):
 
 # ==================== Ext Update Configuration ====================
 
-# 免鉴权 /ext 接口允许更新的字段白名单
+# /ext 接口允许更新的字段白名单
 # 只允许更新非敏感的、公開的配置字段
 EXT_UPDATE_WHITELIST = {
     # 架构域标识
@@ -60,7 +57,40 @@ def _filter_ext_update(ext_update: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in ext_update.items() if k in EXT_UPDATE_WHITELIST}
 
 
-# ==================== Public Endpoints (No Auth Required) ====================
+# 去除敏感字段
+SENSITIVE_FIELDS = frozenset(
+    {"iam_token", "token", "device_id", "binding_id"}
+)
+
+
+def _scrub_sensitive(value: Any) -> Any:
+    """递归去除敏感字段（含以 JSON 字符串存储的 ext）。"""
+    if isinstance(value, dict):
+        return {
+            k: _scrub_sensitive(v)
+            for k, v in value.items()
+            if k not in SENSITIVE_FIELDS
+        }
+    if isinstance(value, (list, tuple)):
+        return [_scrub_sensitive(item) for item in value]
+    if isinstance(value, str):
+        stripped = value.lstrip()
+        if stripped[:1] in "[{":
+            try:
+                decoded = json.loads(stripped)
+            except (ValueError, TypeError):
+                return value
+            scrubbed = _scrub_sensitive(decoded)
+            if isinstance(scrubbed, (dict, list)):
+                try:
+                    return json.dumps(scrubbed, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    return scrubbed
+            return value
+    return value
+
+
+# ==================== Public Endpoints ====================
 
 
 @router.get("/{bot_id}/appcoding-bots", response_model=ApiResponse)
@@ -68,21 +98,21 @@ async def list_coding_bots_by_architect_public(
     bot_id: str = Path(..., description="架构师 Bot ID"),
     _bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> ApiResponse:
-    """免鉴权获取架构师 bot 关联的 coding bots。
+    """获取架构师 bot 关联的 coding bots。
 
     GET /api/public/bots/{bot_id}/appcoding-bots
 
-    与鉴权版本 /api/bots/{bot_id}/appcoding-bots 功能相同，但不需要任何身份验证。
-    返回完整的 bot 字段。
+    去除敏感字段（含 ext 内）。
 
     Args:
         bot_id: 架构师 Bot ID (domain architect bot)
 
     Returns:
-        关联的应用 coding bots 列表（完整字段）
+        关联的应用 coding bots 列表（已脱敏）
     """
     try:
         coding_bots = _bot_service.list_coding_bots_by_architect(bot_id)
+        coding_bots = _scrub_sensitive(coding_bots)
 
         logger.info(
             f"[public_noauth.list_coding_bots] bot_id={bot_id}, "
@@ -117,19 +147,16 @@ async def update_bot_ext_public(
     request: Request = None,
     bot_repo: BotRepository = Injected(BotRepository),
 ) -> ApiResponse:
-    """免鉴权局部更新 bot ext 字段（限制白名单）。
+    """局部更新 bot ext 字段（限制白名单）。
 
     PATCH /api/public/bots/{bot_id}/ext
     Body: { "key1": "value1", ... }  # 只允许白名单字段
 
-    与鉴权版本 /api/bots/{bot_id}/ext 的区别：
-    1. 不需要任何身份验证
-    2. 只允许更新白名单中的非敏感字段
-    3. 敏感字段（如 authorized_sources, iam_token 等）会被自动过滤
+    只允许更新白名单字段，非白名单字段会被自动过滤；
+    敏感字段（如 iam_token 等）会被过滤去除。
 
     允许更新的字段：
-    - ui_state, view_mode, collapsed_panels（前端状态）
-    - client_session_id, last_active_at（临时标记）
+    - arch_domain, is_domain_bot（架构域标识）
 
     Args:
         bot_id: Bot ID
@@ -166,7 +193,7 @@ async def update_bot_ext_public(
                 },
             )
 
-        # 直接通过 repository 获取 bot（免鉴权，不检查 owner）
+        # 通过 repository 获取 bot
         total, items = bot_repo.list_by_conditions(bot_id=bot_id, page=1, page_size=1)
         if not items:
             return ApiResponse(
@@ -191,7 +218,6 @@ async def update_bot_ext_public(
         ext = bot.get("ext") or {}
         if isinstance(ext, str):
             try:
-                import json
                 ext = json.loads(ext)
             except json.JSONDecodeError:
                 ext = {}
@@ -199,7 +225,7 @@ async def update_bot_ext_public(
         # 只更新白名单字段
         ext.update(filtered_update)
 
-        # 通过 repository 直接更新（免鉴权版本不检查 owner）
+        # 通过 repository 更新 ext
         bot_repo.update_by_owner(bot_id, owner_id, {"ext": ext})
 
         logger.info(
