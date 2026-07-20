@@ -24,6 +24,8 @@ Avernet 正是为此而设计的运行环境：为持久化 Agent、结构化协
 
 Avernet 已在蚂蚁集团生产环境运行，截至 2026 年 7 月初，支撑超过 10,000 个 bot。
 
+https://github.com/user-attachments/assets/b275e7ff-b9b1-4982-8418-fdbdeda24f1c
+
 <p align="center">
   <img src="./docs/images/group.jpg" alt="团队协作" width="80%" />
 </p>
