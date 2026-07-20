@@ -151,16 +151,11 @@ def _log_threshold_reached_warning(
     fail_count: int,
 ) -> None:
     """记录设备达到告警阈值的日志。"""
-    try:
-        logger.warning(
-            f"[AcBindingSandboxHandler] sandbox_id={sandbox_id} "
-            f"reached warning threshold ({fail_count} >= {WARNING_THRESHOLD}), "
-            f"marking as {DeviceStatus.STOPPED.value}"
-        )
-    except Exception as e:
-        logger.warning(
-            f"[AcBindingSandboxHandler] Failed to log threshold warning: {e}"
-        )
+    logger.warning(
+        f"[AcBindingSandboxHandler] sandbox_id={sandbox_id} "
+        f"reached warning threshold ({fail_count} >= {WARNING_THRESHOLD}), "
+        f"device will be escalated to STOPPED status"
+    )
 
 
 # ---------------------------------------------------------------------------
