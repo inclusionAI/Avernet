@@ -20,6 +20,7 @@ def _make_publish_approval_service(
     publish_flow_service_provider=None,
     process_service=None,
     bot_service=None,
+    task_queue_service=None,
 ) -> PublishApprovalService:
     """Build a PublishApprovalService with MagicMock fallbacks."""
     return PublishApprovalService(
@@ -27,6 +28,7 @@ def _make_publish_approval_service(
         publish_flow_service_provider=publish_flow_service_provider or (lambda: MagicMock()),
         process_service=process_service or MagicMock(),
         bot_service=bot_service or MagicMock(),
+        task_queue_service=task_queue_service or MagicMock(),
     )
 
 
@@ -806,26 +808,24 @@ class TestHandleApprovalCallbackTriggers:
     """handle_approval_callback 触发发布/下线测试。"""
 
     @pytest.mark.asyncio
-    async def test_agree_online_triggers_release(self):
-        """AGREE + online 触发上线发布。"""
+    async def test_agree_online_enqueues_durable_trigger(self):
+        """AGREE + online (#197): callback enqueues the durable trigger, not inline."""
+        from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+            APPROVAL_TRIGGER_TASK,
+        )
+
         approval = {"puid": "puid_123", "status": "PROCESSING", "operator_id": "user_001"}
-        updated_approval = {"puid": "puid_123", "status": "AGREED", "operator_id": "user_001"}
-        updated_record = _make_publish_record(ext={"approval": updated_approval})
 
         publish_service = MagicMock()
-        publish_service.get_publish_by_id.side_effect = [
-            _make_publish_record(ext={"approval": approval}, status=PublishStatus.VALIDATING.value),  # Initial call
-            updated_record,  # Re-fetch in trigger
-        ]
+        publish_service.get_publish_by_id.return_value = _make_publish_record(
+            ext={"approval": approval}, status=PublishStatus.VALIDATING.value
+        )
         publish_service.update_publish_ext = MagicMock()
 
-        publish_flow_service = MagicMock()
-        publish_flow_service.process = AsyncMock()
-        publish_flow_service.process.return_value = MagicMock(status=PublishStatus.SUCCESS)
-
+        task_queue_service = MagicMock()
         service = _make_publish_approval_service(
             publish_service=publish_service,
-            publish_flow_service_provider=lambda: publish_flow_service,
+            task_queue_service=task_queue_service,
         )
 
         result = await service.handle_approval_callback(
@@ -837,24 +837,31 @@ class TestHandleApprovalCallbackTriggers:
         )
 
         assert result["success"] is True
-        publish_flow_service.process.assert_called_once()
+        task_queue_service.enqueue.assert_called_once()
+        call = task_queue_service.enqueue.call_args
+        assert call.args[0] == APPROVAL_TRIGGER_TASK
+        assert call.args[1] == {"publish_id": 1, "action": "online", "operator": "user_001"}
 
     @pytest.mark.asyncio
-    async def test_agree_offline_triggers_offline(self):
-        """AGREE + offline 触发下线。"""
+    async def test_agree_offline_enqueues_durable_trigger(self):
+        """AGREE + offline (#197): callback enqueues the durable trigger."""
+        from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+            APPROVAL_TRIGGER_TASK,
+        )
+
         approval = {"puid": "puid_123", "status": "PROCESSING", "operator_id": "user_001"}
-        updated_approval = {"puid": "puid_123", "status": "AGREED", "operator_id": "user_001"}
-        updated_record = _make_publish_record(ext={"approval": updated_approval})
 
         publish_service = MagicMock()
-        publish_service.get_publish_by_id.side_effect = [
-            _make_publish_record(ext={"approval": approval}, status=PublishStatus.SUCCESS.value),  # Initial call
-            updated_record,  # Re-fetch in trigger
-        ]
+        publish_service.get_publish_by_id.return_value = _make_publish_record(
+            ext={"approval": approval}, status=PublishStatus.SUCCESS.value
+        )
         publish_service.update_publish_ext = MagicMock()
-        publish_service.offline_publish = AsyncMock(return_value={"success": True})
 
-        service = _make_publish_approval_service(publish_service=publish_service)
+        task_queue_service = MagicMock()
+        service = _make_publish_approval_service(
+            publish_service=publish_service,
+            task_queue_service=task_queue_service,
+        )
 
         result = await service.handle_approval_callback(
             publish_id=1,
@@ -865,7 +872,9 @@ class TestHandleApprovalCallbackTriggers:
         )
 
         assert result["success"] is True
-        publish_service.offline_publish.assert_called_once_with(publish_id=1)
+        call = task_queue_service.enqueue.call_args
+        assert call.args[0] == APPROVAL_TRIGGER_TASK
+        assert call.args[1] == {"publish_id": 1, "action": "offline", "operator": "user_001"}
 
     @pytest.mark.asyncio
     async def test_agree_online_with_invalid_status_skips_trigger(self):
@@ -928,25 +937,19 @@ class TestHandleApprovalCallbackTriggers:
 
     @pytest.mark.asyncio
     async def test_uses_operator_id_from_approval(self):
-        """应使用 approval 中的 operator_id 而非 applicant 参数。"""
+        """enqueue 的 operator 应取 approval 的 operator_id 而非 applicant 参数。"""
         approval = {"puid": "puid_123", "status": "PROCESSING", "operator_id": "operator_001"}
-        updated_approval = {"puid": "puid_123", "status": "AGREED", "operator_id": "operator_001"}
-        updated_record = _make_publish_record(ext={"approval": updated_approval})
 
         publish_service = MagicMock()
-        publish_service.get_publish_by_id.side_effect = [
-            _make_publish_record(ext={"approval": approval}, status=PublishStatus.VALIDATING.value),
-            updated_record,
-        ]
+        publish_service.get_publish_by_id.return_value = _make_publish_record(
+            ext={"approval": approval}, status=PublishStatus.VALIDATING.value
+        )
         publish_service.update_publish_ext = MagicMock()
 
-        publish_flow_service = MagicMock()
-        publish_flow_service.process = AsyncMock()
-        publish_flow_service.process.return_value = MagicMock(status=PublishStatus.SUCCESS)
-
+        task_queue_service = MagicMock()
         service = _make_publish_approval_service(
             publish_service=publish_service,
-            publish_flow_service_provider=lambda: publish_flow_service,
+            task_queue_service=task_queue_service,
         )
 
         result = await service.handle_approval_callback(
@@ -958,33 +961,24 @@ class TestHandleApprovalCallbackTriggers:
         )
 
         assert result["success"] is True
-        # 验证调用时使用的是 operator_id 而非 applicant
-        publish_flow_service.process.assert_called_once_with(
-            publish_id=1,
-            operator="operator_001",  # 应使用 operator_id
-        )
+        # 触发任务的 operator 应使用 operator_id 而非 applicant
+        assert task_queue_service.enqueue.call_args.args[1]["operator"] == "operator_001"
 
     @pytest.mark.asyncio
     async def test_falls_back_to_applicant_when_no_operator_id(self):
-        """当 approval 中没有 operator_id 时，使用 applicant 参数。"""
+        """当 approval 中没有 operator_id 时，enqueue 的 operator 取 applicant。"""
         approval = {"puid": "puid_123", "status": "PROCESSING"}  # 没有 operator_id
-        updated_approval = {"puid": "puid_123", "status": "AGREED"}
-        updated_record = _make_publish_record(ext={"approval": updated_approval})
 
         publish_service = MagicMock()
-        publish_service.get_publish_by_id.side_effect = [
-            _make_publish_record(ext={"approval": approval}, status=PublishStatus.VALIDATING.value),
-            updated_record,
-        ]
+        publish_service.get_publish_by_id.return_value = _make_publish_record(
+            ext={"approval": approval}, status=PublishStatus.VALIDATING.value
+        )
         publish_service.update_publish_ext = MagicMock()
 
-        publish_flow_service = MagicMock()
-        publish_flow_service.process = AsyncMock()
-        publish_flow_service.process.return_value = MagicMock(status=PublishStatus.SUCCESS)
-
+        task_queue_service = MagicMock()
         service = _make_publish_approval_service(
             publish_service=publish_service,
-            publish_flow_service_provider=lambda: publish_flow_service,
+            task_queue_service=task_queue_service,
         )
 
         result = await service.handle_approval_callback(
@@ -996,28 +990,24 @@ class TestHandleApprovalCallbackTriggers:
         )
 
         assert result["success"] is True
-        # 验证调用时使用的是 applicant
-        publish_flow_service.process.assert_called_once_with(
-            publish_id=1,
-            operator="fallback_user",
-        )
+        assert task_queue_service.enqueue.call_args.args[1]["operator"] == "fallback_user"
 
     @pytest.mark.asyncio
     async def test_offline_uses_operator_id_from_approval(self):
-        """offline 应使用 approval 中的 operator_id。"""
+        """offline enqueue 的 operator 应取 approval 的 operator_id。"""
         approval = {"puid": "puid_123", "status": "PROCESSING", "operator_id": "operator_offline"}
-        updated_approval = {"puid": "puid_123", "status": "AGREED", "operator_id": "operator_offline"}
-        updated_record = _make_publish_record(ext={"approval": updated_approval})
 
         publish_service = MagicMock()
-        publish_service.get_publish_by_id.side_effect = [
-            _make_publish_record(ext={"approval": approval}, status=PublishStatus.SUCCESS.value),
-            updated_record,
-        ]
+        publish_service.get_publish_by_id.return_value = _make_publish_record(
+            ext={"approval": approval}, status=PublishStatus.SUCCESS.value
+        )
         publish_service.update_publish_ext = MagicMock()
-        publish_service.offline_publish = AsyncMock(return_value={"success": True})
 
-        service = _make_publish_approval_service(publish_service=publish_service)
+        task_queue_service = MagicMock()
+        service = _make_publish_approval_service(
+            publish_service=publish_service,
+            task_queue_service=task_queue_service,
+        )
 
         result = await service.handle_approval_callback(
             publish_id=1,
@@ -1028,5 +1018,6 @@ class TestHandleApprovalCallbackTriggers:
         )
 
         assert result["success"] is True
-        # 验证使用 operator_id 触发下线
-        publish_service.offline_publish.assert_called_once()
+        call = task_queue_service.enqueue.call_args
+        assert call.args[1]["action"] == "offline"
+        assert call.args[1]["operator"] == "operator_offline"

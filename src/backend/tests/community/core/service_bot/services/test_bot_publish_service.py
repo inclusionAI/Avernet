@@ -291,13 +291,36 @@ class TestOfflinePublish:
         assert result["new_publish_id"] is None
         # 有非终态发布单，不创建新草稿发布单
         mock_bot_service.delete_bot.assert_not_called()
-        # 验证状态更新为 RELEASED
-        mock_repo.update_status.assert_called_once_with(1, PublishStatus.RELEASED)
-        # 验证 destroy_publish_history 被调用（通过后台任务）
-        await asyncio.sleep(0.1)
-        mock_publish_flow_service.destroy_publish_history.assert_called_once_with(
-            publish_id=1,
-            stage=PublishStage.ONLINE,
+        # 验证状态更新为 RELEASED (#197 CAS-guarded SUCCESS→RELEASED)
+        mock_repo.update_status.assert_called_once_with(
+            1, PublishStatus.RELEASED, PublishStatus.SUCCESS
+        )
+        # (#197) 销毁改为入队持久化任务，不再后台直接调用
+        mock_publish_flow_service.enqueue_offline_destroy.assert_called_once_with(
+            publish_id=1, stage=PublishStage.ONLINE, operator="system"
+        )
+
+    @pytest.mark.asyncio
+    async def test_offline_publish_released_record_reenqueues_destroy(self):
+        """(#197 H1) 崩溃恢复：记录已是 RELEASED（前一次下线已翻转状态但可能在
+        入队销毁前崩溃）→ 重新入队销毁，避免线上 bot 泄漏。销毁任务侧幂等去重。"""
+        mock_repo = Mock()
+        mock_record = _create_mock_record(record_id=1, status=PublishStatus.RELEASED)
+        mock_repo.get_by_id.return_value = mock_record
+
+        mock_publish_flow_service = Mock()
+        service = _make_service(
+            bot_publish_repo=mock_repo,
+            publish_flow_service_provider=lambda: mock_publish_flow_service,
+        )
+
+        result = await service.offline_publish(publish_id=1)
+
+        assert result["success"] is True
+        # 不再翻转状态（已是 RELEASED），只重新入队销毁。
+        mock_repo.update_status.assert_not_called()
+        mock_publish_flow_service.enqueue_offline_destroy.assert_called_once_with(
+            publish_id=1, stage=PublishStage.ONLINE, operator="system"
         )
 
     @pytest.mark.asyncio
@@ -363,13 +386,13 @@ class TestOfflinePublish:
         # 验证创建新发布单时关联原发布单（last_pub_id = publish_id）
         insert_call_args = mock_repo.insert.call_args
         assert insert_call_args[0][0]["last_pub_id"] == 1
-        # 验证状态更新为 RELEASED
-        mock_repo.update_status.assert_called_once_with(1, PublishStatus.RELEASED)
-        # 验证 destroy_publish_history 被调用（通过后台任务）
-        await asyncio.sleep(0.1)
-        mock_publish_flow_service.destroy_publish_history.assert_called_once_with(
-            publish_id=1,
-            stage=PublishStage.ONLINE,
+        # 验证状态更新为 RELEASED (#197 CAS-guarded)
+        mock_repo.update_status.assert_called_once_with(
+            1, PublishStatus.RELEASED, PublishStatus.SUCCESS
+        )
+        # (#197) 销毁改为入队持久化任务
+        mock_publish_flow_service.enqueue_offline_destroy.assert_called_once_with(
+            publish_id=1, stage=PublishStage.ONLINE, operator="system"
         )
 
     @pytest.mark.asyncio
@@ -405,11 +428,12 @@ class TestOfflinePublish:
         assert result["success"] is True
         # VALIDATING 状态不调用 delete_bot
         mock_bot_service.delete_bot.assert_not_called()
-        # 验证状态更新为 DRAFT
-        mock_repo.update_status.assert_called_once_with(1, PublishStatus.DRAFT)
-        # VERIFY 阶段不执行销毁流程
-        await asyncio.sleep(0.1)
-        mock_publish_flow_service.destroy_publish_history.assert_not_called()
+        # 验证状态更新为 DRAFT (#197 CAS-guarded VALIDATING→DRAFT)
+        mock_repo.update_status.assert_called_once_with(
+            1, PublishStatus.DRAFT, PublishStatus.VALIDATING
+        )
+        # VERIFY 阶段不执行销毁流程（也不入队）
+        mock_publish_flow_service.enqueue_offline_destroy.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_offline_publish_not_found(self):
@@ -1870,7 +1894,8 @@ class TestRollbackPublish:
         # can_rollback 也会调用 get_by_id，所以需要设置 side_effect
         mock_repo.get_by_id.side_effect = [current_record, target_record, current_record, target_record]
         mock_repo.get_by_last_pub_id.return_value = None
-        mock_repo.update_status_with_ext.return_value = current_record
+        # (#197) 原子翻转：两条 CAS 均命中
+        mock_repo.rollback_flip.return_value = (True, True)
 
         # Mock execute_rollback
         mock_flow_service = MagicMock()
@@ -1895,27 +1920,18 @@ class TestRollbackPublish:
         assert result["deploy_status"] == "online_pub"
         assert result["deploy_message"] == "回滚发布已提交"
 
-        # 验证 update_status_with_ext 被调用两次
-        # 第一次：当前版本状态改为 DRAFT
-        # 第二次：目标版本状态恢复为 SUCCESS
-        assert mock_repo.update_status_with_ext.call_count == 2
-
-        # 验证第一次调用：当前版本状态改为 DRAFT
-        # 注意：repo.update_status_with_ext 接收位置参数 (publish_id, target_status, ext, source_status)
-        first_call = mock_repo.update_status_with_ext.call_args_list[0]
-        assert first_call[0][0] == 3  # publish_id
-        assert first_call[0][1] == PublishStatus.DRAFT  # target_status
-        assert first_call[0][3] == PublishStatus.SUCCESS  # source_status
-        # 验证 rollback 标记被记录
-        assert "rollback" in first_call[0][2]  # ext
-
-        # 验证第二次调用：目标版本状态恢复为 SUCCESS
-        second_call = mock_repo.update_status_with_ext.call_args_list[1]
-        assert second_call[0][0] == 2  # publish_id
-        assert second_call[0][1] == PublishStatus.SUCCESS  # target_status
-        assert second_call[0][3] == PublishStatus.UPGRADED  # source_status
-        # 验证 rollback_restored_from 标记被记录
-        assert second_call[0][2]["rollback_restored_from"] == 3  # ext
+        # (#197) 验证 rollback_flip 被原子调用一次：current SUCCESS→DRAFT，
+        # target UPGRADED→SUCCESS，均在同一事务内。
+        assert mock_repo.rollback_flip.call_count == 1
+        flip_kwargs = mock_repo.rollback_flip.call_args.kwargs
+        assert flip_kwargs["demoted_publish_id"] == 3
+        assert flip_kwargs["demoted_from_status"] == PublishStatus.SUCCESS.value
+        assert flip_kwargs["demoted_to_status"] == PublishStatus.DRAFT.value
+        assert "rollback" in flip_kwargs["demoted_ext"]
+        assert flip_kwargs["restored_publish_id"] == 2
+        assert flip_kwargs["restored_from_status"] == PublishStatus.UPGRADED.value
+        assert flip_kwargs["restored_to_status"] == PublishStatus.SUCCESS.value
+        assert flip_kwargs["restored_ext"]["rollback_restored_from"] == 3
 
         # 验证 execute_rollback 被调用
         mock_flow_service.execute_rollback.assert_awaited_once_with(
@@ -2015,7 +2031,7 @@ class TestRollbackPublish:
 
         mock_repo.get_by_id.side_effect = [current_record, target_record, current_record, target_record]
         mock_repo.get_by_last_pub_id.return_value = None
-        mock_repo.update_status_with_ext.return_value = current_record
+        mock_repo.rollback_flip.return_value = (True, True)
 
         # Mock execute_rollback
         mock_flow_service = MagicMock()
@@ -2032,19 +2048,16 @@ class TestRollbackPublish:
 
         assert result is not None
 
-        # 验证第一次调用保留了 existing_key
-        # 注意：repo.update_status_with_ext 接收位置参数 (publish_id, target_status, ext, source_status)
-        first_call = mock_repo.update_status_with_ext.call_args_list[0]
-        first_ext = first_call[0][2]  # ext 是第三个位置参数
-        assert first_ext["existing_key"] == "existing_value"
-        assert "rollback" in first_ext
+        # (#197) 验证原子翻转保留了两条记录已有的 ext 字段
+        flip_kwargs = mock_repo.rollback_flip.call_args.kwargs
+        current_ext = flip_kwargs["demoted_ext"]
+        assert current_ext["existing_key"] == "existing_value"
+        assert "rollback" in current_ext
 
-        # 验证第二次调用保留了 target_key
-        second_call = mock_repo.update_status_with_ext.call_args_list[1]
-        second_ext = second_call[0][2]  # ext 是第三个位置参数
-        assert second_ext["target_key"] == "target_value"
-        assert second_ext["migration_path"] == "/tmp/build"
-        assert second_ext["rollback_restored_from"] == 3
+        target_ext = flip_kwargs["restored_ext"]
+        assert target_ext["target_key"] == "target_value"
+        assert target_ext["migration_path"] == "/tmp/build"
+        assert target_ext["rollback_restored_from"] == 3
 
 
 class TestGetBotStageBindingInfo:

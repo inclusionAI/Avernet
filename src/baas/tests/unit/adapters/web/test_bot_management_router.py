@@ -1771,3 +1771,60 @@ class TestRouterDefinition:
         assert "/api/v1/bots/{bot_uuid}/detail-by-uuid" in route_paths
         assert "/api/v1/bots/{bot_id}/detail-by-id" in route_paths
         assert "/api/v1/bots/{bot_id}/devices-by-id" in route_paths
+
+
+# ==================== GET /{bot_uuid}/publishes — list_bot_publishes ====================
+
+
+def _make_publish_summary(
+    id: int = 100, bot_id: int = 1, publish_type: str = "UPDATE", status: str = "ACTIVE"
+):
+    from secbaas.community.api.publish_manage import BotPublishSummary
+
+    return BotPublishSummary(
+        id=id,
+        bot_id=bot_id,
+        publish_type=publish_type,
+        status=status,
+        gmt_create=datetime(2026, 7, 15, tzinfo=UTC),
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_bot_publishes_success(mock_service):
+    """GET /{bot_uuid}/publishes returns the bot's publish workflows."""
+    mock_service.list_publishes_by_bot_uuid.return_value = [
+        _make_publish_summary(id=200, status="SUCCESS"),
+        _make_publish_summary(id=100, status="ACTIVE"),
+    ]
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/v1/bots/BOT-001/publishes?tenant=test_tenant")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["code"] == 0
+    assert [row["id"] for row in data["data"]] == [200, 100]
+    assert data["data"][0]["status"] == "SUCCESS"
+    mock_service.list_publishes_by_bot_uuid.assert_awaited_once_with(
+        tenant="test_tenant", bot_uuid="BOT-001"
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_bot_publishes_unknown_bot_404(mock_service):
+    """GET /{bot_uuid}/publishes 404s when the bot_uuid resolves to nothing."""
+    mock_service.list_publishes_by_bot_uuid.return_value = []
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/v1/bots/UNKNOWN/publishes?tenant=test_tenant")
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["error_code"] == "BOT_NOT_FOUND"
+
+
+def test_router_has_publishes_endpoint():
+    route_paths = [r.path for r in router.routes]
+    assert "/api/v1/bots/{bot_uuid}/publishes" in route_paths

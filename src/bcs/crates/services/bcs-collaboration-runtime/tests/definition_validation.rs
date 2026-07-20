@@ -8,10 +8,14 @@ fn validates_collaboration_template_seed_definitions() {
         "en-US/single-bot-guided-answer.yaml",
         "en-US/parallel-expert-review.yaml",
         "en-US/write-and-review.yaml",
+        "en-US/world-cup-preview-media-copy.yaml",
+        "en-US/micro-merchant-event-orchestration.yaml",
         "zh-CN/solution-and-risk-review.yaml",
         "zh-CN/single-bot-guided-answer.yaml",
         "zh-CN/parallel-expert-review.yaml",
         "zh-CN/write-and-review.yaml",
+        "zh-CN/world-cup-preview-media-copy.yaml",
+        "zh-CN/micro-merchant-event-orchestration.yaml",
     ] {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../seeds/collaboration-templates")

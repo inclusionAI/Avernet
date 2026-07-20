@@ -10,7 +10,12 @@ from typing import TYPE_CHECKING
 
 from injector import inject
 
-from agentclaw.community.core.service_bot.repository.models import PublishStatus, BotPublishRecord
+from agentclaw.community.core.service_bot.repository.models import (
+    PublishStatus,
+    BotPublishRecord,
+    PublishOperationKind,
+    PublishOperationState,
+)
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
@@ -71,14 +76,20 @@ from agentclaw.community.core.service_bot.services.publish_flow.eval_publish_mix
 from agentclaw.community.core.service_bot.services.publish_flow.upgrade_resolution_mixin import (
     UpgradeResolutionMixin,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.retry_ops_mixin import (
+    RetryOpsMixin,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.release_stage import (
     ONLINE_SPEC,
     VERIFY_SPEC,
     ReleaseStageRunner,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
+    PublishOperationRunner,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+    enqueue_destroy,
     enqueue_online_release,
-    enqueue_progress_poll,
     enqueue_verify_flow,
 )
 from agentclaw.community.core.task_queue.services.task_queue_service import (
@@ -89,6 +100,9 @@ from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
+    from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
+        PublishOperationRepository,
+    )
     from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion import (
         TeclawFilePromotion,
     )
@@ -139,6 +153,7 @@ class PublishFlowService(
     PublishExtMixin,
     EvalPublishMixin,
     UpgradeResolutionMixin,
+    RetryOpsMixin,
 ):
     """Bot publish flow processing service.
 
@@ -170,6 +185,7 @@ class PublishFlowService(
         device_binding_repo: "DeviceBindingRepository",
         channel_overrides_reader: "ChannelEngineOverridesReader",
         task_queue_service: TaskQueueService,
+        publish_operation_repo: PublishOperationRepository,
     ):
         """Initialize the flow processing service.
 
@@ -231,6 +247,15 @@ class PublishFlowService(
             bot_publish_service, channel_overrides_reader
         )
 
+        # Crash-safe operation ledger + step runner (#197): every BaaS mutation
+        # in the release/restart/offline/rollback/eval/approval paths goes through
+        # this so a crash-resume adopts an in-doubt workflow instead of re-issuing.
+        self._publish_operation_repo = publish_operation_repo
+        self._operation_runner = PublishOperationRunner(
+            ledger=publish_operation_repo,
+            baas_service=baas_service,
+        )
+
         # Stage-parameterized release runner: one first-release + one upgrade
         # implementation for both verify and online (was four near-duplicate
         # methods). The runners take their real dependencies explicitly; the
@@ -241,6 +266,7 @@ class PublishFlowService(
             baas_service=baas_service,
             provider_behaviors=self._provider_behaviors,
             ops=self,
+            operation_runner=self._operation_runner,
         )
         self._build_stage_runner = BuildStageRunner(
             ext_state=self._ext_state,
@@ -777,159 +803,26 @@ class PublishFlowService(
             fallback=self._execute_first_release,
         )
 
-    async def retry(
-        self,
-        publish_id: int,
-        operator: str,
-    ) -> PublishFlowResult:
-        """Retry a failed publish flow.
-
-        Based on the pre-failure status (ext.source_status), roll back to the corresponding status and
-        re-advance the flow:
-        - building → roll back to BUILDING, rebuild + verify publish
-        - built → roll back to BUILT, re-run verify publish
-        - validate_pub → roll back to VALIDATE_PUB, call BaaS restart to retry
-        - online_pub → roll back to ONLINE_PUB; if the online release was already
-          recorded (BaaS-wait failure) call BaaS restart, otherwise re-run the
-          online release work via the online_release task
-
-        Args:
-            publish_id: Publish record ID
-            operator: Operator
-
-        Returns:
-            PublishFlowResult: Retry result
-
-        Raises:
-            PublishNotFoundError: Publish record does not exist
-            PublishFlowServiceError: Status does not support retry or rollback failed
-        """
-        logger.info(
-            f"[PublishFlowService.retry] called: publish_id={publish_id}, operator={operator}"
-        )
-
-        # Step 1: Query the publish record
-        publish_record = self._publish_service.get_publish_by_id(publish_id)
-        if not publish_record:
-            raise PublishNotFoundError(f"Publish order not found: {publish_id}")
-
-        current_status = PublishStatus(publish_record.status)
-
-        # Step 2: Verify the status is FAILED
-        if current_status != PublishStatus.FAILED:
-            raise PublishFlowServiceError(
-                f"Current status {current_status} does not support retry; only FAILED status can be retried"
-            )
-
-        # Step 3: Get the pre-failure status from ext
-        ext = self._get_latest_ext(publish_id)
-        source_status = ext.get("source_status")
-        if not source_status:
-            raise PublishFlowServiceError(
-                f"Publish record is missing pre-failure status info (source_status); cannot retry: publish_id={publish_id}"
-            )
-
-        # Step 4: Determine the rollback target status and retry action based on
-        # source_status. A build failure rolls back to BUILDING (not DRAFT): the
-        # user-driven DRAFT -> BUILDING advance already happened, and the verify_flow
-        # task rebuilds from BUILDING.
-        retry_map = {
-            PublishStatus.BUILDING.value: PublishStatus.BUILDING,
-            PublishStatus.BUILT.value: PublishStatus.BUILT,
-            PublishStatus.VALIDATE_PUB.value: PublishStatus.VALIDATE_PUB,
-            PublishStatus.VALIDATING.value: PublishStatus.VALIDATING,
-            PublishStatus.ONLINE_PUB.value: PublishStatus.ONLINE_PUB,
-            PublishStatus.SUCCESS.value: PublishStatus.SUCCESS,
-        }
-
-        rollback_status = retry_map.get(source_status)
-        if not rollback_status:
-            raise PublishFlowServiceError(
-                f"Unsupported retry scenario: source_status={source_status}, publish_id={publish_id}"
-            )
-
-        # Step 5: Roll back the status (FAILED -> rollback_status) and set the retry flag
-        ext["retry"] = True
-        try:
-            self._update_publish_status(
-                publish_id=publish_id,
-                target_status=rollback_status,
-                source_status=PublishStatus.FAILED,
-                ext=ext,
-            )
-        except Exception as e:
-            raise PublishFlowServiceError(
-                f"Status rollback failed: {rollback_status.value}, error={e}"
-            )
-
-        logger.info(
-            f"[PublishFlowService.retry] Status rolled back: "
-            f"publish_id={publish_id}, FAILED -> {rollback_status.value}"
-        )
-
-        # Step 6: Execute the retry action. Directly enqueue the corresponding task
-        # (no longer via process(), because /process is already read-only for BUILT;
-        # a BUILT retry must re-drive verify_flow).
-        #
-        # A BaaS-level restart applies when the release already reached the BaaS
-        # layer and *it* failed: the *_PUB wait states, SUCCESS, and an ONLINE_PUB
-        # whose online release was already recorded (poll failure). An ONLINE_PUB
-        # whose release was never recorded means the release *work* itself failed,
-        # so re-run it via the online_release task instead.
-        restart = rollback_status in (
-            PublishStatus.VALIDATE_PUB,
-            PublishStatus.SUCCESS,
-        ) or (
-            rollback_status == PublishStatus.ONLINE_PUB
-            and self.is_online_release_recorded(publish_id)
-        )
-        if restart:
-            # BaaS publish failed; call restart_bot to retry
-            restart_result = self.restart_bot(
-                publish_id=publish_id,
-                operator=operator,
-            )
-            success = restart_result.get("success", False)
-            if success:
-                # The BaaS-restart branch parks the record in its *_PUB wait state
-                # without passing through verify_flow/online_release, so pre-#105 it
-                # advanced only via user /sync polling (retry redirect) or an explicit
-                # /restart_status poll. Enqueue the durable poll so the retried
-                # restart self-drives: the poll's retry-flag redirect routes it
-                # through sync_restart_progress and leaves the *_PUB state.
-                enqueue_progress_poll(self._task_queue_service, publish_id=publish_id)
-            else:
-                self._mutate_and_update_ext(
-                    publish_id=publish_id,
-                    mutator=self._clear_retry_flag,
-                )
-            return PublishFlowResult(
-                publish_id=publish_id,
-                status=rollback_status,
-                action="restart",
-                message="Retry submitted (BaaS restart)" if success else f"Retry failed: {restart_result.get('message', 'Unknown error')}",
-            )
-        elif rollback_status in (PublishStatus.VALIDATING, PublishStatus.ONLINE_PUB):
-            # Online release retry: re-open ONLINE_PUB (idempotent if already there)
-            # and re-enqueue the online_release task, which re-runs the release work.
-            self._advance_status(
-                publish_id, PublishStatus.ONLINE_PUB, PublishStatus.VALIDATING
-            )
-            enqueue_online_release(
-                self._task_queue_service, publish_id=publish_id, operator=operator
-            )
-        else:
-            # BUILDING / BUILT: re-enqueue the verify_flow task (the build sub-step
-            # is skipped when already BUILT).
-            enqueue_verify_flow(
-                self._task_queue_service, publish_id=publish_id, operator=operator
-            )
-        return PublishFlowResult(
+    def enqueue_offline_destroy(self, publish_id: int, stage, operator: str) -> None:
+        """Enqueue the durable destroy task for an offline (#197) — replaces the
+        former fire-and-forget background destroy. ``stage`` is a PublishStage."""
+        enqueue_destroy(
+            self._task_queue_service,
             publish_id=publish_id,
-            status=rollback_status,
-            action="process",
-            message="Retry submitted, please check progress later",
+            stage=stage.value if hasattr(stage, "value") else str(stage),
+            operator=operator,
         )
+
+    def _abandon_inflight_operations(self, publish_id: int, reason: str) -> None:
+        """Abandon every non-terminal ledger op for a publish record (#197).
+
+        Used when the record is restarted from an earlier phase (rebuild) or
+        superseded by a new version — the in-flight ops are no longer the current
+        intent, so a fresh attempt must open new ops rather than resume these."""
+        terminal = {s.value for s in PublishOperationState.terminal()}
+        for op in self._publish_operation_repo.list_by_publish_id(publish_id):
+            if op.state not in terminal:
+                self._publish_operation_repo.abandon(op.id, reason)
 
     def _get_owner_id(self, publish_record: BotPublishRecord) -> str:
         return self._ext_state.owner_id(publish_record)
@@ -971,14 +864,34 @@ class PublishFlowService(
         return self._publish_service.get_publish_by_id(publish_id)
 
     def is_online_release_recorded(self, publish_id: int) -> bool:
-        """True once this record's online BaaS publish is recorded in ext.
+        """True once this record's online release is fully recorded — i.e. the
+        binding + ``ext.publish.online`` were written, not merely the BaaS
+        workflow id.
 
-        The online release runs *within* ONLINE_PUB (``process`` owns the
-        VALIDATING → ONLINE_PUB advance), so the live status alone can't tell a
-        not-yet-run release from a completed one. The presence of
-        ``ext.publish.online`` is the idempotency marker: a re-run of the
-        online_release task (crash-resume) skips a second BaaS create, and retry
-        uses it to choose BaaS-restart vs. re-running the release work."""
+        This is the crash-resume guard for the online leg, which runs *within*
+        ONLINE_PUB with no status transition to guard it, so the threshold must
+        be the *completed* release, not just the created workflow. Both consumers
+        need this threshold:
+
+        * the online_release task gate (``tasks.py``) skips re-running the release
+          only when it is fully done; at ``ID_RECORDED``-but-not-complete a re-run
+          MUST re-enter (the runner then resumes: reuses the in-flight op + binding
+          and finishes the ext write) — gating on the mere workflow id would strand
+          the record with an orphaned bot (binding/ext never written).
+        * ``retry`` chooses BaaS-restart only for a completed release (a BaaS-side
+          failure); a partial release re-runs the release work instead.
+
+        Ledger-driven (#197): the latest online-stage release op (first-release or
+        upgrade) is ``COMPLETED``. The ``ext.publish.online`` marker (written in the
+        release's ext step, one step before ``complete_operation``) is a transitional
+        fallback — it covers both the tiny record-ext→complete window and any record
+        that predates the ledger during rollout."""
+        for kind in (PublishOperationKind.FIRST_RELEASE, PublishOperationKind.UPGRADE):
+            op = self._publish_operation_repo.get_latest_by_kind(
+                publish_id, kind, PublishStage.ONLINE.value
+            )
+            if op is not None and op.state == PublishOperationState.COMPLETED.value:
+                return True
         record = self.get_publish_record(publish_id)
         ext = (record.ext or {}) if record else {}
         return bool(ext.get("publish", {}).get(PublishStage.ONLINE.value))

@@ -363,6 +363,64 @@ class BotPublishRepository:
             return None
         return self.get_by_id(publish_id)
 
+    def rollback_flip(
+        self,
+        *,
+        demoted_publish_id: int,
+        demoted_ext: Dict[str, Any],
+        demoted_from_status: str,
+        demoted_to_status: str,
+        restored_publish_id: int,
+        restored_ext: Dict[str, Any],
+        restored_from_status: str,
+        restored_to_status: str,
+    ) -> tuple[bool, bool]:
+        env = get_current_env()
+        demoted_json, demoted_pending = self._offload.prepare(
+            demoted_ext, demoted_publish_id, env
+        )
+        restored_json, restored_pending = self._offload.prepare(
+            restored_ext, restored_publish_id, env
+        )
+        with self._db.orm_session() as db:
+            demoted_affected = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.id == demoted_publish_id,
+                    self.Model.status == demoted_from_status,
+                )
+                .update(
+                    {
+                        self.Model.status: demoted_to_status,
+                        self.Model.ext: demoted_json,
+                        self.Model.gmt_modified: func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+            restored_affected = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.id == restored_publish_id,
+                    self.Model.status == restored_from_status,
+                )
+                .update(
+                    {
+                        self.Model.status: restored_to_status,
+                        self.Model.ext: restored_json,
+                        self.Model.gmt_modified: func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+            # Upload offloaded artifacts only for rows that actually took the write
+            # (inside the txn so a put failure rolls both flips back together).
+            if demoted_affected > 0:
+                self._offload.upload(demoted_pending)
+            if restored_affected > 0:
+                self._offload.upload(restored_pending)
+        return demoted_affected > 0, restored_affected > 0
+
     def update_version(
         self,
         publish_id: int,

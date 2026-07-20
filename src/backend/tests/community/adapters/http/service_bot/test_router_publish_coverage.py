@@ -812,7 +812,10 @@ async def test_rollback_publish_success_and_errors():
 @pytest.mark.asyncio
 async def test_scale_publish_bot_success_and_errors():
     flow = MagicMock()
-    flow.scale_bot.return_value = {"success": True, "message": "scale ok", "target_count": 3}
+    # (#197) scale_bot is now async (routes through the operation runner).
+    flow.scale_bot = AsyncMock(
+        return_value={"success": True, "message": "scale ok", "target_count": 3}
+    )
     resp = await router_publish.scale_publish_bot(1, user=_USER, flow_service=flow)
     assert resp.success is True
     assert resp.message == "scale ok"

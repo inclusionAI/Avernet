@@ -1,5 +1,4 @@
 """Bot Publish Service - Bot发布服务业务逻辑层。"""
-import asyncio
 import threading
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
@@ -937,19 +936,29 @@ class BotPublishService(PublishRollbackMixin):
 
         # Step 2: 根据状态判断 stage
         current_status = publish_record.status
-        stage = None
 
-        if current_status == PublishStatus.SUCCESS:
-            # 已发布上线成功，销毁线上 bot
-            stage = PublishStage.ONLINE
-        elif current_status == PublishStatus.VALIDATING:
-            # 验证中，销毁验证环境 bot
-            stage = PublishStage.VERIFY
-        else:
-            raise BotPublishServiceError(
-                f"发布单状态不支持下线: publish_id={publish_id}, status={current_status}，"
-                f"仅支持状态: {PublishStatus.SUCCESS}, {PublishStatus.VALIDATING}"
+        # (#197) Crash-resume: a prior online offline already flipped
+        # SUCCESS→RELEASED but may have crashed before the durable destroy was
+        # enqueued (the flip and the enqueue are not atomic). Re-enqueue so the
+        # online bot is never leaked. execute_offline_destroy short-circuits when
+        # the destroy already COMPLETED, so this re-enqueue is a true no-op then.
+        if current_status == PublishStatus.RELEASED:
+            publish_flow_service.enqueue_offline_destroy(
+                publish_id=publish_id, stage=PublishStage.ONLINE, operator="system"
             )
+            logger.info(
+                f"[offline_publish] Re-enqueued destroy for already-RELEASED record "
+                f"(crash-resume): publish_id={publish_id}"
+            )
+            return {
+                "success": True,
+                "bot_destroyed": False,
+                "new_publish_id": None,
+                "new_publish_version": None,
+                "message": f"下线销毁已重新提交（崩溃恢复）: publish_id={publish_id}",
+            }
+
+        stage = self._resolve_offline_stage(current_status, publish_id)
 
         logger.info(
             f"[offline_publish] Starting offline: publish_id={publish_id}, "
@@ -966,78 +975,13 @@ class BotPublishService(PublishRollbackMixin):
 
         # Step 3: 如果是 SUCCESS 状态，检查是否有非终态发布单，有则不创建新发布单，没有则创建新草稿发布单
         if current_status == PublishStatus.SUCCESS:
-            bot_id = publish_record.source_bot_id
-            owner_id = publish_record.owner_id
-            source_bot_pk = publish_record.source_bot_pk
-            env = publish_record.env
+            self._release_or_redraft_on_offline(publish_record, publish_id, result)
 
-            # 定义终态
-            terminal_statuses = {
-                PublishStatus.SUCCESS,
-                PublishStatus.UPGRADED,
-                PublishStatus.RELEASED,
-                PublishStatus.FAILED,
-            }
-
-            # 查询该 bot 是否有非终态的发布单
-            all_publish_records = self._repo.list_by_source_bot(source_bot_pk, env)
-            non_terminal_records = [
-                r for r in all_publish_records
-                if r.status not in terminal_statuses and r.id != publish_id
-            ]
-            has_non_terminal = len(non_terminal_records) > 0
-
-            if has_non_terminal:
-                logger.info(
-                    f"[offline_publish] Found {len(non_terminal_records)} non-terminal publish record(s), "
-                    f"skipping bot deletion: bot_id={bot_id}, owner_id={owner_id}"
-                )
-                # 有非终态发布单，不删除 bot，仅将当前发布单状态置为 released
-                self._repo.update_status(publish_id, PublishStatus.RELEASED)
-                logger.info(
-                    f"[offline_publish] Publish status updated to released: publish_id={publish_id}"
-                )
-            else:
-                # 没有非终态发布单，不删除 bot，创建新的草稿发布单
-                logger.info(
-                    f"[offline_publish] No non-terminal publish record found, "
-                    f"creating new draft publish: bot_id={bot_id}, owner_id={owner_id}"
-                )
-
-                # 计算新版本号（基于最大版本号，避免回滚后冲突）
-                new_version = self._get_next_version(publish_record.publish_bot_id, publish_record.owner_id)
-
-                # 创建新的草稿发布单
-                new_record = self.create_publish(
-                    source_bot_pk=publish_record.source_bot_pk,
-                    source_bot_id=publish_record.source_bot_id,
-                    publish_bot_id=publish_record.publish_bot_id,
-                    name=publish_record.name,
-                    owner_id=publish_record.owner_id,
-                    permission_owner=publish_record.permission_owner,
-                    description=publish_record.description,
-                    owner_name=publish_record.owner_name,
-                    version=new_version,
-                    last_pub_id=publish_id,
-                    ext=None,
-                )
-
-                result["new_publish_id"] = new_record.id
-                result["new_publish_version"] = new_version
-                logger.info(
-                    f"[offline_publish] New draft publish created: "
-                    f"original_id={publish_id} -> new_id={new_record.id}, version={new_version}"
-                )
-
-                # 将当前发布单状态置为 released
-                self._repo.update_status(publish_id, PublishStatus.RELEASED)
-                logger.info(
-                    f"[offline_publish] Publish status updated to released: publish_id={publish_id}"
-                )
-
-        # Step 4: 如果是 VALIDATING 状态，将发布单置为草稿
+        # Step 4: 如果是 VALIDATING 状态，将发布单置为草稿 (#197 CAS-guarded)
         if current_status == PublishStatus.VALIDATING:
-            self._repo.update_status(publish_id, PublishStatus.DRAFT)
+            self._repo.update_status(
+                publish_id, PublishStatus.DRAFT, PublishStatus.VALIDATING
+            )
             logger.info(
                 f"[offline_publish] Publish status updated to draft: publish_id={publish_id}"
             )
@@ -1052,23 +996,12 @@ class BotPublishService(PublishRollbackMixin):
             )
             return result
 
-        async def _destroy_in_background():
-            try:
-                destroy_result = publish_flow_service.destroy_publish_history(
-                    publish_id=publish_id,
-                    stage=stage,
-                )
-                logger.info(
-                    f"[offline_publish] Background destroy completed: publish_id={publish_id}, "
-                    f"stage={stage.value}, result={destroy_result}"
-                )
-            except Exception as e:
-                logger.error(
-                    f"[offline_publish] Background destroy failed: publish_id={publish_id}, "
-                    f"stage={stage.value}, error={e}"
-                )
-
-        asyncio.create_task(_destroy_in_background())
+        # (#197) Enqueue a DURABLE destroy task instead of a fire-and-forget
+        # asyncio task, so a pod restart mid-offline does not leak a running
+        # online bot (the DB said RELEASED but the bot was never destroyed).
+        publish_flow_service.enqueue_offline_destroy(
+            publish_id=publish_id, stage=stage, operator="system"
+        )
         result["message"] = f"下线请求已提交，销毁流程正在后台执行: stage={stage.value}"
 
         logger.info(
@@ -1077,6 +1010,101 @@ class BotPublishService(PublishRollbackMixin):
         )
 
         return result
+
+    def _resolve_offline_stage(self, current_status: str, publish_id: int) -> PublishStage:
+        """Map an offline-able publish status to its destroy stage.
+
+        SUCCESS (online) → ONLINE; VALIDATING (verify) → VERIFY; anything else is
+        not offline-able and raises."""
+        if current_status == PublishStatus.SUCCESS:
+            return PublishStage.ONLINE
+        if current_status == PublishStatus.VALIDATING:
+            return PublishStage.VERIFY
+        raise BotPublishServiceError(
+            f"发布单状态不支持下线: publish_id={publish_id}, status={current_status}，"
+            f"仅支持状态: {PublishStatus.SUCCESS}, {PublishStatus.VALIDATING}"
+        )
+
+    def _release_or_redraft_on_offline(
+        self,
+        publish_record: BotPublishRecord,
+        publish_id: int,
+        result: Dict[str, Any],
+    ) -> None:
+        """SUCCESS-branch offline transition: mark the record RELEASED and, when no
+        other non-terminal record exists for the bot, open a fresh draft for the
+        next cycle. Mutates ``result`` with the new draft's id/version. The bot is
+        never destroyed here (that is the durable destroy task's job); both status
+        writes are CAS-guarded (SUCCESS→RELEASED) so a lost race is a no-op."""
+        bot_id = publish_record.source_bot_id
+        owner_id = publish_record.owner_id
+
+        terminal_statuses = {
+            PublishStatus.SUCCESS,
+            PublishStatus.UPGRADED,
+            PublishStatus.RELEASED,
+            PublishStatus.FAILED,
+        }
+
+        all_publish_records = self._repo.list_by_source_bot(
+            publish_record.source_bot_pk, publish_record.env
+        )
+        non_terminal_records = [
+            r for r in all_publish_records
+            if r.status not in terminal_statuses and r.id != publish_id
+        ]
+
+        if non_terminal_records:
+            logger.info(
+                f"[offline_publish] Found {len(non_terminal_records)} non-terminal publish record(s), "
+                f"skipping bot deletion: bot_id={bot_id}, owner_id={owner_id}"
+            )
+            self._repo.update_status(
+                publish_id, PublishStatus.RELEASED, PublishStatus.SUCCESS
+            )
+            logger.info(
+                f"[offline_publish] Publish status updated to released: publish_id={publish_id}"
+            )
+            return
+
+        # No other non-terminal record → open a fresh draft for the next cycle.
+        logger.info(
+            f"[offline_publish] No non-terminal publish record found, "
+            f"creating new draft publish: bot_id={bot_id}, owner_id={owner_id}"
+        )
+
+        # 计算新版本号（基于最大版本号，避免回滚后冲突）
+        new_version = self._get_next_version(
+            publish_record.publish_bot_id, publish_record.owner_id
+        )
+
+        new_record = self.create_publish(
+            source_bot_pk=publish_record.source_bot_pk,
+            source_bot_id=publish_record.source_bot_id,
+            publish_bot_id=publish_record.publish_bot_id,
+            name=publish_record.name,
+            owner_id=publish_record.owner_id,
+            permission_owner=publish_record.permission_owner,
+            description=publish_record.description,
+            owner_name=publish_record.owner_name,
+            version=new_version,
+            last_pub_id=publish_id,
+            ext=None,
+        )
+
+        result["new_publish_id"] = new_record.id
+        result["new_publish_version"] = new_version
+        logger.info(
+            f"[offline_publish] New draft publish created: "
+            f"original_id={publish_id} -> new_id={new_record.id}, version={new_version}"
+        )
+
+        self._repo.update_status(
+            publish_id, PublishStatus.RELEASED, PublishStatus.SUCCESS
+        )
+        logger.info(
+            f"[offline_publish] Publish status updated to released: publish_id={publish_id}"
+        )
 
     def upgrade_bot_to_service(
         self,
