@@ -1,10 +1,10 @@
 """Unit tests for the rebind-architect-bot feature.
 
 Covers the new methods:
-- BotService._get_architect_domain_or_raise
-- BotService._rebind_coding_bot_to_architect
-- BotService.rebind_architect_bot (single)
-- BotService.rebind_architect_bot_batch
+- ArchitectRebindService._get_architect_domain_or_raise
+- ArchitectRebindService._rebind_coding_bot_to_architect
+- ArchitectRebindService.rebind_architect_bot (single)
+- ArchitectRebindService.rebind_architect_bot_batch
 
 Contract pinned here (open source): the owner boundary lives on the architect
 side (owner-scoped), and the per-coding-bot helper only validates existence +
@@ -20,8 +20,11 @@ import pytest
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotPermissionError,
-    BotService,
     BotServiceError,
+)
+
+from agentclaw.community.core.aicoding.services.architect_rebind_service import (
+    ArchitectRebindService,
 )
 
 
@@ -29,8 +32,8 @@ ARCH_ID = "arch1"
 OPERATOR = "u001"
 
 
-def _make_service() -> BotService:
-    svc = BotService.__new__(BotService)
+def _make_service() -> ArchitectRebindService:
+    svc = ArchitectRebindService.__new__(ArchitectRebindService)
     svc._repository = MagicMock()
     svc._template_service = MagicMock()
     return svc

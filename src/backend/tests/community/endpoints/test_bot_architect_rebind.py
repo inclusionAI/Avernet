@@ -1,6 +1,6 @@
 """Endpoint test for PUT /api/bots/{architect_bot_id}/architect-rebind.
 
-Exercises the real handler → real ``BotService.rebind_architect_bot_batch``
+Exercises the real handler → real ``ArchitectRebindService.rebind_architect_bot_batch``
 → real ``BotRepository`` / ``TemplateRepository`` against the per-test SQLite
 DB: a domain architect bot, an application-coding bot (with its template
 linking to a *different* architect) are inserted directly, then the endpoint
