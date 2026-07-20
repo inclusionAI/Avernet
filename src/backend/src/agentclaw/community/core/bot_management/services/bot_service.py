@@ -3490,6 +3490,20 @@ class BotService:
                     nick_name=nick_name,
                     release_reason=f"Bot {bot_id} restarted",
                 )
+            else:
+                # There is no current binding to release, but the asynchronous
+                # allocation can take time. Publish PENDING before spawning it
+                # so status polling does not continue to report the old FAILED
+                # state while recovery is underway.
+                self._repository.update_by_owner(
+                    bot_id,
+                    user_id,
+                    {
+                        "status": "PENDING",
+                        "binding_id": None,
+                        "device_id": None,
+                    },
+                )
             updated_bot = self.start_bot(
                 bot_id=bot_id,
                 user_id=user_id,
