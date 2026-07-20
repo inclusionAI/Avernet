@@ -1,0 +1,197 @@
+# World Cup preview media copy collaboration template.
+# This YAML describes only the collaboration strategy. It does not store concrete bot ids.
+# When creating a group, bind the logical roles below to actual bots via CreateGroupRequest.participant_bindings.
+
+name: World Cup Preview Media Copy
+
+metadata:
+  description: The operations director sets the production flow, the content editor frames the brief, tactics and fact-checking run in parallel, the short-video director writes the voiceover, growth operations packages distribution assets, and the editor accepts the final publish package.
+  labels:
+    scenario: world_cup_preview_media_copy
+
+participants:
+  operations_director:
+    display_name: World Cup Operations Director
+    description: Sets the topic goal, audience, platform, duration, tone, and production cadence.
+    required: true
+
+  content_editor:
+    display_name: World Cup Content Editor
+    description: Frames the content brief, controls the editorial line, and accepts the final publish package.
+    required: true
+
+  tactics_analyst:
+    display_name: World Cup Tactics Analyst
+    description: Designs tactical insight, key matchups, decisive factors, and visual explanation angles.
+    required: true
+
+  script_director:
+    display_name: World Cup Short-Video Director
+    description: Turns tactical insight and verified facts into a short-video voiceover script.
+    required: true
+
+  fact_researcher:
+    display_name: World Cup Match Data Checker
+    description: Verifies schedule, teams, players, historical records, data definitions, and sensitive factual claims.
+    required: true
+
+  growth_operator:
+    display_name: World Cup Growth Operator
+    description: Creates titles, cover hooks, platform packaging, comment prompts, and distribution strategy.
+    required: true
+
+runtime:
+  kind: state_machine
+  state_machine:
+    defaults:
+      node_timeout_ms: 120000
+      max_attempts: 2
+
+    nodes:
+      set_production_direction:
+        kind: bot_task
+        display_name: Set Production Flow
+        node_timeout_ms: 90000
+        assignee:
+          type: bot_binding
+          binding: operations_director
+        instruction: |
+          You are the World Cup operations director. Based on the user request, define the overall production direction for this World Cup match preview media copy.
+
+          Return:
+          1. Match topic, target audience, publishing platforms, target duration, and tone.
+          2. The core business goal, such as follower growth, engagement, pre-match anticipation, or trend capture.
+          3. What each role should add next.
+          4. Expression boundaries, such as unverified injuries, discriminatory language, betting implications, or overconfident predictions.
+        transitions:
+          complete:
+            targets:
+              - frame_content_brief
+
+      frame_content_brief:
+        kind: bot_task
+        display_name: Frame Content Brief
+        node_timeout_ms: 90000
+        assignee:
+          type: bot_binding
+          binding: content_editor
+        instruction: |
+          You are the World Cup content editor. Based on the user request and production direction, create the content brief.
+
+          The brief must include:
+          1. The core match angles that ordinary viewers can understand.
+          2. Editorial line, opening-hook direction, and closing interaction direction.
+          3. Questions the tactics analyst should focus on.
+          4. Facts the match data checker should verify.
+          5. Delivery standards for the short-video director and growth operator.
+
+          Output only the brief, not the final copy.
+        transitions:
+          complete:
+            targets:
+              - design_tactical_insight
+              - verify_match_facts
+
+      design_tactical_insight:
+        kind: bot_task
+        display_name: Design Tactical Insight
+        assignee:
+          type: bot_binding
+          binding: tactics_analyst
+        instruction: |
+          You are the World Cup tactics analyst. Based on the content brief, design tactical insight for the match.
+
+          Return:
+          1. Likely formations, attacking/defensive ideas, and match rhythm for both teams.
+          2. Three key angles ordinary viewers can understand.
+          3. Key players, key matchups, and decisive factors that may shape the match.
+          4. Metaphors, shot prompts, or visual suggestions suitable for short-video voiceover.
+          5. Which judgments are speculative and must not be written as facts.
+        transitions:
+          complete:
+            targets:
+              - create_two_minute_script
+
+      verify_match_facts:
+        kind: bot_task
+        display_name: Verify Match Facts
+        assignee:
+          type: bot_binding
+          binding: fact_researcher
+        instruction: |
+          You are the World Cup match data checker. Based on the content brief, verify facts and data definitions used in the preview copy.
+
+          Return:
+          1. Round, matchup, time, stage, and match background.
+          2. Usable facts such as head-to-head record, recent form, goals for/against, and key players.
+          3. Unconfirmed information that must be avoided or softened.
+          4. Safe wording for score predictions, player status, injuries, suspensions, and rankings.
+          5. Fact material the short-video director and growth operator may quote directly.
+        transitions:
+          complete:
+            targets:
+              - create_two_minute_script
+              - package_distribution_assets
+
+      create_two_minute_script:
+        kind: bot_task
+        display_name: Create Timed Voiceover
+        node_timeout_ms: 180000
+        max_attempts: 3
+        assignee:
+          type: bot_binding
+          binding: script_director
+        instruction: |
+          You are the World Cup short-video director. Combine the content brief, tactical insight, and verified facts into a short-video match preview voiceover.
+
+          Return:
+          1. A complete voiceover script that fits the requested duration, defaulting to about two minutes.
+          2. A 0-5 second opening hook, main body, transitions, and closing interaction.
+          3. Shot, subtitle, and visual prompts for Douyin and Bilibili.
+          4. Careful wording for all speculative content; do not present predictions as facts.
+          5. Title keywords and high-impact lines for growth packaging.
+        transitions:
+          complete:
+            targets:
+              - package_distribution_assets
+
+      package_distribution_assets:
+        kind: bot_task
+        display_name: Package Distribution Assets
+        assignee:
+          type: bot_binding
+          binding: growth_operator
+        instruction: |
+          You are the World Cup growth operator. Based on the verified facts and short-video voiceover, create the publishing package.
+
+          Return:
+          1. Three Douyin titles and three Bilibili titles that are traffic-friendly but not clickbait.
+          2. Cover copy, description, hashtags, and comment prompts.
+          3. Selling points ordered for ordinary viewers.
+          4. Publishing time, redistribution, and comment-section operation suggestions.
+          5. Sensitive expressions the editor should confirm again.
+        transitions:
+          complete:
+            targets:
+              - accept_final_publish_package
+
+      accept_final_publish_package:
+        kind: bot_task
+        display_name: Accept Final Publish Package
+        node_timeout_ms: 180000
+        max_attempts: 3
+        assignee:
+          type: bot_binding
+          binding: content_editor
+        instruction: |
+          You are the World Cup content editor. Combine all upstream outputs, accept the work, and deliver the final World Cup match preview publishing package.
+
+          The final package must include:
+          1. A user-ready short-video voiceover script.
+          2. Tactical angles, factual basis, and wording that needs caution.
+          3. Douyin and Bilibili titles, cover copy, descriptions, hashtags, and comment prompts.
+          4. Recommended publishing cadence and redistribution suggestions.
+          5. Any remaining fact gaps that must be confirmed before publishing.
+
+          Do not expose the internal collaboration process. Output only the final publish package.
+        final_output: true

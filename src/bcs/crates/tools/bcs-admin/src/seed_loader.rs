@@ -297,6 +297,8 @@ mod tests {
                 "write-and-review",
                 "parallel-expert-review",
                 "solution-and-risk-review",
+                "world-cup-preview-media-copy",
+                "micro-merchant-event-orchestration",
                 "single-bot-guided-answer",
             ]
         );
