@@ -16,7 +16,7 @@ import json
 from agentclaw.community.log import get_logger
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from injector import inject
@@ -509,7 +509,6 @@ class GovernanceFeedbackService:
         # 但反馈时不直接 mute(改由管理员 approve_scheduled 审批后进 scheduled)。
         now = datetime.now()
         target_status, review_reason = _RESPONSE_TRANSITION_MAP[response]
-        mute_until: datetime | None = None
 
         # Build self-contained v2 feedback_payload (enrich on server side).
         # Enrichment reads ticket.notification_structured; degrades gracefully,
