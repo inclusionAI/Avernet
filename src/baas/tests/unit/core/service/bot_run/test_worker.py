@@ -372,15 +372,13 @@ def test_trace_context_from_meta_detaches_on_exception():
 
 
 async def test_run_one_executes_with_trace_context(repo, queue):
-    """_run_one should call executor within a trace context span."""
+    """_run_one should restore trace context from meta before executing."""
     run_id = _insert(repo, queue, "bot-1")
     ex = _CompletingExecutor(repo)
     worker = _worker(queue, repo, ex)
 
     mock_tracer = MagicMock()
     mock_tracer.extract_context.return_value = None
-    mock_tracer.start_span.return_value.__enter__ = MagicMock(return_value=None)
-    mock_tracer.start_span.return_value.__exit__ = MagicMock(return_value=False)
     with patch(
         "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
         return_value=mock_tracer,
@@ -394,19 +392,17 @@ async def test_run_one_executes_with_trace_context(repo, queue):
     assert run_id in ex.executed
     assert repo.get_by_run_id(run_id).status == "COMPLETED"
     mock_tracer.extract_context.assert_called_once_with({})
-    mock_tracer.start_span.assert_called_once_with("bot_queue_worker.execute")
+    mock_tracer.start_span.assert_not_called()
 
 
 async def test_run_one_timeout_marks_failed_with_trace(repo, queue):
-    """_run_one timeout path should still run within trace context."""
+    """_run_one timeout path should still restore trace context."""
     _insert(repo, queue, "bot-1")
     ex = _CompletingExecutor(repo)
     worker = _worker(queue, repo, ex)
 
     mock_tracer = MagicMock()
     mock_tracer.extract_context.return_value = None
-    mock_tracer.start_span.return_value.__enter__ = MagicMock(return_value=None)
-    mock_tracer.start_span.return_value.__exit__ = MagicMock(return_value=False)
     with patch(
         "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
         return_value=mock_tracer,
@@ -417,19 +413,18 @@ async def test_run_one_timeout_marks_failed_with_trace(repo, queue):
 
     rec = repo.get_by_run_id(record.run_id)
     assert rec.status == "FAILED"
-    mock_tracer.start_span.assert_called_once_with("bot_queue_worker.execute")
+    mock_tracer.extract_context.assert_called_once_with({})
+    mock_tracer.start_span.assert_not_called()
 
 
 async def test_run_one_executor_exception_with_trace(repo, queue):
-    """_run_one exception path should still run within trace context."""
+    """_run_one exception path should still restore trace context."""
     _insert(repo, queue, "bot-1")
     ex = _RaisingExecutor()
     worker = _worker(queue, repo, ex)
 
     mock_tracer = MagicMock()
     mock_tracer.extract_context.return_value = None
-    mock_tracer.start_span.return_value.__enter__ = MagicMock(return_value=None)
-    mock_tracer.start_span.return_value.__exit__ = MagicMock(return_value=False)
     with patch(
         "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
         return_value=mock_tracer,
@@ -438,7 +433,8 @@ async def test_run_one_executor_exception_with_trace(repo, queue):
         await worker._run_one(record)
 
     assert repo.get_by_run_id(record.run_id).status == "FAILED"
-    mock_tracer.start_span.assert_called_once_with("bot_queue_worker.execute")
+    mock_tracer.extract_context.assert_called_once_with({})
+    mock_tracer.start_span.assert_not_called()
 
 
 async def test_run_one_requeued_path(repo, queue):
@@ -449,8 +445,6 @@ async def test_run_one_requeued_path(repo, queue):
 
     mock_tracer = MagicMock()
     mock_tracer.extract_context.return_value = None
-    mock_tracer.start_span.return_value.__enter__ = MagicMock(return_value=None)
-    mock_tracer.start_span.return_value.__exit__ = MagicMock(return_value=False)
     with patch(
         "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
         return_value=mock_tracer,
@@ -466,7 +460,8 @@ async def test_run_one_requeued_path(repo, queue):
 
     # baas_bot_run should NOT be marked FAILED (requeue is not a failure)
     assert repo.get_by_run_id(record.run_id).status == "PENDING"
-    mock_tracer.start_span.assert_called_once_with("bot_queue_worker.execute")
+    mock_tracer.extract_context.assert_called_once_with({})
+    mock_tracer.start_span.assert_not_called()
 
 
 async def test_run_one_mark_done_raises_warning(repo, queue):
