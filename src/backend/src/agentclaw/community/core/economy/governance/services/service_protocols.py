@@ -538,8 +538,13 @@ class GovernanceWorkflowServiceProtocol(Protocol):
         *,
         offset: int = 0,
         limit: int = 50,
+        delivery_statuses: list[str] | None = None,
     ) -> tuple[list[GovernanceTicket], int]:
-        """评审工单列表(跨 owner, 按治理状态过滤, 分页)。返回领域模型 + 总数。"""
+        """评审工单列表(跨 owner, 按治理状态过滤, 分页)。返回领域模型 + 总数。
+
+        ``delivery_statuses`` 可选按投递状态(pending/sent/failed/cancelled)过滤;
+        None 不过滤,空列表短路返回空。
+        """
         ...
 
     def list_whitelist_observed_tickets(
