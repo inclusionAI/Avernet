@@ -28,8 +28,7 @@ dependencies = [
     "cryptography>=3.0.0",
     "pyyaml>=6.0.0",
     "greenlet>=2.0.0",
-"opentelemetry-instrumentation-openai>=0.62.1",
-    "oss2>=2.19.0",
+"opentelemetry-instrumentation-openai>=0.62.1"
 ]
 description = "secbaas community edition"
 name = "secbaas-community"

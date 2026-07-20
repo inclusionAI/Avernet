@@ -27,10 +27,7 @@ from secbaas.community.plugins.bot_service import (
 )
 from secbaas.community.plugins.cache.stub import StubCachePlugin
 from secbaas.community.plugins.database.stub.sqlite_orm import SqliteOrmPlugin
-from secbaas.community.plugins.file_transfer import (
-    AliyunOssFileTransferBackend,
-    NoopFileTransferBackend,
-)
+from secbaas.community.plugins.file_transfer import NoopFileTransferBackend
 from secbaas.community.plugins.sandbox.arca import StubArcaSandboxPlugin
 from secbaas.community.plugins.sandbox.arca.local_proc import (
     LocalProcessArcaSandboxPlugin,
@@ -51,22 +48,6 @@ from secbaas.community.plugins.sandbox.k8s.real import K8sClientManager
 from secbaas.community.plugins.sandbox.poolab import StubPoolabSandboxPlugin
 from secbaas.community.plugins.sandbox.teclaw import StubTeClawBotPlugin
 from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
-
-
-def _real_file_transfer_backend(config, secret_plugin):
-    """Factory for config-driven OSS file transfer backend.
-
-    Reads endpoint, bucket_name, staging_root_path, and secret_name
-    from the ``file_transfer_oss`` configuration section.  Falls back
-    to module-level defaults when config values are empty.
-    """
-    from .._configs import FileTransferOssConfigSchema
-
-    oss_config = FileTransferOssConfigSchema(**config)
-    return AliyunOssFileTransferBackend(
-        secret_store=secret_plugin,
-        config=oss_config,
-    )
 
 
 class PluginContainer(containers.DeclarativeContainer):
@@ -147,11 +128,6 @@ class PluginContainer(containers.DeclarativeContainer):
 
     file_transfer_backend = providers.Selector(
         config.plugins.file_transfer,
-        oss=providers.Singleton(
-            _real_file_transfer_backend,
-            config=config.file_transfer_oss,
-            secret_plugin=secret_plugin,
-        ),
         noop=providers.Singleton(NoopFileTransferBackend),
     )
 
