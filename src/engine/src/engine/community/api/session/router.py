@@ -5,6 +5,7 @@ Uses EngineManager for default engine, falls back to factory for explicit engine
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import Dict, Optional
@@ -264,8 +265,17 @@ async def update_session(
     user_id: Optional[str] = None,
     agent_id: Optional[str] = None,
     permission_mode: Optional[str] = None,
+    ext_info: Optional[str] = None,
     engine: Optional[str] = None,
 ) -> ApiResponse:
+    # ext_info 为可选 JSON 字符串，引擎实现自行解析其中命名空间化的扩展
+    # 字段（OSS 层不感知具体内部词汇）。
+    parsed_ext_info = None
+    if ext_info:
+        try:
+            parsed_ext_info = json.loads(ext_info)
+        except (json.JSONDecodeError, TypeError):
+            raise HTTPException(status_code=400, detail="ext_info must be valid JSON")
     log.info(f"[update_session] 收到请求: session_id={session_id}, title={title}, model={model}, runtime={runtime}, permission_mode={permission_mode}, engine={engine}")
     warning = check_capability(Capability.SESSION_UPDATE)
     session_id = decode_session_key(session_id)
@@ -281,6 +291,7 @@ async def update_session(
             user_id=user_id,
             agent_id=agent_id,
             permission_mode=permission_mode,
+            ext_info=parsed_ext_info,
         ))
         log.info(f"[update_session] 更新成功: session_id={session.id}")
         return ApiResponse(success=True, data=_session_to_dict(session), warning=warning)
