@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -139,10 +139,10 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             subdir=staging_subdir,
         )
 
-        expires_at = (datetime.utcnow() + timedelta(seconds=expire_seconds)).isoformat()
+        expires_at = (datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=expire_seconds)).isoformat()
 
         # Validate file_size before routing (applies to both SINGLE and MULTIPART)
-        if file_size <= 0:
+        if file_size < 0:
             raise ValueError(f"file_size must be non-negative, got {file_size}")
 
         # D-01/D-02: SINGLE/MULTIPART routing
@@ -350,7 +350,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             device_path,
         )
 
-        expires_at = (datetime.utcnow() + timedelta(seconds=expire_seconds)).isoformat()
+        expires_at = (datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=expire_seconds)).isoformat()
         return GetDownloadUrlResponse(
             transfer_id=transfer_id,
             expires_at=expires_at,
@@ -711,7 +711,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             expire_seconds,
         )
 
-        expires_at = (datetime.utcnow() + timedelta(seconds=expire_seconds)).isoformat()
+        expires_at = (datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=expire_seconds)).isoformat()
         return ShareLinkResponse(
             share_url=share_url,
             transfer_id=transfer_id,
