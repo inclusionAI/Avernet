@@ -1,6 +1,6 @@
 """HTTP routes for AICoding session workspace inspection.
 
-Nine read-only endpoints, all served directly by the engine running inside
+Ten read-only endpoints, all served directly by the engine running inside
 the aicoding container:
 
 * ``GET /api/aicoding/sessions``                     — sessions list + run_status enrich
@@ -11,12 +11,13 @@ the aicoding container:
 * ``GET /api/aicoding/sessions/runs``                — devflow runs for a session
 * ``GET /api/aicoding/sessions/phases``              — phase detail for a run
 * ``GET /api/aicoding/sessions/runs/pull-requests``  — PR outputs for a session
+* ``GET /api/aicoding/sessions/runs/issues``         — issue outputs for a session
 * ``GET /api/aicoding/sessions/worktree-status``     — .worktree.json existence/status
 
 The workspace-inspection endpoints (file-tree / files/preview / git-diff /
-files/diff / worktree-status / runs / phases / runs/pull-requests) accept an
-optional ``cwd`` query parameter: when provided it is validated
-(``WorkspaceService.validate_cwd`` / ``_validate_cwd_prefix``) and used directly
+files/diff / worktree-status / runs / phases / runs/pull-requests /
+runs/issues) accept an optional ``cwd`` query parameter: when provided it is
+validated (``WorkspaceService.validate_cwd`` / ``_validate_cwd_prefix``) and used directly
 as the session workspace root; when omitted, the legacy ``base/{session_id}``
 derivation serves as a fallback (full backwards compatibility). ``session_id``
 stays required for response correlation and fallback.
@@ -44,9 +45,11 @@ from engine.community.api.aicoding_sessions.schemas import (
     FileTreeResponse,
     GitDiffResponse,
     GitProjectDiffSchema,
+    IssueOutputInfo,
     PullRequestOutputInfo,
     RunPhaseStatusData,
     RunPhaseStatusResponse,
+    SessionIssuesResponse,
     SessionPullRequestsResponse,
     SessionRunsResponse,
     WorktreeStatusResponse,
@@ -399,6 +402,36 @@ async def list_session_pull_requests(
         success=True,
         session_id=session_id,
         pull_requests=[PullRequestOutputInfo(**o) for o in items],
+    )
+
+
+@router.get("/runs/issues", response_model=SessionIssuesResponse)
+async def list_session_issues(
+    session_id: str = Query(..., description="AICoding session ID"),
+    cwd: str | None = Query(
+        None,
+        description="可选：前端直传工作目录绝对路径，"
+        "缺省回退 base/{session_id}",
+    ),
+) -> SessionIssuesResponse:
+    """返回 session 工作空间下所有 run 产出的 issue outputs。
+
+    执行 ``aix run output list --kind issue --json --filter <workspace>``，按
+    ``at`` (unix ms) 倒序排列。不做 pull-request / issue 融合，单独返回
+    ``issues`` 列表。
+    """
+    check_capability(Capability.BASH_EXEC)
+    service = _runstatus_service()
+    try:
+        items = await service.get_session_issues(session_id, cwd)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return SessionIssuesResponse(
+        success=True,
+        session_id=session_id,
+        issues=[IssueOutputInfo(**o) for o in items],
     )
 
 
