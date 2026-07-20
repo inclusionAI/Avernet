@@ -132,6 +132,9 @@ async def list_sessions(
             data=[_session_to_dict(s) for s in sessions],
             warning=warning,
         )
+    except (ConnectionError, TimeoutError) as e:
+        log.error(f"[list_sessions] gateway unavailable: {e}", exc_info=True)
+        raise HTTPException(status_code=503, detail="Session gateway unavailable") from e
     except Exception as e:
         log.error(f"[list_sessions] 执行异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

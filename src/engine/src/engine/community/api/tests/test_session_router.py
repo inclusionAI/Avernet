@@ -8,7 +8,6 @@ directly so no real engine runtime is needed.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -107,6 +106,17 @@ class TestListSessions:
         resp = client.get("/api/sessions")
         assert resp.status_code == 500
         assert "db error" in resp.json()["detail"]
+
+    @pytest.mark.parametrize(
+        "error", [ConnectionError("disconnected"), TimeoutError("timed out")]
+    )
+    def test_transport_error_returns_503(self, client, mock_session_api, error):
+        mock_session_api.list.side_effect = error
+
+        resp = client.get("/api/sessions")
+
+        assert resp.status_code == 503
+        assert resp.json()["detail"] == "Session gateway unavailable"
 
 
 # ── POST /api/sessions ────────────────────────────────────────────────────────
