@@ -199,6 +199,11 @@ class TestGetSession:
         assert resp.status_code == 200
         assert resp.json()["data"]["id"] == "sess-1"
 
+        request = mock_session_api.list.call_args.args[0]
+        assert request.session_key == "sess-1"
+        assert request.limit == 1
+        assert request.offset == 0
+
     def test_not_found_returns_404(self, client, mock_session_api):
         mock_session_api.list.return_value = []
         resp = client.get("/api/sessions/missing")

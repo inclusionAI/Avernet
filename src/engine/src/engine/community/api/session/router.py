@@ -164,7 +164,9 @@ async def create_session(body: CreateSessionBody) -> ApiResponse:
 async def get_session(session_id: str, engine: Optional[str] = None) -> ApiResponse:
     log.info(f"[get_session] 收到请求: session_id={session_id}, engine={engine}")
     # Uses the underlying list() plugin method to find one session; SESSION_LIST
-    # is the matching capability.
+    # is the matching capability. The plugin filters a session_key before
+    # pagination, so an inactive conversation cannot be mistaken for missing
+    # merely because it falls outside the first page.
     warning = check_capability(Capability.SESSION_LIST)
     decoded_id = decode_session_key(session_id)
     if decoded_id != session_id:
@@ -172,8 +174,12 @@ async def get_session(session_id: str, engine: Optional[str] = None) -> ApiRespo
     session_id = decoded_id
     try:
         api = _get_session_api(engine)
-        sessions = await api.list(SessionListRequest(limit=100, offset=0))
-        log.info(f"[get_session] 列表查询返回 {len(sessions)} 条, 正在匹配 session_id={session_id}")
+        sessions = await api.list(
+            SessionListRequest(session_key=session_id, limit=1, offset=0)
+        )
+        log.info(
+            f"[get_session] 精确查询返回 {len(sessions)} 条, session_id={session_id}"
+        )
         session = next(
             (
                 s
