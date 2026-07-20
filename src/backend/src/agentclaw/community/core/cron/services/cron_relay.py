@@ -339,12 +339,10 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
     ) -> dict:
         """查找 Bot 的 autoInitiate 类型定时任务并触发执行。
 
-        免鉴权场景下由调用方提供 user_id/nick_name，无需登录态。
-
         Args:
             bot_id: Bot ID
-            user_id: 用户ID（调用方传入）
-            nick_name: 用户花名（调用方传入，死参，缺省用 user_id）
+            user_id: 用户ID
+            nick_name: 用户花名（死参，缺省用 user_id）
             force: 是否强制执行，默认 True
 
         Returns:
@@ -418,16 +416,16 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         append_message: str = "",
         model: str | None = None,
     ) -> dict:
-        """为单个 DIMA 需求直接发起会话（免鉴权）。
+        """为单个需求直接发起会话。
 
         workflow 从 bot 的 template_config.ext.devflow_workflow 中读取，
         与 cron_auto_setup 保持一致，调用方无需传入。
 
         Args:
             bot_id: Bot ID
-            user_id: 用户 ID（调用方传入）
+            user_id: 用户 ID
             nick_name: 用户花名
-            dima_url: DIMA 需求 URL
+            dima_url: 需求 URL
             append_message: 补充说明
             model: 可选模型覆盖
 
