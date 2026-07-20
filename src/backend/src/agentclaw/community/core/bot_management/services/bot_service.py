@@ -1594,6 +1594,11 @@ class BotService:
         if not architect:
             raise BotPermissionError(f"架构师 Bot 不存在或非本人所有: {architect_bot_id}")
         arch_ext = architect.get("ext") or {}
+        if isinstance(arch_ext, str):
+            try:
+                arch_ext = json.loads(arch_ext)
+            except (ValueError, TypeError):
+                arch_ext = {}
         if not (isinstance(arch_ext, dict) and arch_ext.get("is_domain_bot") is True):
             raise BotServiceError(
                 f"目标 Bot 不是架构师 Bot (is_domain_bot != true): {architect_bot_id}"

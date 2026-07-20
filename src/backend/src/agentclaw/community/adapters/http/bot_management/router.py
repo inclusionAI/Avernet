@@ -2138,7 +2138,7 @@ class RebindArchitectRequest(BaseModel):
     @field_validator("coding_bot_ids")
     @classmethod
     def _coding_bot_ids_non_empty(cls, value: List[str]) -> List[str]:
-        cleaned = [x for x in value if isinstance(x, str) and x.strip()]
+        cleaned = [x.strip() for x in value if isinstance(x, str) and x.strip()]
         if not cleaned:
             raise ValueError("coding_bot_ids 不能为空")
         return cleaned
@@ -2170,7 +2170,8 @@ async def rebind_architect_bot(
                 error_code=400,
                 data=None,
             )
-        result = _bot_service.rebind_architect_bot_batch(
+        result = await asyncio.to_thread(
+            _bot_service.rebind_architect_bot_batch,
             coding_bot_ids=payload.coding_bot_ids,
             architect_bot_id=architect_bot_id,
             operator_id=operator_id,

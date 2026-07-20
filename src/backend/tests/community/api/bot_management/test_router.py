@@ -2024,6 +2024,20 @@ class TestRebindArchitectBot:
         assert resp.status_code == 422
         svc.rebind_architect_bot_batch.assert_not_called()
 
+    def test_coding_bot_ids_are_stripped_of_whitespace(self, client):
+        tc, svc, _ = client
+        svc.rebind_architect_bot_batch.return_value = {
+            "architect_bot_id": "arch1", "results": [], "total": 0,
+            "succeeded": 0, "failed": 0,
+        }
+        resp = tc.put(
+            "/api/bots/arch1/architect-rebind",
+            json={"coding_bot_ids": ["  c1  ", "c2", "   "]},
+        )
+        assert resp.status_code == 200
+        kwargs = svc.rebind_architect_bot_batch.call_args.kwargs
+        assert kwargs["coding_bot_ids"] == ["c1", "c2"]
+
     def test_bot_not_found(self, client):
         tc, svc, _ = client
         svc.rebind_architect_bot_batch.side_effect = BotNotFoundError("nope")

@@ -93,6 +93,23 @@ class TestGetArchitectDomainOrRaise:
         svc._repository.get_by_id_and_owner.return_value = arch
         assert svc._get_architect_domain_or_raise(ARCH_ID, OPERATOR) is arch
 
+    def test_ext_stored_as_json_string_is_deserialized_and_succeeds(self):
+        svc = _make_service()
+        arch = _architect_bot()
+        arch["ext"] = '{"is_domain_bot": true}'
+        svc._repository.get_by_id_and_owner.return_value = arch
+        # ext stored as JSON string -> must be deserialized, then pass domain check
+        assert svc._get_architect_domain_or_raise(ARCH_ID, OPERATOR) is arch
+
+    def test_ext_invalid_json_string_is_coerced_and_raises(self):
+        svc = _make_service()
+        arch = _architect_bot()
+        arch["ext"] = "not-json"
+        svc._repository.get_by_id_and_owner.return_value = arch
+        # broken JSON string -> coerced to {} -> not a domain bot -> service error
+        with pytest.raises(BotServiceError):
+            svc._get_architect_domain_or_raise(ARCH_ID, OPERATOR)
+
 
 # ===========================================================================
 # _rebind_coding_bot_to_architect
