@@ -55,16 +55,26 @@ def _trace_context_from_meta(meta: dict[str, Any] | None) -> Generator[None]:
     """从队列工作项 meta 中恢复 trace context。
 
     1. extract_context 从 meta["traceparent"] 反序列化 trace context
+<<<<<<< Updated upstream
     2. attach_context 激活（若无有效 trace 则跳过）
     退出时 detach context 恢复之前的 trace scope。
 
     注：此处不再调用 tracer.start_span 创建 child span。SOFA tracer 要求
     operation_name 为已注册的 span code（http_server/http_client），业务名
     会抛 SpanCodeNotFoundException。child span 能力待后续迭代在插件层适配后恢复。
+=======
+    2. start_span 创建 child span，通过 child_of 挂到提取出的 parent context
+    退出时自动关闭 span。
+
+    不使用 attach_context/detach_context：SOFA 的 attach_context 期望的是
+    scope 对象（带 .span），而 extract_context 返回的是 SofaSpanContext，
+    类型不匹配会导致下游取 scope.span 时 AttributeError。
+>>>>>>> Stashed changes
     """
     tracer = get_tracer_plugin()
     carrier = (meta or {}).get("traceparent") or {}
     trace_ctx = tracer.extract_context(carrier)
+<<<<<<< Updated upstream
     trace_token = (
         tracer.attach_context(trace_ctx) if trace_ctx is not None else None
     )
@@ -73,6 +83,10 @@ def _trace_context_from_meta(meta: dict[str, Any] | None) -> Generator[None]:
     finally:
         if trace_token is not None:
             tracer.detach_context(trace_token)
+=======
+    with tracer.start_span("bot_queue_worker.execute", child_of=trace_ctx):
+        yield
+>>>>>>> Stashed changes
 
 
 @dataclass

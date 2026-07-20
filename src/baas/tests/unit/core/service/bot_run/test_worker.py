@@ -320,9 +320,11 @@ from secbaas.community.core.service.bot_run._worker import (  # noqa: E402
 
 
 def test_trace_context_from_meta_none_meta():
-    """meta=None should not raise — tracer.extract returns None, no attach."""
+    """meta=None → extract called with {}, start_span(child_of=None)."""
     mock_tracer = MagicMock()
     mock_tracer.extract_context.return_value = None
+    mock_tracer.start_span.return_value.__enter__ = MagicMock(return_value=None)
+    mock_tracer.start_span.return_value.__exit__ = MagicMock(return_value=False)
     with patch(
         "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
         return_value=mock_tracer,
@@ -330,17 +332,18 @@ def test_trace_context_from_meta_none_meta():
         with _trace_context_from_meta(None):
             pass
     mock_tracer.extract_context.assert_called_once_with({})
+    mock_tracer.start_span.assert_called_once_with(
+        "bot_queue_worker.execute", child_of=None
+    )
     mock_tracer.attach_context.assert_not_called()
     mock_tracer.detach_context.assert_not_called()
 
 
 def test_trace_context_from_meta_with_carrier():
-    """Valid carrier → extract returns ctx → attach/detach called."""
+    """Valid carrier → extract returns ctx → start_span(child_of=ctx)."""
     sentinel_ctx = object()
-    sentinel_token = object()
     mock_tracer = MagicMock()
     mock_tracer.extract_context.return_value = sentinel_ctx
-    mock_tracer.attach_context.return_value = sentinel_token
     mock_tracer.start_span.return_value.__enter__ = MagicMock(return_value=None)
     mock_tracer.start_span.return_value.__exit__ = MagicMock(return_value=False)
     with patch(
@@ -348,17 +351,20 @@ def test_trace_context_from_meta_with_carrier():
         return_value=mock_tracer,
     ):
         with _trace_context_from_meta({"traceparent": {"traceparent": "00-x-y-03"}}):
-            mock_tracer.attach_context.assert_called_once_with(sentinel_ctx)
-        mock_tracer.detach_context.assert_called_once_with(sentinel_token)
+            pass
+    mock_tracer.extract_context.assert_called_once_with({"traceparent": "00-x-y-03"})
+    mock_tracer.start_span.assert_called_once_with(
+        "bot_queue_worker.execute", child_of=sentinel_ctx
+    )
+    mock_tracer.attach_context.assert_not_called()
+    mock_tracer.detach_context.assert_not_called()
 
 
 def test_trace_context_from_meta_detaches_on_exception():
-    """detach_context must run even if yield block raises."""
+    """span exit must run even if yield block raises."""
     sentinel_ctx = object()
-    sentinel_token = object()
     mock_tracer = MagicMock()
     mock_tracer.extract_context.return_value = sentinel_ctx
-    mock_tracer.attach_context.return_value = sentinel_token
     mock_tracer.start_span.return_value.__enter__ = MagicMock(return_value=None)
     mock_tracer.start_span.return_value.__exit__ = MagicMock(return_value=False)
     with patch(
@@ -366,9 +372,13 @@ def test_trace_context_from_meta_detaches_on_exception():
         return_value=mock_tracer,
     ):
         with pytest.raises(RuntimeError, match="boom"):
-            with _trace_context_from_meta({"traceparent": {"traceparent": "00-x-y-03"}}):
+            with _trace_context_from_meta(
+                {"traceparent": {"traceparent": "00-x-y-03"}}
+            ):
                 raise RuntimeError("boom")
-    mock_tracer.detach_context.assert_called_once_with(sentinel_token)
+    mock_tracer.start_span.assert_called_once_with(
+        "bot_queue_worker.execute", child_of=sentinel_ctx
+    )
 
 
 async def test_run_one_executes_with_trace_context(repo, queue):
@@ -384,15 +394,19 @@ async def test_run_one_executes_with_trace_context(repo, queue):
         return_value=mock_tracer,
     ):
         # claim first so mark_done works
-        record = queue.claim_pending_by_bot(
-            "bot-1", "worker-1", candidates=5
-        )
+        record = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
         await worker._run_one(record)
 
     assert run_id in ex.executed
     assert repo.get_by_run_id(run_id).status == "COMPLETED"
     mock_tracer.extract_context.assert_called_once_with({})
+<<<<<<< Updated upstream
     mock_tracer.start_span.assert_not_called()
+=======
+    mock_tracer.start_span.assert_called_once_with(
+        "bot_queue_worker.execute", child_of=None
+    )
+>>>>>>> Stashed changes
 
 
 async def test_run_one_timeout_marks_failed_with_trace(repo, queue):
@@ -413,8 +427,14 @@ async def test_run_one_timeout_marks_failed_with_trace(repo, queue):
 
     rec = repo.get_by_run_id(record.run_id)
     assert rec.status == "FAILED"
+<<<<<<< Updated upstream
     mock_tracer.extract_context.assert_called_once_with({})
     mock_tracer.start_span.assert_not_called()
+=======
+    mock_tracer.start_span.assert_called_once_with(
+        "bot_queue_worker.execute", child_of=None
+    )
+>>>>>>> Stashed changes
 
 
 async def test_run_one_executor_exception_with_trace(repo, queue):
@@ -433,8 +453,14 @@ async def test_run_one_executor_exception_with_trace(repo, queue):
         await worker._run_one(record)
 
     assert repo.get_by_run_id(record.run_id).status == "FAILED"
+<<<<<<< Updated upstream
     mock_tracer.extract_context.assert_called_once_with({})
     mock_tracer.start_span.assert_not_called()
+=======
+    mock_tracer.start_span.assert_called_once_with(
+        "bot_queue_worker.execute", child_of=None
+    )
+>>>>>>> Stashed changes
 
 
 async def test_run_one_requeued_path(repo, queue):
@@ -454,14 +480,21 @@ async def test_run_one_requeued_path(repo, queue):
         from secbaas.community.core.service.bot_run._bot_concurrency import (
             ConcurrencyLimiter,
         )
+
         limiter = ConcurrencyLimiter(capacity=10)
         worker._buckets["bot-1"] = (limiter, (600, 1))
         await worker._run_one(record)
 
     # baas_bot_run should NOT be marked FAILED (requeue is not a failure)
     assert repo.get_by_run_id(record.run_id).status == "PENDING"
+<<<<<<< Updated upstream
     mock_tracer.extract_context.assert_called_once_with({})
     mock_tracer.start_span.assert_not_called()
+=======
+    mock_tracer.start_span.assert_called_once_with(
+        "bot_queue_worker.execute", child_of=None
+    )
+>>>>>>> Stashed changes
 
 
 async def test_run_one_mark_done_raises_warning(repo, queue):
@@ -505,6 +538,7 @@ async def test_run_one_releases_bucket_slot(repo, queue):
         from secbaas.community.core.service.bot_run._bot_concurrency import (
             ConcurrencyLimiter,
         )
+
         limiter = ConcurrencyLimiter(capacity=10)
         limiter.try_acquire()
         worker._buckets["bot-1"] = (limiter, (600, 1))
