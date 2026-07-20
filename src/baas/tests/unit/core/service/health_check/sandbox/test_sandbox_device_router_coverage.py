@@ -161,7 +161,7 @@ class TestAcBindingHandler:
         result = await handler.warn_device(table_id=1)
         assert result.action == "STOPPED"
         assert result.refresh_fail_count == 10
-        handler._binding_repo.update_status.assert_called_once()
+        handler._binding_repo.update_status.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_warn_device_probe_success_with_ttl(self, handler):
