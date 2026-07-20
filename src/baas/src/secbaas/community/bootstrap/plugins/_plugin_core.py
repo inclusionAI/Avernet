@@ -128,7 +128,7 @@ class PluginContainer(containers.DeclarativeContainer):
 
     file_transfer_backend = providers.Selector(
         config.plugins.file_transfer,
-        noop=providers.Singleton(NoopFileTransferBackend),
+        stub=providers.Singleton(NoopFileTransferBackend),
     )
 
 
