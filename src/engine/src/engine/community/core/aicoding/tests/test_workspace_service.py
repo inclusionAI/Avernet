@@ -9,7 +9,7 @@
      ``os.path.isdir`` 校验；不存在时抛 ``FileNotFoundError``，detail 含完整路径。
 
 2. 4 个实例方法 + ``_ensure_within_workspace`` 保护
-   - ``list_file_tree`` —— 调用 ``FileService.list_dir`` + ``build_file_tree``
+   - ``list_file_tree`` —— AICoding workspace 本地扫描、基础设施目录剪枝 + 建树
    - ``preview_file`` —— 校验 path/大小/路径穿越，读出 utf-8 文本
    - ``list_git_diff`` —— ``find .git`` + ``git status --porcelain`` 全流程
    - ``get_file_diff`` —— ``git diff HEAD`` 主路径 + untracked fallback
@@ -278,63 +278,99 @@ SESSION_ID = "sess-1"
 # ── list_file_tree ─────────────────────────────────────────────────────────
 
 
-async def test_list_file_tree_returns_filtered_sorted_tree(workspace_dir: Path) -> None:
-    """调用 FileService.list_dir(recursive=True, exclude_dirs=...) → build_file_tree → 排序。
+async def test_list_file_tree_prunes_mounts_and_returns_sorted_tree(
+    workspace_dir: Path,
+    monkeypatch,
+) -> None:
+    """Root mounts are never entered; project-local ``skills`` remains visible."""
+    project = workspace_dir / "project-fe"
+    (project / "src").mkdir(parents=True)
+    (project / "skills").mkdir()
+    (project / ".git").mkdir()
+    (project / "node_modules").mkdir()
+    (project / "README.md").write_text("readme")
+    (project / "src" / "index.ts").write_text("index")
+    (project / "skills" / "SKILL.md").write_text("skill")
+    (project / ".git" / "config").write_text("git")
+    (project / "node_modules" / "package.js").write_text("module")
 
-    过滤由 list_dir 的 exclude_dirs 参数完成（mock 模拟已过滤后的结果）；
-    目录优先 + 字母序排列。
-    """
-    file_plugin = FakeFilePlugin(
-        list_result=ListDirResult(
-            dir_path=str(workspace_dir),
-            recursive=True,
-            files=[
-                FileEntry(
-                    name="project-fe",
-                    path=str(workspace_dir / "project-fe"),
-                    relative_path="project-fe",
-                    is_dir=True,
-                    size=0,
-                ),
-                FileEntry(
-                    name="README.md",
-                    path=str(workspace_dir / "project-fe/README.md"),
-                    relative_path="project-fe/README.md",
-                    is_dir=False,
-                    size=42,
-                ),
-                FileEntry(
-                    name="src",
-                    path=str(workspace_dir / "project-fe/src"),
-                    relative_path="project-fe/src",
-                    is_dir=True,
-                    size=0,
-                ),
-                FileEntry(
-                    name="index.ts",
-                    path=str(workspace_dir / "project-fe/src/index.ts"),
-                    relative_path="project-fe/src/index.ts",
-                    is_dir=False,
-                    size=10,
-                ),
-            ],
-        )
-    )
+    root_skills = workspace_dir / "skills"
+    root_repos = workspace_dir / ".repos"
+    (root_skills / "skills-repo").mkdir(parents=True)
+    (root_skills / "skills-repo" / "remote.md").write_text("remote")
+    root_repos.mkdir()
+    (root_repos / "internal.git").write_text("internal")
+
+    # Prove pruning happens before recursion rather than filtering the result
+    # after an expensive OSS walk.
+    real_scandir = os.scandir
+
+    def guarded_scandir(path):  # noqa: ANN001
+        scanned = os.path.normpath(os.fspath(path))
+        assert scanned not in {
+            os.path.normpath(str(root_skills)),
+            os.path.normpath(str(root_repos)),
+            os.path.normpath(str(project / ".git")),
+            os.path.normpath(str(project / "node_modules")),
+        }
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", guarded_scandir)
+    file_plugin = FakeFilePlugin()
     service = _make_service(file_plugin=file_plugin)
+
     tree = await service.list_file_tree(SESSION_ID)
 
-    # 顶层只剩 project-fe
-    assert len(tree) == 1
-    project = tree[0]
-    assert project.name == "project-fe"
-    assert project.is_dir is True
-    # 目录优先 → src 在前，README.md 在后
-    assert [c.name for c in project.children] == ["src", "README.md"]
-    # FileService.list_dir 必须以 workspace 绝对路径 + recursive=True + exclude_dirs 调用
-    assert file_plugin.calls[0] == (
-        "list_dir",
-        {"dir_path": str(workspace_dir), "recursive": True, "exclude_dirs": {".git", "node_modules"}},
-    )
+    assert [node.name for node in tree] == ["project-fe"]
+    project_node = tree[0]
+    assert project_node.children is not None
+    assert [node.name for node in project_node.children] == [
+        "skills",
+        "src",
+        "README.md",
+    ]
+    assert project_node.children[0].children is not None
+    assert [node.name for node in project_node.children[0].children] == [
+        "SKILL.md"
+    ]
+    assert file_plugin.calls == []
+
+
+async def test_list_file_tree_tolerates_stat_race(
+    workspace_dir: Path,
+    monkeypatch,
+) -> None:
+    """A file disappearing after readdir keeps the node and does not fail."""
+    target = workspace_dir / "volatile.txt"
+    target.write_text("soon gone")
+    real_stat = os.stat
+
+    def flaky_stat(path, *args, **kwargs):  # noqa: ANN001
+        if os.path.normpath(os.fspath(path)) == os.path.normpath(str(target)):
+            raise OSError("object disappeared")
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", flaky_stat)
+    tree = await _make_service().list_file_tree(SESSION_ID)
+
+    volatile = next(node for node in tree if node.name == "volatile.txt")
+    assert volatile.is_dir is False
+    assert volatile.size is None
+
+
+@pytest.mark.parametrize(
+    ("session_id", "cwd"),
+    [(None, None), ("", None), ("  ", "\t")],
+)
+async def test_list_file_tree_requires_session_id_or_cwd(
+    session_id: str | None,
+    cwd: str | None,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="session_id and cwd cannot both be empty",
+    ):
+        await _make_service().list_file_tree(session_id, cwd)
 
 
 async def test_list_file_tree_raises_when_workspace_missing(
@@ -924,21 +960,21 @@ def test_ensure_workspace_exists_cwd_none_falls_back(
 # ── 业务方法 cwd 直传透传 ─────────────────────────────────────────────────
 
 
-async def test_list_file_tree_forwards_cwd_as_workspace_root(
+async def test_list_file_tree_uses_cwd_as_workspace_root(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """cwd 直传时以 cwd 为 workspace 根列文件树（跳过 base/{sid} 拼接）。"""
+    """cwd-only requests scan cwd directly instead of deriving base/{sid}."""
     custom = tmp_path / "custom-cwd"
     custom.mkdir()
+    (custom / "cwd-only.txt").write_text("ok")
     monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
-    file_plugin = FakeFilePlugin(
-        list_result=ListDirResult(
-            dir_path=str(custom), recursive=True, files=[],
-        )
-    )
+    file_plugin = FakeFilePlugin()
     service = _make_service(file_plugin=file_plugin)
-    await service.list_file_tree("sid", cwd=str(custom))
-    assert file_plugin.calls[0][1]["dir_path"] == str(custom)
+
+    tree = await service.list_file_tree("   ", cwd=str(custom))
+
+    assert [node.name for node in tree] == ["cwd-only.txt"]
+    assert file_plugin.calls == []
 
 
 async def test_preview_file_forwards_cwd_as_workspace_root(
