@@ -1183,10 +1183,20 @@ impl SessionRepoPort for MySqlSessionStore {
                 "participant {bot_uuid} not in session {session_id}"
             )));
         }
+        // First-collect-writes-time, repeat-collect-keeps-it (idempotent), expressed
+        // via the NULL-ness of collected_at itself: COALESCE writes `now` only when
+        // collected_at is NULL (never collected, or cleared by a prior uncollect) and
+        // preserves the existing value otherwise. This is dialect-portable: do NOT
+        // rewrite as `CASE WHEN collected = 0 THEN now ...` — MySQL evaluates a single
+        // UPDATE's SET left-to-right (so `collected` is already 1 by the time the CASE
+        // reads it) while SQLite evaluates all SET RHS against the pre-update row, so
+        // the CASE form silently never sets collected_at on MySQL while working on
+        // SQLite. Relying on collected_at's own NULL-ness avoids any cross-column
+        // old-value dependency.
         let update_sql = format!(
             "UPDATE bcs_session_participants \
              SET collected = 1, \
-                 collected_at = CASE WHEN collected = 0 THEN {} ELSE collected_at END \
+                 collected_at = COALESCE(collected_at, {}) \
              WHERE env = ? AND session_id = ? AND bot_uuid = ?",
             self.flavor.now()
         );
