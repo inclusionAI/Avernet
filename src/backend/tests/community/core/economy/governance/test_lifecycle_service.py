@@ -184,6 +184,80 @@ class TestOpenTicket:
 
 
 # ---------------------------------------------------------------------------
+# open_observed_ticket (offline-batch entry — 白名单观察单新建)
+# ---------------------------------------------------------------------------
+
+
+class TestOpenObservedTicket:
+    """建观察单瘦路径:OBSERVED 状态、assignee=None、不建 notify_log。
+
+    "白名单不发通知"不变式的核心落点 — 本方法是观察单的唯一来源(三路之一:
+    off-batch 命中无活跃单新建),若它建了 notify 行,整条链路上的不发通知
+    语义就破了。钉死零 notify。
+    """
+
+    def test_observed_row_persisted_with_observed_status(self) -> None:
+        svc, db, _ = _build_svc()
+        ticket = _make_ticket_model(ticket_id="T-obs-new")
+        returned_id = svc.open_observed_ticket(ticket=ticket)
+
+        assert returned_id == "T-obs-new"
+        persisted = svc._task_repo.find_by_ticket_id("T-obs-new")  # noqa: SLF001
+        assert persisted is not None
+        assert persisted.governance_status == GovernanceStatus.OBSERVED
+        assert persisted.assignee is None  # 观察不占治理人力
+        assert persisted.close_reason is None  # 非关单转态,不设 close_reason
+
+    def test_no_notify_log_row_created(self) -> None:
+        """关键不变式:建观察单不创建任何 notify_log 行(不发通知)。"""
+        svc, db, engine = _build_svc()
+        ticket = _make_ticket_model(ticket_id="T-obs-nonotify")
+        svc.open_observed_ticket(ticket=ticket)
+
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            count = s.query(GovernanceNotificationOrm).filter_by(
+                ticket_id="T-obs-nonotify",
+            ).count()
+        assert count == 0  # 零 notify — 白名单不发通知
+
+    def test_delivery_status_not_written(self) -> None:
+        """观察单不调 update_delivery_status:delivery_status 列保持默认 'none'
+        (未被 first_send 写成 pending)。领域模型读时归一 none→pending(读侧),但
+        列本身没被写 — 用 ORM 直查列值验证。"""
+        svc, db, engine = _build_svc()
+        ticket = _make_ticket_model(ticket_id="T-obs-nodelivery")
+        svc.open_observed_ticket(ticket=ticket)
+
+        # ORM 直查列 raw 值(未经 from_orm 归一化):列默认 'none',没被写
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            row = s.query(GovernanceTicketOrm).filter_by(
+                ticket_id="T-obs-nodelivery",
+            ).one()
+            assert row.delivery_status == "none"  # 列默认,未被 first_send 写成 pending
+        # 领域模型读时把 none 归一为 pending(读侧归一,非写入)
+        persisted = svc._task_repo.find_by_ticket_id("T-obs-nodelivery")  # noqa: SLF001
+        assert persisted is not None
+        assert persisted.delivery_status == "pending"
+
+    def test_open_observed_ticket_uses_enter_observed(self) -> None:
+        """open_observed_ticket 复用 enter_observed(单一入口):建单后字段与
+        enter_observed 状态机动作完全一致 — status=OBSERVED + assignee=None +
+        close_reason=None(建单非关单)+ closed_at=None(非关闭)。"""
+        svc, db, _ = _build_svc()
+        ticket = _make_ticket_model(ticket_id="T-obs-enter")
+        svc.open_observed_ticket(ticket=ticket)
+
+        persisted = svc._task_repo.find_by_ticket_id("T-obs-enter")  # noqa: SLF001
+        assert persisted is not None
+        assert persisted.governance_status == GovernanceStatus.OBSERVED
+        assert persisted.assignee is None      # enter_observed 释放
+        assert persisted.close_reason is None   # 建单非关单,close_reason 不设
+        assert persisted.closed_at is None      # OBSERVED 非关闭,不设 closed_at
+
+
+# ---------------------------------------------------------------------------
 # observe_for_whitelist (加白→转 OBSERVED 单条语义,offline-batch 路1 entry)
 # ---------------------------------------------------------------------------
 
@@ -228,7 +302,9 @@ class TestCloseObservedForRemoval:
         assert ok is True
         t = svc._task_repo.find_by_ticket_id("T-obs-rm")  # noqa: SLF001
         assert t.governance_status == GovernanceStatus.CLOSED
-        assert t.close_reason == CloseReason.SCAN_WHITELISTED
+        assert t.close_reason == CloseReason.WHITELIST_APPROVED
+        assert t.closed_at is not None
+        assert t.cooldown_until is None  # 删白不设 cooldown
 
     def test_not_found_returns_false(self) -> None:
         svc, _, _ = _build_svc()

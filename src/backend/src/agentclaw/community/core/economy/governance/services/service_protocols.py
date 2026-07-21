@@ -329,9 +329,10 @@ class GovernanceLifecycleServiceProtocol(Protocol):
     def close_observed_for_removal(
         self, ticket_id: str, *, now: datetime,
     ) -> bool:
-        """Scan 清理白名单 bot 残留活跃单 → CLOSED(scan_whitelisted) + cancel pending.
+        """删白收尾:OBSERVED → CLOSED(whitelist_approved)终态 + cancel pending(best-effort)。
 
-        Returns True if the ticket was found and closed, False if not found.
+        不设 cooldown(等 off-batch 正常重建)。非 OBSERVED 态返 False(幂等 no-op)。
+        审计由调用方(whitelist_service)持有。
         """
         ...
 
@@ -543,6 +544,15 @@ class GovernanceWorkflowServiceProtocol(Protocol):
 
         ``delivery_statuses`` 可选按投递状态(pending/sent/failed/cancelled)过滤;
         None 不过滤,空列表短路返回空。
+        """
+        ...
+
+    def list_whitelist_observed_tickets(
+        self, *, offset: int = 0, limit: int = 50,
+    ) -> tuple[list[GovernanceTicket], int]:
+        """白单观察工单视图:当前 OBSERVED 态工单(加白中 bot 最新治理画像)。
+
+        薄包装,转调 list_review_tickets([observed])。语义入口。
         """
         ...
 
