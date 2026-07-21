@@ -37,6 +37,9 @@ if TYPE_CHECKING:
         BulkOperationResult,
         TicketActionOutcome,
     )
+    from agentclaw.community.core.economy.governance.services.delivery_service import (
+        SendResult,
+    )
 
 
 @runtime_checkable
@@ -131,6 +134,22 @@ class GovernanceDeliveryServiceProtocol(Protocol):
 
         跳过 remind_at 等待(立即 create+send)。
         Returns {notification_id, sent}。无 active → raise ValueError。
+        """
+        ...
+
+    def send_notification(
+        self,
+        notify: GovernanceNotification,
+        *,
+        override_recipient: str | None = None,
+    ) -> SendResult:
+        """投递域唯一单条发送出口:按 ``notify.channel`` 选 tc_card/markdown
+        渲染并实际发送,tc_card 构建失败降级 markdown,title 按 notify_type
+        区分。返回 :class:`SendResult`。
+
+        三条投递路径(create_and_send_reminder / _run_delivery / scan cron)
+        共用本出口,保证手动补发与首发/cron reminder 字段口径一致
+        (tickets-remind-content-divergence SDD)。
         """
         ...
 
@@ -544,15 +563,6 @@ class GovernanceWorkflowServiceProtocol(Protocol):
 
         ``delivery_statuses`` 可选按投递状态(pending/sent/failed/cancelled)过滤;
         None 不过滤,空列表短路返回空。
-        """
-        ...
-
-    def list_whitelist_observed_tickets(
-        self, *, offset: int = 0, limit: int = 50,
-    ) -> tuple[list[GovernanceTicket], int]:
-        """白单观察工单视图:当前 OBSERVED 态工单(加白中 bot 最新治理画像)。
-
-        薄包装,转调 list_review_tickets([observed])。语义入口。
         """
         ...
 
