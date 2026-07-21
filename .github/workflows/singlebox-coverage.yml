@@ -51,6 +51,8 @@ jobs:
       OCB_SKIP_GIT_HOOKS: "1"
       SINGLEBOX_MODEL_CONFIG_MODE: mock
       SINGLEBOX_COVERAGE_MODE: real
+      SINGLEBOX_COVERAGE_BCS_LINE_MIN: "40"
+      SINGLEBOX_COVERAGE_BCS_METHOD_MIN: "36"
       USE_CN_MIRROR: ${{ inputs.use_cn_mirror && '1' || '' }}
       BCN_PLUGIN_SOURCE: source
       CARGO_TERM_COLOR: always
@@ -82,8 +84,10 @@ jobs:
           rustup default stable
           rustup component add llvm-tools
           echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+          cargo install cargo-llvm-cov --locked
           rustc --version
           cargo --version
+          cargo llvm-cov --version
 
       - name: Install system dependencies
         run: |
@@ -124,7 +128,11 @@ jobs:
       - name: Verify singlebox coverage artifacts
         run: |
           python3 scripts/ci/verify_singlebox_coverage_artifacts.py \
-            --reports-dir scripts/.dependencies/coverage/singlebox/reports
+            --reports-dir scripts/.dependencies/coverage/singlebox/reports \
+            --bcs-line-min 40 \
+            --bcs-method-min 36 \
+            --bcs-router-min 100 \
+            --bcs-cli-min 100
 
       - name: Show singlebox diagnostics on failure
         if: failure()
@@ -150,4 +158,10 @@ jobs:
             scripts/.dependencies/coverage/singlebox/**
             scripts/.dependencies/standalone/**
             .standalone-openclaw/logs/**
+            src/bcs/target/cov-e2e/cobertura.xml
+            src/bcs/target/cov-e2e/coverage.txt
+            src/bcs/target/cov-e2e/summary.json
+            src/bcs/target/cov-e2e/endpoint_coverage.xml
+            src/bcs/target/cov-e2e/endpoint_coverage.txt
+            src/bcs/target/cov-e2e/cli_command_coverage.txt
           if-no-files-found: ignore
