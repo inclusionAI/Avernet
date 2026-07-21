@@ -18,8 +18,14 @@ modules:
       status: applicable
       reason: Recycle and reactivation must freeze and unfreeze the bot passport through the injected plugin boundary.
       items:
-        - PassportPlugin.freeze_agent_passport
-        - PassportPlugin.unfreeze_agent_passport
+        - key: PassportPlugin.freeze_agent_passport
+          evidence:
+            path: src/agentclaw/community/plugins/local/passport.py
+            symbol: LocalPassportPlugin.freeze_agent_passport
+        - key: PassportPlugin.unfreeze_agent_passport
+          evidence:
+            path: src/agentclaw/community/plugins/local/passport.py
+            symbol: LocalPassportPlugin.unfreeze_agent_passport
     thresholds:
       core_min_percent: 54.13
       router_min_percent: 100.0
