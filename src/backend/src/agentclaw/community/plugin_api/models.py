@@ -84,8 +84,6 @@ class BotModel(Base):
             "env": self.env,
             "bot_type": self.bot_type,
             "template_type": self.template_type,
-            "call_type": self.call_type,
-            "caller_config_revision": self.caller_config_revision,
         }
 
 

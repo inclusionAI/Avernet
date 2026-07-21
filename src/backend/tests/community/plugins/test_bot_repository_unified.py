@@ -93,8 +93,8 @@ def test_insert_and_get(repo):
     assert rec["engine_types"]  # defaulted
     got = repo.get_by_id_and_owner("bot-1", "emp1")
     assert got["bot_name"] == "Bot One"
-    assert got["call_type"] == "owner"
-    assert got["caller_config_revision"] == 0
+    assert "call_type" not in got
+    assert "caller_config_revision" not in got
 
 
 def test_get_by_id_without_owner(repo):
@@ -146,6 +146,8 @@ def test_get_by_id_and_entity_selects_the_correct_default_bot(repo):
     assert selected["id"] == second["id"]
     assert selected["owner_id"] == "owner-two"
     assert selected["id"] != first["id"]
+    assert selected["call_type"] == "owner"
+    assert selected["caller_config_revision"] == 0
 
 
 def test_get_unique_by_id_rejects_duplicate_default_bots(repo):
@@ -159,7 +161,11 @@ def test_get_unique_by_id_rejects_duplicate_default_bots(repo):
 def test_get_unique_by_id_preserves_single_and_missing_lookups(repo):
     inserted = repo.insert(_data(bot_id="default", entity_id="entity-one"))
 
-    assert repo.get_unique_by_id("default")["id"] == inserted["id"]
+    selected = repo.get_unique_by_id("default")
+
+    assert selected["id"] == inserted["id"]
+    assert selected["call_type"] == "owner"
+    assert selected["caller_config_revision"] == 0
     assert repo.get_unique_by_id("missing") is None
 
 

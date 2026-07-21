@@ -135,6 +135,14 @@ class BotRepository:
     def _env(self):
         return self.Model.env == get_current_env()
 
+    @staticmethod
+    def _to_caller_identity_dict(bot: BotModel) -> Dict[str, Any]:
+        """Return the private Bot projection required by Caller services."""
+        result = bot.to_dict()
+        result["call_type"] = bot.call_type
+        result["caller_config_revision"] = bot.caller_config_revision
+        return result
+
     def get_by_id_and_owner(
         self, bot_id: str, owner_id: str
     ) -> Optional[Dict[str, Any]]:
@@ -236,7 +244,7 @@ class BotRepository:
                 )
                 .first()
             )
-            return bot.to_dict() if bot else None
+            return self._to_caller_identity_dict(bot) if bot else None
 
     def get_unique_by_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
         """Return one live Bot by id or fail closed when callers are ambiguous."""
@@ -255,7 +263,7 @@ class BotRepository:
             )
             if len(bots) > 1:
                 raise BotLookupAmbiguousError
-            return bots[0].to_dict() if bots else None
+            return self._to_caller_identity_dict(bots[0]) if bots else None
 
     def list_by_owner(
         self, owner_id: str, page: int = 1, page_size: int = 20
