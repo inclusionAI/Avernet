@@ -7,8 +7,9 @@ _ALL_SH_LOADED=1
 # toolchain is NOT included here — use `install-tools` command separately.
 #
 # Full singlebox stack: BAAS/backend create the developer runtime, BCS runs
-# collaboration, bots starts the 5 local profiles, demo_bot onboards the
-# backend-created developer bot, then frontend exposes the workbench.
+# collaboration, bots starts the 5 local profiles, demo_bot starts the
+# backend-created developer bot, then frontend exposes the workbench. BCN
+# onboarding remains an explicit product action.
 SETUP_ORDER=(baas backend bcs bcsfuse bots frontend)
 START_ORDER=(baas backend bcs bcsfuse bots demo_bot frontend)
 STOP_ORDER=(frontend demo_bot bots bcsfuse bcs backend baas)
