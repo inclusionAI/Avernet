@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="${ROOT}/scripts/ci/singlebox_coverage.sh"
 REPORTER="${ROOT}/scripts/ci/singlebox_coverage_report.py"
+MANIFEST_CHECKER="${ROOT}/scripts/ci/singlebox_coverage_manifest_check.py"
 MANIFEST="${ROOT}/scripts/ci/singlebox_coverage_modules.yaml"
 
 fail() {
@@ -14,9 +15,17 @@ fail() {
 make_fake_repo() {
   local tmp="$1"
   mkdir -p "${tmp}/scripts/ci"
-  mkdir -p "${tmp}/src/backend" "${tmp}/src/baas" "${tmp}/src/bcs/scripts"
+  mkdir -p \
+    "${tmp}/src/backend/tests/community/acceptance/devices" \
+    "${tmp}/src/backend/tests/community/acceptance/cron" \
+    "${tmp}/src/backend/src/agentclaw/community/core/devices" \
+    "${tmp}/src/backend/src/agentclaw/community/core/cron" \
+    "${tmp}/src/backend/src/agentclaw/community/plugin_api" \
+    "${tmp}/src/baas" \
+    "${tmp}/src/bcs/scripts"
   cp "$SCRIPT" "${tmp}/scripts/ci/singlebox_coverage.sh"
   cp "$REPORTER" "${tmp}/scripts/ci/singlebox_coverage_report.py"
+  cp "$MANIFEST_CHECKER" "${tmp}/scripts/ci/singlebox_coverage_manifest_check.py"
   cat > "${tmp}/scripts/ci/singlebox_coverage_modules.yaml" <<'YAML'
 modules:
   devices:
@@ -96,7 +105,6 @@ JSONL
 {"key":"GET /api/cron"}
 JSONL
   fi
-  printf '%s\n' '{"key":"BotService.create_bot"}' > "${SINGLEBOX_COVERAGE_DIR}/backend/plugin_hits.jsonl"
   printf '%s\n' '{"key":"GET /health"}' > "${SINGLEBOX_COVERAGE_DIR}/baas/router_hits.jsonl"
 fi
 exit 0
@@ -415,9 +423,9 @@ YAML
   rc=$?
   set -e
 
-  [ "$rc" -eq 2 ] || fail "invalid manifest should return reporter usage error"
-  grep -F "coverage module config must be a mapping: empty" <<<"$output" >/dev/null || \
-    fail "reporter selection error should be preserved"
+  [ "$rc" -eq 1 ] || fail "invalid manifest should return validation error"
+  grep -F "empty: module config must be a mapping" <<<"$output" >/dev/null || \
+    fail "manifest validation error should be preserved"
   if grep -F "singlebox coverage manifest selected no modules" <<<"$output" >/dev/null; then
     fail "reporter failure should not be replaced by an empty-selection error"
   fi
