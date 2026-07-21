@@ -281,7 +281,7 @@ class TestGetChatSession:
         svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
 
         with pytest.raises(BotNotFoundError, match="对话列表"):
-                await svc.get_chat_session("user1", "bot1", "owner1")
+            await svc.get_chat_session("user1", "bot1", "owner1")
 
     @pytest.mark.asyncio
     async def test_existing_valid_session_reused(self, mock_repository, mock_bot_repo, mock_device_provider):
@@ -292,7 +292,7 @@ class TestGetChatSession:
         svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
 
         with patch.object(svc, "_check_session_exists", new=AsyncMock(return_value=True)):
-                result = await svc.get_chat_session("user1", "bot1", "owner1")
+            result = await svc.get_chat_session("user1", "bot1", "owner1")
 
         assert result["session_key"] == "session:existing-123"
         assert result["is_new"] is False
@@ -307,8 +307,8 @@ class TestGetChatSession:
         svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
 
         with patch.object(svc, "_check_session_exists", new=AsyncMock(return_value=False)):
-                with patch.object(svc, "_create_session", new=AsyncMock(return_value="session:new-456")):
-                    result = await svc.get_chat_session("user1", "bot1", "owner1")
+            with patch.object(svc, "_create_session", new=AsyncMock(return_value="session:new-456")):
+                result = await svc.get_chat_session("user1", "bot1", "owner1")
 
         assert result["session_key"] == "session:new-456"
         assert result["is_new"] is True
@@ -323,7 +323,7 @@ class TestGetChatSession:
         svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
 
         with patch.object(svc, "_create_session", new=AsyncMock(return_value="session:brand-new")):
-                result = await svc.get_chat_session("user1", "bot1", "owner1")
+            result = await svc.get_chat_session("user1", "bot1", "owner1")
 
         assert result["session_key"] == "session:brand-new"
         assert result["is_new"] is True
@@ -347,7 +347,7 @@ class TestGetChatSession:
         svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider, mock_baas)
 
         with patch.object(svc, "_create_session", new=AsyncMock(return_value="session:new")):
-                result = await svc.get_chat_session("user1", "bot1", "owner1")
+            result = await svc.get_chat_session("user1", "bot1", "owner1")
 
         # 验证 BaasService.get_bind_id 被正确调用
         mock_baas.get_bind_id.assert_called_once_with(
@@ -381,7 +381,7 @@ class TestGetChatSession:
         )
 
         with patch.object(svc, "_create_session", new=AsyncMock(return_value="session:new")):
-                result = await svc.get_chat_session("user1", "bot1", "owner1")
+            result = await svc.get_chat_session("user1", "bot1", "owner1")
 
         # 验证 BaasService 没有被调用 (personal bot uses bot.binding_id directly)
         mock_baas_service.assert_not_called()
