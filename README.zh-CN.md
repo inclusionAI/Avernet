@@ -242,7 +242,7 @@ ocb/
 
 ## 文档
 
-- [WAIC 世界杯撰稿自定义协作复现教程](docs/waic-world-cup-custom-collaboration.zh-CN.md)：从克隆项目、启动 6 个世界杯 Bot，到选择模板、绑定角色并执行自定义协作。
+- [手把手复现 WAIC 现场演示全流程](docs/waic-live-demo-tutorial.zh-CN.md)：从环境准备、安装和启动 Avernet，到以世界杯内容生产为例选择模板、绑定角色并执行现场演示。
 - [Quick Start](docs/quick-start.zh-CN.md)：本地 BCS + OpenClaw 接入主路径。
 - [Dependencies](docs/dependencies.zh-CN.md)：第三方依赖清单、安装指引和安全规则。
 - [Docker Guide](docs/docker.zh-CN.md)：用 Docker 跑本地 BCS。
