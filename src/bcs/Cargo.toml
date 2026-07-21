@@ -45,6 +45,7 @@ members = [
     "crates/services/bcs-secret",
     "crates/services/bcs-session",
     "crates/services/bcs-session-store",
+    "crates/services/bcs-session-file-store",
     "crates/services/bcs-routing",
     "crates/services/bcs-system-message",
     # plugin-api
@@ -236,6 +237,7 @@ bcs-config                 = { path = "crates/services/bcs-config" }
 bcs-route-security         = { path = "crates/services/bcs-route-security" }
 bcs-session                = { path = "crates/services/bcs-session" }
 bcs-session-store          = { path = "crates/services/bcs-session-store" }
+bcs-session-file-store     = { path = "crates/services/bcs-session-file-store" }
 bcs-system-message         = { path = "crates/services/bcs-system-message" }
 bcs-cache-api              = { path = "crates/plugin-api/bcs-cache-api" }
 bcs-channel-api            = { path = "crates/plugin-api/bcs-channel-api" }
