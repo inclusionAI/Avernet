@@ -6,7 +6,7 @@ Tests for the public endpoints:
 
 """
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -371,7 +371,7 @@ class TestUpdateBotExtPublic:
         updated_ext = call_args[0][2]["ext"]
         assert updated_ext["existing_key"] == "existing_value"  # Preserved
         assert updated_ext["arch_domain"] == "新架构域"  # New field added
-        assert updated_ext["is_domain_bot"] == False  # Preserved
+        assert updated_ext["is_domain_bot"] is False  # Preserved
 
     def test_error_handled(self, client, mock_bot_repo):
         """Should handle repository errors gracefully."""
