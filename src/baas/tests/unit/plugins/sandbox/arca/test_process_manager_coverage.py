@@ -1283,7 +1283,9 @@ class TestResolveEnginePython:
 
         assert result == str(configured_python)
 
-    def test_resolve_engine_python_uses_configured_override(self, monkeypatch, tmp_path):
+    def test_resolve_engine_python_uses_configured_override(
+        self, monkeypatch, tmp_path
+    ):
         """Configured LOCAL_ENGINE_PYTHON takes precedence over a colocated venv."""
         engine_src_dir = tmp_path / "engine" / "src"
         engine_src_dir.mkdir(parents=True)

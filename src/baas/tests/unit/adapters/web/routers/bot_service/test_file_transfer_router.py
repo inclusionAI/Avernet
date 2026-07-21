@@ -8,6 +8,7 @@ Tests all error handling paths for:
 - GET /{tenant}/{bot_uuid}/files/staging
 - DELETE /{tenant}/{bot_uuid}/files/staging
 - POST /{tenant}/{bot_uuid}/files/transfers/{transfer_id}/share-link
+- GET /{tenant}/{bot_uuid}/files/transfers/{transfer_id}
 """
 
 from unittest.mock import AsyncMock
@@ -638,3 +639,117 @@ async def test_generate_share_link_generic_exception(mock_dispatcher):
 
     assert resp.status_code == 500
     assert resp.json()["detail"]["error"] == "INTERNAL_ERROR"
+
+
+# ── get_transfer_status tests ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_transfer_status_success(mock_dispatcher):
+    """GET transfer status returns 200 with GetTransferStatusResponse."""
+    from secbaas.community.api.bot_runtime import GetTransferStatusResponse as GTSR
+
+    mock_dispatcher.dispatch_get_transfer_status.return_value = GTSR(
+        transfer_id="tf-001",
+        status="DONE",
+        direction="UPLOAD",
+        filename="data.csv",
+        device_path="/home/data.csv",
+        download_url="https://oss.example.com/dl",
+        created_at="2025-01-01T00:00:00",
+        updated_at="2025-01-01T00:00:00",
+    )
+    resp = await _get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["transfer_id"] == "tf-001"
+    assert data["status"] == "DONE"
+
+
+@pytest.mark.asyncio
+async def test_get_transfer_status_bot_not_found(mock_dispatcher):
+    """GET transfer status with BotNotFoundError returns 404."""
+    mock_dispatcher.dispatch_get_transfer_status.side_effect = BotNotFoundError(
+        "no bot"
+    )
+    resp = await _get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["error"] == "BOT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_get_transfer_status_transfer_not_found(mock_dispatcher):
+    """GET transfer status with TransferNotFoundError returns 404."""
+    mock_dispatcher.dispatch_get_transfer_status.side_effect = TransferNotFoundError(
+        "nope"
+    )
+    resp = await _get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["error"] == "TRANSFER_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_get_transfer_status_not_implemented(mock_dispatcher):
+    """GET transfer status with NotImplementedError returns 501."""
+    mock_dispatcher.dispatch_get_transfer_status.side_effect = NotImplementedError(
+        "nope"
+    )
+    resp = await _get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
+
+    assert resp.status_code == 501
+    assert resp.json()["detail"]["error"] == "NOT_IMPLEMENTED"
+
+
+@pytest.mark.asyncio
+async def test_get_transfer_status_generic_exception(mock_dispatcher):
+    """GET transfer status with generic Exception returns 500."""
+    mock_dispatcher.dispatch_get_transfer_status.side_effect = RuntimeError("boom")
+    resp = await _get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
+
+    assert resp.status_code == 500
+    assert resp.json()["detail"]["error"] == "INTERNAL_ERROR"
+
+
+# ── transfer_query_router tests ─────────────────────────────────────
+
+
+@pytest.fixture
+def query_app():
+    """Create a FastAPI app with only the transfer_query_router."""
+    from secbaas.community.adapters.web.routers.bot_service.transfer_query_router import (
+        router as tq_router,
+    )
+
+    _app = FastAPI()
+    _app.include_router(tq_router)
+    return _app
+
+
+@pytest.fixture
+def mock_query_dispatcher(query_app):
+    """Override dispatcher dependency for transfer_query_router."""
+    mock_instance = AsyncMock()
+    old_overrides = dict(query_app.dependency_overrides)
+    for route in iter_api_routes(query_app):
+        for dep in route.dependant.dependencies:
+            if dep.name == "dispatcher":
+                query_app.dependency_overrides[dep.call] = lambda: mock_instance
+    yield mock_instance
+    query_app.dependency_overrides = old_overrides
+
+
+@pytest.mark.asyncio
+async def test_transfer_query_bot_not_found(mock_query_dispatcher, query_app):
+    """transfer_query_router: BotNotFoundError returns 404 with BOT_NOT_FOUND."""
+    mock_query_dispatcher.dispatch_get_transfer_status.side_effect = BotNotFoundError(
+        "no bot"
+    )
+    transport = ASGITransport(app=query_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["error"] == "BOT_NOT_FOUND"
