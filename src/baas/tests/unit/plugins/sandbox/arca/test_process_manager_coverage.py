@@ -52,6 +52,7 @@ def _clean_env(monkeypatch):
         "BCS_PORT",
         "LOCAL_HERMES_DIR",
         "LOCAL_ENGINE_SRC_DIR",
+        "LOCAL_ENGINE_PYTHON",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -1265,6 +1266,46 @@ class TestResolveConfigTemplatePath:
 
 
 class TestResolveEnginePython:
+    def test_resolve_engine_python_uses_configured_override(self, monkeypatch, tmp_path):
+        """Configured LOCAL_ENGINE_PYTHON takes precedence over a colocated venv."""
+        engine_src_dir = tmp_path / "engine" / "src"
+        engine_src_dir.mkdir(parents=True)
+        configured_python = tmp_path / "runtime" / "bin" / "python"
+        configured_python.parent.mkdir(parents=True)
+        configured_python.touch()
+        configured_python.chmod(configured_python.stat().st_mode | stat.S_IXUSR)
+        monkeypatch.setenv("LOCAL_ENGINE_PYTHON", str(configured_python))
+
+        result = pm.LocalProcessManager._resolve_engine_python(engine_src_dir)
+
+        assert result == str(configured_python)
+
+    def test_resolve_engine_python_rejects_missing_configured_override(
+        self, monkeypatch, tmp_path
+    ):
+        """A configured but missing LOCAL_ENGINE_PYTHON fails clearly."""
+        engine_src_dir = tmp_path / "engine" / "src"
+        engine_src_dir.mkdir(parents=True)
+        missing_python = tmp_path / "missing" / "bin" / "python"
+        monkeypatch.setenv("LOCAL_ENGINE_PYTHON", str(missing_python))
+
+        with pytest.raises(DeviceAllocateError, match="LOCAL_ENGINE_PYTHON"):
+            pm.LocalProcessManager._resolve_engine_python(engine_src_dir)
+
+    def test_resolve_engine_python_rejects_non_executable_override(
+        self, monkeypatch, tmp_path
+    ):
+        """A configured interpreter must be executable."""
+        engine_src_dir = tmp_path / "engine" / "src"
+        engine_src_dir.mkdir(parents=True)
+        non_executable = tmp_path / "runtime" / "bin" / "python"
+        non_executable.parent.mkdir(parents=True)
+        non_executable.touch()
+        monkeypatch.setenv("LOCAL_ENGINE_PYTHON", str(non_executable))
+
+        with pytest.raises(DeviceAllocateError, match="not executable"):
+            pm.LocalProcessManager._resolve_engine_python(engine_src_dir)
+
     def test_resolve_engine_python_venv(self, tmp_path):
         """When venv exists, returns venv python."""
         engine_src_dir = tmp_path / "engine" / "src"
