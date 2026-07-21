@@ -17,6 +17,9 @@ from agentclaw.community.api.caller_identity_service import (
     CallerIdentityServiceProtocol,
     CallerIdentityStage,
 )
+from agentclaw.community.core.caller_identity.contracts import (
+    CallerIdentityAmbiguousError,
+)
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth import AuthPlugin, AuthRequestContext
@@ -139,6 +142,7 @@ async def get_iam_token(
     bot_id: str | None = Query(default=None),
     stage: CallerIdentityStage = Query(default=CallerIdentityStage.DRAFT),
     publish_id: int | None = Query(default=None),
+    entity_id: str | None = Query(default=None),
 ) -> Response:
     headers = _cors_headers(request)
     iam_token = request.cookies.get("IAM_TOKEN") or ""
@@ -171,6 +175,18 @@ async def get_iam_token(
             bot_id=bot_id,
             stage=stage,
             publish_id=publish_id,
+            entity_id=entity_id,
+        )
+    except CallerIdentityAmbiguousError as exc:
+        logger.warning(
+            "caller_token_context_ambiguous bot_id=%s stage=%s",
+            bot_id,
+            stage.value,
+        )
+        return JSONResponse(
+            content={"success": False, "error": exc.detail},
+            status_code=409,
+            headers=headers,
         )
     except Exception:
         logger.warning(
@@ -227,6 +243,8 @@ async def get_iam_token(
             runtime_updater=updater,
             stage=stage.value,
             publish_id=publish_id,
+            entity_id=entity_id,
+            binding_id=token_context.binding_id,
         )
     except CallerCredentialError as exc:
         logger.warning(

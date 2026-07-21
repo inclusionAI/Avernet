@@ -41,10 +41,11 @@ async def get_caller_context(
 ) -> CallerContextResponse:
     """Return exact draft or published Caller identity context."""
     logger.info(
-        "caller_context_get_started bot_id=%s stage=%s publish_id=%s",
+        "caller_context_get_started bot_id=%s stage=%s publish_id=%s entity_scoped=%s",
         bot_id,
         query.stage.value,
         query.publish_id,
+        query.entity_id is not None,
     )
     # COSEC: the actor is derived only from the authenticated request context;
     # query/path values cannot replace the current identity.
@@ -55,21 +56,24 @@ async def get_caller_context(
             actor_id=user.staffId,
             stage=query.stage,
             publish_id=query.publish_id,
+            entity_id=query.entity_id,
         )
     except DomainError:
         logger.warning(
-            "caller_context_get_failed bot_id=%s stage=%s publish_id=%s",
+            "caller_context_get_failed bot_id=%s stage=%s publish_id=%s entity_scoped=%s",
             bot_id,
             query.stage.value,
             query.publish_id,
+            query.entity_id is not None,
         )
         raise
     except Exception:
         logger.warning(
-            "caller_context_get_failed bot_id=%s stage=%s publish_id=%s",
+            "caller_context_get_failed bot_id=%s stage=%s publish_id=%s entity_scoped=%s",
             bot_id,
             query.stage.value,
             query.publish_id,
+            query.entity_id is not None,
         )
         # COSEC: replace untrusted exception details and suppress their context
         # before the production handler logs or serializes this failure.
@@ -84,10 +88,11 @@ async def get_caller_context(
     )
     logger.info(
         "caller_context_get_succeeded bot_id=%s stage=%s publish_id=%s "
-        "bot_call_type=%s",
+        "entity_scoped=%s bot_call_type=%s",
         bot_id,
         response.stage.value,
         response.publish_id,
+        query.entity_id is not None,
         response.bot_call_type.value,
     )
     return response
@@ -108,11 +113,12 @@ async def update_mcp_call_type(
     """Update one draft MCP identity using the current authenticated owner."""
     logger.info(
         "mcp_call_type_http_update_started bot_id=%s stage=draft "
-        "server_code=%s call_type=%s lock_epoch=%s",
+        "server_code=%s call_type=%s lock_epoch=%s entity_scoped=%s",
         bot_id,
         server_code,
         request.call_type.value,
         request.lock_epoch,
+        query.entity_id is not None,
     )
     # COSEC: user/owner/engine identity is absent from the strict body and the
     # actor is always supplied from the authenticated request context.
@@ -123,25 +129,28 @@ async def update_mcp_call_type(
             call_type=request.call_type,
             actor_id=user.staffId,
             lock_epoch=request.lock_epoch,
+            entity_id=query.entity_id,
         )
     except DomainError:
         logger.warning(
             "mcp_call_type_http_update_failed bot_id=%s stage=draft "
-            "server_code=%s call_type=%s lock_epoch=%s",
+            "server_code=%s call_type=%s lock_epoch=%s entity_scoped=%s",
             bot_id,
             server_code,
             request.call_type.value,
             request.lock_epoch,
+            query.entity_id is not None,
         )
         raise
     except Exception:
         logger.warning(
             "mcp_call_type_http_update_failed bot_id=%s stage=draft "
-            "server_code=%s call_type=%s lock_epoch=%s",
+            "server_code=%s call_type=%s lock_epoch=%s entity_scoped=%s",
             bot_id,
             server_code,
             request.call_type.value,
             request.lock_epoch,
+            query.entity_id is not None,
         )
         # COSEC: replace untrusted exception details and suppress their context
         # before the production handler logs or serializes this failure.
@@ -153,12 +162,13 @@ async def update_mcp_call_type(
     )
     logger.info(
         "mcp_call_type_http_update_succeeded bot_id=%s stage=draft "
-        "server_code=%s call_type=%s bot_call_type=%s lock_epoch=%s",
+        "server_code=%s call_type=%s bot_call_type=%s lock_epoch=%s entity_scoped=%s",
         bot_id,
         response.server_code,
         response.call_type.value,
         response.bot_call_type.value,
         request.lock_epoch,
+        query.entity_id is not None,
     )
     return response
 

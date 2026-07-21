@@ -43,6 +43,9 @@ from typing import Any, Dict, List, Optional
 from injector import inject
 from sqlalchemy import func, or_
 
+from agentclaw.community.core.bot_management.repository.protocol import (
+    BotLookupAmbiguousError,
+)
 from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -132,6 +135,14 @@ class BotRepository:
     def _env(self):
         return self.Model.env == get_current_env()
 
+    @staticmethod
+    def _to_caller_identity_dict(bot: BotModel) -> Dict[str, Any]:
+        """Return the private Bot projection required by Caller services."""
+        result = bot.to_dict()
+        result["call_type"] = bot.call_type
+        result["caller_config_revision"] = bot.caller_config_revision
+        return result
+
     def get_by_id_and_owner(
         self, bot_id: str, owner_id: str
     ) -> Optional[Dict[str, Any]]:
@@ -215,6 +226,44 @@ class BotRepository:
                 .first()
             )
             return bot.to_dict() if bot else None
+
+    def get_by_id_and_entity(
+        self, bot_id: str, entity_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Query one live Bot by exact bot and entity identifiers in this env."""
+        with self._db.orm_session() as db:
+            # COSEC: SQLAlchemy binds both identifiers; never interpolate request
+            # values into a raw SQL expression.
+            bot = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.bot_id == bot_id,
+                    self.Model.entity_id == entity_id,
+                    self.Model.is_delete == 0,
+                    self._env(),
+                )
+                .first()
+            )
+            return self._to_caller_identity_dict(bot) if bot else None
+
+    def get_unique_by_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
+        """Return one live Bot by id or fail closed when callers are ambiguous."""
+        with self._db.orm_session() as db:
+            # COSEC: SQLAlchemy binds the request-derived identifier; never
+            # interpolate it into a raw SQL expression.
+            bots = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.bot_id == bot_id,
+                    self.Model.is_delete == 0,
+                    self._env(),
+                )
+                .limit(2)
+                .all()
+            )
+            if len(bots) > 1:
+                raise BotLookupAmbiguousError
+            return self._to_caller_identity_dict(bots[0]) if bots else None
 
     def list_by_owner(
         self, owner_id: str, page: int = 1, page_size: int = 20

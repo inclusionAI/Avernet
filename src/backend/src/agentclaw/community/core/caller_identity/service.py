@@ -9,12 +9,16 @@ from agentclaw.community.core.bot_collaborator.repository.protocol import (
     BotCollabLockRepositoryProtocol,
     CollaboratorRepositoryProtocol,
 )
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.bot_management.repository.protocol import (
+    BotLookupAmbiguousError,
+    BotRepository,
+)
 from agentclaw.community.core.caller_identity.contracts import (
     CALLER_IDENTITY_CAPABILITY,
     CallerCallTypeInvalidError,
     CallerContext,
     CallerIamTokenContext,
+    CallerIdentityAmbiguousError,
     CallerIdentityNotFoundError,
     CallerIdentityPermissionError,
     CallerIdentityReadOnlyError,
@@ -77,10 +81,25 @@ class CallerIdentityService:
         call_type: McpCallType,
         actor_id: str,
         lock_epoch: int,
+        entity_id: str | None = None,
     ) -> McpCallTypeUpdateResult:
         """Update draft state, then synchronously refresh Agent Principal."""
         normalized_call_type = self._parse_call_type(call_type)
-        bot = self._bot_repository.get_by_id_and_owner(bot_id, actor_id)
+        if entity_id is not None:
+            bot = self._bot_repository.get_by_id_and_entity(bot_id, entity_id)
+        else:
+            try:
+                # COSEC: do not select an arbitrary duplicate Bot when callers
+                # omit entity_id; the mutation must fail closed.
+                bot = self._bot_repository.get_unique_by_id(bot_id)
+            except BotLookupAmbiguousError as exc:
+                logger.warning(
+                    "caller_mcp_call_type_update_rejected_ambiguous_bot bot_id=%s",
+                    bot_id,
+                )
+                raise CallerIdentityAmbiguousError from exc
+        # COSEC: an entity-scoped lookup does not authorize the request; the
+        # authenticated actor must still be the Bot owner.
         if bot is None or str(bot.get("owner_id") or "") != actor_id:
             raise CallerIdentityPermissionError
         if bot.get("bot_type") != "service" or bot.get("status") != "ACTIVE":
@@ -176,10 +195,11 @@ class CallerIdentityService:
         actor_id: str,
         stage: CallerIdentityStage,
         publish_id: int | None = None,
+        entity_id: str | None = None,
     ) -> CallerContext:
         """Return draft MCP details and the Bot aggregate for an authorized user."""
         normalized_stage = CallerIdentityStage(stage)
-        bot, is_owner = self._authorize_read(bot_id, actor_id)
+        bot, is_owner = self._authorize_read(bot_id, actor_id, entity_id)
         mcp_call_types = dict(
             self._repository.list_draft_call_types(
                 int(bot["id"]),
@@ -204,46 +224,68 @@ class CallerIdentityService:
         bot_id: str,
         stage: CallerIdentityStage,
         publish_id: int | None = None,
+        entity_id: str | None = None,
     ) -> McpCallType:
         """Provide marketplace callers the aggregate without MCP enumeration."""
         del stage, publish_id
-        return self._bot_call_type(self._get_bot(bot_id))
+        return self._bot_call_type(self._get_bot(bot_id, entity_id))
 
     def is_caller_bot(
         self,
         bot_id: str,
         stage: CallerIdentityStage,
         publish_id: int | None = None,
+        entity_id: str | None = None,
     ) -> bool:
-        return self.get_bot_call_type(bot_id, stage, publish_id) is McpCallType.CALLER
+        return (
+            self.get_bot_call_type(bot_id, stage, publish_id, entity_id)
+            is McpCallType.CALLER
+        )
 
     def get_iam_token_context(
         self,
         bot_id: str,
         stage: CallerIdentityStage,
         publish_id: int | None = None,
+        entity_id: str | None = None,
     ) -> CallerIamTokenContext:
         """Use only ac_bots.call_type to decide the IAM Caller branch."""
-        bot = self._get_bot(bot_id)
+        bot = self._get_bot(bot_id, entity_id)
+        resolved_stage = CallerIdentityStage(stage)
         bot_call_type = self._bot_call_type(bot)
         should_exchange = (
             bot.get("bot_type") == "service"
             and bot.get("status") == "ACTIVE"
             and bot_call_type is McpCallType.CALLER
         )
+        binding_id = (
+            bot.get("binding_id")
+            if resolved_stage is CallerIdentityStage.DRAFT
+            else None
+        )
+        if (
+            not isinstance(binding_id, int)
+            or isinstance(binding_id, bool)
+            or binding_id <= 0
+        ):
+            binding_id = None
         logger.info(
-            "caller_iam_context_resolved bot_id=%s stage=%s caller=%s",
+            "caller_iam_context_resolved bot_id=%s stage=%s caller=%s entity_scoped=%s "
+            "draft_binding_available=%s",
             bot_id,
-            CallerIdentityStage(stage).value,
+            resolved_stage.value,
             should_exchange,
+            entity_id is not None,
+            binding_id is not None,
         )
         return CallerIamTokenContext(
             bot_id=bot_id,
             owner_id=str(bot.get("owner_id") or "") or None,
-            stage=CallerIdentityStage(stage),
+            stage=resolved_stage,
             publish_id=publish_id,
             bot_call_type=bot_call_type,
             should_exchange_caller_token=should_exchange,
+            binding_id=binding_id,
         )
 
     def exchange_caller_identity(
@@ -258,6 +300,8 @@ class CallerIdentityService:
         runtime_updater: CallerRuntimeUpdaterProtocol,
         stage: str,
         publish_id: int | None,
+        entity_id: str | None = None,
+        binding_id: int | None = None,
     ) -> None:
         """Exchange and install the Caller credential for one chat request."""
         delegation_credential = passport.query_token(bot_id, owner_user_id) or ""
@@ -277,15 +321,26 @@ class CallerIdentityService:
             delegation_credential=delegation_credential,
             task_metadata=CALLER_CHAT_TASK,
         )
+        runtime_update_kwargs: dict[str, Any] = {
+            "bot_id": bot_id,
+            "owner_user_id": owner_user_id,
+            "caller_user_id": caller_user_id,
+            "caller_token": caller_token,
+            "agent_pass_token": delegation_credential,
+            "agent_code": agent_code,
+            "stage": stage,
+            "publish_id": publish_id,
+            "entity_id": entity_id,
+        }
+        if (
+            stage == CallerIdentityStage.DRAFT.value
+            and isinstance(binding_id, int)
+            and not isinstance(binding_id, bool)
+            and binding_id > 0
+        ):
+            runtime_update_kwargs["binding_id"] = binding_id
         runtime_updater.update_caller_identity(
-            bot_id=bot_id,
-            owner_user_id=owner_user_id,
-            caller_user_id=caller_user_id,
-            caller_token=caller_token,
-            agent_pass_token=delegation_credential,
-            agent_code=agent_code,
-            stage=stage,
-            publish_id=publish_id,
+            **runtime_update_kwargs,
         )
 
     def _compensate_after_sync_failure(
@@ -334,8 +389,9 @@ class CallerIdentityService:
         self,
         bot_id: str,
         actor_id: str,
+        entity_id: str | None,
     ) -> tuple[Mapping[str, Any], bool]:
-        bot = self._get_bot(bot_id)
+        bot = self._get_bot(bot_id, entity_id)
         is_owner = str(bot.get("owner_id") or "") == actor_id
         if is_owner:
             return bot, True
@@ -348,8 +404,20 @@ class CallerIdentityService:
             raise CallerIdentityPermissionError
         return bot, False
 
-    def _get_bot(self, bot_id: str) -> Mapping[str, Any]:
-        bot = self._bot_repository.get_by_id(bot_id)
+    def _get_bot(
+        self,
+        bot_id: str,
+        entity_id: str | None = None,
+    ) -> Mapping[str, Any]:
+        if entity_id is not None:
+            bot = self._bot_repository.get_by_id_and_entity(bot_id, entity_id)
+        else:
+            try:
+                # COSEC: do not select an arbitrary duplicate Bot when callers
+                # omit entity_id; the caller-specific lookup fails closed.
+                bot = self._bot_repository.get_unique_by_id(bot_id)
+            except BotLookupAmbiguousError as exc:
+                raise CallerIdentityAmbiguousError from exc
         if bot is None:
             raise CallerIdentityNotFoundError
         return bot

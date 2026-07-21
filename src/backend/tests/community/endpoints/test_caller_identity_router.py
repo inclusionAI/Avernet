@@ -77,6 +77,24 @@ def _seed_mutable_caller_identity(world) -> None:
     )
 
 
+def _seed_ambiguous_default_bots(world) -> None:
+    _seed_owner(world)
+    make_bot(
+        world,
+        bot_id="default",
+        owner_id=_OWNER_ID,
+        bot_type="service",
+        status="ACTIVE",
+    )
+    make_bot(
+        world,
+        bot_id="default",
+        owner_id="other_default_owner",
+        bot_type="service",
+        status="ACTIVE",
+    )
+
+
 def _assert_mcp_call_type_updated(response, world) -> None:
     body = response.json()
     assert body["call_type"] == "caller", body
@@ -89,7 +107,7 @@ def _assert_mcp_call_type_updated(response, world) -> None:
     scenario="happy",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID},
-        query_params={"stage": "draft"},
+        query_params={"stage": "draft", "entity_id": _OWNER_ID},
         headers={"x-user-id": _OWNER_ID},
     ),
     seed=_seed_editable_service_bot,
@@ -127,11 +145,34 @@ def get_caller_context_not_found():
 
 
 @endpoint_test(
+    method="GET",
+    path="/api/bots/{bot_id}/caller-context",
+    scenario="ambiguous_default_without_entity",
+    input=CaseInput(
+        path_params={"bot_id": "default"},
+        query_params={"stage": "draft"},
+        headers={"x-user-id": _OWNER_ID},
+    ),
+    seed=_seed_ambiguous_default_bots,
+    expect=ExpectError(
+        status=409,
+        json_contains={"detail": "CALLER_IDENTITY_AMBIGUOUS"},
+    ),
+)
+def get_caller_context_rejects_ambiguous_default_without_entity():
+    """Caller reads must not select an arbitrary default Bot."""
+
+
+@endpoint_test(
     method="PATCH",
     path="/api/bots/{bot_id}/mcps/{server_code}/call-type",
     scenario="happy",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID, "server_code": _SERVER_CODE},
+        query_params={
+            "ctoken": "opaque-gateway-compatibility-value",
+            "entity_id": _OWNER_ID,
+        },
         headers={"x-user-id": _OWNER_ID},
         json_body={"call_type": "caller", "lock_epoch": 1},
     ),
@@ -148,6 +189,23 @@ def get_caller_context_not_found():
 )
 def update_mcp_call_type_happy():
     """The HTTP route maps an accepted Caller update to its response payload."""
+
+
+@endpoint_test(
+    method="PATCH",
+    path="/api/bots/{bot_id}/mcps/{server_code}/call-type",
+    scenario="invalid_query",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "server_code": _SERVER_CODE},
+        query_params={"unexpected": "rejected"},
+        headers={"x-user-id": _OWNER_ID},
+        json_body={"call_type": "caller", "lock_epoch": 1},
+    ),
+    seed=_seed_mutable_caller_identity,
+    expect=ExpectError(status=422),
+)
+def update_mcp_call_type_rejects_unknown_query_parameter():
+    """Only documented compatibility query parameters are accepted."""
 
 
 @endpoint_test(

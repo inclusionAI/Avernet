@@ -13,6 +13,7 @@ from agentclaw.community.core.caller_identity.contracts import (
     CallerCallTypeInvalidError,
     CallerContext,
     CallerIamTokenContext,
+    CallerIdentityAmbiguousError,
     CallerIdentityNotFoundError,
     CallerIdentityPermissionError,
     CallerIdentityReadOnlyError,
@@ -36,6 +37,7 @@ class CallerIdentityServiceProtocol(Protocol):
         call_type: McpCallType,
         actor_id: str,
         lock_epoch: int,
+        entity_id: str | None = None,
     ) -> McpCallTypeUpdateResult: ...
 
     def get_context(
@@ -45,6 +47,7 @@ class CallerIdentityServiceProtocol(Protocol):
         actor_id: str,
         stage: CallerIdentityStage,
         publish_id: int | None = None,
+        entity_id: str | None = None,
     ) -> CallerContext: ...
 
     def get_bot_call_type(
@@ -52,6 +55,7 @@ class CallerIdentityServiceProtocol(Protocol):
         bot_id: str,
         stage: CallerIdentityStage,
         publish_id: int | None = None,
+        entity_id: str | None = None,
     ) -> McpCallType: ...
 
     def is_caller_bot(
@@ -59,6 +63,7 @@ class CallerIdentityServiceProtocol(Protocol):
         bot_id: str,
         stage: CallerIdentityStage,
         publish_id: int | None = None,
+        entity_id: str | None = None,
     ) -> bool: ...
 
     def get_iam_token_context(
@@ -66,6 +71,7 @@ class CallerIdentityServiceProtocol(Protocol):
         bot_id: str,
         stage: CallerIdentityStage,
         publish_id: int | None = None,
+        entity_id: str | None = None,
     ) -> CallerIamTokenContext: ...
 
     def exchange_caller_identity(
@@ -80,6 +86,8 @@ class CallerIdentityServiceProtocol(Protocol):
         runtime_updater: CallerRuntimeUpdaterProtocol,
         stage: str,
         publish_id: int | None,
+        entity_id: str | None = None,
+        binding_id: int | None = None,
     ) -> None: ...
 
 
@@ -88,6 +96,7 @@ __all__ = [
     "CallerCallTypeInvalidError",
     "CallerContext",
     "CallerIamTokenContext",
+    "CallerIdentityAmbiguousError",
     "CallerIdentityNotFoundError",
     "CallerIdentityPermissionError",
     "CallerIdentityReadOnlyError",
