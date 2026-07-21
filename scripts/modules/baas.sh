@@ -149,6 +149,17 @@ baas_start() {
 
     cd "${BAAS_APP_DIR}"
 
+    # BaaS creates OpenClaw's per-bot config later, when a Bot is allocated.
+    # Build and resolve the BCN plugin before launching BaaS so that creation
+    # always writes channels.bcs and the plugin entry into that config.
+    setup_bcn_plugin || return 1
+    local bcn_plugin_path
+    bcn_plugin_path="$(bots_bcn_plugin_load_dir)" || return 1
+    if [ ! -f "${bcn_plugin_path}/dist/esm/index.js" ]; then
+        log_error "BCN plugin is not built at ${bcn_plugin_path}; cannot start BAAS"
+        return 1
+    fi
+
     # Start baas (singlebox mode)
     # app.sh internally includes health check, no external retry needed
     log_info "Starting BAAS with singlebox mode..."
@@ -193,8 +204,10 @@ baas_start() {
         CHAT_ENGINE="${CHAT_ENGINE}"
         LOCAL_AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}"
         SINGLEBOX_MODEL_CONFIG_FILE="${SINGLEBOX_MODEL_CONFIG_FILE:-}"
+        BCN_PLUGIN_PATH="${bcn_plugin_path}"
+        BCS_PORT="${BCS_PORT}"
     )
-    log_info "BAAS env: DATABASE_URL=${DATABASE_URL}, CHAT_ENGINE=${CHAT_ENGINE}, LOCAL_AIDESKTOP_ROOT=${LOCAL_AIDESKTOP_DIR}"
+    log_info "BAAS env: DATABASE_URL=${DATABASE_URL}, CHAT_ENGINE=${CHAT_ENGINE}, LOCAL_AIDESKTOP_ROOT=${LOCAL_AIDESKTOP_DIR}, BCS_PORT=${BCS_PORT}, BCN_PLUGIN_PATH=${bcn_plugin_path}"
 
     if ! env "${baas_env_args[@]}" "${BAAS_APP_DIR}/scripts/app.sh" start --singlebox >> "${BAAS_LOG}" 2>&1; then
         log_error "Failed to start BAAS. Check logs at ${BAAS_LOG}"

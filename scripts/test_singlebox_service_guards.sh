@@ -311,12 +311,17 @@ test_baas_start_refuses_root_bots_dir() (
   # shellcheck source=/dev/null
   source "${ROOT}/scripts/modules/baas.sh"
 
-  local events_file result
+  local events_file plugin_dir result
   events_file="$(mktemp)"
+  plugin_dir="$(mktemp -d)"
+  mkdir -p "${plugin_dir}/dist/esm"
+  : > "${plugin_dir}/dist/esm/index.js"
   stop_port_processes_if_owned() { return 0; }
   stop_matching_processes_if_owned() { return 0; }
   require_port_available_after_owned_stop() { return 0; }
   check_directory_exists() { return 0; }
+  setup_bcn_plugin() { return 0; }
+  bots_bcn_plugin_load_dir() { printf '%s\n' "$plugin_dir"; }
   baas_prepare_bcs_session_backup() { return 0; }
   baas_restore_bcs_sessions() { return 0; }
   rm() { printf 'rm %s\n' "$*" >> "$events_file"; }
@@ -331,6 +336,65 @@ test_baas_start_refuses_root_bots_dir() (
 
   [ "$result" -ne 0 ] || fail "baas_start should reject a root LOCAL_BOTS_DIR"
   [ ! -s "$events_file" ] || fail "baas_start must reject root before calling rm"
+)
+
+test_baas_start_passes_bcn_runtime_configuration() (
+  setup_env
+  export RUNTIME_DATA_DIR="$(mktemp -d)"
+  export LOCAL_AIDESKTOP_DIR="$(mktemp -d)"
+  export LOCAL_MODE=false
+  export CHAT_ENGINE="openclaw"
+  export BCS_PORT="21099"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/baas.sh"
+
+  local plugin_dir captured_env sequence_file
+  plugin_dir="$(mktemp -d)"
+  mkdir -p "${plugin_dir}/dist/esm"
+  : > "${plugin_dir}/dist/esm/index.js"
+  captured_env="$(mktemp)"
+  sequence_file="$(mktemp)"
+
+  stop_port_processes_if_owned() { return 0; }
+  stop_matching_processes_if_owned() { return 0; }
+  require_port_available_after_owned_stop() { return 0; }
+  check_directory_exists() { return 0; }
+  setup_bcn_plugin() { printf '%s\n' "setup" >> "$sequence_file"; }
+  bots_bcn_plugin_load_dir() { printf '%s\n' "resolve" >> "$sequence_file"; printf '%s\n' "$plugin_dir"; }
+  env() { printf '%s\n' "start" >> "$sequence_file"; printf '%s\n' "$*" > "$captured_env"; return 0; }
+
+  baas_start
+
+  grep -F "BCN_PLUGIN_PATH=${plugin_dir}" "$captured_env" >/dev/null || \
+    fail "baas_start must pass the built BCN plugin path to BAAS"
+  grep -F "BCS_PORT=21099" "$captured_env" >/dev/null || \
+    fail "baas_start must pass the selected BCS port to BAAS"
+  assert_eq $'setup\nresolve\nstart' "$(cat "$sequence_file")" \
+    "baas_start must prepare the BCN plugin before launching BAAS"
+)
+
+test_baas_start_aborts_when_bcn_plugin_setup_fails() (
+  setup_env
+  export RUNTIME_DATA_DIR="$(mktemp -d)"
+  export LOCAL_AIDESKTOP_DIR="$(mktemp -d)"
+  export LOCAL_MODE=false
+  export CHAT_ENGINE="openclaw"
+  export BCS_PORT="21000"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/baas.sh"
+
+  local started=false
+  stop_port_processes_if_owned() { return 0; }
+  stop_matching_processes_if_owned() { return 0; }
+  require_port_available_after_owned_stop() { return 0; }
+  check_directory_exists() { return 0; }
+  setup_bcn_plugin() { return 1; }
+  env() { started=true; return 0; }
+
+  if baas_start; then
+    fail "baas_start must fail when BCN plugin setup fails"
+  fi
+  [ "$started" = false ] || fail "BAAS must not launch after BCN plugin setup failure"
 )
 
 test_5bot_openclaw_config_is_written_private() {
@@ -386,6 +450,8 @@ test_baas_session_backup_refuses_to_overwrite_stale_backup
 test_baas_session_backup_recovers_stale_backup_before_snapshot
 test_baas_session_scan_failure_keeps_source_and_backup
 test_baas_start_refuses_root_bots_dir
+test_baas_start_passes_bcn_runtime_configuration
+test_baas_start_aborts_when_bcn_plugin_setup_fails
 test_5bot_openclaw_config_is_written_private
 test_ready_banner_describes_full_stack
 test_backend_separates_profile_env_and_workspace_folder
