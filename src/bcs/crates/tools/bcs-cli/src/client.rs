@@ -27,6 +27,30 @@ use bcs_protocol::{
 /// Default BCS URL if not configured.
 pub const DEFAULT_BCS_URL: &str = "http://localhost:21000";
 
+/// Build a reqwest HTTP client with explicit cross-host redirect policy.
+///
+/// Follows up to 10 redirects, but reqwest's default behavior of stripping
+/// `Authorization` on cross-host redirects is preserved (this is the standard
+/// reqwest behaviour when `Policy::custom` is used with `attempt.follow()`).
+/// We explicitly construct the policy instead of relying on `Client::default()`
+/// so the cross-host auth isolation is auditable.
+fn build_http_client() -> reqwest::Client {
+    let policy = reqwest::redirect::Policy::custom(move |attempt| {
+        if attempt.previous().len() >= 10 {
+            attempt.error("too many redirects")
+        } else {
+            // cross-host or same-host: follow; reqwest strips Authorization on
+            // cross-host hops by default.
+            attempt.follow()
+        }
+    });
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .redirect(policy)
+        .build()
+        .expect("build reqwest client")
+}
+
 #[derive(Debug, Deserialize)]
 pub struct BotGroupListPage {
     pub items: Vec<serde_json::Value>,
@@ -61,10 +85,7 @@ impl BcsClient {
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
-            http_client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(120))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            http_client: build_http_client(),
             token: None,
             cookie: None,
             oauth_headers: None,
@@ -77,10 +98,7 @@ impl BcsClient {
     pub fn with_token(base_url: impl Into<String>, token: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
-            http_client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(120))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            http_client: build_http_client(),
             token: Some(token.into()),
             cookie: None,
             oauth_headers: None,
@@ -97,10 +115,7 @@ impl BcsClient {
     ) -> Self {
         Self {
             base_url: base_url.into(),
-            http_client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(120))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            http_client: build_http_client(),
             token: Some(token.into()),
             cookie: Some(cookie.into()),
             oauth_headers: None,
@@ -117,10 +132,7 @@ impl BcsClient {
     ) -> Self {
         Self {
             base_url: base_url.into(),
-            http_client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(120))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            http_client: build_http_client(),
             token: Some(token.into()),
             cookie: None,
             oauth_headers: Some(oauth_headers),
@@ -136,10 +148,7 @@ impl BcsClient {
     pub fn with_service_key(base_url: impl Into<String>, raw_key: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
-            http_client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(120))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            http_client: build_http_client(),
             token: None,
             cookie: None,
             oauth_headers: None,
@@ -290,6 +299,28 @@ impl BcsClient {
     fn add_chat_headers(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         self.add_auth(builder)
             .header(BCS_CHAT_VERSION_HEADER, BCS_CHAT_VERSION)
+    }
+
+    /// Helper: check response status and parse JSON body.
+    async fn ensure_success(resp: reqwest::Response, label: &str) -> Result<serde_json::Value> {
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("{} failed ({}): {}", label, status, body));
+        }
+        resp.json()
+            .await
+            .with_context(|| format!("Invalid {} response", label))
+    }
+
+    /// Helper: check response status only (no body parsing).
+    async fn ensure_success_status(resp: reqwest::Response, label: &str) -> Result<()> {
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("{} failed ({}): {}", label, status, body));
+        }
+        Ok(())
     }
 
     // ========================================================================
@@ -2598,6 +2629,170 @@ impl BcsClient {
             response.json().await.context("Invalid service session response")?;
         Ok(result)
     }
+
+    // ========================================================================
+    // Session File Workspace
+    // ========================================================================
+
+    /// Prepare a file upload. POST /sessions/{sid}/files
+    pub async fn prepare_session_file(&self, sid: &str, file_name: &str, size: u64, mime: &str) -> Result<serde_json::Value> {
+        let url = format!("{}/sessions/{}/files", self.base_url, urlencoding::encode(sid));
+        let body = serde_json::json!({ "file_name": file_name, "size": size, "mime_type": mime });
+        let resp = self.add_auth(self.http_client.post(&url).json(&body)).send().await
+            .context("prepare session file")?;
+        Self::ensure_success(resp, "prepare session file").await
+    }
+
+    /// PUT bytes to an upload_url. If the upload_url host != BCS base_url
+    /// host, do NOT attach Authorization (backend presigned URL self-authenticates).
+    pub async fn put_session_file_bytes(&self, upload_url: &str, bytes: reqwest::Body) -> Result<()> {
+        let bcs_host = reqwest::Url::parse(&self.base_url).ok().and_then(|u| u.host_str().map(String::from));
+        let target_host = reqwest::Url::parse(upload_url).ok().and_then(|u| u.host_str().map(String::from));
+        let cross_host = match (bcs_host.as_deref(), target_host.as_deref()) {
+            (Some(a), Some(b)) => a != b,
+            _ => false,
+        };
+        let mut req = self.http_client.put(upload_url).body(bytes);
+        if !cross_host {
+            req = self.add_auth(req);
+        }
+        let resp = req.send().await.context("put session file bytes")?;
+        Self::ensure_success_status(resp, "put session file bytes").await
+    }
+
+    /// Complete a file upload. POST /sessions/{sid}/files/{id}/complete
+    pub async fn complete_session_file(&self, sid: &str, file_id: &str) -> Result<serde_json::Value> {
+        let url = format!("{}/sessions/{}/files/{}/complete", self.base_url, urlencoding::encode(sid), file_id);
+        let resp = self.add_auth(self.http_client.post(&url).json(&serde_json::json!({}))).send().await
+            .context("complete session file")?;
+        Self::ensure_success(resp, "complete session file").await
+    }
+
+    /// High-level three-stage upload: prepare -> PUT (single or multipart) -> complete.
+    /// Serial multipart PUTs (no parallelism for v1). Best-effort delete on failure.
+    pub async fn upload_session_file(
+        &self, sid: &str, path: &str, name_override: Option<&str>, mime: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        let file_name = name_override.map(String::from)
+            .unwrap_or_else(|| std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string());
+        let metadata = tokio::fs::metadata(path).await?;
+        let size = metadata.len();
+        let mime = mime.unwrap_or("application/octet-stream").to_string();
+        let prepared = self.prepare_session_file(sid, &file_name, size, &mime).await?;
+        let mode = prepared["mode"].as_str().unwrap_or("single");
+        let file_id = prepared["file_id"].as_str().context("missing file_id")?.to_string();
+        match mode {
+            "single" => {
+                let url = prepared["upload_url"].as_str().context("missing upload_url")?.to_string();
+                let file = tokio::fs::File::open(path).await?;
+                self.put_session_file_bytes(&url, reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file))).await?;
+            }
+            "multipart" => {
+                let part_size = prepared["part_size"].as_u64().context("missing part_size")? as usize;
+                let parts = prepared["parts"].as_array().context("missing parts")?;
+                for (i, p) in parts.iter().enumerate() {
+                    let url = p["upload_url"].as_str().context("missing part url")?.to_string();
+                    let mut f = tokio::fs::File::open(path).await?;
+                    use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
+                    f.seek(std::io::SeekFrom::Start((i as u64) * part_size as u64)).await?;
+                    let take = f.take(part_size as u64);
+                    self.put_session_file_bytes(&url, reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(take))).await?;
+                }
+            }
+            _ => return Err(anyhow!("unknown mode {}", mode)),
+        }
+        let final_file = self.complete_session_file(sid, &file_id).await
+            .or_else(|e| {
+                let _ = self.delete_session_file(sid, &file_id);
+                Err(e)
+            })?;
+        Ok(final_file)
+    }
+
+    /// List files in the session workspace. GET /sessions/{sid}/files
+    pub async fn list_session_files(
+        &self, sid: &str, prefix: Option<&str>, limit: Option<u32>, marker: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        let mut params: Vec<String> = Vec::new();
+        if let Some(p) = prefix {
+            params.push(format!("prefix={}", urlencoding::encode(p)));
+        }
+        if let Some(l) = limit {
+            params.push(format!("limit={}", l));
+        }
+        if let Some(m) = marker {
+            params.push(format!("marker={}", urlencoding::encode(m)));
+        }
+        let mut url = format!("{}/sessions/{}/files", self.base_url, urlencoding::encode(sid));
+        if !params.is_empty() {
+            url.push('?');
+            url.push_str(&params.join("&"));
+        }
+        let resp = self.add_auth(self.http_client.get(&url)).send().await
+            .context("list session files")?;
+        Self::ensure_success(resp, "list session files").await
+    }
+
+    /// Delete a file or cancel an in-progress upload. DELETE /sessions/{sid}/files/{id}
+    pub async fn delete_session_file(&self, sid: &str, file_id: &str) -> Result<serde_json::Value> {
+        let url = format!("{}/sessions/{}/files/{}", self.base_url, urlencoding::encode(sid), file_id);
+        let resp = self.add_auth(self.http_client.delete(&url)).send().await
+            .context("delete session file")?;
+        Self::ensure_success(resp, "delete session file").await
+    }
+
+    /// Get file metadata. GET /sessions/{sid}/files/{id}
+    pub async fn get_session_file(&self, sid: &str, file_id: &str) -> Result<serde_json::Value> {
+        let url = format!("{}/sessions/{}/files/{}", self.base_url, urlencoding::encode(sid), file_id);
+        let resp = self.add_auth(self.http_client.get(&url)).send().await
+            .context("get session file")?;
+        Self::ensure_success(resp, "get session file").await
+    }
+
+    /// Download file bytes. GET /sessions/{sid}/files/{id}/content?ttl=...
+    /// Follows presigned redirect or streams directly, writes to --out file.
+    pub async fn download_session_file(
+        &self, sid: &str, file_id: &str, out: Option<&str>, ttl: Option<u64>,
+    ) -> Result<String> {
+        let mut url = format!("{}/sessions/{}/files/{}/content", self.base_url, urlencoding::encode(sid), file_id);
+        if let Some(t) = ttl { url.push_str(&format!("?ttl={}", t)); }
+        let resp = self.add_auth(self.http_client.get(&url)).send().await
+            .context("download session file")?;
+        if !resp.status().is_success() {
+            let s = resp.status(); let b = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("download failed ({}): {}", s, b));
+        }
+        let out_path = out.map(String::from).unwrap_or_else(|| format!("./{}", file_id));
+        let mut f = tokio::fs::File::create(&out_path).await?;
+        use futures::StreamExt;
+        let mut stream = resp.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            tokio::io::AsyncWriteExt::write_all(&mut f, &chunk?).await?;
+        }
+        Ok(out_path)
+    }
+
+    /// Generate a no-auth share link. POST /sessions/{sid}/files/{id}/share
+    pub async fn share_session_file(
+        &self, sid: &str, file_id: &str, ttl: Option<u64>,
+    ) -> Result<serde_json::Value> {
+        let url = format!("{}/sessions/{}/files/{}/share", self.base_url, urlencoding::encode(sid), file_id);
+        let mut body = serde_json::Map::new();
+        if let Some(t) = ttl {
+            body.insert("ttl".to_string(), serde_json::json!(t));
+        }
+        let resp = self.add_auth(self.http_client.post(&url).json(&serde_json::Value::Object(body))).send().await
+            .context("share session file")?;
+        Self::ensure_success(resp, "share session file").await
+    }
+
+    /// Query backend capabilities. GET /sessions/{sid}/files/capabilities
+    pub async fn session_file_capabilities(&self, sid: &str) -> Result<serde_json::Value> {
+        let url = format!("{}/sessions/{}/files/capabilities", self.base_url, urlencoding::encode(sid));
+        let resp = self.add_auth(self.http_client.get(&url)).send().await
+            .context("session file capabilities")?;
+        Self::ensure_success(resp, "session file capabilities").await
+    }
 }
 
 #[cfg(test)]
@@ -3154,6 +3349,59 @@ mod tests {
         assert_eq!(
             request.timeout().copied(),
             Some(Duration::from_millis(17_345))
+        );
+    }
+
+    // ========================================================================
+    // Cross-host Authorization isolation regression test
+    // ========================================================================
+
+    /// Ensures that `put_session_file_bytes` does NOT send an `Authorization`
+    /// header when the upload URL points to a different host than the BCS
+    /// base URL. OSS presigned URLs self-authenticate and must never leak the
+    /// bearer token across host boundaries.
+    #[tokio::test]
+    async fn cross_host_put_omits_authorization() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let captured_headers = Arc::new(Mutex::new(String::new()));
+        let server_headers = captured_headers.clone();
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
+            let mut buf = [0_u8; 4096];
+            let size = stream.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..size]);
+            *server_headers.lock().unwrap() = request.to_string();
+
+            let response =
+                "HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
+        });
+
+        // BCS base on localhost (different host from 127.0.0.1 per reqwest)
+        let client = BcsClient::with_token(
+            format!("http://localhost:{}", addr.port().wrapping_add(1)),
+            "test-bearer-token",
+        );
+        let upload_url = format!("http://127.0.0.1:{}/put", addr.port());
+        let body = reqwest::Body::from("test-body");
+        let result = client.put_session_file_bytes(&upload_url, body).await;
+
+        server.join().unwrap();
+        assert!(result.is_ok(), "PUT should succeed: {:?}", result.err());
+        let request = captured_headers.lock().unwrap();
+        let request_lower = request.to_lowercase();
+        assert!(
+            !request_lower.contains("authorization:"),
+            "Authorization header MUST NOT be sent cross-host, but was:\n{}",
+            request
         );
     }
 }
