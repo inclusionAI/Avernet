@@ -17,7 +17,7 @@ from injector import inject
 
 from agentclaw.community.core.bot_dormant.protocols import BotServiceProtocol
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.plugin_api.passport import PassportError, PassportPlugin
 
 
 logger = get_logger()
@@ -132,7 +132,7 @@ class ActivateBotService:
                 owner_workno=user_id,
             )
             if not token:
-                raise RuntimeError("passport token is unavailable after unfreeze")
+                raise PassportError("passport token is unavailable after unfreeze")
             logger.info(
                 "[activate] passport token verify success bot_id=%s user_id=%s",
                 bot_id,
