@@ -115,6 +115,7 @@ def _seed_ticket(
     expected_token_saving=None,
     hit_dimensions=None,
     consecutive_normal_days=0,
+    override_owner=None,
 ):
     """Insert a GovernanceTicketOrm ticket row."""
     if ticket_id is None:
@@ -134,6 +135,7 @@ def _seed_ticket(
         worker_id=worker_id,
         bot_id=bot_id,
         owner_id=owner_id,
+        override_owner=override_owner,
         dt_version="20260629",
         governance_decision="actionable",
         bot_name="TestBot",
@@ -402,6 +404,67 @@ class TestReminderCreation:
         svc, db, _ = _build_service(engine)
         summary = svc.process_cron_tick()
         assert summary.reminders_created >= 1
+
+    def test_reminder_uses_override_owner_as_recipient(self, engine):
+        """D4: 工单设了 override_owner → reminder 建通知 owner_id 写 override 的人。
+
+        notify_log 零增列语义自洽: override 的人即通知 owner(收件人)。原工单
+        owner_id 不动(归属不变)。投递层取 notify.owner_id 无感知。
+        """
+        Sess = _make_tables(engine)
+        db = FakeDB(Sess)
+        s = Sess()
+        now = datetime.now()
+        ticket_id = _seed_ticket(
+            s,
+            governance_status="open",
+            latest_decision="actionable",
+            remind_at=now - timedelta(hours=1),
+            remind_count=0,
+            owner_id="original-owner",
+            override_owner="delegated-owner",
+            worker_id="original-owner:bot-x",
+            active_worker="original-owner:bot-x",
+        )
+        s.close()
+
+        svc, db, _ = _build_service(engine)
+        svc.process_cron_tick()
+
+        with db.orm_session() as sess:
+            notify = sess.query(GovernanceNotificationOrm).filter(
+                GovernanceNotificationOrm.ticket_id == ticket_id,
+            ).one()
+            assert notify.owner_id == "delegated-owner"  # override 落 notify_log.owner_id
+            assert notify.notify_type == "reminder"
+
+    def test_reminder_without_override_uses_original_owner(self, engine):
+        """无 override → reminder 建通知 owner_id 写原 owner(默认行为不变)。"""
+        Sess = _make_tables(engine)
+        db = FakeDB(Sess)
+        s = Sess()
+        now = datetime.now()
+        ticket_id = _seed_ticket(
+            s,
+            governance_status="open",
+            latest_decision="actionable",
+            remind_at=now - timedelta(hours=1),
+            remind_count=0,
+            owner_id="original-owner",
+            override_owner=None,
+            worker_id="original-owner:bot-y",
+            active_worker="original-owner:bot-y",
+        )
+        s.close()
+
+        svc, db, _ = _build_service(engine)
+        svc.process_cron_tick()
+
+        with db.orm_session() as sess:
+            notify = sess.query(GovernanceNotificationOrm).filter(
+                GovernanceNotificationOrm.ticket_id == ticket_id,
+            ).one()
+            assert notify.owner_id == "original-owner"  # 无 override,原 owner
 
 
 class TestReminderCreatedOnManualTick:

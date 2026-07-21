@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 from injector import inject
 
 from agentclaw.community.core.economy.governance.domain.enums import (
+    AdminCloseConclusion,
     AuditAction,
     CloseReason,
     GovernanceStatus,
@@ -210,6 +211,89 @@ class GovernanceWorkflowService:
             "sent_at": n.sent_at.isoformat() if n.sent_at else None,
         }
 
+    def list_ticket_history_by_worker(
+        self,
+        *,
+        worker_id: str | None = None,
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        limit: int = 5,
+    ) -> tuple[list[GovernanceTicket], str | None, str | None, str | None]:
+        """按 worker 取最近 N 条工单历史(全状态,gmt_create 倒序),辅助关单-重开决策。
+
+        管理员处理新开/重开工单时,借此横向看该 worker 的工单生命周期(关单原因/
+        裁定结论/用户反馈/审批记录),辅助本次决策。只读、无副作用、不写审计。
+
+        worker_id(``owner:bot``)优先解析并覆盖独立的 ``owner_id``/``bot_id``;解析后
+        三者皆空抛 :class:`ValueError`(路由侧 400,防全表扫,对齐
+        ``GovernanceAuditReadService.list_audit_by_worker`` 口径)。解析逻辑与
+        ``audit_read_service._parse_worker_id`` 同款(刻意不跨服务复用,避免
+        workflow→audit_read 依赖)。
+
+        Args:
+            worker_id: 复合标识 ``"owner_id:bot_id"``,优先解析。
+            owner_id: 独立按 owner 查(被 worker_id 覆盖)。
+            bot_id: 独立按 bot 查(被 worker_id 覆盖)。
+            limit: 取数上限 1~50(路由层 Query 已校验)。
+
+        Returns:
+            ``(tickets, resolved_owner_id, resolved_bot_id, worker_id_echo)``。
+            ``worker_id_echo``:给了 worker_id 或同时给 owner+bot 时回显
+            ``"owner:bot"``;仅给单维度时为 None。
+
+        Raises:
+            ValueError: ``worker_id`` 非 ``owner:bot`` 形态,或解析后 owner/bot/worker
+                三者皆空。
+        """
+        if worker_id is not None:
+            owner_id, bot_id = self._parse_worker_id(worker_id)
+        if owner_id is None and bot_id is None:
+            raise ValueError(
+                "at least one of worker_id / owner_id / bot_id is required"
+            )
+        tickets = self._task_repo.list_recent_tickets_by_worker(
+            # worker_id 原值优先(repo 走 worker_id == 等值,最精确且命中 worker 索引);
+            # 仅给 owner/bot 单维度时传 None,repo 走列过滤。
+            worker_id=worker_id if worker_id is not None else None,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            limit=limit,
+        )
+        can_compose = (
+            worker_id is not None
+            or (owner_id is not None and bot_id is not None)
+        )
+        echo_worker = f"{owner_id}:{bot_id}" if can_compose else None
+        return tickets, owner_id, bot_id, echo_worker
+
+    @staticmethod
+    def _parse_worker_id(worker_id: str) -> tuple[str, str]:
+        """解析 ``"owner_id:bot_id"`` 为 ``(owner_id, bot_id)``。
+
+        逻辑与 :meth:`GovernanceAuditReadService._parse_worker_id` 逐字一致
+        (单冒号、两段非空、无内嵌空白)。刻意不抽公共 util(对齐 workflow_router
+        ``_raise_on_admin_error`` "不抽共享 helper 避免跨文件重构噪音"原则);
+        两处独立维护,如需收口再单开 PR 提到 utils。
+
+        Raises:
+            ValueError: 缺冒号 / 多于一个冒号 / 任一段为空或含空白。
+        """
+        parts = worker_id.split(":")
+        if len(parts) != 2:
+            raise ValueError(
+                f"invalid worker_id {worker_id!r}: expected 'owner_id:bot_id'"
+            )
+        owner, bot = parts[0].strip(), parts[1].strip()
+        if not owner or not bot:
+            raise ValueError(
+                f"invalid worker_id {worker_id!r}: owner and bot must be non-empty"
+            )
+        if any(ch.isspace() for ch in owner + bot):
+            raise ValueError(
+                f"invalid worker_id {worker_id!r}: owner and bot must not contain whitespace"
+            )
+        return owner, bot
+
     def review_ticket(
         self, ticket_id: str, action: str, admin_id: str, remark: str = "",
     ) -> TicketActionOutcome:
@@ -334,11 +418,24 @@ class GovernanceWorkflowService:
         return GovernanceStatus.CLOSED
 
     def admin_close(
-        self, ticket_id: str, admin_id: str, reason: str = "",
+        self, ticket_id: str, admin_id: str, *,
+        conclusion: AdminCloseConclusion,
+        close_payload: str | None = None,
     ) -> TicketActionOutcome:
         """Admin close: close ticket + set cooldown + cancel pending (§6.3).
 
         管理员检查后关单,使用 cooldown_days 设冷却(关单后 N 天内不重建)。
+
+        Args:
+            ticket_id: 工单 ID。
+            admin_id: 操作人 ID(取自鉴权上下文,不允许 body 顶替)。
+            conclusion: 管理员关单结论裁定(``AdminCloseConclusion`` 枚举)。必传,
+                非法值由枚举类型本身拒绝(路由层 422)。
+            close_payload: 关单明细 JSON 字符串(当前 ``{"remark": ...}``),
+                由 router 从 ``CloseDetailPayload`` 序列化灌入。None = 无手写说明。
+
+        ``conclusion`` / ``close_payload`` 透传 lifecycle driver → 领域 close()
+        落盘 ``close_conclusion`` / ``close_payload`` 两列(对标用户反馈落盘)。
         """
         ticket = self._task_repo.find_by_ticket_id(ticket_id)
         if not ticket:
@@ -362,7 +459,14 @@ class GovernanceWorkflowService:
         # CLOSE + cooldown + cancel-pending.
         self._lifecycle_svc.admin_close(
             ticket_id, now=now, cooldown_until=cooldown_until,
+            close_conclusion=conclusion.value,
+            close_payload=close_payload,
         )
+
+        # 审计结构化记录 conclusion + remark(从 close_payload 解出),不再只记裸 reason。
+        audit_msg = f"ticket_id={ticket_id}; conclusion={conclusion.value}; cooldown_until={cooldown_until.isoformat()}"
+        if close_payload:
+            audit_msg += f"; close_payload={close_payload}"
 
         self._audit_repo.add_audit(
             "admin-close",
@@ -371,7 +475,7 @@ class GovernanceWorkflowService:
             actor_id=admin_id,
             action_taken=AuditAction.ADMIN_CLOSE_ALL,
             source="admin_api",
-            error_msg=f"ticket_id={ticket_id}; reason={reason}; cooldown_until={cooldown_until.isoformat()}",
+            error_msg=audit_msg,
             dry_run=0,
         )
 
@@ -379,6 +483,55 @@ class GovernanceWorkflowService:
             ticket_id=ticket_id,
             status=GovernanceStatus.CLOSED,
             close_reason=CloseReason.ADMIN_CLOSED,
+        )
+
+    def set_override_owner(
+        self, ticket_id: str, override_owner: str | None, *, operator: str,
+    ) -> TicketActionOutcome:
+        """设/清工单通知收件人覆盖 (D1/D4: bot 转交/机器人 owner 代联)。
+
+        只改 ``task_record.override_owner`` 字段,不碰状态机/owner_id/cooldown。
+        ``override_owner`` 非空 → 设(后续 reminder 建通知发给此人);空串/None
+        → 清(恢复发原 owner)。reminder 建通知时 ``override or owner`` 写进
+        notify_log.owner_id(notify_log 零增列语义自洽)。
+
+        Args:
+            ticket_id: 工单稳定 UUID。
+            override_owner: 覆盖收件人 staffId;None/空串 = 清除。
+            operator: 操作人 user_id (audit actor_id)。
+
+        Returns:
+            TicketActionOutcome(工单当前 status;不存在 → NOT_FOUND)。
+        """
+        ticket = self._task_repo.find_by_ticket_id(ticket_id)
+        if not ticket:
+            return TicketActionOutcome(
+                ticket_id=ticket_id, status=GovernanceStatus.OPEN,
+                error="Ticket not found", error_code="NOT_FOUND",
+            )
+
+        # 空串归一为 None(清除语义);去空白
+        normalized = (override_owner or "").strip() or None
+        ticket.override_owner = normalized
+        if not self._task_repo.save_ticket(ticket):
+            return TicketActionOutcome(
+                ticket_id=ticket_id, status=ticket.governance_status,
+                error="Failed to persist override_owner", error_code="PERSIST_FAILED",
+            )
+
+        self._write_admin_audit(
+            action_taken=AuditAction.ADMIN_OVERRIDE_OWNER,
+            actor_id=operator,
+            error_msg=(
+                f"ticket_id={ticket_id}; override_owner={normalized or '(cleared)'}"
+            ),
+        )
+        log.info(
+            "[GovernanceAdmin] set_override_owner by %s on %s: override_owner=%s",
+            operator, ticket_id, normalized,
+        )
+        return TicketActionOutcome(
+            ticket_id=ticket_id, status=ticket.governance_status,
         )
 
     def cancel_pending(self, reason: str, operator: str) -> BulkOperationResult:
@@ -412,8 +565,12 @@ class GovernanceWorkflowService:
         )
 
         # Step 3: ticket-side close — per-ticket guard-activated, idempotent.
-        # Driver's admin_close uses ADMIN_CLOSED (aligns notify side).
-        self._lifecycle_svc.bulk_close_by_ticket_ids(ticket_ids, now=now)
+        # Driver's admin_close uses ADMIN_CLOSED (aligns notify side).批量关单
+        # 统一落 BULK_CLOSED 结论(D4:每张被关工单带同一批量结论值)。
+        self._lifecycle_svc.bulk_close_by_ticket_ids(
+            ticket_ids, now=now,
+            close_conclusion=AdminCloseConclusion.BULK_CLOSED.value,
+        )
 
         self._write_admin_audit(
             action_taken=AuditAction.ADMIN_CANCEL_PENDING,
@@ -455,8 +612,10 @@ class GovernanceWorkflowService:
         # Step 2: ticket-side full close (ADMIN_CLOSED). bulk_close_open's
         # WHERE status IN (open,scheduled) + active_worker IS NOT NULL
         # predicate is the state-legality guard (per-spec bulk exemption).
+        # 批量关单统一落 BULK_CLOSED 结论(D4:每张被关工单带同一批量结论值)。
         tickets_closed = self._lifecycle_svc.bulk_close_open(
             close_reason=CloseReason.ADMIN_CLOSED, now=now,
+            close_conclusion=AdminCloseConclusion.BULK_CLOSED.value,
         )
 
         self._write_admin_audit(

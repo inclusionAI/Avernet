@@ -508,7 +508,7 @@ class GovernanceDeliveryService:
             ticket_id=ticket.ticket_id,
             bot_id=ticket.bot_id,
             bot_name=ticket.bot_name,
-            owner_id=ticket.owner_id,
+            owner_id=ticket.override_owner or ticket.owner_id,  # D4: override 落 notify_log.owner_id(手动补发 reminder 路径同 cron)
             worker_id=ticket.worker_id,
             snapshot=FrozenSnapshot(
                 dt_version=ticket.dt_version,

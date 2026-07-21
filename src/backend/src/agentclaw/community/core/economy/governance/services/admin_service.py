@@ -70,7 +70,6 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 _BRAKE_KEY_TEMPLATE = "governance:brake:{env}"
-_BRAKE_TTL_SECONDS = 7 * 24 * 3600  # 7 days
 
 
 # ── Service I/O dataclasses (P5) ─────────────────────────────────────────
@@ -198,7 +197,12 @@ class GovernanceAdminService:
     def pause(self, reason: str, operator: str) -> None:
         """Pause scan + notification sending. Pending notifications preserved.
 
-        Writes distributed cache key with 7-day TTL.
+        Writes distributed cache key **without TTL** — the brake stays active
+        until an explicit :meth:`resume` deletes it. This is fail-closed on
+        purpose: a silently expiring brake (the old 7-day TTL) would let
+        governance quietly resume and surprise users with notifications an
+        admin believed were still suspended.宁可制动卡住可观测、可主动
+        排查,也不要静默放行打扰用户。
         """
         now = datetime.now()
         value = json.dumps({
@@ -207,7 +211,7 @@ class GovernanceAdminService:
             "operator": operator,
             "paused_at": now.isoformat(),
         })
-        self._cache.set(self._brake_key, value, ttl=_BRAKE_TTL_SECONDS)
+        self._cache.set(self._brake_key, value, ttl=0)
 
         self._write_admin_audit(
             action_taken=AuditAction.ADMIN_PAUSE,

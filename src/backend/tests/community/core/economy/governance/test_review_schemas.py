@@ -111,6 +111,13 @@ class TestReviewTicketItem:
         assert item.response is None
         assert item.review_reason is None
         assert item.gmt_create is None
+        assert item.repair_deadline is None  # 默认 None → null
+
+    def test_from_ticket_repair_deadline_iso(self) -> None:
+        """带 repair_deadline 的排期单:列表项暴露 ISO 截止日。"""
+        t = _make_ticket(repair_deadline=datetime(2026, 7, 20, 0, 0, 0))
+        item = ReviewTicketItem.from_ticket(t)
+        assert item.repair_deadline == "2026-07-20T00:00:00"
 
 
 class TestReviewTicketListResponse:

@@ -108,9 +108,10 @@ class TestPause:
         assert payload["operator"] == "admin-1"
         assert payload["paused_at"]
 
-        # TTL propagated to the cache layer.
+        # No TTL — brake never auto-expires (fail-closed: avoids silent
+        # expiry re-enabling governance and surprising users).
         stored_value, ttl = cache._store[svc._brake_key]
-        assert ttl == 7 * 24 * 3600
+        assert ttl == 0
 
         # is_paused now reflects the write.
         assert svc.is_paused() is True
@@ -122,6 +123,30 @@ class TestPause:
             ]
             assert len(audits) == 1
             assert audits[0].actor_id == "admin-1"
+
+    def test_pause_brake_never_auto_expires(self, session, engine):
+        """Brake pause writes the cache key with no TTL — it must not
+        auto-expire after any fixed window (regression: the old 7-day TTL
+        silently evicted the key, letting governance resume and surprise
+        users with notifications an admin believed were still suspended).
+        """
+        svc, _, cache = _build_svc(engine)
+
+        svc.pause(reason="long incident", operator="admin-2")
+
+        # Stored entry carries ttl=0 (never expire) — FakeCache records
+        # (value, ttl) and ttl=0 means no expiry across all cache backends.
+        assert svc._brake_key in cache._store
+        stored_value, ttl = cache._store[svc._brake_key]
+        assert ttl == 0
+        payload = json.loads(stored_value)
+        assert payload["action"] == "pause"
+        assert payload["reason"] == "long incident"
+        assert payload["operator"] == "admin-2"
+        assert payload["paused_at"]
+
+        # Brake stays paused (no TTL to wear it off).
+        assert svc.is_paused() is True
 
 
 # ── resume ───────────────────────────────────────────────────────
