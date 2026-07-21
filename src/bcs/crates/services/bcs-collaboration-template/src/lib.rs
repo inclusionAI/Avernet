@@ -714,7 +714,7 @@ runtime:
                 "write-and-review",
                 "parallel-expert-review",
                 "solution-and-risk-review",
-                "world-cup-preview-media-copy",
+                "world-cup-preview-content-production",
                 "micro-merchant-event-orchestration",
                 "single-bot-guided-answer",
             ]
@@ -750,7 +750,7 @@ runtime:
             vec![
                 "parallel-expert-review",
                 "solution-and-risk-review",
-                "world-cup-preview-media-copy",
+                "world-cup-preview-content-production",
                 "micro-merchant-event-orchestration",
                 "single-bot-guided-answer",
                 "write-and-review",
@@ -801,7 +801,7 @@ runtime:
             vec![
                 "parallel-expert-review",
                 "solution-and-risk-review",
-                "world-cup-preview-media-copy",
+                "world-cup-preview-content-production",
                 "micro-merchant-event-orchestration",
             ]
         );

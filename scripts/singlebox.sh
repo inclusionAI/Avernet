@@ -181,11 +181,7 @@ resolve_services() {
             echo "${START_ORDER[*]}"
             ;;
         bcs_frontend)
-            if [ "$LOCAL_MODE" = true ]; then
-                echo "bcs_bots frontend"
-            else
-                echo "bcs frontend"
-            fi
+            echo "bcs frontend"
             ;;
         bcs_bots)
             echo "bcs bots"
@@ -777,7 +773,9 @@ main() {
 
     case "$command" in
         setup|start|restart|"")
-            singlebox_model_config_prepare || exit 1
+            if singlebox_model_config_required_for_services "${services[@]}"; then
+                singlebox_model_config_prepare || exit 1
+            fi
             ;;
     esac
 

@@ -103,6 +103,87 @@ test_backend_wait_fails_when_started_process_exits() {
   assert_eq "backend_stop" "$(cat "$events_file")" "exited backend process should trigger cleanup"
 }
 
+test_frontend_start_prepares_dependencies_before_launch() (
+  setup_env
+  export FRONTEND_DIR="$(mktemp -d)"
+  export FRONTEND_LOG="${LOG_DIR}/frontend.log"
+  export FRONTEND_PID_FILE="${DEP_DIR}/frontend.pid"
+  export FRONTEND_PORT=8000
+  export BCS_PORT=21000
+  export BCSFUSE_PORT=8765
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/frontend.sh"
+
+  local events_file result
+  events_file="$(mktemp)"
+  frontend_setup() {
+    printf '%s\n' "setup:frontend" >> "$events_file"
+    return 23
+  }
+  stop_port_processes_if_owned() {
+    printf '%s\n' "stop:frontend" >> "$events_file"
+  }
+
+  if frontend_start; then
+    result=0
+  else
+    result=$?
+  fi
+
+  assert_eq "1" "$result" "frontend_start should fail when dependency setup fails"
+  assert_eq "setup:frontend" "$(cat "$events_file")" \
+    "frontend_start should prepare dependencies before touching the running service"
+)
+
+test_frontend_deps_require_dev_commands() (
+  setup_env
+  export FRONTEND_DIR="$(mktemp -d)"
+  export FRONTEND_PORT=8000
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/frontend.sh"
+
+  local package
+  mkdir -p "${FRONTEND_DIR}/node_modules/.bin"
+  printf '%s\n' '{"name":"frontend-test"}' > "${FRONTEND_DIR}/package.json"
+  for package in adapters core ui; do
+    mkdir -p "${FRONTEND_DIR}/node_modules/@aix-chat/${package}"
+    printf '%s\n' "{\"name\":\"@aix-chat/${package}\"}" \
+      > "${FRONTEND_DIR}/node_modules/@aix-chat/${package}/package.json"
+  done
+  touch "${FRONTEND_DIR}/node_modules/.package-lock.json"
+
+  if frontend_deps_ready; then
+    fail "frontend dependencies without cross-env/max should be treated as incomplete"
+  fi
+
+  printf '%s\n' '#!/usr/bin/env sh' 'exit 0' > "${FRONTEND_DIR}/node_modules/.bin/cross-env"
+  printf '%s\n' '#!/usr/bin/env sh' 'exit 0' > "${FRONTEND_DIR}/node_modules/.bin/max"
+  chmod +x \
+    "${FRONTEND_DIR}/node_modules/.bin/cross-env" \
+    "${FRONTEND_DIR}/node_modules/.bin/max"
+
+  frontend_deps_ready || fail "complete frontend dependencies should be reusable"
+)
+
+test_frontend_install_includes_dev_dependencies() (
+  setup_env
+  export FRONTEND_DIR="$(mktemp -d)"
+  export NPM_REGISTRY_URL="https://registry.npmjs.org"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/frontend.sh"
+
+  local npm_args
+  npm_args="$(mktemp)"
+  touch "${FRONTEND_DIR}/package-lock.json"
+  npm() { printf '%s\n' "$*" > "$npm_args"; }
+
+  install_frontend_deps || fail "mock frontend install should succeed"
+  case "$(cat "$npm_args")" in
+    *"ci --include=dev "*) ;;
+    *) fail "frontend install should explicitly include devDependencies" ;;
+  esac
+)
+
 test_service_modules_use_ownership_aware_stop_helpers() {
   local offenders
   offenders="$(
@@ -440,6 +521,9 @@ test_backend_separates_profile_env_and_workspace_folder() {
 test_all_start_rolls_back_started_services_on_failure
 test_backend_health_failure_stops_backend
 test_backend_wait_fails_when_started_process_exits
+test_frontend_start_prepares_dependencies_before_launch
+test_frontend_deps_require_dev_commands
+test_frontend_install_includes_dev_dependencies
 test_service_modules_use_ownership_aware_stop_helpers
 test_service_starts_fail_when_ports_remain_occupied
 test_baas_stop_does_not_delegate_to_app_stop

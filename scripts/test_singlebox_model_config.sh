@@ -208,6 +208,27 @@ test_noninteractive_defaults_to_mock_without_stdout_noise() {
   assert_eq "mock" "$selected" "noninteractive default"
 }
 
+test_model_config_is_required_only_for_consumers() {
+  setup_env
+  # shellcheck source=/dev/null
+  source "$MODULE"
+
+  local service
+  for service in all baas bots bcs_bots; do
+    singlebox_model_config_required_for_services "$service" \
+      || fail "${service} should require model config"
+  done
+
+  for service in bcs bcs_frontend frontend backend bcsfuse; do
+    if singlebox_model_config_required_for_services "$service"; then
+      fail "${service} should not require model config"
+    fi
+  done
+
+  singlebox_model_config_required_for_services bcs frontend bots \
+    || fail "a mixed target containing bots should require model config"
+}
+
 test_manual_generates_runtime_config_from_env
 test_manual_requires_complete_env
 test_home_copies_only_model_fields
@@ -216,5 +237,6 @@ test_home_requires_confirmation
 test_mock_generates_no_real_provider
 test_prompt_maps_selection_to_mode
 test_noninteractive_defaults_to_mock_without_stdout_noise
+test_model_config_is_required_only_for_consumers
 
 printf 'PASS: singlebox model config module tests\n'

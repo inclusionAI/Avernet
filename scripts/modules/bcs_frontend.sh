@@ -4,11 +4,7 @@
 _BCS_FRONTEND_SH_LOADED=1
 
 bcs_frontend_setup() {
-    if [ "$LOCAL_MODE" = true ]; then
-        bcs_bots_setup || return 1
-    else
-        bcs_setup || return 1
-    fi
+    bcs_setup || return 1
     frontend_setup || return 1
 }
 
@@ -21,11 +17,7 @@ bcs_frontend_start() {
     mkdir -p "${LOG_DIR}"
     resolve_bcs_server_env
 
-    if [ "$LOCAL_MODE" = true ]; then
-        bcs_bots_start || return 1
-    else
-        bcs_start || return 1
-    fi
+    bcs_start || return 1
 
     # Set frontend dev script based on LOCAL_MODE
     local old_frontend_script="${FRONTEND_DEV_SCRIPT:-}"
@@ -50,17 +42,10 @@ bcs_frontend_start() {
         return "$frontend_start_rc"
     fi
 
-    if [ "$LOCAL_MODE" = true ]; then
-        bcs_bots_ready || {
-            log_error "BCS + 5 local bots are not ready after startup"
-            return 1
-        }
-    else
-        bcs_ready || {
-            log_error "BCS is not ready after startup"
-            return 1
-        }
-    fi
+    bcs_ready || {
+        log_error "BCS is not ready after startup"
+        return 1
+    }
     frontend_ready || {
         log_error "frontend is not ready after startup"
         return 1
@@ -74,11 +59,7 @@ bcs_frontend_start() {
 
 bcs_frontend_stop() {
     frontend_stop
-    if [ "$LOCAL_MODE" = true ]; then
-        bcs_bots_stop
-    else
-        bcs_stop
-    fi
+    bcs_stop
 }
 
 bcs_frontend_restart() {
@@ -88,26 +69,18 @@ bcs_frontend_restart() {
 }
 
 bcs_frontend_clean() {
-    if [ "$LOCAL_MODE" = true ]; then
-        bcs_bots_clean
-    else
-        bcs_clean
-    fi
+    bcs_clean
 }
 
 bcs_frontend_status() {
-    if [ "$LOCAL_MODE" = true ]; then
-        bcs_bots_status
-    else
-        bcs_status
-    fi
+    bcs_status
     frontend_status
 }
 
 bcs_frontend_help() {
     echo "bcs_frontend - BCS + BCN frontend E2E shortcut (ports ${BCS_PORT}, ${FRONTEND_PORT:-8000})"
     if [ "$LOCAL_MODE" = true ]; then
-        echo "  local: bcs_bots + frontend devs:local:oss"
+        echo "  local: BCS + frontend devs:local:oss"
     else
         echo "  dev:   BCS dev env + skip default onboard + frontend devs:dev"
     fi

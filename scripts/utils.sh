@@ -756,13 +756,12 @@ get_protobuf_version() {
 install_protobuf_macos() {
     log_info "Installing protobuf on macOS..."
 
-    if command -v brew &> /dev/null; then
-        brew install protobuf
-        return $?
-    else
-        log_error "Homebrew not found. Please install Homebrew first: https://brew.sh"
+    if ! command -v brew &> /dev/null; then
+        log_error "Homebrew is required to install protobuf."
+        log_error "Install it from https://brew.sh/ and rerun: ./scripts/singlebox.sh install-tools"
         return 1
     fi
+    run_system_package_install brew protobuf
 }
 
 # 在 Linux 上安装 protobuf
@@ -772,20 +771,16 @@ install_protobuf_linux() {
     # 检测包管理器并安装
     if command -v apt-get &> /dev/null; then
         # Debian/Ubuntu
-        sudo apt-get update && sudo apt-get install -y protobuf-compiler
-        return $?
-    elif command -v yum &> /dev/null; then
-        # CentOS/RHEL/Fedora
-        sudo yum install -y protobuf-compiler
-        return $?
+        run_system_package_install apt-get protobuf-compiler
     elif command -v dnf &> /dev/null; then
         # Fedora
-        sudo dnf install -y protobuf-compiler
-        return $?
+        run_system_package_install dnf protobuf-compiler
+    elif command -v yum &> /dev/null; then
+        # CentOS/RHEL
+        run_system_package_install yum protobuf-compiler
     elif command -v pacman &> /dev/null; then
         # Arch Linux
-        sudo pacman -S protobuf
-        return $?
+        run_system_package_install pacman protobuf
     else
         log_error "Unsupported Linux distribution. Please install protobuf manually."
         log_info "Visit: https://grpc.io/docs/protoc-installation/"
