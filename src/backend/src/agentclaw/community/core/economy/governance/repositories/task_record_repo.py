@@ -206,6 +206,7 @@ class TaskRecordRepository(TaskRecordQueryMixin):
         close_reason: str,
         closed_at: datetime,
         cooldown_until: datetime | None = None,
+        close_conclusion: str | None = None,
     ) -> int:
         """Bulk-close all active open tickets — admin close_all_open.
 
@@ -215,6 +216,9 @@ class TaskRecordRepository(TaskRecordQueryMixin):
         ('open','scheduled')`` predicate (equivalent to the white-list guard).
         Callers are converged to the driver service ``bulk_close_open``, which
         orchestrates audit + notify-cancel around this primitive.
+
+        ``close_conclusion`` 透传批量关单结论(批量场景统一落
+        ``AdminCloseConclusion.BULK_CLOSED``),逐行带同一结论值。
 
         Returns the number of rows affected.
         """
@@ -235,6 +239,11 @@ class TaskRecordRepository(TaskRecordQueryMixin):
                         GovernanceTicketOrm.close_reason: close_reason,
                         GovernanceTicketOrm.closed_at: closed_at,
                         GovernanceTicketOrm.active_worker: None,
+                        **(
+                            {GovernanceTicketOrm.close_conclusion: close_conclusion}
+                            if close_conclusion is not None
+                            else {}
+                        ),
                         **(
                             {GovernanceTicketOrm.cooldown_until: cooldown_until}
                             if cooldown_until is not None

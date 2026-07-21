@@ -163,6 +163,57 @@ class TaskRecordQueryMixin:
             latest[row.worker_id] = GovernanceTicket.from_orm(row)
         return latest
 
+    def list_recent_tickets_by_worker(
+        self,
+        *,
+        worker_id: str | None = None,
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        limit: int = 5,
+    ) -> list[GovernanceTicket]:
+        """按 worker 取最近 N 条工单(全状态,gmt_create 倒序)。
+
+        worker_id(owner:bot)精确等值;owner_id/bot_id 独立维度可任传其一或组合
+        (组合 = AND,同一工单同时满足)。全状态(open/scheduled/waiting_review/
+        closed/observed)不过滤,含历史关单 + 当前活跃单,供管理员横向看一个
+        worker 的工单生命周期,辅助关单-重开决策。
+
+        语义"取最近 N 条",非分页;无 total 配套(调用方 service 已据此设计响应)。
+        用 ``worker_id`` 而非 ``active_worker``(closed 后置 NULL),口径与
+        :meth:`find_latest_closed_by_worker` 一致。
+
+        Args:
+            worker_id: 复合标识,优先(调用方已解析格式并校验,本层不再校验)。
+            owner_id: 按 owner 维度。
+            bot_id: 按 bot 维度。
+            limit: 取数上限(1~50,调用方已校验)。
+
+        Returns:
+            最近 N 条 :class:`GovernanceTicket`(gmt_create DESC);无匹配返回
+            ``[]``。三定位参皆空时返回 ``[]``(防全表扫兜底,调用方 service 层
+            通常已拦 400,此处双保险)。
+        """
+        if worker_id is None and owner_id is None and bot_id is None:
+            return []
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            q = (
+                s.query(GovernanceTicketOrm)
+                .filter(GovernanceTicketOrm.env == _env)
+            )
+            if worker_id is not None:
+                q = q.filter(GovernanceTicketOrm.worker_id == worker_id)
+            if owner_id is not None:
+                q = q.filter(GovernanceTicketOrm.owner_id == owner_id)
+            if bot_id is not None:
+                q = q.filter(GovernanceTicketOrm.bot_id == bot_id)
+            rows = (
+                q.order_by(GovernanceTicketOrm.gmt_create.desc())
+                .limit(limit)
+                .all()
+            )
+            return [GovernanceTicket.from_orm(r) for r in rows]
+
     def list_active_open_tickets(
         self,
     ) -> list[GovernanceTicket]:

@@ -9,7 +9,7 @@ so it CAN import from conftest).
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from agentclaw.community.core.economy.governance.domain.enums import (
     CloseReason,
@@ -65,7 +65,8 @@ def _build_svc():
 
 
 def _seed_ticket(db, *, ticket_id="T-100", status="open", remind_at=None,
-                 worker="owner-1:bot-1", owner_name=None, token_baseline=None):
+                 worker="owner-1:bot-1", owner_name=None, token_baseline=None,
+                 repair_deadline=None):
     """Insert a task_record row directly via ORM for test seeding.
 
     ``worker`` sets both ``worker_id`` and ``active_worker``; the table has a
@@ -106,6 +107,7 @@ def _seed_ticket(db, *, ticket_id="T-100", status="open", remind_at=None,
             last_sync_at=datetime.now(),  # nullable=False, no default
             remind_at=remind_at,
             remind_count=0,
+            repair_deadline=repair_deadline,
         )
         s.add(row)
 
@@ -568,6 +570,42 @@ class TestPauseReviewAdmin:
         assert t.close_reason == "schedule_approved"
         assert t.reviewed_by == "admin-1"
 
+    def test_review_approve_scheduled_sets_mute_until(self) -> None:
+        """approve_scheduled 设 resume_at=repair_deadline(→mute_until),
+        让 cron list_scheduled_due 到期能扫到触发 schedule_due②。纯 repair_deadline,
+        不加 cooldown(否则 approve_close 时重复冷却)。"""
+        svc, db, _ = _build_svc()
+        deadline = datetime.now() + timedelta(days=7)
+        _seed_ticket(
+            db, ticket_id="T-sch-mute", status="waiting_review",
+            repair_deadline=deadline,
+        )
+        assert svc.review_ticket(
+            "T-sch-mute", review_decision="approve_scheduled",
+            reviewed_by="admin-1",
+        ) is True
+        t = svc._task_repo.find_by_ticket_id("T-sch-mute")  # noqa: SLF001
+        assert t.governance_status == GovernanceStatus.SCHEDULED
+        # resume_at (→ mute_until) = 纯 repair_deadline,不加 cooldown。
+        assert t.resume_at == deadline
+        # 落库后能被 list_scheduled_due(mute_until<=now 且 IS NOT NULL)扫到:
+        # 未来日 deadline > now,当前不在 due;但 mute_until 已非空。
+        assert t.resume_at is not None
+
+    def test_review_approve_scheduled_without_repair_deadline_warns(self) -> None:
+        """repair_deadline 缺失(异常数据,need_time 本该必填)时,领域静默不设
+        resume_at,审批仍完成(进 SCHEDULED);lifecycle 兜 warn,不 raise。"""
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-sch-nomute", status="waiting_review")
+        # 不带 repair_deadline(默认 None)
+        assert svc.review_ticket(
+            "T-sch-nomute", review_decision="approve_scheduled",
+            reviewed_by="admin-1",
+        ) is True
+        t = svc._task_repo.find_by_ticket_id("T-sch-nomute")  # noqa: SLF001
+        assert t.governance_status == GovernanceStatus.SCHEDULED  # 审批完成
+        assert t.resume_at is None  # 防御:无 repair_deadline 不设 mute
+
     def test_admin_close_open_to_closed(self) -> None:
         svc, db, _ = _build_svc()
         _seed_ticket(db, ticket_id="T-emg", status="open")
@@ -575,6 +613,31 @@ class TestPauseReviewAdmin:
         t = svc._task_repo.find_by_ticket_id("T-emg")  # noqa: SLF001
         assert t.governance_status == GovernanceStatus.CLOSED
         assert t.close_reason == CloseReason.ADMIN_CLOSED
+
+    def test_admin_close_attaches_conclusion_and_payload(self) -> None:
+        """admin_close 透传 close_conclusion/close_payload 到领域 close()。"""
+        import json as _json
+        from agentclaw.community.core.economy.governance.domain.enums import AdminCloseConclusion
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-cc", status="open")
+        assert svc.admin_close(
+            "T-cc", now=datetime.now(),
+            close_conclusion=AdminCloseConclusion.FALSE_POSITIVE.value,
+            close_payload=_json.dumps({"remark": "误报"}),
+        ) is True
+        t = svc._task_repo.find_by_ticket_id("T-cc")  # noqa: SLF001
+        assert t.governance_status == GovernanceStatus.CLOSED
+        assert t.close_conclusion == AdminCloseConclusion.FALSE_POSITIVE.value
+        assert _json.loads(t.close_payload or "{}")["remark"] == "误报"
+
+    def test_admin_close_without_conclusion_leaves_none(self) -> None:
+        """不传 conclusion(非 admin/旧路径)→ 留 None,关单仍成功。"""
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-nocon", status="open")
+        assert svc.admin_close("T-nocon", now=datetime.now()) is True
+        t = svc._task_repo.find_by_ticket_id("T-nocon")  # noqa: SLF001
+        assert t.close_conclusion is None
+        assert t.close_payload is None
 
     def test_admin_close_idempotent_on_closed(self) -> None:
         """Already-closed → no-op returns False (idempotent guard in driver)."""

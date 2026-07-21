@@ -58,6 +58,7 @@ class AuditAction(str, Enum):
     ADMIN_PAUSE = "admin_pause"                     # Admin pause
     ADMIN_RESUME = "admin_resume"                   # Admin resume
     ADMIN_WHITELIST = "admin_whitelisted"           # Admin whitelist
+    ADMIN_OVERRIDE_OWNER = "admin_override_owner"   # Admin 设/清工单 override_owner(通知收件人覆盖)
     STALE_REPLACED = "stale_replaced"               # 未回复换新:关老工单用新数据重建
     SCAN_SKIPPED_BRAKE = "scan_skipped_brake"       # 自动定时 tick 因制动被跳过 (调度层判定)
 
@@ -173,7 +174,12 @@ class NotifyType(str, Enum):
 
 
 class CloseReason(str, Enum):
-    """工单关闭原因 — 用于 GovernanceTicket.close_reason."""
+    """工单关闭原因 — 用于 GovernanceTicket.close_reason.
+
+    语义维度:**关单机制/来源**(这张单是被谁、什么流程关掉的)。覆盖所有关单路径
+    (admin 手动 / scan 白名单 / 静默 / stale 替换 / 审批)。与 ``AdminCloseConclusion``
+    (管理员裁定结论)是两个独立维度,并列存储,不复用不混用。
+    """
 
     ADMIN_CLOSED = "admin_closed"
     AUTO_SILENCED_NORMAL = "auto_silenced_normal"
@@ -182,6 +188,33 @@ class CloseReason(str, Enum):
     USER_OPTIMIZED_APPROVED = "user_optimized_approved"
     REVIEW_REJECTED = "review_rejected"
     STALE_REPLACED = "stale_replaced"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class AdminCloseConclusion(str, Enum):
+    """管理员关单结论裁定 — 用于 GovernanceTicket.close_conclusion.
+
+    语义维度:**管理员对工单的业务裁定结论**(误报/已优化/重复/暂缓...)。只 admin 关单
+    路径(``tickets:close`` / ``admin_close``)才有值;自动关单路径(scan 白名单 / 静默 /
+    stale 替换)无管理员裁定,留 ``None``。
+
+    与 ``CloseReason``(关单机制/来源)是两个独立维度:一张 admin 关单同时落
+    ``close_reason=ADMIN_CLOSED``(怎么关的)+ ``close_conclusion=FALSE_POSITIVE``(裁
+    定结论);一张 scan 自动关单只落 ``close_reason=SCAN_WHITELISTED``,
+    ``close_conclusion=None``。不复用、不混用 ``CloseReason``。
+
+    取值锚定审批前端 ``CloseTicketModal.CLOSE_PRESETS`` 6 条预设 + close-all 批量专用值。
+    """
+
+    FALSE_POSITIVE = "false_positive"             # 误报,无需治理
+    RESOLVED_OPTIMIZED = "resolved_optimized"     # 已优化达标
+    NOISE_SINGLE_SESSION = "noise_single_session"  # 单次大 session,意义不大
+    DEFERRED_BY_OWNER = "deferred_by_owner"       # 业务方确认暂缓
+    DUPLICATE_MERGED = "duplicate_merged"         # 重复工单,已合并
+    OTHER = "other"                               # 其他(配合 close_payload.remark 手填)
+    BULK_CLOSED = "bulk_closed"                   # tickets:close-all 逐单落的批量结论
 
     def __str__(self) -> str:
         return self.value

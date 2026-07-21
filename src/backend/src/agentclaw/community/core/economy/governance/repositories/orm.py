@@ -409,6 +409,7 @@ class GovernanceTicketOrm(Base):
     worker_id = Column(String(160), nullable=False)  # 工单身份: owner_id:bot_id (禁止 device worker_id)
     bot_id = Column(String(64))
     owner_id = Column(String(64), nullable=True, comment="负责人ID")
+    override_owner = Column(String(64), nullable=True, comment="通知收件人覆盖 (NULL=发原 owner; 非空=发给此人)")
     owner_name = Column(String(256), nullable=True, comment="Bot owner display name")
     dt_version = Column(String(8), nullable=False, comment="工单当前所基于的最新数据版本")
     governance_decision = Column(
@@ -445,6 +446,10 @@ class GovernanceTicketOrm(Base):
 
     # --- 关闭 ---
     close_reason = Column(String(32), nullable=True)
+    close_conclusion = Column(
+        String(32), nullable=True,
+        comment="关单结论裁定 (AdminCloseConclusion 枚举); 仅 admin 关单有值",
+    )
     closed_at = Column(TIMESTAMP, nullable=True)
     cooldown_until = Column(TIMESTAMP, nullable=True)
 
@@ -482,6 +487,9 @@ class GovernanceTicketOrm(Base):
 
     # --- 其它 ---
     feedback_payload = Column(Text, nullable=True, comment="结构化反馈 JSON")
+    close_payload = Column(
+        Text, nullable=True, comment="关单明细 (JSON, 当前 {remark})"
+    )
     actor_id = Column(String(64), nullable=True, comment="实际操作人ID")
     delivery_status = Column(String(32), default="none", comment="最近通知投递状态单值: pending/sent/failed/cancelled;none 为列默认哨兵(历史遗留)")
     last_notified_at = Column(TIMESTAMP, nullable=True, default=None, comment="最近一次成功通知时间(首投/reminder sent 时刷新;失败/取消不动)")
@@ -506,6 +514,7 @@ class GovernanceTicketOrm(Base):
             "bot_id": self.bot_id,
             "bot_name": self.bot_name,
             "owner_id": self.owner_id,
+            "override_owner": self.override_owner,
             "owner_name": self.owner_name,
             "dt_version": self.dt_version,
             "governance_decision": self.governance_decision,
@@ -525,6 +534,7 @@ class GovernanceTicketOrm(Base):
             "response_remark": self.response_remark,
             "response_source": self.response_source,
             "close_reason": self.close_reason,
+            "close_conclusion": self.close_conclusion,
             "closed_at": self.closed_at,
             "cooldown_until": self.cooldown_until,
             "review_reason": self.review_reason,
@@ -541,6 +551,7 @@ class GovernanceTicketOrm(Base):
             "remind_at": self.remind_at,
             "remind_count": self.remind_count,
             "feedback_payload": self.feedback_payload,
+            "close_payload": self.close_payload,
             "actor_id": self.actor_id,
             "delivery_status": self.delivery_status,
             "last_notified_at": self.last_notified_at,

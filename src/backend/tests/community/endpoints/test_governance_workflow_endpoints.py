@@ -763,3 +763,212 @@ def pending_notification_ok():
 )
 def pending_notification_not_found_error():
     """Error path: ticket with no notification → 404."""
+
+
+# ---------------------------------------------------------------------------
+# 9. GET /workflow/tickets/by-worker — 按 worker 查工单历史(辅助决策)
+# ---------------------------------------------------------------------------
+
+
+def _seed_worker_history(world) -> None:
+    """Seed one worker with 2 historical-closed + 1 active-open ticket.
+
+    历史 closed 行用 last_sync_at 拉差以稳定 gmt_create 顺序(SQLite 秒级精度,
+    取毫秒差避免同秒插入导致 gmt_create 并列)。active 工单至多一条(UK active_worker)。
+    """
+    from datetime import datetime, timedelta
+    repo = world.get(TaskRecordRepository)
+    base = datetime.now()
+    worker_id = "owner-h:bot-h"
+    # 老:closed(active_worker=None)。显式 gmt_create 拉开天数,保证 repo 的
+    # gmt_create DESC 确定排序(SQLite TIMESTAMP 秒级精度,不显式设会同时刻插入)。
+    repo.insert_ticket(GovernanceTicketOrm(
+        ticket_id="tkt-hw-old", worker_id=worker_id,
+        bot_id="bot-h", owner_id="owner-h", bot_name="BotH",
+        dt_version="20260701", governance_decision="actionable",
+        governance_status="closed", active_worker=None,
+        close_reason="admin_closed", close_conclusion="false_positive",
+        closed_at=base - timedelta(days=2), delivery_status="sent",
+        gmt_create=base - timedelta(days=2), last_sync_at=base - timedelta(days=2),
+    ))
+    # 中:closed
+    repo.insert_ticket(GovernanceTicketOrm(
+        ticket_id="tkt-hw-mid", worker_id=worker_id,
+        bot_id="bot-h", owner_id="owner-h", bot_name="BotH",
+        dt_version="20260705", governance_decision="actionable",
+        governance_status="closed", active_worker=None,
+        close_reason="review_rejected", closed_at=base - timedelta(days=1),
+        delivery_status="sent", gmt_create=base - timedelta(days=1),
+        last_sync_at=base - timedelta(days=1),
+    ))
+    # 新:open(active)
+    repo.insert_ticket(GovernanceTicketOrm(
+        ticket_id="tkt-hw-new", worker_id=worker_id,
+        bot_id="bot-h", owner_id="owner-h", bot_name="BotH",
+        dt_version="20260710", governance_decision="actionable",
+        governance_status="open", active_worker=worker_id,
+        delivery_status="pending", gmt_create=base, last_sync_at=base,
+    ))
+    # 别的 worker,不应混入
+    repo.insert_ticket(GovernanceTicketOrm(
+        ticket_id="tkt-hw-other", worker_id="owner-x:bot-x",
+        bot_id="bot-x", owner_id="owner-x", bot_name="BotX",
+        dt_version="20260710", governance_decision="actionable",
+        governance_status="open", active_worker="owner-x:bot-x",
+        last_sync_at=base,
+    ))
+
+
+def _assert_worker_history_ok(response, world) -> None:
+    del world
+    body = response.json()
+    assert body["success"] is True
+    data = body["data"]
+    assert data["worker_id"] == "owner-h:bot-h"
+    assert data["owner_id"] == "owner-h"
+    assert data["bot_id"] == "bot-h"
+    assert data["limit"] == 5
+    ids = [it["ticket_id"] for it in data["items"]]
+    assert ids == ["tkt-hw-new", "tkt-hw-mid", "tkt-hw-old"]
+    # 决策字段齐全
+    new_item = data["items"][0]
+    assert new_item["governance_status"] == "open"
+    assert new_item["delivery_status"] == "pending"
+    old_item = data["items"][2]
+    assert old_item["close_reason"] == "admin_closed"
+    assert old_item["close_conclusion"] == "false_positive"
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets/by-worker",
+    scenario="ok_worker_id",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"worker_id": "owner-h:bot-h"},
+    ),
+    seed=_seed_worker_history,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(_assert_worker_history_ok,),
+)
+def tickets_by_worker_ok():
+    """Happy path: worker_id 返回 3 条历史 + 活跃,gmt_create 倒序,回显 worker。"""
+
+
+def _seed_worker_history_many(world) -> None:
+    """Seed 3 closed-history tickets for a worker (limit cap test)."""
+    from datetime import datetime, timedelta
+    repo = world.get(TaskRecordRepository)
+    base = datetime.now()
+    worker_id = "owner-l:bot-l"
+    for i in range(3):
+        repo.insert_ticket(GovernanceTicketOrm(
+            ticket_id=f"tkt-lim-{i}", worker_id=worker_id,
+            bot_id="bot-l", owner_id="owner-l", bot_name="BotL",
+            dt_version=f"2026070{i}", governance_decision="actionable",
+            governance_status="closed", active_worker=None,
+            close_reason="stale_replaced", close_conclusion=None,
+            closed_at=base - timedelta(days=2 - i),
+            delivery_status="sent", last_sync_at=base - timedelta(days=2 - i),
+        ))
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets/by-worker",
+    scenario="ok_limit_cap",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"worker_id": "owner-l:bot-l", "limit": "1"},
+    ),
+    seed=_seed_worker_history_many,
+    expect=ExpectSuccess(status=200, json_contains={"success": True, "data": {"limit": 1}}),
+)
+def tickets_by_worker_limit():
+    """Happy path: limit=1 caps to most recent ticket."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets/by-worker",
+    scenario="ok_owner_only",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"owner_id": "owner-h"},
+    ),
+    seed=_seed_worker_history,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+)
+def tickets_by_worker_owner_only():
+    """Happy path: owner-only query returns matches; worker_id echo None."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets/by-worker",
+    scenario="empty_no_match",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"worker_id": "nobody:none"},
+    ),
+    expect=ExpectSuccess(status=200, json_contains={"success": True, "data": {"items": []}}),
+)
+def tickets_by_worker_empty():
+    """Happy path: no tickets for worker → 200 items=[]."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets/by-worker",
+    scenario="error_missing_all",
+    input=CaseInput(headers=_USER_HEADER),
+    # 全空定位 → service ValueError → 400
+    expect=ExpectError(status=400),
+)
+def tickets_by_worker_missing_all_error():
+    """Error path: no worker/owner/bot → 400."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets/by-worker",
+    scenario="error_invalid_worker_id",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"worker_id": "no-colon"},
+    ),
+    # worker_id 非法 → service ValueError → 400
+    expect=ExpectError(status=400),
+)
+def tickets_by_worker_invalid_worker_id_error():
+    """Error path: worker_id without colon → 400."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets/by-worker",
+    scenario="error_limit_out_of_range_low",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"owner_id": "owner-h", "limit": "0"},
+    ),
+    # limit < 1 → FastAPI Query ge 校验 → 422
+    expect=ExpectError(status=422),
+)
+def tickets_by_worker_limit_zero_error():
+    """Error path: limit=0 → 422."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/economy/governance/workflow/tickets/by-worker",
+    scenario="error_limit_out_of_range_high",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        query_params={"owner_id": "owner-h", "limit": "51"},
+    ),
+    # limit > 50 → FastAPI Query le 校验 → 422
+    expect=ExpectError(status=422),
+)
+def tickets_by_worker_limit_over_fifty_error():
+    """Error path: limit=51 → 422."""

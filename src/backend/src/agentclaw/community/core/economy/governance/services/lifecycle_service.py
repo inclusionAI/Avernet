@@ -559,6 +559,15 @@ class GovernanceLifecycleService:
         except IllegalTicketTransitionError as exc:
             self._audit_illegal(ticket_id, "review_ticket", exc)
             return False
+        # approve_scheduled 应设 resume_at(=repair_deadline)作 mute_until,
+        # 供 cron schedule_due 到期触发。repair_deadline 缺失(need_time 必填
+        # 却无,异常数据)时领域静默不设,此兜 warn 可观测排查;不阻断审批。
+        if review_decision == "approve_scheduled" and ticket.resume_at is None:
+            log.warning(
+                "[GovernanceLifecycle] approve_scheduled left mute_until unset "
+                "(repair_deadline missing); schedule-due will not fire: ticket_id=%s",
+                ticket_id,
+            )
         if not self._task_repo.save_ticket(ticket):
             return False
         self._cancel_pending(ticket_id)
@@ -567,18 +576,22 @@ class GovernanceLifecycleService:
     def admin_close(
         self, ticket_id: str, *, now: datetime,
         cooldown_until: datetime | None = None,
+        close_conclusion: str | None = None,
+        close_payload: str | None = None,
     ) -> bool:
         """Any non-CLOSED → CLOSED(admin_closed) + cancel pending.
 
         方案 A 链路:find → 幂等检查(已 CLOSED 返 False)→
-        ``ticket.close(ADMIN_CLOSED, cooldown_until=...)``(守卫激活)→
-        ``save_ticket`` → 取消通知。审计由调用方(admin_service)拥有(携带 reason +
-        actor_id=admin_id)—— 与 pause_ticket / review_ticket 等
-        sibling 方法一致,driver 不重复写审计。
+        ``ticket.close(ADMIN_CLOSED, cooldown_until=..., close_conclusion=...,
+        close_payload=...)``(守卫激活)→ ``save_ticket`` → 取消通知。审计由调用方
+        (admin_service)拥有(携带 conclusion + actor_id=admin_id)—— 与 pause_ticket
+        / review_ticket 等 sibling 方法一致,driver 不重复写审计。
 
         ``cooldown_until`` 透传到领域关单,与 ``review_ticket`` 的 approve_close
         分支口径一致(关单后 N 天内不重建)。默认 None = 不设冷却(向后兼容)。
-        已 CLOSED 工单短路,never 到 close,cooldown 不被覆盖(幂等保持)。
+        ``close_conclusion`` / ``close_payload`` 透传领域关单(管理员裁定结论 +
+        明细 JSON),仅 admin 关单链路有值,自动关单路径不传(留 None)。已 CLOSED
+        工单短路,never 到 close,这两个字段不被覆盖(幂等保持)。
 
         Returns True if the ticket was found and closed, False if not found
         (or already closed — idempotent no-op).
@@ -592,6 +605,8 @@ class GovernanceLifecycleService:
             ticket.close(
                 close_reason=CloseReason.ADMIN_CLOSED, closed_at=now,
                 cooldown_until=cooldown_until,
+                close_conclusion=close_conclusion,
+                close_payload=close_payload,
             )
         except IllegalTicketTransitionError as exc:
             self._audit_illegal(ticket_id, "admin_close", exc)
@@ -601,7 +616,10 @@ class GovernanceLifecycleService:
         self._cancel_pending(ticket_id)
         return True
 
-    def bulk_close_open(self, *, close_reason: str, now: datetime) -> int:
+    def bulk_close_open(
+        self, *, close_reason: str, now: datetime,
+        close_conclusion: str | None = None,
+    ) -> int:
         """Bulk admin-close all open/scheduled tickets — joint orchestration:
         land ``task_record`` CLOSED (ticket machine, via the bulk primitive)
         + cancel pending notifies (notify-delivery machine, one-way side
@@ -611,10 +629,14 @@ class GovernanceLifecycleService:
         bypasses the per-row model load for performance; state legality is
         enforced by the SQL ``WHERE status IN (open,scheduled)`` predicate.
 
+        ``close_conclusion`` 透传 repo 批量落 ``close_conclusion`` 列(批量场景
+        统一 ``AdminCloseConclusion.BULK_CLOSED``,每张被关工单带同一结论)。
+
         Returns the number of tickets closed.
         """
         count = self._task_repo.bulk_close_open(
             close_reason=close_reason, closed_at=now,
+            close_conclusion=close_conclusion,
         )
         # Best-effort cancel of pending notifies across all closed tickets.
         # The notify bulk-cancel by status is orchestrated in admin_service /
@@ -634,6 +656,7 @@ class GovernanceLifecycleService:
 
     def bulk_close_by_ticket_ids(
         self, ticket_ids: list[str], *, now: datetime,
+        close_conclusion: str | None = None,
     ) -> int:
         """Per-ticket admin-close by ``ticket_id`` set — Task 8 用:
         cancel_pending / bulk_whitelist 取消通知投递后,按被关通知的
@@ -644,16 +667,22 @@ class GovernanceLifecycleService:
         :meth:`bulk_close_open`(会多关已反馈的 scheduled 单)。
         幂等:已 CLOSED / not-found / 非法态均返回 False 且不计数。
 
+        ``close_conclusion`` 透传逐条 admin_close 落盘(批量场景统一
+        ``AdminCloseConclusion.BULK_CLOSED``)。
+
         Args:
             ticket_ids: 被取消通知对应的 ticket_id 集合(已剔 None)。
             now: 关闭时间戳。
+            close_conclusion: 关单结论(批量统一值,可选)。
 
         Returns:
             实际关闭的工单数(不含幂等跳过的)。
         """
         closed = 0
         for ticket_id in ticket_ids:
-            if self.admin_close(ticket_id, now=now):
+            if self.admin_close(
+                ticket_id, now=now, close_conclusion=close_conclusion,
+            ):
                 closed += 1
         return closed
 

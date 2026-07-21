@@ -736,7 +736,7 @@ class TestDeleteTicketCascadeService:
 
     def _svc(
         self, task_rows: list[dict], notify_rows: list[dict],
-    ) -> GovernanceWorkflowService:
+    ) -> Any:
         from agentclaw.community.core.economy.governance.services.workflow_service import (
             GovernanceWorkflowService,
         )
@@ -914,7 +914,7 @@ class TestDeleteCascadeEndpoint:
         task_rows: list[dict] | None = None,
         notify_rows: list[dict] | None = None,
         user_id: str = "operator-1",
-    ) -> tuple[Any, "GovernanceWorkflowService"]:
+    ) -> tuple[Any, Any]:
         from agentclaw.community.adapters.http.economy import workflow_router
         from agentclaw.community.core.economy.governance.services.workflow_service import (
             GovernanceWorkflowService,

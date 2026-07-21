@@ -182,6 +182,21 @@ def _seed_tickets_deliver_happy(world) -> None:
     )
 
 
+def _seed_tickets_override_owner(world) -> None:
+    """Seed an open ticket for tickets:override-owner (set 覆盖收件人)."""
+    _insert_ticket(world, ticket_id="tkt-ov-1", governance_status="open",
+                   bot_id="bot-ov", owner_id="owner-ov")
+
+
+def _assert_override_owner_set(response, world) -> None:
+    """工单 override_owner 落盘 + 原 owner_id 不动。"""
+    repo = world.get(TaskRecordRepository)
+    ticket = repo.find_by_ticket_id("tkt-ov-1")
+    assert ticket is not None
+    assert ticket.override_owner == "delegated-staff"
+    assert ticket.owner_id == "owner-ov"  # 原 owner 不变
+
+
 def _seed_brake_paused(world) -> None:
     """Seed paused state by calling real admin_svc.pause()."""
     admin_svc = world.get(GovernanceAdminServiceProtocol)
@@ -208,7 +223,8 @@ def _seed_scan_and_deliver_happy(world) -> None:
 
 
 def _assert_tickets_closed(response, world) -> None:
-    """Verify both tickets were closed by admin_close 循环."""
+    """Verify both tickets were closed by admin_close 循环 + conclusion/明细落盘。"""
+    import json as _json
     repo = world.get(TaskRecordRepository)
     for tid in ("tkt-close-1", "tkt-close-2"):
         ticket = repo.find_by_ticket_id(tid)
@@ -217,24 +233,31 @@ def _assert_tickets_closed(response, world) -> None:
             f"Expected {tid} closed, got {ticket.governance_status}"
         )
         assert ticket.close_reason == "admin_closed"
+        # D1/D3:结论枚举 + 明细 JSON 落盘(对标 feedback 回执)
+        assert ticket.close_conclusion == "false_positive"
+        assert _json.loads(ticket.close_payload or "{}")["remark"] == "误报，无需治理"
 
 
 def _assert_close_all_full_closed(response, world) -> None:
-    """close-all 全量(close_all_open)→ ticket 主体 CLOSED,ADMIN_CLOSED。"""
+    """close-all 全量(close_all_open)→ ticket 主体 CLOSED,ADMIN_CLOSED,BULK_CLOSED。"""
     repo = world.get(TaskRecordRepository)
     ticket = repo.find_by_ticket_id("tkt-ca-full")
     assert ticket is not None
     assert ticket.governance_status == "closed"
     assert ticket.close_reason == "admin_closed"
+    # D4:批量关单统一落 BULK_CLOSED,明细留空
+    assert ticket.close_conclusion == "bulk_closed"
 
 
 def _assert_close_all_unresponded_closed(response, world) -> None:
-    """close-all only_unresponded(cancel_pending)→ ticket 主体 CLOSED,ADMIN_CLOSED。"""
+    """close-all only_unresponded(cancel_pending)→ ticket 主体 CLOSED,ADMIN_CLOSED,BULK_CLOSED。"""
     repo = world.get(TaskRecordRepository)
     ticket = repo.find_by_ticket_id("tkt-ca-ur")
     assert ticket is not None
     assert ticket.governance_status == "closed"
     assert ticket.close_reason == "admin_closed"
+    # D4:cancel_pending 逐条关单同样落 BULK_CLOSED
+    assert ticket.close_conclusion == "bulk_closed"
 
 
 def _assert_whitelist_deleted(response, world) -> None:
@@ -297,8 +320,9 @@ def _assert_brake_paused(response, world) -> None:
     input=CaseInput(
         headers=_USER_HEADER,
         json_body={
-            "reason": "urgent",
             "ticket_ids": ["tkt-close-1", "tkt-close-2"],
+            "conclusion": "false_positive",
+            "detail": {"remark": "误报，无需治理"},
         },
     ),
     seed=_seed_tickets_close_happy,
@@ -317,14 +341,51 @@ def tickets_close_multi_ok():
         headers=_USER_HEADER,
         # 批量循环不整体 raise;not-found 返回 200 + outcome 含 error_code=NOT_FOUND
         json_body={
-            "reason": "test",
             "ticket_ids": ["tkt-nonexistent-999"],
+            "conclusion": "other",
         },
     ),
     expect=ExpectSuccess(status=200, json_contains={"success": True}),
 )
 def tickets_close_not_found_returns_outcome():
     """批量场景:不存在的 ticket → 200 + outcome 含 error(不整体 404)."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/workflow/tickets:close",
+    scenario="invalid_conclusion_rejected",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        # 非受控枚举 → Pydantic 422(结论字段强校验,不接受任意字符串冒充)
+        json_body={
+            "ticket_ids": ["tkt-close-1"],
+            "conclusion": "not_a_conclusion",
+        },
+    ),
+    seed=_seed_tickets_close_happy,
+    expect=ExpectSuccess(status=422),
+)
+def tickets_close_invalid_conclusion_rejected():
+    """非法 conclusion → 422(枚举受控,D1)。"""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/workflow/tickets:close",
+    scenario="missing_conclusion_rejected",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        # 不传 conclusion → 422(必传,D2 新契约无老接口)
+        json_body={
+            "ticket_ids": ["tkt-close-1"],
+        },
+    ),
+    seed=_seed_tickets_close_happy,
+    expect=ExpectSuccess(status=422),
+)
+def tickets_close_missing_conclusion_rejected():
+    """缺 conclusion → 422(必传,D2)。"""
 
 
 # ---------------------------------------------------------------------------
@@ -385,6 +446,73 @@ def tickets_close_all_only_unresponded_ok():
 )
 def tickets_deliver_dry_run_ok():
     """Happy path: deliver pending notifies for a worker (dry_run)."""
+
+
+# ---------------------------------------------------------------------------
+# 3b. /admin/tickets:override-owner (设/清通知收件人覆盖)
+# ---------------------------------------------------------------------------
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/workflow/tickets:override-owner",
+    scenario="ok_set",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        json_body={
+            "ticket_id": "tkt-ov-1",
+            "override_owner": "delegated-staff",
+        },
+    ),
+    seed=_seed_tickets_override_owner,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(_assert_override_owner_set,),
+)
+def tickets_override_owner_set_ok():
+    """Happy path: set override_owner 落盘 + 原 owner 不变。"""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/workflow/tickets:override-owner",
+    scenario="clear",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        json_body={
+            "ticket_id": "tkt-ov-1",
+            "override_owner": None,
+        },
+    ),
+    seed=_seed_tickets_override_owner,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(
+        lambda response, world: (
+            None
+            if world.get(TaskRecordRepository).find_by_ticket_id("tkt-ov-1").override_owner is None
+            else (_ for _ in ()).throw(AssertionError("override_owner should be None after clear"))
+        ),
+    ),
+)
+def tickets_override_owner_clear_ok():
+    """清除 override_owner(None)→ 工单 override_owner=None。"""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/workflow/tickets:override-owner",
+    scenario="not_found_returns_404",
+    input=CaseInput(
+        headers=_USER_HEADER,
+        json_body={
+            "ticket_id": "tkt-ov-ghost",
+            "override_owner": "delegated-staff",
+        },
+    ),
+    seed=_seed_tickets_override_owner,
+    expect=ExpectError(status=404),
+)
+def tickets_override_owner_not_found_returns_404():
+    """ticket 不存在 → service 返回 NOT_FOUND outcome → 路由转 404。"""
 
 
 # ---------------------------------------------------------------------------

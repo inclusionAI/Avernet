@@ -25,6 +25,7 @@ from agentclaw.community.core.economy.governance.domain.ticket import Governance
 
 from agentclaw.community.core.economy.governance.domain.whitelist import WhitelistEntry
 from agentclaw.community.core.economy.governance.domain.enums import (
+    AdminCloseConclusion,
     CloseReason,
     GovernanceStatus,
     NotifyStatus,
@@ -904,6 +905,34 @@ class TestTicketEnterObserved:
         t.close(close_reason=CloseReason.ADMIN_CLOSED, closed_at=datetime(2026, 7, 18))
         assert t.closed_at is not None
         assert t.governance_status == GovernanceStatus.CLOSED
+
+    def test_close_attaches_conclusion_and_payload(self) -> None:
+        """admin 关单传 conclusion+payload → 落两字段,转态语义不变(仍 CLOSED)。
+
+        附加存储对标 accept_feedback 注入 feedback_payload 的同款模式,不进转态白名单。
+        """
+        t = _make_ticket(governance_status=GovernanceStatus.OPEN)
+        t.close(
+            close_reason=CloseReason.ADMIN_CLOSED,
+            closed_at=datetime(2026, 7, 20),
+            close_conclusion=AdminCloseConclusion.FALSE_POSITIVE.value,
+            close_payload=json.dumps({"remark": "误报"}),
+        )
+        assert t.governance_status == GovernanceStatus.CLOSED
+        assert t.close_reason == CloseReason.ADMIN_CLOSED
+        assert t.close_conclusion == AdminCloseConclusion.FALSE_POSITIVE.value
+        assert json.loads(t.close_payload or "{}")["remark"] == "误报"
+
+    def test_close_without_conclusion_leaves_none(self) -> None:
+        """自动关单路径(scan/静默/stale)不传 conclusion → 留 None。
+
+        证 close() 默认参数不强制 conclusion,自动关单无需构造空结论。
+        """
+        t = _make_ticket(governance_status=GovernanceStatus.OPEN)
+        t.close(close_reason="auto_silenced_normal", closed_at=datetime.now())
+        assert t.governance_status == GovernanceStatus.CLOSED
+        assert t.close_conclusion is None
+        assert t.close_payload is None
 
     @pytest.mark.parametrize(
         "status",

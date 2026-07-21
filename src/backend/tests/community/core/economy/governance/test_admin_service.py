@@ -11,7 +11,12 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.domain.enums import AuditAction
+from agentclaw.community.core.economy.governance.domain.enums import (
+    AdminCloseConclusion,
+    AuditAction,
+    CloseReason,
+    GovernanceStatus,
+)
 from agentclaw.community.core.economy.governance.repositories.orm import (
     AuditLogOrm,
     GovernanceNotificationOrm,
@@ -333,6 +338,44 @@ class TestCloseAllOpen:
         result = svc.close_all_open(reason="test", operator="admin")
         assert result.affected == 0
 
+    def test_close_all_lands_bulk_closed_conclusion(self, session, engine):
+        """D4: close_all_open 每张被关工单 close_conclusion=BULK_CLOSED。
+
+        批量关单一律落批量专用结论值,不要求调用方传逐单 conclusion+detail。
+        """
+        svc, db = _build_workflow_svc(engine)
+        _make_task_record(session, ticket_id="t-bulk-1", governance_status="open")
+        _make_task_record(session, ticket_id="t-bulk-2", governance_status="open")
+
+        svc.close_all_open(reason="bulk", operator="admin")
+
+        with db.orm_session() as s:
+            tickets = s.query(GovernanceTicketOrm).all()
+            assert len(tickets) == 2
+            for t in tickets:
+                assert t.governance_status == GovernanceStatus.CLOSED.value
+                assert t.close_reason == CloseReason.ADMIN_CLOSED.value
+                assert t.close_conclusion == AdminCloseConclusion.BULK_CLOSED.value
+                assert t.close_payload is None  # 批量不落明细
+
+    def test_cancel_pending_lands_bulk_closed_conclusion(self, session, engine):
+        """D4: cancel_pending 逐条关单同样落 BULK_CLOSED。"""
+        svc, db = _build_workflow_svc(engine)
+        _make_task_record(session, ticket_id="t-cp-1", governance_status="open")
+        _make_notification(
+            session, notification_id="n-cp-1", governance_status="open",
+            ticket_id="t-cp-1",
+        )
+
+        svc.cancel_pending(reason="bulk", operator="admin")
+
+        with db.orm_session() as s:
+            t = s.query(GovernanceTicketOrm).filter(
+                GovernanceTicketOrm.ticket_id == "t-cp-1",
+            ).one()
+            assert t.governance_status == GovernanceStatus.CLOSED.value
+            assert t.close_conclusion == AdminCloseConclusion.BULK_CLOSED.value
+
     def test_cooldown_applied(self, session, engine):
         """Each closed ticket gets cooldown_until = now + cooldown_days."""
         svc, db = _build_workflow_svc(engine)
@@ -617,7 +660,11 @@ class TestAdminClose:
         svc, db = _build_workflow_svc(engine)
         _make_task_record(session, ticket_id="t-em-1", governance_status="open")
 
-        result = svc.admin_close("t-em-1", admin_id="admin-1", reason="urgent")
+        result = svc.admin_close(
+            "t-em-1", admin_id="admin-1",
+            conclusion=AdminCloseConclusion.FALSE_POSITIVE,
+            close_payload='{"remark": "误报，无需治理"}',
+        )
         assert result.status.value == "closed"
         assert result.close_reason == "admin_closed"
 
@@ -625,6 +672,9 @@ class TestAdminClose:
             ticket = s.query(GovernanceTicketOrm).first()
             assert ticket.cooldown_until is not None  # admin_close 现在设 cooldown
             assert ticket.active_worker is None
+            # D1: 管理员裁定结论 + 明细落盘
+            assert ticket.close_conclusion == AdminCloseConclusion.FALSE_POSITIVE.value
+            assert ticket.close_payload == '{"remark": "误报，无需治理"}'
 
     def test_waiting_review_to_closed(self, session, engine):
         svc, db = _build_workflow_svc(engine)
@@ -632,12 +682,18 @@ class TestAdminClose:
             session, ticket_id="t-em-2", governance_status="waiting_review",
         )
 
-        result = svc.admin_close("t-em-2", admin_id="admin-1")
+        result = svc.admin_close(
+            "t-em-2", admin_id="admin-1",
+            conclusion=AdminCloseConclusion.OTHER,
+        )
         assert result.status.value == "closed"
 
     def test_not_found(self, session, engine):
         svc, db = _build_workflow_svc(engine)
-        result = svc.admin_close("nonexistent", admin_id="admin-1")
+        result = svc.admin_close(
+            "nonexistent", admin_id="admin-1",
+            conclusion=AdminCloseConclusion.OTHER,
+        )
         assert result.error_code == "NOT_FOUND"
 
     def test_admin_close_audit_actor_is_admin_id(self, session, engine):
@@ -651,7 +707,11 @@ class TestAdminClose:
         svc, db = _build_workflow_svc(engine)
         _make_task_record(session, ticket_id="t-em-audit", governance_status="open")
 
-        result = svc.admin_close("t-em-audit", admin_id="admin-77", reason="uh")
+        result = svc.admin_close(
+            "t-em-audit", admin_id="admin-77",
+            conclusion=AdminCloseConclusion.DUPLICATE_MERGED,
+            close_payload='{"remark": "重复工单，已合并"}',
+        )
         assert result.status.value == "closed"
 
         with db.orm_session() as s:
@@ -662,6 +722,79 @@ class TestAdminClose:
             assert len(emg_audits) == 1, "admin_close must emit exactly one audit row"
             assert emg_audits[0].actor_id == "admin-77"
             assert "t-em-audit" in (emg_audits[0].error_msg or "")
+            # D2: audit 结构化记录 conclusion(不再只记裸 reason)
+            assert "conclusion=duplicate_merged" in (emg_audits[0].error_msg or "")
+
+
+class TestSetOverrideOwner:
+    """Test GovernanceWorkflowService.set_override_owner() (notify-override-owner)。"""
+
+    def test_set_override_owner_persists_and_audits(self, session, engine):
+        svc, db = _build_workflow_svc(engine)
+        _make_task_record(session, ticket_id="t-ov-1", governance_status="open")
+
+        result = svc.set_override_owner("t-ov-1", "delegated-001", operator="admin-9")
+
+        assert result.error is None
+        with db.orm_session() as s:
+            ticket = s.query(GovernanceTicketOrm).filter(
+                GovernanceTicketOrm.ticket_id == "t-ov-1",
+            ).one()
+            assert ticket.override_owner == "delegated-001"
+            # 原 owner_id 不动(归属不变)
+            assert ticket.owner_id is not None and ticket.owner_id != ""
+            audits = [a for a in s.query(AuditLogOrm).all()
+                      if a.action_taken == AuditAction.ADMIN_OVERRIDE_OWNER]
+            assert len(audits) == 1
+            assert audits[0].actor_id == "admin-9"
+            assert "delegated-001" in (audits[0].error_msg or "")
+
+    def test_clear_override_owner_with_none(self, session, engine):
+        svc, db = _build_workflow_svc(engine)
+        _make_task_record(session, ticket_id="t-ov-2", governance_status="open")
+        svc.set_override_owner("t-ov-2", "temp-001", operator="admin-9")
+
+        # 清除(None)
+        svc.set_override_owner("t-ov-2", None, operator="admin-9")
+        with db.orm_session() as s:
+            ticket = s.query(GovernanceTicketOrm).filter(
+                GovernanceTicketOrm.ticket_id == "t-ov-2",
+            ).one()
+            assert ticket.override_owner is None
+
+    def test_clear_override_owner_with_empty_string(self, session, engine):
+        """空串归一为 None(清除语义)。"""
+        svc, db = _build_workflow_svc(engine)
+        _make_task_record(session, ticket_id="t-ov-3", governance_status="open")
+        svc.set_override_owner("t-ov-3", "temp-002", operator="admin-9")
+
+        svc.set_override_owner("t-ov-3", "   ", operator="admin-9")
+        with db.orm_session() as s:
+            ticket = s.query(GovernanceTicketOrm).filter(
+                GovernanceTicketOrm.ticket_id == "t-ov-3",
+            ).one()
+            assert ticket.override_owner is None
+
+    def test_set_override_owner_not_found(self, session, engine):
+        svc, _ = _build_workflow_svc(engine)
+        result = svc.set_override_owner("nope", "x", operator="admin-9")
+        assert result.error_code == "NOT_FOUND"
+
+    def test_set_override_owner_does_not_touch_status_or_owner(self, session, engine):
+        """只改 override_owner,不碰状态机/owner_id/活跃态。"""
+        svc, db = _build_workflow_svc(engine)
+        _make_task_record(
+            session, ticket_id="t-ov-4", governance_status="scheduled",
+            owner_id="orig-owner",
+        )
+        svc.set_override_owner("t-ov-4", "delegated-002", operator="admin-9")
+        with db.orm_session() as s:
+            ticket = s.query(GovernanceTicketOrm).filter(
+                GovernanceTicketOrm.ticket_id == "t-ov-4",
+            ).one()
+            assert ticket.governance_status == "scheduled"  # 状态不变
+            assert ticket.owner_id == "orig-owner"  # owner_id 不变
+            assert ticket.active_worker is not None  # 仍活跃(未关单)
 
 
 # ── list_review_tickets / get_review_ticket_detail (评审只读查询) ────
