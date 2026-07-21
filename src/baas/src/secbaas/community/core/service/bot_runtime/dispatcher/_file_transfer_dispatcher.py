@@ -25,6 +25,7 @@ from secbaas.community.api.bot_runtime import (
     StagingDeleteResponse,
     StagingListResponse,
     TransferNotFoundError,
+    TransferStateConflictError,
 )
 from secbaas.community.core.service.paas import PaasServiceFacade
 from secbaas.community.core.utils.env_utils import get_current_env
@@ -483,7 +484,32 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
                     staging_path=ticket.fileservice_staging_path,
                 )
 
-        self._ticket_repo.update_status(transfer_id, "UPLOAD_COMPLETED")
+        try:
+            self._ticket_repo.update_status(transfer_id, "UPLOAD_COMPLETED")
+        except TransferStateConflictError:
+            # CAS failed — the poller may have already processed this ticket
+            # between our read and the CAS.  Re-read and return success if the
+            # ticket has already reached a valid post-completion state.
+            ticket = self._ticket_repo.get_by_transfer_id(
+                transfer_id, tenant=tenant
+            )
+            if ticket is not None and ticket.status in (
+                "UPLOAD_COMPLETED",
+                "PULLING",
+                "DONE",
+            ):
+                logger.info(
+                    "dispatch_complete_upload: CAS conflict resolved — "
+                    "ticket already in status=%s (transfer_id=%s)",
+                    ticket.status,
+                    transfer_id,
+                )
+                return CompleteUploadResponse(
+                    transfer_id=transfer_id,
+                    status=ticket.status,
+                )
+            raise
+
         return CompleteUploadResponse(
             transfer_id=transfer_id,
             status="UPLOAD_COMPLETED",
