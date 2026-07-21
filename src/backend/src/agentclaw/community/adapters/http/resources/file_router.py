@@ -19,6 +19,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
+from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
 from agentclaw.community.adapters.http.resources.schemas import (
     FileActionResponse,
@@ -33,9 +34,6 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     with_interceptors,
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
-from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
-    CollaboratorService,
-)
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.services.resource_file_service import (
@@ -120,7 +118,7 @@ def _authorize_preview_bot(
     requested_owner_id: str | None,
     user_id: str,
     bot_repo: BotRepository,
-    collaborator_svc: CollaboratorService,
+    collaborator_svc: CollaboratorServiceProtocol,
 ) -> str:
     """Return the authoritative owner after authorizing preview access.
 
@@ -312,7 +310,7 @@ async def preview_file(
     device_uuid: Optional[str] = Query(None, description="Device UUID for multi-instance targeting; omitted → active instance"),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
-    collaborator_svc: CollaboratorService = Injected(CollaboratorService),
+    collaborator_svc: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     publish_repo: BotPublishRepositoryProtocol = Injected(BotPublishRepositoryProtocol),
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> PreviewResponse:
