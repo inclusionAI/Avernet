@@ -1,0 +1,19 @@
+# Gateway community default config (open-source, no internal middlewares).
+# The enterprise edition overlays this with ZCache/ZDAS/DDSOSS/etc. via
+# application.yaml in the gateway-enterprise package.
+
+app_name: "gateway"
+enable_sidecar: false
+workers: 1
+
+log_config:
+  trace_log_dir: ""
+  log_level: "INFO"
+  log_dir: ""
+
+# Module config — only the web server is configured here. RPC/DRM/cache
+# middlewares are enterprise-only and added via overlay in gateway-enterprise.
+module_config:
+  web:
+    port: 8888
+    start: "gateway.community.adapters.web.app:app"
