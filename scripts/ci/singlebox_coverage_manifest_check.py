@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import functools
 import sys
 from pathlib import Path
 from typing import Any
@@ -12,10 +13,25 @@ from typing import Any
 import yaml
 
 
+@functools.lru_cache(maxsize=None)
+def _parse_ast(path: Path) -> ast.Module:
+    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
+def _get_base_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Subscript):
+        return _get_base_name(node.value)
+    return ""
+
+
 def _class_methods(path: Path) -> dict[str, set[str]]:
     if not path.is_file():
         return {}
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    tree = _parse_ast(path)
     return {
         node.name: {
             child.name
@@ -30,11 +46,9 @@ def _class_methods(path: Path) -> dict[str, set[str]]:
 def _class_bases(path: Path) -> dict[str, set[str]]:
     if not path.is_file():
         return {}
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    tree = _parse_ast(path)
     return {
-        node.name: {
-            base.id for base in node.bases if isinstance(base, ast.Name)
-        }
+        node.name: {_get_base_name(base) for base in node.bases} - {""}
         for node in tree.body
         if isinstance(node, ast.ClassDef)
     }
@@ -44,13 +58,11 @@ def _plugin_protocols(backend_root: Path) -> dict[str, set[str]]:
     protocols: dict[str, set[str]] = {}
     plugin_api_root = backend_root / "src/agentclaw/community/plugin_api"
     for path in plugin_api_root.glob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = _parse_ast(path)
         for node in tree.body:
             if not isinstance(node, ast.ClassDef):
                 continue
-            base_names = {
-                base.id for base in node.bases if isinstance(base, ast.Name)
-            }
+            base_names = {_get_base_name(base) for base in node.bases} - {""}
             if "Plugin" not in base_names:
                 continue
             protocols[node.name] = {
