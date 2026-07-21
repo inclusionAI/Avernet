@@ -1,0 +1,198 @@
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+
+import pytest
+
+from engine.community.core.resource_materialization.models import (
+    MaterializationRequest,
+)
+from engine.community.core.resource_materialization.service import ResourceMaterializationService
+
+
+class _PullClient:
+    def __init__(self, content: bytes) -> None:
+        self.content = content
+        self.calls = 0
+
+    async def pull(self, request, destination: Path) -> None:
+        self.calls += 1
+        destination.write_bytes(self.content)
+
+
+class _CallbackClient:
+    def __init__(self) -> None:
+        self.results = []
+
+    async def report(self, result) -> None:
+        self.results.append(result)
+
+
+class _FailingCallbackClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def report(self, result) -> None:
+        self.calls += 1
+        raise RuntimeError("callback unavailable")
+
+
+def _request(content: bytes, **overrides) -> MaterializationRequest:
+    values = {
+        "resource_id": "sr_001",
+        "transfer_id": "transfer-001",
+        "task_id": "task-001",
+        "task_version": 1,
+        "scope_key_hash": "scope_abc",
+        "session_key_hash": "session_abc",
+        "device_path": (
+            "workspace/.teamclaw/session-files/scope_abc/session_abc/"
+            "sr_001/report.txt"
+        ),
+        "filename": "report.txt",
+        "size_bytes": len(content),
+        "content_hash": hashlib.sha256(content).hexdigest(),
+    }
+    values.update(overrides)
+    return MaterializationRequest(**values)
+
+
+@pytest.mark.asyncio
+async def test_materialize_writes_atomic_file_manifest_and_callback(tmp_path: Path):
+    content = b"risk report"
+    pull = _PullClient(content)
+    callback = _CallbackClient()
+    service = ResourceMaterializationService(
+        pull_client=pull,
+        callback_client=callback,
+        workspace_root_provider=lambda: tmp_path,
+    )
+
+    result = await service.materialize(_request(content))
+
+    expected = (
+        tmp_path
+        / ".teamclaw/session-files/scope_abc/session_abc/sr_001/report.txt"
+    ).resolve()
+    assert result.ready is True
+    assert Path(result.canonical_bot_absolute_path) == expected
+    assert expected.read_bytes() == content
+    assert pull.calls == 1
+    assert callback.results == [result]
+    assert service.manifest_store.get("sr_001").status == "ready"
+
+
+@pytest.mark.asyncio
+async def test_materialize_is_idempotent_for_same_ready_task(tmp_path: Path):
+    content = b"same bytes"
+    pull = _PullClient(content)
+    callback = _CallbackClient()
+    service = ResourceMaterializationService(
+        pull_client=pull,
+        callback_client=callback,
+        workspace_root_provider=lambda: tmp_path,
+    )
+    request = _request(content)
+
+    first = await service.materialize(request)
+    second = await service.materialize(request)
+
+    assert first.ready is True and second.ready is True
+    assert pull.calls == 1
+    assert len(callback.results) == 2
+
+
+@pytest.mark.asyncio
+async def test_hash_mismatch_removes_partial_file_and_reports_failure(tmp_path: Path):
+    pull = _PullClient(b"tampered")
+    callback = _CallbackClient()
+    service = ResourceMaterializationService(
+        pull_client=pull,
+        callback_client=callback,
+        workspace_root_provider=lambda: tmp_path,
+    )
+
+    result = await service.materialize(_request(b"expected"))
+
+    target = tmp_path / ".teamclaw/session-files/scope_abc/session_abc/sr_001/report.txt"
+    assert result.ready is False
+    assert result.error_code == "hash_mismatch"
+    assert not target.exists()
+    assert not list(target.parent.glob("*.part-*"))
+    assert callback.results == [result]
+
+
+@pytest.mark.asyncio
+async def test_materialize_rejects_untrusted_device_path_escape(tmp_path: Path):
+    callback = _CallbackClient()
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(b"x"),
+        callback_client=callback,
+        workspace_root_provider=lambda: tmp_path,
+    )
+    request = _request(
+        b"x",
+        device_path="../../outside/report.txt",
+    )
+
+    result = await service.materialize(request)
+
+    assert result.ready is False
+    assert result.error_code == "invalid_device_path"
+    assert callback.results == [result]
+    assert not (tmp_path.parent / "outside/report.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_materialize_rejects_symlink_escape(tmp_path: Path):
+    outside = tmp_path.parent / "outside-resource-target"
+    outside.mkdir()
+    controlled_parent = (
+        tmp_path / ".teamclaw/session-files/scope_abc/session_abc"
+    )
+    controlled_parent.mkdir(parents=True)
+    (controlled_parent / "sr_001").symlink_to(outside, target_is_directory=True)
+    pull = _PullClient(b"x")
+    callback = _CallbackClient()
+    service = ResourceMaterializationService(
+        pull_client=pull,
+        callback_client=callback,
+        workspace_root_provider=lambda: tmp_path,
+    )
+
+    result = await service.materialize(_request(b"x"))
+
+    assert result.ready is False
+    assert result.error_code == "invalid_device_path"
+    assert pull.calls == 0
+    assert callback.results == [result]
+    assert not (outside / "report.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_callback_failure_does_not_reclassify_or_redownload_ready_file(
+    tmp_path: Path,
+):
+    content = b"durable bytes"
+    pull = _PullClient(content)
+    callback = _FailingCallbackClient()
+    service = ResourceMaterializationService(
+        pull_client=pull,
+        callback_client=callback,
+        workspace_root_provider=lambda: tmp_path,
+    )
+    request = _request(content)
+
+    with pytest.raises(RuntimeError, match="callback unavailable"):
+        await service.materialize(request)
+
+    assert callback.calls == 3
+    assert pull.calls == 1
+    assert service.manifest_store.get(request.resource_id).status == "ready"
+
+    service._callback_client = _CallbackClient()
+    result = await service.materialize(request)
+
+    assert result.ready is True
+    assert pull.calls == 1

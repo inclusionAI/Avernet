@@ -57,6 +57,11 @@ _TASK_QUEUE_EXEMPT_REASON = (
     "Internal infra component with no HTTP/router surface (in-process worker + repo); "
     "covered by unit/integration tests, not an e2e flow."
 )
+_SESSION_RESOURCES_EXEMPT_REASON = (
+    "Requires the Frontend upload, BaaS transfer, and Engine callback chain; "
+    "the unpublished BaaS pull contract remains fail-closed and this change "
+    "covers the module with core and HTTP API tests."
+)
 
 SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "aicoding": _EXEMPT_REASON,
@@ -83,6 +88,7 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "notify": _EXEMPT_REASON,
     "nas_usage": _EXEMPT_REASON,
     "service_bot": _EXEMPT_REASON,
+    "session_resources": _SESSION_RESOURCES_EXEMPT_REASON,
     "services": _EXEMPT_REASON,
     "skill_center": _EXEMPT_REASON,
     "storage": _EXEMPT_REASON,
