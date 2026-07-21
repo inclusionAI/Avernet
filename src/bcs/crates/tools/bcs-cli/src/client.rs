@@ -2701,11 +2701,13 @@ impl BcsClient {
             }
             _ => return Err(anyhow!("unknown mode {}", mode)),
         }
-        let final_file = self.complete_session_file(sid, &file_id).await
-            .or_else(|e| {
-                let _ = self.delete_session_file(sid, &file_id);
-                Err(e)
-            })?;
+        let final_file = match self.complete_session_file(sid, &file_id).await {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = self.delete_session_file(sid, &file_id).await;
+                return Err(e);
+            }
+        };
         Ok(final_file)
     }
 
