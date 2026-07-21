@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 from secbaas.community.api import ApiResponse
 from secbaas.community.api.bot_runtime import (
     BotFileTransferDispatcher,
+    BotNotFoundError,
     GetTransferStatusResponse,
     TransferNotFoundError,
 )
@@ -49,9 +50,15 @@ async def get_transfer_status(
         result = await dispatcher.dispatch_get_transfer_status(
             transfer_id=transfer_id,
             tenant=tenant,
+            bot_uuid=bot_uuid,
         )
         return ApiResponse(data=result)
 
+    except BotNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "BOT_NOT_FOUND", "message": str(e), "bot_uuid": bot_uuid},
+        )
     except TransferNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

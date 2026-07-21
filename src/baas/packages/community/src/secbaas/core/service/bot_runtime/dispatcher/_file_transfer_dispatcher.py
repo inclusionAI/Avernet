@@ -25,6 +25,7 @@ from secbaas.api.bot_runtime import (
     StagingDeleteResponse,
     StagingListResponse,
     TransferNotFoundError,
+    TransferStateConflictError,
 )
 from secbaas.core.service.paas import PaasServiceFacade
 from secbaas.core.utils.env_utils import get_current_env
@@ -127,6 +128,8 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             staging_subdir = staging_subdir.strip("/")
 
         transfer_id = uuid.uuid4().hex
+        if device_path is not None and ".." in device_path:
+            raise ValueError("device_path contains invalid path traversal")
         resolved_filename = filename or (
             Path(device_path).name if device_path else "untitled"
         )
@@ -294,6 +297,10 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         )
 
         logger.info("Resolved device for download: paas_device_id=%s", paas_device_id)
+
+        # WR-03: Defense-in-depth path traversal check — same guard as upload path
+        if ".." in device_path:
+            raise ValueError("device_path contains invalid path traversal")
 
         # D-06: Extract filename from device_path
         filename = Path(device_path).name
@@ -481,7 +488,30 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
                     staging_path=ticket.fileservice_staging_path,
                 )
 
-        self._ticket_repo.update_status(transfer_id, "UPLOAD_COMPLETED")
+        try:
+            self._ticket_repo.update_status(transfer_id, "UPLOAD_COMPLETED")
+        except TransferStateConflictError:
+            # CAS failed — the poller may have already processed this ticket
+            # between our read and the CAS.  Re-read and return success if the
+            # ticket has already reached a valid post-completion state.
+            ticket = self._ticket_repo.get_by_transfer_id(transfer_id, tenant=tenant)
+            if ticket is not None and ticket.status in (
+                "UPLOAD_COMPLETED",
+                "PULLING",
+                "DONE",
+            ):
+                logger.info(
+                    "dispatch_complete_upload: CAS conflict resolved — "
+                    "ticket already in status=%s (transfer_id=%s)",
+                    ticket.status,
+                    transfer_id,
+                )
+                return CompleteUploadResponse(
+                    transfer_id=transfer_id,
+                    status=ticket.status,
+                )
+            raise
+
         return CompleteUploadResponse(
             transfer_id=transfer_id,
             status="UPLOAD_COMPLETED",
@@ -530,13 +560,60 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             )
 
         if ticket.multipart_session_id:
-            await asyncio.to_thread(
-                self._file_transfer_backend.abort_multipart_upload,
-                ticket.fileservice_staging_path,
-                ticket.multipart_session_id,
-            )
+            # WR-02: If the multipart session was already completed or
+            # aborted by a concurrent complete_upload, abort_multipart_upload
+            # raises NoSuchUpload from OSS.  Treat as idempotent — the
+            # session no longer needs aborting; proceed to cancel the ticket.
+            try:
+                await asyncio.to_thread(
+                    self._file_transfer_backend.abort_multipart_upload,
+                    ticket.fileservice_staging_path,
+                    ticket.multipart_session_id,
+                )
+            except Exception as _abort_err:
+                _msg = str(_abort_err)
+                if "NoSuchUpload" in _msg or "not found" in _msg.lower():
+                    logger.info(
+                        "dispatch_cancel_upload: multipart session already "
+                        "gone for transfer_id=%s (concurrent complete?), "
+                        "proceeding to cancel ticket",
+                        transfer_id,
+                    )
+                else:
+                    raise
 
-        self._ticket_repo.update_status(transfer_id, "CANCELLED")
+        # WR-01: CAS-aware status update with TransferStateConflictError
+        # recovery — same pattern as dispatch_complete_upload (CR-02).
+        try:
+            self._ticket_repo.update_status(transfer_id, "CANCELLED")
+        except TransferStateConflictError:
+            ticket = self._ticket_repo.get_by_transfer_id(transfer_id, tenant=tenant)
+            if ticket is not None:
+                if ticket.status in (
+                    "CANCELLED",
+                    "FAILED",
+                    "DELETED",
+                    "DONE",
+                    "PULLING",
+                ):
+                    logger.info(
+                        "dispatch_cancel_upload: CAS conflict resolved — "
+                        "ticket already in status=%s (transfer_id=%s)",
+                        ticket.status,
+                        transfer_id,
+                    )
+                    return CancelUploadResponse(
+                        transfer_id=transfer_id,
+                        status=ticket.status,
+                    )
+                if ticket.status == "UPLOAD_COMPLETED":
+                    raise ValueError(
+                        f"Cannot cancel transfer {transfer_id}: "
+                        f"upload is already completed "
+                        f"(status={ticket.status})"
+                    )
+            raise
+
         return CancelUploadResponse(transfer_id=transfer_id, status="CANCELLED")
 
     async def dispatch_list_staging(

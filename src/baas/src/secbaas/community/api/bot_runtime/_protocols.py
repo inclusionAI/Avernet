@@ -151,6 +151,7 @@ class BotFileTransferDispatcher(Protocol):
         self,
         transfer_id: str,
         tenant: str | None = None,
+        bot_uuid: str | None = None,
     ) -> GetTransferStatusResponse: ...
 
     async def dispatch_complete_upload(
