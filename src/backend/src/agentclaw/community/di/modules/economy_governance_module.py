@@ -345,6 +345,7 @@ class EconomyGovernanceModule(Module):
         lifecycle_service: GovernanceLifecycleService,
         render_svc: NotifyRenderService,
         notify_lifecycle_service: NotifyLifecycleService,
+        delivery_service: GovernanceDeliveryService,
     ) -> GovernanceBotService:
         """Construct GovernanceBotService."""
         return GovernanceBotService(
@@ -356,6 +357,7 @@ class EconomyGovernanceModule(Module):
             lifecycle_svc=lifecycle_service,
             render_svc=render_svc,
             notify_lifecycle_svc=notify_lifecycle_service,
+            delivery_svc=delivery_service,
         )
 
     @singleton

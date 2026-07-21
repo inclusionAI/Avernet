@@ -18,6 +18,7 @@ delivery_status + 写投递审计。
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -56,6 +57,20 @@ if TYPE_CHECKING:
 
 
 log = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class SendResult:
+    """Result of a single notification send attempt.
+
+    投递域统一发送出口 :meth:`GovernanceDeliveryService.send_notification`
+    的返回产物;scan_service cron 投递 path 转调统一出口后亦复用本类型。
+    """
+
+    notification_id: str
+    success: bool
+    external_message_id: str | None = None
+    actual_channel: str | None = None
 
 
 class GovernanceDeliveryService:
@@ -186,6 +201,13 @@ class GovernanceDeliveryService:
 
         # ---- Phase 4: Build payloads & optionally send ----
         # (Phase 3 dict 中转已删:直接用领域模型 p,渲染经 render_svc 出口)
+        #
+        # NOTE(tickets-remind-content-divergence): 本分支的 tc_card/markdown
+        # 渲染口径与 :meth:`send_notification` 一致(同走 build_send_payload +
+        # 降级);未复用 send_notification 是因为它要产 dry_run 预览 dict 且
+        # 按 deliver_pending/deliver_by_worker 的 results shape 累计,改用统一
+        # 出口会动 shape。deliver_pending 只投 first_send pending(reminder 不
+        # 经此投递),硬编码 title=🔔 在此口径下正确。仅作代码重复,非内容 bug。
         results: list[dict] = []
         sent_count = 0
         for p in pending_rows:
@@ -384,6 +406,83 @@ class GovernanceDeliveryService:
             "sent_count": sent_count,
             "results": results,
         }
+    # ── 单条发送统一出口(tickets-remind-content-divergence SDD) ──────
+
+    def send_notification(
+        self,
+        notify: GovernanceNotification,
+        *,
+        override_recipient: str | None = None,
+    ) -> SendResult:
+        """投递域唯一单条发送出口 — 三条投递路径共用同口径。
+
+        口径(以原 ``scan_service._send_notification`` 为基准):
+          - ``channel = notify.channel or "markdown"`` —— 读通知行自带的
+            channel(建 notify_row 时录入,与首发/cron 同口径),而非直读
+            ``self._config.notify_channel``,这保证了手动补发与首发/cron
+            走**完全相同的渲染分支**。
+          - title 按 ``notify_type`` 区分:FIRST_SEND→``🔔 Bot 治理通知``,
+            REMINDER→``⚠️ 治理通知提醒``。
+          - tc_card 渠道走 ``render_svc.build_send_payload`` 出卡片壳 +
+            detailLink + extra;构建失败(render 返 None)→ 降级 markdown,
+            body 退用 ``notify.notification_md``。
+          - markdown 渠道 body = ``notify.notification_md``(首发存的全量
+            Markdown)。
+
+        Args:
+            notify: 通知领域模型(身份/快照字段 claim 后不变,沿用 pending
+                模型即可)。
+            override_recipient: 非空覆盖收件人(deliver_by_worker 用);
+                None 用 ``notify.owner_id``。
+
+        Returns:
+            :class:`SendResult` 携带 success / external_message_id /
+            actual_channel(降级后实际发到的渠道)。
+        """
+        recipient = override_recipient or notify.owner_id
+        notify_channel = notify.channel or "markdown"
+        title = (
+            "🔔 Bot 治理通知"
+            if notify.notify_type == NotifyType.FIRST_SEND
+            else "⚠️ 治理通知提醒"
+        )
+
+        # 渲染交内核服务;TC 卡片构建失败 → render 返 None → 降级 markdown。
+        deep_link = ""
+        extra: dict[str, Any] = {}
+        reason = ""
+        if notify_channel == "tc_card":
+            payload = self._render_svc.build_send_payload(
+                notify, user_id=recipient, config=self._config,
+            )
+            if payload is not None:
+                reason, deep_link, extra = payload.body, payload.deep_link, payload.extra
+            else:
+                # TC card build failed → degrade to markdown
+                notify_channel = "markdown"
+
+        # tc_card 实发时用卡片壳 reason;其余(markdown 或降级)用 notification_md。
+        msg_body = reason if (notify_channel == "tc_card" and reason) else (notify.notification_md or "")
+        msg = NotifyMessage(
+            title=title,
+            body=msg_body,
+            recipient=recipient,
+            deep_link=deep_link,
+            extra=extra,
+        )
+        external_id = self._notify_sender.send(msg, channel=notify_channel)
+        if external_id:
+            return SendResult(
+                notification_id=notify.notification_id,
+                success=True,
+                external_message_id=external_id,
+                actual_channel=notify_channel,
+            )
+        return SendResult(
+            notification_id=notify.notification_id,
+            success=False,
+        )
+
     # ── reminder(Task 3 迁入) ─────────────────────────────────────
 
     def create_and_send_reminder(
@@ -424,30 +523,27 @@ class GovernanceDeliveryService:
             ),
             notify_type=NotifyType.REMINDER,
             notify_source="admin_api",
-            channel=getattr(self._config, "notify_channel", "markdown"),
+            channel=self._config.notify_channel,
         )
         self._notify_repo.add_notification(notify_row)
 
-        # Send immediately (跳过 cron tick 等待)
-        msg = NotifyMessage(
-            title="⚠️ 治理通知提醒",
-            body=notification_md,
-            recipient=ticket.owner_id,
-            deep_link="",
-            extra={},
-        )
+        # Send immediately via the delivery-domain unified send outlet
+        # (跳过 cron tick 等待)。与首发 / cron reminder 走同一 send_notification,
+        # 保证 channel / 卡片壳 / detailLink / extra 口径完全一致——不再内联
+        # markdown-only 发送(原 bug:配置 tc_card 时补发仍发裸 markdown)。
         try:
-            external_id = self._notify_sender.send(
-                msg, channel=getattr(self._config, "notify_channel", "markdown"),
-            )
+            result = self.send_notification(notify_row)
         except Exception:
             log.exception(
                 "[GovernanceAdmin] reminder send failed for notification_id=%s",
                 notification_id,
             )
-            external_id = None
+            result = SendResult(
+                notification_id=notification_id, success=False,
+            )
 
-        sent = external_id is not None
+        sent = result.success
+        external_id = result.external_message_id
         if sent:
             self._notify_repo.update_delivery_status(
                 notification_id,
