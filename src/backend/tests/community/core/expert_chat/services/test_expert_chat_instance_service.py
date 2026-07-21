@@ -1163,3 +1163,89 @@ class TestRepositoryUpdateInstanceWithStatusOnly:
         )
         assert result["need_poll"] is True
         assert result["connection"] is None
+
+
+class TestGetCallerConnectionIamToken:
+    """Tests for iam_token parameter behavior in get_caller_connection.
+
+    The iam_token parameter is reserved for future IAM integration and is
+    currently unused. These tests verify that passing iam_token (or not)
+    does not affect the method behavior.
+    """
+
+    @pytest.mark.asyncio
+    async def test_iam_token_param_accepted_without_error(self):
+        """Passing iam_token does not raise any error."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 2,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=1))
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+
+        # Should not raise any error when iam_token is passed
+        result = await svc.get_caller_connection(
+            USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
+        )
+
+        assert result["need_poll"] is False
+        assert result["connection"]["bot_uuid"] == BOT_UUID
+
+    @pytest.mark.asyncio
+    async def test_iam_token_none_works_same_as_default(self):
+        """Passing iam_token=None works the same as not passing it."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 2,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=1))
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+
+        result_explicit_none = await svc.get_caller_connection(
+            USER_ID, BOT_ID, OWNER_ID, iam_token=None
+        )
+        result_default = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        # Results should be identical
+        assert result_explicit_none["need_poll"] == result_default["need_poll"]
+        assert result_explicit_none["connection"]["bot_uuid"] == result_default["connection"]["bot_uuid"]
+
+    @pytest.mark.asyncio
+    async def test_iam_token_with_force_upgrade_accepted(self):
+        """iam_token works correctly with force_upgrade parameter."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=1))
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        # Should work with both force_upgrade and iam_token
+        result = await svc.get_caller_connection(
+            USER_ID, BOT_ID, OWNER_ID, force_upgrade=True, iam_token="test-token"
+        )
+
+        assert result["need_poll"] is False
+        bot_build_service.upgrade_async.assert_called_once()
