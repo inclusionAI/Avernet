@@ -33,6 +33,9 @@ from agentclaw.community.di.modules.http_client_module import HttpClientModule
 from agentclaw.community.di.modules.infrastructure.test.http_client import (
     TestHttpClientModule,
 )
+from agentclaw.community.di.modules.infrastructure.singlebox.devices import (
+    SingleboxBaasDeviceService,
+)
 from agentclaw.community.di.profile import DeployProfile, validate_deploy_environment
 from agentclaw.community.di.profile_modules import modules_for
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
@@ -217,6 +220,7 @@ def test_singlebox_profile_resolves_baas_only_device_runtime():
     assert isinstance(service, DeviceServiceRouter)
     assert set(service._providers) == {"baas"}
     assert isinstance(service._providers["baas"], BaasDeviceService)
+    assert isinstance(service._providers["baas"], SingleboxBaasDeviceService)
     assert injector.get(DeviceAccessor) is baas_device_accessor
     participant_names = {
         type(participant).__name__
