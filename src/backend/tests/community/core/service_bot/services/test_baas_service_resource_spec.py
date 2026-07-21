@@ -5,6 +5,10 @@ from unittest.mock import MagicMock
 from agentclaw.community.kernel.device_dto import ResourceSpecification
 
 from agentclaw.community.core.service_bot.services.baas_service import BotDeployConfig
+from agentclaw.community.core.utils.traffic_env import (
+    TRAFFIC_ENV_ENV_KEY,
+    normalize_traffic_env,
+)
 
 
 def test_deploy_config_to_dict_includes_resource_spec_with_disk():
@@ -133,7 +137,14 @@ def test_build_create_bot_payload_supports_auto_approve_and_extra_envs():
     assert payload["config"]["deploy_config"]["envs"] == {
         "AGENTCLAW_ENGINE": "claude_code",
         "BOT_TYPE": "personalCoding",
+        TRAFFIC_ENV_ENV_KEY: "draft",
     }
+    svc._build_outbound_operation_rule.assert_called_once_with(
+        "B1",
+        "U1",
+        "",
+        traffic_env="draft",
+    )
 
 
 def test_build_create_bot_payload_auto_approves_by_default():
@@ -260,6 +271,7 @@ def test_payload_maps_template_config_overrides_to_deploy_config():
         "AGENTCLAW_ENGINE": "custom",
         "BOT_TYPE": "personalCoding",
         "USER_ENV": "yes",
+        TRAFFIC_ENV_ENV_KEY: "draft",
     }
 
 
@@ -310,3 +322,122 @@ def test_read_only_applied_for_service_online():
     svc._bot_repo.get_by_id_and_owner.return_value = None
     out = svc._get_set_read_only_rule(bot_id="b", owner_id="o", bot_type="service", stage="online")
     assert "--set_read_only" in out  # online 才锁
+
+
+def test_normalize_traffic_env_maps_supported_publish_stage_values():
+    assert normalize_traffic_env("draft") == "draft"
+    assert normalize_traffic_env("pre") == "pre"
+    assert normalize_traffic_env("prod") == "prod"
+    assert normalize_traffic_env("eval") == "eval"
+    assert normalize_traffic_env("verify") == "pre"
+    assert normalize_traffic_env("online") == "prod"
+    # Runtime/env aliases are intentionally not supported; unknowns fall back to draft.
+    assert normalize_traffic_env("dev") == "draft"
+    assert normalize_traffic_env("production") == "draft"
+    assert normalize_traffic_env("unknown") == "draft"
+
+
+def test_build_create_bot_payload_injects_explicit_traffic_env_to_envs_and_rule():
+    svc = _make_service()
+    svc._get_start_cmd = MagicMock(return_value="echo start")
+    svc._get_destroy_cmd = MagicMock(return_value="echo destroy")
+    svc._setup_directory = MagicMock(return_value=[])
+    svc._setup_bot_storage = MagicMock(return_value=None)
+    svc._build_outbound_operation_rule = MagicMock(return_value=None)
+    svc._should_mount_home_dir_storage = MagicMock(return_value=False)
+
+    payload = svc._build_create_bot_payload(
+        bot={
+            "bot_id": "B2",
+            "bot_name": "service-bot",
+            "entity_id": "E1",
+            "entity_type": "staff",
+            "active_engine": "openclaw",
+            "bot_type": "service",
+        },
+        owner_id="U1",
+        request_id="req-1234567890-abcdefghijklmno",
+        device_count=1,
+        migration_path="",
+        stage="eval",
+    )
+
+    assert payload["config"]["deploy_config"]["envs"][TRAFFIC_ENV_ENV_KEY] == "eval"
+    svc._build_outbound_operation_rule.assert_called_once_with(
+        "B2",
+        "U1",
+        "",
+        traffic_env="eval",
+    )
+
+
+def test_build_create_bot_payload_env_var_overrides_stage_for_traffic_env():
+    svc = _make_service()
+    svc._get_start_cmd = MagicMock(return_value="echo start")
+    svc._get_destroy_cmd = MagicMock(return_value="echo destroy")
+    svc._setup_directory = MagicMock(return_value=[])
+    svc._setup_bot_storage = MagicMock(return_value=None)
+    svc._build_outbound_operation_rule = MagicMock(return_value=None)
+    svc._should_mount_home_dir_storage = MagicMock(return_value=False)
+
+    payload = svc._build_create_bot_payload(
+        bot={
+            "bot_id": "B3",
+            "bot_name": "service-bot",
+            "entity_id": "E1",
+            "entity_type": "staff",
+            "active_engine": "openclaw",
+            "bot_type": "service",
+        },
+        owner_id="U1",
+        request_id="req-1234567890-abcdefghijklmno",
+        device_count=1,
+        migration_path="",
+        stage="online",
+        extra_envs={TRAFFIC_ENV_ENV_KEY: "eval"},
+    )
+
+    assert payload["config"]["deploy_config"]["envs"][TRAFFIC_ENV_ENV_KEY] == "eval"
+    svc._build_outbound_operation_rule.assert_called_once_with(
+        "B3",
+        "U1",
+        "",
+        traffic_env="eval",
+    )
+
+
+def test_build_create_bot_payload_template_env_cannot_override_traffic_env():
+    svc = _make_service()
+    svc._get_start_cmd = MagicMock(return_value="echo start")
+    svc._get_destroy_cmd = MagicMock(return_value="echo destroy")
+    svc._setup_directory = MagicMock(return_value=[])
+    svc._setup_bot_storage = MagicMock(return_value=None)
+    svc._build_outbound_operation_rule = MagicMock(return_value=None)
+    svc._should_mount_home_dir_storage = MagicMock(return_value=False)
+
+    payload = svc._build_create_bot_payload(
+        bot={
+            "bot_id": "B4",
+            "bot_name": "service-bot",
+            "entity_id": "E1",
+            "entity_type": "staff",
+            "active_engine": "openclaw",
+            "bot_type": "service",
+        },
+        owner_id="U1",
+        request_id="req-1234567890-abcdefghijklmno",
+        device_count=1,
+        migration_path="",
+        stage="online",
+        template_config={"envs": {TRAFFIC_ENV_ENV_KEY: "eval", "USER_ENV": "yes"}},
+    )
+
+    envs = payload["config"]["deploy_config"]["envs"]
+    assert envs[TRAFFIC_ENV_ENV_KEY] == "prod"
+    assert envs["USER_ENV"] == "yes"
+    svc._build_outbound_operation_rule.assert_called_once_with(
+        "B4",
+        "U1",
+        "",
+        traffic_env="prod",
+    )

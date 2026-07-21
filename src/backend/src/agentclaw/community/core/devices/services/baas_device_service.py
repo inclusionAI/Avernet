@@ -39,9 +39,15 @@ from agentclaw.community.core.devices.services.device_service import (
     DEFAULT_ENGINE_TYPE,
     DeviceService,
 )
+from agentclaw.community.core.utils.traffic_env import (
+    TRAFFIC_ENV_ENV_KEY,
+    TRAFFIC_ENV_HEADER_KEY,
+    resolve_traffic_env,
+)
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     TECLAW_DEVICE_PROVIDER,
 )
+from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 
 
@@ -296,6 +302,16 @@ class BaasDeviceService(DeviceService):
                 f"unsupported bot_type for provider=baas allocation: {effective_bot_type}"
             )
 
+        traffic_env = resolve_traffic_env(
+            extra_envs=extra_envs,
+            stage=PublishStage.DRAFT.value,
+        )
+        effective_extra_envs = dict(extra_envs or {})
+        effective_extra_envs[TRAFFIC_ENV_ENV_KEY] = traffic_env
+        # Drop the header-name alias from container envs if callers used it as input;
+        # outbound header injection is controlled by outbound_operation_rule.
+        effective_extra_envs.pop(TRAFFIC_ENV_HEADER_KEY, None)
+
         create_error_prefix = (
             "BaaS service draft create failed"
             if effective_bot_type == "service"
@@ -303,7 +319,6 @@ class BaasDeviceService(DeviceService):
         )
         try:
             from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
-            from agentclaw.community.core.service_bot.types import PublishStage
 
             # template_uid 是上层业务选择 template 的稳定标识；BaaS 创建接口仍使用底层 template_uuid。
             # 这里按 system_config 映射到实际创建用的 template_uuid。
@@ -335,7 +350,8 @@ class BaasDeviceService(DeviceService):
                 "migration_path": "",
                 "template_uuid": template_uuid,
                 "auto_approve_publish": True,
-                "extra_envs": extra_envs,
+                "extra_envs": effective_extra_envs,
+                "traffic_env": traffic_env,
                 "template_config": template_config,
                 # 个人 Bot / 服务 Bot 草稿没有 migration_path，但启动仍按 NAS home 目录运行。
                 "mount_home_dir_storage": True,
@@ -389,7 +405,8 @@ class BaasDeviceService(DeviceService):
                 # request_id 留底排障用,update 时复用同一个保持幂等不在本期范围
                 "create_request_id": request_id,
                 # passthrough envs for diagnostics
-                "envs": dict(extra_envs) if extra_envs else {},
+                "envs": dict(effective_extra_envs),
+                "traffic_env": traffic_env,
                 "template_uid": template_uid,
                 "template_uuid": template_uuid,
             },
@@ -874,6 +891,11 @@ class BaasDeviceService(DeviceService):
         bolt_id = device.device_props.get("bolt_id", "")
         owner_id = device.device_props.get("entity_id", "")
         device_uuid = device.device_props.get("device_uuid", "")
+        props_envs = device.device_props.get("envs")
+        traffic_env = resolve_traffic_env(
+            explicit=device.device_props.get("traffic_env"),
+            extra_envs=props_envs if isinstance(props_envs, dict) else None,
+        )
 
         logger.info(
             f"[BaasDeviceService.update_device_headers] Start: "
@@ -888,6 +910,7 @@ class BaasDeviceService(DeviceService):
             if device.device_provider == TECLAW_DEVICE_PROVIDER:
                 outbound_rule = self._baas_service._build_teclaw_outbound_operation_rule(
                     agent_pass_token=agent_pass_token,
+                    traffic_env=traffic_env,
                 )
             else:
                 outbound_rule = self._baas_service._build_outbound_operation_rule(
@@ -895,6 +918,7 @@ class BaasDeviceService(DeviceService):
                     owner_id=owner_id,
                     agent_pass_token=agent_pass_token,
                     agent_code=agent_code,
+                    traffic_env=traffic_env,
                 )
         except Exception as e:
             logger.error(

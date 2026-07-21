@@ -78,6 +78,7 @@ def test_release_routes_teclaw_to_create_teclaw_bot():
     assert ck.kwargs["template_uuid"] == "teclaw-tpl"
     assert "agent_pass_token" not in ck.kwargs
     svc._passport_plugin.query_token.assert_called_once_with("b", "u")
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_not_called()
     baas.create_bot.assert_not_called()
 
 
@@ -170,6 +171,7 @@ def test_refresh_teclaw_mcp_outbound_rule_updates_rule():
     baas.update_teclaw_outbound_rule_by_bot_uuid.assert_called_once_with(
         "BOT-t",
         agent_pass_token=svc._passport_plugin.query_token.return_value,
+        traffic_env="",
     )
 
 
@@ -250,6 +252,7 @@ def test_refresh_teclaw_mcp_outbound_rule_returns_false_when_update_fails():
     baas.update_teclaw_outbound_rule_by_bot_uuid.assert_called_once_with(
         "BOT-t",
         agent_pass_token=svc._passport_plugin.query_token.return_value,
+        traffic_env="",
     )
 
 

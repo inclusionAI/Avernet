@@ -35,9 +35,14 @@ class OutboundRuleProvider(Plugin, Protocol):
         owner_id: str = "",
         agent_pass_token: str = "",
         agent_code: str = "",
+        traffic_env: str = "",
         bot_type_resolver: "Callable[[str, str], str | None] | None" = None,
     ) -> OutBoundOperationRule:
         """The full outbound-header rule set for a bot.
+
+        ``traffic_env`` is the normalized traffic environment marker for outbound
+        callers (``draft`` / ``pre`` / ``prod`` / ``eval``); impls that need no such
+        header ignore it.
 
         ``bot_type_resolver(bolt_id, owner_id) -> bot_type | None`` lets the impl
         pick a bot-type-specific policy; impls that need no such split ignore it.
@@ -49,6 +54,7 @@ class OutboundRuleProvider(Plugin, Protocol):
         self,
         *,
         agent_pass_token: str = "",
+        traffic_env: str = "",
     ) -> "OutBoundOperationRule | None":
         """An identity-authorization-only outbound rule (the teclaw path), or
         ``None`` when no token / no egress mutation applies."""

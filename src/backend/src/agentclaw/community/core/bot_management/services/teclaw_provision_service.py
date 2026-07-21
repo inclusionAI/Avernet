@@ -167,6 +167,7 @@ class TeclawProvisionService:
             request_id=request_id,
             config_artifact=config_artifact,
             template_uuid=self._teclaw_template_uuid,
+            traffic_env="draft",
         )
         bot_uuid = result.get("bot_uuid", "")
         publish_id = result.get("publish_id")
@@ -273,6 +274,7 @@ class TeclawProvisionService:
             updated = self._baas.update_teclaw_outbound_rule_by_bot_uuid(
                 bot_uuid,
                 agent_pass_token=agent_pass_token,
+                traffic_env="draft",
             )
             if updated:
                 logger.info(

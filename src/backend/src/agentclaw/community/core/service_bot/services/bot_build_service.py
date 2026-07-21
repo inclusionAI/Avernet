@@ -505,6 +505,7 @@ class BotBuildService:
                     config_artifact=delivery.config_artifact,
                     template_uuid=self._teclaw_template_uuid,
                     device_count=1,
+                    traffic_env=publish_stage.value,
                 )
             else:
                 create_kwargs: dict[str, Any] = {
@@ -1078,6 +1079,7 @@ class BotBuildService:
                     config_artifact=delivery.config_artifact,
                     template_uuid=self._teclaw_template_uuid,
                     device_count=1,
+                    traffic_env=publish_stage.value,
                 )
             else:
                 upgrade_kwargs: dict[str, Any] = {
@@ -1173,6 +1175,7 @@ class BotBuildService:
             self._baas_service.update_teclaw_outbound_rule_by_bot_uuid(
                 bot_uuid,
                 agent_pass_token=agent_pass_token,
+                traffic_env="",
             )
             return True
         except Exception as update_err:

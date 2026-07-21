@@ -26,6 +26,7 @@ class NoopOutboundRuleProvider(MockSeam, OutboundRuleProvider):
         owner_id: str = "",
         agent_pass_token: str = "",
         agent_code: str = "",
+        traffic_env: str = "",
         bot_type_resolver: "Callable[[str, str], str | None] | None" = None,
     ) -> OutBoundOperationRule:
         return OutBoundOperationRule()
@@ -34,6 +35,7 @@ class NoopOutboundRuleProvider(MockSeam, OutboundRuleProvider):
         self,
         *,
         agent_pass_token: str = "",
+        traffic_env: str = "",
     ) -> "OutBoundOperationRule | None":
         return None
 

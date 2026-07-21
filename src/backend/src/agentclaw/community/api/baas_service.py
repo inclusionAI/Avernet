@@ -53,6 +53,7 @@ class BaasServiceProtocol(Protocol):
         template_uuid: Optional[str] = None,
         stage: str = PublishStage.ONLINE.value,
         version: str = "1",
+        traffic_env: str = "",
     ) -> Dict[str, Any]:
         """Create a BaaS bot. Returns ``{bot_uuid, publish_id}``."""
         ...
@@ -218,6 +219,7 @@ class BaasServiceProtocol(Protocol):
         device_count: int = 1,
         stage: str = PublishStage.ONLINE.value,
         version: str = "1",
+        traffic_env: str = "",
     ) -> Dict[str, Any]:
         """Upgrade an existing BaaS bot (POST /bots/{uuid}/update)."""
         ...
@@ -233,6 +235,7 @@ class BaasServiceProtocol(Protocol):
         bot_uuid: str,
         *,
         agent_pass_token: str = "",
+        traffic_env: str = "",
     ) -> list[dict[str, Any]]:
         """按 BaaS bot_uuid 更新 Teclaw PaaS 设备的出站规则。"""
         ...

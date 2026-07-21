@@ -47,6 +47,10 @@ from agentclaw.community.core.service_bot.types import PublishStage, is_editable
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxProvider, EngineSandboxRegistry
+from agentclaw.community.core.utils.traffic_env import (
+    TRAFFIC_ENV_ENV_KEY,
+    resolve_traffic_env,
+)
 
 from agentclaw.community.core.devices.protocols import StoragePathProtocol
 from agentclaw.community.core.devices.services.sandbox_overrides import (
@@ -576,6 +580,7 @@ class BaasService:  # pragma: no cover
         template_config: Optional[Dict[str, Any]] = None,
         mount_home_dir_storage: bool | None = None,
         ext_info: Optional[Dict[str, Any]] = None,
+        traffic_env: str = "",
     ) -> Dict[str, Any]:
         """构建创建 Bot 的请求体。
 
@@ -602,6 +607,7 @@ class BaasService:  # pragma: no cover
             template_config: 上层选择 template 时携带的沙箱覆写配置
             mount_home_dir_storage: 是否使用 home 目录 NAS；None 时由底层挂载逻辑按白名单解析
             ext_info: Optional[Dict[str, Any]] = None,
+            traffic_env: outbound traffic environment marker; defaults from extra_envs/stage.
 
         Returns:
             请求体字典
@@ -670,8 +676,19 @@ class BaasService:  # pragma: no cover
             stage=stage,
         )
 
+        resolved_traffic_env = resolve_traffic_env(
+            explicit=traffic_env,
+            extra_envs=extra_envs,
+            stage=stage,
+        )
+
         # 构建出站操作规则
-        outbound_operation_rule = self._build_outbound_operation_rule(bot_id, owner_id, agent_pass_token)
+        outbound_operation_rule = self._build_outbound_operation_rule(
+            bot_id,
+            owner_id,
+            agent_pass_token,
+            traffic_env=resolved_traffic_env,
+        )
 
         # 从 ac_bots.ext.service_bot_config 解析沙箱规格（cpu/memory 缺一则整组不传）
         resource_spec = self._resolve_service_bot_resource_spec(bot.get("ext"))
@@ -692,6 +709,10 @@ class BaasService:  # pragma: no cover
             template_config=template_config,
             resource_spec=resource_spec,
         )
+
+        # traffic env is Backend-controlled metadata. Re-apply after template env
+        # overrides so deploy_config.envs stays consistent with outbound rule.
+        envs[TRAFFIC_ENV_ENV_KEY] = resolved_traffic_env
 
         # 构建部署配置
         # user_id / tc_bot_id: BaaS 侧按 user_id+tc_bot_id 唯一确定 workspace 目录
@@ -791,6 +812,7 @@ class BaasService:  # pragma: no cover
         version: str = "1",
         auto_approve_publish: bool = True,
         ext_info: Optional[Dict[str, Any]] = None,
+        traffic_env: str = "",
     ) -> Dict[str, Any]:
         """调用 BaaS 层 API 创建 Bot。
 
@@ -858,6 +880,7 @@ class BaasService:  # pragma: no cover
             version=version,
             auto_approve_publish=auto_approve_publish,
             ext_info=ext_info,
+            traffic_env=traffic_env,
         )
 
         logger.info(
@@ -895,6 +918,7 @@ class BaasService:  # pragma: no cover
         template_uuid: str,
         device_count: int = 1,
         ttl_in_minutes: Optional[int] = None,
+        traffic_env: str = "",
     ) -> Dict[str, Any]:
         """Provision a **teclaw** (pull-based, non-mount) container via BaaS.
 
@@ -958,6 +982,7 @@ class BaasService:  # pragma: no cover
         template_uuid: str,
         device_count: int = 1,
         ttl_in_minutes: Optional[int] = None,
+        traffic_env: str = "",
     ) -> Dict[str, Any]:
         """Re-deliver a new frozen artifact to an existing **teclaw** container.
 
@@ -2682,6 +2707,7 @@ class BaasService:  # pragma: no cover
         owner_id: str,
         agent_pass_token: str = "",
         agent_code: str = "",
+        traffic_env: str = "",
     ) -> OutBoundOperationRule:
         """构建出站操作规则 — 委托给注入的 ``OutboundRuleProvider`` (Rule 20)。
 
@@ -2696,6 +2722,7 @@ class BaasService:  # pragma: no cover
             owner_id=owner_id,
             agent_pass_token=agent_pass_token,
             agent_code=agent_code,
+            traffic_env=traffic_env,
             bot_type_resolver=self._resolve_bot_type,
         )
 
@@ -2703,6 +2730,7 @@ class BaasService:  # pragma: no cover
         self,
         *,
         agent_pass_token: str = "",
+        traffic_env: str = "",
     ) -> OutBoundOperationRule | None:
         """Teclaw 出站规则 — 委托给注入的 ``OutboundRuleProvider``。
 
@@ -2710,6 +2738,7 @@ class BaasService:  # pragma: no cover
         """
         return self._outbound_rule_provider.build_agentpass_rule(
             agent_pass_token=agent_pass_token,
+            traffic_env=traffic_env,
         )
 
     def update_teclaw_outbound_rule_by_bot_uuid(
@@ -2717,10 +2746,12 @@ class BaasService:  # pragma: no cover
         bot_uuid: str,
         *,
         agent_pass_token: str = "",
+        traffic_env: str = "",
     ) -> list[dict[str, Any]]:
         """创建/发布后按 BaaS bot_uuid 更新 Teclaw PaaS 设备出站规则。"""
         outbound_rule = self._build_teclaw_outbound_operation_rule(
             agent_pass_token=agent_pass_token,
+            traffic_env=traffic_env,
         )
         if outbound_rule is None:
             return []
@@ -3006,6 +3037,7 @@ class BaasService:  # pragma: no cover
         mount_home_dir_storage: bool | None = None,
         extra_envs: Optional[Dict[str, Any]] = None,
         template_config: Optional[Dict[str, Any]] = None,
+        traffic_env: str = "",
     ) -> Dict[str, Any]:
         """调用 BaaS 层 API 升级 Bot。
 
@@ -3067,6 +3099,7 @@ class BaasService:  # pragma: no cover
             mount_home_dir_storage=mount_home_dir_storage,
             extra_envs=extra_envs,
             template_config=template_config,
+            traffic_env=traffic_env,
         )
 
         logger.info(

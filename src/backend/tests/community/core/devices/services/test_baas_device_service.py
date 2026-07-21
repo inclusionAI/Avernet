@@ -28,6 +28,7 @@ from agentclaw.community.core.devices.services.baas_template_resolver import (
 )
 from agentclaw.community.core.devices.services.device_service import BAAS_DEVICE_PROVIDER
 from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
+from agentclaw.community.core.utils.traffic_env import TRAFFIC_ENV_ENV_KEY
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     TECLAW_DEVICE_PROVIDER,
 )
@@ -133,7 +134,8 @@ class TestUpdateDeviceHeaders:
         )
 
         baas._build_teclaw_outbound_operation_rule.assert_called_once_with(
-            agent_pass_token="passport-token"
+            agent_pass_token="passport-token",
+            traffic_env="draft",
         )
         baas._build_outbound_operation_rule.assert_not_called()
         baas.update_device_outbound_rule.assert_called_once_with("PAAS-1", rule)
@@ -157,7 +159,8 @@ class TestUpdateDeviceHeaders:
 
         assert result == []
         baas._build_teclaw_outbound_operation_rule.assert_called_once_with(
-            agent_pass_token=""
+            agent_pass_token="",
+            traffic_env="draft",
         )
         baas.update_device_outbound_rule.assert_not_called()
 
@@ -188,6 +191,7 @@ class TestUpdateDeviceHeaders:
             owner_id="u1",
             agent_pass_token="passport-token",
             agent_code="agent-code",
+            traffic_env="draft",
         )
         baas._build_teclaw_outbound_operation_rule.assert_not_called()
         baas.update_device_outbound_rule.assert_called_once_with("PAAS-1", rule)
@@ -571,7 +575,11 @@ class TestDoAllocate:
         assert allocated.device_props["bot_uuid"] == "BAAS-CTR-xxx"
         assert allocated.device_props["publish_id"] == "12345"
         assert allocated.device_props["device_from"] == "baas"
-        assert allocated.device_props["envs"] == {"BOT_TYPE": "personalCoding"}
+        assert allocated.device_props["envs"] == {
+            "BOT_TYPE": "personalCoding",
+            TRAFFIC_ENV_ENV_KEY: "draft",
+        }
+        assert allocated.device_props["traffic_env"] == "draft"
         baas._build_personal_bot_payload.assert_not_called()
         baas._build_create_bot_payload.assert_called_once()
         builder_kwargs = baas._build_create_bot_payload.call_args.kwargs
@@ -581,7 +589,11 @@ class TestDoAllocate:
         assert builder_kwargs["mount_home_dir_storage"] is True
         assert "stage" not in builder_kwargs
         assert builder_kwargs["auto_approve_publish"] is True
-        assert builder_kwargs["extra_envs"] == {"BOT_TYPE": "personalCoding"}
+        assert builder_kwargs["extra_envs"] == {
+            "BOT_TYPE": "personalCoding",
+            TRAFFIC_ENV_ENV_KEY: "draft",
+        }
+        assert builder_kwargs["traffic_env"] == "draft"
         assert builder_kwargs["template_config"] == {"template_uid": "aicoding_personal_default"}
         baas.post_bots_api.assert_called_once()
         baas.approve_publish.assert_not_called()
@@ -766,7 +778,11 @@ class TestDoAllocate:
         )
         baas._build_personal_bot_payload.assert_not_called()
         kwargs = baas._build_create_bot_payload.call_args.kwargs
-        assert kwargs["extra_envs"] == {"AIX_DEVFLOW_INFO": "foo"}
+        assert kwargs["extra_envs"] == {
+            "AIX_DEVFLOW_INFO": "foo",
+            TRAFFIC_ENV_ENV_KEY: "draft",
+        }
+        assert kwargs["traffic_env"] == "draft"
         assert kwargs["bot"]["bot_id"] == "default"
         assert kwargs["bot"]["entity_id"] == "staff_u001"
         assert kwargs["bot"]["bot_type"] == "personal"
@@ -803,6 +819,9 @@ class TestDoAllocate:
         assert builder_kwargs["migration_path"] == ""
         assert builder_kwargs["mount_home_dir_storage"] is True
         assert builder_kwargs["stage"] == "draft"
+        assert builder_kwargs["traffic_env"] == "draft"
+        assert builder_kwargs["extra_envs"] == {TRAFFIC_ENV_ENV_KEY: "draft"}
+        assert allocated.device_props["traffic_env"] == "draft"
         assert builder_kwargs["auto_approve_publish"] is True
         baas.create_bot.assert_not_called()
         baas.post_bots_api.assert_called_once_with(
@@ -1739,3 +1758,32 @@ class TestAfterBindingPersisted:
         assert handled is True
         svc._mark_service_start_failed.assert_called_once()
         assert "queue down" in svc._mark_service_start_failed.call_args.kwargs["error"]
+
+
+def test_update_device_headers_preserves_stored_traffic_env():
+    baas = MagicMock()
+    rule = MagicMock()
+    baas._build_outbound_operation_rule.return_value = rule
+    baas.get_device_by_uuid.return_value = {"provider_device_id": "PAAS-1"}
+    svc = _make_service(baas_service=baas)
+    device = AllocatedDevice(
+        device_id="BOT-baas",
+        device_provider=BAAS_DEVICE_PROVIDER,
+        device_props={
+            "bolt_id": "bot-1",
+            "entity_id": "u1",
+            "device_uuid": "DEVICE-1",
+            "traffic_env": "eval",
+        },
+    )
+
+    svc.update_device_headers(device=device)
+
+    baas._build_outbound_operation_rule.assert_called_once_with(
+        bot_id="bot-1",
+        owner_id="u1",
+        agent_pass_token="",
+        agent_code="",
+        traffic_env="eval",
+    )
+    baas.update_device_outbound_rule.assert_called_once_with("PAAS-1", rule)
