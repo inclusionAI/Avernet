@@ -117,7 +117,6 @@ from agentclaw.community.plugins.render_screen_repository import (
 from agentclaw.community.plugins.template_repository import (
     TemplateRepository as UnifiedTemplateRepository,
 )
-from agentclaw.community.utils.singlebox_coverage_proxy import wrap_for_singlebox_coverage
 
 
 logger = get_logger()
@@ -195,32 +194,7 @@ class BotManagementModule(Module):
     @provider
     @inject
     def bot_repository(self, db: DatabasePlugin) -> BotRepository:
-        return wrap_for_singlebox_coverage(
-            UnifiedBotRepository(db),
-            {
-                "insert": "BotRepository create/read/search/update/delete",
-                "get_by_id_and_owner": "BotRepository create/read/search/update/delete",
-                "get_live_by_id_owner_and_env": "BotRepository explicit-env passport repair",
-                "update_ext_by_id_owner_and_env": "BotRepository explicit-env passport repair",
-                "get_by_id": "BotRepository create/read/search/update/delete",
-                "list_by_owner": "BotRepository create/read/search/update/delete",
-                "list_by_owner_or_collaborator": "BotRepository create/read/search/update/delete",
-                "list_by_entity": "BotRepository create/read/search/update/delete",
-                "list_by_conditions": "BotRepository create/read/search/update/delete",
-                "list_by_search": "BotRepository create/read/search/update/delete",
-                "list_domain_bots": "BotRepository create/read/search/update/delete",
-                "update_by_owner": "BotRepository create/read/search/update/delete",
-                "soft_delete_by_owner": "BotRepository create/read/search/update/delete",
-                "count_by_owner": "BotRepository create/read/search/update/delete",
-                "exists_by_owner_and_bot_id": "BotRepository create/read/search/update/delete",
-                "exists_by_bot_name": "BotRepository create/read/search/update/delete",
-                "get_by_bot_name": "BotRepository create/read/search/update/delete",
-                "get_by_binding_id": "BotRepository create/read/search/update/delete",
-                "get_device_provider_by_bot_id_and_owner": "BotRepository create/read/search/update/delete",
-                "get_device_provider_by_bot_id": "BotRepository create/read/search/update/delete",
-                "search_bots": "BotRepository create/read/search/update/delete",
-            },
-        )
+        return UnifiedBotRepository(db)
 
     @singleton
     @provider

@@ -113,7 +113,6 @@ from agentclaw.community.plugins.skill_center_sync_log_repository import (
 from agentclaw.community.plugins.skill_propagation_log_repository import (
     SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository,
 )
-from agentclaw.community.utils.singlebox_coverage_proxy import wrap_for_singlebox_coverage
 
 
 logger = get_logger()
@@ -194,24 +193,7 @@ class SkillCenterModule(Module):
             SkillRepository as UnifiedSkillRepository,
         )
 
-        return wrap_for_singlebox_coverage(
-            UnifiedSkillRepository(db),
-            {
-                "get_by_id": "SkillRepository create/list/get/update/delete",
-                "get_by_uuid": "SkillRepository create/list/get/update/delete",
-                "get_by_git_path": "SkillRepository create/list/get/update/delete",
-                "get_by_link_name": "SkillRepository create/list/get/update/delete",
-                "list_skills": "SkillRepository create/list/get/update/delete",
-                "create": "SkillRepository create/list/get/update/delete",
-                "update": "SkillRepository create/list/get/update/delete",
-                "delete": "SkillRepository create/list/get/update/delete",
-                "delete_by_name_with_cascade": "SkillRepository create/list/get/update/delete",
-                "update_risk_tags": "SkillRepository create/list/get/update/delete",
-                "update_mcp_dependencies": "SkillRepository create/list/get/update/delete",
-                "delete_by_bot_id": "SkillRepository create/list/get/update/delete",
-                "get_active_skills_by_bot": "SkillRepository create/list/get/update/delete",
-            },
-        )
+        return UnifiedSkillRepository(db)
 
     @singleton
     @provider
@@ -221,25 +203,7 @@ class SkillCenterModule(Module):
             SkillSetRepository as UnifiedSkillSetRepository,
         )
 
-        return wrap_for_singlebox_coverage(
-            UnifiedSkillSetRepository(db),
-            {
-                "get_by_id": "SkillSetRepository create/list/get/update/delete",
-                "get_default": "SkillSetRepository create/list/get/update/delete",
-                "list_all": "SkillSetRepository create/list/get/update/delete",
-                "create": "SkillSetRepository create/list/get/update/delete",
-                "update": "SkillSetRepository create/list/get/update/delete",
-                "delete": "SkillSetRepository create/list/get/update/delete",
-                "add_skill_to_set": "SkillSetRepository create/list/get/update/delete",
-                "get_skills_in_set": "SkillSetRepository create/list/get/update/delete",
-                "remove_skill_from_set": "SkillSetRepository create/list/get/update/delete",
-                "delete_by_bot_id": "SkillSetRepository create/list/get/update/delete",
-                "set_active_skill_set": "SkillSetRepository create/list/get/update/delete",
-                "activate_skill_set": "SkillSetRepository create/list/get/update/delete",
-                "deactivate_skill_set": "SkillSetRepository create/list/get/update/delete",
-                "get_active_skill_set": "SkillSetRepository create/list/get/update/delete",
-            },
-        )
+        return UnifiedSkillSetRepository(db)
 
     @singleton
     @provider
@@ -249,20 +213,7 @@ class SkillCenterModule(Module):
             SkillMemberRepository as UnifiedSkillMemberRepository,
         )
 
-        return wrap_for_singlebox_coverage(
-            UnifiedSkillMemberRepository(db),
-            {
-                "get_members_by_skill_uuid": "SkillMemberRepository add/list/update/delete",
-                "get_member": "SkillMemberRepository add/list/update/delete",
-                "add_member": "SkillMemberRepository add/list/update/delete",
-                "remove_member": "SkillMemberRepository add/list/update/delete",
-                "update_member_role": "SkillMemberRepository add/list/update/delete",
-                "is_member": "SkillMemberRepository add/list/update/delete",
-                "get_member_role": "SkillMemberRepository add/list/update/delete",
-                "get_skill_uuids_by_user_id": "SkillMemberRepository add/list/update/delete",
-                "has_admin_role": "SkillMemberRepository add/list/update/delete",
-            },
-        )
+        return UnifiedSkillMemberRepository(db)
 
     @singleton
     @provider
@@ -272,19 +223,7 @@ class SkillCenterModule(Module):
             SkillCategoryRepository as UnifiedSkillCategoryRepository,
         )
 
-        return wrap_for_singlebox_coverage(
-            UnifiedSkillCategoryRepository(db),
-            {
-                "list_active": "SkillCategoryRepository create/list/update/delete",
-                "get_by_code": "SkillCategoryRepository create/list/update/delete",
-                "get_by_path": "SkillCategoryRepository create/list/update/delete",
-                "create": "SkillCategoryRepository create/list/update/delete",
-                "update_by_path": "SkillCategoryRepository create/list/update/delete",
-                "update": "SkillCategoryRepository create/list/update/delete",
-                "list_descendant_codes": "SkillCategoryRepository create/list/update/delete",
-                "get_skills_by_category": "SkillCategoryRepository create/list/update/delete",
-            },
-        )
+        return UnifiedSkillCategoryRepository(db)
 
     @singleton
     @provider

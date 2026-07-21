@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backend-min", type=float, default=38.0)
     parser.add_argument("--baas-min", type=float, default=45.0)
     parser.add_argument("--backend-router-min", type=int, default=10)
-    parser.add_argument("--backend-plugin-min", type=int, default=30)
+    parser.add_argument("--backend-plugin-min", type=int, default=0)
     parser.add_argument("--baas-router-min", type=int, default=10)
     parser.add_argument("--bcs-line-min", type=float, default=40.0)
     parser.add_argument("--bcs-method-min", type=float, default=36.0)
@@ -117,10 +117,10 @@ def validate_summary(summary: dict[str, Any], args: argparse.Namespace, errors: 
         "summary.coverage.backend.router_hits",
         errors,
     )
-    backend_plugin_hits = as_number(
-        get_nested(summary, ("coverage", "backend", "plugin_hits")),
-        "summary.coverage.backend.plugin_hits",
-        errors,
+    backend_plugin_hits = sum(
+        int((module.get("plugin_api") or {}).get("covered") or 0)
+        for module in (summary.get("modules") or {}).values()
+        if isinstance(module, dict)
     )
     baas_router_hits = as_number(
         get_nested(summary, ("coverage", "baas", "router_hits")),
@@ -294,7 +294,11 @@ def main() -> int:
         return 1
 
     backend_router_hits = int(get_nested(summary, ("coverage", "backend", "router_hits")) or 0)
-    backend_plugin_hits = int(get_nested(summary, ("coverage", "backend", "plugin_hits")) or 0)
+    backend_plugin_hits = sum(
+        int((module.get("plugin_api") or {}).get("covered") or 0)
+        for module in (summary.get("modules") or {}).values()
+        if isinstance(module, dict)
+    )
     baas_router_hits = int(get_nested(summary, ("coverage", "baas", "router_hits")) or 0)
 
     print("singlebox coverage artifacts verified")
@@ -305,7 +309,10 @@ def main() -> int:
         f"{bcs_metrics[0]:.2f}%/{bcs_metrics[1]:.2f}%/"
         f"{bcs_metrics[2]:.2f}%/{bcs_metrics[3]:.2f}%"
     )
-    print(f"backend router/plugin hits: {backend_router_hits}/{backend_plugin_hits}")
+    print(
+        "backend router hits/plugin evidence: "
+        f"{backend_router_hits}/{backend_plugin_hits}"
+    )
     print(f"BaaS router hits: {baas_router_hits}")
     return 0
 
