@@ -153,6 +153,7 @@ class TestDispatchGetUploadUrl:
             tenant="t1",
             device_path=None,
             filename="retention.csv",
+            file_size=100,
         )
         assert result.type == "SINGLE"
         ticket_repo.create_ticket.assert_called_once()
@@ -236,6 +237,7 @@ class TestDispatchGetUploadUrl:
             tenant="t1",
             device_path="/x",
             staging_subdir="/subdir/",
+            file_size=100,
         )
         assert file_backend.build_staging_path.call_args.kwargs["subdir"] == "subdir"
 

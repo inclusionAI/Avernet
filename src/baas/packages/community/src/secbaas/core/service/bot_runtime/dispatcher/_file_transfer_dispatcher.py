@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from secbaas.community.api.bot_runtime import (
+from secbaas.api.bot_runtime import (
     BotFileTransferDispatcher,
     CancelUploadResponse,
     CompleteUploadResponse,
@@ -26,15 +26,15 @@ from secbaas.community.api.bot_runtime import (
     StagingListResponse,
     TransferNotFoundError,
 )
-from secbaas.community.core.service.paas import PaasServiceFacade
-from secbaas.community.core.utils.env_utils import get_current_env
-from secbaas.community.logger import get_logger
+from secbaas.core.service.paas import PaasServiceFacade
+from secbaas.core.utils.env_utils import get_current_env
+from secbaas.logger import get_logger
 
 if TYPE_CHECKING:
-    from secbaas.community.core.repository.bot import BotRepository
-    from secbaas.community.core.repository.device import DeviceRepository
-    from secbaas.community.core.repository.file_transfer_ticket import TicketRepository
-    from secbaas.community.spi.file_transfer import FileTransferBackend
+    from secbaas.core.repository.bot import BotRepository
+    from secbaas.core.repository.device import DeviceRepository
+    from secbaas.core.repository.file_transfer_ticket import TicketRepository
+    from secbaas.spi.file_transfer import FileTransferBackend
 
 from ._base_dispatcher import BotBaseDispatcher
 
@@ -473,7 +473,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
                 ticket.fileservice_staging_path,
             )
             if not exists:
-                from secbaas.community.api.bot_runtime import (
+                from secbaas.api.bot_runtime import (
                     OssObjectNotFoundError,
                 )
 
@@ -646,7 +646,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         # D-09: validate terminal state
         terminal_states = {"DONE", "FAILED", "CANCELLED", "DELETED"}
         if ticket.status not in terminal_states:
-            from secbaas.community.api.bot_runtime import (
+            from secbaas.api.bot_runtime import (
                 TransferNotTerminalError,
             )
 

@@ -14,14 +14,14 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from secbaas.community.core.repository.file_transfer_ticket import (
+from secbaas.core.repository.file_transfer_ticket import (
     TicketRecord,
     TicketRepository,
 )
-from secbaas.community.core.service.distributed_lock import DistributedLockService
-from secbaas.community.core.service.paas import PaasServiceFacade
-from secbaas.community.logger import get_logger
-from secbaas.community.spi.file_transfer import FileTransferBackend
+from secbaas.core.service.distributed_lock import DistributedLockService
+from secbaas.core.service.paas import PaasServiceFacade
+from secbaas.logger import get_logger
+from secbaas.spi.file_transfer import FileTransferBackend
 
 log = get_logger("core-scheduler")
 
