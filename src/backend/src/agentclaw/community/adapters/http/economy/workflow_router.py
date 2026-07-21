@@ -66,15 +66,6 @@ _ALLOWED_REVIEW_STATUSES = frozenset(
     {"open", "scheduled", "waiting_review", "closed", "observed"}
 )
 
-# 投递状态核心正规状态集(pending / sent / failed / cancelled)。
-# 核心四态由 notify 生命周期驱动写入;非闭集 — 不阻历史遗留/扩展值(如 none
-# 列默认哨兵、first_send:sent 旧拼接格式),前端按需传任意列原始值精确查。
-# delivery_status 的状态由 notify 驱动写入;各种状态查询由前端组合,后端只精确
-# 匹配不做扩展/归一,保持后端逻辑干净。
-_ALLOWED_DELIVERY_STATUSES = frozenset(
-    {"pending", "sent", "failed", "cancelled"}
-)
-
 # 投递状态过滤值(pending / sent / failed / cancelled)。
 _ALLOWED_DELIVERY_STATUSES = frozenset(
     {"pending", "sent", "failed", "cancelled"}
