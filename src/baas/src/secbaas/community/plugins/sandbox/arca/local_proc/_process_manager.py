@@ -1103,8 +1103,18 @@ class LocalProcessManager:
     def _resolve_engine_python(engine_src_dir: Path) -> str:
         """Resolve the Python executable for the engine adapter.
 
-        Prefers the engine's own venv, falls back to current interpreter.
+        Prefers an explicitly configured interpreter, then the engine's own
+        venv, and finally the current interpreter.
         """
+        configured = os.environ.get("LOCAL_ENGINE_PYTHON")
+        if configured:
+            candidate = Path(configured).expanduser()
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+            raise DeviceAllocateError(
+                f"Configured LOCAL_ENGINE_PYTHON is not executable: {candidate}"
+            )
+
         engine_venv = engine_src_dir.parent / ".venv" / "bin" / "python"
         if engine_venv.exists():
             return str(engine_venv)
