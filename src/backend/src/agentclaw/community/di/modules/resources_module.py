@@ -27,13 +27,9 @@ from agentclaw.community.core.files.repository.protocol import FileRepositoryPro
 from agentclaw.community.core.resources.factory import ResourceServiceFactory
 from agentclaw.community.core.resources.repository.protocol import ResourceRepositoryProtocol
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugins.file_repository import FileRepository
 from agentclaw.community.plugins.resource_repository import (
     ResourceRepository as UnifiedResourceRepository,
-)
-from agentclaw.community.utils.singlebox_coverage_proxy import (
-    wrap_for_singlebox_coverage,
 )
 
 
@@ -55,30 +51,20 @@ class ResourcesModule(Module):
             ResourceFileService,
         )
         binder.bind(ResourceFileService, to=ResourceFileService, scope=singleton)
+        # Unified ORM repo (one body, ZDAS + SQLite). @inject ctor takes
+        # the bound DatabasePlugin; prod vs test differ only by which
+        # DatabasePlugin is bound (ZdasDB / SqliteDB).
+        binder.bind(
+            ResourceRepositoryProtocol,
+            to=UnifiedResourceRepository,
+            scope=singleton,
+        )
         # Teclaw workspace-file metadata (ac_file): same unified-ORM pattern.
         binder.bind(
             FileRepositoryProtocol, to=FileRepository, scope=singleton
         )
         binder.bind(
             BotFileServiceFactory, to=BotFileServiceFactory, scope=singleton
-        )
-
-    @singleton
-    @provider
-    @inject
-    def resource_repository(
-        self, db: DatabasePlugin
-    ) -> ResourceRepositoryProtocol:
-        """Expose resource persistence evidence at the DI boundary."""
-        return wrap_for_singlebox_coverage(
-            UnifiedResourceRepository(db),
-            {
-                "create": "ResourceRepository.create",
-                "list_resources": "ResourceRepository.list_resources",
-                "get_by_id": "ResourceRepository.get_by_id",
-                "update": "ResourceRepository.update",
-                "delete": "ResourceRepository.delete",
-            },
         )
 
     @singleton
