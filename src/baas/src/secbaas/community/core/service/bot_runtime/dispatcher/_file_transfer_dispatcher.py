@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from secbaas.community.api.bot_runtime import (
     BotFileTransferDispatcher,
+    BotNotFoundError,
     CancelUploadResponse,
     CompleteUploadResponse,
     GetDownloadUrlResponse,
@@ -371,12 +372,23 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         self,
         transfer_id: str,
         tenant: str | None = None,
+        bot_uuid: str | None = None,
     ) -> GetTransferStatusResponse:
         """Query a transfer ticket by transfer_id (D-12 query flow).
 
         Maps TicketRecord fields to GetTransferStatusResponse with
         conditional URL/error fields based on ticket status.
+
+        When bot_uuid is provided, validates that the bot exists and belongs
+        to the specified tenant before returning the transfer status.
         """
+        # Validate bot ownership when bot_uuid is provided
+        if bot_uuid is not None and tenant is not None:
+            env = get_current_env()
+            bots = self._bot_repo.list_by_bot_uuid(bot_uuid, tenant, env)
+            if not bots:
+                raise BotNotFoundError(bot_uuid)
+
         record = self._ticket_repo.get_by_transfer_id(
             transfer_id,
             tenant=tenant,
