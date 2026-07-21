@@ -276,15 +276,6 @@ class TestGetChatSession:
             await svc.get_chat_session("user1", "bot1", "owner1")
 
     @pytest.mark.asyncio
-    async def test_bot_not_in_chat_list_raises(self, mock_repository, mock_bot_repo, mock_device_provider):
-        mock_bot_repo.get_by_id_and_owner.return_value = ACTIVE_BOT
-        mock_repository.list_chat_bots.return_value = []  # bot not in list
-        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
-
-        with pytest.raises(BotNotFoundError, match="对话列表"):
-            await svc.get_chat_session("user1", "bot1", "owner1")
-
-    @pytest.mark.asyncio
     async def test_existing_valid_session_reused(self, mock_repository, mock_bot_repo, mock_device_provider):
         mock_bot_repo.get_by_id_and_owner.return_value = ACTIVE_BOT
         mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
@@ -1248,32 +1239,10 @@ class TestGetChatSessionCallerAuthorization:
 
     Security: Unauthorized users must NOT trigger get_caller_connection
     (container creation/upgrade) before authorization is verified.
+
+    Note: Chat list check (list_chat_bots) was removed - users with permission
+    (owner/public/collaborator) can directly use the bot without adding it first.
     """
-
-    @pytest.mark.asyncio
-    async def test_bot_not_in_list_no_instance_call(self, mock_repository, mock_bot_repo, mock_device_provider):
-        """Bot not in user's chat list: instance_service must NOT be called."""
-        caller_bot = {
-            "bot_id": "bot1",
-            "status": "ACTIVE",
-            "call_type": "caller",
-            "owner_id": "owner1",
-            "public": "0",
-        }
-        mock_bot_repo.get_by_id_and_owner.return_value = caller_bot
-        # Bot NOT in user's chat list
-        mock_repository.list_chat_bots.return_value = []
-
-        mock_instance = MagicMock()
-        mock_instance.get_caller_connection = AsyncMock()
-
-        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider, mock_instance_service=mock_instance)
-
-        with pytest.raises(BotNotFoundError, match="Bot不在对话列表中"):
-            await svc.get_chat_session("user1", "bot1", "owner1")
-
-        # CRITICAL: instance_service.get_caller_connection must NOT be called
-        mock_instance.get_caller_connection.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_no_permission_no_instance_call(self, mock_repository, mock_bot_repo, mock_device_provider):
@@ -1286,8 +1255,6 @@ class TestGetChatSessionCallerAuthorization:
             "public": "0",  # Not public
         }
         mock_bot_repo.get_by_id_and_owner.return_value = caller_bot
-        # Bot in user's chat list
-        mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
 
         # User is NOT a collaborator
         mock_collab = MagicMock()
@@ -1323,8 +1290,6 @@ class TestGetChatSessionCallerAuthorization:
             "public": "0",
         }
         mock_bot_repo.get_by_id_and_owner.return_value = caller_bot
-        # Bot in user's chat list (user is also owner)
-        mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
         mock_repository.get_session.return_value = None
 
         mock_instance = MagicMock()
@@ -1356,8 +1321,6 @@ class TestGetChatSessionCallerAuthorization:
             "public": "0",  # Not public
         }
         mock_bot_repo.get_by_id_and_owner.return_value = caller_bot
-        # Bot in user's chat list
-        mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
         mock_repository.get_session.return_value = None
 
         # User IS a collaborator
@@ -1401,8 +1364,6 @@ class TestGetChatSessionCallerAuthorization:
             "public": "1",  # Public bot
         }
         mock_bot_repo.get_by_id_and_owner.return_value = caller_bot
-        # Bot in user's chat list
-        mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
         mock_repository.get_session.return_value = None
 
         mock_instance = MagicMock()
