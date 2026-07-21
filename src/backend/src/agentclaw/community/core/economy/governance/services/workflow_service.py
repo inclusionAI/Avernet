@@ -514,8 +514,11 @@ class GovernanceWorkflowService:
                 notify_delete_failed=0,
             )
 
-        tickets_deleted = self._task_repo.delete_by_ticket_id(ticket_id)
+        # 先删通知、再删工单:崩溃在两步之间时,通知不会孤立(工单仍在,重试可重入
+        # 删通知→删工单)。若反过来先删工单,崩溃在删通知前会让通知永久孤立(
+        # 工单没了,重试因 ticket is None 短路,清不掉残留通知)。
         notify_deleted, notify_failed = self._cascade_delete_notify(ticket_id)
+        tickets_deleted = self._task_repo.delete_by_ticket_id(ticket_id)
         self._audit_cascade(
             ticket=ticket, operator=operator, reason=reason,
             tickets_deleted=tickets_deleted, notify_deleted=notify_deleted,
