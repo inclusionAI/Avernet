@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from ._models import AuthUser
+from ._models import AuthenticatedUser
 
 
 class AuthPlugin(Protocol):
@@ -19,7 +19,7 @@ class AuthPlugin(Protocol):
 
     async def get_login_user(
         self, cookie: str | None = None, referer: str | None = None
-    ) -> AuthUser:
+    ) -> AuthenticatedUser:
         """Authenticate user and return user profile.
 
         Args:
@@ -27,18 +27,18 @@ class AuthPlugin(Protocol):
             referer: Referer header from HTTP request.
 
         Returns:
-            AuthUser with user profile information.
+            AuthenticatedUser with user profile information.
 
         Raises:
             AuthError: If authentication fails.
         """
         ...
 
-    def is_allowed(self, user: AuthUser) -> bool:
+    def is_allowed(self, user: AuthenticatedUser) -> bool:
         """Check whether the user is in the operator whitelist.
 
         Args:
-            user: The authenticated AuthUser to check.
+            user: The authenticated AuthenticatedUser to check.
 
         Returns:
             True if the user's operatorName is in the whitelist.

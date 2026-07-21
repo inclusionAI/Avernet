@@ -6,7 +6,7 @@ open-source edition runs without an identity backend.
 
 from __future__ import annotations
 
-from gateway.community.spi.auth import AuthPlugin, AuthUser
+from gateway.community.spi.auth import AuthPlugin, AuthenticatedUser
 
 
 class BareAuthPlugin(AuthPlugin):
@@ -17,9 +17,9 @@ class BareAuthPlugin(AuthPlugin):
 
     def __init__(
         self,
-        default_user: AuthUser | None = None,
+        default_user: AuthenticatedUser | None = None,
     ) -> None:
-        self._default_user = default_user or AuthUser(
+        self._default_user = default_user or AuthenticatedUser(
             id="bare-user-001",
             operatorName="bare_operator",
             staffId="000001",
@@ -29,10 +29,10 @@ class BareAuthPlugin(AuthPlugin):
 
     async def get_login_user(
         self, cookie: str | None = None, referer: str | None = None
-    ) -> AuthUser:
+    ) -> AuthenticatedUser:
         return self._default_user
 
-    def is_allowed(self, user: AuthUser) -> bool:
+    def is_allowed(self, user: AuthenticatedUser) -> bool:
         return True
 
     def check_permission(

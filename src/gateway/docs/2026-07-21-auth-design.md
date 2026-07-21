@@ -43,7 +43,7 @@
 | **SPI（协议）** | `gateway/community/spi/<能力>/` | `_protocols.py` 协议、`_models.py` 模型、`_errors.py` 异常 |
 | **Plugin（实现）** | `gateway/community/plugins/<能力>/<flavor>/` | 一个能力多份实现，按 flavor 分目录 |
 | **flavor 选择** | `PluginAccessor` + `GATEWAY_RUN_MODE` 环境变量 | `bare`（默认，开源）/ `sofa`（企业，注册 entry point） |
-| **已有身份模型** | `spi/auth/_models.py::AuthUser` | 工号/花名/租户等，形状同 backend `AuthenticatedIdentity` |
+| **已有身份模型** | `spi/auth/_models.py::AuthenticatedUser` | 工号/花名/租户等，形状同 backend `AuthenticatedIdentity` |
 | **已有 auth 协议骨架** | `spi/auth/_protocols.py::AuthPlugin` | `get_login_user` / `is_allowed` / `check_permission`，第一方为主 |
 | **社区/企业实现样板** | `plugins/auth/bare/_plugin.py::BareAuthPlugin` | 返回硬编码用户；企业版将是 `plugins/auth/sofa/`（BUService） |
 
@@ -75,11 +75,11 @@
 
 ## 4. 身份与领域模型（全部类型）
 
-放在 `gateway/community/spi/authn/_models.py`（与既有 `spi/auth/` 并列的新 SPI；`AuthUser` 仍从 `spi/auth` 复用）。
+放在 `gateway/community/spi/authn/_models.py`（与既有 `spi/auth/` 并列的新 SPI；`AuthenticatedUser` 仍从 `spi/auth` 复用）。
 
-### 4.1 已有：`AuthUser` —— 已验证的**终端用户**身份
+### 4.1 已有：`AuthenticatedUser` —— 已验证的**终端用户**身份
 
-复用 `spi/auth/_models.py::AuthUser`。语义：**我们已在自己身份体系里认证过的一个真人**
+复用 `spi/auth/_models.py::AuthenticatedUser`。语义：**我们已在自己身份体系里认证过的一个真人**
 （工号 `staffId` 为规范句柄）。它是 `UserPrincipal.subject` 的类型。
 
 ### 4.2 新增：`ThirdPartyApp` —— 第三方**应用**身份（调用程序本身）
@@ -103,7 +103,7 @@ class ThirdPartyApp(BaseModel):
 from typing import Annotated, Literal
 from enum import StrEnum
 from pydantic import BaseModel, Field
-from gateway.community.spi.auth import AuthUser
+from gateway.community.spi.auth import AuthenticatedUser
 
 class PrincipalType(StrEnum):
     USER            = "user"             # 第一方登录用户（前端 / 人工 curl）
@@ -114,7 +114,7 @@ class UserPrincipal(BaseModel):
     type: Literal[PrincipalType.USER] = PrincipalType.USER
     tenant: str                          # 必填，来自租户令牌，见 §4.6
     scopes: frozenset[str] = frozenset()
-    subject: AuthUser                    # 必填
+    subject: AuthenticatedUser                    # 必填
 
 class AppPrincipal(BaseModel):
     type: Literal[PrincipalType.THIRD_PARTY_APP] = PrincipalType.THIRD_PARTY_APP
@@ -230,15 +230,19 @@ class AuthStrategy(Protocol):
 
 ## 6. 策略实现（本轮启用的类型）
 
-策略本身**与 flavor 无关**；社区/企业差异下沉到策略依赖的**底层 port**（Rule 14）。
+策略本身**与 flavor 无关**；社区/企业差异下沉到策略依赖的**依赖协议（SPI）**（Rule 14）。
 
-### 6.1 底层 port（策略的依赖）
+> "依赖协议（SPI）"就是一个策略**调用、但自己不实现**的协议（有方法、可按 flavor 替换实现），
+> 与组件现有的 `AuthPlugin`（协议）+ `BareAuthPlugin`（实现）是同一手法。注意区分：`ApiKeyValidator` /
+> `TenantResolver` 是**依赖协议**（有 `verify()`/`resolve()`）；`ApiKeyRecord` 只是它们返回的**数据类**，不是协议。
+
+### 6.1 依赖协议（SPI，策略的依赖）
 
 ```python
 # gateway/community/spi/authn/_ports.py
 from typing import Protocol
 from dataclasses import dataclass
-from gateway.community.spi.auth import AuthUser, AuthPlugin  # AuthPlugin 已存在
+from gateway.community.spi.auth import AuthenticatedUser, AuthPlugin  # AuthPlugin 已存在
 
 @dataclass(frozen=True)
 class ApiKeyRecord:
@@ -393,8 +397,42 @@ async def authenticate(
 
 > 项内多 scheme（AND）当前无实际用例；若将来出现（如 `app_key` + `mtls_client`），在此处合并成一个 Principal。
 
-认证成功后，`Principal` 序列化为**签名内部头**（`X-Avernet-Principal` + `-Sig`，叠加内网 mTLS）转发下游；
-下游组件的 auth 退化为"验签 + 反序列化"，不再自行对 OAuth/BUService 说话。
+认证成功后，`Principal` 由网关**签名**并转发下游；下游组件的 auth 退化为"验签 + 反序列化"，
+不再自行对 OAuth/BUService 说话。签发/验签机制见 §7.1。
+
+### 7.1 转发与信任：Principal 的签发与验签
+
+**问题：** 网关把它生成的 `Principal` 转发给下游组件，组件凭什么相信"这确实来自网关、且没被篡改"？
+威胁包括：绕过网关**直连**组件并伪造 `X-Avernet-Principal` 头；篡改/重放截获的 Principal。
+**组件绝不能信任一个裸的 Principal 头。**
+
+**建议：两层纵深防御，都要。**
+
+**① 传输层 —— mTLS / 网络隔离。** 组件只对网关可达（网络策略 / service mesh），mTLS 认证信道
+（网关客户端证书）并加密。挡住任意客户端直连。但单靠它不够（SSRF、同网段其它服务、被攻陷的 sidecar 仍可伪造）。
+
+**② 载荷层 —— 网关对 Principal 非对称签名（JWT 风格短时令牌）。** 网关用**私钥**签名，
+每个组件用网关**公钥**验签——非对称意味着组件能验、但**造不出** Principal（缩小 blast radius）。声明：
+
+| claim | 作用 |
+| --- | --- |
+| `iss` | 签发方 = 网关 |
+| `aud` | 目标组件（baas/engine/…）——**绑定受众**，发给 baas 的令牌无法重放到 engine |
+| `iat`/`exp` | 短 TTL（秒级）——限制重放窗口 |
+| `kid` | 签名密钥 id——支持轮换 |
+| `jti`（可选） | + 组件侧 nonce 缓存 → 更强防重放 |
+| payload | 序列化的 `Principal`（判别联合，含 `type`/`tenant`/…） |
+
+**组件侧 = 一个"网关信任"插件：** 验签 → 校验 `aud`/`exp` → 反序列化 `Principal` → 投影成域 DTO（§9）。
+这正是"组件跑 `auth.mode=none`"的**确切含义**——组件不再认证第三方，只验证"这是网关签发、未被篡改的 Principal"。
+
+**做成 SPI（沿用 bare/sofa）：**
+
+- 网关侧 `PrincipalSigner`：`bare` = HMAC 共享密钥（单盒够用，但持密方能造令牌）；`sofa` = 非对称 + 密钥管理。
+- 组件侧 `PrincipalVerifier`：`bare` = 同一 HMAC；`sofa` = 拉网关公钥 / JWKS 验签，按 `kid` 缓存轮换。
+
+**防重放补充：** 短 `exp` + `aud` 绑定通常够；要防"同一令牌换个请求重放"，可把 `method+path`（或 body 摘要）
+纳入签名 claims，或依赖 mTLS 通道绑定。
 
 ---
 
@@ -518,8 +556,8 @@ def project(p: Principal) -> AuthenticatedUser:
 
 ## 13. 落地路径（增量，不破坏现有 Rule）
 
-1. 新增 `spi/authn/`：`Principal` 判别联合、`ThirdPartyApp`、`AuthStrategy`、`TenantResolver`/`ApiKeyValidator` port
-   + conformance test（Rule 25）。
+1. 新增 `spi/authn/`：`Principal` 判别联合、`ThirdPartyApp`、`AuthStrategy`、`TenantResolver`/`ApiKeyValidator` 依赖协议
+   + `PrincipalSigner`/`PrincipalVerifier`（§7.1）+ conformance test（Rule 25）。
 2. **bare 先行**（单盒优先，Rule 20）：`TenantResolver`(bare) + `app_key` 策略打通最小链路
    （租户令牌 → App 认证 → 签名 Principal → baas 投影 → owner=org）。
 3. 加 `first_party_user`、§7 runner、§8 路由表 + CI 门禁。
@@ -531,7 +569,8 @@ def project(p: Principal) -> AuthenticatedUser:
 
 ## 14. 待拍板的开放问题
 
-1. **网关↔组件信任**：内网 mTLS 是否足够，还是叠加 Principal 头应用层签名？（建议两者都要。）
+1. **网关↔组件信任**：方案已定（§7.1，mTLS + 非对称签名 Principal 双层）；待定的是**密钥分发/轮换**细节
+   （JWKS vs 配置注入）与是否加入请求绑定（`method+path`/body 摘要）防重放。
 2. **租户令牌的签发与轮换**：由谁签发、有效期、轮换与吊销机制？承载方式（`X-Tenant-Token` header 还是 mTLS 客户端证书）？
 3. **App 与租户的绑定**：一个租户下多个 App 如何注册；`app_key` 与租户令牌交叉校验的失败语义（拒绝 vs 告警）。
 4. **模式 B 资源归属粒度**：归 `developer_org_id` 还是 `client_id`？（同一开发者多 App 是否共享资源。）
@@ -544,10 +583,10 @@ def project(p: Principal) -> AuthenticatedUser:
 本轮搁置，但设计思路记录在此，解冻时直接接回。届时新增：
 
 - **`DelegatedPrincipal`**（判别联合第三成员）：`type=DELEGATED`，同时带 `app: ThirdPartyApp` 与
-  `subject: AuthUser`（两者必填），外加 `tenant`。
+  `subject: AuthenticatedUser`（两者必填），外加 `tenant`。
 - **`PrincipalType.DELEGATED`** 与 **`Delegation.REQUIRED`** 启用。
 - **策略 `app_key_delegated`**：`api_key` + partner 显式转发的 `xoneid` header；用
-  **`SubjectTokenResolver`** port（`bare` 抛不支持、`sofa` 用 BUService SDK 解析 `xoneid` → `AuthUser`）产出 `subject`。
+  **`SubjectTokenResolver`** 依赖协议（`bare` 抛不支持、`sofa` 用 BUService SDK 解析 `xoneid` → `AuthenticatedUser`）产出 `subject`。
 - **下游可持续凭证**：若 runtime 需"代表用户"的持久凭证，复用 backend
   `CallerIdentityService.exchange_caller_identity()`（subject + owner 预授权委托凭证换取，**只写 BaaS，绝不回吐 partner**）。
 - **前置确认**：BUService subject token 是否 sender-constrained（audience/mTLS/DPoP），决定 `xoneid` 透传边界。
@@ -557,10 +596,10 @@ def project(p: Principal) -> AuthenticatedUser:
 
 ## 附录：术语
 
-- **`AuthUser`**：已验证的终端用户身份（组件既有模型）。
+- **`AuthenticatedUser`**：已验证的终端用户身份（组件既有模型）。
 - **`ThirdPartyApp`**：第三方应用身份（调用程序本身）。
 - **`Principal`**：网关产出的中立鉴权对象，判别联合 `UserPrincipal | AppPrincipal`，每个成员必带 `tenant`。
 - **租户令牌 / `TenantResolver`**：每租户唯一令牌；网关先验证并映射成 `tenant`（必填），与身份策略正交。
 - **`AuthStrategy`**：网关侧"构建 Principal 的方式"的命名策略；`build()` 用 `None`/`raise` 区分"不适用"/"非法"。
 - **flavor `bare` / `sofa`**：社区（开源无后端）/ 企业（BUService），由 `GATEWAY_RUN_MODE` 选择。
-- **`xoneid`**（§15）：partner 显式转发的用户令牌 header，`sofa` 侧用 BUService SDK 解析为 `AuthUser`。
+- **`xoneid`**（§15）：partner 显式转发的用户令牌 header，`sofa` 侧用 BUService SDK 解析为 `AuthenticatedUser`。

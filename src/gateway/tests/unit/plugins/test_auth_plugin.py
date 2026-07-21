@@ -1,18 +1,18 @@
-"""Unit tests for BareAuthPlugin and AuthUser model."""
+"""Unit tests for BareAuthPlugin and AuthenticatedUser model."""
 
 from __future__ import annotations
 
 import pytest
 
 from gateway.community.plugins.auth.bare import BareAuthPlugin
-from gateway.community.spi.auth import AuthError, AuthUser
+from gateway.community.spi.auth import AuthError, AuthenticatedUser
 
-# ── AuthUser model ───────────────────────────────────────────────────────────
+# ── AuthenticatedUser model ───────────────────────────────────────────────────────────
 
 
-class TestAuthUser:
+class TestAuthenticatedUser:
     def test_basic_construction(self) -> None:
-        user = AuthUser(
+        user = AuthenticatedUser(
             id="u1",
             operatorName="op1",
             staffId="s001",
@@ -22,17 +22,17 @@ class TestAuthUser:
         assert user.staffId == "s001"
 
     def test_staffId_alias_populates_outUserNo(self) -> None:
-        user = AuthUser(id="u1", operatorName="op1", staffId="s100")
+        user = AuthenticatedUser(id="u1", operatorName="op1", staffId="s100")
         assert user.outUserNo == "s100"
         assert user.staffId == "s100"
 
     def test_outUserNo_direct_field(self) -> None:
-        user = AuthUser(id="u1", operatorName="op1", outUserNo="d100")
+        user = AuthenticatedUser(id="u1", operatorName="op1", outUserNo="d100")
         assert user.staffId == "d100"
         assert user.outUserNo == "d100"
 
     def test_tenantId_alias(self) -> None:
-        user = AuthUser(
+        user = AuthenticatedUser(
             id="u1",
             operatorName="op1",
             staffId="s001",
@@ -42,7 +42,7 @@ class TestAuthUser:
         assert user.tenantId == "t100"
 
     def test_tntInstId_direct_field(self) -> None:
-        user = AuthUser(
+        user = AuthenticatedUser(
             id="u1",
             operatorName="op1",
             staffId="s001",
@@ -51,7 +51,7 @@ class TestAuthUser:
         assert user.tenantId == "direct-tenant"
 
     def test_optional_fields_default_none(self) -> None:
-        user = AuthUser(id="u1", operatorName="op1", staffId="s001")
+        user = AuthenticatedUser(id="u1", operatorName="op1", staffId="s001")
         assert user.mobileNumber is None
         assert user.nickName is None
         assert user.realName is None
@@ -59,7 +59,7 @@ class TestAuthUser:
         assert user.tenantId is None
 
     def test_all_fields(self) -> None:
-        user = AuthUser(
+        user = AuthenticatedUser(
             id="u1",
             mobileNumber="13800138000",
             nickName="花名",
@@ -74,7 +74,7 @@ class TestAuthUser:
         assert user.realName == "张三"
 
     def test_json_roundtrip(self) -> None:
-        user = AuthUser(
+        user = AuthenticatedUser(
             id="u1",
             operatorName="op1",
             staffId="s001",
@@ -83,13 +83,13 @@ class TestAuthUser:
         data = user.model_dump(by_alias=True)
         assert data["staffId"] == "s001"
         assert data["tenantId"] == "t1"
-        restored = AuthUser.model_validate(data)
+        restored = AuthenticatedUser.model_validate(data)
         assert restored.staffId == "s001"
         assert restored.tenantId == "t1"
 
     def test_populate_by_name(self) -> None:
         """Both alias and field name should work for population."""
-        user = AuthUser(
+        user = AuthenticatedUser(
             id="u1",
             operatorName="op1",
             outUserNo="by-field",
@@ -139,7 +139,7 @@ class TestBareAuthPlugin:
 
     @pytest.mark.asyncio
     async def test_custom_user_injection(self) -> None:
-        custom = AuthUser(
+        custom = AuthenticatedUser(
             id="custom-001",
             operatorName="custom_op",
             staffId="custom-staff",
@@ -151,7 +151,7 @@ class TestBareAuthPlugin:
 
     def test_is_allowed_always_true(self) -> None:
         plugin = BareAuthPlugin()
-        user = AuthUser(id="any", operatorName="any", staffId="s")
+        user = AuthenticatedUser(id="any", operatorName="any", staffId="s")
         assert plugin.is_allowed(user) is True
 
     def test_is_allowed_with_none_user(self) -> None:
@@ -171,7 +171,7 @@ class TestBareAuthPlugin:
     async def test_multiple_instances_independent(self) -> None:
         p1 = BareAuthPlugin()
         p2 = BareAuthPlugin(
-            default_user=AuthUser(id="other", operatorName="op", staffId="s")
+            default_user=AuthenticatedUser(id="other", operatorName="op", staffId="s")
         )
         u1 = await p1.get_login_user()
         u2 = await p2.get_login_user()

@@ -1,13 +1,13 @@
 """Auth SPI — shared data models.
 
-Implementation-agnostic AuthUser used as the return type for
+Implementation-agnostic AuthenticatedUser used as the return type for
 AuthPlugin.get_login_user().
 """
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class AuthUser(BaseModel):
+class AuthenticatedUser(BaseModel):
     """Authenticated user information.
 
     Used as the return type for AuthPlugin.get_login_user().
