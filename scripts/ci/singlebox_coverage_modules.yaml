@@ -124,18 +124,12 @@ modules:
         - GET /api/resources/{resource_id}
         - DELETE /api/resources/{resource_id}
     plugin_api:
-      status: applicable
-      reason: Resource metadata is persisted through the unified ResourceRepository boundary.
-      items:
-        - ResourceRepository.create
-        - ResourceRepository.list_resources
-        - ResourceRepository.get_by_id
-        - ResourceRepository.update
-        - ResourceRepository.delete
+      status: not_applicable
+      reason: ResourceRepository is a Core persistence seam, not a declared Plugin API protocol.
+      items: []
     thresholds:
       core_min_percent: 39.07
       router_min_percent: 100.0
-      plugin_min_percent: 100.0
 
 pending_modules:
   skill_center:
