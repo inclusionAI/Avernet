@@ -136,6 +136,17 @@ def _authorize_preview_bot(
     if bot is None and bot_id != "default":
         bot = bot_repo.get_by_id(bot_id)
 
+    # A local fallback bot may use the logical ID "default" without a bot row.
+    # In that compatibility case it can only belong to the authenticated user;
+    # never trust a different caller-supplied owner_id.
+    if bot is None and bot_id == "default":
+        if requested_owner_id and requested_owner_id != user_id:
+            raise HTTPException(
+                status_code=403,
+                detail="No permission to access this bot's files",
+            )
+        return user_id
+
     authoritative_owner_id = (bot or {}).get("owner_id")
     if not isinstance(authoritative_owner_id, str) or not authoritative_owner_id:
         raise HTTPException(status_code=404, detail="Bot not found")

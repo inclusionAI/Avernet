@@ -6,9 +6,15 @@ instead of rendering text/json inline in the tab (the ``inline`` branch for
 browsable types was left over from when ``preview_file`` shared this helper;
 preview now returns JSON via ``PreviewResponse`` and does not land here).
 """
-import pytest
+from unittest.mock import MagicMock
 
-from agentclaw.community.adapters.http.resources.file_router import _content_headers
+import pytest
+from fastapi import HTTPException
+
+from agentclaw.community.adapters.http.resources.file_router import (
+    _authorize_preview_bot,
+    _content_headers,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -39,3 +45,35 @@ class TestContentHeadersAlwaysAttaches:
     def test_no_extension_is_attachment(self):
         _, disp = _content_headers("README")
         assert disp.startswith("attachment;"), disp
+
+
+class TestAuthorizePreviewDefaultBot:
+    def test_missing_default_bot_row_uses_authenticated_user(self):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = None
+
+        owner_id = _authorize_preview_bot(
+            bot_id="default",
+            requested_owner_id=None,
+            user_id="current-user",
+            bot_repo=bot_repo,
+            collaborator_svc=MagicMock(),
+        )
+
+        assert owner_id == "current-user"
+        bot_repo.get_by_id.assert_not_called()
+
+    def test_missing_default_bot_row_rejects_different_requested_owner(self):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = None
+
+        with pytest.raises(HTTPException) as exc_info:
+            _authorize_preview_bot(
+                bot_id="default",
+                requested_owner_id="another-user",
+                user_id="current-user",
+                bot_repo=bot_repo,
+                collaborator_svc=MagicMock(),
+            )
+
+        assert exc_info.value.status_code == 403
