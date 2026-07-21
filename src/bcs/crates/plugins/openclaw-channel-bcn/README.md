@@ -48,7 +48,7 @@ Select with the flag or env var (flag wins):
 BCN_PLUGIN_SOURCE=npm ./scripts/singlebox.sh
 
 # pin a version in npm mode (default: latest)
-BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.16 ./scripts/singlebox.sh
+BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.18 ./scripts/singlebox.sh
 ```
 
 ## Configure
