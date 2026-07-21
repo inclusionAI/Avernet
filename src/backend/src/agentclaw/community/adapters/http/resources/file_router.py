@@ -177,6 +177,26 @@ def _authorize_preview_bot(
     return authoritative_owner_id
 
 
+def _validate_preview_publish(
+    *,
+    publish_id: str | None,
+    bot_id: str,
+    publish_repo: BotPublishRepositoryProtocol,
+) -> None:
+    """Ensure an optional publish record belongs to the authorized bot."""
+    if not publish_id:
+        return
+    try:
+        publish_record = publish_repo.get_by_id(int(publish_id))
+    except (TypeError, ValueError):
+        publish_record = None
+    if publish_record is None or publish_record.source_bot_id != bot_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to get device info for publish_id={publish_id}",
+        )
+
+
 # ---- Endpoints ----
 
 
@@ -323,16 +343,11 @@ async def preview_file(
         bot_repo=bot_repo,
         collaborator_svc=collaborator_svc,
     )
-    if publish_id:
-        try:
-            publish_record = publish_repo.get_by_id(int(publish_id))
-        except (TypeError, ValueError):
-            publish_record = None
-        if publish_record is None or publish_record.source_bot_id != ebid:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Failed to get device info for publish_id={publish_id}",
-            )
+    _validate_preview_publish(
+        publish_id=publish_id,
+        bot_id=ebid,
+        publish_repo=publish_repo,
+    )
     try:
         content = await file_svc.read_file(
             entity_id=eid, bot_id=ebid, engine_type=eeng, path=path,
