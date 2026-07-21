@@ -64,6 +64,10 @@ def test_singlebox_projects_loopback_baas_connection_as_local() -> None:
     assert connection.token == "connection-token"
 
 
+def test_singlebox_recognizes_unbracketed_ipv6_loopback_with_port() -> None:
+    assert SingleboxBaasDeviceService._is_loopback_target("::1:20010") is True
+
+
 def test_singlebox_keeps_non_loopback_connection_as_baas() -> None:
     service = _service(target="engine.example.test:20010")
 

@@ -180,7 +180,7 @@ def test_device_live_baas_provider_lifecycle(live_backend):
             client.get(f"/api/v1/devices/{binding_id}/connection")
         )["data"]
         assert connection["available"] is True
-        assert connection["type"] == "remote"
+        assert connection["type"] == "local"
         assert connection["target"]
         assert connection["token"]
 
