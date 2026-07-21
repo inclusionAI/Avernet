@@ -170,6 +170,21 @@ def _metric_markdown(label: str, metric: dict[str, Any]) -> str:
     )
 
 
+def _system_metrics(report: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Return the runtime metrics that are meaningful for a system report."""
+    metric_names = (
+        ("runtime_line", "Runtime Line"),
+        ("method", "Method"),
+        ("router_api", "Router API"),
+        ("cli_command", "CLI Commands"),
+    )
+    return [
+        (label, report[name])
+        for name, label in metric_names
+        if isinstance(report.get(name), dict)
+    ]
+
+
 def _render_markdown(summary: dict[str, Any]) -> str:
     lines = [
         "# Singlebox Coverage Summary",
@@ -183,6 +198,18 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         lines.append(f"- acceptance: {', '.join(targets)}")
     elif acceptance.get("target"):
         lines.append(f"- acceptance: {acceptance['target']}")
+    for report in (summary.get("systems") or {}).values():
+        lines.extend(
+            [
+                "",
+                f"## {str(report['name']).upper()} System",
+                "",
+                *[
+                    _metric_markdown(label, metric)
+                    for label, metric in _system_metrics(report)
+                ],
+            ]
+        )
     for report in (summary.get("modules") or {}).values():
         lines.extend(
             [
@@ -213,6 +240,17 @@ def _metric_html(label: str, metric: dict[str, Any]) -> str:
 
 def _render_dashboard(summary: dict[str, Any]) -> str:
     cards = []
+    for report in (summary.get("systems") or {}).values():
+        cards.append(
+            "<section><h2>"
+            + html.escape(str(report["name"]).upper())
+            + " System</h2><div class='metrics'>"
+            + "".join(
+                _metric_html(label, metric)
+                for label, metric in _system_metrics(report)
+            )
+            + "</div></section>"
+        )
     for report in (summary.get("modules") or {}).values():
         cards.append(
             "<section><h2>"

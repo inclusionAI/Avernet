@@ -86,6 +86,8 @@ run_singlebox_coverage_once() {
     return 0
   fi
   run_required "$repo_root/scripts/ci/singlebox_coverage.sh"
+  run_required python3 "$repo_root/scripts/ci/verify_singlebox_coverage_artifacts.py" \
+    --reports-dir "$repo_root/scripts/.dependencies/coverage/singlebox/reports"
   singlebox_coverage_ran=1
 }
 
@@ -131,11 +133,14 @@ if matches_any '^src/engine/'; then
 fi
 
 if matches_any '^src/bcs/'; then
-  # BCS/BCN 默认强卡点。
-  # pre-push 走 --fast-fail: 第一个失败就退出,节省本地等待时间。
+  # BCS/BCN 默认强卡点:
+  # 1) ci_test.sh 跑 Rust workspace 测试,第一个失败就退出。
+  # 2) 统一 singlebox coverage 复用同一套真实产品栈,执行 BCS user-story
+  #    E2E 并采集 runtime line/method、Router API、CLI command 覆盖率。
   # 如需临时跳过,显式设置 OCB_PRE_PUSH_ENABLE_BCS=0。
   if [[ "${OCB_PRE_PUSH_ENABLE_BCS:-1}" == "1" ]]; then
     run_required "$repo_root/src/bcs/scripts/ci_test.sh" --base "$base" --head "$head" --fast-fail
+    run_singlebox_coverage_once
   else
     echo "BCS/BCN changes detected; BCS/BCN CI gate skipped (OCB_PRE_PUSH_ENABLE_BCS=0)"
   fi
@@ -146,7 +151,7 @@ if matches_any '^src/frontend/'; then
   run_required "$repo_root/src/frontend/scripts/ci_test.sh" --base "$base" --head "$head"
 fi
 
-if matches_any '^(scripts/singlebox\.sh|scripts/modules/|scripts/ci/singlebox_coverage\.sh|src/backend/tests/community/acceptance/|src/baas/tests/e2e/)'; then
+if matches_any '^(scripts/singlebox\.sh|scripts/modules/|scripts/ci/singlebox_coverage(_report|_manifest_check)?\.(sh|py)|scripts/ci/singlebox_coverage_modules\.yaml|scripts/ci/verify_singlebox_coverage_artifacts\.py|src/backend/tests/community/acceptance/|src/baas/tests/e2e/)'; then
   # singlebox 自身脚本或 live E2E 用例变更时,即便没有 Backend/BaaS 源码变更,
   # 也要触发 singlebox coverage gate。
   run_singlebox_coverage_once

@@ -281,6 +281,31 @@ def test_update_report_artifacts_keeps_summary_and_dashboard_consistent(tmp_path
                 "status": "passed",
                 "acceptance": {"target": "tests/community/acceptance/devices"},
                 "coverage": {"backend": {"router_hits": 4, "plugin_hits": 0}},
+                "systems": {
+                    "bcs": {
+                        "name": "bcs",
+                        "runtime_line": {
+                            "covered": 45,
+                            "total": 100,
+                            "percent": 45.0,
+                        },
+                        "method": {
+                            "covered": 40,
+                            "total": 100,
+                            "percent": 40.0,
+                        },
+                        "router_api": {
+                            "covered": 12,
+                            "total": 12,
+                            "percent": 100.0,
+                        },
+                        "cli_command": {
+                            "covered": 8,
+                            "total": 8,
+                            "percent": 100.0,
+                        },
+                    }
+                },
             }
         ),
         encoding="utf-8",
@@ -306,6 +331,14 @@ def test_update_report_artifacts_keeps_summary_and_dashboard_consistent(tmp_path
     assert "60.00%" in dashboard
     assert "66.67%" in dashboard
     assert "Not applicable" in dashboard
+    assert "BCS System" in markdown
+    assert "Runtime Line: 45.00% (45/100)" in markdown
+    assert "Method: 40.00% (40/100)" in markdown
+    assert "Router API: 100.00% (12/12)" in markdown
+    assert "CLI Commands: 100.00% (8/8)" in markdown
+    assert "BCS System" in dashboard
+    assert "Runtime Line" in dashboard
+    assert "CLI Commands" in dashboard
 
 
 def test_update_report_artifacts_marks_threshold_failure(tmp_path: Path):
