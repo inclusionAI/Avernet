@@ -280,44 +280,30 @@ SESSION_ID = "sess-1"
 
 async def test_list_file_tree_prunes_mounts_and_returns_sorted_tree(
     workspace_dir: Path,
-    monkeypatch,
 ) -> None:
-    """Root mounts are never entered; project-local ``skills`` remains visible."""
-    project = workspace_dir / "project-fe"
-    (project / "src").mkdir(parents=True)
-    (project / "skills").mkdir()
-    (project / ".git").mkdir()
-    (project / "node_modules").mkdir()
-    (project / "README.md").write_text("readme")
-    (project / "src" / "index.ts").write_text("index")
-    (project / "skills" / "SKILL.md").write_text("skill")
-    (project / ".git" / "config").write_text("git")
-    (project / "node_modules" / "package.js").write_text("module")
-
-    root_skills = workspace_dir / "skills"
-    root_repos = workspace_dir / ".repos"
-    (root_skills / "skills-repo").mkdir(parents=True)
-    (root_skills / "skills-repo" / "remote.md").write_text("remote")
-    root_repos.mkdir()
-    (root_repos / "internal.git").write_text("internal")
-
-    # Prove pruning happens before recursion rather than filtering the result
-    # after an expensive OSS walk.
-    real_scandir = os.scandir
-
-    def guarded_scandir(path):  # noqa: ANN001
-        scanned = os.path.normpath(os.fspath(path))
-        assert scanned not in {
-            os.path.normpath(str(root_skills)),
-            os.path.normpath(str(root_repos)),
-            os.path.normpath(str(project / ".git")),
-            os.path.normpath(str(project / "node_modules")),
-        }
-        return real_scandir(path)
-
-    monkeypatch.setattr(os, "scandir", guarded_scandir)
+    """The find result is sorted into a tree; command prunes infrastructure."""
     file_plugin = FakeFilePlugin()
-    service = _make_service(file_plugin=file_plugin)
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(
+            stdout=(
+                "f\0project-fe/README.md\0"
+                "d\0project-fe/src\0"
+                "f\0project-fe/src/index.ts\0"
+                "d\0project-fe/skills\0"
+                "f\0project-fe/skills/SKILL.md\0"
+                "d\0project-fe\0"
+            ),
+            stderr="",
+            exit_code=0,
+        ),
+    )
+    service = _make_service(
+        file_plugin=file_plugin,
+        bash_plugin=bash_plugin,
+    )
 
     tree = await service.list_file_tree(SESSION_ID)
 
@@ -333,29 +319,137 @@ async def test_list_file_tree_prunes_mounts_and_returns_sorted_tree(
     assert [node.name for node in project_node.children[0].children] == [
         "SKILL.md"
     ]
+    command, cwd, timeout = bash_plugin.calls[0]
+    assert cwd == str(workspace_dir)
+    assert timeout == 30
+    assert "-name .git" in command
+    assert "-name node_modules" in command
+    assert "-path './skills'" in command
+    assert "-path './.repos'" in command
+    assert "%s" not in command
     assert file_plugin.calls == []
 
 
-async def test_list_file_tree_tolerates_stat_race(
+async def test_list_file_tree_leaves_size_unset(
     workspace_dir: Path,
-    monkeypatch,
 ) -> None:
-    """A file disappearing after readdir keeps the node and does not fail."""
-    target = workspace_dir / "volatile.txt"
-    target.write_text("soon gone")
-    real_stat = os.stat
+    """find does not return size, so file nodes retain the None default."""
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(
+            stdout="f\0README.md\0",
+            stderr="",
+            exit_code=0,
+        ),
+    )
 
-    def flaky_stat(path, *args, **kwargs):  # noqa: ANN001
-        if os.path.normpath(os.fspath(path)) == os.path.normpath(str(target)):
-            raise OSError("object disappeared")
-        return real_stat(path, *args, **kwargs)
+    tree = await _make_service(bash_plugin=bash_plugin).list_file_tree(
+        SESSION_ID
+    )
 
-    monkeypatch.setattr(os, "stat", flaky_stat)
-    tree = await _make_service().list_file_tree(SESSION_ID)
+    assert len(tree) == 1
+    assert tree[0].name == "README.md"
+    assert tree[0].is_dir is False
+    assert tree[0].size is None
 
-    volatile = next(node for node in tree if node.name == "volatile.txt")
-    assert volatile.is_dir is False
-    assert volatile.size is None
+
+async def test_list_file_tree_returns_symlinks_without_following_target(
+    workspace_dir: Path,
+) -> None:
+    """GNU find type ``l`` is exposed as a non-directory node."""
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(
+            stdout=(
+                "l\0link-file\0"
+                "l\0link-dir\0"
+                "l\0broken-link\0"
+            ),
+            stderr="",
+            exit_code=0,
+        ),
+    )
+
+    tree = await _make_service(bash_plugin=bash_plugin).list_file_tree(
+        SESSION_ID
+    )
+
+    assert [node.name for node in tree] == [
+        "broken-link",
+        "link-dir",
+        "link-file",
+    ]
+    assert all(node.is_dir is False for node in tree)
+    assert all(node.size is None for node in tree)
+    assert all(node.children is None for node in tree)
+
+
+async def test_list_file_tree_preserves_special_characters(
+    workspace_dir: Path,
+) -> None:
+    """NUL framing keeps spaces, Unicode and newlines in paths intact."""
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(
+            stdout=(
+                "d\0目录 with space\0"
+                "f\0目录 with space/line\nbreak.txt\0"
+            ),
+            stderr="",
+            exit_code=0,
+        ),
+    )
+
+    tree = await _make_service(bash_plugin=bash_plugin).list_file_tree(
+        SESSION_ID
+    )
+
+    assert tree[0].name == "目录 with space"
+    assert tree[0].children is not None
+    assert tree[0].children[0].name == "line\nbreak.txt"
+    assert tree[0].children[0].path == "目录 with space/line\nbreak.txt"
+
+
+async def test_list_file_tree_raises_when_find_fails(
+    workspace_dir: Path,
+) -> None:
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(
+            stdout="",
+            stderr="find: Permission denied",
+            exit_code=1,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="file-tree find failed"):
+        await _make_service(bash_plugin=bash_plugin).list_file_tree(SESSION_ID)
+
+
+async def test_list_file_tree_rejects_malformed_find_output(
+    workspace_dir: Path,
+) -> None:
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(
+            stdout="f\0missing-path-pair\0d",
+            stderr="",
+            exit_code=0,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="invalid file-tree find output"):
+        await _make_service(bash_plugin=bash_plugin).list_file_tree(SESSION_ID)
 
 
 @pytest.mark.parametrize(
@@ -969,11 +1063,25 @@ async def test_list_file_tree_uses_cwd_as_workspace_root(
     (custom / "cwd-only.txt").write_text("ok")
     monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
     file_plugin = FakeFilePlugin()
-    service = _make_service(file_plugin=file_plugin)
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(custom),
+        BashExecResult(
+            stdout="f\0cwd-only.txt\0",
+            stderr="",
+            exit_code=0,
+        ),
+    )
+    service = _make_service(
+        file_plugin=file_plugin,
+        bash_plugin=bash_plugin,
+    )
 
     tree = await service.list_file_tree("   ", cwd=str(custom))
 
     assert [node.name for node in tree] == ["cwd-only.txt"]
+    assert bash_plugin.calls[0][1] == str(custom)
     assert file_plugin.calls == []
 
 
