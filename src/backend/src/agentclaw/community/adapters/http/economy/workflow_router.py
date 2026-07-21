@@ -442,11 +442,12 @@ async def tickets_close(
     operator = ctx.user_id
     # detail → close_payload JSON 字符串(空 dict/全 None → None,不落空 {} )
     # ensure_ascii=False: 中文手写说明原样落库,不转 \uXXXX (读回可读)
-    close_payload = (
-        json.dumps(body.detail.model_dump(exclude_none=True), ensure_ascii=False)
-        if body.detail is not None and body.detail.model_dump(exclude_none=True)
-        else None
-    )
+    # model_dump 只调一次,避免三元里双重 dump 的冗余。
+    close_payload = None
+    if body.detail is not None:
+        detail_dict = body.detail.model_dump(exclude_none=True)
+        if detail_dict:
+            close_payload = json.dumps(detail_dict, ensure_ascii=False)
 
     def _close_all():
         results = []
