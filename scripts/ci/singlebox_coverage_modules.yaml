@@ -112,17 +112,12 @@ modules:
         - DELETE /api/resources/files
         - POST /api/resources/files/mkdir
     plugin_api:
-      status: applicable
-      reason: Workspace file operations cross the provider-selected DeviceFileSystem boundary.
-      items:
-        - DeviceFileSystem.list_dir
-        - DeviceFileSystem.read_file
-        - DeviceFileSystem.write_file
-        - DeviceFileSystem.delete_file
+      status: not_applicable
+      reason: DeviceFileSystem is a Core service seam, not a declared Plugin API protocol.
+      items: []
     thresholds:
       core_min_percent: 63.52
       router_min_percent: 100.0
-      plugin_min_percent: 100.0
 
   harness:
     system: backend
