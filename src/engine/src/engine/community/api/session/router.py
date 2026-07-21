@@ -176,12 +176,12 @@ async def get_session(session_id: str, engine: Optional[str] = None) -> ApiRespo
     session_id = decoded_id
     try:
         api = _get_session_api(engine)
+        # Engines that support exact lookup filter before pagination. Engines that
+        # do not yet support it retain the previous first-100 fallback behavior.
         sessions = await api.list(
-            SessionListRequest(session_key=session_id, limit=1, offset=0)
+            SessionListRequest(session_key=session_id, limit=100, offset=0)
         )
-        log.info(
-            f"[get_session] 精确查询返回 {len(sessions)} 条, session_id={session_id}"
-        )
+        log.info(f"[get_session] 列表查询返回 {len(sessions)} 条, 正在匹配 session_id={session_id}")
         session = next(
             (
                 s

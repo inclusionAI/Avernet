@@ -208,11 +208,23 @@ class TestGetSession:
         resp = client.get("/api/sessions/sess-1")
         assert resp.status_code == 200
         assert resp.json()["data"]["id"] == "sess-1"
-
         request = mock_session_api.list.call_args.args[0]
         assert request.session_key == "sess-1"
-        assert request.limit == 1
+        assert request.limit == 100
         assert request.offset == 0
+
+    def test_found_uses_exact_key_filter_before_pagination(
+        self, client, mock_session_api
+    ):
+        """A session beyond a legacy first-100 window must still be reusable."""
+        mock_session_api.list.return_value = [_make_session("sess-101")]
+
+        resp = client.get("/api/sessions/sess-101")
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["id"] == "sess-101"
+        request = mock_session_api.list.call_args.args[0]
+        assert request.session_key == "sess-101"
 
     def test_not_found_returns_404(self, client, mock_session_api):
         mock_session_api.list.return_value = []
