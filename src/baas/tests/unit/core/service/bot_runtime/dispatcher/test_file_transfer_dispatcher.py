@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from secbaas.community.api.bot_runtime import (
+    BotNotFoundError,
     CancelUploadResponse,
     CompleteUploadResponse,
     GetDownloadUrlResponse,
@@ -324,6 +325,28 @@ class TestDispatchGetTransferStatus:
         with pytest.raises(TransferNotFoundError, match="tf-001"):
             await dispatcher.dispatch_get_transfer_status("tf-001")
 
+    @pytest.mark.asyncio
+    async def test_bot_ownership_validated(self, dispatcher, bot_repo, ticket_repo):
+        """When bot_uuid is passed, validates bot exists under tenant."""
+        ticket = _make_ticket(status="DONE")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+        bot_repo.list_by_bot_uuid.return_value = [MagicMock()]  # bot exists
+
+        result = await dispatcher.dispatch_get_transfer_status(
+            "tf-001", tenant="t1", bot_uuid="bot-001"
+        )
+        assert result.status == "DONE"
+
+    @pytest.mark.asyncio
+    async def test_bot_not_found_when_validating(self, dispatcher, bot_repo):
+        """When bot_uuid is passed and bot not found, raises BotNotFoundError."""
+        bot_repo.list_by_bot_uuid.return_value = []  # no bots found
+
+        with pytest.raises(BotNotFoundError, match="bot-001"):
+            await dispatcher.dispatch_get_transfer_status(
+                "tf-001", tenant="t1", bot_uuid="bot-001"
+            )
+
 
 # ── dispatch_complete_upload ─────────────────────────────────────────
 
@@ -418,6 +441,26 @@ class TestDispatchCompleteUpload:
 
         result = await dispatcher.dispatch_complete_upload("tf-001")
         assert result.status == "DONE"
+
+    @pytest.mark.asyncio
+    async def test_cas_conflict_unrecoverable(
+        self, dispatcher, ticket_repo, file_backend
+    ):
+        """CAS conflict with unrecoverable state → re-raises TransferStateConflictError."""
+        ticket_created = _make_ticket(status="CREATED")
+        ticket_repo.get_by_transfer_id.side_effect = [
+            ticket_created,  # first read: status=CREATED
+            ticket_created,  # CAS re-read: still CREATED (unrecoverable)
+        ]
+        file_backend.check_object_exists.return_value = True
+
+        def _raise_cas(*args, **kwargs):
+            raise TransferStateConflictError("conflict")
+
+        ticket_repo.update_status.side_effect = _raise_cas
+
+        with pytest.raises(TransferStateConflictError):
+            await dispatcher.dispatch_complete_upload("tf-001")
 
 
 # ── dispatch_cancel_upload ───────────────────────────────────────────
@@ -519,6 +562,41 @@ class TestDispatchCancelUpload:
 
         result = await dispatcher.dispatch_cancel_upload("tf-001")
         assert result.status == "DONE"
+
+    @pytest.mark.asyncio
+    async def test_cancel_cas_conflict_upload_completed(self, dispatcher, ticket_repo):
+        """CAS conflict on cancel: re-read returns UPLOAD_COMPLETED → ValueError."""
+        ticket_created = _make_ticket(status="CREATED")
+        ticket_completed = _make_ticket(status="UPLOAD_COMPLETED")
+        ticket_repo.get_by_transfer_id.side_effect = [
+            ticket_created,  # first read: status=CREATED
+            ticket_completed,  # CAS re-read: UPLOAD_COMPLETED
+        ]
+
+        def _raise_cas(*args, **kwargs):
+            raise TransferStateConflictError("conflict")
+
+        ticket_repo.update_status.side_effect = _raise_cas
+
+        with pytest.raises(ValueError, match="already completed"):
+            await dispatcher.dispatch_cancel_upload("tf-001")
+
+    @pytest.mark.asyncio
+    async def test_cancel_cas_conflict_unrecoverable(self, dispatcher, ticket_repo):
+        """CAS conflict on cancel with unrecoverable state → re-raises error."""
+        ticket_created = _make_ticket(status="CREATED")
+        ticket_repo.get_by_transfer_id.side_effect = [
+            ticket_created,  # first read: status=CREATED
+            ticket_created,  # CAS re-read: still CREATED (unrecoverable)
+        ]
+
+        def _raise_cas(*args, **kwargs):
+            raise TransferStateConflictError("conflict")
+
+        ticket_repo.update_status.side_effect = _raise_cas
+
+        with pytest.raises(TransferStateConflictError):
+            await dispatcher.dispatch_cancel_upload("tf-001")
 
 
 # ── dispatch_list_staging ────────────────────────────────────────────

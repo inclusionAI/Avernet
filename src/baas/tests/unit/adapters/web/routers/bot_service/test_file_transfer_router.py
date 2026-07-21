@@ -711,3 +711,45 @@ async def test_get_transfer_status_generic_exception(mock_dispatcher):
 
     assert resp.status_code == 500
     assert resp.json()["detail"]["error"] == "INTERNAL_ERROR"
+
+
+# ── transfer_query_router tests ─────────────────────────────────────
+
+
+@pytest.fixture
+def query_app():
+    """Create a FastAPI app with only the transfer_query_router."""
+    from secbaas.community.adapters.web.routers.bot_service.transfer_query_router import (
+        router as tq_router,
+    )
+
+    _app = FastAPI()
+    _app.include_router(tq_router)
+    return _app
+
+
+@pytest.fixture
+def mock_query_dispatcher(query_app):
+    """Override dispatcher dependency for transfer_query_router."""
+    mock_instance = AsyncMock()
+    old_overrides = dict(query_app.dependency_overrides)
+    for route in iter_api_routes(query_app):
+        for dep in route.dependant.dependencies:
+            if dep.name == "dispatcher":
+                query_app.dependency_overrides[dep.call] = lambda: mock_instance
+    yield mock_instance
+    query_app.dependency_overrides = old_overrides
+
+
+@pytest.mark.asyncio
+async def test_transfer_query_bot_not_found(mock_query_dispatcher, query_app):
+    """transfer_query_router: BotNotFoundError returns 404 with BOT_NOT_FOUND."""
+    mock_query_dispatcher.dispatch_get_transfer_status.side_effect = BotNotFoundError(
+        "no bot"
+    )
+    transport = ASGITransport(app=query_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["error"] == "BOT_NOT_FOUND"
