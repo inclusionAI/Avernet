@@ -404,6 +404,7 @@ async def test_run_one_executes_with_trace_context(repo, queue):
         "bot_queue_worker.execute", child_of=None
     )
 
+
 async def test_run_one_timeout_marks_failed_with_trace(repo, queue):
     """_run_one timeout path should still restore trace context."""
     _insert(repo, queue, "bot-1")
