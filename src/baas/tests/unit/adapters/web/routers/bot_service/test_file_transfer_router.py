@@ -8,6 +8,7 @@ Tests all error handling paths for:
 - GET /{tenant}/{bot_uuid}/files/staging
 - DELETE /{tenant}/{bot_uuid}/files/staging
 - POST /{tenant}/{bot_uuid}/files/transfers/{transfer_id}/share-link
+- GET /{tenant}/{bot_uuid}/files/transfers/{transfer_id}
 """
 
 from unittest.mock import AsyncMock
@@ -635,6 +636,78 @@ async def test_generate_share_link_generic_exception(mock_dispatcher):
         "/api/v1/bots/t1/bot-001/files/transfers/tf-001/share-link",
         json_data={"expire_seconds": 3600},
     )
+
+    assert resp.status_code == 500
+    assert resp.json()["detail"]["error"] == "INTERNAL_ERROR"
+
+
+# ── get_transfer_status tests ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_transfer_status_success(mock_dispatcher):
+    """GET transfer status returns 200 with GetTransferStatusResponse."""
+    from secbaas.community.api.bot_runtime import GetTransferStatusResponse as GTSR
+
+    mock_dispatcher.dispatch_get_transfer_status.return_value = GTSR(
+        transfer_id="tf-001",
+        status="DONE",
+        direction="UPLOAD",
+        filename="data.csv",
+        device_path="/home/data.csv",
+        download_url="https://oss.example.com/dl",
+        created_at="2025-01-01T00:00:00",
+        updated_at="2025-01-01T00:00:00",
+    )
+    resp = await _get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["transfer_id"] == "tf-001"
+    assert data["status"] == "DONE"
+
+
+@pytest.mark.asyncio
+async def test_get_transfer_status_bot_not_found(mock_dispatcher):
+    """GET transfer status with BotNotFoundError returns 404."""
+    mock_dispatcher.dispatch_get_transfer_status.side_effect = BotNotFoundError(
+        "no bot"
+    )
+    resp = await _get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["error"] == "BOT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_get_transfer_status_transfer_not_found(mock_dispatcher):
+    """GET transfer status with TransferNotFoundError returns 404."""
+    mock_dispatcher.dispatch_get_transfer_status.side_effect = TransferNotFoundError(
+        "nope"
+    )
+    resp = await _get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["error"] == "TRANSFER_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_get_transfer_status_not_implemented(mock_dispatcher):
+    """GET transfer status with NotImplementedError returns 501."""
+    mock_dispatcher.dispatch_get_transfer_status.side_effect = NotImplementedError(
+        "nope"
+    )
+    resp = await _get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
+
+    assert resp.status_code == 501
+    assert resp.json()["detail"]["error"] == "NOT_IMPLEMENTED"
+
+
+@pytest.mark.asyncio
+async def test_get_transfer_status_generic_exception(mock_dispatcher):
+    """GET transfer status with generic Exception returns 500."""
+    mock_dispatcher.dispatch_get_transfer_status.side_effect = RuntimeError("boom")
+    resp = await _get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
 
     assert resp.status_code == 500
     assert resp.json()["detail"]["error"] == "INTERNAL_ERROR"

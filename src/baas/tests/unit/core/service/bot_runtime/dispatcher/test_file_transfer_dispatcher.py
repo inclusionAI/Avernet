@@ -16,6 +16,7 @@ from secbaas.community.api.bot_runtime import (
     StagingListResponse,
     TransferNotFoundError,
     TransferNotTerminalError,
+    TransferStateConflictError,
 )
 from secbaas.community.core.repository.file_transfer_ticket import TicketRecord
 from secbaas.community.core.service.bot_runtime.dispatcher._file_transfer_dispatcher import (
@@ -241,6 +242,19 @@ class TestDispatchGetUploadUrl:
         )
         assert file_backend.build_staging_path.call_args.kwargs["subdir"] == "subdir"
 
+    @pytest.mark.asyncio
+    async def test_device_path_traversal_rejected(
+        self, dispatcher, bot_repo, device_repo
+    ):
+        _setup_resolve_bot_device(dispatcher, bot_repo, device_repo)
+        with pytest.raises(ValueError, match="path traversal"):
+            await dispatcher.dispatch_get_upload_url(
+                bot_uuid="bot-001",
+                tenant="t1",
+                device_path="/home/../etc/passwd",
+                file_size=100,
+            )
+
 
 # ── dispatch_get_download_url ────────────────────────────────────────
 
@@ -260,6 +274,18 @@ class TestDispatchGetDownloadUrl:
         assert result.transfer_id is not None
         ticket_repo.create_ticket.assert_called_once()
         paas_facade.push_file.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_device_path_traversal_rejected(
+        self, dispatcher, bot_repo, device_repo
+    ):
+        _setup_resolve_bot_device(dispatcher, bot_repo, device_repo)
+        with pytest.raises(ValueError, match="path traversal"):
+            await dispatcher.dispatch_get_download_url(
+                bot_uuid="bot-001",
+                tenant="t1",
+                device_path="/home/../etc/passwd",
+            )
 
 
 # ── dispatch_get_transfer_status (sync) ──────────────────────────────
@@ -374,6 +400,27 @@ class TestDispatchCompleteUpload:
         with pytest.raises(ValueError, match="terminal state"):
             await dispatcher.dispatch_complete_upload("tf-001")
 
+    @pytest.mark.asyncio
+    async def test_cas_conflict_recovered(
+        self, dispatcher, ticket_repo, file_backend
+    ):
+        """CAS conflict on update_status: re-read returns DONE → success."""
+        ticket_created = _make_ticket(status="CREATED")
+        ticket_done = _make_ticket(status="DONE")
+        ticket_repo.get_by_transfer_id.side_effect = [
+            ticket_created,  # first read: status=CREATED
+            ticket_done,  # CAS re-read: already reached DONE
+        ]
+        file_backend.check_object_exists.return_value = True
+
+        def _raise_cas(*args, **kwargs):
+            raise TransferStateConflictError("conflict")
+
+        ticket_repo.update_status.side_effect = _raise_cas
+
+        result = await dispatcher.dispatch_complete_upload("tf-001")
+        assert result.status == "DONE"
+
 
 # ── dispatch_cancel_upload ───────────────────────────────────────────
 
@@ -422,6 +469,60 @@ class TestDispatchCancelUpload:
         ticket_repo.get_by_transfer_id.return_value = ticket
         with pytest.raises(ValueError, match="already completed"):
             await dispatcher.dispatch_cancel_upload("tf-001")
+
+    @pytest.mark.asyncio
+    async def test_cancel_multipart_nosuchupload_recovery(
+        self, dispatcher, ticket_repo, file_backend
+    ):
+        """NoSuchUpload on abort_multipart_upload → recover and cancel ticket."""
+        ticket = _make_ticket(status="CREATED", multipart_session_id="mp-1")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        def _raise_nosuchupload(*args, **kwargs):
+            raise RuntimeError("NoSuchUpload: session does not exist")
+
+        file_backend.abort_multipart_upload.side_effect = _raise_nosuchupload
+
+        result = await dispatcher.dispatch_cancel_upload("tf-001")
+        assert result.status == "CANCELLED"
+        # Should still call update_status("CANCELLED") after recovering
+        ticket_repo.update_status.assert_called_once_with("tf-001", "CANCELLED")
+
+    @pytest.mark.asyncio
+    async def test_cancel_multipart_abort_other_error_raises(
+        self, dispatcher, ticket_repo, file_backend
+    ):
+        """Non-NoSuchUpload error on abort_multipart_upload → re-raised."""
+        ticket = _make_ticket(status="CREATED", multipart_session_id="mp-1")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        def _raise_other(*args, **kwargs):
+            raise RuntimeError("AccessDenied: permission error")
+
+        file_backend.abort_multipart_upload.side_effect = _raise_other
+
+        with pytest.raises(RuntimeError, match="AccessDenied"):
+            await dispatcher.dispatch_cancel_upload("tf-001")
+
+    @pytest.mark.asyncio
+    async def test_cancel_cas_conflict_recovered(
+        self, dispatcher, ticket_repo
+    ):
+        """CAS conflict on cancel update_status: re-read returns DONE → success."""
+        ticket_created = _make_ticket(status="CREATED")
+        ticket_done = _make_ticket(status="DONE")
+        ticket_repo.get_by_transfer_id.side_effect = [
+            ticket_created,  # first read: status=CREATED
+            ticket_done,  # CAS re-read: already reached DONE
+        ]
+
+        def _raise_cas(*args, **kwargs):
+            raise TransferStateConflictError("conflict")
+
+        ticket_repo.update_status.side_effect = _raise_cas
+
+        result = await dispatcher.dispatch_cancel_upload("tf-001")
+        assert result.status == "DONE"
 
 
 # ── dispatch_list_staging ────────────────────────────────────────────
