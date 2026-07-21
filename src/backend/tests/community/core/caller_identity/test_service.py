@@ -275,6 +275,24 @@ async def test_mcp_update_syncs_complete_identity_manifest_to_agent_principal() 
 
 
 @pytest.mark.asyncio
+async def test_mcp_update_rejects_ambiguous_bot_id_without_entity_id() -> None:
+    service, deps = _service(bot=_bot())
+    deps.bot_repository.get_unique_by_id.side_effect = BotLookupAmbiguousError
+
+    with pytest.raises(CallerIdentityAmbiguousError):
+        await service.update_mcp_call_type(
+            bot_id="default",
+            server_code="calendar",
+            call_type=McpCallType.CALLER,
+            actor_id="owner-1",
+            lock_epoch=7,
+        )
+
+    deps.bot_repository.get_by_id_and_owner.assert_not_called()
+    deps.mcp_provider.collect_bot_active_mcps.assert_not_called()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("active_mcps", "lock", "expected_error"),
     [

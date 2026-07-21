@@ -4,7 +4,16 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from agentclaw.community.core.caller_identity.credential import CallerToken
+import pytest
+
+from agentclaw.community.core.bot_management.repository.protocol import (
+    BotLookupAmbiguousError,
+)
+from agentclaw.community.core.caller_identity.credential import (
+    CALLER_TARGET_AMBIGUOUS,
+    CallerCredentialError,
+    CallerToken,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.kernel.device_dto import (
     HeaderOperationRule,
@@ -93,3 +102,29 @@ def test_caller_identity_uses_supplied_binding_or_falls_back_to_resolution() -> 
     assert outbound_rule.header_operation_rules[0].header_name == "x-caller-token"
     assert outbound_rule.header_operation_rules[0].action == "set"
     assert outbound_rule.header_operation_rules[0].value == "caller-token"
+
+
+def test_caller_identity_rejects_ambiguous_bot_without_entity_id() -> None:
+    service = _bare_baas_service()
+    service._bot_repo = MagicMock()
+    service._bot_repo.get_unique_by_id.side_effect = BotLookupAmbiguousError
+
+    with pytest.raises(CallerCredentialError) as exc_info:
+        service.update_caller_identity(
+            bot_id="default",
+            owner_user_id="owner-1",
+            caller_user_id="caller-1",
+            caller_token=CallerToken(
+                access_token="caller-token",
+                subject_user_id="caller-1",
+                expires_at=datetime.now(),
+                fingerprint="ignored",
+            ),
+            agent_pass_token="agent-pass-token",
+            agent_code="agent-code",
+            stage="draft",
+            publish_id=None,
+        )
+
+    assert exc_info.value.code == CALLER_TARGET_AMBIGUOUS
+    service._bot_repo.get_by_id_and_owner.assert_not_called()

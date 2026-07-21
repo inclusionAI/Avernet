@@ -34,6 +34,7 @@ from agentclaw.community.core.caller_identity.credential import (
     CallerCredentialError,
     CallerToken,
 )
+from agentclaw.community.core.bot_management.repository.protocol import BotLookupAmbiguousError
 
 from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
@@ -3168,11 +3169,19 @@ class BaasService:  # pragma: no cover
         ):
             raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
 
-        bot = (
-            self._bot_repo.get_by_id_and_entity(bot_id, entity_id)
-            if entity_id is not None
-            else self._bot_repo.get_by_id_and_owner(bot_id, owner_user_id)
-        )
+        if entity_id is not None:
+            bot = self._bot_repo.get_by_id_and_entity(bot_id, entity_id)
+        else:
+            try:
+                # COSEC: do not select an arbitrary duplicate Bot when callers
+                # omit entity_id; the caller credential target must be unique.
+                bot = self._bot_repo.get_unique_by_id(bot_id)
+            except BotLookupAmbiguousError as exc:
+                logger.warning(
+                    "caller_identity_update_rejected_ambiguous_bot bot_id=%s",
+                    bot_id,
+                )
+                raise CallerCredentialError(CALLER_TARGET_AMBIGUOUS) from exc
         # COSEC: an entity-scoped lookup is not authorization; require the
         # resolved Bot owner to match the identity already resolved upstream.
         if (

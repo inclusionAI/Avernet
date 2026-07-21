@@ -85,11 +85,19 @@ class CallerIdentityService:
     ) -> McpCallTypeUpdateResult:
         """Update draft state, then synchronously refresh Agent Principal."""
         normalized_call_type = self._parse_call_type(call_type)
-        bot = (
-            self._bot_repository.get_by_id_and_entity(bot_id, entity_id)
-            if entity_id is not None
-            else self._bot_repository.get_by_id_and_owner(bot_id, actor_id)
-        )
+        if entity_id is not None:
+            bot = self._bot_repository.get_by_id_and_entity(bot_id, entity_id)
+        else:
+            try:
+                # COSEC: do not select an arbitrary duplicate Bot when callers
+                # omit entity_id; the mutation must fail closed.
+                bot = self._bot_repository.get_unique_by_id(bot_id)
+            except BotLookupAmbiguousError as exc:
+                logger.warning(
+                    "caller_mcp_call_type_update_rejected_ambiguous_bot bot_id=%s",
+                    bot_id,
+                )
+                raise CallerIdentityAmbiguousError from exc
         # COSEC: an entity-scoped lookup does not authorize the request; the
         # authenticated actor must still be the Bot owner.
         if bot is None or str(bot.get("owner_id") or "") != actor_id:
