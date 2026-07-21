@@ -75,7 +75,16 @@ class SingleboxBaasDeviceService(BaasDeviceService):
 
     @staticmethod
     def _is_loopback_target(target: str) -> bool:
-        host = urlsplit(f"//{target}").hostname
+        if not target:
+            return False
+        try:
+            host = urlsplit(f"//{target}").hostname
+        except ValueError:
+            host = None
+        if host is None and target.count(":") >= 2:
+            host = target.rsplit(":", 1)[0]
+            if host.startswith("[") and host.endswith("]"):
+                host = host[1:-1]
         return host in {"localhost", "127.0.0.1", "::1"}
 
     def get_device_connection(

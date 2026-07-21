@@ -1266,6 +1266,23 @@ class TestResolveConfigTemplatePath:
 
 
 class TestResolveEnginePython:
+    def test_resolve_engine_python_normalizes_relative_configured_override(
+        self, monkeypatch, tmp_path
+    ):
+        """A configured relative interpreter is returned as an absolute path."""
+        engine_src_dir = tmp_path / "engine" / "src"
+        engine_src_dir.mkdir(parents=True)
+        configured_python = tmp_path / "runtime" / "bin" / "python"
+        configured_python.parent.mkdir(parents=True)
+        configured_python.touch()
+        configured_python.chmod(configured_python.stat().st_mode | stat.S_IXUSR)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("LOCAL_ENGINE_PYTHON", "runtime/bin/python")
+
+        result = pm.LocalProcessManager._resolve_engine_python(engine_src_dir)
+
+        assert result == str(configured_python)
+
     def test_resolve_engine_python_uses_configured_override(self, monkeypatch, tmp_path):
         """Configured LOCAL_ENGINE_PYTHON takes precedence over a colocated venv."""
         engine_src_dir = tmp_path / "engine" / "src"
