@@ -9,7 +9,7 @@ from __future__ import annotations
 import datetime
 import sqlite3
 from collections.abc import AsyncIterator, Generator
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
 from typing import Any
 
 from sqlalchemy import StaticPool, create_engine, event
@@ -120,6 +120,7 @@ class BareDatabasePlugin(DataSourcePlugin):
         finally:
             session.close()
 
+    @asynccontextmanager
     async def session(self) -> AsyncIterator[AsyncSession]:
         if self._async_session_factory is None:
             raise RuntimeError("Async session unavailable — install aiosqlite")

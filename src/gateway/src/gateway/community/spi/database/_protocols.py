@@ -6,8 +6,8 @@ async SQLAlchemy sessions.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Generator
-from contextlib import AbstractContextManager
+from collections.abc import Generator
+from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from typing import Any, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,10 +65,11 @@ class DataSourcePlugin(Protocol):
         """
         ...
 
-    async def session(self) -> AsyncIterator[AsyncSession]:
-        """Get an async SQLAlchemy session.
+    def session(self) -> AbstractAsyncContextManager[AsyncSession]:
+        """Get an async SQLAlchemy session context.
 
-        Session lifecycle (commit/rollback/close) is managed by the caller.
+        Session lifecycle (commit/rollback/close) is managed by the context
+        manager.  Use as ``async with plugin.session() as session:``.
         """
         ...
 
