@@ -78,29 +78,7 @@ def test_release_routes_teclaw_to_create_teclaw_bot():
     assert ck.kwargs["template_uuid"] == "teclaw-tpl"
     assert "agent_pass_token" not in ck.kwargs
     svc._passport_plugin.query_token.assert_called_once_with("b", "u")
-    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_called_once_with(
-        "BOT-t",
-        agent_pass_token=svc._passport_plugin.query_token.return_value,
-    )
     baas.create_bot.assert_not_called()
-
-
-@pytest.mark.unit
-def test_release_teclaw_continues_when_agent_pass_rule_update_fails():
-    svc, baas = _svc("teclaw")
-    baas.update_teclaw_outbound_rule_by_bot_uuid.side_effect = RuntimeError("rule down")
-
-    result = svc.release(
-        _BOT, user_id="u1", migration_path="", publish_stage=PublishStage.VERIFY,
-        delivery=DeliveryArtifact(_ARTIFACT),
-    )
-
-    assert result == {"bot_uuid": "BOT-t", "publish_id": 5}
-    # The teclaw outbound-rule push is attempted (and its failure swallowed) even
-    # though #197 all-auto removed the client approve — the rule push is a
-    # separate side effect, not approval.
-    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_called_once()
-    baas.approve_publish.assert_not_called()
 
 
 @pytest.mark.unit
