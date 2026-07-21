@@ -440,6 +440,17 @@ class GovernanceDeliveryService:
             actual_channel(降级后实际发到的渠道)。
         """
         recipient = override_recipient or notify.owner_id
+        # 防御性:recipient 空则不投递(notify.owner_id 恒非空 DB 约束,但守
+        # fail-closed,避免空收件人传 NotifyMessage 致 sender 崩或静默失败)。
+        # 返回 success=False 让调用方(scan_service)走既有 mark_failed 链。
+        if not recipient:
+            log.warning(
+                "[GovernanceDelivery] skip send: empty recipient for notify %s",
+                notify.notification_id,
+            )
+            return SendResult(
+                notification_id=notify.notification_id, success=False,
+            )
         notify_channel = notify.channel or "markdown"
         title = (
             "🔔 Bot 治理通知"

@@ -464,7 +464,10 @@ class GovernanceWorkflowService:
         )
 
         # 审计结构化记录 conclusion + remark(从 close_payload 解出),不再只记裸 reason。
-        audit_msg = f"ticket_id={ticket_id}; conclusion={conclusion.value}; cooldown_until={cooldown_until.isoformat()}"
+        # cooldown_until 防 None:本路径恒为 now+timedelta,但守 fail-closed,避免
+        # 未来 cooldown_days=0 改传 None 时 isoformat() 崩 admin_close 整条链。
+        cooldown_str = cooldown_until.isoformat() if cooldown_until else "None"
+        audit_msg = f"ticket_id={ticket_id}; conclusion={conclusion.value}; cooldown_until={cooldown_str}"
         if close_payload:
             audit_msg += f"; close_payload={close_payload}"
 
