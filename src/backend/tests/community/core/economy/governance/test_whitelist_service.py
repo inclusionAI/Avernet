@@ -327,7 +327,11 @@ class TestBulkWhitelistTicketAlignment:
     bot_id IN (...) 且 response IS NULL 口径精确:已反馈的通知/工单不动。"""
 
     def test_closes_task_record_subjects_for_unresponded(self, session, engine):
-        """unresponded open 通知对应工单 → CLOSED(admin_closed)。"""
+        """unresponded open 通知对应工单 → OBSERVED(whitelist_approved)。
+
+        加白语义:批量加白把活跃单转 OBSERVED(持续观察画像,非 CLOSED)。
+        通知侧 close_reason 仍 admin_closed(通知关停原因,独立列)。
+        """
         svc, db = _build_svc(engine)
         _make_notification(
             session, notification_id="n-a", bot_id="bot-a", owner_id="owner-a",
@@ -340,8 +344,11 @@ class TestBulkWhitelistTicketAlignment:
 
         with db.orm_session() as s:
             ticket = s.query(GovernanceTicketOrm).one()
-            assert ticket.governance_status == "closed"
-            assert ticket.close_reason == "admin_closed"
+            assert ticket.governance_status == GovernanceStatus.OBSERVED.value
+            assert ticket.close_reason == CloseReason.WHITELIST_APPROVED.value
+            # 通知侧 close_reason 独立(通知关停原因 ≠ 工单转态原因)
+            notify = s.query(GovernanceNotificationOrm).one()
+            assert notify.close_reason == CloseReason.ADMIN_CLOSED.value
 
     def test_preserves_responded_ticket_subject(self, session, engine):
         """已反馈通知(bot 命中但 response 非 None)不在 cancel scope,
@@ -416,6 +423,61 @@ class TestDeleteWhitelistEntry:
             wl_audits = [a for a in audits if a.action_taken == AuditAction.WHITELIST_REMOVED]
             assert len(wl_audits) >= 1
             assert wl_audits[0].actor_id == "admin-1"
+
+    def test_delete_closes_observed_ticket(self, session, engine):
+        """删白收尾:该 worker 现存 OBSERVED 观察单转 CLOSED(终态归档)。
+
+        契约(白名单观察态删白路径):删白 → OBSERVED 单 OBSERVED→CLOSED,
+        close_reason=WHITELIST_APPROVED;不设 cooldown;下次 off-batch 走
+        正常 Step6 重建新 OPEN 单(由 test_whitelist_remove_restores 覆盖)。
+        """
+        svc, db = _build_svc(engine)
+        _make_whitelist(session, bot_id="bot-a", owner_id="user-1")
+        _make_ticket(
+            session, ticket_id="tkt-obs-1",
+            bot_id="bot-a", owner_id="user-1",
+            governance_status=GovernanceStatus.OBSERVED.value,
+        )
+
+        result = svc.delete_whitelist_entry(
+            bot_id="bot-a", owner_id="user-1",
+            reason="cleanup", operator="admin-1",
+        )
+
+        assert result["deleted"] is True
+        assert result["observed_closed"] is True
+        with db.orm_session() as s:
+            t = s.query(GovernanceTicketOrm).filter_by(
+                ticket_id="tkt-obs-1",
+            ).one()
+            assert t.governance_status == GovernanceStatus.CLOSED.value
+            assert t.close_reason == CloseReason.WHITELIST_APPROVED.value
+            assert t.closed_at is not None
+            assert t.cooldown_until is None  # 删白不设 cooldown
+
+    def test_delete_no_observed_ticket_skips_close(self, session, engine):
+        """删白时无 OBSERVED 单 → observed_closed=False(幂等跳过,不报错)。"""
+        svc, db = _build_svc(engine)
+        _make_whitelist(session, bot_id="bot-a", owner_id="user-1")
+        # 只有一条 closed 历史单(非 OBSERVED)→ 不该被删白收尾碰
+        _make_ticket(
+            session, ticket_id="tkt-closed-1",
+            bot_id="bot-a", owner_id="user-1",
+            governance_status=GovernanceStatus.CLOSED.value,
+        )
+
+        result = svc.delete_whitelist_entry(
+            bot_id="bot-a", owner_id="user-1",
+            reason="cleanup", operator="admin-1",
+        )
+
+        assert result["deleted"] is True
+        assert result["observed_closed"] is False
+        with db.orm_session() as s:
+            t = s.query(GovernanceTicketOrm).filter_by(
+                ticket_id="tkt-closed-1",
+            ).one()
+            assert t.governance_status == GovernanceStatus.CLOSED.value  # 未被误改
 
 
 class TestListAllWithTicketMeta:

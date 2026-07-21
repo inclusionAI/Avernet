@@ -180,8 +180,9 @@ class TestLegalTransitionsEndToEnd:
             "T-wl", close_reason=CloseReason.SCAN_WHITELISTED, now=datetime.now(),
         ) is True
         row = driver._task_repo.find_by_ticket_id("T-wl")  # noqa: SLF001
-        assert row.governance_status == GovernanceStatus.CLOSED
+        assert row.governance_status == GovernanceStatus.OBSERVED
         assert row.close_reason == CloseReason.SCAN_WHITELISTED
+        assert row.closed_at is None  # OBSERVED 非关闭,不设 closed_at
 
     def test_accept_feedback_open_to_waiting_review(self):
         driver, db, _ = _build_driver()
@@ -244,14 +245,18 @@ class TestIllegalTransitionsRejected:
     def test_close_already_closed_returns_false(self):
         driver, db, _ = _build_driver()
         _seed_ticket(db, ticket_id="T-c2", status="closed")
-        assert driver.close_for_whitelist_hit("T-c2", now=datetime.now()) is False
+        assert driver.observe_for_whitelist(
+            "T-c2", close_reason=CloseReason.SCAN_WHITELISTED, now=datetime.now(),
+        ) is False
         assert driver.admin_close("T-c2", now=datetime.now()) is False
 
     def test_not_found_returns_false(self):
         driver, _, _ = _build_driver()
         assert driver.transition_schedule_due("nope", now=datetime.now()) is False
         assert driver.admin_close("nope", now=datetime.now()) is False
-        assert driver.close_for_whitelist_hit("nope", now=datetime.now()) is False
+        assert driver.observe_for_whitelist(
+            "nope", close_reason=CloseReason.SCAN_WHITELISTED, now=datetime.now(),
+        ) is False
 
     def test_resume_from_closed_illegal_at_model(self):
         """领域模型 resume() 从 CLOSED 是非法转移 → ValueError(IllegalTicketTransitionError)。

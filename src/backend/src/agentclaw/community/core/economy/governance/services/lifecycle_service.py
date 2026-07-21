@@ -41,7 +41,6 @@ suite + grep guard, not ``test_protocol_contracts.py``.
 """
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import datetime
 
 from agentclaw.community.core.economy.governance.domain.enums import (
@@ -261,7 +260,7 @@ class GovernanceLifecycleService:
         if owner_name is not None:
             ticket.owner_name = owner_name
         if token_baseline is not None:
-            ticket._snapshot = replace(ticket._snapshot, token_baseline=token_baseline)
+            ticket.update_token_baseline(token_baseline)
         if remind_at != "":  # type: ignore[comparison-overlap]
             ticket.remind_at = remind_at  # type: ignore[assignment]
         return self._task_repo._save_ticket_with_snapshot(ticket)  # noqa: SLF001 — primitive
@@ -269,12 +268,12 @@ class GovernanceLifecycleService:
     def observe_for_whitelist(
         self, ticket_id: str, *, close_reason: str, now: datetime,
     ) -> bool:
-        """Scan 清理白名单 bot 残留活跃单 → CLOSED(scan_whitelisted) + cancel pending.
+        """加白→转 OBSERVED 单条语义方法(四条加白入口的统一收口)。
 
-        只记动作不猜原因:scan 遇到白名单 bot 仍挂着活跃单,顺手关掉(cardinality
-        = ❶批量加白漏关 / 加白与扫描并发竞态的兜底)。方案 A 链路:find →
-        ``ticket.close()``(守卫激活)→ ``save_ticket`` → 取消通知。非法转移被守卫
-        抛出,驱动服务捕获转审计 + False。
+        把活跃单转 OBSERVED(持续观察画像,不发通知)+ 释放 active_worker +
+        不设 closed_at + 取消 pending 通知(best-effort)。方案 A 链路:find →
+        ``ticket.enter_observed(close_reason)``(守卫激活)→ ``save_ticket`` →
+        取消通知。非法转移被守卫抛出,驱动服务捕获转审计 + False。
 
         四条加白入口经此(scan 兜底传 SCAN_WHITELISTED;批量加白经
         :meth:`bulk_observe_by_ticket_ids` 传 WHITELIST_APPROVED;审批加白走
@@ -324,7 +323,7 @@ class GovernanceLifecycleService:
             return False
         try:
             ticket.close(
-                close_reason=CloseReason.SCAN_WHITELISTED, closed_at=now,
+                close_reason=CloseReason.WHITELIST_APPROVED, closed_at=now,
             )
         except IllegalTicketTransitionError as exc:
             self._audit_illegal(ticket_id, "close_observed_for_removal", exc)
@@ -340,32 +339,6 @@ class GovernanceLifecycleService:
         """未回复换新 → CLOSED(stale_replaced) + cancel pending。
 
         方案 A 链路同 observe_for_whitelist:find → ticket.close() → save →
-        cancel pending。不设 cooldown_until(stale_replace 去抖靠 gmt_create 节奏,
-        与 cooldown 体系隔离)。非法转移被守卫捕获 → audit + False。
-
-        Returns True if found+closed, False if not found。
-        """
-        ticket = self._task_repo.find_by_ticket_id(ticket_id)
-        if ticket is None:
-            return False
-        try:
-            ticket.close(
-                close_reason=CloseReason.STALE_REPLACED, closed_at=now,
-            )
-        except IllegalTicketTransitionError as exc:
-            self._audit_illegal(ticket_id, "close_for_stale_replace", exc)
-            return False
-        if not self._task_repo.save_ticket(ticket):
-            return False
-        self._cancel_pending(ticket_id)
-        return True
-
-    def close_for_stale_replace(
-        self, ticket_id: str, *, now: datetime,
-    ) -> bool:
-        """未回复换新 → CLOSED(stale_replaced) + cancel pending。
-
-        方案 A 链路同 close_for_whitelist_hit:find → ticket.close() → save →
         cancel pending。不设 cooldown_until(stale_replace 去抖靠 gmt_create 节奏,
         与 cooldown 体系隔离)。非法转移被守卫捕获 → audit + False。
 

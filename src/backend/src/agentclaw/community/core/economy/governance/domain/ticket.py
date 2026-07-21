@@ -11,11 +11,13 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
-from agentclaw.community.core.economy.governance.domain.base import _iso
+from agentclaw.community.core.economy.governance.domain.base import (
+    _iso,
+    _normalize_delivery_status,
+)
 from agentclaw.community.core.economy.governance.domain.enums import (
     CloseReason,
     GovernanceStatus,
-    Response,
     TicketAction,
 )
 
@@ -578,7 +580,9 @@ class GovernanceTicket:
                               可带 cooldown_until
           approve_scheduled → SCHEDULED(同意排期,不关单),close_reason='schedule_approved',
                               保留 repair_deadline;不释放 active_worker(仍 active 观察)
-          approve_whitelist → CLOSED,close_reason='whitelisted'
+          approve_whitelist → OBSERVED,close_reason=WHITELIST_APPROVED(白名单观察态:
+                              释放 active_worker、不设 closed_at,由后续 off-batch
+                              持续刷新快照,不发通知、不占治理人力)
           reject_for_reopen → CLOSED,close_reason='review_rejected'(打回仍关闭,
                               下个 scan 重建 open 单)
         """
@@ -595,7 +599,16 @@ class GovernanceTicket:
             self.close_reason = close_reason or "schedule_approved"
             return
 
-        # 其余三态 → CLOSED
+        if review_decision == "approve_whitelist":
+            # 加白 → OBSERVED(白名单观察态):释放 active_worker、不设 closed_at、
+            # 清 remind_at(详见 enter_observed)。后续 off-batch 持续刷新快照,
+            # 不发通知、不占治理人力。
+            self.enter_observed(
+                close_reason=close_reason or CloseReason.WHITELIST_APPROVED,
+            )
+            return
+
+        # 其余两态(approve_close / reject_for_reopen)→ CLOSED
         self.transition_to(GovernanceStatus.CLOSED)
         self.closed_at = now
         self.assignee = None   # 释放 active_worker
@@ -741,7 +754,7 @@ class GovernanceTicket:
                 last_decision_dt_version=obj.last_decision_dt_version,
                 last_seen_at=obj.last_seen_at,
                 last_sync_at=obj.last_sync_at,
-                delivery_status=getattr(obj, "delivery_status", None) or "pending",
+                delivery_status=_normalize_delivery_status(getattr(obj, "delivery_status", None)),
                 last_notified_at=getattr(obj, "last_notified_at", None),
             ),
             # 生命周期态
