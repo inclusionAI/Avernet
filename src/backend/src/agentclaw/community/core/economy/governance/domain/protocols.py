@@ -58,10 +58,6 @@ class TaskRecordRepositoryProtocol(Protocol):
         """Find most recently closed ticket for a worker (cooldown check)."""
         ...
 
-    def find_observed_ticket(self, worker_id: str) -> GovernanceTicket | None:
-        """Find the active OBSERVED ticket for a worker (whitelist observation)."""
-        ...
-
     def find_latest_tickets_by_worker_keys(
         self, worker_keys: list[str],
     ) -> dict[str, GovernanceTicket]:

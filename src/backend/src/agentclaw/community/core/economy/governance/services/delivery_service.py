@@ -23,8 +23,6 @@ from typing import TYPE_CHECKING, Any
 
 from injector import inject
 
-from agentclaw.community.plugin_api.notify_sender import NotifyMessage
-
 from agentclaw.community.core.economy.governance.domain.enums import (
     AuditAction,
     NotifyStatus,
@@ -203,6 +201,7 @@ class GovernanceDeliveryService:
 
                 if payload is not None:
                     if not dry_run:
+                        from agentclaw.community.plugin_api.notify_sender import NotifyMessage
                         msg = NotifyMessage(
                             title="🔔 Bot 治理通知",
                             body=payload.body,
@@ -220,7 +219,8 @@ class GovernanceDeliveryService:
                         channel_used = "markdown"
 
                     if not dry_run and channel_used == "markdown":
-                        msg_md = NotifyMessage(
+                        from agentclaw.community.plugin_api.notify_sender import NotifyMessage as _NM
+                        msg_md = _NM(
                             title="🔔 Bot 治理通知",
                             body=p.notification_md or "",
                             recipient=recipient,
@@ -252,7 +252,8 @@ class GovernanceDeliveryService:
                     )
                     channel_used = "markdown"
                     if not dry_run:
-                        msg_md = NotifyMessage(
+                        from agentclaw.community.plugin_api.notify_sender import NotifyMessage as _NM
+                        msg_md = _NM(
                             title="🔔 Bot 治理通知",
                             body=p.notification_md or "",
                             recipient=recipient,
@@ -271,7 +272,8 @@ class GovernanceDeliveryService:
                         continue
             else:
                 if not dry_run:
-                    msg_plain = NotifyMessage(
+                    from agentclaw.community.plugin_api.notify_sender import NotifyMessage as _NM
+                    msg_plain = _NM(
                         title="🔔 Bot 治理通知",
                         body=p.notification_md or "",
                         recipient=recipient,
@@ -429,6 +431,7 @@ class GovernanceDeliveryService:
         self._notify_repo.add_notification(notify_row)
 
         # Send immediately (跳过 cron tick 等待)
+        from agentclaw.community.plugin_api.notify_sender import NotifyMessage
         msg = NotifyMessage(
             title="⚠️ 治理通知提醒",
             body=notification_md,
@@ -494,7 +497,7 @@ class GovernanceDeliveryService:
 
         # Audit (full: bot_id/owner_id/notification_id/operator)
         self._audit_repo.add_audit(
-            run_id,
+            f"admin-remind-{uuid.uuid4().hex[:8]}",
             bot_id=ticket.bot_id,
             owner_id=ticket.owner_id,
             notification_id=notification_id,

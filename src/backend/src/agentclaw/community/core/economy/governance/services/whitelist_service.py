@@ -131,10 +131,9 @@ class GovernanceWhitelistService:
             cooldown_until=now + timedelta(days=cooldown_days),
         )
 
-        # 4. Ticket-side observe → OBSERVED (加白语义,非运维关单的 CLOSED)。
-        # 逐条经 observe_for_whitelist 守卫激活,幂等。通知侧用 ADMIN_CLOSED
-        # (通知关停原因,独立列),工单侧转 OBSERVED(close_reason=WHITELIST_APPROVED)。
-        self._lifecycle_svc.bulk_observe_by_ticket_ids(ticket_ids, now=now)
+        # 4. Ticket-side close — per-ticket guard-activated (ADMIN_CLOSED),
+        # idempotent. Aligns the ticket/notify sets (Task 8).
+        self._lifecycle_svc.bulk_close_by_ticket_ids(ticket_ids, now=now)
 
         # 5. 批次摘要行(同 run_id):汇总真实处置计数,供按批次聚合查询。
         skipped = len(bot_owner_pairs) - whitelisted

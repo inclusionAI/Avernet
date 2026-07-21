@@ -41,6 +41,7 @@ suite + grep guard, not ``test_protocol_contracts.py``.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 
 from agentclaw.community.core.economy.governance.domain.enums import (
@@ -260,7 +261,7 @@ class GovernanceLifecycleService:
         if owner_name is not None:
             ticket.owner_name = owner_name
         if token_baseline is not None:
-            ticket.update_token_baseline(token_baseline)
+            ticket._snapshot = replace(ticket._snapshot, token_baseline=token_baseline)
         if remind_at != "":  # type: ignore[comparison-overlap]
             ticket.remind_at = remind_at  # type: ignore[assignment]
         return self._task_repo._save_ticket_with_snapshot(ticket)  # noqa: SLF001 — primitive
@@ -339,6 +340,32 @@ class GovernanceLifecycleService:
         """未回复换新 → CLOSED(stale_replaced) + cancel pending。
 
         方案 A 链路同 observe_for_whitelist:find → ticket.close() → save →
+        cancel pending。不设 cooldown_until(stale_replace 去抖靠 gmt_create 节奏,
+        与 cooldown 体系隔离)。非法转移被守卫捕获 → audit + False。
+
+        Returns True if found+closed, False if not found。
+        """
+        ticket = self._task_repo.find_by_ticket_id(ticket_id)
+        if ticket is None:
+            return False
+        try:
+            ticket.close(
+                close_reason=CloseReason.STALE_REPLACED, closed_at=now,
+            )
+        except IllegalTicketTransitionError as exc:
+            self._audit_illegal(ticket_id, "close_for_stale_replace", exc)
+            return False
+        if not self._task_repo.save_ticket(ticket):
+            return False
+        self._cancel_pending(ticket_id)
+        return True
+
+    def close_for_stale_replace(
+        self, ticket_id: str, *, now: datetime,
+    ) -> bool:
+        """未回复换新 → CLOSED(stale_replaced) + cancel pending。
+
+        方案 A 链路同 close_for_whitelist_hit:find → ticket.close() → save →
         cancel pending。不设 cooldown_until(stale_replace 去抖靠 gmt_create 节奏,
         与 cooldown 体系隔离)。非法转移被守卫捕获 → audit + False。
 

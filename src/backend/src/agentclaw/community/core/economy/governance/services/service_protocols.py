@@ -345,6 +345,15 @@ class GovernanceLifecycleServiceProtocol(Protocol):
         """
         ...
 
+    def close_for_stale_replace(
+        self, ticket_id: str, *, now: datetime,
+    ) -> bool:
+        """未回复换新 → CLOSED(stale_replaced) + cancel pending(不设 cooldown_until)。
+
+        Returns True if the ticket was found and closed, False if not found.
+        """
+        ...
+
     # ── Entry: cron tick (scan_service) ─────────────────────────────────
 
     def transition_schedule_due(
