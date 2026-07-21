@@ -22,6 +22,8 @@ use tracing::{info, warn};
 use crate::state::HttpAppState;
 
 const BOT_EVENT_REQUEST_BODY_LIMIT: usize = 2 * 1024 * 1024;
+const OPENCLAW_SILENT_REPLY_TOKEN: &str = "NO_REPLY";
+const SILENT_STOP_REASON: &str = "silent";
 
 #[derive(Debug, Deserialize)]
 pub struct BotEventRequest {
@@ -203,7 +205,7 @@ impl IntoResponse for BotEventRouteError {
 pub async fn post_bot_event(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
-    LoggedBotEventRequest(req): LoggedBotEventRequest,
+    LoggedBotEventRequest(mut req): LoggedBotEventRequest,
 ) -> Result<Json<Value>, BotEventRouteError> {
     let provider_id = header_required(&headers, BCN_PROVIDER_ID_HEADER)?;
     // Derive state: prefer the explicit `state` field (1.0); fall back to
@@ -233,6 +235,7 @@ pub async fn post_bot_event(
             "state is required when event/payload are absent (1.0 contract)",
         ));
     };
+    normalize_openclaw_silent_callback(&mut req, &effective_state);
 
     info!(
         provider_id = %provider_id,
@@ -281,6 +284,109 @@ pub async fn post_bot_event(
         "delivered_count": outcome.delivered_count,
         "failed_count": outcome.failed_count,
     })))
+}
+
+fn normalize_openclaw_silent_callback(
+    request: &mut BotEventRequest,
+    effective_state: &ChatEventState,
+) -> bool {
+    if request.event.is_none()
+        && matches!(effective_state, ChatEventState::Final)
+        && is_openclaw_silent_reply_text(&request.message.text)
+    {
+        request.message.text.clear();
+        request.event = Some("chat".to_string());
+        request.payload = Some(json!({
+            "run_id": request.run_id.clone(),
+            "state": "final",
+            "stop_reason": SILENT_STOP_REASON,
+        }));
+        return true;
+    }
+
+    let Some(payload) = request.payload.as_mut() else {
+        return false;
+    };
+    let candidate = match request.event.as_deref() {
+        Some("chat") if matches!(effective_state, ChatEventState::Final) => {
+            callback_chat_text(payload)
+        }
+        _ => None,
+    };
+    if !candidate
+        .as_deref()
+        .is_some_and(is_openclaw_silent_reply_text)
+    {
+        return false;
+    }
+
+    let Some(object) = payload.as_object_mut() else {
+        return false;
+    };
+    object.remove("message");
+    object.remove("delta_text");
+    object.remove("deltaText");
+    object.remove("delta");
+    object.remove("text");
+    object.remove("content");
+    object.remove("data");
+    object.remove("routing");
+    object.remove("stopReason");
+    object.insert(
+        "stop_reason".to_string(),
+        Value::String(SILENT_STOP_REASON.to_string()),
+    );
+    true
+}
+
+fn callback_chat_text(payload: &Value) -> Option<String> {
+    if payload.get("message").is_some_and(|message| !message.is_null()) {
+        return callback_message_text(payload.get("message")?);
+    }
+    payload
+        .get("delta_text")
+        .or_else(|| payload.get("deltaText"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn callback_message_text(message: &Value) -> Option<String> {
+    let blocks = message.get("content")?.as_array()?;
+    let mut text = String::new();
+    let mut saw_text = false;
+    for block in blocks {
+        if block.get("type").and_then(Value::as_str) != Some("text") {
+            return None;
+        }
+        text.push_str(block.get("text")?.as_str()?);
+        saw_text = true;
+    }
+    saw_text.then_some(text)
+}
+
+fn is_openclaw_silent_reply_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.eq_ignore_ascii_case(OPENCLAW_SILENT_REPLY_TOKEN) {
+        return true;
+    }
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+        return false;
+    }
+    let Ok(parsed) = serde_json::from_str::<Value>(trimmed) else {
+        return false;
+    };
+    let Some(object) = parsed.as_object() else {
+        return false;
+    };
+    object.len() == 1
+        && object
+            .get("action")
+            .and_then(Value::as_str)
+            .is_some_and(|action| {
+                action
+                    .trim()
+                    .eq_ignore_ascii_case(OPENCLAW_SILENT_REPLY_TOKEN)
+            })
 }
 
 pub async fn post_coordination_event(

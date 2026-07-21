@@ -1706,14 +1706,63 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 run.group_id
             )))?;
         let now = bcs_protocol::now_ms();
+        if matches!(cmd.state, ChatEventState::Final)
+            && extract_text(&cmd.event_payload).is_none()
+        {
+            // A message-less final (including a canonical silent final) is a
+            // completed bot attempt without an artifact. It must advance the
+            // node into the normal failure/retry path instead of returning an
+            // InvalidRequest while the node remains Running.
+            let error = "bot completed without visible output".to_string();
+            let failed = self
+                .runs
+                .fail_node_attempt(
+                    &correlation.state_machine_run_id,
+                    &correlation.node_id,
+                    correlation.attempt,
+                    error.clone(),
+                    now,
+                )
+                .await?;
+            let view = if failed {
+                warn!(
+                    run_id = %correlation.state_machine_run_id,
+                    group_id = %run.group_id,
+                    session_id = %run.session_id,
+                    node_id = %correlation.node_id,
+                    attempt = correlation.attempt,
+                    error = %error,
+                    "state_machine: node failed"
+                );
+                log_state_machine_node_result(
+                    &run,
+                    &correlation,
+                    MessageLogStatus::Failed,
+                    None,
+                    Some(&error),
+                    None,
+                );
+                self.fail_node_or_schedule_retry(
+                    &compiled,
+                    &group,
+                    &run,
+                    &correlation.node_id,
+                    correlation.attempt,
+                    error,
+                )
+                .await?
+            } else {
+                self.run_view(&run.run_id).await?
+            };
+            return Ok(HandleBotTerminalEventOutcome {
+                consumed: true,
+                view,
+            });
+        }
         let mut view = None;
         match cmd.state {
             ChatEventState::Final => {
-                let text = extract_text(&cmd.event_payload).ok_or_else(|| {
-                    CollaborationRuntimeError::InvalidRequest(
-                        "final state-machine bot event must include text".to_string(),
-                    )
-                })?;
+                let text = extract_text(&cmd.event_payload).unwrap_or_default();
                 let artifact_len = text.len();
                 let evaluation = self
                     .evaluate_node_outcome(

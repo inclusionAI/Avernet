@@ -13,7 +13,7 @@ import { formatAllowFromLowercase } from 'openclaw/plugin-sdk/allow-from';
 import { DEFAULT_ACCOUNT_ID } from './api.js';
 import { listAccountIds, resolveAccount } from './accounts.js';
 import { BcsWsClient, sanitizeBcsUrlForLog } from './bcs-ws-client.js';
-import { handleChatSend, handleChatInject, handleChatHistory, handleSessionDelete, abortAllStreams, initAgentEventsSubscription, cleanupAgentEventsSubscription, resolveGroupIdFromSessionKey } from './inbound-handler.js';
+import { handleChatSend, handleChatInject, handleChatHistory, handleSessionDelete, abortAllStreams, initAgentEventsSubscription, cleanupAgentEventsSubscription, isOpenClawSilentReplyText, resolveGroupIdFromSessionKey } from './inbound-handler.js';
 import { getBcsRuntime } from './runtime.js';
 import { resolveBcsSessionCleanupConfig, startBcsSessionCleanup } from './session-cleanup.js';
 import type { ResolvedBcsAccount } from './types.js';
@@ -173,16 +173,21 @@ export function createBcsPlugin(options: BcsChannelPluginOptions = {}) {
         }
         // `to` is the OpenClaw session key (e.g. "bcs:BotName"); resolve to actual BCS group UUID
         const bcsGroupId = resolveGroupIdFromSessionKey(to) ?? to;
+        const silent = isOpenClawSilentReplyText(text);
         // Send as a chat.event frame
         client.sendEvent('chat.event', {
           run_id: `outbound-${Date.now()}`,
           bcs_group_id: bcsGroupId,
           state: 'final',
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text }],
-            timestamp: Date.now(),
-          },
+          ...(silent ? {
+            stop_reason: 'silent',
+          } : {
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text }],
+              timestamp: Date.now(),
+            },
+          }),
         }, 0);
         return { channel: CHANNEL_ID, messageId: `bcs-${Date.now()}`, chatId: to };
       },

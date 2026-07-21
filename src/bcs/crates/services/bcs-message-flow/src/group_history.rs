@@ -937,10 +937,7 @@ fn is_openclaw_no_reply_history_content(content: &str) -> bool {
     if trimmed.eq_ignore_ascii_case(OPENCLAW_NO_REPLY_TOKEN) {
         return true;
     }
-    if !trimmed.starts_with('{')
-        || !trimmed.ends_with('}')
-        || !trimmed.contains(OPENCLAW_NO_REPLY_TOKEN)
-    {
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
         return false;
     }
     let Ok(parsed) = serde_json::from_str::<Value>(trimmed) else {
@@ -978,6 +975,10 @@ fn normalize_group_store_messages(
             let split = parts.len() > 1;
             parts
                 .into_iter()
+                .filter(|(content, _, _)| {
+                    message.role != MessageRole::Assistant
+                        || !is_openclaw_no_reply_history_content(content)
+                })
                 .map(|(content, bot_name, bot_uuid)| {
                     let sender = bot_uuid
                         .clone()
@@ -1228,6 +1229,45 @@ fn handle_queued_message(content: &str) -> Vec<(String, Option<String>, Option<S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn stored_message(id: &str, role: MessageRole, content: &str) -> GroupMessage {
+        GroupMessage {
+            id: id.to_string(),
+            timestamp: 1,
+            sender: "sender".to_string(),
+            content: content.to_string(),
+            message_type: GroupMessageType::Bot,
+            bot_name: None,
+            role,
+            run_id: String::new(),
+            history_meta: None,
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn group_store_history_hides_only_exact_silent_assistant_content() {
+        let messages = vec![
+            stored_message("silent", MessageRole::Assistant, " NO_REPLY "),
+            stored_message(
+                "silent-json",
+                MessageRole::Assistant,
+                r#"{"action":"no_reply"}"#,
+            ),
+            stored_message(
+                "visible-assistant",
+                MessageRole::Assistant,
+                "NO_REPLY explained",
+            ),
+            stored_message("visible-user", MessageRole::User, "NO_REPLY"),
+        ];
+
+        let normalized = normalize_group_store_messages(&[], messages);
+
+        assert_eq!(normalized.len(), 2);
+        assert!(normalized.iter().any(|message| message.id == "visible-assistant"));
+        assert!(normalized.iter().any(|message| message.id == "visible-user"));
+    }
 
     #[test]
     fn test_handle_queued_message_standard_bundle_with_dropped() {

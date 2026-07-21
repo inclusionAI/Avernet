@@ -18,6 +18,7 @@ import type { ConnectionStatus } from '@aix-chat/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GroupInfo, GroupMessage } from '../types';
 import { BCS_SYSTEM_MESSAGE_BOT_UUID } from '../types';
+import { isSilentAssistantReply } from '../utils/silentReply';
 import {
   getProvider,
   listeners,
@@ -834,8 +835,9 @@ export function useGroupChat(config: UseGroupChatConfig): UseGroupChatResult {
   const messages = useMemo(() => {
     const raw = chatResult?.messages;
     if (!raw?.length) return raw ?? [];
-    let mutated = false;
-    const fixed = raw.map((msg) => {
+    const visible = raw.filter((msg) => !isSilentAssistantReply(msg));
+    let mutated = visible.length !== raw.length;
+    const fixed = visible.map((msg) => {
       const extra = (msg as any).extra;
       const isSystemByBotUuid =
         extra?.bot_uuid === BCS_SYSTEM_MESSAGE_BOT_UUID ||

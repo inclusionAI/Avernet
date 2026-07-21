@@ -36,6 +36,8 @@ pub type Result<T> = std::result::Result<T, BotWsDispatchError>;
 const BOT_DELIVERY_IS_PROVIDER_CODE: &str = "bot_delivery_is_provider";
 const BOT_DELIVERY_IS_PROVIDER_MESSAGE: &str =
     "Bot delivery is configured for HttpProvider; WebSocket uplink is no longer accepted for this bot";
+const OPENCLAW_SILENT_REPLY_TOKEN: &str = "NO_REPLY";
+const SILENT_STOP_REASON: &str = "silent";
 
 fn unwrap_outbound_group_id(
     wire_group_id: &str,
@@ -797,8 +799,11 @@ async fn handle_event_frame(
         _ => None,
     };
 
-    let event_payload = event.payload.clone().unwrap_or(Value::Null);
+    let mut event_payload = event.payload.clone().unwrap_or(Value::Null);
     let event_state = chat_event_state.unwrap_or(ChatEventState::Delta);
+    if matches!(event_state, ChatEventState::Final) {
+        normalize_openclaw_silent_final(&mut event_payload);
+    }
     let explicit_session_id = event_payload
         .get("bcs_session_id")
         .and_then(|v| v.as_str());
@@ -1187,6 +1192,87 @@ fn parse_chat_event(payload: &Option<Value>) -> Option<(String, String, ChatEven
     let payload = payload.as_ref()?;
     let chat_event: ChatEventPayload = serde_json::from_value(payload.clone()).ok()?;
     Some((chat_event.run_id, chat_event.bcs_group_id, chat_event.state))
+}
+
+fn normalize_openclaw_silent_final(payload: &mut Value) -> bool {
+    let candidate = if payload.get("message").is_some_and(|message| !message.is_null()) {
+        chat_message_text(payload)
+    } else {
+        payload
+            .get("delta_text")
+            .or_else(|| payload.get("deltaText"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
+    if !candidate
+        .as_deref()
+        .is_some_and(is_openclaw_silent_reply_text)
+    {
+        return false;
+    }
+
+    let Some(object) = payload.as_object_mut() else {
+        return false;
+    };
+    object.remove("message");
+    object.remove("delta_text");
+    object.remove("deltaText");
+    object.remove("stopReason");
+    // A silent completion consumes any engine-side routing intent as well as
+    // its display text; BCS must only observe the terminal lifecycle signal.
+    object.remove("routing");
+    object.insert(
+        "stop_reason".to_string(),
+        Value::String(SILENT_STOP_REASON.to_string()),
+    );
+    true
+}
+
+fn chat_message_text(payload: &Value) -> Option<String> {
+    let message = payload.get("message")?;
+    if !message
+        .get("role")
+        .and_then(Value::as_str)
+        .is_some_and(|role| role.eq_ignore_ascii_case("assistant"))
+    {
+        return None;
+    }
+    let blocks = message.get("content")?.as_array()?;
+    let mut text = String::new();
+    let mut saw_text = false;
+    for block in blocks {
+        if block.get("type").and_then(Value::as_str) != Some("text") {
+            return None;
+        }
+        text.push_str(block.get("text")?.as_str()?);
+        saw_text = true;
+    }
+    saw_text.then_some(text)
+}
+
+fn is_openclaw_silent_reply_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.eq_ignore_ascii_case(OPENCLAW_SILENT_REPLY_TOKEN) {
+        return true;
+    }
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+        return false;
+    }
+    let Ok(parsed) = serde_json::from_str::<Value>(trimmed) else {
+        return false;
+    };
+    let Some(object) = parsed.as_object() else {
+        return false;
+    };
+    object.len() == 1
+        && object
+            .get("action")
+            .and_then(Value::as_str)
+            .is_some_and(|action| {
+                action
+                    .trim()
+                    .eq_ignore_ascii_case(OPENCLAW_SILENT_REPLY_TOKEN)
+            })
 }
 
 /// Send a success response frame.

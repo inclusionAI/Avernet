@@ -38,7 +38,8 @@ import type {
 const CHANNEL_ID = 'bcs';
 const OPENCLAW_GATEWAY_MIN_PROTOCOL = 3;
 const OPENCLAW_GATEWAY_MAX_PROTOCOL = 4;
-const NO_REPLY_TEXT = 'NO_REPLY';
+const OPENCLAW_SILENT_REPLY_TOKEN = 'NO_REPLY';
+const SILENT_STOP_REASON = 'silent';
 const MAX_IMAGE_ATTACHMENTS = 5;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const IMAGE_DOWNLOAD_TIMEOUT_MS = 30_000;
@@ -590,18 +591,22 @@ function buildChatEventPayload(
   runId: string,
   bcsGroupId: string,
   state: ChatEventPayload['state'],
-  text: string,
+  text?: string,
   routeIntent?: PendingRouteIntent,
+  stopReason?: string,
 ): ChatEventPayload {
   return {
     run_id: runId,
     bcs_group_id: bcsGroupId,
     state,
-    message: {
-      role: 'assistant',
-      content: [{ type: 'text', text }],
-      timestamp: Date.now(),
-    },
+    ...(text !== undefined ? {
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text }],
+        timestamp: Date.now(),
+      },
+    } : {}),
+    ...(stopReason ? { stop_reason: stopReason } : {}),
     ...(routeIntent ? {
       routing: {
         responders: routeIntent.responders,
@@ -612,6 +617,44 @@ function buildChatEventPayload(
       } satisfies ChatEventRouting,
     } : {}),
   };
+}
+
+export function isOpenClawSilentReplyText(text: string | undefined): boolean {
+  if (!text) return false;
+
+  const trimmed = text.trim();
+  if (trimmed.toUpperCase() === OPENCLAW_SILENT_REPLY_TOKEN) return true;
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return false;
+
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    const keys = Object.keys(parsed);
+    return keys.length === 1
+      && keys[0] === 'action'
+      && typeof parsed.action === 'string'
+      && parsed.action.trim().toUpperCase() === OPENCLAW_SILENT_REPLY_TOKEN;
+  } catch {
+    return false;
+  }
+}
+
+function couldBeOpenClawSilentReplyPrefix(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  if (OPENCLAW_SILENT_REPLY_TOKEN.startsWith(trimmed.toUpperCase())) {
+    return true;
+  }
+
+  if (!trimmed.startsWith('{')) return false;
+  try {
+    JSON.parse(trimmed);
+    return isOpenClawSilentReplyText(trimmed);
+  } catch {
+    // A partial JSON control envelope must stay buffered until it can be
+    // distinguished from {"action":"NO_REPLY"}.
+    return true;
+  }
 }
 
 function ensureVisibleReplyState(runId: string): VisibleReplyState {
@@ -709,12 +752,25 @@ function markVisibleReplySegmentBoundary(runId: string): void {
 function sendVisibleReplyDelta(
   runId: string,
   log?: { info: (...args: unknown[]) => void },
+  terminal = false,
 ): void {
   const state = visibleReplyByRunId.get(runId);
   const context = runContexts.get(runId);
   if (!state || !context) return;
 
   const deltaText = state.text.slice(state.flushedOffset);
+  if (isOpenClawSilentReplyText(deltaText)) {
+    // Silent is a reply-level decision. Hold an exact candidate across
+    // intermediate tool/lifecycle boundaries; only consume it once the whole
+    // reply terminates without any substantive continuation.
+    if (terminal) {
+      state.text = state.text.slice(0, state.flushedOffset);
+      state.segmentOffset = Math.min(state.segmentOffset, state.text.length);
+      state.sawAssistantText = Boolean(state.text.trim());
+    }
+    return;
+  }
+  if (!terminal && couldBeOpenClawSilentReplyPrefix(deltaText)) return;
   if (!deltaText.trim()) return;
 
   context.client.sendEvent(
@@ -729,9 +785,10 @@ function sendVisibleReplyDelta(
 
 function finishVisibleReply(runId: string, log?: { info: (...args: unknown[]) => void }): string | undefined {
   const state = visibleReplyByRunId.get(runId);
-  if (!state?.sawAssistantText || !state.text.trim()) return undefined;
+  if (!state) return undefined;
 
-  sendVisibleReplyDelta(runId, log);
+  sendVisibleReplyDelta(runId, log, true);
+  if (!state.sawAssistantText || !state.text.trim()) return undefined;
   return state.text.trim();
 }
 
@@ -765,13 +822,17 @@ function sendFinalVisibleReplyOnce(
   if (!context || context.finalSent) return false;
 
   const visibleText = finishVisibleReply(runId, log);
-  const deliveredText = options?.allowDeliveredTextFallback
+  const deliveredCandidate = options?.allowDeliveredTextFallback
     ? options.deliveredText?.trim() || undefined
     : undefined;
-  const combinedText = visibleText ?? deliveredText ?? NO_REPLY_TEXT;
+  const deliveredText = isOpenClawSilentReplyText(deliveredCandidate)
+    ? undefined
+    : deliveredCandidate;
+  const combinedText = visibleText ?? deliveredText;
+  const silent = combinedText === undefined;
 
-  if (!visibleText && !deliveredText) {
-    log?.warn?.(`[BCS] No assistant agent text for run_id=${runId}, sending ${NO_REPLY_TEXT} final${options?.noReplyDetail ? ` ${options.noReplyDetail}` : ''}`);
+  if (silent) {
+    log?.info?.(`[BCS] No visible assistant text for run_id=${runId}, sending silent final${options?.noReplyDetail ? ` ${options.noReplyDetail}` : ''}`);
   } else if (!visibleText && deliveredText) {
     log?.info?.(`[BCS] Using dispatcher final for non-agent run_id=${runId}`);
   } else if (options?.deliveredText && options.deliveredText !== visibleText) {
@@ -781,7 +842,14 @@ function sendFinalVisibleReplyOnce(
   }
 
   const routeIntent = consumeRouteIntent(runId, context.sessionKey);
-  const chatPayload = buildChatEventPayload(runId, context.groupId, 'final', combinedText, routeIntent);
+  const chatPayload = buildChatEventPayload(
+    runId,
+    context.groupId,
+    'final',
+    combinedText,
+    silent ? undefined : routeIntent,
+    silent ? SILENT_STOP_REASON : undefined,
+  );
   context.client.sendEvent('chat.event', chatPayload as unknown as Record<string, unknown>, nextSeq(context.client));
   context.finalSent = true;
 
@@ -2131,7 +2199,7 @@ export function initAgentEventsSubscription(log?: {
     if (!context.finalSent) {
       if (evt.stream === 'assistant') {
         recordAssistantAgentText(resolvedRunId, evt.data);
-      } else {
+      } else if (terminalOutcome !== 'final') {
         sendVisibleReplyDelta(resolvedRunId, log);
         markVisibleReplySegmentBoundary(resolvedRunId);
       }
@@ -2148,22 +2216,21 @@ export function initAgentEventsSubscription(log?: {
       }
     }
 
-    // Build the agent event payload for BCS — always use the original runId
-    // so that all events for one user message share the same run_id
-    const agentPayload: AgentEventPayload = {
-      run_id: resolvedRunId,
-      bcs_group_id: groupId,
-      stream: evt.stream as any,
-      ts: evt.ts,
-      data: evt.data,
-    };
-
-    // Forward to BCS
-    client.sendEvent('agent', agentPayload as unknown as Record<string, unknown>, nextSeq(client));
-
-    log?.info?.(
-      `[BCS] Forwarded agent event: runId=${evt.runId}, stream=${evt.stream}, groupId=${groupId}`,
-    );
+    // Assistant events are consumed locally and translated into chat.event.
+    // Forwarding the raw engine stream would expose OpenClaw control tokens.
+    if (evt.stream !== 'assistant') {
+      const agentPayload: AgentEventPayload = {
+        run_id: resolvedRunId,
+        bcs_group_id: groupId,
+        stream: evt.stream as any,
+        ts: evt.ts,
+        data: evt.data,
+      };
+      client.sendEvent('agent', agentPayload as unknown as Record<string, unknown>, nextSeq(client));
+      log?.info?.(
+        `[BCS] Forwarded agent event: runId=${evt.runId}, stream=${evt.stream}, groupId=${groupId}`,
+      );
+    }
     if (terminalOutcome) {
       void cleanupRunContext(resolvedRunId, log);
     }

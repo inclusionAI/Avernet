@@ -39,6 +39,8 @@ const SSE_CTX_RETRY_MAX: u32 = 20;
 /// it recovers below the threshold. Edge-triggered so a sustained backlog logs
 /// twice (enter + recover), not once per frame.
 const SSE_LAG_ALERT_MS: u64 = 5_000;
+const OPENCLAW_SILENT_REPLY_TOKEN: &str = "NO_REPLY";
+const SILENT_STOP_REASON: &str = "silent";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ProviderClientPolicy {
@@ -1372,6 +1374,15 @@ fn build_event_payload(event: &StreamEvent, run_id: &str, group_id: &str) -> Val
                     message = Some(assistant_text_message(error_message));
                 }
             }
+            let mut delta_text = chat.delta_text.clone();
+            let mut stop_reason = chat.stop_reason.clone();
+            if matches!(chat.state, ChatState::Final)
+                && is_legacy_openclaw_silent_chat_event(chat)
+            {
+                message = None;
+                delta_text = None;
+                stop_reason = Some(SILENT_STOP_REASON.to_string());
+            }
             let payload = ChatEventPayload {
                 run_id: run_id.to_string(),
                 bcs_group_id: group_id.to_string(),
@@ -1379,9 +1390,9 @@ fn build_event_payload(event: &StreamEvent, run_id: &str, group_id: &str) -> Val
                 message,
                 // Forward the frame's incremental delta so BCS can accumulate
                 // segments itself instead of re-deriving from cumulative message.
-                delta_text: chat.delta_text.clone(),
+                delta_text,
                 usage: None,
-                stop_reason: chat.stop_reason.clone(),
+                stop_reason,
                 error_message: chat.error_message.clone(),
                 error_kind: chat.error_kind.clone(),
                 tool_call_id: None,
@@ -1405,6 +1416,63 @@ fn message_has_text(message: &Option<MessageContent>) -> bool {
             .iter()
             .any(|block| block.text.as_deref().is_some_and(|text| !text.trim().is_empty()))
     })
+}
+
+fn is_legacy_openclaw_silent_chat_event(
+    chat: &bcs_protocol::stream::ChatEvent,
+) -> bool {
+    let candidate = match chat.message.as_ref().filter(|message| !message.is_null()) {
+        Some(message) => raw_chat_message_text(message),
+        None => chat.delta_text.clone(),
+    };
+    candidate
+        .as_deref()
+        .is_some_and(is_openclaw_silent_reply_text)
+}
+
+fn raw_chat_message_text(message: &Value) -> Option<String> {
+    if message
+        .get("role")
+        .and_then(Value::as_str)
+        .is_some_and(|role| !role.eq_ignore_ascii_case("assistant"))
+    {
+        return None;
+    }
+    let mut text = String::new();
+    let mut saw_text = false;
+    for block in message.get("content")?.as_array()? {
+        if block.get("type").and_then(Value::as_str) != Some("text") {
+            return None;
+        }
+        text.push_str(block.get("text")?.as_str()?);
+        saw_text = true;
+    }
+    saw_text.then_some(text)
+}
+
+fn is_openclaw_silent_reply_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.eq_ignore_ascii_case(OPENCLAW_SILENT_REPLY_TOKEN) {
+        return true;
+    }
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+        return false;
+    }
+    let Ok(parsed) = serde_json::from_str::<Value>(trimmed) else {
+        return false;
+    };
+    let Some(object) = parsed.as_object() else {
+        return false;
+    };
+    object.len() == 1
+        && object
+            .get("action")
+            .and_then(Value::as_str)
+            .is_some_and(|action| {
+                action
+                    .trim()
+                    .eq_ignore_ascii_case(OPENCLAW_SILENT_REPLY_TOKEN)
+            })
 }
 
 fn assistant_text_message(text: &str) -> MessageContent {
@@ -1783,6 +1851,52 @@ event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"messa
         assert_eq!(chat_payload["run_id"], Value::String("bcn-run-1".into()));
         assert_eq!(chat_payload["bcs_group_id"], Value::String("grp-1".into()));
         assert!(chat_payload.get("deltaText").is_none());
+    }
+
+    #[test]
+    fn provider_normalizes_only_exact_legacy_openclaw_silent_finals() {
+        for text in ["  no_reply  ", r#"{"action":"No_RePlY"}"#] {
+            let event = parse_stream_event(
+                "chat",
+                serde_json::json!({
+                    "runId": "engine-run",
+                    "seq": 1,
+                    "state": "final",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{ "type": "text", "text": text }],
+                        "timestamp": 0
+                    }
+                }),
+            );
+            let payload = build_event_payload(&event, "bcn-run", "grp-1");
+            assert!(payload.get("message").is_none());
+            assert!(payload.get("delta_text").is_none());
+            assert_eq!(payload["stop_reason"], "silent");
+        }
+
+        let visible = parse_stream_event(
+            "chat",
+            serde_json::json!({
+                "runId": "engine-run",
+                "seq": 1,
+                "state": "final",
+                "message": {
+                    "role": "assistant",
+                    "content": [{
+                        "type": "text",
+                        "text": "NO_REPLY is an OpenClaw control token"
+                    }],
+                    "timestamp": 0
+                }
+            }),
+        );
+        let payload = build_event_payload(&visible, "bcn-run", "grp-1");
+        assert_eq!(
+            payload["message"]["content"][0]["text"],
+            "NO_REPLY is an OpenClaw control token"
+        );
+        assert!(payload.get("stop_reason").is_none());
     }
 
     #[tokio::test]

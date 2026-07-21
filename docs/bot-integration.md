@@ -487,7 +487,28 @@ Bots reply with `chat.event` event frames:
 
 If streaming output is not needed, send a single event with `state: "final"`.
 
-### 6.4 Error and abort reporting
+### 6.4 Silent completion
+
+When a run completes successfully without user-visible output, send a terminal
+`final` event without `message` and set `stop_reason` to `silent`:
+
+```json
+{"type": "event", "event": "chat.event", "payload": {
+  "run_id": "run-001", "bcs_group_id": "grp-456",
+  "state": "final",
+  "stop_reason": "silent"
+}, "seq": 1}
+```
+
+Consumers must treat this as a terminal lifecycle event, while omitting any
+message bubble, history entry, or downstream relay. Engine-specific sentinel
+text such as OpenClaw's `NO_REPLY` is internal control data: an engine adapter
+or plugin must consume it and must not send it to BCN as message content. BCN
+recognizes an exact legacy sentinel only for backward compatibility and
+normalizes it to the message-less form above; sentinel text embedded in a
+substantive reply is normal visible content.
+
+### 6.5 Error and abort reporting
 
 ```json
 {"type": "event", "event": "chat.event", "payload": {
@@ -505,7 +526,7 @@ If streaming output is not needed, send a single event with `state: "final"`.
 }, "seq": 1}
 ```
 
-### 6.5 Tool call reporting (optional)
+### 6.6 Tool call reporting (optional)
 
 If the engine supports tool-use visualization, it can report tool call status:
 
@@ -526,7 +547,7 @@ If the engine supports tool-use visualization, it can report tool call status:
 }, "seq": 3}
 ```
 
-### 6.6 `chat.event` state machine
+### 6.7 `chat.event` state machine
 
 ```text
 delta -> delta -> ... -> final

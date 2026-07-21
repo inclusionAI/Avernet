@@ -205,6 +205,37 @@ mod tests {
     }
 
     #[test]
+    fn classify_raw_assistant_drops_but_lifecycle_is_preserved() {
+        let assistant = bcs_protocol::stream::parse_stream_event(
+            "agent",
+            json!({
+                "runId": "r",
+                "seq": 2,
+                "stream": "assistant",
+                "delta": "NO_REPLY"
+            }),
+        );
+        assert!(matches!(classify(&assistant), IngestKind::Drop));
+
+        let lifecycle = bcs_protocol::stream::parse_stream_event(
+            "agent",
+            json!({
+                "runId": "r",
+                "seq": 3,
+                "stream": "lifecycle",
+                "phase": "end"
+            }),
+        );
+        match classify(&lifecycle) {
+            IngestKind::Pipeline { event_type, state } => {
+                assert_eq!(event_type, "agent");
+                assert_eq!(state, AppState::Delta);
+            }
+            _ => panic!("expected lifecycle pipeline"),
+        }
+    }
+
+    #[test]
     fn classify_approval_is_close_unsupported() {
         let ev = bcs_protocol::stream::parse_stream_event(
             "agent",

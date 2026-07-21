@@ -13,6 +13,7 @@ import {
   handleChatSend,
   handleBcsRouteTool,
   initAgentEventsSubscription,
+  isOpenClawSilentReplyText,
   rememberTaskToolSession,
   resolveGroupIdFromSessionKey,
 } from '../src/inbound-handler.js';
@@ -36,6 +37,15 @@ function listSourceFiles(dir: string): string[] {
 }
 
 describe('openclaw-channel-bcn', () => {
+  it('recognizes only exact OpenClaw silent reply payloads', () => {
+    assert.equal(isOpenClawSilentReplyText('NO_REPLY'), true);
+    assert.equal(isOpenClawSilentReplyText('  no_reply  '), true);
+    assert.equal(isOpenClawSilentReplyText('{"action":"NO_REPLY"}'), true);
+    assert.equal(isOpenClawSilentReplyText('NO_REPLY is an internal token'), false);
+    assert.equal(isOpenClawSilentReplyText('Thanks\nNO_REPLY'), false);
+    assert.equal(isOpenClawSilentReplyText('{"action":"NO_REPLY","reason":"none"}'), false);
+  });
+
   it('resolves default and named BCS accounts', () => {
     const cfg = {
       channels: {
@@ -488,8 +498,20 @@ describe('openclaw-channel-bcn', () => {
             agentEventHandler?.({
               runId,
               stream: 'assistant',
+              ts: 0,
+              data: { delta: 'NO_REPLY' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'tool',
+              ts: 0,
+              data: { phase: 'start', toolCallId: 'silent-boundary' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'assistant',
               ts: 1,
-              data: { text: 'snapshot: before tool', delta: 'before tool' },
+              data: { text: 'snapshot: before tool', delta: ' before tool' },
             });
             agentEventHandler?.({
               runId,
@@ -607,16 +629,19 @@ describe('openclaw-channel-bcn', () => {
         'diagram.png',
       ]);
       assert.equal(existsSync(savedImagePath), false);
-      assert.equal(events.filter(item => item.event === 'agent').length, 9);
+      assert.deepEqual(
+        events.filter(item => item.event === 'agent').map(item => item.payload.stream),
+        [ 'tool', 'tool', 'tool', 'lifecycle' ],
+      );
       const chatEvents = events.filter(item => item.event === 'chat.event');
       assert.deepEqual(chatEvents.map(item => item.payload.state), [ 'delta', 'delta', 'delta', 'final' ]);
       assert.deepEqual(
         chatEvents.map(item => (item.payload.message as any).content[0].text),
         [
-          'before tool',
+          'NO_REPLY before tool',
           '\nafter first tool',
           '\nfinal answer',
-          'before tool\nafter first tool\nfinal answer',
+          'NO_REPLY before tool\nafter first tool\nfinal answer',
         ],
       );
       assert.deepEqual(chatEvents.map(item => item.payload.run_id), [ runId, runId, runId, runId ]);
@@ -920,7 +945,7 @@ describe('openclaw-channel-bcn', () => {
     }
   });
 
-  it('sends NO_REPLY only after terminal lifecycle when no assistant agent text is observed', async () => {
+  it('converts split NO_REPLY agent output into a silent final without exposing the token', async () => {
     const responses: Array<{ id: string; ok: boolean; payload?: Record<string, unknown> }> = [];
     const events: Array<{ event: string; payload: Record<string, unknown>; seq: number }> = [];
     let agentEventHandler: ((evt: Record<string, unknown>) => boolean) | undefined;
@@ -986,8 +1011,29 @@ describe('openclaw-channel-bcn', () => {
             agentEventHandler?.({
               runId: agentRunId,
               sessionKey: 'bcs:group-1',
-              stream: 'lifecycle',
+              stream: 'assistant',
               ts: 2,
+              data: { delta: 'NO' },
+            });
+            agentEventHandler?.({
+              runId: agentRunId,
+              sessionKey: 'bcs:group-1',
+              stream: 'tool',
+              ts: 3,
+              data: { phase: 'start', name: 'noop' },
+            });
+            agentEventHandler?.({
+              runId: agentRunId,
+              sessionKey: 'bcs:group-1',
+              stream: 'assistant',
+              ts: 4,
+              data: { delta: '_REPLY' },
+            });
+            agentEventHandler?.({
+              runId: agentRunId,
+              sessionKey: 'bcs:group-1',
+              stream: 'lifecycle',
+              ts: 5,
               data: { phase: 'end' },
             });
           },
@@ -1028,11 +1074,14 @@ describe('openclaw-channel-bcn', () => {
       const runId = responses[0].payload?.run_id;
       const chatEvents = events.filter(item => item.event === 'chat.event');
       assert.deepEqual(chatEvents.map(item => item.payload.state), [ 'final' ]);
-      assert.deepEqual(
-        chatEvents.map(item => (item.payload.message as any).content[0].text),
-        [ 'NO_REPLY' ],
-      );
+      assert.equal(chatEvents[0].payload.message, undefined);
+      assert.equal(chatEvents[0].payload.stop_reason, 'silent');
       assert.deepEqual(chatEvents.map(item => item.payload.run_id), [ runId ]);
+      assert.deepEqual(
+        events.filter(item => item.event === 'agent').map(item => item.payload.stream),
+        [ 'tool', 'lifecycle' ],
+      );
+      assert.equal(JSON.stringify(events).includes('NO_REPLY'), false);
     } finally {
       cleanupAgentEventsSubscription();
       abortAllStreams();
@@ -1167,7 +1216,7 @@ describe('openclaw-channel-bcn', () => {
         events
           .filter(item => item.event === 'agent')
           .map(item => item.payload.run_id),
-        [ bcsRunId, bcsRunId ],
+        [ bcsRunId ],
       );
     } finally {
       cleanupAgentEventsSubscription();

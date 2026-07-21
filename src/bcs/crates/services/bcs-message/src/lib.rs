@@ -230,6 +230,43 @@ fn persisted_to_group_message(
     }
 }
 
+const LEGACY_OPENCLAW_SILENT_TOKEN: &str = "NO_REPLY";
+
+fn is_legacy_openclaw_silent_content(content: &str) -> bool {
+    let trimmed = content.trim();
+    if trimmed.eq_ignore_ascii_case(LEGACY_OPENCLAW_SILENT_TOKEN) {
+        return true;
+    }
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+        return false;
+    }
+    let Ok(serde_json::Value::Object(object)) = serde_json::from_str(trimmed) else {
+        return false;
+    };
+    object.len() == 1
+        && object
+            .get("action")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|action| action.trim().eq_ignore_ascii_case(LEGACY_OPENCLAW_SILENT_TOKEN))
+}
+
+fn is_legacy_openclaw_silent_persisted_message(
+    message: &bcs_domain::PersistedMessage,
+) -> bool {
+    matches!(message.sender_type, bcs_domain::SenderType::Bot)
+        && message
+            .content
+            .as_str()
+            .is_some_and(is_legacy_openclaw_silent_content)
+}
+
+fn filter_legacy_openclaw_silent_messages(messages: &mut Vec<GroupMessage>) {
+    messages.retain(|message| {
+        message.role != MessageRole::Assistant
+            || !is_legacy_openclaw_silent_content(&message.content)
+    });
+}
+
 #[async_trait]
 impl GroupMessageHistoryService for MessageService {
     async fn get_history(
@@ -276,11 +313,15 @@ impl GroupMessageHistoryService for MessageService {
                     e
                 )))
             })?;
+            let repo_was_empty = page.messages.is_empty();
             let mut bot_names: std::collections::HashMap<String, Option<String>> =
                 std::collections::HashMap::new();
             let messages: Vec<GroupMessage> = {
                 let mut result = Vec::with_capacity(page.messages.len());
                 for pm in page.messages {
+                    if is_legacy_openclaw_silent_persisted_message(&pm) {
+                        continue;
+                    }
                     let bot_name = match bot_names.entry(pm.sender_id.clone()) {
                         std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
                         std::collections::hash_map::Entry::Vacant(e) => {
@@ -301,8 +342,10 @@ impl GroupMessageHistoryService for MessageService {
             // provider-backed bot keeps its own transcript, so when a specific
             // bot view is requested and the repo has nothing for it, fall back
             // to the legacy path that fetches history directly from that bot.
-            if messages.is_empty() && cmd.view_bot_id.is_some() {
-                return self.fallback.get_history(cmd).await;
+            if repo_was_empty && cmd.view_bot_id.is_some() {
+                let mut result = self.fallback.get_history(cmd).await?;
+                filter_legacy_openclaw_silent_messages(&mut result.messages);
+                return Ok(result);
             }
             Ok(GroupHistoryResult {
                 group_id: cmd.group_id,
@@ -316,7 +359,9 @@ impl GroupMessageHistoryService for MessageService {
                 group_id = %cmd.group_id,
                 "get_history: old group, falling back to legacy path"
             );
-            self.fallback.get_history(cmd).await
+            let mut result = self.fallback.get_history(cmd).await?;
+            filter_legacy_openclaw_silent_messages(&mut result.messages);
+            Ok(result)
         }
     }
 
@@ -396,6 +441,9 @@ impl GroupMessageHistoryService for MessageService {
             let messages: Vec<GroupMessage> = {
                 let mut result = Vec::with_capacity(page.messages.len());
                 for pm in page.messages {
+                    if is_legacy_openclaw_silent_persisted_message(&pm) {
+                        continue;
+                    }
                     let bot_name = match bot_names.entry(pm.sender_id.clone()) {
                         std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
                         std::collections::hash_map::Entry::Vacant(e) => {
@@ -424,7 +472,9 @@ impl GroupMessageHistoryService for MessageService {
                 session_id = %cmd.session_id,
                 "get_session_history: old session, falling back to legacy path"
             );
-            self.fallback.get_session_history(cmd).await
+            let mut result = self.fallback.get_session_history(cmd).await?;
+            filter_legacy_openclaw_silent_messages(&mut result.messages);
+            Ok(result)
         }
     }
 }
@@ -681,6 +731,91 @@ mod tests {
         assert_eq!(fallback.session_calls().await, 0);
         assert_eq!(result.messages.len(), 1);
         assert_eq!(result.messages[0].content, "visible");
+    }
+
+    #[tokio::test]
+    async fn history_hides_only_legacy_silent_bot_messages() {
+        let (service, repo, _sessions, fallback, session_id) =
+            service_fixture(GroupStrategy::Chat, 0, u64::MAX, Vec::new()).await;
+        for content in [
+            "NO_REPLY",
+            r#"{"action":"no_reply"}"#,
+            "NO_REPLY is an internal token",
+            r#"{"action":"NO_REPLY","detail":"visible"}"#,
+        ] {
+            append_history(&repo, "group-1", &session_id, "bot-a", content, None).await;
+        }
+        repo.append_message(NewMessage {
+            group_id: "group-1".to_string(),
+            session_id: session_id.clone(),
+            sender_id: "human-1".to_string(),
+            sender_type: SenderType::Human,
+            message_type: "chat".to_string(),
+            content: serde_json::Value::String("NO_REPLY".to_string()),
+            client_msg_id: None,
+            created_at: 2,
+            run_id: String::new(),
+            owner_bot_id: None,
+        })
+        .await
+        .expect("append human history");
+
+        let result = service
+            .get_session_history(session_cmd("group-1", &session_id, None))
+            .await
+            .expect("filtered chat history");
+
+        assert_eq!(fallback.session_calls().await, 0);
+        assert_eq!(result.messages.len(), 3);
+        assert!(result.messages.iter().any(|message| {
+            message.role == MessageRole::User && message.content == "NO_REPLY"
+        }));
+        assert!(result
+            .messages
+            .iter()
+            .any(|message| message.content == "NO_REPLY is an internal token"));
+        assert!(result.messages.iter().any(|message| {
+            message.content == r#"{"action":"NO_REPLY","detail":"visible"}"#
+        }));
+    }
+
+    #[tokio::test]
+    async fn legacy_fallback_history_filters_silent_assistant_rows() {
+        let (service, _repo, _sessions, fallback, session_id) = service_fixture(
+            GroupStrategy::ManagerWorker,
+            0,
+            u64::MAX,
+            vec![
+                fallback_message("NO_REPLY"),
+                fallback_message(r#"{"action":"no_reply"}"#),
+                fallback_message("NO_REPLY explained"),
+            ],
+        )
+        .await;
+
+        let result = service
+            .get_session_history(session_cmd("group-1", &session_id, Some("worker-a")))
+            .await
+            .expect("filtered fallback history");
+
+        assert_eq!(fallback.session_calls().await, 1);
+        assert_eq!(result.messages.len(), 1);
+        assert_eq!(result.messages[0].content, "NO_REPLY explained");
+    }
+
+    #[tokio::test]
+    async fn filtered_repo_rows_do_not_trigger_legacy_group_history_fallback() {
+        let (service, repo, _sessions, fallback, _session_id) =
+            service_fixture(GroupStrategy::Chat, 0, u64::MAX, Vec::new()).await;
+        append_history(&repo, "group-1", "", "bot-a", "NO_REPLY", None).await;
+
+        let result = service
+            .get_history(group_cmd("group-1", Some("worker-a")))
+            .await
+            .expect("filtered group history");
+
+        assert!(result.messages.is_empty());
+        assert_eq!(fallback.group_calls().await, 0);
     }
 
     #[tokio::test]

@@ -918,6 +918,59 @@ async fn bot_final_channel_outbound_resolves_missing_sender_name() {
 }
 
 #[tokio::test]
+async fn silent_bot_final_completes_channel_lifecycle_without_renderable_text() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_bot_relay_turn_limit(1);
+    support.group.increment_message_count("group-1").await.unwrap();
+    let recording_channel = Arc::new(RecordingChannelService::default());
+    let channel: Arc<dyn ChannelService> = recording_channel.clone();
+    assert!(flow.channel_slot().set(channel).is_ok());
+
+    let outcome = flow
+        .handle_bot_event(BotEventCommand {
+            bot_id: "bot-observer".to_string(),
+            run_id: "run-channel-silent-final".to_string(),
+            group_id: "group-1".to_string(),
+            event_type: "chat.event".to_string(),
+            event_payload: json!({
+                "state": "final",
+                "stop_reason": "silent",
+            }),
+            state: ChatEventState::Final,
+            bcs_session_id: Some("group-1:abcdef12".to_string()),
+        })
+        .await
+        .unwrap();
+
+    assert!(outcome.bot_deliveries.is_empty());
+    assert_eq!(
+        support.group.get("group-1").await.unwrap().status,
+        GroupStatus::Active,
+        "silent final must not consume the relay limit or deactivate the group"
+    );
+    let outbound = recording_channel.outbound().await;
+    assert_eq!(outbound.len(), 1);
+    assert_eq!(outbound[0].kind, ChannelOutboundEventKind::ChatFinal);
+    assert_eq!(outbound[0].render_hint, ChannelRenderHint::IgnoreByDefault);
+    assert!(outbound[0].text.is_none());
+    assert_eq!(outbound[0].raw_payload["stop_reason"], "silent");
+
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 1, "silent final must still close frontend lifecycle");
+    let event: Value = serde_json::from_str(&events[0]).unwrap();
+    assert_eq!(event["payload"]["state"], "final");
+    assert_eq!(event["payload"]["stop_reason"], "silent");
+    assert!(event["payload"].get("message").is_none());
+}
+
+#[tokio::test]
 async fn bot_terminal_failures_emit_safe_system_channel_feedback() {
     for (state, run_id, expected_text) in [
         (
@@ -2835,6 +2888,70 @@ async fn manager_worker_task_result_not_delivered_defers_history_until_retry_suc
     assert_eq!(appended[1].content, json!("task done"));
     assert_eq!(appended[1].owner_bot_id, None);
     assert_eq!(appended[1].run_id, "task-result-not-delivered");
+}
+
+#[tokio::test]
+async fn manager_worker_silent_final_marks_replied_without_driver_result_or_history() {
+    let (support, repo, _) = manager_worker_flow_with_repo().await;
+    let system_message = Arc::new(RecordingSystemMessage::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_message_repo(repo.clone())
+    .with_system_message(system_message.clone());
+    register_manager_worker_task(
+        &flow,
+        "task-silent-final",
+        ChatResponseMode::AfterLastToolCall,
+    )
+    .await;
+
+    let outcome = flow
+        .handle_bot_event(BotEventCommand {
+            bot_id: "bot-worker".to_string(),
+            run_id: "task-silent-final".to_string(),
+            group_id: "group-1".to_string(),
+            event_type: "chat.event".to_string(),
+            event_payload: json!({
+                "state": "final",
+                "stop_reason": "silent",
+            }),
+            state: ChatEventState::Final,
+            bcs_session_id: Some("group-1:abcdef12".to_string()),
+        })
+        .await
+        .unwrap();
+
+    assert!(outcome.bot_deliveries.is_empty());
+    assert!(support.bot_delivery.frames().await.is_empty());
+    assert!(repo.appended().await.is_empty());
+    assert_eq!(
+        flow.task_store.get("task-silent-final").await.unwrap().status,
+        TaskLedgerStatus::Replied
+    );
+    let notifications = system_message.notifications.lock().await;
+    assert_eq!(notifications.len(), 1);
+    match &notifications[0].event {
+        SystemMessageEvent::GenericNotification {
+            message, receivers, ..
+        } => {
+            assert!(message.contains("待回复: -"));
+            assert!(message.contains("已回复: Worker"));
+            assert_eq!(receivers.len(), 1);
+            assert_eq!(receivers[0].bot_uuid, "bot-manager");
+        }
+        other => panic!("expected GenericNotification, got {other:?}"),
+    }
+
+    let events = support.frontend_delivery.events().await;
+    assert_eq!(events.len(), 1, "silent task final must close frontend lifecycle");
+    let event: Value = serde_json::from_str(&events[0]).unwrap();
+    assert_eq!(event["payload"]["stop_reason"], "silent");
+    assert!(event["payload"].get("message").is_none());
 }
 
 #[tokio::test]

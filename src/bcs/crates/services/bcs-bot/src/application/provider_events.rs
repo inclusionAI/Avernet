@@ -365,16 +365,8 @@ impl ProviderBotEventService for ProviderBotEvents {
                     .handle_bot_terminal_event(HandleBotTerminalEventCommand {
                         bot_id: identity.bot_uuid.clone(),
                         run_id: command.run_id.clone(),
-                        event_type: "chat.event".to_string(),
-                        event_payload: json!({
-                            "state": payload_state,
-                            "message": {
-                                "content": [
-                                    { "type": "text", "text": command.message_text.clone() }
-                                ]
-                            },
-                            "run_id": command.run_id.clone(),
-                        }),
+                        event_type: ingest_event_type.clone(),
+                        event_payload: ingest_payload.clone(),
                         state: command.state.clone(),
                         bcs_session_id: None,
                     })

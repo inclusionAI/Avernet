@@ -284,6 +284,102 @@ async fn bot_events_accepts_static_bearer_final_for_matching_run() {
 }
 
 #[tokio::test]
+async fn bot_events_normalizes_only_exact_openclaw_silent_finals() {
+    let TestApp {
+        app,
+        registry: _,
+        provider_core,
+        provider_bot_core,
+        run_context,
+        message_flow,
+        _temp_dir,
+    } = test_app(Arc::new(StaticAgentpassResolver::default()));
+    let registered = register_provider_bot(
+        provider_core.as_ref(),
+        provider_bot_core.as_ref(),
+        ProviderAuthMode::StaticBearer,
+        "reviewer-v2",
+    )
+    .await;
+    let token = registered.bot_runtime_token.expect("runtime token");
+    let requests = [
+        (
+            "run-silent-legacy",
+            json!({
+                "run_id": "run-silent-legacy",
+                "state": "final",
+                "message": { "text": "  no_reply  " }
+            }),
+        ),
+        (
+            "run-silent-streaming",
+            json!({
+                "run_id": "run-silent-streaming",
+                "event": "chat",
+                "payload": {
+                    "state": "final",
+                    "message": {
+                        "content": [{
+                            "type": "text",
+                            "text": "{\"action\":\"No_RePlY\"}"
+                        }]
+                    }
+                }
+            }),
+        ),
+        (
+            "run-visible",
+            json!({
+                "run_id": "run-visible",
+                "state": "final",
+                "message": { "text": "NO_REPLY is an OpenClaw control token" }
+            }),
+        ),
+    ];
+
+    for (run_id, body) in requests {
+        run_context
+            .put_context(BotRunContext {
+                run_id: run_id.to_string(),
+                bot_id: registered.bot_uuid.clone(),
+                group_id: "group-1".to_string(),
+                bcs_session_id: Some(format!("group-1:{run_id}")),
+                deadline_ms: bcs_protocol::now_ms() + 60_000,
+                terminal: false,
+            })
+            .await;
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/bot/events")
+                    .header("content-type", "application/json")
+                    .header("X-BCN-Provider-Id", registered.provider_id.as_str())
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(run_context.get_context(run_id).await.unwrap().terminal);
+    }
+
+    let events = message_flow.events.lock().await;
+    assert_eq!(events.len(), 3);
+    for event in &events[..2] {
+        assert!(event.event_payload.get("message").is_none());
+        assert_eq!(event.event_payload["stop_reason"], "silent");
+    }
+    assert_eq!(
+        events[2].event_payload["message"]["content"][0]["text"],
+        "NO_REPLY is an OpenClaw control token"
+    );
+    assert!(events[2].event_payload.get("stop_reason").is_none());
+}
+
+#[tokio::test]
 async fn bot_events_defaults_missing_message_to_empty_text() {
     let TestApp {
         app,

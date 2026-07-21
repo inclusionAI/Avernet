@@ -283,7 +283,8 @@ export interface ChatEventPayload {
   sessionKey: string;
   seq: number;
   state: 'delta' | 'final';
-  message: {
+  /** Omitted for terminal silent completions. */
+  message?: {
     role: 'assistant';
     content: Array<{ type: 'text'; text: string }>;
     timestamp: number;

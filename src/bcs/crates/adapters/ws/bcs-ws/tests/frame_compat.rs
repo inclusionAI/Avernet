@@ -1355,6 +1355,58 @@ async fn bot_chat_event_frame_is_forwarded_to_message_flow() {
 }
 
 #[tokio::test]
+async fn legacy_openclaw_silent_finals_are_normalized_without_substring_matches() {
+    let state = new_state();
+    let (tx, _rx) = mpsc::channel(8);
+    let mut registered_bot_id = Some("bot-compat:staff".to_string());
+
+    for (run_id, text) in [
+        ("run-silent-token", "  no_reply  "),
+        ("run-silent-json", r#"{"action":"No_RePlY"}"#),
+        ("run-visible", "NO_REPLY is an OpenClaw control token"),
+    ] {
+        let event = BcsFrame::Event(EventFrame::new(
+            "chat.event",
+            Some(serde_json::json!({
+                "run_id": run_id,
+                "bcs_group_id": "group-1",
+                "state": WireChatEventState::Final,
+                "message": {
+                    "role": "assistant",
+                    "content": [{ "type": "text", "text": text }],
+                    "timestamp": 123
+                },
+                "stopReason": "end_turn",
+                "routing": { "responders": [], "reason": "legacy" }
+            })),
+            Some(1),
+        ));
+        dispatch_frame(
+            &state.dispatch_state,
+            &serde_json::to_string(&event).unwrap(),
+            &tx,
+            &mut registered_bot_id,
+        )
+        .await
+        .unwrap();
+    }
+
+    let events = state.message_flow.bot_events.lock().await;
+    assert_eq!(events.len(), 3);
+    for event in &events[..2] {
+        assert!(event.event_payload.get("message").is_none());
+        assert!(event.event_payload.get("routing").is_none());
+        assert!(event.event_payload.get("stopReason").is_none());
+        assert_eq!(event.event_payload["stop_reason"], "silent");
+    }
+    assert_eq!(
+        events[2].event_payload["message"]["content"][0]["text"],
+        "NO_REPLY is an OpenClaw control token"
+    );
+    assert!(events[2].event_payload.get("stop_reason").is_none());
+}
+
+#[tokio::test]
 async fn bot_response_registers_state_machine_delivery_alias() {
     let state = new_state();
     *state.collaboration_runtime.correlation.lock().await = Some(StateMachineDeliveryCorrelation {

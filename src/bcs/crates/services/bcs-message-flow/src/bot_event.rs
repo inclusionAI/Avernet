@@ -152,6 +152,19 @@ pub async fn handle_bot_event(
     if matches!(cmd.state, ChatEventState::Final)
         && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
     {
+        if is_silent_chat_final(&cmd) {
+            flow.message_tracker.cleanup_run(&cmd.run_id).await;
+            notify_terminal_observer(flow, &cmd).await;
+            return Ok(BotEventOutcome {
+                bot_deliveries,
+                frontend_deliveries,
+                unregistered_run_ids: final_run_ids(&cmd),
+                mentions: Vec::new(),
+                delivered_count: 0,
+                failed_count: 0,
+                delivery_results: Vec::new(),
+            });
+        }
         let relay = relay_final_chat_event(flow, &cmd).await?;
         let relay_mentions = relay.mentions;
         let relay_delivery_results = relay.delivery_results;
@@ -230,11 +243,12 @@ async fn try_channel_outbound(flow: &BcsMessageFlow, cmd: &BotEventCommand) {
     } else {
         cmd.event_payload.clone()
     };
-    let render_hint = match kind {
-        ChannelOutboundEventKind::Agent => ChannelRenderHint::IgnoreByDefault,
-        ChannelOutboundEventKind::ChatDelta
-        | ChannelOutboundEventKind::ChatFinal
-        | ChannelOutboundEventKind::System => ChannelRenderHint::Render,
+    let render_hint = match (kind, is_silent_chat_final(cmd)) {
+        (ChannelOutboundEventKind::ChatFinal, true) => ChannelRenderHint::IgnoreByDefault,
+        (ChannelOutboundEventKind::Agent, _) => ChannelRenderHint::IgnoreByDefault,
+        (ChannelOutboundEventKind::ChatDelta, _)
+        | (ChannelOutboundEventKind::ChatFinal, _)
+        | (ChannelOutboundEventKind::System, _) => ChannelRenderHint::Render,
     };
 
     if let Err(error) = channel
@@ -822,8 +836,27 @@ async fn handle_task_bot_event(
         return Ok(Vec::new());
     }
 
-    let response_text = preview_task_response_text(&entry, cmd).await;
     let group = flow.group.get(&entry.group_id).await;
+    if is_silent_chat_final(cmd) {
+        // A silent final is still terminal for the task lifecycle, but it is
+        // deliberately not a task result. Do not synthesize `[no response]`,
+        // notify the driver, or persist an assistant message.
+        flow.message_tracker.cleanup_run(&cmd.run_id).await;
+        flow.task_store.mark_replied(task_id).await;
+        if let Some(group) = group.as_ref() {
+            crate::task_flow::emit_task_ledger_status(
+                flow,
+                group,
+                &entry.group_id,
+                entry.session_id.as_deref(),
+                &entry.driver_bot,
+            )
+            .await;
+        }
+        return Ok(Vec::new());
+    }
+
+    let response_text = preview_task_response_text(&entry, cmd).await;
 
     let target_bot_name = entry
         .target_bot_name
@@ -1114,6 +1147,17 @@ fn is_terminal_state(state: &ChatEventState) -> bool {
         state,
         ChatEventState::Final | ChatEventState::Error | ChatEventState::Aborted
     )
+}
+
+fn is_silent_chat_final(cmd: &BotEventCommand) -> bool {
+    matches!(cmd.state, ChatEventState::Final)
+        && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
+        && cmd
+            .event_payload
+            .get("stop_reason")
+            .or_else(|| cmd.event_payload.get("stopReason"))
+            .and_then(Value::as_str)
+            .is_some_and(|reason| reason.eq_ignore_ascii_case("silent"))
 }
 
 pub(crate) fn extract_message_text(event: &Value) -> String {

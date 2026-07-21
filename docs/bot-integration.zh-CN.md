@@ -448,7 +448,25 @@ Bot 通过 `chat.event` 事件帧回复消息：
 ### 6.3 非流式回复（直接 final）
 不需要流式输出时，直接发送一个 `state: "final"` 的事件即可。
 
-### 6.4 错误/中止上报
+### 6.4 静默完成
+
+如果一次运行成功结束但没有需要向用户展示的内容，应发送不带 `message`
+的终态 `final` 事件，并将 `stop_reason` 设为 `silent`：
+
+```json
+{"type": "event", "event": "chat.event", "payload": {
+  "run_id": "run-001", "bcs_group_id": "grp-456",
+  "state": "final",
+  "stop_reason": "silent"
+}, "seq": 1}
+```
+
+消费方必须用该事件完成运行生命周期，但不得生成消息气泡、写入聊天历史或继续向下游
+路由。OpenClaw 的 `NO_REPLY` 等引擎专用哨兵文本属于内部控制数据，必须由引擎适配器
+或插件消费，不能作为消息内容发送给 BCN。BCN 只为向后兼容识别精确匹配的旧哨兵并
+将其归一化为上述无 `message` 形式；正常回复中提及该文本时仍按可见内容处理。
+
+### 6.5 错误/中止上报
 ```json
 // 错误
 {"type": "event", "event": "chat.event", "payload": {
@@ -465,7 +483,7 @@ Bot 通过 `chat.event` 事件帧回复消息：
 }, "seq": 1}
 ```
 
-### 6.5 工具调用上报（可选）
+### 6.6 工具调用上报（可选）
 如果引擎支持 tool use 可视化，可以上报工具调用状态：
 
 ```json
@@ -485,7 +503,7 @@ Bot 通过 `chat.event` 事件帧回复消息：
 }, "seq": 3}
 ```
 
-### 6.6 `chat.event` 状态机
+### 6.7 `chat.event` 状态机
 ```plain
 delta ──► delta ──► ... ──► final
                               │
