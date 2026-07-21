@@ -917,7 +917,10 @@ dependencies = [
  "bcs-service-api",
  "bcs-services-container",
  "bcs-session",
+ "bcs-session-file",
+ "bcs-session-file-store",
  "bcs-session-store",
+ "bcs-storage-api",
  "bcs-test-support",
  "bcs-user-directory-api",
  "futures",
@@ -1397,6 +1400,7 @@ dependencies = [
  "bcs-domain",
  "bcs-service-api",
  "bcs-session",
+ "bcs-session-file",
  "serde_json",
  "tokio",
 ]

@@ -5,6 +5,8 @@
 //! for the BCS session shared file workspace.
 
 pub mod authz;
+pub mod noop;
 pub mod service;
 
+pub use noop::NoopSessionFileService;
 pub use service::{SessionFileServiceConfig, SessionFileServiceImpl};

@@ -92,7 +92,7 @@ async fn start_state_machine_run_for_session(
 ///
 /// Mirrors legacy `crate::ws::human_has_group_access` semantics
 /// (server.rs:12300-12320 + ws/mod.rs).
-async fn human_has_group_access(
+pub(crate) async fn human_has_group_access(
     state: &HttpAppState,
     group: &bcs_service_api::Group,
     actor_id: &str,
