@@ -161,9 +161,17 @@ impl StoragePlugin for LocalStoragePlugin {
         let mut f = tokio::fs::File::create(&path)
             .await
             .map_err(|e| StorageError::Backend(e.into()))?;
+        let max_size = handle
+            .backend_handle
+            .get("size")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| StorageError::InvalidInput("missing size in backend_handle".into()))?;
         let mut written: u64 = 0;
         while let Some(chunk) = body.next().await {
             let b = chunk.map_err(|e| StorageError::Backend(e.into()))?;
+            if written.saturating_add(b.len() as u64) > max_size {
+                return Err(StorageError::InvalidInput("exceeds prepared size".into()));
+            }
             written = written.saturating_add(b.len() as u64);
             f.write_all(&b)
                 .await
@@ -193,15 +201,24 @@ impl StoragePlugin for LocalStoragePlugin {
             .ok_or_else(|| StorageError::InvalidInput("missing size".into()))?;
         let final_path = self.final_path(&handle.key);
 
-        let prefix = format!("{key}.", key = handle.key);
-        let p_prefix = format!("{key}.p", key = handle.key);
+        let key_leaf = std::path::Path::new(&handle.key)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&handle.key);
+        let prefix = format!("{key_leaf}.", key_leaf = key_leaf);
+        let p_prefix = format!("{key_leaf}.p", key_leaf = key_leaf);
 
-        // Collect all {key}.* files in the data directory.
-        let mut entries: Vec<std::fs::DirEntry> = Vec::new();
-        let dir = std::fs::read_dir(&self.data_dir)
+        // Collect files matching {key_leaf}.* in the key's parent directory.
+        let mut entries: Vec<tokio::fs::DirEntry> = Vec::new();
+        let scan_dir = final_path.parent().unwrap_or(&self.data_dir);
+        let mut dir = tokio::fs::read_dir(scan_dir)
+            .await
             .map_err(|e| StorageError::Backend(e.into()))?;
-        for entry in dir {
-            let entry = entry.map_err(|e| StorageError::Backend(e.into()))?;
+        while let Some(entry) = dir
+            .next_entry()
+            .await
+            .map_err(|e| StorageError::Backend(e.into()))?
+        {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
             if name_str.starts_with(&prefix) {
@@ -252,7 +269,13 @@ impl StoragePlugin for LocalStoragePlugin {
             for (_, tmp) in &parts {
                 let mut r = tokio::fs::File::open(tmp)
                     .await
-                    .map_err(|e| StorageError::Backend(e.into()))?;
+                    .map_err(|e| {
+                        if e.kind() == std::io::ErrorKind::NotFound {
+                            StorageError::Conflict("missing part file".into())
+                        } else {
+                            StorageError::Backend(e.into())
+                        }
+                    })?;
                 total = total.saturating_add(
                     tokio::io::copy(&mut r, &mut out)
                         .await
@@ -312,11 +335,21 @@ impl StoragePlugin for LocalStoragePlugin {
     }
 
     async fn abort_upload(&self, handle: &UploadHandle) -> Result<(), StorageError> {
-        let prefix = format!("{key}.", key = handle.key);
-        let dir = std::fs::read_dir(&self.data_dir)
+        let key_leaf = std::path::Path::new(&handle.key)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&handle.key);
+        let prefix = format!("{key_leaf}.", key_leaf = key_leaf);
+        let final_path = self.final_path(&handle.key);
+        let scan_dir = final_path.parent().unwrap_or(&self.data_dir);
+        let mut dir = tokio::fs::read_dir(scan_dir)
+            .await
             .map_err(|e| StorageError::Backend(e.into()))?;
-        for entry in dir {
-            let entry = entry.map_err(|e| StorageError::Backend(e.into()))?;
+        while let Some(entry) = dir
+            .next_entry()
+            .await
+            .map_err(|e| StorageError::Backend(e.into()))?
+        {
             let name = entry.file_name();
             if name.to_string_lossy().starts_with(&prefix) {
                 let _ = tokio::fs::remove_file(entry.path()).await;
@@ -467,5 +500,52 @@ mod tests {
         let h = p.health_check().await.unwrap();
         assert!(h.ok);
         assert!(h.detail.is_none());
+    }
+
+    #[tokio::test]
+    async fn slashed_key_roundtrip() {
+        let (p, _dir) = plugin();
+        let key = "session-files/test/sid/fid/file.txt";
+        let body = Bytes::from_static(b"hello slashed key");
+        let size = body.len() as u64;
+
+        let prep = p.prepare_upload(req(key, size)).await.unwrap();
+        p.stream_upload(&prep.handle, None, stream_of(body.clone()))
+            .await
+            .unwrap();
+        let meta = p.complete_upload(&prep.handle).await.unwrap();
+        assert_eq!(meta.key, key);
+        assert_eq!(meta.size, size);
+
+        // Read back via get_stream using a handle with the final_path.
+        let h = StorageHandle {
+            backend: "local".into(),
+            key: key.to_string(),
+            backend_handle: serde_json::json!({ "final_path": p.final_path(key).to_string_lossy() }),
+        };
+        let mut stream = p.get_stream(&h).await.unwrap();
+        let chunks: Vec<Result<Bytes, std::io::Error>> =
+            StreamExt::collect(stream.as_mut()).await;
+        let mut assembled = Vec::new();
+        for c in chunks {
+            assembled.extend_from_slice(&c.unwrap());
+        }
+        assert_eq!(assembled, body);
+    }
+
+    #[tokio::test]
+    async fn stream_upload_rejects_oversize() {
+        let (p, _dir) = plugin();
+        // Prepare size 5, stream 6 bytes.
+        let prep = p.prepare_upload(req("k-oversize", 5)).await.unwrap();
+        let err = p
+            .stream_upload(
+                &prep.handle,
+                None,
+                stream_of(Bytes::from_static(b"123456")),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, StorageError::InvalidInput(_)));
     }
 }
