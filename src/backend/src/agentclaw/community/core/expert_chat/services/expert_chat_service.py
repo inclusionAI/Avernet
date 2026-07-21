@@ -262,6 +262,12 @@ class ExpertChatService:
     async def get_chat_session(self, user_id: str, bot_id: str, owner_id: str, iam_token: Optional[str] = None) -> Dict[str, Any]:
         """获取/创建与专家Bot的 chat session
 
+        Authorization order (all checks BEFORE expensive operations):
+        1. Bot exists and is ACTIVE
+        2. Bot is in user's chat list
+        3. User has chat access (owner/public/collaborator)
+        4. Then: create/retrieve container or binding
+
         Args:
             user_id: 用户ID（使用人）
             bot_id: Bot ID
@@ -281,8 +287,9 @@ class ExpertChatService:
             }
 
         Raises:
-            BotNotFoundError: Bot 不存在
+            BotNotFoundError: Bot 不存在或不在对话列表中
             BotNotActiveError: Bot 状态不是 ACTIVE
+            ChatPermissionError: 用户无聊天权限
         """
         # 1. 校验 bot 是否存在且属于该 owner（通过 bot_id + owner_id 唯一定位）
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
@@ -292,7 +299,21 @@ class ExpertChatService:
         if bot.get("status") != "ACTIVE":
             raise BotNotActiveError(f"Bot未激活: {bot_id}")
 
-        # 根据 call_type 决定连接获取方式
+        # 2. 【安全前置】校验 bot 是否在用户的对话列表中
+        #    必须在任何昂贵操作（容器创建/升级）之前执行，防止未授权用户触发副作用
+        chat_bots = self._repo.list_chat_bots(user_id)
+        bot_in_list = any(
+            entry["bot_id"] == bot_id and entry["owner_id"] == owner_id
+            for entry in chat_bots
+        )
+        if not bot_in_list:
+            raise BotNotFoundError(f"Bot不在对话列表中: {bot_id}")
+
+        # 3. 【安全前置】校验用户是否有聊天权限
+        #    必须在任何昂贵操作（容器创建/升级）之前执行，防止未授权用户触发副作用
+        self._check_chat_access(bot, user_id)
+
+        # 4. 根据 call_type 决定连接获取方式（授权检查之后）
         # Caller 模式：为每个 caller 分配独立的 baas 容器
         bot_call_type = McpCallType.parse(bot.get("call_type"))
         if bot_call_type is McpCallType.CALLER:
@@ -336,19 +357,10 @@ class ExpertChatService:
                 # 将 binding_id 设置到 bot 对象中，供后续 _get_connection 使用
                 bot["binding_id"] = binding_id
 
-        # 2. 校验 bot 是否在用户的对话列表中
-        chat_bots = self._repo.list_chat_bots(user_id)
-        bot_in_list = any(
-            entry["bot_id"] == bot_id and entry["owner_id"] == owner_id
-            for entry in chat_bots
-        )
-        if not bot_in_list:
-            raise BotNotFoundError(f"Bot不在对话列表中: {bot_id}")
-
-        # 3. 查是否已有 session
+        # 5. 查是否已有 session
         session_key = self._repo.get_session(user_id, bot_id, owner_id)
 
-        # 4. 有则校验有效性
+        # 6. 有则校验有效性
         if session_key:
             exists = await self._check_session_exists(bot, session_key, user_id)
             if exists:
@@ -363,7 +375,7 @@ class ExpertChatService:
                 # Session 已失效，删除旧记录
                 self._repo.delete_session(user_id, bot_id, owner_id)
 
-        # 5. 没有或无效则创建新 session
+        # 7. 没有或无效则创建新 session
         session_key = await self._create_session(bot, user_id)
         self._repo.save_session(user_id, bot_id, owner_id, session_key)
 
@@ -458,7 +470,8 @@ class ExpertChatService:
         owner_id = bot.get("owner_id")
         binding_id = bot.get("binding_id")
 
-        # 1. 权限上移 — 失败时 resolver 不被调(早失败语义)
+        # 1. 权限校验 — Defense-in-depth: primary check in get_chat_session
+        #    保持此检查作为安全网，确保其他调用路径（如 refresh_connection）也有权限保护
         self._check_chat_access(bot, user_id)
 
         # 2. 走 resolver (全仓唯一 provider 解析点,替代 v2)
