@@ -406,12 +406,7 @@ async def authenticate(
 威胁包括：绕过网关**直连**组件并伪造 `X-Avernet-Principal` 头；篡改/重放截获的 Principal。
 **组件绝不能信任一个裸的 Principal 头。**
 
-**建议：两层纵深防御，都要。**
-
-**① 传输层 —— mTLS / 网络隔离。** 组件只对网关可达（网络策略 / service mesh），mTLS 认证信道
-（网关客户端证书）并加密。挡住任意客户端直连。但单靠它不够（SSRF、同网段其它服务、被攻陷的 sidecar 仍可伪造）。
-
-**② 载荷层 —— 网关对 Principal 非对称签名（JWT 风格短时令牌）。** 网关用**私钥**签名，
+**方案：网关对 Principal 非对称签名（JWT 风格短时令牌）。** 网关用**私钥**签名，
 每个组件用网关**公钥**验签——非对称意味着组件能验、但**造不出** Principal（缩小 blast radius）。声明：
 
 | claim | 作用 |
@@ -432,7 +427,7 @@ async def authenticate(
 - 组件侧 `PrincipalVerifier`：`bare` = 同一 HMAC；`sofa` = 拉网关公钥 / JWKS 验签，按 `kid` 缓存轮换。
 
 **防重放补充：** 短 `exp` + `aud` 绑定通常够；要防"同一令牌换个请求重放"，可把 `method+path`（或 body 摘要）
-纳入签名 claims，或依赖 mTLS 通道绑定。
+纳入签名 claims。
 
 ---
 
@@ -569,7 +564,7 @@ def project(p: Principal) -> AuthenticatedUser:
 
 ## 14. 待拍板的开放问题
 
-1. **网关↔组件信任**：方案已定（§7.1，mTLS + 非对称签名 Principal 双层）；待定的是**密钥分发/轮换**细节
+1. **网关↔组件信任**：方案已定（§7.1，网关非对称签名 Principal，组件验签）；待定的是**密钥分发/轮换**细节
    （JWKS vs 配置注入）与是否加入请求绑定（`method+path`/body 摘要）防重放。
 2. **租户令牌的签发与轮换**：由谁签发、有效期、轮换与吊销机制？承载方式（`X-Tenant-Token` header 还是 mTLS 客户端证书）？
 3. **App 与租户的绑定**：一个租户下多个 App 如何注册；`app_key` 与租户令牌交叉校验的失败语义（拒绝 vs 告警）。
