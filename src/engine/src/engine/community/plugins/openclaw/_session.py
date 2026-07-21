@@ -24,6 +24,18 @@ def _is_bcs_dm_session_key(key: str) -> bool:
     return group_id.startswith("bcs_grp_") and "_dm_" in group_id
 
 
+def _should_keep_session(session: dict[str, Any]) -> bool:
+    """Return whether a valid gateway session should remain visible."""
+    key = session.get("key")
+    if not isinstance(key, str):
+        return False
+    return (
+        "bcs:group" not in key
+        or "bcs:group:bcs-cli" in key
+        or _is_bcs_dm_session_key(key)
+    )
+
+
 class _SessionPortMixin:
     """Domain mixin: session CRUD + chat_history + model normalisation (pooled)."""
 
@@ -162,14 +174,7 @@ class _SessionPortMixin:
         raw_sessions = [s for s in raw_sessions if isinstance(s, dict)]
 
         # Step 2: Hide BCS group chats while keeping user-visible DM sessions.
-        raw_sessions = [
-            s for s in raw_sessions
-            if (
-                "bcs:group" not in s.get("key", "")
-                or "bcs:group:bcs-cli" in s.get("key", "")
-                or _is_bcs_dm_session_key(s.get("key", ""))
-            )
-        ]
+        raw_sessions = [s for s in raw_sessions if _should_keep_session(s)]
 
         # Step 3: Filter by agent_id if provided (primitive, not DTO-driven).
         if agent_id is not None:

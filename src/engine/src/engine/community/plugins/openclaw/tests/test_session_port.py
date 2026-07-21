@@ -180,6 +180,8 @@ class TestSessionsList:
         native_dm_key = f"agent:main:bcs:group:bcs_grp_dm_{token}"
         flexible_dm_key = "agent:main:bcs:group:bcs_grp_dingtalk_dm_not-a-token"
         sessions = [
+            {"key": None, "label": "Null key"},
+            {"label": "Missing key"},
             {"key": "bcs:group:room-42", "label": "Group"},
             {
                 "key": f"agent:main:bcs:group:bcs_grp_dingtalk_{token}",
@@ -192,7 +194,7 @@ class TestSessionsList:
             {"key": "bcs:group:bcs-cli", "label": "CLI"},  # allowed through
             {"key": "normal-session", "label": "Normal"},
         ]
-        impl, _ = _make_impl({
+        impl, client = _make_impl({
             "sessions.list": self._sessions_payload(sessions),
             "chat.history": self._history_payload([{"id": "m1", "role": "user", "content": "x"}]),
             "providers.available": self._providers_payload(),
@@ -209,6 +211,12 @@ class TestSessionsList:
             "bcs:group:bcs-cli",
             "normal-session",
         ]
+        history_keys = [
+            params["sessionKey"]
+            for method, params, _ in client.calls
+            if method == "chat.history"
+        ]
+        assert history_keys == keys
 
     async def test_bot_init_config_single_message_filtered_out(self):
         """Sessions labelled 'Bot 初始化配置' with exactly one message are filtered."""
