@@ -12,7 +12,7 @@ user_config:
     cache: stub
     bot_service: stub
     engine_adapter: stub  # stub | real
-    file_transfer: noop  # noop | oss
+    file_transfer: stub  # stub | real
     sandbox:
       arca: stub
       desktop: stub
