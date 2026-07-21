@@ -527,24 +527,17 @@ class ClawBotService(BotService):
             is_reused is True if an existing session was found.
         """
         if session_id:
-            try:
-                logger.info(
-                    f"Adapter session already exists: session_id={session_id}, "
-                    f"reusing existing session"
-                )
-                return session_id, True
-            except Exception as e:
-                logger.info(
-                    f"Adapter session not found or query failed: "
-                    f"session_id={session_id}, error={e}, "
-                    f"creating new session"
-                )
-                raise e
+            logger.info(
+                f"Adapter session already exists: session_id={session_id}, "
+                f"reusing existing session"
+            )
+            return session_id, True
         else:
             adapter_session = await session_client.create_session(
                 title=metadata.get("title", None),
                 user_id=user_id,
                 model=metadata.get("model", None),
+                uuid=run_id,
             )
             adapter_session_id = adapter_session.id
             if not adapter_session_id.startswith("agent:main:"):

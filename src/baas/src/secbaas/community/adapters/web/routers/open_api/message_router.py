@@ -112,6 +112,7 @@ async def deliver_message(
             context=context,
             metadata=metadata,
             callback=callback,
+            message_id=request.message_id,
         )
         elapsed_ms = (time.monotonic() - t_start) * 1000
 
