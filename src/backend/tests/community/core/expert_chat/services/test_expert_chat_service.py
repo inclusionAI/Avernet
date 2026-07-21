@@ -25,6 +25,7 @@ def _make_service(
     mock_resolver=None,
     mock_collaborator_service=None,
     mock_transport=None,
+    mock_instance_service=None,
 ):
     """构造 ExpertChatService。
 
@@ -34,6 +35,7 @@ def _make_service(
       _get_connection 透传字段断言);
     - collaborator_service 默认 has_permission=True (历史 case 大多 owner
       自调或 user1 vs owner1,但旧测试不区分,保持兼容)。
+    Caller 模式新增 ``instance_service`` 入参。
     """
     # Default resolver returns a ctx whose conn_info matches DEVICE_CONN
     if mock_resolver is None:
@@ -54,6 +56,9 @@ def _make_service(
     if mock_transport is None:
         mock_transport = MagicMock()
         mock_transport.invoke = AsyncMock(return_value={"data": {"id": "raw-session-id"}})
+    if mock_instance_service is None:
+        mock_instance_service = MagicMock()
+        mock_instance_service.get_caller_connection = AsyncMock()
 
     return ExpertChatService(
         repository=mock_repository,
@@ -63,6 +68,7 @@ def _make_service(
         resolver=mock_resolver,
         collaborator_service=mock_collaborator_service,
         transport=mock_transport,
+        instance_service=mock_instance_service,
     )
 
 
@@ -383,6 +389,205 @@ class TestGetChatSession:
         assert personal_bot["binding_id"] == "personal-binding-456"
         assert result["session_key"] == "session:new"
 
+    # ========== Caller Mode Tests ==========
+
+    @pytest.mark.asyncio
+    async def test_caller_mode_with_need_poll(self, mock_repository, mock_bot_repo, mock_device_provider):
+        """Caller 模式：容器正在创建，需要轮询"""
+        caller_bot = {
+            "bot_id": "bot1",
+            "status": "ACTIVE",
+            "call_type": "caller",  # Caller 模式
+        }
+        mock_bot_repo.get_by_id_and_owner.return_value = caller_bot
+        mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
+
+        # Mock instance_service 返回需要轮询
+        mock_instance = MagicMock()
+        mock_instance.get_caller_connection = AsyncMock(return_value={
+            "instance": {"ext": {"binding_id": 123}},
+            "connection": None,
+            "need_poll": True,
+        })
+
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider, mock_instance_service=mock_instance)
+
+        result = await svc.get_chat_session("user1", "bot1", "owner1")
+
+        # 验证返回值
+        assert result["session_key"] is None
+        assert result["is_new"] is True
+        assert result["connection"] is None
+        assert result["need_poll"] is True
+
+        # 验证 get_caller_connection 被正确调用
+        mock_instance.get_caller_connection.assert_called_once_with(
+            user_id="user1", bot_id="bot1", owner_id="owner1", iam_token=None
+        )
+
+    @pytest.mark.asyncio
+    async def test_caller_mode_container_ready_creates_new_session(self, mock_repository, mock_bot_repo, mock_device_provider):
+        """Caller 模式：容器就绪，创建新 session"""
+        caller_bot = {
+            "bot_id": "bot1",
+            "status": "ACTIVE",
+            "call_type": "caller",
+        }
+        mock_bot_repo.get_by_id_and_owner.return_value = caller_bot
+        mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
+        mock_repository.get_session.return_value = None  # 没有 session
+
+        # Mock instance_service 返回容器就绪
+        mock_instance = MagicMock()
+        mock_instance.get_caller_connection = AsyncMock(return_value={
+            "instance": {"ext": {"binding_id": 456}},
+            "connection": {"ws_url": "ws://test", "token": "abc"},
+            "need_poll": False,
+        })
+        mock_device_provider.get_device_connection_v2.return_value = dict(DEVICE_CONN)
+
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider, mock_instance_service=mock_instance)
+
+        with patch.object(svc, "_create_session", new=AsyncMock(return_value="session:caller-new")):
+            result = await svc.get_chat_session("user1", "bot1", "owner1")
+
+        # 验证返回值
+        assert result["session_key"] == "session:caller-new"
+        assert result["is_new"] is True
+        # connection 来自 _get_connection，使用 DEVICE_CONN 格式
+        assert result["connection"]["type"] == "local"
+
+        # 验证 binding_id 被正确设置
+        assert caller_bot["binding_id"] == 456
+
+        # 验证 get_caller_connection 被正确调用
+        mock_instance.get_caller_connection.assert_called_once_with(
+            user_id="user1", bot_id="bot1", owner_id="owner1", iam_token=None
+        )
+
+    @pytest.mark.asyncio
+    async def test_caller_mode_container_ready_reuses_session(self, mock_repository, mock_bot_repo, mock_device_provider):
+        """Caller 模式：容器就绪，复用已有 session"""
+        caller_bot = {
+            "bot_id": "bot1",
+            "status": "ACTIVE",
+            "call_type": "caller",
+        }
+        mock_bot_repo.get_by_id_and_owner.return_value = caller_bot
+        mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
+        mock_repository.get_session.return_value = "session:caller-existing"
+
+        mock_instance = MagicMock()
+        mock_instance.get_caller_connection = AsyncMock(return_value={
+            "instance": {"ext": {"binding_id": 789}},
+            "connection": {"ws_url": "ws://test2", "token": "xyz"},
+            "need_poll": False,
+        })
+        mock_device_provider.get_device_connection_v2.return_value = dict(DEVICE_CONN)
+
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider, mock_instance_service=mock_instance)
+
+        with patch.object(svc, "_check_session_exists", new=AsyncMock(return_value=True)):
+            result = await svc.get_chat_session("user1", "bot1", "owner1")
+
+        # 验证返回值
+        assert result["session_key"] == "session:caller-existing"
+        assert result["is_new"] is False
+        # connection 来自 _get_connection，使用 DEVICE_CONN 格式
+        assert result["connection"]["type"] == "local"
+
+        # 验证 binding_id 被正确设置
+        assert caller_bot["binding_id"] == 789
+
+        # 验证 get_caller_connection 被正确调用
+        mock_instance.get_caller_connection.assert_called_once_with(
+            user_id="user1", bot_id="bot1", owner_id="owner1", iam_token=None
+        )
+
+    @pytest.mark.asyncio
+    async def test_owner_mode_default_when_call_type_is_none(self, mock_repository, mock_bot_repo, mock_device_provider):
+        """call_type 为 None 时默认走 Owner 模式"""
+        bot_without_call_type = {
+            "bot_id": "bot1",
+            "status": "ACTIVE",
+            "binding_id": "binding-123",
+            # 没有 call_type 字段
+        }
+        mock_bot_repo.get_by_id_and_owner.return_value = bot_without_call_type
+        mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
+        mock_repository.get_session.return_value = None
+        mock_device_provider.get_device_connection_v2.return_value = dict(DEVICE_CONN)
+
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
+
+        with patch.object(svc, "_create_session", new=AsyncMock(return_value="session:owner-mode")):
+            result = await svc.get_chat_session("user1", "bot1", "owner1")
+
+        # 验证走的是 Owner 模式的逻辑（没有调用 instance_service）
+        assert result["session_key"] == "session:owner-mode"
+        assert result["is_new"] is True
+
+    @pytest.mark.asyncio
+    async def test_caller_mode_binding_id_not_provided_raises_error(self, mock_repository, mock_bot_repo, mock_device_provider):
+        """Caller 模式：binding_id 未提供时抛出错误"""
+        caller_bot = {
+            "bot_id": "bot1",
+            "status": "ACTIVE",
+            "call_type": "caller",
+        }
+        mock_bot_repo.get_by_id_and_owner.return_value = caller_bot
+        mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
+        mock_repository.get_session.return_value = None
+
+        # Mock instance_service 返回没有 binding_id
+        mock_instance = MagicMock()
+        mock_instance.get_caller_connection = AsyncMock(return_value={
+            "instance": {"ext": {}},  # 没有 binding_id
+            "connection": {"ws_url": "ws://test", "token": "abc"},
+            "need_poll": False,
+        })
+        mock_device_provider.get_device_connection_v2.return_value = dict(DEVICE_CONN)
+
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider, mock_instance_service=mock_instance)
+
+        with patch.object(svc, "_create_session", new=AsyncMock(return_value="session:caller-new")):
+            with pytest.raises(ConnectionError, match="服务未发布"):
+                await svc.get_chat_session("user1", "bot1", "owner1")
+
+    @pytest.mark.asyncio
+    async def test_get_chat_session_passes_iam_token_to_caller_connection(self, mock_repository, mock_bot_repo, mock_device_provider):
+        """Caller 模式：iam_token 应该被传递到 get_caller_connection"""
+        caller_bot = {
+            "bot_id": "bot1",
+            "status": "ACTIVE",
+            "call_type": "caller",
+        }
+        mock_bot_repo.get_by_id_and_owner.return_value = caller_bot
+        mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
+        mock_repository.get_session.return_value = None
+
+        mock_instance = MagicMock()
+        mock_instance.get_caller_connection = AsyncMock(return_value={
+            "instance": {"ext": {"binding_id": 999}},
+            "connection": {"ws_url": "ws://test", "token": "xyz"},
+            "need_poll": False,
+        })
+        mock_device_provider.get_device_connection_v2.return_value = dict(DEVICE_CONN)
+
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider, mock_instance_service=mock_instance)
+
+        iam_token = "test-iam-token-12345"
+        with patch.object(svc, "_create_session", new=AsyncMock(return_value="session:new")):
+            await svc.get_chat_session("user1", "bot1", "owner1", iam_token=iam_token)
+
+        # 验证 iam_token 被传递给 get_caller_connection
+        mock_instance.get_caller_connection.assert_called_once_with(
+            user_id="user1",
+            bot_id="bot1",
+            owner_id="owner1",
+            iam_token=iam_token
+        )
+
 
 # ---------------------------------------------------------------------------
 # delete_chat_session
@@ -462,7 +667,7 @@ class TestGetConnection:
 
         with pytest.raises(ConnectionError) as exc_info:
             svc._get_connection(bot, "user1")
-        assert exc_info.value.error_code == "5001"
+        assert exc_info.value.error_code == "5002"
         # resolver 不应被调用
         resolver.resolve_for_binding.assert_not_called()
         resolver.resolve_for_bot.assert_not_called()

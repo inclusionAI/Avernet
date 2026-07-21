@@ -92,6 +92,7 @@ class ExpertChatInstanceService:
         bot_id: str,
         owner_id: str,
         force_upgrade: bool = False,
+        iam_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Return the caller's container ``connection``.
 
@@ -106,6 +107,7 @@ class ExpertChatInstanceService:
             force_upgrade: If True, skip the version check fast path and
                 always execute create/upgrade flow, even when the instance
                 is in success state with the latest version.
+            iam_token: IAM token (optional).
 
         Raises:
             BotNotPublishedError: no success publish order for the service

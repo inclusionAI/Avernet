@@ -24,6 +24,7 @@ from agentclaw.community.core.bot_collaborator.services.collaborator_service imp
     CollaboratorService,
 )
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.caller_identity.models import McpCallType
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -38,6 +39,9 @@ from agentclaw.community.core.expert_chat.errors import (
     ConnectionError,
 )
 from agentclaw.community.core.expert_chat.repository import ExpertChatRepository
+from agentclaw.community.core.expert_chat.services.expert_chat_instance_service import (
+    ExpertChatInstanceService,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
 
@@ -100,6 +104,7 @@ class ExpertChatService:
         resolver: DeviceContextResolver,
         collaborator_service: CollaboratorService,
         transport: DeviceAdapterTransport,
+        instance_service: ExpertChatInstanceService,
     ):
         """Initialise.
 
@@ -117,6 +122,9 @@ class ExpertChatService:
         ``DeviceConnectionProvider.get_device_connection_v2`` 拿连接。
         ``CollaboratorService``: 权限上移后显式调,旧 v2 内部副作用搬出。
         ``DeviceService`` 仍保留作为 ``device_provider`` (其他业务路径暂未迁)。
+
+        ``ExpertChatInstanceService``: Caller 模式下,为每个 caller
+        分配独立的 baas 容器实例。
         """
         self._repo = repository
         self._bot_repo: BotInfoProvider = bot_repo
@@ -125,6 +133,7 @@ class ExpertChatService:
         self._resolver = resolver
         self._collaborator_service = collaborator_service
         self._transport = transport
+        self._instance_service = instance_service
 
     # ============ Public Methods ============
 
@@ -250,13 +259,14 @@ class ExpertChatService:
         logger.info(f"[ExpertChatService] Removed chat bot: user={user_id}, bot={bot_id}, owner={owner_id}")
         return result
 
-    async def get_chat_session(self, user_id: str, bot_id: str, owner_id: str) -> Dict[str, Any]:
+    async def get_chat_session(self, user_id: str, bot_id: str, owner_id: str, iam_token: Optional[str] = None) -> Dict[str, Any]:
         """获取/创建与专家Bot的 chat session
 
         Args:
             user_id: 用户ID（使用人）
             bot_id: Bot ID
             owner_id: Bot 所有者ID
+            iam_token: IAM token（可选）
 
         Returns:
             {
@@ -282,19 +292,49 @@ class ExpertChatService:
         if bot.get("status") != "ACTIVE":
             raise BotNotActiveError(f"Bot未激活: {bot_id}")
 
-        # 根据 bot_type 获取 binding_id
-        # 服务型 Bot：通过 BaasService 获取发布成功的发布单
-        bot_type = bot.get("bot_type", "personal")
-        if bot_type == "service":
-            from agentclaw.community.core.service_bot.repository.models import PublishStatus
-            binding_id = self._baas_service.get_bind_id(
+        # 根据 call_type 决定连接获取方式
+        # Caller 模式：为每个 caller 分配独立的 baas 容器
+        bot_call_type = McpCallType.parse(bot.get("call_type"))
+        if bot_call_type is McpCallType.CALLER:
+            logger.info("[ExpertChatService] Caller mode: bot=%s, owner=%s, user=%s", bot_id, owner_id, user_id)
+            result = await self._instance_service.get_caller_connection(
+                user_id=user_id,
                 bot_id=bot_id,
                 owner_id=owner_id,
-                bot_type=bot_type,
-                publish_status=PublishStatus.SUCCESS.value,
+                iam_token=iam_token
             )
-            # 将 binding_id 设置到 bot 对象中，供后续 _get_connection 使用
-            bot["binding_id"] = binding_id
+            connection = result.get("connection")
+            need_poll = result.get("need_poll", False)
+
+            # 容器还在创建中，直接返回
+            if need_poll:
+                logger.info("[ExpertChatService] Caller instance not ready: bot=%s, user=%s, need_poll=%s", bot_id, user_id, need_poll)
+                return {
+                    "session_key": None,
+                    "is_new": True,
+                    "connection": connection,
+                    "need_poll": need_poll,
+                }
+
+            # 从 result 中获取 binding_id 并设置到 bot 对象
+            instance = result.get("instance", {})
+            ext = instance.get("ext") or {}
+            bot["binding_id"] = ext.get("binding_id")
+        else:
+            # Owner 模式：使用原有的 binding_id 方式
+            # 根据 bot_type 获取 binding_id
+            # 服务型 Bot：通过 BaasService 获取发布成功的发布单
+            bot_type = bot.get("bot_type", "personal")
+            if bot_type == "service":
+                from agentclaw.community.core.service_bot.repository.models import PublishStatus
+                binding_id = self._baas_service.get_bind_id(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    bot_type=bot_type,
+                    publish_status=PublishStatus.SUCCESS.value,
+                )
+                # 将 binding_id 设置到 bot 对象中，供后续 _get_connection 使用
+                bot["binding_id"] = binding_id
 
         # 2. 校验 bot 是否在用户的对话列表中
         chat_bots = self._repo.list_chat_bots(user_id)
@@ -424,8 +464,8 @@ class ExpertChatService:
         # 2. 走 resolver (全仓唯一 provider 解析点,替代 v2)
         if not binding_id:
             raise ConnectionError(
-                "binding_id 未提供",
-                error_code="5001",
+                "(binding_id 未提供)服务未发布",
+                error_code="5002",
             )
         logger.info(
             f"[ExpertChatService] Resolving device context: bot={bot_id}, "

@@ -17,7 +17,7 @@ ExpertChat Router — HTTP接口入口
 """
 import traceback
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from agentclaw.community.adapters.http.expert_chat.schemas import (
     AddChatBotRequest,
@@ -138,6 +138,7 @@ async def remove_chat_bot(
 
 @router.post("/{bot_id}/{owner_id}/session", response_model=ApiResponse)
 async def get_chat_session(
+    request: Request,
     bot_id: str,
     owner_id: str,
     user: AuthenticatedUser = Depends(get_current_user),
@@ -149,10 +150,14 @@ async def get_chat_session(
     通过 bot_id + owner_id 唯一定位 Bot，返回 session_key 和 connection 信息
     """
     try:
+        # 从 cookie 获取 IAM_TOKEN
+        iam_token = request.cookies.get("IAM_TOKEN") or None
+
         result = await service.get_chat_session(
             user_id=user.staffId,
             bot_id=bot_id,
-            owner_id=owner_id
+            owner_id=owner_id,
+            iam_token=iam_token
         )
         return ApiResponse(success=True, message="获取成功", error_code=0, data=result)
 
