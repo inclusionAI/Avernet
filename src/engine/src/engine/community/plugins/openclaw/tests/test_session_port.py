@@ -138,6 +138,25 @@ class TestSessionsList:
         result = await impl.sessions_list(token="tok")
         assert result == []
 
+    @pytest.mark.parametrize(
+        "error", [ConnectionError("disconnected"), TimeoutError("timed out")]
+    )
+    async def test_propagates_transport_failures(self, error: Exception):
+        class _TransportErrorClient:
+            connected = True
+
+            async def send_request(self, method, params=None, timeout=None):
+                raise error
+
+        class _TransportErrorPool:
+            async def get(self, token=None):
+                return _TransportErrorClient()
+
+        impl = OpenClawPluginImpl(pool=_TransportErrorPool())
+
+        with pytest.raises(type(error), match=str(error)):
+            await impl.sessions_list(token="tok")
+
     async def test_basic_session_returned_with_messages(self):
         sessions = [{"key": "s1", "label": "Test", "model": "qwen-plus"}]
         messages = [{"id": "m1", "role": "user", "content": "hi"}]

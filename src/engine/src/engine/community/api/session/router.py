@@ -6,6 +6,7 @@ Uses EngineManager for default engine, falls back to factory for explicit engine
 from __future__ import annotations
 
 import json
+import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, Optional
@@ -24,6 +25,7 @@ from engine.community.core.session.models import (
     SessionListRequest,
     SessionUpdateRequest,
 )
+from engine.community.core.session_favorite import get_session_favorite_repository
 from engine.community.shared.utils import decode_session_key
 
 log = logging.getLogger("web-sessions")
@@ -132,6 +134,9 @@ async def list_sessions(
             data=[_session_to_dict(s) for s in sessions],
             warning=warning,
         )
+    except (ConnectionError, TimeoutError) as e:
+        log.error(f"[list_sessions] gateway unavailable: {e}", exc_info=True)
+        raise HTTPException(status_code=503, detail="Session gateway unavailable") from e
     except Exception as e:
         log.error(f"[list_sessions] 执行异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -161,7 +166,9 @@ async def create_session(body: CreateSessionBody) -> ApiResponse:
 async def get_session(session_id: str, engine: Optional[str] = None) -> ApiResponse:
     log.info(f"[get_session] 收到请求: session_id={session_id}, engine={engine}")
     # Uses the underlying list() plugin method to find one session; SESSION_LIST
-    # is the matching capability.
+    # is the matching capability. The plugin filters a session_key before
+    # pagination, so an inactive conversation cannot be mistaken for missing
+    # merely because it falls outside the first page.
     warning = check_capability(Capability.SESSION_LIST)
     decoded_id = decode_session_key(session_id)
     if decoded_id != session_id:
@@ -169,7 +176,11 @@ async def get_session(session_id: str, engine: Optional[str] = None) -> ApiRespo
     session_id = decoded_id
     try:
         api = _get_session_api(engine)
-        sessions = await api.list(SessionListRequest(limit=100, offset=0))
+        # Engines that support exact lookup filter before pagination. Engines that
+        # do not yet support it retain the previous first-100 fallback behavior.
+        sessions = await api.list(
+            SessionListRequest(session_key=session_id, limit=100, offset=0)
+        )
         log.info(f"[get_session] 列表查询返回 {len(sessions)} 条, 正在匹配 session_id={session_id}")
         session = next(
             (
@@ -186,6 +197,9 @@ async def get_session(session_id: str, engine: Optional[str] = None) -> ApiRespo
         return ApiResponse(success=True, data=_session_to_dict(session), warning=warning)
     except HTTPException:
         raise
+    except (ConnectionError, TimeoutError) as error:
+        log.error(f"[get_session] gateway unavailable: {error}", exc_info=True)
+        raise HTTPException(status_code=503, detail="Session gateway unavailable") from error
     except Exception as e:
         log.error(f"[get_session] 执行异常: session_id={session_id}, error={e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -202,6 +216,16 @@ async def delete_session(session_id: str, force: bool = False, engine: Optional[
         if not ok:
             log.warning(f"[delete_session] 删除失败或会话不存在: session_id={session_id}")
             raise HTTPException(status_code=404, detail="Session not found or delete failed")
+        try:
+            await asyncio.to_thread(get_session_favorite_repository().remove_session, session_id)
+        except Exception as cleanup_error:
+            # The engine has already deleted the session. Do not misreport that
+            # successful destructive operation because local metadata cleanup failed.
+            log.warning(
+                "[delete_session] 收藏记录清理失败: session_id=%s, error=%s",
+                session_id,
+                cleanup_error,
+            )
         log.info(f"[delete_session] 删除成功: session_id={session_id}")
         return ApiResponse(success=True, message="Session deleted", warning=warning)
     except HTTPException:

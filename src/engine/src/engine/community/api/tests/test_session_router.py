@@ -8,7 +8,6 @@ directly so no real engine runtime is needed.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -69,7 +68,17 @@ def mock_session_api():
 
 
 @pytest.fixture()
-def client(mock_session_api) -> TestClient:
+def mock_favorite_repository():
+    repository = MagicMock()
+    with patch(
+        "engine.community.api.session.router.get_session_favorite_repository",
+        return_value=repository,
+    ):
+        yield repository
+
+
+@pytest.fixture()
+def client(mock_session_api, mock_favorite_repository) -> TestClient:
     app = FastAPI()
     app.include_router(router)
     return TestClient(app)
@@ -107,6 +116,17 @@ class TestListSessions:
         resp = client.get("/api/sessions")
         assert resp.status_code == 500
         assert "db error" in resp.json()["detail"]
+
+    @pytest.mark.parametrize(
+        "error", [ConnectionError("disconnected"), TimeoutError("timed out")]
+    )
+    def test_transport_error_returns_503(self, client, mock_session_api, error):
+        mock_session_api.list.side_effect = error
+
+        resp = client.get("/api/sessions")
+
+        assert resp.status_code == 503
+        assert resp.json()["detail"] == "Session gateway unavailable"
 
 
 # ── POST /api/sessions ────────────────────────────────────────────────────────
@@ -188,6 +208,23 @@ class TestGetSession:
         resp = client.get("/api/sessions/sess-1")
         assert resp.status_code == 200
         assert resp.json()["data"]["id"] == "sess-1"
+        request = mock_session_api.list.call_args.args[0]
+        assert request.session_key == "sess-1"
+        assert request.limit == 100
+        assert request.offset == 0
+
+    def test_found_uses_exact_key_filter_before_pagination(
+        self, client, mock_session_api
+    ):
+        """A session beyond a legacy first-100 window must still be reusable."""
+        mock_session_api.list.return_value = [_make_session("sess-101")]
+
+        resp = client.get("/api/sessions/sess-101")
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["id"] == "sess-101"
+        request = mock_session_api.list.call_args.args[0]
+        assert request.session_key == "sess-101"
 
     def test_not_found_returns_404(self, client, mock_session_api):
         mock_session_api.list.return_value = []
@@ -210,20 +247,45 @@ class TestGetSession:
         resp = client.get("/api/sessions/sess-1")
         assert resp.status_code == 500
 
+    @pytest.mark.parametrize(
+        "error", [ConnectionError("disconnected"), TimeoutError("timed out")]
+    )
+    def test_transport_error_returns_503(self, client, mock_session_api, error):
+        mock_session_api.list.side_effect = error
+
+        resp = client.get("/api/sessions/sess-1")
+
+        assert resp.status_code == 503
+        assert resp.json()["detail"] == "Session gateway unavailable"
+
 
 # ── DELETE /api/sessions/{session_id} ────────────────────────────────────────
 
 class TestDeleteSession:
-    def test_success(self, client, mock_session_api):
+    def test_success(self, client, mock_session_api, mock_favorite_repository):
         resp = client.delete("/api/sessions/sess-1")
         assert resp.status_code == 200
         assert resp.json()["success"] is True
         assert "deleted" in resp.json()["message"].lower()
+        mock_favorite_repository.remove_session.assert_called_once_with("sess-1")
 
-    def test_not_found_returns_404(self, client, mock_session_api):
+    def test_not_found_returns_404(self, client, mock_session_api, mock_favorite_repository):
         mock_session_api.delete.return_value = False
         resp = client.delete("/api/sessions/missing")
         assert resp.status_code == 404
+        mock_favorite_repository.remove_session.assert_not_called()
+
+    def test_favorite_cleanup_error_does_not_make_delete_fail(
+        self,
+        client,
+        mock_favorite_repository,
+    ):
+        mock_favorite_repository.remove_session.side_effect = RuntimeError("sqlite unavailable")
+
+        resp = client.delete("/api/sessions/sess-1")
+
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
 
     def test_force_param_forwarded(self, client, mock_session_api):
         client.delete("/api/sessions/sess-1?force=true")

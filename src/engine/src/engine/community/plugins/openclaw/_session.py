@@ -117,18 +117,19 @@ class _SessionPortMixin:
           8. Normalise model strings (cached provider map)
           9. Return the final page dicts with `_messages`/`_message_count` set
 
-        Returns `[]` on gateway error.  A page may return fewer than `limit`
-        items when "Bot 初始化配置" sessions fall within it (exact legacy
-        behaviour).
+        Returns `[]` for gateway business errors. Transport failures propagate
+        so callers never mistake an unavailable gateway for an empty session
+        collection. A page may return fewer than `limit` items when "Bot 初始化配置"
+        sessions fall within it (exact legacy behaviour).
         """
         client = await self._pooled_client(token)
 
         # Step 1: sessions.list RPC
         try:
             response = await client.send_request("sessions.list", {})
-        except ConnectionError as e:
-            log.error("[sessions_list] connection failed: %s", e)
-            return []
+        except (ConnectionError, TimeoutError):
+            # An empty list is a valid answer, so it must not mask an upstream outage.
+            raise
         except Exception as e:
             log.exception("[sessions_list] unexpected error: %s", e)
             return []
