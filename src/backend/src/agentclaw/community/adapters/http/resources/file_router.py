@@ -128,24 +128,24 @@ def _authorize_preview_bot(
     Prefer an exact requested-owner match for existing collaborator calls, then
     resolve the bot's stored owner and authorize the authenticated user against it.
     """
-    bot = None
-    if requested_owner_id:
-        bot = bot_repo.get_by_id_and_owner(bot_id, requested_owner_id)
-    if bot is None:
-        bot = bot_repo.get_by_id_and_owner(bot_id, user_id)
-    if bot is None and bot_id != "default":
-        bot = bot_repo.get_by_id(bot_id)
-
-    # A local fallback bot may use the logical ID "default" without a bot row.
-    # In that compatibility case it can only belong to the authenticated user;
-    # never trust a different caller-supplied owner_id.
-    if bot is None and bot_id == "default":
+    # ``default`` is a logical local/fallback bot and normally has no database row.
+    # Keep that compatibility path independent of the repository, but never use a
+    # different caller-supplied owner as an authorization identity.
+    if bot_id == "default":
         if requested_owner_id and requested_owner_id != user_id:
             raise HTTPException(
                 status_code=403,
                 detail="No permission to access this bot's files",
             )
         return user_id
+
+    bot = None
+    if requested_owner_id:
+        bot = bot_repo.get_by_id_and_owner(bot_id, requested_owner_id)
+    if bot is None:
+        bot = bot_repo.get_by_id_and_owner(bot_id, user_id)
+    if bot is None:
+        bot = bot_repo.get_by_id(bot_id)
 
     authoritative_owner_id = (bot or {}).get("owner_id")
     if not isinstance(authoritative_owner_id, str) or not authoritative_owner_id:

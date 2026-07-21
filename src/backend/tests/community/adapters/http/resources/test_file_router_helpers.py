@@ -61,6 +61,7 @@ class TestAuthorizePreviewDefaultBot:
         )
 
         assert owner_id == "current-user"
+        bot_repo.get_by_id_and_owner.assert_not_called()
         bot_repo.get_by_id.assert_not_called()
 
     def test_missing_default_bot_row_rejects_different_requested_owner(self):
@@ -77,3 +78,4 @@ class TestAuthorizePreviewDefaultBot:
             )
 
         assert exc_info.value.status_code == 403
+        bot_repo.get_by_id_and_owner.assert_not_called()
