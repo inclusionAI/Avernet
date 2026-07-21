@@ -413,6 +413,64 @@ class GovernanceRecordService(WhitelistObservationMixin):
     # WhitelistObservationMixin(R9 行门禁),见 record_process_whitelist.py。
     # ------------------------------------------------------------------
 
+    def _handle_whitelist_hit(
+        self,
+        *,
+        active_ticket: GovernanceTicket | None,
+        worker_key: str,
+        owner_id: str,
+        bot_id: str,
+        dt_version: str,
+        run_id: str,
+        dry_run: bool,
+    ) -> RecordProcessResult:
+        """Process whitelist-hit cases (§7.1.4 Step 2).
+
+        scan 遇到白名单 bot,只记动作不猜原因:
+        - No active ticket → audit scan_whitelisted, skip.
+        - Active ticket exists → close ticket (scan_whitelisted), cancel pending notify.
+          (批量加白漏关 / 加白与扫描并发竞态的兜底)
+        """
+        now = datetime.now()
+
+        if active_ticket is None:
+            # Whitelist hit, no active ticket → only audit
+            if not dry_run:
+                self._audit_repo.add_audit(
+                    run_id, bot_id, owner_id,
+                    check_result="actionable",
+                    action_taken=AuditAction.SCAN_WHITELISTED,
+                    dry_run=0,
+                )
+            return RecordProcessResult(
+                worker_key=worker_key,
+                entered_governance_scope=False,
+                action="scan_whitelisted",
+                reason="whitelist_hit_no_active_ticket",
+            )
+
+        # Whitelist hit + active ticket → close ticket via driver service
+        # (sole driver of the ticket machine). Driver orchestrates the close
+        # + cancel-pending-notify side effect atomically.
+        if not dry_run:
+            self._lifecycle_svc.close_for_whitelist_hit(
+                active_ticket.ticket_id, now=now,
+            )
+
+            self._audit_repo.add_audit(
+                run_id, bot_id, owner_id,
+                action_taken=AuditAction.SCAN_WHITELISTED,
+                dry_run=0,
+            )
+
+        return RecordProcessResult(
+            worker_key=worker_key,
+            entered_governance_scope=False,
+            action="scan_whitelisted",
+            reason="whitelist_hit_active_ticket_closed",
+            ticket_id=active_ticket.ticket_id,
+        )
+
     # ------------------------------------------------------------------
     # Internal: Active ticket refresh (§7.1.4 Step 4)
     # ------------------------------------------------------------------

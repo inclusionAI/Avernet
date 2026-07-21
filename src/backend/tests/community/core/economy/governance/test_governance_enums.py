@@ -10,7 +10,6 @@ from agentclaw.community.core.economy.governance.domain.enums import (
     TERMINAL_STATUSES,
     AuditAction,
     CloseReason,
-    GovernanceStatus,
 )
 
 
@@ -44,6 +43,15 @@ def test_scan_skip_values():
     assert AuditAction.SCAN_SKIP_COOLDOWN == "scan_skip_cooldown"
 
 
+def test_close_reason_values():
+    assert CloseReason.ADMIN_CLOSED == "admin_closed"
+    assert CloseReason.SCAN_WHITELISTED == "scan_whitelisted"
+    assert CloseReason.WHITELIST_APPROVED == "whitelist_approved"
+    assert CloseReason.USER_OPTIMIZED_APPROVED == "user_optimized_approved"
+    assert CloseReason.REVIEW_REJECTED == "review_rejected"
+    assert CloseReason.STALE_REPLACED == "stale_replaced"
+
+
 def test_admin_action_values():
     assert AuditAction.ADMIN_CANCEL_PENDING == "admin_cancel_pending"
     assert AuditAction.ADMIN_CLOSE_ALL == "admin_close_all"
@@ -70,7 +78,7 @@ def test_all_action_values_are_unique_strings():
         for k, v in vars(AuditAction).items()
         if not k.startswith("_") and isinstance(v, str)
     ]
-    assert len(values) == 55
+    assert len(values) == 54
     assert all(isinstance(v, str) for v in values)
     assert len(set(values)) == len(values)
 

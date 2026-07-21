@@ -33,10 +33,7 @@ from agentclaw.community.core.economy.governance.services.notify_render_service 
     NotifyRenderService,
 )
 
-from agentclaw.community.core.economy.governance.domain.enums import (
-    AuditAction,
-    GovernanceStatus,
-)
+from agentclaw.community.core.economy.governance.domain.enums import AuditAction
 from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
 from agentclaw.community.core.economy.governance.services.lifecycle_service import (
     GovernanceLifecycleService,
@@ -232,12 +229,17 @@ class TestProcessRecord:
             record, run_id="run-2", notify_source="offline_batch",
         )
 
-        assert result.action == "whitelist_observed"
+        assert result.action == "scan_whitelisted"
         assert result.entered_governance_scope is False
         # 契约:加白后该 bot 不创建工单、不创建通知(加白核心语义 = 不创建通知)。
         with db.orm_session() as s:
             assert s.query(GovernanceTicketOrm).count() == 0
             assert s.query(GovernanceNotificationOrm).count() == 0
+            # 契约(scan 路径 K 无单跳过那支):audit 记 scan_whitelisted。
+            assert any(
+                a.action_taken == AuditAction.SCAN_WHITELISTED
+                for a in s.query(AuditLogOrm).all()
+            )
 
     def test_whitelist_remove_restores_ticket_and_notify(self, session, engine):
         """契约:移除白名单 → 下次 batch 自然走正常建单 + 发通知。
