@@ -401,9 +401,7 @@ class TestDispatchCompleteUpload:
             await dispatcher.dispatch_complete_upload("tf-001")
 
     @pytest.mark.asyncio
-    async def test_cas_conflict_recovered(
-        self, dispatcher, ticket_repo, file_backend
-    ):
+    async def test_cas_conflict_recovered(self, dispatcher, ticket_repo, file_backend):
         """CAS conflict on update_status: re-read returns DONE → success."""
         ticket_created = _make_ticket(status="CREATED")
         ticket_done = _make_ticket(status="DONE")
@@ -505,9 +503,7 @@ class TestDispatchCancelUpload:
             await dispatcher.dispatch_cancel_upload("tf-001")
 
     @pytest.mark.asyncio
-    async def test_cancel_cas_conflict_recovered(
-        self, dispatcher, ticket_repo
-    ):
+    async def test_cancel_cas_conflict_recovered(self, dispatcher, ticket_repo):
         """CAS conflict on cancel update_status: re-read returns DONE → success."""
         ticket_created = _make_ticket(status="CREATED")
         ticket_done = _make_ticket(status="DONE")
