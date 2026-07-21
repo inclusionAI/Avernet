@@ -61,6 +61,7 @@ members = [
     # plugins
     "crates/plugins/bcs-cache-local",
     "crates/plugins/bcs-cache-redis",
+    "crates/plugins/bcs-storage-local",
     "crates/plugins/bcs-db-local",
     "crates/plugins/bcs-db-mysql",
     "crates/plugins/bcs-llm-openai-compatible",
@@ -246,6 +247,7 @@ bcs-channel-api            = { path = "crates/plugin-api/bcs-channel-api" }
 bcs-db-api                 = { path = "crates/plugin-api/bcs-db-api" }
 bcs-llm-api                = { path = "crates/plugin-api/bcs-llm-api" }
 bcs-storage-api            = { path = "crates/plugin-api/bcs-storage-api" }
+bcs-storage-local          = { path = "crates/plugins/bcs-storage-local" }
 bcs-user-directory-api     = { path = "crates/plugin-api/bcs-user-directory-api" }
 bcs-user-identity          = { path = "crates/services/bcs-user-identity" }
 bcs-auth-api               = { path = "crates/plugin-api/bcs-auth-api" }

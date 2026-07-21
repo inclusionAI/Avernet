@@ -1351,6 +1351,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-storage-local"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bcs-storage-api",
+ "bytes",
+ "fastrand",
+ "futures",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "bcs-system-message"
 version = "0.1.0"
 dependencies = [
