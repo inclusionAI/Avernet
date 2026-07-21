@@ -212,9 +212,13 @@ describe('openclaw-channel-bcn', () => {
       readFileSync(join(__dirname, '..', 'package.json'), 'utf8'),
     ) as {
       dependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+      openclaw?: { compat?: { pluginApi?: string } };
     };
 
     assert.equal(pkg.dependencies?.ws, '^8.18.3');
+    assert.equal(pkg.peerDependencies?.openclaw, '>=2026.3.28');
+    assert.equal(pkg.openclaw?.compat?.pluginApi, '>=2026.3.28');
   });
 
   it('does not ship internal-only implementation details in public source files', () => {
@@ -916,7 +920,7 @@ describe('openclaw-channel-bcn', () => {
     }
   });
 
-  it('sends NO_REPLY final when no assistant agent text is observed', async () => {
+  it('sends NO_REPLY only after terminal lifecycle when no assistant agent text is observed', async () => {
     const responses: Array<{ id: string; ok: boolean; payload?: Record<string, unknown> }> = [];
     const events: Array<{ event: string; payload: Record<string, unknown>; seq: number }> = [];
     let agentEventHandler: ((evt: Record<string, unknown>) => boolean) | undefined;
@@ -968,7 +972,7 @@ describe('openclaw-channel-bcn', () => {
           finalizeInboundContext(ctx: Record<string, unknown>) {
             return ctx;
           },
-          async dispatchReplyWithBufferedBlockDispatcher({ dispatcherOptions }: any) {
+          async dispatchReplyWithBufferedBlockDispatcher({ dispatcherOptions, replyOptions }: any) {
             agentEventHandler?.({
               runId: 'unrelated-run',
               stream: 'assistant',
@@ -977,6 +981,15 @@ describe('openclaw-channel-bcn', () => {
             });
             await dispatcherOptions.deliver({ text: 'visible part 1' }, { kind: 'block' });
             await dispatcherOptions.deliver({ text: 'visible part 2' }, { kind: 'block' });
+            const agentRunId = 'queued-agent-run';
+            replyOptions.onAgentRunStart(agentRunId);
+            agentEventHandler?.({
+              runId: agentRunId,
+              sessionKey: 'bcs:group-1',
+              stream: 'lifecycle',
+              ts: 2,
+              data: { phase: 'end' },
+            });
           },
         },
         session: {
@@ -1020,6 +1033,142 @@ describe('openclaw-channel-bcn', () => {
         [ 'NO_REPLY' ],
       );
       assert.deepEqual(chatEvents.map(item => item.payload.run_id), [ runId ]);
+    } finally {
+      cleanupAgentEventsSubscription();
+      abortAllStreams();
+    }
+  });
+
+  it('keeps a queued run context after dispatcher settlement and binds the later agent run exactly', async () => {
+    const responses: Array<{ id: string; ok: boolean; payload?: Record<string, unknown> }> = [];
+    const events: Array<{ event: string; payload: Record<string, unknown>; seq: number }> = [];
+    let agentEventHandler: ((evt: Record<string, unknown>) => boolean) | undefined;
+    let notifyAgentRunStart: ((runId: string) => void) | undefined;
+    const client = {
+      sendResponse(id: string, ok: boolean, payload?: Record<string, unknown>) {
+        responses.push({ id, ok, payload });
+      },
+      sendEvent(event: string, payload: Record<string, unknown>, seq: number) {
+        events.push({ event, payload, seq });
+      },
+    };
+    const account: ResolvedBcsAccount = {
+      accountId: 'default',
+      enabled: true,
+      bcsUrl: 'ws://bcs.test/ws/bot',
+      botId: 'bot-1',
+      botName: 'Bot 1',
+      capabilities: {
+        summary: 'test bot',
+        domains: [],
+        skills: [],
+        scopes: [],
+      },
+      heartbeatIntervalMs: 60000,
+      reconnectIntervalMs: 5000,
+      connectionTimeoutMs: 10000,
+    };
+    const runtime = {
+      config: {
+        async loadConfig() {
+          return {};
+        },
+      },
+      events: {
+        onAgentEvent(handler: (evt: Record<string, unknown>) => boolean) {
+          agentEventHandler = handler;
+          return () => {
+            agentEventHandler = undefined;
+          };
+        },
+      },
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return { agentId: 'agent-1', sessionKey: 'bcs:queued-group' };
+          },
+        },
+        reply: {
+          finalizeInboundContext(ctx: Record<string, unknown>) {
+            return ctx;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ replyOptions }: any) {
+            notifyAgentRunStart = replyOptions.onAgentRunStart;
+          },
+        },
+        session: {
+          resolveStorePath() {
+            return '/tmp/openclaw-bcn-test';
+          },
+          async recordInboundSession() {
+            return undefined;
+          },
+        },
+      },
+    };
+    setBcsRuntime(runtime as any);
+    initAgentEventsSubscription();
+
+    try {
+      await handleChatSend({
+        type: 'req',
+        id: 'chat-queued',
+        method: 'chat.send',
+        params: {
+          bcs_group_id: 'queued-group',
+          channel: { source: 'api', user_id: 'user-1' },
+          session_context: {},
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text: 'wait behind the active run' }],
+            timestamp: Date.now(),
+          },
+        },
+      }, client as any, account);
+
+      const bcsRunId = responses[0].payload?.run_id;
+      assert.equal(typeof bcsRunId, 'string');
+      assert.equal(events.filter(item => item.event === 'chat.event').length, 0);
+
+      agentEventHandler?.({
+        runId: 'unrelated-active-run',
+        sessionKey: 'bcs:queued-group',
+        stream: 'assistant',
+        ts: 1,
+        data: { delta: 'must not be claimed by the queued BCS run' },
+      });
+      assert.equal(events.filter(item => item.event === 'chat.event').length, 0);
+
+      assert.ok(notifyAgentRunStart, 'dispatcher should expose onAgentRunStart');
+      notifyAgentRunStart('actual-queued-agent-run');
+      agentEventHandler?.({
+        runId: 'actual-queued-agent-run',
+        sessionKey: 'bcs:queued-group',
+        stream: 'assistant',
+        ts: 2,
+        data: { delta: 'queued answer' },
+      });
+      agentEventHandler?.({
+        runId: 'actual-queued-agent-run',
+        sessionKey: 'bcs:queued-group',
+        stream: 'lifecycle',
+        ts: 3,
+        data: { phase: 'end' },
+      });
+
+      const chatEvents = events.filter(item => item.event === 'chat.event');
+      assert.deepEqual(chatEvents.map(item => item.payload.state), [ 'delta', 'final' ]);
+      assert.deepEqual(
+        chatEvents.map(item => (item.payload.message as any).content[0].text),
+        [ 'queued answer', 'queued answer' ],
+      );
+      assert.deepEqual(chatEvents.map(item => item.payload.run_id), [ bcsRunId, bcsRunId ]);
+      assert.deepEqual(
+        events
+          .filter(item => item.event === 'agent')
+          .map(item => item.payload.run_id),
+        [ bcsRunId, bcsRunId ],
+      );
     } finally {
       cleanupAgentEventsSubscription();
       abortAllStreams();
