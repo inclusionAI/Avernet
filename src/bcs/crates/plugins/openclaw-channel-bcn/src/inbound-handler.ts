@@ -75,6 +75,9 @@ const runContexts = new Map<string, RunContext>();
 /** Actual OpenClaw agent run ID -> BCS-visible run ID. */
 const bcsRunIdByAgentRunId = new Map<string, string>();
 
+/** In-flight prepared-image cleanup keyed by BCS-visible run ID. */
+const cleanupPromiseByRunId = new Map<string, Promise<void>>();
+
 interface VisibleReplyState {
   text: string;
   flushedOffset: number;
@@ -370,9 +373,12 @@ function bindAgentRun(
 function cleanupRunContext(
   runId: string,
   log?: { info: (...args: unknown[]) => void },
-): void {
+): Promise<void> {
+  const existingCleanup = cleanupPromiseByRunId.get(runId);
+  if (existingCleanup) return existingCleanup;
+
   const context = runContexts.get(runId);
-  if (!context) return;
+  if (!context) return Promise.resolve();
 
   if (context.terminalTimer) {
     clearTimeout(context.terminalTimer);
@@ -392,11 +398,19 @@ function cleanupRunContext(
 
   const preparedImages = context.preparedImages ?? [];
   context.preparedImages = [];
-  if (preparedImages.length > 0) {
-    void cleanupPreparedImages(preparedImages).then(() => {
+  if (preparedImages.length === 0) return Promise.resolve();
+
+  const cleanupPromise = cleanupPreparedImages(preparedImages)
+    .then(() => {
       log?.info?.(`[BCS] Cleaned ${preparedImages.length} prepared image(s) for run_id=${runId}`);
+    })
+    .finally(() => {
+      if (cleanupPromiseByRunId.get(runId) === cleanupPromise) {
+        cleanupPromiseByRunId.delete(runId);
+      }
     });
-  }
+  cleanupPromiseByRunId.set(runId, cleanupPromise);
+  return cleanupPromise;
 }
 
 function armRunTerminalTimeout(
@@ -414,7 +428,7 @@ function armRunTerminalTimeout(
       log,
       `terminal lifecycle timeout after ${RUN_TERMINAL_TIMEOUT_MS}ms`,
     );
-    cleanupRunContext(runId, log);
+    void cleanupRunContext(runId, log);
   }, RUN_TERMINAL_TIMEOUT_MS);
   timer.unref?.();
   context.terminalTimer = timer;
@@ -1015,13 +1029,12 @@ export async function handleChatSend(
 
     const settledContext = runContexts.get(runId);
     if (!settledContext) {
-      await cleanupPreparedImages(preparedImages);
+      await cleanupRunContext(runId, log);
       log?.info?.(`[BCS] Dispatcher settled after terminal lifecycle for run_id=${runId}`);
       return;
     }
     if (abortController.signal.aborted) {
-      cleanupRunContext(runId, log);
-      await cleanupPreparedImages(preparedImages);
+      await cleanupRunContext(runId, log);
       return;
     }
 
@@ -1033,8 +1046,7 @@ export async function handleChatSend(
         allowDeliveredTextFallback: true,
         finalDeliveredPartsCount: finalDeliveredParts.length,
       });
-      cleanupRunContext(runId, log);
-      await cleanupPreparedImages(preparedImages);
+      await cleanupRunContext(runId, log);
       return;
     }
 
@@ -1069,8 +1081,7 @@ export async function handleChatSend(
         'dispatcher failure',
       );
     }
-    cleanupRunContext(runId, log);
-    await cleanupPreparedImages(preparedImages);
+    await cleanupRunContext(runId, log);
   }
 }
 
@@ -1700,7 +1711,7 @@ export function abortAllStreams(): void {
     controller.abort();
   }
   for (const runId of [ ...runContexts.keys() ]) {
-    cleanupRunContext(runId);
+    void cleanupRunContext(runId);
   }
   activeStreams.clear();
   runContexts.clear();
@@ -2154,7 +2165,7 @@ export function initAgentEventsSubscription(log?: {
       `[BCS] Forwarded agent event: runId=${evt.runId}, stream=${evt.stream}, groupId=${groupId}`,
     );
     if (terminalOutcome) {
-      cleanupRunContext(resolvedRunId, log);
+      void cleanupRunContext(resolvedRunId, log);
     }
     return true; // Indicate event was handled
   }) as (() => boolean) | null;
