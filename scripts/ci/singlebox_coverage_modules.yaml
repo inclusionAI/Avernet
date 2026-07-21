@@ -137,7 +137,10 @@ modules:
       status: applicable
       reason: Cron execution reaches the local engine adapter through DeviceAdapterTransport.
       items:
-        - DeviceAdapterTransport.invoke
+        - key: DeviceAdapterTransport.invoke
+          evidence:
+            path: src/agentclaw/community/plugins/local/device_adapter_transport.py
+            symbol: InMemoryDeviceAdapterTransport.invoke
     thresholds:
       core_min_percent: 41.84
       router_min_percent: 100.0
