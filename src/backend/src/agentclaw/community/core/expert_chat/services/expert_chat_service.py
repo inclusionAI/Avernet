@@ -264,9 +264,8 @@ class ExpertChatService:
 
         Authorization order (all checks BEFORE expensive operations):
         1. Bot exists and is ACTIVE
-        2. Bot is in user's chat list
-        3. User has chat access (owner/public/collaborator)
-        4. Then: create/retrieve container or binding
+        2. User has chat access (owner/public/collaborator)
+        3. Then: create/retrieve container or binding
 
         Args:
             user_id: 用户ID（使用人）
@@ -287,7 +286,7 @@ class ExpertChatService:
             }
 
         Raises:
-            BotNotFoundError: Bot 不存在或不在对话列表中
+            BotNotFoundError: Bot 不存在
             BotNotActiveError: Bot 状态不是 ACTIVE
             ChatPermissionError: 用户无聊天权限
         """
@@ -299,21 +298,11 @@ class ExpertChatService:
         if bot.get("status") != "ACTIVE":
             raise BotNotActiveError(f"Bot未激活: {bot_id}")
 
-        # 2. 【安全前置】校验 bot 是否在用户的对话列表中
-        #    必须在任何昂贵操作（容器创建/升级）之前执行，防止未授权用户触发副作用
-        chat_bots = self._repo.list_chat_bots(user_id)
-        bot_in_list = any(
-            entry["bot_id"] == bot_id and entry["owner_id"] == owner_id
-            for entry in chat_bots
-        )
-        if not bot_in_list:
-            raise BotNotFoundError(f"Bot不在对话列表中: {bot_id}")
-
-        # 3. 【安全前置】校验用户是否有聊天权限
+        # 2. 【安全前置】校验用户是否有聊天权限
         #    必须在任何昂贵操作（容器创建/升级）之前执行，防止未授权用户触发副作用
         self._check_chat_access(bot, user_id)
 
-        # 4. 根据 call_type 决定连接获取方式（授权检查之后）
+        # 3. 根据 call_type 决定连接获取方式（授权检查之后）
         # Caller 模式：为每个 caller 分配独立的 baas 容器
         bot_call_type = McpCallType.parse(bot.get("call_type") or None)
         logger.info("[ExpertChatService] Bot call_type: bot=%s, call_type=%s, parsed=%s", bot_id, bot.get("call_type"), bot_call_type)
@@ -358,10 +347,10 @@ class ExpertChatService:
                 # 将 binding_id 设置到 bot 对象中，供后续 _get_connection 使用
                 bot["binding_id"] = binding_id
 
-        # 5. 查是否已有 session
+        # 4. 查是否已有 session
         session_key = self._repo.get_session(user_id, bot_id, owner_id)
 
-        # 6. 有则校验有效性
+        # 5. 有则校验有效性
         if session_key:
             exists = await self._check_session_exists(bot, session_key, user_id)
             if exists:
@@ -376,7 +365,7 @@ class ExpertChatService:
                 # Session 已失效，删除旧记录
                 self._repo.delete_session(user_id, bot_id, owner_id)
 
-        # 7. 没有或无效则创建新 session
+        # 6. 没有或无效则创建新 session
         session_key = await self._create_session(bot, user_id)
         self._repo.save_session(user_id, bot_id, owner_id, session_key)
 
