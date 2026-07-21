@@ -43,7 +43,6 @@ VALID_TRANSITIONS = frozenset(
         # Phase 72: Cancel upload -- any non-terminal upload state -> CANCELLED
         ("CREATED", "CANCELLED"),
         ("UPLOADING", "CANCELLED"),
-        ("UPLOAD_COMPLETED", "CANCELLED"),
         ("PULLING", "CANCELLED"),
         # Phase 72: Delete staging -- terminal states -> DELETED
         ("DONE", "DELETED"),
