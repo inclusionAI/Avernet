@@ -8,6 +8,7 @@ import pytest
 
 from agentclaw.community.core.caller_identity.contracts import (
     CallerCallTypeInvalidError,
+    CallerIdentityAmbiguousError,
     CallerIdentityStage,
     CallerIdentityReadOnlyError,
     CallerLockEpochError,
@@ -22,6 +23,9 @@ from agentclaw.community.core.caller_identity.repository import (
     CallerIdentityLockMismatchError,
 )
 from agentclaw.community.core.caller_identity.service import CallerIdentityService
+from agentclaw.community.core.bot_management.repository.protocol import (
+    BotLookupAmbiguousError,
+)
 
 
 def _bot(*, call_type: str = "owner") -> dict[str, object]:
@@ -42,6 +46,7 @@ def _bot(*, call_type: str = "owner") -> dict[str, object]:
 def _service(*, bot: dict[str, object]):
     bot_repository = MagicMock()
     bot_repository.get_by_id.return_value = bot
+    bot_repository.get_unique_by_id.return_value = bot
     bot_repository.get_by_id_and_owner.return_value = bot
     collaborator_repository = MagicMock()
     lock_repository = MagicMock()
@@ -66,7 +71,9 @@ def _service(*, bot: dict[str, object]):
 
 
 def test_iam_context_reads_only_bot_aggregate_call_type() -> None:
-    service, deps = _service(bot=_bot(call_type="caller"))
+    bot = _bot(call_type="caller")
+    bot["binding_id"] = 9
+    service, deps = _service(bot=bot)
 
     context = service.get_iam_token_context(
         bot_id="bot-1",
@@ -75,8 +82,67 @@ def test_iam_context_reads_only_bot_aggregate_call_type() -> None:
 
     assert context.should_exchange_caller_token is True
     assert context.bot_call_type is McpCallType.CALLER
+    assert context.binding_id == 9
     deps.repository.list_draft_call_types.assert_not_called()
     deps.mcp_provider.collect_bot_active_mcps.assert_not_called()
+
+
+def test_iam_context_uses_exact_entity_scoped_bot_lookup() -> None:
+    service, deps = _service(bot=_bot(call_type="caller"))
+    deps.bot_repository.get_by_id_and_entity.return_value = _bot(call_type="caller")
+
+    context = service.get_iam_token_context(
+        bot_id="default",
+        stage=CallerIdentityStage.DRAFT,
+        entity_id="entity-1",
+    )
+
+    assert context.should_exchange_caller_token is True
+    deps.bot_repository.get_by_id_and_entity.assert_called_once_with(
+        "default", "entity-1"
+    )
+    deps.bot_repository.get_by_id.assert_not_called()
+
+
+def test_caller_reads_reject_ambiguous_bot_id_without_entity_id() -> None:
+    service, deps = _service(bot=_bot(call_type="caller"))
+    deps.bot_repository.get_unique_by_id.side_effect = BotLookupAmbiguousError
+
+    with pytest.raises(CallerIdentityAmbiguousError):
+        service.get_context(
+            bot_id="default",
+            actor_id="owner-1",
+            stage=CallerIdentityStage.DRAFT,
+        )
+    with pytest.raises(CallerIdentityAmbiguousError):
+        service.get_iam_token_context(
+            bot_id="default",
+            stage=CallerIdentityStage.DRAFT,
+        )
+    with pytest.raises(CallerIdentityAmbiguousError):
+        service.get_bot_call_type("default", CallerIdentityStage.DRAFT)
+
+    deps.bot_repository.get_by_id.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "stage",
+    [CallerIdentityStage.VERIFY, CallerIdentityStage.ONLINE],
+)
+def test_iam_context_does_not_reuse_draft_binding_outside_draft(
+    stage: CallerIdentityStage,
+) -> None:
+    bot = _bot(call_type="caller")
+    bot["binding_id"] = 9
+    service, _ = _service(bot=bot)
+
+    context = service.get_iam_token_context(
+        bot_id="bot-1",
+        stage=stage,
+        publish_id=1,
+    )
+
+    assert context.binding_id is None
 
 
 def test_exchange_caller_identity_uses_passport_and_installs_opaque_token() -> None:
@@ -104,6 +170,8 @@ def test_exchange_caller_identity_uses_passport_and_installs_opaque_token() -> N
         runtime_updater=runtime_updater,
         stage="draft",
         publish_id=None,
+        entity_id="entity-1",
+        binding_id=9,
     )
 
     token_provider.exchange.assert_called_once()
@@ -116,12 +184,49 @@ def test_exchange_caller_identity_uses_passport_and_installs_opaque_token() -> N
         agent_code="agent-code",
         stage="draft",
         publish_id=None,
+        entity_id="entity-1",
+        binding_id=9,
     )
+
+
+@pytest.mark.parametrize("stage", ["verify", "online"])
+def test_exchange_caller_identity_does_not_pass_draft_binding_outside_draft(
+    stage: str,
+) -> None:
+    service, _ = _service(bot=_bot(call_type="caller"))
+    passport = MagicMock()
+    passport.query_token.return_value = "agent-pass-token"
+    passport.query_agent_passport.return_value = {"agent_code": "agent-code"}
+    token_provider = MagicMock()
+    token_provider.exchange.return_value = CallerToken(
+        access_token="caller-token",
+        subject_user_id="caller-1",
+        expires_at=datetime.now(),
+        fingerprint="fingerprint",
+    )
+    runtime_updater = MagicMock()
+
+    service.exchange_caller_identity(
+        iam_token="iam-token",
+        caller_user_id="caller-1",
+        bot_id="bot-1",
+        owner_user_id="owner-1",
+        passport=passport,
+        token_provider=token_provider,
+        runtime_updater=runtime_updater,
+        stage=stage,
+        publish_id=1,
+        entity_id="entity-1",
+        binding_id=9,
+    )
+
+    assert "binding_id" not in runtime_updater.update_caller_identity.call_args.kwargs
 
 
 @pytest.mark.asyncio
 async def test_mcp_update_syncs_complete_identity_manifest_to_agent_principal() -> None:
     service, deps = _service(bot=_bot())
+    deps.bot_repository.get_by_id_and_entity.return_value = _bot()
     deps.lock_repository.get_by_key.return_value = SimpleNamespace(
         holder_user_id="owner-1",
         id=7,
@@ -148,6 +253,7 @@ async def test_mcp_update_syncs_complete_identity_manifest_to_agent_principal() 
         call_type=McpCallType.CALLER,
         actor_id="owner-1",
         lock_epoch=7,
+        entity_id="entity-1",
     )
 
     assert result.bot_call_type is McpCallType.CALLER
@@ -162,6 +268,9 @@ async def test_mcp_update_syncs_complete_identity_manifest_to_agent_principal() 
             {"server_code": "documents", "name": "Documents"},
         ],
         identity_modes={"calendar": McpCallType.CALLER},
+    )
+    deps.bot_repository.get_by_id_and_entity.assert_called_once_with(
+        "bot-1", "entity-1"
     )
 
 

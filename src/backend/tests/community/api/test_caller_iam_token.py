@@ -18,6 +18,7 @@ from agentclaw.community.api.caller_identity_service import (
 )
 from agentclaw.community.core.caller_identity.contracts import (
     CallerIamTokenContext,
+    CallerIdentityAmbiguousError,
     McpCallType,
 )
 from agentclaw.community.core.caller_identity.credential import CallerToken
@@ -50,6 +51,7 @@ async def test_iam_route_delegates_caller_exchange_without_returning_token() -> 
         publish_id=None,
         bot_call_type=McpCallType.CALLER,
         should_exchange_caller_token=True,
+        binding_id=9,
     )
     auth = MagicMock()
     auth.resolve_user_from_request = AsyncMock(
@@ -87,12 +89,42 @@ async def test_iam_route_delegates_caller_exchange_without_returning_token() -> 
         bot_id="bot-1",
         stage=CallerIdentityStage.DRAFT,
         publish_id=None,
+        entity_id="entity-1",
     )
 
     assert response.status_code == 200
     assert json.loads(response.body) == {"success": True, "iam_token": "iam-token"}
+    identity.get_iam_token_context.assert_called_once_with(
+        bot_id="bot-1",
+        stage=CallerIdentityStage.DRAFT,
+        publish_id=None,
+        entity_id="entity-1",
+    )
     identity.exchange_caller_identity.assert_called_once()
     exchange_kwargs = identity.exchange_caller_identity.call_args.kwargs
     assert exchange_kwargs["caller_user_id"] == "caller-1"
     assert exchange_kwargs["token_provider"] is token_provider
     assert exchange_kwargs["runtime_updater"] is runtime_updater
+    assert exchange_kwargs["entity_id"] == "entity-1"
+    assert exchange_kwargs["binding_id"] == 9
+
+
+@pytest.mark.asyncio
+async def test_iam_route_rejects_ambiguous_bot_without_entity() -> None:
+    identity = MagicMock()
+    identity.get_iam_token_context.side_effect = CallerIdentityAmbiguousError()
+    request = _Request({CallerIdentityServiceProtocol: identity})
+
+    response = await get_iam_token(
+        request,
+        bot_id="default",
+        stage=CallerIdentityStage.DRAFT,
+        publish_id=None,
+    )
+
+    assert response.status_code == 409
+    assert json.loads(response.body) == {
+        "success": False,
+        "error": "CALLER_IDENTITY_AMBIGUOUS",
+    }
+    identity.exchange_caller_identity.assert_not_called()

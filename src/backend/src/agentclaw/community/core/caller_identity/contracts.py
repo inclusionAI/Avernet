@@ -28,6 +28,11 @@ class CallerIdentityNotFoundError(NotFound):
         super().__init__("BOT_NOT_FOUND")
 
 
+class CallerIdentityAmbiguousError(Conflict):
+    def __init__(self) -> None:
+        super().__init__("CALLER_IDENTITY_AMBIGUOUS")
+
+
 class CallerIdentityReadOnlyError(Conflict):
     def __init__(self) -> None:
         super().__init__("BOT_CONFIG_READ_ONLY")
@@ -82,6 +87,7 @@ class CallerIamTokenContext:
     publish_id: int | None
     bot_call_type: McpCallType
     should_exchange_caller_token: bool
+    binding_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +105,7 @@ __all__ = [
     "CallerCallTypeInvalidError",
     "CallerContext",
     "CallerIamTokenContext",
+    "CallerIdentityAmbiguousError",
     "CallerIdentityNotFoundError",
     "CallerIdentityPermissionError",
     "CallerIdentityReadOnlyError",

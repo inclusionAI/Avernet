@@ -8,6 +8,10 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 from agentclaw.community.core.bot_management.repository.models import BotRestartLockRecord
 
 
+class BotLookupAmbiguousError(RuntimeError):
+    """A caller-specific Bot lookup matched more than one live row."""
+
+
 @runtime_checkable
 class BotRepository(Protocol):
     """Protocol for bot repository implementations.
@@ -48,6 +52,16 @@ class BotRepository(Protocol):
         Used when reading bot metadata (like active_engine) without
         verifying ownership. For permission checks, use get_by_id_and_owner.
         """
+        ...
+
+    def get_by_id_and_entity(
+        self, bot_id: str, entity_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get one live Bot by exact bot and entity identifiers in this env."""
+        ...
+
+    def get_unique_by_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
+        """Get one live Bot by id or raise when the caller scope is ambiguous."""
         ...
 
     def list_by_owner(
