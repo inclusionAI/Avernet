@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from collections.abc import Callable
 from importlib.metadata import entry_points
 
@@ -18,6 +19,7 @@ class PluginAccessor[T]:
         self._group = entry_point_group
         self._fallback = fallback
         self._plugin: T | None = None
+        self._lock = threading.Lock()
 
     def _load(self) -> T:
         is_sofa_mode = os.getenv("GATEWAY_RUN_MODE", "bare").lower() == "sofa"
@@ -29,9 +31,12 @@ class PluginAccessor[T]:
 
     def get(self) -> T:
         if self._plugin is None:
-            self._plugin = self._load()
+            with self._lock:
+                if self._plugin is None:
+                    self._plugin = self._load()
         return self._plugin
 
     def set(self, plugin: T) -> None:
         """Override the cached plugin (useful for tests and explicit wiring)."""
-        self._plugin = plugin
+        with self._lock:
+            self._plugin = plugin
