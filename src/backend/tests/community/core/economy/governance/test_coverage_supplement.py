@@ -666,9 +666,8 @@ class TestWhitelistHitWithActiveTicket:
             ticket = s.query(GovernanceTicketOrm).filter_by(
                 ticket_id="t-whitelist-1",
             ).one()
-            assert ticket.governance_status == GovernanceStatus.OBSERVED.value
-            assert ticket.close_reason == CloseReason.SCAN_WHITELISTED.value
-            assert ticket.closed_at is None  # OBSERVED 非关闭
+            assert ticket.governance_status == "closed"
+            assert ticket.close_reason == "scan_whitelisted"
 
         # Verify notify cancelled
         with db.orm_session() as s:
