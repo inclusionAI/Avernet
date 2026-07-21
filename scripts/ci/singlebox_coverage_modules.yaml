@@ -45,9 +45,18 @@ modules:
       status: applicable
       reason: get_login_user is a legacy method with no production HTTP caller and is outside the runtime-reachable denominator.
       items:
-        - AuthPlugin.resolve_user_from_request
-        - AuthPlugin.is_operator_allowed
-        - AuthPlugin.authorize_entity_access
+        - key: AuthPlugin.resolve_user_from_request
+          evidence:
+            path: src/agentclaw/community/plugins/local/auth.py
+            symbol: LocalAuth.resolve_user_from_request
+        - key: AuthPlugin.is_operator_allowed
+          evidence:
+            path: src/agentclaw/community/plugins/local/auth.py
+            symbol: LocalAuth.is_operator_allowed
+        - key: AuthPlugin.authorize_entity_access
+          evidence:
+            path: src/agentclaw/community/plugins/local/auth.py
+            symbol: LocalAuth.authorize_entity_access
     thresholds:
       core_min_percent: 100.0
       plugin_min_percent: 100.0
