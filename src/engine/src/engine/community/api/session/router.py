@@ -197,6 +197,9 @@ async def get_session(session_id: str, engine: Optional[str] = None) -> ApiRespo
         return ApiResponse(success=True, data=_session_to_dict(session), warning=warning)
     except HTTPException:
         raise
+    except (ConnectionError, TimeoutError) as error:
+        log.error(f"[get_session] gateway unavailable: {error}", exc_info=True)
+        raise HTTPException(status_code=503, detail="Session gateway unavailable") from error
     except Exception as e:
         log.error(f"[get_session] 执行异常: session_id={session_id}, error={e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

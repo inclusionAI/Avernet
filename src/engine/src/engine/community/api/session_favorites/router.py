@@ -66,6 +66,11 @@ async def list_session_favorites(
             data=[_session_to_dict(session) for session in paged_sessions],
             warning=warning,
         )
+    except (ConnectionError, TimeoutError) as exc:
+        log.error(
+            "Session favorites gateway unavailable: %s", exc, exc_info=True
+        )
+        raise HTTPException(status_code=503, detail="Session gateway unavailable") from exc
     except Exception as exc:
         log.error("Failed to list session favorites: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to list session favorites") from exc

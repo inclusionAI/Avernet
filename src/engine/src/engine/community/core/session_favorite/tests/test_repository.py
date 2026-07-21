@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
+import pytest
+
 import engine.community.core.session_favorite.repository as repository_module
 from engine.community.core.session_favorite.repository import SessionFavoriteRepository
 
@@ -58,3 +62,26 @@ def test_repository_singleton_uses_configured_adapter_state_dir(monkeypatch, tmp
 
     assert first is second
     assert first._database_path == tmp_path / "session_favorites.sqlite3"
+
+
+def test_connection_is_closed_after_operation(monkeypatch, tmp_path):
+    connection = MagicMock()
+    monkeypatch.setattr(repository_module.sqlite3, "connect", lambda *_args, **_kwargs: connection)
+    repository = SessionFavoriteRepository(tmp_path / "favorites.sqlite3")
+
+    with repository._connect() as actual_connection:
+        assert actual_connection is connection
+
+    connection.close.assert_called_once()
+
+
+def test_connection_is_closed_when_operation_fails(monkeypatch, tmp_path):
+    connection = MagicMock()
+    monkeypatch.setattr(repository_module.sqlite3, "connect", lambda *_args, **_kwargs: connection)
+    repository = SessionFavoriteRepository(tmp_path / "favorites.sqlite3")
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        with repository._connect():
+            raise RuntimeError("write failed")
+
+    connection.close.assert_called_once()

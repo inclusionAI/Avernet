@@ -167,3 +167,14 @@ def test_engine_error_returns_a_generic_server_error(client, repository, session
 
     assert response.status_code == 500
     assert response.json()["detail"] == "Failed to list session favorites"
+
+
+@pytest.mark.parametrize("error", [ConnectionError("disconnected"), TimeoutError("timed out")])
+def test_engine_transport_error_returns_503(client, repository, session_api, error):
+    repository.list_session_ids.return_value = ["session-1"]
+    session_api.list.side_effect = error
+
+    response = client.get("/api/session-favorites", params={"user_id": "user-a"})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Session gateway unavailable"

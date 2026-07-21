@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -98,11 +100,16 @@ class SessionFavoriteRepository:
                 )
             self._initialized = True
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Generator[sqlite3.Connection, None, None]:
         connection = sqlite3.connect(self._database_path, timeout=5)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 5000")
-        return connection
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
 
 _repository: SessionFavoriteRepository | None = None

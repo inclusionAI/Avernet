@@ -247,6 +247,17 @@ class TestGetSession:
         resp = client.get("/api/sessions/sess-1")
         assert resp.status_code == 500
 
+    @pytest.mark.parametrize(
+        "error", [ConnectionError("disconnected"), TimeoutError("timed out")]
+    )
+    def test_transport_error_returns_503(self, client, mock_session_api, error):
+        mock_session_api.list.side_effect = error
+
+        resp = client.get("/api/sessions/sess-1")
+
+        assert resp.status_code == 503
+        assert resp.json()["detail"] == "Session gateway unavailable"
+
 
 # ── DELETE /api/sessions/{session_id} ────────────────────────────────────────
 
