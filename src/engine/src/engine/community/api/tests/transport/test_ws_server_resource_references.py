@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -47,16 +47,25 @@ async def test_stream_rewrites_resources_before_adapter(fake_engine):
 
     fake_engine.chat.stream = stream
     refs = [{"resource_id": "r1", "insert_id": "i1"}]
+    threaded_functions = []
 
-    await server._stream_chat_events(
-        websocket,
-        "conn-1",
-        "session-1",
-        '<file-ref insert_id="i1"></file-ref>',
-        None,
-        resource_references=refs,
-        prompt_file_refs=refs,
-    )
+    async def run_in_worker_thread(function, /, *args, **kwargs):
+        threaded_functions.append(function)
+        return function(*args, **kwargs)
+
+    with patch(
+        "engine.community.api.transport.ws_server.asyncio.to_thread",
+        new=run_in_worker_thread,
+    ):
+        await server._stream_chat_events(
+            websocket,
+            "conn-1",
+            "session-1",
+            '<file-ref insert_id="i1"></file-ref>',
+            None,
+            resource_references=refs,
+            prompt_file_refs=refs,
+        )
 
     assert captured["request"].query.startswith("read <file-ref")
     extra = captured["request"].extraParams
@@ -64,6 +73,7 @@ async def test_stream_rewrites_resources_before_adapter(fake_engine):
     assert extra["promptFileRefs"] == refs
     assert extra["materializedFiles"][0]["canonical_bot_absolute_path"] == "/bot/work/a.txt"
     reference_service.rewrite.assert_called_once()
+    assert threaded_functions == [reference_service.rewrite]
 
 
 @pytest.mark.asyncio

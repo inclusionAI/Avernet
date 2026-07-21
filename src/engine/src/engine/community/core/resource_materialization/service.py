@@ -129,7 +129,7 @@ class ResourceMaterializationService:
             and current.task_version == request.task_version
             and current.task_id == request.task_id
             and current.status == "ready"
-            and self._entry_file_is_valid(root, current)
+            and await self._entry_file_is_valid(root, current)
         ):
             log.info(
                 "engine.resource_materialize.idempotent resource_id=%s task_version=%s",
@@ -154,7 +154,7 @@ class ResourceMaterializationService:
             if not temporary.is_file():
                 return self._failure_result(request, "pull_missing_file")
             actual_size = temporary.stat().st_size
-            actual_hash = self._sha256(temporary)
+            actual_hash = await asyncio.to_thread(self._sha256, temporary)
             if request.size_bytes is not None and actual_size != request.size_bytes:
                 return self._failure_result(request, "size_mismatch")
             if request.content_hash is not None and actual_hash != request.content_hash:
@@ -240,18 +240,16 @@ class ResourceMaterializationService:
         if resolved_target != resolved_root and resolved_root not in resolved_target.parents:
             raise MaterializationSecurityError("workspace path escapes Bot root")
 
-    def _entry_file_is_valid(self, root: Path, entry: ManifestEntry) -> bool:
+    async def _entry_file_is_valid(self, root: Path, entry: ManifestEntry) -> bool:
         relative = Path(entry.relative_path)
         if relative.is_absolute() or ".." in relative.parts:
             return False
         target = root / relative
         try:
             self._assert_contained(root, target)
-            return (
-                target.is_file()
-                and target.stat().st_size == entry.size_bytes
-                and self._sha256(target) == entry.content_hash
-            )
+            if not target.is_file() or target.stat().st_size != entry.size_bytes:
+                return False
+            return await asyncio.to_thread(self._sha256, target) == entry.content_hash
         except (OSError, MaterializationSecurityError):
             return False
 

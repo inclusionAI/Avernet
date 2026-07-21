@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -81,6 +82,30 @@ async def test_materialize_writes_atomic_file_manifest_and_callback(tmp_path: Pa
     assert pull.calls == 1
     assert callback.results == [result]
     assert service.manifest_store.get("sr_001").status == "ready"
+
+
+@pytest.mark.asyncio
+async def test_materialize_hashes_files_in_worker_thread(tmp_path: Path):
+    content = b"hash on worker thread"
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(content),
+        callback_client=_CallbackClient(),
+        workspace_root_provider=lambda: tmp_path,
+    )
+    threaded_functions = []
+
+    async def run_in_worker_thread(function, /, *args, **kwargs):
+        threaded_functions.append(function)
+        return function(*args, **kwargs)
+
+    with patch(
+        "engine.community.core.resource_materialization.service.asyncio.to_thread",
+        new=run_in_worker_thread,
+    ):
+        result = await service.materialize(_request(content))
+
+    assert result.ready is True
+    assert threaded_functions == [ResourceMaterializationService._sha256]
 
 
 @pytest.mark.asyncio

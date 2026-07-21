@@ -164,9 +164,16 @@ class SessionResourceService:
         )
         return started
 
-    def get_status(self, **identity) -> SessionResourceRecord:
-        session_hash = hash_identifier(identity.pop("session_key"))
-        record = self._owned(session_key_hash=session_hash, **identity)
+    def get_status(
+        self,
+        *,
+        owner_id: str,
+        bot_id: str,
+        session_key: str,
+        resource_id: str,
+    ) -> SessionResourceRecord:
+        session_hash = hash_identifier(session_key)
+        record = self._owned(resource_id, owner_id, bot_id, session_hash)
         log.info(
             "session_resource.materialize.poll resource_id=%s session_key_hash=%s status=%s task_version=%s",
             record.resource_id,
@@ -218,8 +225,20 @@ class SessionResourceService:
             device_path=record.device_path,
         )
 
-    def reference(self, **identity) -> dict:
-        record = self.get_status(**identity)
+    def reference(
+        self,
+        *,
+        owner_id: str,
+        bot_id: str,
+        session_key: str,
+        resource_id: str,
+    ) -> dict:
+        record = self.get_status(
+            owner_id=owner_id,
+            bot_id=bot_id,
+            session_key=session_key,
+            resource_id=resource_id,
+        )
         if record.status is not SessionResourceStatus.READY:
             raise ValueError("resource_not_ready")
         return {
@@ -229,12 +248,19 @@ class SessionResourceService:
             "content_hash": record.client_content_hash,
         }
 
-    def delete(self, **identity) -> SessionResourceRecord:
-        session_hash = hash_identifier(identity.pop("session_key"))
+    def delete(
+        self,
+        *,
+        owner_id: str,
+        bot_id: str,
+        session_key: str,
+        resource_id: str,
+    ) -> SessionResourceRecord:
+        session_hash = hash_identifier(session_key)
         result = self._repository.soft_delete(
-            identity["resource_id"],
-            identity["owner_id"],
-            identity["bot_id"],
+            resource_id,
+            owner_id,
+            bot_id,
             session_hash,
         )
         if result is None:

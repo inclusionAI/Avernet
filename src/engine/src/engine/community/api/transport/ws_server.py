@@ -1011,7 +1011,10 @@ class EngineWebSocketServer:
                 or prompt_file_refs is not None
                 or "<file-ref" in message
             ):
-                resolved = self._resource_reference_service.rewrite(
+                # Reference validation includes controlled workspace file hashing.
+                # Keep that I/O off the WebSocket event loop.
+                resolved = await asyncio.to_thread(
+                    self._resource_reference_service.rewrite,
                     prompt=message,
                     session_key=session_key,
                     resource_references=resource_references,
