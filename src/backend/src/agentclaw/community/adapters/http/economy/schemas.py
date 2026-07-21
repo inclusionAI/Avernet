@@ -7,7 +7,10 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from agentclaw.community.core.economy.governance.domain.enums import GovernanceStatus
+from agentclaw.community.core.economy.governance.domain.enums import (
+    AdminCloseConclusion,
+    GovernanceStatus,
+)
 from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
 from agentclaw.community.core.economy.governance.domain.ticket import compute_available_actions
 
@@ -112,6 +115,18 @@ class RemindRequest(BaseModel):
     worker_id: str = Field(..., min_length=1, description="worker_id (owner_id:bot_id)")
 
 
+class OverrideOwnerRequest(BaseModel):
+    """Request body for admin tickets:override-owner — 设/清通知收件人覆盖。
+
+    bot 转交/机器人 owner 场景:override_owner 非空 → 后续 reminder 发给此人;
+    None/空串 → 清(恢复原 owner)。operator 取自鉴权上下文,不在 body。
+    """
+    ticket_id: str = Field(..., min_length=1, description="工单稳定 UUID")
+    override_owner: str | None = Field(
+        None, description="覆盖收件人 staffId;None/空串=清除(恢复原 owner)",
+    )
+
+
 class OfflineBatchResponse(BaseModel):
     """Response for offline-batch upsert (§7.2, upgraded)."""
     batch_id: str = ""
@@ -181,6 +196,7 @@ class ReviewTicketItem(BaseModel):
     bot_id: str | None = None
     bot_name: str | None = None
     owner_id: str | None = None
+    override_owner: str | None = None  # 通知收件人覆盖 (bot 转交/机器人 owner);None=发原 owner
     owner_name: str | None = None
     token_baseline: int | None = None
     governance_status: str = ""
@@ -188,6 +204,7 @@ class ReviewTicketItem(BaseModel):
     hit_dimensions: str | None = None
     saving_ratio: float | None = None
     response: str | None = None
+    close_conclusion: str | None = None  # 管理员关单结论(仅枚举,轻;明细 close_payload 仅详情)
     review_reason: str | None = None
     gmt_create: str | None = None
     gmt_modified: str | None = None
@@ -195,6 +212,7 @@ class ReviewTicketItem(BaseModel):
     remind_count: int = 0
     remind_at: str | None = None
     last_notified_at: str | None = None
+    repair_deadline: str | None = None  # need_time 排期截止日(ISO);管理员据此看排期到哪天
 
     @classmethod
     def from_ticket(cls, ticket: GovernanceTicket) -> ReviewTicketItem:
@@ -209,12 +227,14 @@ class ReviewTicketItem(BaseModel):
             bot_name=ticket.bot_name,
             owner_id=ticket.owner_id,
             owner_name=ticket.owner_name,
+            override_owner=ticket.override_owner,
             token_baseline=s.token_baseline,
             governance_status=status.value if hasattr(status, "value") else str(status or ""),
             latest_decision=s.current_decision,
             hit_dimensions=s.triggered_dimensions,
             saving_ratio=s.saving_ratio,
             response=ticket.user_feedback,
+            close_conclusion=ticket.close_conclusion,
             review_reason=ticket.review_reason,
             gmt_create=_iso(ticket.gmt_create),
             gmt_modified=_iso(ticket.gmt_modified),
@@ -222,6 +242,7 @@ class ReviewTicketItem(BaseModel):
             remind_count=ticket.remind_count or 0,
             remind_at=_iso(ticket.remind_at),
             last_notified_at=_iso(ticket.last_notified_at),
+            repair_deadline=_iso(ticket.repair_deadline),
         )
 
 
@@ -306,6 +327,7 @@ class ReviewTicketDetailResponse(BaseModel):
     bot_id: str | None = None
     owner_id: str | None = None
     owner_name: str | None = None
+    override_owner: str | None = None  # 通知收件人覆盖;None=发原 owner
     bot_name: str | None = None
     token_baseline: int | None = None
     dt_version: str | None = None
@@ -344,6 +366,8 @@ class ReviewTicketDetailResponse(BaseModel):
     reviewed_at: str | None = None
     review_remark: str | None = None
     close_reason: str | None = None
+    close_conclusion: str | None = None
+    close_payload: str | None = None
     closed_at: str | None = None
     cooldown_until: str | None = None
     mute_until: str | None = None
@@ -389,6 +413,7 @@ class ReviewTicketDetailResponse(BaseModel):
             bot_id=ticket.bot_id,
             owner_id=ticket.owner_id,
             owner_name=ticket.owner_name,
+            override_owner=ticket.override_owner,
             bot_name=ticket.bot_name,
             token_baseline=s.token_baseline,
             dt_version=s.dt_version,
@@ -416,6 +441,8 @@ class ReviewTicketDetailResponse(BaseModel):
             reviewed_at=_iso(ticket.reviewed_at),
             review_remark=ticket.review_remark,
             close_reason=ticket.close_reason,
+            close_conclusion=ticket.close_conclusion,
+            close_payload=ticket.close_payload,
             closed_at=_iso(ticket.closed_at),
             cooldown_until=_iso(ticket.cooldown_until),
             mute_until=_iso(ticket.resume_at),
@@ -424,6 +451,127 @@ class ReviewTicketDetailResponse(BaseModel):
             gmt_create=_iso(ticket.gmt_create),
             gmt_modified=_iso(ticket.gmt_modified),
         )
+
+
+# ---------------------------------------------------------------------------
+# Workflow: 按 worker 查工单历史(辅助关单-重开决策)— 最近 N 条决策摘要
+# ---------------------------------------------------------------------------
+
+
+class TicketHistoryItem(BaseModel):
+    """工单历史单行 — 决策摘要视图(字段直接读 GovernanceTicket 领域属性)。
+
+    字段名对齐 ORM 列名 / to_dict() 契约(前端治理 admin 消费同一套列名),不做
+    业务名翻译(``response`` 不翻 ``user_feedback``):历史视图的价值是"还原当时
+    这张单",对齐原始列名最不易歧义。直接读领域委托属性(非 to_dict),因为
+    ``GovernanceTicket.to_dict()`` 不含 ``delivery_status`` / ``last_notified_at``
+    (该两列属"最近通知态",to_dict 没收录),读属性方能取全。
+    """
+
+    # 身份与时间
+    ticket_id: str | None = None
+    worker_id: str | None = None
+    bot_id: str | None = None
+    bot_name: str | None = None
+    owner_id: str | None = None
+    owner_name: str | None = None
+    gmt_create: str | None = None
+    gmt_modified: str | None = None
+    # 当前治理态
+    governance_status: str | None = None
+    delivery_status: str | None = None
+    # 关单历史(决策核心)
+    close_reason: str | None = None
+    closed_at: str | None = None
+    close_conclusion: str | None = None
+    close_payload: str | None = None
+    cooldown_until: str | None = None
+    # 用户当时的反馈
+    response: str | None = None
+    response_remark: str | None = None
+    response_at: str | None = None
+    response_source: str | None = None
+    # 上次审批记录
+    review_reason: str | None = None
+    review_decision: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: str | None = None
+    review_remark: str | None = None
+    # 命中维度快照(读 snapshot 委托属性)
+    governance_decision: str | None = None
+    latest_decision: str | None = None
+    hit_dimensions: str | None = None
+    hit_dimensions_count: int | None = None
+    governance_max_priority: str | None = None
+    saving_ratio: float | None = None
+    token_baseline: int | None = None
+    dt_version: str | None = None
+    task_summary: str | None = None
+
+    @classmethod
+    def from_ticket(cls, ticket: GovernanceTicket) -> TicketHistoryItem:
+        """从 GovernanceTicket 领域属性构造(显式映射,datetime→ISO,enum→str)。
+
+        直接读领域委托属性(非 ``to_dict()``),因为 to_dict 未收录
+        ``delivery_status`` / ``last_notified_at``;读属性口径与
+        :meth:`ReviewTicketItem.from_ticket` 一致。时间字段经 ``_iso()`` 转 ISO
+        字符串,saving_ratio 原样(float 委托)。
+
+        Args:
+            ticket: 工单领域模型。
+
+        Returns:
+            决策摘要 item。
+        """
+        status = ticket.governance_status
+        s = ticket.snapshot
+        return cls(
+            ticket_id=ticket.ticket_id,
+            worker_id=ticket.worker_id,
+            bot_id=ticket.bot_id,
+            bot_name=ticket.bot_name,
+            owner_id=ticket.owner_id,
+            owner_name=ticket.owner_name,
+            gmt_create=_iso(ticket.gmt_create),
+            gmt_modified=_iso(ticket.gmt_modified),
+            governance_status=status.value if hasattr(status, "value") else str(status or ""),
+            delivery_status=ticket.delivery_status,
+            close_reason=ticket.close_reason,
+            closed_at=_iso(ticket.closed_at),
+            close_conclusion=ticket.close_conclusion,
+            close_payload=ticket.close_payload,
+            cooldown_until=_iso(ticket.cooldown_until),
+            response=ticket.user_feedback,
+            response_remark=ticket.feedback_remark,
+            response_at=_iso(ticket.feedback_at),
+            response_source=ticket.feedback_source,
+            review_reason=ticket.review_reason,
+            review_decision=ticket.review_decision,
+            reviewed_by=ticket.reviewed_by,
+            reviewed_at=_iso(ticket.reviewed_at),
+            review_remark=ticket.review_remark,
+            governance_decision=s.initial_decision,
+            latest_decision=s.current_decision,
+            hit_dimensions=s.triggered_dimensions,
+            hit_dimensions_count=s.hit_dimensions_count,
+            governance_max_priority=s.severity,
+            saving_ratio=s.saving_ratio,
+            token_baseline=s.token_baseline,
+            dt_version=s.dt_version,
+            task_summary=s.task_summary,
+        )
+
+
+class TicketHistoryByWorkerResponse(BaseModel):
+    """GET /workflow/tickets/by-worker 响应 — 最近 N 条工单历史 + 回显定位。"""
+
+    worker_id: str | None = None    # 回显解析后的 owner:bot;仅单维度查询时为 None
+    owner_id: str | None = None
+    bot_id: str | None = None
+    items: list[TicketHistoryItem] = Field(default_factory=list)
+    limit: int = 5
+
+
 # ---------------------------------------------------------------------------
 # Whitelist
 # ---------------------------------------------------------------------------
@@ -462,15 +610,29 @@ class BrakeToggleRequest(BaseModel):
     reason: str = Field("", description="Optional reason for audit")
 
 
+class CloseDetailPayload(BaseModel):
+    """关单明细 JSON — 当前只 remark,JSON 形态为未来扩展(D3,不复杂化)。
+
+    service 层按 JSON 字符串透传落盘 ``close_payload`` 列(对标
+    ``feedback_payload``);不强制 schema,只结论枚举强校验。
+    """
+    remark: str | None = Field(None, description="管理员手写说明")
+
+
 class TicketsCloseRequest(BaseModel):
     """Request body for closing one or more governance tickets.
 
     单条/批量统一入参:把要关的 ticket_id 放进列表,handler 循环调
     ``admin_svc.admin_close``(已委托 ``lifecycle_svc``,关工单+cancel_pending
     由 driver 编排)。禁止直调 repo。
+
+    入参对齐用户反馈回执范式(D1/D2/D3):``conclusion`` 受控枚举必传(非法值
+    422)、``detail`` 承载手写说明(JSON 形态为未来扩展,当前只 remark)。旧
+    ``reason`` 字段下线(说明职能并入 ``detail.remark``);改造后无老接口并存。
     """
-    reason: str = Field(..., description="Close reason for audit")
     ticket_ids: list[str] = Field(..., min_length=1, description="Ticket IDs to close")
+    conclusion: AdminCloseConclusion = Field(..., description="关单结论枚举(必传)")
+    detail: CloseDetailPayload | None = Field(None, description="关单明细 JSON")
 
 
 class TicketsCloseAllRequest(BaseModel):

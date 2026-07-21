@@ -7,6 +7,7 @@ admin_router 抽出来(审批能力迁出 admin_router,运维归运维、审批�
   - GET  /workflow/tickets                 工单列表(按治理状态过滤 + 分页)
   - GET  /workflow/tickets/detail          单工单详情(ticket_id 走 query)
   - GET  /workflow/tickets/pending-notification  查工单待回复通知(notification_id)
+  - GET  /workflow/tickets/by-worker       按 worker 查工单历史(最近 N 条,辅助关单-重开决策)
   - POST /workflow/tickets/review          审批动作(ticket_id 走 body,waiting_review 三态流转)
   - POST /workflow/tickets:delete-cascade 精确级联删单工单 + 连带通知(best-effort,非批量,2026-07-17 从 admin 迁入)
   - GET  /workflow/audit-logs              按 worker 查全部治理审计(只读分页)
@@ -21,6 +22,7 @@ router 层用带 ``from_ticket()`` / ``from_outcome()`` 的 Pydantic schema 做
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -32,11 +34,14 @@ from agentclaw.community.adapters.http.dependencies import (
 from agentclaw.community.adapters.http.economy.schemas import (
     ApiResponse,
     AuditLogItemResponse,
+    OverrideOwnerRequest,
     ReviewTicketDetailResponse,
     ReviewTicketListResponse,
     TicketDeleteCascadeRequest,
     TicketsCloseAllRequest,
     TicketsCloseRequest,
+    TicketHistoryByWorkerResponse,
+    TicketHistoryItem,
     WorkflowReviewRequest,
     WorkflowReviewResponse,
 )
@@ -276,6 +281,56 @@ async def get_pending_notification(
     return ApiResponse(success=True, data=result)
 
 
+# ── Workflow: 按 worker 查工单历史(辅助关单-重开决策) ─────────────────────
+
+
+@workflow_router.get(
+    "/tickets/by-worker",
+    summary="按 worker 查工单历史(最近 N 条,辅助关单-重开决策)",
+)
+async def list_tickets_by_worker(
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+    worker_id: str | None = Query(
+        None, description="复合 worker_id (owner_id:bot_id),优先解析",
+    ),
+    owner_id: str | None = Query(
+        None, description="按 owner_id 精确(被 worker_id 覆盖)",
+    ),
+    bot_id: str | None = Query(
+        None, description="按 bot_id 精确(被 worker_id 覆盖)",
+    ),
+    limit: int = Query(5, ge=1, le=50, description="取最近 N 条(默认 5,1~50)"),
+) -> ApiResponse:
+    """按 worker 取最近 N 条工单(全状态,gmt_create 倒序),含历史关单 + 当前活跃单。
+
+    管理员处理新开/重开工单时,借此横向看该 worker 工单生命周期(关单原因/裁定
+    结论/用户反馈/审批记录/命中维度快照),辅助本次决策。只读:无副作用、不写
+    audit、不碰状态机。定位规则与 ``/audit-logs`` 一致:``worker_id`` 优先;解析后
+    owner/bot/worker 全空 → 400。``worker_id`` 非法(非 owner:bot)→ 400。无工单
+    → 200 items=[]。``limit`` 越界(<1 或 >50)→ 422(FastAPI Query 校验)。
+    """
+    del ctx  # RequestContext 仅用于走 AuthPlugin 鉴权链路
+    try:
+        tickets, res_owner, res_bot, echo_worker = await asyncio.to_thread(
+            admin_svc.list_ticket_history_by_worker,
+            worker_id=worker_id,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            limit=limit,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    data = TicketHistoryByWorkerResponse(
+        worker_id=echo_worker,
+        owner_id=res_owner,
+        bot_id=res_bot,
+        items=[TicketHistoryItem.from_ticket(t) for t in tickets],
+        limit=limit,
+    )
+    return ApiResponse(success=True, data=data.model_dump(mode="json"))
+
+
 # ── Workflow: 审计查询(只读) ──────────────────────────────────────────────
 
 _AuditReadSvc = GovernanceAuditReadServiceProtocol
@@ -380,8 +435,18 @@ async def tickets_close(
 
     单条/批量统一入参:handler 循环调 ``admin_svc.admin_close``(已委托
     ``lifecycle_svc``,关工单 + cancel_pending 由 driver 编排)。禁止直调 repo。
+
+    入参对齐用户反馈回执(D1/D2/D3):``conclusion`` 受控枚举必传、``detail``
+    承载手写说明(handler 序列化为 JSON 透传 service ``close_payload``)。
     """
     operator = ctx.user_id
+    # detail → close_payload JSON 字符串(空 dict/全 None → None,不落空 {} )
+    # ensure_ascii=False: 中文手写说明原样落库,不转 \uXXXX (读回可读)
+    close_payload = (
+        json.dumps(body.detail.model_dump(exclude_none=True), ensure_ascii=False)
+        if body.detail is not None and body.detail.model_dump(exclude_none=True)
+        else None
+    )
 
     def _close_all():
         results = []
@@ -389,7 +454,8 @@ async def tickets_close(
             result = admin_svc.admin_close(
                 ticket_id=ticket_id,
                 admin_id=operator,
-                reason=body.reason,
+                conclusion=body.conclusion,
+                close_payload=close_payload,
             )
             results.append(result.to_dict())
         return results
@@ -423,6 +489,34 @@ async def tickets_close_all(
         result = await asyncio.to_thread(
             admin_svc.close_all_open, reason=body.reason, operator=operator,
         )
+    return ApiResponse(success=True, data=result.to_dict())
+
+
+# ── Workflow: 设/清通知收件人覆盖 (2026-07-21, bot 转交/机器人 owner 代联) ─
+
+
+@workflow_router.post(
+    "/tickets:override-owner",
+    summary="设/清工单通知收件人覆盖 (override_owner)",
+)
+async def tickets_override_owner(
+    body: OverrideOwnerRequest,
+    ctx: RequestContext = Depends(get_request_context),
+    admin_svc: _AdminSvc = Injected(_AdminSvc),
+) -> ApiResponse:
+    """设/清工单 override_owner(bot 转交/机器人 owner 代联, D1/D4)。
+
+    ``override_owner`` 非空 → 后续 reminder 建通知发给此人(override or owner 写
+    notify_log.owner_id);None/空串 → 清(恢复原 owner)。只改 override_owner
+    字段,不碰状态机/owner_id/cooldown。operator 取自鉴权上下文(不允许 body 顶替)。
+    """
+    result = await asyncio.to_thread(
+        admin_svc.set_override_owner,
+        body.ticket_id,
+        body.override_owner,
+        operator=ctx.user_id,
+    )
+    _raise_on_admin_error(result)
     return ApiResponse(success=True, data=result.to_dict())
 
 

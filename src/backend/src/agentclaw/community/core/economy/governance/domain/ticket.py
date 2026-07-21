@@ -274,6 +274,11 @@ class GovernanceTicket:
     id: int | None = None             # 自增主键(只读,from_orm 灌入;to_orm 不写回)
     gmt_create: datetime | None = None
     gmt_modified: datetime | None = None
+    # ── 关单结论(D2:管理員裁定,只 admin 关单路径有值,自动关单留 None) ──
+    close_conclusion: str | None = None
+    close_payload: str | None = None
+    # ── 通知收件人覆盖 (D1: 工单级临时, bot 转交/机器人 owner 代联) ──
+    override_owner: str | None = None  # ORM: override_owner; 非空=通知发给此人而非原 owner
 
     # ── 快照访问(只读) ──────────────────────────────
 
@@ -496,17 +501,25 @@ class GovernanceTicket:
         close_reason: str,
         closed_at: datetime,
         cooldown_until: datetime | None = None,
+        close_conclusion: str | None = None,
+        close_payload: str | None = None,
     ) -> None:
         """关闭工单。
 
         Args:
-            close_reason: 关闭原因。
+            close_reason: 关闭原因(机制/来源, ``CloseReason`` 值)。
             closed_at: 关闭时间。
             cooldown_until: 冷却截止时间。
+            close_conclusion: 管理员关单结论裁定(``AdminCloseConclusion`` 值);
+                仅 admin 关单路径有值,自动关单路径留 None。语义独立于 close_reason。
+            close_payload: 关单明细 JSON(当前 ``{"remark": ...}``),admin 关单手写说明。
 
         逐字段对齐 repo ``close_ticket`` L226-237:
         governance_status='closed' / close_reason / closed_at / remind_at=None /
         cooldown_until(仅当传入) / active_worker=None(closed 释放)。
+        close_conclusion / close_payload 是**附加存储**,在转态之后 set,
+        不进 ``transition_to`` 白名单、不改变状态机语义(对标 ``accept_feedback``
+        注入 feedback_payload 的同款模式)。
         """
         self.transition_to(GovernanceStatus.CLOSED)
         self.close_reason = close_reason
@@ -514,6 +527,8 @@ class GovernanceTicket:
         self.cooldown_until = cooldown_until
         self.assignee = None  # closed 释放 active_worker
         self.remind_at = None  # 对齐 repo L229,默认 None 清空
+        self.close_conclusion = close_conclusion  # 附加存储,不碰状态机
+        self.close_payload = close_payload
 
     def enter_observed(self, *, close_reason: str | None = None) -> None:
         """进入白名单观察态(OBSERVED)。
@@ -579,7 +594,9 @@ class GovernanceTicket:
           approve_close     → CLOSED,close_reason=close_reason|'approve_close',
                               可带 cooldown_until
           approve_scheduled → SCHEDULED(同意排期,不关单),close_reason='schedule_approved',
-                              保留 repair_deadline;不释放 active_worker(仍 active 观察)
+                              保留 repair_deadline;不释放 active_worker(仍 active 观察);
+                              设 resume_at=repair_deadline(→mute_until,cron 到期触发
+                              schedule_due 进 waiting_review②);repair_deadline 缺失则不设(防御)
           approve_whitelist → OBSERVED,close_reason=WHITELIST_APPROVED(白名单观察态:
                               释放 active_worker、不设 closed_at,由后续 off-batch
                               持续刷新快照,不发通知、不占治理人力)
@@ -597,6 +614,14 @@ class GovernanceTicket:
             # 同意排期 → SCHEDULED(不关单,继续排期观察),不释放 active_worker
             self.transition_to(GovernanceStatus.SCHEDULED)
             self.close_reason = close_reason or "schedule_approved"
+            # 排期到期触发:mute_until = 纯 repair_deadline(不加 cooldown —
+            # cooldown 是关单概念,approve_close 时才设,叠到这会重复冷却)。
+            # cron list_scheduled_due 凭 mute_until<=now 触发 SCHEDULED→
+            # waiting_review②(schedule_due);不设则排期到期永不触发,卡死
+            # SCHEDULED。repair_deadline 理论必填(need_time 校验),None 时
+            # 静默不设(防御,不阻断审批);service 层兜 warn 可观测。
+            if self.repair_deadline is not None:
+                self.resume_at = self.repair_deadline
             return
 
         if review_decision == "approve_whitelist":
@@ -695,6 +720,7 @@ class GovernanceTicket:
             feedback_remark=None,
             feedback_source=None,
             close_reason=None,
+            close_conclusion=None,
             closed_at=None,
             cooldown_until=None,
             review_reason=None,
@@ -707,6 +733,8 @@ class GovernanceTicket:
             remind_at=None,
             remind_count=0,
             feedback_payload=None,
+            close_payload=None,
+            override_owner=None,
             actor_id=None,
             gmt_create=None,
             gmt_modified=None,
@@ -765,6 +793,8 @@ class GovernanceTicket:
             feedback_remark=obj.response_remark,
             feedback_source=obj.response_source,
             close_reason=obj.close_reason,
+            close_conclusion=getattr(obj, "close_conclusion", None),
+            override_owner=getattr(obj, "override_owner", None),
             closed_at=obj.closed_at,
             cooldown_until=obj.cooldown_until,
             review_reason=obj.review_reason,
@@ -777,6 +807,7 @@ class GovernanceTicket:
             remind_at=obj.remind_at,
             remind_count=obj.remind_count or 0,
             feedback_payload=obj.feedback_payload,
+            close_payload=getattr(obj, "close_payload", None),
             actor_id=obj.actor_id,
             id=getattr(obj, "id", None),
             gmt_create=getattr(obj, "gmt_create", None),
@@ -833,18 +864,21 @@ class GovernanceTicket:
         row.response_remark = self.feedback_remark
         row.response_source = self.feedback_source
         row.close_reason = self.close_reason
+        row.close_conclusion = self.close_conclusion
         row.closed_at = self.closed_at
         row.cooldown_until = self.cooldown_until
         row.review_reason = self.review_reason
         row.review_decision = self.review_decision
         row.reviewed_by = self.reviewed_by
         row.reviewed_at = self.reviewed_at
+        row.override_owner = self.override_owner  # admin 后补设,可变,需写回(to_orm 全量 + apply_to 增量)
         row.review_remark = self.review_remark
         row.repair_deadline = self.repair_deadline
         row.mute_until = self.resume_at
         row.remind_at = self.remind_at
         row.remind_count = self.remind_count
         row.feedback_payload = self.feedback_payload
+        row.close_payload = self.close_payload
         row.actor_id = self.actor_id
         row.delivery_status = self.delivery_status
         row.last_notified_at = self.last_notified_at
@@ -865,18 +899,21 @@ class GovernanceTicket:
         row.response_remark = self.feedback_remark
         row.response_source = self.feedback_source
         row.close_reason = self.close_reason
+        row.close_conclusion = self.close_conclusion
         row.closed_at = self.closed_at
         row.cooldown_until = self.cooldown_until
         row.review_reason = self.review_reason
         row.review_decision = self.review_decision
         row.reviewed_by = self.reviewed_by
         row.reviewed_at = self.reviewed_at
+        row.override_owner = self.override_owner  # admin 后补设,可变,需写回(to_orm 全量 + apply_to 增量)
         row.review_remark = self.review_remark
         row.repair_deadline = self.repair_deadline
         row.mute_until = self.resume_at
         row.remind_at = self.remind_at
         row.remind_count = self.remind_count
         row.feedback_payload = self.feedback_payload
+        row.close_payload = self.close_payload
         row.actor_id = self.actor_id
         row.delivery_status = self.delivery_status
         row.last_notified_at = self.last_notified_at
@@ -919,6 +956,8 @@ class GovernanceTicket:
             "response_remark": self.feedback_remark,
             "response_source": self.feedback_source,
             "close_reason": self.close_reason,
+            "close_conclusion": self.close_conclusion,
+            "override_owner": self.override_owner,
             "closed_at": _iso(self.closed_at),
             "cooldown_until": _iso(self.cooldown_until),
             "review_reason": self.review_reason,
@@ -931,6 +970,7 @@ class GovernanceTicket:
             "remind_at": _iso(self.remind_at),
             "remind_count": self.remind_count,
             "feedback_payload": self.feedback_payload,
+            "close_payload": self.close_payload,
             "actor_id": self.actor_id,
             "gmt_create": _iso(self.gmt_create),
             "gmt_modified": _iso(self.gmt_modified),
