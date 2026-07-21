@@ -1,0 +1,122 @@
+from __future__ import annotations
+
+from dataclasses import replace
+
+from fastapi import HTTPException
+import pytest
+
+from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+from agentclaw.community.adapters.http.session_resources.router import (
+    materialize_status,
+    materialized_callback,
+)
+from agentclaw.community.adapters.http.session_resources.schemas import (
+    MaterializedCallbackRequest,
+)
+from agentclaw.community.core.session_resources.types import (
+    SessionResourceRecord,
+    SessionResourceStatus,
+)
+
+
+def _record():
+    return SessionResourceRecord(
+        resource_id="sr_001",
+        owner_id="owner-1",
+        bot_id="bot-1",
+        scope_type="personal_bot_chat",
+        scope_key_hash="scope-hash",
+        session_key_hash="session-hash",
+        engine_type="claude_code",
+        tenant="tenant",
+        bot_uuid="uuid",
+        display_name="a.txt",
+        filename="a.txt",
+        device_path="workspace/.teamclaw/session-files/scope/session/sr_001/a.txt",
+        workspace_relative_path=".teamclaw/session-files/scope/session/sr_001/a.txt",
+        transfer_id="transfer-1",
+        status=SessionResourceStatus.DEVICE_SYNCING,
+        task_id="task-1",
+        task_version=1,
+    )
+
+
+class _Service:
+    def __init__(self) -> None:
+        self.callback_kwargs = None
+
+    def get_status(self, **kwargs):
+        self.status_kwargs = kwargs
+        return _record()
+
+    def materialized_callback(self, **kwargs):
+        self.callback_kwargs = kwargs
+        return replace(_record(), status=SessionResourceStatus.READY)
+
+
+@pytest.mark.asyncio
+async def test_polling_only_reads_backend_service_state():
+    service = _Service()
+    user = AuthenticatedUser("id", "owner-1", "owner-1")
+
+    result = await materialize_status(
+        "sr_001",
+        "bot-1",
+        "session-raw",
+        user=user,
+        service=service,
+    )
+
+    assert result["status"] == "device_syncing"
+    assert service.status_kwargs == {
+        "owner_id": "owner-1",
+        "bot_id": "bot-1",
+        "session_key": "session-raw",
+        "resource_id": "sr_001",
+    }
+
+
+@pytest.mark.asyncio
+async def test_callback_uses_task_capability_and_does_not_store_absolute_path():
+    service = _Service()
+    body = MaterializedCallbackRequest(
+        transfer_id="transfer-1",
+        task_id="task-1",
+        task_version=1,
+        ready=True,
+        canonical_bot_absolute_path="/home/admin/private/workspace/a.txt",
+        relative_path=".teamclaw/session-files/scope/session/sr_001/a.txt",
+        size_bytes=1,
+        content_hash="hash",
+    )
+
+    result = await materialized_callback(
+        "sr_001",
+        body,
+        x_materialization_task_id="task-1",
+        service=service,
+    )
+
+    assert result == {"applied": True, "status": "ready"}
+    stored = service.callback_kwargs["materialized_ref"]
+    assert "canonical_bot_absolute_path" not in stored
+    assert stored["path_hash"]
+
+
+@pytest.mark.asyncio
+async def test_callback_rejects_wrong_task_capability():
+    with pytest.raises(HTTPException) as exc:
+        await materialized_callback(
+            "sr_001",
+            MaterializedCallbackRequest(
+                transfer_id="transfer-1",
+                task_id="task-1",
+                task_version=1,
+                ready=False,
+                error_code="pull_failed",
+            ),
+            x_materialization_task_id="wrong",
+            service=_Service(),
+        )
+
+    assert exc.value.status_code == 401

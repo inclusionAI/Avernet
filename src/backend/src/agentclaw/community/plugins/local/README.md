@@ -31,6 +31,7 @@ internal_dependencies:
   - agentclaw.community.core.models
   - agentclaw.community.core.operator_context
   - agentclaw.community.core.service_bot
+  - agentclaw.community.core.session_resources  # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.skill_center
   - agentclaw.community.core.task_queue   # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.workspace

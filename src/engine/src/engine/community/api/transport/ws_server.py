@@ -24,6 +24,7 @@ Per-event side effects (Langfuse emission, etc.) live inside the plugin.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -37,6 +38,7 @@ from engine.community.config import load_max_connections, load_mcp_token_setting
 from engine.community.plugin_api.auth_gate.protocol import AuthGateService
 from engine.community.core.chat.models import ChatAbortRequest, ChatRequest
 from engine.community.core.engine.context import AuthContext
+from engine.community.core.resource_references.service import ResourceReferenceService
 from engine.community.manager import EngineManager
 from engine.community.openclaw.protocol import (
     PROTOCOL_VERSION,
@@ -143,8 +145,15 @@ class EngineWebSocketServer:
     bookkeeping (e.g. OpenClaw's refcount) collapses them if it wants to.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        resource_reference_service: ResourceReferenceService | None = None,
+    ) -> None:
         self._mcp_token_settings = load_mcp_token_settings()
+        self._resource_reference_service = (
+            resource_reference_service or ResourceReferenceService()
+        )
         self._connections: Dict[str, WebSocket] = {}
         self._conn_auth: Dict[str, AuthContext] = {}
         self._session_subscribers: Dict[str, set[str]] = {}
@@ -837,18 +846,22 @@ class EngineWebSocketServer:
         message = params.get("message")
         iam_token = params.get("x-iam-token")
         attachments = params.get("attachments")
+        resource_references = params.get("resourceReferences")
+        prompt_file_refs = params.get("promptFileRefs")
 
         if not session_key or not message:
             return ResponseFrame.err_response(
                 request.id,
                 ErrorShape(ErrorCodes.INVALID_REQUEST, "Missing sessionKey or message"),
             )
+        # COSEC: session keys are identifiers; use a non-reversible digest in logs.
+        session_key_hash = hashlib.sha256(session_key.encode("utf-8")).hexdigest()[:16]
         if attachments is not None:
             if not isinstance(attachments, list) or not all(isinstance(item, dict) for item in attachments):
                 log.warning(
-                    "[attachments][ws_received_invalid] requestId=%s sessionKey=%s summary=%s",
+                    "[attachments][ws_received_invalid] requestId=%s session_key_hash=%s summary=%s",
                     request.id,
-                    session_key,
+                    session_key_hash,
                     _summarize_attachments(attachments),
                 )
                 return ResponseFrame.err_response(
@@ -856,11 +869,26 @@ class EngineWebSocketServer:
                     ErrorShape(ErrorCodes.INVALID_REQUEST, "attachments must be an array of objects"),
                 )
             log.info(
-                "[attachments][ws_received] requestId=%s sessionKey=%s summary=%s",
+                "[attachments][ws_received] requestId=%s session_key_hash=%s summary=%s",
                 request.id,
-                session_key,
+                session_key_hash,
                 _summarize_attachments(attachments),
             )
+        for field_name, value in (
+            ("resourceReferences", resource_references),
+            ("promptFileRefs", prompt_file_refs),
+        ):
+            if value is not None and (
+                not isinstance(value, list)
+                or not all(isinstance(item, dict) for item in value)
+            ):
+                return ResponseFrame.err_response(
+                    request.id,
+                    ErrorShape(
+                        ErrorCodes.INVALID_REQUEST,
+                        f"{field_name} must be an array of objects",
+                    ),
+                )
 
         auth_gate_enabled = await auth_gate_service.get_switch()
         if auth_gate_enabled:
@@ -915,6 +943,8 @@ class EngineWebSocketServer:
                 params.get("timeoutMs"),
                 params.get("idempotencyKey"),
                 attachments=attachments,
+                resource_references=resource_references,
+                prompt_file_refs=prompt_file_refs,
             )
         )
 
@@ -929,6 +959,8 @@ class EngineWebSocketServer:
         timeout_ms: Optional[int],
         idempotency_key: Optional[str] = None,
         attachments: Optional[list[dict[str, Any]]] = None,
+        resource_references: Optional[list[dict[str, Any]]] = None,
+        prompt_file_refs: Optional[list[dict[str, Any]]] = None,
     ) -> None:
         """Relay `ChatService.stream` events back to the client verbatim.
 
@@ -936,7 +968,13 @@ class EngineWebSocketServer:
         inside the plugin — the server is event-shape-agnostic on the chat
         hot path.
         """
-        log.info(f"[stream] Starting chat stream: conn={conn_id}, session={session_key}")
+        # COSEC: session keys are identifiers; use a non-reversible digest in logs.
+        session_key_hash = hashlib.sha256(session_key.encode("utf-8")).hexdigest()[:16]
+        log.info(
+            "[stream] Starting chat stream: conn=%s session_key_hash=%s",
+            conn_id,
+            session_key_hash,
+        )
 
         chat_plugin = EngineManager.get_instance().chat
         extra_params: dict[str, Any] = {}
@@ -945,11 +983,15 @@ class EngineWebSocketServer:
         if attachments is not None:
             extra_params["attachments"] = attachments
             log.info(
-                "[attachments][chat_request_extra] conn=%s sessionKey=%s summary=%s",
+                "[attachments][chat_request_extra] conn=%s session_key_hash=%s summary=%s",
                 conn_id,
-                session_key,
+                session_key_hash,
                 _summarize_attachments(attachments),
             )
+        if resource_references is not None:
+            extra_params["resourceReferences"] = resource_references
+        if prompt_file_refs is not None:
+            extra_params["promptFileRefs"] = prompt_file_refs
         chat_request = ChatRequest(
             # userId / agentId are encoded inside session_key for OpenClaw;
             # the plugin forwards session_key verbatim. Empty strings match
@@ -964,8 +1006,34 @@ class EngineWebSocketServer:
         auth = self._auth_for(conn_id)
 
         try:
+            if (
+                resource_references is not None
+                or prompt_file_refs is not None
+                or "<file-ref" in message
+            ):
+                # Reference validation includes controlled workspace file hashing.
+                # Keep that I/O off the WebSocket event loop.
+                resolved = await asyncio.to_thread(
+                    self._resource_reference_service.rewrite,
+                    prompt=message,
+                    session_key=session_key,
+                    resource_references=resource_references,
+                    prompt_file_refs=prompt_file_refs,
+                )
+                chat_request.query = resolved.prompt
+                merged_extra = dict(chat_request.extraParams or {})
+                merged_extra["materializedFiles"] = resolved.materialized_files
+                chat_request.extraParams = merged_extra
+                log.info(
+                    "engine.resource_reference.validate session_key_hash=%s reference_count=%s ok=true",
+                    session_key_hash,
+                    len(resolved.materialized_files),
+                )
             event_count = 0
-            log.info(f"[stream] Starting to iterate chat_plugin.stream() for session={session_key}")
+            log.info(
+                "[stream] Starting to iterate chat_plugin.stream() session_key_hash=%s",
+                session_key_hash,
+            )
             async for event_frame in chat_plugin.stream(chat_request, auth=auth):
                 event_count += 1
                 event_name = event_frame.event
@@ -992,7 +1060,13 @@ class EngineWebSocketServer:
                 if state in ("final", "error", "aborted"):
                     if isinstance(run_id, str) and run_id.startswith("inject-"):
                         continue
-                    log.info(f"[stream] chat stream ended: conn={conn_id}, reason={state}, total_events={event_count}")
+                    log.info(
+                        "[stream] chat stream ended: conn=%s session_key_hash=%s reason=%s total_events=%s",
+                        conn_id,
+                        session_key_hash,
+                        state,
+                        event_count,
+                    )
                     break
 
         except WebSocketDisconnect:

@@ -1,0 +1,61 @@
+"""Thin HTTP adapter for Backend-triggered materialization."""
+from __future__ import annotations
+
+import hashlib
+import logging
+from typing import Annotated
+
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
+
+from engine.community.core.resource_materialization.models import (
+    MaterializationRequest,
+)
+from engine.community.core.resource_materialization.service import (
+    ResourceMaterializationService,
+)
+from engine.community.di import Injected
+from engine.community.plugin_api.auth_gate.protocol import AuthGateService
+
+log = logging.getLogger("engine.resource_materialization.api")
+router = APIRouter(prefix="/api/resource-materializations", tags=["resource-materializations"])
+
+
+@router.post("")
+async def create_resource_materialization(
+    request: MaterializationRequest,
+    background_tasks: BackgroundTasks,
+    x_iam_token: Annotated[str | None, Header(alias="x-iam-token")] = None,
+    auth_gate_service: AuthGateService = Injected(AuthGateService),
+    service: ResourceMaterializationService = Injected(ResourceMaterializationService),
+) -> dict:
+    """Authenticate, accept, and run materialization after the response."""
+    if not x_iam_token:
+        raise HTTPException(status_code=401, detail="missing internal identity")
+    try:
+        verified = await auth_gate_service.verify(
+            token=x_iam_token,
+            content=f"materialize:{request.resource_id}",
+            session_id=request.session_key_hash,
+        )
+    except Exception as exc:
+        log.warning(
+            "engine.resource_materialize.auth.fail resource_id=%s error_type=%s",
+            request.resource_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=401, detail="internal identity verification failed") from exc
+    if not verified.allowed:
+        raise HTTPException(status_code=403, detail="internal identity denied")
+
+    background_tasks.add_task(service.materialize, request)
+    log.info(
+        "engine.resource_materialize.accept resource_id=%s task_version=%s transfer_hash=%s",
+        request.resource_id,
+        request.task_version,
+        hashlib.sha256(request.transfer_id.encode("utf-8")).hexdigest()[:16],
+    )
+    return {
+        "accepted": True,
+        "task_id": request.task_id,
+        "task_version": request.task_version,
+    }
