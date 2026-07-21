@@ -292,6 +292,7 @@ from agentclaw.community.core.errors import (  # noqa: E402
 )
 from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerCallTypeInvalidError,
+    CallerIdentityAmbiguousError,
     CallerIdentityNotFoundError,
     CallerIdentityPermissionError,
     CallerIdentityReadOnlyError,
@@ -309,6 +310,7 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     Conflict:              409,
     InternalError:         500,
     CallerIdentityPermissionError: 403,
+    CallerIdentityAmbiguousError: 409,
     CallerIdentityNotFoundError: 404,
     CallerIdentityReadOnlyError: 409,
     CallerLockEpochError: 409,

@@ -17,6 +17,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
+from agentclaw.community.core.bot_management.repository.protocol import (
+    BotLookupAmbiguousError,
+)
 from agentclaw.community.core.service_bot.repository.models import BotPublishModel
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugins.bot_repository import BotRepository
@@ -90,6 +93,8 @@ def test_insert_and_get(repo):
     assert rec["engine_types"]  # defaulted
     got = repo.get_by_id_and_owner("bot-1", "emp1")
     assert got["bot_name"] == "Bot One"
+    assert "call_type" not in got
+    assert "caller_config_revision" not in got
 
 
 def test_get_by_id_without_owner(repo):
@@ -125,6 +130,43 @@ def test_get_by_id_returns_none_for_deleted(repo):
     # get_by_id should return None for deleted bots
     got = repo.get_by_id("bot-1")
     assert got is None
+
+
+def test_get_by_id_and_entity_selects_the_correct_default_bot(repo):
+    first = repo.insert(
+        _data(bot_id="default", entity_id="entity-one", owner_id="owner-one")
+    )
+    second = repo.insert(
+        _data(bot_id="default", entity_id="entity-two", owner_id="owner-two")
+    )
+
+    selected = repo.get_by_id_and_entity("default", "entity-two")
+
+    assert selected is not None
+    assert selected["id"] == second["id"]
+    assert selected["owner_id"] == "owner-two"
+    assert selected["id"] != first["id"]
+    assert selected["call_type"] == "owner"
+    assert selected["caller_config_revision"] == 0
+
+
+def test_get_unique_by_id_rejects_duplicate_default_bots(repo):
+    repo.insert(_data(bot_id="default", entity_id="entity-one"))
+    repo.insert(_data(bot_id="default", entity_id="entity-two"))
+
+    with pytest.raises(BotLookupAmbiguousError):
+        repo.get_unique_by_id("default")
+
+
+def test_get_unique_by_id_preserves_single_and_missing_lookups(repo):
+    inserted = repo.insert(_data(bot_id="default", entity_id="entity-one"))
+
+    selected = repo.get_unique_by_id("default")
+
+    assert selected["id"] == inserted["id"]
+    assert selected["call_type"] == "owner"
+    assert selected["caller_config_revision"] == 0
+    assert repo.get_unique_by_id("missing") is None
 
 
 def test_insert_plain_not_upsert(repo):

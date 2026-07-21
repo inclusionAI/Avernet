@@ -57,6 +57,8 @@ class CallerRuntimeUpdaterProtocol(Protocol):
         agent_code: str,
         stage: str,
         publish_id: int | None,
+        entity_id: str | None = None,
+        binding_id: int | None = None,
     ) -> None: ...
 
 

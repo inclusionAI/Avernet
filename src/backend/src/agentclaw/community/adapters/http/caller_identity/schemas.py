@@ -19,6 +19,7 @@ class CallerContextQuery(BaseModel):
 
     stage: CallerIdentityStage
     publish_id: Annotated[int | None, Field(gt=0)] = None
+    entity_id: str | None = None
 
     @model_validator(mode="after")
     def validate_stage_scope(self) -> Self:
@@ -42,9 +43,14 @@ class UpdateMcpCallTypeRequest(BaseModel):
 
 
 class UpdateMcpCallTypeQuery(BaseModel):
-    """Reject every query parameter on the authenticated draft update."""
+    """Compatibility query fields for the authenticated draft update."""
 
     model_config = ConfigDict(extra="forbid")
+
+    # Accepted only because gateway callers already append this opaque value.
+    # Authentication remains exclusively bound to ``get_current_user``.
+    ctoken: str | None = None
+    entity_id: str | None = None
 
 
 class CallerContextResponse(BaseModel):

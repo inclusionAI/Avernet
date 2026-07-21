@@ -34,6 +34,7 @@ from agentclaw.community.core.caller_identity.credential import (
     CallerCredentialError,
     CallerToken,
 )
+from agentclaw.community.core.bot_management.repository.protocol import BotLookupAmbiguousError
 
 from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
@@ -3157,6 +3158,8 @@ class BaasService:  # pragma: no cover
         agent_code: str,
         stage: str,
         publish_id: int | None,
+        entity_id: str | None = None,
+        binding_id: int | None = None,
     ) -> None:
         """Install one Caller-token overlay on the Bot's current BaaS device."""
         if (
@@ -3166,7 +3169,21 @@ class BaasService:  # pragma: no cover
         ):
             raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
 
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_user_id)
+        if entity_id is not None:
+            bot = self._bot_repo.get_by_id_and_entity(bot_id, entity_id)
+        else:
+            try:
+                # COSEC: do not select an arbitrary duplicate Bot when callers
+                # omit entity_id; the caller credential target must be unique.
+                bot = self._bot_repo.get_unique_by_id(bot_id)
+            except BotLookupAmbiguousError as exc:
+                logger.warning(
+                    "caller_identity_update_rejected_ambiguous_bot bot_id=%s",
+                    bot_id,
+                )
+                raise CallerCredentialError(CALLER_TARGET_AMBIGUOUS) from exc
+        # COSEC: an entity-scoped lookup is not authorization; require the
+        # resolved Bot owner to match the identity already resolved upstream.
         if (
             not bot
             or bot.get("bot_type") != "service"
@@ -3175,14 +3192,19 @@ class BaasService:  # pragma: no cover
         ):
             raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
 
-        binding_id = self._resolve_caller_binding_id(
-            bot=bot,
-            bot_id=bot_id,
-            owner_user_id=owner_user_id,
-            stage=stage,
-            publish_id=publish_id,
+        use_supplied_binding_id = self._is_valid_caller_binding_id(binding_id)
+        resolved_binding_id = (
+            binding_id
+            if use_supplied_binding_id
+            else self._resolve_caller_binding_id(
+                bot=bot,
+                bot_id=bot_id,
+                owner_user_id=owner_user_id,
+                stage=stage,
+                publish_id=publish_id,
+            )
         )
-        binding = self._device_binding_repo.get_by_id(binding_id)
+        binding = self._device_binding_repo.get_by_id(resolved_binding_id)
         if (
             binding is None
             or str(getattr(binding, "status", "")).upper() != "ACTIVE"
@@ -3219,27 +3241,44 @@ class BaasService:  # pragma: no cover
         )
 
         logger.info(
-            "caller_outbound_update_started bot_id=%s stage=%s rule_count=%s",
+            "caller_outbound_update_started bot_id=%s stage=%s rule_count=%s "
+            "entity_scoped=%s supplied_binding_id=%s",
             bot_id,
             stage,
             len(complete_rule.header_operation_rules),
+            entity_id is not None,
+            use_supplied_binding_id,
         )
         try:
             updated = self.update_device_outbound_rule(paas_device_id, complete_rule)
         except Exception as exc:
             logger.warning(
-                "caller_outbound_update_failed bot_id=%s stage=%s error_type=%s",
+                "caller_outbound_update_failed bot_id=%s stage=%s error_type=%s "
+                "entity_scoped=%s supplied_binding_id=%s",
                 bot_id,
                 stage,
                 type(exc).__name__,
+                entity_id is not None,
+                use_supplied_binding_id,
             )
             raise CallerCredentialError(CALLER_OUTBOUND_UPDATE_FAILED) from exc
         if not updated:
             raise CallerCredentialError(CALLER_OUTBOUND_UPDATE_FAILED)
         logger.info(
-            "caller_outbound_update_succeeded bot_id=%s stage=%s",
+            "caller_outbound_update_succeeded bot_id=%s stage=%s entity_scoped=%s "
+            "supplied_binding_id=%s",
             bot_id,
             stage,
+            entity_id is not None,
+            use_supplied_binding_id,
+        )
+
+    @staticmethod
+    def _is_valid_caller_binding_id(binding_id: object) -> bool:
+        return (
+            isinstance(binding_id, int)
+            and not isinstance(binding_id, bool)
+            and binding_id > 0
         )
 
     def _resolve_caller_binding_id(
@@ -3275,11 +3314,7 @@ class BaasService:  # pragma: no cover
             )
         else:
             raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
-        if (
-            not isinstance(binding_id, int)
-            or isinstance(binding_id, bool)
-            or binding_id <= 0
-        ):
+        if not self._is_valid_caller_binding_id(binding_id):
             raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
         return binding_id
 
