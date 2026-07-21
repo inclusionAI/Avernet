@@ -1,0 +1,29 @@
+[package]
+name = "bcs-session-file"
+description = "Session file workspace application service for BCS"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait     = { workspace = true }
+bcs-domain      = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-storage-api = { workspace = true }
+bcs-session-file-store = { workspace = true }
+serde           = { workspace = true, features = ["derive"] }
+serde_json      = { workspace = true }
+tracing         = { workspace = true }
+anyhow          = { workspace = true }
+urlencoding     = { workspace = true }
+
+[dev-dependencies]
+bcs-test-support = { workspace = true }
+bytes            = { workspace = true }
+futures          = { workspace = true }
+tokio            = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

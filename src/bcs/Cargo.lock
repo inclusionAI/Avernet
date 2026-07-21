@@ -785,6 +785,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "thiserror 2.0.18",
+ "ulid",
  "uuid",
 ]
 
@@ -1241,6 +1242,7 @@ dependencies = [
  "async-trait",
  "bcs-domain",
  "bcs-protocol",
+ "bcs-storage-api",
  "bcs-test-support",
  "fastrand",
  "serde",
@@ -1279,6 +1281,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-session-file"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bcs-domain",
+ "bcs-service-api",
+ "bcs-session-file-store",
+ "bcs-storage-api",
+ "bcs-test-support",
+ "bytes",
+ "futures",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "urlencoding",
+]
+
+[[package]]
+name = "bcs-session-file-store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-db-api",
+ "bcs-domain",
+ "bcs-service-api",
+ "bcs-test-support",
+ "hex",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tokio-test",
+ "tracing",
+]
+
+[[package]]
 name = "bcs-session-store"
 version = "0.1.0"
 dependencies = [
@@ -1295,6 +1334,20 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tracing",
+]
+
+[[package]]
+name = "bcs-storage-api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "futures",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -4790,6 +4843,16 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+
+[[package]]
+name = "ulid"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "470dbf6591da1b39d43c14523b2b469c86879a53e8b758c8e090a470fe7b1fbe"
+dependencies = [
+ "rand 0.9.4",
+ "web-time",
+]
 
 [[package]]
 name = "unicode-ident"
