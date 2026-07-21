@@ -12,6 +12,17 @@ from engine.community.openclaw.client.gateway_client import OpenClawGatewayClien
 
 log = logging.getLogger("openclaw-port")
 
+_BCS_GROUP_SESSION_MARKER = "bcs:group:"
+
+
+def _is_bcs_dm_session_key(key: str) -> bool:
+    """Return whether an OpenClaw key belongs to a namespaced BCS DM group."""
+    marker_index = key.rfind(_BCS_GROUP_SESSION_MARKER)
+    if marker_index < 0:
+        return False
+    group_id = key[marker_index + len(_BCS_GROUP_SESSION_MARKER):]
+    return group_id.startswith("bcs_grp_") and "_dm_" in group_id
+
 
 class _SessionPortMixin:
     """Domain mixin: session CRUD + chat_history + model normalisation (pooled)."""
@@ -108,7 +119,7 @@ class _SessionPortMixin:
 
         Exact sequence (mirrors `engines/openclaw/session.py:list`):
           1. `sessions.list` RPC → raw sessions
-          2. Filter `bcs:group` sessions (gateway-cleanup, fixed)
+          2. Filter `bcs:group` sessions, keeping `bcs_grp_*_dm_*` and bcs-cli
           3. Filter by `agent_id` if provided
           4. Filter by exact non-blank `session_key` if provided
           5. Paginate: slice `[offset : offset+limit]` — BEFORE history fetch
@@ -150,12 +161,13 @@ class _SessionPortMixin:
 
         raw_sessions = [s for s in raw_sessions if isinstance(s, dict)]
 
-        # Step 2: Filter bcs:group sessions (fixed gateway-cleanup).
+        # Step 2: Hide BCS group chats while keeping user-visible DM sessions.
         raw_sessions = [
             s for s in raw_sessions
             if (
                 "bcs:group" not in s.get("key", "")
                 or "bcs:group:bcs-cli" in s.get("key", "")
+                or _is_bcs_dm_session_key(s.get("key", ""))
             )
         ]
 
