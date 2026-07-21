@@ -356,15 +356,13 @@ jsonl_count() {
 write_summary_artifacts() {
   local acceptance_status="$1"
   local bcs_e2e_status="$2"
-  local backend_router_hits backend_plugin_hits baas_router_hits
+  local backend_router_hits baas_router_hits
   backend_router_hits="$(jsonl_count "$coverage_root/raw/backend/router_hits.jsonl")"
-  backend_plugin_hits="$(jsonl_count "$coverage_root/raw/backend/plugin_hits.jsonl")"
   baas_router_hits="$(jsonl_count "$coverage_root/raw/baas/router_hits.jsonl")"
 
   "${reporter_command[@]}" - \
     "$report_dir" \
     "$backend_router_hits" \
-    "$backend_plugin_hits" \
     "$baas_router_hits" \
     "$acceptance_status" \
     "$bcs_e2e_status" \
@@ -377,11 +375,10 @@ from pathlib import Path
 
 report_dir = Path(sys.argv[1])
 backend_router_hits = int(sys.argv[2])
-backend_plugin_hits = int(sys.argv[3])
-baas_router_hits = int(sys.argv[4])
-acceptance_status = int(sys.argv[5])
-bcs_e2e_status = int(sys.argv[6])
-acceptance_targets = sys.argv[7:]
+baas_router_hits = int(sys.argv[3])
+acceptance_status = int(sys.argv[4])
+bcs_e2e_status = int(sys.argv[5])
+acceptance_targets = sys.argv[6:]
 
 
 def metric(covered, total):
@@ -468,7 +465,7 @@ summary = {
     "coverage": {
         "backend": {
             "router_hits": backend_router_hits,
-            "plugin_hits": backend_plugin_hits,
+            "plugin_evidence": "backend-coverage.json",
             "json": "backend-coverage.json",
             "html": "html/backend/index.html",
         },
@@ -495,7 +492,7 @@ report_dir.mkdir(parents=True, exist_ok=True)
             "- model config: mock",
             f"- acceptance: {', '.join(acceptance_targets)}",
             f"- backend router hits: {backend_router_hits}",
-            f"- backend plugin hits: {backend_plugin_hits}",
+            "- backend plugin evidence: backend-coverage.json",
             f"- baas router hits: {baas_router_hits}",
             f"- bcs e2e: {bcs_system['e2e_status']}",
             f"- bcs runtime line: {bcs_system['runtime_line']['percent']:.2f}%",
@@ -512,7 +509,7 @@ report_dir.mkdir(parents=True, exist_ok=True)
     "<h1>Singlebox Coverage</h1>"
     f"<p>Acceptance: {', '.join(acceptance_targets)}</p>"
     f"<p>Backend router hits: {backend_router_hits}</p>"
-    f"<p>Backend plugin hits: {backend_plugin_hits}</p>"
+    "<p>Backend plugin evidence: backend-coverage.json</p>"
     f"<p>BaaS router hits: {baas_router_hits}</p>"
     f"<p>BCS runtime line: {bcs_system['runtime_line']['percent']:.2f}%</p>"
     f"<p>BCS method: {bcs_system['method']['percent']:.2f}%</p>"
@@ -534,7 +531,6 @@ write_module_artifacts() {
     "${module_args[@]}" \
     --coverage-json "$report_dir/backend-coverage.json" \
     --router-hits "$coverage_root/raw/backend/router_hits.jsonl" \
-    --plugin-hits "$coverage_root/raw/backend/plugin_hits.jsonl" \
     --report-dir "$report_dir"
 }
 
@@ -571,6 +567,9 @@ verify_required_artifacts() {
 case "$mode" in
   real)
     resolve_reporter_command
+    "${reporter_command[@]}" "$script_dir/singlebox_coverage_manifest_check.py" \
+      --manifest "$module_manifest" \
+      --backend-root "$repo_root/src/backend"
     resolve_coverage_scope
     run_real_singlebox
     ;;

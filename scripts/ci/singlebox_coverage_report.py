@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import html
 import json
 import sys
@@ -83,6 +84,17 @@ def _metric(items: list[str], hits: list[str]) -> dict[str, Any]:
     }
 
 
+def _configured_item_keys(config: dict[str, Any]) -> list[str]:
+    keys: list[str] = []
+    for item in config.get("items") or []:
+        if isinstance(item, str):
+            keys.append(item)
+            continue
+        if isinstance(item, dict) and isinstance(item.get("key"), str):
+            keys.append(item["key"])
+    return keys
+
+
 def _configured_metric(config: dict[str, Any], hits: list[str]) -> dict[str, Any]:
     status = config.get("status", "applicable")
     reason = str(config.get("reason") or "")
@@ -99,8 +111,94 @@ def _configured_metric(config: dict[str, Any], hits: list[str]) -> dict[str, Any
     return {
         "status": "applicable",
         "reason": reason,
-        **_metric(list(config.get("items") or []), hits),
+        **_metric(_configured_item_keys(config), hits),
     }
+
+
+def _coverage_file_data(coverage: dict[str, Any], evidence_path: str) -> dict[str, Any]:
+    wanted = evidence_path.replace("\\", "/").lstrip("./")
+    for filename, data in (coverage.get("files") or {}).items():
+        normalized = str(filename).replace("\\", "/").lstrip("./")
+        if normalized == wanted or normalized.endswith(f"/{wanted}"):
+            return data if isinstance(data, dict) else {}
+    return {}
+
+
+def _symbol_body_lines(path: Path, symbol: str) -> set[int]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    parts = symbol.split(".")
+    nodes: list[ast.AST] = list(tree.body)
+    target: ast.AST | None = None
+    for part in parts:
+        target = next(
+            (
+                node
+                for node in nodes
+                if isinstance(
+                    node,
+                    (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef),
+                )
+                and node.name == part
+            ),
+            None,
+        )
+        if target is None:
+            return set()
+        nodes = list(getattr(target, "body", []))
+    if not isinstance(target, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return set()
+    body = list(target.body)
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        body = body[1:]
+    lines: set[int] = set()
+    for statement in body:
+        end_lineno = getattr(statement, "end_lineno", statement.lineno)
+        lines.update(range(statement.lineno, end_lineno + 1))
+    # Importing a class can mark a one-line method's definition line as
+    # executed. A definition line alone is not evidence that the method ran.
+    return {line for line in lines if line > target.lineno}
+
+
+def _plugin_evidence_hits(
+    manifest: dict[str, Any],
+    module_names: list[str],
+    coverage: dict[str, Any],
+    *,
+    backend_root: Path,
+) -> list[str]:
+    hits: list[str] = []
+    modules = _module_configs(manifest)
+    for module_name in module_names:
+        plugin_api = modules[module_name].get("plugin_api") or {}
+        if plugin_api.get("status", "applicable") == "not_applicable":
+            continue
+        for item in plugin_api.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key")
+            evidence = item.get("evidence")
+            if not isinstance(key, str) or not isinstance(evidence, dict):
+                continue
+            evidence_path = evidence.get("path")
+            symbol = evidence.get("symbol")
+            if not isinstance(evidence_path, str) or not isinstance(symbol, str):
+                continue
+            source_path = backend_root / evidence_path
+            if not source_path.is_file():
+                continue
+            executable_lines = _symbol_body_lines(source_path, symbol)
+            file_data = _coverage_file_data(coverage, evidence_path)
+            executed_lines = {
+                int(line) for line in (file_data.get("executed_lines") or [])
+            }
+            if executable_lines & executed_lines and key not in hits:
+                hits.append(key)
+    return hits
 
 
 def build_module_report(
@@ -338,7 +436,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--list-acceptance-targets", action="store_true")
     parser.add_argument("--coverage-json", type=Path)
     parser.add_argument("--router-hits", type=Path)
-    parser.add_argument("--plugin-hits", type=Path)
+    parser.add_argument(
+        "--backend-root",
+        type=Path,
+        default=Path(__file__).resolve().parents[2] / "src/backend",
+    )
     parser.add_argument("--report-dir", type=Path)
     return parser.parse_args()
 
@@ -360,7 +462,6 @@ def main() -> int:
     required = {
         "--coverage-json": args.coverage_json,
         "--router-hits": args.router_hits,
-        "--plugin-hits": args.plugin_hits,
         "--report-dir": args.report_dir,
     }
     missing = [flag for flag, value in required.items() if value is None]
@@ -372,7 +473,12 @@ def main() -> int:
         return 2
     coverage = json.loads(args.coverage_json.read_text(encoding="utf-8"))
     router_hits = _load_jsonl_keys(args.router_hits)
-    plugin_hits = _load_jsonl_keys(args.plugin_hits)
+    plugin_hits = _plugin_evidence_hits(
+        manifest,
+        module_names,
+        coverage,
+        backend_root=args.backend_root,
+    )
     reports = [
         build_module_report(
             manifest=manifest,

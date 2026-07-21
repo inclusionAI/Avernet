@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from singlebox_coverage_report import (  # noqa: E402
     _load_jsonl_keys,
     _matches_core_path,
+    _plugin_evidence_hits,
     acceptance_targets_for,
     build_module_report,
     select_module_names,
@@ -268,6 +269,127 @@ def test_validate_thresholds_reports_applicable_plugin_failure():
     assert report["plugin_api"]["percent"] == 50.0
     assert validate_thresholds(report) == [
         "devices plugin API coverage 50.00% < 75.00%"
+    ]
+
+
+def test_plugin_evidence_hits_uses_executed_implementation_body(tmp_path: Path):
+    source = tmp_path / "src/agentclaw/community/plugins/local/passport.py"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "class LocalPassportPlugin:\n"
+        "    def freeze_agent_passport(self):\n"
+        "        marker = 'called'\n"
+        "        return marker\n"
+        "\n"
+        "    def unfreeze_agent_passport(self):\n"
+        "        return 'not called'\n",
+        encoding="utf-8",
+    )
+    manifest = {
+        "modules": {
+            "bot_dormant": {
+                "plugin_api": {
+                    "items": [
+                        {
+                            "key": "PassportPlugin.freeze_agent_passport",
+                            "evidence": {
+                                "path": "src/agentclaw/community/plugins/local/passport.py",
+                                "symbol": "LocalPassportPlugin.freeze_agent_passport",
+                            },
+                        },
+                        {
+                            "key": "PassportPlugin.unfreeze_agent_passport",
+                            "evidence": {
+                                "path": "src/agentclaw/community/plugins/local/passport.py",
+                                "symbol": "LocalPassportPlugin.unfreeze_agent_passport",
+                            },
+                        },
+                    ]
+                }
+            }
+        }
+    }
+    coverage = {
+        "files": {
+            "src/agentclaw/community/plugins/local/passport.py": {
+                "executed_lines": [1, 2, 3, 4, 6]
+            }
+        }
+    }
+
+    assert _plugin_evidence_hits(
+        manifest, ["bot_dormant"], coverage, backend_root=tmp_path
+    ) == ["PassportPlugin.freeze_agent_passport"]
+
+
+def test_plugin_evidence_does_not_count_one_line_definition(tmp_path: Path):
+    source = tmp_path / "src/agentclaw/community/plugins/local/device.py"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "class DeviceAdapter:\n"
+        "    def invoke(self): return None\n",
+        encoding="utf-8",
+    )
+    manifest = {
+        "modules": {
+            "devices": {
+                "plugin_api": {
+                    "items": [
+                        {
+                            "key": "DeviceAdapterTransport.invoke",
+                            "evidence": {
+                                "path": "src/agentclaw/community/plugins/local/device.py",
+                                "symbol": "DeviceAdapter.invoke",
+                            },
+                        }
+                    ]
+                }
+            }
+        }
+    }
+    coverage = {
+        "files": {
+            str(source): {
+                "executed_lines": [2],
+            }
+        }
+    }
+
+    assert (
+        _plugin_evidence_hits(
+            manifest,
+            ["devices"],
+            coverage,
+            backend_root=tmp_path,
+        )
+        == []
+    )
+
+
+def test_build_module_report_uses_mapping_keys_for_plugin_metric():
+    manifest = _manifest()
+    manifest["modules"]["devices"]["plugin_api"] = {
+        "items": [
+            {
+                "key": "DeviceAdapterTransport.invoke",
+                "evidence": {
+                    "path": "src/plugin.py",
+                    "symbol": "LocalTransport.invoke",
+                },
+            }
+        ]
+    }
+
+    report = build_module_report(
+        manifest=manifest,
+        module_name="devices",
+        coverage=_coverage(),
+        router_hits=[],
+        plugin_hits=["DeviceAdapterTransport.invoke"],
+    )
+
+    assert report["plugin_api"]["covered_items"] == [
+        "DeviceAdapterTransport.invoke"
     ]
 
 
