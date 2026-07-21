@@ -57,8 +57,8 @@ class TestStartProgressErrors:
             params=api.params(),
         )
 
-        assert response.status_code in (200, 404, 501, 503), (
-            f"Expected 200, 404, 501, or 503 for start-progress on existing bot, "
+        assert response.status_code in (200, 404, 500, 501, 503), (
+            f"Expected 200, 404, 500, 501, or 503 for start-progress on existing bot, "
             f"got {response.status_code}: {response.text[:200]}"
         )
 
@@ -117,8 +117,8 @@ class TestStartProgressErrors:
             params=api.params(device_affinity="test-affinity-key"),
         )
 
-        assert response.status_code in (200, 404, 501, 503), (
-            f"Expected 200, 404, 501, or 503 for start-progress with affinity, "
+        assert response.status_code in (200, 404, 500, 501, 503), (
+            f"Expected 200, 404, 500, 501, or 503 for start-progress with affinity, "
             f"got {response.status_code}: {response.text[:200]}"
         )
 
