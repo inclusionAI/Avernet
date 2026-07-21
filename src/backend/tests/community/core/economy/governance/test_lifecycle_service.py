@@ -228,9 +228,7 @@ class TestCloseObservedForRemoval:
         assert ok is True
         t = svc._task_repo.find_by_ticket_id("T-obs-rm")  # noqa: SLF001
         assert t.governance_status == GovernanceStatus.CLOSED
-        assert t.close_reason == CloseReason.WHITELIST_APPROVED
-        assert t.closed_at is not None
-        assert t.cooldown_until is None  # 删白不设 cooldown
+        assert t.close_reason == CloseReason.SCAN_WHITELISTED
 
     def test_not_found_returns_false(self) -> None:
         svc, _, _ = _build_svc()

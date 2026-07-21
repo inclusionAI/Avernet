@@ -269,12 +269,12 @@ class GovernanceLifecycleService:
     def observe_for_whitelist(
         self, ticket_id: str, *, close_reason: str, now: datetime,
     ) -> bool:
-        """加白→转 OBSERVED 单条语义方法(四条加白入口的统一收口)。
+        """Scan 清理白名单 bot 残留活跃单 → CLOSED(scan_whitelisted) + cancel pending.
 
-        把活跃单转 OBSERVED(持续观察画像,不发通知)+ 释放 active_worker +
-        不设 closed_at + 取消 pending 通知(best-effort)。方案 A 链路:find →
-        ``ticket.enter_observed(close_reason)``(守卫激活)→ ``save_ticket`` →
-        取消通知。非法转移被守卫抛出,驱动服务捕获转审计 + False。
+        只记动作不猜原因:scan 遇到白名单 bot 仍挂着活跃单,顺手关掉(cardinality
+        = ❶批量加白漏关 / 加白与扫描并发竞态的兜底)。方案 A 链路:find →
+        ``ticket.close()``(守卫激活)→ ``save_ticket`` → 取消通知。非法转移被守卫
+        抛出,驱动服务捕获转审计 + False。
 
         四条加白入口经此(scan 兜底传 SCAN_WHITELISTED;批量加白经
         :meth:`bulk_observe_by_ticket_ids` 传 WHITELIST_APPROVED;审批加白走
@@ -324,7 +324,7 @@ class GovernanceLifecycleService:
             return False
         try:
             ticket.close(
-                close_reason=CloseReason.WHITELIST_APPROVED, closed_at=now,
+                close_reason=CloseReason.SCAN_WHITELISTED, closed_at=now,
             )
         except IllegalTicketTransitionError as exc:
             self._audit_illegal(ticket_id, "close_observed_for_removal", exc)
