@@ -2,8 +2,9 @@
 
 Composes :class:`engine.community.core.file.protocol.FileService` and
 :class:`engine.community.core.bash.protocol.BashService` for workspace file
-and git operations.  The file-tree endpoint scans the container-local AICoding
-workspace directly so it can prune root-level OSS mounts before traversal.
+and git operations.  The file-tree endpoint invokes GNU ``find`` inside the
+container-local AICoding workspace so it can prune infrastructure mounts before
+traversal without issuing a separate size ``stat`` for every file.
 
 The container workspace base path is ``/home/admin/.aicoding/workspace``
 (matches the relay ``DEFAULT_CWD`` and the AiCodingFileService
@@ -25,7 +26,6 @@ from engine.community.core.aicoding.models import (
     GitDiffResult,
     GitDiffTreeResult,
     GitProjectDiff,
-    _FILTERED_DIRS,
     build_diff_tree,
     build_file_tree,
     parse_porcelain_status,
@@ -45,11 +45,17 @@ CONTAINER_WORKSPACE_BASE = "/home/admin/.aicoding/workspace"
 # 10 MiB cap for inline preview to keep responses bounded.
 PREVIEW_MAX_BYTES = 10 * 1024 * 1024
 
-# AICoding workspace infrastructure directories that must never be exposed by
-# the file-tree endpoint.  ``skills`` contains the OSS-mounted skills-repo and
-# ``.repos`` contains shared worktree internals; both are root-only exclusions
-# so project-local directories with the same names remain visible.
-_FILE_TREE_ROOT_EXCLUDED_DIRS = {"skills", ".repos"}
+# Keep this command static and pass the validated workspace separately as
+# BashService.cwd.  GNU find's ``%y`` supplies the entry type and ``%P`` the
+# workspace-relative path; NUL delimiters preserve whitespace/newlines in file
+# names.  Deliberately omit ``%s`` so NAS-backed workspaces do not pay one
+# explicit size metadata lookup per file.
+_FILE_TREE_FIND_COMMAND = (
+    r"find -P . -ignore_readdir_race -mindepth 1 "
+    r"\( -type d \( -name .git -o -name node_modules "
+    r"-o -path './skills' -o -path './.repos' \) -prune \) "
+    r"-o -printf '%y\0%P\0'"
+)
 
 
 def _resolve_workspace_base() -> str:
@@ -61,70 +67,33 @@ def _resolve_workspace_base() -> str:
     return raw or CONTAINER_WORKSPACE_BASE
 
 
-def _scan_file_tree_entries(workspace: str) -> list[dict]:
-    """Return file-tree entries while pruning AICoding infrastructure mounts.
+def _parse_find_file_tree_entries(
+    output: str,
+    workspace: str,
+) -> list[dict]:
+    """Parse ``type\0relative-path\0`` pairs emitted by GNU ``find``."""
+    fields = output.split("\0")
+    if fields and fields[-1] == "":
+        fields.pop()
+    if len(fields) % 2 != 0:
+        raise RuntimeError("invalid file-tree find output")
 
-    The root ``skills`` directory contains an OSS-mounted ``skills-repo``.  On
-    ossfs, merely walking that mount performs remote object listings and can
-    take several seconds.  Pruning ``dirs`` in-place prevents ``os.walk`` from
-    entering it at all.  ``.repos`` is likewise internal worktree storage.
-
-    A file may disappear between directory listing and ``stat`` on eventually
-    consistent mounts.  Such a race must not fail the entire file-tree request;
-    the node is retained with an unknown size instead.
-    """
     workspace_norm = os.path.normpath(workspace)
     entries: list[dict] = []
+    for index in range(0, len(fields), 2):
+        file_type = fields[index]
+        relative_path = fields[index + 1]
+        if not relative_path:
+            raise RuntimeError("invalid empty path in file-tree find output")
 
-    for root, dirs, filenames in os.walk(
-        workspace_norm,
-        topdown=True,
-        followlinks=False,
-    ):
-        root_norm = os.path.normpath(root)
-        at_workspace_root = root_norm == workspace_norm
-        dirs[:] = [
-            dirname
-            for dirname in dirs
-            if dirname not in _FILTERED_DIRS
-            and not (
-                at_workspace_root
-                and dirname in _FILE_TREE_ROOT_EXCLUDED_DIRS
-            )
-        ]
-
-        for dirname in dirs:
-            full_path = os.path.join(root, dirname)
-            entries.append(
-                {
-                    "name": dirname,
-                    "path": full_path,
-                    "relative_path": os.path.relpath(full_path, workspace_norm),
-                    "is_dir": True,
-                    "size": 0,
-                }
-            )
-
-        for filename in filenames:
-            full_path = os.path.join(root, filename)
-            try:
-                size: int | None = os.stat(full_path).st_size
-            except OSError as exc:
-                log.debug(
-                    "file-tree stat skipped for %s: %s",
-                    full_path,
-                    exc,
-                )
-                size = None
-            entries.append(
-                {
-                    "name": filename,
-                    "path": full_path,
-                    "relative_path": os.path.relpath(full_path, workspace_norm),
-                    "is_dir": False,
-                    "size": size,
-                }
-            )
+        entries.append(
+            {
+                "name": os.path.basename(relative_path),
+                "path": os.path.join(workspace_norm, relative_path),
+                "relative_path": relative_path,
+                "is_dir": file_type == "d",
+            }
+        )
 
     return entries
 
@@ -294,7 +263,19 @@ class WorkspaceService:
             normalized_session_id or "",
             normalized_cwd,
         )
-        return build_file_tree(_scan_file_tree_entries(workspace))
+        result = await self._bash.exec(
+            cmd=_FILE_TREE_FIND_COMMAND,
+            cwd=workspace,
+            timeout=30,
+        )
+        if result.exit_code != 0:
+            detail = (
+                result.stderr.strip() or f"exit code {result.exit_code}"
+            )[:1000]
+            raise RuntimeError(f"file-tree find failed: {detail}")
+
+        entries = _parse_find_file_tree_entries(result.stdout, workspace)
+        return build_file_tree(entries)
 
     # ── file preview ──────────────────────────────────────────────────
 

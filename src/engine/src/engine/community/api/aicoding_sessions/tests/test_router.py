@@ -274,6 +274,26 @@ def test_file_tree_success(client, workspace_svc):
     assert body["tree"][0]["children"][0]["name"] == "README.md"
 
 
+def test_file_tree_keeps_size_field_when_service_leaves_it_unset(
+    client, workspace_svc,
+):
+    workspace_svc.list_file_tree_return = [
+        FileTreeNode(
+            name="README.md",
+            path="README.md",
+            is_dir=False,
+        ),
+    ]
+
+    resp = client.get(
+        "/api/aicoding/sessions/file-tree",
+        params={"session_id": "s1"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["tree"][0]["size"] is None
+
+
 def test_file_tree_accepts_cwd_with_blank_session_id(client, workspace_svc):
     workspace_svc.list_file_tree_return = []
     cwd = "/home/admin/.aicoding/workspace/direct"
