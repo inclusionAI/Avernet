@@ -309,7 +309,10 @@ class GovernanceWorkflowService:
             dry_run=0,
         )
 
-        outcome_status = self._review_outcome_status(action)
+        outcome_status = (
+            GovernanceStatus.SCHEDULED if action == "approve_scheduled"
+            else GovernanceStatus.CLOSED
+        )
         return TicketActionOutcome(
             ticket_id=ticket_id,
             status=outcome_status,
@@ -318,20 +321,6 @@ class GovernanceWorkflowService:
 
     # ── 关单方法(从 admin_service 迁入,工单运营面归属) ─────────────────
 
-
-    @staticmethod
-    def _review_outcome_status(action: str) -> GovernanceStatus:
-        """review_ticket 返回值的状态映射(action → 工单终态)。
-
-        与领域层 ``GovernanceTicket.review()`` 的四态分支保持一致(单一事实源
-        在领域模型,此处仅镜像用于 API 响应)。approve_whitelist → OBSERVED
-        (白名单观察态);approve_scheduled → SCHEDULED;其余 → CLOSED。
-        """
-        if action == "approve_scheduled":
-            return GovernanceStatus.SCHEDULED
-        if action == "approve_whitelist":
-            return GovernanceStatus.OBSERVED
-        return GovernanceStatus.CLOSED
 
     def admin_close(
         self, ticket_id: str, admin_id: str, reason: str = "",
@@ -514,11 +503,8 @@ class GovernanceWorkflowService:
                 notify_delete_failed=0,
             )
 
-        # 先删通知、再删工单:崩溃在两步之间时,通知不会孤立(工单仍在,重试可重入
-        # 删通知→删工单)。若反过来先删工单,崩溃在删通知前会让通知永久孤立(
-        # 工单没了,重试因 ticket is None 短路,清不掉残留通知)。
-        notify_deleted, notify_failed = self._cascade_delete_notify(ticket_id)
         tickets_deleted = self._task_repo.delete_by_ticket_id(ticket_id)
+        notify_deleted, notify_failed = self._cascade_delete_notify(ticket_id)
         self._audit_cascade(
             ticket=ticket, operator=operator, reason=reason,
             tickets_deleted=tickets_deleted, notify_deleted=notify_deleted,

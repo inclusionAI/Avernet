@@ -82,8 +82,6 @@ def _sample_record(
     bot_id: str = "bot-001",
     governance_decision: str = "actionable",
     dt_version: str = "20260705",
-    expected_token_saving: int = 1000,
-    hit_dimensions: str = "token_usage",
 ) -> GovernanceRecord:
     """Build a minimal GovernanceRecord for process_record."""
     return GovernanceRecord(
@@ -92,7 +90,7 @@ def _sample_record(
         bot_name="TestBot",
         governance_decision=governance_decision,
         dt_version=dt_version,
-        hit_dimensions=hit_dimensions,
+        hit_dimensions="token_usage",
         hit_dimensions_count=3,
         governance_max_priority="high",
         expected_token_saving=expected_token_saving,
@@ -236,27 +234,15 @@ class TestProcessRecord:
 
         assert result.action == "whitelist_observed"
         assert result.entered_governance_scope is False
-        # 契约:加白后该 bot 不创建通知(加白核心语义 = 不创建通知)。
+        # 契约:加白后该 bot 不创建工单、不创建通知(加白核心语义 = 不创建通知)。
         with db.orm_session() as s:
-            tickets = s.query(GovernanceTicketOrm).all()
-            assert len(tickets) == 1
-            assert tickets[0].governance_status == GovernanceStatus.OBSERVED.value
-            # 不创建通知(观察单不发 first_send)
+            assert s.query(GovernanceTicketOrm).count() == 0
             assert s.query(GovernanceNotificationOrm).count() == 0
-            # 审计记 WHITELIST_OBSERVED(路 3 建观察单)
-            assert any(
-                a.action_taken == AuditAction.WHITELIST_OBSERVED
-                for a in s.query(AuditLogOrm).all()
-            )
 
     def test_whitelist_remove_restores_ticket_and_notify(self, session, engine):
         """契约:移除白名单 → 下次 batch 自然走正常建单 + 发通知。
 
-        新设计(白名单观察态):加白期间建一条 OBSERVED 观察单(不发通知);移除
-        白名单后(纯删,无补发/补建)下次 batch is_whitelisted=False、find_active
-        不命中观察单(归终态族)、find_latest_closed 不命中观察单(非 closed)→
-        Step6 建新活跃 OPEN 单 + first_send 通知。老观察单暂留(Group D 删白收尾
-        才转 CLOSED)。
+        移除纯删条目(无补发/补建/主动 scan),靠下次 offline-batch 恢复。
         """
         from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
             GovernanceWhitelistRepository,
@@ -269,11 +255,11 @@ class TestProcessRecord:
         )
         record = _sample_record()
 
-        # 1. 加白期间:建观察单(不发通知)
+        # 1. 加白期间:跳过,无工单无通知
         svc.process_record(record, run_id="run-1", notify_source="offline_batch")
         with db.orm_session() as s:
-            assert s.query(GovernanceTicketOrm).count() == 1  # 观察单
-            assert s.query(GovernanceNotificationOrm).count() == 0  # 不发通知
+            assert s.query(GovernanceTicketOrm).count() == 0
+            assert s.query(GovernanceNotificationOrm).count() == 0
 
         # 2. 移除白名单(纯删,无补发/补建)
         removed = whitelist_repo.remove(
@@ -282,78 +268,12 @@ class TestProcessRecord:
         )
         assert removed is True
 
-        # 3. 下次 batch:is_whitelisted=False → 正常建活跃单 + 发通知
+        # 3. 下次 batch:is_whitelisted=False → 正常建单 + 发通知
         result = svc.process_record(record, run_id="run-2", notify_source="offline_batch")
         assert result.entered_governance_scope is True
         with db.orm_session() as s:
-            tickets = s.query(GovernanceTicketOrm).all()
-            assert len(tickets) == 2  # 1 观察单(老)+ 1 活跃单(新)
-            assert s.query(GovernanceNotificationOrm).count() >= 1  # 活跃单 first_send
-
-    def test_whitelist_observed_refresh_updates_snapshot(self, session, engine):
-        """路 2:白名单 bot 已有观察单 → 新 dt_version record 刷新其快照(状态不变不发通知)。
-
-        用例:第 1 次 off-batch 建观察单(dt=v1)→ 第 2 次更新 dt=v2 → 观察单快照
-        刷成 v2,状态仍 OBSERVED,notify 零新增。这是'白名单 bot 持续可见最新画像'
-        的核心路径。
-        """
-        svc, db = _build_svc(engine)
-        whitelist_repo = GovernanceWhitelistRepository(db=db)
-        whitelist_repo.add(
-            bot_id="bot-001", owner_id="staff-001",
-            created_by="admin", whitelist_type="governance",
-        )
-
-        # 第 1 次:建观察单 dt=v1
-        svc.process_record(
-            _sample_record(dt_version="20260701"),
-            run_id="run-1", notify_source="offline_batch",
-        )
-
-        # 第 2 次:更新 dt=v2 → 刷新
-        result = svc.process_record(
-            _sample_record(dt_version="20260710", expected_token_saving=9999),
-            run_id="run-2", notify_source="offline_batch",
-        )
-        assert result.action == "whitelist_observed"
-        assert result.reason == "observed_ticket_refreshed"
-
-        with db.orm_session() as s:
-            tickets = s.query(GovernanceTicketOrm).all()
-            assert len(tickets) == 1  # 仍是同一条观察单,未新建
-            t = tickets[0]
-            assert t.governance_status == GovernanceStatus.OBSERVED.value
-            assert t.dt_version == "20260710"  # 快照刷成 v2
-            assert t.expected_token_saving == 9999
-            assert s.query(GovernanceNotificationOrm).count() == 0  # 零通知(核心不变式)
-
-    def test_whitelist_observed_stale_dt_version_skipped(self, session, engine):
-        """路 2 guard:incoming dt_version ≤ 现有 → 跳过刷新,仅记审计(防 stale 倒刷)。"""
-        svc, db = _build_svc(engine)
-        whitelist_repo = GovernanceWhitelistRepository(db=db)
-        whitelist_repo.add(
-            bot_id="bot-001", owner_id="staff-001",
-            created_by="admin", whitelist_type="governance",
-        )
-
-        # 建观察单 dt=v2
-        svc.process_record(
-            _sample_record(dt_version="20260710", expected_token_saving=5000),
-            run_id="run-1", notify_source="offline_batch",
-        )
-
-        # 来一条更老的 dt=v1 → 跳过刷新
-        result = svc.process_record(
-            _sample_record(dt_version="20260701", expected_token_saving=111),
-            run_id="run-2", notify_source="offline_batch",
-        )
-        assert result.action == "whitelist_observed"
-        assert result.reason == "stale_dt_version_skipped"
-
-        with db.orm_session() as s:
-            t = s.query(GovernanceTicketOrm).one()
-            assert t.dt_version == "20260710"  # 未被 stale record 倒刷
-            assert t.expected_token_saving == 5000  # 保持 v2 的值
+            assert s.query(GovernanceTicketOrm).count() == 1
+            assert s.query(GovernanceNotificationOrm).count() >= 1
 
     def test_dry_run_no_writes(self, session, engine):
         """dry_run=True → no DB writes, preview returned."""
