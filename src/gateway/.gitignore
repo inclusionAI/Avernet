@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+.coverage*
+htmlcov/
+
+# IDE / agent tooling
+.idea/
+.codefuse/
+
+# Configs / runtime
+*.log
+logs/
