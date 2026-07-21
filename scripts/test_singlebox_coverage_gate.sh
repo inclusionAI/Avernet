@@ -14,7 +14,7 @@ fail() {
 make_fake_repo() {
   local tmp="$1"
   mkdir -p "${tmp}/scripts/ci"
-  mkdir -p "${tmp}/src/backend" "${tmp}/src/baas"
+  mkdir -p "${tmp}/src/backend" "${tmp}/src/baas" "${tmp}/src/bcs/scripts"
   cp "$SCRIPT" "${tmp}/scripts/ci/singlebox_coverage.sh"
   cp "$REPORTER" "${tmp}/scripts/ci/singlebox_coverage_report.py"
   cat > "${tmp}/scripts/ci/singlebox_coverage_modules.yaml" <<'YAML'
@@ -75,7 +75,7 @@ case "${STANDALONE_RUNTIME_DIR:-}" in
   *) echo "singlebox coverage should use an isolated standalone runtime dir" >&2; exit 14 ;;
 esac
 printf '%s\n' "$*" >> "${SINGLEBOX_STUB_LOG:?}"
-if [ "$*" = "--standalone start all" ]; then
+if [ "$*" = "--standalone --with-bcs-coverage start all" ]; then
   mkdir -p "${SINGLEBOX_COVERAGE_DIR:?}/backend" "${SINGLEBOX_COVERAGE_DIR:?}/baas"
   printf '%s\n' '{}' > "${SINGLEBOX_COVERAGE_DIR}/backend/.coverage.fake"
   printf '%s\n' '{}' > "${SINGLEBOX_COVERAGE_DIR}/baas/.coverage.fake"
@@ -102,6 +102,34 @@ fi
 exit 0
 SH
   chmod +x "${tmp}/scripts/singlebox.sh"
+cat > "${tmp}/src/bcs/scripts/e2e_coverage.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+expected_bot_data_dir="${PWD}/scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles"
+if [[ "${BCS_BOTS_DATA_DIR:-}" != "$expected_bot_data_dir" ]]; then
+  echo "BCS E2E should read bot sessions from the coverage standalone profile root" >&2
+  exit 15
+fi
+printf '%s\n' "$*" >> "${PWD}/bcs-e2e.log"
+cov_dir="${PWD}/src/bcs/target/cov-e2e"
+[[ -f "${PWD}/fail-bcs-e2e-without-artifacts" ]] && exit 9
+mkdir -p "$cov_dir"
+cat > "$cov_dir/summary.json" <<'JSON'
+{"data":[{"totals":{"lines":{"covered":45,"count":100},"functions":{"covered":40,"count":100},"regions":{"covered":30,"count":100},"branches":{"covered":0,"count":0}}}]}
+JSON
+printf '%s\n' '<coverage line-rate="0.45"></coverage>' > "$cov_dir/cobertura.xml"
+printf '%s\n' 'TOTAL 100 55 45.00%' > "$cov_dir/coverage.txt"
+printf '%s\n' '<endpointCoverage><overall covered="12" total="12" uncovered="0" percent="100.0"/></endpointCoverage>' > "$cov_dir/endpoint_coverage.xml"
+printf '%s\n' 'Endpoint coverage: 12 / 12 (100.0%)' > "$cov_dir/endpoint_coverage.txt"
+printf '%s\n' 'bcs-cli leaf command coverage: 8 / 8 (100.0%)' > "$cov_dir/cli_command_coverage.txt"
+if [[ -f "${PWD}/fail-bcs-e2e-with-malformed-artifacts" ]]; then
+  printf '%s\n' '{"data":[{"totals":{"lines":[],"functions":40}}]}' > "$cov_dir/summary.json"
+  exit 8
+fi
+[[ -f "${PWD}/fail-bcs-e2e" ]] && exit 7
+exit 0
+SH
+  chmod +x "${tmp}/src/bcs/scripts/e2e_coverage.sh"
   mkdir -p "${tmp}/fake-bin"
   cat > "${tmp}/fake-bin/uv" <<'SH'
 #!/usr/bin/env bash
@@ -173,9 +201,10 @@ SH
 }
 
 test_default_mode_runs_real_singlebox() {
-  local tmp log
+  local tmp log bcs_log
   tmp="$(mktemp -d)"
   log="${tmp}/singlebox.log"
+  bcs_log="${tmp}/bcs-e2e.log"
   uv_log="${tmp}/uv.log"
   make_fake_repo "$tmp"
 
@@ -183,18 +212,21 @@ test_default_mode_runs_real_singlebox() {
     cd "$tmp"
     PATH="${tmp}/fake-bin:$PATH" \
       PYTHON="${ROOT}/src/backend/.venv/bin/python" \
-      SINGLEBOX_STUB_LOG="$log" UV_STUB_LOG="$uv_log" \
+      SINGLEBOX_STUB_LOG="$log" \
+      UV_STUB_LOG="$uv_log" \
       "${tmp}/scripts/ci/singlebox_coverage.sh" >/dev/null
   )
 
-  grep -Fx -- "--standalone start all" "$log" >/dev/null || \
-    fail "default coverage mode should start the full standalone singlebox stack"
+  grep -Fx -- "--standalone --with-bcs-coverage start all" "$log" >/dev/null || \
+    fail "default coverage mode should start instrumented BCS in the full standalone stack"
   grep -Fx -- "--standalone stop all" "$log" >/dev/null || \
     fail "default coverage mode should stop the full standalone singlebox stack"
   grep -F "run pytest tests/community/acceptance/devices tests/community/acceptance/cron" "$uv_log" >/dev/null || \
     fail "default coverage mode should run every manifest acceptance target"
-  [ "$(grep -Fc -- '--standalone start all' "$log")" -eq 1 ] || \
+  [ "$(grep -Fc -- '--standalone --with-bcs-coverage start all' "$log")" -eq 1 ] || \
     fail "all modules should share one singlebox startup"
+  grep -Fx -- "--skip-start --bcs-line-min 40 --bcs-method-min 36" "$bcs_log" >/dev/null || \
+    fail "default coverage mode should run BCS E2E against the shared stack"
   grep -F "run coverage combine" "$uv_log" >/dev/null || \
     fail "default coverage mode should combine coverage"
   [ -s "${tmp}/scripts/.dependencies/coverage/singlebox/reports/summary.json" ] || \
@@ -203,12 +235,116 @@ test_default_mode_runs_real_singlebox() {
     fail "summary.md artifact missing"
   [ -s "${tmp}/scripts/.dependencies/coverage/singlebox/reports/dashboard.html" ] || \
     fail "dashboard.html artifact missing"
+  for artifact in e2e.log cobertura.xml coverage.txt summary.json endpoint_coverage.xml endpoint_coverage.txt cli_command_coverage.txt; do
+    [ -s "${tmp}/scripts/.dependencies/coverage/singlebox/reports/bcs/${artifact}" ] || \
+      fail "BCS artifact missing: ${artifact}"
+  done
   "${ROOT}/src/backend/.venv/bin/python" - "${tmp}/scripts/.dependencies/coverage/singlebox/reports/summary.json" <<'PY'
 import json
 import sys
 
 summary = json.load(open(sys.argv[1], encoding="utf-8"))
 assert list(summary["modules"]) == ["devices", "cron"]
+assert summary["systems"]["bcs"]["runtime_line"]["percent"] == 45.0
+assert summary["systems"]["bcs"]["method"]["percent"] == 40.0
+assert summary["systems"]["bcs"]["router_api"]["percent"] == 100.0
+assert summary["systems"]["bcs"]["cli_command"]["percent"] == 100.0
+PY
+}
+
+test_bcs_e2e_failure_preserves_reports_and_fails_gate() {
+  local tmp log bcs_log uv_log output rc
+  tmp="$(mktemp -d)"
+  log="${tmp}/singlebox.log"
+  bcs_log="${tmp}/bcs-e2e.log"
+  uv_log="${tmp}/uv.log"
+  make_fake_repo "$tmp"
+  touch "${tmp}/fail-bcs-e2e"
+
+  set +e
+  output="$({
+    cd "$tmp"
+    PATH="${tmp}/fake-bin:$PATH" \
+      PYTHON="${ROOT}/src/backend/.venv/bin/python" \
+      SINGLEBOX_STUB_LOG="$log" UV_STUB_LOG="$uv_log" \
+      "${tmp}/scripts/ci/singlebox_coverage.sh"
+  } 2>&1)"
+  rc=$?
+  set -e
+
+  [ "$rc" -eq 7 ] || fail "BCS E2E failure should be the final gate status"
+  grep -F "BCS e2e failed with exit code 7" <<<"$output" >/dev/null || \
+    fail "BCS E2E failure should be reported"
+  [ -s "${tmp}/scripts/.dependencies/coverage/singlebox/reports/backend-coverage.json" ] || \
+    fail "Backend coverage should still be generated after BCS E2E failure"
+  [ -s "${tmp}/scripts/.dependencies/coverage/singlebox/reports/bcs/e2e.log" ] || \
+    fail "BCS E2E log should be preserved after failure"
+}
+
+test_bcs_e2e_failure_without_artifacts_preserves_original_status() {
+  local tmp log uv_log output rc summary
+  tmp="$(mktemp -d)"
+  log="${tmp}/singlebox.log"
+  uv_log="${tmp}/uv.log"
+  make_fake_repo "$tmp"
+  touch "${tmp}/fail-bcs-e2e-without-artifacts"
+
+  set +e
+  output="$({
+    cd "$tmp"
+    PATH="${tmp}/fake-bin:$PATH" \
+      PYTHON="${ROOT}/src/backend/.venv/bin/python" \
+      SINGLEBOX_STUB_LOG="$log" UV_STUB_LOG="$uv_log" \
+      "${tmp}/scripts/ci/singlebox_coverage.sh"
+  } 2>&1)"
+  rc=$?
+  set -e
+
+  [ "$rc" -eq 9 ] || fail "missing BCS artifacts should not replace the original E2E status"
+  grep -F "BCS e2e failed with exit code 9" <<<"$output" >/dev/null || \
+    fail "missing-artifact BCS failure should report the original status"
+  summary="${tmp}/scripts/.dependencies/coverage/singlebox/reports/summary.json"
+  [ -s "$summary" ] || fail "top-level summary should survive missing BCS artifacts"
+  "${ROOT}/src/backend/.venv/bin/python" - "$summary" <<'PY'
+import json
+import sys
+
+summary = json.load(open(sys.argv[1], encoding="utf-8"))
+assert summary["status"] == "failed"
+assert summary["systems"]["bcs"]["e2e_status"] == "failed"
+assert summary["systems"]["bcs"]["artifact_errors"]
+PY
+}
+
+test_bcs_e2e_failure_with_malformed_artifacts_preserves_original_status() {
+  local tmp log uv_log output rc summary
+  tmp="$(mktemp -d)"
+  log="${tmp}/singlebox.log"
+  uv_log="${tmp}/uv.log"
+  make_fake_repo "$tmp"
+  touch "${tmp}/fail-bcs-e2e-with-malformed-artifacts"
+
+  set +e
+  output="$({
+    cd "$tmp"
+    PATH="${tmp}/fake-bin:$PATH" \
+      PYTHON="${ROOT}/src/backend/.venv/bin/python" \
+      SINGLEBOX_STUB_LOG="$log" UV_STUB_LOG="$uv_log" \
+      "${tmp}/scripts/ci/singlebox_coverage.sh"
+  } 2>&1)"
+  rc=$?
+  set -e
+
+  [ "$rc" -eq 8 ] || fail "malformed BCS artifacts should not replace the original E2E status"
+  summary="${tmp}/scripts/.dependencies/coverage/singlebox/reports/summary.json"
+  [ -s "$summary" ] || fail "top-level summary should survive malformed BCS artifacts"
+  "${ROOT}/src/backend/.venv/bin/python" - "$summary" <<'PY'
+import json
+import sys
+
+summary = json.load(open(sys.argv[1], encoding="utf-8"))
+assert summary["systems"]["bcs"]["runtime_line"]["total"] == 0
+assert summary["systems"]["bcs"]["artifact_errors"]
 PY
 }
 
@@ -288,6 +424,9 @@ YAML
 }
 
 test_default_mode_runs_real_singlebox
+test_bcs_e2e_failure_preserves_reports_and_fails_gate
+test_bcs_e2e_failure_without_artifacts_preserves_original_status
+test_bcs_e2e_failure_with_malformed_artifacts_preserves_original_status
 test_mock_mode_is_not_supported
 test_module_mode_reports_device_metrics
 test_reporter_selection_failure_is_preserved

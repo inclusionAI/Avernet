@@ -135,12 +135,23 @@ Module gates are selected from the committed files in the resulting diff:
 | `src/backend/` | Backend SAST, unit tests, changed-line coverage, and singlebox coverage |
 | `src/baas/` | BaaS SAST, unit tests, changed-line coverage, and singlebox coverage |
 | `src/engine/` | Engine SAST, unit tests, and changed-line coverage |
-| `src/bcs/` | BCS/BCN unit tests in fast-fail mode |
+| `src/bcs/` | BCS/BCN unit tests in fast-fail mode, then unified singlebox coverage with BCS user-story E2E |
 | `src/frontend/` | Frontend CI |
 | singlebox scripts and Backend/BaaS acceptance or E2E paths | singlebox coverage |
 
 The hook only checks committed changes in the pushed ref. Uncommitted working
 tree changes are outside the natural boundary of a pre-push hook.
+
+The unified `scripts/ci/singlebox_coverage.sh` starts one standalone product
+stack and reuses it for Backend acceptance and BCS user-story E2E. BCS runs as
+an LLVM-instrumented server; the gate requires all BCS E2E stories to pass,
+runtime line coverage of at least 40%, method coverage of at least 36%, and
+100% HTTP endpoint and bcs-cli leaf-command coverage. Its canonical artifacts
+are copied to `scripts/.dependencies/coverage/singlebox/reports/bcs/` and are
+included in `summary.json`, `summary.md`, and `dashboard.html`. Keep pre-push
+and `.github/workflows/singlebox-coverage.yml` pointed at this same entrypoint,
+then run `verify_singlebox_coverage_artifacts.py` against the generated report
+directory so local pushes and GitHub PRs enforce the same artifact baseline.
 
 ## Development Guidelines
 
