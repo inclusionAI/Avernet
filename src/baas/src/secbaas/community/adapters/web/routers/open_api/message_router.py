@@ -233,6 +233,7 @@ async def deliver_message_stream(
             message=request.message,
             context=context,
             metadata=metadata,
+            message_id=request.message_id,
         )
     except ValueError as e:
         raise HTTPException(

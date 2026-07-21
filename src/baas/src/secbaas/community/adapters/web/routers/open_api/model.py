@@ -90,6 +90,7 @@ class StreamMessageRequest(BaseModel):
 
     message: str = Field(..., description="用户消息内容", min_length=1)
     bot_id: str = Field(..., description="Bot 唯一标识", min_length=1)
+    message_id: str | None = Field(default=None, description="Message ID")
     metadata: dict[str, Any] | None = Field(
         default=None,
         description=(
