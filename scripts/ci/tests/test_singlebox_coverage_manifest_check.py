@@ -196,3 +196,49 @@ def test_validate_manifest_rejects_plugin_path_traversal(tmp_path: Path):
         "dormant: evidence source must be under "
         f"src/agentclaw/community/plugins: {traversal_path}"
     ]
+
+
+def test_validate_manifest_accepts_generic_and_qualified_base_classes(
+    tmp_path: Path,
+):
+    plugin_api = tmp_path / "src/agentclaw/community/plugin_api/passport.py"
+    plugin_api.parent.mkdir(parents=True)
+    plugin_api.write_text(
+        "class PassportPlugin(base.Plugin, typing.Protocol):\n"
+        "    def freeze_agent_passport(self): ...\n",
+        encoding="utf-8",
+    )
+    implementation = tmp_path / "src/agentclaw/community/plugins/local/passport.py"
+    implementation.parent.mkdir(parents=True)
+    implementation.write_text(
+        "import passport\n"
+        "class LocalPassportPlugin(passport.PassportPlugin[T]):\n"
+        "    def freeze_agent_passport(self):\n"
+        "        return None\n",
+        encoding="utf-8",
+    )
+    manifest = {
+        "modules": {
+            "dormant": {
+                "plugin_api": {
+                    "items": [
+                        {
+                            "key": "PassportPlugin.freeze_agent_passport",
+                            "evidence": {
+                                "path": (
+                                    "src/agentclaw/community/plugins/local/"
+                                    "passport.py"
+                                ),
+                                "symbol": (
+                                    "LocalPassportPlugin."
+                                    "freeze_agent_passport"
+                                ),
+                            },
+                        }
+                    ]
+                }
+            }
+        }
+    }
+
+    assert validate_manifest(manifest, backend_root=tmp_path) == []

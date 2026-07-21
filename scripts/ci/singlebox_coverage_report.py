@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import functools
 import html
 import json
 import sys
@@ -124,8 +125,13 @@ def _coverage_file_data(coverage: dict[str, Any], evidence_path: str) -> dict[st
     return {}
 
 
+@functools.lru_cache(maxsize=None)
+def _parse_ast(path: Path) -> ast.Module:
+    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
 def _symbol_body_lines(path: Path, symbol: str) -> set[int]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    tree = _parse_ast(path)
     parts = symbol.split(".")
     nodes: list[ast.AST] = list(tree.body)
     target: ast.AST | None = None
