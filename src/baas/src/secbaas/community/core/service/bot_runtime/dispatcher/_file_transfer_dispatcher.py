@@ -494,9 +494,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             # CAS failed — the poller may have already processed this ticket
             # between our read and the CAS.  Re-read and return success if the
             # ticket has already reached a valid post-completion state.
-            ticket = self._ticket_repo.get_by_transfer_id(
-                transfer_id, tenant=tenant
-            )
+            ticket = self._ticket_repo.get_by_transfer_id(transfer_id, tenant=tenant)
             if ticket is not None and ticket.status in (
                 "UPLOAD_COMPLETED",
                 "PULLING",
@@ -589,12 +587,14 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         try:
             self._ticket_repo.update_status(transfer_id, "CANCELLED")
         except TransferStateConflictError:
-            ticket = self._ticket_repo.get_by_transfer_id(
-                transfer_id, tenant=tenant
-            )
+            ticket = self._ticket_repo.get_by_transfer_id(transfer_id, tenant=tenant)
             if ticket is not None:
                 if ticket.status in (
-                    "CANCELLED", "FAILED", "DELETED", "DONE", "PULLING",
+                    "CANCELLED",
+                    "FAILED",
+                    "DELETED",
+                    "DONE",
+                    "PULLING",
                 ):
                     logger.info(
                         "dispatch_cancel_upload: CAS conflict resolved — "
