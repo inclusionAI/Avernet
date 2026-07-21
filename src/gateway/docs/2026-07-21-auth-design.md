@@ -168,18 +168,29 @@ class StrategyParams:
     delegation: Delegation = Delegation.OPTIONAL
 ```
 
-### 4.6 新增：租户令牌与 `tenant` 字段（本轮重点）
+### 4.6 新增：`tenant` 字段与它的**来源**（本轮重点）
 
-每个租户由网关签发**一个唯一的租户令牌**。调用方**每次请求都必须带上它**（如 `X-Tenant-Token` header）；
-网关**先**校验该令牌、把它映射成租户 id，再进入身份策略。`tenant` 因此是每个 `Principal` 的必填字段。
+`tenant` 在每个 `Principal` 上**必填**，但**来源随调用方类型而定**——不是所有流量都从令牌来。
+关键约束：租户令牌是密钥，**不能下发给浏览器**，所以第一方前端不能用令牌。
 
-- 它与"调用方身份"（用户 / App）**正交**：租户令牌回答"这是哪个租户的流量"，身份策略回答"这个租户里的谁在调"。
-- 它是租户的**权威来源**。App 场景下 api-key record 里也带 tenant，网关须**交叉校验二者一致**，
-  否则拒绝（防止一个 App 被挂到错误租户下调用）。
-- 缺失或非法的租户令牌 = 直接 401（租户对所有 API-gateway 流量都必需）。
+| 调用方 | 策略 | `tenant` 来源 |
+| --- | --- | --- |
+| 第三方 server | `app_key` | **租户令牌**（`X-Tenant-Token`，`TenantResolver` 校验）+ 与 api-key record 的 tenant **交叉校验** |
+| 我们的前端 / 人工 | `first_party_user` | **从已认证用户身份取**：`subject.tenantId`，取不到再落 `DEFAULT_TENANT` |
+
+- **租户与身份正交**：租户回答"哪个租户的流量"，身份策略回答"这个租户里的谁在调"。
+- **第三方**：租户令牌是权威来源；与 api-key record 的 tenant 不一致即拒（防止 App 被挂到错误租户）。
+  缺失/非法令牌 = 401（第三方流量必需）。
+- **前端**：浏览器带不了令牌，但带了 SSO/登录 cookie；`first_party_user` 本就把它解析成
+  `AuthenticatedUser`，而该身份**已带租户**（`tntInstId`）。于是 `tenant = subject.tenantId or DEFAULT_TENANT`：
+  - 单租户部署（社区，或只服务一个组织的 corp）→ 自然落到 `DEFAULT_TENANT`（即"前端默认租户"）。
+  - 多租户 corp → 直接取登录用户的 SSO 租户，**不会把不同组织的用户串到同一默认租户**（纯静态默认在此有跨租户串数据风险）。
+
+> **设计取舍：** 因为来源随策略而变，**不设"运行器统一前置解析租户"这一步**（§7）；改由**每个策略自己把
+> `tenant` 填进 Principal**。`AuthStrategy.build()` 因此不接收 `tenant` 入参。
 
 ```python
-# gateway/community/spi/authn/_ports.py
+# gateway/community/spi/authn/_ports.py —— 仅第三方 app_key 依赖它
 from typing import Protocol
 
 class TenantResolver(Protocol):
@@ -193,7 +204,8 @@ class TenantResolver(Protocol):
 
 ## 5. `AuthStrategy` 协议（构建 Principal 的方式）
 
-放在 `gateway/community/spi/authn/_protocols.py`。租户已由 §4.6 解析好并作为 `tenant` 传入。
+放在 `gateway/community/spi/authn/_protocols.py`。每个策略**自己产出完整 Principal，包括 `tenant`**
+（来源见 §4.6），运行器不再前置解析租户。
 
 ```python
 from typing import Protocol
@@ -203,9 +215,9 @@ class AuthStrategy(Protocol):
     name: str  # 稳定名字，API 的 `security` 按名字引用
 
     async def build(
-        self, creds: CredentialBundle, params: StrategyParams, tenant: str,
+        self, creds: CredentialBundle, params: StrategyParams,
     ) -> Principal | None:
-        """Try to build a Principal (for the given, already-verified tenant).
+        """Try to build a Principal from the request (tenant included).
 
         返回 None    → 本策略的凭证不在请求里（不适用），让下一个 OR 分支尝试。
         raise AuthError → 凭证在但非法（硬失败），不再回退。
@@ -278,10 +290,11 @@ _SESSION_COOKIES = ("IAM_TOKEN", "SSO_TOKEN", "access_token")
 class FirstPartyUserStrategy(AuthStrategy):
     name = "first_party_user"
 
-    def __init__(self, auth: AuthPlugin) -> None:
+    def __init__(self, auth: AuthPlugin, default_tenant: str) -> None:
         self._auth = auth
+        self._default_tenant = default_tenant             # 身份无租户时的兜底（前端默认租户）
 
-    async def build(self, creds, params, tenant):
+    async def build(self, creds, params):
         if not any(k in creds.cookies for k in _SESSION_COOKIES):
             return None                                   # 无第一方凭证 → 不适用
         if params.delegation is Delegation.FORBIDDEN:
@@ -289,6 +302,8 @@ class FirstPartyUserStrategy(AuthStrategy):
         user = await self._auth.get_login_user(           # 非法 → AuthPlugin 抛 AuthError
             cookie=creds.headers.get("cookie", ""), referer=creds.headers.get("referer"),
         )
+        # 前端带不了租户令牌；tenant 从登录用户身份取，取不到落默认租户
+        tenant = user.tenantId or self._default_tenant
         granted = _first_party_scopes(self._auth, user)   # 由权限插件推导；见注
         return UserPrincipal(tenant=tenant, subject=user, scopes=granted)
 ```
@@ -304,22 +319,27 @@ from gateway.community.spi.auth import AuthError
 from gateway.community.spi.authn import (
     AuthStrategy, StrategyParams, AppPrincipal, ThirdPartyApp, Delegation,
 )
-from gateway.community.spi.authn._ports import ApiKeyValidator
+from gateway.community.spi.authn._ports import ApiKeyValidator, TenantResolver
+
+_TENANT_HEADER = "x-tenant-token"
 
 class AppKeyStrategy(AuthStrategy):
     name = "app_key"
 
-    def __init__(self, keys: ApiKeyValidator) -> None:
+    def __init__(self, keys: ApiKeyValidator, tenants: TenantResolver) -> None:
         self._keys = keys
+        self._tenants = tenants
 
-    async def build(self, creds, params, tenant):
+    async def build(self, creds, params):
         api_key = _bearer(creds.headers.get("authorization"))
         if not api_key:
             return None                                   # 无 api key → 不适用
         record = await self._keys.verify(api_key)
         if record is None:
             raise AuthError("invalid api key")            # 凭证在但非法 → 硬失败
-        if record.tenant != tenant:                       # 与租户令牌交叉校验
+        # 第三方 tenant 来自租户令牌（权威），并与 api-key record 交叉校验
+        tenant = await self._tenants.resolve(creds.headers.get(_TENANT_HEADER, ""))
+        if record.tenant != tenant:
             raise AuthError("api key does not belong to the presented tenant")
         if params.delegation is Delegation.FORBIDDEN:
             # 纯 App 调用被显式允许；只有携带用户句柄时才拒（本轮 on_behalf_of 由 header 提供）
@@ -360,29 +380,24 @@ class SofaTenantResolver(TenantResolver):
 
 ---
 
-## 7. 网关运行器（先解析租户，再执行 OR/AND + scope）
+## 7. 网关运行器（执行 OR/AND + scope；tenant 由策略自带）
+
+> 每个策略自己按 §4.6 产出含 `tenant` 的 Principal，运行器不再前置解析租户。
 
 ```python
 # gateway/community/core/authn/_runner.py
-_TENANT_HEADER = "x-tenant-token"
-
 async def authenticate(
     creds: CredentialBundle,
     route_security: list[dict[str, StrategyParams]],   # 见 §8 的编译结果
     registry: dict[str, AuthStrategy],
-    tenant_resolver: TenantResolver,
 ) -> Principal:
-    # ① 先验证租户令牌（对所有流量必需）
-    tenant = await tenant_resolver.resolve(creds.headers.get(_TENANT_HEADER, ""))
-
-    # ② 再跑身份策略
     last_err: AuthError | None = None
     for item in route_security:                        # 列表项之间 OR
         built: Principal | None = None
         ok = True
         for name, params in item.items():              # 项内多 scheme AND
             try:
-                p = await registry[name].build(creds, params, tenant)
+                p = await registry[name].build(creds, params)
             except AuthError as e:
                 last_err, ok = e, False; break         # 凭证非法 → 本项失败
             if p is None:
@@ -522,7 +537,7 @@ def project(p: Principal) -> AuthenticatedUser:
 
 ## 11. 授权分层
 
-- **网关（粗粒度，租户/App/策略级）：** 租户令牌校验（§7①）；route 是否允许该策略；`scopes` 校验；
+- **网关（粗粒度，租户/App/策略级）：** 租户解析（§4.6：第三方 = 令牌校验，前端 = 身份/默认）；route 是否允许该策略；`scopes` 校验；
   配额、限流、租户隔离、审计。
 - **组件（细粒度，资源级）—— 留 core（Rule 7）：** "这个 principal 能否访问 bot X / entity Y"——
   已有 `AuthPlugin.authorize_entity_access()`、engine `AuthGateService.verify()`。
@@ -594,7 +609,7 @@ def project(p: Principal) -> AuthenticatedUser:
 - **`AuthenticatedUser`**：已验证的终端用户身份（组件既有模型）。
 - **`ThirdPartyApp`**：第三方应用身份（调用程序本身）。
 - **`Principal`**：网关产出的中立鉴权对象，判别联合 `UserPrincipal | AppPrincipal`，每个成员必带 `tenant`。
-- **租户令牌 / `TenantResolver`**：每租户唯一令牌；网关先验证并映射成 `tenant`（必填），与身份策略正交。
+- **租户 / `tenant`**：每个 Principal 必填；来源随调用方——第三方走租户令牌（`TenantResolver`），前端取 `subject.tenantId or DEFAULT_TENANT`（§4.6）。
 - **`AuthStrategy`**：网关侧"构建 Principal 的方式"的命名策略；`build()` 用 `None`/`raise` 区分"不适用"/"非法"。
 - **flavor `bare` / `sofa`**：社区（开源无后端）/ 企业（BUService），由 `GATEWAY_RUN_MODE` 选择。
 - **`xoneid`**（§15）：partner 显式转发的用户令牌 header，`sofa` 侧用 BUService SDK 解析为 `AuthenticatedUser`。
