@@ -6,6 +6,7 @@ Uses EngineManager for default engine, falls back to factory for explicit engine
 from __future__ import annotations
 
 import json
+import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, Optional
@@ -24,6 +25,7 @@ from engine.community.core.session.models import (
     SessionListRequest,
     SessionUpdateRequest,
 )
+from engine.community.core.session_favorite import get_session_favorite_repository
 from engine.community.shared.utils import decode_session_key
 
 log = logging.getLogger("web-sessions")
@@ -211,6 +213,16 @@ async def delete_session(session_id: str, force: bool = False, engine: Optional[
         if not ok:
             log.warning(f"[delete_session] 删除失败或会话不存在: session_id={session_id}")
             raise HTTPException(status_code=404, detail="Session not found or delete failed")
+        try:
+            await asyncio.to_thread(get_session_favorite_repository().remove_session, session_id)
+        except Exception as cleanup_error:
+            # The engine has already deleted the session. Do not misreport that
+            # successful destructive operation because local metadata cleanup failed.
+            log.warning(
+                "[delete_session] 收藏记录清理失败: session_id=%s, error=%s",
+                session_id,
+                cleanup_error,
+            )
         log.info(f"[delete_session] 删除成功: session_id={session_id}")
         return ApiResponse(success=True, message="Session deleted", warning=warning)
     except HTTPException:

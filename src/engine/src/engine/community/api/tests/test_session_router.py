@@ -68,7 +68,17 @@ def mock_session_api():
 
 
 @pytest.fixture()
-def client(mock_session_api) -> TestClient:
+def mock_favorite_repository():
+    repository = MagicMock()
+    with patch(
+        "engine.community.api.session.router.get_session_favorite_repository",
+        return_value=repository,
+    ):
+        yield repository
+
+
+@pytest.fixture()
+def client(mock_session_api, mock_favorite_repository) -> TestClient:
     app = FastAPI()
     app.include_router(router)
     return TestClient(app)
@@ -229,16 +239,30 @@ class TestGetSession:
 # ── DELETE /api/sessions/{session_id} ────────────────────────────────────────
 
 class TestDeleteSession:
-    def test_success(self, client, mock_session_api):
+    def test_success(self, client, mock_session_api, mock_favorite_repository):
         resp = client.delete("/api/sessions/sess-1")
         assert resp.status_code == 200
         assert resp.json()["success"] is True
         assert "deleted" in resp.json()["message"].lower()
+        mock_favorite_repository.remove_session.assert_called_once_with("sess-1")
 
-    def test_not_found_returns_404(self, client, mock_session_api):
+    def test_not_found_returns_404(self, client, mock_session_api, mock_favorite_repository):
         mock_session_api.delete.return_value = False
         resp = client.delete("/api/sessions/missing")
         assert resp.status_code == 404
+        mock_favorite_repository.remove_session.assert_not_called()
+
+    def test_favorite_cleanup_error_does_not_make_delete_fail(
+        self,
+        client,
+        mock_favorite_repository,
+    ):
+        mock_favorite_repository.remove_session.side_effect = RuntimeError("sqlite unavailable")
+
+        resp = client.delete("/api/sessions/sess-1")
+
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
 
     def test_force_param_forwarded(self, client, mock_session_api):
         client.delete("/api/sessions/sess-1?force=true")
