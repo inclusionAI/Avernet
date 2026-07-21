@@ -32,6 +32,10 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     CollaboratorPermissionInterceptor,
     with_interceptors,
 )
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
+    CollaboratorService,
+)
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.services.resource_file_service import (
@@ -39,6 +43,9 @@ from agentclaw.community.core.services.resource_file_service import (
     is_readonly,
 )
 from agentclaw.community.core.devices.services.device_filesystem import FileTooLargeError
+from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
+    BotPublishRepositoryProtocol,
+)
 from agentclaw.community.di import Injected
 
 logger = logging.getLogger(__name__)
@@ -105,6 +112,60 @@ def _content_headers(path: str) -> tuple[str, str]:
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
     media_type = _MIME_TYPES.get(ext, 'application/octet-stream')
     return media_type, f"attachment; filename*=UTF-8''{quote(filename)}"
+
+
+def _authorize_preview_bot(
+    *,
+    bot_id: str,
+    requested_owner_id: str | None,
+    user_id: str,
+    bot_repo: BotRepository,
+    collaborator_svc: CollaboratorService,
+) -> str:
+    """Return the authoritative owner after authorizing preview access.
+
+    ``owner_id`` is caller-controlled and therefore cannot establish ownership.
+    Prefer an exact requested-owner match for existing collaborator calls, then
+    resolve the bot's stored owner and authorize the authenticated user against it.
+    """
+    bot = None
+    if requested_owner_id:
+        bot = bot_repo.get_by_id_and_owner(bot_id, requested_owner_id)
+    if bot is None:
+        bot = bot_repo.get_by_id_and_owner(bot_id, user_id)
+    if bot is None and bot_id != "default":
+        bot = bot_repo.get_by_id(bot_id)
+
+    authoritative_owner_id = (bot or {}).get("owner_id")
+    if not isinstance(authoritative_owner_id, str) or not authoritative_owner_id:
+        raise HTTPException(status_code=404, detail="Bot not found")
+
+    if user_id == authoritative_owner_id:
+        return authoritative_owner_id
+
+    try:
+        permission = collaborator_svc.check_collaborator_permission(
+            bot_id=bot_id,
+            owner_id=authoritative_owner_id,
+            user_id=user_id,
+            required_level=PermissionLevel.ADMIN,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[preview_file] permission check failed user_id=%s bot_id=%s: %s",
+            user_id, bot_id, exc,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="No permission to access this bot's files",
+        ) from exc
+
+    if not permission.get("has_permission"):
+        raise HTTPException(
+            status_code=403,
+            detail="No permission to access this bot's files",
+        )
+    return authoritative_owner_id
 
 
 # ---- Endpoints ----
@@ -240,10 +301,29 @@ async def preview_file(
     device_uuid: Optional[str] = Query(None, description="Device UUID for multi-instance targeting; omitted → active instance"),
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
+    collaborator_svc: CollaboratorService = Injected(CollaboratorService),
+    publish_repo: BotPublishRepositoryProtocol = Injected(BotPublishRepositoryProtocol),
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> PreviewResponse:
     """Preview file content (text files only)."""
     eid, ebid, eeng = _resolve_params(ctx, bot_id, engine_type, owner_id, bot_repo=bot_repo)
+    eid = _authorize_preview_bot(
+        bot_id=ebid,
+        requested_owner_id=owner_id,
+        user_id=ctx.user_id,
+        bot_repo=bot_repo,
+        collaborator_svc=collaborator_svc,
+    )
+    if publish_id:
+        try:
+            publish_record = publish_repo.get_by_id(int(publish_id))
+        except (TypeError, ValueError):
+            publish_record = None
+        if publish_record is None or publish_record.source_bot_id != ebid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to get device info for publish_id={publish_id}",
+            )
     try:
         content = await file_svc.read_file(
             entity_id=eid, bot_id=ebid, engine_type=eeng, path=path,
