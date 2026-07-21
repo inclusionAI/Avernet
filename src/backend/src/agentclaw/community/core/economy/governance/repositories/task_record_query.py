@@ -91,38 +91,6 @@ class TaskRecordQueryMixin:
             )
             return GovernanceTicket.from_orm(obj) if obj else None
 
-    def find_observed_ticket(
-        self, worker_id: str,
-    ) -> GovernanceTicket | None:
-        """Find the active OBSERVED ticket for a worker (whitelist observation).
-
-        白名单观察态:bot 进白名单后由审批加白或 scan 兜底转入 OBSERVED,或由
-        offline-batch 命中白名单时新建。本查询按 ``worker_id`` 取该 worker 最近
-        的一条观察单(同 ``find_latest_closed_by_worker`` 的 worker_id 口径,
-        **非** active_worker —— 加白关单时 active_worker 已释放置 NULL)。
-
-        排序 ``gmt_modified DESC``(非 closed_at,因 OBSERVED 不设 closed_at);
-        最新刷新的观察单排前,供 offline-batch 刷新与删白收尾定位。
-
-        Returns:
-            :class:`GovernanceTicket` or ``None`` if no observed ticket exists.
-        """
-        _env = get_current_env()
-        with self._db.orm_session() as s:
-            obj = (
-                s.query(GovernanceTicketOrm)
-                .filter(
-                    GovernanceTicketOrm.worker_id == worker_id,
-                    GovernanceTicketOrm.governance_status == GovernanceStatus.OBSERVED,
-                    GovernanceTicketOrm.env == _env,
-                )
-                .order_by(
-                    GovernanceTicketOrm.gmt_modified.desc(),
-                )
-                .first()
-            )
-            return GovernanceTicket.from_orm(obj) if obj else None
-
     def find_latest_tickets_by_worker_keys(
         self, worker_keys: list[str],
     ) -> dict[str, GovernanceTicket]:

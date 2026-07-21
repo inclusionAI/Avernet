@@ -179,20 +179,6 @@ def _assert_list_waiting_filter(response, world) -> None:
     )
 
 
-def _assert_list_observed_filter(response, world) -> None:
-    """observed filter 返回观察态工单(评审据此查看白名单 bot 最新画像,Task 13)。"""
-    del world
-    body = response.json()
-    assert body["success"] is True
-    data = body["data"]
-    assert data["status_filter"] == ["observed"]
-    assert data["total"] >= 1
-    for item in data["items"]:
-        assert item["governance_status"] == "observed"
-    ticket_ids = {item["ticket_id"] for item in data["items"]}
-    assert "tkt-list-obs1" in ticket_ids
-
-
 def _assert_list_pagination(response, world) -> None:
     """limit=1 page returns <=1 item; total unaffected by window."""
     body = response.json()

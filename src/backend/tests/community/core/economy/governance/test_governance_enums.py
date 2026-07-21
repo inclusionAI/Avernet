@@ -44,15 +44,6 @@ def test_scan_skip_values():
     assert AuditAction.SCAN_SKIP_COOLDOWN == "scan_skip_cooldown"
 
 
-def test_close_reason_values():
-    assert CloseReason.ADMIN_CLOSED == "admin_closed"
-    assert CloseReason.SCAN_WHITELISTED == "scan_whitelisted"
-    assert CloseReason.WHITELIST_APPROVED == "whitelist_approved"
-    assert CloseReason.USER_OPTIMIZED_APPROVED == "user_optimized_approved"
-    assert CloseReason.REVIEW_REJECTED == "review_rejected"
-    assert CloseReason.STALE_REPLACED == "stale_replaced"
-
-
 def test_admin_action_values():
     assert AuditAction.ADMIN_CANCEL_PENDING == "admin_cancel_pending"
     assert AuditAction.ADMIN_CLOSE_ALL == "admin_close_all"

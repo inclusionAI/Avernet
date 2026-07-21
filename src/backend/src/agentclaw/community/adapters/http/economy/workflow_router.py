@@ -75,6 +75,11 @@ _ALLOWED_DELIVERY_STATUSES = frozenset(
     {"pending", "sent", "failed", "cancelled"}
 )
 
+# 投递状态过滤值(pending / sent / failed / cancelled)。
+_ALLOWED_DELIVERY_STATUSES = frozenset(
+    {"pending", "sent", "failed", "cancelled"}
+)
+
 
 # ---------------------------------------------------------------------------
 # Private helpers — keeps handlers short
@@ -121,19 +126,24 @@ def _validate_status_filter(statuses: list[str] | None) -> list[str] | None:
 def _validate_delivery_status_filter(delivery_statuses: list[str] | None) -> list[str] | None:
     """校验 ``delivery_status`` query 取值,返回归一化后的列表。
 
-    语义守恒(只做 None/[] 短路,不做枚举校验):
+    语义守恒:
       - None  = 缺省 → 不过滤投递态
       - []    = 显式空过滤 → 空结果路径
-      - 非空  = 直通(不拦非核心值;前端可传 none 历史哨兵 / first_send:sent 旧格式
-        等任意列原始值,SQL 精确匹配 IN(...))
-
-    核心正规状态集 ``_ALLOWED_DELIVERY_STATUSES`` 仅作文档/校验参考(非闭集)。
-    delivery_status 状态由 notify 驱动写入;查询组合由前端做,后端精确匹配不扩展。
+      - 非空  = 任一非法值 → 422
     """
     if delivery_statuses is None:
         return None
     if len(delivery_statuses) == 0:
         return []
+    invalid = [s for s in delivery_statuses if s not in _ALLOWED_DELIVERY_STATUSES]
+    if invalid:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Invalid delivery_status {invalid!r}; allowed: "
+                f"{sorted(_ALLOWED_DELIVERY_STATUSES)}"
+            ),
+        )
     return delivery_statuses
 
 

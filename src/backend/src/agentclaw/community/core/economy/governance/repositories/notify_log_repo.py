@@ -651,7 +651,7 @@ class NotifyLogRepository:
                     GovernanceNotificationOrm.ticket_id == ticket_id,
                     GovernanceNotificationOrm.env == _env,
                 )
-                .delete(synchronize_session=False)
+                .delete(synchronize_session="fetch")
             )
             return deleted
 
