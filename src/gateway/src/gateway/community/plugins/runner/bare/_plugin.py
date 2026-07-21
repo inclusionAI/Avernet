@@ -28,7 +28,7 @@ class BareAppRunnerPlugin(AppRunnerPlugin):
         import uvicorn
 
         uvicorn.run(
-            app="gateway.community.servers.web.app:app",
+            app="gateway.community.adapters.web.app:app",
             host="0.0.0.0",
             port=port,
             workers=workers,

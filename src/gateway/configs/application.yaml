@@ -16,4 +16,4 @@ log_config:
 module_config:
   web:
     port: 8888
-    start: "gateway.community.servers.web.app:app"
+    start: "gateway.community.adapters.web.app:app"

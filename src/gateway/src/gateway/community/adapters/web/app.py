@@ -1,10 +1,4 @@
-"""FastAPI Web application entry point (community edition).
-
-Mirrors the original ``teamclawgw/servers/web/app.py`` but swaps the
-``sofapy_base`` calls for SPI accessors so the open-source package has no
-framework dependency: app creation, logging and tracing all resolve through
-the ``gateway.community`` plugin layer.
-"""
+"""FastAPI Web application entry point."""
 
 from __future__ import annotations
 

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from gateway.community.config import ConfigLoader
 from gateway.community.logger import get_logger
-from gateway.community.servers.web.app import app, create_app
+from gateway.community.adapters.web.app import app, create_app
 from gateway.community.tracer import get_tracer_plugin
 
 
