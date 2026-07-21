@@ -18,6 +18,9 @@ from injector import Injector, Module
 from engine.community.di.modules.config_module import ConfigModule
 from engine.community.di.modules.manager_module import ManagerModule
 from engine.community.di.modules.process_module import ProcessModule
+from engine.community.di.modules.resource_materialization_module import (
+    ResourceMaterializationModule,
+)
 from engine.community.di.modules.router_collection import SharedRoutersModule
 from engine.community.di.profile_modules import modules_for
 from engine.community.di.runtime_mode import RuntimeConfig
@@ -39,6 +42,7 @@ def build_injector(
         ConfigModule(),
         ProcessModule(),
         ManagerModule(),
+        ResourceMaterializationModule(),
         SharedRoutersModule(),
     ]
     modules.extend(modules_for(config.profile))
