@@ -17,8 +17,10 @@ use bcs_service_api::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tracing::{info, warn};
+use tracing::{Span, info, warn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use crate::gateway_trace::record_span_content;
 use crate::state::HttpAppState;
 
 const BOT_EVENT_REQUEST_BODY_LIMIT: usize = 2 * 1024 * 1024;
@@ -205,6 +207,12 @@ pub async fn post_bot_event(
     headers: HeaderMap,
     LoggedBotEventRequest(req): LoggedBotEventRequest,
 ) -> Result<Json<Value>, BotEventRouteError> {
+    let callback_content = serde_json::to_string(&json!({
+        "message": &req.message.text,
+        "payload": &req.payload,
+    }))
+    .expect("serializing JSON callback content cannot fail");
+    record_span_content("bcn.provider.callback.content", &callback_content);
     let provider_id = header_required(&headers, BCN_PROVIDER_ID_HEADER)?;
     // Derive state: prefer the explicit `state` field (1.0); fall back to
     // extracting from `payload.state` for chat events (2.0 callback-streaming);
@@ -243,6 +251,17 @@ pub async fn post_bot_event(
         message_text = %req.message.text,
         "provider callback: received bot event"
     );
+    let span = Span::current();
+    span.set_attribute("bcn.operation", "provider.callback");
+    span.set_attribute("bcn.provider.id", provider_id.clone());
+    span.set_attribute("bcn.run.id", req.run_id.clone());
+    span.set_attribute("bcn.callback.state", format!("{effective_state:?}"));
+    if let Some(seq) = req.seq {
+        span.set_attribute("bcn.callback.seq", seq as i64);
+    }
+    if let Some(event) = req.event.as_deref() {
+        span.set_attribute("bcn.callback.event", event.to_string());
+    }
     let credential = credential_from_headers(&state, &headers, &provider_id).await?;
 
     let outcome = match state
@@ -275,6 +294,11 @@ pub async fn post_bot_event(
         failed_count = %outcome.failed_count,
         "provider callback: bot event processed"
     );
+    span.set_attribute(
+        "bcn.callback.delivered_count",
+        outcome.delivered_count as i64,
+    );
+    span.set_attribute("bcn.callback.failed_count", outcome.failed_count as i64);
 
     Ok(Json(json!({
         "ok": true,
@@ -288,6 +312,12 @@ pub async fn post_coordination_event(
     headers: HeaderMap,
     Json(req): Json<ProviderCoordinationEventRequest>,
 ) -> Result<Json<Value>, BotEventRouteError> {
+    let callback_content = serde_json::to_string(&json!({
+        "result_text": &req.result_text,
+        "intent": &req.intent,
+    }))
+    .expect("serializing JSON callback content cannot fail");
+    record_span_content("bcn.provider.callback.content", &callback_content);
     let provider_id = header_required(&headers, BCN_PROVIDER_ID_HEADER)?;
     let credential = credential_from_headers(&state, &headers, &provider_id).await?;
     info!(
@@ -299,7 +329,18 @@ pub async fn post_coordination_event(
         mcp_server = ?req.mcp_server,
         "provider callback: received coordination event"
     );
-
+    let span = Span::current();
+    span.set_attribute("bcn.operation", "provider.callback");
+    span.set_attribute("bcn.provider.id", provider_id.clone());
+    span.set_attribute("bcn.run.id", req.run_id.clone());
+    span.set_attribute("bcn.callback.tool_call_id", req.tool_call_id.clone());
+    span.set_attribute("bcn.callback.kind", format!("{:?}", req.kind));
+    if let Some(tool_name) = req.tool_name.as_deref() {
+        span.set_attribute("bcn.callback.tool_name", tool_name.to_string());
+    }
+    if let Some(mcp_server) = req.mcp_server.as_deref() {
+        span.set_attribute("bcn.callback.mcp_server", mcp_server.to_string());
+    }
     let outcome = state
         .services
         .provider_bot_events
@@ -320,6 +361,8 @@ pub async fn post_coordination_event(
         })
         .await
         .map_err(bot_event_error)?;
+    span.set_attribute("bcn.callback.processed", outcome.processed);
+    span.set_attribute("bcn.callback.duplicate", outcome.duplicate);
 
     Ok(Json(json!({
         "ok": true,

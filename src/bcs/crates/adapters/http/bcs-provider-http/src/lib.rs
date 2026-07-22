@@ -17,9 +17,12 @@ use bcs_service_api::{
     BotRunContext, BotRunContextPort, ChatEventState, GroupHistoryBotRequestPort, MessageFlowService,
     ProviderTransportPreference, ServiceError, ServiceResult,
 };
+use opentelemetry::global;
+use opentelemetry_http::HeaderInjector;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tracing::{info, warn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 mod sse;
 
@@ -735,6 +738,12 @@ async fn send_provider_request(
     if protocol_version == "2.0" {
         request = request.header(BCN_TRANSPORT_HEADER, transport);
     }
+    let context = tracing::Span::current().context();
+    let mut trace_headers = reqwest::header::HeaderMap::new();
+    global::get_text_map_propagator(|propagator| {
+        propagator.inject_context(&context, &mut HeaderInjector(&mut trace_headers));
+    });
+    request = request.headers(trace_headers);
     let response = request
         .json(body)
         .send()

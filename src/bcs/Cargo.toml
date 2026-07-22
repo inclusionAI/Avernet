@@ -123,6 +123,13 @@ inventory = "0.3"
 tracing            = "0.1"
 tracing-appender   = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "local-time"] }
+tracing-opentelemetry = "=0.32.0"
+
+# Distributed tracing
+opentelemetry = { version = "=0.31.0", features = ["trace"] }
+opentelemetry-http = "=0.31.0"
+opentelemetry_sdk = { version = "=0.31.0", features = ["trace"] }
+opentelemetry-otlp = { version = "=0.31.0", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client"] }
 
 # Async
 async-trait = "0.1"

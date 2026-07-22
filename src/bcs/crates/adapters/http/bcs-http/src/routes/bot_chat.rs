@@ -11,8 +11,11 @@ use bcs_service_api::{
 use serde::Deserialize;
 use serde_json::Value;
 use std::time::Instant;
+use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::chat_digest::{ChatDigestRecord, log_chat_digest};
+use crate::gateway_trace::{chat_client_observation, record_span_content};
 use crate::state::HttpAppState;
 
 use super::{bot_id_from_headers, container_header_matches};
@@ -121,6 +124,7 @@ pub async fn bot_chat(
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
     let effective_timeout_ms = effective_legacy_chat_timeout_ms(req.timeout_ms);
+    record_chat_dispatch_trace(&bot_uuid, &headers, &req, false, effective_timeout_ms);
 
     let from_bot_id = match resolve_bot_caller(&state, &headers).await {
         Ok(from_bot_id) => from_bot_id,
@@ -166,6 +170,7 @@ pub async fn bot_chat(
     }
 
     let run_id = uuid::Uuid::new_v4().to_string();
+    Span::current().set_attribute("bcn.run.id", run_id.clone());
     let session_key = resolve_session_key(
         req.session_id.as_deref(),
         &run_id,
@@ -237,6 +242,7 @@ pub async fn bot_chat(
             });
             err
         })?;
+    Span::current().set_attribute("bcn.delivery.accepted", outcome.delivered);
 
     log_bot_chat_digest(ChatDigestArgs {
         endpoint: "bot_chat",
@@ -281,6 +287,7 @@ pub async fn bot_chat_async(
         .timeout_ms
         .unwrap_or(state.async_chat_run_timeout_ms)
         .min(24 * 60 * 60 * 1_000);
+    record_chat_dispatch_trace(&bot_uuid, &headers, &req, true, timeout_ms);
 
     let from_bot_id = match resolve_bot_caller(&state, &headers).await {
         Ok(from_bot_id) => from_bot_id,
@@ -306,6 +313,7 @@ pub async fn bot_chat_async(
     let authenticated_staff_id = authenticated_staff_id(&state, &headers, &uri).await;
 
     let run_id = uuid::Uuid::new_v4().to_string();
+    Span::current().set_attribute("bcn.run.id", run_id.clone());
     let session_key = resolve_session_key(
         req.session_id.as_deref(),
         &run_id,
@@ -378,6 +386,7 @@ pub async fn bot_chat_async(
             });
             err
         })?;
+    Span::current().set_attribute("bcn.delivery.accepted", true);
 
     log_bot_chat_digest(ChatDigestArgs {
         endpoint: "bot_chat_async",
@@ -405,6 +414,46 @@ pub async fn bot_chat_async(
             "expires_at_ms": accepted.expires_at_ms,
         })),
     ))
+}
+
+fn record_chat_dispatch_trace(
+    target_bot_id: &str,
+    headers: &HeaderMap,
+    request: &ChatRequest,
+    async_mode: bool,
+    effective_timeout_ms: u64,
+) {
+    let span = Span::current();
+    span.set_attribute("bcn.operation", "chat.dispatch");
+    span.set_attribute("bcn.target.bot_id", target_bot_id.to_string());
+    span.set_attribute("bcn.chat.async", async_mode);
+    span.set_attribute("bcn.chat.timeout_ms", effective_timeout_ms as i64);
+    span.set_attribute("bcn.chat.message_size_bytes", request.message.len() as i64);
+    span.set_attribute("bcn.chat.tags_count", request.tags.len() as i64);
+    span.set_attribute(
+        "bcn.chat.response_mode",
+        format!("{:?}", request.response_mode),
+    );
+    if let Some(value) = request.from.as_deref() {
+        span.set_attribute("bcn.chat.from", value.to_string());
+    }
+    if let Some(value) = request.session_id.as_deref() {
+        span.set_attribute("bcn.chat.session_id", value.to_string());
+    }
+    if let Some(value) = request.caller_wait_mode.as_deref() {
+        span.set_attribute("bcn.chat.caller_wait_mode", value.to_string());
+    }
+    if let Some(value) = request.organization_code.as_deref() {
+        span.set_attribute("bcn.chat.organization_code", value.to_string());
+    }
+    let client = chat_client_observation(headers);
+    if let Some(detach) = client.detach {
+        span.set_attribute("bcn.client.detach", detach);
+    }
+    if let Some(wait_timeout_ms) = client.wait_timeout_ms {
+        span.set_attribute("bcn.client.wait_timeout_ms", wait_timeout_ms as i64);
+    }
+    record_span_content("bcn.chat.message", &request.message);
 }
 
 fn effective_legacy_chat_timeout_ms(timeout_ms: Option<u64>) -> u64 {
