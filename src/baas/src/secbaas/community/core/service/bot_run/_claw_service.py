@@ -195,7 +195,7 @@ class ClawBotService(BotService):
         binding_info: BotBindingInfo,
         wait_result: bool = True,
         context: BotChatContext | None = None,
-        timeout: int | None = None,
+        timeout: float,
         chat_metadata: dict[str, str] | None = None,
     ) -> BotResponse:
         """Send a message and get response via ChatClient.
@@ -239,9 +239,7 @@ class ClawBotService(BotService):
                 message=message,
                 session_key=session_id,
                 wait_result=wait_result,
-                timeout=timeout
-                if timeout is not None
-                else self._config.request_timeout,
+                timeout=timeout,
                 auth_token=auth_token,
                 app_id=app_id,
                 chat_metadata=chat_metadata,
@@ -263,7 +261,7 @@ class ClawBotService(BotService):
         message: str,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
-        timeout: int | None = None,
+        timeout: float,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，逐 chunk 产出 StreamChunk。
 
@@ -290,9 +288,7 @@ class ClawBotService(BotService):
             async for chunk in client.send_message_stream(
                 message=message,
                 session_key=session_id,
-                timeout=timeout
-                if timeout is not None
-                else self._config.request_timeout,
+                timeout=timeout,
                 auth_token=auth_token,
                 app_id=app_id,
             ):

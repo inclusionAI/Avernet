@@ -611,6 +611,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
             task_message_dispatcher,
         ),
         system_config_service=system_config_service,
+        default_request_timeout=config.bot_service.request_timeout,
     )
 
     bcn_downlink_service = providers.Singleton(

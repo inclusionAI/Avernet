@@ -271,7 +271,7 @@ class AsyncChatClient:
         message: str,
         session_key: str | None = None,
         wait_result: bool = True,
-        timeout: int | None = None,  # noqa: ASYNC109
+        timeout: float | None = None,  # noqa: ASYNC109
         auth_token: str | None = None,
         app_id: str | None = None,
         chat_metadata: dict[str, str] | None = None,
@@ -412,7 +412,7 @@ class AsyncChatClient:
         self,
         message: str,
         session_key: str | None = None,
-        timeout: int | None = None,  # noqa: ASYNC109
+        timeout: float | None = None,  # noqa: ASYNC109
         auth_token: str | None = None,
         app_id: str | None = None,
         chat_metadata: dict[str, str] | None = None,
@@ -576,7 +576,7 @@ class AsyncChatClient:
     @staticmethod
     async def _drain_stream_queue(
         queue: asyncio.Queue[StreamChunk],
-        timeout: int | None,
+        timeout: float | None,
     ) -> AsyncIterator[StreamChunk]:
         """从 stream_queue 消费 StreamChunk，遇到终止 chunk 后停止。
 

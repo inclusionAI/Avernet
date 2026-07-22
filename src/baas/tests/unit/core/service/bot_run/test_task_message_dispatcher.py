@@ -76,6 +76,7 @@ class TestTaskMessageDispatcherSend:
             message="hello",
             binding_info=arca_binding,
             context=context,
+            timeout=30.0,
         )
         await asyncio.sleep(0)
 
@@ -93,6 +94,7 @@ class TestTaskMessageDispatcherSend:
             message="hello",
             binding_info=arca_binding,
             context=context,
+            timeout=30.0,
         )
         await asyncio.sleep(0)
 
@@ -110,6 +112,7 @@ class TestTaskMessageDispatcherSend:
             message="hello",
             binding_info=arca_binding,
             context=context,
+            timeout=30.0,
         )
         await asyncio.sleep(0)
 
@@ -132,6 +135,7 @@ class TestTaskMessageDispatcherSend:
             message="hello",
             binding_info=arca_binding,
             context=context,
+            timeout=30.0,
         )
         await asyncio.sleep(0)
 
@@ -153,6 +157,7 @@ class TestTaskMessageDispatcherSend:
             binding_info=arca_binding,
             context=context,
             wait_result=False,
+            timeout=30.0,
         )
         await asyncio.sleep(0)
 
@@ -187,6 +192,7 @@ class TestTaskMessageDispatcherSend:
             binding_info=arca_binding,
             context=context,
             callback="bcn_uplink",
+            timeout=30.0,
         )
         await asyncio.sleep(0.1)
 
@@ -251,6 +257,7 @@ class TestTaskMessageDispatcherWithPool:
             binding_info=arca_binding,
             context=context,
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            timeout=30.0,
         )
         await asyncio.sleep(0.2)
         assert pool.active_count == 0
@@ -271,6 +278,78 @@ class TestTaskMessageDispatcherWithPool:
             binding_info=arca_binding,
             context=context,
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            timeout=30.0,
         )
         await asyncio.sleep(0.2)
+        assert pool.active_count == 0
+
+
+class TestTaskMessageDispatcherTimeout:
+    """Cover timeout reduction logic: bot_service gets timeout - 0.2 (floored at 0.1),
+    slot.run gets the original timeout."""
+
+    @pytest.mark.asyncio
+    async def test_send_message_receives_reduced_timeout(
+        self, mock_bot_service, mock_run_repo, arca_binding, context
+    ):
+        dispatcher = TaskMessageDispatcher(
+            run_repository=mock_run_repo, task_pool=None
+        )
+        await dispatcher.dispatch_send(
+            bot_service=mock_bot_service,
+            run_id="run-001",
+            session_id="sess-001",
+            message="hello",
+            binding_info=arca_binding,
+            context=context,
+            timeout=30.0,
+        )
+        await asyncio.sleep(0)
+
+        call_kw = mock_bot_service.send_message.call_args.kwargs
+        assert call_kw["timeout"] == pytest.approx(29.8)
+
+    @pytest.mark.asyncio
+    async def test_small_timeout_floored_to_0_1(
+        self, mock_bot_service, mock_run_repo, arca_binding, context
+    ):
+        dispatcher = TaskMessageDispatcher(
+            run_repository=mock_run_repo, task_pool=None
+        )
+        await dispatcher.dispatch_send(
+            bot_service=mock_bot_service,
+            run_id="run-001",
+            session_id="sess-001",
+            message="hello",
+            binding_info=arca_binding,
+            context=context,
+            timeout=0.1,
+        )
+        await asyncio.sleep(0)
+
+        call_kw = mock_bot_service.send_message.call_args.kwargs
+        assert call_kw["timeout"] == pytest.approx(0.1)
+
+    @pytest.mark.asyncio
+    async def test_slot_run_receives_original_timeout(
+        self, mock_bot_service, mock_run_repo, arca_binding, context
+    ):
+        pool = TaskConcurrencyPool(softmax=1, per_key_max=0)
+        dispatcher = TaskMessageDispatcher(
+            run_repository=mock_run_repo, task_pool=pool
+        )
+        await dispatcher.dispatch_send(
+            bot_service=mock_bot_service,
+            run_id="run-001",
+            session_id="sess-001",
+            message="hello",
+            binding_info=arca_binding,
+            context=context,
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            timeout=15.0,
+        )
+        await asyncio.sleep(0.2)
+
+        call_kw = mock_bot_service.send_message.call_args.kwargs
+        assert call_kw["timeout"] == pytest.approx(14.8)
         assert pool.active_count == 0
