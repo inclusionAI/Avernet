@@ -135,8 +135,8 @@ None new. `fastapi>=0.100`, `pydantic>=2.0`, `httpx`/`pytest`/`pytest-asyncio` a
 - **Define the full auth machinery here** (AppPrincipal, discriminated `Principal` union, `AuthStrategy`,
   Principal signing) — rejected; that's the gateway auth-plugin's job (#301). We **do** seed the first-party
   `UserPrincipal` domain model in `spi/authn/_models.py` (per #301 §4) so the identity the gateway forwards is
-  a real typed model, and routes *declare* the requirement via `x-avernet-security`. `subject` reuses the
-  existing `spi/auth.AuthUser`; #301 later neutralizes it to `AuthenticatedUser`.
+  a real typed model, and routes *declare* the requirement via `x-avernet-security`. `subject` is the neutral
+  `spi/auth.AuthenticatedUser` (from #301, now merged to dev).
 - **One big PR** — rejected; user wants the auth/global-contract foundation reviewable first to unblock others.
 
 ## Rollout

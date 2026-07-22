@@ -5,12 +5,12 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from gateway.community.spi.auth import AuthUser
+from gateway.community.spi.auth import AuthenticatedUser
 from gateway.community.spi.authn import Principal, PrincipalType, UserPrincipal
 
 
-def _subject() -> AuthUser:
-    return AuthUser(id="u1", operatorName="op", staffId="s1")
+def _subject() -> AuthenticatedUser:
+    return AuthenticatedUser(id="u1", username="op")
 
 
 def test_user_principal_defaults() -> None:
