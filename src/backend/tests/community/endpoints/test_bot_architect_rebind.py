@@ -24,6 +24,7 @@ from tests.community.framework import (
 ARCHITECT_BOT_ID = "arch_bot_rebind_arch"
 CODING_BOT_ID = "app_bot_rebind_app"
 OTHER_ARCHITECT_BOT_ID = "other_arch"
+TARGET_ARCHITECT_BOT_ID = "target_arch"
 
 
 def _seed_architect_and_coding_bot(world):
@@ -38,6 +39,23 @@ def _seed_architect_and_coding_bot(world):
             "owner_name": "test_user",
             "creator_id": "test_user",
             "entity_id": "test_user",
+            "entity_type": "staff",
+            "active_engine": "openclaw",
+            "bot_type": "personal",
+            "status": "ACTIVE",
+            "ext": {"is_domain_bot": True},
+        }
+    )
+    # Target domain architect bot (may be owned by someone else; rebind
+    # only requires the *source* architect to be owned by the caller).
+    bot_repo.insert(
+        {
+            "bot_id": TARGET_ARCHITECT_BOT_ID,
+            "bot_name": "Target Architect Bot (rebind)",
+            "owner_id": "other_user",
+            "owner_name": "other_user",
+            "creator_id": "other_user",
+            "entity_id": "other_user",
             "entity_type": "staff",
             "active_engine": "openclaw",
             "bot_type": "personal",
@@ -80,7 +98,7 @@ def _seed_architect_and_coding_bot(world):
     input=CaseInput(
         path_params={"architect_bot_id": ARCHITECT_BOT_ID},
         headers={"x-user-id": "test_user"},
-        json_body={"coding_bot_ids": [CODING_BOT_ID]},
+        json_body={"target_architect_bot_id": TARGET_ARCHITECT_BOT_ID, "coding_bot_ids": [CODING_BOT_ID]},
     ),
     seed=_seed_architect_and_coding_bot,
     expect=ExpectSuccess(
@@ -88,7 +106,8 @@ def _seed_architect_and_coding_bot(world):
         json_contains={
             "success": True,
             "data": {
-                "architect_bot_id": ARCHITECT_BOT_ID,
+                "source_architect_bot_id": ARCHITECT_BOT_ID,
+                "target_architect_bot_id": TARGET_ARCHITECT_BOT_ID,
                 "total": 1,
                 "succeeded": 1,
                 "failed": 0,
@@ -107,7 +126,7 @@ def rebind_architect_bot_ok():
     input=CaseInput(
         path_params={"architect_bot_id": ARCHITECT_BOT_ID},
         headers={"x-user-id": "anonymous"},
-        json_body={"coding_bot_ids": [CODING_BOT_ID]},
+        json_body={"target_architect_bot_id": TARGET_ARCHITECT_BOT_ID, "coding_bot_ids": [CODING_BOT_ID]},
     ),
     seed=_seed_architect_and_coding_bot,
     expect=ExpectError(

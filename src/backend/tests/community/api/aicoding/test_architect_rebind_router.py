@@ -71,10 +71,11 @@ class TestRebindArchitectBot:
     def test_success(self, client):
         tc, svc = client
         svc.rebind_architect_bot_batch.return_value = {
-            "architect_bot_id": "arch1",
+            "source_architect_bot_id": "arch1",
+            "target_architect_bot_id": "arch2",
             "results": [
                 {"bot_id": "c1", "success": True, "changed": True,
-                 "previous_architect_bot_id": "old", "architect_bot_id": "arch1"},
+                 "previous_architect_bot_id": "old", "architect_bot_id": "arch2"},
             ],
             "total": 1,
             "succeeded": 1,
@@ -82,14 +83,15 @@ class TestRebindArchitectBot:
         }
         resp = tc.put(
             "/api/bots/arch1/architect-rebind",
-            json={"coding_bot_ids": ["c1", "c2", "c1"]},
+            json={"target_architect_bot_id": "arch2", "coding_bot_ids": ["c1", "c2", "c1"]},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
         assert data["data"]["total"] == 1
         kwargs = svc.rebind_architect_bot_batch.call_args.kwargs
-        assert kwargs["architect_bot_id"] == "arch1"
+        assert kwargs["source_architect_bot_id"] == "arch1"
+        assert kwargs["target_architect_bot_id"] == "arch2"
         assert kwargs["coding_bot_ids"] == ["c1", "c2", "c1"]
         assert kwargs["operator_id"] == "test_user"
 
@@ -98,7 +100,7 @@ class TestRebindArchitectBot:
         tc.app.dependency_overrides[get_request_context] = lambda: _make_ctx(user_id="anonymous")
         resp = tc.put(
             "/api/bots/arch1/architect-rebind",
-            json={"coding_bot_ids": ["c1"]},
+            json={"target_architect_bot_id": "arch2", "coding_bot_ids": ["c1"]},
         )
         body = resp.json()
         assert body["success"] is False
@@ -110,7 +112,7 @@ class TestRebindArchitectBot:
         # RebindArchitectRequest validator rejects empty/all-blank list -> 422
         resp = tc.put(
             "/api/bots/arch1/architect-rebind",
-            json={"coding_bot_ids": ["  ", ""]},
+            json={"target_architect_bot_id": "arch2", "coding_bot_ids": ["  ", ""]},
         )
         assert resp.status_code == 422
         svc.rebind_architect_bot_batch.assert_not_called()
@@ -118,12 +120,13 @@ class TestRebindArchitectBot:
     def test_coding_bot_ids_are_stripped_of_whitespace(self, client):
         tc, svc = client
         svc.rebind_architect_bot_batch.return_value = {
-            "architect_bot_id": "arch1", "results": [], "total": 0,
+            "source_architect_bot_id": "arch1",
+            "target_architect_bot_id": "arch2", "results": [], "total": 0,
             "succeeded": 0, "failed": 0,
         }
         resp = tc.put(
             "/api/bots/arch1/architect-rebind",
-            json={"coding_bot_ids": ["  c1  ", "c2", "   "]},
+            json={"target_architect_bot_id": "arch2", "coding_bot_ids": ["  c1  ", "c2", "   "]},
         )
         assert resp.status_code == 200
         kwargs = svc.rebind_architect_bot_batch.call_args.kwargs
@@ -132,7 +135,7 @@ class TestRebindArchitectBot:
     def test_bot_not_found(self, client):
         tc, svc = client
         svc.rebind_architect_bot_batch.side_effect = BotNotFoundError("nope")
-        resp = tc.put("/api/bots/arch1/architect-rebind", json={"coding_bot_ids": ["c1"]})
+        resp = tc.put("/api/bots/arch1/architect-rebind", json={"target_architect_bot_id": "arch2", "coding_bot_ids": ["c1"]})
         data = resp.json()
         assert data["success"] is False
         assert data["error_code"] == 404
@@ -140,7 +143,7 @@ class TestRebindArchitectBot:
     def test_permission_error(self, client):
         tc, svc = client
         svc.rebind_architect_bot_batch.side_effect = BotPermissionError("forbidden")
-        resp = tc.put("/api/bots/arch1/architect-rebind", json={"coding_bot_ids": ["c1"]})
+        resp = tc.put("/api/bots/arch1/architect-rebind", json={"target_architect_bot_id": "arch2", "coding_bot_ids": ["c1"]})
         data = resp.json()
         assert data["success"] is False
         assert data["error_code"] == 403
@@ -148,7 +151,7 @@ class TestRebindArchitectBot:
     def test_service_error(self, client):
         tc, svc = client
         svc.rebind_architect_bot_batch.side_effect = BotServiceError("bad")
-        resp = tc.put("/api/bots/arch1/architect-rebind", json={"coding_bot_ids": ["c1"]})
+        resp = tc.put("/api/bots/arch1/architect-rebind", json={"target_architect_bot_id": "arch2", "coding_bot_ids": ["c1"]})
         data = resp.json()
         assert data["success"] is False
         assert data["error_code"] == 400
@@ -156,7 +159,26 @@ class TestRebindArchitectBot:
     def test_unexpected_exception(self, client):
         tc, svc = client
         svc.rebind_architect_bot_batch.side_effect = ValueError("boom")
-        resp = tc.put("/api/bots/arch1/architect-rebind", json={"coding_bot_ids": ["c1"]})
+        resp = tc.put("/api/bots/arch1/architect-rebind", json={"target_architect_bot_id": "arch2", "coding_bot_ids": ["c1"]})
         data = resp.json()
         assert data["success"] is False
         assert data["error_code"] == 500
+
+    def test_missing_target_architect_bot_id_rejected_by_request_model(self, client):
+        tc, svc = client
+        # RebindArchitectRequest requires target_architect_bot_id -> 422
+        resp = tc.put(
+            "/api/bots/arch1/architect-rebind",
+            json={"coding_bot_ids": ["c1"]},
+        )
+        assert resp.status_code == 422
+        svc.rebind_architect_bot_batch.assert_not_called()
+
+    def test_blank_target_architect_bot_id_rejected_by_request_model(self, client):
+        tc, svc = client
+        resp = tc.put(
+            "/api/bots/arch1/architect-rebind",
+            json={"target_architect_bot_id": "   ", "coding_bot_ids": ["c1"]},
+        )
+        assert resp.status_code == 422
+        svc.rebind_architect_bot_batch.assert_not_called()
