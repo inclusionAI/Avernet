@@ -51,6 +51,11 @@ class GetUploadUrlRequest(BaseModel):
         ge=1048576,
         description="Custom part size in bytes for multipart, defaults to 10MB if file_size >= threshold.",
     )
+    operator: str = Field(
+        default="unknown",
+        max_length=256,
+        description="Identifier of the user or system initiating this upload",
+    )
 
     model_config = {"from_attributes": True}
 
@@ -109,6 +114,11 @@ class GetDownloadUrlRequest(BaseModel):
         le=86400,
         description="Pre-signed URL validity duration in seconds (60–86400, default 3600)",
     )
+    operator: str = Field(
+        default="unknown",
+        max_length=256,
+        description="Identifier of the user or system initiating this download",
+    )
 
     model_config = {"from_attributes": True}
 
@@ -149,6 +159,7 @@ class GetTransferStatusResponse(BaseModel):
     error_message: str | None = None
     created_at: str
     updated_at: str
+    operator: str
 
     model_config = {"from_attributes": True}
 
