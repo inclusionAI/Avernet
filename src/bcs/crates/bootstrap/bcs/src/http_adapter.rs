@@ -243,13 +243,37 @@ impl ChatRunEventPort for BootstrapRunChannelPort {
         let is_gateway_dispatch = current_span.metadata().is_some_and(|metadata| {
             metadata.target() == "bcn_otel" && metadata.name() == "bcn.gateway.dispatch"
         });
-        let trace_parent = if source.as_deref() == Some("http-chat-async") && is_gateway_dispatch {
+        let (trace_parent, trace_context_status) = if source.as_deref() != Some("http-chat-async") {
+            (None, "source_not_http_chat_async")
+        } else if !is_gateway_dispatch {
+            (None, "gateway_span_not_current")
+        } else {
             let context = current_span.context();
             let span_context = context.span().span_context().clone();
-            span_context.is_valid().then_some(span_context)
-        } else {
-            None
+            if span_context.is_valid() {
+                (Some(span_context), "attached")
+            } else {
+                (None, "current_span_context_invalid")
+            }
         };
+        let trace_id = trace_parent
+            .as_ref()
+            .map(|context| context.trace_id().to_string())
+            .unwrap_or_default();
+        let parent_span_id = trace_parent
+            .as_ref()
+            .map(|context| context.span_id().to_string())
+            .unwrap_or_default();
+        tracing::info!(
+            run_id = %run_id,
+            session_key = %session_key,
+            source = ?source,
+            is_gateway_dispatch,
+            trace_context_status,
+            trace_id = %trace_id,
+            parent_span_id = %parent_span_id,
+            "Chat run trace context registration evaluated"
+        );
         self.run_channels
             .register_with_trace_parent(
                 run_id,

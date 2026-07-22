@@ -23,7 +23,7 @@ use bcs_service_api::{
     SystemMessageService, TaskCompleteCommand, TaskDispatchCommand,
     TaskMessageCommand, TaskRunAliasRegistration,
 };
-use opentelemetry::{Context, KeyValue};
+use opentelemetry::Context;
 use opentelemetry::trace::TraceContextExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -854,6 +854,14 @@ async fn handle_event_frame(
             event_state,
             ChatEventState::Final | ChatEventState::Aborted | ChatEventState::Error
         ) || matches!(event.event.as_str(), "agent") && is_final;
+        info!(
+            bot_id = %bot_id,
+            run_id = %run_id,
+            event_type = %event.event,
+            response_span_created = false,
+            response_span_skip_reason = "collaboration_runtime",
+            "Bot response tracing skipped"
+        );
         state
             .collaboration_runtime
             .handle_bot_terminal_event(bcs_service_api::HandleBotTerminalEventCommand {
@@ -880,6 +888,15 @@ async fn handle_event_frame(
         None
     };
     if let Some(trace_parent) = trace_parent {
+        info!(
+            bot_id = %bot_id,
+            run_id = %run_id,
+            event_type = %event.event,
+            parent_trace_id = %trace_parent.trace_id(),
+            parent_span_id = %trace_parent.span_id(),
+            response_span_created = true,
+            "Creating traced Bot response span"
+        );
         let span = info_span!(
             target: "bcn_otel",
             "bcn.bot.response",
@@ -905,6 +922,16 @@ async fn handle_event_frame(
         .instrument(span)
         .await?;
     } else {
+        if event.event == "chat.event" {
+            info!(
+                bot_id = %bot_id,
+                run_id = %run_id,
+                event_type = %event.event,
+                response_span_created = false,
+                response_span_skip_reason = "missing_run_trace_context",
+                "Bot response tracing skipped"
+            );
+        }
         handle_default_group_event(
             state,
             &bot_id,
@@ -936,16 +963,23 @@ fn record_ws_bot_response_trace(
     let content = serde_json::to_string(event_payload)
         .expect("serializing parsed WebSocket bot event payload cannot fail");
     let (captured, truncated) = truncate_bot_response_content(&content);
-    span.add_event(
-        "bcn.bot.response.content",
-        vec![
-            KeyValue::new("bcn.content", captured.clone()),
-            KeyValue::new("bcn.content.original_size_bytes", content.len() as i64),
-            KeyValue::new("bcn.content.captured_size_bytes", captured.len() as i64),
-            KeyValue::new("bcn.content.limit_bytes", BOT_RESPONSE_CONTENT_LIMIT_BYTES as i64),
-            KeyValue::new("bcn.content.truncated", truncated),
-            KeyValue::new("bcn.content.untrusted", false),
-        ],
+    span.set_attribute("gen_ai.output.messages", captured.clone());
+    span.set_attribute("bcn.content.original_size_bytes", content.len() as i64);
+    span.set_attribute("bcn.content.captured_size_bytes", captured.len() as i64);
+    span.set_attribute(
+        "bcn.content.limit_bytes",
+        BOT_RESPONSE_CONTENT_LIMIT_BYTES as i64,
+    );
+    span.set_attribute("bcn.content.truncated", truncated);
+    span.set_attribute("bcn.content.untrusted", false);
+    info!(
+        bot_id = %bot_id,
+        run_id = %run_id,
+        response_state = ?event_state,
+        content_original_size_bytes = content.len(),
+        content_captured_size_bytes = captured.len(),
+        content_truncated = truncated,
+        "Bot response trace attributes recorded"
     );
 }
 
@@ -1093,11 +1127,14 @@ async fn handle_master_slave_response(
                 }
                 TaskRunAliasRegistration::Rejected => false,
             };
+            let trace_context_linked = run_channel_alias_registered
+                && state.run_channels.trace_parent(sub_run_id).await.is_some();
             info!(
                 task_id = %run_id,
                 sub_bot_run_id = %sub_run_id,
                 task_alias_registration = ?task_alias_registration,
                 run_channel_alias_registered = run_channel_alias_registered,
+                trace_context_linked = trace_context_linked,
                 "master_slave: registered sub bot run_id alias"
             );
             log_master_slave_bot_accept(
