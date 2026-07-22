@@ -1747,7 +1747,24 @@ pub async fn delete_session(
     }
 
     match state.services.session_management.delete(&sid).await {
-        Ok(true) => Json(serde_json::json!({"deleted": true, "session_id": sid})).into_response(),
+        Ok(true) => {
+            // Best-effort session-file cleanup: count logged on success, error
+            // logged but not fatal — orphan sweep reconciles later. MUST NOT
+            // fail the session-delete response.
+            match state.services.session_files.delete_all_for_session(&sid).await {
+                Ok(n) => tracing::info!(
+                    session_id = %sid,
+                    deleted = n,
+                    "cleaned up session files after session delete"
+                ),
+                Err(e) => tracing::warn!(
+                    error = ?e,
+                    session_id = %sid,
+                    "session file cleanup partial failure (orphan sweep will reconcile)"
+                ),
+            }
+            Json(serde_json::json!({"deleted": true, "session_id": sid})).into_response()
+        }
         Ok(false) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "not_found", "message": "session not found"})),
