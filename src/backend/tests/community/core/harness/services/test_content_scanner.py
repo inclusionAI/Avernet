@@ -60,7 +60,7 @@ def _make_llm(responses: dict[str, str] | None = None):
     llm = AsyncMock(spec=LLM)
     resp_map = responses or {}
 
-    async def chat(system, user):
+    async def chat(system, user, **kwargs):
         for ft, resp in resp_map.items():
             if ft in user:
                 return resp

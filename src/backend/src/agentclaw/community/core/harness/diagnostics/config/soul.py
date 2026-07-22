@@ -7,6 +7,7 @@ import requests
 
 from agentclaw.community.core.harness.diagnostics.base import Diagnostic, DiagnosticContext
 from agentclaw.community.core.harness.models import Finding
+from agentclaw.community.core.harness.services.llm import DIAGNOSTIC_MAX_TOKENS
 logger = logging.getLogger(__name__)
 
 # ── BCSFuse 配置 ──────────────────────────────────────────────────
@@ -280,5 +281,5 @@ class SoulPersonaDiagnostic(Diagnostic):
                 user_msg += f"\n--- Bot 画像信息 ---\n{profile_summary}\n"
         user_msg += "--- end ---"
 
-        response = await ctx.llm.chat(system=self.system_prompt, user=user_msg)
+        response = await ctx.llm.chat(system=self.system_prompt, user=user_msg, max_tokens=DIAGNOSTIC_MAX_TOKENS)
         return self._analyze_response(response, ctx.bot_id)

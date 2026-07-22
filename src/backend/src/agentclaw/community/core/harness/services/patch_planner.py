@@ -429,15 +429,14 @@ class PatchPlanner:
             logger.warning("[PatchPlanner] LLM returned empty content")
             return None
         if result.strip() == "[llm disabled]":
-            logger.warning("[PatchPlanner] LLM disabled")
-            # Fallback: 返回原始内容和一个简单描述
-            issues_list = issues.split("\n")[:2]  # 取前2个问题
-            short_desc = "修复: " + "; ".join(
-                line.strip("- ")[:40] for line in issues_list if line
+            # LLM unavailable (no token or retries exhausted). Do NOT fabricate a
+            # no-op patch (dst==src): skip this op so the template is dropped
+            # cleanly rather than persisting an empty diff that looks like a fix.
+            logger.warning(
+                "[PatchPlanner] LLM unavailable for %s, skipping fix generation",
+                file_type,
             )
-            if len(short_desc) > 100:
-                short_desc = short_desc[:97] + "..."
-            return src, short_desc
+            return None
 
         # 解析结果：分离 FIX_SUMMARY 和文件内容
         summary_match = re.search(r'<!-- FIX_SUMMARY:\s*(.+?)\s*-->', result, re.DOTALL)
