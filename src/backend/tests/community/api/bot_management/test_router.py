@@ -4,7 +4,7 @@ Uses a minimal FastAPI test app — never imports agentclaw.servers.web.app.
 """
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
@@ -1761,6 +1761,21 @@ class TestListDomainBots:
         assert data["success"] is False
         assert data["error_code"] == 500
         assert "查询失败" in data["message"] or "失败" in data["message"]
+
+    def test_list_domain_bots_non_operator_forbidden(self, client):
+        """An authenticated non-operator cannot enumerate domain bots."""
+        tc, svc, _ = client
+
+        async def _deny_operator():
+            raise HTTPException(status_code=403, detail="operator required")
+
+        tc.app.dependency_overrides[require_operator] = _deny_operator
+        svc.list_domain_bots.reset_mock()
+
+        resp = tc.get("/api/bots/search/domain-bots")
+
+        assert resp.status_code == 403
+        svc.list_domain_bots.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

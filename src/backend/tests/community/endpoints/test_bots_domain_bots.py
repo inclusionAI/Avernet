@@ -11,7 +11,6 @@ handler's generic try/except is covered elsewhere.)
 from __future__ import annotations
 
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.plugin_api.auth import AuthPlugin
 
 from tests.community.framework import (
     CaseInput,
@@ -42,16 +41,11 @@ def _seed_domain_bots(world):
         )
 
 
-def _deny_operator(world):
-    auth = world.get(AuthPlugin)
-    auth.is_operator_allowed = lambda staff_id: False
-
-
 @endpoint_test(
     method="GET",
     path="/api/bots/search/domain-bots",
     scenario="ok_no_pagination",
-    input=CaseInput(query_params={}),
+    input=CaseInput(query_params={}, headers={"x-user-id": "operator-user"}),
     seed=_seed_domain_bots,
     expect=ExpectSuccess(
         status=200,
@@ -69,7 +63,10 @@ def list_domain_bots_ok_no_pagination():
     method="GET",
     path="/api/bots/search/domain-bots",
     scenario="ok_with_pagination",
-    input=CaseInput(query_params={"page": "1", "page_size": "2"}),
+    input=CaseInput(
+        query_params={"page": "1", "page_size": "2"},
+        headers={"x-user-id": "operator-user"},
+    ),
     seed=_seed_domain_bots,
     expect=ExpectSuccess(
         status=200,
@@ -87,7 +84,10 @@ def list_domain_bots_ok_with_pagination():
     method="GET",
     path="/api/bots/search/domain-bots",
     scenario="ok_keyword_match",
-    input=CaseInput(query_params={"keyword": "Security"}),
+    input=CaseInput(
+        query_params={"keyword": "Security"},
+        headers={"x-user-id": "operator-user"},
+    ),
     seed=_seed_domain_bots,
     expect=ExpectSuccess(
         status=200,
@@ -105,7 +105,10 @@ def list_domain_bots_keyword_match():
     method="GET",
     path="/api/bots/search/domain-bots",
     scenario="ok_keyword_no_match",
-    input=CaseInput(query_params={"keyword": "nonexistent"}),
+    input=CaseInput(
+        query_params={"keyword": "nonexistent"},
+        headers={"x-user-id": "operator-user"},
+    ),
     seed=_seed_domain_bots,
     expect=ExpectSuccess(
         status=200,
@@ -123,7 +126,10 @@ def list_domain_bots_keyword_no_match():
     method="GET",
     path="/api/bots/search/domain-bots",
     scenario="invalid_pagination",
-    input=CaseInput(query_params={"page": "0", "page_size": "20"}),
+    input=CaseInput(
+        query_params={"page": "0", "page_size": "20"},
+        headers={"x-user-id": "operator-user"},
+    ),
     expect=ExpectError(status=422),
 )
 def list_domain_bots_invalid_page():
@@ -133,10 +139,9 @@ def list_domain_bots_invalid_page():
 @endpoint_test(
     method="GET",
     path="/api/bots/search/domain-bots",
-    scenario="non_operator_forbidden",
-    input=CaseInput(headers={"x-user-id": "ordinary-user"}),
-    seed=_deny_operator,
-    expect=ExpectError(status=403),
+    scenario="unauthenticated",
+    input=CaseInput(),
+    expect=ExpectError(status=401),
 )
-def list_domain_bots_requires_operator():
-    """A normal authenticated user cannot enumerate platform domain bots."""
+def list_domain_bots_requires_authentication():
+    """An unauthenticated caller cannot enumerate platform domain bots."""
