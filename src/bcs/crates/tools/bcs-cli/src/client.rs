@@ -1573,6 +1573,25 @@ impl BcsClient {
         context: Option<&str>,
         topic: Option<&str>,
     ) -> Result<CreateGroupResponse> {
+        self.create_group_with_strategy_and_context(
+            driver_bot,
+            participants,
+            context,
+            topic,
+            None,
+        )
+        .await
+    }
+
+    /// Create a group with optional context, topic, and group strategy.
+    pub async fn create_group_with_strategy_and_context(
+        &self,
+        driver_bot: &str,
+        participants: Vec<ParticipantInfo>,
+        context: Option<&str>,
+        topic: Option<&str>,
+        group_strategy: Option<&str>,
+    ) -> Result<CreateGroupResponse> {
         let url = format!("{}/groups", self.base_url);
 
         let payload = CreateGroupRequest {
@@ -1588,7 +1607,7 @@ impl BcsClient {
             topic: topic.map(|s| s.to_string()),
             group_kind: None,
             service_spec: None,
-            group_strategy: None,
+            group_strategy: group_strategy.map(str::to_string),
             originator: None,
             collaboration_definition_yaml: None,
             auto_start_on_service_invocation: None,

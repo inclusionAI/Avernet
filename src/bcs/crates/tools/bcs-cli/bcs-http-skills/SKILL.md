@@ -51,6 +51,12 @@ bcs-cli --url "$BCS_API_BASE_URL" create-group \
   --participants "bot-dba,bot-security" \
   --topic "Incident analysis"
 
+# Create a manager-worker group; all participants are assigned the worker role
+bcs-cli --url "$BCS_API_BASE_URL" create-group \
+  --manager "bot-manager" \
+  --participants "bot-worker-1,bot-worker-2" \
+  --topic "Parallel implementation"
+
 # Send a direct message to a bot
 bcs-cli --url "$BCS_API_BASE_URL" chat \
   --bot-uuid "bot-dba" \

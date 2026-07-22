@@ -972,9 +972,13 @@ enum Commands {
         #[arg(short, long, hide = true)]
         id: Option<String>,
 
-        /// Driver bot ID
-        #[arg(long)]
-        driver: String,
+        /// Driver bot ID for a regular chat group (required unless --manager is used)
+        #[arg(long, required_unless_present = "manager", conflicts_with = "manager")]
+        driver: Option<String>,
+
+        /// Manager bot ID for a manager-worker group (required unless --driver is used)
+        #[arg(long, required_unless_present = "driver", conflicts_with = "driver")]
+        manager: Option<String>,
 
         /// Participants (comma-separated bot UUIDs, e.g. "bot1,20260412_abc:100005")
         #[arg(short, long)]
@@ -2533,6 +2537,7 @@ async fn main() -> Result<()> {
             token,
             id: _,
             driver,
+            manager,
             participants,
             context,
             topic,
@@ -2545,16 +2550,42 @@ async fn main() -> Result<()> {
                 oauth_headers.as_ref(),
             );
 
+            let (driver, group_strategy) = match (driver, manager) {
+                (Some(driver), None) => (driver, None),
+                (None, Some(manager)) => (manager, Some("manager_worker")),
+                _ => return Err(anyhow!("Exactly one of --driver or --manager is required")),
+            };
+
             // Format: bot_uuid (may contain colons, e.g. "20260412_347nf7bz:100005")
-            // Comma-separated for multiple participants.
-            // Consistent with request-group-help which also passes bot_uuid as-is.
-            let participants: Vec<bcs_protocol::ParticipantInfo> = participants
+            // Comma-separated for multiple participants. In manager-worker groups,
+            // the manager role is derived from --manager and every other participant
+            // is a worker, so role suffixes do not conflict with bot UUID syntax.
+            let mut participants: Vec<bcs_protocol::ParticipantInfo> = participants
                 .split(',')
                 .map(|p| bcs_protocol::ParticipantInfo {
                     bot_uuid: p.trim().to_string(),
-                    role: None,
+                    role: group_strategy.map(|_| {
+                        if p.trim() == driver {
+                            "manager".to_string()
+                        } else {
+                            "worker".to_string()
+                        }
+                    }),
                 })
                 .collect();
+            if group_strategy.is_some()
+                && !participants
+                    .iter()
+                    .any(|participant| participant.bot_uuid == driver)
+            {
+                participants.insert(
+                    0,
+                    bcs_protocol::ParticipantInfo {
+                        bot_uuid: driver.clone(),
+                        role: Some("manager".to_string()),
+                    },
+                );
+            }
 
             debug_request!(
                 debug,
@@ -2562,16 +2593,18 @@ async fn main() -> Result<()> {
                 "/groups",
                 json!({
                     "driver_bot": &driver,
-                    "participants": &participants
+                    "participants": &participants,
+                    "group_strategy": group_strategy
                 })
             );
 
             let result = client
-                .create_group_with_context(
+                .create_group_with_strategy_and_context(
                     &driver,
                     participants,
                     context.as_deref(),
                     topic.as_deref(),
+                    group_strategy,
                 )
                 .await?;
 
@@ -3990,6 +4023,67 @@ mod tests {
 
         let error = decode_group_continuation(&encoded).unwrap_err();
         assert!(error.to_string().contains("Unsupported list-groups continuation token version"));
+    }
+
+    #[test]
+    fn test_create_group_accepts_manager_instead_of_driver() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "create-group",
+            "--manager",
+            "manager-bot",
+            "--participants",
+            "worker-1,worker-2",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::CreateGroup {
+                driver,
+                manager,
+                participants,
+                ..
+            } => {
+                assert!(driver.is_none());
+                assert_eq!(manager.as_deref(), Some("manager-bot"));
+                assert_eq!(participants, "worker-1,worker-2");
+            }
+            _ => panic!("expected create-group command"),
+        }
+    }
+
+    #[test]
+    fn test_create_group_rejects_driver_and_manager_together() {
+        let error = match Cli::try_parse_from([
+            "bcs-cli",
+            "create-group",
+            "--driver",
+            "driver-bot",
+            "--manager",
+            "manager-bot",
+            "--participants",
+            "worker-1",
+        ]) {
+            Ok(_) => panic!("expected --driver and --manager to conflict"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn test_create_group_requires_driver_or_manager() {
+        let error = match Cli::try_parse_from([
+            "bcs-cli",
+            "create-group",
+            "--participants",
+            "worker-1",
+        ]) {
+            Ok(_) => panic!("expected create-group to require a lead bot"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
     }
 
     #[test]

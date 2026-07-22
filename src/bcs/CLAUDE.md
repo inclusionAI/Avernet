@@ -499,7 +499,10 @@ bcs-cli request-group-help --gap-type skill --description "需要数据库死锁
 bcs-cli confirm-group-help --url http://localhost:21000/groups/<token>/confirm
 
 # Create a group directly
-bcs-cli create-group --driver zhangsan --participants "zhangsan:driver,lisi:consultant"
+bcs-cli create-group --driver zhangsan --participants "lisi,wangwu"
+
+# Create a manager-worker group; participants are assigned the worker role
+bcs-cli create-group --manager zhangsan --participants "lisi,wangwu"
 
 # Fuse contexts
 bcs-cli fuse --group <group_id> --question "如何协调？" --participants bot1,bot2
