@@ -308,6 +308,12 @@ impl BcsClient {
             let body = resp.text().await.unwrap_or_default();
             return Err(anyhow!("{} failed ({}): {}", label, status, body));
         }
+        // 204 No Content carries no JSON body (e.g. DELETE returns 204). Return
+        // Null instead of failing the `json()` parse — callers that print the
+        // result render `null`/skip, and the best-effort cancel ignores it.
+        if resp.status() == reqwest::StatusCode::NO_CONTENT {
+            return Ok(serde_json::Value::Null);
+        }
         resp.json()
             .await
             .with_context(|| format!("Invalid {} response", label))
@@ -3049,6 +3055,35 @@ mod tests {
         assert!(line.contains("GET /bots/discover?"), "{line}");
         assert!(line.contains("organization_code=promo%202026"), "{line}");
         assert!(line.contains("role=traffic%2Fanalyst"), "{line}");
+    }
+
+    #[tokio::test]
+    async fn delete_session_file_tolerates_204_no_content() {
+        // DELETE /sessions/{sid}/files/{file_id} returns 204 No Content (empty
+        // body). `delete_session_file` must surface this as Ok(Null) — not fail
+        // `ensure_success`'s json() parse on the empty body (which made the
+        // CLI exit 1 on a successful delete).
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0_u8; 4096];
+            let _ = stream.read(&mut buf).unwrap_or(0);
+            // 204 with no body — reqwest must accept it as a success.
+            stream
+                .write_all(b"HTTP/1.1 204 No Content\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                .unwrap();
+            stream.flush().unwrap();
+        });
+
+        let client = BcsClient::with_token(format!("http://{}", addr), "bot-token");
+        let result = client.delete_session_file("g1:abcd1234", "01KYFILEID").await;
+        server.join().unwrap();
+        assert!(result.is_ok(), "delete should succeed on 204: {result:?}");
+        assert_eq!(result.unwrap(), serde_json::Value::Null);
     }
 
     #[tokio::test]

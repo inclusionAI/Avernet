@@ -211,9 +211,16 @@ impl StoragePlugin for LocalStoragePlugin {
         // Collect files matching {key_leaf}.* in the key's parent directory.
         let mut entries: Vec<tokio::fs::DirEntry> = Vec::new();
         let scan_dir = final_path.parent().unwrap_or(&self.data_dir);
-        let mut dir = tokio::fs::read_dir(scan_dir)
-            .await
-            .map_err(|e| StorageError::Backend(e.into()))?;
+        // `prepare_upload` does not create the key's directory — only
+        // `stream_upload` does — so a missing scan dir means nothing was ever
+        // staged: completing is a state conflict (no parts), not a backend error.
+        let mut dir = match tokio::fs::read_dir(scan_dir).await {
+            Ok(d) => d,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(StorageError::Conflict("no staged parts to complete".into()))
+            }
+            Err(e) => return Err(StorageError::Backend(e.into())),
+        };
         while let Some(entry) = dir
             .next_entry()
             .await
@@ -342,9 +349,16 @@ impl StoragePlugin for LocalStoragePlugin {
         let prefix = format!("{key_leaf}.", key_leaf = key_leaf);
         let final_path = self.final_path(&handle.key);
         let scan_dir = final_path.parent().unwrap_or(&self.data_dir);
-        let mut dir = tokio::fs::read_dir(scan_dir)
-            .await
-            .map_err(|e| StorageError::Backend(e.into()))?;
+        // `prepare_upload` does not create the key's directory — only
+        // `stream_upload` does — so a missing scan dir means nothing was ever
+        // staged: there is nothing to abort. Idempotent Ok, NOT a backend error
+        // (this is what made DELETE of a prepared-but-never-uploaded file
+        // return 502 STORAGE_BACKEND).
+        let mut dir = match tokio::fs::read_dir(scan_dir).await {
+            Ok(d) => d,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(StorageError::Backend(e.into())),
+        };
         while let Some(entry) = dir
             .next_entry()
             .await
@@ -481,6 +495,36 @@ mod tests {
             backend_handle: serde_json::Value::Null,
         };
         assert!(p.delete(&h).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn abort_prepared_never_uploaded_is_ok() {
+        // Regression: `prepare_upload` does not create the key's directory
+        // (only `stream_upload` does). Aborting a prepared-but-never-uploaded
+        // file therefore scans a non-existent directory — that must be an
+        // idempotent Ok, NOT a `Backend` (502) error. Uses a slashed key so the
+        // scan dir is a nested path that was never created.
+        let (p, _dir) = plugin();
+        let prepared = p
+            .prepare_upload(req("session-files/test/sid/fid/free_chat.png", 100))
+            .await
+            .unwrap();
+        assert!(p.abort_upload(&prepared.handle).await.is_ok());
+        // Idempotent: a second abort is still Ok.
+        assert!(p.abort_upload(&prepared.handle).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn complete_prepared_never_uploaded_is_conflict() {
+        // Same never-staged condition, but on `complete_upload`: a missing scan
+        // dir is a state conflict (no parts), not a backend error.
+        let (p, _dir) = plugin();
+        let prepared = p
+            .prepare_upload(req("session-files/test/sid/fid/no-parts.bin", 100))
+            .await
+            .unwrap();
+        let err = p.complete_upload(&prepared.handle).await.unwrap_err();
+        assert!(matches!(err, StorageError::Conflict(_)));
     }
 
     #[test]
