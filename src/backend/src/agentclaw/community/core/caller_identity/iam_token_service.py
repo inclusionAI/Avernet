@@ -5,17 +5,16 @@ from __future__ import annotations
 import asyncio
 
 from agentclaw.community.api.caller_credential import (
-    CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
     CALLER_CREDENTIAL_REQUEST_INVALID,
     CALLER_OUTBOUND_UPDATE_FAILED,
     CallerCredentialError,
     CallerRuntimeUpdater,
     CallerTokenProvider,
 )
-from agentclaw.community.api.caller_iam_token_service import CallerIamTokenResult
 from agentclaw.community.api.caller_identity_service import CallerIdentityServiceProtocol
 from agentclaw.community.core.caller_identity.contracts import (
     CallerIdentityAmbiguousError,
+    CallerIamTokenOutcome,
     CallerIdentityPermissionError,
     CallerIdentityStage,
 )
@@ -52,17 +51,13 @@ class CallerIamTokenService:
         publish_id: int | None,
         entity_id: str | None,
         is_test_exchange: bool,
-    ) -> CallerIamTokenResult:
+    ) -> CallerIamTokenOutcome:
         if not iam_token:
-            return CallerIamTokenResult(
-                iam_token="", error="IAM_TOKEN cookie not found", status_code=400
-            )
+            return CallerIamTokenOutcome(iam_token="", error="IAM_TOKEN cookie not found")
         if is_test_exchange and not bot_id:
-            return CallerIamTokenResult(
-                iam_token="", error=CALLER_CREDENTIAL_REQUEST_INVALID, status_code=400
-            )
+            return CallerIamTokenOutcome(iam_token="", error=CALLER_CREDENTIAL_REQUEST_INVALID)
         if not bot_id:
-            return CallerIamTokenResult(iam_token=iam_token)
+            return CallerIamTokenOutcome(iam_token=iam_token)
         try:
             context = await asyncio.to_thread(
                 self._caller_identity.get_iam_token_context,
@@ -73,18 +68,16 @@ class CallerIamTokenService:
                 is_test_exchange=is_test_exchange,
             )
         except CallerIdentityAmbiguousError as exc:
-            return CallerIamTokenResult(iam_token="", error=exc.detail, status_code=409)
+            return CallerIamTokenOutcome(iam_token="", error=exc.detail)
         except CallerIdentityPermissionError as exc:
-            return CallerIamTokenResult(iam_token="", error=exc.detail, status_code=403)
+            return CallerIamTokenOutcome(iam_token="", error=exc.detail)
         except Exception:
             logger.warning("caller_token_context_unavailable bot_id=%s stage=%s", bot_id, stage.value)
-            return CallerIamTokenResult(iam_token=iam_token)
+            return CallerIamTokenOutcome(iam_token=iam_token)
         if not context.should_exchange_caller_token:
-            return CallerIamTokenResult(iam_token=iam_token)
+            return CallerIamTokenOutcome(iam_token=iam_token)
         if not context.owner_id:
-            return CallerIamTokenResult(
-                iam_token="", error=CALLER_CREDENTIAL_REQUEST_INVALID, status_code=400
-            )
+            return CallerIamTokenOutcome(iam_token="", error=CALLER_CREDENTIAL_REQUEST_INVALID)
         try:
             identity = await self._auth_plugin.resolve_user_from_request(auth_request)
             if is_test_exchange:
@@ -108,14 +101,11 @@ class CallerIamTokenService:
                 is_test_exchange=is_test_exchange,
             )
         except CallerCredentialError as exc:
-            status = 400 if exc.code == CALLER_CREDENTIAL_REQUEST_INVALID else 503 if exc.code == CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE else 502
-            return CallerIamTokenResult(iam_token="", error=exc.code, status_code=status)
+            return CallerIamTokenOutcome(iam_token="", error=exc.code)
         except CallerIdentityPermissionError as exc:
-            return CallerIamTokenResult(iam_token="", error=exc.detail, status_code=403)
+            return CallerIamTokenOutcome(iam_token="", error=exc.detail)
         except Exception:
             logger.warning("caller_runtime_update_failed bot_id=%s stage=%s", bot_id, stage.value)
-            return CallerIamTokenResult(
-                iam_token="", error=CALLER_OUTBOUND_UPDATE_FAILED, status_code=502
-            )
+            return CallerIamTokenOutcome(iam_token="", error=CALLER_OUTBOUND_UPDATE_FAILED)
         logger.info("caller_token_exchange_succeeded bot_id=%s stage=%s", bot_id, stage.value)
-        return CallerIamTokenResult(iam_token=iam_token)
+        return CallerIamTokenOutcome(iam_token=iam_token)

@@ -6,6 +6,10 @@ from fastapi.responses import JSONResponse
 from agentclaw.community.api.caller_iam_token_service import (
     CallerIamTokenServiceProtocol,
 )
+from agentclaw.community.api.caller_credential import (
+    CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
+    CALLER_CREDENTIAL_REQUEST_INVALID,
+)
 from agentclaw.community.api.caller_identity_service import CallerIdentityStage
 from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.auth import AuthRequestContext
@@ -30,6 +34,18 @@ def _auth_request(request: Request) -> AuthRequestContext:
         query_params=dict(request.query_params),
         base_url=str(request.base_url),
     )
+
+
+def _caller_error_status(error: str) -> int:
+    if error == CALLER_CREDENTIAL_REQUEST_INVALID or error == "IAM_TOKEN cookie not found":
+        return 400
+    if error == CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE:
+        return 503
+    if error == "CALLER_IDENTITY_AMBIGUOUS":
+        return 409
+    if error == "CALLER_IDENTITY_FORBIDDEN":
+        return 403
+    return 502
 
 
 @router.options("/api/v1/token/exchange")
@@ -97,6 +113,6 @@ async def get_iam_token(
         content["error"] = result.error
     return JSONResponse(
         content=content,
-        status_code=result.status_code,
+        status_code=200 if result.error is None else _caller_error_status(result.error),
         headers=_cors_headers(request),
     )

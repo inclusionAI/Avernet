@@ -90,6 +90,14 @@ class CallerIamTokenContext:
     binding_id: int | None = None
 
 
+@dataclass(frozen=True)
+class CallerIamTokenOutcome:
+    """HTTP-neutral result of optional Caller identity installation."""
+
+    iam_token: str
+    error: str | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class CallerContext:
     capability: str
