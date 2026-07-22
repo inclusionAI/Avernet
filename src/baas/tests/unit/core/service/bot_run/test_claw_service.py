@@ -275,7 +275,7 @@ class TestSendMessage:
                 session_id=SESSION_ID,
                 message="hello",
                 binding_info=baas_binding,
-            timeout=30.0,
+                timeout=30.0,
             )
 
     @pytest.mark.asyncio
@@ -292,7 +292,7 @@ class TestSendMessage:
                 message="hello",
                 binding_info=arca_binding,
                 wait_result=True,
-            timeout=30.0,
+                timeout=30.0,
             )
 
         assert isinstance(result, BotResponse)
@@ -332,7 +332,7 @@ class TestSendMessage:
                 message="hello",
                 binding_info=arca_binding,
                 context=ctx,
-            timeout=30.0,
+                timeout=30.0,
             )
 
         assert result.content == "resp with auth"
@@ -362,7 +362,7 @@ class TestSendMessage:
                 message="ping",
                 binding_info=arca_binding,
                 wait_result=False,
-            timeout=30.0,
+                timeout=30.0,
             )
 
         assert result.content == "fast resp"
@@ -392,7 +392,7 @@ class TestSendMessage:
                     session_id=SESSION_ID,
                     message="boom",
                     binding_info=arca_binding,
-                timeout=30.0,
+                    timeout=30.0,
                 )
 
         # No release needed — shared connection stays in pool
@@ -416,7 +416,7 @@ class TestSendMessage:
                     session_id=SESSION_ID,
                     message="hello",
                     binding_info=arca_binding,
-                timeout=30.0,
+                    timeout=30.0,
                 )
 
 
