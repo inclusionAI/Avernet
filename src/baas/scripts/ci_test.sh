@@ -22,6 +22,13 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
+if [[ -z "$base" ]]; then
+  if git rev-parse --verify origin/dev >/dev/null 2>&1; then
+    base="$(git merge-base "$head" origin/dev)"
+    echo "auto-detected base: $base (merge-base of HEAD and origin/dev)"
+  fi
+fi
+
 if [[ ! -d "$baas_dir" ]]; then
   echo "baas CI failed: community package not found: $baas_dir" >&2
   exit 1

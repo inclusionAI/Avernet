@@ -41,6 +41,13 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
+if [[ -z "$base" ]]; then
+  if git rev-parse --verify origin/dev >/dev/null 2>&1; then
+    base="$(git merge-base "$head" origin/dev)"
+    echo "auto-detected base: $base (merge-base of HEAD and origin/dev)"
+  fi
+fi
+
 cd "$backend_dir"
 mkdir -p "$report_dir"
 

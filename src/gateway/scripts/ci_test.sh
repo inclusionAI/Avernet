@@ -21,6 +21,13 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
+if [[ -z "$base" ]]; then
+  if git rev-parse --verify origin/dev >/dev/null 2>&1; then
+    base="$(git merge-base "$head" origin/dev)"
+    echo "auto-detected base: $base (merge-base of HEAD and origin/dev)"
+  fi
+fi
+
 if [[ ! -d "$gateway_dir" ]]; then
   echo "gateway CI failed: community package not found: $gateway_dir" >&2
   exit 1
@@ -56,9 +63,17 @@ if [[ "$gateway_ci_status" -ne 0 ]]; then
 fi
 
 echo "--- unit coverage report ---"
+check_args=(
+  "$repo_root/scripts/ci/report_check.py"
+  --junit "$unit_report"
+  --coverage "$coverage_report"
+  --source-root "$gateway_dir/src"
+  --min-case-pass-rate 100
+  --min-line-coverage "$line_coverage_min"
+)
 if [[ -n "$base" ]]; then
-  echo "diff coverage check not yet configured (base=$base head=$head)"
+  check_args+=(--base "$base" --head "$head" --min-change-line-coverage 80)
 fi
-echo "Coverage report: file://$report_dir/html/index.html"
+"$python_bin" "${check_args[@]}"
 echo "--- end unit coverage report ---"
 echo "gateway CI gate passed"
