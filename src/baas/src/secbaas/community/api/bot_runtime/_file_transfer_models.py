@@ -153,7 +153,10 @@ class GetTransferStatusResponse(BaseModel):
     filename: str
     device_path: str | None
     download_url: str | None = None
-    expires_at: str | None = None
+    expires_at: str | None = Field(
+        default=None,
+        description="Intentionally null for transfer queries; OSS presigned URLs embed their own expiry via the Expires query parameter. Only populated in direct upload/download URL generation responses.",
+    )
     error_message: str | None = None
     created_at: str
     updated_at: str
