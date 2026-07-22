@@ -1,3 +1,5 @@
+"""Logger module — lazy plugin accessor for log management."""
+
 from gateway.community.plugin_accessor import PluginAccessor
 from gateway.community.plugins.logger.bare import BareLoggerPlugin
 from gateway.community.spi.logger import LoggerPlugin
