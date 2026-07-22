@@ -115,19 +115,6 @@ class TicketRepository(Protocol):
         """
         ...
 
-    def get_by_fileservice_staging_path(
-        self,
-        staging_path: str,
-        tenant: str | None = None,
-    ) -> TicketRecord | None:
-        """Look up a ticket by its fileservice_staging_path.
-
-        Optionally scoped to tenant for authorization enforcement.
-
-        Returns None if not found.
-        """
-        ...
-
     def update_urls(
         self,
         transfer_id: str,
