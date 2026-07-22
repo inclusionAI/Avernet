@@ -29,6 +29,8 @@ pub trait ChannelBindingRepoPort: Send + Sync {
         target: &BindingTarget,
         channel_type: Option<&str>,
     ) -> ServiceResult<Vec<ChannelBinding>>;
+    /// Delete every binding for the exact Bot/Group target in one environment.
+    async fn delete_by_target(&self, target: &BindingTarget, env: &str) -> ServiceResult<u64>;
     async fn set_status(&self, id: &str, active: bool) -> ServiceResult<()>;
     async fn set_config(&self, id: &str, config: serde_json::Value) -> ServiceResult<()>;
     async fn delete(&self, id: &str) -> ServiceResult<()>;

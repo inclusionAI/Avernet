@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use bcs_route_security::OutboundUrlGuard;
 
 use bcs_service_api::{
-    ActorKind, ActorStatus, BotRegistryCoreService, BotRuntimeConnectionService, DmActorSpec, DmCreateCommand,
+    ActorKind, ActorStatus, BotRegistryCoreService, BotRuntimeConnectionService,
+    ChannelBindingCleanupPort, DmActorSpec, DmCreateCommand,
     DmCreateResult, FriendCoreService, Group as DomainGroup, GroupAddMemberCommand,
     GroupAddMemberResult, GroupCoreService, GroupCreateCommand,
     GroupDeleteCommand, GroupDeleteResult, GroupDetailCommand, GroupDetailResult, GroupKind,
@@ -16,7 +17,8 @@ use bcs_service_api::{
     GroupStrategy, GroupUpdateLabelCommand, GroupUpdateVisibilityCommand,
     GroupUpdateWorkspaceCommand, GroupUseCaseError,
     GroupWorkspaceQueryCommand, GroupWorkspaceResult, Participant, ParticipantMode,
-    ParticipantRole, RelationCoreService, RegisteredBot, ServiceError, ServiceSpec,
+    NoopChannelBindingCleanupPort, ParticipantRole, RelationCoreService, RegisteredBot,
+    ServiceError, ServiceSpec,
     ServiceSpecPatchConflictField, Session, SessionKind,
     SessionManagementService, SystemMessageEvent,
     WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand, WorkbenchConnectOutcome,
@@ -55,6 +57,7 @@ pub struct GroupManagement {
     config: GroupConfig,
     system_message: Arc<dyn bcs_service_api::SystemMessageService>,
     session_management: Arc<dyn SessionManagementService>,
+    channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
     bot_runtime: Option<Arc<dyn BotRuntimeConnectionService>>,
     outbound_url_guard: OutboundUrlGuard,
 }
@@ -98,6 +101,7 @@ impl GroupManagement {
             config,
             system_message,
             session_management,
+            channel_binding_cleanup: Arc::new(NoopChannelBindingCleanupPort),
             bot_runtime: None,
             outbound_url_guard: OutboundUrlGuard::strict(),
         }
@@ -108,6 +112,14 @@ impl GroupManagement {
         bot_runtime: Arc<dyn BotRuntimeConnectionService>,
     ) -> Self {
         self.bot_runtime = Some(bot_runtime);
+        self
+    }
+
+    pub fn with_channel_binding_cleanup(
+        mut self,
+        channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
+    ) -> Self {
+        self.channel_binding_cleanup = channel_binding_cleanup;
         self
     }
 
@@ -1235,7 +1247,23 @@ impl GroupManagementService for GroupManagement {
         }
         self.ensure_group_coordinator(&group, &cmd.caller_actor_id, "delete this group")?;
 
+        // Remove the group first so concurrent binding creation can no longer validate the target.
+        // If binding cleanup fails, restore the group instead of leaving a dangling binding.
         self.group.delete(&cmd.group_id).await?;
+        if let Err(cleanup_error) = self
+            .channel_binding_cleanup
+            .delete_bindings_for_group(&cmd.group_id)
+            .await
+        {
+            if let Err(rollback_error) = self.group.upsert(group).await {
+                return Err(ServiceError::InternalError(format!(
+                    "Failed to delete channel bindings for group '{}': {}; group rollback also failed: {}",
+                    cmd.group_id, cleanup_error, rollback_error
+                ))
+                .into());
+            }
+            return Err(cleanup_error.into());
+        }
         Ok(GroupDeleteResult {
             group_id: cmd.group_id,
             deleted: true,
