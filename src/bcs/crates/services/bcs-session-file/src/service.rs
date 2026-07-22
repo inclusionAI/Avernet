@@ -30,7 +30,7 @@ use bcs_storage_api::{
     StorageError, StorageHandle, UploadHandle, UploadMode, UploadPrepareRequest,
 };
 
-use crate::authz::{can_mutate, derive_key};
+use crate::authz::{can_mutate, derive_key, validate_file_name};
 
 /// Fixed part size used by the local-proxy (`ProxyViaBcs`) multipart branch.
 ///
@@ -232,6 +232,14 @@ impl SessionFileService for SessionFileServiceImpl {
             .get(&cmd.session_id)
             .await
             .ok_or_else(|| SessionFileUseCaseError::NotFound(format!("session {}", cmd.session_id)))?;
+
+        // File names are interpolated into the storage key as a path component
+        // (see `derive_key`); reject path-traversal metacharacters up front so
+        // the local backend's `data_dir.join(key)` cannot resolve outside the
+        // session-files root. This is opaque-metadata safety, not a whitelist.
+        validate_file_name(&cmd.file_name).map_err(|reason| {
+            SessionFileUseCaseError::InvalidInput(format!("invalid file_name: {reason}"))
+        })?;
 
         let file_id = new_file_id();
         let key = derive_key(&self.cfg.env, &cmd.session_id, &file_id, &cmd.file_name);
@@ -710,45 +718,127 @@ impl SessionFileService for SessionFileServiceImpl {
     }
 
     async fn delete_all_for_session(&self, session_id: &str) -> Result<u64, SessionFileUseCaseError> {
-        let rows = self
-            .cfg
-            .repo
-            .delete_all_for_session(session_id)
-            .await
-            .map_err(SessionFileUseCaseError::Internal)?;
+        // Collect every row for the session WITHOUT deleting yet, so backend
+        // cleanup happens BEFORE the metadata row is dropped. The previous flow
+        // deleted every row up front (atomic repo `delete_all_for_session`)
+        // and only then attempted `storage.delete`; a backend failure there
+        // orphaned the object with no metadata row left for any later retry or
+        // the pending sweep to find — a silent false-success.
+        //
+        // Now: per row, attempt backend cleanup first ([`cleanup_backend_for_row`]);
+        // only on success do we drop the metadata. On failure we KEEP the row
+        // (row + object stay consistent, a retry can find them) and surface a
+        // partial-failure error at the end. The session-delete caller logs that
+        // error without failing the HTTP response (session is already gone).
+        let mut rows = Vec::new();
+        let mut offset = 0u32;
+        loop {
+            let page = self
+                .cfg
+                .repo
+                .list(
+                    session_id,
+                    SessionFileListParams { prefix: None, status: None, limit: 1000, offset },
+                )
+                .await
+                .map_err(SessionFileUseCaseError::Internal)?;
+            let got = page.items.len() as u32;
+            rows.extend(page.items);
+            if got < 1000 {
+                break;
+            }
+            offset += got;
+        }
+
         let mut deleted = 0u64;
+        let mut retained = 0u64;
         for row in rows {
-            // Only Ready objects have a StorageHandle on the backend. Pending/
-            // Failed rows hold an UploadHandle — aborting those is the sweep's
-            // job; deleting the row here is enough at the metadata layer.
-            if row.status != FileStatus::Ready {
+            if self.cleanup_backend_for_row(&row).await {
+                self.cfg
+                    .repo
+                    .delete(&row.session_id, &row.file_id)
+                    .await
+                    .map_err(SessionFileUseCaseError::Internal)?;
                 deleted += 1;
-                continue;
+            } else {
+                // Backend cleanup failed: keep the metadata row so a later
+                // retry / sweep can reconcile (both row and object persist).
+                retained += 1;
             }
-            let handle: StorageHandle = match serde_json::from_str(&row.object_handle) {
-                Ok(h) => h,
-                Err(e) => {
-                    warn!(
-                        error = %e,
-                        file_id = %row.file_id,
-                        "delete_all_for_session: decode storage handle failed; leaving orphan object",
-                    );
-                    continue;
-                }
-            };
-            if let Err(e) = self.cfg.storage.delete(&handle).await {
-                // Partial-failure semantics: log + leave orphan object for a
-                // future reconciliation sweep; do NOT abort the whole call.
-                warn!(
-                    error = ?e,
-                    file_id = %row.file_id,
-                    "delete_all_for_session: backend delete failed; orphan object kept",
-                );
-                continue;
-            }
-            deleted += 1;
+        }
+
+        if retained > 0 {
+            return Err(SessionFileUseCaseError::Internal(
+                bcs_service_api::ServiceError::InternalError(format!(
+                    "session file cleanup partial failure: {retained} object(s) retained for retry, {deleted} deleted"
+                )),
+            ));
         }
         Ok(deleted)
+    }
+}
+
+impl SessionFileServiceImpl {
+    /// Attempt backend cleanup for one row during session-delete.
+    ///
+    /// Returns `true` when the backend holds no remaining object for the row
+    /// — either cleanup succeeded, or the status never had a backend object
+    /// (`Failed` / `Deleting`), so the metadata row can be dropped. Returns
+    /// `false` when cleanup failed; the caller keeps the row for retry.
+    async fn cleanup_backend_for_row(&self, row: &SessionFile) -> bool {
+        match row.status {
+            FileStatus::Ready => {
+                let handle: StorageHandle = match serde_json::from_str(&row.object_handle) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        warn!(
+                            error = %e,
+                            file_id = %row.file_id,
+                            "delete_all_for_session: decode storage handle failed; retaining row",
+                        );
+                        return false;
+                    }
+                };
+                if let Err(e) = self.cfg.storage.delete(&handle).await {
+                    warn!(
+                        error = ?e,
+                        file_id = %row.file_id,
+                        "delete_all_for_session: backend delete failed; retaining row + object for retry",
+                    );
+                    return false;
+                }
+                true
+            }
+            FileStatus::Pending => {
+                // Pending rows hold an UploadHandle with staged temp parts;
+                // abort them so the backend is not left with orphaned multipart
+                // data. If abort fails, keep the row so the pending sweep can
+                // retry (it re-runs abort_upload before marking Failed).
+                let handle: UploadHandle = match serde_json::from_str(&row.object_handle) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        warn!(
+                            error = %e,
+                            file_id = %row.file_id,
+                            "delete_all_for_session: decode upload handle failed; retaining row",
+                        );
+                        return false;
+                    }
+                };
+                if let Err(e) = self.cfg.storage.abort_upload(&handle).await {
+                    warn!(
+                        error = ?e,
+                        file_id = %row.file_id,
+                        "delete_all_for_session: backend abort_upload failed; retaining row for sweep retry",
+                    );
+                    return false;
+                }
+                true
+            }
+            // No final backend object to remove for these states; dropping the
+            // metadata row is the only cleanup needed.
+            FileStatus::Failed | FileStatus::Deleting => true,
+        }
     }
 }
 
@@ -1068,6 +1158,41 @@ mod tests {
         };
         let err = s.prepare_upload(cmd).await.unwrap_err();
         assert!(matches!(err, SessionFileUseCaseError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn prepare_rejects_path_traversal_file_name() {
+        // A file_name carrying path separators / `..` must be rejected before
+        // it reaches `derive_key`, otherwise `data_dir.join(key)` in the local
+        // backend resolves outside the session-files root.
+        let (s, _, repo) = build_svc(local_caps());
+        for bad in ["../../etc/passwd", "a/b", "a\\b", "..", ".", "evil\0.txt", ""] {
+            let cmd = PrepareUploadCommand {
+                file_name: bad.into(),
+                ..sample_prepare(5)
+            };
+            let err = s.prepare_upload(cmd).await.unwrap_err();
+            assert!(
+                matches!(err, SessionFileUseCaseError::InvalidInput(_)),
+                "expected InvalidInput for file_name {bad:?}, got {err:?}"
+            );
+        }
+        // No row was created for any rejected name.
+        let page = repo
+            .list("g1:abcd1234", SessionFileListParams::default())
+            .await
+            .unwrap();
+        assert_eq!(page.items.len(), 0);
+
+        // A safe (including non-ASCII) name still succeeds.
+        let r = s
+            .prepare_upload(PrepareUploadCommand {
+                file_name: "自由.txt".into(),
+                ..sample_prepare(5)
+            })
+            .await
+            .unwrap();
+        assert_eq!(r.file.file_name, "自由.txt");
     }
 
     // ---- stream + complete roundtrip ----------------------------------------
@@ -1435,6 +1560,121 @@ mod tests {
         assert!(repo.get("g1:abcd1234", &r2.file.file_id).await.unwrap().is_none());
         // Other session untouched.
         assert!(repo.get("g1:other", &r3.file.file_id).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn delete_all_for_session_retains_row_when_backend_delete_fails() {
+        // Regression for the orphan-on-failure bug: when `storage.delete` fails
+        // for a Ready row, the metadata row MUST be retained (cleanup happens
+        // before the row is dropped) so a later retry can find it, and the call
+        // surfaces a partial-failure error instead of false success. A Pending
+        // row whose abort succeeds is still cleaned — partial progress.
+        let storage: Arc<dyn StoragePlugin> = Arc::new(FailingDeleteStorage {
+            inner: FakeStoragePlugin::new(local_caps()),
+        });
+        let (s, repo) = build_svc_with_storage(storage);
+
+        // Ready file (backend delete will fail).
+        let r1 = s.prepare_upload(sample_prepare(5)).await.unwrap();
+        let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
+        s.stream_upload("g1:abcd1234", &r1.file.file_id, None, body, 5).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r1.file.file_id).await.unwrap();
+        // Pending file (abort succeeds → cleaned).
+        let r2 = s.prepare_upload(sample_prepare(10)).await.unwrap();
+
+        let err = s.delete_all_for_session("g1:abcd1234").await.unwrap_err();
+        assert!(
+            matches!(err, SessionFileUseCaseError::Internal(_)),
+            "expected partial-failure Internal error, got {err:?}"
+        );
+        // Ready row retained for retry (NOT orphaned — row + object both persist).
+        let row = repo
+            .get("g1:abcd1234", &r1.file.file_id)
+            .await
+            .unwrap()
+            .expect("Ready row retained after failed backend delete");
+        assert_eq!(row.status, FileStatus::Ready);
+        // Pending row was cleaned (abort succeeded) despite the Ready failure.
+        assert!(repo.get("g1:abcd1234", &r2.file.file_id).await.unwrap().is_none());
+    }
+
+    /// `build_svc` variant that takes a caller-supplied storage plugin (used to
+    /// inject backend failures).
+    fn build_svc_with_storage(
+        storage: Arc<dyn StoragePlugin>,
+    ) -> (SessionFileServiceImpl, Arc<dyn SessionFileRepoPort>) {
+        let repo: Arc<dyn SessionFileRepoPort> = Arc::new(MemorySessionFileRepo::new());
+        let session_repo: Arc<dyn SessionRepoPort> =
+            Arc::new(FakeSessionRepo::with_sessions(&["g1:abcd1234", "g1:other"]));
+        let cfg = SessionFileServiceConfig {
+            storage: storage.clone(),
+            repo: repo.clone(),
+            session_repo,
+            env: "test".into(),
+            max_size: 5_000_000_000,
+            multipart_threshold: 100 * 1024 * 1024,
+            bcs_base_url: "http://bcs:21000".into(),
+            share_secret: b"k".to_vec(),
+            share_default_ttl: 3600,
+            share_base_url: None,
+        };
+        (SessionFileServiceImpl::new(cfg), repo)
+    }
+
+    /// A `StoragePlugin` that delegates the upload lifecycle to
+    /// `FakeStoragePlugin` but forces `delete` to fail — used to exercise the
+    /// retain-on-failure path of `delete_all_for_session`.
+    struct FailingDeleteStorage {
+        inner: FakeStoragePlugin,
+    }
+
+    #[async_trait]
+    impl StoragePlugin for FailingDeleteStorage {
+        fn backend_name(&self) -> &'static str {
+            self.inner.backend_name()
+        }
+        fn capabilities(&self) -> StorageCapabilities {
+            self.inner.capabilities()
+        }
+        async fn prepare_upload(
+            &self,
+            req: UploadPrepareRequest,
+        ) -> Result<PreparedUpload, StorageError> {
+            self.inner.prepare_upload(req).await
+        }
+        async fn stream_upload(
+            &self,
+            handle: &UploadHandle,
+            part_number: Option<u16>,
+            body: ByteStream,
+        ) -> Result<(), StorageError> {
+            self.inner.stream_upload(handle, part_number, body).await
+        }
+        async fn complete_upload(
+            &self,
+            handle: &UploadHandle,
+        ) -> Result<bcs_storage_api::StorageObjectMeta, StorageError> {
+            self.inner.complete_upload(handle).await
+        }
+        async fn abort_upload(&self, handle: &UploadHandle) -> Result<(), StorageError> {
+            self.inner.abort_upload(handle).await
+        }
+        async fn get_stream(&self, handle: &StorageHandle) -> Result<ByteStream, StorageError> {
+            self.inner.get_stream(handle).await
+        }
+        async fn presign_get(
+            &self,
+            handle: &StorageHandle,
+            ttl_secs: u64,
+        ) -> Result<PresignGetTicket, StorageError> {
+            self.inner.presign_get(handle, ttl_secs).await
+        }
+        async fn delete(&self, _handle: &StorageHandle) -> Result<(), StorageError> {
+            Err(StorageError::Backend(anyhow::anyhow!("forced delete failure")))
+        }
+        async fn health_check(&self) -> Result<bcs_storage_api::StorageHealth, StorageError> {
+            self.inner.health_check().await
+        }
     }
 
     // ---- misc / trait sanity ------------------------------------------------

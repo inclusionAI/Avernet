@@ -2859,7 +2859,11 @@ impl BcsClient {
         let url = format!("{}/sessions/{}/files/{}/share", self.base_url, urlencoding::encode(sid), file_id);
         let mut body = serde_json::Map::new();
         if let Some(t) = ttl {
-            body.insert("ttl".to_string(), serde_json::json!(t));
+            // The HTTP `ShareRequest` DTO deserializes `ttl_seconds` (unknown
+            // fields are ignored), so the body key must match exactly — sending
+            // `ttl` here would be silently dropped and fall back to the service
+            // default, ignoring the caller's requested expiry.
+            body.insert("ttl_seconds".to_string(), serde_json::json!(t));
         }
         let resp = self.add_auth(self.http_client.post(&url).json(&serde_json::Value::Object(body))).send().await
             .context("share session file")?;
@@ -3641,6 +3645,43 @@ mod tests {
             !request_lower.contains("authorization:"),
             "Authorization header MUST NOT be sent cross-host, but was:\n{}",
             request
+        );
+    }
+
+    // Regression: `share --ttl N` must send `ttl_seconds` (the ShareRequest DTO
+    // field), not `ttl` — serde ignores unknown fields, so `ttl` would be
+    // silently dropped and the service would fall back to its default expiry.
+    #[tokio::test]
+    async fn share_session_file_sends_ttl_seconds_field() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/sessions/s1/files/f1/share"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "share_url": "http://bcs/sessions/shared-file?token=x",
+                    "share_token": "x",
+                    "expires_at": 0u64,
+                })),
+            )
+            .mount(&server)
+            .await;
+
+        let client = BcsClient::with_token(&server.uri(), "bot-token");
+        let _ = client.share_session_file("s1", "f1", Some(120)).await.unwrap();
+
+        let requests = server.received_requests().await.expect("captured requests");
+        let req = requests
+            .iter()
+            .find(|r| r.method.as_str() == "POST" && r.url.path() == "/sessions/s1/files/f1/share")
+            .expect("share POST request");
+        let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+        assert_eq!(body["ttl_seconds"], 120, "body must carry ttl_seconds, was: {body}");
+        assert!(
+            body.get("ttl").is_none(),
+            "legacy `ttl` key must not be sent (silently ignored by the DTO), was: {body}"
         );
     }
 }

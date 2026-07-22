@@ -11,8 +11,40 @@ use bcs_domain::ActorRef;
 /// bootstrap to match the repo's `env` column — see `MySqlSessionFileStore`).
 /// Keeping the env segment in the key mirrors the per-row DB `env` column so
 /// prod/gray/pre/dev objects remain isolated in the storage backend.
+///
+/// `file_name` is interpolated as a raw path component, so callers MUST first
+/// reject unsafe names with [`validate_file_name`]. That guard is what keeps
+/// the derived key — and therefore the local backend's `data_dir.join(key)` —
+/// inside the session-files root. See [`validate_file_name`] for the contract.
 pub fn derive_key(env: &str, session_id: &str, file_id: &str, file_name: &str) -> String {
     format!("session-files/{env}/{session_id}/{file_id}/{file_name}")
+}
+
+/// Validate a user-supplied `file_name` before it becomes a storage-key path
+/// component ([`derive_key`]).
+///
+/// File names are opaque metadata (preserved verbatim in the DB row and the
+/// download response), but they MUST NOT carry path metacharacters: a name
+/// containing separators (`/`, `\`), NUL, or the `.` / `..` segments could
+/// otherwise make the derived key resolve outside the session-files root when
+/// the local backend joins it under `data_dir` (path traversal). Any safe name
+/// passes — including non-ASCII / Chinese names — so this is a safety check,
+/// not a character whitelist.
+///
+/// Returns `Ok(())` for a safe name, or `Err` holding a short reason. Called
+/// by [`crate::SessionFileServiceImpl::prepare_upload`] at the use-case
+/// boundary so the policy is enforced uniformly for every backend.
+pub fn validate_file_name(name: &str) -> Result<(), &'static str> {
+    if name.is_empty() {
+        return Err("file_name must not be empty");
+    }
+    if name == "." || name == ".." {
+        return Err("file_name must not be a path segment (. or ..)");
+    }
+    if name.contains('/') || name.contains('\\') || name.contains('\0') {
+        return Err("file_name must not contain path separators or NUL");
+    }
+    Ok(())
 }
 
 /// Test whether `caller` may mutate (delete / share) a file owned by `owner`.
@@ -89,5 +121,43 @@ mod tests {
     fn multiple_identities_one_match_allows() {
         let ids = vec!["u1".to_string(), "bot-a".into(), "u3".into()];
         assert!(can_mutate(&ids, &actor("u3"), None, None));
+    }
+
+    // ---- validate_file_name: path-traversal guard ---------------------------
+
+    #[test]
+    fn safe_names_pass() {
+        assert!(validate_file_name("x.txt").is_ok());
+        assert!(validate_file_name("report (final).pdf").is_ok());
+        // Non-ASCII / Chinese names are safe — this is not a whitelist.
+        assert!(validate_file_name("自由.txt").is_ok());
+        assert!(validate_file_name("a b.tar.gz").is_ok());
+    }
+
+    #[test]
+    fn empty_name_rejected() {
+        assert!(validate_file_name("").is_err());
+    }
+
+    #[test]
+    fn path_separators_rejected() {
+        assert!(validate_file_name("a/b").is_err());
+        assert!(validate_file_name("a\\b").is_err());
+        assert!(validate_file_name("/etc/passwd").is_err());
+        // Whole-name traversal segments resolve outside the root.
+        assert!(validate_file_name(".").is_err());
+        assert!(validate_file_name("..").is_err());
+    }
+
+    #[test]
+    fn traversal_relative_name_rejected() {
+        // The classic attack: a file_name that climbs out of the key dir.
+        assert!(validate_file_name("../../etc/passwd").is_err());
+        assert!(validate_file_name("..\\..\\windows").is_err());
+    }
+
+    #[test]
+    fn nul_byte_rejected() {
+        assert!(validate_file_name("evil\0.txt").is_err());
     }
 }
