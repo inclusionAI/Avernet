@@ -14,9 +14,9 @@ from secbaas.api.bot_runtime import (
     BotNotFoundError,
     CancelUploadResponse,
     CompleteUploadResponse,
+    DeleteTransferResponse,
     GetDownloadUrlRequest,
     GetDownloadUrlResponse,
-    GetTransferStatusResponse,
     GetUploadUrlRequest,
     GetUploadUrlResponse,
     NoActiveDevicesError,
@@ -24,8 +24,6 @@ from secbaas.api.bot_runtime import (
     OssObjectNotFoundError,
     ShareLinkRequest,
     ShareLinkResponse,
-    StagingDeleteResponse,
-    StagingListResponse,
     TransferNotFoundError,
     TransferNotTerminalError,
     TransferStateConflictError,
@@ -362,73 +360,38 @@ async def cancel_upload(
         )
 
 
-@router.get(
-    "/{tenant}/{bot_uuid}/files/staging",
-    response_model=ApiResponse[StagingListResponse],
-    summary="List staging area objects with marker-based pagination",
-)
-@inject
-async def list_staging(
-    tenant: Annotated[str, Path(description="Tenant for isolation")],
-    bot_uuid: Annotated[str, Path(description="Bot UUID")],
-    prefix: Annotated[str | None, Query(description="OSS key prefix filter")] = None,
-    limit: Annotated[int, Query(ge=1, le=1000, description="Page size")] = 100,
-    marker: Annotated[
-        str | None, Query(description="Pagination marker from previous response")
-    ] = None,
-    dispatcher: BotFileTransferDispatcher = Depends(
-        Provide[ApplicationContainer.services.bot_file_transfer_dispatcher]
-    ),
-) -> ApiResponse[StagingListResponse]:
-    """List objects in the OSS staging area.
-
-    Supports marker-based pagination for traversing large result sets.
-    Each item includes key, size, and last_modified timestamp.
-    """
-    logger.info(
-        f"list_staging: tenant={tenant}, bot_uuid={bot_uuid}, "
-        f"prefix={prefix}, limit={limit}, marker={marker}"
-    )
-
-    try:
-        result = await dispatcher.dispatch_list_staging(
-            prefix=prefix or "",
-            limit=limit,
-            marker=marker,
-            tenant=tenant,
-        )
-        return ApiResponse(data=result)
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": "INTERNAL_ERROR", "message": str(e)},
-        )
-
-
 @router.delete(
-    "/{tenant}/{bot_uuid}/files/staging",
-    response_model=ApiResponse[StagingDeleteResponse],
-    summary="Delete a single staging object (terminal-state tickets only)",
+    "/{tenant}/{bot_uuid}/files/transfers/{transfer_id}",
+    response_model=ApiResponse[DeleteTransferResponse],
+    summary="Delete a completed transfer and its OSS staging object",
 )
 @inject
-async def delete_staging(
+async def delete_transfer(
     tenant: Annotated[str, Path(description="Tenant for isolation")],
     bot_uuid: Annotated[str, Path(description="Bot UUID")],
-    key: Annotated[str, Query(description="Full OSS object key to delete")],
+    transfer_id: Annotated[
+        str, Path(description="Transfer ID to delete")
+    ],
     dispatcher: BotFileTransferDispatcher = Depends(
         Provide[ApplicationContainer.services.bot_file_transfer_dispatcher]
     ),
-) -> ApiResponse[StagingDeleteResponse]:
-    """Delete a single file from the OSS staging area.
+) -> ApiResponse[DeleteTransferResponse]:
+    """Delete a transfer ticket and its associated OSS staging object.
 
     Only tickets in a terminal state (DONE/FAILED/CANCELLED/DELETED)
     can be deleted.  The ticket transitions to DELETED on success.
+    Already-DELETED tickets are handled idempotently.
     """
-    logger.info(f"delete_staging: tenant={tenant}, bot_uuid={bot_uuid}, key={key}")
+    logger.info(
+        f"delete_transfer: tenant={tenant}, bot_uuid={bot_uuid}, "
+        f"transfer_id={transfer_id}"
+    )
 
     try:
-        result = await dispatcher.dispatch_delete_staging(key=key, tenant=tenant)
+        result = await dispatcher.dispatch_delete_transfer(
+            transfer_id=transfer_id,
+            tenant=tenant,
+        )
         return ApiResponse(data=result)
 
     except TransferNotFoundError as e:
@@ -443,6 +406,15 @@ async def delete_staging(
                 "error": e.error_code,
                 "message": str(e),
                 "transfer_id": e.transfer_id,
+            },
+        )
+    except TransferStateConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": e.error_code,
+                "message": str(e),
+                "transfer_id": getattr(e, "transfer_id", None),
             },
         )
     except NotImplementedError as e:
@@ -514,58 +486,3 @@ async def generate_share_link(
         )
 
 
-@router.get(
-    "/{tenant}/{bot_uuid}/files/transfers/{transfer_id}",
-    response_model=ApiResponse[GetTransferStatusResponse],
-    summary="Query file transfer status by transfer ID",
-)
-@inject
-async def get_transfer_status(
-    tenant: Annotated[str, Path(description="Tenant for isolation")],
-    bot_uuid: Annotated[str, Path(description="Bot UUID")],
-    transfer_id: Annotated[
-        str, Path(description="Transfer ID from upload-url/download-url response")
-    ],
-    dispatcher: BotFileTransferDispatcher = Depends(
-        Provide[ApplicationContainer.services.bot_file_transfer_dispatcher]
-    ),
-) -> ApiResponse[GetTransferStatusResponse]:
-    """Query the current status of a file transfer ticket.
-
-    Returns the transfer's status along with conditional fields:
-    - download_url when status == DONE
-    - error_message when status == FAILED
-    """
-    logger.info(
-        f"get_transfer_status: tenant={tenant}, bot_uuid={bot_uuid}, "
-        f"transfer_id={transfer_id}"
-    )
-
-    try:
-        result = await dispatcher.dispatch_get_transfer_status(
-            transfer_id=transfer_id,
-            tenant=tenant,
-            bot_uuid=bot_uuid,
-        )
-        return ApiResponse(data=result)
-
-    except BotNotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "BOT_NOT_FOUND", "message": str(e), "bot_uuid": bot_uuid},
-        )
-    except TransferNotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "TRANSFER_NOT_FOUND", "message": str(e)},
-        )
-    except NotImplementedError as e:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={"error": "NOT_IMPLEMENTED", "message": str(e)},
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": "INTERNAL_ERROR", "message": str(e)},
-        )
