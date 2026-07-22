@@ -271,7 +271,13 @@ def test_exchange_caller_identity_uses_passport_and_installs_opaque_token() -> N
         binding_id=9,
     )
 
-    token_provider.exchange.assert_called_once()
+    token_provider.exchange.assert_called_once_with(
+        auth_context=caller_identity_service.AuthContext(user_id="caller-1"),
+        iam_token="iam-token",
+        bot_id="bot-1",
+        owner_user_id="owner-1",
+        task_metadata=caller_identity_service.CALLER_CHAT_TASK,
+    )
     runtime_updater.update_caller_identity.assert_called_once_with(
         bot_id="bot-1",
         owner_user_id="owner-1",

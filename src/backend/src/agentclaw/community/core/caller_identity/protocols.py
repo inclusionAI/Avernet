@@ -37,7 +37,8 @@ class CallerTokenProviderProtocol(Protocol):
         *,
         auth_context: AuthContext,
         iam_token: str,
-        delegation_credential: str,
+        bot_id: str,
+        owner_user_id: str,
         task_metadata: Mapping[str, str],
     ) -> CallerToken: ...
 

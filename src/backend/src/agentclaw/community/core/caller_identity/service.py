@@ -345,8 +345,11 @@ class CallerIdentityService:
         is_test_exchange: bool = False,
     ) -> None:
         """Exchange and install the Caller credential for one chat request."""
-        delegation_credential = passport.query_token(bot_id, owner_user_id) or ""
-        if not delegation_credential:
+        # The Passport token remains runtime-only input for the BaaS outbound
+        # rule. Facade-based Caller exchange receives the Bot/owner identity
+        # directly and must never receive this token as delegation material.
+        agent_pass_token = passport.query_token(bot_id, owner_user_id) or ""
+        if not agent_pass_token:
             raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
 
         passport_detail = passport.query_agent_passport(bot_id, owner_user_id)
@@ -359,7 +362,8 @@ class CallerIdentityService:
         caller_token = token_provider.exchange(
             auth_context=AuthContext(user_id=caller_user_id),
             iam_token=iam_token,
-            delegation_credential=delegation_credential,
+            bot_id=bot_id,
+            owner_user_id=owner_user_id,
             task_metadata=CALLER_CHAT_TASK,
         )
         runtime_update_kwargs: dict[str, Any] = {
@@ -367,7 +371,7 @@ class CallerIdentityService:
             "owner_user_id": owner_user_id,
             "caller_user_id": caller_user_id,
             "caller_token": caller_token,
-            "agent_pass_token": delegation_credential,
+            "agent_pass_token": agent_pass_token,
             "agent_code": agent_code,
             "stage": stage,
             "publish_id": publish_id,
