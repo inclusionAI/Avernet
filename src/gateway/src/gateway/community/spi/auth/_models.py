@@ -16,10 +16,10 @@ class AuthenticatedUser(BaseModel):
     are optional profile attributes a provider may not supply.
     """
 
-    id: str                          # stable, provider-issued unique user id
-    username: str                    # account / login name
-    display_name: str | None = None  # human-facing name, if the provider supplies one
-    full_name: str | None = None     # full / legal name, if available
-    email: str | None = None         # contact email, if available
-    phone: str | None = None         # contact phone, if available
-    tenant_id: str | None = None     # tenant this identity belongs to, if the provider scopes it
+    id: str  # stable, provider-issued unique user id
+    username: str  # account / login name
+    display_name: str | None = None  # human-facing name, if provided
+    full_name: str | None = None  # full / legal name, if available
+    email: str | None = None  # contact email, if available
+    phone: str | None = None  # contact phone, if available
+    tenant_id: str | None = None  # tenant the identity belongs to, if any

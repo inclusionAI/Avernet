@@ -6,7 +6,7 @@ open-source edition runs without an identity backend.
 
 from __future__ import annotations
 
-from gateway.community.spi.auth import AuthPlugin, AuthenticatedUser
+from gateway.community.spi.auth import AuthenticatedUser, AuthPlugin
 
 
 class BareAuthPlugin(AuthPlugin):

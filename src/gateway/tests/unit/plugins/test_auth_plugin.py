@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from gateway.community.plugins.auth.bare import BareAuthPlugin
-from gateway.community.spi.auth import AuthError, AuthenticatedUser
+from gateway.community.spi.auth import AuthenticatedUser, AuthError
 
 # ── AuthenticatedUser model ───────────────────────────────────────────────────
 
