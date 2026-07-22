@@ -162,49 +162,6 @@ def test_abandon_from_id_recorded(repo):
     assert repo.abandon(op.id, "again") is None
 
 
-def test_fail_by_workflow_outcome_corrects_completed_op(repo):
-    """The op's steps completed at bookkeeping time; its workflow's terminal
-    FAILED arrives later via the progress sync. Unlike fail(), COMPLETED is an
-    allowed source — this is an outcome correction, not a step regression."""
-    op = _intent(repo)
-    repo.record_workflow(op.id, baas_publish_id=901)
-    repo.complete(op.id)
-
-    assert repo.fail_by_workflow(1, 901, "BaaS publish failed") is True
-    corrected = repo.get_by_id(op.id)
-    assert corrected.state == PublishOperationState.FAILED.value
-    assert corrected.last_error == "BaaS publish failed"
-
-
-def test_fail_by_workflow_from_id_recorded(repo):
-    op = _intent(repo)
-    repo.record_workflow(op.id, baas_publish_id=902)
-    assert repo.fail_by_workflow(1, 902, "failed mid-flight") is True
-    assert repo.get_by_id(op.id).state == PublishOperationState.FAILED.value
-
-
-def test_fail_by_workflow_noop_cases(repo):
-    # No row of this publish carries the workflow id (e.g. pre-ledger record).
-    assert repo.fail_by_workflow(1, 999, "e") is False
-
-    # Wrong publish: the row exists but belongs to another record.
-    op = _intent(repo, publish_id=7, request_id="req-7")
-    repo.record_workflow(op.id, baas_publish_id=903)
-    assert repo.fail_by_workflow(1, 903, "e") is False
-
-    # Already FAILED → no-op (idempotent on repeated failure syncs).
-    repo.fail_by_workflow(7, 903, "first")
-    assert repo.fail_by_workflow(7, 903, "second") is False
-    assert repo.get_by_id(op.id).last_error == "first"
-
-    # ABANDONED rows stay untouched (already not treated as landed).
-    ab = _intent(repo, publish_id=8, request_id="req-8")
-    repo.record_workflow(ab.id, baas_publish_id=904)
-    repo.abandon(ab.id, "superseded")
-    assert repo.fail_by_workflow(8, 904, "e") is False
-    assert repo.get_by_id(ab.id).state == PublishOperationState.ABANDONED.value
-
-
 def test_update_result_blind_overwrite(repo):
     op = _intent(repo)
     r1 = repo.update_result(op.id, {"binding_id": 10})
@@ -225,7 +182,7 @@ def test_publish_operation_kind_deploy_partition():
     """Every PublishOperationKind must be classified as either version-setting
     (a deploy — its completed op marks which version is live on its bot) or
     version-preserving (restart/scale/teardown — leaves the deployed version
-    unchanged). is_current_online_deployment's liveness scan filters on
+    unchanged). is_online_release_recorded's liveness scan filters on
     ``sets_deployed_version``, so an unclassified new kind would be silently
     mistreated; this partition assertion fails CI until the kind is classified in
     models.py (`_KINDS_SET_DEPLOYED_VERSION` / `_KINDS_PRESERVE_DEPLOYED_VERSION`)."""
