@@ -13,6 +13,7 @@ use axum::{
 use bcs_bot::{BotCore, ProviderBotEvents, ProviderCore, ProviderManagement};
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
 use bcs_http::{
+    gateway_trace::{BcnMakeSpan, BcnOnResponse},
     router::build_router,
     state::{BotRuntimeTokenResolverPort, HttpAppState},
 };
@@ -32,6 +33,9 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::{Mutex, RwLock};
 use tower::ServiceExt;
+use tower_http::trace::TraceLayer;
+use tracing::instrument::WithSubscriber;
+use tracing_subscriber::prelude::*;
 
 #[derive(Clone, Default)]
 struct SharedLogBuffer(Arc<std::sync::Mutex<Vec<u8>>>);
@@ -77,6 +81,55 @@ where
     future.await;
     drop(guard);
     String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap()
+}
+
+async fn capture_otel_spans<F, T>(future: F) -> (T, Vec<opentelemetry_sdk::trace::SpanData>)
+where
+    F: Future<Output = T>,
+{
+    opentelemetry::global::set_text_map_propagator(
+        opentelemetry_sdk::propagation::TraceContextPropagator::new(),
+    );
+    let exporter = opentelemetry_sdk::trace::InMemorySpanExporterBuilder::new().build();
+    let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+        .with_simple_exporter(exporter.clone())
+        .build();
+    let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, "bot-events-contract");
+    let subscriber = tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new("bcn_otel=info"))
+        .with(tracing_opentelemetry::layer().with_tracer(tracer));
+
+    let output = future.with_subscriber(subscriber).await;
+    provider.force_flush().unwrap();
+    (output, exporter.get_finished_spans().unwrap())
+}
+
+fn assert_otel_span_string_attribute(
+    span: &opentelemetry_sdk::trace::SpanData,
+    key: &str,
+    expected: &str,
+) {
+    assert!(span.attributes.iter().any(|attr| {
+        attr.key.as_str() == key
+            && matches!(&attr.value, opentelemetry::Value::String(value) if value.as_str() == expected)
+    }));
+}
+
+fn assert_otel_event_bool_attribute(
+    event: &opentelemetry::trace::Event,
+    key: &str,
+    expected: bool,
+) {
+    assert!(event.attributes.iter().any(|attr| {
+        attr.key.as_str() == key && attr.value == opentelemetry::Value::Bool(expected)
+    }));
+}
+
+fn assert_otel_event_contains(event: &opentelemetry::trace::Event, expected: &str) {
+    assert!(event.attributes.iter().any(|attr| {
+        attr.key.as_str() == "bcn.content"
+            && matches!(&attr.value, opentelemetry::Value::String(value) if value.as_str().contains(expected))
+    }));
 }
 
 struct TestApp {
@@ -1575,6 +1628,192 @@ async fn bot_events_rejects_provider_admin_token_for_static_bearer_provider() {
     let body = response_json(response).await;
     assert_eq!(body["error"], "auth_mode_mismatch");
     assert!(message_flow.events.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn bot_events_marks_auth_failure_content_untrusted_without_business_attributes() {
+    let resolver = Arc::new(StaticAgentpassResolver::default());
+    let TestApp {
+        app,
+        provider_core,
+        provider_bot_core,
+        run_context,
+        ..
+    } = test_app(resolver.clone());
+    let registered = register_provider_bot_with_admin_token(
+        provider_core.as_ref(),
+        provider_bot_core.as_ref(),
+        ProviderAuthMode::StaticBearer,
+        "reviewer-v2",
+    )
+    .await;
+    resolver
+        .insert_provider_admin(&registered.admin_token, &registered.provider_id)
+        .await;
+    run_context
+        .put_context(BotRunContext {
+            run_id: "run-untrusted".to_string(),
+            bot_id: registered.bot_uuid,
+            group_id: "group-1".to_string(),
+            bcs_session_id: None,
+            deadline_ms: bcs_protocol::now_ms() + 60_000,
+            terminal: false,
+        })
+        .await;
+    let app = app.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(BcnMakeSpan)
+            .on_response(BcnOnResponse),
+    );
+    let provider_id = registered.provider_id;
+    let admin_token = registered.admin_token;
+
+    let (status, spans) = capture_otel_spans(async move {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/bot/events")
+                    .header("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+                    .header("content-type", "application/json")
+                    .header("X-BCN-Provider-Id", provider_id)
+                    .header("X-BCN-Provider-Bot-Ref", "reviewer-v2")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .body(Body::from(json!({
+                        "run_id": "run-untrusted",
+                        "state": "final",
+                        "message": { "text": "untrusted-callback-content" }
+                    }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        drop(response);
+        status
+    })
+    .await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let span = spans.iter().find(|span| span.name == "bcn.bot.response").unwrap();
+    assert_otel_span_string_attribute(span, "bcn.auth.result", "failed");
+    assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.provider.id"));
+    assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.run.id"));
+    let event = span.events.events.iter().find(|event| event.name == "bcn.bot.response.content").unwrap();
+    assert_otel_event_bool_attribute(event, "bcn.content.untrusted", true);
+    assert_otel_event_contains(event, "untrusted-callback-content");
+}
+
+#[tokio::test]
+async fn bot_events_marks_success_content_trusted_with_business_attributes() {
+    let TestApp {
+        app,
+        provider_core,
+        provider_bot_core,
+        run_context,
+        ..
+    } = test_app(Arc::new(StaticAgentpassResolver::default()));
+    let registered = register_provider_bot(
+        provider_core.as_ref(),
+        provider_bot_core.as_ref(),
+        ProviderAuthMode::StaticBearer,
+        "reviewer-v2",
+    )
+    .await;
+    let token = registered.bot_runtime_token.unwrap();
+    run_context
+        .put_context(BotRunContext {
+            run_id: "run-trusted".to_string(),
+            bot_id: registered.bot_uuid,
+            group_id: "group-1".to_string(),
+            bcs_session_id: None,
+            deadline_ms: bcs_protocol::now_ms() + 60_000,
+            terminal: false,
+        })
+        .await;
+    let app = app.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(BcnMakeSpan)
+            .on_response(BcnOnResponse),
+    );
+    let provider_id = registered.provider_id;
+    let request_provider_id = provider_id.clone();
+
+    let (status, spans) = capture_otel_spans(async move {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/bot/events")
+                    .header("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+                    .header("content-type", "application/json")
+                    .header("X-BCN-Provider-Id", request_provider_id.as_str())
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(json!({
+                        "run_id": "run-trusted",
+                        "state": "final",
+                        "message": { "text": "trusted-callback-content" }
+                    }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        drop(response);
+        status
+    })
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let span = spans.iter().find(|span| span.name == "bcn.bot.response").unwrap();
+    assert_otel_span_string_attribute(span, "bcn.auth.result", "success");
+    assert_otel_span_string_attribute(span, "bcn.provider.id", &provider_id);
+    assert_otel_span_string_attribute(span, "bcn.run.id", "run-trusted");
+    let event = span.events.events.iter().find(|event| event.name == "bcn.bot.response.content").unwrap();
+    assert_otel_event_bool_attribute(event, "bcn.content.untrusted", false);
+    assert_otel_event_contains(event, "trusted-callback-content");
+}
+
+#[tokio::test]
+async fn bot_events_records_untrusted_content_when_auth_cannot_follow_invalid_shape() {
+    let TestApp { app, .. } = test_app(Arc::new(StaticAgentpassResolver::default()));
+    let app = app.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(BcnMakeSpan)
+            .on_response(BcnOnResponse),
+    );
+
+    let (status, spans) = capture_otel_spans(async move {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/bot/events")
+                    .header("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+                    .header("content-type", "application/json")
+                    .header("X-BCN-Provider-Id", "unverified-provider")
+                    .header("authorization", "Bearer unverified-token")
+                    .body(Body::from(json!({
+                        "run_id": "unverified-run",
+                        "message": { "text": "invalid-shape-content" }
+                    }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        drop(response);
+        status
+    })
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let span = spans.iter().find(|span| span.name == "bcn.bot.response").unwrap();
+    assert_otel_span_string_attribute(span, "bcn.auth.result", "unverified");
+    assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.provider.id"));
+    let event = span.events.events.iter().find(|event| event.name == "bcn.bot.response.content").unwrap();
+    assert_otel_event_bool_attribute(event, "bcn.content.untrusted", true);
+    assert_otel_event_contains(event, "invalid-shape-content");
 }
 
 #[tokio::test]

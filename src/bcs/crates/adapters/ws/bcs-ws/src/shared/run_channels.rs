@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use opentelemetry::trace::SpanContext;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, info, warn};
 
@@ -12,6 +13,7 @@ pub struct ClientChannel {
     pub registered_at: Instant,
     pub source: Option<String>,
     pub user_id: Option<String>,
+    pub trace_parent: Option<SpanContext>,
 }
 
 #[derive(Debug, Default)]
@@ -35,11 +37,26 @@ impl RunChannelManager {
         source: Option<String>,
         user_id: Option<String>,
     ) {
+        self.register_with_trace_parent(run_id, bcs_group_id, tx, source, user_id, None)
+            .await;
+    }
+
+    pub async fn register_with_trace_parent(
+        &self,
+        run_id: String,
+        bcs_group_id: String,
+        tx: mpsc::Sender<String>,
+        source: Option<String>,
+        user_id: Option<String>,
+        trace_parent: Option<SpanContext>,
+    ) {
+        let trace_parent = trace_parent.filter(SpanContext::is_valid);
         let channel = ClientChannel {
             tx,
             registered_at: Instant::now(),
             source,
             user_id,
+            trace_parent,
         };
 
         self.channels.write().await.insert(run_id.clone(), channel);
@@ -207,6 +224,15 @@ impl RunChannelManager {
         self.channels.read().await.contains_key(&resolved_run_id)
     }
 
+    pub async fn trace_parent(&self, run_id: &str) -> Option<SpanContext> {
+        let resolved_run_id = self.resolve_run_id(run_id).await;
+        self.channels
+            .read()
+            .await
+            .get(&resolved_run_id)
+            .and_then(|channel| channel.trace_parent.clone())
+    }
+
     pub async fn register_alias(&self, alias_run_id: String, source_run_id: String) -> bool {
         if alias_run_id == source_run_id {
             return self.is_registered(&source_run_id).await;
@@ -317,6 +343,17 @@ impl RunChannelManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
+
+    fn test_span_context() -> SpanContext {
+        SpanContext::new(
+            TraceId::from_hex("0af7651916cd43dd8448eb211c80319c").unwrap(),
+            SpanId::from_hex("b7ad6b7169203331").unwrap(),
+            TraceFlags::SAMPLED,
+            false,
+            TraceState::default(),
+        )
+    }
 
     #[tokio::test]
     async fn register_and_send_event() {
@@ -393,5 +430,52 @@ mod tests {
         assert!(!manager.is_registered("outer-run").await);
         assert!(!manager.is_registered("sub-run").await);
         assert!(manager.get_session_runs("grp-001:abcdef12").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn trace_parent_lookup_resolves_alias_and_cleans_up_with_channel() {
+        let manager = RunChannelManager::new();
+        let (tx, _rx) = mpsc::channel(16);
+        let trace_parent = test_span_context();
+
+        manager
+            .register_with_trace_parent(
+                "outer-run".to_string(),
+                "grp-001".to_string(),
+                tx,
+                Some("http-chat-async".to_string()),
+                None,
+                Some(trace_parent.clone()),
+            )
+            .await;
+        assert!(
+            manager
+                .register_alias("inner-run".to_string(), "outer-run".to_string())
+                .await
+        );
+
+        assert_eq!(manager.trace_parent("inner-run").await, Some(trace_parent));
+        manager.unregister("inner-run").await;
+        assert_eq!(manager.trace_parent("outer-run").await, None);
+        assert_eq!(manager.trace_parent("inner-run").await, None);
+    }
+
+    #[tokio::test]
+    async fn invalid_trace_parent_is_not_retained() {
+        let manager = RunChannelManager::new();
+        let (tx, _rx) = mpsc::channel(1);
+
+        manager
+            .register_with_trace_parent(
+                "run-invalid".to_string(),
+                "group-1".to_string(),
+                tx,
+                Some("http-chat-async".to_string()),
+                None,
+                Some(SpanContext::empty_context()),
+            )
+            .await;
+
+        assert_eq!(manager.trace_parent("run-invalid").await, None);
     }
 }

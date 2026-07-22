@@ -6,6 +6,7 @@ use bcs_auth_api::{AuthPluginChain, AuthPrincipal};
 use bcs_auth_local::StaticAuthPlugin;
 use bcs_bot::BotCore;
 use bcs_http::{
+    gateway_trace::{BcnMakeSpan, BcnOnResponse},
     router::build_router,
     state::{ChatRunEventPort, ChainUserIdentityPort, HttpAppState},
 };
@@ -25,6 +26,9 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::sync::{Mutex, RwLock, mpsc};
 use tower::ServiceExt;
+use tower_http::trace::TraceLayer;
+use tracing::instrument::WithSubscriber;
+use tracing_subscriber::prelude::*;
 
 #[derive(Default)]
 struct RecordingA2aChat {
@@ -37,6 +41,8 @@ struct RecordingA2aChat {
     blocking_content: Mutex<String>,
     blocking_failure: Mutex<Option<String>>,
     blocking_returns_error: Mutex<bool>,
+    async_unauthorized: Mutex<bool>,
+    async_forbidden: Mutex<bool>,
 }
 
 #[derive(Clone, Default)]
@@ -245,6 +251,12 @@ impl A2aChatRunService for RecordingA2aChat {
         &self,
         cmd: AsyncA2aChatCommand,
     ) -> ServiceResult<AsyncA2aChatAccepted> {
+        if *self.async_unauthorized.lock().await {
+            return Err(ServiceError::Unauthorized("owner mismatch".to_string()));
+        }
+        if *self.async_forbidden.lock().await {
+            return Err(ServiceError::Forbidden("access denied".to_string()));
+        }
         if let Some(bot_id) = self.not_connected_bot_id.lock().await.clone() {
             return Err(ServiceError::BotNotConnected(bot_id));
         }
@@ -620,6 +632,245 @@ async fn bot_chat_async_returns_accepted_and_preserves_cli_session_fallback() {
     assert_eq!(commands[0].caller_wait_mode.as_deref(), Some("detached"));
     assert_eq!(commands[0].organization_code, None);
     assert_eq!(a2a.run_channel_froms.lock().await.as_slice(), &[None]);
+}
+
+#[tokio::test]
+async fn bot_chat_async_marks_unauthorized_content_untrusted_without_business_attributes() {
+    let (app, _, _) = build_chat_app().await;
+    let app = app.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(BcnMakeSpan)
+            .on_response(BcnOnResponse),
+    );
+    let message = "unauthorized-sensitive-content";
+
+    let (status, spans) = capture_otel_spans(async move {
+        let response = app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/bots/target-bot/chat-async")
+                .header("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+                .header("authorization", "Bearer invalid-token")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::json!({ "message": message }).to_string()))
+                .unwrap(),
+        ).await.unwrap();
+        let status = response.status();
+        drop(response);
+        status
+    })
+    .await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let span = spans.iter().find(|span| span.name == "bcn.gateway.dispatch").unwrap();
+    assert_span_string_attribute(span, "bcn.auth.result", "failed");
+    assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.target.bot_id"));
+    assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "url.path"));
+    assert_span_string_attribute(span, "http.route", "/bots/{id}/chat-async");
+    let event = span.events.events.iter().find(|event| event.name == "bcn.chat.message").unwrap();
+    assert_event_bool_attribute(event, "bcn.content.untrusted", true);
+    assert_event_contains(event, message);
+}
+
+#[tokio::test]
+async fn bot_chat_async_marks_authenticated_content_trusted() {
+    let (app, _, _) = build_chat_app().await;
+    let app = app.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(BcnMakeSpan)
+            .on_response(BcnOnResponse),
+    );
+
+    let (status, spans) = capture_otel_spans(async move {
+        let response = app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/bots/target-bot/chat-async")
+                .header("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+                .header("authorization", "Bearer caller-token")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"message":"trusted-content"}"#))
+                .unwrap(),
+        ).await.unwrap();
+        let status = response.status();
+        drop(response);
+        status
+    })
+    .await;
+
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let span = spans.iter().find(|span| span.name == "bcn.gateway.dispatch").unwrap();
+    assert_span_string_attribute(span, "bcn.auth.result", "success");
+    assert_span_string_attribute(span, "bcn.target.bot_id", "target-bot");
+    let event = span.events.events.iter().find(|event| event.name == "bcn.chat.message").unwrap();
+    assert_event_bool_attribute(event, "bcn.content.untrusted", false);
+    assert_event_contains(event, "trusted-content");
+}
+
+#[tokio::test]
+async fn bot_chat_async_marks_service_authorization_failure_untrusted() {
+    let (app, a2a, _) = build_chat_app().await;
+    *a2a.async_unauthorized.lock().await = true;
+    let app = app.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(BcnMakeSpan)
+            .on_response(BcnOnResponse),
+    );
+
+    let (status, spans) = capture_otel_spans(async move {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/bots/unverified-target/chat-async")
+                    .header("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+                    .header("authorization", "Bearer caller-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"message":"authorization-failure-content"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        drop(response);
+        status
+    })
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let span = spans.iter().find(|span| span.name == "bcn.gateway.dispatch").unwrap();
+    assert_span_string_attribute(span, "bcn.auth.result", "failed");
+    assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.target.bot_id"));
+    assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.run.id"));
+    let event = span.events.events.iter().find(|event| event.name == "bcn.chat.message").unwrap();
+    assert_event_bool_attribute(event, "bcn.content.untrusted", true);
+    assert_event_contains(event, "authorization-failure-content");
+}
+
+#[tokio::test]
+async fn bot_chat_async_marks_service_forbidden_failure_untrusted() {
+    let (app, a2a, _) = build_chat_app().await;
+    *a2a.async_forbidden.lock().await = true;
+    let app = app.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(BcnMakeSpan)
+            .on_response(BcnOnResponse),
+    );
+
+    let (status, spans) = capture_otel_spans(async move {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/bots/unverified-target/chat-async")
+                    .header("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+                    .header("authorization", "Bearer caller-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"message":"forbidden-content"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        drop(response);
+        status
+    })
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let span = spans.iter().find(|span| span.name == "bcn.gateway.dispatch").unwrap();
+    assert_span_string_attribute(span, "bcn.auth.result", "failed");
+    assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.target.bot_id"));
+    assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.run.id"));
+    let event = span.events.events.iter().find(|event| event.name == "bcn.chat.message").unwrap();
+    assert_event_bool_attribute(event, "bcn.content.untrusted", true);
+    assert_event_contains(event, "forbidden-content");
+}
+
+#[tokio::test]
+async fn bot_chat_async_records_trusted_content_after_auth_when_session_is_invalid() {
+    let (app, _, _) = build_chat_app().await;
+    let app = app.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(BcnMakeSpan)
+            .on_response(BcnOnResponse),
+    );
+
+    let (status, spans) = capture_otel_spans(async move {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/bots/target-bot/chat-async")
+                    .header("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+                    .header("authorization", "Bearer caller-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"message":"invalid-session-content","session_id":" "}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        drop(response);
+        status
+    })
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let span = spans.iter().find(|span| span.name == "bcn.gateway.dispatch").unwrap();
+    assert_span_string_attribute(span, "bcn.auth.result", "success");
+    let event = span.events.events.iter().find(|event| event.name == "bcn.chat.message").unwrap();
+    assert_event_bool_attribute(event, "bcn.content.untrusted", false);
+    assert_event_contains(event, "invalid-session-content");
+}
+
+async fn capture_otel_spans<F, T>(future: F) -> (T, Vec<opentelemetry_sdk::trace::SpanData>)
+where
+    F: Future<Output = T>,
+{
+    opentelemetry::global::set_text_map_propagator(
+        opentelemetry_sdk::propagation::TraceContextPropagator::new(),
+    );
+    let exporter = opentelemetry_sdk::trace::InMemorySpanExporterBuilder::new().build();
+    let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+        .with_simple_exporter(exporter.clone())
+        .build();
+    let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, "bot-chat-contract");
+    let subscriber = tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new("bcn_otel=info"))
+        .with(tracing_opentelemetry::layer().with_tracer(tracer));
+
+    let output = future.with_subscriber(subscriber).await;
+    provider.force_flush().unwrap();
+    (output, exporter.get_finished_spans().unwrap())
+}
+
+fn assert_span_string_attribute(
+    span: &opentelemetry_sdk::trace::SpanData,
+    key: &str,
+    expected: &str,
+) {
+    assert!(span.attributes.iter().any(|attr| {
+        attr.key.as_str() == key
+            && matches!(&attr.value, opentelemetry::Value::String(value) if value.as_str() == expected)
+    }));
+}
+
+fn assert_event_bool_attribute(
+    event: &opentelemetry::trace::Event,
+    key: &str,
+    expected: bool,
+) {
+    assert!(event.attributes.iter().any(|attr| {
+        attr.key.as_str() == key && attr.value == opentelemetry::Value::Bool(expected)
+    }));
+}
+
+fn assert_event_contains(event: &opentelemetry::trace::Event, expected: &str) {
+    assert!(event.attributes.iter().any(|attr| {
+        attr.key.as_str() == "bcn.content"
+            && matches!(&attr.value, opentelemetry::Value::String(value) if value.as_str().contains(expected))
+    }));
 }
 
 #[tokio::test]

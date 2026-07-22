@@ -15,12 +15,14 @@ use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::chat_digest::{ChatDigestRecord, log_chat_digest};
-use crate::gateway_trace::{chat_client_observation, record_span_content};
+use crate::gateway_trace::{
+    chat_client_observation, record_span_content, record_span_content_with_untrusted,
+};
 use crate::state::HttpAppState;
 
 use super::{bot_id_from_headers, container_header_matches};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ChatRequest {
     pub message: String,
     #[serde(default)]
@@ -124,7 +126,14 @@ pub async fn bot_chat(
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
     let effective_timeout_ms = effective_legacy_chat_timeout_ms(req.timeout_ms);
-    record_chat_dispatch_trace(&bot_uuid, &headers, &req, false, effective_timeout_ms);
+    record_chat_dispatch_trace(
+        &bot_uuid,
+        &headers,
+        &req,
+        false,
+        effective_timeout_ms,
+        None,
+    );
 
     let from_bot_id = match resolve_bot_caller(&state, &headers).await {
         Ok(from_bot_id) => from_bot_id,
@@ -287,11 +296,11 @@ pub async fn bot_chat_async(
         .timeout_ms
         .unwrap_or(state.async_chat_run_timeout_ms)
         .min(24 * 60 * 60 * 1_000);
-    record_chat_dispatch_trace(&bot_uuid, &headers, &req, true, timeout_ms);
-
     let from_bot_id = match resolve_bot_caller(&state, &headers).await {
         Ok(from_bot_id) => from_bot_id,
         Err(err) => {
+            Span::current().set_attribute("bcn.auth.result", "failed");
+            record_span_content_with_untrusted("bcn.chat.message", &req.message, true);
             log_bot_chat_digest(ChatDigestArgs {
                 endpoint: "bot_chat_async",
                 from_bot_id: None,
@@ -313,39 +322,48 @@ pub async fn bot_chat_async(
     let authenticated_staff_id = authenticated_staff_id(&state, &headers, &uri).await;
 
     let run_id = uuid::Uuid::new_v4().to_string();
-    Span::current().set_attribute("bcn.run.id", run_id.clone());
-    let session_key = resolve_session_key(
+    let trace_request = req.clone();
+    let session_key = match resolve_session_key(
         req.session_id.as_deref(),
         &run_id,
         client_identity.as_deref(),
         &from_bot_id,
-    )
-    .map_err(LegacyChatError::invalid_request)
-    .map_err(|err| {
-        log_bot_chat_digest(ChatDigestArgs {
-            endpoint: "bot_chat_async",
-            from_bot_id: Some(&from_bot_id),
-            target_bot_id: &bot_uuid,
-            run_id: Some(&run_id),
-            session_id: req.session_id.as_deref(),
-            client: client_identity.as_deref(),
-            async_mode: true,
-            timeout_ms: Some(timeout_ms),
-            message_len,
-            started,
-            success: false,
-            status_code: err.status,
-            error_kind: Some(err.error_kind),
-        });
-        err
-    })?;
+    ) {
+        Ok(session_key) => session_key,
+        Err(message) => {
+            let err = LegacyChatError::invalid_request(message);
+            record_authenticated_async_chat_trace(
+                &bot_uuid,
+                &headers,
+                &trace_request,
+                timeout_ms,
+                &run_id,
+            );
+            log_bot_chat_digest(ChatDigestArgs {
+                endpoint: "bot_chat_async",
+                from_bot_id: Some(&from_bot_id),
+                target_bot_id: &bot_uuid,
+                run_id: Some(&run_id),
+                session_id: req.session_id.as_deref(),
+                client: client_identity.as_deref(),
+                async_mode: true,
+                timeout_ms: Some(timeout_ms),
+                message_len,
+                started,
+                success: false,
+                status_code: err.status,
+                error_kind: Some(err.error_kind),
+            });
+            return Err(err);
+        }
+    };
     let run_channel_from = req.from.clone();
     let organization_code = normalize_optional_string(req.organization_code);
     let chat_from_actor_id = Some(req.from.unwrap_or_else(|| "user".to_string()));
     let tags = normalize_tags(req.tags);
     let caller_wait_mode = normalize_optional_string(req.caller_wait_mode);
     let digest_client = client_identity.clone();
-    let accepted = state
+    let accepted_result = state
         .services
         .a2a_chat_runs
         .start_async_chat(AsyncA2aChatCommand {
@@ -366,9 +384,39 @@ pub async fn bot_chat_async(
             caller_wait_mode,
             organization_code,
         })
-        .await
-        .map_err(map_service_error)
-        .map_err(|err| {
+        .await;
+    let accepted = match accepted_result {
+        Ok(accepted) => {
+            record_authenticated_async_chat_trace(
+                &bot_uuid,
+                &headers,
+                &trace_request,
+                timeout_ms,
+                &run_id,
+            );
+            accepted
+        }
+        Err(service_error) => {
+            if matches!(
+                service_error,
+                ServiceError::Unauthorized(_) | ServiceError::Forbidden(_)
+            ) {
+                Span::current().set_attribute("bcn.auth.result", "failed");
+                record_span_content_with_untrusted(
+                    "bcn.chat.message",
+                    &trace_request.message,
+                    true,
+                );
+            } else {
+                record_authenticated_async_chat_trace(
+                    &bot_uuid,
+                    &headers,
+                    &trace_request,
+                    timeout_ms,
+                    &run_id,
+                );
+            }
+            let err = map_service_error(service_error);
             log_bot_chat_digest(ChatDigestArgs {
                 endpoint: "bot_chat_async",
                 from_bot_id: Some(&from_bot_id),
@@ -384,8 +432,9 @@ pub async fn bot_chat_async(
                 status_code: err.status,
                 error_kind: Some(err.error_kind),
             });
-            err
-        })?;
+            return Err(err);
+        }
+    };
     Span::current().set_attribute("bcn.delivery.accepted", true);
 
     log_bot_chat_digest(ChatDigestArgs {
@@ -416,12 +465,32 @@ pub async fn bot_chat_async(
     ))
 }
 
+fn record_authenticated_async_chat_trace(
+    target_bot_id: &str,
+    headers: &HeaderMap,
+    request: &ChatRequest,
+    timeout_ms: u64,
+    run_id: &str,
+) {
+    Span::current().set_attribute("bcn.auth.result", "success");
+    Span::current().set_attribute("bcn.run.id", run_id.to_string());
+    record_chat_dispatch_trace(
+        target_bot_id,
+        headers,
+        request,
+        true,
+        timeout_ms,
+        Some(false),
+    );
+}
+
 fn record_chat_dispatch_trace(
     target_bot_id: &str,
     headers: &HeaderMap,
     request: &ChatRequest,
     async_mode: bool,
     effective_timeout_ms: u64,
+    content_untrusted: Option<bool>,
 ) {
     let span = Span::current();
     span.set_attribute("bcn.operation", "chat.dispatch");
@@ -453,7 +522,11 @@ fn record_chat_dispatch_trace(
     if let Some(wait_timeout_ms) = client.wait_timeout_ms {
         span.set_attribute("bcn.client.wait_timeout_ms", wait_timeout_ms as i64);
     }
-    record_span_content("bcn.chat.message", &request.message);
+    if let Some(untrusted) = content_untrusted {
+        record_span_content_with_untrusted("bcn.chat.message", &request.message, untrusted);
+    } else {
+        record_span_content("bcn.chat.message", &request.message);
+    }
 }
 
 fn effective_legacy_chat_timeout_ms(timeout_ms: Option<u64>) -> u64 {

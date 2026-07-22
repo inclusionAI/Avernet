@@ -1,6 +1,6 @@
 use axum::http::HeaderMap;
 use opentelemetry::{KeyValue, global};
-use opentelemetry::trace::Status;
+use opentelemetry::trace::{Status, TraceContextExt};
 use opentelemetry_http::HeaderExtractor;
 use std::time::Duration;
 use tower_http::trace::{MakeSpan, OnResponse};
@@ -13,14 +13,14 @@ pub(crate) const SPAN_CONTENT_LIMIT_BYTES: usize = 4096;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BusinessTraceOperation {
     GatewayDispatch,
-    ProviderCallback,
+    BotResponse,
 }
 
 impl BusinessTraceOperation {
     pub fn span_name(self) -> &'static str {
         match self {
             Self::GatewayDispatch => "bcn.gateway.dispatch",
-            Self::ProviderCallback => "bcn.provider.callback",
+            Self::BotResponse => "bcn.bot.response",
         }
     }
 }
@@ -50,9 +50,7 @@ pub fn classify_business_request(path: &str) -> Option<BusinessTraceOperation> {
         ["bots", bot_id, "chat" | "chat-async"] if !bot_id.is_empty() => {
             Some(BusinessTraceOperation::GatewayDispatch)
         }
-        ["bot", "events"] | ["bot", "events", "coordination"] => {
-            Some(BusinessTraceOperation::ProviderCallback)
-        }
+        ["bot", "events"] => Some(BusinessTraceOperation::BotResponse),
         _ => None,
     }
 }
@@ -64,6 +62,9 @@ impl<B> MakeSpan<B> for BcnMakeSpan {
     fn make_span(&mut self, request: &axum::http::Request<B>) -> Span {
         let method = request.method().as_str();
         let path = request.uri().path();
+        if path == "/bot/events/coordination" {
+            return Span::none();
+        }
         let Some(operation) = classify_business_request(path) else {
             return debug_span!(
                 target: "bcs_http_access",
@@ -73,7 +74,23 @@ impl<B> MakeSpan<B> for BcnMakeSpan {
             );
         };
 
+        let parent = global::get_text_map_propagator(|propagator| {
+            propagator.extract(&HeaderExtractor(request.headers()))
+        });
+        if matches!(path, "/bot/events") || path.ends_with("/chat-async") {
+            if !parent.span().span_context().is_valid() {
+                return Span::none();
+            }
+        }
+
         let span = match operation {
+            BusinessTraceOperation::GatewayDispatch if path.ends_with("/chat-async") => info_span!(
+                target: "bcn_otel",
+                "bcn.gateway.dispatch",
+                otel.kind = "server",
+                http.request.method = %method,
+                http.route = "/bots/{id}/chat-async",
+            ),
             BusinessTraceOperation::GatewayDispatch => info_span!(
                 target: "bcn_otel",
                 "bcn.gateway.dispatch",
@@ -81,17 +98,14 @@ impl<B> MakeSpan<B> for BcnMakeSpan {
                 http.request.method = %method,
                 url.path = %path,
             ),
-            BusinessTraceOperation::ProviderCallback => info_span!(
+            BusinessTraceOperation::BotResponse => info_span!(
                 target: "bcn_otel",
-                "bcn.provider.callback",
+                "bcn.bot.response",
                 otel.kind = "server",
                 http.request.method = %method,
                 url.path = %path,
             ),
         };
-        let parent = global::get_text_map_propagator(|propagator| {
-            propagator.extract(&HeaderExtractor(request.headers()))
-        });
         let _ = span.set_parent(parent);
         span
     }
@@ -162,26 +176,43 @@ pub(crate) fn truncate_span_content(input: &str, limit_bytes: usize) -> Captured
 }
 
 pub(crate) fn record_span_content(event_name: &'static str, content: &str) {
+    record_span_content_inner(event_name, content, None);
+}
+
+pub(crate) fn record_span_content_with_untrusted(
+    event_name: &'static str,
+    content: &str,
+    untrusted: bool,
+) {
+    record_span_content_inner(event_name, content, Some(untrusted));
+}
+
+fn record_span_content_inner(
+    event_name: &'static str,
+    content: &str,
+    untrusted: Option<bool>,
+) {
     let captured = truncate_span_content(content, SPAN_CONTENT_LIMIT_BYTES);
-    Span::current().add_event(
-        event_name,
-        vec![
-            KeyValue::new("bcn.content", captured.content),
-            KeyValue::new(
-                "bcn.content.original_size_bytes",
-                captured.original_size_bytes as i64,
-            ),
-            KeyValue::new(
-                "bcn.content.captured_size_bytes",
-                captured.captured_size_bytes as i64,
-            ),
-            KeyValue::new(
-                "bcn.content.limit_bytes",
-                SPAN_CONTENT_LIMIT_BYTES as i64,
-            ),
-            KeyValue::new("bcn.content.truncated", captured.truncated),
-        ],
-    );
+    let mut attributes = vec![
+        KeyValue::new("bcn.content", captured.content),
+        KeyValue::new(
+            "bcn.content.original_size_bytes",
+            captured.original_size_bytes as i64,
+        ),
+        KeyValue::new(
+            "bcn.content.captured_size_bytes",
+            captured.captured_size_bytes as i64,
+        ),
+        KeyValue::new(
+            "bcn.content.limit_bytes",
+            SPAN_CONTENT_LIMIT_BYTES as i64,
+        ),
+        KeyValue::new("bcn.content.truncated", captured.truncated),
+    ];
+    if let Some(untrusted) = untrusted {
+        attributes.push(KeyValue::new("bcn.content.untrusted", untrusted));
+    }
+    Span::current().add_event(event_name, attributes);
 }
 
 fn floor_char_boundary(value: &str, mut index: usize) -> usize {
@@ -258,8 +289,9 @@ mod tests {
         );
         assert_eq!(
             classify_business_request("/bot/events"),
-            Some(BusinessTraceOperation::ProviderCallback)
+            Some(BusinessTraceOperation::BotResponse)
         );
+        assert_eq!(classify_business_request("/bot/events/coordination"), None);
         assert_eq!(classify_business_request("/chat/runs/run-1"), None);
     }
 
@@ -269,8 +301,33 @@ mod tests {
     }
 
     #[test]
-    fn provider_callback_span_uses_provider_traceparent_as_remote_parent() {
-        assert_request_span_parent("/bot/events", "bcn.provider.callback");
+    fn bot_response_span_uses_provider_traceparent_as_remote_parent() {
+        assert_request_span_parent("/bot/events", "bcn.bot.response");
+    }
+
+    #[test]
+    fn gated_routes_without_valid_traceparent_do_not_create_spans() {
+        assert_request_creates_no_span("/bots/bot-1/chat-async", None);
+        assert_request_creates_no_span("/bot/events", None);
+        assert_request_creates_no_span("/bots/bot-1/chat-async", Some("malformed"));
+        assert_request_creates_no_span("/bot/events", Some("malformed"));
+    }
+
+    #[test]
+    fn coordination_route_returns_disabled_span_even_with_traceparent() {
+        global::set_text_map_propagator(TraceContextPropagator::new());
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/bot/events/coordination")
+            .header(
+                "traceparent",
+                "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+            )
+            .body(())
+            .unwrap();
+        let mut make_span = BcnMakeSpan::default();
+
+        assert!(make_span.make_span(&request).is_disabled());
     }
 
     fn assert_request_span_parent(path: &str, expected_name: &str) {
@@ -309,6 +366,33 @@ mod tests {
             spans[0].parent_span_id.to_string(),
             "b7ad6b7169203331"
         );
+    }
+
+    fn assert_request_creates_no_span(path: &str, traceparent: Option<&str>) {
+        global::set_text_map_propagator(TraceContextPropagator::new());
+        let exporter = InMemorySpanExporterBuilder::new().build();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        let tracer = provider.tracer("bcn-gateway-test");
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::new("bcn_otel=info"))
+            .with(tracing_opentelemetry::layer().with_tracer(tracer));
+
+        tracing::subscriber::with_default(subscriber, || {
+            let mut builder = axum::http::Request::builder().method("POST").uri(path);
+            if let Some(traceparent) = traceparent {
+                builder = builder.header("traceparent", traceparent);
+            }
+            let request = builder.body(()).unwrap();
+            let mut make_span = BcnMakeSpan::default();
+            let span = make_span.make_span(&request);
+            assert!(span.is_disabled());
+            drop(span);
+        });
+
+        provider.force_flush().unwrap();
+        assert!(exporter.get_finished_spans().unwrap().is_empty());
     }
 
     #[test]
