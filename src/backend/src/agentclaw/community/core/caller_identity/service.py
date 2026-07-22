@@ -80,7 +80,7 @@ class CallerIdentityService:
         server_code: str,
         call_type: McpCallType,
         actor_id: str,
-        lock_epoch: int,
+        lock_epoch: int | None = None,
         entity_id: str | None = None,
     ) -> McpCallTypeUpdateResult:
         """Update draft state, then synchronously refresh Agent Principal."""
@@ -123,7 +123,15 @@ class CallerIdentityService:
 
         lock_key = f"{bot_id}:{actor_id}"
         lock = self._lock_repository.get_by_key(lock_key)
-        if lock is None or lock.holder_user_id != actor_id or lock.id != lock_epoch:
+        if lock_epoch is None:
+            if lock is not None:
+                logger.warning(
+                    "caller_mcp_call_type_update_rejected_missing_lock_epoch "
+                    "bot_id=%s",
+                    bot_id,
+                )
+                raise CallerLockEpochError
+        elif lock is None or lock.holder_user_id != actor_id or lock.id != lock_epoch:
             raise CallerLockEpochError
 
         try:
@@ -142,8 +150,6 @@ class CallerIdentityService:
             raise CallerLockEpochError from exc
         except CallerIdentityEngineChangedError as exc:
             raise CallerIdentityReadOnlyError from exc
-        except (TypeError, ValueError) as exc:
-            raise CallerCallTypeInvalidError from exc
 
         try:
             identity_modes = self._repository.list_draft_call_types(
@@ -176,11 +182,12 @@ class CallerIdentityService:
 
         logger.info(
             "caller_mcp_call_type_updated bot_id=%s server_code=%s call_type=%s "
-            "bot_call_type=%s",
+            "bot_call_type=%s lock_epoch_supplied=%s",
             bot_id,
             server_code,
             normalized_call_type.value,
             mutation.bot_call_type.value,
+            lock_epoch is not None,
         )
         return McpCallTypeUpdateResult(
             server_code=server_code,
@@ -215,7 +222,7 @@ class CallerIdentityService:
             editable=(
                 is_owner
                 and normalized_stage is CallerIdentityStage.DRAFT
-                and self._holds_lock(bot, actor_id)
+                and self._can_edit_draft(bot, actor_id)
             ),
         )
 
@@ -248,15 +255,26 @@ class CallerIdentityService:
         stage: CallerIdentityStage,
         publish_id: int | None = None,
         entity_id: str | None = None,
+        is_test_exchange: bool = False,
     ) -> CallerIamTokenContext:
-        """Use only ac_bots.call_type to decide the IAM Caller branch."""
+        """Resolve whether the IAM request should execute the Caller branch."""
         bot = self._get_bot(bot_id, entity_id)
         resolved_stage = CallerIdentityStage(stage)
-        bot_call_type = self._bot_call_type(bot)
+        # COSEC: temporary browser testing only bypasses the Bot type and
+        # aggregate call-type lookup/gates. Exact Bot resolution, ACTIVE state and
+        # the downstream IAM/Passport/runtime validations remain mandatory.
+        bot_call_type = (
+            McpCallType.OWNER if is_test_exchange else self._bot_call_type(bot)
+        )
         should_exchange = (
-            bot.get("bot_type") == "service"
-            and bot.get("status") == "ACTIVE"
-            and bot_call_type is McpCallType.CALLER
+            bot.get("status") == "ACTIVE"
+            and (
+                is_test_exchange
+                or (
+                    bot.get("bot_type") == "service"
+                    and bot_call_type is McpCallType.CALLER
+                )
+            )
         )
         binding_id = (
             bot.get("binding_id")
@@ -270,11 +288,12 @@ class CallerIdentityService:
         ):
             binding_id = None
         logger.info(
-            "caller_iam_context_resolved bot_id=%s stage=%s caller=%s entity_scoped=%s "
-            "draft_binding_available=%s",
+            "caller_iam_context_resolved bot_id=%s stage=%s caller=%s "
+            "test_exchange=%s entity_scoped=%s draft_binding_available=%s",
             bot_id,
             resolved_stage.value,
             should_exchange,
+            is_test_exchange,
             entity_id is not None,
             binding_id is not None,
         )
@@ -302,6 +321,7 @@ class CallerIdentityService:
         publish_id: int | None,
         entity_id: str | None = None,
         binding_id: int | None = None,
+        is_test_exchange: bool = False,
     ) -> None:
         """Exchange and install the Caller credential for one chat request."""
         delegation_credential = passport.query_token(bot_id, owner_user_id) or ""
@@ -339,6 +359,17 @@ class CallerIdentityService:
             and binding_id > 0
         ):
             runtime_update_kwargs["binding_id"] = binding_id
+        if is_test_exchange:
+            # The HTTP adapter restricts this temporary path to a non-production
+            # Bot owner. BaaS needs the marker only to accept a personal Bot for
+            # that controlled end-to-end test.
+            runtime_update_kwargs["is_test_exchange"] = True
+        logger.info(
+            "caller_runtime_update_requested bot_id=%s stage=%s test_exchange=%s",
+            bot_id,
+            stage,
+            is_test_exchange,
+        )
         runtime_updater.update_caller_identity(
             **runtime_update_kwargs,
         )
@@ -353,7 +384,7 @@ class CallerIdentityService:
         mutation: Any,
         effective_server_codes: set[str],
         actor_id: str,
-        lock_epoch: int,
+        lock_epoch: int | None,
     ) -> None:
         try:
             compensation = self._repository.compensate_draft_call_type(
@@ -425,6 +456,11 @@ class CallerIdentityService:
     def _holds_lock(self, bot: Mapping[str, Any], actor_id: str) -> bool:
         lock = self._lock_repository.get_by_key(f"{bot['bot_id']}:{bot['owner_id']}")
         return lock is not None and lock.holder_user_id == actor_id
+
+    def _can_edit_draft(self, bot: Mapping[str, Any], actor_id: str) -> bool:
+        """Permit an owner when no collaboration lock has been created yet."""
+        lock = self._lock_repository.get_by_key(f"{bot['bot_id']}:{bot['owner_id']}")
+        return lock is None or lock.holder_user_id == actor_id
 
     @staticmethod
     def _bot_call_type(bot: Mapping[str, Any]) -> McpCallType:

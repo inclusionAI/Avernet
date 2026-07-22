@@ -44,26 +44,42 @@ class CallerIdentityRepository:
         effective_server_codes: set[str],
         lock_key: str,
         lock_holder_user_id: str,
-        lock_epoch: int,
+        lock_epoch: int | None,
     ) -> DraftCallTypeMutationResult:
         normalized_call_type = McpCallType.parse(call_type)
         env = get_current_env()
         with self._db.transactional_orm_session() as session:
-            # COSEC: verify the exact lock inside the write transaction so a
-            # released or stolen lock cannot authorize a stale mutation.
-            lock = (
-                session.query(BotCollabLockModel)
-                .filter(
-                    BotCollabLockModel.lock_key == lock_key,
-                    BotCollabLockModel.holder_user_id == lock_holder_user_id,
-                    BotCollabLockModel.id == lock_epoch,
-                    BotCollabLockModel.env == env,
+            if lock_epoch is not None:
+                # COSEC: verify the exact lock inside the write transaction so a
+                # released or stolen lock cannot authorize a stale mutation.
+                lock = (
+                    session.query(BotCollabLockModel)
+                    .filter(
+                        BotCollabLockModel.lock_key == lock_key,
+                        BotCollabLockModel.holder_user_id == lock_holder_user_id,
+                        BotCollabLockModel.id == lock_epoch,
+                        BotCollabLockModel.env == env,
+                    )
+                    .with_for_update()
+                    .one_or_none()
                 )
-                .with_for_update()
-                .one_or_none()
-            )
-            if lock is None:
-                raise CallerIdentityLockMismatchError
+                if lock is None:
+                    raise CallerIdentityLockMismatchError
+            else:
+                # COSEC: repeat the unlocked-path check in the write
+                # transaction. A lock created after the service check must not
+                # be bypassed by an omitted epoch.
+                lock = (
+                    session.query(BotCollabLockModel)
+                    .filter(
+                        BotCollabLockModel.lock_key == lock_key,
+                        BotCollabLockModel.env == env,
+                    )
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if lock is not None:
+                    raise CallerIdentityLockMismatchError
             bot = (
                 session.query(BotModel)
                 .filter(BotModel.id == bot_pk, BotModel.env == env)
@@ -141,23 +157,38 @@ class CallerIdentityRepository:
         expected_revision: int,
         lock_key: str,
         lock_holder_user_id: str,
-        lock_epoch: int,
+        lock_epoch: int | None,
     ) -> DraftCallTypeCompensationResult:
         env = get_current_env()
         with self._db.transactional_orm_session() as session:
-            lock = (
-                session.query(BotCollabLockModel)
-                .filter(
-                    BotCollabLockModel.lock_key == lock_key,
-                    BotCollabLockModel.holder_user_id == lock_holder_user_id,
-                    BotCollabLockModel.id == lock_epoch,
-                    BotCollabLockModel.env == env,
+            if lock_epoch is not None:
+                lock = (
+                    session.query(BotCollabLockModel)
+                    .filter(
+                        BotCollabLockModel.lock_key == lock_key,
+                        BotCollabLockModel.holder_user_id == lock_holder_user_id,
+                        BotCollabLockModel.id == lock_epoch,
+                        BotCollabLockModel.env == env,
+                    )
+                    .with_for_update()
+                    .one_or_none()
                 )
-                .with_for_update()
-                .one_or_none()
-            )
-            if lock is None:
-                raise CallerIdentityLockMismatchError
+                if lock is None:
+                    raise CallerIdentityLockMismatchError
+            else:
+                # COSEC: do not roll back an unlocked mutation after another
+                # editor has established a collaboration lock.
+                lock = (
+                    session.query(BotCollabLockModel)
+                    .filter(
+                        BotCollabLockModel.lock_key == lock_key,
+                        BotCollabLockModel.env == env,
+                    )
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if lock is not None:
+                    raise CallerIdentityLockMismatchError
             bot = (
                 session.query(BotModel)
                 .filter(BotModel.id == bot_pk, BotModel.env == env)
