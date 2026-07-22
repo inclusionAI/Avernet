@@ -71,10 +71,7 @@ def _resolve_overlay_path(env: str) -> Path | None:
 def _merge(base: dict, overlay: dict) -> dict:
     out = dict(base)
     for key, value in (overlay or {}).items():
-        if (
-            isinstance(value, dict)
-            and isinstance(out.get(key), dict)
-        ):
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
             out[key] = _merge(out[key], value)
         else:
             out[key] = value
