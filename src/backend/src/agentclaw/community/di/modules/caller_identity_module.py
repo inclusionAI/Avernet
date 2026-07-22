@@ -120,7 +120,7 @@ class CallerIdentityModule(Module):
     @singleton
     @provider
     @inject
-def caller_runtime_updater_protocol(
+    def caller_runtime_updater_protocol(
         self,
         baas_service: BaasService,
     ) -> CallerRuntimeUpdaterProtocol:
