@@ -28,7 +28,7 @@ from secbaas.community.api.bot_runtime import (
     TooManyRequestsError,
 )
 from secbaas.community.api.device_manage import ErrorCode, PaasError
-from secbaas.community.api.sse import StreamChunk
+from secbaas.community.api.sse import SseEvent, StreamChunk
 from secbaas.community.core.service.bot_run import (
     BotBindingNotFoundError,
     BotRunner,
@@ -1642,76 +1642,275 @@ class TestSelectDispatcherConfig:
         assert result is task_d
 
 
-# ==================== Tests: _with_heartbeat ====================
+# ==================== Tests: with_sse_heartbeat ====================
 
 
-class TestWithHeartbeat:
-    """Cover _with_heartbeat: normal yield, timeout heartbeat, StopAsyncIteration."""
+class TestWithSseHeartbeat:
+    """Cover with_sse_heartbeat: normal yield, timeout heartbeat, empty stream."""
 
     @pytest.mark.asyncio
-    async def test_yields_chunks(self):
-        from secbaas.community.core.service.bot_run._runner import _with_heartbeat
+    async def test_yields_sse(self):
+        from secbaas.community.api.sse import with_sse_heartbeat
 
         async def source():
-            yield StreamChunk(type="delta", content="a")
-            yield StreamChunk(type="final", content="done")
+            yield "event: delta\ndata: a\n\n"
+            yield "event: final\ndata: done\n\n"
 
-        chunks = []
-        async for chunk in _with_heartbeat(source()):
-            chunks.append(chunk)
+        results = []
+        async for sse in with_sse_heartbeat(source()):
+            results.append(sse)
 
-        assert len(chunks) == 2
-        assert chunks[0].type == "delta"
-        assert chunks[1].type == "final"
+        assert len(results) == 2
+        assert results[0] == "event: delta\ndata: a\n\n"
+        assert results[1] == "event: final\ndata: done\n\n"
 
     @pytest.mark.asyncio
     async def test_inserts_heartbeat_on_timeout(self):
-        from secbaas.community.core.service.bot_run._runner import _with_heartbeat
+        from secbaas.community.api.sse import HEARTBEAT_SSE, with_sse_heartbeat
 
         async def slow_source():
-            yield StreamChunk(type="delta", content="first")
+            yield "event: delta\ndata: first\n\n"
             await asyncio.sleep(0.15)
-            yield StreamChunk(type="final", content="late")
+            yield "event: final\ndata: late\n\n"
 
         original_wait_for = asyncio.wait_for
 
         with patch(
-            "secbaas.community.core.service.bot_run._runner.asyncio.wait_for",
+            "secbaas.community.api.sse._heartbeat.asyncio.wait_for",
             lambda coro, timeout: original_wait_for(coro, 0.1),
         ):
-            chunks = []
-            async for chunk in _with_heartbeat(slow_source()):
-                chunks.append(chunk)
+            results = []
+            async for sse in with_sse_heartbeat(slow_source()):
+                results.append(sse)
 
-        assert len(chunks) == 3
-        assert chunks[0].type == "delta"
-        assert chunks[1].type == "heartbeat"
-        assert chunks[2].type == "final"
+        assert len(results) == 3
+        assert results[0] == "event: delta\ndata: first\n\n"
+        assert results[1] == HEARTBEAT_SSE
+        assert results[2] == "event: final\ndata: late\n\n"
 
     @pytest.mark.asyncio
     async def test_empty_stream(self):
-        from secbaas.community.core.service.bot_run._runner import _with_heartbeat
+        from secbaas.community.api.sse import with_sse_heartbeat
 
         async def empty():
             return
             yield  # make it an async generator
 
-        chunks = []
-        async for chunk in _with_heartbeat(empty()):
-            chunks.append(chunk)
+        results = []
+        async for sse in with_sse_heartbeat(empty()):
+            results.append(sse)
 
-        assert chunks == []
+        assert results == []
 
     @pytest.mark.asyncio
-    async def test_single_chunk(self):
-        from secbaas.community.core.service.bot_run._runner import _with_heartbeat
+    async def test_single_sse(self):
+        from secbaas.community.api.sse import with_sse_heartbeat
 
         async def single():
-            yield StreamChunk(type="final", content="only")
+            yield "event: final\ndata: only\n\n"
 
-        chunks = []
-        async for chunk in _with_heartbeat(single()):
-            chunks.append(chunk)
+        results = []
+        async for sse in with_sse_heartbeat(single()):
+            results.append(sse)
 
-        assert len(chunks) == 1
-        assert chunks[0].content == "only"
+        assert len(results) == 1
+        assert results[0] == "event: final\ndata: only\n\n"
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_when_all_filtered(self):
+        """Upstream yields nothing useful for >interval; heartbeat should fire."""
+        from secbaas.community.api.sse import HEARTBEAT_SSE, with_sse_heartbeat
+
+        async def silent_source():
+            await asyncio.sleep(0.15)
+            return
+            yield  # make it an async generator
+
+        original_wait_for = asyncio.wait_for
+
+        with patch(
+            "secbaas.community.api.sse._heartbeat.asyncio.wait_for",
+            lambda coro, timeout: original_wait_for(coro, 0.1),
+        ):
+            results = []
+            async for sse in with_sse_heartbeat(silent_source()):
+                results.append(sse)
+
+        assert results == [HEARTBEAT_SSE]
+
+    @pytest.mark.asyncio
+    async def test_propagates_upstream_exception(self):
+        """Exceptions from the upstream SSE iterator are re-raised."""
+        from secbaas.community.api.sse import with_sse_heartbeat
+
+        async def failing_source():
+            yield "event: delta\ndata: a\n\n"
+            raise RuntimeError("upstream boom")
+
+        with pytest.raises(RuntimeError, match="upstream boom"):
+            async for _sse in with_sse_heartbeat(failing_source()):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_cancels_producer_on_early_exit(self):
+        """If the consumer stops early, the producer task is cancelled cleanly."""
+        from secbaas.community.api.sse import with_sse_heartbeat
+
+        async def endless_source():
+            yield "event: delta\ndata: a\n\n"
+            await asyncio.sleep(100)
+
+        gen = with_sse_heartbeat(endless_source())
+        # Read one item then abandon the generator
+        async for sse in gen:
+            assert sse == "event: delta\ndata: a\n\n"
+            break
+
+        # Generator cleanup runs __anext__ → triggers finally block
+        await gen.aclose()
+
+
+# ==================== Tests: convert_chunks_to_sse ====================
+
+
+class TestConvertChunksToSse:
+    """Cover convert_chunks_to_sse: prefix, conversion, None filtering, errors."""
+
+    @pytest.mark.asyncio
+    async def test_converts_chunks(self):
+        from secbaas.community.api.sse import convert_chunks_to_sse
+
+        converter = _DummyConverter()
+        converter._results = [
+            SseEvent(event="delta", data='{"a":1}'),
+            SseEvent(event="final", data='{"b":2}'),
+        ]
+
+        async def chunks():
+            yield StreamChunk(type="delta", content="a")
+            yield StreamChunk(type="final", content="b")
+
+        results = []
+        async for sse in convert_chunks_to_sse(chunks(), converter, "run-1"):
+            results.append(sse)
+
+        assert len(results) == 2
+        assert results[0] == 'event: delta\ndata: {"a":1}\n\n'
+        assert results[1] == 'event: final\ndata: {"b":2}\n\n'
+
+    @pytest.mark.asyncio
+    async def test_skips_none_events(self):
+        from secbaas.community.api.sse import convert_chunks_to_sse
+
+        converter = _DummyConverter()
+        converter._results = [
+            None,
+            SseEvent(event="delta", data='{"ok":true}'),
+            None,
+        ]
+
+        async def chunks():
+            yield StreamChunk(type="agent")
+            yield StreamChunk(type="delta", content="hi")
+            yield StreamChunk(type="agent")
+
+        results = []
+        async for sse in convert_chunks_to_sse(chunks(), converter, "r1"):
+            results.append(sse)
+
+        assert len(results) == 1
+        assert results[0] == 'event: delta\ndata: {"ok":true}\n\n'
+
+    @pytest.mark.asyncio
+    async def test_prefix_yields_first(self):
+        from secbaas.community.api.sse import convert_chunks_to_sse
+
+        converter = _DummyConverter()
+        converter._results = [SseEvent(event="delta", data='{"x":1}')]
+
+        ready = 'event: ready\ndata: {"mid":"m1"}\n\n'
+
+        async def chunks():
+            yield StreamChunk(type="delta", content="x")
+
+        results = []
+        async for sse in convert_chunks_to_sse(
+            chunks(), converter, "r1", prefix=[ready]
+        ):
+            results.append(sse)
+
+        assert results == [ready, 'event: delta\ndata: {"x":1}\n\n']
+
+    @pytest.mark.asyncio
+    async def test_on_error_callback(self):
+        from secbaas.community.api.sse import convert_chunks_to_sse
+
+        converter = _DummyConverter()
+        converter._results = [SseEvent(event="delta", data='{"a":1}')]
+
+        async def chunks():
+            yield StreamChunk(type="delta", content="a")
+            raise RuntimeError("convert boom")
+
+        captured: list[Exception] = []
+
+        def on_error(e: Exception) -> str:
+            captured.append(e)
+            return 'event: error\ndata: {"msg":"boom"}\n\n'
+
+        results = []
+        async for sse in convert_chunks_to_sse(chunks(), converter, "r1", on_error=on_error):
+            results.append(sse)
+
+        assert len(results) == 2
+        assert results[0] == 'event: delta\ndata: {"a":1}\n\n'
+        assert results[1] == 'event: error\ndata: {"msg":"boom"}\n\n'
+        assert len(captured) == 1
+        assert isinstance(captured[0], RuntimeError)
+
+    @pytest.mark.asyncio
+    async def test_re_raise_without_on_error(self):
+        from secbaas.community.api.sse import convert_chunks_to_sse
+
+        converter = _DummyConverter()
+        converter._results = [SseEvent(event="delta", data='{"a":1}')]
+
+        async def chunks():
+            yield StreamChunk(type="delta", content="a")
+            raise RuntimeError("no handler")
+
+        with pytest.raises(RuntimeError, match="no handler"):
+            async for _sse in convert_chunks_to_sse(chunks(), converter, "r1"):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_empty_chunk_iter(self):
+        from secbaas.community.api.sse import convert_chunks_to_sse
+
+        converter = _DummyConverter()
+        converter._results = []
+
+        async def empty():
+            return
+            yield  # async generator
+
+        results = []
+        async for _sse in convert_chunks_to_sse(empty(), converter, "r1"):
+            results.append(_sse)
+
+        assert results == []
+
+
+class _DummyConverter:
+    """Minimal StreamConverter stub for testing convert_chunks_to_sse."""
+
+    _idx = 0
+
+    @staticmethod
+    def name() -> str:
+        return "dummy"
+
+    def convert(self, chunk, *, run_id: str):
+        result = self._results[self._idx]
+        self._idx += 1
+        return result
