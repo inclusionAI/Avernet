@@ -292,9 +292,7 @@ class TestTaskMessageDispatcherTimeout:
     async def test_send_message_receives_reduced_timeout(
         self, mock_bot_service, mock_run_repo, arca_binding, context
     ):
-        dispatcher = TaskMessageDispatcher(
-            run_repository=mock_run_repo, task_pool=None
-        )
+        dispatcher = TaskMessageDispatcher(run_repository=mock_run_repo, task_pool=None)
         await dispatcher.dispatch_send(
             bot_service=mock_bot_service,
             run_id="run-001",
@@ -313,9 +311,7 @@ class TestTaskMessageDispatcherTimeout:
     async def test_small_timeout_floored_to_0_1(
         self, mock_bot_service, mock_run_repo, arca_binding, context
     ):
-        dispatcher = TaskMessageDispatcher(
-            run_repository=mock_run_repo, task_pool=None
-        )
+        dispatcher = TaskMessageDispatcher(run_repository=mock_run_repo, task_pool=None)
         await dispatcher.dispatch_send(
             bot_service=mock_bot_service,
             run_id="run-001",
@@ -335,9 +331,7 @@ class TestTaskMessageDispatcherTimeout:
         self, mock_bot_service, mock_run_repo, arca_binding, context
     ):
         pool = TaskConcurrencyPool(softmax=1, per_key_max=0)
-        dispatcher = TaskMessageDispatcher(
-            run_repository=mock_run_repo, task_pool=pool
-        )
+        dispatcher = TaskMessageDispatcher(run_repository=mock_run_repo, task_pool=pool)
         await dispatcher.dispatch_send(
             bot_service=mock_bot_service,
             run_id="run-001",
