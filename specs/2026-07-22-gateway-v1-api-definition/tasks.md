@@ -5,14 +5,14 @@
 > `NotImplementedError` (definition only). Keep `ruff` + strict `mypy`/`pyright` green and
 > `src/gateway/scripts/ci_test.sh` passing throughout.
 
-## Task 1: Shared response contract (envelope + pagination)
+## Task 1: Shared response contract (envelope + pagination) — `[x]` done
 - **Goal:** Provide the standard response envelope and pagination primitives every route reuses.
 - **Files:** `adapters/web/contracts/__init__.py`, `adapters/web/contracts/envelope.py`, `adapters/web/contracts/pagination.py`
 - **Done when:**
-  - [ ] `Envelope[T]` (Pydantic v2 generic) with `code: int`, `message: str`, `data: T | None`, `request_id: str`; plus `Page[T] = {total, items}`, and small shared payloads `Deleted`, `NameCheck`.
-  - [ ] Standard code constants defined (`200000, 201000, 202000, 204000`).
-  - [ ] `PageParams` query dependency (`page`, `page_size`) in `pagination.py`.
-  - [ ] `Envelope[SomeModel]` instantiates and `model_dump()` shows all four keys; ruff/mypy clean.
+  - [x] `Envelope[T]` (Pydantic v2 generic) with `code: int`, `message: str`, `data: T | None`, `request_id: str`; plus `Page[T] = {total, items}`, and small shared payloads `Deleted`, `NameCheck`.
+  - [x] Standard code constants defined (`200000, 201000, 202000, 204000`).
+  - [x] `PageParams` query dependency (`page`, `page_size`) in `pagination.py`.
+  - [x] `Envelope[SomeModel]` instantiates and `model_dump()` shows all four keys; ruff/mypy clean.
 - **Depends on:** —
 
 ## Task 2: Per-route security metadata helper
