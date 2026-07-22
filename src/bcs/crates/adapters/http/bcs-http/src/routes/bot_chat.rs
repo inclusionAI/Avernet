@@ -16,7 +16,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::chat_digest::{ChatDigestRecord, log_chat_digest};
 use crate::gateway_trace::{
-    chat_client_observation, record_span_content, record_span_content_with_untrusted,
+    chat_client_observation, record_span_content_attributes, record_span_content_event,
 };
 use crate::state::HttpAppState;
 
@@ -300,7 +300,7 @@ pub async fn bot_chat_async(
         Ok(from_bot_id) => from_bot_id,
         Err(err) => {
             Span::current().set_attribute("bcn.auth.result", "failed");
-            record_span_content_with_untrusted("bcn.chat.message", &req.message, true);
+            record_span_content_attributes("gen_ai.input.messages", &req.message, true);
             log_bot_chat_digest(ChatDigestArgs {
                 endpoint: "bot_chat_async",
                 from_bot_id: None,
@@ -402,8 +402,8 @@ pub async fn bot_chat_async(
                 ServiceError::Unauthorized(_) | ServiceError::Forbidden(_)
             ) {
                 Span::current().set_attribute("bcn.auth.result", "failed");
-                record_span_content_with_untrusted(
-                    "bcn.chat.message",
+                record_span_content_attributes(
+                    "gen_ai.input.messages",
                     &trace_request.message,
                     true,
                 );
@@ -523,9 +523,13 @@ fn record_chat_dispatch_trace(
         span.set_attribute("bcn.client.wait_timeout_ms", wait_timeout_ms as i64);
     }
     if let Some(untrusted) = content_untrusted {
-        record_span_content_with_untrusted("bcn.chat.message", &request.message, untrusted);
+        record_span_content_attributes(
+            "gen_ai.input.messages",
+            &request.message,
+            untrusted,
+        );
     } else {
-        record_span_content("bcn.chat.message", &request.message);
+        record_span_content_event("bcn.chat.message", &request.message);
     }
 }
 

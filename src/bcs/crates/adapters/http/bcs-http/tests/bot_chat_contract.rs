@@ -667,9 +667,9 @@ async fn bot_chat_async_marks_unauthorized_content_untrusted_without_business_at
     assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.target.bot_id"));
     assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "url.path"));
     assert_span_string_attribute(span, "http.route", "/bots/{id}/chat-async");
-    let event = span.events.events.iter().find(|event| event.name == "bcn.chat.message").unwrap();
-    assert_event_bool_attribute(event, "bcn.content.untrusted", true);
-    assert_event_contains(event, message);
+    assert!(span.events.events.is_empty());
+    assert_span_bool_attribute(span, "bcn.content.untrusted", true);
+    assert_span_attribute_contains(span, "gen_ai.input.messages", message);
 }
 
 #[tokio::test]
@@ -702,9 +702,9 @@ async fn bot_chat_async_marks_authenticated_content_trusted() {
     let span = spans.iter().find(|span| span.name == "bcn.gateway.dispatch").unwrap();
     assert_span_string_attribute(span, "bcn.auth.result", "success");
     assert_span_string_attribute(span, "bcn.target.bot_id", "target-bot");
-    let event = span.events.events.iter().find(|event| event.name == "bcn.chat.message").unwrap();
-    assert_event_bool_attribute(event, "bcn.content.untrusted", false);
-    assert_event_contains(event, "trusted-content");
+    assert!(span.events.events.is_empty());
+    assert_span_bool_attribute(span, "bcn.content.untrusted", false);
+    assert_span_attribute_contains(span, "gen_ai.input.messages", "trusted-content");
 }
 
 #[tokio::test]
@@ -742,9 +742,13 @@ async fn bot_chat_async_marks_service_authorization_failure_untrusted() {
     assert_span_string_attribute(span, "bcn.auth.result", "failed");
     assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.target.bot_id"));
     assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.run.id"));
-    let event = span.events.events.iter().find(|event| event.name == "bcn.chat.message").unwrap();
-    assert_event_bool_attribute(event, "bcn.content.untrusted", true);
-    assert_event_contains(event, "authorization-failure-content");
+    assert!(span.events.events.is_empty());
+    assert_span_bool_attribute(span, "bcn.content.untrusted", true);
+    assert_span_attribute_contains(
+        span,
+        "gen_ai.input.messages",
+        "authorization-failure-content",
+    );
 }
 
 #[tokio::test]
@@ -782,9 +786,9 @@ async fn bot_chat_async_marks_service_forbidden_failure_untrusted() {
     assert_span_string_attribute(span, "bcn.auth.result", "failed");
     assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.target.bot_id"));
     assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.run.id"));
-    let event = span.events.events.iter().find(|event| event.name == "bcn.chat.message").unwrap();
-    assert_event_bool_attribute(event, "bcn.content.untrusted", true);
-    assert_event_contains(event, "forbidden-content");
+    assert!(span.events.events.is_empty());
+    assert_span_bool_attribute(span, "bcn.content.untrusted", true);
+    assert_span_attribute_contains(span, "gen_ai.input.messages", "forbidden-content");
 }
 
 #[tokio::test]
@@ -819,9 +823,9 @@ async fn bot_chat_async_records_trusted_content_after_auth_when_session_is_inval
     assert_eq!(status, StatusCode::BAD_REQUEST);
     let span = spans.iter().find(|span| span.name == "bcn.gateway.dispatch").unwrap();
     assert_span_string_attribute(span, "bcn.auth.result", "success");
-    let event = span.events.events.iter().find(|event| event.name == "bcn.chat.message").unwrap();
-    assert_event_bool_attribute(event, "bcn.content.untrusted", false);
-    assert_event_contains(event, "invalid-session-content");
+    assert!(span.events.events.is_empty());
+    assert_span_bool_attribute(span, "bcn.content.untrusted", false);
+    assert_span_attribute_contains(span, "gen_ai.input.messages", "invalid-session-content");
 }
 
 async fn capture_otel_spans<F, T>(future: F) -> (T, Vec<opentelemetry_sdk::trace::SpanData>)
@@ -856,19 +860,23 @@ fn assert_span_string_attribute(
     }));
 }
 
-fn assert_event_bool_attribute(
-    event: &opentelemetry::trace::Event,
+fn assert_span_bool_attribute(
+    span: &opentelemetry_sdk::trace::SpanData,
     key: &str,
     expected: bool,
 ) {
-    assert!(event.attributes.iter().any(|attr| {
+    assert!(span.attributes.iter().any(|attr| {
         attr.key.as_str() == key && attr.value == opentelemetry::Value::Bool(expected)
     }));
 }
 
-fn assert_event_contains(event: &opentelemetry::trace::Event, expected: &str) {
-    assert!(event.attributes.iter().any(|attr| {
-        attr.key.as_str() == "bcn.content"
+fn assert_span_attribute_contains(
+    span: &opentelemetry_sdk::trace::SpanData,
+    key: &str,
+    expected: &str,
+) {
+    assert!(span.attributes.iter().any(|attr| {
+        attr.key.as_str() == key
             && matches!(&attr.value, opentelemetry::Value::String(value) if value.as_str().contains(expected))
     }));
 }

@@ -226,11 +226,18 @@ impl RunChannelManager {
 
     pub async fn trace_parent(&self, run_id: &str) -> Option<SpanContext> {
         let resolved_run_id = self.resolve_run_id(run_id).await;
-        self.channels
+        let trace_parent = self.channels
             .read()
             .await
             .get(&resolved_run_id)
-            .and_then(|channel| channel.trace_parent.clone())
+            .and_then(|channel| channel.trace_parent.clone());
+        debug!(
+            run_id = %run_id,
+            resolved_run_id = %resolved_run_id,
+            trace_parent_found = trace_parent.is_some(),
+            "Run channel trace context lookup"
+        );
+        trace_parent
     }
 
     pub async fn register_alias(&self, alias_run_id: String, source_run_id: String) -> bool {

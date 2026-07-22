@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use tracing::{Span, info, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::gateway_trace::record_span_content_with_untrusted;
+use crate::gateway_trace::record_span_content_attributes;
 use crate::state::HttpAppState;
 
 const BOT_EVENT_REQUEST_BODY_LIMIT: usize = 2 * 1024 * 1024;
@@ -243,8 +243,8 @@ pub async fn post_bot_event(
         ChatEventState::Delta
     } else {
         Span::current().set_attribute("bcn.auth.result", "unverified");
-        record_span_content_with_untrusted(
-            "bcn.bot.response.content",
+        record_span_content_attributes(
+            "gen_ai.output.messages",
             &callback_content,
             true,
         );
@@ -321,7 +321,7 @@ pub async fn post_bot_event(
         outcome.delivered_count as i64,
     );
     span.set_attribute("bcn.callback.failed_count", outcome.failed_count as i64);
-    record_span_content_with_untrusted("bcn.bot.response.content", &callback_content, false);
+    record_span_content_attributes("gen_ai.output.messages", &callback_content, false);
 
     Ok(Json(json!({
         "ok": true,
@@ -375,7 +375,7 @@ pub async fn post_coordination_event(
 
 fn record_bot_response_auth_failure(callback_content: &str) {
     Span::current().set_attribute("bcn.auth.result", "failed");
-    record_span_content_with_untrusted("bcn.bot.response.content", callback_content, true);
+    record_span_content_attributes("gen_ai.output.messages", callback_content, true);
 }
 
 fn header_required(headers: &HeaderMap, name: &'static str) -> Result<String, BotEventRouteError> {
