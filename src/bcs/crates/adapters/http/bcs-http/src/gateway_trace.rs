@@ -1,0 +1,463 @@
+use axum::http::HeaderMap;
+use opentelemetry::{KeyValue, global};
+use opentelemetry::trace::{Status, TraceContextExt};
+use opentelemetry_http::HeaderExtractor;
+use std::time::Duration;
+use tower_http::trace::{MakeSpan, OnResponse};
+use tracing::{Span, debug_span, info_span};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+const TRUNCATION_MARKER: &str = "...[TRUNCATED]...";
+pub(crate) const SPAN_CONTENT_LIMIT_BYTES: usize = 4096;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BusinessTraceOperation {
+    GatewayDispatch,
+    BotResponse,
+}
+
+impl BusinessTraceOperation {
+    pub fn span_name(self) -> &'static str {
+        match self {
+            Self::GatewayDispatch => "bcn.gateway.dispatch",
+            Self::BotResponse => "bcn.bot.response",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ChatClientObservation {
+    pub detach: Option<bool>,
+    pub wait_timeout_ms: Option<u64>,
+}
+
+pub(crate) fn chat_client_observation(headers: &HeaderMap) -> ChatClientObservation {
+    ChatClientObservation {
+        detach: headers
+            .get("x-bcs-client-detach")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse().ok()),
+        wait_timeout_ms: headers
+            .get("x-bcs-client-wait-timeout-ms")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse().ok()),
+    }
+}
+
+pub fn classify_business_request(path: &str) -> Option<BusinessTraceOperation> {
+    let segments: Vec<_> = path.trim_matches('/').split('/').collect();
+    match segments.as_slice() {
+        ["bots", bot_id, "chat" | "chat-async"] if !bot_id.is_empty() => {
+            Some(BusinessTraceOperation::GatewayDispatch)
+        }
+        ["bot", "events"] => Some(BusinessTraceOperation::BotResponse),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BcnMakeSpan;
+
+impl<B> MakeSpan<B> for BcnMakeSpan {
+    fn make_span(&mut self, request: &axum::http::Request<B>) -> Span {
+        let method = request.method().as_str();
+        let path = request.uri().path();
+        if path == "/bot/events/coordination" {
+            return Span::none();
+        }
+        let Some(operation) = classify_business_request(path) else {
+            return debug_span!(
+                target: "bcs_http_access",
+                "http.request",
+                http.request.method = %method,
+                url.path = %path,
+            );
+        };
+
+        let parent = global::get_text_map_propagator(|propagator| {
+            propagator.extract(&HeaderExtractor(request.headers()))
+        });
+        if matches!(path, "/bot/events") || path.ends_with("/chat-async") {
+            if !parent.span().span_context().is_valid() {
+                return Span::none();
+            }
+        }
+
+        let span = match operation {
+            BusinessTraceOperation::GatewayDispatch if path.ends_with("/chat-async") => info_span!(
+                target: "bcn_otel",
+                "bcn.gateway.dispatch",
+                otel.kind = "server",
+                http.request.method = %method,
+                http.route = "/bots/{id}/chat-async",
+            ),
+            BusinessTraceOperation::GatewayDispatch => info_span!(
+                target: "bcn_otel",
+                "bcn.gateway.dispatch",
+                otel.kind = "server",
+                http.request.method = %method,
+                url.path = %path,
+            ),
+            BusinessTraceOperation::BotResponse => info_span!(
+                target: "bcn_otel",
+                "bcn.bot.response",
+                otel.kind = "server",
+                http.request.method = %method,
+                url.path = %path,
+            ),
+        };
+        let _ = span.set_parent(parent);
+        span
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BcnOnResponse;
+
+impl<B> OnResponse<B> for BcnOnResponse {
+    fn on_response(self, response: &axum::http::Response<B>, latency: Duration, span: &Span) {
+        let status = response.status().as_u16() as i64;
+        span.set_attribute("http.response.status_code", status);
+        span.set_attribute("http.server.request.duration_ms", latency.as_millis() as i64);
+        if response.status().is_server_error() {
+            span.set_status(Status::error(format!("HTTP {status}")));
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CapturedSpanContent {
+    pub content: String,
+    pub original_size_bytes: usize,
+    pub captured_size_bytes: usize,
+    pub truncated: bool,
+}
+
+pub(crate) fn truncate_span_content(input: &str, limit_bytes: usize) -> CapturedSpanContent {
+    let original_size_bytes = input.len();
+    if original_size_bytes <= limit_bytes {
+        return CapturedSpanContent {
+            content: input.to_string(),
+            original_size_bytes,
+            captured_size_bytes: original_size_bytes,
+            truncated: false,
+        };
+    }
+
+    if limit_bytes <= TRUNCATION_MARKER.len() {
+        let end = floor_char_boundary(input, limit_bytes);
+        let content = input[..end].to_string();
+        return CapturedSpanContent {
+            captured_size_bytes: content.len(),
+            content,
+            original_size_bytes,
+            truncated: true,
+        };
+    }
+
+    let available = limit_bytes - TRUNCATION_MARKER.len();
+    let requested_head = available.saturating_mul(3) / 4;
+    let head_end = floor_char_boundary(input, requested_head);
+    let requested_tail = available - head_end;
+    let tail_start = ceil_char_boundary(input, input.len().saturating_sub(requested_tail));
+    let content = format!(
+        "{}{}{}",
+        &input[..head_end],
+        TRUNCATION_MARKER,
+        &input[tail_start..]
+    );
+
+    CapturedSpanContent {
+        captured_size_bytes: content.len(),
+        content,
+        original_size_bytes,
+        truncated: true,
+    }
+}
+
+pub(crate) fn record_span_content(event_name: &'static str, content: &str) {
+    record_span_content_inner(event_name, content, None);
+}
+
+pub(crate) fn record_span_content_with_untrusted(
+    event_name: &'static str,
+    content: &str,
+    untrusted: bool,
+) {
+    record_span_content_inner(event_name, content, Some(untrusted));
+}
+
+fn record_span_content_inner(
+    event_name: &'static str,
+    content: &str,
+    untrusted: Option<bool>,
+) {
+    let captured = truncate_span_content(content, SPAN_CONTENT_LIMIT_BYTES);
+    let mut attributes = vec![
+        KeyValue::new("bcn.content", captured.content),
+        KeyValue::new(
+            "bcn.content.original_size_bytes",
+            captured.original_size_bytes as i64,
+        ),
+        KeyValue::new(
+            "bcn.content.captured_size_bytes",
+            captured.captured_size_bytes as i64,
+        ),
+        KeyValue::new(
+            "bcn.content.limit_bytes",
+            SPAN_CONTENT_LIMIT_BYTES as i64,
+        ),
+        KeyValue::new("bcn.content.truncated", captured.truncated),
+    ];
+    if let Some(untrusted) = untrusted {
+        attributes.push(KeyValue::new("bcn.content.untrusted", untrusted));
+    }
+    Span::current().add_event(event_name, attributes);
+}
+
+fn floor_char_boundary(value: &str, mut index: usize) -> usize {
+    index = index.min(value.len());
+    while index > 0 && !value.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
+fn ceil_char_boundary(value: &str, mut index: usize) -> usize {
+    index = index.min(value.len());
+    while index < value.len() && !value.is_char_boundary(index) {
+        index += 1;
+    }
+    index
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{HeaderMap, HeaderValue};
+    use opentelemetry::{global, trace::TracerProvider as _};
+    use opentelemetry_sdk::{
+        propagation::TraceContextPropagator,
+        trace::{InMemorySpanExporterBuilder, SdkTracerProvider},
+    };
+    use tower_http::trace::{MakeSpan, OnResponse};
+    use tracing_subscriber::prelude::*;
+
+    #[test]
+    fn span_content_keeps_short_utf8_text() {
+        let captured = truncate_span_content("你好 BCN", 4096);
+
+        assert_eq!(captured.content, "你好 BCN");
+        assert_eq!(captured.original_size_bytes, 10);
+        assert_eq!(captured.captured_size_bytes, 10);
+        assert!(!captured.truncated);
+    }
+
+    #[test]
+    fn span_content_preserves_head_and_tail_within_byte_limit() {
+        let input = format!("{}END", "你".repeat(2000));
+        let captured = truncate_span_content(&input, 4096);
+
+        assert!(captured.truncated);
+        assert!(captured.content.contains("...[TRUNCATED]..."));
+        assert!(captured.content.ends_with("END"));
+        assert!(captured.captured_size_bytes <= 4096);
+        assert_eq!(captured.original_size_bytes, input.len());
+        assert!(std::str::from_utf8(captured.content.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn chat_client_observation_parses_detach_and_wait_timeout_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-bcs-client-detach", HeaderValue::from_static("true"));
+        headers.insert(
+            "x-bcs-client-wait-timeout-ms",
+            HeaderValue::from_static("60000"),
+        );
+
+        let observation = chat_client_observation(&headers);
+
+        assert_eq!(observation.detach, Some(true));
+        assert_eq!(observation.wait_timeout_ms, Some(60_000));
+    }
+
+    #[test]
+    fn business_trace_operation_classifies_chat_and_callback_routes() {
+        assert_eq!(
+            classify_business_request("/bots/bot-1/chat-async"),
+            Some(BusinessTraceOperation::GatewayDispatch)
+        );
+        assert_eq!(
+            classify_business_request("/bot/events"),
+            Some(BusinessTraceOperation::BotResponse)
+        );
+        assert_eq!(classify_business_request("/bot/events/coordination"), None);
+        assert_eq!(classify_business_request("/chat/runs/run-1"), None);
+    }
+
+    #[test]
+    fn gateway_request_span_uses_inbound_traceparent_as_remote_parent() {
+        assert_request_span_parent("/bots/bot-1/chat-async", "bcn.gateway.dispatch");
+    }
+
+    #[test]
+    fn bot_response_span_uses_provider_traceparent_as_remote_parent() {
+        assert_request_span_parent("/bot/events", "bcn.bot.response");
+    }
+
+    #[test]
+    fn gated_routes_without_valid_traceparent_do_not_create_spans() {
+        assert_request_creates_no_span("/bots/bot-1/chat-async", None);
+        assert_request_creates_no_span("/bot/events", None);
+        assert_request_creates_no_span("/bots/bot-1/chat-async", Some("malformed"));
+        assert_request_creates_no_span("/bot/events", Some("malformed"));
+    }
+
+    #[test]
+    fn coordination_route_returns_disabled_span_even_with_traceparent() {
+        global::set_text_map_propagator(TraceContextPropagator::new());
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/bot/events/coordination")
+            .header(
+                "traceparent",
+                "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+            )
+            .body(())
+            .unwrap();
+        let mut make_span = BcnMakeSpan::default();
+
+        assert!(make_span.make_span(&request).is_disabled());
+    }
+
+    fn assert_request_span_parent(path: &str, expected_name: &str) {
+        global::set_text_map_propagator(TraceContextPropagator::new());
+        let exporter = InMemorySpanExporterBuilder::new().build();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        let tracer = provider.tracer("bcn-gateway-test");
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_opentelemetry::layer().with_tracer(tracer));
+
+        tracing::subscriber::with_default(subscriber, || {
+            let request = axum::http::Request::builder()
+                .method("POST")
+                .uri(path)
+                .header(
+                    "traceparent",
+                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+                )
+                .body(())
+                .unwrap();
+            let mut make_span = BcnMakeSpan::default();
+            drop(make_span.make_span(&request));
+        });
+
+        provider.force_flush().unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].name, expected_name);
+        assert_eq!(
+            spans[0].span_context.trace_id().to_string(),
+            "0af7651916cd43dd8448eb211c80319c"
+        );
+        assert_eq!(
+            spans[0].parent_span_id.to_string(),
+            "b7ad6b7169203331"
+        );
+    }
+
+    fn assert_request_creates_no_span(path: &str, traceparent: Option<&str>) {
+        global::set_text_map_propagator(TraceContextPropagator::new());
+        let exporter = InMemorySpanExporterBuilder::new().build();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        let tracer = provider.tracer("bcn-gateway-test");
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::new("bcn_otel=info"))
+            .with(tracing_opentelemetry::layer().with_tracer(tracer));
+
+        tracing::subscriber::with_default(subscriber, || {
+            let mut builder = axum::http::Request::builder().method("POST").uri(path);
+            if let Some(traceparent) = traceparent {
+                builder = builder.header("traceparent", traceparent);
+            }
+            let request = builder.body(()).unwrap();
+            let mut make_span = BcnMakeSpan::default();
+            let span = make_span.make_span(&request);
+            assert!(span.is_disabled());
+            drop(span);
+        });
+
+        provider.force_flush().unwrap();
+        assert!(exporter.get_finished_spans().unwrap().is_empty());
+    }
+
+    #[test]
+    fn gateway_response_records_status_latency_and_server_error() {
+        let exporter = InMemorySpanExporterBuilder::new().build();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        let tracer = provider.tracer("bcn-gateway-test");
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_opentelemetry::layer().with_tracer(tracer));
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = info_span!(target: "bcn_otel", "bcn.gateway.dispatch");
+            let response = axum::http::Response::builder()
+                .status(503)
+                .body(())
+                .unwrap();
+            BcnOnResponse.on_response(&response, Duration::from_millis(42), &span);
+            drop(span);
+        });
+
+        provider.force_flush().unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+        let attributes = &spans[0].attributes;
+        assert!(attributes.iter().any(|attribute| {
+            attribute.key.as_str() == "http.response.status_code"
+                && attribute.value == opentelemetry::Value::I64(503)
+        }));
+        assert!(attributes.iter().any(|attribute| {
+            attribute.key.as_str() == "http.server.request.duration_ms"
+                && attribute.value == opentelemetry::Value::I64(42)
+        }));
+        assert!(matches!(spans[0].status, Status::Error { .. }));
+    }
+
+    #[test]
+    fn content_event_records_truncated_body_and_sizes() {
+        let exporter = InMemorySpanExporterBuilder::new().build();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        let tracer = provider.tracer("bcn-content-test");
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_opentelemetry::layer().with_tracer(tracer));
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = info_span!(target: "bcn_otel", "bcn.gateway.dispatch");
+            let _guard = span.enter();
+            record_span_content("bcn.chat.message", &"x".repeat(5000));
+        });
+
+        provider.force_flush().unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+        let event = &spans[0].events.events[0];
+        assert_eq!(event.name, "bcn.chat.message");
+        assert!(event.attributes.iter().any(|attribute| {
+            attribute.key.as_str() == "bcn.content.truncated"
+                && attribute.value == opentelemetry::Value::Bool(true)
+        }));
+        let captured = event
+            .attributes
+            .iter()
+            .find(|attribute| attribute.key.as_str() == "bcn.content")
+            .unwrap();
+        assert!(matches!(&captured.value, opentelemetry::Value::String(value) if value.as_str().len() <= 4096));
+    }
+}

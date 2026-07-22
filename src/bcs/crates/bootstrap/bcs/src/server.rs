@@ -3039,7 +3039,11 @@ impl BcsServer {
                         .unwrap()
                 },
             ))
-            .layer(TraceLayer::new_for_http())
+            .layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(bcs_http::gateway_trace::BcnMakeSpan)
+                    .on_response(bcs_http::gateway_trace::BcnOnResponse),
+            )
             .layer(
                 CorsLayer::new()
                     .allow_origin(AllowOrigin::predicate(move |origin, _| {

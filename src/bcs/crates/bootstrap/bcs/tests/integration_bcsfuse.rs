@@ -70,6 +70,7 @@ fn create_test_config_bcsfuse_enabled(bots_dir: &PathBuf) -> BcsConfig {
         api_keys: vec![],
         metrics: Default::default(),
         invite: Default::default(),
+        ..BcsConfig::default()
     }
 }
 

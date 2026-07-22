@@ -8,6 +8,7 @@
 //! - Automatic cleanup of old log files (`max_keep_days`)
 
 use crate::config::{LogOutputConfig, LogOutputFormat, LoggingConfig};
+use opentelemetry_sdk::trace::SdkTracer;
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::io::{IsTerminal, Write};
@@ -190,24 +191,11 @@ impl<'a> MakeWriter<'a> for RotatingFileWriter {
 
 /// Initialize the tracing subscriber based on `LoggingConfig`.
 ///
-/// Two code paths:
-/// - Console-only (no file outputs): uses `tracing_subscriber::fmt()` directly.
-/// - Console + file outputs: uses registry with per-layer filters.
-pub fn init(config: &LoggingConfig) {
+/// Console, file, and BCN OpenTelemetry output use independent layer filters.
+pub fn init(config: &LoggingConfig, tracer: SdkTracer) {
     let timer = LocalTime::new(format_description!(
         "[year]-[month]-[day] [hour]:[minute]:[second]"
     ));
-
-    if config.outputs.is_empty() {
-        if config.console {
-            tracing_subscriber::fmt()
-                .with_timer(timer)
-                .with_ansi(console_ansi_enabled())
-                .with_env_filter(build_env_filter(config))
-                .init();
-        }
-        return;
-    }
 
     let file_layers: Vec<Box<dyn Layer<_> + Send + Sync>> = config
         .outputs
@@ -262,9 +250,14 @@ pub fn init(config: &LoggingConfig) {
         None
     };
 
+    let otel_layer = tracing_opentelemetry::layer()
+        .with_tracer(tracer)
+        .with_filter(Targets::new().with_target("bcn_otel", LevelFilter::TRACE));
+
     tracing_subscriber::registry()
         .with(console_layer)
         .with(file_layers)
+        .with(otel_layer)
         .init();
 }
 

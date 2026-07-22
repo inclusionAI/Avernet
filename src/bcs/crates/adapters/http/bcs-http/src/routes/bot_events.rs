@@ -17,8 +17,10 @@ use bcs_service_api::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tracing::{info, warn};
+use tracing::{Span, info, warn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use crate::gateway_trace::record_span_content_with_untrusted;
 use crate::state::HttpAppState;
 
 const BOT_EVENT_REQUEST_BODY_LIMIT: usize = 2 * 1024 * 1024;
@@ -205,7 +207,18 @@ pub async fn post_bot_event(
     headers: HeaderMap,
     LoggedBotEventRequest(req): LoggedBotEventRequest,
 ) -> Result<Json<Value>, BotEventRouteError> {
-    let provider_id = header_required(&headers, BCN_PROVIDER_ID_HEADER)?;
+    let callback_content = serde_json::to_string(&json!({
+        "message": &req.message.text,
+        "payload": &req.payload,
+    }))
+    .expect("serializing JSON callback content cannot fail");
+    let provider_id = match header_required(&headers, BCN_PROVIDER_ID_HEADER) {
+        Ok(provider_id) => provider_id,
+        Err(error) => {
+            record_bot_response_auth_failure(&callback_content);
+            return Err(error);
+        }
+    };
     // Derive state: prefer the explicit `state` field (1.0); fall back to
     // extracting from `payload.state` for chat events (2.0 callback-streaming);
     // for agent events default to Delta (non-terminal, goes through pipeline).
@@ -229,6 +242,12 @@ pub async fn post_bot_event(
         // agent events (tool/thinking/lifecycle) — non-terminal pipeline.
         ChatEventState::Delta
     } else {
+        Span::current().set_attribute("bcn.auth.result", "unverified");
+        record_span_content_with_untrusted(
+            "bcn.bot.response.content",
+            &callback_content,
+            true,
+        );
         return Err(BotEventRouteError::bad_request(
             "state is required when event/payload are absent (1.0 contract)",
         ));
@@ -243,7 +262,13 @@ pub async fn post_bot_event(
         message_text = %req.message.text,
         "provider callback: received bot event"
     );
-    let credential = credential_from_headers(&state, &headers, &provider_id).await?;
+    let credential = match credential_from_headers(&state, &headers, &provider_id).await {
+        Ok(credential) => credential,
+        Err(error) => {
+            record_bot_response_auth_failure(&callback_content);
+            return Err(error);
+        }
+    };
 
     let outcome = match state
         .services
@@ -251,11 +276,11 @@ pub async fn post_bot_event(
         .submit_event(ProviderBotEventCommand {
             provider_id: provider_id.clone(),
             credential,
-            run_id: req.run_id,
-            state: effective_state,
-            message_text: req.message.text,
-            event: req.event,
-            payload: req.payload,
+            run_id: req.run_id.clone(),
+            state: effective_state.clone(),
+            message_text: req.message.text.clone(),
+            event: req.event.clone(),
+            payload: req.payload.clone(),
         })
         .await
     {
@@ -266,7 +291,11 @@ pub async fn post_bot_event(
                 error = %error,
                 "provider callback: bot event rejected"
             );
-            return Err(bot_event_error(error));
+            let route_error = bot_event_error(error);
+            if matches!(route_error.status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+                record_bot_response_auth_failure(&callback_content);
+            }
+            return Err(route_error);
         }
     };
     info!(
@@ -275,6 +304,24 @@ pub async fn post_bot_event(
         failed_count = %outcome.failed_count,
         "provider callback: bot event processed"
     );
+    let span = Span::current();
+    span.set_attribute("bcn.auth.result", "success");
+    span.set_attribute("bcn.operation", "bot.response");
+    span.set_attribute("bcn.provider.id", provider_id.clone());
+    span.set_attribute("bcn.run.id", req.run_id.clone());
+    span.set_attribute("bcn.callback.state", format!("{effective_state:?}"));
+    if let Some(seq) = req.seq {
+        span.set_attribute("bcn.callback.seq", seq as i64);
+    }
+    if let Some(event) = req.event.as_deref() {
+        span.set_attribute("bcn.callback.event", event.to_string());
+    }
+    span.set_attribute(
+        "bcn.callback.delivered_count",
+        outcome.delivered_count as i64,
+    );
+    span.set_attribute("bcn.callback.failed_count", outcome.failed_count as i64);
+    record_span_content_with_untrusted("bcn.bot.response.content", &callback_content, false);
 
     Ok(Json(json!({
         "ok": true,
@@ -299,7 +346,6 @@ pub async fn post_coordination_event(
         mcp_server = ?req.mcp_server,
         "provider callback: received coordination event"
     );
-
     let outcome = state
         .services
         .provider_bot_events
@@ -320,12 +366,16 @@ pub async fn post_coordination_event(
         })
         .await
         .map_err(bot_event_error)?;
-
     Ok(Json(json!({
         "ok": true,
         "processed": outcome.processed,
         "duplicate": outcome.duplicate,
     })))
+}
+
+fn record_bot_response_auth_failure(callback_content: &str) {
+    Span::current().set_attribute("bcn.auth.result", "failed");
+    record_span_content_with_untrusted("bcn.bot.response.content", callback_content, true);
 }
 
 fn header_required(headers: &HeaderMap, name: &'static str) -> Result<String, BotEventRouteError> {

@@ -23,10 +23,13 @@ use bcs_service_api::{
     SystemMessageService, TaskCompleteCommand, TaskDispatchCommand,
     TaskMessageCommand, TaskRunAliasRegistration,
 };
+use opentelemetry::{Context, KeyValue};
+use opentelemetry::trace::TraceContextExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::{Mutex, mpsc};
-use tracing::{debug, info, warn};
+use tracing::{Instrument, Span, debug, info, info_span, warn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::bot::BotConnectionRegistry;
 use crate::shared::RunChannelManager;
@@ -36,6 +39,8 @@ pub type Result<T> = std::result::Result<T, BotWsDispatchError>;
 const BOT_DELIVERY_IS_PROVIDER_CODE: &str = "bot_delivery_is_provider";
 const BOT_DELIVERY_IS_PROVIDER_MESSAGE: &str =
     "Bot delivery is configured for HttpProvider; WebSocket uplink is no longer accepted for this bot";
+const BOT_RESPONSE_CONTENT_LIMIT_BYTES: usize = 4096;
+const TRUNCATION_MARKER: &str = "...[TRUNCATED]...";
 
 fn unwrap_outbound_group_id(
     wire_group_id: &str,
@@ -869,20 +874,115 @@ async fn handle_event_frame(
         return Ok(());
     }
 
-    handle_default_group_event(
-        state,
-        &bot_id,
-        &run_id,
-        &real_group_id,
-        bcs_session_id.as_deref(),
-        event,
-        &event_payload,
-        &event_state,
-        is_final,
-    )
-    .await?;
+    let trace_parent = if event.event == "chat.event" {
+        state.run_channels.trace_parent(&run_id).await
+    } else {
+        None
+    };
+    if let Some(trace_parent) = trace_parent {
+        let span = info_span!(
+            target: "bcn_otel",
+            "bcn.bot.response",
+            otel.kind = "consumer",
+        );
+        let _ = span.set_parent(Context::new().with_remote_span_context(trace_parent));
+        async {
+            handle_default_group_event(
+                state,
+                &bot_id,
+                &run_id,
+                &real_group_id,
+                bcs_session_id.as_deref(),
+                event,
+                &event_payload,
+                &event_state,
+                is_final,
+            )
+            .await?;
+            record_ws_bot_response_trace(&bot_id, &run_id, &event_state, &event_payload);
+            Ok::<(), BotWsDispatchError>(())
+        }
+        .instrument(span)
+        .await?;
+    } else {
+        handle_default_group_event(
+            state,
+            &bot_id,
+            &run_id,
+            &real_group_id,
+            bcs_session_id.as_deref(),
+            event,
+            &event_payload,
+            &event_state,
+            is_final,
+        )
+        .await?;
+    }
 
     Ok(())
+}
+
+fn record_ws_bot_response_trace(
+    bot_id: &str,
+    run_id: &str,
+    event_state: &ChatEventState,
+    event_payload: &Value,
+) {
+    let span = Span::current();
+    span.set_attribute("bcn.operation", "bot.response");
+    span.set_attribute("bcn.bot.id", bot_id.to_string());
+    span.set_attribute("bcn.run.id", run_id.to_string());
+    span.set_attribute("bcn.callback.state", format!("{event_state:?}"));
+    let content = serde_json::to_string(event_payload)
+        .expect("serializing parsed WebSocket bot event payload cannot fail");
+    let (captured, truncated) = truncate_bot_response_content(&content);
+    span.add_event(
+        "bcn.bot.response.content",
+        vec![
+            KeyValue::new("bcn.content", captured.clone()),
+            KeyValue::new("bcn.content.original_size_bytes", content.len() as i64),
+            KeyValue::new("bcn.content.captured_size_bytes", captured.len() as i64),
+            KeyValue::new("bcn.content.limit_bytes", BOT_RESPONSE_CONTENT_LIMIT_BYTES as i64),
+            KeyValue::new("bcn.content.truncated", truncated),
+            KeyValue::new("bcn.content.untrusted", false),
+        ],
+    );
+}
+
+fn truncate_bot_response_content(content: &str) -> (String, bool) {
+    if content.len() <= BOT_RESPONSE_CONTENT_LIMIT_BYTES {
+        return (content.to_string(), false);
+    }
+    let available = BOT_RESPONSE_CONTENT_LIMIT_BYTES - TRUNCATION_MARKER.len();
+    let requested_head = available.saturating_mul(3) / 4;
+    let head_end = floor_char_boundary(content, requested_head);
+    let requested_tail = available - head_end;
+    let tail_start = ceil_char_boundary(content, content.len().saturating_sub(requested_tail));
+    (
+        format!(
+            "{}{}{}",
+            &content[..head_end],
+            TRUNCATION_MARKER,
+            &content[tail_start..]
+        ),
+        true,
+    )
+}
+
+fn floor_char_boundary(value: &str, mut index: usize) -> usize {
+    index = index.min(value.len());
+    while index > 0 && !value.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
+fn ceil_char_boundary(value: &str, mut index: usize) -> usize {
+    index = index.min(value.len());
+    while index < value.len() && !value.is_char_boundary(index) {
+        index += 1;
+    }
+    index
 }
 
 // ---------------------------------------------------------------------------
@@ -1847,6 +1947,20 @@ mod tests {
 
         assert_eq!(group_id, "group-1");
         assert_eq!(session_id.as_deref(), Some("group-1:abcdef12"));
+    }
+
+    #[test]
+    fn bot_response_truncation_is_utf8_safe_and_preserves_head_and_tail() {
+        let content = format!("START{}END", "你".repeat(2000));
+
+        let (captured, truncated) = truncate_bot_response_content(&content);
+
+        assert!(truncated);
+        assert!(captured.starts_with("START"));
+        assert!(captured.ends_with("END"));
+        assert!(captured.contains(TRUNCATION_MARKER));
+        assert!(captured.len() <= BOT_RESPONSE_CONTENT_LIMIT_BYTES);
+        assert!(std::str::from_utf8(captured.as_bytes()).is_ok());
     }
 
     #[test]

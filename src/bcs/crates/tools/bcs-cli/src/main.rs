@@ -57,7 +57,7 @@ use clap::ArgAction;
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::{Level, debug, info};
+use tracing::{Level, debug, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
 use bcs_cli::BcsClient;
@@ -1876,6 +1876,11 @@ async fn main() -> Result<()> {
             BcsClient::with_token(bcs_url, token)
         };
         client.set_client_identity(format!("bcs-cli/{}", env!("CARGO_PKG_VERSION")));
+        if let Ok(traceparent) = std::env::var("TRACEPARENT") {
+            if let Err(error) = client.set_traceparent(traceparent.trim()) {
+                warn!(error = %error, "Ignoring invalid TRACEPARENT from tool environment");
+            }
+        }
         client
     }
 

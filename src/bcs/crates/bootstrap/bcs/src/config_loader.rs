@@ -157,7 +157,12 @@ fn is_sensitive_config_key(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
     matches!(
         lower.as_str(),
-        "password" | "api_key" | "auth_token" | "client_secret" | "gateway_client_secret"
+        "password"
+            | "api_key"
+            | "auth_token"
+            | "client_secret"
+            | "gateway_client_secret"
+            | "extra_headers"
     ) || lower.ends_with("_password")
         || lower.ends_with("_api_key")
         || lower.ends_with("_secret")
@@ -540,6 +545,28 @@ mod tests {
             "<redacted>"
         );
         assert_eq!(source["cache"]["redis"]["connection"]["password"], "redis-pass");
+    }
+
+    #[test]
+    fn test_redact_telemetry_extra_headers_as_a_sensitive_container() {
+        let source = serde_json::json!({
+            "telemetry": {
+                "otlp_traces_endpoint": "https://collector.example.com/v1/traces",
+                "extra_headers": {
+                    "x-collector-route": "collector-local",
+                    "authorization": "Bearer secret"
+                }
+            }
+        });
+
+        let redacted = redact_sensitive_values(&source);
+
+        assert_eq!(
+            redacted["telemetry"]["otlp_traces_endpoint"],
+            "https://collector.example.com/v1/traces"
+        );
+        assert_eq!(redacted["telemetry"]["extra_headers"], "<redacted>");
+        assert!(source["telemetry"]["extra_headers"].is_object());
     }
 
     // =========================================================================

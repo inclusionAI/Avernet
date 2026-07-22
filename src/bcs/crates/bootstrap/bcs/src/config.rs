@@ -56,6 +56,67 @@ pub struct CorsConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct TelemetryConfig {
+    #[serde(default = "default_telemetry_enabled")]
+    pub enabled: bool,
+
+    #[serde(default = "default_telemetry_service_name")]
+    pub service_name: String,
+
+    #[serde(default)]
+    pub otlp_traces_endpoint: Option<String>,
+
+    #[serde(default)]
+    pub extra_headers: BTreeMap<String, String>,
+}
+
+impl Default for TelemetryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_telemetry_enabled(),
+            service_name: default_telemetry_service_name(),
+            otlp_traces_endpoint: None,
+            extra_headers: BTreeMap::new(),
+        }
+    }
+}
+
+impl TelemetryConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.service_name.trim().is_empty() {
+            return Err("telemetry.service_name must not be empty".to_string());
+        }
+        if let Some(endpoint) = self.otlp_traces_endpoint.as_deref() {
+            let endpoint = reqwest::Url::parse(endpoint)
+                .map_err(|error| format!("telemetry.otlp_traces_endpoint is invalid: {error}"))?;
+            if !matches!(endpoint.scheme(), "http" | "https") {
+                return Err(
+                    "telemetry.otlp_traces_endpoint must use http or https".to_string(),
+                );
+            }
+        }
+        for (name, value) in &self.extra_headers {
+            axum::http::HeaderName::try_from(name.as_str()).map_err(|_| {
+                format!("telemetry.extra_headers contains invalid header name '{name}'")
+            })?;
+            axum::http::HeaderValue::try_from(value.as_str()).map_err(|_| {
+                format!("telemetry.extra_headers contains an invalid value for '{name}'")
+            })?;
+        }
+        Ok(())
+    }
+}
+
+fn default_telemetry_enabled() -> bool {
+    true
+}
+
+fn default_telemetry_service_name() -> String {
+    "bcn".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CollaborationConfig {
     #[serde(default)]
     pub templates: CollaborationTemplatesConfig,
@@ -257,6 +318,10 @@ pub struct BcsConfig {
     /// Logging configuration.
     #[serde(default)]
     pub logging: LoggingConfig,
+
+    /// OpenTelemetry trace export configuration.
+    #[serde(default)]
+    pub telemetry: TelemetryConfig,
 
     /// bcsfuse integration configuration.
     /// When enabled, fusion is delegated to bcsfuse (Python service) via HTTP.
@@ -610,6 +675,7 @@ impl Default for BcsConfig {
             manifest: ManifestConfig::default(),
             onboard_binding_enabled: false,
             logging: LoggingConfig::default(),
+            telemetry: TelemetryConfig::default(),
             bcsfuse: BcsFuseConfig::default(),
             auth_sdk: AuthSdkConfig::default(),
             user_directory: UserDirectoryConfig::default(),
@@ -1010,6 +1076,10 @@ impl BcsConfig {
 }
 
 fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::Error>> {
+    config.telemetry.validate().map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+            as Box<dyn std::error::Error>
+    })?;
     config.validate_metrics().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
@@ -1140,6 +1210,66 @@ mod tests {
                 "http://localhost:8000".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn test_telemetry_config_defaults_without_section() {
+        let config: BcsConfig = toml::from_str(r#"bots_base_dir = "/bots""#).unwrap();
+
+        assert!(config.telemetry.enabled);
+        assert_eq!(config.telemetry.service_name, "bcn");
+        assert_eq!(config.telemetry.otlp_traces_endpoint, None);
+        assert!(config.telemetry.extra_headers.is_empty());
+    }
+
+    #[test]
+    fn test_telemetry_config_parses_endpoint_and_extra_headers() {
+        let config: BcsConfig = toml::from_str(
+            r#"
+bots_base_dir = "/bots"
+
+[telemetry]
+enabled = true
+service_name = "bcn-prod"
+otlp_traces_endpoint = "https://collector.example.com/v1/traces"
+
+[telemetry.extra_headers]
+x-collector-route = "collector-local"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.telemetry.service_name, "bcn-prod");
+        assert_eq!(
+            config.telemetry.otlp_traces_endpoint.as_deref(),
+            Some("https://collector.example.com/v1/traces")
+        );
+        assert_eq!(
+            config
+                .telemetry
+                .extra_headers
+                .get("x-collector-route")
+                .map(String::as_str),
+            Some("collector-local")
+        );
+    }
+
+    #[test]
+    fn test_telemetry_config_validation_rejects_invalid_endpoint_and_headers() {
+        let invalid_endpoint = TelemetryConfig {
+            otlp_traces_endpoint: Some("not-an-http-endpoint".to_string()),
+            ..TelemetryConfig::default()
+        };
+        assert!(invalid_endpoint.validate().is_err());
+
+        let invalid_header = TelemetryConfig {
+            extra_headers: BTreeMap::from([(
+                "invalid header".to_string(),
+                "value".to_string(),
+            )]),
+            ..TelemetryConfig::default()
+        };
+        assert!(invalid_header.validate().is_err());
     }
 
     #[test]

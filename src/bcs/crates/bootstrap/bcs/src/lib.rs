@@ -139,6 +139,7 @@ pub mod migrations;
 pub mod plugins;
 pub mod server;
 pub mod state_machine_timeout_scanner;
+mod telemetry;
 pub mod timeout_scanner;
 pub mod token_expiry_scanner;
 
@@ -156,7 +157,7 @@ pub use config::{
     AuthSdkConfig, BcsConfig, CacheConfig, DatabaseConfig, DatabaseType, DingTalkAccountConfig,
     InviteConfig, LlmConfig, LlmProviderType, LoggingConfig, MessageHistoryConfig, MetricsConfig,
     MetricsMode, MistConfig, RedisCacheConfig, SecurityGatewayProviderConfig,
-    StructuredOutputMode, UserDirectoryConfig, UserDirectoryProviderConfig,
+    StructuredOutputMode, TelemetryConfig, UserDirectoryConfig, UserDirectoryProviderConfig,
 };
 pub use error::{BcsError, Result};
 pub use plugins::{CachePluginKind, DbPluginKind, InfrastructurePlugins};
@@ -182,7 +183,8 @@ pub async fn run_from_env_with_config_dir(config_dir: Option<&std::path::PathBuf
         .validate_api_keys()
         .map_err(BcsError::InvalidConfig)?;
 
-    logging::init(&config.logging);
+    let telemetry = telemetry::Telemetry::init(&config.telemetry);
+    logging::init(&config.logging, telemetry.tracer());
     logging::spawn_cleanup_task(config.logging.outputs.clone());
 
     tracing::info!(
