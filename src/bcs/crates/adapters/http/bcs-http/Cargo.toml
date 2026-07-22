@@ -25,6 +25,8 @@ bcs-protocol    = { workspace = true }
 bcs-storage-api = { workspace = true }
 axum            = { workspace = true }
 async-trait     = { workspace = true }
+bytes           = { workspace = true }
+futures         = { workspace = true }
 base64          = { workspace = true }
 serde           = { workspace = true }
 serde_json      = { workspace = true }

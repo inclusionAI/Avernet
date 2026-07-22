@@ -296,31 +296,40 @@ impl SessionFileService for SessionFileServiceImpl {
                 row.status,
             )));
         }
-        if content_length > self.max_size() {
-            return Err(SessionFileUseCaseError::InvalidInput(format!(
-                "content_length {} exceeds max {}",
-                content_length,
-                self.max_size()
-            )));
-        }
-        if content_length != row.size {
-            // Multipart: per-part size may legitimately be < row.size, but
-            // single-part uploads must match exactly. Reject only the
-            // mismatched single-part case to avoid InvalidInput on a final
-            // short part of a multipart upload.
-            if part_number.is_none() {
+        // `content_length == 0` means "unknown": the client streamed the body
+        // with chunked transfer encoding (no Content-Length header), which the
+        // CLI does for `Body::wrap_stream` uploads. In that case we cannot
+        // pre-validate size, so skip the upfront guards and rely on the
+        // backend's per-chunk cap (rejects bytes beyond the prepared size)
+        // plus `complete_upload`'s cumulative-size check. When the client
+        // declares a length, enforce it eagerly as a fast-fail.
+        if content_length != 0 {
+            if content_length > self.max_size() {
                 return Err(SessionFileUseCaseError::InvalidInput(format!(
-                    "content_length {} != prepared size {}",
-                    content_length, row.size,
+                    "content_length {} exceeds max {}",
+                    content_length,
+                    self.max_size()
                 )));
             }
-            // For multipart, a part must not exceed the prepared part size.
-            // The accumulated total is verified by the backend at complete_upload.
-            if content_length > PROXY_PART_SIZE {
-                return Err(SessionFileUseCaseError::InvalidInput(format!(
-                    "part content_length {} exceeds part_size {}",
-                    content_length, PROXY_PART_SIZE,
-                )));
+            if content_length != row.size {
+                // Multipart: per-part size may legitimately be < row.size, but
+                // single-part uploads must match exactly. Reject only the
+                // mismatched single-part case to avoid InvalidInput on a final
+                // short part of a multipart upload.
+                if part_number.is_none() {
+                    return Err(SessionFileUseCaseError::InvalidInput(format!(
+                        "content_length {} != prepared size {}",
+                        content_length, row.size,
+                    )));
+                }
+                // For multipart, a part must not exceed the prepared part size.
+                // The accumulated total is verified by the backend at complete_upload.
+                if content_length > PROXY_PART_SIZE {
+                    return Err(SessionFileUseCaseError::InvalidInput(format!(
+                        "part content_length {} exceeds part_size {}",
+                        content_length, PROXY_PART_SIZE,
+                    )));
+                }
             }
         }
         let handle: UploadHandle = serde_json::from_str(&row.object_handle).map_err(|e| {

@@ -12,11 +12,15 @@
 
 use axum::{
     Json,
-    body::Body,
+    body::{Body, BodyDataStream},
     extract::{Path, Query, State},
     http::{header, HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Redirect, Response},
 };
+use bytes::Bytes;
+use futures::Stream;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use bcs_domain::{ActorKind, ActorRef, SessionFile};
 use bcs_service_api::application::session_files::{
     CapabilitiesView, DeleteFileCommand, PrepareUploadCommand, SessionFileUseCaseError,
@@ -26,8 +30,33 @@ use bcs_service_api::port::repo::SessionFileListParams;
 use serde::Deserialize;
 use serde_json::json;
 
+use bcs_storage_api::{ByteStream, ByteStreamTrait};
+
 use crate::routes::group_messages::{resolve_group_chat_caller, GroupChatCaller};
 use crate::state::HttpAppState;
+
+/// Adapts an axum `Body` data stream into a `ByteStream` for proxy upload
+/// ingestion, without buffering the whole request body into memory. This lets
+/// the `PUT .../content` route accept large single-part uploads (bytes stream
+/// straight to the storage backend) and sidesteps axum's default 2 MiB body
+/// limit that a buffering `Bytes` extractor would impose (the route also sets
+/// `DefaultBodyLimit::disable`). When a client sends an oversize body, the
+/// backend's per-chunk cap rejects it mid-stream rather than after buffering.
+struct RequestBodyStream(BodyDataStream);
+
+impl Stream for RequestBodyStream {
+    type Item = Result<Bytes, std::io::Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match Pin::new(&mut self.0).poll_next(cx) {
+            Poll::Ready(Some(Ok(b))) => Poll::Ready(Some(Ok(b))),
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(std::io::Error::other(e)))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+impl ByteStreamTrait for RequestBodyStream {}
 
 // ---------------------------------------------------------------
 // DTOs
@@ -315,7 +344,7 @@ pub async fn upload_bytes(
     Path((sid, file_id)): Path<(String, String)>,
     headers: HeaderMap,
     uri: Uri,
-    body: axum::body::Bytes,
+    body: Body,
 ) -> Response {
     let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
         Ok(c) => c,
@@ -328,8 +357,16 @@ pub async fn upload_bytes(
         .query()
         .and_then(|q| q.split('&').find(|p| p.starts_with("part=")))
         .and_then(|p| p["part=".len()..].parse().ok());
-    let content_length = body.len() as u64;
-    let stream = bcs_storage_api::byte_stream_from_bytes(body.into());
+    // Content-Length is absent for chunked (streamed) request bodies — e.g. the
+    // CLI's `Body::wrap_stream` uploads. Pass 0 = "unknown" so the service
+    // skips its size-equality guard and relies on the backend's per-chunk cap
+    // plus `complete_upload`'s cumulative-size check.
+    let content_length = headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    let stream: ByteStream = Box::new(RequestBodyStream(body.into_data_stream()));
     match state
         .services
         .session_files
@@ -691,6 +728,10 @@ mod tests {
     }
 
     async fn build_test_app() -> TestApp {
+        build_test_app_with_max_size(1024 * 1024).await
+    }
+
+    async fn build_test_app_with_max_size(max_size: u64) -> TestApp {
         // Registry: two bots registered with stable tokens.
         let bot_dir = tempfile::tempdir().expect("temp dir for bot registry");
         let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(PathBuf::from(
@@ -784,7 +825,7 @@ mod tests {
             repo: file_repo,
             session_repo: session_repo_dyn,
             env: "local".into(),
-            max_size: 1024 * 1024,
+            max_size,
             // effectively never multipart for tests
             multipart_threshold: 1024 * 1024 * 1024,
             bcs_base_url: "http://test.local".into(),
@@ -1211,6 +1252,58 @@ mod tests {
         let s = cd.to_str().unwrap();
         assert!(s.contains("attachment"), "cd: {s}");
         assert!(s.contains("disp.txt"), "cd: {s}");
+    }
+
+    #[tokio::test]
+    async fn upload_accepts_large_chunked_body() {
+        // Regression: the proxy `PUT .../content` route must NOT be subject to
+        // axum's default 2 MiB body limit, and must accept a chunked upload
+        // (no Content-Length header) — which is what the CLI sends via
+        // `reqwest::Body::wrap_stream`. Before the fix this returned
+        // 413 "Failed to buffer the request body: length limit exceeded".
+        //
+        // Use a 3 MiB body (>2 MiB default limit) and a max_size large enough
+        // to prepare it. The body is sent as a stream with no Content-Length,
+        // exercising the service's `content_length == 0` (unknown) path that
+        // relies on the backend's per-chunk cap.
+        let app = build_test_app_with_max_size(5 * 1024 * 1024).await;
+        let size: u64 = 3 * 1024 * 1024;
+
+        // 1. Prepare
+        let prepare_uri = format!("/sessions/{}/files", app.sid);
+        let req = post_json(
+            &app,
+            &prepare_uri,
+            &app.bot_a_token,
+            json!({ "file_name": "big.bin", "size": size, "mime_type": "application/octet-stream" }),
+        );
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::CREATED, "prepare body: {body:?}");
+        let file_id = body.get("file_id").and_then(|v| v.as_str()).unwrap().to_string();
+        assert_eq!(body.get("mode").and_then(|v| v.as_str()), Some("single"));
+
+        // 2. Upload — chunked (no Content-Length), 3 MiB body.
+        let upload_uri = format!("/sessions/{}/files/{}/content", app.sid, file_id);
+        let payload = Bytes::from(vec![0u8; size as usize]);
+        let stream = futures::stream::once(async move { Ok::<Bytes, std::io::Error>(payload) });
+        let req = Request::builder()
+            .method(Method::PUT)
+            .uri(&upload_uri)
+            .header(header::AUTHORIZATION, format!("Bearer {}", app.bot_a_token))
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            // NOTE: deliberately NO Content-Length — chunked transfer.
+            .body(Body::from_stream(stream))
+            .unwrap();
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::ACCEPTED, "upload body: {body:?}");
+
+        // 3. Complete — backend-reported size must equal the 3 MiB prepared.
+        let complete_uri = format!("/sessions/{}/files/{}/complete", app.sid, file_id);
+        let req = post_json(&app, &complete_uri, &app.bot_a_token, json!({}));
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::OK, "complete body: {body:?}");
+        assert_eq!(body.get("status").and_then(|v| v.as_str()), Some("Ready"));
+        assert_eq!(body.get("size").and_then(|v| v.as_u64()), Some(size));
     }
 
     // ------------------- Internal test helpers -------------------
