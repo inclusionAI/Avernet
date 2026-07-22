@@ -619,7 +619,7 @@ mod tests {
     use axum::http::{header, HeaderValue, Method, Request, StatusCode};
     use bcs_bot::BotCore;
     use bcs_bot_store::MemoryBotRepo;
-    use bcs_domain::{ActorKind as DomainActorKind, FileStatus, ShareTokenPayload, share_token_encode};
+    use bcs_domain::{ActorKind as DomainActorKind, FileStatus};
     use bcs_group::GroupCore;
     use bcs_group_store::MemoryGroupRepo;
     use bcs_service_api::application::session_files::SessionFileService;
