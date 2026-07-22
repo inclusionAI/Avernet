@@ -177,12 +177,10 @@ impl BcsClient {
         self.client_identity = Some(identity.into());
     }
 
-    /// Configure the W3C Trace Context propagated only on business dispatch
-    /// requests. Polling and management requests intentionally omit it.
+    /// Configure the opaque Trace Context propagated only on business dispatch
+    /// requests. The gateway owns W3C validation; polling and management
+    /// requests intentionally omit it.
     pub fn set_traceparent(&mut self, value: &str) -> Result<()> {
-        if !valid_w3c_traceparent(value) {
-            return Err(anyhow!("invalid W3C TRACEPARENT value"));
-        }
         let header = HeaderValue::from_str(value).context("invalid TRACEPARENT header value")?;
         self.traceparent = Some(header);
         Ok(())
@@ -2652,36 +2650,6 @@ impl BcsClient {
     }
 }
 
-fn valid_w3c_traceparent(value: &str) -> bool {
-    let mut fields = value.split('-');
-    let (Some(version), Some(trace_id), Some(parent_id), Some(flags)) = (
-        fields.next(),
-        fields.next(),
-        fields.next(),
-        fields.next(),
-    ) else {
-        return false;
-    };
-    if fields.next().is_some()
-        || version != "00"
-        || trace_id.len() != 32
-        || parent_id.len() != 16
-        || flags.len() != 2
-    {
-        return false;
-    }
-    let lowercase_hex = |field: &str| {
-        field
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    };
-    lowercase_hex(trace_id)
-        && lowercase_hex(parent_id)
-        && lowercase_hex(flags)
-        && trace_id.bytes().any(|byte| byte != b'0')
-        && parent_id.bytes().any(|byte| byte != b'0')
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2899,17 +2867,40 @@ mod tests {
     }
 
     #[test]
-    fn test_set_traceparent_rejects_invalid_w3c_values() {
-        let invalid_values = [
+    fn test_set_traceparent_forwards_http_safe_values_without_w3c_semantic_validation() {
+        let values = [
             "not-a-traceparent",
-            "00-00000000000000000000000000000000-b7ad6b7169203331-01",
-            "00-0af7651916cd43dd8448eb211c80319c-0000000000000000-01",
-            "ff-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+            "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-09",
+            "02-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-09-extension",
         ];
 
-        for value in invalid_values {
+        for value in values {
             let mut client = BcsClient::new("http://localhost:21000");
-            assert!(client.set_traceparent(value).is_err(), "accepted {value}");
+            client.set_traceparent(value).unwrap();
+            let request = client
+                .add_chat_dispatch_headers(
+                    client.http_client.post("http://localhost:21000/bots/bot-1/chat-async"),
+                    true,
+                    1_800_000,
+                )
+                .build()
+                .unwrap();
+
+            assert_eq!(
+                request
+                    .headers()
+                    .get("traceparent")
+                    .and_then(|header| header.to_str().ok()),
+                Some(value)
+            );
+        }
+    }
+
+    #[test]
+    fn test_set_traceparent_rejects_unsafe_http_header_values() {
+        for value in ["bad\ntraceparent", "bad\r\ntraceparent: injected"] {
+            let mut client = BcsClient::new("http://localhost:21000");
+            assert!(client.set_traceparent(value).is_err(), "accepted {value:?}");
         }
     }
 
