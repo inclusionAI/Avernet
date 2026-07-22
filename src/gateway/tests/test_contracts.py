@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from gateway.community.adapters.web.contracts import (
     CODE_CREATED,
     CODE_OK,
@@ -15,7 +18,10 @@ from gateway.community.adapters.web.contracts import (
 
 def test_envelope_shape() -> None:
     env = Envelope[NameCheck](
-        code=CODE_OK, data=NameCheck(name="alice", exists=False), request_id="trace-1"
+        code=CODE_OK,
+        message="OK",
+        data=NameCheck(name="alice", exists=False),
+        request_id="trace-1",
     )
     dumped = env.model_dump()
     assert set(dumped) == {"code", "message", "data", "request_id"}
@@ -25,12 +31,24 @@ def test_envelope_shape() -> None:
     assert dumped["request_id"] == "trace-1"
 
 
-def test_envelope_defaults() -> None:
-    env: Envelope[NameCheck] = Envelope(code=CODE_CREATED)
-    assert env.message == "OK"
+def test_envelope_all_fields_required() -> None:
+    # Every response advertises {code, message, data, request_id}; none omittable.
+    with pytest.raises(ValidationError):
+        Envelope[NameCheck](code=CODE_CREATED)  # type: ignore[call-arg]
+
+
+def test_envelope_data_is_nullable_but_present() -> None:
+    env = Envelope[NameCheck](
+        code=CODE_CREATED, message="Created", data=None, request_id="t"
+    )
     assert env.data is None
-    assert env.request_id == ""
+    assert "data" in env.model_dump()  # present, just null
     assert CODE_CREATED == 201000
+
+
+def test_envelope_schema_marks_all_fields_required() -> None:
+    schema = Envelope[NameCheck].model_json_schema()
+    assert set(schema["required"]) == {"code", "message", "data", "request_id"}
 
 
 def test_page_shape() -> None:
@@ -40,8 +58,10 @@ def test_page_shape() -> None:
     assert dumped["items"] == [{"name": "a", "exists": True}]
 
 
-def test_page_defaults_to_empty_items() -> None:
-    assert Page[NameCheck](total=0).items == []
+def test_page_items_required_but_may_be_empty() -> None:
+    with pytest.raises(ValidationError):
+        Page[NameCheck](total=0)  # type: ignore[call-arg]
+    assert Page[NameCheck](total=0, items=[]).items == []
 
 
 def test_deleted_payload() -> None:
