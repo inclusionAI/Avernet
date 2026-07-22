@@ -1728,7 +1728,6 @@ impl BcsClient {
         &self,
         offset: u64,
         limit: u64,
-        include_session_groups: bool,
     ) -> Result<CurrentActorGroupListPage> {
         let url = format!("{}/groups/my", self.base_url);
 
@@ -1736,10 +1735,6 @@ impl BcsClient {
             .add_auth(self.http_client.get(&url).query(&[
                 ("offset", offset.to_string()),
                 ("limit", limit.to_string()),
-                (
-                    "include_session_groups",
-                    include_session_groups.to_string(),
-                ),
             ]))
             .send()
             .await

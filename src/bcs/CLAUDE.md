@@ -180,6 +180,9 @@ Bots have a `created_by` field set during onboard when a user identity is availa
 ### Unprotected Endpoints (read-only)
 - `GET /bots`, `GET /bots/{id}`, `GET /bots/discover`
 
+### Authenticated Endpoints (read-only)
+- `GET /groups/my` lists formal group memberships for the authenticated human or bot; session-only memberships are excluded
+
 ### Database Migration
 ```sql
 ALTER TABLE bcs_bots ADD COLUMN created_by VARCHAR(256) DEFAULT NULL;
@@ -375,6 +378,7 @@ export BOT_DATA_DIR=/path/to/bot/data
 | `/groups/{token}/confirm` | POST | Confirm proposal and create group |
 | `/groups` | POST | Create group directly |
 | `/groups` | GET | List all groups |
+| `/groups/my` | GET | List formal groups for the authenticated human or bot |
 | `/groups/{id}` | GET | Get group details |
 | `/groups/{id}` | DELETE | Delete group |
 | `/groups/{id}/members` | POST | Add member to group |

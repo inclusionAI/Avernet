@@ -2,7 +2,7 @@
 
 use crate::common::{assert_failure, assert_output_contains, assert_success, TestContext};
 use wiremock::{
-    matchers::{bearer_token, method, path, query_param},
+    matchers::{bearer_token, method, path, query_param, query_param_is_missing},
     Mock, ResponseTemplate,
 };
 
@@ -24,7 +24,7 @@ async fn list_groups_uses_authenticated_actor_without_local_bot_uuid() {
         .and(bearer_token(&ctx.session.token))
         .and(query_param("offset", "0"))
         .and(query_param("limit", "20"))
-        .and(query_param("include_session_groups", "false"))
+        .and(query_param_is_missing("include_session_groups"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "actor_id": "bot-current",
             "items": [{
@@ -66,7 +66,7 @@ async fn list_groups_uses_offset_and_returns_readable_next_command() {
         .and(path("/groups/my"))
         .and(query_param("offset", "2"))
         .and(query_param("limit", "2"))
-        .and(query_param("include_session_groups", "false"))
+        .and(query_param_is_missing("include_session_groups"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "actor_id": "bot-current",
             "items": [
@@ -190,6 +190,57 @@ async fn list_groups_rejects_mismatched_page_offset() {
 }
 
 #[tokio::test]
+async fn list_groups_rejects_zero_progress_page_with_records_remaining() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+    Mock::given(method("GET"))
+        .and(path("/groups/my"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "actor_id": "bot-current",
+            "items": [],
+            "total": 2,
+            "offset": 0,
+            "limit": 20
+        })))
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("list-groups")
+        .arg("--all")
+        .output()
+        .expect("Failed to execute list-groups");
+
+    assert_failure(&output, None);
+    assert_output_contains(&output, "pagination made no progress");
+}
+
+#[tokio::test]
+async fn list_groups_rejects_empty_actor_id() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+    Mock::given(method("GET"))
+        .and(path("/groups/my"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "actor_id": "",
+            "items": [],
+            "total": 0,
+            "offset": 0,
+            "limit": 20
+        })))
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("list-groups")
+        .output()
+        .expect("Failed to execute list-groups");
+
+    assert_failure(&output, None);
+    assert_output_contains(&output, "did not identify the authenticated actor");
+}
+
+#[tokio::test]
 async fn list_groups_human_output_includes_readable_next_command() {
     let ctx = TestContext::new().await.expect("Failed to create test context");
     Mock::given(method("GET"))
@@ -255,7 +306,7 @@ async fn list_groups_all_collects_remaining_pages_from_offset() {
         .and(path("/groups/my"))
         .and(query_param("offset", "1"))
         .and(query_param("limit", "2"))
-        .and(query_param("include_session_groups", "false"))
+        .and(query_param_is_missing("include_session_groups"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "actor_id": "bot-current",
             "items": [{"group_id": "group-2"}, {"group_id": "group-3"}],
@@ -270,7 +321,7 @@ async fn list_groups_all_collects_remaining_pages_from_offset() {
         .and(path("/groups/my"))
         .and(query_param("offset", "3"))
         .and(query_param("limit", "2"))
-        .and(query_param("include_session_groups", "false"))
+        .and(query_param_is_missing("include_session_groups"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "actor_id": "bot-current",
             "items": [{"group_id": "group-4"}],
@@ -301,4 +352,50 @@ async fn list_groups_all_collects_remaining_pages_from_offset() {
     assert_eq!(json["has_more"], false);
     assert!(json.get("next_offset").is_none());
     assert!(json.get("next_command").is_none());
+}
+
+#[tokio::test]
+async fn list_groups_all_rejects_actor_change_between_pages() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+
+    Mock::given(method("GET"))
+        .and(path("/groups/my"))
+        .and(query_param("offset", "0"))
+        .and(query_param("limit", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "actor_id": "bot-first",
+            "items": [{"group_id": "group-1"}],
+            "total": 2,
+            "offset": 0,
+            "limit": 1
+        })))
+        .expect(1)
+        .mount(&ctx.mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/groups/my"))
+        .and(query_param("offset", "1"))
+        .and(query_param("limit", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "actor_id": "bot-second",
+            "items": [{"group_id": "group-2"}],
+            "total": 2,
+            "offset": 1,
+            "limit": 1
+        })))
+        .expect(1)
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("list-groups")
+        .arg("--all")
+        .arg("--batch-size")
+        .arg("1")
+        .output()
+        .expect("Failed to execute list-groups");
+
+    assert_failure(&output, None);
+    assert_output_contains(&output, "current actor changed during pagination");
 }

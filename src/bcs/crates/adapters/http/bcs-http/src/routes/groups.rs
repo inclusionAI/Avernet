@@ -81,6 +81,32 @@ fn default_include_session_groups() -> bool {
     true
 }
 
+fn formal_only_group_query(mut query: ListBotGroupsQuery) -> ListBotGroupsQuery {
+    query.include_session_groups = false;
+    query
+}
+
+#[cfg(test)]
+mod list_my_groups_query_tests {
+    use super::{GroupKindFilter, ListBotGroupsQuery, formal_only_group_query};
+
+    #[test]
+    fn my_groups_forces_session_only_groups_off() {
+        let query = formal_only_group_query(ListBotGroupsQuery {
+            offset: Some(4),
+            limit: Some(5),
+            group_kind: GroupKindFilter::default(),
+            q: Some("topic".to_string()),
+            include_session_groups: true,
+        });
+
+        assert!(!query.include_session_groups);
+        assert_eq!(query.offset, Some(4));
+        assert_eq!(query.limit, Some(5));
+        assert_eq!(query.q.as_deref(), Some("topic"));
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct DeleteSessionQuery {
     pub bot_id: String,
@@ -540,7 +566,7 @@ pub async fn list_my_groups(
     Query(query): Query<ListBotGroupsQuery>,
 ) -> Result<Json<Value>, HttpAdapterError> {
     let actor_id = resolve_actor_caller(&state, &headers, &uri).await?;
-    let page = list_actor_groups(&state, &actor_id, query).await?;
+    let page = list_actor_groups(&state, &actor_id, formal_only_group_query(query)).await?;
 
     Ok(Json(serde_json::json!({
         "actor_id": actor_id,
@@ -1608,7 +1634,9 @@ async fn resolve_actor_caller(
     uri: &Uri,
 ) -> Result<String, HttpAdapterError> {
     if let Ok(bot_id) = authenticated_bot_from_headers(state, headers).await {
-        return Ok(bot_id);
+        if !bot_id.trim().is_empty() {
+            return Ok(bot_id);
+        }
     }
     extract_human_actor_id(state, headers, uri)
         .await

@@ -2736,15 +2736,19 @@ async fn main() -> Result<()> {
                     json!({
                         "offset": offset,
                         "limit": batch_size,
-                        "include_session_groups": false,
                     })
                 );
-                let page = client.list_my_groups(offset, batch_size, false).await?;
+                let page = client.list_my_groups(offset, batch_size).await?;
                 if page.offset != offset {
                     return Err(anyhow!(
                         "Invalid current actor groups pagination response: requested offset={}, received offset={}",
                         offset,
                         page.offset
+                    ));
+                }
+                if page.actor_id.trim().is_empty() {
+                    return Err(anyhow!(
+                        "Current actor groups response did not identify the authenticated actor"
                     ));
                 }
                 if let Some(current_actor_id) = actor_id.as_deref() {
@@ -2761,6 +2765,13 @@ async fn main() -> Result<()> {
                 let page_groups = page.items;
                 let total = page.total;
                 let page_returned = page_groups.len() as u64;
+                if page_returned == 0 && offset < total {
+                    return Err(anyhow!(
+                        "Current actor groups pagination made no progress at offset {} while total is {}",
+                        offset,
+                        total
+                    ));
+                }
                 groups.extend(page_groups);
                 let next_offset = offset.saturating_add(page_returned);
                 if !all || page_returned == 0 || next_offset >= total {

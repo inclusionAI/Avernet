@@ -1330,7 +1330,7 @@ async fn my_groups_resolves_bot_principal_and_preserves_query() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/groups/my?group_kind=normal&offset=4&limit=5&q=05&include_session_groups=false")
+                .uri("/groups/my?group_kind=normal&offset=4&limit=5&q=05&include_session_groups=true")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1382,6 +1382,28 @@ async fn my_groups_resolves_human_identity() {
     let calls = query.bot_group_calls.lock().await;
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].bot_id, "human_alice");
+}
+
+#[tokio::test]
+async fn my_groups_rejects_empty_bot_actor_identity() {
+    let query = Arc::new(RecordingGroupQuery::default());
+    let services = Services::builder().group_query(query).build_for_test();
+    let app = build_router(HttpAppState::new(services).with_auth_chain(
+        static_bot_auth_chain(""),
+        AuthConfig::default(),
+    ));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/groups/my")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
