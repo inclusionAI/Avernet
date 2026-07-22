@@ -27,7 +27,7 @@ prepare → PUT → complete
 
 ### Multipart 上传
 
-- **100MB 是单片/分段阈值（非硬截断）**：超过 100MB 自动走 multipart 并行 PUT
+- **100MB 是单片/分段阈值（非硬截断）**：超过 100MB 自动走 multipart 串行 PUT（v1；可并行优化为后续）
 - multipart 响应的最外层包含 `expires_at` 和 `method` 字段
 
 ### 分享链接
@@ -85,7 +85,7 @@ bcs session file upload --session "<session_id>" --path <本地路径> [--name <
 # 上传小文件（<100MB，单片上传）
 bcs session file upload --session "grp-001:1a2b3c4d" --path ./report.pdf
 
-# 上传大文件（≥100MB，自动 multipart 并行 PUT）
+# 上传大文件（≥100MB，自动 multipart 串行 PUT（v1；可并行优化为后续））
 bcs session file upload --session "grp-001:1a2b3c4d" --path ./model.bin --mime application/octet-stream
 
 # 自定义文件名

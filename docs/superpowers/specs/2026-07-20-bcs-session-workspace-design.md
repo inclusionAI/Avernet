@@ -387,7 +387,7 @@ skill，使 bot 能用 CLI 上传/下载/分享/列举会话文件，与现有 `
   `capabilities`，每条标必需参数与说明。
 - **`session file upload`**：三阶段一次性封装（`POST /files` prepare → PUT `upload_url` → `POST /complete`）；
   说明 `upload_url` 指向随后端能力（presign 后端直传后端、字节不经 BCS；local 经 BCS），失败会尝试 `DELETE`
-  取消。给小文件与大文件（≥100MB 自动 multipart，并行 PUT 各 `parts[].upload_url`）示例。
+  取消。给小文件与大文件（≥100MB 自动 multipart，串行 PUT 各 `parts[].upload_url`（v1；可并行优化为后续））示例。
 - **`session file download`**：跟随预签名 302 自动落到后端（baas/OSS）或 BCS 流式（local），流式写 `--out`。
 - **`session file share`**：生成分享链接返回 `share_url`（可直接分发，不校验会话权限，过期失效）；
   说明分享下载是裸 URL，无 CLI 子命令。

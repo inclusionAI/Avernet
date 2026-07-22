@@ -163,7 +163,7 @@ Base：`http://{bcs-host}/sessions/{sid}/files`
 ```
 
 `part_count = ceil(size / part_size)`；一次 prepare 返回所有分片的 `upload_url`（`method`/`expires_at`
-在最外层，各 part 共用），可并行上传。`upload_url` 指向随后端能力：presign 后端（baas/OSS）为后端真
+在最外层，各 part 共用），可串行上传（v1；可并行优化为后续）。`upload_url` 指向随后端能力：presign 后端（baas/OSS）为后端真
 直传 URL（客户端直传后端、字节不经 BCS）；local 后端为 BCS 代理 `PUT .../content?part={n}`。客户端
 PUT 各分片后调一次 `complete`，由 `StoragePlugin::complete_upload` 在后端组装（baas/OSS：`list_parts`/
 组装；local：按 `part_number` 顺序拼接段文件），客户端无需收集 ETag。**分段上传须所有分片 PUT 完成后再 `complete`；缺段或累计 size ≠ prepare `size` 时 `complete` 返 `409 INVALID_TRANSITION`（字节尚未上传完全），local 在 `complete_upload` 校验各段存在与累计大小。**`part_number` 为 `u16`（1–65535）；后端 `part_size` 选择须保证 `part_count ≤ 65535`，否则 prepare 返 `413 PAYLOAD_TOO_LARGE`。中途可 `DELETE` 取消
