@@ -29,7 +29,10 @@ const DEFAULT_PROVIDER_DOWNLINK_TIMEOUT_MS: u64 = 60 * 60 * 1_000;
 
 /// Idle timeout for an SSE read loop: if no bytes arrive within this window the
 /// run is considered stuck and closed with a synthesized error terminal (#3).
-const SSE_IDLE_TIMEOUT_MS: u64 = 120_000;
+const SSE_IDLE_TIMEOUT_MS: u64 = 15 * 60 * 1_000;
+/// Maximum time for an SSE request to receive response headers. Body liveness
+/// is governed separately by `SSE_IDLE_TIMEOUT_MS` after the stream is accepted.
+const SSE_RESPONSE_HEADER_TIMEOUT_MS: u64 = 125_000;
 /// Bounded retry for resolving run context after `deliver()` returns but before
 /// `put_context` lands (#2 put_context race): ~50ms * 20 ≈ 1s.
 const SSE_CTX_RETRY_INTERVAL_MS: u64 = 50;
@@ -44,6 +47,7 @@ const SSE_LAG_ALERT_MS: u64 = 5_000;
 struct ProviderClientPolicy {
     total_timeout: Option<Duration>,
     read_timeout: Option<Duration>,
+    response_header_timeout: Option<Duration>,
     http2_only: bool,
 }
 
@@ -52,13 +56,17 @@ impl ProviderClientPolicy {
         if accept_sse {
             Self {
                 total_timeout: None,
-                read_timeout: Some(Duration::from_secs(125)),
+                read_timeout: None,
+                response_header_timeout: Some(Duration::from_millis(
+                    SSE_RESPONSE_HEADER_TIMEOUT_MS,
+                )),
                 http2_only: true,
             }
         } else {
             Self {
                 total_timeout: Some(Duration::from_secs(65)),
                 read_timeout: None,
+                response_header_timeout: None,
                 http2_only: false,
             }
         }
@@ -643,6 +651,25 @@ async fn send_provider_request(
     body: &ProviderWebhookRequest,
     accept_sse: bool,
 ) -> ServiceResult<reqwest::Response> {
+    send_provider_request_with_policy(
+        client,
+        url_guard,
+        target,
+        body,
+        accept_sse,
+        ProviderClientPolicy::for_request(accept_sse),
+    )
+    .await
+}
+
+async fn send_provider_request_with_policy(
+    client: &reqwest::Client,
+    url_guard: &OutboundUrlGuard,
+    target: &BotDeliveryTarget,
+    body: &ProviderWebhookRequest,
+    accept_sse: bool,
+    client_policy: ProviderClientPolicy,
+) -> ServiceResult<reqwest::Response> {
     let BotDeliveryTarget::HttpProvider {
         webhook_url,
         bcs_to_provider_token,
@@ -671,7 +698,6 @@ async fn send_provider_request(
             });
         }
     };
-    let client_policy = ProviderClientPolicy::for_request(accept_sse);
     let pinned_client = provider_client_for_url(&guarded_url, client_policy).map_err(|error| {
         ServiceError::InternalError(format!("provider HTTP client build failed: {error}"))
     })?;
@@ -721,6 +747,7 @@ async fn send_provider_request(
         http2_only = client_policy.http2_only,
         total_timeout_ms = ?client_policy.total_timeout.map(|timeout| timeout.as_millis()),
         read_timeout_ms = ?client_policy.read_timeout.map(|timeout| timeout.as_millis()),
+        response_header_timeout_ms = ?client_policy.response_header_timeout.map(|timeout| timeout.as_millis()),
         request_started_ms,
         "provider downlink: posting webhook"
     );
@@ -735,26 +762,50 @@ async fn send_provider_request(
     if protocol_version == "2.0" {
         request = request.header(BCN_TRANSPORT_HEADER, transport);
     }
-    let response = request
-        .json(body)
-        .send()
-        .await
-        .map_err(|error| {
-            let elapsed_ms = request_started.elapsed().as_millis();
-            warn!(
-                provider_id = %body.to_bot.provider_id,
-                method = %body.method,
-                frame_id = %body.id,
-                message_id = %message_id,
-                webhook_url = %webhook_url,
-                dns_pinned,
-                http2_only = client_policy.http2_only,
-                elapsed_ms,
-                error = %error,
-                "provider downlink: webhook transport error"
-            );
-            ServiceError::InternalError(format!("provider request failed: {error}"))
-        })?;
+    let send = request.json(body).send();
+    let response_result =
+        if let Some(response_header_timeout) = client_policy.response_header_timeout {
+            match tokio::time::timeout(response_header_timeout, send).await {
+                Ok(result) => result,
+                Err(_) => {
+                    let elapsed_ms = request_started.elapsed().as_millis();
+                    warn!(
+                        provider_id = %body.to_bot.provider_id,
+                        method = %body.method,
+                        frame_id = %body.id,
+                        message_id = %message_id,
+                        webhook_url = %webhook_url,
+                        dns_pinned,
+                        http2_only = client_policy.http2_only,
+                        elapsed_ms,
+                        response_header_timeout_ms = response_header_timeout.as_millis(),
+                        "provider downlink: response header timeout"
+                    );
+                    return Err(ServiceError::InternalError(format!(
+                        "provider response header timeout after {}ms",
+                        response_header_timeout.as_millis()
+                    )));
+                }
+            }
+        } else {
+            send.await
+        };
+    let response = response_result.map_err(|error| {
+        let elapsed_ms = request_started.elapsed().as_millis();
+        warn!(
+            provider_id = %body.to_bot.provider_id,
+            method = %body.method,
+            frame_id = %body.id,
+            message_id = %message_id,
+            webhook_url = %webhook_url,
+            dns_pinned,
+            http2_only = client_policy.http2_only,
+            elapsed_ms,
+            error = %error,
+            "provider downlink: webhook transport error"
+        );
+        ServiceError::InternalError(format!("provider request failed: {error}"))
+    })?;
 
     let status = response.status();
     let response_version = response.version();
@@ -1490,6 +1541,7 @@ async fn ingest(
 #[cfg(test)]
 mod client_policy_tests {
     use super::*;
+    use bcs_domain::RedactedToken;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     async fn spawn_http1_server() -> std::net::SocketAddr {
@@ -1507,13 +1559,37 @@ mod client_policy_tests {
         addr
     }
 
+    async fn spawn_delayed_http1_server(delay: Duration) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request).await.unwrap();
+            tokio::time::sleep(delay).await;
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .await;
+        });
+        addr
+    }
+
     #[test]
     fn sse_policy_is_http2_only_without_total_timeout() {
         let policy = ProviderClientPolicy::for_request(true);
 
         assert_eq!(policy.total_timeout, None);
-        assert_eq!(policy.read_timeout, Some(Duration::from_secs(125)));
+        assert_eq!(policy.read_timeout, None);
+        assert_eq!(
+            policy.response_header_timeout,
+            Some(Duration::from_secs(125))
+        );
         assert!(policy.http2_only);
+    }
+
+    #[test]
+    fn sse_idle_timeout_is_fifteen_minutes() {
+        assert_eq!(SSE_IDLE_TIMEOUT_MS, 15 * 60 * 1_000);
     }
 
     #[test]
@@ -1522,7 +1598,63 @@ mod client_policy_tests {
 
         assert_eq!(policy.total_timeout, Some(Duration::from_secs(65)));
         assert_eq!(policy.read_timeout, None);
+        assert_eq!(policy.response_header_timeout, None);
         assert!(!policy.http2_only);
+    }
+
+    #[tokio::test]
+    async fn provider_request_times_out_waiting_for_response_headers() {
+        let addr = spawn_delayed_http1_server(Duration::from_millis(100)).await;
+        let policy = ProviderClientPolicy {
+            response_header_timeout: Some(Duration::from_millis(10)),
+            http2_only: false,
+            ..ProviderClientPolicy::for_request(true)
+        };
+        let client = provider_client_builder(policy).build().unwrap();
+        let url_guard = OutboundUrlGuard::allowing_private_networks_for_tests();
+        let target = BotDeliveryTarget::HttpProvider {
+            bot_id: "bot-1".to_string(),
+            provider_id: "provider-1".to_string(),
+            provider_bot_ref: "bot-1".to_string(),
+            webhook_url: format!("http://{addr}"),
+            bcs_to_provider_token: RedactedToken::new("secret"),
+            protocol_version: "2.0".to_string(),
+        };
+        let body = ProviderWebhookRequest {
+            frame_type: "request".to_string(),
+            id: "frame-timeout".to_string(),
+            method: "chat.send".to_string(),
+            session_id: "session-1".to_string(),
+            bcn_group_id: "group-1".to_string(),
+            to_bot: ProviderWebhookBotRef {
+                provider_id: "provider-1".to_string(),
+                provider_bot_ref: "bot-1".to_string(),
+                tags: Vec::new(),
+            },
+            from: None,
+            message: None,
+            attachments: Vec::new(),
+            before: None,
+            after: None,
+            limit: None,
+            timeout_ms: 1_000,
+            extensions: None,
+        };
+
+        let error = send_provider_request_with_policy(
+            &client,
+            &url_guard,
+            &target,
+            &body,
+            true,
+            policy,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains(
+            "provider response header timeout after 10ms"
+        ));
     }
 
     #[test]
