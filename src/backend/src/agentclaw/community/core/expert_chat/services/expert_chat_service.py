@@ -315,8 +315,9 @@ class ExpertChatService:
 
         # 4. 根据 call_type 决定连接获取方式（授权检查之后）
         # Caller 模式：为每个 caller 分配独立的 baas 容器
-        bot_call_type = McpCallType.parse(bot.get("call_type"))
-        if bot_call_type is McpCallType.CALLER:
+        bot_call_type = McpCallType.parse(bot.get("call_type") or None)
+        logger.info("[ExpertChatService] Bot call_type: bot=%s, call_type=%s, parsed=%s", bot_id, bot.get("call_type"), bot_call_type)
+        if bot_call_type == McpCallType.CALLER:
             logger.info("[ExpertChatService] Caller mode: bot=%s, owner=%s, user=%s", bot_id, owner_id, user_id)
             result = await self._instance_service.get_caller_connection(
                 user_id=user_id,
