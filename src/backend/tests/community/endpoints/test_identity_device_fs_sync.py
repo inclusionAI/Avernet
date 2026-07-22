@@ -22,6 +22,7 @@ A non-reference file (``SOUL.md``) is used so the write is a single push
 
 Coverage:
 - bot-level write   (PUT .../bot/{bot_id}/{file_type}): happy + error (bad file_type → 400)
+- entity-level read (GET .../{entity_type}/{entity_id}/{file_type}): happy
 - entity-level write(PUT .../{entity_type}/{entity_id}/{file_type}): happy + error (bad file_type → 400)
 
 The ``/batch`` write routes are intentionally NOT covered here: they are
@@ -98,6 +99,13 @@ def _pf(world):
     return world.get(WorkspacePathFactory)
 
 
+def _seed_entity_persona_read(world) -> None:
+    _seed_arca_bot(world, bot_id="default")
+    path = _get_entity_file_path("staff", _OWNER, _FILE, _pf(world))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_CONTENT, encoding="utf-8")
+
+
 # ============================================================
 # bot-level write  (PUT .../bot/{bot_id}/{file_type})
 # ============================================================
@@ -149,6 +157,37 @@ def bot_persona_write_pushes_to_device():
 )
 def bot_persona_invalid_file_type_400():
     """An invalid identity file_type → 400 before any device write."""
+
+
+# ============================================================
+# entity-level read  (GET .../{entity_type}/{entity_id}/{file_type})
+# ============================================================
+
+@endpoint_test(
+    method="GET",
+    path="/api/identity/{entity_type}/{entity_id}/{file_type}",
+    scenario="happy_arca_entity_persona_read",
+    input=CaseInput(
+        path_params={
+            "entity_type": "staff",
+            "entity_id": _OWNER,
+            "file_type": _FILE,
+        },
+        headers={"x-user-id": _OWNER},
+    ),
+    seed=_seed_entity_persona_read,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "entity_id": _OWNER,
+            "file_type": _FILE,
+            "content": _CONTENT,
+        },
+    ),
+)
+def entity_persona_read_uses_authenticated_device_identity():
+    """An authenticated owner reads the entity identity file successfully."""
 
 
 # ============================================================
