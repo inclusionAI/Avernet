@@ -84,6 +84,7 @@ async def get_upload_url(
             device_affinity=device_affinity,
             file_size=request.file_size,
             part_size=request.part_size,
+            operator=request.operator,
         )
         return ApiResponse(data=result)
 
@@ -181,6 +182,7 @@ async def get_download_url(
             device_path=request.device_path,
             expire_seconds=request.expire_seconds,
             device_affinity=device_affinity,
+            operator=request.operator,
         )
         return ApiResponse(data=result)
 

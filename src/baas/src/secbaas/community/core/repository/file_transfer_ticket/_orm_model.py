@@ -38,6 +38,7 @@ class FileTransferTicketModel(Base):
     upload_url = Column(String(2048), nullable=True)
     multipart_session_id = Column(String(256), nullable=True)
     env = Column(String(16), nullable=False)
+    operator = Column(String(256), nullable=False, server_default="unknown")
 
     __table_args__ = (
         UniqueConstraint("transfer_id", "env", name="uk_ft_transfer_id_env"),
@@ -63,4 +64,5 @@ class FileTransferTicketModel(Base):
             upload_url=self.upload_url,
             multipart_session_id=self.multipart_session_id,
             env=self.env,
+            operator=self.operator,
         )

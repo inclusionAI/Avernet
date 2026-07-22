@@ -72,6 +72,7 @@ class TicketRepository(Protocol):
         fileservice_staging_path: str,
         error_message: str | None,
         multipart_session_id: str | None = None,
+        operator: str = "unknown",
     ) -> int:
         """Insert a new transfer ticket record. Returns the new record ID."""
         ...

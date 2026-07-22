@@ -51,6 +51,7 @@ def _make_ticket(**overrides):
         upload_url=None,
         multipart_session_id=None,
         env="test",
+        operator="unknown",
     )
     defaults.update(overrides)
     return TicketRecord(**defaults)
