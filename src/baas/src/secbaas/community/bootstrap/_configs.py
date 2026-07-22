@@ -299,6 +299,7 @@ class BotRunnerConfig(ConfigSchema):
         gt=0,
         description="请求默认超时秒数，metadata 未指定 timeout 时使用",
     )
+    origin: str = Field(default="", description="设置请求的origin header")
 
 
 class BcnUplinkConfigSchema(BaseModel):
