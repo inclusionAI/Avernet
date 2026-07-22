@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from gateway.community import __version__
+from gateway.community.adapters.web.routers import include_all
 from gateway.community.config import ConfigLoader
 from gateway.community.logger import get_logger, get_logger_plugin
 from gateway.community.tracer import get_tracer_plugin
@@ -60,6 +61,9 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         """Liveness probe."""
         return {"status": "ok"}
+
+    # Mount the public /openapi/v1 API group routers.
+    include_all(app)
 
     return app
 

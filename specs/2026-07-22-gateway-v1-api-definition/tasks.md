@@ -23,12 +23,12 @@
   - [x] Unit test asserts the exact shape.
 - **Depends on:** —
 
-## Task 3: Router aggregator + app wiring
+## Task 3: Router aggregator + app wiring — `[x]` done
 - **Goal:** A single include point so `create_app()` mounts all group routers.
 - **Files:** `adapters/web/routers/__init__.py` (new, `include_all(app)`), `adapters/web/app.py` (call it)
 - **Done when:**
-  - [ ] `include_all(app)` includes each registered group router; called in `create_app()` after middleware install.
-  - [ ] `/health` and `/api/test` still work; `/openapi.json` is served; existing `tests/test_example.py` stays green.
+  - [x] `include_all(app)` includes each registered group router; called in `create_app()` after middleware install.
+  - [x] `/health` and `/api/test` still work; `/openapi.json` is served; existing `tests/test_example.py` stays green.
 - **Depends on:** Task 1
 
 ## Task 4: `bots` schemas
