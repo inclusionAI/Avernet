@@ -238,10 +238,12 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         *,
         download_url: str | None = None,
     ) -> None:
+        download_url_preview = (download_url[:200]) if download_url else None
         log.info(
-            "update_urls: transfer_id=%s, download_url=%s",
+            "update_urls: transfer_id=%s, download_url=%s, download_url_preview=%s",
             transfer_id,
             bool(download_url),
+            download_url_preview,
         )
         from sqlalchemy import func
 
@@ -250,6 +252,7 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         if download_url is not None:
             update_kwargs["download_url"] = download_url
         else:
+            log.debug("update_urls: transfer_id=%s, download_url is None, no-op", transfer_id)
             return  # no-op
 
         result = (
