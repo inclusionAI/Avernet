@@ -19,7 +19,7 @@ from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 logger = logging.getLogger(__name__)
 
 # ── concurrency limiter ────────────────────────────────────
-_MAX_CONCURRENT_LLM_CALLS = 5
+_MAX_CONCURRENT_LLM_CALLS = 10
 _SEMAPHORE = asyncio.Semaphore(_MAX_CONCURRENT_LLM_CALLS)
 
 # ── retry config ───────────────────────────────────────────
