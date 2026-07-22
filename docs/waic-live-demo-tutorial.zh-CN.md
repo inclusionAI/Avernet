@@ -93,7 +93,7 @@ flowchart LR
 
 代码框中不包含终端最左侧的提示符，不需要额外输入美元符号。
 
-![截图占位：打开终端并检查基础环境](images/waic-world-cup-tutorial/01-prerequisites-terminal.svg)
+![打开终端并检查基础环境](images/waic-world-cup-tutorial/01-prerequisites-terminal.png)
 
 ## 3. 第一步：安装 Git
 
@@ -171,7 +171,8 @@ test -f scripts/6bots_world_cup_creator_profile/bots.json && echo "世界杯 Bot
 
 更完整的工具说明见 [macOS 依赖清单](dependencies.zh-CN.md)。
 
-![截图占位：install-tools 完成](images/waic-world-cup-tutorial/02-install-tools-complete.svg)
+![安装工具链](images/waic-world-cup-tutorial/02.1-install-tools-complete.png)
+![依赖预检](images/waic-world-cup-tutorial/02.2-install-tools-complete.png)
 
 ## 6. 第四步：编译 BCS 并安装前端依赖
 
@@ -242,7 +243,7 @@ OPENCLAW_OPENAI_MODEL_ID=your-model-id
 
 不要把上面的 example 地址原样当成可用服务，也不要把真实 Key 写进教程截图。
 
-![截图占位：选择模型配置方式](images/waic-world-cup-tutorial/03-model-config-choice.svg)
+![选择模型配置方式](images/waic-world-cup-tutorial/03-model-config-choice.png)
 
 ## 8. 第六步：启动 BCS 和前端
 
@@ -265,7 +266,7 @@ OPENCLAW_OPENAI_MODEL_ID=your-model-id
 - BCS 显示 Running，端口为 21000。
 - Frontend 显示 Running。
 
-![截图占位：BCS 和前端启动成功](images/waic-world-cup-tutorial/04-stack-ready.svg)
+![BCS 和前端启动成功](images/waic-world-cup-tutorial/04-stack-ready.png)
 
 ## 9. 第七步：启动世界杯 6 Bot
 
@@ -296,7 +297,7 @@ Choose model config mode:
 
 6 个 Bot 都应显示 Running，并各自带有端口和 bot_uuid。
 
-![截图占位：6 个世界杯 Bot 全部运行](images/waic-world-cup-tutorial/05-six-bots.svg)
+![6 个世界杯 Bot 全部运行](images/waic-world-cup-tutorial/05-six-bots.png)
 
 ## 10. 第八步：进入 Avernet 前端
 
@@ -316,7 +317,7 @@ Choose model config mode:
 2. 再运行一次 Bot 状态命令，确认 6 个 Bot 均为 Running。
 3. 确认当前打开的是 8000 端口，而不是另一个旧前端。
 
-![截图占位：进入 Avernet 并选择运营总监](images/waic-world-cup-tutorial/06-enter-avernet.svg)
+![进入 Avernet 并选择运营总监](images/waic-world-cup-tutorial/06-enter-avernet.png)
 
 ## 11. 第九步：从模板创建自定义协作群
 
@@ -346,7 +347,9 @@ Choose model config mode:
 
 这个模板不是手工上传的。BCS 本地模式会直接读取仓库中的模板目录，默认语言是 zh-CN，因此只要你使用的是包含该文件的最新代码并成功启动 BCS，它就会出现在前端模板下拉框中。
 
-![截图占位：选择世界杯模板并校验 YAML](images/waic-world-cup-tutorial/07-custom-collaboration-template.svg)
+![创建协作群](images/waic-world-cup-tutorial/07.1-custom-collaboration-template.jpg)
+
+![选择世界杯模板并校验 YAML](images/waic-world-cup-tutorial/07.2-custom-collaboration-template.png)
 
 ## 12. 第十步：把 6 个逻辑角色绑定到 6 个 Bot
 
@@ -381,7 +384,7 @@ Choose model config mode:
 
 > 创建协作群只是保存可复用的协作结构和角色绑定，还没有提交某场比赛的具体内容任务。下一步创建会话时才会真正执行一次。
 
-![截图占位：6 个角色全部完成绑定](images/waic-world-cup-tutorial/08-role-bindings.svg)
+![6 个角色全部完成绑定](images/waic-world-cup-tutorial/08-role-bindings.png)
 
 ## 13. 第十一步：提交本次任务并开始执行
 
@@ -440,7 +443,7 @@ WAIC 复现：星河队 vs 山海队赛前前瞻
 
 填写完成后点击“确认”。这次服务调用会创建会话，并自动启动自定义协作。
 
-![截图占位：填写新会话和协作目标](images/waic-world-cup-tutorial/09-new-session.svg)
+![填写新会话和协作目标](images/waic-world-cup-tutorial/09-new-session.png)
 
 ## 14. 第十二步：观察执行并检查结果
 
@@ -472,7 +475,7 @@ WAIC 复现：星河队 vs 山海队赛前前瞻
 
 使用虚构输入时，成品必须持续标注“演示设定”，不能把星河队、山海队或虚构球员包装成真实世界杯事实。
 
-![截图占位：节点执行过程和最终发布包](images/waic-world-cup-tutorial/10-running-and-result.svg)
+![自定义协作任务执行中](images/waic-world-cup-tutorial/10.1-running-and-result.png)
 
 ## 15. 停止服务
 
