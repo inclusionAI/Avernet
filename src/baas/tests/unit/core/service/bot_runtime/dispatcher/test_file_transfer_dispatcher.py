@@ -9,12 +9,11 @@ from secbaas.community.api.bot_runtime import (
     BotNotFoundError,
     CancelUploadResponse,
     CompleteUploadResponse,
+    DeleteTransferResponse,
     GetDownloadUrlResponse,
     GetUploadUrlResponse,
     OssObjectNotFoundError,
     ShareLinkResponse,
-    StagingDeleteResponse,
-    StagingListResponse,
     TransferNotFoundError,
     TransferNotTerminalError,
     TransferStateConflictError,
@@ -26,7 +25,6 @@ from secbaas.community.core.service.bot_runtime.dispatcher._file_transfer_dispat
 )
 from secbaas.community.spi.file_transfer import (
     MultipartSession,
-    ObjectListing,
     PartInfo,
 )
 
@@ -80,10 +78,6 @@ def file_backend():
     backend.generate_download_url.return_value = "https://oss.example.com/get?token=abc"
     backend.check_object_exists.return_value = True
     backend.build_staging_path.return_value = "file-transfers/t1/tf-001/data.csv"
-    backend.build_staging_prefix.return_value = "file-transfers/t1/"
-    backend.list_objects.return_value = ObjectListing(
-        items=[], truncated=False, next_marker=None
-    )
     backend.initiate_multipart_upload.return_value = MultipartSession(
         session_id="mp-session-1",
         part_count=2,
@@ -596,94 +590,62 @@ class TestDispatchCancelUpload:
             await dispatcher.dispatch_cancel_upload("tf-001")
 
 
-# ── dispatch_list_staging ────────────────────────────────────────────
+# ── dispatch_delete_transfer ──────────────────────────────────────────
 
 
-class TestDispatchListStaging:
-    @pytest.mark.asyncio
-    async def test_with_tenant(self, dispatcher, file_backend):
-        result = await dispatcher.dispatch_list_staging(
-            prefix="", limit=10, tenant="t1"
-        )
-        assert isinstance(result, StagingListResponse)
-        file_backend.build_staging_prefix.assert_called_once_with(
-            tenant="t1", subdir=None
-        )
-
-    @pytest.mark.asyncio
-    async def test_with_prefix_subdir(self, dispatcher, file_backend):
-        await dispatcher.dispatch_list_staging(
-            prefix="my-subdir", limit=10, tenant="t1"
-        )
-        file_backend.build_staging_prefix.assert_called_once_with(
-            tenant="t1", subdir="my-subdir"
-        )
-
-    @pytest.mark.asyncio
-    async def test_path_traversal_rejected(self, dispatcher):
-        with pytest.raises(ValueError, match="path traversal"):
-            await dispatcher.dispatch_list_staging(prefix="../etc")
-
-    @pytest.mark.asyncio
-    async def test_strips_legacy_prefix(self, dispatcher, file_backend):
-        await dispatcher.dispatch_list_staging(
-            prefix="file-transfers/sub", limit=10, tenant="t1"
-        )
-        file_backend.build_staging_prefix.assert_called_once_with(
-            tenant="t1", subdir="sub"
-        )
-
-    @pytest.mark.asyncio
-    async def test_strips_baas_prefix(self, dispatcher, file_backend):
-        await dispatcher.dispatch_list_staging(
-            prefix="baas-file-transfer/sub", limit=10, tenant="t1"
-        )
-        file_backend.build_staging_prefix.assert_called_once_with(
-            tenant="t1", subdir="sub"
-        )
-
-    @pytest.mark.asyncio
-    async def test_legacy_prefix_exact_match(self, dispatcher, file_backend):
-        await dispatcher.dispatch_list_staging(
-            prefix="file-transfers", limit=10, tenant="t1"
-        )
-        file_backend.build_staging_prefix.assert_called_once_with(
-            tenant="t1", subdir=None
-        )
-
-
-# ── dispatch_delete_staging ──────────────────────────────────────────
-
-
-class TestDispatchDeleteStaging:
+class TestDispatchDeleteTransfer:
     @pytest.mark.asyncio
     async def test_delete_done_ticket(self, dispatcher, ticket_repo, file_backend):
         ticket = _make_ticket(status="DONE")
-        ticket_repo.get_by_fileservice_staging_path.return_value = ticket
-        result = await dispatcher.dispatch_delete_staging(key="oss-key", tenant="t1")
-        assert isinstance(result, StagingDeleteResponse)
+        ticket_repo.get_by_transfer_id.return_value = ticket
+        result = await dispatcher.dispatch_delete_transfer("tf-001", tenant="t1")
+        assert isinstance(result, DeleteTransferResponse)
         assert result.previous_status == "DONE"
         assert result.new_status == "DELETED"
-        file_backend.delete_object.assert_called_once_with("oss-key")
+        file_backend.delete_object.assert_called_once_with(
+            ticket.fileservice_staging_path
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_failed_ticket(self, dispatcher, ticket_repo, file_backend):
+        ticket = _make_ticket(status="FAILED")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+        result = await dispatcher.dispatch_delete_transfer("tf-001", tenant="t1")
+        assert result.previous_status == "FAILED"
+        assert result.new_status == "DELETED"
+        file_backend.delete_object.assert_called_once_with(
+            ticket.fileservice_staging_path
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_cancelled_ticket(self, dispatcher, ticket_repo, file_backend):
+        ticket = _make_ticket(status="CANCELLED")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+        result = await dispatcher.dispatch_delete_transfer("tf-001", tenant="t1")
+        assert result.previous_status == "CANCELLED"
+        assert result.new_status == "DELETED"
+        file_backend.delete_object.assert_called_once_with(
+            ticket.fileservice_staging_path
+        )
 
     @pytest.mark.asyncio
     async def test_not_found(self, dispatcher, ticket_repo):
-        ticket_repo.get_by_fileservice_staging_path.return_value = None
+        ticket_repo.get_by_transfer_id.return_value = None
         with pytest.raises(TransferNotFoundError):
-            await dispatcher.dispatch_delete_staging(key="oss-key")
+            await dispatcher.dispatch_delete_transfer("tf-001")
 
     @pytest.mark.asyncio
-    async def test_non_terminal(self, dispatcher, ticket_repo):
+    async def test_non_terminal_raises(self, dispatcher, ticket_repo):
         ticket = _make_ticket(status="CREATED")
-        ticket_repo.get_by_fileservice_staging_path.return_value = ticket
+        ticket_repo.get_by_transfer_id.return_value = ticket
         with pytest.raises(TransferNotTerminalError):
-            await dispatcher.dispatch_delete_staging(key="oss-key")
+            await dispatcher.dispatch_delete_transfer("tf-001")
 
     @pytest.mark.asyncio
-    async def test_already_deleted(self, dispatcher, ticket_repo):
+    async def test_already_deleted_idempotent(self, dispatcher, ticket_repo):
         ticket = _make_ticket(status="DELETED")
-        ticket_repo.get_by_fileservice_staging_path.return_value = ticket
-        result = await dispatcher.dispatch_delete_staging(key="oss-key")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+        result = await dispatcher.dispatch_delete_transfer("tf-001")
         assert result.previous_status == "DELETED"
         assert result.new_status == "DELETED"
 
