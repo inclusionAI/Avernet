@@ -371,15 +371,27 @@ async def test_upgrade_bot_not_found_abandons_and_falls_back():
 
 
 # ── retry / abandonment: ledger-driven decisions (#197 Task 10) ───────────────
+def _land_completed_op(svc, ledger, *, publish_id, kind, bot_uuid, baas_id):
+    """Open → record workflow → complete a ledger op landing ``baas_id`` on
+    ``bot_uuid`` (a completed BaaS deploy/lifecycle workflow)."""
+    op = svc._operation_runner.open_operation(
+        publish_id=publish_id, kind=kind, stage=PublishStage.ONLINE, bot_uuid=bot_uuid
+    )
+    ledger.record_workflow(op.id, baas_publish_id=baas_id, bot_uuid=bot_uuid)
+    ledger.complete(op.id)
+    return op
+
+
 def test_is_online_release_recorded_reads_ledger():
     ledger = _ledger()
     baas = FakeBaas()
     publish_service = Mock()
-    publish_service.get_publish_by_id.return_value = _record(PublishStatus.ONLINE_PUB.value)
+    rec = _record(PublishStatus.ONLINE_PUB.value)
+    publish_service.get_publish_by_id.return_value = rec
     svc = _flow(ledger=ledger, baas=baas, build_service=Mock(),
                 publish_service=publish_service)
 
-    # No op, no ext marker (record ext has no 'publish') → not recorded.
+    # No online release op for this publish → not recorded.
     assert svc.is_online_release_recorded(1) is False
 
     # An online op with only the workflow recorded (ID_RECORDED, binding/ext not
@@ -391,20 +403,76 @@ def test_is_online_release_recorded_reads_ledger():
     ledger.record_workflow(op.id, baas_publish_id=901, bot_uuid="BOT-x")
     assert svc.is_online_release_recorded(1) is False
 
-    # Only once the op COMPLETES (binding + ext done) is it "recorded".
+    # Once the op COMPLETES it is the latest deploy that landed on the bot → the
+    # live online release.
     ledger.complete(op.id)
     assert svc.is_online_release_recorded(1) is True
 
 
-def test_is_online_release_recorded_ext_fallback_for_pre_ledger():
+def test_is_online_release_recorded_false_for_rolled_back_completed_op():
+    """A COMPLETED online op is stale once a later deploy lands on the same bot.
+
+    Rollback demotes a SUCCESS record to DRAFT and re-deploys the previous version
+    onto the shared online bot (a ROLLBACK_DEPLOY op with a higher baas_publish_id).
+    The demoted record's prior COMPLETED online op is no longer the latest deploy on
+    the bot, so a re-publish of that record must run the release again — the stale op
+    must NOT gate it (otherwise the online leg is skipped and no BaaS workflow is
+    ever issued for the new lifecycle)."""
+    ledger = _ledger()
+    baas = FakeBaas()
+    publish_service = Mock()
+    rec = _record(PublishStatus.ONLINE_PUB.value)
+    publish_service.get_publish_by_id.return_value = rec
+    svc = _flow(ledger=ledger, baas=baas, build_service=Mock(),
+                publish_service=publish_service)
+
+    # This record's online upgrade completed and is the latest deploy on the bot.
+    _land_completed_op(svc, ledger, publish_id=1, kind="upgrade",
+                       bot_uuid="BOT-live", baas_id=901)
+    assert svc.is_online_release_recorded(1) is True
+
+    # Rollback re-deploys the previous version onto the SAME bot (higher baas id),
+    # on the target record (publish_id=2). The demoted record's op 901 is no longer
+    # the latest deploy → stale → not recorded → a re-publish runs the release.
+    _land_completed_op(svc, ledger, publish_id=2, kind="rollback_deploy",
+                       bot_uuid="BOT-live", baas_id=902)
+    assert svc.is_online_release_recorded(1) is False
+
+
+def test_is_online_release_recorded_true_after_restart_or_scale():
+    """A restart / scale lands on the same online bot (higher baas id) but does NOT
+    set the deployed version, so it must not make a live release look stale — else
+    retry() would misroute (re-run the release instead of restart) and the online
+    gate could re-issue a redundant deploy."""
+    ledger = _ledger()
+    publish_service = Mock()
+    rec = _record(PublishStatus.ONLINE_PUB.value)
+    publish_service.get_publish_by_id.return_value = rec
+    svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock(),
+                publish_service=publish_service)
+
+    _land_completed_op(svc, ledger, publish_id=1, kind="upgrade",
+                       bot_uuid="BOT-live", baas_id=901)
+    # A restart and a scale-up land afterwards on the same bot (version unchanged).
+    _land_completed_op(svc, ledger, publish_id=1, kind="restart",
+                       bot_uuid="BOT-live", baas_id=902)
+    _land_completed_op(svc, ledger, publish_id=1, kind="scale",
+                       bot_uuid="BOT-live", baas_id=903)
+    assert svc.is_online_release_recorded(1) is True
+
+
+def test_is_online_release_recorded_ignores_ext_marker():
+    """The answer is purely ledger-driven: an ext.publish.online marker with no
+    completed online release op in the ledger does NOT count as recorded. (The
+    ledger is the source of truth; a record with a live release always carries its
+    own COMPLETED first_release/upgrade op.)"""
     ledger = _ledger()
     svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock(),
                 publish_service=Mock())
-    # No ledger op, but a legacy ext.publish.online marker (pre-ledger record).
     rec = _record(PublishStatus.ONLINE_PUB.value)
     rec.ext = {"publish": {"online": 500}}
     svc._publish_service.get_publish_by_id = Mock(return_value=rec)
-    assert svc.is_online_release_recorded(2) is True
+    assert svc.is_online_release_recorded(2) is False
 
 
 def test_abandon_inflight_operations_marks_nonterminal():

@@ -176,3 +176,36 @@ def test_transitions_on_missing_row_return_none(repo):
     assert repo.complete(123456) is None
     assert repo.fail(123456, "e") is None
     assert repo.abandon(123456, "r") is None
+
+
+def test_publish_operation_kind_deploy_partition():
+    """Every PublishOperationKind must be classified as either version-setting
+    (a deploy — its completed op marks which version is live on its bot) or
+    version-preserving (restart/scale/teardown — leaves the deployed version
+    unchanged). is_online_release_recorded's liveness scan filters on
+    ``sets_deployed_version``, so an unclassified new kind would be silently
+    mistreated; this partition assertion fails CI until the kind is classified in
+    models.py (`_KINDS_SET_DEPLOYED_VERSION` / `_KINDS_PRESERVE_DEPLOYED_VERSION`)."""
+    setting = PublishOperationKind.version_setting_kinds()
+    preserving = PublishOperationKind.version_preserving_kinds()
+
+    # Disjoint and exhaustive over all kinds (every kind in exactly one bucket).
+    assert setting.isdisjoint(preserving)
+    assert setting | preserving == set(PublishOperationKind)
+
+    # The property agrees with the sets for every kind.
+    for kind in PublishOperationKind:
+        assert kind.sets_deployed_version == (kind in setting)
+
+    # Pin the intended classification so a semantic change is a conscious edit.
+    assert setting == {
+        PublishOperationKind.FIRST_RELEASE,
+        PublishOperationKind.UPGRADE,
+        PublishOperationKind.ROLLBACK_DEPLOY,
+        PublishOperationKind.EVAL_PUBLISH,
+    }
+    assert preserving == {
+        PublishOperationKind.RESTART,
+        PublishOperationKind.SCALE,
+        PublishOperationKind.EVAL_TEARDOWN,
+    }

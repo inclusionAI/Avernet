@@ -14,6 +14,7 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
     BotPublishRecord,
     PublishOperationKind,
+    PublishOperationRecord,
     PublishOperationState,
 )
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
@@ -864,35 +865,90 @@ class PublishFlowService(
         return self._publish_service.get_publish_by_id(publish_id)
 
     def is_online_release_recorded(self, publish_id: int) -> bool:
-        """True once this record's online release is fully recorded — i.e. the
-        binding + ``ext.publish.online`` were written, not merely the BaaS
-        workflow id.
+        """True when this record's online release is the *live* deployment on its
+        bot — i.e. the latest version-setting op that has landed on the shared
+        online bot belongs to this publish.
 
-        This is the crash-resume guard for the online leg, which runs *within*
-        ONLINE_PUB with no status transition to guard it, so the threshold must
-        be the *completed* release, not just the created workflow. Both consumers
-        need this threshold:
+        Purely ledger-driven (#197): the ledger is the source of truth for what is
+        deployed. The question is answered from the bot's op timeline alone, in two
+        steps:
 
-        * the online_release task gate (``tasks.py``) skips re-running the release
-          only when it is fully done; at ``ID_RECORDED``-but-not-complete a re-run
-          MUST re-enter (the runner then resumes: reuses the in-flight op + binding
-          and finishes the ext write) — gating on the mere workflow id would strand
-          the record with an orphaned bot (binding/ext never written).
-        * ``retry`` chooses BaaS-restart only for a completed release (a BaaS-side
-          failure); a partial release re-runs the release work instead.
+        1. This record's own online release op (first-release / upgrade) must be
+           ``COMPLETED`` — a completed BaaS deploy that landed a binding + ext.
+           Anything short of that (no op, or an ``ID_RECORDED`` deploy still
+           mid-flight) is *not* recorded: the online_release gate must re-enter so
+           the runner resumes the same op (no second bot), and ``retry`` must re-run
+           the release work rather than restart.
+        2. That completed release must still be the latest deploy on the bot. A
+           ``COMPLETED`` op genuinely completed and is never rewritten; what makes it
+           stale is a *later* version-setting op landing on the same bot. Rollback
+           demotes this record to DRAFT and re-deploys the previous version onto the
+           bot (a ``ROLLBACK_DEPLOY`` with a higher, globally-monotonic
+           ``baas_publish_id``), so the demoted record's release is no longer the
+           latest deploy and a re-publish must run again. A restart / scale lands on
+           the bot too but does not set the version (``sets_deployed_version``), so
+           it never supersedes a release.
 
-        Ledger-driven (#197): the latest online-stage release op (first-release or
-        upgrade) is ``COMPLETED``. The ``ext.publish.online`` marker (written in the
-        release's ext step, one step before ``complete_operation``) is a transitional
-        fallback — it covers both the tiny record-ext→complete window and any record
-        that predates the ledger during rollout."""
+        Consumers: the online_release gate (``tasks.py``) skips the release only
+        when it is the live deployment; ``retry`` chooses BaaS-restart only for a
+        completed, still-live release (a BaaS-side wait failure) and otherwise
+        re-runs the release work."""
+        release_op = self._completed_online_release_op(publish_id)
+        if release_op is None or not release_op.bot_uuid:
+            return False
+
+        return not self._online_release_superseded(release_op)
+
+    def _completed_online_release_op(
+        self, publish_id: int
+    ) -> PublishOperationRecord | None:
+        """This record's completed online release op (first-release or upgrade),
+        or ``None`` if it has no completed online deploy yet.
+
+        Reads the latest attempt of each release kind and keeps the COMPLETED one.
+        An ``UPGRADE`` that hit ``BOT_NOT_FOUND`` is ABANDONED and a
+        ``FIRST_RELEASE`` fallback completes, so both kinds can coexist for one
+        publish; only the completed one is the record's real release. A still
+        in-flight (``ID_RECORDED``) or absent op yields ``None`` — the caller
+        treats that as not-yet-recorded (re-enter / re-run rather than skip)."""
+        completed = []
         for kind in (PublishOperationKind.FIRST_RELEASE, PublishOperationKind.UPGRADE):
             op = self._publish_operation_repo.get_latest_by_kind(
                 publish_id, kind, PublishStage.ONLINE.value
             )
-            if op is not None and op.state == PublishOperationState.COMPLETED.value:
+            if (
+                op is not None
+                and op.state == PublishOperationState.COMPLETED.value
+                and op.baas_publish_id is not None
+            ):
+                completed.append(op)
+        if not completed:
+            return None
+        return max(completed, key=lambda o: o.baas_publish_id)
+
+    def _online_release_superseded(self, release_op: PublishOperationRecord) -> bool:
+        """True if a later version-setting deploy has landed on the same online bot
+        — i.e. ``release_op`` is no longer the live deployment.
+
+        Scans the shared bot's ledger timeline for a ``sets_deployed_version`` op
+        (a newer upgrade, or a rollback re-deploy of another version) whose workflow
+        landed after this release (higher, globally-monotonic ``baas_publish_id``).
+        A landed op is one that reached ``ID_RECORDED``/``COMPLETED`` (a workflow was
+        issued); ``FAILED``/``ABANDONED`` deploys never took, so they do not
+        supersede. Restart / scale are skipped — they do not set the version."""
+        landed = {
+            PublishOperationState.ID_RECORDED.value,
+            PublishOperationState.COMPLETED.value,
+        }
+        for op in self._publish_operation_repo.list_by_bot(
+            release_op.bot_uuid, release_op.env
+        ):
+            if (
+                op.baas_publish_id is not None
+                and op.baas_publish_id > release_op.baas_publish_id
+                and op.state in landed
+                and PublishOperationKind(op.operation_kind).sets_deployed_version
+            ):
                 return True
-        record = self.get_publish_record(publish_id)
-        ext = (record.ext or {}) if record else {}
-        return bool(ext.get("publish", {}).get(PublishStage.ONLINE.value))
+        return False
 

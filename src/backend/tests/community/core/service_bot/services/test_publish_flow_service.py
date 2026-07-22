@@ -3161,16 +3161,19 @@ async def test_retry_missing_source_status_raises():
 
 @pytest.mark.asyncio
 async def test_retry_from_online_pub_recorded_calls_restart():
-    # Online release already recorded (ext.publish.online) → a BaaS-wait failure →
-    # retry restarts the BaaS publish.
+    # Online release already recorded in the ledger — a COMPLETED online upgrade that
+    # is the latest deploy on the bot → a BaaS-wait failure → retry restarts the
+    # BaaS publish.
     record = _make_publish_record(
         status=PublishStatus.FAILED.value,
-        ext={
-            "source_status": PublishStatus.ONLINE_PUB.value,
-            "publish": {"online": 9},
-        },
+        ext={"source_status": PublishStatus.ONLINE_PUB.value},
     )
     svc, _ = _svc_with_record(record)
+    op = svc._operation_runner.open_operation(
+        publish_id=1, kind="upgrade", stage=PublishStage.ONLINE, bot_uuid="BOT-live"
+    )
+    svc._publish_operation_repo.record_workflow(op.id, baas_publish_id=9, bot_uuid="BOT-live")
+    svc._publish_operation_repo.complete(op.id)
     # #162 + durable restart: retry runs execute_restart inline then enqueues the poll.
     svc.execute_restart = AsyncMock(return_value={"success": True})
     result = await svc.retry(publish_id=1, operator="op")
