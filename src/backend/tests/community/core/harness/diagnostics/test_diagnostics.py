@@ -223,7 +223,7 @@ class TestToolsDeclarationDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -273,7 +273,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -308,7 +308,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -336,7 +336,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -353,7 +353,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -408,7 +408,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -435,7 +435,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -459,7 +459,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -487,7 +487,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -529,7 +529,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -567,7 +567,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -606,7 +606,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -640,7 +640,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -704,7 +704,7 @@ class TestSoulPersonaDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -731,7 +731,7 @@ class TestSoulPersonaDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -809,7 +809,7 @@ class TestSoulPersonaDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"

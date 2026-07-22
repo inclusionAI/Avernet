@@ -12,6 +12,7 @@ import requests
 
 from agentclaw.community.core.harness.diagnostics.base import Diagnostic, DiagnosticContext
 from agentclaw.community.core.harness.models import Finding
+from agentclaw.community.core.harness.services.llm import DIAGNOSTIC_MAX_TOKENS
 
 if TYPE_CHECKING:
     from agentclaw.community.di.config import KbConfig
@@ -505,6 +506,6 @@ XX 为 0-100 的整数
                 logger.warning("[D-TOOLS-002] KB context fetch failed for bot=%s", ctx.bot_id, exc_info=True)
         user_msg += "--- end ---"
 
-        response = await ctx.llm.chat(system=self.system_prompt, user=user_msg)
+        response = await ctx.llm.chat(system=self.system_prompt, user=user_msg, max_tokens=DIAGNOSTIC_MAX_TOKENS)
         logger.info("[D-TOOLS-002] LLM response received: bot=%s response_len=%d", ctx.bot_id, len(response))
         return self._analyze_response(response, ctx.bot_id)
