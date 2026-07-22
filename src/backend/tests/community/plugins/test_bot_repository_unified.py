@@ -93,8 +93,8 @@ def test_insert_and_get(repo):
     assert rec["engine_types"]  # defaulted
     got = repo.get_by_id_and_owner("bot-1", "emp1")
     assert got["bot_name"] == "Bot One"
-    assert "call_type" not in got
-    assert "caller_config_revision" not in got
+    assert got["call_type"] == "owner"
+    assert got["caller_config_revision"] == 0
 
 
 def test_get_by_id_without_owner(repo):
