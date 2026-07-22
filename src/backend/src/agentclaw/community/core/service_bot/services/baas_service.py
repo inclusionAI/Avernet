@@ -3160,6 +3160,7 @@ class BaasService:  # pragma: no cover
         publish_id: int | None,
         entity_id: str | None = None,
         binding_id: int | None = None,
+        is_test_exchange: bool = False,
     ) -> None:
         """Install one Caller-token overlay on the Bot's current BaaS device."""
         if (
@@ -3186,7 +3187,7 @@ class BaasService:  # pragma: no cover
         # resolved Bot owner to match the identity already resolved upstream.
         if (
             not bot
-            or bot.get("bot_type") != "service"
+            or (not is_test_exchange and bot.get("bot_type") != "service")
             or bot.get("status") != "ACTIVE"
             or str(bot.get("owner_id") or "") != owner_user_id
         ):
@@ -3242,35 +3243,38 @@ class BaasService:  # pragma: no cover
 
         logger.info(
             "caller_outbound_update_started bot_id=%s stage=%s rule_count=%s "
-            "entity_scoped=%s supplied_binding_id=%s",
+            "entity_scoped=%s supplied_binding_id=%s test_exchange=%s",
             bot_id,
             stage,
             len(complete_rule.header_operation_rules),
             entity_id is not None,
             use_supplied_binding_id,
+            is_test_exchange,
         )
         try:
             updated = self.update_device_outbound_rule(paas_device_id, complete_rule)
         except Exception as exc:
             logger.warning(
                 "caller_outbound_update_failed bot_id=%s stage=%s error_type=%s "
-                "entity_scoped=%s supplied_binding_id=%s",
+                "entity_scoped=%s supplied_binding_id=%s test_exchange=%s",
                 bot_id,
                 stage,
                 type(exc).__name__,
                 entity_id is not None,
                 use_supplied_binding_id,
+                is_test_exchange,
             )
             raise CallerCredentialError(CALLER_OUTBOUND_UPDATE_FAILED) from exc
         if not updated:
             raise CallerCredentialError(CALLER_OUTBOUND_UPDATE_FAILED)
         logger.info(
             "caller_outbound_update_succeeded bot_id=%s stage=%s entity_scoped=%s "
-            "supplied_binding_id=%s",
+            "supplied_binding_id=%s test_exchange=%s",
             bot_id,
             stage,
             entity_id is not None,
             use_supplied_binding_id,
+            is_test_exchange,
         )
 
     @staticmethod

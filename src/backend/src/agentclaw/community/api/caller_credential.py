@@ -58,6 +58,7 @@ class CallerRuntimeUpdater(Protocol):
         publish_id: int | None,
         entity_id: str | None = None,
         binding_id: int | None = None,
+        is_test_exchange: bool = False,
     ) -> None:
         """Replace the device's complete outbound rule with Caller overlay."""
         ...

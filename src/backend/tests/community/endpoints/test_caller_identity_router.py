@@ -34,7 +34,7 @@ def _seed_owner(world) -> None:
     make_staff_user(world, user_id=_OWNER_ID)
 
 
-def _seed_editable_service_bot(world) -> None:
+def _seed_service_bot(world, *, acquire_lock: bool) -> None:
     _seed_owner(world)
     make_bot(
         world,
@@ -43,15 +43,20 @@ def _seed_editable_service_bot(world) -> None:
         bot_type="service",
         status="ACTIVE",
     )
-    world.get(CollaboratorLockService).acquire_lock(
-        _BOT_ID,
-        _OWNER_ID,
-        _OWNER_ID,
-    )
+    if acquire_lock:
+        world.get(CollaboratorLockService).acquire_lock(
+            _BOT_ID,
+            _OWNER_ID,
+            _OWNER_ID,
+        )
 
 
-def _seed_mutable_caller_identity(world) -> None:
-    _seed_editable_service_bot(world)
+def _seed_editable_service_bot(world) -> None:
+    _seed_service_bot(world, acquire_lock=True)
+
+
+def _seed_mutable_caller_identity(world, *, acquire_lock: bool = True) -> None:
+    _seed_service_bot(world, acquire_lock=acquire_lock)
     bot = world.get(BotRepository).get_by_id(_BOT_ID)
     engine_type = str(bot["active_engine"])
     skill_set = world.get(SkillSetRepository).create(
@@ -75,6 +80,10 @@ def _seed_mutable_caller_identity(world) -> None:
         user_id=_OWNER_ID,
         env=get_current_env(),
     )
+
+
+def _seed_unlocked_mutable_caller_identity(world) -> None:
+    _seed_mutable_caller_identity(world, acquire_lock=False)
 
 
 def _seed_ambiguous_default_bots(world) -> None:
@@ -189,6 +198,31 @@ def get_caller_context_rejects_ambiguous_default_without_entity():
 )
 def update_mcp_call_type_happy():
     """The HTTP route maps an accepted Caller update to its response payload."""
+
+
+@endpoint_test(
+    method="PATCH",
+    path="/api/bots/{bot_id}/mcps/{server_code}/call-type",
+    scenario="unlocked_owner_without_epoch",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "server_code": _SERVER_CODE},
+        query_params={"entity_id": _OWNER_ID},
+        headers={"x-user-id": _OWNER_ID},
+        json_body={"call_type": "caller"},
+    ),
+    seed=_seed_unlocked_mutable_caller_identity,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "server_code": _SERVER_CODE,
+            "call_type": "caller",
+            "bot_call_type": "caller",
+        },
+    ),
+    extra_assertions=(_assert_mcp_call_type_updated,),
+)
+def update_mcp_call_type_without_lock_epoch_for_unlocked_owner():
+    """A single owner may update Caller identity before a lock exists."""
 
 
 @endpoint_test(

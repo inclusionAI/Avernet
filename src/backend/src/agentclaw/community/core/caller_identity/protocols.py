@@ -59,6 +59,7 @@ class CallerRuntimeUpdaterProtocol(Protocol):
         publish_id: int | None,
         entity_id: str | None = None,
         binding_id: int | None = None,
+        is_test_exchange: bool = False,
     ) -> None: ...
 
 

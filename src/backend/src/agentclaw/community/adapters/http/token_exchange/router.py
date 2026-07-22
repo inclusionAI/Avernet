@@ -19,6 +19,7 @@ from agentclaw.community.api.caller_identity_service import (
 )
 from agentclaw.community.core.caller_identity.contracts import (
     CallerIdentityAmbiguousError,
+    CallerIdentityPermissionError,
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
@@ -143,12 +144,20 @@ async def get_iam_token(
     stage: CallerIdentityStage = Query(default=CallerIdentityStage.DRAFT),
     publish_id: int | None = Query(default=None),
     entity_id: str | None = Query(default=None),
+    is_test_exchange: bool = False,
 ) -> Response:
     headers = _cors_headers(request)
     iam_token = request.cookies.get("IAM_TOKEN") or ""
     if not iam_token:
         return JSONResponse(
             content={"success": False, "error": "IAM_TOKEN cookie not found"},
+            status_code=400,
+            headers=headers,
+        )
+    if is_test_exchange and not bot_id:
+        logger.warning("caller_test_exchange_rejected reason=bot_id_missing")
+        return JSONResponse(
+            content={"success": False, "error": CALLER_CREDENTIAL_REQUEST_INVALID},
             status_code=400,
             headers=headers,
         )
@@ -176,38 +185,57 @@ async def get_iam_token(
             stage=stage,
             publish_id=publish_id,
             entity_id=entity_id,
+            is_test_exchange=is_test_exchange,
         )
     except CallerIdentityAmbiguousError as exc:
         logger.warning(
-            "caller_token_context_ambiguous bot_id=%s stage=%s",
+            "caller_token_context_ambiguous bot_id=%s stage=%s test_exchange=%s",
             bot_id,
             stage.value,
+            is_test_exchange,
         )
         return JSONResponse(
             content={"success": False, "error": exc.detail},
             status_code=409,
             headers=headers,
         )
-    except Exception:
+    except CallerIdentityPermissionError as exc:
         logger.warning(
-            "caller_token_context_unavailable bot_id=%s stage=%s",
+            "caller_token_context_forbidden bot_id=%s stage=%s test_exchange=%s",
             bot_id,
             stage.value,
+            is_test_exchange,
+        )
+        return JSONResponse(
+            content={"success": False, "error": exc.detail},
+            status_code=403,
+            headers=headers,
+        )
+    except Exception:
+        logger.warning(
+            "caller_token_context_unavailable bot_id=%s stage=%s test_exchange=%s",
+            bot_id,
+            stage.value,
+            is_test_exchange,
         )
         return _success_iam_response(iam_token, headers)
     if not token_context.should_exchange_caller_token:
         logger.info(
-            "caller_token_exchange_skipped bot_id=%s stage=%s call_type=%s",
+            "caller_token_exchange_skipped bot_id=%s stage=%s call_type=%s "
+            "test_exchange=%s",
             bot_id,
             stage.value,
             token_context.bot_call_type.value,
+            is_test_exchange,
         )
         return _success_iam_response(iam_token, headers)
     if not token_context.owner_id:
         logger.warning(
-            "caller_token_exchange_failed bot_id=%s stage=%s reason=owner_missing",
+            "caller_token_exchange_failed bot_id=%s stage=%s reason=owner_missing "
+            "test_exchange=%s",
             bot_id,
             stage.value,
+            is_test_exchange,
         )
         return JSONResponse(
             content={"success": False, "error": CALLER_CREDENTIAL_REQUEST_INVALID},
@@ -217,6 +245,12 @@ async def get_iam_token(
 
     try:
         current_user = await _resolve_current_user(request)
+        if is_test_exchange:
+            caller_identity.authorize_iam_token_exchange(
+                caller_user_id=current_user.staffId,
+                owner_user_id=token_context.owner_id,
+                is_test_exchange=True,
+            )
         passport = _get_optional_dependency(
             request,
             PassportPlugin,
@@ -232,37 +266,56 @@ async def get_iam_token(
             CallerRuntimeUpdater,
             CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
         )
+        exchange_kwargs = {
+            "iam_token": iam_token,
+            "caller_user_id": current_user.staffId,
+            "bot_id": bot_id,
+            "owner_user_id": token_context.owner_id,
+            "passport": passport,
+            "token_provider": provider,
+            "runtime_updater": updater,
+            "stage": stage.value,
+            "publish_id": publish_id,
+            "entity_id": entity_id,
+            "binding_id": token_context.binding_id,
+        }
+        if is_test_exchange:
+            exchange_kwargs["is_test_exchange"] = True
         await asyncio.to_thread(
             caller_identity.exchange_caller_identity,
-            iam_token=iam_token,
-            caller_user_id=current_user.staffId,
-            bot_id=bot_id,
-            owner_user_id=token_context.owner_id,
-            passport=passport,
-            token_provider=provider,
-            runtime_updater=updater,
-            stage=stage.value,
-            publish_id=publish_id,
-            entity_id=entity_id,
-            binding_id=token_context.binding_id,
+            **exchange_kwargs,
         )
     except CallerCredentialError as exc:
         logger.warning(
-            "caller_token_exchange_failed bot_id=%s stage=%s code=%s",
+            "caller_token_exchange_failed bot_id=%s stage=%s code=%s test_exchange=%s",
             bot_id,
             stage.value,
             exc.code,
+            is_test_exchange,
         )
         return JSONResponse(
             content={"success": False, "error": exc.code},
             status_code=_caller_error_status(exc.code),
             headers=headers,
         )
-    except Exception:
+    except CallerIdentityPermissionError as exc:
         logger.warning(
-            "caller_runtime_update_failed bot_id=%s stage=%s",
+            "caller_token_exchange_forbidden bot_id=%s stage=%s test_exchange=%s",
             bot_id,
             stage.value,
+            is_test_exchange,
+        )
+        return JSONResponse(
+            content={"success": False, "error": exc.detail},
+            status_code=403,
+            headers=headers,
+        )
+    except Exception:
+        logger.warning(
+            "caller_runtime_update_failed bot_id=%s stage=%s test_exchange=%s",
+            bot_id,
+            stage.value,
+            is_test_exchange,
         )
         return JSONResponse(
             content={"success": False, "error": CALLER_OUTBOUND_UPDATE_FAILED},
@@ -271,9 +324,10 @@ async def get_iam_token(
         )
 
     logger.info(
-        "caller_token_exchange_succeeded bot_id=%s stage=%s",
+        "caller_token_exchange_succeeded bot_id=%s stage=%s test_exchange=%s",
         bot_id,
         stage.value,
+        is_test_exchange,
     )
     # COSEC: the Caller credential is written to BaaS only. Returning it to
     # the browser would turn a server-side runtime credential into an API secret.
