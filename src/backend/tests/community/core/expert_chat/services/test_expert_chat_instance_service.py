@@ -795,6 +795,43 @@ class TestGetCallerConnection:
         bot_build_service.release_async.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_upgrade_updates_version_in_ext(self):
+        """Upgrade container updates version in ext to new version."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,  # Old version
+            "binding_id": BINDING_ID,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=3))  # New version 3
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        # Verify upgrade was called
+        bot_build_service.upgrade_async.assert_called_once()
+        # Verify version was updated in ext
+        update_calls = instance_repo.update_instance.call_args_list
+        # Find the call that has ext with version
+        version_updated = False
+        for call in update_calls:
+            ext = call[1].get("ext", {})
+            if ext.get("version") == 3:
+                version_updated = True
+                break
+        assert version_updated, "Version should be updated to 3 in ext during upgrade"
+        assert result["need_poll"] is False
+
+    @pytest.mark.asyncio
     async def test_force_upgrade_false_uses_fast_path(self):
         """force_upgrade=False uses the version check fast path when version is current."""
         svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
