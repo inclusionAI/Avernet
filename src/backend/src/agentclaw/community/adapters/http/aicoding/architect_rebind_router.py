@@ -1,10 +1,6 @@
-"""AICoding one-click architect-bot rebind route.
+"""One-click rebind of application-coding bots between domain architect bots.
 
-``PUT /api/bots/{architect_bot_id}/architect-rebind`` is an aicoding-creation
-specific endpoint (it binds ``applicationCoding`` bots to a domain architect
-bot), so it lives under the aicoding HTTP package instead of the generic
-bot-management router. The path is kept under ``/api/bots`` because it
-operates on bot resources; only the owning code moves.
+``PUT /api/bots/{architect_bot_id}/architect-rebind``
 """
 from __future__ import annotations
 
@@ -30,7 +26,7 @@ router = APIRouter(prefix="/api/bots", tags=["aicoding"])
 
 
 class ApiResponse(BaseModel):
-    """Unified API response envelope for the rebind route."""
+    """Unified API response envelope."""
 
     success: bool
     message: str = "OK"
@@ -39,9 +35,18 @@ class ApiResponse(BaseModel):
 
 
 class RebindArchitectRequest(BaseModel):
-    """请求模型：一键换绑架构师 bot（把一批应用 coding bot 绑定到指定架构师 bot）。"""
+    """换绑请求：从源架构师 bot 把一批应用 coding bot 换绑到目标架构师 bot。"""
 
+    target_architect_bot_id: str
     coding_bot_ids: List[str]
+
+    @field_validator("target_architect_bot_id")
+    @classmethod
+    def _target_non_empty(cls, value: str) -> str:
+        cleaned = value.strip() if isinstance(value, str) else ""
+        if not cleaned:
+            raise ValueError("target_architect_bot_id 不能为空")
+        return cleaned
 
     @field_validator("coding_bot_ids")
     @classmethod
@@ -59,15 +64,11 @@ async def rebind_architect_bot(
     ctx: RequestContext = Depends(get_request_context),
     _architect_rebind_service: ArchitectRebindServiceProtocol = Injected(ArchitectRebindServiceProtocol),
 ) -> ApiResponse:
-    """一键换绑架构师 bot（支持批量）：把应用 coding bot 绑定到指定架构师 bot。
+    """把应用 coding bot 从源架构师 bot 换绑到目标架构师 bot。
 
-    PUT /api/bots/{architect_bot_id}/architect-rebind
-    Body: {"coding_bot_ids": ["app_coding_bot_id_1", ...]}
-
-    - {architect_bot_id} 须为 domain architect bot (ext.is_domain_bot == true)
-    - coding_bot_ids 为 applicationCoding bot 列表，自动去重保序
-    - 仅允许架构师 bot 的 owner 调用，非 owner -> 403
-    - 落库 ac_templates.ext.architect_bot_id；单条失败不影响其余
+    - 路径 ``{architect_bot_id}`` = 源架构师 bot（须 domain，操作者须为其 owner）
+    - body ``target_architect_bot_id`` = 目标架构师 bot（须 domain，不校验 owner）
+    - body ``coding_bot_ids`` = applicationCoding bot 列表
     """
     try:
         operator_id = ctx.user_id
@@ -80,8 +81,9 @@ async def rebind_architect_bot(
             )
         result = await asyncio.to_thread(
             _architect_rebind_service.rebind_architect_bot_batch,
+            source_architect_bot_id=architect_bot_id,
+            target_architect_bot_id=payload.target_architect_bot_id,
             coding_bot_ids=payload.coding_bot_ids,
-            architect_bot_id=architect_bot_id,
             operator_id=operator_id,
         )
         return ApiResponse(success=True, data=result)
