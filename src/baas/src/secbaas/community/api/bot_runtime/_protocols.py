@@ -136,6 +136,7 @@ class BotFileTransferDispatcher(Protocol):
         device_affinity: str | None = None,
         file_size: int = 0,
         part_size: int | None = None,
+        operator: str | None = None,
     ) -> GetUploadUrlResponse: ...
 
     async def dispatch_get_download_url(
@@ -145,6 +146,7 @@ class BotFileTransferDispatcher(Protocol):
         device_path: str,
         expire_seconds: int = 3600,
         device_affinity: str | None = None,
+        operator: str | None = None,
     ) -> GetDownloadUrlResponse: ...
 
     async def dispatch_get_transfer_status(

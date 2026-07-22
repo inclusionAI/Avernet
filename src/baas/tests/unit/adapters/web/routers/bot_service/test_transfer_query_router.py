@@ -46,10 +46,10 @@ async def test_get_transfer_status_success(mock_dispatcher):
             filename="data.csv",
             device_path="/home/data.csv",
             download_url="https://oss.example.com/dl?token=abc",
-            upload_url=None,
             expires_at="2099-01-01T00:00:00",
             created_at="2025-01-01T00:00:00",
             updated_at="2025-01-01T00:01:00",
+            operator="unknown",
         )
     )
 

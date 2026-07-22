@@ -48,9 +48,9 @@ def _make_ticket(**overrides):
         fileservice_staging_path="file-transfers/t1/tf-001/data.csv",
         error_message=None,
         download_url=None,
-        upload_url=None,
         multipart_session_id=None,
         env="test",
+        operator="unknown",
     )
     defaults.update(overrides)
     return TicketRecord(**defaults)
@@ -303,13 +303,10 @@ class TestDispatchGetTransferStatus:
 
     @pytest.mark.asyncio
     async def test_status_created(self, dispatcher, ticket_repo):
-        ticket = _make_ticket(
-            status="CREATED", upload_url="https://oss.example.com/put"
-        )
+        ticket = _make_ticket(status="CREATED")
         ticket_repo.get_by_transfer_id.return_value = ticket
         result = await dispatcher.dispatch_get_transfer_status("tf-001", tenant="t1")
         assert result.status == "CREATED"
-        assert result.upload_url == "https://oss.example.com/put"
 
     @pytest.mark.asyncio
     async def test_status_failed(self, dispatcher, ticket_repo):

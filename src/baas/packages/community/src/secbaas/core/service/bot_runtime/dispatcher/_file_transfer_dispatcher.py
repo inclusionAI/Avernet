@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from secbaas.api.bot_runtime import (
     BotFileTransferDispatcher,
+    BotNotFoundError,
     CancelUploadResponse,
     CompleteUploadResponse,
     GetDownloadUrlResponse,
@@ -81,6 +82,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         device_affinity: str | None = None,
         file_size: int = 0,
         part_size: int | None = None,
+        operator: str | None = None,
     ) -> GetUploadUrlResponse:
         """Orchestrate upload URL generation (v1.5: D-01/D-02/D-05 flow).
 
@@ -103,6 +105,9 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             tenant,
             file_size,
         )
+        # D-04: Normalize empty/None operator to "unknown" before any DB write
+        if not operator or not operator.strip():
+            operator = "unknown"
 
         # D-05: Retention mode — device_path is None, skip device resolution
         if device_path is not None:
@@ -208,6 +213,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
                 fileservice_staging_path=staging_path,
                 error_message=None,
                 multipart_session_id=multipart_session.session_id,
+                operator=operator,
             )
 
             logger.info(
@@ -250,6 +256,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
                 device_path=device_path,
                 fileservice_staging_path=staging_path,
                 error_message=None,
+                operator=operator,
             )
 
             logger.info(
@@ -270,6 +277,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         device_path: str,
         expire_seconds: int = 3600,
         device_affinity: str | None = None,
+        operator: str | None = None,
     ) -> GetDownloadUrlResponse:
         """Orchestrate download URL request (D-10 flow).
 
@@ -288,6 +296,9 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             device_path,
             tenant,
         )
+        # D-04: Normalize empty/None operator to "unknown" before any DB write
+        if not operator or not operator.strip():
+            operator = "unknown"
 
         _, _, paas_device_id = await self._resolve_bot_device(
             bot_uuid=bot_uuid,
@@ -342,6 +353,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             device_path=device_path,
             fileservice_staging_path=staging_path,
             error_message=None,
+            operator=operator,
         )
 
         logger.info("Ticket created: transfer_id=%s, direction=DOWNLOAD", transfer_id)
@@ -371,12 +383,23 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         self,
         transfer_id: str,
         tenant: str | None = None,
+        bot_uuid: str | None = None,
     ) -> GetTransferStatusResponse:
         """Query a transfer ticket by transfer_id (D-12 query flow).
 
         Maps TicketRecord fields to GetTransferStatusResponse with
         conditional URL/error fields based on ticket status.
+
+        When bot_uuid is provided, validates that the bot exists and belongs
+        to the specified tenant before returning the transfer status.
         """
+        # Validate bot ownership when bot_uuid is provided
+        if bot_uuid is not None and tenant is not None:
+            env = get_current_env()
+            bots = self._bot_repo.list_by_bot_uuid(bot_uuid, tenant, env)
+            if not bots:
+                raise BotNotFoundError(bot_uuid)
+
         record = self._ticket_repo.get_by_transfer_id(
             transfer_id,
             tenant=tenant,
@@ -386,7 +409,6 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
 
         # Conditional fields per status
         download_url = record.download_url if record.status == "DONE" else None
-        upload_url = record.upload_url if record.status == "CREATED" else None
         # OSS presigned URLs embed their own expiry — expires_at is null for transfer queries
         expires_at: str | None = None
 
@@ -399,11 +421,11 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             filename=record.filename,
             device_path=record.device_path,
             download_url=download_url,
-            upload_url=upload_url,
             expires_at=expires_at,
             error_message=error_message,
             created_at=record.gmt_create.isoformat(),
             updated_at=record.gmt_modified.isoformat(),
+            operator=record.operator,
         )
 
     # ------------------------------------------------------------------

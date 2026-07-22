@@ -50,7 +50,6 @@ def _make_ticket(**overrides):
         fileservice_staging_path="file-transfers/t1/tf-001/data.csv",
         error_message=None,
         download_url=None,
-        upload_url=None,
         multipart_session_id=None,
         env="test",
     )

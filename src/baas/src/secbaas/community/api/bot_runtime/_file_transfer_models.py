@@ -51,6 +51,11 @@ class GetUploadUrlRequest(BaseModel):
         ge=1048576,
         description="Custom part size in bytes for multipart, defaults to 10MB if file_size >= threshold.",
     )
+    operator: str = Field(
+        default="unknown",
+        max_length=256,
+        description="Identifier of the user or system initiating this upload",
+    )
 
     model_config = {"from_attributes": True}
 
@@ -109,6 +114,11 @@ class GetDownloadUrlRequest(BaseModel):
         le=86400,
         description="Pre-signed URL validity duration in seconds (60–86400, default 3600)",
     )
+    operator: str = Field(
+        default="unknown",
+        max_length=256,
+        description="Identifier of the user or system initiating this download",
+    )
 
     model_config = {"from_attributes": True}
 
@@ -132,7 +142,6 @@ class GetTransferStatusResponse(BaseModel):
 
     Maps from TicketRecord.  Conditional fields:
     - download_url: only present when status == DONE
-    - upload_url: only present when status == CREATED (resume support)
     - expires_at: intentionally null for transfer queries; OSS presigned URLs
       embed their own expiry via the Expires query parameter
     - error_message: only present when status == FAILED
@@ -144,11 +153,14 @@ class GetTransferStatusResponse(BaseModel):
     filename: str
     device_path: str | None
     download_url: str | None = None
-    upload_url: str | None = None
-    expires_at: str | None = None
+    expires_at: str | None = Field(
+        default=None,
+        description="Intentionally null for transfer queries; OSS presigned URLs embed their own expiry via the Expires query parameter. Only populated in direct upload/download URL generation responses.",
+    )
     error_message: str | None = None
     created_at: str
     updated_at: str
+    operator: str
 
     model_config = {"from_attributes": True}
 

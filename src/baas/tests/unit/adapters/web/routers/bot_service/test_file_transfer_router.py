@@ -658,6 +658,7 @@ async def test_get_transfer_status_success(mock_dispatcher):
         download_url="https://oss.example.com/dl",
         created_at="2025-01-01T00:00:00",
         updated_at="2025-01-01T00:00:00",
+        operator="unknown",
     )
     resp = await _get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
 

@@ -17,6 +17,7 @@ Requires:
   (just restart-mock-failure-hook)
 """
 
+import asyncio
 import uuid
 
 import pytest
@@ -115,6 +116,19 @@ class TestDestroyHookFailure:
         )
         await activate_bot(api, bot)
 
+        # Ensure bot is in terminal state before destroy to avoid 409
+        # (CREATE publish must reach SUCCESS/FAILED before a new DESTROY
+        # publish can be created; PublishConflictError otherwise).
+        for _ in range(10):
+            resp = await api.client.get(
+                api.bot_url(bot["bot_uuid"]), params=api.params()
+            )
+            if resp.status_code == 200:
+                status = resp.json()["data"]["status"]
+                if status in ("ACTIVE", "FAILED"):
+                    break
+            await asyncio.sleep(0.2)
+
         # Destroy the bot
         resp = await api.client.post(
             api.bot_url(bot["bot_uuid"]) + "/destroy",
@@ -153,6 +167,19 @@ class TestRestartHookFailure:
         bot = await create_and_activate_bot(
             api, f"restart-hook-fail-{unique_id}", device_count=1
         )
+
+        # Ensure bot is in terminal state before restart to avoid 409
+        # (CREATE publish must reach SUCCESS/FAILED before a new RESTART
+        # publish can be created; PublishConflictError otherwise).
+        for _ in range(10):
+            resp = await api.client.get(
+                api.bot_url(bot["bot_uuid"]), params=api.params()
+            )
+            if resp.status_code == 200:
+                status = resp.json()["data"]["status"]
+                if status in ("ACTIVE", "FAILED"):
+                    break
+            await asyncio.sleep(0.2)
 
         # Restart the bot
         resp = await api.client.post(

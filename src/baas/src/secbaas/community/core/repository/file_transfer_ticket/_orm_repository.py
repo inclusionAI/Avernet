@@ -71,6 +71,7 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         fileservice_staging_path: str,
         error_message: str | None,
         multipart_session_id: str | None = None,
+        operator: str = "unknown",
     ) -> int:
         log.info(
             "create_ticket: transfer_id=%s, direction=%s, multipart_session_id=%s",
@@ -92,6 +93,7 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
             error_message=error_message,
             multipart_session_id=multipart_session_id,
             env=env,
+            operator=operator,
         )
         self._session.add(row)
         self._session.flush()
@@ -235,13 +237,13 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         transfer_id: str,
         *,
         download_url: str | None = None,
-        upload_url: str | None = None,
     ) -> None:
+        download_url_preview = (download_url[:200]) if download_url else None
         log.info(
-            "update_urls: transfer_id=%s, download_url=%s, upload_url=%s",
+            "update_urls: transfer_id=%s, download_url=%s, download_url_preview=%s",
             transfer_id,
             bool(download_url),
-            bool(upload_url),
+            download_url_preview,
         )
         from sqlalchemy import func
 
@@ -249,11 +251,11 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         update_kwargs: dict = {"gmt_modified": func.now()}
         if download_url is not None:
             update_kwargs["download_url"] = download_url
-        if upload_url is not None:
-            update_kwargs["upload_url"] = upload_url
-
-        if "download_url" not in update_kwargs and "upload_url" not in update_kwargs:
-            return  # no-op: both None
+        else:
+            log.debug(
+                "update_urls: transfer_id=%s, download_url is None, no-op", transfer_id
+            )
+            return  # no-op
 
         result = (
             self._session.query(FileTransferTicketModel)

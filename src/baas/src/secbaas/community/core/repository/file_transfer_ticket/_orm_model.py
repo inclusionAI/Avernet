@@ -35,9 +35,9 @@ class FileTransferTicketModel(Base):
     fileservice_staging_path = Column(String(1024), nullable=False)
     error_message = Column(Text, nullable=True)
     download_url = Column(String(2048), nullable=True)
-    upload_url = Column(String(2048), nullable=True)
     multipart_session_id = Column(String(256), nullable=True)
     env = Column(String(16), nullable=False)
+    operator = Column(String(256), nullable=False, server_default="unknown")
 
     __table_args__ = (
         UniqueConstraint("transfer_id", "env", name="uk_ft_transfer_id_env"),
@@ -60,7 +60,7 @@ class FileTransferTicketModel(Base):
             fileservice_staging_path=self.fileservice_staging_path,
             error_message=self.error_message,
             download_url=self.download_url,
-            upload_url=self.upload_url,
             multipart_session_id=self.multipart_session_id,
             env=self.env,
+            operator=self.operator,
         )

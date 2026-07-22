@@ -30,8 +30,10 @@ class TransferNotFoundError(FileTransferRepositoryError, ApiTransferNotFoundErro
     """
 
     def __init__(self, transfer_id: str) -> None:
+        message = f"Transfer ticket {transfer_id} not found"
+        self.message = message  # Set explicitly — cooperative MRO stops at RuntimeError
         super().__init__(
-            f"Transfer ticket {transfer_id} not found",
+            message,
             error_code="FILE_TRANSFER_NOT_FOUND",
         )
 
@@ -47,6 +49,9 @@ class TransferStateConflictError(
     """
 
     def __init__(self, message: str) -> None:
+        self.message = (
+            message  # Set explicitly — BotServiceError.__init__ unreachable via MRO
+        )
         super().__init__(message, error_code="FILE_TRANSFER_STATE_CONFLICT")
 
 
@@ -72,6 +77,7 @@ class TicketRepository(Protocol):
         fileservice_staging_path: str,
         error_message: str | None,
         multipart_session_id: str | None = None,
+        operator: str = "unknown",
     ) -> int:
         """Insert a new transfer ticket record. Returns the new record ID."""
         ...
@@ -93,7 +99,8 @@ class TicketRepository(Protocol):
         Uses a CAS (Compare-And-Swap) SQL UPDATE: only modifies the row if
         its current status is one of the allowed source states for new_status.
         Same-state transitions are idempotent.
-        Raises DeviceCreationError on invalid transition or not found.
+        Raises TransferStateConflictError on invalid state transition.
+        Raises TransferNotFoundError if no ticket with the given transfer_id exists.
         """
         ...
 
@@ -126,10 +133,9 @@ class TicketRepository(Protocol):
         transfer_id: str,
         *,
         download_url: str | None = None,
-        upload_url: str | None = None,
     ) -> None:
-        """Update download_url and/or upload_url on a ticket.
+        """Update download_url on a ticket.
 
-        Updates only the fields that are not None. Both None is a no-op.
+        Returns early (no-op) when download_url is None.
         """
         ...
