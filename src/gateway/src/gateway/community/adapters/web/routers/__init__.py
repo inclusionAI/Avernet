@@ -19,3 +19,9 @@ def include_all(app: FastAPI) -> None:
     """Mount every registered public-API group router onto ``app``."""
     for router in GROUP_ROUTERS:
         app.include_router(router)
+
+
+__all__ = [
+    "GROUP_ROUTERS",
+    "include_all",
+]

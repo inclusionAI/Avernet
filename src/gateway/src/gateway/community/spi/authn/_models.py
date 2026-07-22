@@ -17,7 +17,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from gateway.community.spi.auth import AuthUser
+from gateway.community.spi.auth import AuthenticatedUser
 
 
 class PrincipalType(StrEnum):
@@ -46,7 +46,7 @@ class UserPrincipal(BaseModel):
         default_factory=frozenset,
         description="Permission scopes granted to the caller.",
     )
-    subject: AuthUser = Field(description="The authenticated end user.")
+    subject: AuthenticatedUser = Field(description="The authenticated end user.")
 
 
 # `Principal` becomes a discriminated union (UserPrincipal | AppPrincipal | ...)
