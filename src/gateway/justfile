@@ -1,0 +1,33 @@
+#!/usr/bin/env just --justfile
+
+set dotenv-load := true
+set positional-arguments := true
+
+import 'justfiles/ctrl-gateway.just'
+
+import 'justfiles/lint.just'
+import 'justfiles/test-common.just'
+import 'justfiles/test-self.just'
+import 'justfiles/test-ut.just'
+import 'justfiles/test-it.just'
+import 'justfiles/test-arch.just'
+import 'justfiles/test-e2e.just'
+
+_default:
+    @just --list --list-prefix '==> '
+
+test-e2e-one test:
+    source scripts/lib/test-stages.sh && run_one_e2e_test "{{test}}"
+
+test-ci group='ci' mode='bare' overlay='e2e-sqlite':
+    ./scripts/ci_test.sh --group {{group}} {{mode}} {{overlay}}
+
+test mode='bare' overlay='e2e-sqlite':
+    source scripts/lib/pipeline.sh && run_ci_pipeline {{mode}} {{overlay}}
+
+test-full:
+    source scripts/lib/test-stages.sh && run_e2e_tests bare e2e-sqlite
+    source scripts/lib/test-stages.sh && run_e2e_tests bare e2e-zdas
+
+serve-docs port='8910':
+    @./docs/openapi/serve-docs.sh {{port}}

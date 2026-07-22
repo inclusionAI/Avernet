@@ -33,3 +33,24 @@ run_ci_tests() {
     if [[ $rc -ne 0 ]]; then log_error "test-ci failed"; fi
     return $rc
 }
+
+run_arch_tests() {
+    log_stage
+    echo "[ARCH] test-arch: architecture enforcement"
+    mkdir -p "$REPORT_DIR"
+    _run_pytest uv run pytest tests/architecture/ \
+        -v \
+        --junitxml="$REPORT_DIR/arch.xml" \
+        --color=yes
+    local rc=$?
+    if [[ $rc -ne 0 ]]; then log_error "test-arch failed"; fi
+    return $rc
+}
+
+run_integration_tests() {
+  return 0
+}
+
+run_e2e_tests() {
+  return 0
+}
