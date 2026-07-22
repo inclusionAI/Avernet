@@ -634,6 +634,16 @@ fn default_true() -> bool {
 fn default_log_outputs() -> Vec<LogOutputConfig> {
     vec![
         LogOutputConfig {
+            name: "common-error".to_string(),
+            path: "./logs".to_string(),
+            file: "common-error.log".to_string(),
+            level: "error".to_string(),
+            rotation: "daily".to_string(),
+            format: LogOutputFormat::Text,
+            targets: vec!["*".to_string()],
+            max_keep_days: 7,
+        },
+        LogOutputConfig {
             name: "messages".to_string(),
             path: "./logs".to_string(),
             file: "bcs-messages.log".to_string(),
@@ -1108,6 +1118,23 @@ mod tests {
         assert_eq!(messages.format, LogOutputFormat::Json);
         assert_eq!(messages.targets, vec!["bcs_message"]);
         assert_eq!(messages.max_keep_days, 7);
+    }
+
+    #[test]
+    fn default_logging_outputs_include_common_error_file() {
+        let logging = LoggingConfig::default();
+
+        let common_error = logging
+            .outputs
+            .iter()
+            .find(|output| output.name == "common-error")
+            .expect("common error log output should be configured by default");
+
+        assert_eq!(common_error.file, "common-error.log");
+        assert_eq!(common_error.level, "error");
+        assert_eq!(common_error.format, LogOutputFormat::Text);
+        assert_eq!(common_error.targets, vec!["*"]);
+        assert_eq!(common_error.max_keep_days, 7);
     }
 
     #[test]

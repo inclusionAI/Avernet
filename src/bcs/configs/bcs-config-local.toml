@@ -80,6 +80,15 @@ default_level = "debug"
 console = true
 
 [[logging.outputs]]
+name = "common-error"
+path = "./logs"
+file = "common-error.log"
+level = "error"
+rotation = "daily"
+targets = ["*"]
+max_keep_days = 7
+
+[[logging.outputs]]
 name = "messages"
 path = "./logs"
 file = "bcs-messages.log"

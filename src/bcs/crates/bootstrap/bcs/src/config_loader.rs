@@ -654,6 +654,26 @@ mod tests {
     }
 
     #[test]
+    fn test_real_local_config_routes_all_errors_to_common_error_file() {
+        let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../configs/bcs-config-local.toml");
+        let content = std::fs::read_to_string(config_path).unwrap();
+        let config: crate::config::BcsConfig = toml::from_str(&content).unwrap();
+
+        let common_error = config
+            .logging
+            .outputs
+            .iter()
+            .find(|output| output.name == "common-error")
+            .expect("local config should include common-error output");
+
+        assert_eq!(common_error.path, "./logs");
+        assert_eq!(common_error.file, "common-error.log");
+        assert_eq!(common_error.level, "error");
+        assert_eq!(common_error.targets, vec!["*"]);
+    }
+
+    #[test]
     fn test_real_base_config_accepts_dingtalk_lab_json_override() {
         let source_config_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../configs");
         let dir = tempfile::tempdir().unwrap();

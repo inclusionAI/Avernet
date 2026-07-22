@@ -400,6 +400,64 @@ mod tests {
     }
 
     #[test]
+    fn error_is_written_to_main_and_common_error_outputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        let main_output = LogOutputConfig {
+            name: "main".to_string(),
+            path: path.clone(),
+            file: "bcs.log".to_string(),
+            level: "info".to_string(),
+            rotation: "daily".to_string(),
+            format: LogOutputFormat::Text,
+            targets: vec!["*".to_string()],
+            max_keep_days: 7,
+        };
+        let common_error_output = LogOutputConfig {
+            name: "common-error".to_string(),
+            path,
+            file: "common-error.log".to_string(),
+            level: "error".to_string(),
+            rotation: "daily".to_string(),
+            format: LogOutputFormat::Text,
+            targets: vec!["*".to_string()],
+            max_keep_days: 7,
+        };
+
+        let subscriber = tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(RotatingFileWriter::new(dir.path(), &main_output.file))
+                    .with_ansi(false)
+                    .with_filter(build_output_targets_filter(&main_output)),
+            )
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(RotatingFileWriter::new(
+                        dir.path(),
+                        &common_error_output.file,
+                    ))
+                    .with_ansi(false)
+                    .with_filter(build_output_targets_filter(&common_error_output)),
+            );
+
+        let dispatch = tracing::Dispatch::new(subscriber);
+        tracing::dispatcher::with_default(&dispatch, || {
+            tracing::warn!(target: "bcs_http::routes", "warning stays in main only");
+            tracing::error!(target: "bcs_http::routes", "error is duplicated");
+        });
+
+        let main = std::fs::read_to_string(dir.path().join("bcs.log")).unwrap();
+        let common_error =
+            std::fs::read_to_string(dir.path().join("common-error.log")).unwrap();
+
+        assert!(main.contains("warning stays in main only"));
+        assert!(main.contains("error is duplicated"));
+        assert!(!common_error.contains("warning stays in main only"));
+        assert!(common_error.contains("error is duplicated"));
+    }
+
+    #[test]
     fn json_output_flattens_message_log_fields() {
         let dir = tempfile::tempdir().unwrap();
         let output = LogOutputConfig {
