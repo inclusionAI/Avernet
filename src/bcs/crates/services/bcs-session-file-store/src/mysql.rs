@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use bcs_db_api::{DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue, db_get_column, db_get_column_opt};
+use bcs_db_api::{DbPlugin, DbRow, DbStatement, DbValue, db_get_column, db_get_column_opt};
 use bcs_domain::{ActorKind, ActorRef, FileStatus, SessionFile};
 use bcs_service_api::port::repo::{
     NewSessionFileParams, SessionFileListPage, SessionFileListParams, SessionFileRepoPort,
@@ -29,28 +29,19 @@ const SELECT_COLS: &str = "file_id, session_id, file_name, mime_type, size, sha2
 // ---------------------------------------------------------------------------
 
 /// MySQL-backed session file metadata repository.
+///
+/// Unlike `bcs-session-store`, this store needs no `DbSqlFlavor` field: it
+/// relies on DB defaults for timestamps and uses lowercase `json_extract`
+/// (valid on both MySQL and SQLite), so no dialect branching is required.
 #[derive(Clone)]
 pub struct MySqlSessionFileStore {
     db: Arc<dyn DbPlugin>,
     env: String,
-    flavor: DbSqlFlavor,
 }
 
 impl MySqlSessionFileStore {
     pub fn new(db: Arc<dyn DbPlugin>, env: String) -> Self {
-        Self {
-            db,
-            env,
-            flavor: DbSqlFlavor::Mysql,
-        }
-    }
-
-    pub fn sqlite(db: Arc<dyn DbPlugin>, env: String) -> Self {
-        Self {
-            db,
-            env,
-            flavor: DbSqlFlavor::Sqlite,
-        }
+        Self { db, env }
     }
 }
 
