@@ -42,6 +42,22 @@ class CallerTokenProvider(Protocol):
         ...
 
 
+class UnavailableCallerTokenProvider:
+    """Stable non-Corp binding that fails closed without Injector errors."""
+
+    def exchange(
+        self,
+        *,
+        auth_context: AuthContext,
+        iam_token: str,
+        bot_id: str,
+        owner_user_id: str,
+        task_metadata: Mapping[str, str],
+    ) -> CallerToken:
+        del auth_context, iam_token, bot_id, owner_user_id, task_metadata
+        raise CallerCredentialError(CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE)
+
+
 @runtime_checkable
 class CallerRuntimeUpdater(Protocol):
     """Install the current Caller identity on the exact runtime device."""
@@ -77,4 +93,5 @@ __all__ = [
     "CallerRuntimeUpdater",
     "CallerToken",
     "CallerTokenProvider",
+    "UnavailableCallerTokenProvider",
 ]
