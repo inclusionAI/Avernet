@@ -3147,6 +3147,45 @@ class BaasService:  # pragma: no cover
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
 
+    def append_caller_outbound_rule(
+        self,
+        paas_device_id: str,
+        caller_rule: OutBoundOperationRule,
+    ) -> bool:
+        """Append one validated Caller overlay without replacing base rules."""
+        payload = self._outbound_rule_to_dict(caller_rule)
+        logger.info(
+            "caller_outbound_append_started rule_count=%s",
+            len(caller_rule.header_operation_rules),
+        )
+        try:
+            response = self._http.put(
+                f"/api/v1/paas/devices/{paas_device_id}/outbound-rule?mode=append",
+                json=payload,
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            response_data = response.json()
+            if response_data.get("code") != 0:
+                logger.warning("caller_outbound_append_rejected")
+                raise BaasServiceError("BaaS Caller outbound append rejected")
+        except httpx.HTTPStatusError as exc:
+            logger.warning(
+                "caller_outbound_append_http_failed status_code=%s",
+                exc.response.status_code,
+            )
+            raise BaasServiceError("BaaS Caller outbound append failed") from exc
+        except BaasServiceError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "caller_outbound_append_failed error_type=%s",
+                type(exc).__name__,
+            )
+            raise BaasServiceError("BaaS Caller outbound append failed") from exc
+        logger.info("caller_outbound_append_succeeded")
+        return True
+
     def update_caller_identity(
         self,
         *,
@@ -3154,8 +3193,6 @@ class BaasService:  # pragma: no cover
         owner_user_id: str,
         caller_user_id: str,
         caller_token: CallerToken,
-        agent_pass_token: str,
-        agent_code: str,
         stage: str,
         publish_id: int | None,
         entity_id: str | None = None,
@@ -3166,7 +3203,6 @@ class BaasService:  # pragma: no cover
         if (
             not caller_token.access_token
             or caller_token.subject_user_id != caller_user_id
-            or not agent_pass_token
         ):
             raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
 
@@ -3222,37 +3258,24 @@ class BaasService:  # pragma: no cover
         if not self._is_valid_paas_device_id(paas_device_id):
             raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
 
-        base_rule = self._build_outbound_operation_rule(
-            bot_id=bot_id,
-            owner_id=owner_user_id,
-            agent_pass_token=agent_pass_token,
-            agent_code=agent_code,
-        )
         caller_rule = self._outbound_rule_provider.build_caller_rule(
             caller_token=caller_token.access_token,
         )
         if not self._is_valid_caller_rule(caller_rule, caller_token.access_token):
             raise CallerCredentialError(CALLER_OUTBOUND_INVALID)
         assert caller_rule is not None
-        complete_rule = OutBoundOperationRule(
-            header_operation_rules=(
-                base_rule.header_operation_rules
-                + caller_rule.header_operation_rules
-            )
-        )
-
         logger.info(
             "caller_outbound_update_started bot_id=%s stage=%s rule_count=%s "
             "entity_scoped=%s supplied_binding_id=%s test_exchange=%s",
             bot_id,
             stage,
-            len(complete_rule.header_operation_rules),
+            len(caller_rule.header_operation_rules),
             entity_id is not None,
             use_supplied_binding_id,
             is_test_exchange,
         )
         try:
-            updated = self.update_device_outbound_rule(paas_device_id, complete_rule)
+            updated = self.append_caller_outbound_rule(paas_device_id, caller_rule)
         except Exception as exc:
             logger.warning(
                 "caller_outbound_update_failed bot_id=%s stage=%s error_type=%s "

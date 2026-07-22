@@ -1,207 +1,80 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agentclaw.community.adapters.http.token_exchange.router import get_iam_token
-from agentclaw.community.api.caller_credential import (
-    CallerRuntimeUpdater,
-    CallerTokenProvider,
+from agentclaw.community.api.caller_iam_token_service import (
+    CallerIamTokenServiceProtocol,
 )
-from agentclaw.community.api.caller_identity_service import (
-    CallerIdentityServiceProtocol,
-    CallerIdentityStage,
-)
-from agentclaw.community.core.caller_identity.contracts import (
-    CallerIamTokenContext,
-    CallerIdentityAmbiguousError,
-    CallerIdentityPermissionError,
-    McpCallType,
-)
-from agentclaw.community.core.caller_identity.credential import CallerToken
-from agentclaw.community.plugin_api.auth import AuthPlugin
-from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.api.caller_identity_service import CallerIdentityStage
+from agentclaw.community.core.caller_identity.contracts import CallerIamTokenOutcome
 
 
 class _Request:
-    def __init__(self, dependencies: dict[object, object]) -> None:
-        self.cookies = {"IAM_TOKEN": "iam-token"}
-        self.headers: dict[str, str] = {}
-        self.query_params: dict[str, str] = {}
-        self.base_url = "http://test/"
-        self.app = SimpleNamespace(
-            state=SimpleNamespace(
-                injector=SimpleNamespace(
-                    get=lambda dependency: dependencies[dependency]
-                )
-            )
-        )
+    cookies = {"IAM_TOKEN": "iam-token"}
+    headers: dict[str, str] = {}
+    query_params: dict[str, str] = {}
+    base_url = "http://test/"
+
+
+def _service(*, iam_token: str = "iam-token", error: str | None = None) -> MagicMock:
+    service = MagicMock(spec=CallerIamTokenServiceProtocol)
+    service.get_iam_token = AsyncMock(
+        return_value=CallerIamTokenOutcome(iam_token=iam_token, error=error)
+    )
+    return service
 
 
 @pytest.mark.asyncio
 async def test_iam_route_delegates_caller_exchange_without_returning_token() -> None:
-    identity = MagicMock()
-    identity.get_iam_token_context.return_value = CallerIamTokenContext(
-        bot_id="bot-1",
-        owner_id="owner-1",
-        stage=CallerIdentityStage.DRAFT,
-        publish_id=None,
-        bot_call_type=McpCallType.CALLER,
-        should_exchange_caller_token=True,
-        binding_id=9,
-    )
-    auth = MagicMock()
-    auth.resolve_user_from_request = AsyncMock(
-        return_value=SimpleNamespace(
-            id="id-1",
-            staffId="caller-1",
-            operatorName="Caller",
-            nickName="Caller",
-            tenantId="tenant-1",
-        )
-    )
-    passport = MagicMock()
-    passport.query_token.return_value = "agent-pass-token"
-    passport.query_agent_passport.return_value = {"agent_code": "agent-code"}
-    token_provider = MagicMock()
-    token_provider.exchange.return_value = CallerToken(
-        access_token="caller-token",
-        subject_user_id="caller-1",
-        expires_at=datetime.now(),
-        fingerprint="ignored",
-    )
-    runtime_updater = MagicMock()
-    request = _Request(
-        {
-            CallerIdentityServiceProtocol: identity,
-            AuthPlugin: auth,
-            PassportPlugin: passport,
-            CallerTokenProvider: token_provider,
-            CallerRuntimeUpdater: runtime_updater,
-        }
-    )
+    service = _service()
 
     response = await get_iam_token(
-        request,
+        _Request(),
         bot_id="bot-1",
         stage=CallerIdentityStage.DRAFT,
         publish_id=None,
         entity_id="entity-1",
+        service=service,
     )
 
     assert response.status_code == 200
     assert json.loads(response.body) == {"success": True, "iam_token": "iam-token"}
-    identity.get_iam_token_context.assert_called_once_with(
-        bot_id="bot-1",
-        stage=CallerIdentityStage.DRAFT,
-        publish_id=None,
-        entity_id="entity-1",
-        is_test_exchange=False,
-    )
-    identity.exchange_caller_identity.assert_called_once()
-    exchange_kwargs = identity.exchange_caller_identity.call_args.kwargs
-    assert exchange_kwargs["caller_user_id"] == "caller-1"
-    assert exchange_kwargs["token_provider"] is token_provider
-    assert exchange_kwargs["runtime_updater"] is runtime_updater
-    assert exchange_kwargs["entity_id"] == "entity-1"
-    assert exchange_kwargs["binding_id"] == 9
+    assert service.get_iam_token.call_args.kwargs["bot_id"] == "bot-1"
 
 
 @pytest.mark.asyncio
 async def test_iam_route_test_exchange_forces_exchange_for_non_caller_context() -> None:
-    identity = MagicMock()
-    identity.get_iam_token_context.return_value = CallerIamTokenContext(
-        bot_id="bot-1",
-        owner_id="owner-1",
-        stage=CallerIdentityStage.DRAFT,
-        publish_id=None,
-        bot_call_type=McpCallType.OWNER,
-        should_exchange_caller_token=True,
-    )
-    auth = MagicMock()
-    auth.resolve_user_from_request = AsyncMock(
-        return_value=SimpleNamespace(
-            id="id-1",
-            staffId="owner-1",
-            operatorName="Caller",
-            nickName="Caller",
-            tenantId="tenant-1",
-        )
-    )
-    request = _Request(
-        {
-            CallerIdentityServiceProtocol: identity,
-            AuthPlugin: auth,
-            PassportPlugin: MagicMock(),
-            CallerTokenProvider: MagicMock(),
-            CallerRuntimeUpdater: MagicMock(),
-        }
-    )
+    service = _service()
 
     response = await get_iam_token(
-        request,
+        _Request(),
         bot_id="bot-1",
         stage=CallerIdentityStage.DRAFT,
         publish_id=None,
         entity_id=None,
         is_test_exchange=True,
+        service=service,
     )
 
     assert response.status_code == 200
     assert json.loads(response.body) == {"success": True, "iam_token": "iam-token"}
-    identity.get_iam_token_context.assert_called_once_with(
-        bot_id="bot-1",
-        stage=CallerIdentityStage.DRAFT,
-        publish_id=None,
-        entity_id=None,
-        is_test_exchange=True,
-    )
-    identity.exchange_caller_identity.assert_called_once()
-    assert (
-        identity.exchange_caller_identity.call_args.kwargs["is_test_exchange"]
-        is True
-    )
+    assert service.get_iam_token.call_args.kwargs["is_test_exchange"] is True
 
 
 @pytest.mark.asyncio
 async def test_iam_route_test_exchange_rejects_non_owner() -> None:
-    identity = MagicMock()
-    identity.get_iam_token_context.return_value = CallerIamTokenContext(
-        bot_id="bot-1",
-        owner_id="owner-1",
-        stage=CallerIdentityStage.DRAFT,
-        publish_id=None,
-        bot_call_type=McpCallType.OWNER,
-        should_exchange_caller_token=True,
-    )
-    auth = MagicMock()
-    auth.resolve_user_from_request = AsyncMock(
-        return_value=SimpleNamespace(
-            id="id-1",
-            staffId="caller-1",
-            operatorName="Caller",
-            nickName="Caller",
-            tenantId="tenant-1",
-        )
-    )
-    identity.authorize_iam_token_exchange.side_effect = CallerIdentityPermissionError()
-
     response = await get_iam_token(
-        _Request(
-            {
-                CallerIdentityServiceProtocol: identity,
-                AuthPlugin: auth,
-            }
-        ),
+        _Request(),
         bot_id="bot-1",
         stage=CallerIdentityStage.DRAFT,
         publish_id=None,
         entity_id=None,
         is_test_exchange=True,
+        service=_service(error="CALLER_IDENTITY_FORBIDDEN"),
     )
 
     assert response.status_code == 403
@@ -209,21 +82,18 @@ async def test_iam_route_test_exchange_rejects_non_owner() -> None:
         "success": False,
         "error": "CALLER_IDENTITY_FORBIDDEN",
     }
-    identity.exchange_caller_identity.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_iam_route_test_exchange_rejects_production_environment() -> None:
-    identity = MagicMock()
-    identity.get_iam_token_context.side_effect = CallerIdentityPermissionError()
-
     response = await get_iam_token(
-        _Request({CallerIdentityServiceProtocol: identity}),
+        _Request(),
         bot_id="bot-1",
         stage=CallerIdentityStage.DRAFT,
         publish_id=None,
         entity_id=None,
         is_test_exchange=True,
+        service=_service(error="CALLER_IDENTITY_FORBIDDEN"),
     )
 
     assert response.status_code == 403
@@ -231,24 +101,18 @@ async def test_iam_route_test_exchange_rejects_production_environment() -> None:
         "success": False,
         "error": "CALLER_IDENTITY_FORBIDDEN",
     }
-    identity.get_iam_token_context.assert_called_once_with(
-        bot_id="bot-1",
-        stage=CallerIdentityStage.DRAFT,
-        publish_id=None,
-        entity_id=None,
-        is_test_exchange=True,
-    )
 
 
 @pytest.mark.asyncio
 async def test_iam_route_test_exchange_requires_bot_id() -> None:
     response = await get_iam_token(
-        _Request({}),
+        _Request(),
         bot_id=None,
         stage=CallerIdentityStage.DRAFT,
         publish_id=None,
         entity_id=None,
         is_test_exchange=True,
+        service=_service(error="CALLER_CREDENTIAL_REQUEST_INVALID"),
     )
 
     assert response.status_code == 400
@@ -260,15 +124,13 @@ async def test_iam_route_test_exchange_requires_bot_id() -> None:
 
 @pytest.mark.asyncio
 async def test_iam_route_rejects_ambiguous_bot_without_entity() -> None:
-    identity = MagicMock()
-    identity.get_iam_token_context.side_effect = CallerIdentityAmbiguousError()
-    request = _Request({CallerIdentityServiceProtocol: identity})
-
     response = await get_iam_token(
-        request,
+        _Request(),
         bot_id="default",
         stage=CallerIdentityStage.DRAFT,
         publish_id=None,
+        entity_id=None,
+        service=_service(error="CALLER_IDENTITY_AMBIGUOUS"),
     )
 
     assert response.status_code == 409
@@ -276,4 +138,3 @@ async def test_iam_route_rejects_ambiguous_bot_without_entity() -> None:
         "success": False,
         "error": "CALLER_IDENTITY_AMBIGUOUS",
     }
-    identity.exchange_caller_identity.assert_not_called()

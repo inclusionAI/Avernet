@@ -34,11 +34,28 @@ class CallerTokenProvider(Protocol):
         *,
         auth_context: AuthContext,
         iam_token: str,
-        delegation_credential: str,
+        bot_id: str,
+        owner_user_id: str,
         task_metadata: Mapping[str, str],
     ) -> CallerToken:
         """Issue one non-retried Caller execution credential."""
         ...
+
+
+class UnavailableCallerTokenProvider:
+    """Stable non-Corp binding that fails closed without Injector errors."""
+
+    def exchange(
+        self,
+        *,
+        auth_context: AuthContext,
+        iam_token: str,
+        bot_id: str,
+        owner_user_id: str,
+        task_metadata: Mapping[str, str],
+    ) -> CallerToken:
+        del auth_context, iam_token, bot_id, owner_user_id, task_metadata
+        raise CallerCredentialError(CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE)
 
 
 @runtime_checkable
@@ -52,15 +69,13 @@ class CallerRuntimeUpdater(Protocol):
         owner_user_id: str,
         caller_user_id: str,
         caller_token: CallerToken,
-        agent_pass_token: str,
-        agent_code: str,
         stage: str,
         publish_id: int | None,
         entity_id: str | None = None,
         binding_id: int | None = None,
         is_test_exchange: bool = False,
     ) -> None:
-        """Replace the device's complete outbound rule with Caller overlay."""
+        """Append the Caller overlay to the exact runtime device."""
         ...
 
 
@@ -78,4 +93,5 @@ __all__ = [
     "CallerRuntimeUpdater",
     "CallerToken",
     "CallerTokenProvider",
+    "UnavailableCallerTokenProvider",
 ]
