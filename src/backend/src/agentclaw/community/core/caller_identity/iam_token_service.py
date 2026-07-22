@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import asyncio
 
-from agentclaw.community.api.caller_credential import (
+from agentclaw.community.core.caller_identity.credential import (
     CALLER_CREDENTIAL_REQUEST_INVALID,
     CALLER_OUTBOUND_UPDATE_FAILED,
     CallerCredentialError,
-    CallerRuntimeUpdater,
-    CallerTokenProvider,
 )
-from agentclaw.community.api.caller_identity_service import CallerIdentityServiceProtocol
 from agentclaw.community.core.caller_identity.contracts import (
     CallerIdentityAmbiguousError,
     CallerIamTokenOutcome,
     CallerIdentityPermissionError,
     CallerIdentityStage,
+)
+from agentclaw.community.core.caller_identity.protocols import (
+    CallerIdentityTokenExchangeProtocol,
+    CallerRuntimeUpdaterProtocol,
+    CallerTokenProviderProtocol,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth import AuthPlugin, AuthRequestContext
@@ -31,10 +33,10 @@ class CallerIamTokenService:
     def __init__(
         self,
         *,
-        caller_identity: CallerIdentityServiceProtocol,
+        caller_identity: CallerIdentityTokenExchangeProtocol,
         auth_plugin: AuthPlugin,
-        token_provider: CallerTokenProvider,
-        runtime_updater: CallerRuntimeUpdater,
+        token_provider: CallerTokenProviderProtocol,
+        runtime_updater: CallerRuntimeUpdaterProtocol,
     ) -> None:
         self._caller_identity = caller_identity
         self._auth_plugin = auth_plugin

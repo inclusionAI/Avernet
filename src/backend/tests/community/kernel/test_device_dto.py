@@ -50,6 +50,7 @@ def test_header_operation_rule_to_dict_full_shape() -> None:
         "header_name": "Authorization",
         "value": "tok",
         "placeholder": "${API-KEY}",
+        "separator": None,
     }
 
 
@@ -83,6 +84,7 @@ def test_outbound_rule_to_dict_nests_header_rules() -> None:
                 "header_name": "h1",
                 "value": "v1",
                 "placeholder": None,
+                "separator": None,
             },
             {
                 "domains": ["d2"],
@@ -90,6 +92,7 @@ def test_outbound_rule_to_dict_nests_header_rules() -> None:
                 "header_name": "h2",
                 "value": "v2",
                 "placeholder": "${P}",
+                "separator": None,
             },
         ]
     }
