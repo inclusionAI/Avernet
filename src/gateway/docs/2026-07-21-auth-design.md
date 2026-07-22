@@ -163,7 +163,7 @@ class Delegation(StrEnum):
 
 @dataclass(frozen=True)
 class StrategyParams:
-    """Per-route parameters for one strategy — parsed from the API's `security` block."""
+    """Per-route parameters for one strategy — parsed from the API's `x-avernet-security` block."""
     scopes: frozenset[str] = frozenset()          # 该路由**要求**的权限（AND 子集校验）
     delegation: Delegation = Delegation.OPTIONAL
 ```
@@ -212,7 +212,7 @@ from typing import Protocol
 from ._models import CredentialBundle, StrategyParams, Principal
 
 class AuthStrategy(Protocol):
-    name: str  # 稳定名字，API 的 `security` 按名字引用
+    name: str  # 稳定名字，API 的 `x-avernet-security` 按名字引用
 
     async def build(
         self, creds: CredentialBundle, params: StrategyParams,
@@ -453,16 +453,24 @@ async def authenticate(
 
 ### 8.1 权威源：随各 API spec 声明（作者手写）
 
-```yaml
-# 挨着 endpoint 写在组件的 API spec 里
-POST /v1/bots/{id}/chat:
-  security:                 # 列表项之间 OR；项内多 scheme AND
-    - app_key:           { scopes: [bots:chat] }
-    - first_party_user:  { scopes: [bots:chat] }
+> **这是 Avernet 自定义 DSL，不是原生 OpenAPI。** 标准 OpenAPI 的 `security` 要求值为 scope 字符串**数组**
+> （`- schemeName: [scope1, scope2]`）；我们要在 scheme 下携带 `delegation`/`scopes` 等 **map** 参数，
+> 这超出原生 `security` 的形状。因此**不写进 OpenAPI 的 `security:` 字段**（否则 Swagger/生成器会解析报错），
+> 而是放在 **`x-avernet-security`** 扩展字段下——`x-` 扩展会被标准工具**忽略**，OpenAPI 仍然合规；
+> 网关构建期再把它编译成 §8.2 的路由表。
 
-POST /v1/apps/self/usage:
-  security:
-    - app_key: { delegation: forbidden, scopes: [usage:read] }
+```yaml
+# 挨着 operation 写在组件的 OpenAPI spec 里，用 x- 扩展承载
+paths:
+  /v1/bots/{id}/chat:
+    post:
+      x-avernet-security:       # 列表项之间 OR；项内多 scheme AND
+        - app_key:          { scopes: [bots:chat] }
+        - first_party_user: { scopes: [bots:chat] }
+  /v1/apps/self/usage:
+    post:
+      x-avernet-security:
+        - app_key: { delegation: forbidden, scopes: [usage:read] }
 ```
 
 ### 8.2 网关消费视图：单张路由表（构建期聚合）
