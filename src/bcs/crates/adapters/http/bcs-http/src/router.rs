@@ -197,6 +197,10 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/collaboration/templates/{template_id}",
             get(routes::templates::get_template),
         )
+        .route(
+            "/collaboration/definitions/validate",
+            post(routes::collaboration_definitions::validate_collaboration_definition_yaml),
+        )
         .route("/groups/request", post(routes::group_requests::group_request))
         .route(
             "/groups/{token}/confirm",

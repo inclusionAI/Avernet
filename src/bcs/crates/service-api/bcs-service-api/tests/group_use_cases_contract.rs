@@ -232,6 +232,7 @@ fn group_result_dtos_are_route_friendly_views() {
         driver_bot_id: "driver".to_string(),
         participant_bot_ids: vec!["driver".to_string(), "bot-a".to_string()],
         chat_url: None,
+        session_id: "group-1:initial".to_string(),
         context_injected: 0,
     };
     let add_member = GroupAddMemberResult {

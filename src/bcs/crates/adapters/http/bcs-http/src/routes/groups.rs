@@ -1221,7 +1221,7 @@ fn validate_state_machine_runtime_bindings_before_create(
         }
         if referenced_slots.contains(slot) && bot_ids.len() != 1 {
             return Err(HttpAdapterError::BadRequest(format!(
-                "participant slot {slot} is assigned to a node and must resolve to exactly one bot in MVP"
+                "participant slot {slot} is assigned to a node and must resolve to exactly one bot in the current runtime"
             )));
         }
         resolved_slots.insert(slot.clone());
@@ -1402,6 +1402,7 @@ fn group_detail_to_create_json(result: GroupDetailResult, created: bool) -> Valu
         "participants": result.participants.iter().map(|p| &p.bot_uuid).collect::<Vec<_>>(),
         "context_injected": result.context_injected,
         "chat_url": result.chat_url,
+        "session_id": result.latest_running_session_id,
         "group_kind": result.group_kind,
         "dm_pair_key": result.dm_pair_key,
         "created": created

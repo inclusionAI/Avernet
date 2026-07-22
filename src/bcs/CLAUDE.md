@@ -374,6 +374,7 @@ export BOT_DATA_DIR=/path/to/bot/data
 | `/groups/request` | POST | Request group proposal |
 | `/groups/{token}/confirm` | POST | Confirm proposal and create group |
 | `/groups` | POST | Create group directly |
+| `/collaboration/definitions/validate` | POST | Validate custom collaboration YAML |
 | `/groups` | GET | List all groups |
 | `/groups/{id}` | GET | Get group details |
 | `/groups/{id}` | DELETE | Delete group |
@@ -503,6 +504,11 @@ bcs-cli create-group --driver zhangsan --participants "lisi,wangwu"
 
 # Create a manager-worker group; participants are assigned the worker role
 bcs-cli create-group --manager zhangsan --participants "lisi,wangwu"
+
+# Validate and create a custom collaboration group
+bcs-cli collaboration validate workflow.yaml
+bcs-cli collaboration create workflow.yaml --driver zhangsan \
+  --binding planner=zhangsan --binding reviewer=lisi
 
 # Fuse contexts
 bcs-cli fuse --group <group_id> --question "如何协调？" --participants bot1,bot2

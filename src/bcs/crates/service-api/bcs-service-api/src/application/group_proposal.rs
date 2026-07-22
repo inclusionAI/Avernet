@@ -53,6 +53,7 @@ pub struct GroupProposalConfirmResult {
     pub driver_bot_id: String,
     pub participant_bot_ids: Vec<String>,
     pub chat_url: Option<String>,
+    pub session_id: String,
     pub context_injected: u64,
 }
 

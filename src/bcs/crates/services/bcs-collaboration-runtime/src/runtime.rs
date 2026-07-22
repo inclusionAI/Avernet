@@ -22,8 +22,9 @@ use bcs_service_api::{
     BotRegistryCoreService,
     CancelStateMachineRunCommand,
     ChatEventState, CollaborationDefinitionRecord, CollaborationEventRepoPort,
-    CollaborationRuntimeError, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
-    ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand, DefinitionYamlSource,
+    CollaborationDefinitionValidationOutcome, CollaborationRuntimeError,
+    CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
+    CreateOrReactivateCommand, DefinitionYamlSource,
     FrontendDeliveryCommand, FrontendDeliveryKind,
     FrontendDeliveryPort, FrontendDeliveryTarget, GroupCoreService, GroupRuntimeBindingRepoPort,
     GroupCollaborationDefinitionView, HandleBotTerminalEventCommand,
@@ -37,12 +38,14 @@ use bcs_service_api::{
     StateMachineGraphDefinitionView, StateMachineGraphEdgeView, StateMachineGraphNodeView,
     StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineRunGraphView,
     StateMachineRunView, UpgradeGroupCollaborationDefinitionCommand,
+    ValidateCollaborationDefinitionYamlCommand,
 };
 use serde_json::Value;
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::definition::{CompiledStateMachine, reject_explicit_participant_roles, validate_definition};
+use crate::validation::validate_authoring_definition_yaml;
 
 const BCS_STATE_MACHINE_BOT_ID: &str = "bcs_state_machine";
 const BCS_STATE_MACHINE_BOT_NAME: &str = "BCS State Machine";
@@ -1348,6 +1351,13 @@ impl CollaborationRuntime {
 
 #[async_trait]
 impl CollaborationRuntimeService for CollaborationRuntime {
+    async fn validate_definition_yaml(
+        &self,
+        cmd: ValidateCollaborationDefinitionYamlCommand,
+    ) -> Result<CollaborationDefinitionValidationOutcome, CollaborationRuntimeError> {
+        Ok(validate_authoring_definition_yaml(cmd))
+    }
+
     async fn start_state_machine_run(
         &self,
         cmd: StartStateMachineRunCommand,
@@ -2295,7 +2305,7 @@ fn resolve_participant_bindings(
         }
         if referenced_slots.contains(slot) && bot_ids.len() != 1 {
             return invalid_participant_binding(format!(
-                "participant slot {slot} is assigned to a node and must resolve to exactly one bot in MVP"
+                "participant slot {slot} is assigned to a node and must resolve to exactly one bot in the current runtime"
             ));
         }
         let participants = bot_ids

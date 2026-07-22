@@ -50,15 +50,17 @@ pub use application::session::{
     SessionUseCaseError,
 };
 pub use application::collaboration_runtime::{
-    CancelStateMachineRunCommand, CollaborationRuntimeError, CollaborationRuntimeService,
-    ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome, DefinitionYamlSource,
-    GroupCollaborationDefinitionView, HandleBotTerminalEventCommand,
+    CancelStateMachineRunCommand, CollaborationDefinitionParticipantSlot,
+    CollaborationDefinitionValidationDiagnostic, CollaborationDefinitionValidationOutcome,
+    CollaborationDefinitionValidationSummary, CollaborationRuntimeError,
+    CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
+    DefinitionYamlSource, GroupCollaborationDefinitionView, HandleBotTerminalEventCommand,
     HandleBotTerminalEventOutcome, MAX_COLLABORATION_DEFINITION_YAML_BYTES,
     PatchGroupCollaborationDefinitionCommand,
     StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineGraphDefinitionView,
     StateMachineGraphEdgeView, StateMachineGraphNodeView, StateMachineRunGraphView,
     StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineRunView,
-    UpgradeGroupCollaborationDefinitionCommand,
+    UpgradeGroupCollaborationDefinitionCommand, ValidateCollaborationDefinitionYamlCommand,
 };
 pub use application::collaboration_template::{
     CollaborationTemplateDetail, CollaborationTemplateError, CollaborationTemplateFormat,

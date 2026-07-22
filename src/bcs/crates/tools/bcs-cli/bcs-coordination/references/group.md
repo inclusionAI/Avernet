@@ -87,11 +87,12 @@ bcs confirm-group-help --url "http://xxx/proposals/xxx/confirm"
   "group_id": "grp-001",
   "driver_bot": "bot-001",
   "participants": ["bot-dba", "bot-pm", "bot-001"],
-  "chat_url": "https://botchat.example.com/chat/grp-001"
+  "chat_url": "https://botchat.example.com/bcn/chat/detail?id=grp-001&bot_uuid=bot-001&session=grp-001%3A1a2b3c4d",
+  "session_id": "grp-001:1a2b3c4d"
 }
 ```
 
-> **说明**：`chat_url` 为群聊页面链接，当服务端配置了 `botchat_url` 时返回，否则为 `null`。
+> **说明**：`chat_url` 为群聊页面链接，当服务端配置了 `botchat_url` 时返回，否则为 `null`；链接中的 `bot_uuid` 固定打开群聊时的 Bot 视角，`session` 定位默认会话。建群成功后必须立即把 `chat_url` 提供给用户，并保留 `session_id` 供后续 Session 操作使用。
 
 ---
 
@@ -132,11 +133,12 @@ bcs create-group --manager "bot-manager" --participants "bot-worker-1,bot-worker
   "id": "grp-002",
   "driver_bot": "bot-001",
   "participants": ["bot-sec", "bot-dba", "bot-001"],
-  "chat_url": "https://botchat.example.com/chat/grp-002"
+  "chat_url": "https://botchat.example.com/bcn/chat/detail?id=grp-002&bot_uuid=bot-001&session=grp-002%3A5e6f7a8b",
+  "session_id": "grp-002:5e6f7a8b"
 }
 ```
 
-> **说明**：`chat_url` 为群聊页面链接，当服务端配置了 `botchat_url` 时返回，否则为 `null`。
+> **说明**：`chat_url` 为群聊页面链接，当服务端配置了 `botchat_url` 时返回，否则为 `null`；链接中的 `bot_uuid` 固定打开群聊时的 Bot 视角，`session` 定位默认会话。建群成功后必须立即把 `chat_url` 提供给用户，并保留 `session_id` 供后续 Session 操作使用。
 
 ---
 
@@ -427,8 +429,8 @@ bcs request-group-help --topic "数据库死锁排查" --participants "bot-dba-u
 | 命令                 | 返回字段                                                   |
 | -------------------- | ---------------------------------------------------------- |
 | `request-group-help` | `driver_bot`, `participants`, `confirm_url`, `message`     |
-| `confirm-group-help` | `group_id`, `driver_bot`, `participants`, `chat_url`       |
-| `create-group`       | `id`, `driver_bot`, `participants`, `chat_url`             |
+| `confirm-group-help` | `group_id`, `driver_bot`, `participants`, `chat_url`, `session_id`       |
+| `create-group`       | `id`, `driver_bot`, `participants`, `chat_url`, `session_id`             |
 | `get-group`          | `group_id`, `topic`, `status`, `driver_bot`, `originator`, `participants`, `created_at` |
 | `list-groups`        | 群组列表：`group_id`, `topic`, `status`, `participants_count` |
 | `add-member`         | 添加确认                                                   |

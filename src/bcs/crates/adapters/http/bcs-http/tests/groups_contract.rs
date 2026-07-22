@@ -12,7 +12,9 @@ use bcs_http::{
 };
 use bcs_service_api::{
     ActorKind, BotCapabilities, BotGroupListCommand, BotRegistryCoreService,
-    CancelStateMachineRunCommand, CollaborationDefinition, CollaborationRuntimeError,
+    CancelStateMachineRunCommand, CollaborationDefinition,
+    CollaborationDefinitionParticipantSlot, CollaborationDefinitionValidationOutcome,
+    CollaborationDefinitionValidationSummary, CollaborationRuntimeError,
     CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
     DmCreateCommand, DmCreateResult, Group, GroupAddMemberCommand, GroupAddMemberResult,
     GroupCoreService, GroupCreateCommand, GroupDeleteCommand, GroupDeleteResult,
@@ -25,6 +27,7 @@ use bcs_service_api::{
     ParticipantMode, ParticipantRole, RoutingMode, RoutingPolicy, Skill,
     SessionHistoryResult, StartStateMachineRunCommand, StartStateMachineRunOutcome,
     StateMachineDeliveryCorrelation, StateMachineRunView, Workspace,
+    ValidateCollaborationDefinitionYamlCommand,
 };
 use bcs_services_container::Services;
 use bcs_test_support::{NoopBotRegistryCoreService, NoopFriendCoreService};
@@ -70,11 +73,38 @@ struct RecordingCollaborationRuntime {
     definitions: Mutex<Vec<CollaborationDefinition>>,
     configure_calls: Mutex<Vec<ConfigureGroupRuntimeCommand>>,
     start_commands: Mutex<Vec<StartStateMachineRunCommand>>,
+    validation_calls: Mutex<Vec<ValidateCollaborationDefinitionYamlCommand>>,
     upsert_error: Mutex<Option<CollaborationRuntimeError>>,
 }
 
 #[async_trait::async_trait]
 impl CollaborationRuntimeService for RecordingCollaborationRuntime {
+    async fn validate_definition_yaml(
+        &self,
+        cmd: ValidateCollaborationDefinitionYamlCommand,
+    ) -> Result<CollaborationDefinitionValidationOutcome, CollaborationRuntimeError> {
+        self.validation_calls.lock().await.push(cmd);
+        Ok(CollaborationDefinitionValidationOutcome {
+            valid: true,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+            summary: CollaborationDefinitionValidationSummary {
+                participants: 1,
+                nodes: 1,
+                initial_nodes: vec!["answer".to_string()],
+                final_output_node: Some("answer".to_string()),
+            },
+            participants: vec![CollaborationDefinitionParticipantSlot {
+                binding: "writer".to_string(),
+                display_name: Some("Writer".to_string()),
+                description: None,
+                required: true,
+                assigned: true,
+            }],
+            definition: None,
+        })
+    }
+
     async fn start_state_machine_run(
         &self,
         cmd: StartStateMachineRunCommand,
@@ -485,6 +515,42 @@ impl GroupManagementService for RecordingGroupManagement {
 }
 
 #[tokio::test]
+async fn post_collaboration_definition_validate_delegates_to_runtime_service() {
+    let (app, _, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/collaboration/definitions/validate")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "definition_yaml": "name: test"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["valid"], true);
+    assert_eq!(json["summary"]["nodes"], 1);
+    assert_eq!(json["participants"][0]["binding"], "writer");
+    assert!(json.get("definition").is_none());
+
+    let calls = collaboration_runtime.validation_calls.lock().await;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].definition_yaml, "name: test");
+    assert!(!calls[0].judge_available);
+}
+
+#[tokio::test]
 async fn post_groups_delegates_to_group_management_create_and_preserves_response_shape() {
     let (app, recorder, _temp_dir) = test_app().await;
 
@@ -878,7 +944,7 @@ runtime:
         .unwrap();
     let body = String::from_utf8(body.to_vec()).unwrap();
     assert!(body.contains(
-        "participant slot driver is assigned to a node and must resolve to exactly one bot in MVP"
+        "participant slot driver is assigned to a node and must resolve to exactly one bot in the current runtime"
     ));
     assert!(recorder.create_calls.lock().await.is_empty());
     assert!(collaboration_runtime.definitions.lock().await.is_empty());

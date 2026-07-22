@@ -17,6 +17,7 @@ E2E_TESTS_STORIES=(
     "story_provider_operator_publishes_agent"
     "story_user_validates_external_channel_setup"
     "story_operator_coordinates_with_cli"
+    "story_cli_operator_creates_custom_collaboration"
     "story_cli_operator_builds_collaboration_team"
     "story_cli_operator_runs_sessions_and_services"
     "story_cli_operator_validates_channel_management"
