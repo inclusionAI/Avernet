@@ -131,15 +131,30 @@ fn assert_otel_span_bool_attribute(
     }));
 }
 
-fn assert_otel_span_attribute_contains(
+fn assert_gen_ai_output_message(
     span: &opentelemetry_sdk::trace::SpanData,
-    key: &str,
-    expected: &str,
+    expected_content: &str,
+    expected_finish_reason: &str,
 ) {
-    assert!(span.attributes.iter().any(|attr| {
-        attr.key.as_str() == key
-            && matches!(&attr.value, opentelemetry::Value::String(value) if value.as_str().contains(expected))
-    }));
+    let value = span
+        .attributes
+        .iter()
+        .find_map(|attr| match &attr.value {
+            opentelemetry::Value::String(value)
+                if attr.key.as_str() == "gen_ai.output.messages" =>
+            {
+                Some(value.as_str())
+            }
+            _ => None,
+        })
+        .expect("gen_ai.output.messages string attribute");
+    let messages: Value = serde_json::from_str(value).expect("schema-compliant output messages JSON");
+    assert_eq!(messages.as_array().map(Vec::len), Some(1));
+    assert_eq!(messages[0]["role"], "assistant");
+    assert_eq!(messages[0]["parts"].as_array().map(Vec::len), Some(1));
+    assert_eq!(messages[0]["parts"][0]["type"], "text");
+    assert_eq!(messages[0]["parts"][0]["content"], expected_content);
+    assert_eq!(messages[0]["finish_reason"], expected_finish_reason);
 }
 
 struct TestApp {
@@ -2084,11 +2099,7 @@ async fn bot_events_marks_auth_failure_content_untrusted_without_business_attrib
     assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.run.id"));
     assert!(span.events.events.is_empty());
     assert_otel_span_bool_attribute(span, "bcn.content.untrusted", true);
-    assert_otel_span_attribute_contains(
-        span,
-        "gen_ai.output.messages",
-        "untrusted-callback-content",
-    );
+    assert_gen_ai_output_message(span, "untrusted-callback-content", "stop");
 }
 
 #[tokio::test]
@@ -2158,11 +2169,7 @@ async fn bot_events_marks_success_content_trusted_with_business_attributes() {
     assert_otel_span_string_attribute(span, "bcn.run.id", "run-trusted");
     assert!(span.events.events.is_empty());
     assert_otel_span_bool_attribute(span, "bcn.content.untrusted", false);
-    assert_otel_span_attribute_contains(
-        span,
-        "gen_ai.output.messages",
-        "trusted-callback-content",
-    );
+    assert_gen_ai_output_message(span, "trusted-callback-content", "stop");
 }
 
 #[tokio::test]
@@ -2204,11 +2211,7 @@ async fn bot_events_records_untrusted_content_when_auth_cannot_follow_invalid_sh
     assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.provider.id"));
     assert!(span.events.events.is_empty());
     assert_otel_span_bool_attribute(span, "bcn.content.untrusted", true);
-    assert_otel_span_attribute_contains(
-        span,
-        "gen_ai.output.messages",
-        "invalid-shape-content",
-    );
+    assert_gen_ai_output_message(span, "invalid-shape-content", "unknown");
 }
 
 #[tokio::test]

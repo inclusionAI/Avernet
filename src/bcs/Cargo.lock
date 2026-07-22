@@ -921,6 +921,7 @@ dependencies = [
  "bcs-services-container",
  "bcs-session",
  "bcs-session-store",
+ "bcs-telemetry",
  "bcs-test-support",
  "bcs-user-directory-api",
  "futures",
@@ -1328,6 +1329,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-telemetry"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "bcs-test-support"
 version = "0.1.0"
 dependencies = [
@@ -1378,6 +1386,7 @@ dependencies = [
  "bcs-route-security",
  "bcs-service-api",
  "bcs-session",
+ "bcs-telemetry",
  "bcs-test-support",
  "chrono",
  "futures",
