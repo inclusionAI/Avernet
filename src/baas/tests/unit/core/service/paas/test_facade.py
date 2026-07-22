@@ -1274,7 +1274,7 @@ class TestUpdateOutboundOperationRule:
             template_id=42
         )
         mock_service.update_outbound_operation_rule.assert_called_once_with(
-            "sandbox-abc123", rule
+            "sandbox-abc123", rule, mode=None
         )
 
     @pytest.mark.asyncio

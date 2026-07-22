@@ -84,7 +84,10 @@ def _normalize_message(raw_message: str | list | Any) -> str:
 
 
 if TYPE_CHECKING:
-    from secbaas.community.api.device_manage import OutBoundOperationRule
+    from secbaas.community.api.device_manage import (
+        OutBoundOperationRule,
+        OutBoundOperationRuleUpdatedMode,
+    )
 
     # Phase 34: DeviceRecord forward reference for _process_publish_callback_for_device
     from secbaas.community.core.repository.device import DeviceRecord
@@ -1481,6 +1484,7 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         self,
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
     ) -> bool:
         """Update outbound operation rule for a local device.
 
