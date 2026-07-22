@@ -11,6 +11,8 @@ import asyncio
 import logging
 from typing import Any
 
+import httpx
+
 from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 
@@ -23,6 +25,55 @@ _SEMAPHORE = asyncio.Semaphore(_MAX_CONCURRENT_LLM_CALLS)
 # ── retry config ───────────────────────────────────────────
 _MAX_RETRIES = 3
 _RETRY_DELAYS = [2.0, 5.0, 10.0]  # seconds between retries
+
+# ── generation budget ──────────────────────────────────────
+# GLM-5.1 stalls on a huge max_tokens: the old 256_000 pushed it into a slow
+# reasoning path that never returned within antchat's ~90s gateway window, so the
+# gateway closed the connection → httpx.ReadError (re-sent 3×, ~5min/template).
+# 8k covers every harness prompt — short diagnostic analyses AND full-file patch
+# rewrites (largest file ~7.7kB ≈ 2.5k tokens) — with headroom. On a
+# read-timeout / broken-connection retry we shrink further so the model can finish
+# within the window instead of verbatim-repeating the same heavy request.
+_DEFAULT_MAX_TOKENS = 32768
+# Diagnostic calls only emit a short summary + message + ``[SCORE:xx]`` — far
+# smaller than a full-file patch rewrite — so a tighter budget keeps the first
+# request light and avoids pushing GLM into the slow-reasoning path that
+# exceeds antchat's ~90s gateway window.
+DIAGNOSTIC_MAX_TOKENS = 32768
+_TIMEOUT_MAX_RETRIES = 1
+_TIMEOUT_RETRY_MAX_TOKENS = 4096
+
+# Exceptions where the request never got a usable response back: the gateway
+# closed the connection (httpx.ReadError / RemoteProtocolError) or the
+# read/connect/pool timed out. These call for a lighter retry, not a verbatim
+# repeat of the same heavy body.
+_TIMEOUT_EXCEPTIONS: tuple[type[Exception], ...] = (
+    httpx.TimeoutException,
+    httpx.TransportError,
+)
+
+
+def _client_error_status(exc: BaseException) -> int | None:
+    """Return a 4xx status carried on ``exc.response`` if present, else None.
+
+    The general ``HttpClient`` runs under a send-hook wrapper (outside this
+    repo) that re-wraps low-level httpx transport failures into an exception
+    type we can't subclass-match. So we classify connection-level failures by
+    *symptom* — does the exception carry a response object? — not by type:
+
+    - A 4xx (auth/usage) response almost always has ``response`` set: retrying
+      verbatim is pointless, the caller must not retry.
+    - A connection dropped during send/read never has ``response``: that is a
+      connection-level failure the caller should retry *lightly* with a
+      shrunken body.
+
+    Returns the 4xx status code, or ``None`` (treat as connection-level).
+    """
+    resp = getattr(exc, "response", None)
+    status = getattr(resp, "status_code", None)
+    if isinstance(status, int) and 400 <= status < 500:
+        return status
+    return None
 
 
 class LLM:
@@ -96,8 +147,18 @@ class LLM:
             )
         return None
 
-    async def chat(self, system: str | None, user: str) -> str:
-        """Send prompt and return text response (OpenAI-compatible API)."""
+    async def chat(
+        self,
+        system: str | None,
+        user: str,
+        *,
+        max_tokens: int = _DEFAULT_MAX_TOKENS,
+    ) -> str:
+        """Send prompt and return text response (OpenAI-compatible API).
+
+        ``max_tokens`` defaults to a bounded budget (``_DEFAULT_MAX_TOKENS``):
+        GLM-5.1 stalls on the old 256k cap and never returns within antchat's
+        gateway window."""
         if not self._token:
             logger.warning("[LLM] chat() called but no token resolved, returning [llm disabled]")
             return "[llm disabled]"
@@ -107,46 +168,111 @@ class LLM:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": user})
 
-        body: dict[str, Any] = {
-            "model": self._model,
-            "max_tokens": 256000,
-            "messages": messages,
-        }
-
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self._token}",
         }
 
-        logger.info("[LLM] POST %s/v1/chat/completions model=%s", self._base_url, self._model)
+        logger.info(
+            "[LLM] POST %s/v1/chat/completions model=%s max_tokens=%d",
+            self._base_url, self._model, max_tokens,
+        )
 
         async with _SEMAPHORE:
-            return await self._request_with_retry(body, headers)
+            return await self._request_with_retry(
+                messages=messages, headers=headers, max_tokens=max_tokens,
+            )
 
-    async def _request_with_retry(self, body: dict[str, Any], headers: dict[str, str]) -> str:
-        """Execute request with retry — any failure triggers up to 3 retries."""
-        last_err: Exception | None = None
+    async def _request_with_retry(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        headers: dict[str, str],
+        max_tokens: int,
+    ) -> str:
+        """Execute request with classified retry.
+
+        - 5xx → retry up to ``_MAX_RETRIES`` (transient server fault).
+        - 4xx → do not retry (client/auth error; retrying won't help).
+        - read timeout / broken connection (``_TIMEOUT_EXCEPTIONS`` or any
+          exception without a 4xx response, e.g. the gateway-side send-hook
+          wrapper) → retry at most ``_TIMEOUT_MAX_RETRIES`` with a shrunk
+          ``max_tokens``: the gateway closed at ~90s because the request was
+          too heavy, so a verbatim repeat just wastes another window.
+
+        Connection-level failures are detected by *symptom*, not by exception
+        type: the deployed ``general`` client has a send-hook wrapper (outside
+        this repo) that re-wraps httpx transport errors into a type we cannot
+        subclass-match, so we treat "no 4xx response attached" as
+        connection-level and route it through the light retry (see
+        :func:`_client_error_status`).
+
+        Exhaustion returns the ``[llm disabled]`` sentinel so callers (parser /
+        PatchPlanner) treat it uniformly as "LLM unavailable"."""
+        budget = max_tokens
         for attempt in range(_MAX_RETRIES):
+            body: dict[str, Any] = {
+                "model": self._model,
+                "max_tokens": budget,
+                "messages": messages,
+            }
             try:
                 return await self._do_request(body, headers)
-            except Exception as e:
-                last_err = e
-                status = getattr(getattr(e, "response", None), "status_code", None)
-                label = f"HTTP {status}" if status else type(e).__name__
-
-                if attempt < _MAX_RETRIES - 1:
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                if 500 <= status < 600 and attempt < _MAX_RETRIES - 1:
                     delay = _RETRY_DELAYS[min(attempt, len(_RETRY_DELAYS) - 1)]
                     logger.warning(
-                        "[LLM] %s (attempt %d/%d), retrying in %.1fs",
-                        label, attempt + 1, _MAX_RETRIES, delay,
+                        "[LLM] HTTP %d (attempt %d/%d), retrying in %.1fs",
+                        status, attempt + 1, _MAX_RETRIES, delay,
                     )
                     await asyncio.sleep(delay)
-                else:
-                    logger.error(
-                        "[LLM] %s after %d retries: %s",
-                        label, _MAX_RETRIES, e,
+                    continue
+                logger.error("[LLM] HTTP %d, not retrying: %r", status, e)
+                break
+            except _TIMEOUT_EXCEPTIONS as e:
+                if attempt < _TIMEOUT_MAX_RETRIES:
+                    budget = _TIMEOUT_RETRY_MAX_TOKENS
+                    delay = _RETRY_DELAYS[0]
+                    logger.warning(
+                        "[LLM] %s (attempt %d/%d), shrinking max_tokens=%d, retrying in %.1fs",
+                        type(e).__name__, attempt + 1, _MAX_RETRIES, budget, delay,
                     )
-        logger.error("[LLM] all retries exhausted: %s", last_err)
+                    await asyncio.sleep(delay)
+                    continue
+                logger.error(
+                    "[LLM] %s after timeout retries (max_tokens=%d): %r",
+                    type(e).__name__, budget, e,
+                )
+                break
+            except Exception as e:
+                # 4xx carried through a non-HTTPStatusError wrapper → client
+                # error, retrying verbatim is pointless.
+                client_status = _client_error_status(e)
+                if client_status is not None:
+                    logger.error(
+                        "[LLM] %s (HTTP %d), not retrying: %r",
+                        type(e).__name__, client_status, e,
+                    )
+                    break
+                # No response attached → connection-level failure (gateway
+                # dropped the connection, or the send-hook wrapper re-raised a
+                # transport error). Route to the same light retry as timeouts,
+                # bounded by ``_TIMEOUT_MAX_RETRIES`` instead of verbatim-retry.
+                if attempt < _TIMEOUT_MAX_RETRIES:
+                    budget = _TIMEOUT_RETRY_MAX_TOKENS
+                    delay = _RETRY_DELAYS[0]
+                    logger.warning(
+                        "[LLM] %s (attempt %d/%d), shrinking max_tokens=%d, retrying in %.1fs: %r",
+                        type(e).__name__, attempt + 1, _MAX_RETRIES, budget, delay, e,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.error(
+                    "[LLM] %s after timeout retries (max_tokens=%d): %r",
+                    type(e).__name__, budget, e,
+                )
+                break
         return "[llm disabled]"
 
     async def _do_request(self, body: dict[str, Any], headers: dict[str, str]) -> str:

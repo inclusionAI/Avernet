@@ -1,4 +1,4 @@
-"""PatchPlanner behaviour: LLM-disabled fallback + generate_and_save_patches persistence."""
+"""PatchPlanner behaviour: LLM-disabled skip + generate_and_save_patches persistence."""
 from __future__ import annotations
 
 import pytest
@@ -20,7 +20,7 @@ def _planner(llm):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_llm_disabled_fix_returns_src_and_desc():
+async def test_llm_disabled_fix_returns_none():
     llm = MagicMock()
     llm.chat = AsyncMock(return_value="[llm disabled]")
     planner = _planner(llm)
@@ -28,11 +28,9 @@ async def test_llm_disabled_fix_returns_src_and_desc():
         file_type="AGENTS.md", src="# original",
         issues="- missing summary\n- weak rules", template_instructions="",
     )
-    assert out is not None
-    fixed, desc = out
-    assert fixed == "# original"        # fallback returns source unchanged
-    # fallback derives the desc from the issue lines (strip "- ", join with "; ")
-    assert desc == "修复: missing summary; weak rules"
+    # LLM unavailable (no token / retries exhausted) → skip cleanly; never
+    # fabricate a no-op patch (dst==src) that masquerades as a fix.
+    assert out is None
 
 
 @pytest.mark.unit
