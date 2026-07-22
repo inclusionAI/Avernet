@@ -56,6 +56,13 @@ frontend_deps_ready() {
     if [ -f "${FRONTEND_DIR}/package-lock.json" ] && [ "${FRONTEND_DIR}/package-lock.json" -nt "$marker" ]; then
         return 1
     fi
+    # The local dev command is provided by devDependencies. A production-only
+    # install can still contain all runtime packages while being unable to run
+    # `cross-env ... max dev`.
+    if [ ! -x "${FRONTEND_DIR}/node_modules/.bin/cross-env" ] ||
+       [ ! -x "${FRONTEND_DIR}/node_modules/.bin/max" ]; then
+        return 1
+    fi
 
     (
         cd "${FRONTEND_DIR}" &&
@@ -75,15 +82,17 @@ install_frontend_deps() {
     # 有 lockfile 时用 npm ci:严格按 lockfile 安装,且不改写 lockfile —— 保证可复现,
     # 也不会把 resolved 源改回内网镜像(license 合规要求:committed lockfile 恒为公网源)。
     # 用 --registry 仅影响下载来源,npm ci 不会回写 lockfile。
+    # 前端 dev server 依赖 cross-env 和 @umijs/max 等 devDependencies，显式包含 dev
+    # 依赖，避免 NODE_ENV=production 或 npm omit 配置导致启动命令缺失。
     if [ -f package-lock.json ]; then
-        if ! HUSKY=0 npm ci --registry="${NPM_REGISTRY_URL}"; then
+        if ! HUSKY=0 npm ci --include=dev --registry="${NPM_REGISTRY_URL}"; then
             log_error "Failed to install frontend dependencies (npm ci)."
             log_error "若刚改过 package.json,请先本地 'npm install' 更新 package-lock.json 再提交。"
             return 1
         fi
     else
         log_warn "No package-lock.json; falling back to 'npm install' (will generate a lockfile)."
-        if ! HUSKY=0 npm install --registry="${NPM_REGISTRY_URL}"; then
+        if ! HUSKY=0 npm install --include=dev --registry="${NPM_REGISTRY_URL}"; then
             log_error "Failed to install frontend dependencies"
             return 1
         fi
@@ -95,9 +104,10 @@ install_frontend_deps() {
 frontend_start() {
     mkdir -p "${LOG_DIR}"
 
-    if ! check_directory_exists "${FRONTEND_DIR}" "frontend"; then
-        return 1
-    fi
+    # `start` may be invoked without a preceding `setup`. Ensure dependencies
+    # once here; frontend_setup skips npm install when the lockfile marker is
+    # already current.
+    frontend_setup || return 1
 
     cd "${FRONTEND_DIR}"
     local frontend_script="${FRONTEND_DEV_SCRIPT:-devs:local:oss}"

@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "name": "一个人 + 一支队",
+  "port_start": 30001,
+  "port_step": 10,
+  "scopes": "production",
+  "bots": [
+    {
+      "source": "ceo",
+      "profile": "ceo",
+      "name": "CEO",
+      "summary": "CEO，团队总控 Bot，负责把 Chairman 的模糊目标压缩成清晰任务，用第一性原理识别关键约束，调度产品、研发、验证、客服协作，并在冲突中做最终取舍和推进闭环",
+      "domains": "strategy,execution,first-principles,orchestration,leadership,resource-allocation,tradeoff,team-coordination,decision-making",
+      "skills": "goal-framing,first-principles-analysis,task-decomposition,priority-ranking,agent-routing,resource-allocation,risk-framing,tradeoff-analysis,decision-escalation,execution-followup"
+    },
+    {
+      "source": "product-manager",
+      "profile": "product-manager",
+      "name": "产品经理",
+      "summary": "产品经理，产品判断 Bot，负责从用户场景和体验闭环出发定义需求，识别真正痛点，裁剪功能范围，明确不做什么，并把产品判断转成研发和验证可执行的验收标准",
+      "domains": "product,user-experience,requirement,prioritization,prd,scope,design-quality,user-value,acceptance-criteria",
+      "skills": "product-judgment,user-scenario-framing,requirement-clarification,scope-pruning,mvp-definition,ux-review,copy-review,acceptance-criteria-design,non-goal-definition,product-risk-review"
+    },
+    {
+      "source": "engineering",
+      "profile": "engineering",
+      "name": "研发",
+      "summary": "研发，工程实现 Bot，负责把产品目标落到真实代码和系统边界上，评估架构影响、实现复杂度、技术风险和维护成本，优先选择简单、可测试、可演进的工程路径",
+      "domains": "engineering,architecture,code,maintainability,implementation,technical-design,code-quality,system-boundary,technical-debt",
+      "skills": "implementation-planning,architecture-review,code-review,technical-risk-analysis,complexity-control,dependency-analysis,contract-impact-review,testability-review,debugging-plan,maintainability-assessment"
+    },
+    {
+      "source": "verification",
+      "profile": "verification",
+      "name": "验证",
+      "summary": "验证，质量验证 Bot，负责把团队结论转成可证伪假设，设计测试、寻找反例、检查边界条件，区分已验证和未验证内容，并在发布或承诺前给出证据化质量门禁",
+      "domains": "verification,testing,evidence,quality,edge-case,regression,acceptance,quality-gate,risk-classification",
+      "skills": "test-design,edge-case-analysis,counterexample-search,evidence-review,quality-gate,regression-risk-review,acceptance-validation,log-evidence-analysis,coverage-gap-analysis,release-readiness-check"
+    },
+    {
+      "source": "customer-service",
+      "profile": "customer-service",
+      "name": "客服",
+      "summary": "客服，客户服务 Bot，负责接住用户现场问题和情绪，整理诉求、影响范围、复现线索和承诺风险，把用户反馈转成产品、研发、验证可处理的输入，并推动服务补救和回访闭环",
+      "domains": "customer-service,feedback,support,service-recovery,user-voice,incident-intake,complaint-handling,followup,escalation",
+      "skills": "customer-intake,issue-triage,service-recovery,feedback-synthesis,user-voice-summarization,impact-assessment,commitment-tracking,escalation,followup-planning,external-response-drafting"
+    }
+  ]
+}

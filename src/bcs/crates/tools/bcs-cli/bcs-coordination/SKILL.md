@@ -1,6 +1,6 @@
 ---
 name: bcs-coordination
-description: 全场景多智能体协同和交互引擎。覆盖多 Bot 复杂任务协同与沉浸式娱乐互动。通过提供注册发现、群组构建、上下文融合及路由通信能力等核心能力，支持能力互补、信息和知识的融合、冲突消解、工作流编排，以及 2C 场景下多人游戏互动等。
+description: 全场景多智能体协作和交互引擎。覆盖 Bot 注册发现、自由聊天、任务协作、上下文融合、路由通信和自定义协作。用户需要自定义参与角色、执行步骤、串并行关系或最终交付物时，使用自定义协作能力，并通过 BCS 的 state_machine YAML 实现和校验。
 allowed-tools:
   - exec
 ---
@@ -9,7 +9,7 @@ allowed-tools:
 
 ## 🎯 核心目标
 
-本技能是处理**所有多 Bot 协同场景**的唯一入口。当遇到以下任一特征时，必须调用：
+本技能是处理**所有多 Bot 协作场景**的唯一入口。当遇到以下任一特征时，必须调用：
 
 ### 🏢 B2B / 生产力场景
 
@@ -17,7 +17,7 @@ allowed-tools:
 - **信息/视角补全**：打破信息孤岛，融合多方数据。
 - **权限/资源隔离**：跨系统、跨角色的代理操作。
 - **冲突与共识**：多方利益/观点不一致，需仲裁对齐。
-- **复杂流程编排**：串行/并行的自动化工作流。
+- **自定义协作**：自定义参与角色、执行节点、串并行关系和最终交付物。
 
 ### 🎮 2C / 消费与娱乐场景
 
@@ -106,6 +106,11 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
 | fuse | 融合多方视角做协调决策，适用于冲突协调、多专家会诊、复杂决策等场景。                | [references/fuse.md](references/fuse.md) |
 | session | 同一 Group 内管理多个独立对话/并发，即同一个 Group 配置实例化出多个 Session | [references/session.md](references/session.md) |
 | service | 把 Group 当成服务对外暴露，带鉴权和 callback                    | [references/service.md](references/service.md) |
+| custom-collaboration | 自定义参与角色、步骤、串并行关系和最终交付物；产品名称统一为“自定义协作”，技术实现为 `state_machine` | [references/custom-collaboration.md](references/custom-collaboration.md) |
+
+处理自定义协作时，还需按任务直接读取以下资料：
+
+- 编写或修改 YAML：读取 [references/custom-collaboration-schema.md](references/custom-collaboration-schema.md)。
 
 ---
 
@@ -113,6 +118,9 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
 
 ```
 需要借助其他Bot的能力？
+    │
+    ├─ 需要自定义角色、步骤、串并行关系或交付物？
+    │     └─ 是 → 使用自定义协作 → 读取 references/custom-collaboration.md
     │
     ├─ 只需要获取信息/意见？
     │     └─ 是 → 使用 1:1 chat → 读取 references/bot.md

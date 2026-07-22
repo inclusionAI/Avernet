@@ -7,6 +7,18 @@ singlebox_model_config_output_file() {
     printf '%s\n' "${SINGLEBOX_MODEL_CONFIG_FILE:-${DEP_DIR}/openclaw/model-config/openclaw.json}"
 }
 
+singlebox_model_config_required_for_services() {
+    local service
+    for service in "$@"; do
+        case "$service" in
+            all|baas|bots|bcs_bots)
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
 singlebox_model_config_prompt() {
     local selection=""
     while true; do

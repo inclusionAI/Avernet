@@ -13,6 +13,7 @@ export UV_PYTHON="${UV_PYTHON:-3.12}"
 coverage_root="${SINGLEBOX_COVERAGE_ROOT:-$repo_root/scripts/.dependencies/coverage/singlebox}"
 report_dir="$coverage_root/reports"
 mode="${SINGLEBOX_COVERAGE_MODE:-real}"
+model_config_mode="${SINGLEBOX_COVERAGE_MODEL_CONFIG_MODE:-mock}"
 module_manifest="$script_dir/singlebox_coverage_modules.yaml"
 bcs_coverage_dir="$repo_root/src/bcs/target/cov-e2e"
 bcs_line_min="${SINGLEBOX_COVERAGE_BCS_LINE_MIN:-40}"
@@ -50,6 +51,10 @@ Options:
   --bcs-line-min N        BCS runtime line coverage minimum, default: $bcs_line_min
   --bcs-method-min N      BCS runtime method coverage minimum, default: $bcs_method_min
   -h, --help              Show this help
+
+Environment:
+  SINGLEBOX_COVERAGE_MODEL_CONFIG_MODE
+                          OpenClaw model config mode: mock (default), manual, or home
 USAGE
 }
 
@@ -190,19 +195,20 @@ run_real_singlebox() {
   echo "standalone_runtime_dir: $coverage_standalone_runtime"
   echo "coverage_modules: ${coverage_modules[*]}"
   echo "acceptance_targets: ${acceptance_targets[*]}"
+  echo "model_config_mode: $model_config_mode"
   cleanup_real_singlebox() {
     flush_coverage_processes || true
-    env OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE=mock \
+    env OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
       STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
       STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
       bash "$repo_root/scripts/singlebox.sh" --standalone stop all || true
   }
   trap cleanup_real_singlebox EXIT
-  env OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE=mock \
+  env OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
     bash "$repo_root/scripts/singlebox.sh" --standalone setup all
-  env SINGLEBOX_COVERAGE=1 SINGLEBOX_COVERAGE_DIR="$coverage_root/raw" OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE=mock \
+  env SINGLEBOX_COVERAGE=1 SINGLEBOX_COVERAGE_DIR="$coverage_root/raw" OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
     BCS_DEBUG=true BCS_COVERAGE_FORCE_REBUILD="${BCS_COVERAGE_FORCE_REBUILD:-1}" \
     BACKEND_READY_ATTEMPTS="${BACKEND_READY_ATTEMPTS:-120}" \
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
@@ -362,6 +368,7 @@ write_summary_artifacts() {
 
   "${reporter_command[@]}" - \
     "$report_dir" \
+    "$model_config_mode" \
     "$backend_router_hits" \
     "$baas_router_hits" \
     "$acceptance_status" \
@@ -374,11 +381,12 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 report_dir = Path(sys.argv[1])
-backend_router_hits = int(sys.argv[2])
-baas_router_hits = int(sys.argv[3])
-acceptance_status = int(sys.argv[4])
-bcs_e2e_status = int(sys.argv[5])
-acceptance_targets = sys.argv[6:]
+model_config_mode = sys.argv[2]
+backend_router_hits = int(sys.argv[3])
+baas_router_hits = int(sys.argv[4])
+acceptance_status = int(sys.argv[5])
+bcs_e2e_status = int(sys.argv[6])
+acceptance_targets = sys.argv[7:]
 
 
 def metric(covered, total):
@@ -455,7 +463,7 @@ summary = {
     "mode": "real",
     "status": "passed" if acceptance_status == 0 and bcs_e2e_status == 0 else "failed",
     "stack": "standalone start all",
-    "model_config_mode": "mock",
+    "model_config_mode": model_config_mode,
     "acceptance": {
         "status": "passed" if acceptance_status == 0 else "failed",
         "targets": acceptance_targets,
@@ -489,7 +497,7 @@ report_dir.mkdir(parents=True, exist_ok=True)
             "",
             "- mode: real",
             "- stack: standalone start all",
-            "- model config: mock",
+            f"- model config: {model_config_mode}",
             f"- acceptance: {', '.join(acceptance_targets)}",
             f"- backend router hits: {backend_router_hits}",
             "- backend plugin evidence: backend-coverage.json",

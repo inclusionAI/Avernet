@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "name": "世界杯自媒体内容小队",
+  "port_start": 30401,
+  "port_step": 10,
+  "scopes": "local,world-cup,creator-media,world-cup-creator-demo",
+  "bots": [
+    {
+      "source": "operations-director",
+      "profile": "world-cup-operations-director",
+      "name": "世界杯运营总监",
+      "summary": "世界杯自媒体内容小队负责人，负责把用户的内容目标压缩成高层需求简报，发现并组织专业 Bot，与内容主编确认可复用的自定义协作流程，生成、校验并交付工作流 YAML。",
+      "domains": "world-cup-creator-demo,world-cup,football,creator-media,content-operations,workflow-orchestration,team-coordination,state-machine",
+      "skills": "goal-framing,workflow-design,agent-discovery,agent-routing,content-operations,state-machine-yaml-authoring,state-machine-yaml-validation,execution-followup"
+    },
+    {
+      "source": "content-editor",
+      "profile": "world-cup-content-editor",
+      "name": "世界杯内容主编",
+      "summary": "世界杯自媒体内容小队代表，负责把执行输入整理成简短任务简报、确认精简协作流程，并汇总事实、角度、脚本和发布包装形成最终纯文字发布包。",
+      "domains": "world-cup-creator-demo,world-cup,football,creator-media,editorial-planning,content-strategy,audience-segmentation,short-video",
+      "skills": "editorial-brief-normalization,demo-workflow-design,style-compliance-review,audience-fit-review,length-acceptance,final-package-assembly"
+    },
+    {
+      "source": "match-data-researcher",
+      "profile": "world-cup-match-data-researcher",
+      "name": "世界杯赛事数据核查",
+      "summary": "世界杯自媒体内容小队成员，负责按赛前前瞻、赛后复盘或人物故事核验相关赛事事实，记录可靠来源，并在联网失败时安全降级。",
+      "domains": "world-cup-creator-demo,world-cup,football,match-data,fact-checking,source-verification,research,creator-media",
+      "skills": "live-match-research,official-source-prioritization,two-source-verification,claim-audit,fallback-fact-card,source-citation"
+    },
+    {
+      "source": "tactical-analyst",
+      "profile": "world-cup-tactical-analyst",
+      "name": "世界杯战术解说",
+      "summary": "世界杯自媒体内容小队成员，负责从阵型、空间、转换、压迫和比赛转折中提炼内容角度，并按女性球迷、普通群众或专业球迷调整解释深度。",
+      "domains": "world-cup-creator-demo,world-cup,football,tactical-analysis,audience-adaptation,story-angle,creator-media",
+      "skills": "tactical-angle-development,audience-depth-adaptation,jargon-translation,causal-analysis,non-stereotyped-audience-framing"
+    },
+    {
+      "source": "short-video-director",
+      "profile": "world-cup-short-video-director",
+      "name": "世界杯短视频编导",
+      "summary": "世界杯自媒体内容小队成员，负责把事实卡和内容角度写成指定文风、目标受众和目标时长的口播，并生成纯文字分镜。",
+      "domains": "world-cup-creator-demo,world-cup,football,short-video,scriptwriting,storytelling,creator-media,spoken-copy",
+      "skills": "style-conditioned-scriptwriting,target-length-revision,spoken-rhythm-control,timecoded-script,text-storyboard,hook-design"
+    },
+    {
+      "source": "growth-operator",
+      "profile": "world-cup-growth-operator",
+      "name": "世界杯增长运营",
+      "summary": "世界杯自媒体内容小队成员，负责让标题、封面文案、发布说明和标签匹配脚本、平台与目标受众，并给出版权和非欺骗性检查。",
+      "domains": "world-cup-creator-demo,world-cup,football,creator-growth,distribution,platform-copy,audience-segmentation,content-compliance",
+      "skills": "audience-segmentation,style-consistent-packaging,non-deceptive-hook-design,title-writing,hashtag-planning,copyright-risk-review"
+    }
+  ]
+}

@@ -15,7 +15,7 @@ templates:
     tags: [parallel]
     priority: 20
 
-  world-cup-preview-media-copy:
+  world-cup-preview-content-production:
     tags: [parallel]
     priority: 30
 
