@@ -23,17 +23,20 @@ CODE_NO_CONTENT = 204000
 class Envelope[T](BaseModel):
     """Uniform response wrapper for every public endpoint."""
 
+    # All four keys are always present in every response; `data` is nullable
+    # (present but null) rather than absent. Kept required (no defaults) so the
+    # generated OpenAPI marks them required and SDKs don't treat them as omittable.
     code: int = Field(
         description="6-digit code: HTTP status (3) + business subcode (3)."
     )
     message: str = Field(
-        default="OK", description="Human-readable status; always English."
+        description='Human-readable status; always English (e.g. "OK").'
     )
     data: T | None = Field(
-        default=None, description="Response payload; null on errors or empty results."
+        description="Response payload; present but null on errors or empty results."
     )
     request_id: str = Field(
-        default="", description="Trace id; mirrors the X-Trace-Id response header."
+        description="Trace id; mirrors the X-Trace-Id response header."
     )
 
 
@@ -42,7 +45,7 @@ class Page[T](BaseModel):
 
     total: int = Field(description="Total number of items matching the query.")
     items: list[T] = Field(
-        default_factory=list, description="Items on the current page."
+        description="Items on the current page (present, possibly empty)."
     )
 
 
