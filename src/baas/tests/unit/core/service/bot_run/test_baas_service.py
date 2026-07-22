@@ -392,6 +392,7 @@ class TestSendMessage:
                 session_id=SESSION_ID,
                 message="hello",
                 binding_info=binding,
+            timeout=30.0,
             )
             assert response.content == "response content"
             mock_pool.get.assert_awaited_once()
@@ -423,6 +424,7 @@ class TestSendMessage:
                     session_id=SESSION_ID,
                     message="hello",
                     binding_info=binding,
+                timeout=30.0,
                 )
             mock_failed.assert_called_once_with("SESSION-xyz", err_msg="error msg")
 
@@ -450,6 +452,7 @@ class TestSendMessage:
                     session_id=SESSION_ID,
                     message="hello",
                     binding_info=binding,
+                timeout=30.0,
                 )
             mock_failed.assert_called_once_with("SESSION-xyz", err_msg="ws closed")
 
@@ -476,6 +479,7 @@ class TestSendMessage:
                 session_id=SESSION_ID,
                 message="hello",
                 binding_info=binding,
+            timeout=30.0,
             )
             assert response.content == "ok"
             mock_completed.assert_called_once_with(None, result={"content": "ok"})
@@ -502,6 +506,7 @@ class TestSendMessage:
                 session_id=SESSION_ID,
                 message="hello",
                 binding_info=binding,
+            timeout=30.0,
             )
             mock_resolve.assert_called_once()
 
@@ -533,6 +538,7 @@ class TestSendMessage:
                     session_id=SESSION_ID,
                     message="hello",
                     binding_info=binding,
+                timeout=30.0,
                 )
             mock_failed.assert_called_once()
 
@@ -1338,6 +1344,7 @@ class TestSendMessageExtended:
                 session_id=SESSION_ID,
                 message="hello",
                 binding_info=binding,
+            timeout=30.0,
             )
             mock_client.send_message.assert_awaited_once_with(
                 message="hello",
@@ -1378,6 +1385,7 @@ class TestSendMessageExtended:
                 message="hello",
                 binding_info=binding,
                 context=context,
+            timeout=30.0,
             )
             mock_client.send_message.assert_awaited_once_with(
                 message="hello",
@@ -1412,6 +1420,7 @@ class TestSendMessageExtended:
                     session_id=SESSION_ID,
                     message="hello",
                     binding_info=binding,
+                timeout=30.0,
                 )
             mock_failed.assert_called_once_with(
                 "SESSION-xyz", err_msg="DNS resolution failed"
@@ -1444,6 +1453,7 @@ class TestSendMessageExtended:
                     session_id=SESSION_ID,
                     message="hello",
                     binding_info=binding,
+                timeout=30.0,
                 )
 
     @pytest.mark.asyncio
@@ -1469,6 +1479,7 @@ class TestSendMessageExtended:
                 session_id=SESSION_ID,
                 message="hello",
                 binding_info=binding,
+            timeout=30.0,
             )
             mock_pool.get.assert_awaited_once_with(
                 conn_info.target,
@@ -2137,6 +2148,7 @@ class TestSendMessageWaitResult:
                 message="hello",
                 binding_info=binding,
                 wait_result=False,
+            timeout=30.0,
             )
             call_kwargs = mock_client.send_message.call_args[1]
             assert call_kwargs["wait_result"] is False
