@@ -459,10 +459,10 @@ pub async fn list_files(
         Some("Ready") => Some(FileStatus::Ready),
         Some("Deleting") => Some(FileStatus::Deleting),
         Some("Failed") => Some(FileStatus::Failed),
-        Some(_) => {
+        Some(invalid) => {
             return (StatusCode::BAD_REQUEST, Json(json!({
                 "error": "INVALID_INPUT",
-                "message": format!("invalid status value: {}", q.status.unwrap()),
+                "message": format!("invalid status value: {invalid}"),
             }))).into_response();
         }
         None => None,

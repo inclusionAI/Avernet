@@ -285,8 +285,9 @@ PUT 各分片后调一次 `complete`，由 `StoragePlugin::complete_upload` 在�
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `prefix` | string | 否 | 文件名前缀过滤 |
-| `limit` | int | 否 | 默认 100，最大 1000 |
-| `marker` | string | 否 | 不透明分页游标，取自上次的 `next_marker` |
+| `status` | string | 否 | 按状态过滤,取值 `Pending`/`Ready`/`Deleting`/`Failed`(PascalCase);非法值返回 400 |
+| `limit` | int | 否 | 每页条数;默认 100,最大 1000;`limit=0` 视为 100 |
+| `offset` | int | 否 | 跳过条数,默认 0;`offset >= total` 时返回空 items 但 `total` 仍为完整匹配数 |
 
 **响应 200：**
 ```json

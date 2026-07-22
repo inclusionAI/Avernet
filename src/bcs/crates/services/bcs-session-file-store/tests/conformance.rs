@@ -117,4 +117,52 @@ async fn list_offset_total_and_status_filter() {
     assert_eq!(page.items.len(), 1);
     assert_eq!(page.total, 1);
     assert_eq!(page.items[0].status, FileStatus::Ready);
+
+    // offset >= total → empty items, but `total` is still the full match count.
+    let page = repo
+        .list(
+            "s3",
+            SessionFileListParams {
+                prefix: None,
+                status: None,
+                limit: 100,
+                offset: 10,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 0);
+    assert_eq!(page.total, 5);
+
+    // Combined prefix + status filter: only f0 is Ready, and only f0 matches prefix "f-f0".
+    // (params() sets file_name = "f-{id}", so f0's file_name is "f-f0".)
+    let page = repo
+        .list(
+            "s3",
+            SessionFileListParams {
+                prefix: Some("f-f0".to_string()),
+                status: Some(FileStatus::Ready),
+                limit: 100,
+                offset: 0,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.total, 1);
+    // Prefix matches but status doesn't: "f-f1" is Pending, filter Ready → zero.
+    let page = repo
+        .list(
+            "s3",
+            SessionFileListParams {
+                prefix: Some("f-f1".to_string()),
+                status: Some(FileStatus::Ready),
+                limit: 100,
+                offset: 0,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 0);
+    assert_eq!(page.total, 0);
 }
