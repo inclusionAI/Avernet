@@ -529,6 +529,52 @@ class TestGetChatSession:
         assert result["is_new"] is True
 
     @pytest.mark.asyncio
+    async def test_owner_mode_when_call_type_is_empty_string(self, mock_repository, mock_bot_repo, mock_device_provider):
+        """call_type 为空字符串时走 Owner 模式（空字符串转为 None，parse 返回 OWNER）"""
+        bot_with_empty_call_type = {
+            "bot_id": "bot1",
+            "status": "ACTIVE",
+            "binding_id": "binding-123",
+            "call_type": "",  # 空字符串
+        }
+        mock_bot_repo.get_by_id_and_owner.return_value = bot_with_empty_call_type
+        mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
+        mock_repository.get_session.return_value = None
+        mock_device_provider.get_device_connection_v2.return_value = dict(DEVICE_CONN)
+
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
+
+        with patch.object(svc, "_create_session", new=AsyncMock(return_value="session:owner-mode")):
+            result = await svc.get_chat_session("user1", "bot1", "owner1")
+
+        # 验证走的是 Owner 模式的逻辑（没有调用 instance_service）
+        assert result["session_key"] == "session:owner-mode"
+        assert result["is_new"] is True
+
+    @pytest.mark.asyncio
+    async def test_owner_mode_when_call_type_is_explicit_owner(self, mock_repository, mock_bot_repo, mock_device_provider):
+        """call_type 显式为 "owner" 时走 Owner 模式"""
+        bot_with_owner_call_type = {
+            "bot_id": "bot1",
+            "status": "ACTIVE",
+            "binding_id": "binding-123",
+            "call_type": "owner",  # 显式 owner
+        }
+        mock_bot_repo.get_by_id_and_owner.return_value = bot_with_owner_call_type
+        mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
+        mock_repository.get_session.return_value = None
+        mock_device_provider.get_device_connection_v2.return_value = dict(DEVICE_CONN)
+
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
+
+        with patch.object(svc, "_create_session", new=AsyncMock(return_value="session:owner-mode")):
+            result = await svc.get_chat_session("user1", "bot1", "owner1")
+
+        # 验证走的是 Owner 模式的逻辑（没有调用 instance_service）
+        assert result["session_key"] == "session:owner-mode"
+        assert result["is_new"] is True
+
+    @pytest.mark.asyncio
     async def test_caller_mode_binding_id_not_provided_raises_error(self, mock_repository, mock_bot_repo, mock_device_provider):
         """Caller 模式：binding_id 未提供时抛出错误"""
         caller_bot = {
