@@ -9,6 +9,7 @@ import pytest
 from agentclaw.community.core.caller_identity.contracts import (
     CallerCallTypeInvalidError,
     CallerIdentityAmbiguousError,
+    CallerIdentityPermissionError,
     CallerIdentityStage,
     CallerIdentityReadOnlyError,
     CallerLockEpochError,
@@ -17,6 +18,7 @@ from agentclaw.community.core.caller_identity.contracts import (
     DraftCallTypeMutationResult,
     McpCallType,
 )
+from agentclaw.community.core.caller_identity import service as caller_identity_service
 from agentclaw.community.core.caller_identity.credential import CallerToken
 from agentclaw.community.core.caller_identity.repository import (
     CallerIdentityEngineChangedError,
@@ -116,6 +118,43 @@ def test_iam_context_test_exchange_skips_bot_type_and_call_type() -> None:
 
     assert context.should_exchange_caller_token is True
     assert context.bot_call_type is McpCallType.OWNER
+
+
+def test_iam_context_test_exchange_rejects_production_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(caller_identity_service, "get_current_env", lambda: "prod")
+    service, deps = _service(bot=_bot(call_type="owner"))
+
+    with pytest.raises(CallerIdentityPermissionError):
+        service.get_iam_token_context(
+            bot_id="bot-1",
+            stage=CallerIdentityStage.DRAFT,
+            is_test_exchange=True,
+        )
+
+    deps.bot_repository.get_by_id.assert_not_called()
+
+
+def test_test_exchange_authorization_rejects_non_owner() -> None:
+    service, _ = _service(bot=_bot(call_type="owner"))
+
+    with pytest.raises(CallerIdentityPermissionError):
+        service.authorize_iam_token_exchange(
+            caller_user_id="caller-1",
+            owner_user_id="owner-1",
+            is_test_exchange=True,
+        )
+
+
+def test_test_exchange_authorization_allows_owner() -> None:
+    service, _ = _service(bot=_bot(call_type="owner"))
+
+    service.authorize_iam_token_exchange(
+        caller_user_id="owner-1",
+        owner_user_id="owner-1",
+        is_test_exchange=True,
+    )
 
 
 def test_iam_context_default_keeps_non_caller_bot_fast_path() -> None:

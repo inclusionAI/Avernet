@@ -48,6 +48,7 @@ from agentclaw.community.core.caller_identity.repository import (
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 logger = get_logger()
@@ -258,6 +259,12 @@ class CallerIdentityService:
         is_test_exchange: bool = False,
     ) -> CallerIamTokenContext:
         """Resolve whether the IAM request should execute the Caller branch."""
+        if is_test_exchange and get_current_env() == "prod":
+            logger.warning(
+                "caller_test_exchange_rejected bot_id=%s reason=production_environment",
+                bot_id,
+            )
+            raise CallerIdentityPermissionError
         bot = self._get_bot(bot_id, entity_id)
         resolved_stage = CallerIdentityStage(stage)
         # COSEC: temporary browser testing only bypasses the Bot type and
@@ -306,6 +313,20 @@ class CallerIdentityService:
             should_exchange_caller_token=should_exchange,
             binding_id=binding_id,
         )
+
+    def authorize_iam_token_exchange(
+        self,
+        *,
+        caller_user_id: str,
+        owner_user_id: str,
+        is_test_exchange: bool,
+    ) -> None:
+        """Restrict the temporary test-exchange path to the Bot owner."""
+        if is_test_exchange and caller_user_id != owner_user_id:
+            logger.warning(
+                "caller_test_exchange_rejected reason=not_owner",
+            )
+            raise CallerIdentityPermissionError
 
     def exchange_caller_identity(
         self,

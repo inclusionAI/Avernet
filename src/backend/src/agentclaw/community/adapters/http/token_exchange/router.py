@@ -26,7 +26,6 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth import AuthPlugin, AuthRequestContext
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.token_exchange import TokenExchangePlugin
-from agentclaw.community.utils.env_utils import get_current_env
 
 router = APIRouter()
 logger = get_logger()
@@ -162,13 +161,6 @@ async def get_iam_token(
             status_code=400,
             headers=headers,
         )
-    if is_test_exchange and get_current_env() == "prod":
-        logger.warning("caller_test_exchange_rejected reason=production_environment")
-        return JSONResponse(
-            content={"success": False, "error": CallerIdentityPermissionError().detail},
-            status_code=403,
-            headers=headers,
-        )
     if not bot_id:
         return _success_iam_response(iam_token, headers)
 
@@ -207,6 +199,18 @@ async def get_iam_token(
             status_code=409,
             headers=headers,
         )
+    except CallerIdentityPermissionError as exc:
+        logger.warning(
+            "caller_token_context_forbidden bot_id=%s stage=%s test_exchange=%s",
+            bot_id,
+            stage.value,
+            is_test_exchange,
+        )
+        return JSONResponse(
+            content={"success": False, "error": exc.detail},
+            status_code=403,
+            headers=headers,
+        )
     except Exception:
         logger.warning(
             "caller_token_context_unavailable bot_id=%s stage=%s test_exchange=%s",
@@ -241,19 +245,11 @@ async def get_iam_token(
 
     try:
         current_user = await _resolve_current_user(request)
-        if is_test_exchange and current_user.staffId != token_context.owner_id:
-            logger.warning(
-                "caller_test_exchange_rejected bot_id=%s stage=%s reason=not_owner",
-                bot_id,
-                stage.value,
-            )
-            return JSONResponse(
-                content={
-                    "success": False,
-                    "error": CallerIdentityPermissionError().detail,
-                },
-                status_code=403,
-                headers=headers,
+        if is_test_exchange:
+            caller_identity.authorize_iam_token_exchange(
+                caller_user_id=current_user.staffId,
+                owner_user_id=token_context.owner_id,
+                is_test_exchange=True,
             )
         passport = _get_optional_dependency(
             request,
@@ -300,6 +296,18 @@ async def get_iam_token(
         return JSONResponse(
             content={"success": False, "error": exc.code},
             status_code=_caller_error_status(exc.code),
+            headers=headers,
+        )
+    except CallerIdentityPermissionError as exc:
+        logger.warning(
+            "caller_token_exchange_forbidden bot_id=%s stage=%s test_exchange=%s",
+            bot_id,
+            stage.value,
+            is_test_exchange,
+        )
+        return JSONResponse(
+            content={"success": False, "error": exc.detail},
+            status_code=403,
             headers=headers,
         )
     except Exception:

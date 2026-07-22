@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import json
 from datetime import datetime
 from types import SimpleNamespace
@@ -20,16 +19,12 @@ from agentclaw.community.api.caller_identity_service import (
 from agentclaw.community.core.caller_identity.contracts import (
     CallerIamTokenContext,
     CallerIdentityAmbiguousError,
+    CallerIdentityPermissionError,
     McpCallType,
 )
 from agentclaw.community.core.caller_identity.credential import CallerToken
 from agentclaw.community.plugin_api.auth import AuthPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
-
-
-token_exchange_router = importlib.import_module(
-    "agentclaw.community.adapters.http.token_exchange.router"
-)
 
 
 class _Request:
@@ -117,10 +112,7 @@ async def test_iam_route_delegates_caller_exchange_without_returning_token() -> 
 
 
 @pytest.mark.asyncio
-async def test_iam_route_test_exchange_forces_exchange_for_non_caller_context(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(token_exchange_router, "get_current_env", lambda: "pre")
+async def test_iam_route_test_exchange_forces_exchange_for_non_caller_context() -> None:
     identity = MagicMock()
     identity.get_iam_token_context.return_value = CallerIamTokenContext(
         bot_id="bot-1",
@@ -176,10 +168,7 @@ async def test_iam_route_test_exchange_forces_exchange_for_non_caller_context(
 
 
 @pytest.mark.asyncio
-async def test_iam_route_test_exchange_rejects_non_owner(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(token_exchange_router, "get_current_env", lambda: "pre")
+async def test_iam_route_test_exchange_rejects_non_owner() -> None:
     identity = MagicMock()
     identity.get_iam_token_context.return_value = CallerIamTokenContext(
         bot_id="bot-1",
@@ -199,6 +188,7 @@ async def test_iam_route_test_exchange_rejects_non_owner(
             tenantId="tenant-1",
         )
     )
+    identity.authorize_iam_token_exchange.side_effect = CallerIdentityPermissionError()
 
     response = await get_iam_token(
         _Request(
@@ -223,11 +213,9 @@ async def test_iam_route_test_exchange_rejects_non_owner(
 
 
 @pytest.mark.asyncio
-async def test_iam_route_test_exchange_rejects_production_environment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(token_exchange_router, "get_current_env", lambda: "prod")
+async def test_iam_route_test_exchange_rejects_production_environment() -> None:
     identity = MagicMock()
+    identity.get_iam_token_context.side_effect = CallerIdentityPermissionError()
 
     response = await get_iam_token(
         _Request({CallerIdentityServiceProtocol: identity}),
@@ -243,7 +231,13 @@ async def test_iam_route_test_exchange_rejects_production_environment(
         "success": False,
         "error": "CALLER_IDENTITY_FORBIDDEN",
     }
-    identity.get_iam_token_context.assert_not_called()
+    identity.get_iam_token_context.assert_called_once_with(
+        bot_id="bot-1",
+        stage=CallerIdentityStage.DRAFT,
+        publish_id=None,
+        entity_id=None,
+        is_test_exchange=True,
+    )
 
 
 @pytest.mark.asyncio

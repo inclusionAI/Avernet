@@ -75,6 +75,14 @@ class CallerIdentityServiceProtocol(Protocol):
         is_test_exchange: bool = False,
     ) -> CallerIamTokenContext: ...
 
+    def authorize_iam_token_exchange(
+        self,
+        *,
+        caller_user_id: str,
+        owner_user_id: str,
+        is_test_exchange: bool,
+    ) -> None: ...
+
     def exchange_caller_identity(
         self,
         *,
