@@ -294,6 +294,11 @@ class BotRunnerConfig(ConfigSchema):
         ge=0,
         description="单个任务最大执行秒数，默认 660（10分钟+1分钟缓冲）；0=不限；超时自动取消并释放槽位",
     )
+    default_timeout: float = Field(
+        default=30.0,
+        gt=0,
+        description="请求默认超时秒数，metadata 未指定 timeout 时使用",
+    )
 
 
 class BcnUplinkConfigSchema(BaseModel):

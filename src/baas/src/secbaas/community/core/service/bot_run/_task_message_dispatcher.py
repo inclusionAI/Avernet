@@ -62,7 +62,7 @@ class TaskMessageDispatcher:
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         wait_result: bool = True,
-        timeout: int | None = None,
+        timeout: float,
         bot_id: str = "",
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
@@ -96,7 +96,7 @@ class TaskMessageDispatcher:
         message: str,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
-        timeout: int | None = None,
+        timeout: float,
         bot_id: str = "",
     ) -> AsyncIterator[StreamChunk]:
         """流式直传：直接 yield bot_service.send_message_stream 的 chunk。
@@ -195,7 +195,7 @@ class TaskMessageDispatcher:
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         wait_result: bool = True,
-        timeout: int | None = None,
+        timeout: float,
         bot_id: str = "",
         chat_metadata: dict[str, str] | None = None,
     ) -> None:
@@ -217,7 +217,7 @@ class TaskMessageDispatcher:
                     binding_info=binding_info,
                     wait_result=wait_result,
                     context=context,
-                    timeout=timeout,
+                    timeout=max(timeout - 0.2, 0.1),
                     chat_metadata=chat_metadata,
                 )
 

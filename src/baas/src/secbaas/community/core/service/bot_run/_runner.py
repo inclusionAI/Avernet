@@ -89,12 +89,14 @@ class BotRunner:
         bot_service_plugin: BotServicePlugin,
         dispatchers: list[MessageDispatcher],
         system_config_service: SystemConfigManageService | None = None,
+        default_request_timeout: float = 30.0,
     ):
         self._bot_service_selector = bot_service_selector
         self._run_repository = run_repository
         self._bot_service_plugin = bot_service_plugin
         self._dispatchers = dispatchers
         self._system_config_service = system_config_service
+        self._default_request_timeout = default_request_timeout
         self._dispatcher_map: dict[str, MessageDispatcher] = {
             d.__class__.__name__: d for d in self._dispatchers
         }
@@ -224,7 +226,7 @@ class BotRunner:
         Returns:
             Tuple of (message_id, session_id)
         """
-        timeout: int | None = metadata.get("timeout")
+        timeout: float = float(metadata.get("timeout") or self._default_request_timeout)
 
         if message_id is None:
             message_id = str(uuid.uuid4())
@@ -323,7 +325,7 @@ class BotRunner:
         Returns:
             Tuple of (message_id, session_id, AsyncIterator[StreamChunk])
         """
-        timeout: int | None = metadata.get("timeout")
+        timeout: float = float(metadata.get("timeout") or self._default_request_timeout)
 
         if message_id is None:
             message_id = str(uuid.uuid4())

@@ -87,7 +87,7 @@ class BotService(Protocol):
         binding_info: BotBindingInfo,
         wait_result: bool = True,
         context: BotChatContext | None = None,
-        timeout: int | None = None,
+        timeout: float,
         chat_metadata: dict[str, str] | None = None,
     ) -> BotResponse:
         """发送消息并获取响应
@@ -110,7 +110,7 @@ class BotService(Protocol):
         message: str,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
-        timeout: int | None = None,
+        timeout: float,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，返回 StreamChunk 迭代器。
 
@@ -225,7 +225,7 @@ class MessageDispatcher(Protocol):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         wait_result: bool = True,
-        timeout: int | None = None,
+        timeout: float,
         bot_id: str = "",
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
@@ -260,7 +260,7 @@ class MessageDispatcher(Protocol):
         message: str,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
-        timeout: int | None = None,
+        timeout: float,
         bot_id: str = "",
     ) -> AsyncIterator[StreamChunk]:
         """流式消息发送分发，返回 StreamChunk 迭代器。
