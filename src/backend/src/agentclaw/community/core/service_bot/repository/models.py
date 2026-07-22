@@ -275,6 +275,36 @@ class PublishOperationKind(StrEnum):
         """
         return _KIND_BAAS_PUBLISH_TYPES[self]
 
+    @property
+    def sets_deployed_version(self) -> bool:
+        """Whether a *successful* op of this kind sets/replaces which application
+        version is running on its target bot.
+
+        ``True`` for the deploy kinds (first release, upgrade, rollback re-deploy,
+        eval publish); ``False`` for the lifecycle kinds that leave the deployed
+        version unchanged (restart, scale, eval teardown). This is the fence for
+        the online-release liveness scan: a record's completed online release is
+        still the *live* deployment on the shared online bot only while no later
+        ``sets_deployed_version`` op has landed on that bot — a newer upgrade or a
+        rollback re-deploy supersedes it, but a restart / scale does not.
+
+        Every kind is partitioned into exactly one of
+        ``_KINDS_SET_DEPLOYED_VERSION`` / ``_KINDS_PRESERVE_DEPLOYED_VERSION``;
+        ``test_publish_operation_kind_deploy_partition`` asserts the partition, so a
+        newly added kind fails CI until it is classified here.
+        """
+        return self in _KINDS_SET_DEPLOYED_VERSION
+
+    @classmethod
+    def version_setting_kinds(cls) -> frozenset["PublishOperationKind"]:
+        """Kinds whose successful op sets/replaces the deployed version (deploys)."""
+        return _KINDS_SET_DEPLOYED_VERSION
+
+    @classmethod
+    def version_preserving_kinds(cls) -> frozenset["PublishOperationKind"]:
+        """Kinds that leave the deployed version unchanged (restart/scale/teardown)."""
+        return _KINDS_PRESERVE_DEPLOYED_VERSION
+
 
 # The BaaS publish_type(s) each kind's workflow can carry — the adopt-by-query
 # type fence, co-located with the kind it describes (exposed via
@@ -288,6 +318,24 @@ _KIND_BAAS_PUBLISH_TYPES: Dict[PublishOperationKind, frozenset[str]] = {
     PublishOperationKind.EVAL_PUBLISH: frozenset({"CREATE"}),
     PublishOperationKind.EVAL_TEARDOWN: frozenset({"DESTROY", "STOP"}),
 }
+
+# Deploy vs lifecycle partition of every kind (exposed via
+# ``PublishOperationKind.sets_deployed_version``). A deploy kind's completed op
+# marks which version is live on its bot; a lifecycle kind leaves it unchanged.
+# The two sets MUST partition every ``PublishOperationKind`` (asserted by
+# ``test_publish_operation_kind_deploy_partition``): a new kind must be classified
+# into exactly one, or the liveness scan silently mistreats it.
+_KINDS_SET_DEPLOYED_VERSION: frozenset[PublishOperationKind] = frozenset({
+    PublishOperationKind.FIRST_RELEASE,
+    PublishOperationKind.UPGRADE,
+    PublishOperationKind.ROLLBACK_DEPLOY,
+    PublishOperationKind.EVAL_PUBLISH,
+})
+_KINDS_PRESERVE_DEPLOYED_VERSION: frozenset[PublishOperationKind] = frozenset({
+    PublishOperationKind.RESTART,
+    PublishOperationKind.SCALE,
+    PublishOperationKind.EVAL_TEARDOWN,
+})
 
 
 class PublishOperationState(StrEnum):
