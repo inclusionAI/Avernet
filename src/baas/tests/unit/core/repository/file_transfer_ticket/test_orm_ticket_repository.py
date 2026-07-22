@@ -11,10 +11,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from secbaas.community.core.repository.file_transfer_ticket import (
-    TicketRecord,
     OrmTicketRepository,
-)
-from secbaas.community.core.repository.file_transfer_ticket._protocol import (
+    TicketRecord,
     TransferNotFoundError,
     TransferStateConflictError,
 )
