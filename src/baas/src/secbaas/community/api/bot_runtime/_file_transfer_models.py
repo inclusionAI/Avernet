@@ -142,7 +142,6 @@ class GetTransferStatusResponse(BaseModel):
 
     Maps from TicketRecord.  Conditional fields:
     - download_url: only present when status == DONE
-    - upload_url: only present when status == CREATED (resume support)
     - expires_at: intentionally null for transfer queries; OSS presigned URLs
       embed their own expiry via the Expires query parameter
     - error_message: only present when status == FAILED
@@ -154,7 +153,6 @@ class GetTransferStatusResponse(BaseModel):
     filename: str
     device_path: str | None
     download_url: str | None = None
-    upload_url: str | None = None
     expires_at: str | None = None
     error_message: str | None = None
     created_at: str

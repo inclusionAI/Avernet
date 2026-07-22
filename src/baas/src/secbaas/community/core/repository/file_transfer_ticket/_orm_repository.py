@@ -237,13 +237,11 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         transfer_id: str,
         *,
         download_url: str | None = None,
-        upload_url: str | None = None,
     ) -> None:
         log.info(
-            "update_urls: transfer_id=%s, download_url=%s, upload_url=%s",
+            "update_urls: transfer_id=%s, download_url=%s",
             transfer_id,
             bool(download_url),
-            bool(upload_url),
         )
         from sqlalchemy import func
 
@@ -251,11 +249,8 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         update_kwargs: dict = {"gmt_modified": func.now()}
         if download_url is not None:
             update_kwargs["download_url"] = download_url
-        if upload_url is not None:
-            update_kwargs["upload_url"] = upload_url
-
-        if "download_url" not in update_kwargs and "upload_url" not in update_kwargs:
-            return  # no-op: both None
+        else:
+            return  # no-op
 
         result = (
             self._session.query(FileTransferTicketModel)

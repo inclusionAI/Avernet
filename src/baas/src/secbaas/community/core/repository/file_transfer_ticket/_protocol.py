@@ -127,10 +127,9 @@ class TicketRepository(Protocol):
         transfer_id: str,
         *,
         download_url: str | None = None,
-        upload_url: str | None = None,
     ) -> None:
-        """Update download_url and/or upload_url on a ticket.
+        """Update download_url on a ticket.
 
-        Updates only the fields that are not None. Both None is a no-op.
+        Returns early (no-op) when download_url is None.
         """
         ...

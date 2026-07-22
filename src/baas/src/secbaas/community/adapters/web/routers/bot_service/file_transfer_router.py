@@ -535,7 +535,6 @@ async def get_transfer_status(
 
     Returns the transfer's status along with conditional fields:
     - download_url when status == DONE
-    - upload_url when status == CREATED
     - error_message when status == FAILED
     """
     logger.info(
