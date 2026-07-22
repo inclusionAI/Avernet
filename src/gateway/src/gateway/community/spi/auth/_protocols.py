@@ -14,7 +14,7 @@ class AuthPlugin(Protocol):
 
     Implementations:
     - BareAuthPlugin: returns hardcoded user, always-allowed for tests.
-    - SofaAuthPlugin (enterprise): calls buservice API for login.
+    - Enterprise plugin: calls the enterprise SSO / identity API for login.
     """
 
     async def get_login_user(
@@ -41,7 +41,7 @@ class AuthPlugin(Protocol):
             user: The authenticated AuthenticatedUser to check.
 
         Returns:
-            True if the user's operatorName is in the whitelist.
+            True if the user's username is in the whitelist.
         """
         ...
 
@@ -55,7 +55,7 @@ class AuthPlugin(Protocol):
         """Check whether a user has the specified permissions.
 
         Args:
-            user_id: User staff ID (工号).
+            user_id: The user's stable id (``AuthenticatedUser.id``).
             permission_codes: Comma-separated permission codes to check.
             request_url: Optional request URL context.
             request_map: Optional request mapping context.

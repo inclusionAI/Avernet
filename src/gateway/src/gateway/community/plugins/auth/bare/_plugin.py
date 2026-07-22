@@ -21,10 +21,8 @@ class BareAuthPlugin(AuthPlugin):
     ) -> None:
         self._default_user = default_user or AuthenticatedUser(
             id="bare-user-001",
-            operatorName="bare_operator",
-            staffId="000001",
-            nickName="BareUser",
-            realName="Bare User",
+            username="bare_operator",
+            display_name="Bare User",
         )
 
     async def get_login_user(

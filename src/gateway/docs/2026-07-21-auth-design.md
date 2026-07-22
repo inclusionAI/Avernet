@@ -43,7 +43,7 @@
 | **SPI（协议）** | `gateway/community/spi/<能力>/` | `_protocols.py` 协议、`_models.py` 模型、`_errors.py` 异常 |
 | **Plugin（实现）** | `gateway/community/plugins/<能力>/<flavor>/` | 一个能力多份实现，按 flavor 分目录 |
 | **flavor 选择** | `PluginAccessor` + `GATEWAY_RUN_MODE` 环境变量 | `bare`（默认，开源）/ `sofa`（企业，注册 entry point） |
-| **已有身份模型** | `spi/auth/_models.py::AuthenticatedUser` | 工号/花名/租户等，形状同 backend `AuthenticatedIdentity` |
+| **已有身份模型** | `spi/auth/_models.py::AuthenticatedUser` | 中立字段：`id`/`username`/`tenant_id` 等（provider 无关） |
 | **已有 auth 协议骨架** | `spi/auth/_protocols.py::AuthPlugin` | `get_login_user` / `is_allowed` / `check_permission`，第一方为主 |
 | **社区/企业实现样板** | `plugins/auth/bare/_plugin.py::BareAuthPlugin` | 返回硬编码用户；企业版将是 `plugins/auth/sofa/`（BUService） |
 
@@ -80,7 +80,7 @@
 ### 4.1 已有：`AuthenticatedUser` —— 已验证的**终端用户**身份
 
 复用 `spi/auth/_models.py::AuthenticatedUser`。语义：**我们已在自己身份体系里认证过的一个真人**
-（工号 `staffId` 为规范句柄）。它是 `UserPrincipal.subject` 的类型。
+（`id` 为稳定规范标识，`username` 为登录名）。它是 `UserPrincipal.subject` 的类型。
 
 ### 4.2 新增：`ThirdPartyApp` —— 第三方**应用**身份（调用程序本身）
 
@@ -112,13 +112,13 @@ class PrincipalType(StrEnum):
 
 class UserPrincipal(BaseModel):
     type: Literal[PrincipalType.USER] = PrincipalType.USER
-    tenant: str                          # 必填，来自租户令牌，见 §4.6
+    tenant: str                          # 必填；租户 **id**（稳定、非展示名），见 §4.6
     scopes: frozenset[str] = frozenset()
-    subject: AuthenticatedUser                    # 必填
+    subject: AuthenticatedUser           # 必填
 
 class AppPrincipal(BaseModel):
     type: Literal[PrincipalType.THIRD_PARTY_APP] = PrincipalType.THIRD_PARTY_APP
-    tenant: str                          # 必填
+    tenant: str                          # 必填；租户 **id**
     scopes: frozenset[str] = frozenset()
     app: ThirdPartyApp                   # 必填
     on_behalf_of_opaque: str | None = None
@@ -170,19 +170,22 @@ class StrategyParams:
 
 ### 4.6 新增：`tenant` 字段与它的**来源**（本轮重点）
 
-`tenant` 在每个 `Principal` 上**必填**，但**来源随调用方类型而定**——不是所有流量都从令牌来。
+`tenant` 在每个 `Principal` 上**必填**，值是**租户 id**（不是展示名），但**来源随调用方类型而定**——不是所有流量都从令牌来。
 关键约束：租户令牌是密钥，**不能下发给浏览器**，所以第一方前端不能用令牌。
+
+> **用 id 还是 name？—— 用 id。** 展示名（name）可被改名/重命名、不保证唯一，拿它当键会随改名而失效、易冲突。
+> 租户 id 稳定、唯一、不可变；展示名若需要，另存一个字段供 UI 用，不参与鉴权/归属判定。
 
 | 调用方 | 策略 | `tenant` 来源 |
 | --- | --- | --- |
 | 第三方 server | `app_key` | **租户令牌**（`X-Tenant-Token`，`TenantResolver` 校验）+ 与 api-key record 的 tenant **交叉校验** |
-| 我们的前端 / 人工 | `first_party_user` | **从已认证用户身份取**：`subject.tenantId`，取不到再落 `DEFAULT_TENANT` |
+| 我们的前端 / 人工 | `first_party_user` | **从已认证用户身份取**：`subject.tenant_id`，取不到再落 `DEFAULT_TENANT` |
 
 - **租户与身份正交**：租户回答"哪个租户的流量"，身份策略回答"这个租户里的谁在调"。
 - **第三方**：租户令牌是权威来源；与 api-key record 的 tenant 不一致即拒（防止 App 被挂到错误租户）。
   缺失/非法令牌 = 401（第三方流量必需）。
 - **前端**：浏览器带不了令牌，但带了 SSO/登录 cookie；`first_party_user` 本就把它解析成
-  `AuthenticatedUser`，而该身份**已带租户**（`tntInstId`）。于是 `tenant = subject.tenantId or DEFAULT_TENANT`：
+  `AuthenticatedUser`，而该身份**已带租户**（`tenant_id`）。于是 `tenant = subject.tenant_id or DEFAULT_TENANT`：
   - 单租户部署（社区，或只服务一个组织的 corp）→ 自然落到 `DEFAULT_TENANT`（即"前端默认租户"）。
   - 多租户 corp → 直接取登录用户的 SSO 租户，**不会把不同组织的用户串到同一默认租户**（纯静态默认在此有跨租户串数据风险）。
 
@@ -303,7 +306,7 @@ class FirstPartyUserStrategy(AuthStrategy):
             cookie=creds.headers.get("cookie", ""), referer=creds.headers.get("referer"),
         )
         # 前端带不了租户令牌；tenant 从登录用户身份取，取不到落默认租户
-        tenant = user.tenantId or self._default_tenant
+        tenant = user.tenant_id or self._default_tenant
         granted = _first_party_scopes(self._auth, user)   # 由权限插件推导；见注
         return UserPrincipal(tenant=tenant, subject=user, scopes=granted)
 ```
@@ -520,23 +523,24 @@ route_security:
 - 每个组件在自己的 adapter 边界自持 `Principal → 本组件 DTO` 的窄转换器，按 `type` 判别：
 
 ```python
-# 某组件 adapter 边界（示意）
-def project(p: Principal) -> AuthenticatedUser:
+# 某组件 adapter 边界（示意）；ComponentUser 是该组件自有的 DTO（各组件命名不同）
+def project(p: Principal) -> ComponentUser:
     match p:
         case UserPrincipal(subject=u, tenant=t):
-            return AuthenticatedUser(staffId=u.staffId, tenantId=t, operatorName=u.operatorName)
+            # 把中立 subject 映射到本组件 DTO 键的字段上
+            return ComponentUser(user_id=u.id, tenant=t, login=u.username)
         case AppPrincipal(app=a, tenant=t, on_behalf_of_opaque=eu):
-            return AuthenticatedUser.for_app(org=a.developer_org_id, tenantId=t, acting_for=eu)
+            return ComponentUser.for_app(org=a.developer_org_id, tenant=t, acting_for=eu)
 ```
 
 - 组件核心/路由**永不 import** 网关的 `Principal` 类（Rule 7；红线："路由不得直连非 Service-API 类型"）。
 
 | 组件 | 它真正需要的域模型 |
 | --- | --- |
-| backend | `AuthenticatedUser`（staffId/tenantId/operatorName）——已存在 |
+| backend | 自有身份 DTO（登录名 + 规范 id + 租户）——已存在 |
 | engine  | `AuthGateService.verify(token, content, session_id)`——要 caller token + 幂等键 |
 | bcs     | 多半只要 `tenant + scopes + type` |
-| baas    | `developer_org_id`（App 场景）或 `subject.staffId`（用户场景）作为 owner key |
+| baas    | `developer_org_id`（App 场景）或 `subject.id`（用户场景）作为 owner key |
 
 ---
 
@@ -626,7 +630,7 @@ def project(p: Principal) -> AuthenticatedUser:
 - **`AuthenticatedUser`**：已验证的终端用户身份（组件既有模型）。
 - **`ThirdPartyApp`**：第三方应用身份（调用程序本身）。
 - **`Principal`**：网关产出的中立鉴权对象，判别联合 `UserPrincipal | AppPrincipal`，每个成员必带 `tenant`。
-- **租户 / `tenant`**：每个 Principal 必填；来源随调用方——第三方走租户令牌（`TenantResolver`），前端取 `subject.tenantId or DEFAULT_TENANT`（§4.6）。
+- **租户 / `tenant`**：每个 Principal 必填的**租户 id**（稳定、不可变、非展示名）；来源随调用方——第三方走租户令牌（`TenantResolver`），前端取 `subject.tenant_id or DEFAULT_TENANT`（§4.6）。
 - **`AuthStrategy`**：网关侧"构建 Principal 的方式"的命名策略；`build()` 用 `None`/`raise` 区分"不适用"/"非法"。
 - **flavor `bare` / `sofa`**：社区（开源无后端）/ 企业（BUService），由 `GATEWAY_RUN_MODE` 选择。
 - **`xoneid`**（§15）：partner 显式转发的用户令牌 header，`sofa` 侧用 BUService SDK 解析为 `AuthenticatedUser`。
