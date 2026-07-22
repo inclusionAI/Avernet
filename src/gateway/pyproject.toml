@@ -116,6 +116,8 @@ asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
 markers = [
     "integration: marks tests as integration tests",
+    "e2e: marks tests as end-to-end tests (against separately started app)",
+    "baseline: marks tests as baseline / smoke tests",
 ]
 
 # --- 静态类型检查 Pyright 配置 ---
