@@ -243,11 +243,66 @@ class TestHandlePublicApprovalCallback:
                 "friend_approval": "0", "applicant": "op_user"
             }
         })
-        result = svc.handle_public_approval_callback("bot1", "owner1", "puid1", "agree")
+        with patch.object(
+            svc,
+            "_sync_access_mode_and_relations_or_raise",
+        ) as mock_sync:
+            result = svc.handle_public_approval_callback(
+                "bot1", "owner1", "puid1", "agree",
+            )
+
         assert result["success"] is True
         assert result["public"] == "1"
         update_data = bot_repo.update_by_owner.call_args[0][2]
         assert update_data["public"] == "1"
+        mock_sync.assert_called_once_with("bot1", "owner1", "OPEN", "1")
+
+    def test_agree_propagates_auth_sync_failure(self):
+        svc, _, _ = self._make_svc_with_bot({
+            "public_approval": {
+                "puid": "puid1", "status": "PROCESSING",
+                "permission_owner": "caller", "public": "1",
+                "friend_approval": "1", "applicant": "op_user",
+            }
+        })
+
+        with (
+            patch.object(
+                svc,
+                "_sync_access_mode_and_relations_or_raise",
+                side_effect=RuntimeError("auth unavailable"),
+            ),
+            pytest.raises(RuntimeError, match="auth unavailable"),
+        ):
+            svc.handle_public_approval_callback(
+                "bot1", "owner1", "puid1", "agree",
+            )
+
+    def test_agree_callback_can_retry_after_auth_sync_failure(self):
+        svc, _, bot_repo = self._make_svc_with_bot({
+            "public_approval": {
+                "puid": "puid1", "status": "PROCESSING",
+                "permission_owner": "caller", "public": "1",
+                "friend_approval": "1", "applicant": "op_user",
+            }
+        })
+
+        with patch.object(
+            svc,
+            "_sync_access_mode_and_relations_or_raise",
+            side_effect=[RuntimeError("auth unavailable"), None],
+        ) as mock_sync:
+            with pytest.raises(RuntimeError, match="auth unavailable"):
+                svc.handle_public_approval_callback(
+                    "bot1", "owner1", "puid1", "agree",
+                )
+            result = svc.handle_public_approval_callback(
+                "bot1", "owner1", "puid1", "agree",
+            )
+
+        assert result["success"] is True
+        assert bot_repo.update_by_owner.call_count == 2
+        assert mock_sync.call_count == 2
 
     def test_disagree_does_not_change_public(self):
         svc, bot, bot_repo = self._make_svc_with_bot({
@@ -317,9 +372,60 @@ class TestHandleFriendRequestApprovalCallback:
         repo = self._make_repo(record=friend_record)
         repo.accept.return_value = {"id": 1, "status": "ACCEPTED"}
         svc = _make_service(bot_friend_repo=repo)
-        result = svc.handle_friend_request_approval_callback("puid1", "agree", 1)
+        with patch.object(
+            svc,
+            "_create_auth_relationship_for_approval",
+        ) as mock_create_auth:
+            result = svc.handle_friend_request_approval_callback(
+                "puid1", "agree", 1,
+            )
+
         assert result["success"] is True
         repo.accept.assert_called_once_with(1, approval_uuid="puid1")
+        mock_create_auth.assert_called_once_with(friend_record, 1)
+
+    def test_agree_propagates_auth_relationship_failure(self):
+        friend_record = {"id": 1, "status": "PENDING"}
+        repo = self._make_repo(record=friend_record)
+        repo.accept.return_value = {"id": 1, "status": "ACCEPTED"}
+        svc = _make_service(bot_friend_repo=repo)
+
+        with (
+            patch.object(
+                svc,
+                "_create_auth_relationship_for_approval",
+                side_effect=RuntimeError("auth unavailable"),
+            ),
+            pytest.raises(RuntimeError, match="auth unavailable"),
+        ):
+            svc.handle_friend_request_approval_callback(
+                "puid1", "agree", 1,
+            )
+
+        repo.accept.assert_called_once_with(1, approval_uuid="puid1")
+
+    def test_agree_callback_can_retry_after_auth_relationship_failure(self):
+        friend_record = {"id": 1, "status": "PENDING"}
+        repo = self._make_repo(record=friend_record)
+        repo.accept.return_value = {"id": 1, "status": "ACCEPTED"}
+        svc = _make_service(bot_friend_repo=repo)
+
+        with patch.object(
+            svc,
+            "_create_auth_relationship_for_approval",
+            side_effect=[RuntimeError("auth unavailable"), None],
+        ) as mock_create_auth:
+            with pytest.raises(RuntimeError, match="auth unavailable"):
+                svc.handle_friend_request_approval_callback(
+                    "puid1", "agree", 1,
+                )
+            result = svc.handle_friend_request_approval_callback(
+                "puid1", "agree", 1,
+            )
+
+        assert result["success"] is True
+        assert repo.accept.call_count == 2
+        assert mock_create_auth.call_count == 2
 
     def test_agree_accept_fails(self):
         friend_record = {"id": 1, "status": "PENDING"}
@@ -354,6 +460,177 @@ class TestHandleFriendRequestApprovalCallback:
         result = svc.handle_friend_request_approval_callback("puid1", "NOOP", 1)
         assert result["success"] is False
         assert "Unknown" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# _create_auth_relationship_for_approval
+# ---------------------------------------------------------------------------
+
+class TestCreateAuthRelationshipForApproval:
+    @staticmethod
+    def _friend_record():
+        return {
+            "id": 1,
+            "target_bot_id": "bot1",
+            "target_entity_id": "owner1",
+            "requester_entity_id": "friend1",
+        }
+
+    @patch(
+        "agentclaw.community.core.bot_management.utils.resolve_agent_code",
+        return_value="agent_123",
+    )
+    def test_creates_relationship_for_restricted_bot(self, _mock_resolve):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(
+            ext={"friend_approval": "1"},
+        )
+        plugin = MagicMock()
+        plugin.create_relationship.return_value = {"auth_id": 42}
+        svc = _make_service(
+            bot_repository=bot_repo,
+            auth_relationship_plugin=plugin,
+        )
+
+        svc._create_auth_relationship_for_approval(self._friend_record(), 1)
+
+        plugin.create_relationship.assert_called_once_with(
+            work_no="friend1",
+            agent_code="agent_123",
+            description="Authorized by TeamClaw via friend request approval",
+            operator_work_no="owner1",
+            operator_name="owner_nick",
+        )
+
+    @patch(
+        "agentclaw.community.core.bot_management.utils.resolve_agent_code",
+        return_value="agent_123",
+    )
+    def test_already_exists_is_idempotent_success(self, _mock_resolve):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(
+            ext={"friend_approval": "1"},
+        )
+        plugin = MagicMock()
+        plugin.create_relationship.return_value = {
+            "auth_id": None,
+            "already_exists": True,
+        }
+        svc = _make_service(
+            bot_repository=bot_repo,
+            auth_relationship_plugin=plugin,
+        )
+
+        svc._create_auth_relationship_for_approval(self._friend_record(), 1)
+
+        plugin.create_relationship.assert_called_once()
+
+    def test_open_bot_skips_explicit_relationship(self):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(
+            ext={"friend_approval": "0"},
+        )
+        plugin = MagicMock()
+        svc = _make_service(
+            bot_repository=bot_repo,
+            auth_relationship_plugin=plugin,
+        )
+
+        svc._create_auth_relationship_for_approval(self._friend_record(), 1)
+
+        plugin.create_relationship.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "missing_field",
+        ["target_bot_id", "requester_entity_id"],
+    )
+    def test_missing_required_friend_field_fails_closed(self, missing_field):
+        friend_record = self._friend_record()
+        friend_record.pop(missing_field)
+        svc = _make_service()
+
+        with pytest.raises(BotPublicServiceError, match="缺少"):
+            svc._create_auth_relationship_for_approval(friend_record, 1)
+
+    def test_missing_bot_fails_closed(self):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = None
+        svc = _make_service(bot_repository=bot_repo)
+
+        with pytest.raises(BotNotFoundError, match="bot1"):
+            svc._create_auth_relationship_for_approval(
+                self._friend_record(), 1,
+            )
+
+    def test_invalid_bot_ext_propagates_json_error(self):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(ext="invalid-json")
+        svc = _make_service(bot_repository=bot_repo)
+
+        with pytest.raises(ValueError):
+            svc._create_auth_relationship_for_approval(
+                self._friend_record(), 1,
+            )
+
+    @patch(
+        "agentclaw.community.core.bot_management.utils.resolve_agent_code",
+        return_value=None,
+    )
+    def test_missing_agent_code_fails_closed(self, _mock_resolve):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(
+            ext={"friend_approval": "1"},
+        )
+        svc = _make_service(bot_repository=bot_repo)
+
+        with pytest.raises(BotPublicServiceError, match="agent_code"):
+            svc._create_auth_relationship_for_approval(
+                self._friend_record(), 1,
+            )
+
+    @patch(
+        "agentclaw.community.core.bot_management.utils.resolve_agent_code",
+        return_value="agent_123",
+    )
+    def test_none_result_fails_closed(self, _mock_resolve):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(
+            ext={"friend_approval": "1"},
+        )
+        plugin = MagicMock()
+        plugin.create_relationship.return_value = None
+        svc = _make_service(
+            bot_repository=bot_repo,
+            auth_relationship_plugin=plugin,
+        )
+
+        with pytest.raises(BotPublicServiceError, match="授权关系服务返回失败"):
+            svc._create_auth_relationship_for_approval(
+                self._friend_record(), 1,
+            )
+
+    @patch(
+        "agentclaw.community.core.bot_management.utils.resolve_agent_code",
+        return_value="agent_123",
+    )
+    def test_plugin_exception_propagates(self, _mock_resolve):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot(
+            ext={"friend_approval": "1"},
+        )
+        plugin = MagicMock()
+        plugin.create_relationship.side_effect = RuntimeError(
+            "auth unavailable",
+        )
+        svc = _make_service(
+            bot_repository=bot_repo,
+            auth_relationship_plugin=plugin,
+        )
+
+        with pytest.raises(RuntimeError, match="auth unavailable"):
+            svc._create_auth_relationship_for_approval(
+                self._friend_record(), 1,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1024,6 +1301,105 @@ class TestSyncAccessModeAndRelations:
 
 
 # ---------------------------------------------------------------------------
+# _sync_access_mode_and_relations_or_raise
+# ---------------------------------------------------------------------------
+
+class TestSyncAccessModeAndRelationsOrRaise:
+    @patch(
+        "agentclaw.community.core.bot_management.utils.resolve_agent_code",
+        return_value="agent_123",
+    )
+    def test_updates_passport_then_rebuilds_relationships(self, _mock_resolve):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot()
+        passport = MagicMock()
+        svc = _make_service(
+            bot_repository=bot_repo,
+            passport_plugin=passport,
+        )
+
+        with patch.object(svc, "_rebuild_auth_relationships") as mock_rebuild:
+            svc._sync_access_mode_and_relations_or_raise(
+                "bot1", "owner1", "RESTRICTED", "1",
+            )
+
+        passport.update_passport.assert_called_once()
+        assert passport.update_passport.call_args.kwargs["access_mode"] == "RESTRICTED"
+        mock_rebuild.assert_called_once_with(
+            bot_id="bot1",
+            owner_id="owner1",
+            owner_name="owner_nick",
+            agent_code="agent_123",
+            access_mode="RESTRICTED",
+            public="1",
+        )
+
+    def test_raises_when_bot_missing(self):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = None
+        svc = _make_service(bot_repository=bot_repo)
+
+        with pytest.raises(BotNotFoundError, match="bot1"):
+            svc._sync_access_mode_and_relations_or_raise(
+                "bot1", "owner1", "OPEN", "1",
+            )
+
+    @patch(
+        "agentclaw.community.core.bot_management.utils.resolve_agent_code",
+        return_value=None,
+    )
+    def test_raises_when_agent_code_missing(self, _mock_resolve):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot()
+        svc = _make_service(bot_repository=bot_repo)
+
+        with pytest.raises(BotPublicServiceError, match="agent_code"):
+            svc._sync_access_mode_and_relations_or_raise(
+                "bot1", "owner1", "OPEN", "1",
+            )
+
+    @patch(
+        "agentclaw.community.core.bot_management.utils.resolve_agent_code",
+        return_value="agent_123",
+    )
+    def test_wraps_passport_failure(self, _mock_resolve):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot()
+        passport = MagicMock()
+        passport.update_passport.side_effect = RuntimeError("passport unavailable")
+        svc = _make_service(
+            bot_repository=bot_repo,
+            passport_plugin=passport,
+        )
+
+        with pytest.raises(BotPublicServiceError, match="passport unavailable"):
+            svc._sync_access_mode_and_relations_or_raise(
+                "bot1", "owner1", "OPEN", "1",
+            )
+
+    @patch(
+        "agentclaw.community.core.bot_management.utils.resolve_agent_code",
+        return_value="agent_123",
+    )
+    def test_propagates_rebuild_failure(self, _mock_resolve):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = _make_bot()
+        svc = _make_service(bot_repository=bot_repo)
+
+        with (
+            patch.object(
+                svc,
+                "_rebuild_auth_relationships",
+                side_effect=RuntimeError("auth unavailable"),
+            ),
+            pytest.raises(RuntimeError, match="auth unavailable"),
+        ):
+            svc._sync_access_mode_and_relations_or_raise(
+                "bot1", "owner1", "RESTRICTED", "1",
+            )
+
+
+# ---------------------------------------------------------------------------
 # _rebuild_auth_relationships
 # ---------------------------------------------------------------------------
 
@@ -1108,3 +1484,68 @@ class TestRebuildAuthRelationships:
 
         # Should not crash on already_exists
         plugin.create_relationship.assert_called_once()
+
+    def test_open_mode_propagates_delete_failure(self):
+        plugin = MagicMock()
+        plugin.delete_relationships_by_agent.side_effect = RuntimeError(
+            "delete unavailable",
+        )
+        svc = _make_service(auth_relationship_plugin=plugin)
+
+        with pytest.raises(RuntimeError, match="delete unavailable"):
+            svc._rebuild_auth_relationships(
+                bot_id="bot1", owner_id="owner1", owner_name="owner_nick",
+                agent_code="agent_123", access_mode="OPEN", public="1",
+            )
+
+    def test_restricted_public_propagates_friend_list_failure(self):
+        repo = MagicMock()
+        repo.list_approved_friends_for_bot.side_effect = RuntimeError(
+            "friend query unavailable",
+        )
+        svc = _make_service(bot_friend_repo=repo)
+
+        with pytest.raises(RuntimeError, match="friend query unavailable"):
+            svc._rebuild_auth_relationships(
+                bot_id="bot1", owner_id="owner1", owner_name="owner_nick",
+                agent_code="agent_123", access_mode="RESTRICTED", public="1",
+            )
+
+    def test_restricted_mode_propagates_delete_failure(self):
+        plugin = MagicMock()
+        plugin.delete_relationships_by_agent.side_effect = RuntimeError(
+            "delete unavailable",
+        )
+        svc = _make_service(auth_relationship_plugin=plugin)
+
+        with pytest.raises(RuntimeError, match="delete unavailable"):
+            svc._rebuild_auth_relationships(
+                bot_id="bot1", owner_id="owner1", owner_name="owner_nick",
+                agent_code="agent_123", access_mode="RESTRICTED", public="0",
+            )
+
+    def test_restricted_mode_propagates_create_failure(self):
+        plugin = MagicMock()
+        plugin.delete_relationships_by_agent.return_value = 0
+        plugin.create_relationship.side_effect = RuntimeError(
+            "create unavailable",
+        )
+        svc = _make_service(auth_relationship_plugin=plugin)
+
+        with pytest.raises(RuntimeError, match="create unavailable"):
+            svc._rebuild_auth_relationships(
+                bot_id="bot1", owner_id="owner1", owner_name="owner_nick",
+                agent_code="agent_123", access_mode="RESTRICTED", public="0",
+            )
+
+    def test_restricted_mode_treats_none_create_result_as_failure(self):
+        plugin = MagicMock()
+        plugin.delete_relationships_by_agent.return_value = 0
+        plugin.create_relationship.return_value = None
+        svc = _make_service(auth_relationship_plugin=plugin)
+
+        with pytest.raises(BotPublicServiceError, match="授权关系服务返回失败"):
+            svc._rebuild_auth_relationships(
+                bot_id="bot1", owner_id="owner1", owner_name="owner_nick",
+                agent_code="agent_123", access_mode="RESTRICTED", public="0",
+            )
