@@ -558,6 +558,48 @@ class BotService:
             )
             return None
 
+    def _list_bot_members(
+        self, bot_id: str, owner_id: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """List a bot's members (collaborators) for the appcoding-bots response.
+
+        Reads the ``ac_bot_collaborator`` table (added admin/member
+        collaborators) scoped to the current env. The bot owner is intentionally
+        not synthesized as a member here: owner identity lives on the bot record
+        itself (``owner_id`` / ``owner_name``); callers wanting the full roster
+        should combine that with this list.
+
+        Returns an empty list when there are no collaborators, when ``owner_id``
+        is missing, or when the lookup itself fails — member enrichment must
+        never break the coding-bots listing.
+
+        Args:
+            bot_id: Bot ID of the coding bot.
+            owner_id: Bot owner's work number (filters the collaborator index).
+
+        Returns:
+            A list of member dicts with ``user_id`` and ``user_name`` only
+            (operator_id / role / timestamps are not exposed on this public
+            surface).
+        """
+        if not owner_id:
+            return []
+        try:
+            env = get_current_env()
+            collaborators = self._collaborator_repo.list_by_bot(
+                bot_id=bot_id, owner_id=owner_id, env=env,
+            )
+            return [
+                {"user_id": c.user_id, "user_name": c.user_name}
+                for c in collaborators
+            ]
+        except Exception as e:
+            logger.warning(
+                "[bot_service._list_bot_members] Failed: bot_id=%s, owner_id=%s, error=%s",
+                bot_id, owner_id, e,
+            )
+            return []
+
     def _try_acquire_restart_lock(
         self, env: str, entity_id: str, bot_id: str, holder_user_id: str
     ) -> Optional[BotRestartLockRecord]:
@@ -1662,6 +1704,16 @@ class BotService:
                     ext = template_ext_map.get(bot_id)
                     if ext is not None:
                         bot["template_config"] = ext
+                    # Attach bot member (collaborator) information. The owner
+                    # is intentionally NOT included here: it lives on the bot
+                    # record itself (owner_id / owner_name); only added admin/
+                    # member collaborators are returned. Failure is non-fatal:
+                    # an empty list is attached so enrichment never breaks the
+                    # coding-bots list.
+                    bot["members"] = self._list_bot_members(
+                        bot_id=bot_id,
+                        owner_id=bot.get("owner_id"),
+                    )
                     coding_bots.append(bot)
             except Exception as e:
                 logger.warning(
