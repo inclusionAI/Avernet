@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
+from agentclaw.community.adapters.http.auth.dependencies import require_operator
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotService,
