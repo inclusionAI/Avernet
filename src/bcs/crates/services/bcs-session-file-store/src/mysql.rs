@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use bcs_db_api::{DbPlugin, DbRow, DbStatement, DbValue, db_get_column, db_get_column_opt};
+use bcs_db_api::{DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue, db_get_column, db_get_column_opt};
 use bcs_domain::{ActorKind, ActorRef, FileStatus, SessionFile};
 use bcs_service_api::port::repo::{
     NewSessionFileParams, SessionFileListPage, SessionFileListParams, SessionFileRepoPort,
@@ -19,29 +19,44 @@ use bcs_service_api::{ServiceError, ServiceResult};
 // SQL constants
 // ---------------------------------------------------------------------------
 
-/// Column list for SELECT queries (includes owner columns needed to reconstruct ActorRef).
-const SELECT_COLS: &str = "file_id, session_id, file_name, mime_type, size, sha256, \
-    storage_backend, object_handle, status, created_at, updated_at, \
-    owner_actor_kind, owner_actor_id";
+/// Base SELECT columns (everything except the timestamp projections, which are
+/// flavor-aware — see [`MySqlSessionFileStore::select_cols`]).
+const SELECT_BASE_COLS: &str = "file_id, session_id, file_name, mime_type, size, sha256, \
+    storage_backend, object_handle, status, owner_actor_kind, owner_actor_id";
 
 // ---------------------------------------------------------------------------
 // Public type
 // ---------------------------------------------------------------------------
 
-/// MySQL-backed session file metadata repository.
+/// MySQL/SQLite-backed session file metadata repository.
 ///
-/// Unlike `bcs-session-store`, this store needs no `DbSqlFlavor` field: it
-/// relies on DB defaults for timestamps and uses lowercase `json_extract`
-/// (valid on both MySQL and SQLite), so no dialect branching is required.
+/// `created_at`/`updated_at` are NOT stored columns — the table has only the
+/// DB-managed `gmt_create`/`gmt_modified` audit timestamps. The domain fields
+/// are projected from those on read (epoch seconds) in a flavor-aware way
+/// (`UNIX_TIMESTAMP` on MySQL, `strftime('%s', …)` on SQLite), and `list`
+/// orders by `gmt_create`. `json_extract` is lowercase for MySQL/SQLite
+/// portability, so the only dialect branch is the timestamp projection.
 #[derive(Clone)]
 pub struct MySqlSessionFileStore {
     db: Arc<dyn DbPlugin>,
     env: String,
+    flavor: DbSqlFlavor,
 }
 
 impl MySqlSessionFileStore {
+    /// MySQL-backed constructor.
     pub fn new(db: Arc<dyn DbPlugin>, env: String) -> Self {
-        Self { db, env }
+        Self::with_flavor(db, env, DbSqlFlavor::Mysql)
+    }
+
+    /// SQLite-backed constructor (local dev via `bcs-db-local`).
+    pub fn sqlite(db: Arc<dyn DbPlugin>, env: String) -> Self {
+        Self::with_flavor(db, env, DbSqlFlavor::Sqlite)
+    }
+
+    /// Flavor-explicit constructor (used by bootstrap, which knows `db_kind`).
+    pub fn with_flavor(db: Arc<dyn DbPlugin>, env: String, flavor: DbSqlFlavor) -> Self {
+        Self { db, env, flavor }
     }
 }
 
@@ -69,6 +84,35 @@ fn column_u64(row: &DbRow, name: &str) -> u64 {
 fn parse_status(raw: &str) -> ServiceResult<FileStatus> {
     serde_json::from_value(serde_json::Value::String(raw.to_string()))
         .map_err(|e| ServiceError::InternalError(format!("parse status: {e}")))
+}
+
+impl MySqlSessionFileStore {
+    /// Full SELECT column list, projecting `created_at`/`updated_at` (epoch
+    /// seconds) from the DB-managed `gmt_create`/`gmt_modified` in a
+    /// flavor-aware way. `UNIX_TIMESTAMP` is wrapped in `CAST(... AS SIGNED)`
+    /// so MySQL's fractional-timestamp DOUBLE result decodes cleanly to i64
+    /// (SQLite's `strftime('%s', …)` already yields INTEGER).
+    fn select_cols(&self) -> String {
+        let (created, updated) = match self.flavor {
+            DbSqlFlavor::Mysql => (
+                "CAST(UNIX_TIMESTAMP(gmt_create) AS SIGNED) AS created_at",
+                "CAST(UNIX_TIMESTAMP(gmt_modified) AS SIGNED) AS updated_at",
+            ),
+            DbSqlFlavor::Sqlite => (
+                "CAST(strftime('%s', gmt_create) AS INTEGER) AS created_at",
+                "CAST(strftime('%s', gmt_modified) AS INTEGER) AS updated_at",
+            ),
+        };
+        format!("{SELECT_BASE_COLS}, {created}, {updated}")
+    }
+
+    /// Build a SELECT query with the given WHERE clause suffix and params.
+    fn select_sql(&self, where_suffix: &str) -> String {
+        format!(
+            "SELECT {} FROM bcs_session_files WHERE {where_suffix}",
+            self.select_cols()
+        )
+    }
 }
 
 /// Convert a DB row into a `SessionFile`.
@@ -112,11 +156,6 @@ fn row_to_session(row: &DbRow) -> ServiceResult<SessionFile> {
     })
 }
 
-/// Build a SELECT query with the given WHERE clause suffix and params.
-fn select_sql(where_suffix: &str) -> String {
-    format!("SELECT {SELECT_COLS} FROM bcs_session_files WHERE {where_suffix}")
-}
-
 // ---------------------------------------------------------------------------
 // SessionFileRepoPort impl
 // ---------------------------------------------------------------------------
@@ -124,8 +163,10 @@ fn select_sql(where_suffix: &str) -> String {
 #[async_trait]
 impl SessionFileRepoPort for MySqlSessionFileStore {
     async fn insert(&self, params: NewSessionFileParams) -> ServiceResult<SessionFile> {
-        // created_at/updated_at are the business creation time (unix secs) used for
-        // list ordering — NOT expires_at. expires_at lives inside object_handle JSON.
+        // created_at/updated_at are NOT stored columns: the table carries only
+        // DB-managed gmt_create/gmt_modified. The returned row's timestamps are
+        // the application now (≈ DB gmt_create); re-reads (get/list) project
+        // them from gmt_*. expires_at lives inside object_handle JSON.
         let now = now_secs();
         let actor_kind_str = match params.owner.actor_kind {
             ActorKind::Bot => "Bot",
@@ -134,8 +175,8 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
 
         let sql = "INSERT INTO bcs_session_files \
             (env, file_id, session_id, owner_actor_kind, owner_actor_id, file_name, \
-             mime_type, size, storage_backend, object_handle, status, created_at, updated_at) \
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?)";
+             mime_type, size, storage_backend, object_handle, status) \
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending')";
 
         let stmt = DbStatement::with_params(
             sql,
@@ -150,8 +191,6 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
                 DbValue::from(params.size),
                 DbValue::from(params.storage_backend.as_str()),
                 DbValue::from(params.object_handle.as_str()),
-                DbValue::from(now),
-                DbValue::from(now),
             ],
         );
 
@@ -181,7 +220,7 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
         session_id: &str,
         file_id: &str,
     ) -> ServiceResult<Option<SessionFile>> {
-        let sql = select_sql("env = ? AND session_id = ? AND file_id = ? LIMIT 1");
+        let sql = self.select_sql("env = ? AND session_id = ? AND file_id = ? LIMIT 1");
         let rows = self
             .db
             .query(DbStatement::with_params(
@@ -198,7 +237,7 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
     }
 
     async fn get_by_file_id(&self, file_id: &str) -> ServiceResult<Option<SessionFile>> {
-        let sql = select_sql("env = ? AND file_id = ? LIMIT 1");
+        let sql = self.select_sql("env = ? AND file_id = ? LIMIT 1");
         let rows = self
             .db
             .query(DbStatement::with_params(
@@ -221,14 +260,13 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
         status: FileStatus,
         size: u64,
     ) -> ServiceResult<Option<SessionFile>> {
-        let now = now_secs();
         let status_str = serde_json::to_string(&status)
             .map_err(|e| ServiceError::InternalError(format!("serialize status: {e}")))?;
         // The serialized form has surrounding quotes; strip them for the DB TEXT column.
         let status_str = status_str.trim_matches('"');
 
         let update_sql = "UPDATE bcs_session_files \
-            SET object_handle = ?, status = ?, size = ?, updated_at = ? \
+            SET object_handle = ?, status = ?, size = ? \
             WHERE env = ? AND session_id = ? AND file_id = ?";
 
         self.db
@@ -238,7 +276,6 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
                     DbValue::from(object_handle),
                     DbValue::from(status_str),
                     DbValue::from(size),
-                    DbValue::from(now),
                     DbValue::from(self.env.as_str()),
                     DbValue::from(session_id),
                     DbValue::from(file_id),
@@ -257,13 +294,12 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
         file_id: &str,
         status: FileStatus,
     ) -> ServiceResult<Option<SessionFile>> {
-        let now = now_secs();
         let status_str = serde_json::to_string(&status)
             .map_err(|e| ServiceError::InternalError(format!("serialize status: {e}")))?;
         let status_str = status_str.trim_matches('"');
 
         let update_sql = "UPDATE bcs_session_files \
-            SET status = ?, updated_at = ? \
+            SET status = ? \
             WHERE env = ? AND session_id = ? AND file_id = ?";
 
         self.db
@@ -271,7 +307,6 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
                 update_sql,
                 vec![
                     DbValue::from(status_str),
-                    DbValue::from(now),
                     DbValue::from(self.env.as_str()),
                     DbValue::from(session_id),
                     DbValue::from(file_id),
@@ -357,9 +392,10 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
         page_binds.push(DbValue::from(params.offset));
 
         let page_sql = format!(
-            "SELECT {SELECT_COLS} FROM bcs_session_files \
+            "SELECT {} FROM bcs_session_files \
              WHERE {where_clause} \
-             ORDER BY created_at, file_id LIMIT ? OFFSET ?"
+             ORDER BY gmt_create, file_id LIMIT ? OFFSET ?",
+            self.select_cols()
         );
 
         let rows = self
@@ -386,10 +422,11 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
     ) -> ServiceResult<Vec<SessionFile>> {
         // Use lowercase `json_extract` for both MySQL and SQLite portability.
         let sql = format!(
-            "SELECT {SELECT_COLS} FROM bcs_session_files \
+            "SELECT {} FROM bcs_session_files \
              WHERE env = ? AND status = 'Pending' \
              AND CAST(json_extract(object_handle, '$.expires_at') AS INTEGER) < ? \
-             LIMIT ?"
+             LIMIT ?",
+            self.select_cols()
         );
 
         let rows = self
@@ -417,7 +454,7 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
         session_id: &str,
     ) -> ServiceResult<Vec<SessionFile>> {
         // Step 1: SELECT all rows for the session.
-        let select_sql = select_sql("env = ? AND session_id = ?");
+        let select_sql = self.select_sql("env = ? AND session_id = ?");
         let rows = self
             .db
             .query(DbStatement::with_params(

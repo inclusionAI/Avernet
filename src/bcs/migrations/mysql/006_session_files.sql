@@ -19,9 +19,8 @@ CREATE TABLE IF NOT EXISTS `bcs_session_files` (
   `storage_backend` varchar(32) NOT NULL,
   `object_handle` text NOT NULL,
   `status` varchar(16) NOT NULL,
-  `created_at` bigint(20) unsigned NOT NULL,
-  `updated_at` bigint(20) unsigned NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_session_file` (`env`, `session_id`, `file_id`),
-  KEY `idx_session_files_session` (`env`, `session_id`, `created_at`)
+  UNIQUE KEY `uk_env_file_id` (`env`, `file_id`),
+  KEY `idx_session_files_session` (`env`, `session_id`, `gmt_create`)
 ) DEFAULT CHARSET = utf8mb4;

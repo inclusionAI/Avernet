@@ -672,12 +672,11 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         sha256 TEXT,
         storage_backend TEXT NOT NULL,
         object_handle TEXT NOT NULL,
-        status TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
+        status TEXT NOT NULL
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_session_file ON bcs_session_files (env, session_id, file_id)",
-    "CREATE INDEX IF NOT EXISTS idx_session_files_session ON bcs_session_files (env, session_id, created_at)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uk_env_file_id ON bcs_session_files (env, file_id)",
+    "CREATE INDEX IF NOT EXISTS idx_session_files_session ON bcs_session_files (env, session_id, gmt_create)",
 ];
 
 #[derive(Debug, Clone, Copy)]
@@ -890,9 +889,7 @@ async fn ensure_bcs_session_files(db: &dyn DbPlugin) -> DbResult<()> {
                 sha256 TEXT,
                 storage_backend TEXT NOT NULL,
                 object_handle TEXT NOT NULL,
-                status TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
+                status TEXT NOT NULL
             )"
         )).await?;
         db.execute(DbStatement::new(
@@ -900,8 +897,12 @@ async fn ensure_bcs_session_files(db: &dyn DbPlugin) -> DbResult<()> {
              ON bcs_session_files (env, session_id, file_id)"
         )).await?;
         db.execute(DbStatement::new(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uk_env_file_id \
+             ON bcs_session_files (env, file_id)"
+        )).await?;
+        db.execute(DbStatement::new(
             "CREATE INDEX IF NOT EXISTS idx_session_files_session \
-             ON bcs_session_files (env, session_id, created_at)"
+             ON bcs_session_files (env, session_id, gmt_create)"
         )).await?;
     }
     Ok(())

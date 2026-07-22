@@ -143,7 +143,9 @@ fn default_bootstrap_secret_service() -> Arc<dyn bcs_service_api::SecretService>
 /// Build the session-file workspace service for the bootstrap `Services` bundle.
 ///
 /// `db` selects the repo backend:
-/// - `Some(db)` → `MySqlSessionFileStore::new(db, env)` (mysql-backed mode).
+/// - `Some(db)` → `MySqlSessionFileStore::with_flavor(db, env, db_flavor)`; the
+///   flavor MUST accompany `db` (it tells the store which SQL dialect to use
+///   when projecting `created_at`/`updated_at` from `gmt_create`/`gmt_modified`).
 /// - `None` → `MemorySessionFileRepo::new()` (standalone/dev mode).
 ///
 /// The `env` passed here MUST match the env the repo writes into the `env`
@@ -158,6 +160,7 @@ fn build_session_files_service(
     config: &BcsConfig,
     env: String,
     db: Option<Arc<dyn bcs_db_api::DbPlugin>>,
+    db_flavor: Option<DbSqlFlavor>,
     session_repo: Arc<dyn SessionRepoPort>,
 ) -> Arc<dyn bcs_service_api::application::session_files::SessionFileService> {
     use bcs_service_api::port::repo::SessionFileRepoPort;
@@ -182,7 +185,10 @@ fn build_session_files_service(
     }));
 
     let file_repo: Arc<dyn SessionFileRepoPort> = match db {
-        Some(db) => Arc::new(MySqlSessionFileStore::new(db, env.clone())),
+        Some(db) => {
+            let flavor = db_flavor.expect("`db` present implies `db_flavor` present");
+            Arc::new(MySqlSessionFileStore::with_flavor(db, env.clone(), flavor))
+        }
         None => Arc::new(MemorySessionFileRepo::new()),
     };
 
@@ -1254,6 +1260,7 @@ impl Default for BcsServerState {
             .session_files(build_session_files_service(
                 &config,
                 crate::env::resolve_env(),
+                None,
                 None,
                 session_repo.clone(),
             ))
@@ -2405,6 +2412,7 @@ impl BcsServer {
                 &config,
                 crate::env::resolve_env(),
                 None,
+                None,
                 session_repo.clone(),
             ))
             .build()
@@ -2955,6 +2963,7 @@ impl BcsServer {
                 &config,
                 crate::env::resolve_env(),
                 infrastructure_plugins.db(),
+                Some(db_flavor),
                 session_repo.clone(),
             ))
             .build()
