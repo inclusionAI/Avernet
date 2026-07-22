@@ -1162,6 +1162,17 @@ mod tests {
             body.get("session_id").is_none(),
             "shared-file meta response must not expose session_id: {body:?}"
         );
+
+        // Consume via shared_file_content — token-only (no sid, no member
+        // auth), local backend streams with Content-Disposition.
+        let content_uri = format!("/sessions/shared-file/content?token={}", token);
+        let req = auth_request(Method::GET, &content_uri, &app.bot_a_token, None);
+        let (status, _body, cd) = send(&app, req).await;
+        assert_eq!(status, StatusCode::OK, "share content body: {_body:?}");
+        let cd = cd.expect("content-disposition on shared-file content");
+        let s = cd.to_str().unwrap();
+        assert!(s.contains("attachment"), "cd: {s}");
+        assert!(s.contains("share.txt"), "cd: {s}");
     }
 
     #[tokio::test]
@@ -1178,6 +1189,21 @@ mod tests {
         assert_eq!(
             body.get("error").and_then(|v| v.as_str()),
             Some("UNAUTHORIZED")
+        );
+    }
+
+    #[tokio::test]
+    async fn shared_file_content_no_token_is_401() {
+        // Guards the *content* static route wiring: no token ⇒ 401 from the
+        // shared-file handler, not 404 from the `/sessions/{sid}` param route.
+        let app = build_test_app().await;
+        let uri = "/sessions/shared-file/content";
+        let req = auth_request(Method::GET, uri, &app.bot_a_token, None);
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(
+            status,
+            StatusCode::UNAUTHORIZED,
+            "expected 401 for missing token on content, body: {body:?}"
         );
     }
 

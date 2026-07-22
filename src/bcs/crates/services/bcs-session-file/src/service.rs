@@ -625,9 +625,11 @@ impl SessionFileService for SessionFileServiceImpl {
                 row.status,
             )));
         }
-        // NOTE: returns the full SessionFile row. `object_handle` stays internal —
-        // HTTP `to_dto` strips it on serialization. Do NOT call a `redacted()`
-        // helper — there isn't one.
+        // NOTE: returns the full SessionFile row. The HTTP layer is responsible
+        // for not leaking internal/out-of-scope fields: the shared-file *meta*
+        // handler serializes via `to_shared_dto` (strips `object_handle` AND
+        // `session_id`), and the *content* handler streams bytes (no JSON body).
+        // Do NOT call a `redacted()` helper — there isn't one.
         Ok(ShareConsumeResult { file: row })
     }
 
