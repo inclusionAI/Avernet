@@ -71,6 +71,7 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         fileservice_staging_path: str,
         error_message: str | None,
         multipart_session_id: str | None = None,
+        operator: str = "unknown",
     ) -> int:
         log.info(
             "create_ticket: transfer_id=%s, direction=%s, multipart_session_id=%s",
@@ -92,6 +93,7 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
             error_message=error_message,
             multipart_session_id=multipart_session_id,
             env=env,
+            operator=operator,
         )
         self._session.add(row)
         self._session.flush()
