@@ -35,6 +35,10 @@ export type StateMachineNodeStatus =
   | 'retry_scheduled'
   | 'skipped';
 
+export type StateMachineNodeSubStatus =
+  | 'awaiting_response'
+  | 'judging';
+
 export interface StateMachineRun {
   run_id: string;
   definition_id: string;
@@ -76,6 +80,7 @@ export interface StateMachineNode {
   assignee_bot_id?: string;
   started_at?: number;
   completed_at?: number;
+  sub_status?: StateMachineNodeSubStatus;
 }
 
 export interface StateMachineNodeDetailNode {
@@ -103,6 +108,7 @@ export interface StateMachineJudgeOutput {
 
 export interface StateMachineNodeDetailResponse {
   node: StateMachineNodeDetailNode;
+  sub_status?: StateMachineNodeSubStatus;
   judge_outputs?: StateMachineJudgeOutput[];
 }
 
@@ -1430,10 +1436,51 @@ function normalizeStatus(status?: string) {
   return (status || 'unknown').toLowerCase();
 }
 
+function getStatusLabel(status?: string) {
+  const normalized = normalizeStatus(status);
+
+  if (normalized === 'judging') {
+    return 'Judging response';
+  }
+
+  if (normalized === 'awaiting_response') {
+    return 'Awaiting bot response';
+  }
+
+  if (normalized === 'retry_scheduled') {
+    return 'Retry scheduled';
+  }
+
+  return normalized;
+}
+
+function getNodeDisplayStatus(
+  status?: string,
+  subStatus?: StateMachineNodeSubStatus,
+) {
+  return normalizeStatus(status) === 'running' && subStatus
+    ? subStatus
+    : status;
+}
+
 function getStatusTone(status?: string): StatusTone {
   const normalized = normalizeStatus(status);
 
-  if (normalized === 'running' || normalized === 'retry_scheduled') {
+  if (normalized === 'judging') {
+    return {
+      bg: '#f5f3ff',
+      border: '#ddd6fe',
+      text: '#6d28d9',
+      stroke: '#7c3aed',
+      fill: '#ede9fe',
+    };
+  }
+
+  if (
+    normalized === 'running' ||
+    normalized === 'awaiting_response' ||
+    normalized === 'retry_scheduled'
+  ) {
     return {
       bg: '#eff6ff',
       border: '#bfdbfe',
@@ -1503,6 +1550,15 @@ function getStatusTone(status?: string): StatusTone {
 function renderNodeStatusMarker(status: string | undefined) {
   const normalized = normalizeStatus(status);
 
+  if (normalized === 'judging') {
+    return (
+      <>
+        <path d="M -3.2 -3.2 H 3.2 M -3.2 3.2 H 3.2" fill="none" />
+        <path d="M -2.6 -2.8 C -2.6 -0.9, 2.6 0.9, 2.6 2.8 M 2.6 -2.8 C 2.6 -0.9, -2.6 0.9, -2.6 2.8" fill="none" />
+      </>
+    );
+  }
+
   if (
     normalized === 'completed' ||
     normalized === 'success' ||
@@ -1524,7 +1580,11 @@ function renderNodeStatusMarker(status: string | undefined) {
     );
   }
 
-  if (normalized === 'running' || normalized === 'retry_scheduled') {
+  if (
+    normalized === 'running' ||
+    normalized === 'awaiting_response' ||
+    normalized === 'retry_scheduled'
+  ) {
     return <path d="M -1.8 -3.2 L 4 0 L -1.8 3.2 Z" fill="#ffffff" />;
   }
 
@@ -2531,6 +2591,12 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
   const headerTitle = graph ? runQuery || runLabel : runId;
   const selectedNodeStatus =
     selectedRuntimeNode?.status || selectedNode?.status || undefined;
+  const selectedNodeSubStatus =
+    selectedNodeDetail?.sub_status || selectedNode?.sub_status;
+  const selectedNodeDisplayStatus = getNodeDisplayStatus(
+    selectedNodeStatus,
+    selectedNodeSubStatus,
+  );
   const selectedNodeAttempt =
     selectedRuntimeNode?.attempt ?? selectedNode?.attempt;
   const selectedNodeAttemptText = formatNodeAttempt(
@@ -2548,7 +2614,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
       selectedNode.assignee_bot_id ||
       stringifyValue(selectedNode.assignee)
     : '-';
-  const selectedNodeStatusTone = getStatusTone(selectedNodeStatus);
+  const selectedNodeStatusTone = getStatusTone(selectedNodeDisplayStatus);
   const selectedNodeDurationParts = formatDurationParts(
     selectedNodeStarted,
     selectedNodeCompleted,
@@ -2655,7 +2721,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
             <NodeSummaryStatus>
               <NodeStatusSummaryPill $tone={selectedNodeStatusTone}>
                 <NodeStatusDot $tone={selectedNodeStatusTone} />
-                {selectedNodeStatus || 'unknown'}
+                {getStatusLabel(selectedNodeDisplayStatus)}
               </NodeStatusSummaryPill>
             </NodeSummaryStatus>
           </NodeTagRow>
@@ -2734,6 +2800,12 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
         {selectedRuntimeNode?.error ? (
           <InlineNotice $danger>
             <strong>Node error:</strong> {selectedRuntimeNode.error}
+          </InlineNotice>
+        ) : null}
+
+        {selectedNodeSubStatus === 'judging' ? (
+          <InlineNotice>
+            Bot response received. Judging is in progress.
           </InlineNotice>
         ) : null}
 
@@ -2989,7 +3061,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
           <Actions>
             {graph?.run.status ? (
               <StatusPill $tone={getStatusTone(graph.run.status)}>
-                {graph.run.status}
+                {getStatusLabel(graph.run.status)}
               </StatusPill>
             ) : null}
             <IconButton
@@ -3184,7 +3256,11 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
 
                     {layout.nodes.map((layoutNode) => {
                       const { node, x, y, width, height } = layoutNode;
-                      const tone = getStatusTone(node.status);
+                      const displayStatus = getNodeDisplayStatus(
+                        node.status,
+                        node.sub_status,
+                      );
+                      const tone = getStatusTone(displayStatus);
                       const selected = node.node_id === selectedNodeId;
                       const nodePhase = isNodeActiveStatus(node.status)
                         ? 'active'
@@ -3296,7 +3372,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                             strokeWidth="1.8"
                             transform={`translate(${x + width - 1} ${y + 1})`}
                           >
-                            <title>{node.status || 'unknown'}</title>
+                            <title>{getStatusLabel(displayStatus)}</title>
                             <circle
                               cx="0"
                               cy="0"
@@ -3305,7 +3381,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                               stroke="#ffffff"
                               strokeWidth="1.5"
                             />
-                            {renderNodeStatusMarker(node.status)}
+                            {renderNodeStatusMarker(displayStatus)}
                           </g>
                           <foreignObject
                             height="18"

@@ -155,7 +155,7 @@ jobs:
         #   singlebox --standalone --with-bcs-coverage start bcs_bots
         #     -> builds the instrumented bcs in target/cov-e2e/llvm-cov-target,
         #        starts BCS + 5 OpenClaw bots (BCN plugin built by setup_bcn_plugin)
-        #   e2e.sh                      -> 12 user-story cases
+        #   e2e.sh                      -> 13 user-story cases
         #   SIGTERM bcs                 -> flush profraw
         #   singlebox stop bcs_bots     -> tear down
         #   cargo llvm-cov report + endpoint coverage report

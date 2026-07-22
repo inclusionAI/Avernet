@@ -57,7 +57,8 @@ pub use application::collaboration_runtime::{
     PatchGroupCollaborationDefinitionCommand,
     StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineGraphDefinitionView,
     StateMachineGraphEdgeView, StateMachineGraphNodeView, StateMachineRunGraphView,
-    StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineRunView,
+    StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineNodeSubStatus,
+    StateMachineRunView,
     UpgradeGroupCollaborationDefinitionCommand,
 };
 pub use application::collaboration_template::{
