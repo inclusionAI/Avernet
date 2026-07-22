@@ -11,6 +11,15 @@ renders the full contract. **Delivery-first, two milestones:** Milestone 1 lands
 contract + one representative group (`bots`) and goes up for review to unblock the gateway
 and backend teams; Milestone 2 adds the remaining six groups.
 
+> **Why define response models on a pass-through gateway?** The models are consumed at runtime
+> only by FastAPI's **OpenAPI generation** (serving `/openapi.json` / the runtime publish-register
+> module) — that is their sole purpose here. When the gateway later proxies real traffic, the
+> handler returns the downstream response as a raw `Response`, which FastAPI forwards **without**
+> applying `response_model`; the gateway never constructs an `Envelope` for actual traffic. The
+> backend produces the envelope; the gateway defines the contract and relays. `Envelope` lives in
+> its own shared contract module so the backend can reuse the same definition rather than declaring
+> a second one.
+
 ## Affected Components
 
 - `src/gateway/src/gateway/community/adapters/web/` — **all changes live here.** New routers +
