@@ -37,6 +37,7 @@ user_router = APIRouter(prefix="/api/v1/user", tags=["user"])
 @user_router.get("", response_model=ApiResponse[list[UserItem]])
 async def list_users(
     user_type: str | None = None,
+    user: AuthenticatedUser = Depends(require_operator),  # noqa: B008
     svc: UserServiceProtocol = Injected(UserServiceProtocol),
 ) -> ApiResponse[list[UserItem]]:
     records = svc.list_users(user_type=user_type)
@@ -58,6 +59,7 @@ async def list_users(
 async def get_user(
     user_type: str,
     user_id: str,
+    user: AuthenticatedUser = Depends(require_operator),  # noqa: B008
     svc: UserServiceProtocol = Injected(UserServiceProtocol),
 ) -> ApiResponse[UserItem | None]:
     try:
@@ -78,6 +80,7 @@ async def get_user(
 @user_router.post("", response_model=ApiResponse[dict])
 async def upsert_user(
     req: UpsertUserRequest,
+    user: AuthenticatedUser = Depends(require_operator),  # noqa: B008
     svc: UserServiceProtocol = Injected(UserServiceProtocol),
 ) -> ApiResponse[dict]:
     svc.upsert_user(user_id=req.user_id, user_type=req.user_type, status=req.status)
