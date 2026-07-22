@@ -467,25 +467,34 @@ POST /v1/apps/self/usage:
 
 ### 8.2 网关消费视图：单张路由表（构建期聚合）
 
+**键的语法：`"[METHOD ]<path-glob>"` —— method 是可选前缀。** 省略 method 即对该 path 的**所有方法**生效；
+只有当同一 path 需要**按方法区分策略**时才写 method。绝大多数规则都不写 method。
+
 ```yaml
-# 一张表；键是 (可选 METHOD +) path 模式；更具体者优先
+# 更具体的键覆盖更一般的键（method 可有可无，与"具体度"无关）
 route_security:
-  "/**":                              [ first_party_user ]                # 顶层默认
-  "POST /open_api/**":                [ app_key: {} ]
-  "POST /open_api/v1/bots/{id}/chat": [ app_key: { scopes: [bots:chat] } ]
+  "/**":                          [ first_party_user ]                    # 顶层默认，无 method
+  "/open_api/**":                 [ app_key: {} ]                          # 无 method：该前缀所有方法都用 app_key
+  "/open_api/v1/bots/{id}/chat":  [ app_key: { scopes: [bots:chat] } ]    # 仍无 method，只是 path 更具体
+  "GET /open_api/v1/bots/{id}":   [ app_key: { scopes: [bots:read] } ]    # 仅此处需按方法区分，才写 method
 ```
+
+> §8.1 是随每个 HTTP operation 写的，天然自带 method+path；编译进本表后就是带 method 的具体规则。
+> 本表在此之上还允许**手写 method-optional 的前缀默认**（如 `/open_api/**`）来收敛约定。
 
 ### 8.3 匹配规则（每次请求）
 
 ```
 1. 取所有 pattern 命中当前 (method, path) 的规则
 2. 选**最具体**的一条：
-     - 带 method 的胜过不带 method 的
-     - 字面前缀更长 / 通配符更少者更具体（/open_api/v1/** 胜过 /open_api/**，胜过 /**）
+     - 先比 path：字面前缀更长 / 通配符更少者更具体（/open_api/v1/** 胜过 /open_api/**，胜过 /**）
+     - path 相同时才看 method：带 method 且匹配当前方法的，胜过不带 method 的
+       （method 只是"同一 path 下更精确的限定"，不是必填项）
 3. 命中规则整条生效（不与更一般规则做字段合并——行为可预测）
 4. "/**" 兜底必命中；若刻意留空且无命中 → fail-closed 拒绝
 ```
 
+- **method 可选**：不写就覆盖该 path 的所有方法；要按方法分策略时才加。
 - **单一默认**：`"/**"` 就是那条"顶层默认"，天然被更具体规则覆盖。
 - **整条覆盖，不合并**。
 - **CI 门禁**（呼应 `docs/arch/ci.enforce.md`）：每条对第三方暴露的 route 必须能解析到一条 requirement，
