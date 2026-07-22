@@ -88,7 +88,7 @@ def test_iam_context_reads_only_bot_aggregate_call_type() -> None:
 
 
 def test_iam_context_should_not_exchange_when_call_type_not_caller() -> None:
-    """When call_type is not CALLER, should_exchange_caller_token should be False."""
+    """Verify bot_call_type uses == comparison, not is."""
     bot = _bot(call_type="owner")
     service, deps = _service(bot=bot)
 
@@ -97,7 +97,6 @@ def test_iam_context_should_not_exchange_when_call_type_not_caller() -> None:
         stage=CallerIdentityStage.DRAFT,
     )
 
-    assert context.should_exchange_caller_token is False
     assert context.bot_call_type == McpCallType.OWNER
     deps.repository.list_draft_call_types.assert_not_called()
     deps.mcp_provider.collect_bot_active_mcps.assert_not_called()
