@@ -105,7 +105,6 @@ impl SessionFileService for NoopSessionFileService {
 
     async fn share_consume(
         &self,
-        _session_id: &str,
         _token: &str,
     ) -> Result<ShareConsumeResult, SessionFileUseCaseError> {
         Err(SessionFileUseCaseError::NotFound(NOT_SUPPORTED.into()))

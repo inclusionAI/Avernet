@@ -345,11 +345,11 @@ fn build_api_routes() -> Router<HttpAppState> {
             post(routes::session_files::share_mint),
         )
         .route(
-            "/sessions/{sid}/shared-file",
+            "/sessions/shared-file",
             get(routes::session_files::shared_file_meta),
         )
         .route(
-            "/sessions/{sid}/shared-file/content",
+            "/sessions/shared-file/content",
             get(routes::session_files::shared_file_content),
         )
         // Proxy byte ingestion (PUT .../content) is merged with the default

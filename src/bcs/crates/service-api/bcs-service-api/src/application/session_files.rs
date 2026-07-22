@@ -165,7 +165,6 @@ pub trait SessionFileService: Send + Sync {
     /// Verify share token (no session auth), return the file (must be Ready).
     async fn share_consume(
         &self,
-        session_id: &str,
         token: &str,
     ) -> Result<ShareConsumeResult, SessionFileUseCaseError>;
 

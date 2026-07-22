@@ -595,9 +595,8 @@ impl SessionFileService for SessionFileServiceImpl {
             .clone()
             .unwrap_or_else(|| self.cfg.bcs_base_url.clone());
         let share_url = format!(
-            "{}/sessions/{}/shared-file/content?token={}",
+            "{}/sessions/shared-file/content?token={}",
             base,
-            urlencoding::encode(&cmd.session_id),
             token,
         );
         Ok(ShareMintResult {
@@ -609,7 +608,6 @@ impl SessionFileService for SessionFileServiceImpl {
 
     async fn share_consume(
         &self,
-        session_id: &str,
         token: &str,
     ) -> Result<ShareConsumeResult, SessionFileUseCaseError> {
         let payload = share_token_decode_and_verify(token, &self.cfg.share_secret)
@@ -617,18 +615,10 @@ impl SessionFileService for SessionFileServiceImpl {
         let row = self
             .cfg
             .repo
-            .get(session_id, &payload.file_id)
+            .get_by_file_id(&payload.file_id)
             .await
             .map_err(SessionFileUseCaseError::Internal)?
             .ok_or_else(|| SessionFileUseCaseError::NotFound(format!("file {}", payload.file_id)))?;
-        // sid mismatch: token pointed at a different session — surface as NotFound
-        // so we never reveal that the file_id behind the token exists elsewhere.
-        if row.session_id != session_id {
-            return Err(SessionFileUseCaseError::NotFound(format!(
-                "file {} not in session {}",
-                payload.file_id, session_id,
-            )));
-        }
         if row.status != FileStatus::Ready {
             return Err(SessionFileUseCaseError::InvalidState(format!(
                 "file status {:?} not Ready — cannot consume share",
@@ -1277,10 +1267,10 @@ mod tests {
         let (s, _, _) = build_svc(local_caps());
         let file_id = prepare_complete(&s).await;
         let r = s.share_mint(share_cmd(&file_id, &["human_1"])).await.unwrap();
-        assert!(r.share_url.contains("/sessions/g1%3Aabcd1234/shared-file/content?token="));
+        assert!(r.share_url.contains("/sessions/shared-file/content?token="));
         assert!(!r.share_token.is_empty());
         assert!(r.expires_at > now_secs());
-        let consumed = s.share_consume("g1:abcd1234", &r.share_token).await.unwrap();
+        let consumed = s.share_consume(&r.share_token).await.unwrap();
         assert_eq!(consumed.file.file_id, file_id);
         assert_eq!(consumed.file.status, FileStatus::Ready);
     }
@@ -1312,7 +1302,7 @@ mod tests {
             &ShareTokenPayload { v: 1, file_id: file_id.clone(), exp },
             b"k",
         );
-        let err = s.share_consume("g1:abcd1234", &token).await.unwrap_err();
+        let err = s.share_consume(&token).await.unwrap_err();
         assert!(matches!(err, SessionFileUseCaseError::InvalidState(_)));
     }
 
@@ -1327,20 +1317,10 @@ mod tests {
         let last = chars[last_idx];
         chars[last_idx] = if last == 'a' { 'b' } else { 'a' };
         let tampered: String = chars.into_iter().collect();
-        let err = s.share_consume("g1:abcd1234", &tampered).await.unwrap_err();
+        let err = s.share_consume(&tampered).await.unwrap_err();
         // Tampered token → InvalidInput (per `From<ShareTokenError>` mapping)
         // or InvalidSignature → InvalidInput.
         assert!(matches!(err, SessionFileUseCaseError::InvalidInput(_)));
-    }
-
-    #[tokio::test]
-    async fn share_consume_wrong_session_rejected_as_not_found() {
-        let (s, _, _) = build_svc(local_caps());
-        let file_id = prepare_complete(&s).await;
-        let r = s.share_mint(share_cmd(&file_id, &["human_1"])).await.unwrap();
-        // Different session — even a valid token must NOT reveal existence.
-        let err = s.share_consume("g1:different", &r.share_token).await.unwrap_err();
-        assert!(matches!(err, SessionFileUseCaseError::NotFound(_)));
     }
 
     #[tokio::test]
@@ -1348,7 +1328,7 @@ mod tests {
         let (s, _, _) = build_svc_parts_for_share_base();
         let file_id = prepare_complete(&s).await;
         let r = s.share_mint(share_cmd(&file_id, &["human_1"])).await.unwrap();
-        assert!(r.share_url.starts_with("https://share.example.com/sessions/g1%3Aabcd1234/shared-file/content?token="));
+        assert!(r.share_url.starts_with("https://share.example.com/sessions/shared-file/content?token="));
     }
 
     fn build_svc_parts_for_share_base() -> (SessionFileServiceImpl, Arc<dyn StoragePlugin>, Arc<dyn SessionFileRepoPort>) {

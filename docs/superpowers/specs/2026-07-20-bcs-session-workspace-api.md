@@ -333,7 +333,7 @@ Bearer token 不泄漏给 OSS；OSS 预签名 URL 自带 query 签名，自洽�
 为 `Ready` 的文件生成一个**不校验会话权限**的分享链接：拿到链接者凭 token 即可下载/查元信息，
 过期失效。token 为无状态签名（HMAC-SHA256，对标 invite/register token 方案，但**使用独立密钥**
 `[session_files.share] token_secret`，不复用 invite 密钥）。**token payload = `{ file_id, exp, version }`**
-（**不含 `session_id`**——`file_id` 全局唯一，消费端凭 `file_id` 查行取得 `session_id` 与路径 `{sid}` 比对）。无状态意味着**不可撤销**（未过期前一直
+（**不含 `session_id`**——`file_id` 全局唯一，消费端凭 `file_id` 查行）。无状态意味着**不可撤销**（未过期前一直
 有效）；撤销方式 = 删除文件（删除后 token 验证时查 DB 行失败 → `404`）或等自然过期。无 DB 表、
 无活跃分享列表。
 
@@ -352,23 +352,24 @@ Bearer token 不泄漏给 OSS；OSS 预签名 URL 自带 query 签名，自洽�
 **响应 201：**
 ```json
 {
-  "share_url": "http://{bcs-host}/sessions/g1:a1b2c3d4/shared-file/content?token=eyJ...",
+  "share_url": "http://{bcs-host}/sessions/shared-file/content?token=eyJ...",
   "share_token": "eyJ...",
   "expires_at": 1721466000
 }
 ```
 
-`share_url` 指向 BCS 自有的 `GET .../shared-file/content?token=` 端点（见 1.9.c），可直接分发/点击。
+`share_url` 指向 BCS 自有的 `GET /sessions/shared-file/content?token=` 端点（见 1.9.c），可直接分发/点击。
 文件需 `Ready`，否则 `422 INVALID_STATE`。
 
-### 1.9.b 查询分享文件元信息 — `GET /sessions/{sid}/shared-file?token={token}`
+### 1.9.b 查询分享文件元信息 — `GET /sessions/shared-file?token={token}`
 
-**权限：无** —— 仅校验 token 签名 + 过期 + `{sid}` 与文件 `session_id` 一致，**跳过会话成员鉴权**。
+**权限：无** —— 仅校验 token 签名 + 过期，**跳过会话成员鉴权**。`token` query 参数为**必填**，
+缺失返回 `401 UNAUTHORIZED`。元信息响应**不含 `session_id`**（token 仅携带 `file_id`，
+消费端无需也不应知晓源会话）。
 
 ```json
 {
   "file_id": "01HZX...",
-  "session_id": "g1:a1b2c3d4",
   "file_name": "report.pdf",
   "mime_type": "application/pdf",
   "size": 1048576,
@@ -381,13 +382,11 @@ Bearer token 不泄漏给 OSS；OSS 预签名 URL 自带 query 签名，自洽�
 }
 ```
 
-返回裁剪后的 `SessionFile`（`object_handle` 为内部句柄，不透出任何客户端——分享响应与普通响应均不含）。`{sid}`
-此处仅作路径命名空间与一致性校验（token 解出的 `file_id` 查行后，若行 `session_id` ≠ 路径 `{sid}`
-返 `404`），不参与鉴权。
+返回裁剪后的 `SessionFile`（`object_handle` 与 `session_id` 均不透出——分享响应与普通响应均不含 `object_handle`）。
 
-### 1.9.c 下载分享文件字节 — `GET /sessions/{sid}/shared-file/content?token={token}`
+### 1.9.c 下载分享文件字节 — `GET /sessions/shared-file/content?token={token}`
 
-**权限：无**（同 1.9.b 的校验，跳过成员鉴权）。字节路由复用 1.8：
+**权限：无**（token 校验后跳过成员鉴权）。`token` query 参数为**必填**。字节路由复用 1.8：
 - 预签名后端：**302 跳转** 到 `StoragePlugin::presign_get` 签名 URL，**有效期取 token 过期与后端
   预签名 TTL 的更早者**（确保分享链接过期后该 URL 亦不可用）。跨主机重定向**必须剥离 `Authorization`
   头（同 §1.8：`bcs-cli` 显式配置 `RedirectPolicy`，不依赖默认）。
@@ -397,14 +396,15 @@ Bearer token 不泄漏给 OSS；OSS 预签名 URL 自带 query 签名，自洽�
 ### 错误（1.9.b / 1.9.c 共用）
 
 > **安全设计（关闭 oracle）：`share_consume` 统一返回 `404 NOT_FOUND`。**
-> 无鉴权端点在 token 过期/无效/篡改、文件不存在/非 Ready、`sid` 不匹配等**所有失败模式**
+> 无鉴权端点在 token 过期/无效/篡改、文件不存在/非 Ready 等**所有失败模式**
 > 下均返回统一的 `404 NOT_FOUND`（`{"error":"NOT_FOUND","message":"shared file not found"}`），
 > 不区分具体原因。服务层内部仍保留 `SessionFileUseCaseError` 的细粒度变体
 > （`InvalidInput`/`InvalidState`/`NotFound`/…），该区分仅用于服务层测试，不暴露到 HTTP。
 > 此设计杜绝了 token 持有者通过 HTTP 状态码探测文件是否存在/是否过期/签名是否有效的信息泄漏。
 
+- `401 UNAUTHORIZED` —— token query 参数缺失（1.9.b / 1.9.c 共用）；
 - `404 NOT_FOUND` —— `share_consume` 所有失败模式统一返回（token 过期/无效/篡改、版本不支持、
-  文件已删/非 Ready/`sid` 不匹配等），不泄漏具体原因；
+  文件已删/非 Ready 等），不泄漏具体原因；
 - `502 STORAGE_BACKEND` —— 后端取字节失败（仅 1.9.c 下载流阶段）。
 - 1.9.a 另有：`403 FORBIDDEN`（非上传者/创建者/driver）、`404 FILE_NOT_FOUND`、`422 INVALID_STATE`。
 

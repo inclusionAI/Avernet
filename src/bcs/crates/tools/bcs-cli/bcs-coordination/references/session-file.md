@@ -34,7 +34,7 @@ prepare → PUT → complete
 
 - 分享链接使用独立密钥签发，过期前不可撤销
 - 删除文件即令分享链接失效
-- 返回的 `share_url` 为裸 URL，下载无需 CLI 子命令（直接 HTTP GET 即可）
+- 返回的 `share_url` 为裸 URL（格式 `{base}/sessions/shared-file/content?token=...`），不含 session id——消费端凭 token 即可下载，无需 CLI 子命令（直接 HTTP GET 即可）
 
 ## 权限
 
@@ -179,12 +179,13 @@ bcs session file share --session "grp-001:1a2b3c4d" --file-id "f1a2b3c4" --ttl 8
 
 ```json
 {
-  "share_url": "https://bcs.example.com/files/shared/AbCdEf123456",
-  "expires_at": 1716789012345
+  "share_url": "https://bcs.example.com/sessions/shared-file/content?token=eyJ...",
+  "share_token": "eyJ...",
+  "expires_at": 1721466000
 }
 ```
 
-> 返回的 `share_url` 为裸 URL，接收方直接 HTTP GET 即可下载，无需 CLI 子命令。分享链接使用独立密钥签发，有效期到期后自动失效；删除源文件也会令分享链接失效。
+> 返回的 `share_url` 为裸 URL（不含 session id），接收方直接 HTTP GET 即可下载，无需 CLI 子命令。
 
 ---
 

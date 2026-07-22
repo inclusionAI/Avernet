@@ -89,6 +89,16 @@ impl SessionFileRepoPort for MemorySessionFileRepo {
             .cloned())
     }
 
+    async fn get_by_file_id(&self, file_id: &str) -> ServiceResult<Option<SessionFile>> {
+        Ok(self
+            .rows
+            .read()
+            .await
+            .values()
+            .find(|r| r.file_id == file_id)
+            .cloned())
+    }
+
     async fn update_object_handle_and_status(
         &self,
         session_id: &str,

@@ -197,6 +197,22 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
         Ok(rows.into_iter().next().map(|r| row_to_session(&r)).transpose()?)
     }
 
+    async fn get_by_file_id(&self, file_id: &str) -> ServiceResult<Option<SessionFile>> {
+        let sql = select_sql("env = ? AND file_id = ? LIMIT 1");
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                &sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(file_id),
+                ],
+            ))
+            .await
+            .map_err(|e| ServiceError::InternalError(format!("session file get_by_file_id: {e}")))?;
+        Ok(rows.into_iter().next().map(|r| row_to_session(&r)).transpose()?)
+    }
+
     async fn update_object_handle_and_status(
         &self,
         session_id: &str,

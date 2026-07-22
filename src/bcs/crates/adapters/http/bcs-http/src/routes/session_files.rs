@@ -94,6 +94,43 @@ fn status_slug(status: &FileStatus) -> &'static str {
     }
 }
 
+/// Wire DTO for the shared-file meta endpoint — omits `session_id` so the
+/// share consumer never learns which session the file belongs to.
+#[derive(serde::Serialize)]
+struct SharedFileMetaDto {
+    file_id: String,
+    file_name: String,
+    mime_type: String,
+    size: u64,
+    sha256: Option<String>,
+    owner: ActorRefDto,
+    storage_backend: String,
+    status: String,
+    created_at: u64,
+    updated_at: u64,
+}
+
+fn to_shared_dto(f: &SessionFile) -> SharedFileMetaDto {
+    SharedFileMetaDto {
+        file_id: f.file_id.clone(),
+        file_name: f.file_name.clone(),
+        mime_type: f.mime_type.clone(),
+        size: f.size,
+        sha256: f.sha256.clone(),
+        owner: ActorRefDto {
+            actor_kind: match f.owner.actor_kind {
+                ActorKind::Bot => "Bot".to_string(),
+                ActorKind::Human => "Human".to_string(),
+            },
+            actor_id: f.owner.actor_id.clone(),
+        },
+        storage_backend: f.storage_backend.clone(),
+        status: status_slug(&f.status).to_string(),
+        created_at: f.created_at,
+        updated_at: f.updated_at,
+    }
+}
+
 fn to_dto(f: &SessionFile) -> SessionFileDto {
     SessionFileDto {
         file_id: f.file_id.clone(),
@@ -628,27 +665,25 @@ pub async fn share_mint(
 
 pub async fn shared_file_meta(
     State(state): State<HttpAppState>,
-    Path(sid): Path<String>,
     Query(q): Query<DownloadQuery>,
 ) -> Response {
     let Some(token) = q.token else {
         return unauthorized();
     };
-    match state.services.session_files.share_consume(&sid, &token).await {
-        Ok(r) => (StatusCode::OK, Json(json!(to_dto(&r.file)))).into_response(),
+    match state.services.session_files.share_consume(&token).await {
+        Ok(r) => (StatusCode::OK, Json(json!(to_shared_dto(&r.file)))).into_response(),
         Err(_) => share_consume_err_to_response(),
     }
 }
 
 pub async fn shared_file_content(
     State(state): State<HttpAppState>,
-    Path(sid): Path<String>,
     Query(q): Query<DownloadQuery>,
 ) -> Response {
     let Some(token) = q.token else {
         return unauthorized();
     };
-    match state.services.session_files.share_consume(&sid, &token).await {
+    match state.services.session_files.share_consume(&token).await {
         Ok(r) => {
             let sid_owned = r.file.session_id.clone();
             let fid = r.file.file_id.clone();
@@ -1109,11 +1144,8 @@ mod tests {
             .to_string();
         assert!(!token.is_empty());
 
-        // Consume via shared_file_meta — 200 with file DTO.
-        let meta_uri = format!(
-            "/sessions/{}/shared-file?token={}",
-            app.sid, token
-        );
+        // Consume via shared_file_meta — 200 with file DTO, no session_id in response.
+        let meta_uri = format!("/sessions/shared-file?token={}", token);
         let req = auth_request(Method::GET, &meta_uri, &app.bot_a_token, None);
         let (status, body, _) = send(&app, req).await;
         assert_eq!(status, StatusCode::OK, "share consume body: {body:?}");
@@ -1125,39 +1157,27 @@ mod tests {
             body.get("status").and_then(|v| v.as_str()),
             Some("Ready")
         );
+        // Meta response must NOT contain session_id.
+        assert!(
+            body.get("session_id").is_none(),
+            "shared-file meta response must not expose session_id: {body:?}"
+        );
     }
 
     #[tokio::test]
-    async fn share_consume_sid_mismatch_is_404() {
-        // Mint on sid=s1; consume on a different sid → service returns NotFound.
+    async fn shared_file_meta_no_token_is_401() {
         let app = build_test_app().await;
-        let (file_id, _) = upload_complete(&app, "share2.txt", b"y").await;
-
-        let mint_uri = format!("/sessions/{}/files/{}/share", app.sid, file_id);
-        let req = post_json(&app, &mint_uri, &app.bot_a_token, json!({}));
-        let (status, body, _) = send(&app, req).await;
-        assert_eq!(status, StatusCode::CREATED, "share mint body: {body:?}");
-        let token = body
-            .get("share_token")
-            .and_then(|v| v.as_str())
-            .unwrap()
-            .to_string();
-
-        // Different session id.
-        let wrong_uri = format!(
-            "/sessions/{}/shared-file?token={}",
-            "s-other", token
-        );
-        let req = auth_request(Method::GET, &wrong_uri, &app.bot_a_token, None);
+        let uri = "/sessions/shared-file";
+        let req = auth_request(Method::GET, uri, &app.bot_a_token, None);
         let (status, body, _) = send(&app, req).await;
         assert_eq!(
             status,
-            StatusCode::NOT_FOUND,
-            "expected 404 for sid-mismatch, body: {body:?}"
+            StatusCode::UNAUTHORIZED,
+            "expected 401 for missing token, body: {body:?}"
         );
         assert_eq!(
             body.get("error").and_then(|v| v.as_str()),
-            Some("NOT_FOUND")
+            Some("UNAUTHORIZED")
         );
     }
 
@@ -1193,10 +1213,7 @@ mod tests {
         );
         assert_ne!(valid_token, expired_token);
 
-        let meta_uri = format!(
-            "/sessions/{}/shared-file?token={}",
-            app.sid, expired_token
-        );
+        let meta_uri = format!("/sessions/shared-file?token={}", expired_token);
         let req = auth_request(Method::GET, &meta_uri, &app.bot_a_token, None);
         let (status, body, _) = send(&app, req).await;
         assert_eq!(
@@ -1232,10 +1249,7 @@ mod tests {
         chars[idx] = if last == 'a' { 'b' } else { 'a' };
         let tampered: String = chars.into_iter().collect();
 
-        let meta_uri = format!(
-            "/sessions/{}/shared-file?token={}",
-            app.sid, tampered
-        );
+        let meta_uri = format!("/sessions/shared-file?token={}", tampered);
         let req = auth_request(Method::GET, &meta_uri, &app.bot_a_token, None);
         let (status, body, _) = send(&app, req).await;
         assert_eq!(

@@ -38,6 +38,9 @@ pub struct SessionFileListPage {
 pub trait SessionFileRepoPort: Send + Sync {
     async fn insert(&self, params: NewSessionFileParams) -> ServiceResult<SessionFile>;
     async fn get(&self, session_id: &str, file_id: &str) -> ServiceResult<Option<SessionFile>>;
+    /// Look up a file by its globally-unique file_id (used by share_consume,
+    /// which has no session id — the share token only carries file_id).
+    async fn get_by_file_id(&self, file_id: &str) -> ServiceResult<Option<SessionFile>>;
     async fn update_object_handle_and_status(
         &self,
         session_id: &str,
