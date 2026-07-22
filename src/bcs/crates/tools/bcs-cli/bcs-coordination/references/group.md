@@ -100,12 +100,13 @@ bcs confirm-group-help --url "http://xxx/proposals/xxx/confirm"
 跳过提案流程，直接创建一个群组。**推荐在 agent 已知参与者的场景下使用**（如 agent 自己建群自己确认）。
 
 ```bash
-bcs create-group --driver "<driver_bot_id>" --participants "<bot1,bot2>" [--topic "<群组主题>"] [--context "<协作背景>"]
+bcs create-group (--driver "<driver_bot_id>" | --manager "<manager_bot_id>") --participants "<bot1,bot2>" [--topic "<群组主题>"] [--context "<协作背景>"]
 ```
 
 **参数：**
 
-- `--driver "BotID"`: 指定 driver Bot（**必需**）
+- `--driver "BotID"`: 创建普通 chat 群，并指定 driver Bot（与 `--manager` 二选一）
+- `--manager "BotID"`: 创建 manager-worker 群，并指定唯一 manager Bot（与 `--driver` 二选一）
 - `--participants "Bot1,Bot2"`: 参与者列表（**必需**）
 - `--topic "主题"`: 群组主题，设置群组 label 为 "Group: {topic}"（可选）
 - `--context "背景"`: 协作背景描述（可选）
@@ -119,6 +120,9 @@ bcs create-group --driver "bot-001" --participants "bot-sec,bot-dba" --topic "�
 
 # 带上下文
 bcs create-group --driver "bot-001" --participants "bot-dba,bot-pm" --topic "数据库死锁排查" --context "用户反馈系统卡顿，疑似死锁"
+
+# manager-worker 群；participants 自动作为 worker，manager 无需重复出现在列表中
+bcs create-group --manager "bot-manager" --participants "bot-worker-1,bot-worker-2" --topic "并行实现任务"
 ```
 
 **返回示例：**
