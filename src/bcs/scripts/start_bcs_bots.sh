@@ -92,7 +92,14 @@ session_bot_uuid_for() {
     [ -f "$session_file" ] || return 0
     command -v jq >/dev/null 2>&1 || return 0
 
-    jq -r 'if (.bot_uuid | type) == "string" then .bot_uuid else empty end' "$session_file" 2>/dev/null | head -n 1
+    jq -r --arg bcs_url "$BCS_URL" '
+      if ((.bot_uuid | type) == "string")
+        and ((.bot_uuid | length) > 0)
+        and ((.token | type) == "string")
+        and ((.token | length) > 0)
+        and (.bcs_url == $bcs_url)
+      then .bot_uuid else empty end
+    ' "$session_file" 2>/dev/null | head -n 1
 }
 
 workspace_dir_for() {
