@@ -28,8 +28,6 @@ class TestAuthenticatedUser:
         user = AuthenticatedUser(id="u1", username="op1")
         assert user.display_name is None
         assert user.full_name is None
-        assert user.email is None
-        assert user.phone is None
         assert user.tenant_id is None
 
     def test_all_fields(self) -> None:
@@ -38,14 +36,10 @@ class TestAuthenticatedUser:
             username="domain_admin",
             display_name="Ada",
             full_name="Ada Lovelace",
-            email="ada@example.com",
-            phone="+10000000000",
             tenant_id="tenant-a",
         )
         assert user.display_name == "Ada"
         assert user.full_name == "Ada Lovelace"
-        assert user.email == "ada@example.com"
-        assert user.phone == "+10000000000"
         assert user.tenant_id == "tenant-a"
 
     def test_json_roundtrip(self) -> None:
