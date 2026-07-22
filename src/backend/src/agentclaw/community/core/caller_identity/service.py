@@ -256,7 +256,7 @@ class CallerIdentityService:
         should_exchange = (
             bot.get("bot_type") == "service"
             and bot.get("status") == "ACTIVE"
-            and bot_call_type == McpCallType.CALLER
+            and bot_call_type is McpCallType.CALLER
         )
         binding_id = (
             bot.get("binding_id")
