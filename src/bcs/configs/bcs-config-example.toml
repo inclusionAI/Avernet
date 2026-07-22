@@ -106,6 +106,15 @@ targets = ["*", "!bcs_chat_digest", "!bcs_sse_detail"]
 max_keep_days = 7
 
 [[logging.outputs]]
+name = "common-error"
+path = "/var/log/bcs"
+file = "common-error.log"
+level = "error"
+rotation = "daily"
+targets = ["*"]
+max_keep_days = 7
+
+[[logging.outputs]]
 name = "messages"
 path = "/var/log/bcs"
 file = "bcs-messages.log"
