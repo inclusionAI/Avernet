@@ -32,7 +32,10 @@ from secbaas.community.api.tenant_manage import TenantType
 from ._paas_service import PaasService
 
 if TYPE_CHECKING:
-    from secbaas.community.api.device_manage import OutBoundOperationRule
+    from secbaas.community.api.device_manage import (
+        OutBoundOperationRule,
+        OutBoundOperationRuleUpdatedMode,
+    )
 
 
 def _is_mock_failure(env_var: str) -> bool:
@@ -178,6 +181,7 @@ class MockPaasService(PaasService):
         self,
         paas_device_id: str,
         outbound_operation_rule: "OutBoundOperationRule",
+        mode: "OutBoundOperationRuleUpdatedMode | None" = None,
     ) -> bool:
         """Mock update outbound operation rule.
 

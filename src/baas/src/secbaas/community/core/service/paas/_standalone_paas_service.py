@@ -497,6 +497,7 @@ class StandalonePaasService(PaasService):
         self,
         paas_device_id: str,
         outbound_operation_rule: Any,
+        mode: Any = None,
     ) -> bool:
         """Not supported: Docker platform does not support outbound operation rules.
 

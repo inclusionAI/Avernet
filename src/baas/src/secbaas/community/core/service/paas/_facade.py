@@ -55,7 +55,10 @@ from secbaas.community.logger import get_logger
 from ._factory import PaasServiceFactory
 
 if TYPE_CHECKING:
-    from secbaas.community.api.device_manage import OutBoundOperationRule
+    from secbaas.community.api.device_manage import (
+        OutBoundOperationRule,
+        OutBoundOperationRuleUpdatedMode,
+    )
     from secbaas.community.api.health_check.bot import TTLInfo
     from secbaas.community.api.template_manage import DeviceTemplateManageService
     from secbaas.community.core.repository.device import DeviceRepository
@@ -1199,6 +1202,7 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
         self,
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
     ) -> bool:
         """Update outbound operation rule for a device.
 
@@ -1256,7 +1260,7 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
 
             # Update outbound operation rule using raw_paas_device_id (without @template_id suffix)
             result = await service.update_outbound_operation_rule(
-                raw_paas_device_id, outbound_operation_rule
+                raw_paas_device_id, outbound_operation_rule, mode=mode
             )
 
             self._logger.info(

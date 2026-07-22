@@ -25,7 +25,10 @@ from secbaas.community.spi.bot.teclaw import TeClawBotPlugin
 from ._paas_service import PaasService
 
 if TYPE_CHECKING:
-    from secbaas.community.api.device_manage import OutBoundOperationRule
+    from secbaas.community.api.device_manage import (
+        OutBoundOperationRule,
+        OutBoundOperationRuleUpdatedMode,
+    )
     from secbaas.community.api.health_check.bot import TTLInfo
 
 
@@ -243,6 +246,7 @@ class TeClawPaasService(PaasService):
         self,
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
     ) -> bool:
         """Update outbound operation rule via plugin.update_outbound_rule.
 
