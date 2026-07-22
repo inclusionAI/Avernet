@@ -1022,6 +1022,21 @@ class TestUpdateOutboundOperationRule:
             service._update_outbound_operation_rule_sync("dev-001", rule)
         assert exc_info.value.code == ErrorCode.DEVICE_UNAVAILABLE
 
+    def test_update_outbound_sync_append_mode(self, service, mock_sandbox):
+        """APPEND mode is forwarded to sandbox.update_outbound_rule."""
+        mock_sandbox.update_outbound_rule.return_value = True
+
+        rule = OutBoundOperationRule()
+        result = service._update_outbound_operation_rule_sync(
+            "dev-001", rule, mode=OutBoundOperationRuleUpdatedMode.APPEND
+        )
+
+        assert result is True
+        mock_sandbox.update_outbound_rule.assert_called_once_with(
+            rule=rule,
+            updated_mode=OutBoundOperationRuleUpdatedMode.APPEND,
+        )
+
     @pytest.mark.asyncio
     async def test_update_outbound_async(self, service, mock_sandbox):
         """Test the async update_outbound_operation_rule wrapper."""
