@@ -443,26 +443,22 @@ async fn state_machine_dispatches_provider_bot_and_accepts_final_callback() {
         .expect("state-machine provider callback");
     let status = response.status();
     let body_text = response.text().await.expect("callback body");
-    assert!(
-        status.is_success(),
+    assert_eq!(
+        status.as_u16(),
+        200,
         "state-machine provider callback failed: {status} {body_text}"
     );
+    let callback: Value = serde_json::from_str(&body_text).expect("callback response");
+    assert_eq!(callback["ok"], true);
+    assert_eq!(callback["delivered_count"], 1);
 
-    let response = client
-        .get(format!(
-            "http://{}/state-machine-runs/{}",
-            bcs_addr, state_machine_run_id
-        ))
-        .send()
-        .await
-        .expect("get state-machine run");
-    let status = response.status();
-    let body_text = response.text().await.expect("state-machine view body");
-    assert!(
-        status.is_success(),
-        "get state-machine run failed: {status} {body_text}"
-    );
-    let view: Value = serde_json::from_str(&body_text).expect("state-machine run view");
+    let view = wait_for_state_machine_run_status(
+        &client,
+        bcs_addr,
+        &state_machine_run_id,
+        "completed",
+    )
+    .await;
     assert_eq!(view["run"]["status"], "completed");
     assert_eq!(view["nodes"][0]["status"], "completed");
     assert_eq!(view["nodes"][0]["artifact_text"], "state-machine provider final");
@@ -856,4 +852,35 @@ async fn wait_for_bot_frame_containing(bot: &mut MockBot, needle: &str) -> Value
         }
     }
     panic!("bot did not receive frame containing {needle}");
+}
+
+async fn wait_for_state_machine_run_status(
+    client: &reqwest::Client,
+    bcs_addr: SocketAddr,
+    run_id: &str,
+    expected_status: &str,
+) -> Value {
+    let mut last_view = None;
+    for _ in 0..100 {
+        let response = client
+            .get(format!("http://{}/state-machine-runs/{}", bcs_addr, run_id))
+            .send()
+            .await
+            .expect("get state-machine run");
+        let status = response.status();
+        let body_text = response.text().await.expect("state-machine view body");
+        assert!(
+            status.is_success(),
+            "get state-machine run failed: {status} {body_text}"
+        );
+        let view: Value = serde_json::from_str(&body_text).expect("state-machine run view");
+        if view["run"]["status"] == expected_status {
+            return view;
+        }
+        last_view = Some(view);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!(
+        "state-machine run {run_id} did not reach {expected_status}; last view: {last_view:#?}"
+    );
 }

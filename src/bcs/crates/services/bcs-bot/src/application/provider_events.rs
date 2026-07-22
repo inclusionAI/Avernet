@@ -1,5 +1,5 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -15,7 +15,7 @@ use bcs_service_api::{
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 const COORDINATION_MAGIC_KEY: &str = "__bcs_coordination__";
 const CONTRACT_VERSION: u64 = 1;
@@ -23,6 +23,22 @@ const TOOL_ASSIGN_TASK: &str = "bcs_assign_task";
 const TOOL_SEND_TASK_MESSAGE: &str = "bcs_send_task_message";
 const TOOL_TASK_COMPLETE: &str = "bcs_task_complete";
 const COORDINATION_PROCESSED_TTL_MS: u64 = 10 * 60 * 1000;
+
+type StateMachineTerminalKey = (String, String, i32);
+
+struct StateMachineTerminalInflightGuard {
+    inflight: Arc<StdMutex<HashSet<StateMachineTerminalKey>>>,
+    key: StateMachineTerminalKey,
+}
+
+impl Drop for StateMachineTerminalInflightGuard {
+    fn drop(&mut self) {
+        self.inflight
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&self.key);
+    }
+}
 
 #[derive(Debug, Clone)]
 struct CoordinationCall {
@@ -95,6 +111,7 @@ pub struct ProviderBotEvents {
     message_flow: Arc<dyn MessageFlowService>,
     collaboration_runtime: Option<Arc<dyn CollaborationRuntimeService>>,
     coordination_seen: Arc<Mutex<HashMap<String, u64>>>,
+    state_machine_terminals_inflight: Arc<StdMutex<HashSet<StateMachineTerminalKey>>>,
 }
 
 impl ProviderBotEvents {
@@ -109,6 +126,7 @@ impl ProviderBotEvents {
             message_flow,
             collaboration_runtime: None,
             coordination_seen: Arc::new(Mutex::new(HashMap::new())),
+            state_machine_terminals_inflight: Arc::new(StdMutex::new(HashSet::new())),
         }
     }
 
@@ -361,23 +379,124 @@ impl ProviderBotEventService for ProviderBotEvents {
                     ));
                 }
 
+                if matches!(command.state, ChatEventState::Final)
+                    && command.message_text.trim().is_empty()
+                {
+                    return Err(ProviderBotEventError::InvalidRequest(
+                        "final state-machine bot event must include text".to_string(),
+                    ));
+                }
+
+                let terminal_command = HandleBotTerminalEventCommand {
+                    bot_id: identity.bot_uuid.clone(),
+                    run_id: command.run_id.clone(),
+                    event_type: "chat.event".to_string(),
+                    event_payload: json!({
+                        "state": payload_state,
+                        "message": {
+                            "content": [
+                                { "type": "text", "text": command.message_text.clone() }
+                            ]
+                        },
+                        "run_id": command.run_id.clone(),
+                    }),
+                    state: command.state.clone(),
+                    bcs_session_id: None,
+                };
+                if matches!(command.state, ChatEventState::Final) {
+                    let inflight_key = (
+                        correlation.state_machine_run_id.clone(),
+                        correlation.node_id.clone(),
+                        correlation.attempt,
+                    );
+                    let accepted = self
+                        .state_machine_terminals_inflight
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .insert(inflight_key.clone());
+                    if !accepted {
+                        info!(
+                            provider_id = %command.provider_id,
+                            run_id = %command.run_id,
+                            state_machine_run_id = %correlation.state_machine_run_id,
+                            node_id = %correlation.node_id,
+                            attempt = correlation.attempt,
+                            "provider callback: duplicate async state-machine final accepted"
+                        );
+                        return Ok(ProviderBotEventOutcome {
+                            delivered_count: 1,
+                            failed_count: 0,
+                        });
+                    }
+
+                    let collaboration_runtime = collaboration_runtime.clone();
+                    let inflight_guard = StateMachineTerminalInflightGuard {
+                        inflight: self.state_machine_terminals_inflight.clone(),
+                        key: inflight_key,
+                    };
+                    let provider_id = command.provider_id.clone();
+                    let provider_run_id = command.run_id.clone();
+                    let bot_id = identity.bot_uuid.clone();
+                    let state_machine_run_id = correlation.state_machine_run_id.clone();
+                    let node_id = correlation.node_id.clone();
+                    let attempt = correlation.attempt;
+                    info!(
+                        provider_id = %provider_id,
+                        run_id = %provider_run_id,
+                        bot_id = %bot_id,
+                        state_machine_run_id = %state_machine_run_id,
+                        node_id = %node_id,
+                        attempt = attempt,
+                        "provider callback: state-machine final accepted for async processing"
+                    );
+                    tokio::spawn(async move {
+                        let processing = tokio::spawn(async move {
+                            let _inflight_guard = inflight_guard;
+                            collaboration_runtime
+                                .handle_bot_terminal_event(terminal_command)
+                                .await
+                        });
+                        match processing.await {
+                            Ok(Ok(outcome)) => info!(
+                                provider_id = %provider_id,
+                                run_id = %provider_run_id,
+                                bot_id = %bot_id,
+                                state_machine_run_id = %state_machine_run_id,
+                                node_id = %node_id,
+                                attempt = attempt,
+                                consumed = %outcome.consumed,
+                                "provider callback: async state-machine final processing completed"
+                            ),
+                            Ok(Err(processing_error)) => error!(
+                                provider_id = %provider_id,
+                                run_id = %provider_run_id,
+                                bot_id = %bot_id,
+                                state_machine_run_id = %state_machine_run_id,
+                                node_id = %node_id,
+                                attempt = attempt,
+                                error = %processing_error,
+                                "provider callback: async state-machine final processing failed"
+                            ),
+                            Err(join_error) => error!(
+                                provider_id = %provider_id,
+                                run_id = %provider_run_id,
+                                bot_id = %bot_id,
+                                state_machine_run_id = %state_machine_run_id,
+                                node_id = %node_id,
+                                attempt = attempt,
+                                error = %join_error,
+                                "provider callback: async state-machine final task failed"
+                            ),
+                        }
+                    });
+                    return Ok(ProviderBotEventOutcome {
+                        delivered_count: 1,
+                        failed_count: 0,
+                    });
+                }
+
                 let outcome = collaboration_runtime
-                    .handle_bot_terminal_event(HandleBotTerminalEventCommand {
-                        bot_id: identity.bot_uuid.clone(),
-                        run_id: command.run_id.clone(),
-                        event_type: "chat.event".to_string(),
-                        event_payload: json!({
-                            "state": payload_state,
-                            "message": {
-                                "content": [
-                                    { "type": "text", "text": command.message_text.clone() }
-                                ]
-                            },
-                            "run_id": command.run_id.clone(),
-                        }),
-                        state: command.state.clone(),
-                        bcs_session_id: None,
-                    })
+                    .handle_bot_terminal_event(terminal_command)
                     .await
                     .map_err(map_collaboration_runtime_error)?;
                 info!(
