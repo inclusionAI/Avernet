@@ -156,6 +156,7 @@ def client(mock_bot_service, mock_passport):
 
     app = FastAPI()
     app.include_router(router)
+    app.dependency_overrides[require_operator] = lambda: MagicMock(staffId="test_user")
 
     # Mirror api/app.py: surface DomainError subclasses as HTTP codes so
     # tests can assert 401 / 403 rather than receiving an unhandled 500.

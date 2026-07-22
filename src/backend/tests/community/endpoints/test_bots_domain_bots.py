@@ -11,6 +11,7 @@ handler's generic try/except is covered elsewhere.)
 from __future__ import annotations
 
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.plugin_api.auth import AuthPlugin
 
 from tests.community.framework import (
     CaseInput,
@@ -39,6 +40,11 @@ def _seed_domain_bots(world):
                 "ext": {"is_domain_bot": True},
             }
         )
+
+
+def _deny_operator(world):
+    auth = world.get(AuthPlugin)
+    auth.is_operator_allowed = lambda staff_id: False
 
 
 @endpoint_test(
@@ -122,3 +128,15 @@ def list_domain_bots_keyword_no_match():
 )
 def list_domain_bots_invalid_page():
     """Error path: page=0 violates Query(ge=1) → 422 (real validation, no mock)."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/bots/search/domain-bots",
+    scenario="non_operator_forbidden",
+    input=CaseInput(headers={"x-user-id": "ordinary-user"}),
+    seed=_deny_operator,
+    expect=ExpectError(status=403),
+)
+def list_domain_bots_requires_operator():
+    """A normal authenticated user cannot enumerate platform domain bots."""

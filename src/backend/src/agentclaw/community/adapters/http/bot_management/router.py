@@ -1806,6 +1806,7 @@ async def search_bots(
 @router.get("/search/domain-bots", response_model=ApiResponse)
 async def list_domain_bots(
     request: Request,
+    user: AuthenticatedUser = Depends(require_operator),  # noqa: B008
     page: Optional[int] = Query(None, ge=1, description="Page number (1-based). Omit for all results"),
     page_size: Optional[int] = Query(None, ge=1, description="Items per page. Omit for all results"),
     keyword: Optional[str] = Query(None, description="Keyword to fuzzy-match on bot name"),
