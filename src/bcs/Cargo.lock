@@ -929,6 +929,7 @@ dependencies = [
  "bcs-storage-api",
  "bcs-test-support",
  "bcs-user-directory-api",
+ "bytes",
  "futures",
  "hex",
  "reqwest",
