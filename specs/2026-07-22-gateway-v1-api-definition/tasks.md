@@ -15,12 +15,12 @@
   - [x] `Envelope[SomeModel]` instantiates and `model_dump()` shows all four keys; ruff/mypy clean.
 - **Depends on:** —
 
-## Task 2: Per-route security metadata helper
+## Task 2: Per-route security metadata helper — `[x]` done
 - **Goal:** One place that emits the `x-avernet-security` OpenAPI extension for the user principal.
 - **Files:** `adapters/web/contracts/security.py`
 - **Done when:**
-  - [ ] `user_principal()` returns `{"x-avernet-security": [{"first_party_user": {}}]}` (format per `src/gateway/docs/2026-07-21-auth-design.md` §8.1).
-  - [ ] Unit test asserts the exact shape.
+  - [x] `user_principal()` returns `{"x-avernet-security": [{"first_party_user": {}}]}` (format per `src/gateway/docs/2026-07-21-auth-design.md` §8.1).
+  - [x] Unit test asserts the exact shape.
 - **Depends on:** —
 
 ## Task 3: Router aggregator + app wiring
