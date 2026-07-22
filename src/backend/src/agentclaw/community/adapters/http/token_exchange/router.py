@@ -24,7 +24,6 @@ from agentclaw.community.core.caller_identity.contracts import (
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth import AuthPlugin, AuthRequestContext
-from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.token_exchange import TokenExchangePlugin
 
 router = APIRouter()
@@ -251,11 +250,6 @@ async def get_iam_token(
                 owner_user_id=token_context.owner_id,
                 is_test_exchange=True,
             )
-        passport = _get_optional_dependency(
-            request,
-            PassportPlugin,
-            CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
-        )
         provider = _get_optional_dependency(
             request,
             CallerTokenProvider,
@@ -271,7 +265,6 @@ async def get_iam_token(
             "caller_user_id": current_user.staffId,
             "bot_id": bot_id,
             "owner_user_id": token_context.owner_id,
-            "passport": passport,
             "token_provider": provider,
             "runtime_updater": updater,
             "stage": stage.value,

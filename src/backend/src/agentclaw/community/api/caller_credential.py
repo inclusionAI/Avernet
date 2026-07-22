@@ -53,15 +53,13 @@ class CallerRuntimeUpdater(Protocol):
         owner_user_id: str,
         caller_user_id: str,
         caller_token: CallerToken,
-        agent_pass_token: str,
-        agent_code: str,
         stage: str,
         publish_id: int | None,
         entity_id: str | None = None,
         binding_id: int | None = None,
         is_test_exchange: bool = False,
     ) -> None:
-        """Replace the device's complete outbound rule with Caller overlay."""
+        """Append the Caller overlay to the exact runtime device."""
         ...
 
 

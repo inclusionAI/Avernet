@@ -24,7 +24,6 @@ from agentclaw.community.core.caller_identity.contracts import (
     McpCallType,
     McpCallTypeUpdateResult,
 )
-from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
 @runtime_checkable
@@ -90,7 +89,6 @@ class CallerIdentityServiceProtocol(Protocol):
         caller_user_id: str,
         bot_id: str,
         owner_user_id: str,
-        passport: PassportPlugin,
         token_provider: CallerTokenProviderProtocol,
         runtime_updater: CallerRuntimeUpdaterProtocol,
         stage: str,

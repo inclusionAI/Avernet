@@ -53,13 +53,10 @@ def test_caller_identity_uses_supplied_binding_or_falls_back_to_resolution() -> 
             ]
         )
     )
-    service._build_outbound_operation_rule = MagicMock(
-        return_value=OutBoundOperationRule()
-    )
     service.list_devices_by_bot_uuid = MagicMock(
         return_value=[{"provider_device_id": "device-1@template-1"}]
     )
-    service.update_device_outbound_rule = MagicMock(return_value=True)
+    service.append_caller_outbound_rule = MagicMock(return_value=True)
     service._resolve_caller_binding_id = MagicMock(return_value=9)
 
     update_kwargs = {
@@ -72,8 +69,6 @@ def test_caller_identity_uses_supplied_binding_or_falls_back_to_resolution() -> 
             expires_at=datetime.now(),
             fingerprint="ignored",
         ),
-        "agent_pass_token": "agent-pass-token",
-        "agent_code": "agent-code",
         "stage": "draft",
         "publish_id": None,
         "entity_id": "entity-1",
@@ -97,7 +92,7 @@ def test_caller_identity_uses_supplied_binding_or_falls_back_to_resolution() -> 
     service._outbound_rule_provider.build_caller_rule.assert_called_with(
         caller_token="caller-token"
     )
-    paas_device_id, outbound_rule = service.update_device_outbound_rule.call_args.args
+    paas_device_id, outbound_rule = service.append_caller_outbound_rule.call_args.args
     assert paas_device_id == "device-1@template-1"
     assert outbound_rule.header_operation_rules[0].header_name == "x-caller-token"
     assert outbound_rule.header_operation_rules[0].action == "set"
@@ -120,8 +115,6 @@ def test_caller_identity_rejects_ambiguous_bot_without_entity_id() -> None:
                 expires_at=datetime.now(),
                 fingerprint="ignored",
             ),
-            agent_pass_token="agent-pass-token",
-            agent_code="agent-code",
             stage="draft",
             publish_id=None,
         )
@@ -157,13 +150,10 @@ def test_caller_identity_test_exchange_allows_active_personal_bot() -> None:
             ]
         )
     )
-    service._build_outbound_operation_rule = MagicMock(
-        return_value=OutBoundOperationRule()
-    )
     service.list_devices_by_bot_uuid = MagicMock(
         return_value=[{"provider_device_id": "device-1@template-1"}]
     )
-    service.update_device_outbound_rule = MagicMock(return_value=True)
+    service.append_caller_outbound_rule = MagicMock(return_value=True)
 
     service.update_caller_identity(
         bot_id="bot-1",
@@ -175,8 +165,6 @@ def test_caller_identity_test_exchange_allows_active_personal_bot() -> None:
             expires_at=datetime.now(),
             fingerprint="ignored",
         ),
-        agent_pass_token="agent-pass-token",
-        agent_code="agent-code",
         stage="draft",
         publish_id=None,
         entity_id="entity-1",
@@ -184,4 +172,4 @@ def test_caller_identity_test_exchange_allows_active_personal_bot() -> None:
         is_test_exchange=True,
     )
 
-    service.update_device_outbound_rule.assert_called_once()
+    service.append_caller_outbound_rule.assert_called_once()

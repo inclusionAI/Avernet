@@ -31,9 +31,7 @@ from agentclaw.community.core.caller_identity.contracts import (
 )
 from agentclaw.community.core.caller_identity.credential import (
     CALLER_CHAT_TASK,
-    CALLER_CREDENTIAL_REQUEST_INVALID,
     AuthContext,
-    CallerCredentialError,
 )
 from agentclaw.community.core.caller_identity.protocols import (
     CallerMcpSyncProtocol,
@@ -47,7 +45,6 @@ from agentclaw.community.core.caller_identity.repository import (
 )
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -335,7 +332,6 @@ class CallerIdentityService:
         caller_user_id: str,
         bot_id: str,
         owner_user_id: str,
-        passport: PassportPlugin,
         token_provider: CallerTokenProviderProtocol,
         runtime_updater: CallerRuntimeUpdaterProtocol,
         stage: str,
@@ -345,20 +341,6 @@ class CallerIdentityService:
         is_test_exchange: bool = False,
     ) -> None:
         """Exchange and install the Caller credential for one chat request."""
-        # The Passport token remains runtime-only input for the BaaS outbound
-        # rule. Facade-based Caller exchange receives the Bot/owner identity
-        # directly and must never receive this token as delegation material.
-        agent_pass_token = passport.query_token(bot_id, owner_user_id) or ""
-        if not agent_pass_token:
-            raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
-
-        passport_detail = passport.query_agent_passport(bot_id, owner_user_id)
-        agent_code_value = (
-            passport_detail.get("agent_code")
-            if isinstance(passport_detail, Mapping)
-            else None
-        )
-        agent_code = agent_code_value if isinstance(agent_code_value, str) else ""
         caller_token = token_provider.exchange(
             auth_context=AuthContext(user_id=caller_user_id),
             iam_token=iam_token,
@@ -371,8 +353,6 @@ class CallerIdentityService:
             "owner_user_id": owner_user_id,
             "caller_user_id": caller_user_id,
             "caller_token": caller_token,
-            "agent_pass_token": agent_pass_token,
-            "agent_code": agent_code,
             "stage": stage,
             "publish_id": publish_id,
             "entity_id": entity_id,

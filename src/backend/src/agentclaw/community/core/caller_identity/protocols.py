@@ -54,8 +54,6 @@ class CallerRuntimeUpdaterProtocol(Protocol):
         owner_user_id: str,
         caller_user_id: str,
         caller_token: CallerToken,
-        agent_pass_token: str,
-        agent_code: str,
         stage: str,
         publish_id: int | None,
         entity_id: str | None = None,

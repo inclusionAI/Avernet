@@ -242,11 +242,8 @@ def test_iam_context_does_not_reuse_draft_binding_outside_draft(
     assert context.binding_id is None
 
 
-def test_exchange_caller_identity_uses_passport_and_installs_opaque_token() -> None:
+def test_exchange_caller_identity_installs_opaque_token_without_passport_lookup() -> None:
     service, _ = _service(bot=_bot(call_type="caller"))
-    passport = MagicMock()
-    passport.query_token.return_value = "agent-pass-token"
-    passport.query_agent_passport.return_value = {"agent_code": "agent-code"}
     token_provider = MagicMock()
     caller_token = CallerToken(
         access_token="caller-token",
@@ -262,7 +259,6 @@ def test_exchange_caller_identity_uses_passport_and_installs_opaque_token() -> N
         caller_user_id="caller-1",
         bot_id="bot-1",
         owner_user_id="owner-1",
-        passport=passport,
         token_provider=token_provider,
         runtime_updater=runtime_updater,
         stage="draft",
@@ -283,8 +279,6 @@ def test_exchange_caller_identity_uses_passport_and_installs_opaque_token() -> N
         owner_user_id="owner-1",
         caller_user_id="caller-1",
         caller_token=caller_token,
-        agent_pass_token="agent-pass-token",
-        agent_code="agent-code",
         stage="draft",
         publish_id=None,
         entity_id="entity-1",
@@ -294,9 +288,6 @@ def test_exchange_caller_identity_uses_passport_and_installs_opaque_token() -> N
 
 def test_exchange_caller_identity_propagates_test_exchange_to_runtime() -> None:
     service, _ = _service(bot=_bot(call_type="owner"))
-    passport = MagicMock()
-    passport.query_token.return_value = "agent-pass-token"
-    passport.query_agent_passport.return_value = {"agent_code": "agent-code"}
     token_provider = MagicMock()
     caller_token = CallerToken(
         access_token="caller-token",
@@ -312,7 +303,6 @@ def test_exchange_caller_identity_propagates_test_exchange_to_runtime() -> None:
         caller_user_id="owner-1",
         bot_id="bot-1",
         owner_user_id="owner-1",
-        passport=passport,
         token_provider=token_provider,
         runtime_updater=runtime_updater,
         stage="draft",
@@ -331,9 +321,6 @@ def test_exchange_caller_identity_does_not_pass_draft_binding_outside_draft(
     stage: str,
 ) -> None:
     service, _ = _service(bot=_bot(call_type="caller"))
-    passport = MagicMock()
-    passport.query_token.return_value = "agent-pass-token"
-    passport.query_agent_passport.return_value = {"agent_code": "agent-code"}
     token_provider = MagicMock()
     token_provider.exchange.return_value = CallerToken(
         access_token="caller-token",
@@ -348,7 +335,6 @@ def test_exchange_caller_identity_does_not_pass_draft_binding_outside_draft(
         caller_user_id="caller-1",
         bot_id="bot-1",
         owner_user_id="owner-1",
-        passport=passport,
         token_provider=token_provider,
         runtime_updater=runtime_updater,
         stage=stage,
