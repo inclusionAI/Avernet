@@ -81,8 +81,24 @@ def test_iam_context_reads_only_bot_aggregate_call_type() -> None:
     )
 
     assert context.should_exchange_caller_token is True
-    assert context.bot_call_type is McpCallType.CALLER
+    assert context.bot_call_type == McpCallType.CALLER
     assert context.binding_id == 9
+    deps.repository.list_draft_call_types.assert_not_called()
+    deps.mcp_provider.collect_bot_active_mcps.assert_not_called()
+
+
+def test_iam_context_should_not_exchange_when_call_type_not_caller() -> None:
+    """When call_type is not CALLER, should_exchange_caller_token should be False."""
+    bot = _bot(call_type="owner")
+    service, deps = _service(bot=bot)
+
+    context = service.get_iam_token_context(
+        bot_id="bot-1",
+        stage=CallerIdentityStage.DRAFT,
+    )
+
+    assert context.should_exchange_caller_token is False
+    assert context.bot_call_type == McpCallType.OWNER
     deps.repository.list_draft_call_types.assert_not_called()
     deps.mcp_provider.collect_bot_active_mcps.assert_not_called()
 
@@ -256,7 +272,7 @@ async def test_mcp_update_syncs_complete_identity_manifest_to_agent_principal() 
         entity_id="entity-1",
     )
 
-    assert result.bot_call_type is McpCallType.CALLER
+    assert result.bot_call_type == McpCallType.CALLER
     deps.mcp_sync_service.sync_mcp_identity_to_agent_principal.assert_awaited_once_with(
         user_id="owner-1",
         entity_id="entity-1",
