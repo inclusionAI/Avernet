@@ -70,7 +70,14 @@ class GetUploadUrlResponse(BaseModel):
 
     upload_url: str | None = None
     transfer_id: str
-    expires_at: str
+    http_method: str = Field(
+        default="PUT",
+        description="HTTP method to use for the upload URL (always PUT for OSS pre-signed uploads)",
+    )
+    expires_at: str | None = Field(
+        default=None,
+        description="Upload URL expiry time (ISO 8601). Present in SINGLE mode; null in MULTIPART mode where each part has its own expires_at.",
+    )
     type: str = Field(
         default="SINGLE",
         description="Upload mode: SINGLE or MULTIPART.",
@@ -89,7 +96,7 @@ class GetUploadUrlResponse(BaseModel):
     )
     parts: list[dict] | None = Field(
         default=None,
-        description="List of part objects [{part_number, upload_url, expires_at}] (only for MULTIPART).",
+        description="List of part objects [{part_number, upload_url, http_method: 'PUT', expires_at}] (only for MULTIPART).",
     )
 
     model_config = {"from_attributes": True}
@@ -142,8 +149,6 @@ class GetTransferStatusResponse(BaseModel):
 
     Maps from TicketRecord.  Conditional fields:
     - download_url: only present when status == DONE
-    - expires_at: intentionally null for transfer queries; OSS presigned URLs
-      embed their own expiry via the Expires query parameter
     - error_message: only present when status == FAILED
     """
 
@@ -153,10 +158,6 @@ class GetTransferStatusResponse(BaseModel):
     filename: str
     device_path: str | None
     download_url: str | None = None
-    expires_at: str | None = Field(
-        default=None,
-        description="Intentionally null for transfer queries; OSS presigned URLs embed their own expiry via the Expires query parameter. Only populated in direct upload/download URL generation responses.",
-    )
     error_message: str | None = None
     created_at: str
     updated_at: str
@@ -219,27 +220,13 @@ class ShareLinkResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class StagingListResponse(BaseModel):
-    """Response for staging area object listing.
+class DeleteTransferResponse(BaseModel):
+    """Response for transfer deletion (D-09).
 
-    Returns flat list of objects with marker-based pagination.
+    Returns the transfer_id and status transition.  Does not include
+    deleted_key because the delete is keyed by transfer_id, not OSS key.
     """
 
-    prefix: str
-    items: list[dict]
-    truncated: bool
-    next_marker: str | None = None
-
-    model_config = {"from_attributes": True}
-
-
-class StagingDeleteResponse(BaseModel):
-    """Response for staging object deletion.
-
-    Returns the deleted key, associated transfer_id, and status transition.
-    """
-
-    deleted_key: str
     transfer_id: str
     previous_status: str
     new_status: str

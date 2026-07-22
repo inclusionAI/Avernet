@@ -3,7 +3,6 @@ from ._exceptions import (
     BotNotAvailableError,
     BotNotFoundError,
     BotServiceError,
-    DirectoryNotEmptyError,
     NoActiveDevicesError,
     NoDevicesFoundError,
     OssObjectNotFoundError,
@@ -17,6 +16,7 @@ from ._exceptions import (
 from ._file_transfer_models import (
     CancelUploadResponse,
     CompleteUploadResponse,
+    DeleteTransferResponse,
     GetDownloadUrlRequest,
     GetDownloadUrlResponse,
     GetTransferStatusResponse,
@@ -24,8 +24,6 @@ from ._file_transfer_models import (
     GetUploadUrlResponse,
     ShareLinkRequest,
     ShareLinkResponse,
-    StagingDeleteResponse,
-    StagingListResponse,
     TransferNotFoundError,
 )
 from ._http_connection_info import HttpConnectionInfo
@@ -56,7 +54,6 @@ __all__ = [
     "BotNotAvailableError",
     "BotNotFoundError",
     "BotServiceError",
-    "DirectoryNotEmptyError",
     "NoActiveDevicesError",
     "NoDevicesFoundError",
     "OssObjectNotFoundError",
@@ -88,6 +85,7 @@ __all__ = [
     # File Transfer Models
     "CancelUploadResponse",
     "CompleteUploadResponse",
+    "DeleteTransferResponse",
     "GetDownloadUrlRequest",
     "GetDownloadUrlResponse",
     "GetTransferStatusResponse",
@@ -95,7 +93,5 @@ __all__ = [
     "GetUploadUrlResponse",
     "ShareLinkRequest",
     "ShareLinkResponse",
-    "StagingDeleteResponse",
-    "StagingListResponse",
     "TransferNotFoundError",
 ]
