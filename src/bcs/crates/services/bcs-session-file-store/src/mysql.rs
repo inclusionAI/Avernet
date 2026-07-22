@@ -303,17 +303,13 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
             bind_values.push(DbValue::from(format!("{}%", prefix)));
         }
 
-        // Marker pagination: cursor = "<created_at>:<file_id>"
-        if let Some(ref marker) = params.marker {
-            if let Some((mc_str, mf)) = marker.split_once(':') {
-                let mc: u64 = mc_str.parse().unwrap_or(0);
-                conditions.push(
-                    "(created_at > ? OR (created_at = ? AND file_id > ?))".to_string(),
-                );
-                bind_values.push(DbValue::from(mc));
-                bind_values.push(DbValue::from(mc));
-                bind_values.push(DbValue::from(mf));
-            }
+        // Optional status filter
+        if let Some(ref status) = params.status {
+            let status_str = serde_json::to_string(status)
+                .map_err(|e| ServiceError::InternalError(format!("serialize status: {e}")))?;
+            let status_str = status_str.trim_matches('"');
+            conditions.push("status = ?".to_string());
+            bind_values.push(DbValue::from(status_str));
         }
 
         // Clamp limit to [1, 1000], defaulting to 100.
@@ -322,42 +318,48 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
         } else {
             params.limit.min(1000)
         };
-        // Read N+1 rows to detect truncation.
-        bind_values.push(DbValue::from(limit_u32 + 1));
 
         let where_clause = conditions.join(" AND ");
-        let sql = format!(
+
+        // COUNT query
+        let count_sql = format!(
+            "SELECT COUNT(*) AS cnt FROM bcs_session_files WHERE {where_clause}"
+        );
+        let count_rows = self
+            .db
+            .query(DbStatement::with_params(&count_sql, bind_values.clone()))
+            .await
+            .map_err(|e| ServiceError::InternalError(format!("session file list count: {e}")))?;
+        let total = count_rows
+            .first()
+            .map(|r| db_get_column::<i64>(r, "cnt").unwrap_or(0) as u64)
+            .unwrap_or(0);
+
+        // PAGE query: add limit + offset
+        let mut page_binds = bind_values;
+        page_binds.push(DbValue::from(limit_u32));
+        page_binds.push(DbValue::from(params.offset));
+
+        let page_sql = format!(
             "SELECT {SELECT_COLS} FROM bcs_session_files \
              WHERE {where_clause} \
-             ORDER BY created_at, file_id LIMIT ?"
+             ORDER BY created_at, file_id LIMIT ? OFFSET ?"
         );
 
         let rows = self
             .db
-            .query(DbStatement::with_params(&sql, bind_values))
+            .query(DbStatement::with_params(&page_sql, page_binds))
             .await
             .map_err(|e| ServiceError::InternalError(format!("session file list: {e}")))?;
 
-        let limit = limit_u32 as usize;
-        let truncated = rows.len() > limit;
         let items: Vec<SessionFile> = rows
             .into_iter()
-            .take(limit)
             .map(|r| row_to_session(&r))
             .collect::<ServiceResult<Vec<_>>>()?;
 
-        let next_marker = if truncated {
-            items
-                .last()
-                .map(|r| format!("{}:{}", r.created_at, r.file_id))
-        } else {
-            None
-        };
-
         Ok(SessionFileListPage {
             items,
-            truncated,
-            next_marker,
+            total,
         })
     }
 

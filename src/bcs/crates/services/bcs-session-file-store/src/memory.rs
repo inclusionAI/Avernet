@@ -149,42 +149,32 @@ impl SessionFileRepoPort for MemorySessionFileRepo {
                     .as_deref()
                     .map_or(true, |p| r.file_name.starts_with(p))
             })
+            .filter(|r| {
+                params
+                    .status
+                    .map_or(true, |s| r.status == s)
+            })
             .cloned()
             .collect();
         items.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.file_id.cmp(&b.file_id)));
 
-        // marker = "<created_at>:<file_id>"; resume strictly after marker
-        if let Some(m) = &params.marker {
-            if let Some((mc_str, mf)) = m.split_once(':') {
-                let mc: u64 = mc_str.parse().unwrap_or(0);
-                // Skip all items up to and including the marker row.
-                items.retain(|r| {
-                    r.created_at > mc
-                        || (r.created_at == mc && r.file_id.as_str() > mf)
-                });
-            }
-        }
+        let total = items.len() as u64;
 
         let limit = if params.limit == 0 {
             100
         } else {
             params.limit.min(1000)
         } as usize;
-        let truncated = items.len() > limit;
-        if truncated {
-            items.truncate(limit);
-        }
-        let next_marker = if truncated {
-            items
-                .last()
-                .map(|r| format!("{}:{}", r.created_at, r.file_id))
-        } else {
-            None
-        };
+
+        let page_items: Vec<SessionFile> = items
+            .into_iter()
+            .skip(params.offset as usize)
+            .take(limit)
+            .collect();
+
         Ok(SessionFileListPage {
-            items,
-            truncated,
-            next_marker,
+            items: page_items,
+            total,
         })
     }
 
@@ -267,14 +257,15 @@ mod tests {
                 "s1",
                 SessionFileListParams {
                     prefix: None,
+                    status: None,
                     limit: 100,
-                    marker: None,
+                    offset: 0,
                 },
             )
             .await
             .unwrap();
         assert_eq!(page.items.len(), 1);
-        assert!(!page.truncated);
+        assert_eq!(page.total, 1);
 
         // update_object_handle_and_status
         let updated = repo
@@ -310,10 +301,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn marker_pagination() {
+    async fn offset_pagination() {
         let repo = MemorySessionFileRepo::new();
         // Insert 5 files for session s3 — created_at is monotonic but
-        // Rapid insertion within the same second is possible, so second
+        // rapid insertion within the same second is possible, so second
         // page handling must be robust.
         for i in 1u8..=5 {
             let p = NewSessionFileParams {
@@ -333,53 +324,53 @@ mod tests {
             repo.insert(p).await.unwrap();
         }
 
-        // First page: limit=2
+        // First page: limit=2, offset=0
         let p1 = repo
             .list(
                 "s3",
                 SessionFileListParams {
                     prefix: None,
+                    status: None,
                     limit: 2,
-                    marker: None,
+                    offset: 0,
                 },
             )
             .await
             .unwrap();
         assert_eq!(p1.items.len(), 2);
-        assert!(p1.truncated);
-        let marker = p1.next_marker.as_ref().unwrap();
+        assert_eq!(p1.total, 5);
 
-        // Second page: using marker
+        // Second page: limit=2, offset=2
         let p2 = repo
             .list(
                 "s3",
                 SessionFileListParams {
                     prefix: None,
+                    status: None,
                     limit: 2,
-                    marker: Some(marker.clone()),
+                    offset: 2,
                 },
             )
             .await
             .unwrap();
         assert_eq!(p2.items.len(), 2);
-        assert!(p2.truncated);
+        assert_eq!(p2.total, 5);
 
-        // Third page: last item
-        let marker2 = p2.next_marker.as_ref().unwrap();
+        // Third page: last item (limit=2, offset=4 -> only 1 remaining)
         let p3 = repo
             .list(
                 "s3",
                 SessionFileListParams {
                     prefix: None,
+                    status: None,
                     limit: 2,
-                    marker: Some(marker2.clone()),
+                    offset: 4,
                 },
             )
             .await
             .unwrap();
         assert_eq!(p3.items.len(), 1);
-        assert!(!p3.truncated);
-        assert!(p3.next_marker.is_none());
+        assert_eq!(p3.total, 5);
     }
 
     #[tokio::test]
@@ -427,13 +418,14 @@ mod tests {
                 "s4",
                 SessionFileListParams {
                     prefix: Some("images/".into()),
+                    status: None,
                     limit: 100,
-                    marker: None,
+                    offset: 0,
                 },
             )
             .await
             .unwrap();
         assert_eq!(page.items.len(), 2);
-        assert!(!page.truncated);
+        assert_eq!(page.total, 2);
     }
 }

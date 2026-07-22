@@ -292,14 +292,13 @@ PUT 各分片后调一次 `complete`，由 `StoragePlugin::complete_upload` 在�
 ```json
 {
   "items": [ { /* SessionFile */ }, { /* SessionFile */ } ],
-  "truncated": false,
-  "next_marker": null
+  "total": 42
 }
 ```
 
-- 默认按 `created_at` **升序**返回（保证分页稳定、不漏页不重页）；`marker` 为不透明游标，
-  客户端原样回传，不得解析。
+- 默认按 `created_at` **升序**返回（保证分页稳定、不漏页不重页）。
 - `prefix` 对 `file_name` 做**大小写敏感**的前缀过滤。
+- `total` 为匹配（`env`, `session_id`, 可选的 `prefix` 和 `status`）的总数，不受 `limit`/`offset` 影响。
 - 列表权威来源为 BCS 自身 DB，从不取自后端。
 - 同一会话**允许存在多个同名文件**：`file_id` 是唯一标识（DB 唯一索引在 `(env, session_id, file_id)`，
   不在 `file_name`）。客户端不得按 `file_name` 去重。
@@ -440,10 +439,10 @@ bcs session file upload \
 ```
 bcs session file list \
   --session <sid> \
-  [--prefix <p>] [--limit <n>] [--marker <m>] \
+  [--prefix <p>] [--status <s>] [--limit <n>] [--offset <o>] \
   [--token <t>] [--url <bcs-url>]
 ```
-打印 `{items, truncated, next_marker}`（`--no-json` 下为表格）。
+打印 `{items, total}`（`--no-json` 下为表格）。
 
 ### 2.3 `download` —— 下载文件字节
 ```

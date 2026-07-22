@@ -2713,17 +2713,20 @@ impl BcsClient {
 
     /// List files in the session workspace. GET /sessions/{sid}/files
     pub async fn list_session_files(
-        &self, sid: &str, prefix: Option<&str>, limit: Option<u32>, marker: Option<&str>,
+        &self, sid: &str, prefix: Option<&str>, status: Option<&str>, limit: Option<u32>, offset: Option<u32>,
     ) -> Result<serde_json::Value> {
         let mut params: Vec<String> = Vec::new();
         if let Some(p) = prefix {
             params.push(format!("prefix={}", urlencoding::encode(p)));
         }
+        if let Some(s) = status {
+            params.push(format!("status={}", urlencoding::encode(s)));
+        }
         if let Some(l) = limit {
             params.push(format!("limit={}", l));
         }
-        if let Some(m) = marker {
-            params.push(format!("marker={}", urlencoding::encode(m)));
+        if let Some(o) = offset {
+            params.push(format!("offset={}", o));
         }
         let mut url = format!("{}/sessions/{}/files", self.base_url, urlencoding::encode(sid));
         if !params.is_empty() {

@@ -33,14 +33,15 @@ async fn insert_get_list_update_delete() {
             "s1",
             SessionFileListParams {
                 prefix: None,
+                status: None,
                 limit: 100,
-                marker: None,
+                offset: 0,
             },
         )
         .await
         .unwrap();
     assert_eq!(page.items.len(), 1);
-    assert!(!page.truncated);
+    assert_eq!(page.total, 1);
     let updated = repo
         .update_object_handle_and_status(
             "s1",
@@ -65,4 +66,55 @@ async fn expired_pending_filtered() {
     assert_eq!(expired.len(), 1);
     let none = repo.list_expired_pending(500, 10).await.unwrap();
     assert!(none.is_empty());
+}
+
+#[tokio::test]
+async fn list_offset_total_and_status_filter() {
+    let repo = MemorySessionFileRepo::new();
+    // Insert 5 files with distinct created_at via created_offset.
+    for i in 0u64..5 {
+        repo.insert(params(&format!("f{i}"), "s3", i * 10 + 1)).await.unwrap();
+    }
+
+    // List with limit=2, offset=1 → items.len()==2 && total==5
+    let page = repo
+        .list(
+            "s3",
+            SessionFileListParams {
+                prefix: None,
+                status: None,
+                limit: 2,
+                offset: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 2);
+    assert_eq!(page.total, 5);
+
+    // Complete one file (f0 → Ready) and filter by status=Ready
+    repo.update_object_handle_and_status(
+        "s3",
+        "f0",
+        r#"{"expires_at":1}"#,
+        FileStatus::Ready,
+        10,
+    )
+        .await
+        .unwrap();
+    let page = repo
+        .list(
+            "s3",
+            SessionFileListParams {
+                prefix: None,
+                status: Some(FileStatus::Ready),
+                limit: 100,
+                offset: 0,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.total, 1);
+    assert_eq!(page.items[0].status, FileStatus::Ready);
 }

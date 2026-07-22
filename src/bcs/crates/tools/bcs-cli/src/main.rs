@@ -1607,8 +1607,9 @@ enum SessionFileCommands {
     List {
         #[arg(short, long)] session: String,
         #[arg(long)] prefix: Option<String>,
+        #[arg(long)] status: Option<String>,
         #[arg(long)] limit: Option<u32>,
-        #[arg(long)] marker: Option<String>,
+        #[arg(long)] offset: Option<u32>,
     },
     /// Download a file's bytes (follows presigned redirect or streams).
     Download {
@@ -3875,16 +3876,16 @@ async fn main() -> Result<()> {
                                 println!("✓ Uploaded: {} ({})", fid, size);
                             }
                         }
-                        SessionFileCommands::List { session, prefix, limit, marker } => {
+                        SessionFileCommands::List { session, prefix, status, limit, offset } => {
                             debug_request!(
                                 debug,
                                 "GET",
                                 &format!("/sessions/{}/files", &session),
-                                json!({ "prefix": &prefix, "limit": &limit, "marker": &marker })
+                                json!({ "prefix": &prefix, "status": &status, "limit": &limit, "offset": &offset })
                             );
 
                             let result = client
-                                .list_session_files(&session, prefix.as_deref(), limit, marker.as_deref())
+                                .list_session_files(&session, prefix.as_deref(), status.as_deref(), limit, offset)
                                 .await?;
 
                             debug_response!(debug, "200", &result);

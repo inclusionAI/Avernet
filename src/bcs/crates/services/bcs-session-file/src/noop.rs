@@ -81,8 +81,7 @@ impl SessionFileService for NoopSessionFileService {
     ) -> Result<SessionFileListPage, SessionFileUseCaseError> {
         Ok(SessionFileListPage {
             items: Vec::new(),
-            truncated: false,
-            next_marker: None,
+            total: 0,
         })
     }
 

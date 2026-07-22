@@ -23,15 +23,15 @@ pub struct NewSessionFileParams {
 #[derive(Debug, Clone, Default)]
 pub struct SessionFileListParams {
     pub prefix: Option<String>,
-    pub limit: u32,
-    pub marker: Option<String>, // opaque cursor (created_at,file_id)
+    pub status: Option<FileStatus>,
+    pub limit: u32,   // 0 => 100, clamped to [1, 1000] in impls
+    pub offset: u32,  // skip this many (in created_at,file_id order)
 }
 
 #[derive(Debug, Clone)]
 pub struct SessionFileListPage {
     pub items: Vec<SessionFile>,
-    pub truncated: bool,
-    pub next_marker: Option<String>,
+    pub total: u64,    // full count matching (env, session_id, [prefix], [status]) ignoring limit/offset
 }
 
 #[async_trait]

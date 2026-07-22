@@ -21,7 +21,7 @@ use bytes::Bytes;
 use futures::Stream;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use bcs_domain::{ActorKind, ActorRef, SessionFile};
+use bcs_domain::{ActorKind, ActorRef, FileStatus, SessionFile};
 use bcs_service_api::application::session_files::{
     CapabilitiesView, DeleteFileCommand, PrepareUploadCommand, SessionFileUseCaseError,
     ShareMintCommand,
@@ -84,7 +84,7 @@ struct SessionFileDto {
     // NOTE: `object_handle` intentionally omitted — internal only, never leaked.
 }
 
-fn status_slug(status: &bcs_domain::FileStatus) -> &'static str {
+fn status_slug(status: &FileStatus) -> &'static str {
     use bcs_domain::FileStatus::*;
     match status {
         Pending => "Pending",
@@ -128,9 +128,11 @@ pub struct ListQuery {
     #[serde(default)]
     pub prefix: Option<String>,
     #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
     pub limit: Option<u32>,
     #[serde(default)]
-    pub marker: Option<String>,
+    pub offset: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -452,16 +454,29 @@ pub async fn list_files(
     if !ensure_session_member(&state, &sid, &caller).await {
         return forbidden_not_participant();
     }
+    let status: Option<FileStatus> = match q.status.as_deref() {
+        Some("Pending") => Some(FileStatus::Pending),
+        Some("Ready") => Some(FileStatus::Ready),
+        Some("Deleting") => Some(FileStatus::Deleting),
+        Some("Failed") => Some(FileStatus::Failed),
+        Some(_) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({
+                "error": "INVALID_INPUT",
+                "message": format!("invalid status value: {}", q.status.unwrap()),
+            }))).into_response();
+        }
+        None => None,
+    };
     let params = SessionFileListParams {
         prefix: q.prefix,
+        status,
         limit: q.limit.unwrap_or(100),
-        marker: q.marker,
+        offset: q.offset.unwrap_or(0),
     };
     match state.services.session_files.list(&sid, params).await {
         Ok(page) => Json(json!({
             "items": page.items.iter().map(to_dto).collect::<Vec<_>>(),
-            "truncated": page.truncated,
-            "next_marker": page.next_marker,
+            "total": page.total,
         }))
         .into_response(),
         Err(e) => err_to_response(e),

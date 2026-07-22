@@ -99,7 +99,7 @@ bcs session file upload --session "grp-001:1a2b3c4d" --path ./data.csv --name "2
 ## session file list - 列出文件
 
 ```bash
-bcs session file list --session "<session_id>" [--prefix <前缀>] [--limit <数量>] [--marker <标记>]
+bcs session file list --session "<session_id>" [--prefix <前缀>] [--status <状态>] [--limit <数量>] [--offset <偏移>]
 ```
 
 **示例：**
@@ -111,8 +111,11 @@ bcs session file list --session "grp-001:1a2b3c4d"
 # 按前缀筛选
 bcs session file list --session "grp-001:1a2b3c4d" --prefix "report"
 
+# 按状态筛选
+bcs session file list --session "grp-001:1a2b3c4d" --status "Ready"
+
 # 分页
-bcs session file list --session "grp-001:1a2b3c4d" --limit 20
+bcs session file list --session "grp-001:1a2b3c4d" --limit 20 --offset 0
 ```
 
 ---
@@ -221,7 +224,7 @@ bcs session file capabilities --session "grp-001:1a2b3c4d"
 | 命令 | 关键返回字段 |
 |------|-------------|
 | `upload` | `file_id`, `status`, `name`, `size`, `mime_type` |
-| `list` | `items[]`: `file_id`, `status`, `name`, `size`, `uploader`, `created_at` |
+| `list` | `items[]`: `file_id`, `status`, `name`, `size`, `uploader`, `created_at`, `total` |
 | `download` | 文件字节流（或跟随 302 重定向） |
 | `delete` | 空或确认信息 |
 | `share` | `share_url`, `expires_at` |

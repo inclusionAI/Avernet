@@ -1395,9 +1395,10 @@ mod tests {
         }
         let page = s.list(
             "g1:abcd1234",
-            SessionFileListParams { prefix: None, limit: 100, marker: None },
+            SessionFileListParams { prefix: None, status: None, limit: 100, offset: 0 },
         ).await.unwrap();
         assert_eq!(page.items.len(), 3);
+        assert_eq!(page.total, 3);
     }
 
     // ---- sweep ---------------------------------------------------------------
