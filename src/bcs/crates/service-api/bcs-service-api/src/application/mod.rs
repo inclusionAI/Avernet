@@ -20,6 +20,7 @@ pub mod principal;
 pub mod provider;
 pub mod secret;
 pub mod session;
+pub mod session_files;
 pub mod system_message;
 
 pub use a2a_chat::*;
@@ -42,6 +43,7 @@ pub use principal::*;
 pub use provider::*;
 pub use secret::*;
 pub use session::*;
+pub use session_files::*;
 pub use system_message::*;
 
 pub use crate::port::{

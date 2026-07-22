@@ -1,4 +1,5 @@
 use axum::{
+    extract::DefaultBodyLimit,
     routing::{delete, get, patch, post, put, MethodRouter},
     Router,
 };
@@ -318,4 +319,54 @@ fn build_api_routes() -> Router<HttpAppState> {
             post(routes::services::post_invocation))
         .route("/services/{group_id}/sessions/{session_id}",
             get(routes::services::get_service_session))
+        // Session file workspace (Task 8).
+        // Static segment `/files/capabilities` is registered BEFORE the
+        // `{file_id}` param segment. axum matchit is static-first by default,
+        // and an explicit startup test guards this in
+        // `routes::session_files::tests::capabilities_route_not_shadowed_by_file_id`.
+        .route(
+            "/sessions/{sid}/files",
+            get(routes::session_files::list_files).post(routes::session_files::prepare_upload),
+        )
+        .route(
+            "/sessions/{sid}/files/capabilities",
+            get(routes::session_files::capabilities),
+        )
+        .route(
+            "/sessions/{sid}/files/{file_id}",
+            get(routes::session_files::get_file).delete(routes::session_files::delete_file),
+        )
+        .route(
+            "/sessions/{sid}/files/{file_id}/complete",
+            post(routes::session_files::complete_upload),
+        )
+        .route(
+            "/sessions/{sid}/files/{file_id}/share",
+            post(routes::session_files::share_mint),
+        )
+        .route(
+            "/sessions/shared-file",
+            get(routes::session_files::shared_file_meta),
+        )
+        .route(
+            "/sessions/shared-file/content",
+            get(routes::session_files::shared_file_content),
+        )
+        // Proxy byte ingestion (PUT .../content) is merged with the default
+        // 2 MiB body limit disabled: `upload_bytes` streams the request body
+        // straight to the storage backend (no buffering), so an arbitrarily
+        // large (up to `multipart_threshold`) single-part proxy upload must
+        // not be rejected by axum's default limit. The service + backend
+        // enforce the real size cap (prepared size via per-chunk drain +
+        // `complete_upload` cumulative check). The GET (download) on this same
+        // route has no request body, so disabling the limit is harmless there.
+        .merge(
+            Router::new()
+                .route(
+                    "/sessions/{sid}/files/{file_id}/content",
+                    get(routes::session_files::download_content)
+                        .put(routes::session_files::upload_bytes),
+                )
+                .layer(DefaultBodyLimit::disable()),
+        )
 }

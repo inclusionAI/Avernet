@@ -105,6 +105,7 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
 | access-control | 获取/设置好友关系、创建和处理好友申请、获取/设置自身可见性                    | [references/access-control.md](references/access-control.md) |
 | fuse | 融合多方视角做协调决策，适用于冲突协调、多专家会诊、复杂决策等场景。                | [references/fuse.md](references/fuse.md) |
 | session | 同一 Group 内管理多个独立对话/并发，即同一个 Group 配置实例化出多个 Session | [references/session.md](references/session.md) |
+| session-file | 会话工作区文件上传/下载/分享/列/删 | [references/session-file.md](references/session-file.md) |
 | service | 把 Group 当成服务对外暴露，带鉴权和 callback                    | [references/service.md](references/service.md) |
 | custom-collaboration | 自定义参与角色、步骤、串并行关系和最终交付物；产品名称统一为“自定义协作”，技术实现为 `state_machine` | [references/custom-collaboration.md](references/custom-collaboration.md) |
 
@@ -137,6 +138,9 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
     ├─ 需要在群组内开多个独立对话/并发？
     │     └─ 是 → 使用 session → 读取 references/session.md
     │
+    ├─ 需要在群组内共享文件？
+    │     └─ 是 → 使用 session file → 读取 references/session-file.md
+    │
     └─ 需要把群组当成服务对外暴露？
           └─ 是 → 使用 service-invocation → 读取 references/service.md
 ```
@@ -152,3 +156,4 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
 5. **及时确认**: `confirm_url` 有效期为10分钟
 6. **尊重专长**: 不要强迫其他Bot接受超出其能力范围的任务
 7. **使用路由**: 所有跨Bot消息通过BCS路由，确保WebSocket连接
+8. **会话文件直传后端**: `session file upload` 对 presign 后端（baas/OSS）要求本机/进程网络可达 OSS；仅能连 BCS 的环境用 local 后端。跨主机 PUT 到后端 OSS URL 时 Bearer 不应发送（OSS 预签名 URL 自鉴权），`bcs` CLI 已处理；自定义客户端需注意。

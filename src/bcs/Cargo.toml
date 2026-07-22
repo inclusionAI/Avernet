@@ -45,6 +45,8 @@ members = [
     "crates/services/bcs-secret",
     "crates/services/bcs-session",
     "crates/services/bcs-session-store",
+    "crates/services/bcs-session-file",
+    "crates/services/bcs-session-file-store",
     "crates/services/bcs-routing",
     "crates/services/bcs-system-message",
     # plugin-api
@@ -54,10 +56,12 @@ members = [
     "crates/plugin-api/bcs-db-api",
     "crates/plugin-api/bcs-llm-api",
     "crates/plugin-api/bcs-security-gateway-api",
+    "crates/plugin-api/bcs-storage-api",
     "crates/plugin-api/bcs-user-directory-api",
     # plugins
     "crates/plugins/bcs-cache-local",
     "crates/plugins/bcs-cache-redis",
+    "crates/plugins/bcs-storage-local",
     "crates/plugins/bcs-db-local",
     "crates/plugins/bcs-db-mysql",
     "crates/plugins/bcs-llm-openai-compatible",
@@ -167,6 +171,7 @@ sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"
 base64 = "0.22"
+ulid       = "1"
 
 # Crypto for Alipay RSA2 signing
 rsa = { version = "0.9", features = ["pem"] }
@@ -241,11 +246,15 @@ bcs-config                 = { path = "crates/services/bcs-config" }
 bcs-route-security         = { path = "crates/services/bcs-route-security" }
 bcs-session                = { path = "crates/services/bcs-session" }
 bcs-session-store          = { path = "crates/services/bcs-session-store" }
+bcs-session-file-store     = { path = "crates/services/bcs-session-file-store" }
+bcs-session-file           = { path = "crates/services/bcs-session-file" }
 bcs-system-message         = { path = "crates/services/bcs-system-message" }
 bcs-cache-api              = { path = "crates/plugin-api/bcs-cache-api" }
 bcs-channel-api            = { path = "crates/plugin-api/bcs-channel-api" }
 bcs-db-api                 = { path = "crates/plugin-api/bcs-db-api" }
 bcs-llm-api                = { path = "crates/plugin-api/bcs-llm-api" }
+bcs-storage-api            = { path = "crates/plugin-api/bcs-storage-api" }
+bcs-storage-local          = { path = "crates/plugins/bcs-storage-local" }
 bcs-user-directory-api     = { path = "crates/plugin-api/bcs-user-directory-api" }
 bcs-user-identity          = { path = "crates/services/bcs-user-identity" }
 bcs-auth-api               = { path = "crates/plugin-api/bcs-auth-api" }

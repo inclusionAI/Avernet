@@ -140,6 +140,109 @@ fn default_bootstrap_secret_service() -> Arc<dyn bcs_service_api::SecretService>
     Arc::new(DefaultSecretService::new(Arc::new(NoopSecretAccess)))
 }
 
+/// Build the session-file workspace service for the bootstrap `Services` bundle.
+///
+/// `db` selects the repo backend:
+/// - `Some(db)` → `MySqlSessionFileStore::new(db, env)` (mysql-backed mode).
+/// - `None` → `MemorySessionFileRepo::new()` (standalone/dev mode).
+///
+/// The `env` passed here MUST match the env the repo writes into the `env`
+/// column of `bcs_session_files`; the service uses the same env to scope
+/// object keys via [`bcs_session_file::authz::derive_key`].
+///
+/// Share token secret is independent of `invite.token_secret`: if
+/// `session_files.share.token_secret` is unset, bootstrap logs a warning and
+/// generates a random 32-byte secret that does NOT survive a restart (prod
+/// must set it explicitly). Mirrors the invite secret fallback contract.
+fn build_session_files_service(
+    config: &BcsConfig,
+    env: String,
+    db: Option<Arc<dyn bcs_db_api::DbPlugin>>,
+    session_repo: Arc<dyn SessionRepoPort>,
+) -> Arc<dyn bcs_service_api::application::session_files::SessionFileService> {
+    use bcs_service_api::port::repo::SessionFileRepoPort;
+    use bcs_session_file::{SessionFileServiceConfig, SessionFileServiceImpl};
+    use bcs_session_file_store::{MemorySessionFileRepo, MySqlSessionFileStore};
+    use bcs_storage_api::StoragePlugin;
+    use bcs_storage_local::{LocalStorageConfig, LocalStoragePlugin};
+
+    // Resolve data dir: explicit config > {bots_base_dir}/session-files.
+    let data_dir = std::path::PathBuf::from(
+        config
+            .session_files
+            .data_dir
+            .clone()
+            .unwrap_or_else(|| format!("{}/session-files", config.bots_base_dir.display())),
+    );
+    let _ = std::fs::create_dir_all(&data_dir);
+
+    let storage: Arc<dyn StoragePlugin> = Arc::new(LocalStoragePlugin::new(LocalStorageConfig {
+        data_dir,
+        max_object_size: config.session_files.max_file_size,
+    }));
+
+    let file_repo: Arc<dyn SessionFileRepoPort> = match db {
+        Some(db) => Arc::new(MySqlSessionFileStore::new(db, env.clone())),
+        None => Arc::new(MemorySessionFileRepo::new()),
+    };
+
+    let share_secret = config
+        .session_files
+        .share
+        .token_secret
+        .as_deref()
+        .map(|s| s.as_bytes().to_vec())
+        .unwrap_or_else(|| {
+            warn!(
+                "session_files.share.token_secret not configured — generating random \
+                 32-byte secret (share tokens will not survive restart)"
+            );
+            (0..32).map(|_| fastrand::u8(..)).collect()
+        });
+
+    // Prefer the configured external endpoint, then bind:port, mirroring
+    // `proposal_base_url` above.
+    let bcs_base_url = config
+        .bcs_endpoint
+        .clone()
+        .unwrap_or_else(|| format!("http://{}:{}", config.bind, config.port));
+
+    Arc::new(SessionFileServiceImpl::new(SessionFileServiceConfig {
+        storage,
+        repo: file_repo,
+        session_repo,
+        env,
+        max_size: config.session_files.max_file_size,
+        multipart_threshold: config.session_files.multipart_threshold,
+        bcs_base_url,
+        share_secret,
+        share_default_ttl: config.session_files.share.default_ttl_seconds,
+        share_base_url: config.session_files.share.share_base_url.clone(),
+    }))
+}
+
+/// Spawn the Pending-sweep background task for the session-file workspace.
+///
+/// Mirrors the timeout/token-expiry scanner pattern: a tokio interval task
+/// that calls `sweep_expired_pending()` every 300s, logs results, and
+/// swallows errors so a transient backend hiccup never tears down the loop.
+fn spawn_session_files_pending_sweep(
+    service: Arc<dyn bcs_service_api::application::session_files::SessionFileService>,
+) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        interval.tick().await; // consume the immediate first tick
+        loop {
+            interval.tick().await;
+            match service.sweep_expired_pending().await {
+                Ok(n) if n > 0 => info!(swept = n, "session file pending sweep"),
+                Ok(_) => {}
+                Err(e) => warn!(error = ?e, "session file pending sweep error"),
+            }
+        }
+    });
+}
+
 fn build_file_collaboration_template_service_with_judge_templates(
     config: &BcsConfig,
     judge_templates_enabled: bool,
@@ -1148,6 +1251,12 @@ impl Default for BcsServerState {
             .session_management(session_management.clone())
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
+            .session_files(build_session_files_service(
+                &config,
+                crate::env::resolve_env(),
+                None,
+                session_repo.clone(),
+            ))
             .build()
             .expect("services must be fully wired");
 
@@ -1171,6 +1280,9 @@ impl Default for BcsServerState {
             services.bot_runtime.clone(),
             crate::token_expiry_scanner::DEFAULT_SCAN_INTERVAL,
         );
+
+        // Start Pending-sweep for session-file workspace
+        spawn_session_files_pending_sweep(services.session_files.clone());
 
         let (leader_election, lifecycle) = create_standalone_leader_lifecycle();
         register_channel_lifecycles(&lifecycle, &channel_runtime.lifecycles);
@@ -2289,6 +2401,12 @@ impl BcsServer {
             .session_management(session_management.clone())
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
+            .session_files(build_session_files_service(
+                &config,
+                crate::env::resolve_env(),
+                None,
+                session_repo.clone(),
+            ))
             .build()
             .expect("services must be fully wired");
 
@@ -2305,6 +2423,9 @@ impl BcsServer {
             crate::state_machine_timeout_scanner::DEFAULT_BATCH_SIZE,
             crate::state_machine_timeout_scanner::DEFAULT_TIMEOUT_GRACE_MS,
         );
+
+        // Start Pending-sweep for session-file workspace
+        spawn_session_files_pending_sweep(services.session_files.clone());
 
         let (leader_election, lifecycle) = create_standalone_leader_lifecycle();
         register_late_lifecycles(&lifecycle, fuse_client.as_ref());
@@ -2830,6 +2951,12 @@ impl BcsServer {
             .session_management(session_management.clone())
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
+            .session_files(build_session_files_service(
+                &config,
+                crate::env::resolve_env(),
+                infrastructure_plugins.db(),
+                session_repo.clone(),
+            ))
             .build()
             .expect("services must be fully wired");
 
@@ -2846,6 +2973,9 @@ impl BcsServer {
             crate::state_machine_timeout_scanner::DEFAULT_BATCH_SIZE,
             crate::state_machine_timeout_scanner::DEFAULT_TIMEOUT_GRACE_MS,
         );
+
+        // Start Pending-sweep for session-file workspace
+        spawn_session_files_pending_sweep(services.session_files.clone());
 
         let auth_config = crate::auth_wiring::resolve_auth_config(
             &config.auth,

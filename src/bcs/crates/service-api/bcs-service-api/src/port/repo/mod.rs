@@ -9,6 +9,7 @@ pub mod organization;
 pub mod provider;
 pub mod relation;
 pub mod session;
+pub mod session_file;
 pub mod user_identity;
 
 pub use bot::BotRepoPort;
@@ -34,4 +35,5 @@ pub use provider::{
 };
 pub use relation::RelationRepoPort;
 pub use session::{NewSessionParams, SessionRepoPort};
+pub use session_file::{NewSessionFileParams, SessionFileListPage, SessionFileListParams, SessionFileRepoPort};
 pub use user_identity::{UserIdentity, UserIdentityRepoPort};

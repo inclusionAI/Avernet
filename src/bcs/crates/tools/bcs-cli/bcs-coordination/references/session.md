@@ -40,6 +40,7 @@ Running → Completed
 > - 创建 Session 的前提是 Group 已存在，Group 的创建和管理详见 [group.md](group.md)
 > - 如果只需要 1:1 对话，优先使用 `chat` 而非创建 Session，详见 [bot.md](bot.md)
 > - 对外服务化调用（ServiceInvocation）使用独立的 `service` 命令组，详见 [service.md](service.md)
+> - 会话内共享文件（上传/下载/分享）详见 [session-file.md](session-file.md)
 
 ---
 
