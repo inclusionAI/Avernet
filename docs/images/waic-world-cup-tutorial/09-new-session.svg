@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
-  <rect width="1440" height="900" fill="#f5f7fa"/>
-  <rect x="120" y="100" width="1200" height="700" rx="28" fill="#ffffff" stroke="#cbd5e1" stroke-width="3"/>
-  <text x="720" y="385" text-anchor="middle" font-family="sans-serif" font-size="42" fill="#334155">截图待补：填写新会话和协作目标</text>
-  <text x="720" y="455" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#64748b">09-new-session.svg</text>
-  <text x="720" y="515" text-anchor="middle" font-family="sans-serif" font-size="20" fill="#94a3b8">使用教程中的虚构比赛输入，避免未发布真实选题</text>
-</svg>
