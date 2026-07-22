@@ -30,6 +30,7 @@ export type StateMachineNodeStatus =
   | 'pending'
   | 'ready'
   | 'running'
+  | 'judging'
   | 'completed'
   | 'failed'
   | 'retry_scheduled'
@@ -178,6 +179,7 @@ const NODE_ACTIVE_STATUSES = new Set<string>([
   'pending',
   'ready',
   'running',
+  'judging',
   'retry_scheduled',
 ]);
 const NODE_TERMINAL_STATUSES = new Set<string>([
@@ -1443,6 +1445,16 @@ function getStatusTone(status?: string): StatusTone {
     };
   }
 
+  if (normalized === 'judging') {
+    return {
+      bg: '#faf5ff',
+      border: '#e9d5ff',
+      text: '#7e22ce',
+      stroke: '#9333ea',
+      fill: '#f3e8ff',
+    };
+  }
+
   if (normalized === 'ready') {
     return {
       bg: '#eef2ff',
@@ -1526,6 +1538,10 @@ function renderNodeStatusMarker(status: string | undefined) {
 
   if (normalized === 'running' || normalized === 'retry_scheduled') {
     return <path d="M -1.8 -3.2 L 4 0 L -1.8 3.2 Z" fill="#ffffff" />;
+  }
+
+  if (normalized === 'judging') {
+    return <path d="M 0 -3.8 L 3.8 0 L 0 3.8 L -3.8 0 Z" fill="#ffffff" />;
   }
 
   if (normalized === 'skipped') {
@@ -1641,6 +1657,7 @@ function getEdgeState(
     isCompletedStatus(targetStatus) ||
     isFailedStatus(targetStatus) ||
     normalizeStatus(targetStatus) === 'running' ||
+    normalizeStatus(targetStatus) === 'judging' ||
     normalizeStatus(targetStatus) === 'retry_scheduled' ||
     normalizeStatus(targetStatus) === 'ready'
   ) {
@@ -2280,12 +2297,16 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
           const runningNode = data.nodes.find(
             (node) => normalizeStatus(node.status) === 'running',
           );
+          const judgingNode = data.nodes.find(
+            (node) => normalizeStatus(node.status) === 'judging',
+          );
           const activeNode = data.nodes.find((node) =>
             isNodeActiveStatus(node.status),
           );
 
           return (
             runningNode?.node_id ||
+            judgingNode?.node_id ||
             activeNode?.node_id ||
             data.nodes[0]?.node_id ||
             null
@@ -2561,7 +2582,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
       !selectedNodeId ||
       !nodeDetailModalOpen ||
       nodeDetailLoading ||
-      normalizeStatus(selectedNodeStatus) !== 'running'
+      !['running', 'judging'].includes(normalizeStatus(selectedNodeStatus))
     ) {
       return undefined;
     }
@@ -3249,7 +3270,9 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                             y={y}
                             vectorEffect="non-scaling-stroke"
                           />
-                          {normalizeStatus(node.status) === 'running' ? (
+                          {['running', 'judging'].includes(
+                            normalizeStatus(node.status),
+                          ) ? (
                             <rect
                               fill="none"
                               height={height}

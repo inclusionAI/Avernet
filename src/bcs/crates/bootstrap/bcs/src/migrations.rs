@@ -517,6 +517,9 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         delivery_request_id TEXT DEFAULT NULL,
         bot_delivery_run_id TEXT DEFAULT NULL,
         artifact_text TEXT DEFAULT NULL,
+        judge_claim_token TEXT DEFAULT NULL,
+        judge_lease_until_ms INTEGER DEFAULT NULL,
+        judge_decision_json TEXT DEFAULT NULL,
         error_message TEXT DEFAULT NULL,
         started_at_ms INTEGER DEFAULT NULL,
         completed_at_ms INTEGER DEFAULT NULL,
@@ -526,6 +529,7 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_sm_nodes_run_status ON bcs_state_machine_node_runs(env, run_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_sm_nodes_status_started ON bcs_state_machine_node_runs(env, status, started_at_ms)",
     "CREATE INDEX IF NOT EXISTS idx_sm_nodes_timeout_deadline ON bcs_state_machine_node_runs(env, status, timeout_deadline_ms)",
+    "CREATE INDEX IF NOT EXISTS idx_sm_nodes_judge_claim ON bcs_state_machine_node_runs(env, status, judge_lease_until_ms)",
     "CREATE INDEX IF NOT EXISTS idx_sm_nodes_assignee_status ON bcs_state_machine_node_runs(env, assignee_bot_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_sm_nodes_delivery_request ON bcs_state_machine_node_runs(env, delivery_request_id)",
     "CREATE INDEX IF NOT EXISTS idx_sm_nodes_bot_delivery_run ON bcs_state_machine_node_runs(env, bot_delivery_run_id)",
@@ -684,6 +688,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 5,
         name: "add_session_collection_timestamp",
     },
+    SqliteMigration {
+        version: 6,
+        name: "add_state_machine_node_judging",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -784,6 +792,7 @@ pub async fn run_sqlite_bootstrap_tables(db: &dyn DbPlugin) -> DbResult<()> {
     }
     ensure_sqlite_message_owner_bot_id(db).await?;
     ensure_sqlite_session_collected_column(db).await?;
+    ensure_sqlite_state_machine_judge_columns(db).await?;
     Ok(())
 }
 
@@ -838,6 +847,35 @@ async fn ensure_sqlite_session_collected_column(db: &dyn DbPlugin) -> DbResult<(
          ON bcs_session_participants(env, group_id, bot_uuid, collected, collected_at)",
     ))
     .await?;
+    Ok(())
+}
+
+async fn ensure_sqlite_state_machine_judge_columns(db: &dyn DbPlugin) -> DbResult<()> {
+    if !table_exists(db, "bcs_state_machine_node_runs").await? {
+        return Ok(());
+    }
+    let columns = sqlite_table_columns(db, "bcs_state_machine_node_runs").await?;
+    if !columns.iter().any(|column| column == "judge_claim_token") {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_state_machine_node_runs ADD COLUMN judge_claim_token TEXT DEFAULT NULL",
+        ))
+        .await?;
+    }
+    if !columns
+        .iter()
+        .any(|column| column == "judge_lease_until_ms")
+    {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_state_machine_node_runs ADD COLUMN judge_lease_until_ms INTEGER DEFAULT NULL",
+        ))
+        .await?;
+    }
+    if !columns.iter().any(|column| column == "judge_decision_json") {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_state_machine_node_runs ADD COLUMN judge_decision_json TEXT DEFAULT NULL",
+        ))
+        .await?;
+    }
     Ok(())
 }
 
@@ -900,6 +938,10 @@ async fn apply_sqlite_migration_body(
         // collected_at column is added by ensure_sqlite_session_collected_column
         // in run_sqlite_bootstrap_tables; version 5 only records progress.
         5 => Ok(()),
+        // Judge claim, lease, and decision columns are added by the bootstrap
+        // repair pass before the version is recorded so fresh and legacy SQLite
+        // databases converge.
+        6 => ensure_sqlite_state_machine_judge_columns(db).await,
         _ => Ok(()),
     }
 }
@@ -1110,6 +1152,22 @@ mod tests {
 
         let columns = column_names(&db, "bcs_bots").await?;
         assert!(columns.iter().any(|column| column == "agent_code"));
+        let node_columns = column_names(&db, "bcs_state_machine_node_runs").await?;
+        assert!(
+            node_columns
+                .iter()
+                .any(|column| column == "judge_claim_token")
+        );
+        assert!(
+            node_columns
+                .iter()
+                .any(|column| column == "judge_lease_until_ms")
+        );
+        assert!(
+            node_columns
+                .iter()
+                .any(|column| column == "judge_decision_json")
+        );
         assert_eq!(
             migration_rows(&db).await?,
             vec![
@@ -1125,7 +1183,12 @@ mod tests {
                     5,
                     "add_session_collection_timestamp".to_string(),
                     "sqlite".to_string()
-                )
+                ),
+                (
+                    6,
+                    "add_state_machine_node_judging".to_string(),
+                    "sqlite".to_string()
+                ),
             ]
         );
         Ok(())
@@ -1137,7 +1200,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 5);
+        assert_eq!(report.pending_versions.len(), 6);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1155,6 +1218,11 @@ mod tests {
         assert_eq!(
             report.pending_versions[4].name,
             "add_session_collection_timestamp"
+        );
+        assert_eq!(report.pending_versions[5].version, 6);
+        assert_eq!(
+            report.pending_versions[5].name,
+            "add_state_machine_node_judging"
         );
         Ok(())
     }
@@ -1181,9 +1249,37 @@ mod tests {
                     5,
                     "add_session_collection_timestamp".to_string(),
                     "sqlite".to_string()
-                )
+                ),
+                (
+                    6,
+                    "add_state_machine_node_judging".to_string(),
+                    "sqlite".to_string()
+                ),
             ]
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_judge_column_repair_handles_missing_and_legacy_tables() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+
+        ensure_sqlite_state_machine_judge_columns(&db).await?;
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_state_machine_node_runs (id INTEGER PRIMARY KEY)",
+        ))
+        .await?;
+
+        ensure_sqlite_state_machine_judge_columns(&db).await?;
+
+        let columns = column_names(&db, "bcs_state_machine_node_runs").await?;
+        assert!(columns.iter().any(|column| column == "judge_claim_token"));
+        assert!(
+            columns
+                .iter()
+                .any(|column| column == "judge_lease_until_ms")
+        );
+        assert!(columns.iter().any(|column| column == "judge_decision_json"));
         Ok(())
     }
 

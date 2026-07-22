@@ -148,6 +148,10 @@ Constraints:
 - `state` is fixed to `final`.
 - Send only one successful final event for the same `run_id`.
 - When retrying the same callback event, keep the same `X-BCN-Event-Id`.
+- An HTTP `2xx` means BCS has durably accepted the event. For a state-machine
+  node with a judge, BCS first enters `judging` and evaluates it in the
+  background; the response does not mean that the judge or the full run has
+  completed.
 
 ## Error responses
 

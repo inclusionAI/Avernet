@@ -53,6 +53,13 @@ slow-timeout = { period = "60s", terminate-after = 5 }
 filter = 'binary(integration_collab_reachability)'
 threads-required = "num-cpus"
 
+[[profile.default.overrides]]
+# This unit test exercises a real detached HTTP callback and initializes a fresh
+# reqwest client. Reserve the runner while it observes localhost delivery so CPU
+# saturation cannot turn scheduler latency into a false callback failure.
+filter = 'package(bcs-http) & test(=admin_invocation_terminal::tests::matching_bot_terminal_dispatches_callback_once)'
+threads-required = "num-cpus"
+
 # ────────────────────────────────────────────────────────────────
 # quick profile: fast tests only, for quick feedback during iteration.
 # Skips tests marked #[ignore = "slow"] and fails slow tests outright.
@@ -70,6 +77,10 @@ slow-timeout = { period = "10s", terminate-after = 1 }
 
 [[profile.quick.overrides]]
 filter = 'binary(integration_collab_reachability)'
+threads-required = "num-cpus"
+
+[[profile.quick.overrides]]
+filter = 'package(bcs-http) & test(=admin_invocation_terminal::tests::matching_bot_terminal_dispatches_callback_once)'
 threads-required = "num-cpus"
 
 # ────────────────────────────────────────────────────────────────
@@ -94,4 +105,8 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 
 [[profile.ci.overrides]]
 filter = 'binary(integration_collab_reachability)'
+threads-required = "num-cpus"
+
+[[profile.ci.overrides]]
+filter = 'package(bcs-http) & test(=admin_invocation_terminal::tests::matching_bot_terminal_dispatches_callback_once)'
 threads-required = "num-cpus"

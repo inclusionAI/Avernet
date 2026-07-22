@@ -1126,6 +1126,12 @@ impl Default for BcsServerState {
             crate::state_machine_timeout_scanner::DEFAULT_BATCH_SIZE,
             crate::state_machine_timeout_scanner::DEFAULT_TIMEOUT_GRACE_MS,
         );
+        let _state_machine_judge_handle = crate::state_machine_judge_worker::spawn(
+            services.collaboration_runtime.clone(),
+            crate::state_machine_judge_worker::DEFAULT_SCAN_INTERVAL,
+            crate::state_machine_judge_worker::DEFAULT_BATCH_SIZE,
+            crate::state_machine_judge_worker::DEFAULT_LEASE_MS,
+        );
 
         // Start JWT token expiry scanner
         let _token_expiry_handle = crate::token_expiry_scanner::spawn(
@@ -2262,6 +2268,12 @@ impl BcsServer {
             crate::state_machine_timeout_scanner::DEFAULT_BATCH_SIZE,
             crate::state_machine_timeout_scanner::DEFAULT_TIMEOUT_GRACE_MS,
         );
+        let _state_machine_judge_handle = crate::state_machine_judge_worker::spawn(
+            services.collaboration_runtime.clone(),
+            crate::state_machine_judge_worker::DEFAULT_SCAN_INTERVAL,
+            crate::state_machine_judge_worker::DEFAULT_BATCH_SIZE,
+            crate::state_machine_judge_worker::DEFAULT_LEASE_MS,
+        );
 
         let (leader_election, lifecycle) = create_standalone_leader_lifecycle();
         register_late_lifecycles(&lifecycle, fuse_client.as_ref());
@@ -2799,6 +2811,12 @@ impl BcsServer {
             crate::state_machine_timeout_scanner::DEFAULT_SCAN_INTERVAL,
             crate::state_machine_timeout_scanner::DEFAULT_BATCH_SIZE,
             crate::state_machine_timeout_scanner::DEFAULT_TIMEOUT_GRACE_MS,
+        );
+        let _state_machine_judge_handle = crate::state_machine_judge_worker::spawn(
+            services.collaboration_runtime.clone(),
+            crate::state_machine_judge_worker::DEFAULT_SCAN_INTERVAL,
+            crate::state_machine_judge_worker::DEFAULT_BATCH_SIZE,
+            crate::state_machine_judge_worker::DEFAULT_LEASE_MS,
         );
 
         let auth_config = crate::auth_wiring::resolve_auth_config(

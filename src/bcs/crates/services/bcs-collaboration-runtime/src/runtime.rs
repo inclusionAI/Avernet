@@ -19,25 +19,23 @@ use bcs_protocol::{
 };
 use bcs_service_api::{
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryTarget,
-    BotRegistryCoreService,
-    CancelStateMachineRunCommand,
-    ChatEventState, CollaborationDefinitionRecord, CollaborationEventRepoPort,
-    CollaborationRuntimeError, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
-    ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand, DefinitionYamlSource,
-    FrontendDeliveryCommand, FrontendDeliveryKind,
-    FrontendDeliveryPort, FrontendDeliveryTarget, GroupCoreService, GroupRuntimeBindingRepoPort,
-    GroupCollaborationDefinitionView, HandleBotTerminalEventCommand,
-    HandleBotTerminalEventOutcome, MAX_COLLABORATION_DEFINITION_YAML_BYTES,
-    MessageLogContent, MessageLogEventType, MessageLogMode, MessageLogStatus,
-    MESSAGE_LOG_SCHEMA_VERSION, MSG_LOG_TARGET, message_log_json,
-    NewSessionParams, PatchGroupCollaborationDefinitionCommand, RunFallbackDelivery,
+    BotRegistryCoreService, CancelStateMachineRunCommand, ChatEventState,
+    CollaborationDefinitionRecord, CollaborationEventRepoPort, CollaborationRuntimeError,
+    CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
+    CreateOrReactivateCommand, DefinitionYamlSource, FrontendDeliveryCommand, FrontendDeliveryKind,
+    FrontendDeliveryPort, FrontendDeliveryTarget, GroupCollaborationDefinitionView,
+    GroupCoreService, GroupRuntimeBindingRepoPort, HandleBotTerminalEventCommand,
+    HandleBotTerminalEventOutcome, JudgeArtifact, JudgeDecision, JudgeEvaluatorPort, JudgeRequest,
+    MAX_COLLABORATION_DEFINITION_YAML_BYTES, MESSAGE_LOG_SCHEMA_VERSION, MSG_LOG_TARGET,
+    MessageLogContent, MessageLogEventType, MessageLogMode, MessageLogStatus, NewSessionParams,
+    PatchGroupCollaborationDefinitionCommand, RunFallbackDelivery, ServiceError,
     SessionHistoryResult, SessionKind, SessionManagementService, StartStateMachineRunCommand,
     StartStateMachineRunOutcome, StateMachineDefinitionRepoPort, StateMachineRunRepoPort,
-    JudgeArtifact, JudgeEvaluatorPort, JudgeRequest, ServiceError,
     StateMachineGraphDefinitionView, StateMachineGraphEdgeView, StateMachineGraphNodeView,
     StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineRunGraphView,
-    StateMachineRunView, UpgradeGroupCollaborationDefinitionCommand,
+    StateMachineRunView, UpgradeGroupCollaborationDefinitionCommand, message_log_json,
 };
+use futures::{StreamExt, stream};
 use serde_json::Value;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -49,7 +47,7 @@ const BCS_STATE_MACHINE_BOT_NAME: &str = "BCS State Machine";
 const DEFAULT_JUDGE_TIMEOUT_MS: u64 = 90_000;
 
 enum JudgeEvaluationResult {
-    Outcome(String),
+    Decision(JudgeDecision),
     Failed(String),
 }
 
@@ -540,7 +538,7 @@ impl CollaborationRuntime {
         }
     }
 
-    async fn publish_state_machine_bot_event(
+    fn publish_state_machine_bot_event(
         &self,
         run: &StateMachineRun,
         bot_id: &str,
@@ -549,7 +547,7 @@ impl CollaborationRuntime {
         event_payload: &Value,
         state: &ChatEventState,
     ) {
-        let Some(frontend_delivery) = self.frontend_delivery.as_ref() else {
+        let Some(frontend_delivery) = self.frontend_delivery.clone() else {
             return;
         };
         let frontend_event = workbench_event_name(event_type, state);
@@ -567,37 +565,54 @@ impl CollaborationRuntime {
             "group_id": run.group_id.clone(),
             "bot_uuid": bot_id,
         });
-        let fallback = BcsFrame::Event(EventFrame::new(
-            event_type.to_string(),
-            Some(payload),
-            None,
-        ));
-        if let Err(error) = frontend_delivery
-            .publish(FrontendDeliveryCommand {
-                target: FrontendDeliveryTarget::Session {
-                    session_id: run.session_id.clone(),
-                },
-                event_json: frame.to_string(),
-                delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
-                run_fallback: Some(RunFallbackDelivery {
-                    run_id: delivery_run_id.to_string(),
-                    session_id: run.session_id.clone(),
-                    event_json: serde_json::to_string(&fallback)
-                        .unwrap_or_else(|_| frame.to_string()),
-                }),
-                exclude_conn_id: None,
-            })
+        let fallback =
+            BcsFrame::Event(EventFrame::new(event_type.to_string(), Some(payload), None));
+        let command = FrontendDeliveryCommand {
+            target: FrontendDeliveryTarget::Session {
+                session_id: run.session_id.clone(),
+            },
+            event_json: frame.to_string(),
+            delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
+            run_fallback: Some(RunFallbackDelivery {
+                run_id: delivery_run_id.to_string(),
+                session_id: run.session_id.clone(),
+                event_json: serde_json::to_string(&fallback).unwrap_or_else(|_| frame.to_string()),
+            }),
+            exclude_conn_id: None,
+        };
+        let run_id = run.run_id.clone();
+        let session_id = run.session_id.clone();
+        let delivery_run_id = delivery_run_id.to_string();
+        let bot_id = bot_id.to_string();
+        tokio::spawn(async move {
+            match tokio::time::timeout(
+                Duration::from_millis(500),
+                frontend_delivery.publish(command),
+            )
             .await
-        {
-            warn!(
-                run_id = %run.run_id,
-                bot_delivery_run_id = %delivery_run_id,
-                session_id = %run.session_id,
-                bot_id = %bot_id,
-                error = %error,
-                "state_machine: failed to publish bot event to frontend"
-            );
-        }
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => {
+                    warn!(
+                        run_id = %run_id,
+                        bot_delivery_run_id = %delivery_run_id,
+                        session_id = %session_id,
+                        bot_id = %bot_id,
+                        error = %error,
+                        "state_machine: failed to publish bot event to frontend"
+                    );
+                }
+                Err(_) => {
+                    warn!(
+                        run_id = %run_id,
+                        bot_delivery_run_id = %delivery_run_id,
+                        session_id = %session_id,
+                        bot_id = %bot_id,
+                        "state_machine: timed out publishing bot event to frontend"
+                    );
+                }
+            }
+        });
     }
 
     async fn build_node_prompt(
@@ -1127,27 +1142,44 @@ impl CollaborationRuntime {
         node_id: &str,
         attempt: i32,
         artifact_text: &str,
+        timeout_deadline_ms: Option<u64>,
     ) -> Result<JudgeEvaluationResult, CollaborationRuntimeError> {
         let state_machine = match &compiled.definition.runtime {
             CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
-            _ => return Ok(JudgeEvaluationResult::Outcome("complete".to_string())),
+            _ => {
+                return Ok(JudgeEvaluationResult::Failed(
+                    "judge evaluation requires a state-machine definition".to_string(),
+                ));
+            }
         };
         let Some(node) = state_machine.nodes.get(node_id) else {
-            return Ok(JudgeEvaluationResult::Outcome("complete".to_string()));
+            return Ok(JudgeEvaluationResult::Failed(format!(
+                "judge node is missing from the state-machine definition: {node_id}"
+            )));
         };
         let Some(judge) = &node.judge else {
-            return Ok(JudgeEvaluationResult::Outcome("complete".to_string()));
+            return Ok(JudgeEvaluationResult::Failed(format!(
+                "judge configuration is missing for node: {node_id}"
+            )));
         };
         let upstream_outputs = self
             .judge_upstream_outputs(compiled, &run.run_id, node_id)
             .await?;
         let judge_type = judge.judge_type.clone().unwrap_or_else(|| "llm".to_string());
         let allowed_outcomes = judge.outcomes.clone();
-        let judge_timeout_ms = node
+        let configured_judge_timeout_ms = node
             .node_timeout_ms
             .or(state_machine.defaults.node_timeout_ms)
             .unwrap_or(DEFAULT_JUDGE_TIMEOUT_MS)
             .max(1);
+        let judge_timeout_ms = timeout_deadline_ms
+            .map(|deadline_ms| {
+                deadline_ms
+                    .saturating_sub(bcs_protocol::now_ms())
+                    .max(1)
+                    .min(configured_judge_timeout_ms)
+            })
+            .unwrap_or(configured_judge_timeout_ms);
         info!(
             run_id = %run.run_id,
             node_id = %node_id,
@@ -1261,18 +1293,6 @@ impl CollaborationRuntime {
             .await?;
             return Ok(JudgeEvaluationResult::Failed(failure));
         }
-        self.events
-            .append_event(
-                &run.run_id,
-                Some(node_id),
-                Some(attempt),
-                "state_machine.judge.completed",
-                serde_json::to_value(&decision).map_err(|error| {
-                    CollaborationRuntimeError::InvalidRequest(error.to_string())
-                })?,
-                bcs_protocol::now_ms(),
-            )
-            .await?;
         info!(
             run_id = %run.run_id,
             node_id = %node_id,
@@ -1282,7 +1302,7 @@ impl CollaborationRuntime {
             elapsed_ms = elapsed_ms,
             "state_machine: judge evaluation completed"
         );
-        Ok(JudgeEvaluationResult::Outcome(decision.outcome))
+        Ok(JudgeEvaluationResult::Decision(decision))
     }
 
     async fn append_judge_failure_event(
@@ -1343,6 +1363,332 @@ impl CollaborationRuntime {
             }
         }
         Ok(artifacts)
+    }
+
+    async fn process_judging_node(
+        &self,
+        node: StateMachineNodeRun,
+        lease_ms: u64,
+    ) -> Result<bool, CollaborationRuntimeError> {
+        let lease_ms = lease_ms.max(1_000);
+        let claim_token = Uuid::new_v4().to_string();
+        let claimed_at = bcs_protocol::now_ms();
+        if !self
+            .runs
+            .claim_judging_node(
+                &node.run_id,
+                &node.node_id,
+                node.attempt,
+                &claim_token,
+                claimed_at,
+                claimed_at.saturating_add(lease_ms),
+            )
+            .await?
+        {
+            return Ok(false);
+        }
+        self.events
+            .append_event(
+                &node.run_id,
+                Some(&node.node_id),
+                Some(node.attempt),
+                "state_machine.judge.claimed",
+                serde_json::json!({
+                    "run_id": node.run_id.clone(),
+                    "node_id": node.node_id.clone(),
+                    "attempt": node.attempt,
+                    "claim_token": claim_token.clone(),
+                    "lease_until_ms": claimed_at.saturating_add(lease_ms),
+                }),
+                claimed_at,
+            )
+            .await?;
+        let Some(run) = self.runs.get_run(&node.run_id).await? else {
+            return Ok(false);
+        };
+        if run.status != StateMachineRunStatus::Running {
+            return Ok(false);
+        }
+        let definition = self.load_run_definition(&run).await?;
+        let compiled = validate_definition(definition)?;
+        let group = self.groups.get(&run.group_id).await.ok_or_else(|| {
+            CollaborationRuntimeError::InvalidRequest(format!("group not found: {}", run.group_id))
+        })?;
+        let artifact_text = node.artifact_text.clone().ok_or_else(|| {
+            CollaborationRuntimeError::InvalidRequest(format!(
+                "judging node {}/{} has no artifact",
+                node.run_id, node.node_id
+            ))
+        })?;
+        let persisted_decision_json = self
+            .runs
+            .get_judging_node_decision(&node.run_id, &node.node_id, node.attempt)
+            .await?;
+        let needs_decision_persist = persisted_decision_json.is_none();
+        let evaluation = async {
+            if let Some(decision_json) = persisted_decision_json {
+                let decision =
+                    serde_json::from_str::<JudgeDecision>(&decision_json).map_err(|error| {
+                        CollaborationRuntimeError::InvalidRequest(format!(
+                            "invalid persisted judge decision for {}/{} attempt {}: {error}",
+                            node.run_id, node.node_id, node.attempt
+                        ))
+                    })?;
+                info!(
+                    run_id = %node.run_id,
+                    node_id = %node.node_id,
+                    attempt = node.attempt,
+                    outcome = %decision.outcome,
+                    "state_machine: resuming persisted judge decision"
+                );
+                Ok(JudgeEvaluationResult::Decision(decision))
+            } else if node.status != StateMachineNodeStatus::Judging {
+                Err(CollaborationRuntimeError::InvalidRequest(format!(
+                    "completed judging node {}/{} attempt {} has no persisted decision",
+                    node.run_id, node.node_id, node.attempt
+                )))
+            } else {
+                self.evaluate_node_outcome(
+                    &compiled,
+                    &run,
+                    &node.node_id,
+                    node.attempt,
+                    &artifact_text,
+                    node.timeout_deadline_ms,
+                )
+                .await
+            }
+        };
+        tokio::pin!(evaluation);
+        let renewal_interval = Duration::from_millis((lease_ms / 3).clamp(100, 30_000));
+        let mut renewal_ticker = tokio::time::interval(renewal_interval);
+        renewal_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        renewal_ticker.tick().await;
+        let evaluation = loop {
+            tokio::select! {
+                evaluation = &mut evaluation => break evaluation?,
+                _ = renewal_ticker.tick() => {
+                    let lease_until_ms = bcs_protocol::now_ms().saturating_add(lease_ms);
+                    if !self.runs
+                        .renew_judging_node_claim(
+                            &node.run_id,
+                            &node.node_id,
+                            node.attempt,
+                            &claim_token,
+                            lease_until_ms,
+                        )
+                        .await?
+                    {
+                        warn!(
+                            run_id = %node.run_id,
+                            node_id = %node.node_id,
+                            attempt = node.attempt,
+                            claim_token = %claim_token,
+                            "state_machine: judge claim was lost"
+                        );
+                        return Ok(false);
+                    }
+                }
+            }
+        };
+        match evaluation {
+            JudgeEvaluationResult::Decision(decision) => {
+                let decision_json = serde_json::to_string(&decision).map_err(|error| {
+                    CollaborationRuntimeError::InvalidRequest(error.to_string())
+                })?;
+                let decision_value = serde_json::to_value(&decision).map_err(|error| {
+                    CollaborationRuntimeError::InvalidRequest(error.to_string())
+                })?;
+                let outcome = decision.outcome.clone();
+                let completed_at = node.completed_at.unwrap_or_else(bcs_protocol::now_ms);
+                let continuation = async {
+                    if needs_decision_persist
+                        && !self
+                            .runs
+                            .persist_judging_node_decision(
+                                &node.run_id,
+                                &node.node_id,
+                                node.attempt,
+                                &claim_token,
+                                decision_json,
+                                bcs_protocol::now_ms(),
+                            )
+                            .await?
+                    {
+                        return Ok::<bool, CollaborationRuntimeError>(false);
+                    }
+                    let newly_completed = node.status == StateMachineNodeStatus::Judging;
+                    if newly_completed
+                        && !self
+                            .runs
+                            .complete_judging_node_attempt(
+                                &node.run_id,
+                                &node.node_id,
+                                node.attempt,
+                                &claim_token,
+                                completed_at,
+                            )
+                            .await?
+                    {
+                        return Ok::<bool, CollaborationRuntimeError>(false);
+                    }
+                    let decision_event_exists = self
+                        .judge_outputs_for_node(&node.run_id, &node.node_id)
+                        .await?
+                        .into_iter()
+                        .any(|output| {
+                            output.attempt == node.attempt && output.decision == decision
+                        });
+                    if !decision_event_exists {
+                        self.events
+                            .append_event(
+                                &run.run_id,
+                                Some(&node.node_id),
+                                Some(node.attempt),
+                                "state_machine.judge.completed",
+                                decision_value,
+                                bcs_protocol::now_ms(),
+                            )
+                            .await?;
+                    }
+                    if newly_completed {
+                        info!(
+                            run_id = %node.run_id,
+                            group_id = %run.group_id,
+                            session_id = %run.session_id,
+                            node_id = %node.node_id,
+                            attempt = node.attempt,
+                            outcome = %outcome,
+                            artifact_len = artifact_text.len(),
+                            "state_machine: judged node completed"
+                        );
+                        if let Some(delivery_request_id) = node.delivery_request_id.as_deref() {
+                            if let Some(correlation) = self
+                                .runs
+                                .lookup_delivery_correlation(delivery_request_id)
+                                .await?
+                            {
+                                log_state_machine_node_result(
+                                    &run,
+                                    &correlation,
+                                    MessageLogStatus::Completed,
+                                    Some(&outcome),
+                                    None,
+                                    Some(artifact_text.len()),
+                                );
+                            }
+                        }
+                    }
+                    self.skip_unselected_targets(
+                        &compiled,
+                        &run,
+                        &node.node_id,
+                        &outcome,
+                        completed_at,
+                    )
+                    .await?;
+                    self.dispatch_ready_targets(&compiled, &group, &run, &node.node_id, &outcome)
+                        .await?;
+                    self.complete_run_if_done(&compiled, &run).await?;
+                    if !self
+                        .runs
+                        .finish_judging_node_attempt(
+                            &node.run_id,
+                            &node.node_id,
+                            node.attempt,
+                            &claim_token,
+                        )
+                        .await?
+                    {
+                        return Ok(false);
+                    }
+                    Ok::<bool, CollaborationRuntimeError>(true)
+                };
+                tokio::pin!(continuation);
+                let continued = loop {
+                    tokio::select! {
+                        result = &mut continuation => break result,
+                        _ = renewal_ticker.tick() => {
+                            let lease_until_ms = bcs_protocol::now_ms().saturating_add(lease_ms);
+                            if !self.runs
+                                .renew_judging_node_claim(
+                                    &node.run_id,
+                                    &node.node_id,
+                                    node.attempt,
+                                    &claim_token,
+                                    lease_until_ms,
+                                )
+                                .await?
+                            {
+                                warn!(
+                                    run_id = %node.run_id,
+                                    node_id = %node.node_id,
+                                    attempt = node.attempt,
+                                    claim_token = %claim_token,
+                                    "state_machine: judge continuation claim was lost"
+                                );
+                                return Ok(false);
+                            }
+                        }
+                    }
+                }?;
+                if !continued {
+                    return Ok(false);
+                }
+            }
+            JudgeEvaluationResult::Failed(error) => {
+                let failed_at = bcs_protocol::now_ms();
+                if !self
+                    .runs
+                    .fail_judging_node_attempt(
+                        &node.run_id,
+                        &node.node_id,
+                        node.attempt,
+                        &claim_token,
+                        error.clone(),
+                        failed_at,
+                    )
+                    .await?
+                {
+                    return Ok(false);
+                }
+                warn!(
+                    run_id = %node.run_id,
+                    group_id = %run.group_id,
+                    session_id = %run.session_id,
+                    node_id = %node.node_id,
+                    attempt = node.attempt,
+                    error = %error,
+                    "state_machine: judged node failed"
+                );
+                if let Some(delivery_request_id) = node.delivery_request_id.as_deref() {
+                    if let Some(correlation) = self
+                        .runs
+                        .lookup_delivery_correlation(delivery_request_id)
+                        .await?
+                    {
+                        log_state_machine_node_result(
+                            &run,
+                            &correlation,
+                            MessageLogStatus::Failed,
+                            None,
+                            Some(&error),
+                            None,
+                        );
+                    }
+                }
+                self.fail_node_or_schedule_retry(
+                    &compiled,
+                    &group,
+                    &run,
+                    &node.node_id,
+                    node.attempt,
+                    error,
+                )
+                .await?;
+            }
+        }
+        Ok(true)
     }
 }
 
@@ -1624,6 +1970,27 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             .runs
             .get_node_run(&correlation.state_machine_run_id, &correlation.node_id)
             .await?;
+        let duplicate_judging_final = node.as_ref().is_some_and(|node| {
+            matches!(cmd.state, ChatEventState::Final)
+                && run.status == StateMachineRunStatus::Running
+                && node.status == StateMachineNodeStatus::Judging
+                && node.attempt == correlation.attempt
+                && node.delivery_request_id.as_deref()
+                    == Some(correlation.delivery_request_id.as_str())
+                && correlation.assignee_bot_id == cmd.bot_id
+        });
+        if duplicate_judging_final {
+            info!(
+                run_id = %correlation.state_machine_run_id,
+                node_id = %correlation.node_id,
+                attempt = correlation.attempt,
+                "state_machine: duplicate final event accepted while judging"
+            );
+            return Ok(HandleBotTerminalEventOutcome {
+                consumed: true,
+                view: self.run_view(&run.run_id).await?,
+            });
+        }
         let current_event = node.as_ref().is_some_and(|node| {
             run.status == StateMachineRunStatus::Running
                 && node.status == StateMachineNodeStatus::Running
@@ -1686,15 +2053,6 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             "state_machine: bot terminal event received"
         );
         log_state_machine_bot_event(&run, &correlation, &cmd, event_text_len);
-        self.publish_state_machine_bot_event(
-            &run,
-            &cmd.bot_id,
-            &cmd.run_id,
-            &cmd.event_type,
-            &cmd.event_payload,
-            &cmd.state,
-        )
-        .await;
         let definition = self.load_run_definition(&run).await?;
         let compiled = validate_definition(definition)?;
         let group = self
@@ -1715,109 +2073,93 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                     )
                 })?;
                 let artifact_len = text.len();
-                let evaluation = self
-                    .evaluate_node_outcome(
-                        &compiled,
-                        &run,
-                        &correlation.node_id,
-                        correlation.attempt,
-                        &text,
-                    )
-                    .await?;
-                match evaluation {
-                    JudgeEvaluationResult::Outcome(outcome) => {
-                        let completed_at = bcs_protocol::now_ms();
-                        if self
-                            .runs
-                            .complete_node_attempt(
+                if compiled_node_has_judge(&compiled, &correlation.node_id) {
+                    if self
+                        .runs
+                        .mark_node_judging(
+                            &correlation.state_machine_run_id,
+                            &correlation.node_id,
+                            correlation.attempt,
+                            text,
+                        )
+                        .await?
+                    {
+                        self.events
+                            .append_event(
                                 &correlation.state_machine_run_id,
-                                &correlation.node_id,
-                                correlation.attempt,
-                                text,
-                                completed_at,
-                            )
-                            .await?
-                        {
-                            info!(
-                                run_id = %correlation.state_machine_run_id,
-                                group_id = %run.group_id,
-                                session_id = %run.session_id,
-                                node_id = %correlation.node_id,
-                                attempt = correlation.attempt,
-                                outcome = %outcome,
-                                artifact_len = artifact_len,
-                                "state_machine: node completed"
-                            );
-                            log_state_machine_node_result(
-                                &run,
-                                &correlation,
-                                MessageLogStatus::Completed,
-                                Some(&outcome),
-                                None,
-                                Some(artifact_len),
-                            );
-                            self.skip_unselected_targets(
-                                &compiled,
-                                &run,
-                                &correlation.node_id,
-                                &outcome,
-                                completed_at,
+                                Some(&correlation.node_id),
+                                Some(correlation.attempt),
+                                "state_machine.judge.requested",
+                                serde_json::json!({
+                                    "run_id": correlation.state_machine_run_id.clone(),
+                                    "node_id": correlation.node_id.clone(),
+                                    "attempt": correlation.attempt,
+                                    "artifact_len": artifact_len,
+                                    "timeout_deadline_ms": node.as_ref().and_then(|node| node.timeout_deadline_ms),
+                                }),
+                                bcs_protocol::now_ms(),
                             )
                             .await?;
-                            self.dispatch_ready_targets(
-                                &compiled,
-                                &group,
-                                &run,
-                                &correlation.node_id,
-                                &outcome,
-                            )
-                            .await?;
-                            view = self.complete_run_if_done(&compiled, &run).await?;
-                        }
+                        info!(
+                            run_id = %correlation.state_machine_run_id,
+                            group_id = %run.group_id,
+                            session_id = %run.session_id,
+                            node_id = %correlation.node_id,
+                            attempt = correlation.attempt,
+                            artifact_len = artifact_len,
+                            "state_machine: node queued for judging"
+                        );
                     }
-                    JudgeEvaluationResult::Failed(error) => {
-                        let failed_at = bcs_protocol::now_ms();
-                        if self
-                            .runs
-                            .fail_node_attempt(
-                                &correlation.state_machine_run_id,
-                                &correlation.node_id,
-                                correlation.attempt,
-                                error.clone(),
-                                failed_at,
-                            )
-                            .await?
-                        {
-                            warn!(
-                                run_id = %correlation.state_machine_run_id,
-                                group_id = %run.group_id,
-                                session_id = %run.session_id,
-                                node_id = %correlation.node_id,
-                                attempt = correlation.attempt,
-                                error = %error,
-                                "state_machine: node failed"
-                            );
-                            log_state_machine_node_result(
-                                &run,
-                                &correlation,
-                                MessageLogStatus::Failed,
-                                None,
-                                Some(&error),
-                                None,
-                            );
-                            view = self
-                                .fail_node_or_schedule_retry(
-                                    &compiled,
-                                    &group,
-                                    &run,
-                                    &correlation.node_id,
-                                    correlation.attempt,
-                                    error,
-                                )
-                                .await?;
-                        } else {
-                            view = self.run_view(&run.run_id).await?;
-                        }
+                    view = self.run_view(&run.run_id).await?;
+                } else {
+                    let outcome = "complete";
+                    let completed_at = bcs_protocol::now_ms();
+                    if self
+                        .runs
+                        .complete_node_attempt(
+                            &correlation.state_machine_run_id,
+                            &correlation.node_id,
+                            correlation.attempt,
+                            text,
+                            completed_at,
+                        )
+                        .await?
+                    {
+                        info!(
+                            run_id = %correlation.state_machine_run_id,
+                            group_id = %run.group_id,
+                            session_id = %run.session_id,
+                            node_id = %correlation.node_id,
+                            attempt = correlation.attempt,
+                            outcome = %outcome,
+                            artifact_len = artifact_len,
+                            "state_machine: node completed"
+                        );
+                        log_state_machine_node_result(
+                            &run,
+                            &correlation,
+                            MessageLogStatus::Completed,
+                            Some(outcome),
+                            None,
+                            Some(artifact_len),
+                        );
+                        self.skip_unselected_targets(
+                            &compiled,
+                            &run,
+                            &correlation.node_id,
+                            outcome,
+                            completed_at,
+                        )
+                        .await?;
+                        self.dispatch_ready_targets(
+                            &compiled,
+                            &group,
+                            &run,
+                            &correlation.node_id,
+                            outcome,
+                        )
+                        .await?;
+                        view = self.complete_run_if_done(&compiled, &run).await?;
                     }
                 }
             }
@@ -1869,6 +2211,14 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 view = self.run_view(&run.run_id).await?;
             }
         }
+        self.publish_state_machine_bot_event(
+            &run,
+            &cmd.bot_id,
+            &cmd.run_id,
+            &cmd.event_type,
+            &cmd.event_payload,
+            &cmd.state,
+        );
         Ok(HandleBotTerminalEventOutcome {
             consumed: true,
             view,
@@ -1884,8 +2234,9 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             return Ok(0);
         }
         let now = bcs_protocol::now_ms();
-        let expired_nodes = self.runs
-            .list_expired_running_node_runs(now, timeout_grace_ms, limit)
+        let expired_nodes = self
+            .runs
+            .list_expired_active_node_runs(now, timeout_grace_ms, limit)
             .await?;
         let mut processed = 0usize;
         for node in expired_nodes {
@@ -1954,6 +2305,39 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 error,
             )
             .await?;
+        }
+        Ok(processed)
+    }
+
+    async fn process_pending_judges(
+        &self,
+        limit: usize,
+        lease_ms: u64,
+    ) -> Result<usize, CollaborationRuntimeError> {
+        if limit == 0 {
+            return Ok(0);
+        }
+        let candidates = self
+            .runs
+            .list_claimable_judging_node_runs(bcs_protocol::now_ms(), limit)
+            .await?;
+        let results = stream::iter(candidates)
+            .map(|node| self.process_judging_node(node, lease_ms))
+            .buffer_unordered(limit)
+            .collect::<Vec<_>>()
+            .await;
+        let mut processed = 0usize;
+        for result in results {
+            match result {
+                Ok(true) => processed += 1,
+                Ok(false) => {}
+                Err(error) => {
+                    warn!(
+                        error = %error,
+                        "state_machine: failed to process pending judge"
+                    );
+                }
+            }
         }
         Ok(processed)
     }
@@ -3427,6 +3811,16 @@ fn compiled_node_max_attempts(compiled: &CompiledStateMachine, node_id: &str) ->
                 .max(1)
         }
         _ => 1,
+    }
+}
+
+fn compiled_node_has_judge(compiled: &CompiledStateMachine, node_id: &str) -> bool {
+    match &compiled.definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine
+            .nodes
+            .get(node_id)
+            .is_some_and(|node| node.judge.is_some()),
+        _ => false,
     }
 }
 

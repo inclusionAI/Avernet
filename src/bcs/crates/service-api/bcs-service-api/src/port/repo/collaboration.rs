@@ -133,6 +133,86 @@ pub trait StateMachineRunRepoPort: Send + Sync {
         Ok(true)
     }
 
+    async fn mark_node_judging(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        artifact_text: String,
+    ) -> ServiceResult<bool>;
+
+    async fn list_claimable_judging_node_runs(
+        &self,
+        now_ms: u64,
+        limit: usize,
+    ) -> ServiceResult<Vec<StateMachineNodeRun>> {
+        let _ = (now_ms, limit);
+        Ok(Vec::new())
+    }
+
+    async fn claim_judging_node(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+        now_ms: u64,
+        lease_until_ms: u64,
+    ) -> ServiceResult<bool>;
+
+    async fn renew_judging_node_claim(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+        lease_until_ms: u64,
+    ) -> ServiceResult<bool>;
+
+    async fn get_judging_node_decision(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+    ) -> ServiceResult<Option<String>>;
+
+    async fn persist_judging_node_decision(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+        decision_json: String,
+        now_ms: u64,
+    ) -> ServiceResult<bool>;
+
+    async fn complete_judging_node_attempt(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+        completed_at: u64,
+    ) -> ServiceResult<bool>;
+
+    async fn fail_judging_node_attempt(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+        error: String,
+        completed_at: u64,
+    ) -> ServiceResult<bool>;
+
+    async fn finish_judging_node_attempt(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+    ) -> ServiceResult<bool>;
+
     async fn complete_node_attempt(
         &self,
         run_id: &str,
@@ -192,7 +272,7 @@ pub trait StateMachineRunRepoPort: Send + Sync {
         run_id: &str,
     ) -> ServiceResult<Option<StateMachineDeliveryCorrelation>>;
 
-    async fn list_expired_running_node_runs(
+    async fn list_expired_active_node_runs(
         &self,
         now_ms: u64,
         timeout_grace_ms: u64,

@@ -126,6 +126,7 @@ X-BCN-Event-Id: <uuid>
 - `seq` 固定为 `1`。
 - `state` 固定为 `final`。
 - 同一个 `run_id` 只发送一次成功的 final。
+- HTTP `2xx` 表示 BCS 已可靠接收并持久化该事件。对于配置了 Judge 的状态机节点，BCS 会先进入 `judging` 并在后台完成判定；响应不表示 Judge 或整个状态机已经完成。
 - Provider 重试同一个回调事件时，应保持同一个 `X-BCN-Event-Id`。
 
 ## 错误响应

@@ -374,6 +374,84 @@ async fn mysql_runtime_node_and_run_updates_use_cas_sql() {
 }
 
 #[tokio::test]
+async fn mysql_runtime_judging_claims_use_lease_protected_cas_sql() {
+    let node = test_node();
+    let db = Arc::new(RecordingDb {
+        runtime_node_rows: Mutex::new(vec![node_row(&node)]),
+        ..RecordingDb::default()
+    });
+    let store = MySqlCollaborationStore::new(db.clone(), "dev".to_string());
+
+    assert!(
+        store
+            .mark_node_judging("sm-run-1", "answer", 1, "candidate".to_string())
+            .await
+            .expect("mark judging")
+    );
+    let candidates = store
+        .list_claimable_judging_node_runs(1_000, 4)
+        .await
+        .expect("list judging nodes");
+    assert_eq!(candidates.len(), 1);
+    assert!(
+        store
+            .claim_judging_node("sm-run-1", "answer", 1, "claim-1", 1_000, 31_000)
+            .await
+            .expect("claim judging node")
+    );
+    assert!(
+        store
+            .renew_judging_node_claim("sm-run-1", "answer", 1, "claim-1", 41_000)
+            .await
+            .expect("renew judging claim")
+    );
+    assert!(
+        store
+            .persist_judging_node_decision(
+                "sm-run-1",
+                "answer",
+                1,
+                "claim-1",
+                r#"{"outcome":"approved"}"#.to_string(),
+                1_500,
+            )
+            .await
+            .expect("persist judging decision")
+    );
+    assert!(
+        store
+            .complete_judging_node_attempt("sm-run-1", "answer", 1, "claim-1", 2_000)
+            .await
+            .expect("complete judging node")
+    );
+    assert!(
+        store
+            .finish_judging_node_attempt("sm-run-1", "answer", 1, "claim-1")
+            .await
+            .expect("finish judging node")
+    );
+
+    let queries = db.queries.lock().await;
+    assert!(queries[0].sql().contains("n.status = 'judging'"));
+    assert!(queries[0].sql().contains("n.judge_lease_until_ms <= ?"));
+    let executes = db.executes.lock().await;
+    assert!(executes[0].sql().contains("SET status = 'judging'"));
+    assert!(executes[1].sql().contains("judge_claim_token = ?"));
+    assert!(executes[1].sql().contains("judge_lease_until_ms <= ?"));
+    assert!(executes[2].sql().contains("judge_claim_token = ?"));
+    assert!(executes[3].sql().contains("judge_decision_json = ?"));
+    assert!(executes[3].sql().contains("judge_lease_until_ms > ?"));
+    assert!(executes[4].sql().contains("status = 'completed'"));
+    assert!(
+        executes[4]
+            .sql()
+            .contains("judge_decision_json IS NOT NULL")
+    );
+    assert!(executes[5].sql().contains("judge_decision_json = NULL"));
+    assert!(executes[5].sql().contains("status = 'completed'"));
+}
+
+#[tokio::test]
 async fn mysql_runtime_delivery_correlation_and_events_are_persistent() {
     let correlation = test_correlation();
     let db = Arc::new(RecordingDb {

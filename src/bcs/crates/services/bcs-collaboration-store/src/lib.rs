@@ -39,9 +39,24 @@ struct StoreInner {
     bindings: BTreeMap<String, GroupRuntimeBinding>,
     runs: BTreeMap<String, StateMachineRun>,
     nodes: BTreeMap<(String, String), StateMachineNodeRun>,
+    judge_claims: BTreeMap<(String, String), JudgeClaim>,
+    judge_decisions: BTreeMap<(String, String), JudgeDecisionRecord>,
     correlations: BTreeMap<String, StateMachineDeliveryCorrelation>,
     correlation_aliases: BTreeMap<String, String>,
     events: Vec<CollaborationEventRecord>,
+}
+
+#[derive(Debug, Clone)]
+struct JudgeClaim {
+    attempt: i32,
+    token: String,
+    lease_until_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+struct JudgeDecisionRecord {
+    attempt: i32,
+    decision_json: String,
 }
 
 #[derive(Debug, Clone)]
@@ -355,6 +370,12 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         node.timeout_deadline_ms = node
             .node_timeout_ms
             .map(|timeout_ms| started_at.saturating_add(timeout_ms));
+        inner
+            .judge_claims
+            .remove(&(run_id.to_string(), node_id.to_string()));
+        inner
+            .judge_decisions
+            .remove(&(run_id.to_string(), node_id.to_string()));
         Ok(())
     }
 
@@ -389,6 +410,301 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         node.timeout_deadline_ms = node
             .node_timeout_ms
             .map(|timeout_ms| started_at.saturating_add(timeout_ms));
+        inner
+            .judge_claims
+            .remove(&(run_id.to_string(), node_id.to_string()));
+        inner
+            .judge_decisions
+            .remove(&(run_id.to_string(), node_id.to_string()));
+        Ok(true)
+    }
+
+    async fn mark_node_judging(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        artifact_text: String,
+    ) -> ServiceResult<bool> {
+        let mut inner = self.inner.write().await;
+        if !run_is_running(&inner, run_id)? {
+            return Ok(false);
+        }
+        let node = node_mut(&mut inner, run_id, node_id)?;
+        if node.status != StateMachineNodeStatus::Running || node.attempt != attempt {
+            return Ok(false);
+        }
+        node.status = StateMachineNodeStatus::Judging;
+        node.artifact_text = Some(artifact_text);
+        node.error = None;
+        node.completed_at = None;
+        inner
+            .judge_claims
+            .remove(&(run_id.to_string(), node_id.to_string()));
+        inner
+            .judge_decisions
+            .remove(&(run_id.to_string(), node_id.to_string()));
+        Ok(true)
+    }
+
+    async fn list_claimable_judging_node_runs(
+        &self,
+        now_ms: u64,
+        limit: usize,
+    ) -> ServiceResult<Vec<StateMachineNodeRun>> {
+        let inner = self.inner.read().await;
+        let mut nodes = inner
+            .nodes
+            .values()
+            .filter(|node| {
+                let key = (node.run_id.clone(), node.node_id.clone());
+                let claim = inner.judge_claims.get(&key);
+                (node.status == StateMachineNodeStatus::Judging
+                    || node.status == StateMachineNodeStatus::Completed && claim.is_some())
+                    && inner
+                        .judge_claims
+                        .get(&key)
+                        .is_none_or(|claim| claim.lease_until_ms <= now_ms)
+                    && inner
+                        .runs
+                        .get(&node.run_id)
+                        .is_some_and(|run| run.status == StateMachineRunStatus::Running)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        nodes.sort_by(|left, right| {
+            left.started_at
+                .cmp(&right.started_at)
+                .then_with(|| left.run_id.cmp(&right.run_id))
+                .then_with(|| left.node_id.cmp(&right.node_id))
+        });
+        nodes.truncate(limit);
+        Ok(nodes)
+    }
+
+    async fn claim_judging_node(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+        now_ms: u64,
+        lease_until_ms: u64,
+    ) -> ServiceResult<bool> {
+        let mut inner = self.inner.write().await;
+        if !run_is_running(&inner, run_id)? {
+            return Ok(false);
+        }
+        let key = (run_id.to_string(), node_id.to_string());
+        let node = inner.nodes.get(&key).ok_or_else(|| {
+            ServiceError::InternalError(format!("state machine node not found: {run_id}/{node_id}"))
+        })?;
+        if !matches!(
+            node.status,
+            StateMachineNodeStatus::Judging | StateMachineNodeStatus::Completed
+        ) || node.attempt != attempt
+        {
+            return Ok(false);
+        }
+        if inner
+            .judge_claims
+            .get(&key)
+            .is_some_and(|claim| claim.lease_until_ms > now_ms)
+        {
+            return Ok(false);
+        }
+        inner.judge_claims.insert(
+            key,
+            JudgeClaim {
+                attempt,
+                token: claim_token.to_string(),
+                lease_until_ms,
+            },
+        );
+        Ok(true)
+    }
+
+    async fn renew_judging_node_claim(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+        lease_until_ms: u64,
+    ) -> ServiceResult<bool> {
+        let mut inner = self.inner.write().await;
+        let key = (run_id.to_string(), node_id.to_string());
+        let node_matches = inner.nodes.get(&key).is_some_and(|node| {
+            matches!(
+                node.status,
+                StateMachineNodeStatus::Judging | StateMachineNodeStatus::Completed
+            ) && node.attempt == attempt
+        });
+        let Some(claim) = inner.judge_claims.get_mut(&key) else {
+            return Ok(false);
+        };
+        if !node_matches || claim.attempt != attempt || claim.token != claim_token {
+            return Ok(false);
+        }
+        claim.lease_until_ms = lease_until_ms;
+        Ok(true)
+    }
+
+    async fn get_judging_node_decision(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+    ) -> ServiceResult<Option<String>> {
+        let inner = self.inner.read().await;
+        let key = (run_id.to_string(), node_id.to_string());
+        let Some(node) = inner.nodes.get(&key) else {
+            return Err(ServiceError::InternalError(format!(
+                "state machine node not found: {run_id}/{node_id}"
+            )));
+        };
+        if node.attempt != attempt {
+            return Ok(None);
+        }
+        Ok(inner
+            .judge_decisions
+            .get(&key)
+            .filter(|decision| decision.attempt == attempt)
+            .map(|decision| decision.decision_json.clone()))
+    }
+
+    async fn persist_judging_node_decision(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+        decision_json: String,
+        now_ms: u64,
+    ) -> ServiceResult<bool> {
+        let mut inner = self.inner.write().await;
+        if !run_is_running(&inner, run_id)? {
+            return Ok(false);
+        }
+        let key = (run_id.to_string(), node_id.to_string());
+        let node_matches = inner.nodes.get(&key).is_some_and(|node| {
+            node.status == StateMachineNodeStatus::Judging && node.attempt == attempt
+        });
+        let claim_matches = inner.judge_claims.get(&key).is_some_and(|claim| {
+            claim.attempt == attempt && claim.token == claim_token && claim.lease_until_ms > now_ms
+        });
+        if !node_matches || !claim_matches || inner.judge_decisions.contains_key(&key) {
+            return Ok(false);
+        }
+        inner.judge_decisions.insert(
+            key,
+            JudgeDecisionRecord {
+                attempt,
+                decision_json,
+            },
+        );
+        Ok(true)
+    }
+
+    async fn complete_judging_node_attempt(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+        completed_at: u64,
+    ) -> ServiceResult<bool> {
+        let mut inner = self.inner.write().await;
+        if !run_is_running(&inner, run_id)? {
+            return Ok(false);
+        }
+        let key = (run_id.to_string(), node_id.to_string());
+        let claim_matches = inner
+            .judge_claims
+            .get(&key)
+            .is_some_and(|claim| claim.attempt == attempt && claim.token == claim_token);
+        let decision_matches = inner
+            .judge_decisions
+            .get(&key)
+            .is_some_and(|decision| decision.attempt == attempt);
+        let Some(node) = inner.nodes.get_mut(&key) else {
+            return Err(ServiceError::InternalError(format!(
+                "state machine node not found: {run_id}/{node_id}"
+            )));
+        };
+        if !claim_matches
+            || !decision_matches
+            || node.status != StateMachineNodeStatus::Judging
+            || node.attempt != attempt
+        {
+            return Ok(false);
+        }
+        node.status = StateMachineNodeStatus::Completed;
+        node.error = None;
+        node.completed_at = Some(completed_at);
+        node.timeout_deadline_ms = None;
+        Ok(true)
+    }
+
+    async fn fail_judging_node_attempt(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+        error: String,
+        completed_at: u64,
+    ) -> ServiceResult<bool> {
+        let mut inner = self.inner.write().await;
+        if !run_is_running(&inner, run_id)? {
+            return Ok(false);
+        }
+        let key = (run_id.to_string(), node_id.to_string());
+        let claim_matches = inner
+            .judge_claims
+            .get(&key)
+            .is_some_and(|claim| claim.attempt == attempt && claim.token == claim_token);
+        let Some(node) = inner.nodes.get_mut(&key) else {
+            return Err(ServiceError::InternalError(format!(
+                "state machine node not found: {run_id}/{node_id}"
+            )));
+        };
+        if !claim_matches
+            || node.status != StateMachineNodeStatus::Judging
+            || node.attempt != attempt
+        {
+            return Ok(false);
+        }
+        node.status = StateMachineNodeStatus::Failed;
+        node.error = Some(error);
+        node.completed_at = Some(completed_at);
+        node.timeout_deadline_ms = None;
+        inner.judge_claims.remove(&key);
+        inner.judge_decisions.remove(&key);
+        Ok(true)
+    }
+
+    async fn finish_judging_node_attempt(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+    ) -> ServiceResult<bool> {
+        let mut inner = self.inner.write().await;
+        let key = (run_id.to_string(), node_id.to_string());
+        let node_matches = inner.nodes.get(&key).is_some_and(|node| {
+            node.status == StateMachineNodeStatus::Completed && node.attempt == attempt
+        });
+        let claim_matches = inner
+            .judge_claims
+            .get(&key)
+            .is_some_and(|claim| claim.attempt == attempt && claim.token == claim_token);
+        if !node_matches || !claim_matches {
+            return Ok(false);
+        }
+        inner.judge_claims.remove(&key);
+        inner.judge_decisions.remove(&key);
         Ok(true)
     }
 
@@ -412,6 +728,7 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         node.artifact_text = Some(artifact_text);
         node.error = None;
         node.completed_at = Some(completed_at);
+        node.timeout_deadline_ms = None;
         Ok(true)
     }
 
@@ -428,12 +745,23 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
             return Ok(false);
         }
         let node = node_mut(&mut inner, run_id, node_id)?;
-        if node.status != StateMachineNodeStatus::Running || node.attempt != attempt {
+        if !matches!(
+            node.status,
+            StateMachineNodeStatus::Running | StateMachineNodeStatus::Judging
+        ) || node.attempt != attempt
+        {
             return Ok(false);
         }
         node.status = StateMachineNodeStatus::Failed;
         node.error = Some(error);
         node.completed_at = Some(completed_at);
+        node.timeout_deadline_ms = None;
+        inner
+            .judge_claims
+            .remove(&(run_id.to_string(), node_id.to_string()));
+        inner
+            .judge_decisions
+            .remove(&(run_id.to_string(), node_id.to_string()));
         Ok(true)
     }
 
@@ -461,6 +789,12 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         node.started_at = None;
         node.completed_at = None;
         node.timeout_deadline_ms = None;
+        inner
+            .judge_claims
+            .remove(&(run_id.to_string(), node_id.to_string()));
+        inner
+            .judge_decisions
+            .remove(&(run_id.to_string(), node_id.to_string()));
         Ok(true)
     }
 
@@ -556,7 +890,7 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         Ok(inner.correlations.get(primary_key).cloned())
     }
 
-    async fn list_expired_running_node_runs(
+    async fn list_expired_active_node_runs(
         &self,
         now_ms: u64,
         timeout_grace_ms: u64,
@@ -567,10 +901,12 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
             .nodes
             .values()
             .filter(|node| {
-                node.status == StateMachineNodeStatus::Running
-                    && node.timeout_deadline_ms.is_some_and(|deadline| {
-                        deadline.saturating_add(timeout_grace_ms) <= now_ms
-                    })
+                matches!(
+                    node.status,
+                    StateMachineNodeStatus::Running | StateMachineNodeStatus::Judging
+                ) && node
+                    .timeout_deadline_ms
+                    .is_some_and(|deadline| deadline.saturating_add(timeout_grace_ms) <= now_ms)
                     && inner
                         .runs
                         .get(&node.run_id)
@@ -1375,6 +1711,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             "UPDATE bcs_state_machine_node_runs \
              SET status = 'running', attempt = ?, delivery_request_id = ?, \
                  bot_delivery_run_id = NULL, artifact_text = NULL, \
+                 judge_claim_token = NULL, judge_lease_until_ms = NULL, \
+                 judge_decision_json = NULL, \
                  error_message = NULL, started_at_ms = ?, completed_at_ms = NULL, \
                  timeout_deadline_ms = CASE \
                    WHEN node_timeout_ms IS NULL THEN NULL \
@@ -1416,6 +1754,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 "UPDATE bcs_state_machine_node_runs n \
                  SET n.status = 'running', n.delivery_request_id = ?, \
                      n.bot_delivery_run_id = NULL, n.artifact_text = NULL, \
+                     n.judge_claim_token = NULL, n.judge_lease_until_ms = NULL, \
+                     n.judge_decision_json = NULL, \
                      n.error_message = NULL, n.started_at_ms = ?, n.completed_at_ms = NULL, \
                      n.timeout_deadline_ms = CASE \
                        WHEN n.node_timeout_ms IS NULL THEN NULL \
@@ -1436,6 +1776,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 "UPDATE bcs_state_machine_node_runs \
                  SET status = 'running', delivery_request_id = ?, \
                      bot_delivery_run_id = NULL, artifact_text = NULL, \
+                     judge_claim_token = NULL, judge_lease_until_ms = NULL, \
+                     judge_decision_json = NULL, \
                      error_message = NULL, started_at_ms = ?, completed_at_ms = NULL, \
                      timeout_deadline_ms = CASE \
                        WHEN node_timeout_ms IS NULL THEN NULL \
@@ -1472,18 +1814,18 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         Ok(result.affected_rows > 0)
     }
 
-    async fn complete_node_attempt(
+    async fn mark_node_judging(
         &self,
         run_id: &str,
         node_id: &str,
         attempt: i32,
         artifact_text: String,
-        completed_at: u64,
     ) -> ServiceResult<bool> {
         let sql = format!(
             "UPDATE bcs_state_machine_node_runs \
-             SET status = 'completed', artifact_text = ?, error_message = NULL, \
-                 completed_at_ms = ?, timeout_deadline_ms = NULL, {} \
+             SET status = 'judging', artifact_text = ?, error_message = NULL, \
+                 completed_at_ms = NULL, judge_claim_token = NULL, \
+                 judge_lease_until_ms = NULL, judge_decision_json = NULL, {} \
              WHERE env = ? AND run_id = ? AND node_id = ? \
                AND attempt = ? AND status = 'running' \
                AND record_status = 'active' \
@@ -1500,6 +1842,367 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 sql,
                 vec![
                     DbValue::from(artifact_text),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(run_id),
+                    DbValue::from(node_id),
+                    DbValue::from(attempt),
+                ],
+            ))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine node mark judging: {error}"))
+            })?;
+        Ok(result.affected_rows > 0)
+    }
+
+    async fn list_claimable_judging_node_runs(
+        &self,
+        now_ms: u64,
+        limit: usize,
+    ) -> ServiceResult<Vec<StateMachineNodeRun>> {
+        let sql = "SELECT n.run_id, n.node_id, n.status, n.attempt, n.node_timeout_ms, \
+                    n.timeout_deadline_ms, n.max_attempts, n.assignee_bot_id, \
+                    n.delivery_request_id, n.bot_delivery_run_id, n.artifact_text, \
+                    n.error_message, n.started_at_ms, n.completed_at_ms \
+             FROM bcs_state_machine_node_runs n \
+             INNER JOIN bcs_state_machine_runs r \
+               ON r.env = n.env AND r.run_id = n.run_id \
+             WHERE n.env = ? \
+               AND (n.status = 'judging' OR \
+                    (n.status = 'completed' AND n.judge_claim_token IS NOT NULL)) \
+               AND (n.judge_lease_until_ms IS NULL OR n.judge_lease_until_ms <= ?) \
+               AND n.record_status = 'active' \
+               AND r.status = 'running' AND r.record_status = 'active' \
+             ORDER BY n.started_at_ms ASC, n.run_id ASC, n.node_id ASC \
+             LIMIT ?";
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(now_ms),
+                    DbValue::from(limit as u64),
+                ],
+            ))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!("claimable judging node list: {error}"))
+            })?;
+        rows.into_iter()
+            .map(row_to_state_machine_node_run)
+            .collect()
+    }
+
+    async fn claim_judging_node(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+        now_ms: u64,
+        lease_until_ms: u64,
+    ) -> ServiceResult<bool> {
+        let sql = format!(
+            "UPDATE bcs_state_machine_node_runs \
+             SET judge_claim_token = ?, judge_lease_until_ms = ?, {} \
+             WHERE env = ? AND run_id = ? AND node_id = ? \
+               AND attempt = ? AND status IN ('judging', 'completed') \
+               AND (judge_lease_until_ms IS NULL OR judge_lease_until_ms <= ?) \
+               AND record_status = 'active' \
+               AND EXISTS ( \
+                 SELECT 1 FROM bcs_state_machine_runs r \
+                 WHERE r.env = bcs_state_machine_node_runs.env \
+                   AND r.run_id = bcs_state_machine_node_runs.run_id \
+                   AND r.status = 'running' AND r.record_status = 'active' \
+               )",
+            self.flavor.set_modified_now()
+        );
+        let result = self.db
+            .execute(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(claim_token),
+                    DbValue::from(lease_until_ms),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(run_id),
+                    DbValue::from(node_id),
+                    DbValue::from(attempt),
+                    DbValue::from(now_ms),
+                ],
+            ))
+            .await
+            .map_err(|error| ServiceError::InternalError(format!("judging node claim: {error}")))?;
+        Ok(result.affected_rows > 0)
+    }
+
+    async fn renew_judging_node_claim(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+        lease_until_ms: u64,
+    ) -> ServiceResult<bool> {
+        let sql = format!(
+            "UPDATE bcs_state_machine_node_runs \
+             SET judge_lease_until_ms = ?, {} \
+             WHERE env = ? AND run_id = ? AND node_id = ? \
+               AND attempt = ? AND status IN ('judging', 'completed') \
+               AND judge_claim_token = ? AND record_status = 'active'",
+            self.flavor.set_modified_now()
+        );
+        let result = self
+            .db
+            .execute(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(lease_until_ms),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(run_id),
+                    DbValue::from(node_id),
+                    DbValue::from(attempt),
+                    DbValue::from(claim_token),
+                ],
+            ))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!("judging node claim renew: {error}"))
+            })?;
+        Ok(result.affected_rows > 0)
+    }
+
+    async fn get_judging_node_decision(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+    ) -> ServiceResult<Option<String>> {
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                "SELECT judge_decision_json FROM bcs_state_machine_node_runs \
+                 WHERE env = ? AND run_id = ? AND node_id = ? AND attempt = ? \
+                   AND status IN ('judging', 'completed') AND record_status = 'active' \
+                 LIMIT 1",
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(run_id),
+                    DbValue::from(node_id),
+                    DbValue::from(attempt),
+                ],
+            ))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!("judging node decision get: {error}"))
+            })?;
+        let Some(row) = rows.into_iter().next() else {
+            return Ok(None);
+        };
+        row.get_string("judge_decision_json").map_err(|error| {
+            ServiceError::InternalError(format!("judging node decision decode: {error}"))
+        })
+    }
+
+    async fn persist_judging_node_decision(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+        decision_json: String,
+        now_ms: u64,
+    ) -> ServiceResult<bool> {
+        let sql = format!(
+            "UPDATE bcs_state_machine_node_runs \
+             SET judge_decision_json = ?, {} \
+             WHERE env = ? AND run_id = ? AND node_id = ? \
+               AND attempt = ? AND status = 'judging' \
+               AND judge_claim_token = ? AND judge_lease_until_ms > ? \
+               AND judge_decision_json IS NULL AND record_status = 'active' \
+               AND EXISTS ( \
+                 SELECT 1 FROM bcs_state_machine_runs r \
+                 WHERE r.env = bcs_state_machine_node_runs.env \
+                   AND r.run_id = bcs_state_machine_node_runs.run_id \
+                   AND r.status = 'running' AND r.record_status = 'active' \
+               )",
+            self.flavor.set_modified_now()
+        );
+        let result = self
+            .db
+            .execute(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(decision_json),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(run_id),
+                    DbValue::from(node_id),
+                    DbValue::from(attempt),
+                    DbValue::from(claim_token),
+                    DbValue::from(now_ms),
+                ],
+            ))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!("judging node decision persist: {error}"))
+            })?;
+        Ok(result.affected_rows > 0)
+    }
+
+    async fn complete_judging_node_attempt(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+        completed_at: u64,
+    ) -> ServiceResult<bool> {
+        let sql = format!(
+            "UPDATE bcs_state_machine_node_runs \
+             SET status = 'completed', error_message = NULL, completed_at_ms = ?, \
+                 timeout_deadline_ms = NULL, {} \
+             WHERE env = ? AND run_id = ? AND node_id = ? \
+               AND attempt = ? AND status = 'judging' AND judge_claim_token = ? \
+               AND judge_decision_json IS NOT NULL \
+               AND record_status = 'active' \
+               AND EXISTS ( \
+                 SELECT 1 FROM bcs_state_machine_runs r \
+                 WHERE r.env = bcs_state_machine_node_runs.env \
+                   AND r.run_id = bcs_state_machine_node_runs.run_id \
+                   AND r.status = 'running' AND r.record_status = 'active' \
+               )",
+            self.flavor.set_modified_now()
+        );
+        let result = self
+            .db
+            .execute(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(completed_at),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(run_id),
+                    DbValue::from(node_id),
+                    DbValue::from(attempt),
+                    DbValue::from(claim_token),
+                ],
+            ))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!("judging node complete: {error}"))
+            })?;
+        Ok(result.affected_rows > 0)
+    }
+
+    async fn fail_judging_node_attempt(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+        error: String,
+        completed_at: u64,
+    ) -> ServiceResult<bool> {
+        let sql = format!(
+            "UPDATE bcs_state_machine_node_runs \
+             SET status = 'failed', error_message = ?, completed_at_ms = ?, \
+                 timeout_deadline_ms = NULL, judge_claim_token = NULL, \
+                 judge_lease_until_ms = NULL, judge_decision_json = NULL, {} \
+             WHERE env = ? AND run_id = ? AND node_id = ? \
+               AND attempt = ? AND status = 'judging' AND judge_claim_token = ? \
+               AND record_status = 'active' \
+               AND EXISTS ( \
+                 SELECT 1 FROM bcs_state_machine_runs r \
+                 WHERE r.env = bcs_state_machine_node_runs.env \
+                   AND r.run_id = bcs_state_machine_node_runs.run_id \
+                   AND r.status = 'running' AND r.record_status = 'active' \
+               )",
+            self.flavor.set_modified_now()
+        );
+        let result = self
+            .db
+            .execute(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(error),
+                    DbValue::from(completed_at),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(run_id),
+                    DbValue::from(node_id),
+                    DbValue::from(attempt),
+                    DbValue::from(claim_token),
+                ],
+            ))
+            .await
+            .map_err(|error| ServiceError::InternalError(format!("judging node fail: {error}")))?;
+        Ok(result.affected_rows > 0)
+    }
+
+    async fn finish_judging_node_attempt(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        claim_token: &str,
+    ) -> ServiceResult<bool> {
+        let sql = format!(
+            "UPDATE bcs_state_machine_node_runs \
+             SET judge_claim_token = NULL, judge_lease_until_ms = NULL, \
+                 judge_decision_json = NULL, {} \
+                 WHERE env = ? AND run_id = ? AND node_id = ? \
+               AND attempt = ? AND status = 'completed' \
+               AND judge_claim_token = ? AND record_status = 'active'",
+            self.flavor.set_modified_now()
+        );
+        let result = self
+            .db
+            .execute(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(run_id),
+                    DbValue::from(node_id),
+                    DbValue::from(attempt),
+                    DbValue::from(claim_token),
+                ],
+            ))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!("judging node finish: {error}"))
+            })?;
+        Ok(result.affected_rows > 0)
+    }
+
+    async fn complete_node_attempt(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        artifact_text: String,
+        completed_at: u64,
+    ) -> ServiceResult<bool> {
+        let sql = format!(
+            "UPDATE bcs_state_machine_node_runs \
+             SET status = 'completed', artifact_text = ?, error_message = NULL, \
+                 completed_at_ms = ?, timeout_deadline_ms = NULL, \
+                 judge_claim_token = NULL, judge_lease_until_ms = NULL, \
+                 judge_decision_json = NULL, {} \
+             WHERE env = ? AND run_id = ? AND node_id = ? \
+               AND attempt = ? AND status = 'running' \
+               AND record_status = 'active' \
+               AND EXISTS ( \
+                 SELECT 1 FROM bcs_state_machine_runs r \
+                 WHERE r.env = bcs_state_machine_node_runs.env \
+                   AND r.run_id = bcs_state_machine_node_runs.run_id \
+                   AND r.status = 'running' AND r.record_status = 'active' \
+               )",
+            self.flavor.set_modified_now()
+        );
+        let result = self
+            .db
+            .execute(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(artifact_text),
                     DbValue::from(completed_at),
                     DbValue::from(self.env.as_str()),
                     DbValue::from(run_id),
@@ -1508,7 +2211,9 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("state machine node complete: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine node complete: {error}"))
+            })?;
         Ok(result.affected_rows > 0)
     }
 
@@ -1523,9 +2228,10 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         let sql = format!(
             "UPDATE bcs_state_machine_node_runs \
              SET status = 'failed', error_message = ?, completed_at_ms = ?, \
-                 timeout_deadline_ms = NULL, {} \
+                 timeout_deadline_ms = NULL, judge_claim_token = NULL, \
+                 judge_lease_until_ms = NULL, judge_decision_json = NULL, {} \
              WHERE env = ? AND run_id = ? AND node_id = ? \
-               AND attempt = ? AND status = 'running' \
+               AND attempt = ? AND status IN ('running', 'judging') \
                AND record_status = 'active' \
                AND EXISTS ( \
                  SELECT 1 FROM bcs_state_machine_runs r \
@@ -1535,7 +2241,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                )",
             self.flavor.set_modified_now()
         );
-        let result = self.db
+        let result = self
+            .db
             .execute(DbStatement::with_params(
                 sql,
                 vec![
@@ -1548,7 +2255,9 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("state machine node fail: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine node fail: {error}"))
+            })?;
         Ok(result.affected_rows > 0)
     }
 
@@ -1565,6 +2274,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                  delivery_request_id = NULL, bot_delivery_run_id = NULL, \
                  artifact_text = NULL, error_message = NULL, started_at_ms = NULL, \
                  completed_at_ms = NULL, timeout_deadline_ms = NULL, \
+                 judge_claim_token = NULL, judge_lease_until_ms = NULL, \
+                 judge_decision_json = NULL, \
                  {} \
              WHERE env = ? AND run_id = ? AND node_id = ? \
                AND attempt = ? AND status = 'failed' \
@@ -1809,7 +2520,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         rows.into_iter().next().map(row_to_delivery_correlation).transpose()
     }
 
-    async fn list_expired_running_node_runs(
+    async fn list_expired_active_node_runs(
         &self,
         now_ms: u64,
         timeout_grace_ms: u64,
@@ -1822,7 +2533,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                    FROM bcs_state_machine_node_runs n \
                    INNER JOIN bcs_state_machine_runs r \
                      ON r.env = n.env AND r.run_id = n.run_id \
-                   WHERE n.env = ? AND n.status = 'running' \
+                   WHERE n.env = ? AND n.status IN ('running', 'judging') \
                      AND n.timeout_deadline_ms IS NOT NULL \
                      AND n.timeout_deadline_ms + ? <= ? \
                      AND n.record_status = 'active' \
@@ -2381,6 +3092,7 @@ fn node_status_to_str(status: StateMachineNodeStatus) -> &'static str {
         StateMachineNodeStatus::Pending => "pending",
         StateMachineNodeStatus::Ready => "ready",
         StateMachineNodeStatus::Running => "running",
+        StateMachineNodeStatus::Judging => "judging",
         StateMachineNodeStatus::Completed => "completed",
         StateMachineNodeStatus::Failed => "failed",
         StateMachineNodeStatus::RetryScheduled => "retry_scheduled",
@@ -2393,6 +3105,7 @@ fn parse_node_status(value: &str) -> ServiceResult<StateMachineNodeStatus> {
         "pending" => Ok(StateMachineNodeStatus::Pending),
         "ready" => Ok(StateMachineNodeStatus::Ready),
         "running" => Ok(StateMachineNodeStatus::Running),
+        "judging" => Ok(StateMachineNodeStatus::Judging),
         "completed" => Ok(StateMachineNodeStatus::Completed),
         "failed" => Ok(StateMachineNodeStatus::Failed),
         "retry_scheduled" => Ok(StateMachineNodeStatus::RetryScheduled),
@@ -2527,6 +3240,9 @@ mod tests {
                 delivery_request_id TEXT DEFAULT NULL,
                 bot_delivery_run_id TEXT DEFAULT NULL,
                 artifact_text TEXT DEFAULT NULL,
+                judge_claim_token TEXT DEFAULT NULL,
+                judge_lease_until_ms INTEGER DEFAULT NULL,
+                judge_decision_json TEXT DEFAULT NULL,
                 error_message TEXT DEFAULT NULL,
                 started_at_ms INTEGER DEFAULT NULL,
                 completed_at_ms INTEGER DEFAULT NULL,
@@ -2798,7 +3514,7 @@ runtime:
         store.create_run(run.clone(), vec![node]).await.unwrap();
 
         let expired = store
-            .list_expired_running_node_runs(700, 500, 10)
+            .list_expired_active_node_runs(700, 500, 10)
             .await
             .unwrap();
         assert_eq!(expired.len(), 1);
@@ -2825,9 +3541,182 @@ runtime:
             .await
             .unwrap());
         let expired_after_terminal = store
-            .list_expired_running_node_runs(900, 500, 10)
+            .list_expired_active_node_runs(900, 500, 10)
             .await
             .unwrap();
         assert!(expired_after_terminal.is_empty());
+    }
+
+    #[tokio::test]
+    async fn memory_store_claims_and_recovers_judging_nodes() {
+        let store = MemoryCollaborationStore::new();
+        let run = StateMachineRun {
+            run_id: "run-judge".to_string(),
+            definition_id: "def".to_string(),
+            definition_version: 1,
+            group_id: "group".to_string(),
+            group_version: 1,
+            session_id: "session".to_string(),
+            created_by: None,
+            status: StateMachineRunStatus::Running,
+            input: serde_json::Value::Null,
+            output: None,
+            error: None,
+            created_at: 1,
+            updated_at: 1,
+            completed_at: None,
+        };
+        let node = StateMachineNodeRun {
+            run_id: run.run_id.clone(),
+            node_id: "review".to_string(),
+            status: StateMachineNodeStatus::Running,
+            attempt: 0,
+            node_timeout_ms: Some(60_000),
+            timeout_deadline_ms: Some(60_000),
+            max_attempts: 1,
+            assignee_bot_id: "bot-a".to_string(),
+            delivery_request_id: Some("delivery-a".to_string()),
+            bot_delivery_run_id: None,
+            artifact_text: None,
+            error: None,
+            started_at: Some(0),
+            completed_at: None,
+        };
+        store.create_run(run, vec![node]).await.unwrap();
+
+        assert!(
+            store
+                .mark_node_judging("run-judge", "review", 0, "candidate artifact".to_string())
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store
+                .list_claimable_judging_node_runs(100, 10)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            store
+                .claim_judging_node("run-judge", "review", 0, "claim-a", 100, 1_000)
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .list_claimable_judging_node_runs(999, 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !store
+                .complete_judging_node_attempt("run-judge", "review", 0, "stale", 1_000)
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .claim_judging_node("run-judge", "review", 0, "claim-b", 1_000, 2_000)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .complete_judging_node_attempt("run-judge", "review", 0, "claim-a", 1_100)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .persist_judging_node_decision(
+                    "run-judge",
+                    "review",
+                    0,
+                    "claim-a",
+                    r#"{"outcome":"rejected"}"#.to_string(),
+                    1_100,
+                )
+                .await
+                .unwrap()
+        );
+        let decision_json = r#"{"outcome":"approved"}"#.to_string();
+        assert!(
+            store
+                .persist_judging_node_decision(
+                    "run-judge",
+                    "review",
+                    0,
+                    "claim-b",
+                    decision_json.clone(),
+                    1_100,
+                )
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store
+                .get_judging_node_decision("run-judge", "review", 0)
+                .await
+                .unwrap(),
+            Some(decision_json)
+        );
+        assert!(
+            store
+                .complete_judging_node_attempt("run-judge", "review", 0, "claim-b", 1_200)
+                .await
+                .unwrap()
+        );
+
+        let node = store
+            .get_node_run("run-judge", "review")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(node.status, StateMachineNodeStatus::Completed);
+        assert_eq!(node.artifact_text.as_deref(), Some("candidate artifact"));
+        assert_eq!(node.timeout_deadline_ms, None);
+        assert!(
+            store
+                .list_claimable_judging_node_runs(1_999, 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .list_claimable_judging_node_runs(2_000, 10)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            store
+                .claim_judging_node("run-judge", "review", 0, "claim-c", 2_000, 3_000)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .finish_judging_node_attempt("run-judge", "review", 0, "claim-b")
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .finish_judging_node_attempt("run-judge", "review", 0, "claim-c")
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .list_claimable_judging_node_runs(3_000, 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 }

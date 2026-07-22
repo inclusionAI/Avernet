@@ -2,7 +2,10 @@ use std::{
     collections::BTreeMap,
     future::Future,
     io::{self, Write},
-    sync::{Arc, OnceLock},
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
@@ -18,19 +21,19 @@ use bcs_group::GroupStore;
 use bcs_group_store::MemoryGroupRepo;
 use bcs_protocol::{BcsFrame, ChatSendParams};
 use bcs_service_api::{
-    BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, ChatEventState,
-    CollaborationEventRepoPort, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
-    DefinitionYamlSource, FrontendDeliveryCommand,
-    FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, GroupCoreService,
-    CallbackChannelConfig, CallbackConfig, PatchGroupCollaborationDefinitionCommand,
-    ServiceResult, ServiceSpec, SessionManagementService, StartStateMachineRunCommand,
-    StateMachineDefinitionRepoPort,
-    JudgeDecision, JudgeEvaluatorPort, JudgeRequest, ServiceError
+    BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget,
+    CallbackChannelConfig, CallbackConfig, ChatEventState, CollaborationEventRepoPort,
+    CollaborationRuntimeService, ConfigureGroupRuntimeCommand, DefinitionYamlSource,
+    FrontendDeliveryCommand, FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget,
+    GroupCoreService, JudgeDecision, JudgeEvaluatorPort, JudgeRequest,
+    PatchGroupCollaborationDefinitionCommand, ServiceError, ServiceResult, ServiceSpec,
+    SessionManagementService, StartStateMachineRunCommand, StateMachineDefinitionRepoPort,
+    StateMachineRunRepoPort,
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
 use serde_json::{Value, json};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 #[derive(Clone, Default)]
 struct SharedLogBuffer(Arc<std::sync::Mutex<Vec<u8>>>);
@@ -226,6 +229,7 @@ async fn single_node_run_completes_session_with_bot_final_text() {
         .await
         .expect("handle delta");
     assert!(delta.consumed);
+    wait_for_frontend_commands(&frontend_delivery, 2).await;
     let frontend_commands = frontend_delivery.commands.lock().await;
     assert_eq!(frontend_commands.len(), 2);
     let delta_event: Value =
@@ -281,6 +285,7 @@ async fn single_node_run_completes_session_with_bot_final_text() {
         .expect("handle final");
 
     assert!(handled.consumed);
+    wait_for_frontend_commands(&frontend_delivery, 3).await;
     let frontend_commands = frontend_delivery.commands.lock().await;
     assert_eq!(frontend_commands.len(), 3);
     assert!(matches!(
@@ -1118,6 +1123,353 @@ async fn complete_transitions_support_fan_out_and_implicit_all_join() {
 }
 
 #[tokio::test]
+async fn judged_node_final_is_acknowledged_before_judge_execution() {
+    let group = Arc::new(GroupStore::new());
+    group.upsert(test_group()).await.expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let judge = Arc::new(RecordingJudge::with_outcome("approved"));
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        sessions,
+        delivery.clone(),
+        judge.clone(),
+    );
+
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(judge_branch_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"question": "judge asynchronously"}),
+            caller_id: None,
+        })
+        .await
+        .expect("start run");
+    let review_run_id = delivery.commands.lock().await[0].run_id.clone();
+    let command = bcs_service_api::HandleBotTerminalEventCommand {
+        bot_id: "driver-bot".to_string(),
+        run_id: review_run_id,
+        event_type: "chat.event".to_string(),
+        event_payload: json!({
+            "state": "final",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "candidate final answer"}]
+            }
+        }),
+        state: ChatEventState::Final,
+        bcs_session_id: Some(started.view.run.session_id.clone()),
+    };
+
+    let handled = runtime
+        .handle_bot_terminal_event(command.clone())
+        .await
+        .expect("accept final");
+    let view = handled.view.expect("judging run view");
+    let review = view
+        .nodes
+        .iter()
+        .find(|node| node.node_id == "review")
+        .expect("review node");
+    assert_eq!(review.status, StateMachineNodeStatus::Judging);
+    assert_eq!(
+        review.artifact_text.as_deref(),
+        Some("candidate final answer")
+    );
+    assert!(judge.requests.lock().await.is_empty());
+
+    runtime
+        .handle_bot_terminal_event(command)
+        .await
+        .expect("accept duplicate final");
+    assert!(judge.requests.lock().await.is_empty());
+
+    assert_eq!(runtime.process_pending_judges(1, 30_000).await.unwrap(), 1);
+    assert_eq!(judge.requests.lock().await.len(), 1);
+    let view = runtime
+        .get_state_machine_run(&started.view.run.run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        view.nodes
+            .iter()
+            .find(|node| node.node_id == "review")
+            .unwrap()
+            .status,
+        StateMachineNodeStatus::Completed
+    );
+}
+
+#[tokio::test]
+async fn judged_node_final_does_not_wait_for_frontend_publication() {
+    let group = Arc::new(GroupStore::new());
+    group.upsert(test_group()).await.expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let frontend_delivery = Arc::new(BlockingFrontendDelivery::default());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        sessions,
+        delivery.clone(),
+        Arc::new(RecordingJudge::with_outcome("approved")),
+    )
+    .with_frontend_delivery(frontend_delivery.clone());
+
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(judge_branch_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"question": "judge asynchronously"}),
+            caller_id: None,
+        })
+        .await
+        .expect("start run");
+    let review_run_id = delivery.commands.lock().await[0].run_id.clone();
+    let handled = tokio::time::timeout(
+        Duration::from_secs(1),
+        runtime.handle_bot_terminal_event(bcs_service_api::HandleBotTerminalEventCommand {
+            bot_id: "driver-bot".to_string(),
+            run_id: review_run_id,
+            event_type: "chat.event".to_string(),
+            event_payload: json!({
+                "state": "final",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "candidate final answer"}]
+                }
+            }),
+            state: ChatEventState::Final,
+            bcs_session_id: Some(started.view.run.session_id.clone()),
+        }),
+    )
+    .await
+    .expect("BaaS acknowledgement must not wait for frontend publication")
+    .expect("accept final");
+
+    let review = handled
+        .view
+        .expect("judging run view")
+        .nodes
+        .into_iter()
+        .find(|node| node.node_id == "review")
+        .expect("review node");
+    assert_eq!(review.status, StateMachineNodeStatus::Judging);
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        frontend_delivery.blocked_started.notified(),
+    )
+    .await
+    .expect("detached frontend publication should start");
+    frontend_delivery.release.notify_one();
+}
+
+#[tokio::test]
+async fn completed_judge_continuation_recovers_without_re_evaluating() {
+    let group = Arc::new(GroupStore::new());
+    group.upsert(test_group()).await.expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let judge = Arc::new(RecordingJudge::with_outcome("rejected"));
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        group,
+        sessions,
+        delivery.clone(),
+        judge.clone(),
+    );
+
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(judge_branch_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"question": "recover judge continuation"}),
+            caller_id: None,
+        })
+        .await
+        .expect("start run");
+    let review_run_id = delivery.commands.lock().await[0].run_id.clone();
+    runtime
+        .handle_bot_terminal_event(bcs_service_api::HandleBotTerminalEventCommand {
+            bot_id: "driver-bot".to_string(),
+            run_id: review_run_id,
+            event_type: "chat.event".to_string(),
+            event_payload: json!({
+                "state": "final",
+                "message": {
+                    "content": [{"type": "text", "text": "candidate"}]
+                }
+            }),
+            state: ChatEventState::Final,
+            bcs_session_id: Some(started.view.run.session_id.clone()),
+        })
+        .await
+        .expect("accept final");
+
+    let claimed_at = bcs_protocol::now_ms();
+    assert!(
+        store
+            .claim_judging_node(
+                &started.view.run.run_id,
+                "review",
+                0,
+                "crashed-worker",
+                claimed_at,
+                claimed_at.saturating_add(10),
+            )
+            .await
+            .unwrap()
+    );
+    let decision = JudgeDecision {
+        outcome: "approved".to_string(),
+        reason: "persisted before worker crash".to_string(),
+        confidence: 1.0,
+        checked_criteria: Vec::new(),
+        retry_instruction: String::new(),
+        raw_response: None,
+    };
+    assert!(
+        store
+            .persist_judging_node_decision(
+                &started.view.run.run_id,
+                "review",
+                0,
+                "crashed-worker",
+                serde_json::to_string(&decision).unwrap(),
+                claimed_at,
+            )
+            .await
+            .unwrap()
+    );
+    assert!(
+        store
+            .complete_judging_node_attempt(
+                &started.view.run.run_id,
+                "review",
+                0,
+                "crashed-worker",
+                claimed_at,
+            )
+            .await
+            .unwrap()
+    );
+
+    tokio::time::sleep(Duration::from_millis(15)).await;
+    assert_eq!(runtime.process_pending_judges(1, 1_000).await.unwrap(), 1);
+    assert!(judge.requests.lock().await.is_empty());
+    assert_eq!(delivery.commands.lock().await.len(), 2);
+    let view = runtime
+        .get_state_machine_run(&started.view.run.run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        view.nodes
+            .iter()
+            .find(|node| node.node_id == "review")
+            .unwrap()
+            .status,
+        StateMachineNodeStatus::Completed
+    );
+    assert_eq!(view.judge_outputs.len(), 1);
+    assert_eq!(view.judge_outputs[0].decision, decision);
+}
+
+#[tokio::test]
+async fn judging_node_is_failed_by_the_node_timeout_scanner() {
+    let group = Arc::new(GroupStore::new());
+    group.upsert(test_group()).await.expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let judge = Arc::new(RecordingJudge::with_outcome("approved"));
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        sessions,
+        delivery.clone(),
+        judge.clone(),
+    );
+
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(judge_timeout_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"question": "judge timeout scan"}),
+            caller_id: None,
+        })
+        .await
+        .expect("start run");
+    let review_run_id = delivery.commands.lock().await[0].run_id.clone();
+    runtime
+        .handle_bot_terminal_event(bcs_service_api::HandleBotTerminalEventCommand {
+            bot_id: "driver-bot".to_string(),
+            run_id: review_run_id,
+            event_type: "chat.event".to_string(),
+            event_payload: json!({
+                "state": "final",
+                "message": {
+                    "content": [{"type": "text", "text": "candidate"}]
+                }
+            }),
+            state: ChatEventState::Final,
+            bcs_session_id: Some(started.view.run.session_id.clone()),
+        })
+        .await
+        .expect("accept final");
+    tokio::time::sleep(Duration::from_millis(5)).await;
+
+    assert_eq!(
+        runtime.process_expired_node_timeouts(10, 0).await.unwrap(),
+        1
+    );
+    assert!(judge.requests.lock().await.is_empty());
+    let view = runtime
+        .get_state_machine_run(&started.view.run.run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(view.run.status, StateMachineRunStatus::Failed);
+    assert_eq!(
+        view.nodes
+            .iter()
+            .find(|node| node.node_id == "review")
+            .unwrap()
+            .status,
+        StateMachineNodeStatus::Failed
+    );
+}
+
+#[tokio::test]
 async fn judged_node_routes_selected_outcome_and_skips_unselected_branch() {
     let group = Arc::new(GroupStore::new());
     group.upsert(test_group()).await.expect("seed group");
@@ -1242,6 +1594,7 @@ async fn judged_node_publishes_bot_output_but_not_judge_message_to_workbench() {
     )
     .await;
 
+    wait_for_frontend_commands(&frontend_delivery, 2).await;
     let frontend_commands = frontend_delivery.commands.lock().await;
     assert_eq!(frontend_commands.len(), 2);
     let panel_event: Value =
@@ -1648,6 +2001,32 @@ impl FrontendDeliveryPort for RecordingFrontendDelivery {
     }
 }
 
+#[derive(Default)]
+struct BlockingFrontendDelivery {
+    calls: AtomicUsize,
+    blocked_started: Notify,
+    release: Notify,
+}
+
+#[async_trait]
+impl FrontendDeliveryPort for BlockingFrontendDelivery {
+    async fn publish(&self, cmd: FrontendDeliveryCommand) -> ServiceResult<FrontendDeliveryResult> {
+        let target = cmd.target;
+        if self.calls.fetch_add(1, Ordering::SeqCst) > 0 {
+            self.blocked_started.notify_one();
+            self.release.notified().await;
+        }
+        Ok(FrontendDeliveryResult {
+            target,
+            delivered: 1,
+        })
+    }
+
+    async fn unregister_run(&self, _run_id: &str) -> ServiceResult<()> {
+        Ok(())
+    }
+}
+
 fn chat_send_params(command: &BotDeliveryCommand) -> ChatSendParams {
     match &command.frame {
         BcsFrame::Request(request) => {
@@ -1767,7 +2146,11 @@ async fn complete_with_text(
     session_id: &str,
     text: &str,
 ) -> bcs_service_api::HandleBotTerminalEventOutcome {
-    runtime
+    let correlation = runtime
+        .lookup_delivery_correlation(delivery_run_id)
+        .await
+        .expect("lookup delivery correlation");
+    let mut outcome = runtime
         .handle_bot_terminal_event(bcs_service_api::HandleBotTerminalEventCommand {
             bot_id: "driver-bot".to_string(),
             run_id: delivery_run_id.to_string(),
@@ -1785,7 +2168,31 @@ async fn complete_with_text(
             bcs_session_id: Some(session_id.to_string()),
         })
         .await
-        .expect("handle final")
+        .expect("handle final");
+    runtime
+        .process_pending_judges(4, 30_000)
+        .await
+        .expect("process pending judges");
+    if let Some(correlation) = correlation {
+        outcome.view = runtime
+            .get_state_machine_run(&correlation.state_machine_run_id)
+            .await
+            .expect("get state machine run after judge");
+    }
+    outcome
+}
+
+async fn wait_for_frontend_commands(
+    frontend_delivery: &Arc<RecordingFrontendDelivery>,
+    expected: usize,
+) {
+    for _ in 0..100 {
+        if frontend_delivery.commands.lock().await.len() >= expected {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+    panic!("frontend command count did not reach {expected}");
 }
 
 async fn wait_for_callback_status(

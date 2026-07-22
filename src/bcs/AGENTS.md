@@ -8,9 +8,12 @@ Before changing BCS code, read `src/bcs/CLAUDE.md` and follow its module
 architecture, layering, testing, and coding rules. If this file and
 `CLAUDE.md` overlap, treat `CLAUDE.md` as the detailed local source of truth.
 
-## No Global Formatting
+## Never Run Rustfmt
 
-Do not run `cargo fmt`, `cargo fmt --all`, or any global formatter in BCS.
+Never run `rustfmt`, either directly or indirectly. This includes `cargo fmt`,
+`cargo fmt --all`, editor format-on-save, scripts, hooks, and any other command
+that invokes `rustfmt` in BCS. There are no exceptions to this rule.
+
 Keep whitespace and style edits limited to the lines that must change for the
 task. Avoid import reordering, line wrapping, or formatting churn in unrelated
 code.

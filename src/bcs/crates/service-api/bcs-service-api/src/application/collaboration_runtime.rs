@@ -324,4 +324,13 @@ pub trait CollaborationRuntimeService: Send + Sync {
         let _ = (limit, timeout_grace_ms);
         Ok(0)
     }
+
+    async fn process_pending_judges(
+        &self,
+        limit: usize,
+        lease_ms: u64,
+    ) -> Result<usize, CollaborationRuntimeError> {
+        let _ = (limit, lease_ms);
+        Ok(0)
+    }
 }

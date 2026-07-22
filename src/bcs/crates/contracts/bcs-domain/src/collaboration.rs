@@ -450,6 +450,7 @@ pub enum StateMachineNodeStatus {
     Pending,
     Ready,
     Running,
+    Judging,
     Completed,
     Failed,
     RetryScheduled,

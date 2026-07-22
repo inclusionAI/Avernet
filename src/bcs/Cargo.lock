@@ -680,6 +680,7 @@ dependencies = [
  "bcs-session",
  "bcs-session-store",
  "bcs-test-support",
+ "futures",
  "serde_json",
  "serde_yaml",
  "tokio",

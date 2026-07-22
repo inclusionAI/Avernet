@@ -138,6 +138,7 @@ pub mod metrics;
 pub mod migrations;
 pub mod plugins;
 pub mod server;
+pub mod state_machine_judge_worker;
 pub mod state_machine_timeout_scanner;
 pub mod timeout_scanner;
 pub mod token_expiry_scanner;

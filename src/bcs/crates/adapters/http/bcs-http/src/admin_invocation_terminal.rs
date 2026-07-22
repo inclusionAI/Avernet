@@ -173,6 +173,13 @@ mod tests {
     use super::*;
     use crate::state::{AdminInvocationCallback, AdminInvocationRun};
 
+    // Callback delivery initializes a fresh reqwest client (including native
+    // certificate roots) in a detached task. On a fully loaded nextest run,
+    // that startup can legitimately take longer than two seconds even though
+    // the localhost callback is dispatched correctly.
+    const CALLBACK_DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
+    const DUPLICATE_CALLBACK_OBSERVATION_WINDOW: Duration = Duration::from_secs(1);
+
     fn admin_run(callback_url: String) -> AdminInvocationRun {
         AdminInvocationRun {
             provider_id: "admin-provider".to_string(),
@@ -241,11 +248,11 @@ mod tests {
         };
 
         bot_terminal_observer_port_contract_tests(&observer, event.clone(), async {
-            let (mut socket, _) = timeout(Duration::from_secs(2), listener.accept())
+            let (mut socket, _) = timeout(CALLBACK_DELIVERY_TIMEOUT, listener.accept())
                 .await
                 .unwrap()
                 .unwrap();
-            let request = timeout(Duration::from_secs(2), read_http_request(&mut socket))
+            let request = timeout(CALLBACK_DELIVERY_TIMEOUT, read_http_request(&mut socket))
                 .await
                 .unwrap();
             socket
@@ -261,7 +268,7 @@ mod tests {
 
         observer.observe(event).await;
         assert!(
-            timeout(Duration::from_millis(100), listener.accept())
+            timeout(DUPLICATE_CALLBACK_OBSERVATION_WINDOW, listener.accept())
                 .await
                 .is_err()
         );
