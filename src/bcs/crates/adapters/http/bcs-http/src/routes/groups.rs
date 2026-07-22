@@ -522,6 +522,47 @@ pub async fn list_bot_groups(
     Path(bot_uuid): Path<String>,
     Query(query): Query<ListBotGroupsQuery>,
 ) -> Result<Json<Value>, HttpAdapterError> {
+    let page = list_actor_groups(&state, &bot_uuid, query).await?;
+
+    Ok(Json(serde_json::json!({
+        "bot_uuid": bot_uuid,
+        "items": page.items,
+        "total": page.total,
+        "offset": page.offset,
+        "limit": page.limit,
+    })))
+}
+
+pub async fn list_my_groups(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    Query(query): Query<ListBotGroupsQuery>,
+) -> Result<Json<Value>, HttpAdapterError> {
+    let actor_id = resolve_actor_caller(&state, &headers, &uri).await?;
+    let page = list_actor_groups(&state, &actor_id, query).await?;
+
+    Ok(Json(serde_json::json!({
+        "actor_id": actor_id,
+        "items": page.items,
+        "total": page.total,
+        "offset": page.offset,
+        "limit": page.limit,
+    })))
+}
+
+struct ActorGroupListPage {
+    items: Vec<Value>,
+    total: u64,
+    offset: u64,
+    limit: u64,
+}
+
+async fn list_actor_groups(
+    state: &HttpAppState,
+    actor_id: &str,
+    query: ListBotGroupsQuery,
+) -> Result<ActorGroupListPage, HttpAdapterError> {
     let offset = query.offset.unwrap_or(0);
     let limit = query.limit.unwrap_or(10);
     let kind_filter = group_kind_filter(query.group_kind);
@@ -530,7 +571,7 @@ pub async fn list_bot_groups(
         .services
         .group_query
         .list_bot_groups(BotGroupListCommand {
-            bot_id: bot_uuid.clone(),
+            bot_id: actor_id.to_string(),
             group_kind: kind_filter,
             q: query.q.clone(),
             offset,
@@ -546,13 +587,12 @@ pub async fn list_bot_groups(
             .map(bot_group_list_entry_to_legacy_json)
             .collect();
 
-        return Ok(Json(serde_json::json!({
-            "bot_uuid": bot_uuid,
-            "items": items,
-            "total": result.total,
-            "offset": result.offset,
-            "limit": result.limit,
-        })));
+        return Ok(ActorGroupListPage {
+            items,
+            total: result.total,
+            offset: result.offset,
+            limit: result.limit,
+        });
     }
 
     // Union: include groups where the actor is only a session participant
@@ -567,7 +607,7 @@ pub async fn list_bot_groups(
     if let Ok(session_group_ids) = state
         .services
         .session_management
-        .list_group_ids_by_session_participant(&bot_uuid)
+        .list_group_ids_by_session_participant(actor_id)
         .await
     {
         for gid in session_group_ids {
@@ -619,13 +659,12 @@ pub async fn list_bot_groups(
             .map(bot_group_list_entry_to_legacy_json)
             .collect();
 
-        return Ok(Json(serde_json::json!({
-            "bot_uuid": bot_uuid,
-            "items": items,
-            "total": result.total,
-            "offset": result.offset,
-            "limit": result.limit,
-        })));
+        return Ok(ActorGroupListPage {
+            items,
+            total: result.total,
+            offset: result.offset,
+            limit: result.limit,
+        });
     }
 
     let session_extra_len = session_extra.len() as u64;
@@ -642,13 +681,12 @@ pub async fn list_bot_groups(
         .map(bot_group_list_entry_to_legacy_json)
         .collect();
 
-    Ok(Json(serde_json::json!({
-        "bot_uuid": bot_uuid,
-        "items": items,
-        "total": total,
-        "offset": offset,
-        "limit": limit,
-    })))
+    Ok(ActorGroupListPage {
+        items,
+        total,
+        offset,
+        limit,
+    })
 }
 
 fn group_detail_matches_bot_group_query(group: &GroupDetailResult, q: Option<&str>) -> bool {
