@@ -424,6 +424,8 @@ pub trait GroupManagementService: Send + Sync {
         cmd: GroupRemoveMemberCommand,
     ) -> Result<GroupRemoveMemberResult, GroupUseCaseError>;
 
+    /// Delete a group and every channel binding that targets it.
+    /// Binding cleanup failures fail the use case instead of reporting a partial success.
     async fn delete_group(
         &self,
         cmd: GroupDeleteCommand,

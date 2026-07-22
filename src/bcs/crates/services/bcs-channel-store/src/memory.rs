@@ -126,6 +126,17 @@ impl ChannelBindingRepoPort for MemoryChannelBindingRepo {
             .collect())
     }
 
+    async fn delete_by_target(&self, target: &BindingTarget, env: &str) -> ServiceResult<u64> {
+        let removed = {
+            let mut bindings = self.bindings.write().await;
+            let original_len = bindings.len();
+            bindings.retain(|binding| binding.target != *target || binding.env != env);
+            (original_len - bindings.len()) as u64
+        };
+        self.save_to_disk().await?;
+        Ok(removed)
+    }
+
     async fn set_status(&self, id: &str, active: bool) -> ServiceResult<()> {
         {
             let mut bindings = self.bindings.write().await;
