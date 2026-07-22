@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 class WebConfig:
     port: int = 8888
     start: str = "gateway.community.adapters.web.app:app"
+    enable_api_docs: bool = True
 
 
 @dataclass
