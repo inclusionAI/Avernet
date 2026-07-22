@@ -32,7 +32,7 @@ class OpenClawSessionPort(Protocol):
 
         Exact ordering (matches legacy `engines/openclaw/session.py:list`):
           1. `sessions.list` RPC → raw sessions
-          2. Filter out `bcs:group` sessions (keep `bcs:group:bcs-cli`)
+          2. Filter out `bcs:group` sessions (keep `bcs_grp_*_dm_*` and bcs-cli)
           3. Filter by `agent_id` if provided (request-param-driven but primitive)
           4. Filter by exact non-blank `session_key` if provided
           5. Paginate: slice `[offset : offset+limit]`

@@ -6,7 +6,8 @@ Session DTOs — those are covered by core/adapters/openclaw/tests/test_session.
 
 Coverage preserved from engines/openclaw/tests/test_session.py (legacy):
   - sessions_list: sessions.list + per-page chat.history + providers.available
-  - sessions_list: bcs:group filter, "Bot 初始化配置" filter
+  - sessions_list: bcs:group filter with bcs_grp DM/bcs-cli exceptions,
+    "Bot 初始化配置" filter
   - sessions_list: pagination (offset/limit BEFORE history fetch)
   - sessions_list: model normalization via _normalized_model key
   - session_create: sessions.patch RPC method + params + raw return
@@ -172,14 +173,28 @@ class TestSessionsList:
         assert s["_message_count"] == 1
         assert s["_messages"] == messages
 
-    async def test_bcs_group_sessions_filtered_out(self):
-        """Sessions whose key contains 'bcs:group' (but not 'bcs:group:bcs-cli') are dropped."""
+    async def test_bcs_group_sessions_hide_group_chats_and_keep_dm_sessions(self):
+        """BCS group chats are hidden while bcs_grp DM sessions remain visible."""
+        token = "bc7d52974947474da2f1cdea1c5642b6"
+        channel_dm_key = f"agent:main:bcs:group:bcs_grp_dingtalk_dm_{token}"
+        native_dm_key = f"agent:main:bcs:group:bcs_grp_dm_{token}"
+        flexible_dm_key = "agent:main:bcs:group:bcs_grp_dingtalk_dm_not-a-token"
         sessions = [
+            {"key": None, "label": "Null key"},
+            {"label": "Missing key"},
             {"key": "bcs:group:room-42", "label": "Group"},
+            {
+                "key": f"agent:main:bcs:group:bcs_grp_dingtalk_{token}",
+                "label": "DingTalk group",
+            },
+            {"key": channel_dm_key, "label": "DingTalk DM"},
+            {"key": native_dm_key, "label": "Native DM"},
+            {"key": flexible_dm_key, "label": "Flexible DM"},
+            {"key": "agent:main:bcs:group:legacy_dm_session", "label": "Legacy group"},
             {"key": "bcs:group:bcs-cli", "label": "CLI"},  # allowed through
             {"key": "normal-session", "label": "Normal"},
         ]
-        impl, _ = _make_impl({
+        impl, client = _make_impl({
             "sessions.list": self._sessions_payload(sessions),
             "chat.history": self._history_payload([{"id": "m1", "role": "user", "content": "x"}]),
             "providers.available": self._providers_payload(),
@@ -187,8 +202,21 @@ class TestSessionsList:
         result = await impl.sessions_list(token="tok")
         keys = [s["key"] for s in result]
         assert "bcs:group:room-42" not in keys
-        assert "bcs:group:bcs-cli" in keys
-        assert "normal-session" in keys
+        assert f"agent:main:bcs:group:bcs_grp_dingtalk_{token}" not in keys
+        assert "agent:main:bcs:group:legacy_dm_session" not in keys
+        assert keys == [
+            channel_dm_key,
+            native_dm_key,
+            flexible_dm_key,
+            "bcs:group:bcs-cli",
+            "normal-session",
+        ]
+        history_keys = [
+            params["sessionKey"]
+            for method, params, _ in client.calls
+            if method == "chat.history"
+        ]
+        assert history_keys == keys
 
     async def test_bot_init_config_single_message_filtered_out(self):
         """Sessions labelled 'Bot 初始化配置' with exactly one message are filtered."""
