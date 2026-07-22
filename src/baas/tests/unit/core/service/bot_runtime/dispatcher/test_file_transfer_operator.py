@@ -248,9 +248,7 @@ class TestOperatorPassthrough:
 
 class TestTransferStatusOperator:
     @pytest.mark.asyncio
-    async def test_status_response_includes_operator(
-        self, dispatcher, ticket_repo
-    ):
+    async def test_status_response_includes_operator(self, dispatcher, ticket_repo):
         """dispatch_get_transfer_status returns operator from TicketRecord."""
         ticket = _make_ticket(status="DONE", operator="alice")
         ticket_repo.get_by_transfer_id.return_value = ticket

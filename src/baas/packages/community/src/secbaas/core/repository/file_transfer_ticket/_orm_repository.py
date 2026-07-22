@@ -252,7 +252,9 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         if download_url is not None:
             update_kwargs["download_url"] = download_url
         else:
-            log.debug("update_urls: transfer_id=%s, download_url is None, no-op", transfer_id)
+            log.debug(
+                "update_urls: transfer_id=%s, download_url is None, no-op", transfer_id
+            )
             return  # no-op
 
         result = (

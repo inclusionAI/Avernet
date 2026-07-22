@@ -49,7 +49,9 @@ class TransferStateConflictError(
     """
 
     def __init__(self, message: str) -> None:
-        self.message = message  # Set explicitly — BotServiceError.__init__ unreachable via MRO
+        self.message = (
+            message  # Set explicitly — BotServiceError.__init__ unreachable via MRO
+        )
         super().__init__(message, error_code="FILE_TRANSFER_STATE_CONFLICT")
 
 
