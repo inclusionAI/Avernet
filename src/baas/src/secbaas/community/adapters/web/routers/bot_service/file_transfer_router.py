@@ -409,6 +409,15 @@ async def delete_transfer(
                 "transfer_id": e.transfer_id,
             },
         )
+    except TransferStateConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": e.error_code,
+                "message": str(e),
+                "transfer_id": getattr(e, "transfer_id", None),
+            },
+        )
     except NotImplementedError as e:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
