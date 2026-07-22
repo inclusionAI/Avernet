@@ -207,6 +207,7 @@ class ExpertChatInstanceService:
                 binding_id = ext.get("binding_id")
                 ext = dict(ext)
                 ext["baas_publish_id"] = baas_publish_id
+                ext["version"] = version
                 if "bot_uuid" not in ext:
                     ext["bot_uuid"] = bot_uuid
             else:
