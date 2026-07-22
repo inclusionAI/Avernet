@@ -354,6 +354,9 @@ bcs session file capabilities --session <sid>
   元信息候选端返回（`object_handle` 不透出客户端，参见 API 文档通用约定）；下载端复用 `GET .../content` 字节路由
   （预签名后端 302 到 `StoragePlugin::presign_get`，**预签名 URL 有效期取 token 过期与后端 TTL 的
   更早者**；本地后端 `get_stream` 流式返回）。
+  **HTTP 层安全设计**：`share_consume` 所有失败模式（token 过期/无效/篡改、文件不存在/非 Ready、
+  `sid` 不匹配）统一返回 `404 NOT_FOUND`，不区分具体原因（关闭 oracle）。服务层内部仍保留
+  `SessionFileUseCaseError` 的细粒度变体，但 HTTP handler 将其折叠为统一 404（见 API 文档 §1.9 错误表）。
 - 不新增 `StoragePlugin` 方法、不新增 DB 表，分享功能纯 token + routing。
 - `{sid}` 在消费端仅作路径命名空间与一致性校验，**不参与鉴权**，且分享消费者无需知道也不依赖 `sid`
   （`share_url` 自带 `sid` 与 `token`）。

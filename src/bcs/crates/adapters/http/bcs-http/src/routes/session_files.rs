@@ -167,6 +167,18 @@ fn forbidden_not_participant() -> Response {
         .into_response()
 }
 
+/// Uniform 404 for all `share_consume` failures — closes the token-validity /
+/// file-existence oracle. The underlying `SessionFileUseCaseError` variants
+/// (InvalidInput / InvalidState / NotFound / …) stay distinct at the service
+/// layer for tests; the HTTP surface never distinguishes them.
+fn share_consume_err_to_response() -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({ "error": "NOT_FOUND", "message": "shared file not found" })),
+    )
+        .into_response()
+}
+
 // ---------------------------------------------------------------
 // Caller helpers
 // ---------------------------------------------------------------
@@ -572,7 +584,7 @@ pub async fn shared_file_meta(
     };
     match state.services.session_files.share_consume(&sid, &token).await {
         Ok(r) => (StatusCode::OK, Json(json!(to_dto(&r.file)))).into_response(),
-        Err(e) => err_to_response(e),
+        Err(_) => share_consume_err_to_response(),
     }
 }
 
@@ -590,7 +602,7 @@ pub async fn shared_file_content(
             let fid = r.file.file_id.clone();
             download_file_by_id(&state, &sid_owned, &fid, q.ttl).await
         }
-        Err(e) => err_to_response(e),
+        Err(_) => share_consume_err_to_response(),
     }
 }
 
@@ -607,7 +619,7 @@ mod tests {
     use axum::http::{header, HeaderValue, Method, Request, StatusCode};
     use bcs_bot::BotCore;
     use bcs_bot_store::MemoryBotRepo;
-    use bcs_domain::{ActorKind as DomainActorKind, FileStatus};
+    use bcs_domain::{ActorKind as DomainActorKind, FileStatus, ShareTokenPayload, share_token_encode};
     use bcs_group::GroupCore;
     use bcs_group_store::MemoryGroupRepo;
     use bcs_service_api::application::session_files::SessionFileService;
@@ -1086,6 +1098,98 @@ mod tests {
             status,
             StatusCode::NOT_FOUND,
             "expected 404 for sid-mismatch, body: {body:?}"
+        );
+        assert_eq!(
+            body.get("error").and_then(|v| v.as_str()),
+            Some("NOT_FOUND")
+        );
+    }
+
+    #[tokio::test]
+    async fn share_consume_expired_token_is_404() {
+        // Mint a valid token, then construct a clone with `exp` in the past via
+        // the domain share encode function. Consume must return uniform 404 —
+        // no 422/410 leakage that reveals the token was expired.
+        let app = build_test_app().await;
+        let (file_id, _) = upload_complete(&app, "share-exp.txt", b"e").await;
+
+        let mint_uri = format!("/sessions/{}/files/{}/share", app.sid, file_id);
+        let req = post_json(&app, &mint_uri, &app.bot_a_token, json!({}));
+        let (_status, body, _) = send(&app, req).await;
+        let valid_token = body
+            .get("share_token")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .to_string();
+
+        // Re-encode an expired token with the same file_id using the app's share secret.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let expired_token = bcs_domain::share_token_encode(
+            &bcs_domain::ShareTokenPayload {
+                v: 1,
+                file_id: file_id.clone(),
+                exp: now.saturating_sub(10),
+            },
+            b"test-secret-32-bytes-0123456789",
+        );
+        assert_ne!(valid_token, expired_token);
+
+        let meta_uri = format!(
+            "/sessions/{}/shared-file?token={}",
+            app.sid, expired_token
+        );
+        let req = auth_request(Method::GET, &meta_uri, &app.bot_a_token, None);
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "expected uniform 404 for expired share token, got {status}; body: {body:?}",
+        );
+        assert_eq!(
+            body.get("error").and_then(|v| v.as_str()),
+            Some("NOT_FOUND")
+        );
+    }
+
+    #[tokio::test]
+    async fn share_consume_tampered_token_is_404() {
+        // Mint a valid token, tamper one character, consume must return uniform
+        // 404 — no 400/401 leakage that reveals the token was tampered.
+        let app = build_test_app().await;
+        let (file_id, _) = upload_complete(&app, "share-tamper.txt", b"t").await;
+
+        let mint_uri = format!("/sessions/{}/files/{}/share", app.sid, file_id);
+        let req = post_json(&app, &mint_uri, &app.bot_a_token, json!({}));
+        let (_status, body, _) = send(&app, req).await;
+        let token = body
+            .get("share_token")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .to_string();
+
+        let mut chars: Vec<char> = token.chars().collect();
+        let idx = chars.len() - 1;
+        let last = chars[idx];
+        chars[idx] = if last == 'a' { 'b' } else { 'a' };
+        let tampered: String = chars.into_iter().collect();
+
+        let meta_uri = format!(
+            "/sessions/{}/shared-file?token={}",
+            app.sid, tampered
+        );
+        let req = auth_request(Method::GET, &meta_uri, &app.bot_a_token, None);
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "expected uniform 404 for tampered share token, got {status}; body: {body:?}",
+        );
+        assert_eq!(
+            body.get("error").and_then(|v| v.as_str()),
+            Some("NOT_FOUND")
         );
     }
 

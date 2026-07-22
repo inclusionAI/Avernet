@@ -396,11 +396,16 @@ Bearer token 不泄漏给 OSS；OSS 预签名 URL 自带 query 签名，自洽�
 
 ### 错误（1.9.b / 1.9.c 共用）
 
-- `401` —— token 签名无效 / 版本不支持（`InvalidSignature`/`UnsupportedVersion`）；
-- `410 GONE` —— token 已过期（`Expired`，与 invite 的 `Expired → 410` 一致）；
-- `404 FILE_NOT_FOUND` —— 文件已删/`{sid}` 与文件 `session_id` 不一致/`file_id` 不存在；
-- `422 INVALID_STATE` —— 文件非 `Ready`（如中途转 `Failed`，理论上 `Ready` 才能生成分享）；
-- `502 STORAGE_BACKEND` —— 后端取字节失败。
+> **安全设计（关闭 oracle）：`share_consume` 统一返回 `404 NOT_FOUND`。**
+> 无鉴权端点在 token 过期/无效/篡改、文件不存在/非 Ready、`sid` 不匹配等**所有失败模式**
+> 下均返回统一的 `404 NOT_FOUND`（`{"error":"NOT_FOUND","message":"shared file not found"}`），
+> 不区分具体原因。服务层内部仍保留 `SessionFileUseCaseError` 的细粒度变体
+> （`InvalidInput`/`InvalidState`/`NotFound`/…），该区分仅用于服务层测试，不暴露到 HTTP。
+> 此设计杜绝了 token 持有者通过 HTTP 状态码探测文件是否存在/是否过期/签名是否有效的信息泄漏。
+
+- `404 NOT_FOUND` —— `share_consume` 所有失败模式统一返回（token 过期/无效/篡改、版本不支持、
+  文件已删/非 Ready/`sid` 不匹配等），不泄漏具体原因；
+- `502 STORAGE_BACKEND` —— 后端取字节失败（仅 1.9.c 下载流阶段）。
 - 1.9.a 另有：`403 FORBIDDEN`（非上传者/创建者/driver）、`404 FILE_NOT_FOUND`、`422 INVALID_STATE`。
 
 ---
