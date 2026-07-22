@@ -54,7 +54,13 @@ from secbaas.community.api.bcn import (
     ChatSendInput,
 )
 from secbaas.community.api.bot_runtime import BotBindingNotFoundError
-from secbaas.community.api.sse import SseConverterFactory, SseEvent, StreamChunk
+from secbaas.community.api.sse import (
+    SseConverterFactory,
+    SseEvent,
+    StreamChunk,
+    convert_chunks_to_sse,
+    with_sse_heartbeat,
+)
 from secbaas.community.bootstrap import ApplicationContainer
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.secret import SecretStorePlugin
@@ -277,20 +283,14 @@ async def _dispatch_chat_send_stream(
 
     converter = converter_factory.create("default")
 
-    async def _stream() -> AsyncIterator[str]:
-        try:
-            async for chunk in chunk_iter:
-                event = converter.convert(chunk, run_id=req.id)
-                if event is None:
-                    continue
-                sse = event.to_sse()
-                yield sse
-        except Exception as e:
-            logger.exception("[chat.send.stream] Unexpected error: run_id=%s", req.id)
-            yield _build_sse_error(req.id, "INTERNAL_ERROR", str(e), False)
+    def on_error(e: Exception) -> str:
+        logger.exception("[chat.send.stream] Unexpected error: run_id=%s", req.id)
+        return _build_sse_error(req.id, "INTERNAL_ERROR", str(e), False)
 
     return StreamingResponse(
-        _stream(),
+        with_sse_heartbeat(
+            convert_chunks_to_sse(chunk_iter, converter, req.id, on_error=on_error)
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
