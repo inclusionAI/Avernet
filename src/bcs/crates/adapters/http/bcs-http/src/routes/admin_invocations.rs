@@ -215,7 +215,7 @@ pub async fn create_admin_run(
     schedule_timeout_callback(state.clone(), run_id.clone(), timeout_ms);
     let location = format!("/organizations/{organization_code}/admin-runs/{run_id}");
     let mut response = (
-        StatusCode::ACCEPTED,
+        StatusCode::OK,
         Json(Envelope {
             code: 20000,
             message: "accepted".to_string(),

@@ -1148,7 +1148,7 @@ print("1" if any(item.get("bot_uuid") == target for item in json.load(sys.stdin)
         "{\"target_bot_uuid\":\"${provider_bot_uuid}\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Review the E2E release plan\"}]},\"detach\":true}" \
         "Authorization: Bearer ${admin_token}" \
         "X-BCN-Provider-Id: ${provider_id}"
-    require_status "provider starts an organization admin run" "202" || return
+    require_status "provider starts an organization admin run" "200" || return
     local admin_run_id
     admin_run_id=$(json_path "$RESPONSE" "data.run_id")
     assert_not_empty "organization admin run returns a run id" "$admin_run_id"
