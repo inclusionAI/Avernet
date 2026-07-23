@@ -21,6 +21,10 @@ from engine.community.core.skills.models import (
     CleanSymlinksResult,
     SyncSymlinksResult,
 )
+from engine.community.core.skills.layout_probe import (
+    RuntimeLayoutInspection,
+    RuntimeLayoutInspectionStatus,
+)
 from engine.community.manager import EngineManager
 
 
@@ -215,3 +219,31 @@ def test_ensure_center_skills_route_success(rich_manager, client):
         {"skill_uuid": "u2", "version": "2.0.0", "reason": "missing"}
     ]
     assert len(captured["items"]) == 2
+
+
+def test_runtime_layout_probe_has_no_engine_capability_dependency(client, monkeypatch):
+    import importlib
+
+    router_module = importlib.import_module("engine.community.api.skills.router")
+    monkeypatch.setattr(
+        router_module,
+        "inspect_runtime_layout",
+        lambda **_kwargs: RuntimeLayoutInspection(
+            status=RuntimeLayoutInspectionStatus.READY,
+            engine="openclaw",
+            layout_contract_version="skills-pool-p3-v1",
+            preparation_id="prep-1",
+            evidence={"checks": {"pool_repo_mounted": True}},
+        ),
+    )
+
+    response = client.post(
+        "/api/skills/layout/probe",
+        json={
+            "engine": "openclaw",
+            "layout_contract_version": "skills-pool-p3-v1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "READY"
