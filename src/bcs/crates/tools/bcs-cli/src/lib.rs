@@ -15,6 +15,9 @@ mod client;
 
 pub use client::{BcsClient, BotGroupListPage};
 
+const COMPILED_PRE_BCS_URL: Option<&str> = option_env!("BCS_CLI_DEFAULT_PRE_URL");
+const COMPILED_PROD_BCS_URL: Option<&str> = option_env!("BCS_CLI_DEFAULT_PROD_URL");
+
 /// Get current environment from `AGENTCLAW_ENV` or `env` variable.
 /// Priority: `AGENTCLAW_ENV` > `env` > `SERVER_ENV` chain > "dev" (default)
 pub fn get_current_env() -> String {
@@ -135,7 +138,51 @@ fn resolve_session_bcs_url() -> Result<Option<String>> {
     normalize_url_from_source(raw_url.to_string(), "$BOT_DATA_DIR/.bcs/session.json").map(Some)
 }
 
-fn resolve_bcs_url(args: &GlobalArgs) -> Result<String> {
+fn resolve_distribution_default_url_for_env(
+    runtime_env: &str,
+    pre_url: Option<&str>,
+    prod_url: Option<&str>,
+) -> Result<Option<String>> {
+    let (pre_url, prod_url) = match (pre_url, prod_url) {
+        (None, None) => return Ok(None),
+        (Some(pre_url), Some(prod_url)) => (pre_url, prod_url),
+        _ => {
+            return Err(anyhow!(
+                "BCS_CLI_DEFAULT_PRE_URL and BCS_CLI_DEFAULT_PROD_URL must both be configured"
+            ));
+        }
+    };
+
+    let is_pre = matches!(
+        runtime_env.to_ascii_lowercase().as_str(),
+        "pre" | "prepub"
+    );
+    let (url, source) = if is_pre {
+        (pre_url, "compiled default (pre-release)")
+    } else {
+        (prod_url, "compiled default (production)")
+    };
+
+    normalize_url_from_source(url.to_string(), source).map(Some)
+}
+
+/// Resolve the distribution-specific URL compiled into this CLI build.
+///
+/// Public builds omit both compile-time values and return `None`. Internal
+/// builds provide both values and select one using the runtime environment.
+pub fn resolve_compiled_distribution_default_url() -> Result<Option<String>> {
+    resolve_distribution_default_url_for_env(
+        &get_current_env(),
+        COMPILED_PRE_BCS_URL,
+        COMPILED_PROD_BCS_URL,
+    )
+}
+
+fn resolve_bcs_url_with_distribution_defaults(
+    args: &GlobalArgs,
+    pre_url: Option<&str>,
+    prod_url: Option<&str>,
+) -> Result<String> {
     if let Some(url) = args.url.as_ref() {
         return normalize_url_from_source(url.clone(), "--url");
     }
@@ -148,12 +195,26 @@ fn resolve_bcs_url(args: &GlobalArgs) -> Result<String> {
         return Ok(url);
     }
 
+    if let Some(url) =
+        resolve_distribution_default_url_for_env(&get_current_env(), pre_url, prod_url)?
+    {
+        return Ok(url);
+    }
+
     let default_url = "http://127.0.0.1:21000";
     info!(
         "No BCS URL configured, defaulting to local BCS: {}",
         default_url
     );
     normalize_url_from_source(default_url.to_string(), "default (local)")
+}
+
+fn resolve_bcs_url(args: &GlobalArgs) -> Result<String> {
+    resolve_bcs_url_with_distribution_defaults(
+        args,
+        COMPILED_PRE_BCS_URL,
+        COMPILED_PROD_BCS_URL,
+    )
 }
 
 /// Discover authentication token from various sources.
@@ -342,7 +403,7 @@ pub fn init(args: &GlobalArgs) -> Result<RuntimeConfig> {
     // Get current environment (defaults to "dev")
     let env = get_current_env();
 
-    // Determine BCS URL: CLI arg > env var > session.json > default
+    // Determine BCS URL: CLI arg > env var > session.json > compiled default > local
     let bcs_url = resolve_bcs_url(args)?;
 
     // Determine cookie: CLI arg > env var
@@ -471,6 +532,196 @@ mod tests {
     }
 
     #[test]
+    fn test_distribution_default_selects_pre_for_pre_and_prepub() {
+        let pre_url = Some("https://pre.example.com/");
+        let prod_url = Some("https://prod.example.com/");
+
+        assert_eq!(
+            resolve_distribution_default_url_for_env("pre", pre_url, prod_url).unwrap(),
+            Some("https://pre.example.com".to_string())
+        );
+        assert_eq!(
+            resolve_distribution_default_url_for_env("PREPUB", pre_url, prod_url).unwrap(),
+            Some("https://pre.example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn test_distribution_default_selects_prod_for_other_or_missing_env() {
+        let pre_url = Some("https://pre.example.com");
+        let prod_url = Some("https://prod.example.com");
+
+        for runtime_env in ["prod", "gray", "dev", "local", ""] {
+            assert_eq!(
+                resolve_distribution_default_url_for_env(runtime_env, pre_url, prod_url).unwrap(),
+                Some("https://prod.example.com".to_string())
+            );
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_runtime_environment_priority_matches_legacy_cli() {
+        let keys = [
+            "AGENTCLAW_ENV",
+            "env",
+            "SERVER_ENV",
+            "REAL_SERVER_ENV",
+            "ALIPAY_APP_ENV",
+        ];
+        let originals: Vec<_> = keys
+            .iter()
+            .map(|key| std::env::var(key).ok())
+            .collect();
+
+        safe_set_var("AGENTCLAW_ENV", "prod");
+        safe_set_var("env", "prepub");
+        safe_set_var("SERVER_ENV", "pre");
+        assert_eq!(get_current_env(), "prod");
+
+        safe_remove_var("AGENTCLAW_ENV");
+        assert_eq!(get_current_env(), "prepub");
+
+        safe_remove_var("env");
+        safe_set_var("SERVER_ENV", "prepub");
+        assert_eq!(get_current_env(), "pre");
+
+        for (key, original) in keys.into_iter().zip(originals) {
+            if let Some(value) = original {
+                safe_set_var(key, value);
+            } else {
+                safe_remove_var(key);
+            }
+        }
+    }
+
+    #[test]
+    fn test_distribution_default_is_absent_for_public_build() {
+        assert_eq!(
+            resolve_distribution_default_url_for_env("pre", None, None).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn test_distribution_default_rejects_partial_compiled_configuration() {
+        let pre_only = resolve_distribution_default_url_for_env(
+            "pre",
+            Some("https://pre.example.com"),
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+        let prod_only = resolve_distribution_default_url_for_env(
+            "prod",
+            None,
+            Some("https://prod.example.com"),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(pre_only.contains("must both be configured"));
+        assert!(prod_only.contains("must both be configured"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_compiled_distribution_defaults_match_build_mode() {
+        let requested_pre_url = std::env::var("BCS_CLI_DEFAULT_PRE_URL").ok();
+        let requested_prod_url = std::env::var("BCS_CLI_DEFAULT_PROD_URL").ok();
+        match (requested_pre_url.as_deref(), requested_prod_url.as_deref()) {
+            (None, None) => {
+                assert_eq!(COMPILED_PRE_BCS_URL, None);
+                assert_eq!(COMPILED_PROD_BCS_URL, None);
+            }
+            (Some(pre_url), Some(prod_url)) => {
+                assert_eq!(COMPILED_PRE_BCS_URL, Some(pre_url));
+                assert_eq!(COMPILED_PROD_BCS_URL, Some(prod_url));
+            }
+            _ => panic!("build environment must provide both compiled BCS defaults"),
+        }
+
+        let original_agentclaw_env = std::env::var("AGENTCLAW_ENV").ok();
+        safe_set_var("AGENTCLAW_ENV", "pre");
+        let pre_result = resolve_compiled_distribution_default_url();
+
+        safe_set_var("AGENTCLAW_ENV", "prod");
+        let prod_result = resolve_compiled_distribution_default_url();
+
+        if let Some(value) = original_agentclaw_env {
+            safe_set_var("AGENTCLAW_ENV", value);
+        } else {
+            safe_remove_var("AGENTCLAW_ENV");
+        }
+
+        match (COMPILED_PRE_BCS_URL, COMPILED_PROD_BCS_URL) {
+            (None, None) => {
+                assert_eq!(pre_result.unwrap(), None);
+                assert_eq!(prod_result.unwrap(), None);
+            }
+            (Some(pre_url), Some(prod_url)) => {
+                assert_eq!(pre_result.unwrap(), normalize_bcs_api_url(pre_url));
+                assert_eq!(prod_result.unwrap(), normalize_bcs_api_url(prod_url));
+            }
+            _ => panic!("compiled BCS defaults must both be configured"),
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_session_url_overrides_distribution_default() {
+        let temp_dir = TempDir::new().unwrap();
+        write_session_file(
+            &temp_dir,
+            serde_json::json!({
+                "bot_uuid": null,
+                "token": "session-token",
+                "api_base_url": "https://session.example.com"
+            }),
+        );
+
+        let original_data_dir = std::env::var("BOT_DATA_DIR").ok();
+        let original_url = std::env::var("MOLTIS_BCS_URL").ok();
+        let original_base_url = std::env::var("BCS_API_BASE_URL").ok();
+
+        safe_set_var("BOT_DATA_DIR", temp_dir.path());
+        safe_remove_var("MOLTIS_BCS_URL");
+        safe_remove_var("BCS_API_BASE_URL");
+
+        let args = GlobalArgs {
+            url: None,
+            cookie: None,
+            log_level: "info".to_string(),
+            json: false,
+            debug: false,
+        };
+        let resolved = resolve_bcs_url_with_distribution_defaults(
+            &args,
+            Some("https://pre.example.com"),
+            Some("https://prod.example.com"),
+        )
+        .unwrap();
+
+        if let Some(value) = original_data_dir {
+            safe_set_var("BOT_DATA_DIR", value);
+        } else {
+            safe_remove_var("BOT_DATA_DIR");
+        }
+        if let Some(value) = original_url {
+            safe_set_var("MOLTIS_BCS_URL", value);
+        } else {
+            safe_remove_var("MOLTIS_BCS_URL");
+        }
+        if let Some(value) = original_base_url {
+            safe_set_var("BCS_API_BASE_URL", value);
+        } else {
+            safe_remove_var("BCS_API_BASE_URL");
+        }
+
+        assert_eq!(resolved, "https://session.example.com");
+    }
+
+    #[test]
     #[serial]
     fn test_resolve_bcs_url_defaults_to_local() {
         let original_data_dir = std::env::var("BOT_DATA_DIR").ok();
@@ -488,7 +739,7 @@ mod tests {
             json: false,
             debug: false,
         };
-        let result = resolve_bcs_url(&args);
+        let result = resolve_bcs_url_with_distribution_defaults(&args, None, None);
 
         if let Some(value) = original_data_dir {
             safe_set_var("BOT_DATA_DIR", value);

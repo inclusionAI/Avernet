@@ -9,17 +9,19 @@
 //! # Configuration
 //!
 //! BCS CLI can be configured via:
-//! 1. Command-line arguments (highest priority)
-//! 2. Environment variables: MOLTIS_BCS_URL, BCS_COOKIE
-//! 3. Session file: $BOT_DATA_DIR/.bcs/session.json
-//! 4. Default local URL (lowest priority)
+//! 1. `--url` (highest priority)
+//! 2. `BCS_API_BASE_URL`
+//! 3. `MOLTIS_BCS_URL`
+//! 4. Session file: `$BOT_DATA_DIR/.bcs/session.json`
+//! 5. Runtime-selected compiled distribution default
+//! 6. Default local URL (lowest priority)
 //!
 //! # Environment-Based Configuration
 //!
-//! Set `env` environment variable to switch between environments:
-//! - `env=dev` (default) - development environment
-//! - `env=pre` - pre-production environment
-//! - `env=prod` - production environment
+//! Distribution builds may compile both pre and production defaults into one
+//! binary. Runtime environment priority is `AGENTCLAW_ENV`, `env`, then the
+//! server environment chain. `pre`/`prepub` selects pre; every other value
+//! selects production. Public builds omit both compiled defaults.
 //!
 //! # Token Discovery
 //!
@@ -330,6 +332,10 @@ fn resolve_bcs_url(cli: &Cli) -> Result<String> {
     }
 
     if let Some(url) = resolve_session_bcs_url()? {
+        return Ok(url);
+    }
+
+    if let Some(url) = bcs_cli::resolve_compiled_distribution_default_url()? {
         return Ok(url);
     }
 
@@ -1702,7 +1708,7 @@ async fn main() -> Result<()> {
     // Get current environment (defaults to "dev")
     let env = get_current_env();
 
-    // Determine BCS URL: CLI arg > env var > session.json > default
+    // Determine BCS URL: CLI arg > env var > session.json > compiled default > local
     // Note: bcs_url resolution is deferred for commands that don't need it (e.g., --web mode).
     let bcs_url = resolve_bcs_url(&cli).unwrap_or_default();
 
@@ -4428,7 +4434,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_resolve_bcs_url_defaults_to_local() {
+    fn test_resolve_bcs_url_uses_distribution_default_or_local() {
         let original_data_dir = std::env::var("BOT_DATA_DIR").ok();
         let original_url = std::env::var("MOLTIS_BCS_URL").ok();
         let original_base_url = std::env::var("BCS_API_BASE_URL").ok();
@@ -4450,6 +4456,9 @@ mod tests {
             command: Commands::Health,
         };
         let result = resolve_bcs_url(&cli);
+        let expected = bcs_cli::resolve_compiled_distribution_default_url()
+            .unwrap()
+            .unwrap_or_else(|| "http://127.0.0.1:21000".to_string());
 
         if let Some(value) = original_data_dir {
             safe_set_var("BOT_DATA_DIR", value);
@@ -4473,12 +4482,12 @@ mod tests {
         }
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "http://127.0.0.1:21000");
+        assert_eq!(result.unwrap(), expected);
     }
 
     #[test]
     #[serial]
-    fn test_resolve_bcs_url_defaults_to_local_when_agentclaw_env_pre() {
+    fn test_resolve_bcs_url_uses_pre_distribution_default_or_local() {
         let original_data_dir = std::env::var("BOT_DATA_DIR").ok();
         let original_url = std::env::var("MOLTIS_BCS_URL").ok();
         let original_base_url = std::env::var("BCS_API_BASE_URL").ok();
@@ -4500,6 +4509,9 @@ mod tests {
             command: Commands::Health,
         };
         let result = resolve_bcs_url(&cli);
+        let expected = bcs_cli::resolve_compiled_distribution_default_url()
+            .unwrap()
+            .unwrap_or_else(|| "http://127.0.0.1:21000".to_string());
 
         if let Some(value) = original_data_dir {
             safe_set_var("BOT_DATA_DIR", value);
@@ -4523,7 +4535,7 @@ mod tests {
         }
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "http://127.0.0.1:21000");
+        assert_eq!(result.unwrap(), expected);
     }
 
     #[test]
