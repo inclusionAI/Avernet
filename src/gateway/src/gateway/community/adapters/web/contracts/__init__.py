@@ -6,7 +6,7 @@ OpenAPI generation; the gateway forwards downstream responses verbatim at
 runtime and does not construct an envelope itself.
 """
 
-from .envelope import (
+from ._envelope import (
     CODE_ACCEPTED,
     CODE_CREATED,
     CODE_NO_CONTENT,
@@ -16,8 +16,8 @@ from .envelope import (
     NameCheck,
     Page,
 )
-from .pagination import PageParams, PageParamsDep
-from .security import requires_user_principal
+from ._pagination import PageParams, PageParamsDep
+from ._security import requires_user_principal
 
 __all__ = [
     "CODE_ACCEPTED",
