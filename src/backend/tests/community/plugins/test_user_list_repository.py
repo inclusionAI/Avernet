@@ -126,3 +126,35 @@ def test_set_membership_upserts_then_removes_only_the_current_environment(reposi
         assert session.query(EntityUserListModel).filter(
             EntityUserListModel.env == other_env,
         ).count() == 1
+
+
+def test_set_membership_supports_explicit_environment(repository):
+    repository.set_membership(
+        entity_id="member",
+        user_list_type="caller_identity",
+        in_whitelist=True,
+        env="prod",
+    )
+
+    assert repository.exists(
+        entity_id="member",
+        user_list_type="caller_identity",
+        env="prod",
+    )
+    assert not repository.exists(
+        entity_id="member",
+        user_list_type="caller_identity",
+        env="dev",
+    )
+
+    repository.set_membership(
+        entity_id="member",
+        user_list_type="caller_identity",
+        in_whitelist=False,
+        env="prod",
+    )
+    assert not repository.exists(
+        entity_id="member",
+        user_list_type="caller_identity",
+        env="prod",
+    )

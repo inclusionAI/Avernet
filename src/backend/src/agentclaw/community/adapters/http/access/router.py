@@ -158,15 +158,26 @@ async def check_user_list(
 @user_list_router.put("/correct", response_model=ApiResponse[UserListCheckData])
 async def correct_user_list(
     request: UserListCorrectionRequest,
+    env: Annotated[
+        str | None,
+        Query(
+            min_length=3,
+            max_length=4,
+            pattern=_USER_LIST_ENV_PATTERN,
+            description="Optional correction environment; defaults to the running environment",
+        ),
+    ] = None,
     user: AuthenticatedUser = Depends(get_current_user),
     service: UserListServiceProtocol = Injected(UserListServiceProtocol),
 ) -> ApiResponse[UserListCheckData]:
-    """Apply one authenticated current-environment user-list correction."""
+    """Apply one authenticated user-list correction in the selected environment."""
+    correction_env = env or get_current_env()
     in_whitelist = service.correct_membership(
         actor_id=user.staffId,
         entity_id=request.entity_id,
         user_list_type=request.user_list_type,
         in_whitelist=request.in_whitelist,
+        env=correction_env,
     )
     return ApiResponse(
         success=True,

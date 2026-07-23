@@ -43,8 +43,9 @@ class UserListRepository:
         entity_id: str,
         user_list_type: str,
         in_whitelist: bool,
+        env: str | None = None,
     ) -> None:
-        env = get_current_env()
+        target_env = env or get_current_env()
         with self._db.orm_session() as session:
             if not in_whitelist:
                 (
@@ -52,7 +53,7 @@ class UserListRepository:
                     .filter(
                         EntityUserListModel.entity_id == entity_id,
                         EntityUserListModel.user_list_type == user_list_type,
-                        EntityUserListModel.env == env,
+                        EntityUserListModel.env == target_env,
                     )
                     .delete(synchronize_session=False)
                 )
@@ -62,7 +63,7 @@ class UserListRepository:
             values = {
                 "entity_id": entity_id,
                 "user_list_type": user_list_type,
-                "env": env,
+                "env": target_env,
             }
             if session.get_bind().dialect.name == "sqlite":
                 from sqlalchemy.dialects.sqlite import insert as _insert

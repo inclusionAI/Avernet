@@ -38,18 +38,21 @@ class UserListService:
         entity_id: str,
         user_list_type: str,
         in_whitelist: bool,
+        env: str | None = None,
     ) -> bool:
         self._repository.set_membership(
             entity_id=entity_id,
             user_list_type=user_list_type,
             in_whitelist=in_whitelist,
+            env=env,
         )
         logger.info(
             "user_list_membership_corrected actor_id=%s entity_id=%s "
-            "user_list_type=%s in_whitelist=%s",
+            "user_list_type=%s env=%s in_whitelist=%s",
             actor_id,
             entity_id,
             user_list_type,
+            env or "runtime",
             in_whitelist,
         )
         return in_whitelist

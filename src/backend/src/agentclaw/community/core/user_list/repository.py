@@ -23,6 +23,7 @@ class UserListRepositoryProtocol(Protocol):
         entity_id: str,
         user_list_type: str,
         in_whitelist: bool,
+        env: str | None = None,
     ) -> None: ...
 
 

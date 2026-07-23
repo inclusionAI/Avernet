@@ -87,6 +87,10 @@ def _seed_correction_actor(world) -> None:
     make_staff_user(world, user_id=_CORRECTION_ACTOR)
 
 
+def _seed_manual_correction_actor(world) -> None:
+    make_staff_user(world, user_id=_CORRECTION_ACTOR)
+
+
 def _seed_second_correction_actor_with_member(world) -> None:
     make_staff_user(world, user_id=_SECOND_CORRECTION_ACTOR)
     with world.get(DatabasePlugin).orm_session() as session:
@@ -328,6 +332,49 @@ def user_list_correction_allows_an_authenticated_user_to_add():
 )
 def user_list_correction_allows_another_authenticated_user_to_remove():
     """Another authenticated user may disable an exact entry."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/api/v1/user-lists/correct",
+    scenario="authenticated_user_adds_member_in_manual_env",
+    input=CaseInput(
+        query_params={"env": "prod"},
+        headers={"x-user-id": _CORRECTION_ACTOR},
+        json_body={
+            "entity_id": _CORRECTION_TARGET,
+            "user_list_type": _USER_LIST_TYPE,
+            "in_whitelist": True,
+        },
+    ),
+    seed=_seed_manual_correction_actor,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True, "data": {"in_whitelist": True}},
+    ),
+)
+def user_list_correction_supports_manual_environment_override():
+    """An explicit env selects the membership partition being corrected."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/api/v1/user-lists/correct",
+    scenario="rejects_invalid_correction_env",
+    input=CaseInput(
+        query_params={"env": "staging"},
+        headers={"x-user-id": _CORRECTION_ACTOR},
+        json_body={
+            "entity_id": _CORRECTION_TARGET,
+            "user_list_type": _USER_LIST_TYPE,
+            "in_whitelist": True,
+        },
+    ),
+    seed=_seed_correction_actor,
+    expect=ExpectError(status=422),
+)
+def user_list_correction_rejects_invalid_environment():
+    """Correction env accepts only normalized dev/pre/prod values."""
 
 
 @endpoint_test(

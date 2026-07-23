@@ -7,10 +7,16 @@ from agentclaw.community.core.user_list.service import UserListService
 
 class _Repository:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str, bool]] = []
+        self.calls: list[tuple[str, str, bool, str | None]] = []
 
-    def exists(self, *, entity_id: str, user_list_type: str) -> bool:
-        del entity_id, user_list_type
+    def exists(
+        self,
+        *,
+        entity_id: str,
+        user_list_type: str,
+        env: str | None = None,
+    ) -> bool:
+        del entity_id, user_list_type, env
         return False
 
     def set_membership(
@@ -19,8 +25,9 @@ class _Repository:
         entity_id: str,
         user_list_type: str,
         in_whitelist: bool,
+        env: str | None = None,
     ) -> None:
-        self.calls.append((entity_id, user_list_type, in_whitelist))
+        self.calls.append((entity_id, user_list_type, in_whitelist, env))
 
 
 def test_correction_allows_any_authenticated_actor():
@@ -35,7 +42,7 @@ def test_correction_allows_any_authenticated_actor():
     )
 
     assert result is True
-    assert repository.calls == [("target", "caller_identity", True)]
+    assert repository.calls == [("target", "caller_identity", True, None)]
 
 
 def test_correction_allows_another_authenticated_actor_to_remove():
@@ -50,4 +57,20 @@ def test_correction_allows_another_authenticated_actor_to_remove():
     )
 
     assert result is False
-    assert repository.calls == [("target", "caller_identity", False)]
+    assert repository.calls == [("target", "caller_identity", False, None)]
+
+
+def test_correction_forwards_explicit_environment():
+    repository = _Repository()
+    service = UserListService(repository=repository)
+
+    result = service.correct_membership(
+        actor_id="authenticated_actor",
+        entity_id="target",
+        user_list_type="caller_identity",
+        in_whitelist=True,
+        env="prod",
+    )
+
+    assert result is True
+    assert repository.calls == [("target", "caller_identity", True, "prod")]
