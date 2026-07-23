@@ -40,7 +40,8 @@ VALID_TRANSITIONS = frozenset(
         ("UPLOAD_COMPLETED", "FAILED"),
         ("PULLING", "FAILED"),
         ("PUSHING", "FAILED"),
-        # Phase 72: Cancel upload -- any non-terminal upload state -> CANCELLED
+        # Phase 72: Cancel upload -- non-terminal upload states -> CANCELLED
+        # (UPLOAD_COMPLETED deliberately excluded: OSS object already exists, cannot cancel)
         ("CREATED", "CANCELLED"),
         ("UPLOADING", "CANCELLED"),
         ("PULLING", "CANCELLED"),
@@ -143,8 +144,9 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         update_kwargs = {
             "status": new_status,
             "gmt_modified": func.now(),
-            "error_message": error_message,
         }
+        if error_message is not None:
+            update_kwargs["error_message"] = error_message
         result = (
             self._session.query(FileTransferTicketModel)
             .filter(

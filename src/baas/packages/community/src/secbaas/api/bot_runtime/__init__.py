@@ -1,4 +1,11 @@
-from ._exceptions import TransferStateConflictError
+from ._exceptions import (
+    BotNotFoundError,
+    NoActiveDevicesError,
+    NoDevicesFoundError,
+    OssObjectNotFoundError,
+    TransferNotTerminalError,
+    TransferStateConflictError,
+)
 from ._file_transfer_models import (
     CancelUploadResponse,
     CompleteUploadResponse,
@@ -15,6 +22,11 @@ from ._file_transfer_models import (
 
 __all__ = [
     # Exceptions
+    "BotNotFoundError",
+    "NoActiveDevicesError",
+    "NoDevicesFoundError",
+    "OssObjectNotFoundError",
+    "TransferNotTerminalError",
     "TransferStateConflictError",
     # File Transfer Models
     "CancelUploadResponse",

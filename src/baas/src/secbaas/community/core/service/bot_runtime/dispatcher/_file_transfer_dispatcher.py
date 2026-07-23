@@ -147,7 +147,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         )
 
         expires_at = (
-            datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=expire_seconds)
+            datetime.now(UTC) + timedelta(seconds=expire_seconds)
         ).isoformat()
 
         # Validate file_size before routing (applies to both SINGLE and MULTIPART)
@@ -372,7 +372,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         )
 
         expires_at = (
-            datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=expire_seconds)
+            datetime.now(UTC) + timedelta(seconds=expire_seconds)
         ).isoformat()
         return GetDownloadUrlResponse(
             transfer_id=transfer_id,
@@ -686,12 +686,14 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             )
 
         previous_status = ticket.status
-        # D-12: OSS delete uses ticket's fileservice_staging_path
+        # D-12: Transition ticket to DELETED first (atomic CAS), then
+        # best-effort OSS delete.  If the OSS call fails the ticket is
+        # already DELETED and a background cleanup job can retry.
+        self._ticket_repo.update_status(ticket.transfer_id, "DELETED")
         await asyncio.to_thread(
             self._file_transfer_backend.delete_object,
             ticket.fileservice_staging_path,
         )
-        self._ticket_repo.update_status(ticket.transfer_id, "DELETED")
 
         logger.info(
             "dispatch_delete_transfer: result: transfer_id=%s, "
@@ -745,7 +747,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         )
 
         expires_at = (
-            datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=expire_seconds)
+            datetime.now(UTC) + timedelta(seconds=expire_seconds)
         ).isoformat()
         return ShareLinkResponse(
             share_url=share_url,
