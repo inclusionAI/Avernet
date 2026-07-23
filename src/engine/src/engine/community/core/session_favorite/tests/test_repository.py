@@ -15,7 +15,7 @@ def test_add_list_and_remove_are_scoped_to_user(tmp_path):
     repository.add("user-a", "session-2")
     repository.add("user-b", "session-1")
 
-    assert repository.list_session_ids("user-a") == ["session-1", "session-2"]
+    assert repository.list_session_ids("user-a") == ["session-2", "session-1"]
     assert repository.list_session_ids("user-b") == ["session-1"]
 
     assert repository.remove("user-a", "session-1") is True

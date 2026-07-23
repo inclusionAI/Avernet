@@ -25,6 +25,7 @@ class SessionFavoriteRepository:
         self._initialized = False
 
     def list_session_ids(self, user_id: str) -> list[str]:
+        """Return session IDs with the most recently favorited session first."""
         self._ensure_initialized()
         with self._connect() as connection:
             # 以下为安全注释COSEC：使用参数化查询防止 SQL 注入，禁止字符串拼接
@@ -33,7 +34,7 @@ class SessionFavoriteRepository:
                 SELECT session_id
                 FROM session_favorites
                 WHERE user_id = ?
-                ORDER BY created_at ASC
+                ORDER BY created_at DESC, rowid DESC
                 """,
                 (user_id,),
             ).fetchall()

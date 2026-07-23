@@ -55,7 +55,7 @@ def test_list_returns_full_session_data_for_current_users_favorites(
     repository,
     session_api,
 ):
-    repository.list_session_ids.return_value = ["session-1", "session-3"]
+    repository.list_session_ids.return_value = ["session-3", "session-1"]
     session_api.list = AsyncMock(return_value=[
         _make_session("session-1"),
         _make_session("session-2"),
@@ -71,8 +71,8 @@ def test_list_returns_full_session_data_for_current_users_favorites(
     body = response.json()
     assert body["success"] is True
     assert body["data"] == [{
-        "id": "session-3",
-        "title": "Title for session-3",
+        "id": "session-1",
+        "title": "Title for session-1",
         "user_id": "user-a",
         "agent_id": "main",
         "model": None,

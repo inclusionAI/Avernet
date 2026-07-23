@@ -42,8 +42,8 @@ async def list_session_favorites(
     warning = check_capability(Capability.SESSION_LIST)
     try:
         repository = get_session_favorite_repository()
-        favorite_session_ids = set(
-            await asyncio.to_thread(repository.list_session_ids, resolved_user_id)
+        favorite_session_ids = await asyncio.to_thread(
+            repository.list_session_ids, resolved_user_id
         )
         if not favorite_session_ids:
             return ApiResponse(success=True, data=[], warning=warning)
@@ -57,9 +57,15 @@ async def list_session_favorites(
                 offset=0,
             )
         )
+        # Engines own their session ordering, so restore the SQLite favorite
+        # order before applying favorite-list pagination.
+        favorite_rank = {
+            session_id: index for index, session_id in enumerate(favorite_session_ids)
+        }
         favorite_sessions = [
-            session for session in sessions if session.id in favorite_session_ids
+            session for session in sessions if session.id in favorite_rank
         ]
+        favorite_sessions.sort(key=lambda session: favorite_rank[session.id])
         paged_sessions = favorite_sessions[offset:offset + limit]
         return ApiResponse(
             success=True,
