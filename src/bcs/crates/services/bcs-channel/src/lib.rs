@@ -1575,7 +1575,7 @@ mod tests {
             env: &str,
             new_id: Arc<dyn Fn() -> String + Send + Sync>,
         ) -> ServiceResult<Self> {
-            let binding_repo = Arc::new(MemoryChannelBindingRepo::new());
+            let binding_repo = Arc::new(MemoryChannelBindingRepo::new(env));
             let conversation_repo = Arc::new(MemoryConversationSessionRepo::new());
             let participant_repo = Arc::new(MemoryImParticipantRepo::new());
             let session_repo = Arc::new(RecordingSessionRepo::default());
@@ -1623,7 +1623,7 @@ mod tests {
         }
 
         async fn new_without_binding_list(group: Group) -> ServiceResult<Self> {
-            let binding_repo = Arc::new(MemoryChannelBindingRepo::new());
+            let binding_repo = Arc::new(MemoryChannelBindingRepo::new("pre"));
             let conversation_repo = Arc::new(MemoryConversationSessionRepo::new());
             let participant_repo = Arc::new(MemoryImParticipantRepo::new());
             let session_repo = Arc::new(RecordingSessionRepo::default());
@@ -1701,7 +1701,7 @@ mod tests {
     }
 
     async fn active_inbound_binding_repo() -> Arc<MemoryChannelBindingRepo> {
-        let bindings = Arc::new(MemoryChannelBindingRepo::new());
+        let bindings = Arc::new(MemoryChannelBindingRepo::new("pre"));
         bindings
             .create(active_binding(
                 "binding_1",
@@ -2484,7 +2484,7 @@ mod tests {
     #[tokio::test]
     async fn inbound_classifies_missing_binding_and_lookup_failure() -> TestResult {
         let missing_binding = inbound_service(
-            Arc::new(MemoryChannelBindingRepo::new()),
+            Arc::new(MemoryChannelBindingRepo::new("pre")),
             Arc::new(MemoryImParticipantRepo::new()),
             Arc::new(RecordingSessionRepo::default()),
             Arc::new(RecordingMessageFlow::default()),
@@ -2529,7 +2529,7 @@ mod tests {
     #[tokio::test]
     async fn inbound_classifies_invalid_input_and_context_resolution_failure() -> TestResult {
         let invalid_input = inbound_service(
-            Arc::new(MemoryChannelBindingRepo::new()),
+            Arc::new(MemoryChannelBindingRepo::new("pre")),
             Arc::new(MemoryImParticipantRepo::new()),
             Arc::new(RecordingSessionRepo::default()),
             Arc::new(RecordingMessageFlow::default()),
@@ -2550,7 +2550,7 @@ mod tests {
             "account_ref",
         );
 
-        let bindings = Arc::new(MemoryChannelBindingRepo::new());
+        let bindings = Arc::new(MemoryChannelBindingRepo::new("pre"));
         bindings
             .create(active_binding(
                 "binding_context",
@@ -3613,7 +3613,7 @@ mod tests {
             target,
             group_chat_scope: Some(GroupChatScope::ConversationShared),
             outbound_visibility: visibility,
-            env: "dev".to_string(),
+            env: "pre".to_string(),
             status: BindingStatus::Active,
             created_by: Some("creator".to_string()),
             config: dingtalk_config(account_ref),

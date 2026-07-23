@@ -12,6 +12,8 @@ use bcs_domain::{
 use crate::types::ServiceResult;
 
 /// ChannelBinding 持久化。
+///
+/// Repository 实例由 composition root 绑定到单一运行环境；所有读写都只能作用于该环境。
 #[async_trait]
 pub trait ChannelBindingRepoPort: Send + Sync {
     async fn create(&self, binding: ChannelBinding) -> ServiceResult<()>;

@@ -256,14 +256,15 @@ fn channel_bridge_enabled(config: &BcsConfig) -> bool {
 }
 
 fn memory_channel_repos(data_dir: Option<PathBuf>) -> ChannelRepos {
+    let env = bcs_config::resolve_env_str();
     match data_dir {
         Some(dir) => (
-            Arc::new(MemoryChannelBindingRepo::with_data_dir(dir.clone())),
+            Arc::new(MemoryChannelBindingRepo::with_data_dir(dir.clone(), env)),
             Arc::new(MemoryConversationSessionRepo::with_data_dir(dir.clone())),
             Arc::new(MemoryImParticipantRepo::with_data_dir(dir)),
         ),
         None => (
-            Arc::new(MemoryChannelBindingRepo::new()),
+            Arc::new(MemoryChannelBindingRepo::new(env)),
             Arc::new(MemoryConversationSessionRepo::new()),
             Arc::new(MemoryImParticipantRepo::new()),
         ),
@@ -278,11 +279,12 @@ async fn channel_repos_with_storage(
             "channel storage: DbPlugin handle unavailable".to_string(),
         )
     })?;
+    let env = bcs_config::resolve_env_str();
     match infrastructure_plugins.db_kind() {
         DbPluginKind::LocalSqlite => {
             info!("Initializing SQLite channel storage");
             Ok((
-                Arc::new(DbChannelBindingStore::sqlite(db_plugin.clone())),
+                Arc::new(DbChannelBindingStore::sqlite(db_plugin.clone(), env)),
                 Arc::new(DbConversationSessionStore::sqlite(db_plugin.clone())),
                 Arc::new(DbImParticipantStore::sqlite(db_plugin)),
             ))
@@ -290,7 +292,7 @@ async fn channel_repos_with_storage(
         DbPluginKind::Mysql => {
             info!("Initializing MySQL channel storage");
             Ok((
-                Arc::new(DbChannelBindingStore::mysql(db_plugin.clone())),
+                Arc::new(DbChannelBindingStore::mysql(db_plugin.clone(), env)),
                 Arc::new(DbConversationSessionStore::mysql(db_plugin.clone())),
                 Arc::new(DbImParticipantStore::mysql(db_plugin)),
             ))
@@ -3647,7 +3649,7 @@ mod tests {
 
         let result = build_configured_channel_providers(
             &config,
-            Arc::new(MemoryChannelBindingRepo::new()),
+            Arc::new(MemoryChannelBindingRepo::new("test")),
         );
 
         assert!(matches!(

@@ -160,7 +160,7 @@ async fn im_participant_repo_round_trips_and_replaces_external_identity(
 
 #[tokio::test]
 async fn binding_repo_lifecycle_filters_active_bindings() -> ServiceResult<()> {
-    let repo = MemoryChannelBindingRepo::new();
+    let repo = MemoryChannelBindingRepo::new("dev");
 
     repo.create(binding("binding_1", "robot_1", BindingStatus::Active))
         .await?;
@@ -227,8 +227,25 @@ async fn binding_repo_lifecycle_filters_active_bindings() -> ServiceResult<()> {
 }
 
 #[tokio::test]
+async fn binding_repo_rejects_cross_environment_writes() -> ServiceResult<()> {
+    let repo = MemoryChannelBindingRepo::new("pre");
+    let mut prod_binding = binding("binding_prod", "robot_1", BindingStatus::Active);
+    prod_binding.env = "prod".to_string();
+
+    let error = repo
+        .create(prod_binding)
+        .await
+        .expect_err("repository must reject a binding from another environment");
+
+    assert!(error.to_string().contains("does not match repository env"));
+    assert!(repo.list().await?.is_empty());
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn binding_repo_lists_only_requested_target_and_optional_channel() -> ServiceResult<()> {
-    let repo = MemoryChannelBindingRepo::new();
+    let repo = MemoryChannelBindingRepo::new("dev");
 
     let mut group_dingtalk = binding("group_dingtalk", "robot_1", BindingStatus::Active);
     group_dingtalk.target = BindingTarget::Group {
@@ -285,7 +302,7 @@ async fn binding_repo_lists_only_requested_target_and_optional_channel() -> Serv
 
 #[tokio::test]
 async fn binding_repo_preserves_generic_channel_type_and_config() -> ServiceResult<()> {
-    let repo = MemoryChannelBindingRepo::new();
+    let repo = MemoryChannelBindingRepo::new("dev");
     let mut binding = binding("binding_generic", "account_1", BindingStatus::Active);
     binding.channel_type = "test_im".to_string();
     binding.config = serde_json::json!({
