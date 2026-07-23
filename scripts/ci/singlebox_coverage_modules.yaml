@@ -182,10 +182,23 @@ modules:
       - tests/community/acceptance/expert_chat
     core_paths:
       - src/agentclaw/community/core/expert_chat/
-    router_api: *pending_router_denominator
-    plugin_api: *pending_plugin_denominator
+    router_api:
+      status: applicable
+      reason: Expert chat session and caller connection APIs. Caller connection routes require IAM token for caller identity exchange.
+      items:
+        - POST /api/expert-chat/bots
+        - GET /api/expert-chat/bots
+        - DELETE /api/expert-chat/bots/{bot_id}/{owner_id}
+        - POST /api/expert-chat/bots/{bot_id}/{owner_id}/session
+        - DELETE /api/expert-chat/bots/{bot_id}/{owner_id}/session
+        - POST /api/expert-chat/bots/caller-connection
+    plugin_api:
+      status: not_applicable
+      reason: Expert chat uses core CallerIdentityTokenExchangeProtocol without production plugin implementation.
+      items: []
     thresholds:
-      core_min_percent: 63.49
+      core_min_percent: 63.20
+      router_min_percent: 100.0
 
   files:
     system: backend
