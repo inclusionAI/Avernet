@@ -1,6 +1,6 @@
 from contextlib import contextmanager
 from datetime import datetime
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -227,6 +227,45 @@ async def test_execute_verify_upgrade_falls_back_to_first_release_on_bot_not_fou
         migration_path='/tmp/migration',
         bot={'bot_id': 'b1'},
     )
+
+
+@pytest.mark.asyncio
+async def test_service_release_uses_frozen_engine_layout_not_live_draft_drift():
+    publish_service = Mock()
+    build_service = Mock()
+    build_service.release_async = AsyncMock()
+    svc = _pf(
+        publish_service,
+        build_service,
+        Mock(),
+        Mock(),
+        _arca_router(build_service),
+    )
+    publish_record = _make_publish_record(
+        status=PublishStatus.BUILT.value,
+        ext={
+            "migration_path": "/snapshot/1/openclaw",
+            "skills_artifact": {
+                "schema_version": 1,
+                "engine": "openclaw",
+                "active_layout": "pool",
+                "layout_contract_version": "skills-pool-p3-v1",
+            },
+        },
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="engine no longer matches",
+    ):
+        await svc._execute_verify_first_release(
+            publish_record=publish_record,
+            operator="u1",
+            migration_path="/snapshot/1/openclaw",
+            bot={"bot_id": "b1", "active_engine": "claude_code"},
+        )
+
+    build_service.release_async.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -727,6 +766,45 @@ async def test_restart_recreate_threads_config_artifact():
     assert build_service.release_async.await_args.kwargs["delivery"].config_artifact == artifact
     # The recreate minted a fresh binding for the new bot.
     assert publish_service.create_device_binding.call_args.kwargs["device_id"] == "BOT-recreated"
+
+
+@pytest.mark.asyncio
+async def test_restart_and_recreate_preserve_frozen_pool_layout():
+    publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"success": False, "error_code": "BOT_NOT_FOUND"}
+    )
+    build_service.release_async = AsyncMock(
+        return_value={"publish_id": 99, "bot_uuid": "BOT-recreated"}
+    )
+    svc = _pf(
+        publish_service, build_service, Mock(), Mock(), _arca_router(build_service)
+    )
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={
+            "binding": {"online": 1},
+            "migration_path": "/snapshot/2/openclaw",
+            "skills_artifact": {
+                "schema_version": 1,
+                "engine": "openclaw",
+                "active_layout": "pool",
+                "layout_contract_version": "skills-pool-p3-v1",
+            },
+        },
+    )
+    _setup_restart(svc, record)
+
+    await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    expected = {
+        "AGENTCLAW_SKILLS_LAYOUT": "pool",
+        "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+    }
+    assert build_service.upgrade_async.await_args.kwargs["extra_envs"] == expected
+    assert build_service.release_async.await_args.kwargs["extra_envs"] == expected
 
 
 # ── Task 9: restart reads stored per-stage overrides ─────────────────────────
@@ -1280,15 +1358,28 @@ async def test_verify_first_release_arca_skips_channel_fetch_and_store():
     svc.approve_baas_publish = Mock()
 
     record = _make_publish_record(
-        status=PublishStatus.BUILT.value, ext={"migration_path": "/m"}
+        status=PublishStatus.BUILT.value,
+        ext={
+            "migration_path": "/m",
+            "skills_artifact": {
+                "schema_version": 1,
+                "engine": "openclaw",
+                "active_layout": "pool",
+                "layout_contract_version": "skills-pool-p3-v1",
+            },
+        },
     )
     await svc._execute_verify_first_release(
         publish_record=record, operator="op", migration_path="/m",
-        bot={"bot_id": "b2", "owner_id": "u1"},
+        bot={"bot_id": "b2", "owner_id": "u1", "active_engine": "openclaw"},
     )
 
     reader.overrides_for_stage.assert_not_called()
     assert build_service.release_async.await_args.kwargs["delivery"].config_artifact is None
+    assert build_service.release_async.await_args.kwargs["extra_envs"] == {
+        "AGENTCLAW_SKILLS_LAYOUT": "pool",
+        "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+    }
     persisted_ext = svc._ext_state.update_status.call_args.kwargs["ext"]
     assert "engine_overrides_by_stage" not in persisted_ext
 
@@ -1633,6 +1724,12 @@ async def test_execute_rollback_uses_fixed_device_count_one():
         ext={
             "migration_path": "/tmp/build/v2",
             "binding": {"online": 100},  # binding_id
+            "skills_artifact": {
+                "schema_version": 1,
+                "engine": "openclaw",
+                "active_layout": "pool",
+                "layout_contract_version": "skills-pool-p3-v1",
+            },
         },
     )
 
@@ -1665,6 +1762,10 @@ async def test_execute_rollback_uses_fixed_device_count_one():
     # Verify upgrade_async uses the fixed device_count
     upgrade_call = build_service.upgrade_async.call_args
     assert upgrade_call.kwargs["device_count"] == 1
+    assert upgrade_call.kwargs["extra_envs"] == {
+        "AGENTCLAW_SKILLS_LAYOUT": "pool",
+        "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+    }
 
     # Verify the return value
     assert result.publish_id == 2  # returns target_publish_id
@@ -1921,10 +2022,19 @@ async def test_scale_bot_success_prefers_bot_ext_device_count():
         common_config_service=common_config_service,
     )
 
+    frozen_skills = {
+        "schema_version": 1,
+        "engine": "openclaw",
+        "active_layout": "pool",
+        "layout_contract_version": "skills-pool-p3-v1",
+    }
     record = _make_publish_record(
         id=10,
         status=PublishStatus.SUCCESS.value,
-        ext={"binding": {"online": 123}},
+        ext={
+            "binding": {"online": 123},
+            "skills_artifact": frozen_skills,
+        },
     )
     binding = Mock()
     binding.device_id = "BOT-UUID-1"
@@ -1950,7 +2060,11 @@ async def test_scale_bot_success_prefers_bot_ext_device_count():
     assert kwargs["request_id"] == operation_request_id(10, "scale", "online", 1)
     publish_service.update_publish_ext.assert_called_once_with(
         publish_id=10,
-        ext={"binding": {"online": 123}, "scale": {"publish_id": 888}},
+        ext={
+            "binding": {"online": 123},
+            "skills_artifact": frozen_skills,
+            "scale": {"publish_id": 888},
+        },
     )
 
 

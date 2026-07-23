@@ -791,6 +791,7 @@ class BaasService:  # pragma: no cover
         version: str = "1",
         auto_approve_publish: bool = True,
         ext_info: Optional[Dict[str, Any]] = None,
+        extra_envs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """调用 BaaS 层 API 创建 Bot。
 
@@ -858,6 +859,7 @@ class BaasService:  # pragma: no cover
             version=version,
             auto_approve_publish=auto_approve_publish,
             ext_info=ext_info,
+            extra_envs=extra_envs,
         )
 
         logger.info(

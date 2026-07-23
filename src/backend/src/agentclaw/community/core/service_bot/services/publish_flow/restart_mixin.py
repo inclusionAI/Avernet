@@ -6,6 +6,9 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationState,
     PublishStatus,
 )
+from agentclaw.community.core.service_bot.services.deploy.service_skills_artifact import (
+    service_skills_env_from_ext,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
     TargetBotGoneError,
     acquire_deploy_workflow,
@@ -224,6 +227,7 @@ class RestartMixin:
         # STORED overrides slot: reproduce what was promoted (not a live re-fetch),
         # so restarting a non-latest stage never delivers another stage's channels.
         delivery = self._ext_state.compose_stored(publish_record.ext or {}, stage_enum)
+        skills_env = service_skills_env_from_ext(publish_record.ext, bot)
 
         # A prior recreate that crashed between its ext write and its
         # complete_operation left a dangling op. That crashed leg IS this restart
@@ -254,8 +258,8 @@ class RestartMixin:
                 publish_stage=stage_enum,
                 version=version,
                 delivery=delivery,
+                extra_envs=skills_env,
             )
-
         # NOTE: transient errors out of the atom are NOT caught + failed here. A
         # genuine crash leaves the op non-terminal so the durable task retry
         # re-runs and the SAME op resumes → adopt-by-query (existing bot).
@@ -290,6 +294,7 @@ class RestartMixin:
                 migration_path=migration_path,
                 version=version,
                 delivery=delivery,
+                skills_env=skills_env,
                 operator=operator,
             )
         restart_publish_id = op.baas_publish_id
@@ -317,7 +322,6 @@ class RestartMixin:
         )
         return {"success": True, "message": f"Restart submitted, stage: {stage_enum.value}",
                 "stage": stage_enum.value, "restart_publish_id": restart_publish_id}
-
     def _finalize_dangling_recreate_op(
         self, publish_id: int, stage_enum: PublishStage, ext: dict
     ) -> int | None:
@@ -381,6 +385,7 @@ class RestartMixin:
         migration_path: str | None,
         version: str,
         delivery,
+        skills_env: dict[str, str] | None,
         operator: str,
     ) -> dict:
         """Recreate a restart's gone target bot — crash-safe (closes the former
@@ -414,6 +419,7 @@ class RestartMixin:
                 publish_stage=stage_enum,
                 version=version,
                 delivery=delivery,
+                extra_envs=skills_env,
             )
 
         op = await acquire_deploy_workflow(
@@ -454,4 +460,3 @@ class RestartMixin:
         return {"success": True,
                 "message": f"Restart target recreated, stage: {stage_enum.value}",
                 "stage": stage_enum.value, "restart_publish_id": recreate_publish_id}
-

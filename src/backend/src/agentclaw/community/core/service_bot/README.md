@@ -13,6 +13,7 @@ provides:
 consumes:
   - "BotManagement"
   - "DeviceService + repo"
+  - "SkillsPool layout state"
   - "SystemConfig"
   - "PassportPlugin"
 internal_dependencies:
@@ -23,6 +24,7 @@ internal_dependencies:
   - agentclaw.community.core.caller_identity.credential  # CallerToken used by BaaS outbound-rule update
   - agentclaw.community.core.devices
   - agentclaw.community.core.quality.services
+  - agentclaw.community.core.skills_pool
   - agentclaw.community.core.system_config
   - agentclaw.community.core.task_queue    # durable publish stage tasks (enqueue + handlers + worker)
   - agentclaw.community.core.workspace
@@ -49,6 +51,9 @@ internal_dependencies:
 ### Change impact
 
 Publication path is the user-visible go-live for bots — bugs here block customers from publishing.
+Service artifacts freeze the persisted Skills Pool layout state at build time;
+changes to the Skills Pool contract or repository therefore affect publication
+compatibility and must be reviewed together with this module.
 
 ## Publish operation ledger (#197)
 

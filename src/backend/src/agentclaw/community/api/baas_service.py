@@ -53,6 +53,9 @@ class BaasServiceProtocol(Protocol):
         template_uuid: Optional[str] = None,
         stage: str = PublishStage.ONLINE.value,
         version: str = "1",
+        auto_approve_publish: bool = True,
+        ext_info: Optional[Dict[str, Any]] = None,
+        extra_envs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Create a BaaS bot. Returns ``{bot_uuid, publish_id}``."""
         ...

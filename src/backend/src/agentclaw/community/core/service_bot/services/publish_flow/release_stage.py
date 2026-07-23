@@ -39,6 +39,9 @@ from agentclaw.community.core.service_bot.services.publish_flow.operation_runner
     TargetBotGoneError,
     acquire_deploy_workflow,
 )
+from agentclaw.community.core.service_bot.services.deploy.service_skills_artifact import (
+    service_skills_env_from_ext,
+)
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 
@@ -156,6 +159,7 @@ class ReleaseStageRunner:
         is no config_artifact."""
         publish_id = publish_record.id
         owner_id = self._ext_state.owner_id(publish_record)
+        skills_env = service_skills_env_from_ext(publish_record.ext, bot)
 
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
         # ext['config_artifact'] is never handed to BaaS. ``overrides`` is the applied
@@ -178,6 +182,7 @@ class ReleaseStageRunner:
                 # provider to interpret config_artifact. Push that decision behind the
                 # provider seam in a follow-up; tracked separately.
                 delivery=delivery,
+                extra_envs=skills_env,
             )
             if spec.first_release_passes_version:
                 release_kwargs["version"] = f"{publish_record.version}"
@@ -252,6 +257,7 @@ class ReleaseStageRunner:
         publish_id = publish_record.id
         version = f"{publish_record.version}"
         owner_id = self._ext_state.owner_id(publish_record)
+        skills_env = service_skills_env_from_ext(publish_record.ext, bot)
 
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
         # ext['config_artifact'] is never handed to BaaS. ``overrides`` is the applied
@@ -273,6 +279,7 @@ class ReleaseStageRunner:
                 publish_stage=spec.stage,
                 version=version,
                 delivery=delivery,
+                extra_envs=skills_env,
             )
 
         try:
