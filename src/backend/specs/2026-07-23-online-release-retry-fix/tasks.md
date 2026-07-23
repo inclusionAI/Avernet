@@ -306,7 +306,7 @@
         consistent ledger timeline (`list_by_bot`).
 - **Depends on:** Tasks 6, 7
 
-## Task 10: Full-suite verification & spec acceptance check
+## Task 10: `[~]` Full-suite verification & spec acceptance check
 
 - **Goal:** Feature meets every spec acceptance criterion; branch is
   push-clean against the release target.

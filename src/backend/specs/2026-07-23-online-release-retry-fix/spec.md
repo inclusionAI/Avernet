@@ -43,43 +43,43 @@ correct shape.
   crash-safe shape, so a fix or guarantee added to one applies to all.
 
 ## Acceptance Criteria
-- [ ] Retrying a failed publish whose pre-failure stage was the online stage
+- [x] Retrying a failed publish whose pre-failure stage was the online stage
       always re-drives the online-release process; it never chooses a BaaS
       restart based on whether the release was already recorded/live.
-- [ ] An online-stage retry whose release never landed re-runs the release work
+- [x] An online-stage retry whose release never landed re-runs the release work
       and reaches a live deployment (creating a new bot or upgrading the existing
       one as appropriate), without creating a duplicate bot.
-- [ ] An online-stage retry whose release **did** land and is still live does not
+- [x] An online-stage retry whose release **did** land and is still live does not
       issue a redundant re-deploy; it resumes by waiting for/settling the
       existing deployment.
-- [ ] An online-stage retry after the deploy was issued but its BaaS workflow
+- [x] An online-stage retry after the deploy was issued but its BaaS workflow
       ultimately **failed** re-issues the deploy as a fresh attempt — the failed
       deploy is never mistaken for a live one, so the retry can never skip the
       work and strand the record in a failure loop.
-- [ ] The system's record of what is deployed reflects observed deploy
+- [x] The system's record of what is deployed reflects observed deploy
       failures: a deploy whose workflow failed does not count as the live
       deployment, and does not supersede a genuinely live earlier release on
       the same bot.
-- [ ] Retrying a failed publish whose pre-failure stage was the verify stage, or
+- [x] Retrying a failed publish whose pre-failure stage was the verify stage, or
       whose pre-failure state was a fully-published (live) record, still uses the
       BaaS restart path — unchanged from today.
-- [ ] A restart of a live online bot always re-deploys through BaaS; the
+- [x] A restart of a live online bot always re-deploys through BaaS; the
       "release is already the current live deployment" condition never causes a
       restart to skip the BaaS call.
-- [ ] The online-release **gate** still skips re-issuing the release only when
+- [x] The online-release **gate** still skips re-issuing the release only when
       this record's release is the current live deployment on its bot (the #341
       behavior for the rolled-back-then-re-promoted record is preserved).
-- [ ] The predicate that answers "is this record's online release the current
+- [x] The predicate that answers "is this record's online release the current
       live deployment?" has exactly one caller (the gate) and a name that states
       that meaning.
-- [ ] When a restart's target bot no longer exists, recovery creates a fresh bot
+- [x] When a restart's target bot no longer exists, recovery creates a fresh bot
       without risking a second orphan bot on a crash-resume — matching the
       guarantee the upgrade path already provides.
-- [ ] The online first-release, online upgrade, and restart operations run
+- [x] The online first-release, online upgrade, and restart operations run
       through one shared crash-safe operation shape; existing crash-window
       guarantees for each are preserved.
-- [ ] No change to the verify publish flow's behavior.
-- [ ] There is test coverage for **cross-publish-boundary** scenarios — flows
+- [x] No change to the verify publish flow's behavior.
+- [x] There is test coverage for **cross-publish-boundary** scenarios — flows
       that span more than one publish record and more than one operation on a
       shared online bot — including at minimum: an upgrade chain across
       successive publish records; a rollback that demotes a record and
@@ -88,7 +88,7 @@ correct shape.
       same bot; a failed deploy retried to success; and restart flows
       (including target-bot-gone recovery). Each asserts the record reaches
       the correct live deployment and that no duplicate/orphan bot is created.
-- [ ] These cross-boundary scenarios run against the **production code path**
+- [x] These cross-boundary scenarios run against the **production code path**
       end-to-end — driven through the public publish operations with only the
       system boundaries (the deployment platform, object storage, artifact
       build I/O) replaced by local in-memory implementations — so the tests
