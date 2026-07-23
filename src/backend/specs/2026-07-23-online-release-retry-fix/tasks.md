@@ -54,7 +54,7 @@
   - [ ] `pytest tests/community/core/service_bot/` green.
 - **Depends on:** Task 1
 
-## Task 3: Re-route retry — dispatch by rollback status, flag only restart branches
+## Task 3: `[x]` Re-route retry — dispatch by rollback status, flag only restart branches
 
 - **Goal:** An `ONLINE_PUB`-pre-failure retry always re-enqueues
   `online_release`; the restart-vs-rerun heuristic and the predicate's retry

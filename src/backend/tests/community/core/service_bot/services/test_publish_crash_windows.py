@@ -554,6 +554,80 @@ def test_sync_restart_failure_outcome_corrects_restart_op():
     assert ledger.get_by_id(op.id).state == PublishOperationState.FAILED.value
 
 
+@pytest.mark.asyncio
+async def test_failed_deploy_retry_reissues_fresh_attempt_no_loop():
+    """The end-to-end loop guard: deploy issued → workflow FAILED (op
+    outcome-corrected) → the gate reads not-current → the release re-runs and
+    open_operation opens a FRESH attempt that re-issues. Without the outcome
+    correction the COMPLETED op read as live, the gate skipped the re-issue,
+    and the record looped FAILED forever."""
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+
+    async def upgrade_async(**kw):
+        wid = baas.issue("BOT-live", "UPDATE")
+        return {"publish_id": wid, "success": True}
+
+    build_service.upgrade_async = AsyncMock(side_effect=upgrade_async)
+    svc = _upgrade_flow(ledger, baas, build_service)
+
+    record = _record(PublishStatus.ONLINE_PUB.value)
+    record.last_pub_id = 10
+    await _run_online_upgrade(svc, record)
+    assert svc.is_current_online_deployment(1) is True
+
+    # The BaaS wait fails → the poll's failure handler outcome-corrects the op.
+    svc._handle_sync_failure(
+        publish_id=1,
+        current_status=PublishStatus.ONLINE_PUB,
+        ext={},
+        progress={"status": "FAILED", "failed_devices": []},
+        baas_publish_id=901,
+    )
+    # Gate: not current → the online_release task re-runs the release work.
+    assert svc.is_current_online_deployment(1) is False
+
+    await _run_online_upgrade(svc, record)
+    # A SECOND issue reached BaaS via a fresh ledger attempt — no skip, no loop.
+    assert build_service.upgrade_async.await_count == 2
+    op = ledger.get_latest_by_kind(1, "upgrade", "online")
+    assert op.attempt == 2
+    assert op.state == PublishOperationState.COMPLETED.value
+    assert op.baas_publish_id == 902
+    assert svc.is_current_online_deployment(1) is True
+    # Exactly the two attempts on the bot's timeline — no duplicate bot.
+    assert len(baas.list_bot_publishes("BOT-live")) == 2
+
+
+def test_online_retry_poll_follows_release_not_restart_sync():
+    """After an ONLINE_PUB retry the record's ext carries NO retry flag, so the
+    progress poll must drive the release wait (ext.publish.online) instead of
+    redirecting to sync_restart_progress — which would read a stale restart
+    workflow (or nothing) and strand the record."""
+    ledger = _ledger()
+    publish_service = Mock()
+    rec = _record(PublishStatus.ONLINE_PUB.value)
+    rec.ext = {"source_status": PublishStatus.ONLINE_PUB.value,
+               "publish": {"online": 901}}
+    publish_service.get_publish_by_id.return_value = rec
+    svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock(),
+                publish_service=publish_service)
+    svc.sync_restart_progress = Mock()
+    svc.get_baas_publish_progress = Mock(return_value={"status": "RUNNING"})
+
+    result = svc.advance_publish_progress(1)
+
+    svc.sync_restart_progress.assert_not_called()
+    svc.get_baas_publish_progress.assert_called_once_with(baas_publish_id=901)
+    assert "RUNNING" in result.message
+
+    # Contrast: with the restart-branch flag set, the redirect still fires.
+    rec.ext = {"retry": True, "source_status": PublishStatus.VALIDATE_PUB.value}
+    svc.sync_restart_progress = Mock(return_value="REDIRECTED")
+    assert svc.advance_publish_progress(1) == "REDIRECTED"
+
+
 def test_abandon_inflight_operations_marks_nonterminal():
     ledger = _ledger()
     svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock())
