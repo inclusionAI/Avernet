@@ -25,6 +25,7 @@ acceptance_targets=()
 explicit_acceptance_targets=()
 coverage_modules=()
 reporter_command=()
+source "$repo_root/src/bcs/scripts/e2e-test/mock_services.sh"
 
 if [[ -n "${SINGLEBOX_COVERAGE_MODULE:-}" ]]; then
   requested_modules+=("$SINGLEBOX_COVERAGE_MODULE")
@@ -202,8 +203,10 @@ run_real_singlebox() {
       STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
       STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
       bash "$repo_root/scripts/singlebox.sh" --standalone stop all || true
+    bcs_e2e_mock_stop || true
   }
   trap cleanup_real_singlebox EXIT
+  bcs_e2e_mock_start "$coverage_root/mock-services"
   env OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \

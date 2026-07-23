@@ -35,8 +35,8 @@ use bcs_service_api::{
     StartStateMachineRunOutcome, StateMachineDefinitionRepoPort, StateMachineRunRepoPort,
     JudgeArtifact, JudgeEvaluatorPort, JudgeRequest, ServiceError,
     StateMachineGraphDefinitionView, StateMachineGraphEdgeView, StateMachineGraphNodeView,
-    StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineRunGraphView,
-    StateMachineRunView, UpgradeGroupCollaborationDefinitionCommand,
+    StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineNodeSubStatus,
+    StateMachineRunGraphView, StateMachineRunView, UpgradeGroupCollaborationDefinitionCommand,
 };
 use serde_json::Value;
 use tracing::{info, warn};
@@ -1472,8 +1472,10 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             return Ok(None);
         };
         let judge_outputs = self.judge_outputs_for_node(run_id, node_id).await?;
+        let sub_status = node_sub_status(&node);
         Ok(Some(StateMachineNodeRunView {
             node,
+            sub_status,
             judge_outputs,
         }))
     }
@@ -1715,6 +1717,22 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                     )
                 })?;
                 let artifact_len = text.len();
+                if node_uses_judge(&compiled, &correlation.node_id)
+                    && !self
+                        .runs
+                        .record_node_artifact_if_running(
+                            &correlation.state_machine_run_id,
+                            &correlation.node_id,
+                            correlation.attempt,
+                            text.clone(),
+                        )
+                        .await?
+                {
+                    return Ok(HandleBotTerminalEventOutcome {
+                        consumed: true,
+                        view: self.run_view(&run.run_id).await?,
+                    });
+                }
                 let evaluation = self
                     .evaluate_node_outcome(
                         &compiled,
@@ -2830,6 +2848,7 @@ fn run_graph_view(
                 assignee_bot_id: run_node.map(|node| node.assignee_bot_id.clone()),
                 started_at: run_node.and_then(|node| node.started_at),
                 completed_at: run_node.and_then(|node| node.completed_at),
+                sub_status: run_node.and_then(node_sub_status),
             }
         })
         .collect();
@@ -2858,6 +2877,27 @@ fn run_graph_view(
         },
         nodes,
         edges,
+    })
+}
+
+fn node_uses_judge(compiled: &CompiledStateMachine, node_id: &str) -> bool {
+    match &compiled.definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine
+            .nodes
+            .get(node_id)
+            .is_some_and(|node| node.judge.is_some()),
+        _ => false,
+    }
+}
+
+fn node_sub_status(node: &StateMachineNodeRun) -> Option<StateMachineNodeSubStatus> {
+    if node.status != StateMachineNodeStatus::Running {
+        return None;
+    }
+    Some(if node.artifact_text.is_some() {
+        StateMachineNodeSubStatus::Judging
+    } else {
+        StateMachineNodeSubStatus::AwaitingResponse
     })
 }
 
