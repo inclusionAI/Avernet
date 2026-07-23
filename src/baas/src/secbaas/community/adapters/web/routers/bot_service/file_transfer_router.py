@@ -109,6 +109,11 @@ async def get_upload_url(
                 "bot_uuid": bot_uuid,
             },
         )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "INVALID_PARAMETER", "message": str(e)},
+        )
     except NotImplementedError as e:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
@@ -206,6 +211,11 @@ async def get_download_url(
                 "message": str(e),
                 "bot_uuid": bot_uuid,
             },
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "INVALID_PARAMETER", "message": str(e)},
         )
     except NotImplementedError as e:
         raise HTTPException(

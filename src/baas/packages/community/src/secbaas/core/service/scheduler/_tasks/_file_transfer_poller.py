@@ -94,7 +94,7 @@ class FileTransferPoller:
                 # if a ticket gets stuck after status transition but before
                 # the operation completes (e.g. pull_file fails after
                 # update_status), the next poller cycle can retry it.
-                statuses=["CREATED", "UPLOADING", "UPLOAD_COMPLETED", "PUSHING"],
+                statuses=["CREATED", "UPLOADING", "UPLOAD_COMPLETED", "PULLING", "PUSHING"],
                 limit=10000,
             )
             # UPLOAD direction: CREATED/UPLOADING/UPLOAD_COMPLETED
@@ -240,7 +240,9 @@ class FileTransferPoller:
                     transfer_id,
                 )
 
-                # Retention mode: device_path IS NULL -> skip pull_file, go directly to DONE
+                # Retention mode: device_path IS NULL -> skip pull_file,
+                # go directly UPLOAD_COMPLETED -> DONE (no PULLING needed
+                # since there is no device to pull to).
                 if ticket.device_path is None:
                     log.info(
                         "[FileTransferPoller] Ticket %s is retention mode "
@@ -257,14 +259,22 @@ class FileTransferPoller:
                     self._ticket_repo.update_status(transfer_id, "DONE", None)
                     return "retention_done"
 
-                # Normal path: UPLOAD_COMPLETED -> pull_file -> DONE
+                # Normal path: UPLOAD_COMPLETED -> PULLING -> pull_file -> DONE
                 # Recovery: if ticket is already UPLOAD_COMPLETED (stuck from
-                # a previous cycle where pull_file failed after status update),
-                # skip the redundant transition and proceed directly to
-                # download/pull.
+                # a previous cycle), skip the redundant transition.
                 if ticket.status != "UPLOAD_COMPLETED":
                     self._ticket_repo.update_status(
                         transfer_id, "UPLOAD_COMPLETED", None
+                    )
+
+                # Transition to PULLING before the pull_file call.
+                # Recovery: if ticket is already PULLING (stuck from a
+                # previous cycle where pull_file failed after the PULLING
+                # transition), skip the redundant status update and retry
+                # pull_file directly.
+                if ticket.status != "PULLING":
+                    self._ticket_repo.update_status(
+                        transfer_id, "PULLING", None
                     )
 
                 download_url = await asyncio.to_thread(
