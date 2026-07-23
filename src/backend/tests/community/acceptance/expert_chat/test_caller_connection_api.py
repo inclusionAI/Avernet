@@ -607,7 +607,7 @@ def test_expert_chat_add_bot(live_backend):
 
         response = admin_client.post(
             "/api/v1/expert-chats",
-            params={
+            json={
                 "bot_id": bot_id,
                 "owner_id": owner_id,
             },
