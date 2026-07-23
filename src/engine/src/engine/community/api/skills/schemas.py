@@ -75,6 +75,26 @@ class PoolLayoutActivateRequest(BaseModel):
     mappings: list[SymlinkItem]
 
 
+class PoolLayoutActivateResponse(BaseModel):
+    committed: bool
+    status: Literal[
+        "COMMITTED",
+        "ALREADY_COMMITTED",
+        "ACTIVE_ENTRY_CONFLICT",
+        "DATA_INCONSISTENT",
+        "INVALID",
+        "TRANSIENT_ERROR",
+        "POST_CUTOVER_SYNC_PENDING",
+        "NOT_ATOMIC",
+        "UNKNOWN",
+    ]
+    evidence: dict[str, Any]
+
+
+class PoolLayoutActivateApiResponse(ApiResponse):
+    data: PoolLayoutActivateResponse
+
+
 class PoolMappingVerifyRequest(BaseModel):
     mappings: list[SymlinkItem]
 
@@ -93,5 +113,7 @@ __all__ = [
     "RuntimeLayoutProbeResponse",
     "RuntimeLayoutProbeApiResponse",
     "PoolLayoutActivateRequest",
+    "PoolLayoutActivateResponse",
+    "PoolLayoutActivateApiResponse",
     "PoolMappingVerifyRequest",
 ]

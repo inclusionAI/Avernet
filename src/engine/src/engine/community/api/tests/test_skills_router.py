@@ -23,6 +23,7 @@ from engine.community.core.engine.exceptions import (
 from engine.community.core.skills.models import (
     CleanSymlinksResult,
     PoolLayoutActivationResult,
+    PoolLayoutActivationStatus,
     PoolLayoutProbeResult,
     PoolLayoutProbeStatus,
     PoolMappingPublishResult,
@@ -260,7 +261,7 @@ def test_pool_activation_and_mapping_routes_are_capability_independent(
     plugin.activate_pool_layout = AsyncMock(
         return_value=PoolLayoutActivationResult(
             committed=True,
-            status="COMMITTED",
+            status=PoolLayoutActivationStatus.COMMITTED,
             evidence={"bridge": "valid"},
         ),
     )

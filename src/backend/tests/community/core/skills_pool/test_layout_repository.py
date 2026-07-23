@@ -21,6 +21,9 @@ from agentclaw.community.core.skills_pool.types import (
 from agentclaw.community.core.skills_pool.repository.models import (
     BotSkillLayoutStateModel,
 )
+from agentclaw.community.core.skills_pool.repository.protocol import (
+    SkillsPoolLayoutRepositoryProtocol,
+)
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.plugins.skills_pool_layout_repository import (
     SkillsPoolLayoutRepository,
@@ -73,6 +76,12 @@ def rollout_evidence() -> RolloutEvidence:
         engine_type="openclaw",
         decision_reason="exact_bot_match",
     )
+
+
+def test_layout_repository_satisfies_public_protocol_shape() -> None:
+    repository = SkillsPoolLayoutRepository(InMemorySqliteDB())
+
+    assert isinstance(repository, SkillsPoolLayoutRepositoryProtocol)
 
 
 def test_missing_layout_state_reads_as_legacy_without_persisting() -> None:
@@ -287,6 +296,74 @@ def test_expired_lease_competition_has_one_new_owner(tmp_path: Path) -> None:
     assert results.count(True) == 1
     winner = ["worker-2", "worker-3"][results.index(True)]
     assert repository.get(scope).lease_owner == winner
+
+
+def test_pre_cutover_failure_evidence_survives_an_ordinary_retry() -> None:
+    repository = SkillsPoolLayoutRepository(InMemorySqliteDB())
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+    failure_evidence = {
+        "status": "DATA_INCONSISTENT",
+        "evidence": {
+            "reason": "registered_local_source_missing",
+            "registered_name": "handmade",
+        },
+    }
+
+    assert repository.record_pre_cutover_failure(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        failure_code="DATA_INCONSISTENT",
+        failure_stage="pre_cutover_validation",
+        retryable=False,
+        evidence=failure_evidence,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "still-valid"},
+    )
+
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.POOL_READY
+    assert state.last_probe_evidence == {"marker": "still-valid"}
+    assert state.last_failure_code == "DATA_INCONSISTENT"
+    assert state.last_failure_stage == "pre_cutover_validation"
+    assert state.last_failure_retryable is False
+    assert state.last_failure_evidence == failure_evidence
+    assert state.last_failure_at is not None
+    assert not repository.record_pre_cutover_failure(
+        scope=scope,
+        migration_generation="stale-generation",
+        lease_owner="worker-1",
+        failure_code="ACTIVE_ENTRY_CONFLICT",
+        failure_stage="pre_cutover_validation",
+        retryable=False,
+        evidence={},
+    )
 
 
 def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:

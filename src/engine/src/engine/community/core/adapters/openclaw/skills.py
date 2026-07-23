@@ -33,6 +33,7 @@ from engine.community.core.skills.models import (
     CleanSymlinksResult,
     PoolLayoutActivateRequest,
     PoolLayoutActivationResult,
+    PoolLayoutActivationStatus,
     PoolLayoutProbeRequest,
     PoolLayoutProbeResult,
     PoolLayoutProbeStatus,
@@ -156,10 +157,26 @@ class OpenClawSkillsAdapter(SkillsService):
                 ],
             }
         )
+        raw_status = str(raw.get("status", ""))
+        try:
+            status = PoolLayoutActivationStatus(raw_status)
+        except ValueError:
+            status = PoolLayoutActivationStatus.UNKNOWN
+        evidence = dict(raw.get("evidence") or {})
+        if status is PoolLayoutActivationStatus.UNKNOWN:
+            evidence["raw_status"] = raw_status
+        committed = (
+            raw.get("committed") is True
+            and status
+            in {
+                PoolLayoutActivationStatus.COMMITTED,
+                PoolLayoutActivationStatus.ALREADY_COMMITTED,
+            }
+        )
         return PoolLayoutActivationResult(
-            committed=raw.get("committed") is True,
-            status=str(raw.get("status", "")),
-            evidence=dict(raw.get("evidence") or {}),
+            committed=committed,
+            status=status,
+            evidence=evidence,
         )
 
     async def probe_pool_layout(

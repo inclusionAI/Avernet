@@ -176,7 +176,11 @@ class CenterEnsureResult:
 
 @dataclass
 class PoolLayoutActivateRequest:
-    """提交 OpenClaw Pool 数据面所需的稳定 Service API 请求。"""
+    """提交 OpenClaw Pool 数据面所需的稳定 Service API 请求。
+
+    ``registered_local_names`` 用于核对数据库登记事实；运行时还会枚举并
+    迁移 Legacy local 和 active 入口中的完整文件系统事实。
+    """
 
     migration_generation: str
     preparation_id: str
@@ -224,15 +228,29 @@ class PoolLayoutActivationResult:
     """Pool 数据面切换结果。"""
 
     committed: bool
-    status: str
+    status: "PoolLayoutActivationStatus"
     evidence: dict[str, Any] = field(default_factory=dict)
 
     def to_data(self) -> dict[str, Any]:
         return {
             "committed": self.committed,
-            "status": self.status,
+            "status": self.status.value,
             "evidence": self.evidence,
         }
+
+
+class PoolLayoutActivationStatus(StrEnum):
+    """跨 Service/Plugin/HTTP 边界稳定传输的切换状态。"""
+
+    COMMITTED = "COMMITTED"
+    ALREADY_COMMITTED = "ALREADY_COMMITTED"
+    ACTIVE_ENTRY_CONFLICT = "ACTIVE_ENTRY_CONFLICT"
+    DATA_INCONSISTENT = "DATA_INCONSISTENT"
+    INVALID = "INVALID"
+    TRANSIENT_ERROR = "TRANSIENT_ERROR"
+    POST_CUTOVER_SYNC_PENDING = "POST_CUTOVER_SYNC_PENDING"
+    NOT_ATOMIC = "NOT_ATOMIC"
+    UNKNOWN = "UNKNOWN"
 
 
 @dataclass
@@ -266,6 +284,7 @@ __all__ = [
     "CleanSymlinksResult",
     "PoolLayoutActivateRequest",
     "PoolLayoutActivationResult",
+    "PoolLayoutActivationStatus",
     "PoolLayoutProbeRequest",
     "PoolLayoutProbeResult",
     "PoolLayoutProbeStatus",

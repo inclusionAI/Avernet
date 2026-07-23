@@ -172,7 +172,7 @@ class SkillsService(Protocol):
         request: PoolLayoutActivateRequest,
         auth: AuthContext | None = None,
     ) -> PoolLayoutActivationResult:
-        """最终同步已登记 local 并原子提交 Legacy→Pool bridge。"""
+        """核对登记事实、同步完整 local 并原子提交 Legacy→Pool bridge。"""
         ...
 
     async def probe_pool_layout(

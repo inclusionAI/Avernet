@@ -8,6 +8,7 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
     RuntimeLayoutProbeResult,
 )
 from agentclaw.community.core.skills_pool.models import (
+    PoolCutoverResult,
     PoolSkillMapping,
     RegisteredSkillAsset,
 )
@@ -55,7 +56,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
         preparation_id: str,
         registered_local_names: list[str],
         mappings: list[PoolSkillMapping],
-    ) -> dict[str, object]:
+    ) -> PoolCutoverResult:
         ...
 
     async def publish_mappings(

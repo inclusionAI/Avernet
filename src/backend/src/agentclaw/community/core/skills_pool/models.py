@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,8 +40,40 @@ class PoolSkillMapping:
         return {"source": self.source, "target": self.target}
 
 
+class PoolCutoverStatus(StrEnum):
+    """Backend 与 Engine 激活端点之间的稳定状态契约。"""
+
+    COMMITTED = "COMMITTED"
+    ALREADY_COMMITTED = "ALREADY_COMMITTED"
+    ACTIVE_ENTRY_CONFLICT = "ACTIVE_ENTRY_CONFLICT"
+    DATA_INCONSISTENT = "DATA_INCONSISTENT"
+    INVALID = "INVALID"
+    TRANSIENT_ERROR = "TRANSIENT_ERROR"
+    POST_CUTOVER_SYNC_PENDING = "POST_CUTOVER_SYNC_PENDING"
+    NOT_ATOMIC = "NOT_ATOMIC"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass(frozen=True, slots=True)
+class PoolCutoverResult:
+    """Engine 激活响应在 Backend 领域层的类型化表示。"""
+
+    committed: bool
+    status: PoolCutoverStatus
+    evidence: dict[str, object]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "committed": self.committed,
+            "status": self.status.value,
+            "evidence": self.evidence,
+        }
+
+
 __all__ = [
     "OpenClawPoolPaths",
+    "PoolCutoverResult",
+    "PoolCutoverStatus",
     "PoolSkillMapping",
     "RegisteredSkillAsset",
 ]

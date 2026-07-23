@@ -10,47 +10,45 @@ import stat
 from pathlib import Path
 from uuid import uuid4
 
+from engine.community.plugins.openclaw.layout_atomic import (
+    atomic_exchange_paths,
+)
+
 Fingerprint = tuple[str, str]
 Manifest = dict[str, Fingerprint]
 
 
-def mirror_registered_local(
+def mirror_local_tree(
     *,
     source_root: Path,
     pool_local: Path,
-    registered_local_names: list[str],
     staging_root: Path,
-) -> None:
-    """交换前把 registered local 精确镜像到 Pool。"""
+) -> list[str]:
+    """交换前把 Legacy local 的完整文件系统真相精确镜像到 Pool。"""
 
     _remove_path(staging_root)
     staging_root.mkdir()
-    for name in registered_local_names:
-        staging = staging_root / name
-        shutil.copytree(
-            source_root / name,
-            staging,
-            symlinks=True,
-            copy_function=shutil.copy2,
-        )
-        destination = pool_local / name
+    source_entries = sorted(source_root.iterdir(), key=lambda path: path.name)
+    for source in source_entries:
+        _copy_entry(source, staging_root / source.name)
+
+    for destination in list(pool_local.iterdir()):
         _remove_path(destination)
-        staging.rename(destination)
+    for staged in list(staging_root.iterdir()):
+        staged.rename(pool_local / staged.name)
     staging_root.rmdir()
+    return [entry.name for entry in source_entries]
 
 
 def write_baseline_manifest(
     *,
     pool_local: Path,
-    registered_local_names: list[str],
+    local_names: list[str],
     manifest_path: Path,
 ) -> Manifest:
     """持久化交换前 Pool 快照，供交换后或失败重试执行三方合并。"""
 
-    manifest = snapshot_registered(
-        pool_local,
-        registered_local_names,
-    )
+    manifest = snapshot_local(pool_local, local_names=local_names)
     temporary = manifest_path.with_name(
         f".{manifest_path.name}.{uuid4().hex}.tmp"
     )
@@ -83,19 +81,23 @@ def merge_post_cutover_changes(
     *,
     source_root: Path,
     pool_local: Path,
-    registered_local_names: list[str],
     baseline: Manifest,
 ) -> dict[str, object]:
     """三方合并交换窗口内的 Legacy 变化，保留交换后的 Pool 新写入。
 
     ``baseline`` 是首次 final sync 后的 Pool；``source_root`` 是原子交换
     后换出的 Legacy 快照；``pool_local`` 是交换后继续承接新写入的目标。
-    交换后 Pool 是唯一写入权威源：已有或已删除的目标绝不再被 Legacy
-    修改/删除。只对 baseline 中不存在、且 Pool 当前仍不存在的新路径执行
-    原子 no-clobber 创建；其余 Legacy delta 留在 quarantine 供审计。
+    交换后 Pool 是唯一写入权威源：新路径使用原子 no-clobber 创建；已有
+    路径使用原子 exchange 检查交换瞬间换出的实际版本，Pool 已变化时立即
+    回滚并保留 Pool。删除和无法安全收敛的 delta 留在 quarantine 供审计。
+
+    这是本期明确接受的 best-effort 边界：没有写栅栏时，跨 exchange 持有
+    的已打开文件描述符，或连续命中回滚后再次交换窗口的同文件写入，仍可能
+    落到随后清理的临时 inode。完整消除此竞态需要所有 writer 遵守共享的
+    quiesce/lock 协议，不属于 #370。
     """
 
-    source = snapshot_registered(source_root, registered_local_names)
+    source = snapshot_local(source_root)
     changed = {
         key
         for key in set(baseline) | set(source)
@@ -117,7 +119,22 @@ def merge_post_cutover_changes(
         observed = _fingerprint(target)
         if observed == desired:
             continue
-        if baseline.get(key) is not None or observed is not None:
+        baseline_fingerprint = baseline.get(key)
+        if baseline_fingerprint is not None:
+            if (
+                observed == baseline_fingerprint
+                and _replace_if_unchanged(
+                    source=source_path,
+                    target=target,
+                    expected=baseline_fingerprint,
+                    desired=desired,
+                )
+            ):
+                applied.append(key)
+            else:
+                conflicts.append(key)
+            continue
+        if observed is not None:
             conflicts.append(key)
             continue
         if not _create_if_absent(
@@ -135,12 +152,17 @@ def merge_post_cutover_changes(
     }
 
 
-def snapshot_registered(
+def snapshot_local(
     root: Path,
-    registered_local_names: list[str],
+    local_names: list[str] | None = None,
 ) -> Manifest:
     manifest: Manifest = {}
-    for name in registered_local_names:
+    names = (
+        local_names
+        if local_names is not None
+        else sorted(entry.name for entry in root.iterdir())
+    )
+    for name in names:
         skill_root = root / name
         root_fingerprint = _fingerprint(skill_root)
         if root_fingerprint is None:
@@ -159,6 +181,20 @@ def snapshot_registered(
                 if fingerprint is not None:
                     manifest[entry.relative_to(root).as_posix()] = fingerprint
     return manifest
+
+
+def _copy_entry(source: Path, destination: Path) -> None:
+    if source.is_symlink():
+        destination.symlink_to(os.readlink(source))
+    elif source.is_dir():
+        shutil.copytree(
+            source,
+            destination,
+            symlinks=True,
+            copy_function=shutil.copy2,
+        )
+    else:
+        shutil.copy2(source, destination, follow_symlinks=False)
 
 
 def _fingerprint(path: Path) -> Fingerprint | None:
@@ -224,6 +260,52 @@ def _create_if_absent(
     return _fingerprint(target) == desired
 
 
+def _replace_if_unchanged(
+    *,
+    source: Path,
+    target: Path,
+    expected: Fingerprint,
+    desired: Fingerprint,
+) -> bool:
+    """以 exchange 瞬间换出的对象判断 Pool 是否仍为 baseline。
+
+    先交换再检查，避免 check-then-replace 的 TOCTOU。若换出的 Pool 已变化，
+    立即原子换回；若回滚窗口内 canonical path 又收到写入，则该更晚写入
+    随临时项再次换回 canonical。调用方接受无协作写锁时跨 inode 写入仍有
+    极窄残余竞态；此处不声称提供文件内容 CAS。
+    """
+
+    if desired == expected:
+        return True
+    temporary = target.with_name(f".{target.name}.{uuid4().hex}.pool-sync")
+    try:
+        if desired[0] == "file":
+            shutil.copy2(source, temporary)
+        elif desired[0] == "symlink":
+            temporary.symlink_to(os.readlink(source))
+        elif desired[0] == "dir":
+            temporary.mkdir()
+        else:
+            return False
+        if not atomic_exchange_paths(temporary, target):
+            raise OSError("atomic file exchange unavailable")
+        displaced = _fingerprint(temporary)
+        if displaced == expected:
+            return _fingerprint(target) == desired
+
+        if not atomic_exchange_paths(temporary, target):
+            raise OSError("failed to restore concurrently changed Pool file")
+        candidate_after_rollback = _fingerprint(temporary)
+        if candidate_after_rollback != desired:
+            if not atomic_exchange_paths(temporary, target):
+                raise OSError("failed to restore newer Pool file")
+        return _fingerprint(target) == desired
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    finally:
+        _remove_path(temporary)
+
+
 def _remove_path(path: Path) -> None:
     if path.is_symlink() or (path.exists() and not path.is_dir()):
         path.unlink()
@@ -234,7 +316,7 @@ def _remove_path(path: Path) -> None:
 __all__ = [
     "load_baseline_manifest",
     "merge_post_cutover_changes",
-    "mirror_registered_local",
-    "snapshot_registered",
+    "mirror_local_tree",
+    "snapshot_local",
     "write_baseline_manifest",
 ]

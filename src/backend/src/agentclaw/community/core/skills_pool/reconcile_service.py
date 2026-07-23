@@ -20,6 +20,7 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
 )
 from agentclaw.community.core.skills_pool.models import (
     OpenClawPoolPaths,
+    PoolCutoverStatus,
     PoolSkillMapping,
     RegisteredSkillAsset,
 )
@@ -47,6 +48,8 @@ class SkillsPoolReconcileOutcome(StrEnum):
     TRANSIENT_ERROR = "transient_error"
     INVALID = "invalid"
     STATE_RACE_LOST = "state_race_lost"
+    DATA_INCONSISTENT = "data_inconsistent"
+    ACTIVE_ENTRY_CONFLICT = "active_entry_conflict"
     CUTOVER_FAILED = "cutover_failed"
     MAPPING_FAILED = "mapping_failed"
     MAPPING_VERIFY_FAILED = "mapping_verify_failed"
@@ -200,18 +203,43 @@ class SkillsPoolReconcileService:
                 registered_local_names=local_names,
                 mappings=mappings,
             )
-            if cutover.get("committed") is not True:
+            if not cutover.committed:
+                failure_profile = self._cutover_failure_profile(
+                    cutover.status
+                )
+                if failure_profile is not None:
+                    outcome, stage, retryable = failure_profile
+                    cutover_evidence = cutover.to_dict()
+                    recorded = self._layouts.record_pre_cutover_failure(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        failure_code=cutover.status.value,
+                        failure_stage=stage,
+                        retryable=retryable,
+                        evidence=cutover_evidence,
+                    )
+                    if not recorded:
+                        return SkillsPoolReconcileResult(
+                            SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                            preparation_id=probe.preparation_id,
+                        )
+                    return SkillsPoolReconcileResult(
+                        outcome,
+                        preparation_id=probe.preparation_id,
+                        evidence=cutover_evidence,
+                    )
                 return SkillsPoolReconcileResult(
                     SkillsPoolReconcileOutcome.CUTOVER_FAILED,
                     preparation_id=probe.preparation_id,
-                    evidence=cutover,
+                    evidence=cutover.to_dict(),
                 )
             if not self._layouts.record_cutover_committed(
                 scope=scope,
                 migration_generation=generation,
                 lease_owner=lease_owner,
                 preparation_id=probe.preparation_id,
-                evidence=cutover,
+                evidence=cutover.to_dict(),
             ):
                 return SkillsPoolReconcileResult(
                     SkillsPoolReconcileOutcome.STATE_RACE_LOST,
@@ -279,6 +307,38 @@ class SkillsPoolReconcileService:
             ),
             RuntimeLayoutProbeStatus.INVALID: SkillsPoolReconcileOutcome.INVALID,
         }.get(status, SkillsPoolReconcileOutcome.INVALID)
+
+    @staticmethod
+    def _cutover_failure_profile(
+        status: PoolCutoverStatus,
+    ) -> tuple[SkillsPoolReconcileOutcome, str, bool] | None:
+        return {
+            PoolCutoverStatus.DATA_INCONSISTENT: (
+                SkillsPoolReconcileOutcome.DATA_INCONSISTENT,
+                "pre_cutover_validation",
+                False,
+            ),
+            PoolCutoverStatus.ACTIVE_ENTRY_CONFLICT: (
+                SkillsPoolReconcileOutcome.ACTIVE_ENTRY_CONFLICT,
+                "pre_cutover_validation",
+                False,
+            ),
+            PoolCutoverStatus.NOT_ATOMIC: (
+                SkillsPoolReconcileOutcome.CUTOVER_FAILED,
+                "atomic_cutover",
+                False,
+            ),
+            PoolCutoverStatus.INVALID: (
+                SkillsPoolReconcileOutcome.CUTOVER_FAILED,
+                "pre_cutover_validation",
+                False,
+            ),
+            PoolCutoverStatus.TRANSIENT_ERROR: (
+                SkillsPoolReconcileOutcome.CUTOVER_FAILED,
+                "pre_cutover_filesystem",
+                True,
+            ),
+        }.get(status)
 
     @staticmethod
     def _source_tail(git_path: str, prefix: str) -> PurePosixPath:

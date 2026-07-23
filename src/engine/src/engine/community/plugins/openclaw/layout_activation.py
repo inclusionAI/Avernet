@@ -1,26 +1,27 @@
-"""OpenClaw Skills Pool 的运行时最终同步与原子 local bridge 切换。"""
+"""OpenClaw Skills Pool 的完整文件系统收敛与原子 local bridge 切换。"""
 
 from __future__ import annotations
 
-import ctypes
-import errno
 import os
 import re
-import sys
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Callable
 
+from engine.community.plugins.openclaw.layout_atomic import (
+    atomic_exchange_paths,
+)
 from engine.community.plugins.openclaw.layout_probe import (
     LAYOUT_CONTRACT_VERSION,
     RuntimeLayoutInspectionStatus,
     inspect_runtime_layout,
 )
 from engine.community.plugins.openclaw.layout_sync import (
+    Manifest,
     load_baseline_manifest,
     merge_post_cutover_changes,
-    mirror_registered_local,
+    mirror_local_tree,
     write_baseline_manifest,
 )
 
@@ -28,6 +29,8 @@ from engine.community.plugins.openclaw.layout_sync import (
 class PoolActivationStatus(StrEnum):
     COMMITTED = "COMMITTED"
     ALREADY_COMMITTED = "ALREADY_COMMITTED"
+    ACTIVE_ENTRY_CONFLICT = "ACTIVE_ENTRY_CONFLICT"
+    DATA_INCONSISTENT = "DATA_INCONSISTENT"
     INVALID = "INVALID"
     TRANSIENT_ERROR = "TRANSIENT_ERROR"
     POST_CUTOVER_SYNC_PENDING = "POST_CUTOVER_SYNC_PENDING"
@@ -85,6 +88,7 @@ class _Layout:
     pool_root: Path
     pool_local: Path
     pool_repo: Path
+    legacy_repo: Path
 
     @classmethod
     def for_home(cls, home: Path) -> "_Layout":
@@ -97,7 +101,23 @@ class _Layout:
             pool_root=pool_root,
             pool_local=pool_root / "skills-local",
             pool_repo=pool_root / "skills-repo",
+            legacy_repo=legacy_root / "skills-repo",
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _MappingPlan:
+    managed: dict[Path, Path]
+    external: tuple[Path, ...]
+    failures: tuple[dict[str, str], ...]
+    conflicts: tuple[dict[str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _PostCutoverFinalization:
+    post_sync: dict[str, object]
+    cleanup_pending: bool
+    failure: PoolActivationResult | None = None
 
 
 def _lexical_target(link: Path) -> Path:
@@ -107,60 +127,244 @@ def _lexical_target(link: Path) -> Path:
     return Path(os.path.abspath(target))
 
 
-def atomic_exchange_paths(left: Path, right: Path) -> bool:
-    """原子交换同一文件系统上的两个目录项。
+def _canonical_pool_source(layout: _Layout, source: Path) -> Path | None:
+    source = Path(os.path.abspath(source))
+    for root, pool_root in (
+        (layout.legacy_local, layout.pool_local),
+        (layout.pool_local, layout.pool_local),
+        (layout.legacy_repo, layout.pool_repo),
+        (layout.pool_repo, layout.pool_repo),
+    ):
+        normalized_root = Path(os.path.abspath(root))
+        if source.is_relative_to(normalized_root):
+            return pool_root / source.relative_to(normalized_root)
+    return None
 
-    Linux 使用 ``renameat2(RENAME_EXCHANGE)``，macOS 测试环境使用
-    ``renamex_np(RENAME_SWAP)``。不支持时返回 ``False``，调用方不得降级成
-    两次普通 rename。
-    """
 
-    if left.parent.stat().st_dev != right.parent.stat().st_dev:
-        return False
-    libc = ctypes.CDLL(None, use_errno=True)
-    left_raw = os.fsencode(left)
-    right_raw = os.fsencode(right)
+def _pool_source_failure(layout: _Layout, source: Path) -> str | None:
+    """证明 source 是 canonical Pool root 内真实、可读的技能目录。"""
 
-    if sys.platform.startswith("linux") and hasattr(libc, "renameat2"):
-        renameat2 = libc.renameat2
-        renameat2.argtypes = [
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_uint,
-        ]
-        renameat2.restype = ctypes.c_int
-        result = renameat2(-100, left_raw, -100, right_raw, 2)
-    elif sys.platform == "darwin" and hasattr(libc, "renamex_np"):
-        renamex_np = libc.renamex_np
-        renamex_np.argtypes = [
-            ctypes.c_char_p,
-            ctypes.c_char_p,
-            ctypes.c_uint,
-        ]
-        renamex_np.restype = ctypes.c_int
-        result = renamex_np(left_raw, right_raw, 0x00000002)
-    else:
-        return False
+    normalized = Path(os.path.abspath(source))
+    containing_root: Path | None = None
+    for root in (layout.pool_local, layout.pool_repo):
+        normalized_root = Path(os.path.abspath(root))
+        if normalized.is_relative_to(normalized_root):
+            containing_root = normalized_root
+            break
+    if containing_root is None:
+        return "source_outside_pool"
+    if not normalized.exists():
+        return "source_missing"
+    try:
+        if not normalized.resolve(strict=True).is_relative_to(
+            containing_root.resolve(strict=True)
+        ):
+            return "source_escapes_pool"
+    except OSError:
+        return "source_unreadable"
+    if not normalized.is_dir():
+        return "source_not_directory"
+    unreadable = _first_unreadable_path(normalized)
+    if unreadable is not None:
+        return "source_unreadable"
+    return None
 
-    if result == 0:
-        return True
-    current_errno = ctypes.get_errno()
-    if current_errno in {
-        errno.ENOSYS,
-        errno.ENOTSUP,
-        getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),
-        errno.EXDEV,
-    }:
-        return False
-    raise OSError(current_errno, os.strerror(current_errno))
+
+def _active_entry_inventory(
+    layout: _Layout,
+) -> tuple[dict[Path, Path], tuple[Path, ...], tuple[Path, ...]]:
+    managed: dict[Path, Path] = {}
+    external: list[Path] = []
+    occupied: list[Path] = []
+    reserved = {layout.legacy_local, layout.legacy_repo}
+    for entry in sorted(layout.legacy_root.iterdir(), key=lambda path: path.name):
+        if entry in reserved or entry.name.startswith(
+            ".skills-local.pool-cutover-"
+        ):
+            continue
+        if not entry.is_symlink():
+            occupied.append(entry)
+            continue
+        canonical = _canonical_pool_source(layout, _lexical_target(entry))
+        if canonical is None:
+            external.append(entry)
+        else:
+            managed[entry] = canonical
+    return managed, tuple(external), tuple(occupied)
+
+
+def _mapping_plan(
+    *,
+    layout: _Layout,
+    mappings: list[SkillMapping],
+) -> _MappingPlan:
+    desired: dict[Path, Path] = {}
+    failures: list[dict[str, str]] = []
+    conflicts: list[dict[str, str]] = []
+    for mapping in mappings:
+        source_input = Path(mapping.source)
+        source = Path(os.path.abspath(source_input))
+        target = Path(mapping.target)
+        reason = ""
+        if not source_input.is_absolute():
+            reason = "source_outside_pool"
+        else:
+            reason = _pool_source_failure(layout, source) or ""
+        if not reason and (
+            not target.is_absolute()
+            or target.parent != layout.legacy_root
+            or target in {layout.legacy_local, layout.legacy_repo}
+        ):
+            reason = "target_invalid"
+        elif (
+            not reason
+            and target in desired
+            and desired[target] != source
+        ):
+            conflicts.append(
+                {
+                    "target": str(target),
+                    "requested_source": str(source),
+                    "existing_source": str(desired[target]),
+                }
+            )
+            continue
+        if reason:
+            failures.append(
+                {"source": str(source), "target": str(target), "reason": reason}
+            )
+        else:
+            desired[target] = source
+
+    discovered, external, occupied = _active_entry_inventory(layout)
+    for target, source in discovered.items():
+        reason = _pool_source_failure(layout, source)
+        if reason:
+            failures.append(
+                {
+                    "source": str(source),
+                    "target": str(target),
+                    "reason": f"managed_{reason}",
+                }
+            )
+            continue
+        if target in desired and desired[target] != source:
+            conflicts.append(
+                {
+                    "target": str(target),
+                    "requested_source": str(desired[target]),
+                    "existing_source": str(source),
+                }
+            )
+        desired[target] = source
+    for target in occupied:
+        if target in desired:
+            conflicts.append(
+                {
+                    "target": str(target),
+                    "requested_source": str(desired[target]),
+                    "existing_source": "<occupied-non-symlink>",
+                }
+            )
+    for target in external:
+        desired.pop(target, None)
+    return _MappingPlan(
+        managed=desired,
+        external=external,
+        failures=tuple(failures),
+        conflicts=tuple(conflicts),
+    )
 
 
 def _invalid(reason: str, **evidence: object) -> PoolActivationResult:
     return PoolActivationResult(
         PoolActivationStatus.INVALID,
         {"reason": reason, **evidence},
+    )
+
+
+def _data_inconsistent(
+    reason: str, **evidence: object
+) -> PoolActivationResult:
+    return PoolActivationResult(
+        PoolActivationStatus.DATA_INCONSISTENT,
+        {"reason": reason, **evidence},
+    )
+
+
+def _active_entry_conflict(
+    conflicts: tuple[dict[str, str], ...],
+) -> PoolActivationResult:
+    return PoolActivationResult(
+        PoolActivationStatus.ACTIVE_ENTRY_CONFLICT,
+        {
+            "reason": "managed_active_entry_conflict",
+            "conflicts": list(conflicts),
+        },
+    )
+
+
+def _first_unreadable_path(root: Path) -> Path | None:
+    for current_root, directory_names, file_names in os.walk(
+        root,
+        followlinks=False,
+    ):
+        current = Path(current_root)
+        if not os.access(current, os.R_OK | os.X_OK):
+            return current
+        for name in [*directory_names, *file_names]:
+            entry = current / name
+            if entry.is_symlink():
+                continue
+            required = os.R_OK | os.X_OK if entry.is_dir() else os.R_OK
+            if not os.access(entry, required):
+                return entry
+    return None
+
+
+def _finalize_post_cutover(
+    *,
+    temporary: Path,
+    pool_local: Path,
+    quarantine: Path,
+    baseline_path: Path,
+    baseline: Manifest | None = None,
+) -> _PostCutoverFinalization:
+    """完成交换后的三方合并与审计快照归档；首次执行与重试共用。"""
+
+    try:
+        effective_baseline = (
+            baseline
+            if baseline is not None
+            else load_baseline_manifest(baseline_path)
+        )
+        post_sync = merge_post_cutover_changes(
+            source_root=temporary,
+            pool_local=pool_local,
+            baseline=effective_baseline,
+        )
+    except (OSError, ValueError) as error:
+        return _PostCutoverFinalization(
+            post_sync={},
+            cleanup_pending=False,
+            failure=PoolActivationResult(
+                PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                {
+                    "reason": "post_cutover_sync_failed",
+                    "error_type": type(error).__name__,
+                    "errno": getattr(error, "errno", None),
+                },
+            ),
+        )
+
+    quarantine.parent.mkdir(parents=True, exist_ok=True)
+    cleanup_pending = quarantine.exists() or quarantine.is_symlink()
+    if not cleanup_pending:
+        temporary.rename(quarantine)
+    baseline_path.unlink(missing_ok=True)
+    return _PostCutoverFinalization(
+        post_sync=post_sync,
+        cleanup_pending=cleanup_pending,
     )
 
 
@@ -175,7 +379,7 @@ def activate_openclaw_pool(
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
     before_post_sync: Callable[[], None] | None = None,
 ) -> PoolActivationResult:
-    """同步已登记 local，校验 mapping source，并原子提交 Legacy→Pool bridge。"""
+    """校验登记事实、同步完整 local，并原子提交 Legacy→Pool bridge。"""
 
     home_path = Path(home)
     layout = _Layout.for_home(home_path)
@@ -228,8 +432,7 @@ def activate_openclaw_pool(
                 os.path.abspath(layout.pool_local)
             ):
                 return _invalid("legacy_local_bridge_invalid")
-            cleanup_pending = False
-            post_sync: dict[str, object] = {}
+            finalization = _PostCutoverFinalization({}, False)
             if temporary.is_dir() and not temporary.is_symlink():
                 for name in normalized_names:
                     source = temporary / name
@@ -238,37 +441,24 @@ def activate_openclaw_pool(
                             "registered_local_source_invalid",
                             source=str(source),
                         )
-                try:
-                    baseline = load_baseline_manifest(baseline_path)
-                    post_sync = merge_post_cutover_changes(
-                        source_root=temporary,
-                        pool_local=layout.pool_local,
-                        registered_local_names=normalized_names,
-                        baseline=baseline,
-                    )
-                except (OSError, ValueError) as error:
-                    return PoolActivationResult(
-                        PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
-                        {
-                            "reason": "post_cutover_sync_failed",
-                            "error_type": type(error).__name__,
-                            "errno": error.errno,
-                        },
-                    )
-                quarantine.parent.mkdir(parents=True, exist_ok=True)
-                if quarantine.exists() or quarantine.is_symlink():
-                    cleanup_pending = True
-                else:
-                    temporary.rename(quarantine)
-                baseline_path.unlink(missing_ok=True)
+                finalization = _finalize_post_cutover(
+                    temporary=temporary,
+                    pool_local=layout.pool_local,
+                    quarantine=quarantine,
+                    baseline_path=baseline_path,
+                )
+                if finalization.failure is not None:
+                    return finalization.failure
             return PoolActivationResult(
                 PoolActivationStatus.ALREADY_COMMITTED,
                 {
                     "bridge": str(layout.legacy_local),
                     "target": str(layout.pool_local),
                     "quarantine": str(quarantine),
-                    "quarantine_cleanup_pending": cleanup_pending,
-                    "post_sync": post_sync,
+                    "quarantine_cleanup_pending": (
+                        finalization.cleanup_pending
+                    ),
+                    "post_sync": finalization.post_sync,
                 },
             )
         if not layout.legacy_local.is_dir():
@@ -276,43 +466,55 @@ def activate_openclaw_pool(
 
         for name in normalized_names:
             source = layout.legacy_local / name
+            if not source.exists():
+                return _data_inconsistent(
+                    "registered_local_source_missing",
+                    registered_name=name,
+                    source=str(source),
+                )
             if not source.is_dir() or source.is_symlink():
-                return _invalid("registered_local_source_invalid", source=str(source))
+                return _data_inconsistent(
+                    "registered_local_source_invalid",
+                    registered_name=name,
+                    source=str(source),
+                )
+            unreadable = _first_unreadable_path(source)
+            if unreadable is not None:
+                return _data_inconsistent(
+                    "registered_local_source_unreadable",
+                    registered_name=name,
+                    source=str(source),
+                    unreadable_path=str(unreadable),
+                )
 
-        mirror_registered_local(
+        local_names = mirror_local_tree(
             source_root=layout.legacy_local,
             pool_local=layout.pool_local,
-            registered_local_names=normalized_names,
             staging_root=layout.pool_root
             / f".final-sync-{migration_generation}",
         )
         baseline = write_baseline_manifest(
             pool_local=layout.pool_local,
-            registered_local_names=normalized_names,
+            local_names=local_names,
             manifest_path=baseline_path,
         )
 
-        targets: set[Path] = set()
-        for mapping in mappings:
-            source = Path(mapping.source)
-            target = Path(mapping.target)
-            if (
-                not source.is_absolute()
-                or not target.is_absolute()
-                or target.parent != layout.legacy_root
-                or target in targets
-                or not (
-                    source.is_relative_to(layout.pool_local)
-                    or source.is_relative_to(layout.pool_repo)
-                )
-                or not source.exists()
+        mapping_plan = _mapping_plan(layout=layout, mappings=mappings)
+        if mapping_plan.conflicts:
+            return _active_entry_conflict(mapping_plan.conflicts)
+        if mapping_plan.failures:
+            if any(
+                failure["reason"].startswith("managed_")
+                for failure in mapping_plan.failures
             ):
-                return _invalid(
-                    "mapping_source_invalid",
-                    source=str(source),
-                    target=str(target),
+                return _data_inconsistent(
+                    "managed_active_source_invalid",
+                    failures=list(mapping_plan.failures),
                 )
-            targets.add(target)
+            return _invalid(
+                "mapping_source_invalid",
+                failures=list(mapping_plan.failures),
+            )
 
         if temporary.exists() or temporary.is_symlink():
             return _invalid("cutover_temporary_path_occupied", path=str(temporary))
@@ -333,40 +535,36 @@ def activate_openclaw_pool(
 
         if before_post_sync is not None:
             before_post_sync()
-        try:
-            post_sync = merge_post_cutover_changes(
-                source_root=temporary,
-                pool_local=layout.pool_local,
-                registered_local_names=normalized_names,
-                baseline=baseline,
-            )
-        except (OSError, ValueError) as error:
-            return PoolActivationResult(
-                PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
-                {
-                    "reason": "post_cutover_sync_failed",
-                    "error_type": type(error).__name__,
-                    "errno": error.errno,
-                },
-            )
-
-        quarantine.parent.mkdir(parents=True, exist_ok=True)
-        cleanup_pending = False
-        if quarantine.exists() or quarantine.is_symlink():
-            cleanup_pending = True
-        else:
-            temporary.rename(quarantine)
-        baseline_path.unlink(missing_ok=True)
+        finalization = _finalize_post_cutover(
+            temporary=temporary,
+            pool_local=layout.pool_local,
+            quarantine=quarantine,
+            baseline_path=baseline_path,
+            baseline=baseline,
+        )
+        if finalization.failure is not None:
+            return finalization.failure
         return PoolActivationResult(
             PoolActivationStatus.COMMITTED,
             {
                 "bridge": str(layout.legacy_local),
                 "target": str(layout.pool_local),
                 "quarantine": str(quarantine),
-                "quarantine_cleanup_pending": cleanup_pending,
+                "quarantine_cleanup_pending": finalization.cleanup_pending,
                 "registered_local_count": len(normalized_names),
+                "local_inventory": {
+                    "registered": len(normalized_names),
+                    "unregistered": len(
+                        set(local_names) - set(normalized_names)
+                    ),
+                    "total": len(local_names),
+                },
                 "mapping_source_count": len(mappings),
-                "post_sync": post_sync,
+                "active_inventory": {
+                    "managed": len(mapping_plan.managed),
+                    "external": len(mapping_plan.external),
+                },
+                "post_sync": finalization.post_sync,
             },
         )
     except OSError as error:
@@ -401,36 +599,29 @@ def verify_skill_mappings(
     """验证受管激活入口精确解析到请求中的 Pool source。"""
 
     layout = _Layout.for_home(Path(home))
-    seen: set[Path] = set()
+    plan = _mapping_plan(layout=layout, mappings=mappings)
     failures: list[dict[str, str]] = []
-    for mapping in mappings:
-        source = Path(mapping.source)
-        target = Path(mapping.target)
+    failures.extend(plan.failures)
+    for conflict in plan.conflicts:
+        failures.append({**conflict, "reason": "managed_source_conflict"})
+    for target, source in plan.managed.items():
         reason = ""
-        if (
-            not source.is_absolute()
-            or not (
-                source.is_relative_to(layout.pool_local)
-                or source.is_relative_to(layout.pool_repo)
-            )
-        ):
-            reason = "source_outside_pool"
-        elif not source.exists():
-            reason = "source_missing"
-        elif target.parent != layout.legacy_root or target in seen:
-            reason = "target_invalid"
-        elif not target.is_symlink():
+        if not target.is_symlink():
             reason = "target_not_symlink"
         elif _lexical_target(target) != Path(os.path.abspath(source)):
             reason = "target_mismatch"
-        seen.add(target)
         if reason:
             failures.append(
                 {"source": str(source), "target": str(target), "reason": reason}
             )
     return MappingVerificationResult(
         valid=not failures,
-        evidence={"checked": len(mappings), "failures": failures},
+        evidence={
+            "checked": len(mappings),
+            "managed_checked": len(plan.managed),
+            "external_ignored": len(plan.external),
+            "failures": failures,
+        },
     )
 
 
@@ -439,45 +630,25 @@ def publish_pool_mappings(
     mappings: list[SkillMapping],
     home: str | Path = "/home/admin",
 ) -> MappingPublishResult:
-    """对齐已登记 Pool mapping，同时保留尚未分类的既有入口。
-
-    #369 只掌握 Backend 已登记技能，不能把未出现在请求中的入口等同为
-    stale；完整文件系统枚举与受管/外部分类由后续 #370 承接。
-    """
+    """按文件系统事实对齐全部受管 Pool mapping，并保留外部入口。"""
 
     layout = _Layout.for_home(Path(home))
-    desired: dict[Path, Path] = {}
-    failures: list[dict[str, str]] = []
-    for mapping in mappings:
-        source = Path(mapping.source)
-        target = Path(mapping.target)
-        reason = ""
-        if (
-            not source.is_absolute()
-            or not (
-                source.is_relative_to(layout.pool_local)
-                or source.is_relative_to(layout.pool_repo)
-            )
-            or not source.exists()
-        ):
-            reason = "source_invalid"
-        elif (
-            not target.is_absolute()
-            or target.parent != layout.legacy_root
-            or target.name in {"skills-local", "skills-repo"}
-            or target in desired
-        ):
-            reason = "target_invalid"
-        if reason:
-            failures.append(
-                {"source": str(source), "target": str(target), "reason": reason}
-            )
-        else:
-            desired[target] = source
-    if failures:
+    plan = _mapping_plan(layout=layout, mappings=mappings)
+    if plan.conflicts:
         return MappingPublishResult(
             published=False,
-            evidence={"reason": "mapping_invalid", "failures": failures},
+            evidence={
+                "reason": "managed_active_entry_conflict",
+                "conflicts": list(plan.conflicts),
+            },
+        )
+    if plan.failures:
+        return MappingPublishResult(
+            published=False,
+            evidence={
+                "reason": "mapping_invalid",
+                "failures": list(plan.failures),
+            },
         )
 
     created: list[str] = []
@@ -485,7 +656,7 @@ def publish_pool_mappings(
     kept: list[str] = []
     removed: list[str] = []
     try:
-        for target, source in desired.items():
+        for target, source in plan.managed.items():
             if target.is_symlink():
                 if _lexical_target(target) == Path(os.path.abspath(source)):
                     kept.append(str(target))
@@ -516,11 +687,12 @@ def publish_pool_mappings(
     return MappingPublishResult(
         published=True,
         evidence={
-            "total": len(desired),
+            "total": len(plan.managed),
             "created": created,
             "updated": updated,
             "kept": kept,
             "removed": removed,
+            "external_ignored": [str(path) for path in plan.external],
         },
     )
 
