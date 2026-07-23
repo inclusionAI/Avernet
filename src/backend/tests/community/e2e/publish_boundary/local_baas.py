@@ -123,7 +123,8 @@ class LocalBaas:
             rows.reverse()  # newest first, like the real endpoint
             return _ok(rows, path)
         if "/devices" in path:
-            # Provider probe (resolve_container_provider) → teclaw.
+            # Per-bot device listing (list_devices_by_bot_uuid consumers) —
+            # reports a teclaw-provider device for the probed bot.
             bot_uuid = parts[-2] if len(parts) >= 2 else ""
             return _ok(
                 [{"items": [{"provider_type": "TECLAW", "device_uuid": bot_uuid}]}],
