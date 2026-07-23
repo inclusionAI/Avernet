@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationKind,
+    PublishOperationState,
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
@@ -224,6 +225,12 @@ class RestartMixin:
         # so restarting a non-latest stage never delivers another stage's channels.
         delivery = self._ext_state.compose_stored(publish_record.ext or {}, stage_enum)
 
+        # A prior recreate that crashed between its ext write and its
+        # complete_operation left a dangling op; this re-delivery resolves the
+        # NEW bot from ext and takes the happy path, so nothing else would ever
+        # finish that bookkeeping — finalize it here before deploying.
+        self._finalize_dangling_recreate_op(publish_id, stage_enum, ext)
+
         async def _issue():
             return await self._build_service.upgrade_async(
                 bot_uuid=bot_uuid,
@@ -298,6 +305,43 @@ class RestartMixin:
         return {"success": True, "message": f"Restart submitted, stage: {stage_enum.value}",
                 "stage": stage_enum.value, "restart_publish_id": restart_publish_id}
 
+    def _finalize_dangling_recreate_op(
+        self, publish_id: int, stage_enum: PublishStage, ext: dict
+    ) -> None:
+        """Complete a recreate FIRST_RELEASE op stranded by a crash between its
+        ext write and its ``complete_operation``.
+
+        The recreate's last two steps are the ext write (binding/publish/restart
+        → the new ids) and the op completion. A crash between them leaves the op
+        ``ID_RECORDED`` while ext already points at the NEW, alive bot — so the
+        re-delivered restart takes the happy (upgrade) path and the recreate leg
+        never runs again to finish its bookkeeping. Left dangling, that
+        non-terminal latest FIRST_RELEASE attempt hides the record's genuinely
+        completed release from ``is_current_online_deployment`` (which reads the
+        latest attempt per kind), and a later release for the same record/stage
+        would resume it and complete without issuing anything.
+
+        The condition is exact: a non-terminal FIRST_RELEASE op for this
+        record/stage whose recorded workflow id IS ``ext.publish.<stage>`` — the
+        ext write demonstrably landed, so completing the op is pure bookkeeping
+        catch-up. ``complete`` is a CAS from ID_RECORDED; anything else no-ops."""
+        op = self._publish_operation_repo.get_latest_by_kind(
+            publish_id, str(PublishOperationKind.FIRST_RELEASE), stage_enum.value
+        )
+        if op is None or op.baas_publish_id is None:
+            return
+        terminal = {s.value for s in PublishOperationState.terminal()}
+        if op.state in terminal:
+            return
+        if op.baas_publish_id != (ext.get("publish") or {}).get(stage_enum.value):
+            return
+        logger.info(
+            "[PublishFlowService._finalize_dangling_recreate_op] completing "
+            "stranded recreate op: publish_id=%s stage=%s op_id=%s baas_publish_id=%s",
+            publish_id, stage_enum.value, op.id, op.baas_publish_id,
+        )
+        self._operation_runner.complete_operation(op)
+
     async def _recreate_restart_target(
         self,
         *,
@@ -305,7 +349,7 @@ class RestartMixin:
         stage_enum: PublishStage,
         publish_record,
         bot: dict,
-        migration_path: str,
+        migration_path: str | None,
         version: str,
         delivery,
         operator: str,

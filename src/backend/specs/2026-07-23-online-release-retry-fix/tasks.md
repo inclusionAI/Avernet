@@ -165,7 +165,7 @@
   - [ ] `pytest tests/community/core/service_bot/` green.
 - **Depends on:** Task 4 (atom); Task 1 (predicate name used in tests)
 
-## Task 7: DI-world publish harness — LocalBaas + world fixture + baseline lifecycle
+## Task 7: `[~]` DI-world publish harness — LocalBaas + world fixture + baseline lifecycle
 
 - **Goal:** A reusable DI-world harness for publish flows: the real app wiring
   (TEST profile, per-test injector, in-memory SQLite) with **local
