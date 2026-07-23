@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
+from datetime import datetime
 
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
@@ -174,6 +175,17 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         local_locators: dict[int, str],
     ) -> bool:
         """在一个事务中更新该 Bot 全部 local locator 并提交 Pool Active。"""
+        ...
+
+    def record_runtime_reconciliation(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        observed_at: datetime,
+        evidence: dict[str, object],
+    ) -> bool:
+        """Record a qualified post-activation runtime lifecycle signal."""
         ...
 
     def begin_legacy_rollback(

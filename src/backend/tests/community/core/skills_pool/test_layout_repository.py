@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Barrier
 
@@ -12,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.core.skills_pool.quarantine import QuarantineStatus
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     RolloutEvidence,
@@ -20,6 +22,7 @@ from agentclaw.community.core.skills_pool.types import (
 )
 from agentclaw.community.core.skills_pool.repository.models import (
     BotSkillLayoutStateModel,
+    SkillMigrationQuarantineModel,
 )
 from agentclaw.community.core.skills_pool.repository.protocol import (
     SkillsPoolLayoutRepositoryProtocol,
@@ -362,7 +365,16 @@ def test_pre_cutover_failure_evidence_survives_an_ordinary_retry() -> None:
         failure_code="ACTIVE_ENTRY_CONFLICT",
         failure_stage="pre_cutover_validation",
         retryable=False,
-        evidence={},
+        evidence={
+            "committed": True,
+            "status": "COMMITTED",
+            "evidence": {
+                "quarantine": (
+                    "/home/admin/.openclaw/workspace/skills-pool/"
+                    ".migration-quarantine/generation-1/skills-local"
+                )
+            },
+        },
     )
 
 
@@ -421,12 +433,37 @@ def test_post_cutover_failure_remains_forward_only_and_auditable() -> None:
         lease_owner="worker-1",
         preparation_id="preparation-1",
     )
+    assert not repository.record_cutover_committed(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "committed": True,
+            "status": "COMMITTED",
+            "evidence": {"bridge": "valid"},
+        },
+    )
+    assert (
+        repository.get(scope).phase
+        is SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER
+    )
     assert repository.record_cutover_committed(
         scope=scope,
         migration_generation="generation-1",
         lease_owner="worker-1",
         preparation_id="preparation-1",
-        evidence={"bridge": "pool"},
+        evidence={
+            "committed": True,
+            "status": "COMMITTED",
+            "evidence": {
+                "bridge": "pool",
+                "quarantine": (
+                    "/home/admin/.openclaw/workspace/skills-pool/"
+                    ".migration-quarantine/generation-1/skills-local"
+                ),
+            },
+        },
     )
 
     assert repository.record_post_cutover_failure(
@@ -551,6 +588,22 @@ def test_operator_resolves_manual_repair_with_note_and_explicit_fact() -> None:
         lease_owner="worker-2",
         lease_seconds=60,
     )
+    assert repository.record_cutover_committed(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-2",
+        preparation_id="preparation-1",
+        evidence={
+            "committed": True,
+            "status": "ALREADY_COMMITTED",
+            "evidence": {
+                "quarantine": (
+                    "/home/admin/.openclaw/workspace/skills-pool/"
+                    ".migration-quarantine/generation-1/skills-local"
+                )
+            },
+        },
+    )
     with database.transactional_orm_session() as session:
         session.add(
             Skill(
@@ -611,7 +664,17 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
         migration_generation="generation-1",
         lease_owner="worker-1",
         preparation_id="preparation-1",
-        evidence={"bridge": "valid"},
+        evidence={
+            "committed": True,
+            "status": "COMMITTED",
+            "evidence": {
+                "bridge": "valid",
+                "quarantine": (
+                    "/home/admin/.openclaw/workspace/skills-pool/"
+                    ".migration-quarantine/generation-1/skills-local"
+                ),
+            },
+        },
     )
     with database.transactional_orm_session() as session:
         session.add_all(
@@ -678,6 +741,66 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
     assert state.phase is SkillLayoutPhase.POOL_ACTIVE
     assert state.pool_activated_at is not None
     assert state.lease_owner is None
+    quarantine = repository.get_quarantine(scope, "generation-1")
+    assert quarantine is not None
+    assert quarantine.engine == "openclaw"
+    assert quarantine.source_evidence["evidence"]["bridge"] == "valid"
+    assert repository.record_runtime_reconciliation(
+        scope=scope,
+        migration_generation="generation-1",
+        observed_at=datetime.now(UTC) + timedelta(seconds=1),
+        evidence={"source": "arca_device_alive"},
+    )
+    reconciled = repository.get_quarantine(scope, "generation-1")
+    assert reconciled is not None
+    assert reconciled.runtime_evidence == {"source": "arca_device_alive"}
+    assert repository.claim_cleanup(
+        scope=scope,
+        migration_generation="generation-1",
+        cleanup_owner="cleanup-1",
+        lease_seconds=60,
+    )
+    assert repository.record_cleanup_uncertain(
+        scope=scope,
+        migration_generation="generation-1",
+        cleanup_owner="cleanup-1",
+        evidence={"reason": "runtime_cleanup_outcome_unknown"},
+    )
+    cleaning = repository.get_quarantine(scope, "generation-1")
+    assert cleaning is not None
+    assert cleaning.status is QuarantineStatus.CLEANING
+    assert cleaning.cleanup_lease_expires_at is not None
+    assert not repository.begin_legacy_rollback(
+        scope=scope,
+        rollback_generation="rollback-1",
+        operator="oncall",
+        note="must wait for cleanup fence",
+        lease_owner="rollback-worker",
+        lease_seconds=60,
+    )
+    with database.transactional_orm_session() as session:
+        session.query(SkillMigrationQuarantineModel).update(
+            {
+                SkillMigrationQuarantineModel.cleanup_lease_expires_at: (
+                    datetime.now(UTC).replace(tzinfo=None)
+                    - timedelta(seconds=1)
+                )
+            }
+        )
+    assert repository.begin_legacy_rollback(
+        scope=scope,
+        rollback_generation="rollback-1",
+        operator="oncall",
+        note="expired cleanup fence may be taken over",
+        lease_owner="rollback-worker",
+        lease_seconds=60,
+    )
+    assert not repository.mark_cleaned(
+        scope=scope,
+        migration_generation="generation-1",
+        cleanup_owner="cleanup-1",
+        evidence={"path_absent": True},
+    )
     with database.transactional_orm_session() as session:
         paths = {
             row.id: row.git_path
@@ -709,7 +832,16 @@ def test_pool_active_commit_rejects_partial_or_stale_local_locator_set() -> None
         migration_generation="generation-1",
         lease_owner="worker-1",
         preparation_id="preparation-1",
-        evidence={},
+        evidence={
+            "committed": True,
+            "status": "COMMITTED",
+            "evidence": {
+                "quarantine": (
+                    "/home/admin/.openclaw/workspace/skills-pool/"
+                    ".migration-quarantine/generation-1/skills-local"
+                )
+            },
+        },
     )
     assert repository.begin_cutover(
         scope=scope,
@@ -722,7 +854,16 @@ def test_pool_active_commit_rejects_partial_or_stale_local_locator_set() -> None
         migration_generation="generation-1",
         lease_owner="worker-1",
         preparation_id="preparation-1",
-        evidence={},
+        evidence={
+            "committed": True,
+            "status": "COMMITTED",
+            "evidence": {
+                "quarantine": (
+                    "/home/admin/.openclaw/workspace/skills-pool/"
+                    ".migration-quarantine/generation-1/skills-local"
+                )
+            },
+        },
     )
     with database.transactional_orm_session() as session:
         session.add_all(

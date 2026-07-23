@@ -228,7 +228,14 @@ class SkillsPoolReconcileService:
         cutover_finalizing = (
             state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
         )
-        if not state.data_plane_cutover_committed or cutover_finalizing:
+        repair_evidence_refresh = (
+            state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
+        )
+        if (
+            not state.data_plane_cutover_committed
+            or cutover_finalizing
+            or repair_evidence_refresh
+        ):
             if not state.data_plane_cutover_committed:
                 recorded = self._layouts.record_ready_probe(
                     scope=scope,

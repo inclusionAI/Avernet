@@ -61,6 +61,15 @@ Engine Layout Descriptor 仍不在本期范围内。
 - local 后置合并采用 best-effort 原子 exchange：一般的切换前修改、切换后
   Pool 修改和新增路径竞争均可收敛；无写栅栏时，跨 exchange 的已打开文件
   描述符或连续同文件写入仍存在极窄竞态，作为 #370 的显式接受限制。
+- 原子切换留下的旧 local 以 Bot 与 migration generation 独立登记为
+  Migration Quarantine，只用于审计和人工取证，不参与 locator、mapping、
+  日常读写或自动回滚。
+- 隔离内容至少保留到 `POOL_ACTIVE` 七天后，并且必须观察到激活后的 ARCA
+  新 sandbox 存活交接或 BaaS 成功重启/重发及 reconcile；失败、人工修复和
+  显式回滚阶段都阻断清理。
+- 七天任务由持久化任务队列延迟调度；重复执行、任务接管和目录已不存在均
+  幂等。容器只接受 generation，由固定 engine Pool 根推导删除目标，不能
+  删除其他 Bot 或 generation。数据库保留清理时间与证据。
 
 ## Context Boundary
 
@@ -75,6 +84,8 @@ provides:
   - "SkillsPoolReconcileWakeupListener"
   - "SkillsPoolRecoveryService"
   - "SkillsPoolRollbackService"
+  - "SkillsPoolQuarantineService"
+  - "SkillsPoolQuarantineCleanupTaskHandler"
   - "PoolCutoverStatus"
   - "PoolCutoverResult"
   - "BotSkillLayoutState and migration enums"

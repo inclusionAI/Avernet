@@ -23,6 +23,9 @@ from engine.community.plugins.openclaw.layout_activation import (
     rollback_openclaw_pool,
     verify_skill_mappings,
 )
+from engine.community.plugins.skills_pool.layout_quarantine import (
+    cleanup_quarantine,
+)
 from engine.community.plugins.openclaw.layout_probe import inspect_runtime_layout
 
 log = logging.getLogger("openclaw-port")
@@ -81,6 +84,17 @@ class _SkillsPortMixin:
             ),
         )
         return PoolLayoutActivationPortResult(**result.to_data())
+
+    async def cleanup_pool_quarantine(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            cleanup_quarantine,
+            engine="openclaw",
+            home=Path("/home/admin"),
+            migration_generation=params["migration_generation"],
+        )
+        return result.to_data()
 
     async def probe_pool_layout(
         self, params: dict[str, Any]

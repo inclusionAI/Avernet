@@ -1,0 +1,391 @@
+"""Migration Quarantine persistence mixed into the layout repository."""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime
+
+from sqlalchemy import exists, func, or_, text
+
+from agentclaw.community.core.skills_pool.quarantine import QuarantineRecord
+from agentclaw.community.core.skills_pool.repository.models import (
+    BotSkillLayoutStateModel,
+    SkillMigrationQuarantineModel,
+)
+from agentclaw.community.core.skills_pool.types import (
+    BotSkillLayoutScope,
+    SkillLayout,
+    SkillLayoutPhase,
+)
+
+
+class SkillsPoolQuarantineRepositoryMixin:
+    """Generation-scoped evidence and cleanup audit operations."""
+
+    _database: object
+
+    @staticmethod
+    def _cleanup_lease_deadline(session, seconds: int):
+        if session.bind.dialect.name == "sqlite":
+            return func.datetime(func.now(), text(f"'+{seconds} seconds'"))
+        return func.date_add(func.now(), text(f"INTERVAL {seconds} SECOND"))
+
+    @staticmethod
+    def _upsert_quarantine(
+        session,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        engine: str,
+        path: object,
+        evidence_json: str,
+    ) -> bool:
+        existing = (
+            session.query(SkillMigrationQuarantineModel)
+            .filter(
+                SkillMigrationQuarantineModel.env == scope.env,
+                SkillMigrationQuarantineModel.entity_id == scope.entity_id,
+                SkillMigrationQuarantineModel.bot_id == scope.bot_id,
+                SkillMigrationQuarantineModel.migration_generation
+                == migration_generation,
+            )
+            .one_or_none()
+        )
+        if existing is not None:
+            return existing.engine == engine and (
+                not isinstance(path, str) or existing.path == path
+            )
+        if not isinstance(path, str) or not path:
+            return False
+        session.add(
+            SkillMigrationQuarantineModel(
+                env=scope.env,
+                entity_id=scope.entity_id,
+                bot_id=scope.bot_id,
+                migration_generation=migration_generation,
+                engine=engine,
+                path=path,
+                source_evidence=evidence_json,
+            )
+        )
+        return True
+
+    @staticmethod
+    def _activate_quarantine(
+        session,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+    ) -> bool:
+        affected = (
+            session.query(SkillMigrationQuarantineModel)
+            .filter(
+                SkillMigrationQuarantineModel.env == scope.env,
+                SkillMigrationQuarantineModel.entity_id == scope.entity_id,
+                SkillMigrationQuarantineModel.bot_id == scope.bot_id,
+                SkillMigrationQuarantineModel.migration_generation
+                == migration_generation,
+                SkillMigrationQuarantineModel.pool_activated_at.is_(None),
+            )
+            .update(
+                {SkillMigrationQuarantineModel.pool_activated_at: func.now()},
+                synchronize_session=False,
+            )
+        )
+        return affected == 1
+
+    @staticmethod
+    def _no_active_quarantine_cleanup(scope: BotSkillLayoutScope):
+        return ~exists().where(
+            SkillMigrationQuarantineModel.env == scope.env,
+            SkillMigrationQuarantineModel.entity_id == scope.entity_id,
+            SkillMigrationQuarantineModel.bot_id == scope.bot_id,
+            SkillMigrationQuarantineModel.status == "cleaning",
+            SkillMigrationQuarantineModel.cleanup_lease_expires_at > func.now(),
+        )
+
+    def get_quarantine(
+        self,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+    ) -> QuarantineRecord | None:
+        with self._database.transactional_orm_session() as session:
+            row = (
+                session.query(SkillMigrationQuarantineModel)
+                .filter(
+                    SkillMigrationQuarantineModel.env == scope.env,
+                    SkillMigrationQuarantineModel.entity_id == scope.entity_id,
+                    SkillMigrationQuarantineModel.bot_id == scope.bot_id,
+                    SkillMigrationQuarantineModel.migration_generation
+                    == migration_generation,
+                )
+                .one_or_none()
+            )
+            return row.to_record() if row and row.pool_activated_at else None
+
+    def record_runtime_reconciliation(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        observed_at: datetime,
+        evidence: dict[str, object],
+    ) -> bool:
+        observed_at = observed_at.replace(tzinfo=None)
+        with self._database.transactional_orm_session() as session:
+            current = (
+                session.query(BotSkillLayoutStateModel.id)
+                .filter(
+                    BotSkillLayoutStateModel.env == scope.env,
+                    BotSkillLayoutStateModel.entity_id == scope.entity_id,
+                    BotSkillLayoutStateModel.bot_id == scope.bot_id,
+                    BotSkillLayoutStateModel.active_layout
+                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.phase
+                    == SkillLayoutPhase.POOL_ACTIVE.value,
+                    BotSkillLayoutStateModel.migration_generation
+                    == migration_generation,
+                    BotSkillLayoutStateModel.pool_activated_at < observed_at,
+                )
+                .first()
+            )
+            if current is None:
+                return False
+            affected = (
+                session.query(SkillMigrationQuarantineModel)
+                .filter(
+                    SkillMigrationQuarantineModel.env == scope.env,
+                    SkillMigrationQuarantineModel.entity_id == scope.entity_id,
+                    SkillMigrationQuarantineModel.bot_id == scope.bot_id,
+                    SkillMigrationQuarantineModel.migration_generation
+                    == migration_generation,
+                    SkillMigrationQuarantineModel.pool_activated_at < observed_at,
+                    SkillMigrationQuarantineModel.cleaned_at.is_(None),
+                )
+                .update(
+                    {
+                        SkillMigrationQuarantineModel.runtime_reconciled_at: observed_at,
+                        SkillMigrationQuarantineModel.runtime_evidence: json.dumps(
+                            evidence,
+                            ensure_ascii=False,
+                        ),
+                    },
+                    synchronize_session=False,
+                )
+            )
+        return affected == 1
+
+    def claim_cleanup(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        cleanup_owner: str,
+        lease_seconds: int,
+    ) -> bool:
+        with self._database.transactional_orm_session() as session:
+            current = (
+                session.query(BotSkillLayoutStateModel)
+                .filter(
+                    BotSkillLayoutStateModel.env == scope.env,
+                    BotSkillLayoutStateModel.entity_id == scope.entity_id,
+                    BotSkillLayoutStateModel.bot_id == scope.bot_id,
+                    BotSkillLayoutStateModel.active_layout
+                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.phase
+                    == SkillLayoutPhase.POOL_ACTIVE.value,
+                    BotSkillLayoutStateModel.migration_generation
+                    == migration_generation,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if current is None:
+                return False
+            affected = (
+                session.query(SkillMigrationQuarantineModel)
+                .filter(
+                    SkillMigrationQuarantineModel.env == scope.env,
+                    SkillMigrationQuarantineModel.entity_id == scope.entity_id,
+                    SkillMigrationQuarantineModel.bot_id == scope.bot_id,
+                    SkillMigrationQuarantineModel.migration_generation
+                    == migration_generation,
+                    SkillMigrationQuarantineModel.cleaned_at.is_(None),
+                    or_(
+                        SkillMigrationQuarantineModel.status.in_(
+                            ("retained", "cleanup_failed")
+                        ),
+                        SkillMigrationQuarantineModel.cleanup_lease_expires_at
+                        <= func.now(),
+                    ),
+                )
+                .update(
+                    {
+                        SkillMigrationQuarantineModel.status: "cleaning",
+                        SkillMigrationQuarantineModel.cleanup_lease_owner: (
+                            cleanup_owner
+                        ),
+                        SkillMigrationQuarantineModel.cleanup_lease_expires_at: (
+                            self._cleanup_lease_deadline(session, lease_seconds)
+                        ),
+                    },
+                    synchronize_session=False,
+                )
+            )
+        return affected == 1
+
+    @staticmethod
+    def _holds_cleanup_fence(
+        session,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+    ) -> bool:
+        return (
+            session.query(BotSkillLayoutStateModel.id)
+            .filter(
+                BotSkillLayoutStateModel.env == scope.env,
+                BotSkillLayoutStateModel.entity_id == scope.entity_id,
+                BotSkillLayoutStateModel.bot_id == scope.bot_id,
+                BotSkillLayoutStateModel.active_layout == SkillLayout.POOL.value,
+                BotSkillLayoutStateModel.phase
+                == SkillLayoutPhase.POOL_ACTIVE.value,
+                BotSkillLayoutStateModel.migration_generation
+                == migration_generation,
+            )
+            .with_for_update()
+            .first()
+            is not None
+        )
+
+    def mark_cleaned(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        cleanup_owner: str,
+        evidence: dict[str, object],
+    ) -> bool:
+        with self._database.transactional_orm_session() as session:
+            if not self._holds_cleanup_fence(
+                session,
+                scope=scope,
+                migration_generation=migration_generation,
+            ):
+                return False
+            query = session.query(SkillMigrationQuarantineModel).filter(
+                SkillMigrationQuarantineModel.env == scope.env,
+                SkillMigrationQuarantineModel.entity_id == scope.entity_id,
+                SkillMigrationQuarantineModel.bot_id == scope.bot_id,
+                SkillMigrationQuarantineModel.migration_generation
+                == migration_generation,
+                SkillMigrationQuarantineModel.status == "cleaning",
+                SkillMigrationQuarantineModel.cleanup_lease_owner
+                == cleanup_owner,
+                SkillMigrationQuarantineModel.cleanup_lease_expires_at
+                > func.now(),
+            )
+            affected = query.filter(
+                SkillMigrationQuarantineModel.cleaned_at.is_(None)
+            ).update(
+                {
+                    SkillMigrationQuarantineModel.status: "cleaned",
+                    SkillMigrationQuarantineModel.cleaned_at: func.now(),
+                    SkillMigrationQuarantineModel.cleanup_evidence: json.dumps(
+                        evidence,
+                        ensure_ascii=False,
+                    ),
+                    SkillMigrationQuarantineModel.cleanup_lease_owner: None,
+                    SkillMigrationQuarantineModel.cleanup_lease_expires_at: None,
+                },
+                synchronize_session=False,
+            )
+            if affected == 1:
+                return True
+            return False
+
+    def mark_cleanup_failed(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        cleanup_owner: str,
+        evidence: dict[str, object],
+    ) -> bool:
+        with self._database.transactional_orm_session() as session:
+            if not self._holds_cleanup_fence(
+                session,
+                scope=scope,
+                migration_generation=migration_generation,
+            ):
+                return False
+            affected = (
+                session.query(SkillMigrationQuarantineModel)
+                .filter(
+                    SkillMigrationQuarantineModel.env == scope.env,
+                    SkillMigrationQuarantineModel.entity_id == scope.entity_id,
+                    SkillMigrationQuarantineModel.bot_id == scope.bot_id,
+                    SkillMigrationQuarantineModel.migration_generation
+                    == migration_generation,
+                    SkillMigrationQuarantineModel.status == "cleaning",
+                    SkillMigrationQuarantineModel.cleanup_lease_owner
+                    == cleanup_owner,
+                    SkillMigrationQuarantineModel.cleanup_lease_expires_at
+                    > func.now(),
+                )
+                .update(
+                    {
+                        SkillMigrationQuarantineModel.status: "cleanup_failed",
+                        SkillMigrationQuarantineModel.cleanup_evidence: json.dumps(
+                            evidence,
+                            ensure_ascii=False,
+                        ),
+                        SkillMigrationQuarantineModel.cleanup_lease_owner: None,
+                        SkillMigrationQuarantineModel.cleanup_lease_expires_at: None,
+                    },
+                    synchronize_session=False,
+                )
+            )
+        return affected == 1
+
+    def record_cleanup_uncertain(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        cleanup_owner: str,
+        evidence: dict[str, object],
+    ) -> bool:
+        """Audit an unknown runtime outcome without releasing its delete fence."""
+        with self._database.transactional_orm_session() as session:
+            if not self._holds_cleanup_fence(
+                session,
+                scope=scope,
+                migration_generation=migration_generation,
+            ):
+                return False
+            affected = (
+                session.query(SkillMigrationQuarantineModel)
+                .filter(
+                    SkillMigrationQuarantineModel.env == scope.env,
+                    SkillMigrationQuarantineModel.entity_id == scope.entity_id,
+                    SkillMigrationQuarantineModel.bot_id == scope.bot_id,
+                    SkillMigrationQuarantineModel.migration_generation
+                    == migration_generation,
+                    SkillMigrationQuarantineModel.status == "cleaning",
+                    SkillMigrationQuarantineModel.cleanup_lease_owner
+                    == cleanup_owner,
+                    SkillMigrationQuarantineModel.cleanup_lease_expires_at
+                    > func.now(),
+                )
+                .update(
+                    {
+                        SkillMigrationQuarantineModel.cleanup_evidence: json.dumps(
+                            evidence,
+                            ensure_ascii=False,
+                        ),
+                    },
+                    synchronize_session=False,
+                )
+            )
+        return affected == 1

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC
 
 from sqlalchemy import (
     Column,
@@ -22,6 +23,10 @@ from agentclaw.community.core.skills_pool.types import (
     RolloutEvidence,
     SkillLayout,
     SkillLayoutPhase,
+)
+from agentclaw.community.core.skills_pool.quarantine import (
+    QuarantineRecord,
+    QuarantineStatus,
 )
 from agentclaw.community.plugin_api.models import AutoIncrementBigInteger
 
@@ -140,4 +145,100 @@ class BotSkillLayoutStateModel(Base):
             ),
             gmt_create=self.gmt_create,
             gmt_modified=self.gmt_modified,
+        )
+
+
+class SkillMigrationQuarantineModel(Base):
+    """One immutable Bot/migration-generation quarantine identity."""
+
+    __tablename__ = "ac_skill_migration_quarantine"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    env = Column(String(20), nullable=False)
+    entity_id = Column(String(512), nullable=False)
+    bot_id = Column(String(128), nullable=False)
+    migration_generation = Column(String(64), nullable=False)
+    engine = Column(String(64), nullable=False)
+    path = Column(String(1024), nullable=False)
+    status = Column(
+        String(32),
+        nullable=False,
+        default=QuarantineStatus.RETAINED.value,
+    )
+    source_evidence = Column(Text, nullable=False)
+    pool_activated_at = Column(DateTime, nullable=True)
+    runtime_reconciled_at = Column(DateTime, nullable=True)
+    runtime_evidence = Column(Text, nullable=True)
+    cleaned_at = Column(DateTime, nullable=True)
+    cleanup_evidence = Column(Text, nullable=True)
+    cleanup_lease_owner = Column(String(128), nullable=True)
+    cleanup_lease_expires_at = Column(DateTime, nullable=True)
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "env",
+            "entity_id",
+            "bot_id",
+            "migration_generation",
+            name="uk_skill_migration_quarantine_scope_generation",
+        ),
+        Index(
+            "idx_skill_migration_quarantine_cleanup",
+            "env",
+            "status",
+            "pool_activated_at",
+        ),
+    )
+
+    def to_record(self) -> QuarantineRecord:
+        if self.pool_activated_at is None:
+            raise ValueError("quarantine activation timestamp is not committed")
+        return QuarantineRecord(
+            scope=BotSkillLayoutScope(
+                env=self.env,
+                entity_id=self.entity_id,
+                bot_id=self.bot_id,
+            ),
+            migration_generation=self.migration_generation,
+            engine=self.engine,
+            path=self.path,
+            status=QuarantineStatus(self.status),
+            created_at=self.gmt_create.replace(tzinfo=UTC),
+            pool_activated_at=self.pool_activated_at.replace(tzinfo=UTC),
+            source_evidence=json.loads(self.source_evidence),
+            runtime_reconciled_at=(
+                self.runtime_reconciled_at.replace(tzinfo=UTC)
+                if self.runtime_reconciled_at
+                else None
+            ),
+            runtime_evidence=(
+                json.loads(self.runtime_evidence)
+                if self.runtime_evidence
+                else None
+            ),
+            cleaned_at=(
+                self.cleaned_at.replace(tzinfo=UTC) if self.cleaned_at else None
+            ),
+            cleanup_evidence=(
+                json.loads(self.cleanup_evidence)
+                if self.cleanup_evidence
+                else None
+            ),
+            cleanup_lease_expires_at=(
+                self.cleanup_lease_expires_at.replace(tzinfo=UTC)
+                if self.cleanup_lease_expires_at
+                else None
+            ),
         )

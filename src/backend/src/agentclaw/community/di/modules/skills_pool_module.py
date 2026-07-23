@@ -27,6 +27,11 @@ from agentclaw.community.core.skills_pool.ports import (
     SkillsPoolRuntimeProtocol,
     SkillsPoolSkillRepositoryProtocol,
 )
+from agentclaw.community.core.skills_pool.quarantine import (
+    QuarantineRepositoryProtocol,
+    SkillsPoolQuarantineCleanupTaskHandler,
+    SkillsPoolQuarantineService,
+)
 from agentclaw.community.plugins.skill_repository import SkillRepository
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import (
@@ -44,6 +49,11 @@ class SkillsPoolModule(Module):
     def configure(self, binder: Binder) -> None:
         binder.bind(
             SkillsPoolLayoutRepositoryProtocol,
+            to=SkillsPoolLayoutRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            QuarantineRepositoryProtocol,
             to=SkillsPoolLayoutRepository,
             scope=singleton,
         )
@@ -86,11 +96,13 @@ class SkillsPoolModule(Module):
         claim_service: SkillsPoolMigrationClaimService,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         reconcile_service: SkillsPoolReconcileService,
+        task_queue_service: TaskQueueService,
     ) -> SkillsPoolReconcileTaskHandler:
         return SkillsPoolReconcileTaskHandler(
             claim_service=claim_service,
             layout_repository=layout_repository,
             reconcile_service=reconcile_service,
+            task_queue_service=task_queue_service,
         )
 
     @singleton
@@ -103,6 +115,7 @@ class SkillsPoolModule(Module):
         task_queue_service: TaskQueueService,
         registry: HandlerRegistry,
         task_handler: SkillsPoolReconcileTaskHandler,
+        quarantine_task_handler: SkillsPoolQuarantineCleanupTaskHandler,
     ) -> SkillsPoolReconcileWakeupListener:
         return SkillsPoolReconcileWakeupListener(
             binding_repository=binding_repository,
@@ -110,4 +123,29 @@ class SkillsPoolModule(Module):
             task_queue_service=task_queue_service,
             registry=registry,
             task_handler=task_handler,
+            quarantine_task_handler=quarantine_task_handler,
         )
+
+    @singleton
+    @provider
+    @inject
+    def quarantine_service(
+        self,
+        layout_repository: SkillsPoolLayoutRepositoryProtocol,
+        quarantine_repository: QuarantineRepositoryProtocol,
+        runtime: SkillsPoolRuntimeProtocol,
+    ) -> SkillsPoolQuarantineService:
+        return SkillsPoolQuarantineService(
+            quarantine_repository=quarantine_repository,
+            layout_repository=layout_repository,
+            runtime=runtime,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def quarantine_task_handler(
+        self,
+        service: SkillsPoolQuarantineService,
+    ) -> SkillsPoolQuarantineCleanupTaskHandler:
+        return SkillsPoolQuarantineCleanupTaskHandler(service)
