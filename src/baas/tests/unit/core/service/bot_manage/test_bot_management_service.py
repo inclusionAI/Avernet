@@ -3653,7 +3653,11 @@ class TestUpdateBotConfigMerges:
 
         mock_bot_repo = MagicMock()
         mock_device_repo = MagicMock()
-        mock_device_repo.list_by_bot_id.return_value = [MagicMock()]
+        mock_device_repo.list_by_bot_id.return_value = [
+            MagicMock(),
+            MagicMock(),
+            MagicMock(),
+        ]
         mock_publish_service = MagicMock()
         mock_publish_service.create_publish = AsyncMock(return_value=mock_publish)
         mock_bot_service = MagicMock()
@@ -3672,7 +3676,9 @@ class TestUpdateBotConfigMerges:
         ):
             bot_config = MagicMock(spec=BotConfig)
             bot_config.share_policy = None
-            bot_config.deploy_config = {"image": "v2"}
+            bot_config.deploy_config = {
+                "after_create_cmd_hook": "/start-pool-artifact"
+            }
             bot_config.entity_id = ""
             bot_config.entity_type = ""
             bot_config.sla_grade = ""
@@ -3688,6 +3694,14 @@ class TestUpdateBotConfigMerges:
             )
 
             assert result.publish_id == 888
+            publish_config = (
+                mock_publish_service.create_publish.call_args.kwargs["config"]
+            )
+            assert publish_config.replica_desired == 3
+            assert (
+                publish_config.deploy_config.after_create_cmd_hook
+                == "/start-pool-artifact"
+            )
 
     @pytest.mark.asyncio
     async def test_update_bot_merges_entity_type(self):

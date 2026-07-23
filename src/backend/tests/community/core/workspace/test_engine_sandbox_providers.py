@@ -7,8 +7,6 @@ extra_sync_* 是否正确装配。
 """
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 
 from agentclaw.community.core.workspace.engines.claude_code import ClaudeCodeSandboxProvider
@@ -59,6 +57,14 @@ class TestOpenClawProvider:
         assert plan.extra_sync_source_relpath == ""
         assert plan.extra_sync_target_relpath == ""
 
+    def test_build_snapshot_excludes_pool_shared_repo(self):
+        provider = OpenClawSandboxProvider(workspace=_workspace())
+
+        assert (
+            "workspace/skills-pool/skills-repo"
+            in provider.get_build_plan().rsync_excludes
+        )
+
     def test_default_read_only_rules_include_skills_local(self):
         # 验证 workspace/skills/skills-local 路径在只读规则中
         # （修正了历史路径 workspace/skills-local 的错误）
@@ -100,6 +106,14 @@ class TestClaudeCodeProvider:
 
         assert plan.extra_sync_source_relpath == ".claude"
         assert plan.extra_sync_target_relpath == "claude"
+
+    def test_build_snapshot_excludes_pool_shared_repo(self):
+        provider = ClaudeCodeSandboxProvider(workspace=_workspace())
+
+        assert (
+            "workspace/skills-pool/skills-repo"
+            in provider.get_build_plan().rsync_excludes
+        )
 
     def test_default_read_only_rules_include_settings_models_config(self):
         # 这次新增的只读规则覆盖了 settings.json / models.json / config.json

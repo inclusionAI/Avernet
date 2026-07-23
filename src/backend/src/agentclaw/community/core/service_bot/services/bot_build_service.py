@@ -430,6 +430,7 @@ class BotBuildService:
         version: str = "1",
         delivery: DeliveryArtifact = DeliveryArtifact(None),
         ext_info: Optional[Dict[str, Any]] = None,
+        extra_envs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """发布 Bot 到 BaaS 层。
 
@@ -517,6 +518,7 @@ class BotBuildService:
                     "stage": publish_stage.value,
                     "version": version,
                     "ext_info": ext_info,
+                    "extra_envs": extra_envs,
                 }
                 template_uuid = self._resolve_baas_template_uuid(
                     bot=bot,
@@ -550,6 +552,7 @@ class BotBuildService:
         version: str = "1",
         delivery: DeliveryArtifact = DeliveryArtifact(None),
         ext_info: Optional[Dict[str, Any]] = None,
+        extra_envs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """异步发布 Bot 到 BaaS 层。
 
@@ -580,6 +583,7 @@ class BotBuildService:
         return await asyncio.to_thread(
             self.release, bot, user_id, migration_path, device_count, publish_stage, version,
             delivery, ext_info,
+            extra_envs,
         )
 
     def _sync_skill_links(
@@ -1024,6 +1028,7 @@ class BotBuildService:
             publish_stage: PublishStage = PublishStage.ONLINE,
             version: str = "1",
             delivery: DeliveryArtifact = DeliveryArtifact(None),
+            extra_envs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """升级 Bot 到 BaaS 层（复用现有 Bot）。
 
@@ -1089,6 +1094,7 @@ class BotBuildService:
                     "device_count": device_count,
                     "stage": publish_stage.value,
                     "version": version,
+                    "extra_envs": extra_envs,
                 }
                 template_uuid = self._resolve_baas_template_uuid(
                     bot=bot,
@@ -1195,6 +1201,7 @@ class BotBuildService:
         publish_stage: PublishStage = PublishStage.ONLINE,
         version: str = "1",
         delivery: DeliveryArtifact = DeliveryArtifact(None),
+        extra_envs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """异步升级 Bot 到 BaaS 层。
 
@@ -1209,4 +1216,5 @@ class BotBuildService:
         return await asyncio.to_thread(
             self.upgrade, bot_uuid, bot, user_id, migration_path, device_count, publish_stage, version,
             delivery,
+            extra_envs,
         )

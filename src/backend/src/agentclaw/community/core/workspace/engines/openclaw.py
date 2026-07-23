@@ -23,6 +23,8 @@ _OPENCLAW_RSYNC_EXCLUDES = [
     "workspace/skills/skills-repo",
     "workspace/skills/.skills-repo*",
     "workspace/skills/skills-center",
+    "workspace/skills-pool/skills-repo",
+    "workspace/skills-pool/.skills-repo*",
     "skills/*/.git/",
     "memory/",
     "logs/",

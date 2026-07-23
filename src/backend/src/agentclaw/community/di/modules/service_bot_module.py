@@ -74,6 +74,12 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import Bo
 from agentclaw.community.core.service_bot.services.deploy.arca_snapshot_producer import (
     ArcaSnapshotProducer,
 )
+from agentclaw.community.core.service_bot.services.deploy.service_skills_artifact import (
+    ServiceSkillsArtifactBuilder,
+)
+from agentclaw.community.core.skills_pool.repository.protocol import (
+    SkillsPoolLayoutRepositoryProtocol,
+)
 from agentclaw.community.core.service_bot.services.deploy.external_compose_producer import (
     ExternalComposeProducer,
 )
@@ -288,10 +294,15 @@ class ServiceBotModule(Module):
     @provider
     @singleton
     def arca_snapshot_producer(
-        self, bot_build_service: BotBuildService
+        self,
+        bot_build_service: BotBuildService,
+        layout_repository: SkillsPoolLayoutRepositoryProtocol,
     ) -> ArcaSnapshotProducer:
-        """ARCA build-snapshot producer — wraps the existing ``build()``."""
-        return ArcaSnapshotProducer(bot_build_service)
+        """ARCA snapshot plus the service draft's frozen Skills layout."""
+        return ArcaSnapshotProducer(
+            bot_build_service,
+            ServiceSkillsArtifactBuilder(layout_repository),
+        )
 
     @singleton
     @provider
