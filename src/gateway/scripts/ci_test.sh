@@ -8,7 +8,7 @@ gateway_dir="${GATEWAY_COMMUNITY_DIR:-$gateway_root}"
 report_dir="$gateway_dir/pytest_report"
 unit_report="$report_dir/TEST-unit.xml"
 coverage_report="$report_dir/TEST-cov.xml"
-line_coverage_min="${GATEWAY_CI_LINE_COVERAGE_MIN:-80}"
+line_coverage_min="${GATEWAY_CI_LINE_COVERAGE_MIN:-90}"
 python_bin="$(command -v python || command -v python3 || true)"
 base=""
 head="HEAD"
@@ -56,9 +56,18 @@ if [[ "$gateway_ci_status" -ne 0 ]]; then
 fi
 
 echo "--- unit coverage report ---"
+check_args=(
+  "$repo_root/scripts/ci/report_check.py"
+  --junit "$unit_report"
+  --coverage "$coverage_report"
+  --source-root "$gateway_dir/src/gateway"
+  --min-case-pass-rate 100
+  --min-line-coverage "$line_coverage_min"
+)
 if [[ -n "$base" ]]; then
-  echo "diff coverage check not yet configured (base=$base head=$head)"
+  check_args+=(--base "$base" --head "$head" --min-change-line-coverage 90)
 fi
+"$python_bin" "${check_args[@]}"
 echo "Coverage report: file://$report_dir/html/index.html"
 echo "--- end unit coverage report ---"
 echo "gateway CI gate passed"
