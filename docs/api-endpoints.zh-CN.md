@@ -170,17 +170,27 @@ v1 共 **7 个资源组**:
 
 v1 采用简化的"目录 + Agent 已安装技能"模型(后端更丰富的 skill-set 模型是否上探为一等公民仍待定)。
 
-安装/卸载即激活/停用:"为 Agent 安装技能"意味着技能对该 Agent **立即生效**(对应现有后端的
-activate 语义),卸载即失效;契约中不存在"已安装但停用"的中间状态。skill-set 级批量激活/切换
-不在 v1 范围内。
+技能生命周期分三层(评测等场景下一个 Agent 会装很多技能,需要按场景启停,不应反复上传):
+
+1. **上传(全局)** —— 自定义技能上传后归属调用者本人,不绑定任何 Agent;
+2. **安装(per Agent)** —— 将技能装到某个 Agent 上,安装后默认**启用**(对应现有后端的
+   activate 语义);
+3. **启用/停用(per Agent)** —— 已安装技能通过状态位按需切换生效/失效,无需卸载或重新上传;
+   **卸载只解除技能与该 Agent 的绑定,不删除上传的技能本身**。
+
+> 标 ★ 的端点(按需启停、全局上传)是在 PR #345 已定契约之上新增的,gateway spec 待同步修订。
 
 | 方法 | 路径 | 说明 | 成功响应 |
 | --- | --- | --- | --- |
 | GET | `/openapi/v1/skills` | 技能目录列表 | `Envelope[Page[Skill]]` |
 | GET | `/openapi/v1/skills/{skill_id}` | 技能详情 | `Envelope[SkillDetail]` |
-| GET | `/openapi/v1/bots/{bot_id}/skills` | 列出 Agent 已安装技能 | `Envelope[list[BotSkill]]` |
-| POST | `/openapi/v1/bots/{bot_id}/skills` | 为 Agent 安装技能 | `Envelope[BotSkill]` |
-| DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 卸载技能 | `Envelope[Deleted]` |
+| POST ★ | `/openapi/v1/skills/upload` | 上传自定义技能(multipart;全局,归属调用者) | `Envelope[Skill]` |
+| GET | `/openapi/v1/bots/{bot_id}/skills` | 列出 Agent 已安装技能(含启用状态) | `Envelope[list[BotSkill]]` |
+| POST | `/openapi/v1/bots/{bot_id}/skills` | 为 Agent 安装技能(默认启用) | `Envelope[BotSkill]` |
+| PATCH ★ | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 启用/停用切换(body `status`) | `Envelope[BotSkill]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 卸载(解除绑定,不删除上传的技能) | `Envelope[Deleted]` |
+
+skill-set 级批量激活/切换仍不在 v1 范围内。
 
 ### channels — 渠道
 
