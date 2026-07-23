@@ -35,14 +35,27 @@ class RuntimeLayoutProbeStatus(str, Enum):
 
 
 @dataclass(frozen=True)
-class OpenClawPoolLayout:
+class RuntimePoolLayout:
     pool_root: Path
     marker: Path
 
     @classmethod
-    def for_home(cls, home: str | Path = "/home/admin") -> "OpenClawPoolLayout":
+    def for_home(cls, home: str | Path = "/home/admin") -> "RuntimePoolLayout":
         pool_root = Path(home) / ".openclaw" / "workspace" / "skills-pool"
         return cls(pool_root=pool_root, marker=pool_root / ".pool-ready")
+
+    @classmethod
+    def for_engine(
+        cls,
+        engine: str,
+        home: str | Path = "/home/admin",
+    ) -> "RuntimePoolLayout":
+        if engine == "openclaw":
+            return cls.for_home(home)
+        if engine == "claude_code":
+            pool_root = Path(home) / ".claude_code" / "workspace" / "skills-pool"
+            return cls(pool_root=pool_root, marker=pool_root / ".pool-ready")
+        raise ValueError(f"engine Pool layout not implemented: {engine}")
 
 
 @dataclass(frozen=True)
@@ -88,16 +101,16 @@ class CurrentRuntimeLayoutProbeService:
         bot_id: str,
         user_id: str,
         engine: str,
-        layout: OpenClawPoolLayout | None = None,
+        layout: RuntimePoolLayout | None = None,
     ) -> RuntimeLayoutProbeResult:
-        layout = layout or OpenClawPoolLayout.for_home()
         if engine == "teclaw":
             return self._not_capable(
                 engine,
                 "engine_has_no_filesystem_pool_layout",
             )
-        if engine != "openclaw":
+        if engine not in {"openclaw", "claude_code"}:
             return self._not_capable(engine, "engine_pool_probe_not_implemented")
+        layout = layout or RuntimePoolLayout.for_engine(engine)
 
         try:
             context = self._resolver.resolve_for_bot(bot_id, user_id)
@@ -142,7 +155,7 @@ class CurrentRuntimeLayoutProbeService:
         *,
         conn_info: dict[str, Any],
         engine: str,
-        layout: OpenClawPoolLayout,
+        layout: RuntimePoolLayout,
     ) -> RuntimeLayoutProbeResult:
         """Treat 404 as old-image capability only after adapter liveness succeeds."""
         try:
@@ -169,7 +182,7 @@ class CurrentRuntimeLayoutProbeService:
     def _classify_http_status_error(
         *,
         engine: str,
-        layout: OpenClawPoolLayout,
+        layout: RuntimePoolLayout,
         error: DeviceAdapterHTTPStatusError,
     ) -> RuntimeLayoutProbeResult:
         if error.status_code >= 500 or error.status_code in {408, 425, 429}:
@@ -190,7 +203,7 @@ class CurrentRuntimeLayoutProbeService:
         response: dict[str, Any],
         *,
         engine: str,
-        layout: OpenClawPoolLayout,
+        layout: RuntimePoolLayout,
     ) -> RuntimeLayoutProbeResult:
         try:
             envelope = _RuntimeLayoutProbeEnvelope.model_validate(response)
@@ -217,7 +230,7 @@ class CurrentRuntimeLayoutProbeService:
     @staticmethod
     def _invalid_control_plane(
         engine: str,
-        layout: OpenClawPoolLayout,
+        layout: RuntimePoolLayout,
         reason: str,
         error: Exception,
     ) -> RuntimeLayoutProbeResult:
@@ -245,7 +258,7 @@ class CurrentRuntimeLayoutProbeService:
 
     @staticmethod
     def _invalid_response(
-        engine: str, layout: OpenClawPoolLayout
+        engine: str, layout: RuntimePoolLayout
     ) -> RuntimeLayoutProbeResult:
         return RuntimeLayoutProbeResult(
             status=RuntimeLayoutProbeStatus.INVALID,
@@ -261,7 +274,7 @@ class CurrentRuntimeLayoutProbeService:
     @staticmethod
     def _transient(
         engine: str,
-        layout: OpenClawPoolLayout,
+        layout: RuntimePoolLayout,
         error: Exception,
     ) -> RuntimeLayoutProbeResult:
         return RuntimeLayoutProbeResult(
@@ -278,10 +291,15 @@ class CurrentRuntimeLayoutProbeService:
         )
 
 
+# Compatibility for callers introduced by the initial OpenClaw rollout.
+OpenClawPoolLayout = RuntimePoolLayout
+
+
 __all__ = [
     "CurrentRuntimeLayoutProbeService",
     "LAYOUT_CONTRACT_VERSION",
     "OpenClawPoolLayout",
+    "RuntimePoolLayout",
     "RuntimeLayoutProbeResult",
     "RuntimeLayoutProbeStatus",
 ]

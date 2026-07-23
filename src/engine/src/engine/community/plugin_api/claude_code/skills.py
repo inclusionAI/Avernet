@@ -25,6 +25,7 @@ Port method                 Relay RPC (method name on the wire)
 ``skills_ensure_center``    ``skills.ensure_center``
 ==========================  ================================================
 """
+
 from __future__ import annotations
 
 from typing import Protocol
@@ -221,6 +222,34 @@ class ClaudeCodeSkillsPort(Protocol):
         Args:
             token: MCP token for per-token pool routing; None -> default client.
         """
+        ...
+
+    async def activate_pool_layout(
+        self,
+        params: dict,
+    ) -> dict:
+        """Atomically switch Claude Code's physical Legacy local to Pool."""
+        ...
+
+    async def probe_pool_layout(
+        self,
+        params: dict,
+    ) -> dict:
+        """Inspect Claude Code's marker, canonical roots, and stable bridges."""
+        ...
+
+    async def publish_pool_mappings(
+        self,
+        params: dict,
+    ) -> dict:
+        """Publish the complete managed mapping set under ``~/.claude/skills``."""
+        ...
+
+    async def verify_pool_mappings(
+        self,
+        params: dict,
+    ) -> dict:
+        """Verify managed Claude Code entries against Pool sources."""
         ...
 
 

@@ -228,10 +228,7 @@ def test_managed_active_entry_nas_io_error_is_transient(tmp_path, monkeypatch):
     )
 
     assert result.status is RuntimeLayoutInspectionStatus.TRANSIENT_ERROR
-    assert (
-        result.evidence["reason"]
-        == "managed_active_entries_temporarily_unavailable"
-    )
+    assert result.evidence["reason"] == "managed_active_entries_temporarily_unavailable"
 
 
 def test_deactivating_prepared_managed_entry_does_not_invalidate_marker(tmp_path):
@@ -325,9 +322,7 @@ def test_teclaw_is_noop_without_touching_home(tmp_path):
         ("prepared_at", "not-a-timestamp"),
     ],
 )
-def test_marker_contract_rejects_invalid_identity_or_timestamp(
-    tmp_path, field, value
-):
+def test_marker_contract_rejects_invalid_identity_or_timestamp(tmp_path, field, value):
     home, _, _, pool_repo = _ready_home(tmp_path)
     marker_path = home / ".openclaw" / "workspace" / "skills-pool" / ".pool-ready"
     marker = json.loads(marker_path.read_text())
@@ -411,9 +406,7 @@ def test_invalid_declared_managed_entry_is_rejected(tmp_path):
     home, _, _, pool_repo = _ready_home(tmp_path)
     marker_path = home / ".openclaw" / "workspace" / "skills-pool" / ".pool-ready"
     marker = json.loads(marker_path.read_text())
-    marker["validation_summary"]["managed_active_entries"] = [
-        {"source": "unknown"}
-    ]
+    marker["validation_summary"]["managed_active_entries"] = [{"source": "unknown"}]
     marker_path.write_text(json.dumps(marker))
 
     result = inspect_runtime_layout(
@@ -429,7 +422,7 @@ def test_invalid_declared_managed_entry_is_rejected(tmp_path):
 
 def test_other_engine_is_not_capable_without_touching_home(tmp_path):
     result = inspect_runtime_layout(
-        engine="claude_code",
+        engine="aicoding",
         expected_contract_version=LAYOUT_CONTRACT_VERSION,
         home=tmp_path / "missing",
         repo_is_mounted=lambda _path: (_ for _ in ()).throw(AssertionError()),

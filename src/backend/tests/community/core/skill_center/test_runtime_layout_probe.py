@@ -88,6 +88,47 @@ async def test_ready_is_taken_from_current_runtime_inspection():
 
 
 @pytest.mark.asyncio
+async def test_claude_code_ready_uses_current_runtime_probe():
+    service, resolver, transport, context = _service(
+        response={
+            "success": True,
+            "data": {
+                "status": "READY",
+                "engine": "claude_code",
+                "layout_contract_version": "skills-pool-p3-v1",
+                "preparation_id": "2a958f59-8cf4-4413-a267-7d56d3382f23",
+                "evidence": {
+                    "checks": {
+                        "stable_local_bridge_valid": True,
+                        "stable_repo_bridge_valid": True,
+                    }
+                },
+            },
+        }
+    )
+
+    result = await service.probe_bot(
+        bot_id="bot-1",
+        user_id="user-1",
+        engine="claude_code",
+    )
+
+    assert result.status is RuntimeLayoutProbeStatus.READY
+    assert result.engine == "claude_code"
+    resolver.resolve_for_bot.assert_called_once_with("bot-1", "user-1")
+    transport.invoke.assert_awaited_once_with(
+        context.conn_info,
+        "POST",
+        "/api/skills/layout/probe",
+        body={
+            "engine": "claude_code",
+            "layout_contract_version": "skills-pool-p3-v1",
+        },
+        timeout=10.0,
+    )
+
+
+@pytest.mark.asyncio
 async def test_new_runtime_without_marker_is_not_capable():
     service, *_ = _service(
         response={
@@ -152,9 +193,7 @@ async def test_unreachable_runtime_is_transient():
 
 @pytest.mark.asyncio
 async def test_bot_without_current_binding_is_not_capable():
-    service, *_ = _service(
-        resolver_error=DeviceNotBoundError("no active binding")
-    )
+    service, *_ = _service(resolver_error=DeviceNotBoundError("no active binding"))
 
     result = await service.probe_bot(
         bot_id="bot-1",
@@ -168,9 +207,7 @@ async def test_bot_without_current_binding_is_not_capable():
 
 @pytest.mark.asyncio
 async def test_unknown_provider_is_invalid_instead_of_retried():
-    service, *_ = _service(
-        resolver_error=UnknownProviderError("broken provider")
-    )
+    service, *_ = _service(resolver_error=UnknownProviderError("broken provider"))
 
     result = await service.probe_bot(
         bot_id="bot-1",

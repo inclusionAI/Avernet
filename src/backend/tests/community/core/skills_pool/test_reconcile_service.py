@@ -1,4 +1,4 @@
-"""OpenClaw Skills Pool 已登记技能激活闭环测试。"""
+"""多引擎 Skills Pool 已登记技能激活闭环测试。"""
 
 from __future__ import annotations
 
@@ -17,10 +17,10 @@ from agentclaw.community.core.skills_pool.claim_service import (
     MigrationClaimResult,
 )
 from agentclaw.community.core.skills_pool.models import (
-    OpenClawPoolPaths,
     PoolCutoverResult,
     PoolCutoverStatus,
     RegisteredSkillAsset,
+    pool_paths_for_engine,
 )
 from agentclaw.community.core.skills_pool.reconcile_service import (
     SkillsPoolReconcileOutcome,
@@ -60,13 +60,13 @@ def claimed_state(**changes: object) -> BotSkillLayoutState:
 
 
 class FakeBotRepository:
-    def __init__(self) -> None:
+    def __init__(self, engine: str = "openclaw") -> None:
         self.bot: dict[str, object] | None = {
             "bot_id": SCOPE.bot_id,
             "entity_id": SCOPE.entity_id,
             "owner_id": "owner-1",
             "env": SCOPE.env,
-            "active_engine": "openclaw",
+            "active_engine": engine,
         }
 
     def get_by_id_and_entity(
@@ -184,7 +184,8 @@ class FakeLayoutRepository:
 
 
 class FakeSkillRepository:
-    def __init__(self) -> None:
+    def __init__(self, engine: str = "openclaw") -> None:
+        self.engine = engine
         self.registered = [
             RegisteredSkillAsset(
                 skill_id=11,
@@ -221,12 +222,22 @@ class FakeSkillRepository:
         engine: str,
     ) -> list[RegisteredSkillAsset]:
         assert (env, bot_id) == (SCOPE.env, SCOPE.bot_id)
-        assert (user_id, engine) == ("owner-1", "openclaw")
+        assert (user_id, engine) == ("owner-1", self.engine)
         return self.active
 
 
 class FakeRuntime:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        engine: str = "openclaw",
+        pool_local: str | None = None,
+        pool_repo: str | None = None,
+    ) -> None:
+        paths = pool_paths_for_engine(engine)
+        self.engine = engine
+        self.pool_local = pool_local or paths.pool_local
+        self.pool_repo = pool_repo or paths.pool_repo
         self.events: list[str] = []
         self.publish_success = True
         self.verify_success = True
@@ -244,7 +255,7 @@ class FakeRuntime:
         )
         self.probe_result = RuntimeLayoutProbeResult(
             status=RuntimeLayoutProbeStatus.READY,
-            engine="openclaw",
+            engine=engine,
             layout_contract_version="skills-pool-p3-v1",
             preparation_id=PREPARATION_ID,
             evidence={"marker": "valid"},
@@ -252,6 +263,7 @@ class FakeRuntime:
 
     async def probe(self, **kwargs: object) -> RuntimeLayoutProbeResult:
         self.events.append("probe")
+        assert kwargs["engine"] == self.engine
         return self.probe_result
 
     async def cutover(self, **kwargs: object) -> PoolCutoverResult:
@@ -259,9 +271,9 @@ class FakeRuntime:
         assert kwargs["registered_local_names"] == ["local-a", "local-b"]
         mappings = kwargs["mappings"]
         assert [mapping.source for mapping in mappings] == [
-            f"{OpenClawPoolPaths().pool_local}/local-a",
-            f"{OpenClawPoolPaths().pool_local}/local-b",
-            f"{OpenClawPoolPaths().pool_repo}/business/repo-skill",
+            f"{self.pool_local}/local-a",
+            f"{self.pool_local}/local-b",
+            f"{self.pool_repo}/business/repo-skill",
         ]
         if (
             self.cutover_result.committed
@@ -282,11 +294,13 @@ class FakeRuntime:
 def build_service(
     layouts: FakeLayoutRepository,
     runtime: FakeRuntime,
+    *,
+    engine: str = "openclaw",
 ) -> SkillsPoolReconcileService:
     return SkillsPoolReconcileService(
-        bot_repository=FakeBotRepository(),
+        bot_repository=FakeBotRepository(engine),
         layout_repository=layouts,
-        skill_repository=FakeSkillRepository(),
+        skill_repository=FakeSkillRepository(engine),
         runtime=runtime,
     )
 
@@ -315,12 +329,47 @@ async def test_ready_claimed_bot_completes_pool_activation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_mapping_failure_after_cutover_does_not_commit_database() -> None:
+async def test_claude_code_uses_its_own_pool_paths_for_full_activation() -> None:
     layouts = FakeLayoutRepository()
-    runtime = FakeRuntime()
+    pool_local = "/home/admin/.claude_code/workspace/skills-pool/skills-local"
+    pool_repo = "/home/admin/.claude_code/workspace/skills-pool/skills-repo"
+    runtime = FakeRuntime(
+        engine="claude_code",
+        pool_local=pool_local,
+        pool_repo=pool_repo,
+    )
+
+    result = await build_service(
+        layouts,
+        runtime,
+        engine="claude_code",
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.events == ["probe", "cutover", "mapping", "verify"]
+    assert layouts.committed_locators == {
+        11: f"local://{pool_local}/local-a",
+        12: f"local://{pool_local}/local-b",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("engine", ["openclaw", "claude_code"])
+async def test_mapping_failure_after_cutover_does_not_commit_database(
+    engine: str,
+) -> None:
+    layouts = FakeLayoutRepository()
+    runtime = FakeRuntime(engine=engine)
     runtime.publish_success = False
 
-    result = await build_service(layouts, runtime).reconcile(
+    result = await build_service(
+        layouts,
+        runtime,
+        engine=engine,
+    ).reconcile(
         scope=SCOPE,
         lease_owner="worker-1",
     )
@@ -334,7 +383,11 @@ async def test_mapping_failure_after_cutover_does_not_commit_database() -> None:
     runtime.publish_success = True
     runtime.events.clear()
     layouts.events.clear()
-    retried = await build_service(layouts, runtime).reconcile(
+    retried = await build_service(
+        layouts,
+        runtime,
+        engine=engine,
+    ).reconcile(
         scope=SCOPE,
         lease_owner="worker-1",
     )
