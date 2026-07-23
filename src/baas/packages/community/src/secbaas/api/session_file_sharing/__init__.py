@@ -7,10 +7,10 @@ re-exported without a SESSION_ prefix (per D-04).
 """
 
 from ._errors import (
+    OssObjectNotFoundError,
     SessionFileSharingError,
     SourceTransferNotFoundError,
     SourceTransferNotReadyError,
-    StagingObjectNotFoundError,
     TransferNotFoundError,
     TransferNotTerminalError,
     TransferStateConflictError,
@@ -25,13 +25,10 @@ from ._models import (
     SessionShareLinkRequest,
     SessionShareLinkResponse,
 )
-from ._protocols import SessionFileSharingDispatcher
 
 __all__ = [
-    # Protocols
-    "SessionFileSharingDispatcher",
     # Errors
-    "StagingObjectNotFoundError",
+    "OssObjectNotFoundError",
     "SessionFileSharingError",
     "SourceTransferNotFoundError",
     "SourceTransferNotReadyError",
