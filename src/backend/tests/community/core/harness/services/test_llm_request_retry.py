@@ -243,6 +243,33 @@ async def test_wrapper_with_4xx_response_does_not_retry():
 
 
 @pytest.mark.asyncio
+async def test_send_hook_failure_recoverable_on_second_light_retry():
+    """A transient gateway drop can persist past the first light retry and only
+    clear on the second. With ``_TIMEOUT_MAX_RETRIES >= 2`` the call must still
+    recover on the second shrunken-budget retry instead of giving up after one.
+    Locks in the bump from one light retry (which gave up prematurely on blips
+    that lasted >1 retry) to two."""
+    if llm_mod._TIMEOUT_MAX_RETRIES < 2:
+        pytest.skip("light-retry budget is < 2; second-retry recovery not supported")
+    outcomes = [
+        RuntimeError("Error in httpx send hook"),
+        RuntimeError("Error in httpx send hook"),
+        _ok("recovered-on-second-light-retry"),
+    ]
+    http = _ScriptedHttpClient(outcomes)
+    out = await _llm(http).chat(system="s", user="u")
+
+    assert out == "recovered-on-second-light-retry"
+    assert len(http.calls) == 3
+    assert http.calls[0]["json"]["max_tokens"] == llm_mod._DEFAULT_MAX_TOKENS
+    # Both light retries use the shrunken budget.
+    assert all(
+        c["json"]["max_tokens"] == llm_mod._TIMEOUT_RETRY_MAX_TOKENS
+        for c in http.calls[1:]
+    )
+
+
+@pytest.mark.asyncio
 async def test_diagnostic_max_tokens_forwarded_into_body():
     http = _ScriptedHttpClient([_ok("ok")])
     await _llm(http).chat(system="s", user="u", max_tokens=DIAGNOSTIC_MAX_TOKENS)
