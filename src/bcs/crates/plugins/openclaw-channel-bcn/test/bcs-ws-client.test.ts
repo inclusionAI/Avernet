@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { once } from 'node:events';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer, type AddressInfo, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -236,6 +236,98 @@ describe('BcsWsClient security behavior', () => {
       await client.connect(null);
       assert.equal(bcs.connectParams?.bot_id, 'default:mock-user');
       assert.equal(bcs.connectParams?.token, undefined);
+    } finally {
+      await client.disconnect();
+      await bcs.close();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not reuse an incomplete saved session to pin bot identity', async () => {
+    const bcs = await startBcsStub();
+    const dataDir = await mkdtemp(join(tmpdir(), 'bcn-incomplete-session-'));
+    const logs: string[] = [];
+    const account: ResolvedBcsAccount = {
+      accountId: 'default',
+      enabled: true,
+      bcsUrl: `ws://127.0.0.1:${bcs.port}/ws/bot`,
+      botId: 'Bot 1',
+      botName: 'Bot 1',
+      capabilities: {
+        summary: 'test bot',
+        domains: [],
+        skills: [],
+        scopes: [],
+      },
+      heartbeatIntervalMs: 60_000,
+      reconnectIntervalMs: 5_000,
+      connectionTimeoutMs: 10_000,
+    };
+    await mkdir(join(dataDir, '.bcs'), { recursive: true });
+    await writeFile(
+      join(dataDir, '.bcs', 'session.json'),
+      JSON.stringify({
+        bot_uuid: 'default:545716',
+        token: '',
+        bcs_url: account.bcsUrl,
+      }),
+    );
+    const client = new BcsWsClient({
+      account,
+      dataDir,
+      log: {
+        info: () => undefined,
+        warn: (...args: unknown[]) => logs.push(args.join(' ')),
+        error: () => undefined,
+      },
+    });
+
+    try {
+      await client.connect(null);
+      assert.equal(bcs.connectParams?.bot_id, undefined);
+      assert.equal(bcs.connectParams?.token, undefined);
+      assert.equal(logs.some(line => line.includes('Ignoring saved BCS session without reconnect token')), true);
+    } finally {
+      await client.disconnect();
+      await bcs.close();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reconnects with a saved token when the bot identity is not assigned yet', async () => {
+    const bcs = await startBcsStub();
+    const dataDir = await mkdtemp(join(tmpdir(), 'bcn-pending-session-'));
+    const account: ResolvedBcsAccount = {
+      accountId: 'default',
+      enabled: true,
+      bcsUrl: `ws://127.0.0.1:${bcs.port}/ws/bot`,
+      botId: 'Bot 1',
+      botName: 'Bot 1',
+      capabilities: {
+        summary: 'test bot',
+        domains: [],
+        skills: [],
+        scopes: [],
+      },
+      heartbeatIntervalMs: 60_000,
+      reconnectIntervalMs: 5_000,
+      connectionTimeoutMs: 10_000,
+    };
+    await mkdir(join(dataDir, '.bcs'), { recursive: true });
+    await writeFile(
+      join(dataDir, '.bcs', 'session.json'),
+      JSON.stringify({
+        bot_uuid: null,
+        token: 'pending-token',
+        bcs_url: account.bcsUrl,
+      }),
+    );
+    const client = new BcsWsClient({ account, dataDir });
+
+    try {
+      await client.connect(null);
+      assert.equal(bcs.connectParams?.bot_id, undefined);
+      assert.equal(bcs.connectParams?.token, 'pending-token');
     } finally {
       await client.disconnect();
       await bcs.close();

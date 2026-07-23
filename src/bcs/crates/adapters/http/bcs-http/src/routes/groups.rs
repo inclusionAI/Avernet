@@ -1634,11 +1634,18 @@ async fn resolve_actor_caller(
     headers: &HeaderMap,
     uri: &Uri,
 ) -> Result<String, HttpAdapterError> {
-    if let Ok(bot_id) = authenticated_bot_from_headers(state, headers).await {
-        if !bot_id.trim().is_empty() {
-            return Ok(bot_id);
+    let explicit_bot_token = headers.contains_key("X-BCS-Bot-Token");
+    match authenticated_bot_from_headers(state, headers).await {
+        Ok(bot_id) if !bot_id.trim().is_empty() => return Ok(bot_id),
+        Ok(_) if explicit_bot_token => {
+            return Err(HttpAdapterError::Unauthorized(
+                "valid bot token is required".to_string(),
+            ));
         }
+        Err(error) if explicit_bot_token => return Err(error),
+        _ => {}
     }
+
     extract_human_actor_id(state, headers, uri)
         .await
         .ok_or_else(|| HttpAdapterError::Unauthorized("valid bot token or human cookie is required".to_string()))

@@ -1388,15 +1388,19 @@ async fn my_groups_resolves_bot_principal_and_preserves_query() {
     let services = Services::builder()
         .group_query(query.clone())
         .build_for_test();
-    let app = build_router(HttpAppState::new(services).with_auth_chain(
-        static_bot_auth_chain("bot-current"),
-        AuthConfig::default(),
-    ));
+    let chain = static_auth_chain("alice", "Alice");
+    let app = build_router(
+        HttpAppState::new(services)
+            .with_auth_chain(static_bot_auth_chain("bot-current"), AuthConfig::default())
+            .with_user_identity(Arc::new(ChainUserIdentityPort::new(chain))),
+    );
 
     let response = app
         .oneshot(
             Request::builder()
                 .uri("/groups/my?group_kind=normal&offset=4&limit=5&q=05&include_session_groups=true")
+                .header("authorization", "Bearer human-oauth-token")
+                .header("X-BCS-Bot-Token", "valid-bot-token")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1434,6 +1438,7 @@ async fn my_groups_resolves_human_identity() {
         .oneshot(
             Request::builder()
                 .uri("/groups/my?include_session_groups=false")
+                .header("authorization", "Bearer human-oauth-token")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1451,18 +1456,80 @@ async fn my_groups_resolves_human_identity() {
 }
 
 #[tokio::test]
-async fn my_groups_rejects_empty_bot_actor_identity() {
+async fn my_groups_rejects_explicit_invalid_bot_token_instead_of_falling_back_to_human() {
     let query = Arc::new(RecordingGroupQuery::default());
-    let services = Services::builder().group_query(query).build_for_test();
-    let app = build_router(HttpAppState::new(services).with_auth_chain(
-        static_bot_auth_chain(""),
-        AuthConfig::default(),
-    ));
+    let services = Services::builder()
+        .group_query(query.clone())
+        .build_for_test();
+    let chain = static_auth_chain("alice", "Alice");
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
+        ChainUserIdentityPort::new(chain),
+    )));
 
     let response = app
         .oneshot(
             Request::builder()
                 .uri("/groups/my")
+                .header("authorization", "Bearer human-oauth-token")
+                .header("X-BCS-Bot-Token", "stale-bot-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(query.bot_group_calls.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn my_groups_rejects_explicit_bot_token_when_container_validation_fails() {
+    let query = Arc::new(RecordingGroupQuery::default());
+    let services = Services::builder()
+        .group_query(query.clone())
+        .build_for_test();
+    let chain = static_auth_chain("alice", "Alice");
+    let app = build_router(
+        HttpAppState::new(services)
+            .with_auth_chain(static_bot_auth_chain("bot-current"), AuthConfig::default())
+            .with_user_identity(Arc::new(ChainUserIdentityPort::new(chain)))
+            .with_strict_container_validation(true),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/groups/my")
+                .header("authorization", "Bearer human-oauth-token")
+                .header("X-BCS-Bot-Token", "valid-bot-token")
+                .header("x-agentclaw-bolt-id", "different-container")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(query.bot_group_calls.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn my_groups_rejects_empty_bot_actor_identity() {
+    let query = Arc::new(RecordingGroupQuery::default());
+    let services = Services::builder().group_query(query).build_for_test();
+    let chain = static_auth_chain("alice", "Alice");
+    let app = build_router(
+        HttpAppState::new(services)
+            .with_auth_chain(static_bot_auth_chain(""), AuthConfig::default())
+            .with_user_identity(Arc::new(ChainUserIdentityPort::new(chain))),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/groups/my")
+                .header("authorization", "Bearer human-oauth-token")
+                .header("X-BCS-Bot-Token", "valid-bot-token")
                 .body(Body::empty())
                 .unwrap(),
         )

@@ -118,6 +118,46 @@ fn emit_structured_result(result: &StructuredResult) {
     );
 }
 
+fn render_discover_result(
+    result: &bcs_protocol::DiscoverBotsExtendedResponse,
+    json_output: bool,
+) -> Result<String> {
+    if json_output {
+        return Ok(serde_json::to_string_pretty(result)?);
+    }
+
+    let mut lines = vec![format!("Discovered {} bots:", result.count)];
+    for bot in &result.bots {
+        let name = bot.capabilities.name.as_deref().unwrap_or("unnamed");
+        let vis = &bot.visibility;
+        let friend_tag = match bot.is_friend {
+            Some(true) => " ★friend",
+            Some(false) | None => "",
+        };
+        let provider_tag = bot
+            .provider_info
+            .as_ref()
+            .map(|provider| {
+                format!(
+                    " provider={}/{}",
+                    provider.provider_name, provider.provider_id
+                )
+            })
+            .unwrap_or_default();
+        let agent_code_tag = bot
+            .agent_code
+            .as_ref()
+            .map(|agent_code| format!(" agent_code={agent_code}"))
+            .unwrap_or_default();
+        lines.push(format!(
+            "  - {} ({}) [{}]{}{}{}",
+            bot.bot_uuid, name, vis, friend_tag, provider_tag, agent_code_tag
+        ));
+    }
+
+    Ok(lines.join("\n"))
+}
+
 fn classify_auth_error_message(msg: &str) -> &'static str {
     if msg.contains("timed out locally") {
         "auth_timeout"
@@ -998,6 +1038,10 @@ enum Commands {
         /// Organization member role filter. Requires --organization-code.
         #[arg(long)]
         role: Option<String>,
+
+        /// Output discover results in human-readable text instead of JSON
+        #[arg(long)]
+        no_json: bool,
     },
 
     /// Update bot status
@@ -2449,6 +2493,7 @@ async fn main() -> Result<()> {
             collaborate_bot,
             organization_code,
             role,
+            no_json,
         } => {
             let token = get_token(token.as_deref())?;
             let client = create_client(
@@ -2489,35 +2534,10 @@ async fn main() -> Result<()> {
                 })
             );
 
-            println!("Discovered {} bots:", result.count);
-            for bot in &result.bots {
-                let name = bot.capabilities.name.as_deref().unwrap_or("unnamed");
-                let vis = &bot.visibility;
-                let friend_tag = match bot.is_friend {
-                    Some(true) => " ★friend",
-                    Some(false) => "",
-                    None => "",
-                };
-                let provider_tag = bot
-                    .provider_info
-                    .as_ref()
-                    .map(|provider| {
-                        format!(
-                            " provider={}/{}",
-                            provider.provider_name, provider.provider_id
-                        )
-                    })
-                    .unwrap_or_default();
-                let agent_code_tag = bot
-                    .agent_code
-                    .as_ref()
-                    .map(|agent_code| format!(" agent_code={agent_code}"))
-                    .unwrap_or_default();
-                println!(
-                    "  - {} ({}) [{}]{}{}{}",
-                    bot.bot_uuid, name, vis, friend_tag, provider_tag, agent_code_tag
-                );
-            }
+            println!(
+                "{}",
+                render_discover_result(&result, structured_mode && !no_json)?
+            );
         }
 
         Commands::UpdateStatus {
