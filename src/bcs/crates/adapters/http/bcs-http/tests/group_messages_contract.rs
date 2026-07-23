@@ -703,7 +703,11 @@ async fn build_group_app_with_identity(
 ) {
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
-    for (bot_id, name) in [("owner-bot", "Owner"), ("target-bot", "Target")] {
+    for (bot_id, name) in [
+        ("owner-bot", "Owner"),
+        ("target-bot", "Target"),
+        ("intruder-bot", "Intruder"),
+    ] {
         registry
             .register(
                 bot_id.to_string(),
@@ -716,6 +720,12 @@ async fn build_group_app_with_identity(
             .await
             .unwrap();
     }
+    registry
+        .store_token_mapping(
+            "intruder-token".to_string(),
+            "intruder-bot".to_string(),
+        )
+        .await;
     registry
         .save_created_by("owner-bot", "123", true)
         .await
@@ -932,6 +942,65 @@ async fn session_chat_auto_joins_authenticated_human_and_binds_sender_identity()
     assert_eq!(participant["role"], "observer");
     assert_eq!(participant["actor_kind"], "human");
     assert_eq!(participant["mode"], "present");
+}
+
+#[tokio::test]
+async fn session_chat_does_not_auto_join_authenticated_bot() {
+    let (
+        app,
+        _group_store,
+        _routing,
+        _bot_delivery,
+        _frontend_delivery,
+        _bot_request,
+        message_flow,
+        _group_message_history,
+    ) = build_group_app().await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions/group-1:abcdef12/chat")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer intruder-token")
+                .body(Body::from(
+                    serde_json::json!({
+                        "message": "should be rejected",
+                        "from": "intruder-bot"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"], "caller is not a session participant");
+    assert!(message_flow.group_chats.lock().await.is_empty());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sessions/group-1:abcdef12")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["participants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|participant| participant["bot_uuid"] != "intruder-bot"));
 }
 
 async fn post_session_chat_with_flow_error(error: ServiceError) -> (StatusCode, Value) {
