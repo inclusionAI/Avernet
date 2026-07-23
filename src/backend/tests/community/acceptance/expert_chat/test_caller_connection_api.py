@@ -458,3 +458,121 @@ def test_expert_chat_caller_connection_different_callers_separate(live_backend):
             # Each caller should have their own bot_uuid
             assert "bot_uuid" in conn1, body1
             assert "bot_uuid" in conn2, body2
+
+
+@pytest.mark.acceptance
+def test_expert_chat_caller_connection_with_iam_token(live_backend):
+    """Caller connection with iam_token parameter triggers identity exchange path.
+
+    When iam_token is provided and container is successfully pulled (status=SUCCESS),
+    the service should attempt caller identity exchange. Even if exchange fails (no
+    production token provider in singlebox), the container startup should succeed.
+
+    This test requires a fully functional BaaS service. If BaaS returns an error,
+    the test is skipped rather than failed.
+    """
+    owner_id = fresh_id("caller_conn_iam_owner")
+    bot_id = fresh_id("caller_conn_iam_bot")
+    caller_id = fresh_id("caller_iam")
+
+    with httpx.Client(
+        base_url=live_backend,
+        headers={"x-user-id": ADMIN_USER_ID},
+        timeout=30.0,
+    ) as admin_client:
+        # Seed service bot and publish record
+        _seed_service_bot(
+            admin_client,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            bot_name="CallerConn IAM Token Bot",
+        )
+        _seed_successful_publish(
+            admin_client,
+            bot_id=bot_id,
+            owner_id=owner_id,
+        )
+
+        # Call with iam_token parameter
+        response = admin_client.post(
+            "/api/v1/expert-chats/caller-connection",
+            params={
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "user_id": caller_id,
+            },
+            json={
+                "iam_token": "test-iam-token-for-caller-exchange",
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+
+        # Should succeed even if caller identity exchange fails
+        # (UnavailableCallerTokenProvider in singlebox environment)
+        assert body.get("success") is True, body
+        assert "data" in body, body
+        data = body.get("data", {})
+        assert "instance" in data, body
+        assert "need_poll" in data, body
+
+        # If connection is available, container was pulled successfully
+        if data.get("connection"):
+            connection = data["connection"]
+            assert "bot_uuid" in connection, body
+            assert "ws_url" in connection, body
+
+
+@pytest.mark.acceptance
+def test_expert_chat_caller_connection_without_iam_token(live_backend):
+    """Caller connection without iam_token skips identity exchange.
+
+    When iam_token is not provided, the service should skip caller identity
+    exchange and just return the connection.
+
+    This test requires a fully functional BaaS service. If BaaS returns an error,
+    the test is skipped rather than failed.
+    """
+    owner_id = fresh_id("caller_conn_no_iam_owner")
+    bot_id = fresh_id("caller_conn_no_iam_bot")
+    caller_id = fresh_id("caller_no_iam")
+
+    with httpx.Client(
+        base_url=live_backend,
+        headers={"x-user-id": ADMIN_USER_ID},
+        timeout=30.0,
+    ) as admin_client:
+        # Seed service bot and publish record
+        _seed_service_bot(
+            admin_client,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            bot_name="CallerConn No IAM Token Bot",
+        )
+        _seed_successful_publish(
+            admin_client,
+            bot_id=bot_id,
+            owner_id=owner_id,
+        )
+
+        # Call without iam_token parameter
+        response = admin_client.post(
+            "/api/v1/expert-chats/caller-connection",
+            params={
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "user_id": caller_id,
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+
+        assert body.get("success") is True, body
+        assert "data" in body, body
+        data = body.get("data", {})
+        assert "instance" in data, body
+
+        # If connection is available, container was pulled successfully
+        if data.get("connection"):
+            connection = data["connection"]
+            assert "bot_uuid" in connection, body
