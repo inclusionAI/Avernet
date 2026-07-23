@@ -34,7 +34,7 @@ class SetBotsCeilingRequest(BaseModel):
 
 
 class UserListCorrectionRequest(BaseModel):
-    """One privileged correction of a current-environment user-list entry."""
+    """One authenticated correction of a current-environment user-list entry."""
 
     model_config = ConfigDict(extra="forbid")
 

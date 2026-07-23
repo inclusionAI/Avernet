@@ -155,7 +155,7 @@ async def correct_user_list(
     user: AuthenticatedUser = Depends(get_current_user),
     service: UserListServiceProtocol = Injected(UserListServiceProtocol),
 ) -> ApiResponse[UserListCheckData]:
-    """Apply one authorized current-environment user-list correction."""
+    """Apply one authenticated current-environment user-list correction."""
     in_whitelist = service.correct_membership(
         actor_id=user.staffId,
         entity_id=request.entity_id,
