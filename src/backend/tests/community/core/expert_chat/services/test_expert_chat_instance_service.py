@@ -1562,3 +1562,184 @@ class TestCallerIdentityExchange:
         error_call = str(mock_logger.error.call_args)
         assert "Caller identity exchange failed" in error_call
         assert "exchange failed" in error_call
+
+    @pytest.mark.asyncio
+    async def test_exchange_without_binding_id(self):
+        """Exchange works correctly when binding_id is None."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
+
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+            # No binding_id
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=2))
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        # Call with iam_token, no binding_id
+        result = await svc.get_caller_connection(
+            USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
+        )
+
+        # Verify exchange was called with binding_id=None
+        caller_identity.exchange_caller_identity.assert_called_once()
+        call_kwargs = caller_identity.exchange_caller_identity.call_args[1]
+        assert call_kwargs["binding_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_exchange_with_none_binding_id(self):
+        """Exchange handles explicit None binding_id correctly."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
+
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+            "binding_id": None,  # Explicit None
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=2))
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        result = await svc.get_caller_connection(
+            USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
+        )
+
+        caller_identity.exchange_caller_identity.assert_called_once()
+        call_kwargs = caller_identity.exchange_caller_identity.call_args[1]
+        assert call_kwargs["binding_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_exchange_entity_id_equals_owner_id(self):
+        """entity_id parameter is set to owner_id as designed."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
+
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=2))
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        result = await svc.get_caller_connection(
+            USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
+        )
+
+        caller_identity.exchange_caller_identity.assert_called_once()
+        call_kwargs = caller_identity.exchange_caller_identity.call_args[1]
+        # entity_id should equal owner_id per the design
+        assert call_kwargs["entity_id"] == OWNER_ID
+
+    @pytest.mark.asyncio
+    async def test_exchange_is_test_exchange_false(self):
+        """is_test_exchange is always False in expert chat context."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
+
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=2))
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        result = await svc.get_caller_connection(
+            USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
+        )
+
+        caller_identity.exchange_caller_identity.assert_called_once()
+        call_kwargs = caller_identity.exchange_caller_identity.call_args[1]
+        assert call_kwargs["is_test_exchange"] is False
+
+    @pytest.mark.asyncio
+    async def test_exchange_stage_is_online(self):
+        """stage parameter is set to 'online' for container."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
+
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=2))
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        result = await svc.get_caller_connection(
+            USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
+        )
+
+        caller_identity.exchange_caller_identity.assert_called_once()
+        call_kwargs = caller_identity.exchange_caller_identity.call_args[1]
+        assert call_kwargs["stage"] == "online"
+
+    @pytest.mark.asyncio
+    async def test_exchange_with_zero_binding_id(self):
+        """Exchange handles binding_id=0 correctly (treated as None)."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
+
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+            "binding_id": 0,  # Zero binding_id
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=2))
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        result = await svc.get_caller_connection(
+            USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
+        )
+
+        caller_identity.exchange_caller_identity.assert_called_once()
+        call_kwargs = caller_identity.exchange_caller_identity.call_args[1]
+        # binding_id=0 should be passed as is (the method signature accepts Optional[int])
+        assert call_kwargs["binding_id"] == 0
