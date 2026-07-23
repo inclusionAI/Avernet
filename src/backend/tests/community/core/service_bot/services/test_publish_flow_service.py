@@ -515,6 +515,7 @@ def test_handle_sync_failure_clears_retry_flag_and_stores_source_status_value():
         current_status=PublishStatus.ONLINE_PUB,
         ext=ext,
         progress={'status': 'FAILED', 'failed_devices': [{'id': 'd1'}]},
+        baas_publish_id=456,
     )
 
     assert result.status == PublishStatus.FAILED
