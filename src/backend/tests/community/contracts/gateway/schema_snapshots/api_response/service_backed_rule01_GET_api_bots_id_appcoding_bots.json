@@ -224,6 +224,9 @@
           },
           "caller_config_revision": {
             "type": "integer"
+          },
+          "members": {
+            "type": "array"
           }
         },
         "required": [
@@ -244,6 +247,7 @@
           "gmt_modified",
           "id",
           "is_delete",
+          "members",
           "modifier_id",
           "owner_id",
           "owner_name",
