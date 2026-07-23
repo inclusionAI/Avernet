@@ -13,8 +13,30 @@ from fastapi import APIRouter, FastAPI
 
 def _group_routers() -> list[APIRouter]:
     from gateway.community.adapters.web.routers.bots import router as bots_router
+    from gateway.community.adapters.web.routers.channels import (
+        router as channels_router,
+    )
+    from gateway.community.adapters.web.routers.identity import (
+        router as identity_router,
+    )
+    from gateway.community.adapters.web.routers.mcp import router as mcp_router
+    from gateway.community.adapters.web.routers.resources import (
+        router as resources_router,
+    )
+    from gateway.community.adapters.web.routers.routines import (
+        router as routines_router,
+    )
+    from gateway.community.adapters.web.routers.skills import router as skills_router
 
-    return [bots_router]
+    return [
+        bots_router,
+        channels_router,
+        identity_router,
+        mcp_router,
+        resources_router,
+        routines_router,
+        skills_router,
+    ]
 
 
 def include_all(app: FastAPI) -> None:
