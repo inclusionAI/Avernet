@@ -46,6 +46,7 @@ from engine.community.core.skills.models import (
     PoolLayoutProbeRequest,
     PoolLayoutProbeResult,
     PoolLayoutProbeStatus,
+    PoolLayoutRollbackRequest,
     PoolMappingPublishResult,
     PoolMappingVerificationResult,
     Skill,
@@ -386,6 +387,38 @@ class ClaudeCodeSkillsAdapter(SkillsService):
                 else None
             ),
             evidence=dict(raw.get("evidence") or {}),
+        )
+
+    async def rollback_pool_layout(
+        self,
+        request: PoolLayoutRollbackRequest,
+        auth: AuthContext | None = None,
+    ) -> PoolLayoutActivationResult:
+        raw = await self._port.rollback_pool_layout(
+            {
+                "rollback_generation": request.rollback_generation,
+                "registered_local_names": request.registered_local_names,
+            }
+        )
+        raw_status = str(raw.get("status", ""))
+        try:
+            status = PoolLayoutActivationStatus(raw_status)
+        except ValueError:
+            status = PoolLayoutActivationStatus.UNKNOWN
+        evidence = dict(raw.get("evidence") or {})
+        if status is PoolLayoutActivationStatus.UNKNOWN:
+            evidence["raw_status"] = raw_status
+        return PoolLayoutActivationResult(
+            committed=(
+                raw.get("committed") is True
+                and status
+                in {
+                    PoolLayoutActivationStatus.COMMITTED,
+                    PoolLayoutActivationStatus.ALREADY_COMMITTED,
+                }
+            ),
+            status=status,
+            evidence=evidence,
         )
 
     async def publish_pool_mappings(

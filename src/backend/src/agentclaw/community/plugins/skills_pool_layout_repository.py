@@ -295,6 +295,7 @@ class SkillsPoolLayoutRepository:
                     BotSkillLayoutStateModel.phase.in_(
                         (
                             SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER.value,
+                            SkillLayoutPhase.POOL_CUTOVER_FINALIZING.value,
                             SkillLayoutPhase.POOL_CUTOVER_COMMITTED.value,
                         )
                     ),
@@ -311,6 +312,62 @@ class SkillsPoolLayoutRepository:
                         ),
                         BotSkillLayoutStateModel.data_plane_cutover_committed: 1,
                         BotSkillLayoutStateModel.last_probe_evidence: evidence_json,
+                    },
+                    synchronize_session=False,
+                )
+            )
+        return affected == 1
+
+    def record_cutover_finalizing(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        preparation_id: str,
+        evidence: dict[str, object],
+    ) -> bool:
+        """Persist a known bridge commit whose post-sync must be retried."""
+
+        evidence_json = json.dumps(evidence, ensure_ascii=False)
+        with self._database.transactional_orm_session() as session:
+            affected = (
+                session.query(BotSkillLayoutStateModel)
+                .filter(
+                    *self._scope_filter(scope),
+                    BotSkillLayoutStateModel.active_layout
+                    == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.target_layout
+                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.phase.in_(
+                        (
+                            SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER.value,
+                            SkillLayoutPhase.POOL_CUTOVER_FINALIZING.value,
+                        )
+                    ),
+                    BotSkillLayoutStateModel.migration_generation
+                    == migration_generation,
+                    BotSkillLayoutStateModel.preparation_id == preparation_id,
+                    BotSkillLayoutStateModel.lease_owner == lease_owner,
+                    BotSkillLayoutStateModel.lease_expires_at > func.now(),
+                )
+                .update(
+                    {
+                        BotSkillLayoutStateModel.phase: (
+                            SkillLayoutPhase.POOL_CUTOVER_FINALIZING.value
+                        ),
+                        BotSkillLayoutStateModel.data_plane_cutover_committed: 1,
+                        BotSkillLayoutStateModel.last_failure_code: (
+                            "POST_CUTOVER_SYNC_PENDING"
+                        ),
+                        BotSkillLayoutStateModel.last_failure_stage: (
+                            "post_cutover_sync"
+                        ),
+                        BotSkillLayoutStateModel.last_failure_retryable: 1,
+                        BotSkillLayoutStateModel.last_failure_evidence: (
+                            evidence_json
+                        ),
+                        BotSkillLayoutStateModel.last_failure_at: func.now(),
                     },
                     synchronize_session=False,
                 )
@@ -410,6 +467,163 @@ class SkillsPoolLayoutRepository:
             )
         return affected == 1
 
+    def record_post_cutover_failure(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        failure_code: str,
+        failure_stage: str,
+        retryable: bool,
+        evidence: dict[str, object],
+    ) -> bool:
+        """Record a forward-only failure after the data-plane commit."""
+
+        evidence_json = json.dumps(evidence, ensure_ascii=False)
+        with self._database.transactional_orm_session() as session:
+            affected = (
+                session.query(BotSkillLayoutStateModel)
+                .filter(
+                    *self._scope_filter(scope),
+                    BotSkillLayoutStateModel.active_layout
+                    == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.target_layout
+                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.phase
+                    == SkillLayoutPhase.POOL_CUTOVER_COMMITTED.value,
+                    BotSkillLayoutStateModel.data_plane_cutover_committed == 1,
+                    BotSkillLayoutStateModel.migration_generation
+                    == migration_generation,
+                    BotSkillLayoutStateModel.lease_owner == lease_owner,
+                    BotSkillLayoutStateModel.lease_expires_at > func.now(),
+                )
+                .update(
+                    {
+                        BotSkillLayoutStateModel.last_failure_code: failure_code,
+                        BotSkillLayoutStateModel.last_failure_stage: failure_stage,
+                        BotSkillLayoutStateModel.last_failure_retryable: int(
+                            retryable
+                        ),
+                        BotSkillLayoutStateModel.last_failure_evidence: (
+                            evidence_json
+                        ),
+                        BotSkillLayoutStateModel.last_failure_at: func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+        return affected == 1
+
+    def mark_repair_required(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        failure_code: str,
+        failure_stage: str,
+        evidence: dict[str, object],
+    ) -> bool:
+        """Fence automation when the atomic cutover result is unknowable."""
+
+        evidence_json = json.dumps(evidence, ensure_ascii=False)
+        with self._database.transactional_orm_session() as session:
+            affected = (
+                session.query(BotSkillLayoutStateModel)
+                .filter(
+                    *self._scope_filter(scope),
+                    BotSkillLayoutStateModel.active_layout
+                    == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.target_layout
+                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.phase
+                    == SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER.value,
+                    BotSkillLayoutStateModel.data_plane_cutover_committed == 0,
+                    BotSkillLayoutStateModel.migration_generation
+                    == migration_generation,
+                    BotSkillLayoutStateModel.lease_owner == lease_owner,
+                    BotSkillLayoutStateModel.lease_expires_at > func.now(),
+                )
+                .update(
+                    {
+                        BotSkillLayoutStateModel.phase: (
+                            SkillLayoutPhase.NEEDS_MANUAL_REPAIR.value
+                        ),
+                        BotSkillLayoutStateModel.last_failure_code: failure_code,
+                        BotSkillLayoutStateModel.last_failure_stage: failure_stage,
+                        BotSkillLayoutStateModel.last_failure_retryable: 0,
+                        BotSkillLayoutStateModel.last_failure_evidence: (
+                            evidence_json
+                        ),
+                        BotSkillLayoutStateModel.last_failure_at: func.now(),
+                        BotSkillLayoutStateModel.lease_owner: None,
+                        BotSkillLayoutStateModel.lease_expires_at: None,
+                    },
+                    synchronize_session=False,
+                )
+            )
+        return affected == 1
+
+    def resolve_repair(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        operator: str,
+        note: str,
+        cutover_committed: bool,
+    ) -> bool:
+        """Persist an operator's filesystem finding and resume safely."""
+
+        resume_phase = (
+            SkillLayoutPhase.POOL_CUTOVER_COMMITTED
+            if cutover_committed
+            else SkillLayoutPhase.POOL_READY
+        )
+        with self._database.transactional_orm_session() as session:
+            row = (
+                session.query(BotSkillLayoutStateModel)
+                .filter(
+                    *self._scope_filter(scope),
+                    BotSkillLayoutStateModel.active_layout
+                    == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.target_layout
+                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.phase
+                    == SkillLayoutPhase.NEEDS_MANUAL_REPAIR.value,
+                    BotSkillLayoutStateModel.migration_generation
+                    == migration_generation,
+                )
+                .with_for_update()
+                .first()
+            )
+            if row is None:
+                return False
+            previous_evidence = (
+                json.loads(row.last_failure_evidence)
+                if row.last_failure_evidence
+                else None
+            )
+            row.phase = resume_phase.value
+            row.data_plane_cutover_committed = int(cutover_committed)
+            row.last_failure_code = "MANUAL_REPAIR_RESOLVED"
+            row.last_failure_stage = "operator_resolution"
+            row.last_failure_retryable = 1
+            row.last_failure_evidence = json.dumps(
+                {
+                    "operator": operator,
+                    "note": note,
+                    "cutover_committed": cutover_committed,
+                    "previous_failure": previous_evidence,
+                },
+                ensure_ascii=False,
+            )
+            row.last_failure_at = func.now()
+            row.lease_owner = None
+            row.lease_expires_at = None
+        return True
+
     def commit_pool_active(
         self,
         *,
@@ -421,13 +635,14 @@ class SkillsPoolLayoutRepository:
     ) -> bool:
         """原子提交精确 Bot 范围内的全部 local locator 和布局状态。"""
 
-        pool_prefix = (
-            "local:///home/admin/.openclaw/workspace/"
-            "skills-pool/skills-local/"
+        pool_prefixes = (
+            "local:///home/admin/.openclaw/workspace/skills-pool/skills-local/",
+            "local:///home/admin/.claude_code/workspace/skills-pool/skills-local/",
+            "local:///home/admin/.aicoding/workspace/skills-pool/skills-local/",
         )
         if any(
             not isinstance(skill_id, int)
-            or not locator.startswith(pool_prefix)
+            or not locator.startswith(pool_prefixes)
             for skill_id, locator in local_locators.items()
         ):
             return False
@@ -475,11 +690,284 @@ class SkillsPoolLayoutRepository:
                         BotSkillLayoutStateModel.pool_activated_at: func.now(),
                         BotSkillLayoutStateModel.lease_owner: None,
                         BotSkillLayoutStateModel.lease_expires_at: None,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if affected != 1:
+                return False
+            for row in local_rows:
+                row.git_path = local_locators[row.id]
+        return True
+
+    def begin_legacy_rollback(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        rollback_generation: str,
+        operator: str,
+        note: str,
+        lease_owner: str,
+        lease_seconds: int,
+    ) -> bool:
+        """原子认领从 Pool 返回 Legacy 的显式业务回滚。"""
+
+        evidence_json = json.dumps(
+            {"operator": operator, "note": note},
+            ensure_ascii=False,
+        )
+        with self._database.transactional_orm_session() as session:
+            affected = (
+                session.query(BotSkillLayoutStateModel)
+                .filter(
+                    *self._scope_filter(scope),
+                    BotSkillLayoutStateModel.active_layout
+                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.target_layout.is_(None),
+                    BotSkillLayoutStateModel.phase
+                    == SkillLayoutPhase.POOL_ACTIVE.value,
+                )
+                .update(
+                    {
+                        BotSkillLayoutStateModel.target_layout: (
+                            SkillLayout.LEGACY.value
+                        ),
+                        BotSkillLayoutStateModel.phase: (
+                            SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING.value
+                        ),
+                        BotSkillLayoutStateModel.migration_generation: (
+                            rollback_generation
+                        ),
+                        BotSkillLayoutStateModel.lease_owner: lease_owner,
+                        BotSkillLayoutStateModel.lease_expires_at: self._now_plus(
+                            session, lease_seconds
+                        ),
+                        BotSkillLayoutStateModel.last_failure_code: None,
+                        BotSkillLayoutStateModel.last_failure_stage: (
+                            "rollback_requested"
+                        ),
+                        BotSkillLayoutStateModel.last_failure_retryable: None,
+                        BotSkillLayoutStateModel.last_failure_evidence: (
+                            evidence_json
+                        ),
+                        BotSkillLayoutStateModel.last_failure_at: func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+        return affected == 1
+
+    def record_legacy_rollback_committed(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        rollback_generation: str,
+        lease_owner: str,
+        evidence: dict[str, object],
+    ) -> bool:
+        """记录 Legacy 已成为运行时的数据面权威源。"""
+
+        evidence_json = json.dumps(evidence, ensure_ascii=False)
+        with self._database.transactional_orm_session() as session:
+            affected = (
+                session.query(BotSkillLayoutStateModel)
+                .filter(
+                    *self._scope_filter(scope),
+                    BotSkillLayoutStateModel.active_layout
+                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.target_layout
+                    == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.phase.in_(
+                        (
+                            SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING.value,
+                            SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED.value,
+                        )
+                    ),
+                    BotSkillLayoutStateModel.migration_generation
+                    == rollback_generation,
+                    BotSkillLayoutStateModel.lease_owner == lease_owner,
+                    BotSkillLayoutStateModel.lease_expires_at > func.now(),
+                )
+                .update(
+                    {
+                        BotSkillLayoutStateModel.phase: (
+                            SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED.value
+                        ),
+                        BotSkillLayoutStateModel.data_plane_cutover_committed: 0,
                         BotSkillLayoutStateModel.last_failure_code: None,
                         BotSkillLayoutStateModel.last_failure_stage: None,
                         BotSkillLayoutStateModel.last_failure_retryable: None,
-                        BotSkillLayoutStateModel.last_failure_evidence: None,
+                        BotSkillLayoutStateModel.last_failure_evidence: (
+                            evidence_json
+                        ),
                         BotSkillLayoutStateModel.last_failure_at: None,
+                    },
+                    synchronize_session=False,
+                )
+            )
+        return affected == 1
+
+    def try_acquire_rollback_lease(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        rollback_generation: str,
+        lease_owner: str,
+        lease_seconds: int,
+    ) -> bool:
+        """同一 owner 可续租；旧 lease 过期后允许新 worker 接管。"""
+
+        with self._database.transactional_orm_session() as session:
+            affected = (
+                session.query(BotSkillLayoutStateModel)
+                .filter(
+                    *self._scope_filter(scope),
+                    BotSkillLayoutStateModel.active_layout
+                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.target_layout
+                    == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.phase.in_(
+                        (
+                            SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING.value,
+                            SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED.value,
+                        )
+                    ),
+                    BotSkillLayoutStateModel.migration_generation
+                    == rollback_generation,
+                    or_(
+                        BotSkillLayoutStateModel.lease_owner == lease_owner,
+                        BotSkillLayoutStateModel.lease_expires_at.is_(None),
+                        BotSkillLayoutStateModel.lease_expires_at <= func.now(),
+                    ),
+                )
+                .update(
+                    {
+                        BotSkillLayoutStateModel.lease_owner: lease_owner,
+                        BotSkillLayoutStateModel.lease_expires_at: (
+                            self._now_plus(session, lease_seconds)
+                        ),
+                    },
+                    synchronize_session=False,
+                )
+            )
+        return affected == 1
+
+    def record_rollback_failure(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        rollback_generation: str,
+        lease_owner: str,
+        failure_code: str,
+        failure_stage: str,
+        retryable: bool,
+        evidence: dict[str, object],
+    ) -> bool:
+        """持久化回滚失败，同时保留当前单向阶段。"""
+
+        evidence_json = json.dumps(evidence, ensure_ascii=False)
+        with self._database.transactional_orm_session() as session:
+            affected = (
+                session.query(BotSkillLayoutStateModel)
+                .filter(
+                    *self._scope_filter(scope),
+                    BotSkillLayoutStateModel.active_layout
+                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.target_layout
+                    == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.phase.in_(
+                        (
+                            SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING.value,
+                            SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED.value,
+                        )
+                    ),
+                    BotSkillLayoutStateModel.migration_generation
+                    == rollback_generation,
+                    BotSkillLayoutStateModel.lease_owner == lease_owner,
+                    BotSkillLayoutStateModel.lease_expires_at > func.now(),
+                )
+                .update(
+                    {
+                        BotSkillLayoutStateModel.last_failure_code: failure_code,
+                        BotSkillLayoutStateModel.last_failure_stage: failure_stage,
+                        BotSkillLayoutStateModel.last_failure_retryable: int(
+                            retryable
+                        ),
+                        BotSkillLayoutStateModel.last_failure_evidence: (
+                            evidence_json
+                        ),
+                        BotSkillLayoutStateModel.last_failure_at: func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+        return affected == 1
+
+    def commit_legacy_active(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        rollback_generation: str,
+        lease_owner: str,
+        local_locators: dict[int, str],
+    ) -> bool:
+        """同事务恢复全部 local locator 与 ``LEGACY_ACTIVE``。"""
+
+        legacy_prefixes = (
+            "local:///home/admin/.openclaw/workspace/skills/skills-local/",
+            "local:///home/admin/.claude_code/workspace/skills/skills-local/",
+            "local:///home/admin/.aicoding/workspace/skills/skills-local/",
+        )
+        if any(
+            not isinstance(skill_id, int)
+            or not locator.startswith(legacy_prefixes)
+            for skill_id, locator in local_locators.items()
+        ):
+            return False
+
+        with self._database.transactional_orm_session() as session:
+            local_rows = (
+                session.query(Skill)
+                .filter(
+                    Skill.env == scope.env,
+                    Skill.bolt_id == scope.bot_id,
+                    Skill.git_path.like("local://%"),
+                )
+                .with_for_update()
+                .all()
+            )
+            if {row.id for row in local_rows} != set(local_locators):
+                return False
+
+            affected = (
+                session.query(BotSkillLayoutStateModel)
+                .filter(
+                    *self._scope_filter(scope),
+                    BotSkillLayoutStateModel.active_layout
+                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.target_layout
+                    == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.phase
+                    == SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED.value,
+                    BotSkillLayoutStateModel.migration_generation
+                    == rollback_generation,
+                    BotSkillLayoutStateModel.lease_owner == lease_owner,
+                    BotSkillLayoutStateModel.lease_expires_at > func.now(),
+                )
+                .update(
+                    {
+                        BotSkillLayoutStateModel.active_layout: (
+                            SkillLayout.LEGACY.value
+                        ),
+                        BotSkillLayoutStateModel.target_layout: None,
+                        BotSkillLayoutStateModel.phase: (
+                            SkillLayoutPhase.LEGACY_ACTIVE.value
+                        ),
+                        BotSkillLayoutStateModel.layout_contract_version: None,
+                        BotSkillLayoutStateModel.preparation_id: None,
+                        BotSkillLayoutStateModel.data_plane_cutover_committed: 0,
+                        BotSkillLayoutStateModel.lease_owner: None,
+                        BotSkillLayoutStateModel.lease_expires_at: None,
                     },
                     synchronize_session=False,
                 )

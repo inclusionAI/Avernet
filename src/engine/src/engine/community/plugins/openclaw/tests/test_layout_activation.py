@@ -22,6 +22,7 @@ from engine.community.plugins.openclaw.layout_activation import (
     activate_openclaw_pool,
     atomic_exchange_paths,
     publish_pool_mappings,
+    rollback_openclaw_pool,
     verify_skill_mappings,
 )
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
@@ -148,6 +149,61 @@ def test_registered_local_cutover_syncs_latest_content_and_atomically_bridges(
         mappings=mappings,
         home=home,
         repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert repeated.status is PoolActivationStatus.ALREADY_COMMITTED
+
+
+def test_explicit_rollback_rebuilds_legacy_from_current_pool_content(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    mappings = [
+        SkillMapping(
+            source=str(pool_local / "handmade"),
+            target=str(legacy_local.parent / "handmade"),
+        )
+    ]
+    activated = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=mappings,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert activated.committed
+
+    # These writes happened after Pool became authoritative and must survive.
+    (pool_local / "handmade" / "SKILL.md").write_text("pool-new-write")
+    (pool_local / "created-after-activation").mkdir()
+    (pool_local / "created-after-activation" / "SKILL.md").write_text("new")
+    external = legacy_local.parent / "external-unmanaged"
+    external.symlink_to(tmp_path / "external")
+
+    result = rollback_openclaw_pool(
+        rollback_generation="rollback-1",
+        registered_local_names=["handmade", "created-after-activation"],
+        home=home,
+    )
+
+    assert result.status is PoolActivationStatus.COMMITTED
+    assert legacy_local.is_dir()
+    assert not legacy_local.is_symlink()
+    assert (legacy_local / "handmade" / "SKILL.md").read_text() == (
+        "pool-new-write"
+    )
+    assert (
+        legacy_local / "created-after-activation" / "SKILL.md"
+    ).read_text() == "new"
+    assert (pool_local / "handmade" / "SKILL.md").read_text() == (
+        "pool-new-write"
+    )
+    assert external.is_symlink()
+
+    repeated = rollback_openclaw_pool(
+        rollback_generation="rollback-1",
+        registered_local_names=["handmade", "created-after-activation"],
+        home=home,
     )
     assert repeated.status is PoolActivationStatus.ALREADY_COMMITTED
 

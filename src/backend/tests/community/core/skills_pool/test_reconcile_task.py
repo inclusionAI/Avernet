@@ -569,6 +569,27 @@ def test_non_retryable_cutover_failure_blocks() -> None:
     )
 
 
+def test_manual_repair_state_stops_before_lease_reacquisition() -> None:
+    state = replace(
+        _claimed_state(),
+        phase=SkillLayoutPhase.NEEDS_MANUAL_REPAIR,
+        lease_owner=None,
+    )
+    handler, _, layouts, reconcile = _handler(
+        claim_results=[
+            MigrationClaimResult(MigrationClaimOutcome.ALREADY_CLAIMED, state)
+        ],
+        reconcile_results=[],
+        state=state,
+    )
+
+    assert handler.handle(_payload()) == Fail(
+        "skills pool migration requires manual repair"
+    )
+    assert layouts.acquire_calls == []
+    assert reconcile.calls == []
+
+
 def test_invalid_payload_fails_without_touching_domain_services() -> None:
     state = _claimed_state()
     handler, claims, _, reconcile = _handler(

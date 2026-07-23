@@ -19,6 +19,7 @@ from engine.community.plugins.skills_pool.layout_activation import (
     SkillMapping,
     activate_claude_code_pool,
     publish_pool_mappings as _publish_pool_mappings,
+    rollback_claude_code_pool,
     verify_skill_mappings as _verify_skill_mappings,
 )
 from engine.community.plugins.skills_pool.layout_probe import (
@@ -79,5 +80,6 @@ __all__ = [
     "activate_claude_code_pool",
     "inspect_claude_code_runtime_layout",
     "publish_claude_code_pool_mappings",
+    "rollback_claude_code_pool",
     "verify_claude_code_pool_mappings",
 ]

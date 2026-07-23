@@ -397,6 +397,190 @@ def test_invalid_runtime_probe_can_be_recorded_while_pool_is_preparing() -> None
     assert state.last_failure_evidence == {"reason": "marker_contract_mismatch"}
 
 
+def test_post_cutover_failure_remains_forward_only_and_auditable() -> None:
+    repository = SkillsPoolLayoutRepository(InMemorySqliteDB())
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+    assert repository.record_cutover_committed(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"bridge": "pool"},
+    )
+
+    assert repository.record_post_cutover_failure(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        failure_code="MAPPING_PUBLISH_FAILED",
+        failure_stage="mapping_publish",
+        retryable=True,
+        evidence={"mapping_count": 3},
+    )
+
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.POOL_CUTOVER_COMMITTED
+    assert state.data_plane_cutover_committed is True
+    assert state.last_failure_code == "MAPPING_PUBLISH_FAILED"
+    assert state.last_failure_stage == "mapping_publish"
+    assert state.last_failure_retryable is True
+    assert state.last_failure_evidence == {"mapping_count": 3}
+    assert state.last_failure_at is not None
+
+
+def test_unknown_cutover_is_fenced_for_manual_repair() -> None:
+    repository = SkillsPoolLayoutRepository(InMemorySqliteDB())
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+
+    assert repository.mark_repair_required(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        failure_code="UNKNOWN",
+        failure_stage="cutover_outcome_unknown",
+        evidence={"reason": "response_lost"},
+    )
+
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.NEEDS_MANUAL_REPAIR
+    assert state.data_plane_cutover_committed is False
+    assert state.last_failure_retryable is False
+    assert state.lease_owner is None
+    assert state.last_failure_evidence == {"reason": "response_lost"}
+
+
+def test_operator_resolves_manual_repair_with_note_and_explicit_fact() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+    assert repository.mark_repair_required(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        failure_code="UNKNOWN",
+        failure_stage="cutover_outcome_unknown",
+        evidence={"reason": "response_lost"},
+    )
+
+    assert repository.resolve_repair(
+        scope=scope,
+        migration_generation="generation-1",
+        operator="oncall-1",
+        note="容器内已核验 bridge 指向 Pool",
+        cutover_committed=True,
+    )
+
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.POOL_CUTOVER_COMMITTED
+    assert state.data_plane_cutover_committed is True
+    assert state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
+    assert state.last_failure_stage == "operator_resolution"
+    assert state.last_failure_retryable is True
+    assert state.last_failure_evidence == {
+        "operator": "oncall-1",
+        "note": "容器内已核验 bridge 指向 Pool",
+        "cutover_committed": True,
+        "previous_failure": {"reason": "response_lost"},
+    }
+    assert repository.try_acquire_lease(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-2",
+        lease_seconds=60,
+    )
+    with database.transactional_orm_session() as session:
+        session.add(
+            Skill(
+                id=91,
+                name="local-a",
+                git_path="local:///legacy/local-a",
+                bolt_id=scope.bot_id,
+                env=scope.env,
+            )
+        )
+    assert repository.commit_pool_active(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-2",
+        preparation_id="preparation-1",
+        local_locators={
+            91: (
+                "local:///home/admin/.openclaw/workspace/"
+                "skills-pool/skills-local/local-a"
+            )
+        },
+    )
+    active = repository.get(scope)
+    assert active.phase is SkillLayoutPhase.POOL_ACTIVE
+    assert active.last_failure_code == "MANUAL_REPAIR_RESOLVED"
+    assert active.last_failure_evidence["previous_failure"] == {
+        "reason": "response_lost"
+    }
+
+
 def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
     database = InMemorySqliteDB()
     repository = SkillsPoolLayoutRepository(database)
@@ -573,3 +757,155 @@ def test_pool_active_commit_rejects_partial_or_stale_local_locator_set() -> None
         },
     )
     assert repository.get(scope).active_layout is SkillLayout.LEGACY
+
+
+def test_explicit_rollback_is_fenced_and_commits_locator_atomically() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    with database.transactional_orm_session() as session:
+        session.add(
+            BotSkillLayoutStateModel(
+                env=scope.env,
+                entity_id=scope.entity_id,
+                bot_id=scope.bot_id,
+                active_layout=SkillLayout.POOL.value,
+                phase=SkillLayoutPhase.POOL_ACTIVE.value,
+                layout_contract_version="skills-pool-p3-v1",
+                preparation_id="preparation-1",
+                migration_generation="migration-1",
+                data_plane_cutover_committed=1,
+            )
+        )
+        session.add(
+            Skill(
+                id=101,
+                env=scope.env,
+                bolt_id=scope.bot_id,
+                user_id="owner-1",
+                name="local-a",
+                git_path=(
+                    "local:///home/admin/.openclaw/workspace/"
+                    "skills-pool/skills-local/local-a"
+                ),
+            )
+        )
+
+    assert repository.begin_legacy_rollback(
+        scope=scope,
+        rollback_generation="rollback-1",
+        operator="oncall-1",
+        note="业务回滚",
+        lease_owner="rollback-worker",
+        lease_seconds=60,
+    )
+    preparing = repository.get(scope)
+    assert preparing.phase is SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING
+    assert preparing.target_layout is SkillLayout.LEGACY
+    assert preparing.migration_generation == "rollback-1"
+    assert preparing.last_failure_stage == "rollback_requested"
+
+    assert repository.record_legacy_rollback_committed(
+        scope=scope,
+        rollback_generation="rollback-1",
+        lease_owner="rollback-worker",
+        evidence={"source": "current_pool"},
+    )
+    assert repository.record_rollback_failure(
+        scope=scope,
+        rollback_generation="rollback-1",
+        lease_owner="rollback-worker",
+        failure_code="ROLLBACK_MAPPING_PUBLISH_FAILED",
+        failure_stage="mapping_publish",
+        retryable=True,
+        evidence={"mapping_count": 1},
+    )
+    committed = repository.get(scope)
+    assert committed.phase is SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED
+    assert committed.last_failure_code == "ROLLBACK_MAPPING_PUBLISH_FAILED"
+    assert committed.last_failure_at is not None
+    with database.transactional_orm_session() as session:
+        session.query(BotSkillLayoutStateModel).filter(
+            *repository._scope_filter(scope)
+        ).update(
+            {
+                BotSkillLayoutStateModel.lease_expires_at: func.datetime(
+                    func.now(), text("'-1 second'")
+                )
+            }
+        )
+    assert repository.try_acquire_rollback_lease(
+        scope=scope,
+        rollback_generation="rollback-1",
+        lease_owner="replacement-worker",
+        lease_seconds=60,
+    )
+
+    locator = (
+        "local:///home/admin/.openclaw/workspace/"
+        "skills/skills-local/local-a"
+    )
+    assert repository.commit_legacy_active(
+        scope=scope,
+        rollback_generation="rollback-1",
+        lease_owner="replacement-worker",
+        local_locators={101: locator},
+    )
+    state = repository.get(scope)
+    assert state.active_layout is SkillLayout.LEGACY
+    assert state.target_layout is None
+    assert state.phase is SkillLayoutPhase.LEGACY_ACTIVE
+    assert state.layout_contract_version is None
+    assert state.preparation_id is None
+    assert state.lease_owner is None
+    with database.transactional_orm_session() as session:
+        assert session.get(Skill, 101).git_path == locator
+
+
+def test_explicit_rollback_rejects_partial_local_locator_commit() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    with database.transactional_orm_session() as session:
+        session.add(
+            BotSkillLayoutStateModel(
+                env=scope.env,
+                entity_id=scope.entity_id,
+                bot_id=scope.bot_id,
+                active_layout=SkillLayout.POOL.value,
+                target_layout=SkillLayout.LEGACY.value,
+                phase=SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED.value,
+                migration_generation="rollback-1",
+                lease_owner="rollback-worker",
+                lease_expires_at=func.datetime(
+                    func.now(), text("'+60 seconds'")
+                ),
+            )
+        )
+        for skill_id, name in ((101, "local-a"), (102, "local-b")):
+            session.add(
+                Skill(
+                    id=skill_id,
+                    env=scope.env,
+                    bolt_id=scope.bot_id,
+                    user_id="owner-1",
+                    name=name,
+                    git_path=f"local:///pool/{name}",
+                )
+            )
+
+    assert not repository.commit_legacy_active(
+        scope=scope,
+        rollback_generation="rollback-1",
+        lease_owner="rollback-worker",
+        local_locators={
+            101: (
+                "local:///home/admin/.openclaw/workspace/"
+                "skills/skills-local/local-a"
+            )
+        },
+    )
+    assert (
+        repository.get(scope).phase
+        is SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED
+    )

@@ -31,6 +31,7 @@ from agentclaw.community.core.skills_pool.repository.protocol import (
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     SkillLayout,
+    SkillLayoutPhase,
 )
 from agentclaw.community.core.skills_pool.ports import (
     SkillsPoolRuntimeProtocol,
@@ -55,6 +56,7 @@ class SkillsPoolReconcileOutcome(StrEnum):
     MAPPING_FAILED = "mapping_failed"
     MAPPING_VERIFY_FAILED = "mapping_verify_failed"
     DATABASE_COMMIT_FAILED = "database_commit_failed"
+    MANUAL_REPAIR_REQUIRED = "manual_repair_required"
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +91,13 @@ class SkillsPoolReconcileService:
         lease_owner: str,
     ) -> SkillsPoolReconcileResult:
         state = self._layouts.get(scope)
+        if state.phase is SkillLayoutPhase.NEEDS_MANUAL_REPAIR:
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.MANUAL_REPAIR_REQUIRED,
+                preparation_id=state.preparation_id,
+                evidence=state.last_failure_evidence,
+                retryable=False,
+            )
         if state.active_layout is SkillLayout.POOL:
             return SkillsPoolReconcileResult(
                 SkillsPoolReconcileOutcome.ALREADY_ACTIVE,
@@ -197,27 +206,31 @@ class SkillsPoolReconcileService:
                 evidence={"reason": str(error)},
             )
 
-        if not state.data_plane_cutover_committed:
-            recorded = self._layouts.record_ready_probe(
-                scope=scope,
-                migration_generation=generation,
-                lease_owner=lease_owner,
-                preparation_id=probe.preparation_id,
-                evidence=probe.evidence,
-            )
-            if not recorded:
-                return SkillsPoolReconcileResult(
-                    SkillsPoolReconcileOutcome.STATE_RACE_LOST
+        cutover_finalizing = (
+            state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
+        )
+        if not state.data_plane_cutover_committed or cutover_finalizing:
+            if not state.data_plane_cutover_committed:
+                recorded = self._layouts.record_ready_probe(
+                    scope=scope,
+                    migration_generation=generation,
+                    lease_owner=lease_owner,
+                    preparation_id=probe.preparation_id,
+                    evidence=probe.evidence,
                 )
-            if not self._layouts.begin_cutover(
-                scope=scope,
-                migration_generation=generation,
-                lease_owner=lease_owner,
-                preparation_id=probe.preparation_id,
-            ):
-                return SkillsPoolReconcileResult(
-                    SkillsPoolReconcileOutcome.STATE_RACE_LOST
-                )
+                if not recorded:
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.STATE_RACE_LOST
+                    )
+                if not self._layouts.begin_cutover(
+                    scope=scope,
+                    migration_generation=generation,
+                    lease_owner=lease_owner,
+                    preparation_id=probe.preparation_id,
+                ):
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.STATE_RACE_LOST
+                    )
 
             cutover = await self._runtime.cutover(
                 bot_id=scope.bot_id,
@@ -228,6 +241,50 @@ class SkillsPoolReconcileService:
                 mappings=mappings,
             )
             if not cutover.committed:
+                evidence = cutover.to_dict()
+                if (
+                    cutover.status
+                    is PoolCutoverStatus.POST_CUTOVER_SYNC_PENDING
+                    or cutover_finalizing
+                ):
+                    recorded = self._layouts.record_cutover_finalizing(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        preparation_id=probe.preparation_id,
+                        evidence=evidence,
+                    )
+                    if not recorded:
+                        return SkillsPoolReconcileResult(
+                            SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                            preparation_id=probe.preparation_id,
+                        )
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.CUTOVER_FAILED,
+                        preparation_id=probe.preparation_id,
+                        evidence=evidence,
+                        retryable=True,
+                    )
+                if cutover.status is PoolCutoverStatus.UNKNOWN:
+                    recorded = self._layouts.mark_repair_required(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        failure_code=cutover.status.value,
+                        failure_stage="cutover_outcome_unknown",
+                        evidence=evidence,
+                    )
+                    if not recorded:
+                        return SkillsPoolReconcileResult(
+                            SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                            preparation_id=probe.preparation_id,
+                        )
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.MANUAL_REPAIR_REQUIRED,
+                        preparation_id=probe.preparation_id,
+                        evidence=evidence,
+                        retryable=False,
+                    )
                 failure_profile = self._cutover_failure_profile(cutover.status)
                 if failure_profile is not None:
                     outcome, stage, retryable = failure_profile
@@ -283,18 +340,30 @@ class SkillsPoolReconcileService:
             user_id=user_id,
             mappings=mappings,
         ):
-            return SkillsPoolReconcileResult(
-                SkillsPoolReconcileOutcome.MAPPING_FAILED,
+            return self._record_post_cutover_failure(
+                scope=scope,
+                generation=generation,
+                lease_owner=lease_owner,
                 preparation_id=probe.preparation_id,
+                outcome=SkillsPoolReconcileOutcome.MAPPING_FAILED,
+                failure_code="MAPPING_PUBLISH_FAILED",
+                failure_stage="mapping_publish",
+                evidence={"mapping_count": len(mappings)},
             )
         if not await self._runtime.verify_mappings(
             bot_id=scope.bot_id,
             user_id=user_id,
             mappings=mappings,
         ):
-            return SkillsPoolReconcileResult(
-                SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED,
+            return self._record_post_cutover_failure(
+                scope=scope,
+                generation=generation,
+                lease_owner=lease_owner,
                 preparation_id=probe.preparation_id,
+                outcome=SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED,
+                failure_code="MAPPING_VERIFY_FAILED",
+                failure_stage="mapping_verify",
+                evidence={"mapping_count": len(mappings)},
             )
 
         local_locators = {
@@ -308,13 +377,52 @@ class SkillsPoolReconcileService:
             preparation_id=probe.preparation_id,
             local_locators=local_locators,
         ):
-            return SkillsPoolReconcileResult(
-                SkillsPoolReconcileOutcome.DATABASE_COMMIT_FAILED,
+            return self._record_post_cutover_failure(
+                scope=scope,
+                generation=generation,
+                lease_owner=lease_owner,
                 preparation_id=probe.preparation_id,
+                outcome=SkillsPoolReconcileOutcome.DATABASE_COMMIT_FAILED,
+                failure_code="DATABASE_COMMIT_FAILED",
+                failure_stage="control_plane_commit",
+                evidence={"local_locator_count": len(local_locators)},
             )
         return SkillsPoolReconcileResult(
             SkillsPoolReconcileOutcome.POOL_ACTIVE,
             preparation_id=probe.preparation_id,
+        )
+
+    def _record_post_cutover_failure(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        generation: str,
+        lease_owner: str,
+        preparation_id: str,
+        outcome: SkillsPoolReconcileOutcome,
+        failure_code: str,
+        failure_stage: str,
+        evidence: dict[str, object],
+    ) -> SkillsPoolReconcileResult:
+        recorded = self._layouts.record_post_cutover_failure(
+            scope=scope,
+            migration_generation=generation,
+            lease_owner=lease_owner,
+            failure_code=failure_code,
+            failure_stage=failure_stage,
+            retryable=True,
+            evidence=evidence,
+        )
+        if not recorded:
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                preparation_id=preparation_id,
+            )
+        return SkillsPoolReconcileResult(
+            outcome,
+            preparation_id=preparation_id,
+            evidence=evidence,
+            retryable=True,
         )
 
     @staticmethod
