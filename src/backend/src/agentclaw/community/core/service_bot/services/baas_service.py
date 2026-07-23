@@ -1040,9 +1040,17 @@ class BaasService:  # pragma: no cover
         try:
             return self._post_bots_api(path=path, payload=payload, action=action)
         except httpx.HTTPStatusError as e:
-            raise BaasServiceError(
+            error = BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
+            # Preserve the HTTP payload for structured extraction downstream:
+            # BotBuildService._extract_baas_error_info reads ``.response.json()``
+            # to classify errors like the 404 ``{"detail": {"error_code":
+            # "BOT_NOT_FOUND"}}``. Dropping it here made the teclaw path unable
+            # to take the gone-bot fallback (first-release / restart-recreate)
+            # that the ARCA path (which re-raises the HTTPStatusError) has.
+            error.response = e.response
+            raise error from e
         except BaasServiceError:
             raise
         except Exception as e:
