@@ -2,7 +2,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from agentclaw.community.core.bot_chat.service import (
     BotChatService,
@@ -1679,6 +1679,8 @@ class TestBotChatServiceGetSession:
 
         service._db_repo = MagicMock()
         service._db_repo.has_bot_access.return_value = True
+        service._db_repo.get_group_labels.return_value = (None, None)
+        service._db_repo.get_bot_name.return_value = "bot-a"
 
         mock_aiohttp_session = AsyncMock()
         mock_aiohttp_session.get = mock_get
@@ -1722,6 +1724,8 @@ class TestBotChatServiceGetSession:
 
         service._db_repo = MagicMock()
         service._db_repo.has_bot_access.return_value = True
+        service._db_repo.get_group_labels.return_value = (None, None)
+        service._db_repo.get_bot_name.return_value = "bot-a"
 
         mock_aiohttp_session = AsyncMock()
         mock_aiohttp_session.get = mock_get
