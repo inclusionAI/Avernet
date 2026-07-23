@@ -22,8 +22,9 @@ use bcs_service_api::{
     BotRegistryCoreService,
     CancelStateMachineRunCommand,
     ChatEventState, CollaborationDefinitionRecord, CollaborationEventRepoPort,
-    CollaborationRuntimeError, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
-    ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand, DefinitionYamlSource,
+    CollaborationDefinitionValidationOutcome, CollaborationRuntimeError,
+    CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
+    CreateOrReactivateCommand, DefinitionYamlSource,
     FrontendDeliveryCommand, FrontendDeliveryKind,
     FrontendDeliveryPort, FrontendDeliveryTarget, GroupCoreService, GroupRuntimeBindingRepoPort,
     GroupCollaborationDefinitionView, HandleBotTerminalEventCommand,
@@ -35,14 +36,16 @@ use bcs_service_api::{
     StartStateMachineRunOutcome, StateMachineDefinitionRepoPort, StateMachineRunRepoPort,
     JudgeArtifact, JudgeEvaluatorPort, JudgeRequest, ServiceError,
     StateMachineGraphDefinitionView, StateMachineGraphEdgeView, StateMachineGraphNodeView,
-    StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineRunGraphView,
-    StateMachineRunView, UpgradeGroupCollaborationDefinitionCommand,
+    StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineNodeSubStatus,
+    StateMachineRunGraphView, StateMachineRunView, UpgradeGroupCollaborationDefinitionCommand,
+    ValidateCollaborationDefinitionYamlCommand,
 };
 use serde_json::Value;
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::definition::{CompiledStateMachine, reject_explicit_participant_roles, validate_definition};
+use crate::validation::validate_authoring_definition_yaml;
 
 const BCS_STATE_MACHINE_BOT_ID: &str = "bcs_state_machine";
 const BCS_STATE_MACHINE_BOT_NAME: &str = "BCS State Machine";
@@ -1348,6 +1351,13 @@ impl CollaborationRuntime {
 
 #[async_trait]
 impl CollaborationRuntimeService for CollaborationRuntime {
+    async fn validate_definition_yaml(
+        &self,
+        cmd: ValidateCollaborationDefinitionYamlCommand,
+    ) -> Result<CollaborationDefinitionValidationOutcome, CollaborationRuntimeError> {
+        Ok(validate_authoring_definition_yaml(cmd))
+    }
+
     async fn start_state_machine_run(
         &self,
         cmd: StartStateMachineRunCommand,
@@ -1472,8 +1482,10 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             return Ok(None);
         };
         let judge_outputs = self.judge_outputs_for_node(run_id, node_id).await?;
+        let sub_status = node_sub_status(&node);
         Ok(Some(StateMachineNodeRunView {
             node,
+            sub_status,
             judge_outputs,
         }))
     }
@@ -1706,15 +1718,79 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 run.group_id
             )))?;
         let now = bcs_protocol::now_ms();
+        if matches!(cmd.state, ChatEventState::Final)
+            && extract_text(&cmd.event_payload).is_none()
+        {
+            // A message-less final completes the bot attempt without an
+            // artifact. It must advance the node into the normal failure/retry
+            // path instead of leaving the node Running after an InvalidRequest.
+            let error = "bot completed without visible output".to_string();
+            let failed = self
+                .runs
+                .fail_node_attempt(
+                    &correlation.state_machine_run_id,
+                    &correlation.node_id,
+                    correlation.attempt,
+                    error.clone(),
+                    now,
+                )
+                .await?;
+            let view = if failed {
+                warn!(
+                    run_id = %correlation.state_machine_run_id,
+                    group_id = %run.group_id,
+                    session_id = %run.session_id,
+                    node_id = %correlation.node_id,
+                    attempt = correlation.attempt,
+                    error = %error,
+                    "state_machine: node failed"
+                );
+                log_state_machine_node_result(
+                    &run,
+                    &correlation,
+                    MessageLogStatus::Failed,
+                    None,
+                    Some(&error),
+                    None,
+                );
+                self.fail_node_or_schedule_retry(
+                    &compiled,
+                    &group,
+                    &run,
+                    &correlation.node_id,
+                    correlation.attempt,
+                    error,
+                )
+                .await?
+            } else {
+                self.run_view(&run.run_id).await?
+            };
+            return Ok(HandleBotTerminalEventOutcome {
+                consumed: true,
+                view,
+            });
+        }
         let mut view = None;
         match cmd.state {
             ChatEventState::Final => {
-                let text = extract_text(&cmd.event_payload).ok_or_else(|| {
-                    CollaborationRuntimeError::InvalidRequest(
-                        "final state-machine bot event must include text".to_string(),
-                    )
-                })?;
+                let text = extract_text(&cmd.event_payload).unwrap_or_default();
                 let artifact_len = text.len();
+                if node_uses_judge(&compiled, &correlation.node_id)
+                    && !self
+                        .runs
+                        .record_node_artifact_if_running(
+                            &correlation.state_machine_run_id,
+                            &correlation.node_id,
+                            correlation.attempt,
+                            text.clone(),
+                        )
+                        .await?
+                {
+                    return Ok(HandleBotTerminalEventOutcome {
+                        consumed: true,
+                        view: self.run_view(&run.run_id).await?,
+                    });
+                }
                 let evaluation = self
                     .evaluate_node_outcome(
                         &compiled,
@@ -2295,7 +2371,7 @@ fn resolve_participant_bindings(
         }
         if referenced_slots.contains(slot) && bot_ids.len() != 1 {
             return invalid_participant_binding(format!(
-                "participant slot {slot} is assigned to a node and must resolve to exactly one bot in MVP"
+                "participant slot {slot} is assigned to a node and must resolve to exactly one bot in the current runtime"
             ));
         }
         let participants = bot_ids
@@ -2830,6 +2906,7 @@ fn run_graph_view(
                 assignee_bot_id: run_node.map(|node| node.assignee_bot_id.clone()),
                 started_at: run_node.and_then(|node| node.started_at),
                 completed_at: run_node.and_then(|node| node.completed_at),
+                sub_status: run_node.and_then(node_sub_status),
             }
         })
         .collect();
@@ -2858,6 +2935,27 @@ fn run_graph_view(
         },
         nodes,
         edges,
+    })
+}
+
+fn node_uses_judge(compiled: &CompiledStateMachine, node_id: &str) -> bool {
+    match &compiled.definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine
+            .nodes
+            .get(node_id)
+            .is_some_and(|node| node.judge.is_some()),
+        _ => false,
+    }
+}
+
+fn node_sub_status(node: &StateMachineNodeRun) -> Option<StateMachineNodeSubStatus> {
+    if node.status != StateMachineNodeStatus::Running {
+        return None;
+    }
+    Some(if node.artifact_text.is_some() {
+        StateMachineNodeSubStatus::Judging
+    } else {
+        StateMachineNodeSubStatus::AwaitingResponse
     })
 }
 

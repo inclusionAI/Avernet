@@ -167,10 +167,11 @@ def _transform_agent(payload: dict[str, Any], engine: str) -> dict[str, Any] | N
         return _transform_tool(data, engine)
 
     if stream == "command_output":
-        # Only claude_code relies on command_output for the tool result. Other
-        # engines (e.g. openclaw) ALSO emit a `tool`/`phase:result` frame for
-        # the same toolCallId, so consuming command_output there would persist a
-        # duplicate, name-less tool_result. Ignore it for non-claude engines.
+        # Claude-format engines rely on command_output for the tool result.
+        # Other engines (e.g. openclaw) ALSO emit a `tool`/`phase:result` frame
+        # for the same toolCallId, so consuming command_output there would
+        # persist a duplicate, name-less tool_result. Ignore it for other
+        # engines.
         if not _is_claude_engine(engine):
             return None
         return _transform_command_output(data)
@@ -207,7 +208,11 @@ def _transform_tool(data: dict[str, Any], engine: str) -> dict[str, Any] | None:
 
 
 def _is_claude_engine(engine: str) -> bool:
-    return engine.replace("-", "_").lower() in {"claude", "claude_code"}
+    return engine.replace("-", "_").lower() in {
+        "aicoding",
+        "claude",
+        "claude_code",
+    }
 
 
 def _is_claude_tool(data: dict[str, Any], engine: str) -> bool:

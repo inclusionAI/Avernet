@@ -148,6 +148,11 @@ Constraints:
 - `state` is fixed to `final`.
 - Send only one successful final event for the same `run_id`.
 - When retrying the same callback event, keep the same `X-BCN-Event-Id`.
+- BCS returns HTTP `200` after the event passes synchronous request validation,
+  authentication, and run-correlation checks. For a state-machine run, remaining processing,
+  including Judge evaluation, continues asynchronously in the current BCS
+  process. The response does not mean that the node or run has completed, and
+  in-flight processing is not recovered if that BCS process exits.
 
 ## Error responses
 

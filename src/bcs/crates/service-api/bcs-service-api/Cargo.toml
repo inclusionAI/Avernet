@@ -20,6 +20,7 @@ strum       = { workspace = true }
 tokio       = { workspace = true }
 bcs-domain   = { workspace = true }
 bcs-protocol = { workspace = true }
+bcs-storage-api = { workspace = true }
 
 [dev-dependencies]
 bcs-test-support = { workspace = true }

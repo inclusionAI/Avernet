@@ -19,3 +19,4 @@ htmlcov/
 # Configs / runtime
 *.log
 logs/
+openspec

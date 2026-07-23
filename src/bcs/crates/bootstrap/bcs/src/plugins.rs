@@ -829,7 +829,7 @@ mod tests {
     #[test]
     fn registered_channel_provider_factory_receives_provider_context() {
         let channel_bindings: Arc<dyn ChannelBindingRepoPort> =
-            Arc::new(MemoryChannelBindingRepo::new());
+            Arc::new(MemoryChannelBindingRepo::new("test"));
         let mut provider_config = bcs_config_api::ChannelProviderConfig {
             enabled: true,
             ..Default::default()

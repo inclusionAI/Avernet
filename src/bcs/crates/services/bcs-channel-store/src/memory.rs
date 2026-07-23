@@ -10,7 +10,7 @@ use bcs_domain::{
     BindingStatus, BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap,
     ImParticipantMap, SessionScope,
 };
-use bcs_service_api::ServiceResult;
+use bcs_service_api::{ServiceError, ServiceResult};
 use bcs_service_api::port::repo::{
     ChannelBindingRepoPort, ConversationSessionRepoPort, ImParticipantRepoPort,
 };
@@ -24,20 +24,23 @@ const CHANNEL_IM_PARTICIPANTS_FILE: &str = "channel_im_participants.json";
 pub struct MemoryChannelBindingRepo {
     bindings: RwLock<Vec<ChannelBinding>>,
     data_dir: Option<PathBuf>,
+    env: String,
 }
 
 impl MemoryChannelBindingRepo {
-    pub fn new() -> Self {
+    pub fn new(env: impl Into<String>) -> Self {
         Self {
             bindings: RwLock::new(Vec::new()),
             data_dir: None,
+            env: env.into(),
         }
     }
 
-    pub fn with_data_dir(data_dir: PathBuf) -> Self {
+    pub fn with_data_dir(data_dir: PathBuf, env: impl Into<String>) -> Self {
         Self {
             bindings: RwLock::new(Vec::new()),
             data_dir: Some(data_dir),
+            env: env.into(),
         }
     }
 
@@ -70,22 +73,26 @@ impl MemoryChannelBindingRepo {
     }
 }
 
-impl Default for MemoryChannelBindingRepo {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[async_trait]
 impl ChannelBindingRepoPort for MemoryChannelBindingRepo {
     async fn create(&self, binding: ChannelBinding) -> ServiceResult<()> {
+        // 以下为安全注释COSEC：拒绝跨环境写入，避免调用方绕过 repository 的环境隔离。
+        if binding.env != self.env {
+            return Err(ServiceError::InternalError(format!(
+                "channel binding env '{}' does not match repository env '{}'",
+                binding.env, self.env
+            )));
+        }
         self.bindings.write().await.push(binding);
         self.save_to_disk().await
     }
 
     async fn get(&self, id: &str) -> ServiceResult<Option<ChannelBinding>> {
         let bindings = self.bindings.read().await;
-        Ok(bindings.iter().find(|binding| binding.id == id).cloned())
+        Ok(bindings
+            .iter()
+            .find(|binding| binding.id == id && binding.env == self.env)
+            .cloned())
     }
 
     async fn find_active_by_account(
@@ -100,12 +107,20 @@ impl ChannelBindingRepoPort for MemoryChannelBindingRepo {
                 binding.channel_type == channel_type
                     && binding.account_ref == account_ref
                     && binding.status == BindingStatus::Active
+                    && binding.env == self.env
             })
             .cloned())
     }
 
     async fn list(&self) -> ServiceResult<Vec<ChannelBinding>> {
-        Ok(self.bindings.read().await.clone())
+        Ok(self
+            .bindings
+            .read()
+            .await
+            .iter()
+            .filter(|binding| binding.env == self.env)
+            .cloned()
+            .collect())
     }
 
     async fn list_by_target(
@@ -117,7 +132,8 @@ impl ChannelBindingRepoPort for MemoryChannelBindingRepo {
         Ok(bindings
             .iter()
             .filter(|binding| {
-                binding.target == *target
+                binding.env == self.env
+                    && binding.target == *target
                     && channel_type
                         .map(|expected| binding.channel_type == expected)
                         .unwrap_or(true)
@@ -126,10 +142,25 @@ impl ChannelBindingRepoPort for MemoryChannelBindingRepo {
             .collect())
     }
 
+    async fn delete_by_target(&self, target: &BindingTarget) -> ServiceResult<u64> {
+        // 以下为安全注释COSEC：删除范围固定为 repository env，禁止调用方选择其他环境。
+        let removed = {
+            let mut bindings = self.bindings.write().await;
+            let original_len = bindings.len();
+            bindings.retain(|binding| binding.target != *target || binding.env != self.env);
+            (original_len - bindings.len()) as u64
+        };
+        self.save_to_disk().await?;
+        Ok(removed)
+    }
+
     async fn set_status(&self, id: &str, active: bool) -> ServiceResult<()> {
         {
             let mut bindings = self.bindings.write().await;
-            if let Some(binding) = bindings.iter_mut().find(|binding| binding.id == id) {
+            if let Some(binding) = bindings
+                .iter_mut()
+                .find(|binding| binding.id == id && binding.env == self.env)
+            {
                 binding.status = if active {
                     BindingStatus::Active
                 } else {
@@ -143,7 +174,10 @@ impl ChannelBindingRepoPort for MemoryChannelBindingRepo {
     async fn set_config(&self, id: &str, config: serde_json::Value) -> ServiceResult<()> {
         {
             let mut bindings = self.bindings.write().await;
-            if let Some(binding) = bindings.iter_mut().find(|binding| binding.id == id) {
+            if let Some(binding) = bindings
+                .iter_mut()
+                .find(|binding| binding.id == id && binding.env == self.env)
+            {
                 binding.config = config;
             }
         }
@@ -154,7 +188,7 @@ impl ChannelBindingRepoPort for MemoryChannelBindingRepo {
         self.bindings
             .write()
             .await
-            .retain(|binding| binding.id != id);
+            .retain(|binding| binding.id != id || binding.env != self.env);
         self.save_to_disk().await
     }
 }
@@ -448,7 +482,7 @@ mod tests {
 
     #[tokio::test]
     async fn find_active_by_account_matches_active_only() -> ServiceResult<()> {
-        let repo = MemoryChannelBindingRepo::new();
+        let repo = MemoryChannelBindingRepo::new("dev");
 
         repo.create(binding(
             "binding_active",
@@ -478,7 +512,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_removes_binding() -> ServiceResult<()> {
-        let repo = MemoryChannelBindingRepo::new();
+        let repo = MemoryChannelBindingRepo::new("dev");
 
         repo.create(binding("binding_delete", "robot_delete", BindingStatus::Active))
             .await?;
@@ -574,7 +608,7 @@ mod tests {
         let data_dir = tempfile::tempdir()?;
         let path = data_dir.path().to_path_buf();
 
-        let repo = MemoryChannelBindingRepo::with_data_dir(path.clone());
+        let repo = MemoryChannelBindingRepo::with_data_dir(path.clone(), "dev");
         repo.create(binding(
             "binding_persisted",
             "robot_persisted",
@@ -582,7 +616,7 @@ mod tests {
         ))
         .await?;
 
-        let loaded_repo = MemoryChannelBindingRepo::with_data_dir(path);
+        let loaded_repo = MemoryChannelBindingRepo::with_data_dir(path, "dev");
         loaded_repo.load_from_disk().await?;
 
         let loaded = loaded_repo.get("binding_persisted").await?;
@@ -590,6 +624,52 @@ mod tests {
             loaded.as_ref().map(|binding| binding.account_ref.as_str()),
             Some("robot_persisted")
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn binding_repo_isolates_environment_reads_and_writes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let data_dir = tempfile::tempdir()?;
+        let path = data_dir.path().to_path_buf();
+
+        let pre_repo = MemoryChannelBindingRepo::with_data_dir(path.clone(), "pre");
+        let mut pre_binding = binding("binding_pre", "robot_shared", BindingStatus::Active);
+        pre_binding.env = "pre".to_string();
+        pre_repo.create(pre_binding.clone()).await?;
+
+        let prod_repo = MemoryChannelBindingRepo::with_data_dir(path.clone(), "prod");
+        prod_repo.load_from_disk().await?;
+        let mut prod_binding = binding("binding_prod", "robot_shared", BindingStatus::Active);
+        prod_binding.env = "prod".to_string();
+        prod_repo.create(prod_binding.clone()).await?;
+
+        assert_eq!(prod_repo.list().await?, vec![prod_binding.clone()]);
+        assert_eq!(prod_repo.get("binding_pre").await?, None);
+        prod_repo.set_status("binding_pre", false).await?;
+        prod_repo
+            .set_config("binding_pre", serde_json::json!({"changed": true}))
+            .await?;
+        prod_repo.delete("binding_pre").await?;
+        assert_eq!(prod_repo.delete_by_target(&prod_binding.target).await?, 1);
+
+        let reloaded_pre = MemoryChannelBindingRepo::with_data_dir(path, "pre");
+        reloaded_pre.load_from_disk().await?;
+        assert_eq!(reloaded_pre.list().await?, vec![pre_binding]);
+        assert_eq!(reloaded_pre.get("binding_prod").await?, None);
+
+        let mut mismatched = binding(
+            "binding_mismatched",
+            "robot_mismatched",
+            BindingStatus::Active,
+        );
+        mismatched.env = "prod".to_string();
+        let error = reloaded_pre
+            .create(mismatched)
+            .await
+            .expect_err("repository must reject a cross-environment write");
+        assert!(error.to_string().contains("does not match repository env"));
 
         Ok(())
     }

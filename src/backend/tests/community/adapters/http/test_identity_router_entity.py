@@ -37,9 +37,25 @@ async def test_get_entity_identity_file_value_error_maps_to_400():
     svc.get_entity_file = AsyncMock(side_effect=ValueError("bad type"))
     with pytest.raises(HTTPException) as ei:
         await r.get_entity_identity_file(
-            "staff", "u-1", "NOPE.md", user_id="op", ctx=_ctx(), identity_service=svc,
+            "staff", "u-1", "NOPE.md", user_id="u-1", ctx=_ctx(), identity_service=svc,
         )
     assert ei.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_get_entity_identity_file_rejects_spoofed_operator():
+    svc = MagicMock()
+    svc.get_entity_file = AsyncMock(return_value="RESP")
+
+    with pytest.raises(HTTPException) as ei:
+        await r.get_entity_identity_file(
+            "staff", "target", "RULES.md",
+            user_id="spoofed-user", ctx=_ctx("authenticated-user"),
+            identity_service=svc,
+        )
+
+    assert ei.value.status_code == 403
+    svc.get_entity_file.assert_not_awaited()
 
 
 @pytest.mark.asyncio

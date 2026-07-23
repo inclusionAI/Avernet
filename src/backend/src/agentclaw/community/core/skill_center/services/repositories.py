@@ -35,6 +35,16 @@ class SkillRepository(Protocol):
                     env: str | None = None) -> list[dict]:
         ...
 
+    def get_bot_local_by_name(
+        self,
+        *,
+        bot_id: str,
+        name: str,
+        user_id: str | None = None,
+    ) -> dict | None:
+        """精确查询 Bot 自有的同名 local 技能，不包含全局行。"""
+        ...
+
     def create(self, skill_data: dict) -> dict:
         ...
 

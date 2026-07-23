@@ -1,13 +1,13 @@
-# 世界杯比赛前瞻自媒体文案协同模板。
+# 世界杯比赛前瞻内容生产协作模板。
 # 这个 YAML 只描述协同策略，不存储具体 bot id。
 # 创建群时，通过 CreateGroupRequest.participant_bindings 把下面的逻辑角色绑定到实际 bot。
 
-name: 世界杯比赛前瞻自媒体文案
+name: 世界杯比赛前瞻内容生产
 
 metadata:
   description: 运营总监安排整体制作流程，内容主编整理任务简报，战术解说和赛事数据核查并发补齐内容依据，短视频编导生成口播文稿，增长运营包装发布，最后由内容主编验收交付。
   labels:
-    scenario: world_cup_preview_media_copy
+    scenario: world_cup_preview_content_production
 
 participants:
   operations_director:
@@ -17,7 +17,7 @@ participants:
 
   content_editor:
     display_name: 世界杯内容主编
-    description: 负责整理内容任务简报、把控文案主线、验收最终发布包。
+    description: 负责整理内容任务简报、把控内容主线、验收最终发布包。
     required: true
 
   tactics_analyst:
@@ -56,7 +56,7 @@ runtime:
           type: bot_binding
           binding: operations_director
         instruction: |
-          你是世界杯运营总监。请根据用户输入，明确这条世界杯比赛前瞻自媒体文案的整体制作方向。
+          你是世界杯运营总监。请根据用户输入，明确本次世界杯比赛前瞻内容生产的整体制作方向。
 
           请输出：
           1. 比赛主题、目标受众、发布平台、目标时长和内容调性。
@@ -80,12 +80,12 @@ runtime:
 
           简报必须包含：
           1. 这场比赛最适合普通观众理解的核心看点。
-          2. 文案主线、开场钩子方向和结尾互动方向。
+          2. 内容主线、开场钩子方向和结尾互动方向。
           3. 战术解说需要重点分析的问题。
           4. 赛事数据核查需要重点确认的事实。
           5. 给短视频编导和增长运营的交付标准。
 
-          请只输出任务简报，不要直接写最终文案。
+          请只输出任务简报，不要直接写最终内容。
         transitions:
           complete:
             targets:
@@ -119,7 +119,7 @@ runtime:
           type: bot_binding
           binding: fact_researcher
         instruction: |
-          你是世界杯赛事数据核查。请基于内容任务简报，核验这条前瞻文案会用到的事实和数据口径。
+          你是世界杯赛事数据核查。请基于内容任务简报，核验这次前瞻内容会用到的事实和数据口径。
 
           请输出：
           1. 比赛轮次、对阵双方、时间、阶段和背景信息。
@@ -184,7 +184,7 @@ runtime:
           type: bot_binding
           binding: content_editor
         instruction: |
-          你是世界杯内容主编。请综合上游所有结果，验收并交付最终的世界杯比赛前瞻自媒体发布包。
+          你是世界杯内容主编。请综合上游所有结果，验收并交付最终的世界杯比赛前瞻内容发布包。
 
           最终发布包必须包含：
           1. 面向用户可直接使用的短视频口播稿。

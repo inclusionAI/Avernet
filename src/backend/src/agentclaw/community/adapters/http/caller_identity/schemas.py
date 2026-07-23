@@ -34,12 +34,12 @@ class CallerContextQuery(BaseModel):
 
 
 class UpdateMcpCallTypeRequest(BaseModel):
-    """Owner-controlled draft update with an exact opaque lock epoch."""
+    """Owner-controlled draft update with an optional collaboration lock epoch."""
 
     model_config = ConfigDict(extra="forbid")
 
     call_type: McpCallType
-    lock_epoch: Annotated[int, Field(gt=0, strict=True)]
+    lock_epoch: Annotated[int | None, Field(gt=0, strict=True)] = None
 
 
 class UpdateMcpCallTypeQuery(BaseModel):

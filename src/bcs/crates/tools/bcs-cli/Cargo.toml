@@ -22,7 +22,6 @@ anyhow    = { workspace = true }
 dirs = { workspace = true }
 
 # Serialization
-base64     = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
 
@@ -35,6 +34,10 @@ tracing-subscriber = { workspace = true }
 
 # HTTP client
 reqwest = { workspace = true }
+
+# Async utilities
+futures = { workspace = true }
+tokio-util = { workspace = true, features = ["io"] }
 
 # URL encoding
 urlencoding = "2"

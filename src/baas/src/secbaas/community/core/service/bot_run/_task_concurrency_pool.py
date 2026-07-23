@@ -93,7 +93,7 @@ class TaskConcurrencySlot:
         return self._key
 
     async def run(
-        self, coro: Coroutine[Any, Any, _T], timeout: int | None = None
+        self, coro: Coroutine[Any, Any, _T], timeout: float | None = None
     ) -> _T:
         """在 slot 内执行协程，超时自动取消并释放 slot。
 

@@ -428,6 +428,106 @@ async fn start_run_fails_and_marks_node_failed_when_delivery_returns_not_deliver
 }
 
 #[tokio::test]
+async fn message_less_final_fails_attempt_and_schedules_retry() {
+    let group = Arc::new(GroupStore::new());
+    group.upsert(test_group()).await.expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let frontend_delivery = Arc::new(RecordingFrontendDelivery::default());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        group,
+        sessions,
+        delivery.clone(),
+        noop_judge(),
+    )
+    .with_frontend_delivery(frontend_delivery.clone());
+
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(single_node_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"question": "empty final should retry"}),
+            caller_id: None,
+        })
+        .await
+        .expect("start run");
+    let first_delivery_run_id = delivery.commands.lock().await[0].run_id.clone();
+
+    let tool_event = runtime
+        .handle_bot_terminal_event(bcs_service_api::HandleBotTerminalEventCommand {
+            bot_id: "driver-bot".to_string(),
+            run_id: first_delivery_run_id.clone(),
+            event_type: "agent".to_string(),
+            event_payload: json!({
+                "run_id": first_delivery_run_id.clone(),
+                "stream": "tool",
+                "data": {
+                    "name": "lookup",
+                    "phase": "result",
+                    "toolCallId": "tool-1",
+                },
+            }),
+            state: ChatEventState::ToolCallEnd,
+            bcs_session_id: Some(started.view.run.session_id.clone()),
+        })
+        .await
+        .expect("handle tool event");
+    assert!(tool_event.consumed);
+
+    let handled = runtime
+        .handle_bot_terminal_event(bcs_service_api::HandleBotTerminalEventCommand {
+            bot_id: "driver-bot".to_string(),
+            run_id: first_delivery_run_id,
+            event_type: "chat.event".to_string(),
+            event_payload: json!({"state": "final"}),
+            state: ChatEventState::Final,
+            bcs_session_id: Some(started.view.run.session_id.clone()),
+        })
+        .await
+        .expect("message-less final should enter retry flow");
+
+    assert!(handled.consumed);
+    let view = handled.view.expect("run view after retry scheduling");
+    assert_eq!(view.run.status, StateMachineRunStatus::Running);
+    assert_eq!(view.nodes[0].status, StateMachineNodeStatus::Running);
+    assert_eq!(view.nodes[0].attempt, 1);
+    assert_eq!(delivery.commands.lock().await.len(), 2);
+
+    let frontend_commands = frontend_delivery.commands.lock().await;
+    assert_eq!(frontend_commands.len(), 3);
+    let tool_event: Value =
+        serde_json::from_str(&frontend_commands[1].event_json).expect("tool event json");
+    assert_eq!(tool_event["event"], "agent");
+    assert_eq!(tool_event["payload"]["stream"], "tool");
+    assert_eq!(tool_event["payload"]["data"]["phase"], "result");
+    let final_event: Value =
+        serde_json::from_str(&frontend_commands[2].event_json).expect("empty final event json");
+    assert_eq!(final_event["event"], "chat");
+    assert_eq!(final_event["payload"]["state"], "final");
+    assert!(final_event["payload"].get("message").is_none());
+    assert!(final_event["payload"].get("stop_reason").is_none());
+
+    let retry_events = CollaborationEventRepoPort::list_events_by_run_node_and_type(
+        &*store,
+        &started.view.run.run_id,
+        "answer",
+        "state_machine.node.retry_scheduled",
+    )
+    .await
+    .expect("list retry events");
+    assert_eq!(retry_events.len(), 1);
+    assert_eq!(retry_events[0].payload["reason"], "bot completed without visible output");
+}
+
+#[tokio::test]
 async fn state_machine_completion_dispatches_service_callback() {
     let group = Arc::new(GroupStore::new());
     let mut seeded_group = test_group();
@@ -926,7 +1026,7 @@ async fn start_run_uses_group_participant_bindings_for_template_definition() {
 }
 
 #[tokio::test]
-async fn start_run_rejects_multi_bot_slot_with_single_assignee_in_mvp() {
+async fn start_run_rejects_multi_bot_slot_with_current_single_assignee_runtime() {
     let group = Arc::new(GroupStore::new());
     let mut seeded_group = test_group();
     seeded_group.participants.push(Participant {
@@ -982,7 +1082,7 @@ async fn start_run_rejects_multi_bot_slot_with_single_assignee_in_mvp() {
             caller_id: None,
         })
         .await
-        .expect_err("multi bot slot is not supported by single assignee MVP");
+        .expect_err("multi bot slot is not supported by the current single-assignee runtime");
 
     assert!(error.to_string().contains("exactly one bot"));
 }
@@ -1928,6 +2028,9 @@ runtime:
           type: bot_binding
           binding: driver
         instruction: Review revised answer.
+        transitions:
+          complete:
+            targets: [publish]
 "#
     .to_string()
 }

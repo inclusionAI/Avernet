@@ -61,6 +61,10 @@ dev = [
     "types-pyyaml>=6.0.12.20260508",
     "pytest-cov>=7.1.0",
     "coverage>=7.6.0",
+    "pytestarch>=4.0.0,<5.0.0",
+    "httpx2>=2.7.0",
+    "greenlet>=3.5.3",
+    "basedpyright>=1.39.9",
 ]
 
 # --- 构建后端定义 ---
@@ -112,6 +116,8 @@ asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
 markers = [
     "integration: marks tests as integration tests",
+    "e2e: marks tests as end-to-end tests (against separately started app)",
+    "baseline: marks tests as baseline / smoke tests",
 ]
 
 # --- 静态类型检查 Pyright 配置 ---

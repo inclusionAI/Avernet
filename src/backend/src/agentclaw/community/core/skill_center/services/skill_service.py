@@ -665,7 +665,7 @@ class SkillService:
                         link_name = self.get_link_name(relative_path)
                     else:
                         skill_id = skill_path[8:]
-                        link_name = skill_id
+                        link_name = Path(skill_id).name
                     results["success"].append({
                         "id": skill_id,
                         "link_name": link_name,
@@ -1795,7 +1795,24 @@ class SkillService:
 
         # ===== 通过 DeviceFileSystem 写入文件（自动适配 local/arca/teclaw） =====
         device_fs = self._device_fs_factory(bolt_id, user_id)
-        skill_dir = self.local_dir / skill_name
+        # POOL_ACTIVE 后 DB locator 已经是 Pool canonical 绝对路径。重传同名
+        # 本地技能时必须继续使用该 locator；否则会写到 Legacy bridge 后又以
+        # Legacy locator 新建一条重复记录。
+        existing_skill = self._skill_repo.get_bot_local_by_name(
+            bot_id=bolt_id or "default",
+            name=skill_name,
+            user_id=user_id,
+        )
+        existing_locator = (
+            str(existing_skill["git_path"])[len("local://") :]
+            if existing_skill is not None
+            else ""
+        )
+        skill_dir = (
+            Path(existing_locator)
+            if existing_locator.startswith("/")
+            else self.local_dir / skill_name
+        )
         skill_dir_str = str(skill_dir)
         # The DB ``git_path`` keeps ``skill_dir_str`` (logical for teclaw, host for
         # arca); the device-fs delete/write use the adapter-expanded engine path
@@ -1822,8 +1839,6 @@ class SkillService:
 
             # Check if skill with same path already exists (区分 Bot)
             skill_path = f"local://{skill_dir_str}"
-            existing_skill = self.get_skill_by_path(skill_path, bolt_id=bolt_id, user_id=user_id)
-
             if existing_skill:
                 # Update existing skill metadata using repository
                 update_data = {

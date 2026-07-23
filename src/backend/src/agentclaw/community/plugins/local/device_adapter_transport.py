@@ -107,6 +107,22 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
         *,
         timeout: float | None = None,
     ) -> dict[str, Any]:
+        if path == "/api/skills/layout/probe":
+            contract_version = (body or {}).get(
+                "layout_contract_version", "skills-pool-p3-v1"
+            )
+            return {
+                "success": True,
+                "data": {
+                    "status": "NOT_CAPABLE",
+                    "engine": (body or {}).get("engine", "openclaw"),
+                    "layout_contract_version": contract_version,
+                    "preparation_id": None,
+                    "evidence": {
+                        "reason": "local_simulator_has_no_persistent_pool_layout"
+                    },
+                },
+            }
         store = self._store(conn_info)
         # Segments after ``/api/cron``: [] | [status] | [running] |
         # [task_id] | [task_id, run|runs]

@@ -26,10 +26,12 @@ pub mod register;
 pub mod registry;
 pub mod routing;
 pub mod session;
+pub mod session_file;
+pub mod share;
 pub mod system_message;
 pub mod task_ledger;
 
-pub use actor::{ActorKind, ActorStatus, EnsureHumanResult, EnsureOwnerEdgesResult, RelationEdge};
+pub use actor::{ActorKind, ActorRef, ActorStatus, EnsureHumanResult, EnsureOwnerEdgesResult, RelationEdge};
 pub use attachment::{Attachment, AttachmentType};
 pub use channel::{
     BindingStatus, BindingTarget, GroupChatScope, ChannelBinding, ChannelConfig, ChannelType,
@@ -91,3 +93,5 @@ pub use system_message::{
 pub use task_ledger::LedgerSummary;
 pub use invite::{InviteTokenPayload, InviteTokenError, encode as invite_token_encode, decode_and_verify as invite_token_decode_and_verify, decode_and_verify_no_expiry as invite_token_decode_no_expiry};
 pub use register::{RegisterTokenPayload, RegisterTokenError, encode as register_token_encode, decode_and_verify as register_token_decode_and_verify};
+pub use session_file::{FileStatus, SessionFile, new_file_id};
+pub use share::{ShareTokenError, ShareTokenPayload, share_token_decode_and_verify, share_token_encode};

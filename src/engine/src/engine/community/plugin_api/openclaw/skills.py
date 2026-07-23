@@ -14,7 +14,24 @@ raises ``CapabilityNotSupportedError`` directly for each.
 """
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, TypedDict
+
+
+class PoolLayoutActivationPortResult(TypedDict):
+    """Plugin API 返回的版本化 Pool 激活结果。"""
+
+    committed: bool
+    status: Literal[
+        "COMMITTED",
+        "ALREADY_COMMITTED",
+        "ACTIVE_ENTRY_CONFLICT",
+        "DATA_INCONSISTENT",
+        "INVALID",
+        "TRANSIENT_ERROR",
+        "POST_CUTOVER_SYNC_PENDING",
+        "NOT_ATOMIC",
+    ]
+    evidence: dict[str, Any]
 
 
 class OpenClawSkillsPort(Protocol):
@@ -85,5 +102,29 @@ class OpenClawSkillsPort(Protocol):
         """
         ...
 
+    async def activate_pool_layout(
+        self, params: dict[str, Any]
+    ) -> PoolLayoutActivationPortResult:
+        """核对登记事实、同步完整 local 并原子提交永久兼容 bridge。"""
+        ...
 
-__all__ = ["OpenClawSkillsPort"]
+    async def probe_pool_layout(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """核验当前 OpenClaw Pool layout。"""
+        ...
+
+    async def publish_pool_mappings(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """发布目标 Pool layout 的完整受管 mapping。"""
+        ...
+
+    async def verify_pool_mappings(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """验证受管入口精确解析到目标 Pool source。"""
+        ...
+
+
+__all__ = ["OpenClawSkillsPort", "PoolLayoutActivationPortResult"]

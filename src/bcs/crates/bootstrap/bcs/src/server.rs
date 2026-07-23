@@ -85,7 +85,8 @@ use bcs_security_gateway_api::SecurityGatewayPort;
 use bcs_service_api::lifecycle::ServiceLifecycle;
 use bcs_service_api::{
     A2aChatRunService, A2aChatService, BotDeliveryPort, BotDeliveryTarget, BotRegistryCoreService,
-    BotMetricsSnapshotPort, BotRunContextPort, BotTerminalObserverPort, ChannelService,
+    BotMetricsSnapshotPort, BotRunContextPort, BotTerminalObserverPort, ChannelBindingCleanupPort,
+    ChannelService,
     CollaborationTemplateService,
     DirectChatClientKind, DirectChatRunEvent, DirectChatRunLifecycleHook,
     DirectChatRunReason, DirectChatRunSnapshotPort, FrontendDeliveryPort, GroupCoreService,
@@ -139,6 +140,115 @@ fn default_bootstrap_secret_service() -> Arc<dyn bcs_service_api::SecretService>
     Arc::new(DefaultSecretService::new(Arc::new(NoopSecretAccess)))
 }
 
+/// Build the session-file workspace service for the bootstrap `Services` bundle.
+///
+/// `db` selects the repo backend:
+/// - `Some(db)` → `MySqlSessionFileStore::with_flavor(db, env, db_flavor)`; the
+///   flavor MUST accompany `db` (it tells the store which SQL dialect to use
+///   when projecting `created_at`/`updated_at` from `gmt_create`/`gmt_modified`).
+/// - `None` → `MemorySessionFileRepo::new()` (standalone/dev mode).
+///
+/// The `env` passed here MUST match the env the repo writes into the `env`
+/// column of `bcs_session_files`; the service uses the same env to scope
+/// object keys via [`bcs_session_file::authz::derive_key`].
+///
+/// Share token secret is independent of `invite.token_secret`: if
+/// `session_files.share.token_secret` is unset, bootstrap logs a warning and
+/// generates a random 32-byte secret that does NOT survive a restart (prod
+/// must set it explicitly). Mirrors the invite secret fallback contract.
+fn build_session_files_service(
+    config: &BcsConfig,
+    env: String,
+    db: Option<Arc<dyn bcs_db_api::DbPlugin>>,
+    db_flavor: Option<DbSqlFlavor>,
+    session_repo: Arc<dyn SessionRepoPort>,
+) -> Arc<dyn bcs_service_api::application::session_files::SessionFileService> {
+    use bcs_service_api::port::repo::SessionFileRepoPort;
+    use bcs_session_file::{SessionFileServiceConfig, SessionFileServiceImpl};
+    use bcs_session_file_store::{MemorySessionFileRepo, MySqlSessionFileStore};
+    use bcs_storage_api::StoragePlugin;
+    use bcs_storage_local::{LocalStorageConfig, LocalStoragePlugin};
+
+    // Resolve data dir: explicit config > {bots_base_dir}/session-files.
+    let data_dir = std::path::PathBuf::from(
+        config
+            .session_files
+            .data_dir
+            .clone()
+            .unwrap_or_else(|| format!("{}/session-files", config.bots_base_dir.display())),
+    );
+    let _ = std::fs::create_dir_all(&data_dir);
+
+    let storage: Arc<dyn StoragePlugin> = Arc::new(LocalStoragePlugin::new(LocalStorageConfig {
+        data_dir,
+        max_object_size: config.session_files.max_file_size,
+    }));
+
+    let file_repo: Arc<dyn SessionFileRepoPort> = match db {
+        Some(db) => {
+            let flavor = db_flavor.expect("`db` present implies `db_flavor` present");
+            Arc::new(MySqlSessionFileStore::with_flavor(db, env.clone(), flavor))
+        }
+        None => Arc::new(MemorySessionFileRepo::new()),
+    };
+
+    let share_secret = config
+        .session_files
+        .share
+        .token_secret
+        .as_deref()
+        .map(|s| s.as_bytes().to_vec())
+        .unwrap_or_else(|| {
+            warn!(
+                "session_files.share.token_secret not configured — generating random \
+                 32-byte secret (share tokens will not survive restart)"
+            );
+            (0..32).map(|_| fastrand::u8(..)).collect()
+        });
+
+    // Prefer the configured external endpoint, then bind:port, mirroring
+    // `proposal_base_url` above.
+    let bcs_base_url = config
+        .bcs_endpoint
+        .clone()
+        .unwrap_or_else(|| format!("http://{}:{}", config.bind, config.port));
+
+    Arc::new(SessionFileServiceImpl::new(SessionFileServiceConfig {
+        storage,
+        repo: file_repo,
+        session_repo,
+        env,
+        max_size: config.session_files.max_file_size,
+        multipart_threshold: config.session_files.multipart_threshold,
+        bcs_base_url,
+        share_secret,
+        share_default_ttl: config.session_files.share.default_ttl_seconds,
+        share_base_url: config.session_files.share.share_base_url.clone(),
+    }))
+}
+
+/// Spawn the Pending-sweep background task for the session-file workspace.
+///
+/// Mirrors the timeout/token-expiry scanner pattern: a tokio interval task
+/// that calls `sweep_expired_pending()` every 300s, logs results, and
+/// swallows errors so a transient backend hiccup never tears down the loop.
+fn spawn_session_files_pending_sweep(
+    service: Arc<dyn bcs_service_api::application::session_files::SessionFileService>,
+) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        interval.tick().await; // consume the immediate first tick
+        loop {
+            interval.tick().await;
+            match service.sweep_expired_pending().await {
+                Ok(n) if n > 0 => info!(swept = n, "session file pending sweep"),
+                Ok(_) => {}
+                Err(e) => warn!(error = ?e, "session file pending sweep error"),
+            }
+        }
+    });
+}
+
 fn build_file_collaboration_template_service_with_judge_templates(
     config: &BcsConfig,
     judge_templates_enabled: bool,
@@ -156,6 +266,34 @@ fn build_file_collaboration_template_service_with_judge_templates(
 }
 
 type ChannelSlot = Arc<OnceLock<Arc<dyn ChannelService>>>;
+
+#[derive(Default)]
+struct DeferredChannelBindingCleanupPort {
+    service: OnceLock<Arc<dyn ChannelBindingCleanupPort>>,
+}
+
+impl DeferredChannelBindingCleanupPort {
+    fn set(&self, service: Arc<dyn ChannelBindingCleanupPort>) {
+        if self.service.set(service).is_err() {
+            warn!("channel binding cleanup port already initialized");
+        }
+    }
+}
+
+#[async_trait]
+impl ChannelBindingCleanupPort for DeferredChannelBindingCleanupPort {
+    async fn delete_bindings_for_group(
+        &self,
+        group_id: &str,
+    ) -> bcs_service_api::ServiceResult<u64> {
+        let service = self.service.get().ok_or_else(|| {
+            bcs_service_api::ServiceError::InternalError(
+                "channel binding cleanup port is not initialized".to_string(),
+            )
+        })?;
+        service.delete_bindings_for_group(group_id).await
+    }
+}
 
 type ChannelRepos = (
     Arc<dyn ChannelBindingRepoPort>,
@@ -256,14 +394,15 @@ fn channel_bridge_enabled(config: &BcsConfig) -> bool {
 }
 
 fn memory_channel_repos(data_dir: Option<PathBuf>) -> ChannelRepos {
+    let env = bcs_config::resolve_env_str();
     match data_dir {
         Some(dir) => (
-            Arc::new(MemoryChannelBindingRepo::with_data_dir(dir.clone())),
+            Arc::new(MemoryChannelBindingRepo::with_data_dir(dir.clone(), env)),
             Arc::new(MemoryConversationSessionRepo::with_data_dir(dir.clone())),
             Arc::new(MemoryImParticipantRepo::with_data_dir(dir)),
         ),
         None => (
-            Arc::new(MemoryChannelBindingRepo::new()),
+            Arc::new(MemoryChannelBindingRepo::new(env)),
             Arc::new(MemoryConversationSessionRepo::new()),
             Arc::new(MemoryImParticipantRepo::new()),
         ),
@@ -278,11 +417,12 @@ async fn channel_repos_with_storage(
             "channel storage: DbPlugin handle unavailable".to_string(),
         )
     })?;
+    let env = bcs_config::resolve_env_str();
     match infrastructure_plugins.db_kind() {
         DbPluginKind::LocalSqlite => {
             info!("Initializing SQLite channel storage");
             Ok((
-                Arc::new(DbChannelBindingStore::sqlite(db_plugin.clone())),
+                Arc::new(DbChannelBindingStore::sqlite(db_plugin.clone(), env)),
                 Arc::new(DbConversationSessionStore::sqlite(db_plugin.clone())),
                 Arc::new(DbImParticipantStore::sqlite(db_plugin)),
             ))
@@ -290,7 +430,7 @@ async fn channel_repos_with_storage(
         DbPluginKind::Mysql => {
             info!("Initializing MySQL channel storage");
             Ok((
-                Arc::new(DbChannelBindingStore::mysql(db_plugin.clone())),
+                Arc::new(DbChannelBindingStore::mysql(db_plugin.clone(), env)),
                 Arc::new(DbConversationSessionStore::mysql(db_plugin.clone())),
                 Arc::new(DbImParticipantStore::mysql(db_plugin)),
             ))
@@ -307,6 +447,7 @@ async fn channel_repos_with_storage(
 fn build_channel_runtime(
     config: &BcsConfig,
     channel_slot: ChannelSlot,
+    channel_binding_cleanup: Arc<DeferredChannelBindingCleanupPort>,
     channel_repos: ChannelRepos,
     session_repo: Arc<dyn SessionRepoPort>,
     message_flow: Arc<dyn MessageFlowService>,
@@ -317,6 +458,9 @@ fn build_channel_runtime(
 ) -> Result<ChannelRuntime> {
     if !channel_bridge_enabled(config) {
         info!("channel bridge disabled");
+        channel_binding_cleanup.set(Arc::new(
+            bcs_service_api::NoopChannelBindingCleanupPort,
+        ));
         return Ok(ChannelRuntime {
             service: Arc::new(DisabledChannelService),
             http_ingress: None,
@@ -333,7 +477,7 @@ fn build_channel_runtime(
         ChannelProviderRegistry::new(providers.clone())
             .map_err(|error| crate::BcsError::InvalidConfig(error.to_string()))?,
     );
-    let channel_service: Arc<dyn ChannelService> = Arc::new(BcsChannelService::new(
+    let channel_service_impl = Arc::new(BcsChannelService::new(
         channel_bindings,
         channel_conversations,
         channel_im_participants,
@@ -348,6 +492,8 @@ fn build_channel_runtime(
         Arc::new(now_ms),
         Arc::new(|| uuid::Uuid::new_v4().to_string()),
     ));
+    let channel_service: Arc<dyn ChannelService> = channel_service_impl.clone();
+    channel_binding_cleanup.set(channel_service_impl);
     if channel_slot.set(channel_service.clone()).is_err() {
         warn!("message-flow channel slot already initialized");
     }
@@ -1001,6 +1147,7 @@ impl Default for BcsServerState {
                 outbound_url_guard.clone(),
             )),
         );
+        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let group_management_impl = Arc::new(GroupManagement::new(
             sessions.clone(),
             bot_registry.clone(),
@@ -1015,6 +1162,7 @@ impl Default for BcsServerState {
             session_management.clone(),
             system_message.clone(),
         )
+        .with_channel_binding_cleanup(channel_binding_cleanup.clone())
         .with_outbound_url_guard(outbound_url_guard.clone())
         .with_bot_runtime(bot_use_cases.clone()));
         let group_management = maybe_wrap_group_management(&config, group_management_impl.clone());
@@ -1057,6 +1205,7 @@ impl Default for BcsServerState {
         let channel_runtime = build_channel_runtime(
             &config,
             channel_slot,
+            channel_binding_cleanup,
             memory_channel_repos(None),
             session_repo.clone(),
             message_flow.clone(),
@@ -1110,6 +1259,13 @@ impl Default for BcsServerState {
             .session_management(session_management.clone())
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
+            .session_files(build_session_files_service(
+                &config,
+                crate::env::resolve_env(),
+                None,
+                None,
+                session_repo.clone(),
+            ))
             .build()
             .expect("services must be fully wired");
 
@@ -1133,6 +1289,9 @@ impl Default for BcsServerState {
             services.bot_runtime.clone(),
             crate::token_expiry_scanner::DEFAULT_SCAN_INTERVAL,
         );
+
+        // Start Pending-sweep for session-file workspace
+        spawn_session_files_pending_sweep(services.session_files.clone());
 
         let (leader_election, lifecycle) = create_standalone_leader_lifecycle();
         register_channel_lifecycles(&lifecycle, &channel_runtime.lifecycles);
@@ -1374,6 +1533,7 @@ fn build_use_case_bundle(
     frontend_delivery: Arc<dyn FrontendDeliveryPort>,
     group_message_history: Arc<dyn GroupMessageHistoryService>,
     session_management: Arc<dyn SessionManagementService>,
+    channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
     bot_run_context: Arc<dyn BotRunContextPort>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     message_repo: Option<Arc<dyn MessageRepoPort>>,
@@ -1438,6 +1598,7 @@ fn build_use_case_bundle(
         session_management.clone(),
         system_message.clone(),
     )
+    .with_channel_binding_cleanup(channel_binding_cleanup)
     .with_outbound_url_guard(callback_url_guard.clone())
     .with_bot_runtime(bot_use_cases.clone()));
     let proposal_base_url = config
@@ -2115,6 +2276,7 @@ impl BcsServer {
         let a2a_chat_runs: Arc<dyn A2aChatRunService> = a2a_chat_impl.clone();
         let a2a_chat_runs = maybe_wrap_a2a_chat_runs(&config, a2a_chat_runs);
         let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl;
+        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let use_cases = build_use_case_bundle(
             &config,
             bot_registry.clone(),
@@ -2132,6 +2294,7 @@ impl BcsServer {
             frontend_delivery.clone(),
             group_message_history.clone(),
             session_management.clone(),
+            channel_binding_cleanup.clone(),
             bot_run_context.clone(),
             user_directory.clone(),
             Some(message_repo.clone()),
@@ -2189,6 +2352,7 @@ impl BcsServer {
         let channel_runtime = build_channel_runtime(
             &config,
             channel_slot,
+            channel_binding_cleanup,
             memory_channel_repos(None),
             session_repo.clone(),
             message_flow.clone(),
@@ -2246,6 +2410,13 @@ impl BcsServer {
             .session_management(session_management.clone())
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
+            .session_files(build_session_files_service(
+                &config,
+                crate::env::resolve_env(),
+                None,
+                None,
+                session_repo.clone(),
+            ))
             .build()
             .expect("services must be fully wired");
 
@@ -2262,6 +2433,9 @@ impl BcsServer {
             crate::state_machine_timeout_scanner::DEFAULT_BATCH_SIZE,
             crate::state_machine_timeout_scanner::DEFAULT_TIMEOUT_GRACE_MS,
         );
+
+        // Start Pending-sweep for session-file workspace
+        spawn_session_files_pending_sweep(services.session_files.clone());
 
         let (leader_election, lifecycle) = create_standalone_leader_lifecycle();
         register_late_lifecycles(&lifecycle, fuse_client.as_ref());
@@ -2632,6 +2806,7 @@ impl BcsServer {
         let a2a_chat_runs: Arc<dyn A2aChatRunService> = a2a_chat_impl.clone();
         let a2a_chat_runs = maybe_wrap_a2a_chat_runs(&config, a2a_chat_runs);
         let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl;
+        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let use_cases = build_use_case_bundle(
             &config,
             bot_registry.clone(),
@@ -2649,6 +2824,7 @@ impl BcsServer {
             frontend_delivery.clone(),
             group_message_history.clone(),
             session_management.clone(),
+            channel_binding_cleanup.clone(),
             bot_run_context.clone(),
             user_directory.clone(),
             Some(message_repo.clone()),
@@ -2723,6 +2899,7 @@ impl BcsServer {
         let channel_runtime = build_channel_runtime(
             &config,
             channel_slot,
+            channel_binding_cleanup,
             channel_repos,
             session_repo.clone(),
             message_flow.clone(),
@@ -2784,6 +2961,13 @@ impl BcsServer {
             .session_management(session_management.clone())
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
+            .session_files(build_session_files_service(
+                &config,
+                crate::env::resolve_env(),
+                infrastructure_plugins.db(),
+                Some(db_flavor),
+                session_repo.clone(),
+            ))
             .build()
             .expect("services must be fully wired");
 
@@ -2800,6 +2984,9 @@ impl BcsServer {
             crate::state_machine_timeout_scanner::DEFAULT_BATCH_SIZE,
             crate::state_machine_timeout_scanner::DEFAULT_TIMEOUT_GRACE_MS,
         );
+
+        // Start Pending-sweep for session-file workspace
+        spawn_session_files_pending_sweep(services.session_files.clone());
 
         let auth_config = crate::auth_wiring::resolve_auth_config(
             &config.auth,
@@ -2993,7 +3180,11 @@ impl BcsServer {
                         .unwrap()
                 },
             ))
-            .layer(TraceLayer::new_for_http())
+            .layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(bcs_http::gateway_trace::BcnMakeSpan)
+                    .on_response(bcs_http::gateway_trace::BcnOnResponse),
+            )
             .layer(
                 CorsLayer::new()
                     .allow_origin(AllowOrigin::predicate(move |origin, _| {
@@ -3647,7 +3838,7 @@ mod tests {
 
         let result = build_configured_channel_providers(
             &config,
-            Arc::new(MemoryChannelBindingRepo::new()),
+            Arc::new(MemoryChannelBindingRepo::new("test")),
         );
 
         assert!(matches!(

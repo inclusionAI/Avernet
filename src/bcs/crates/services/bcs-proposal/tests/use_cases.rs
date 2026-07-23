@@ -321,6 +321,18 @@ async fn confirm_proposal_creates_initial_session_and_dispatches_session_context
         .unwrap();
 
     assert_eq!(confirmed.context_injected, 7);
+    assert_eq!(
+        confirmed.session_id,
+        format!("{}:initial", confirmed.group_id)
+    );
+    let expected_chat_url = format!(
+        "http://chat.example.test/bcn/chat/detail?id={}&bot_uuid=driver&session={}%3Ainitial",
+        confirmed.group_id, confirmed.group_id
+    );
+    assert_eq!(
+        confirmed.chat_url.as_deref(),
+        Some(expected_chat_url.as_str())
+    );
     let commands = fixture.session_management.commands.lock().await;
     assert_eq!(commands.len(), 1);
     let command = &commands[0];

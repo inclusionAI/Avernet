@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING, Any
 from secbaas.community.api.device_manage import CommandResult, DeviceCreateConfig
 
 if TYPE_CHECKING:
-    from secbaas.community.api.device_manage import DeviceInfo, OutBoundOperationRule
+    from secbaas.community.api.device_manage import (
+        DeviceInfo,
+        OutBoundOperationRule,
+        OutBoundOperationRuleUpdatedMode,
+    )
 
 from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionInfo
 from secbaas.community.api.device_manage import (
@@ -213,6 +217,7 @@ class SigmaPaasService(PaasService):
         self,
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
     ) -> bool:
         """STUB: Update outbound operation rule for Sigma device.
 

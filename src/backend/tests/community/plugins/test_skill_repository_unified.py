@@ -151,6 +151,39 @@ def test_skill_list_and_published_center(skills):
     assert [c["name"] for c in centers] == ["c"]
 
 
+def test_get_bot_local_by_name_never_falls_back_to_global(skills):
+    skills.create(
+        {
+            "name": "same",
+            "git_path": "local:///global/same",
+            "bolt_id": None,
+            "user_id": "owner",
+        }
+    )
+    bot_owned = skills.create(
+        {
+            "name": "same",
+            "git_path": "local:///bot/same",
+            "bolt_id": "bot-x",
+            "user_id": "owner",
+        }
+    )
+
+    assert skills.get_bot_local_by_name(
+        bot_id="bot-x",
+        name="same",
+        user_id="owner",
+    )["id"] == bot_owned["id"]
+    assert (
+        skills.get_bot_local_by_name(
+            bot_id="bot-y",
+            name="same",
+            user_id="owner",
+        )
+        is None
+    )
+
+
 def test_skill_update_risk_and_mcp(skills):
     sid = skills.create({"name": "r"})["id"]
     assert skills.update_risk_tags(sid, ["high"])["risk_tags"] == [
@@ -185,6 +218,104 @@ def test_delete_by_bot_id(skills):
     skills.create({"name": "b2", "bolt_id": "bot-x"})
     assert skills.delete_by_bot_id("bot-x") == 2
     assert skills.list_skills(bolt_id="bot-x") == []
+
+
+def test_skills_pool_asset_views_are_exactly_bot_scoped(skills, sets):
+    local = skills.create(
+        {
+            "name": "local-a",
+            "git_path": "local:///legacy/local-a",
+            "bolt_id": "bot-x",
+        }
+    )
+    repo = skills.create(
+        {
+            "name": "repo-a",
+            "git_path": "git://business/repo-a",
+            "bolt_id": "bot-x",
+        }
+    )
+    skills.create(
+        {
+            "name": "other-local",
+            "git_path": "local:///legacy/other-local",
+            "bolt_id": "bot-y",
+        }
+    )
+    skill_set = sets.create(
+        {
+            "name": "active",
+            "bolt_id": "bot-x",
+            "user_id": "owner-x",
+            "engine_type": "openclaw",
+            "is_active": True,
+        }
+    )
+    sets.add_skill_to_set(skill_set["id"], local["id"])
+    sets.add_skill_to_set(skill_set["id"], repo["id"])
+
+    local_assets = skills.list_bot_local_assets(
+        env=local["env"],
+        bot_id="bot-x",
+    )
+    active_assets = skills.list_bot_active_assets(
+        env=local["env"],
+        bot_id="bot-x",
+        user_id="owner-x",
+        engine="openclaw",
+    )
+
+    assert [(asset.skill_id, asset.name) for asset in local_assets] == [
+        (int(local["id"]), "local-a")
+    ]
+    assert {asset.git_path for asset in active_assets} == {
+        "local:///legacy/local-a",
+        "git://business/repo-a",
+    }
+
+
+def test_skills_pool_active_assets_include_default_set_and_exclusions(
+    skills, sets
+):
+    default_enabled = skills.create(
+        {
+            "name": "default-enabled",
+            "git_path": "git://defaults/enabled",
+        }
+    )
+    default_excluded = skills.create(
+        {
+            "name": "default-excluded",
+            "git_path": "git://defaults/excluded",
+        }
+    )
+    default_set = sets.create(
+        {
+            "name": "OpenClaw defaults",
+            "is_default": True,
+            "is_active": True,
+            "engine_type": "openclaw",
+        }
+    )
+    sets.add_skill_to_set(default_set["id"], default_enabled["id"])
+    sets.add_skill_to_set(default_set["id"], default_excluded["id"])
+    sets.add_default_skill_exclusion(
+        user_id="owner-x",
+        bot_id="bot-x",
+        skill_set_id=int(default_set["id"]),
+        skill_id=int(default_excluded["id"]),
+    )
+
+    assets = skills.list_bot_active_assets(
+        env=default_enabled["env"],
+        bot_id="bot-x",
+        user_id="owner-x",
+        engine="openclaw",
+    )
+
+    assert [asset.git_path for asset in assets] == [
+        "git://defaults/enabled"
+    ]
 
 
 # ── SkillSetRepository ──────────────────────────────────────────────

@@ -36,7 +36,7 @@ class CallerIdentityServiceProtocol(Protocol):
         server_code: str,
         call_type: McpCallType,
         actor_id: str,
-        lock_epoch: int,
+        lock_epoch: int | None = None,
         entity_id: str | None = None,
     ) -> McpCallTypeUpdateResult: ...
 
@@ -72,7 +72,16 @@ class CallerIdentityServiceProtocol(Protocol):
         stage: CallerIdentityStage,
         publish_id: int | None = None,
         entity_id: str | None = None,
+        is_test_exchange: bool = False,
     ) -> CallerIamTokenContext: ...
+
+    def authorize_iam_token_exchange(
+        self,
+        *,
+        caller_user_id: str,
+        owner_user_id: str,
+        is_test_exchange: bool,
+    ) -> None: ...
 
     def exchange_caller_identity(
         self,
@@ -88,6 +97,7 @@ class CallerIdentityServiceProtocol(Protocol):
         publish_id: int | None,
         entity_id: str | None = None,
         binding_id: int | None = None,
+        is_test_exchange: bool = False,
     ) -> None: ...
 
 

@@ -65,6 +65,7 @@ type RunContext = {
   sessionKey?: string;
   agentRunId?: string;
   finalSent?: boolean;
+  sawToolEvent: boolean;
   preparedImages?: PreparedImage[];
   terminalTimer?: ReturnType<typeof setTimeout>;
 };
@@ -590,18 +591,20 @@ function buildChatEventPayload(
   runId: string,
   bcsGroupId: string,
   state: ChatEventPayload['state'],
-  text: string,
+  text?: string,
   routeIntent?: PendingRouteIntent,
 ): ChatEventPayload {
   return {
     run_id: runId,
     bcs_group_id: bcsGroupId,
     state,
-    message: {
-      role: 'assistant',
-      content: [{ type: 'text', text }],
-      timestamp: Date.now(),
-    },
+    ...(text !== undefined ? {
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text }],
+        timestamp: Date.now(),
+      },
+    } : {}),
     ...(routeIntent ? {
       routing: {
         responders: routeIntent.responders,
@@ -768,9 +771,13 @@ function sendFinalVisibleReplyOnce(
   const deliveredText = options?.allowDeliveredTextFallback
     ? options.deliveredText?.trim() || undefined
     : undefined;
-  const combinedText = visibleText ?? deliveredText ?? NO_REPLY_TEXT;
+  const assistantText = visibleText ?? deliveredText;
+  const toolOnlyEmpty = assistantText === undefined && context.sawToolEvent;
+  const combinedText = assistantText ?? (toolOnlyEmpty ? undefined : NO_REPLY_TEXT);
 
-  if (!visibleText && !deliveredText) {
+  if (toolOnlyEmpty) {
+    log?.info?.(`[BCS] Tool activity completed without assistant text for run_id=${runId}, sending message-less final${options?.noReplyDetail ? ` ${options.noReplyDetail}` : ''}`);
+  } else if (!visibleText && !deliveredText) {
     log?.warn?.(`[BCS] No assistant agent text for run_id=${runId}, sending ${NO_REPLY_TEXT} final${options?.noReplyDetail ? ` ${options.noReplyDetail}` : ''}`);
   } else if (!visibleText && deliveredText) {
     log?.info?.(`[BCS] Using dispatcher final for non-agent run_id=${runId}`);
@@ -781,7 +788,13 @@ function sendFinalVisibleReplyOnce(
   }
 
   const routeIntent = consumeRouteIntent(runId, context.sessionKey);
-  const chatPayload = buildChatEventPayload(runId, context.groupId, 'final', combinedText, routeIntent);
+  const chatPayload = buildChatEventPayload(
+    runId,
+    context.groupId,
+    'final',
+    combinedText,
+    routeIntent,
+  );
   context.client.sendEvent('chat.event', chatPayload as unknown as Record<string, unknown>, nextSeq(context.client));
   context.finalSent = true;
 
@@ -871,7 +884,7 @@ export async function handleChatSend(
   let preparedImages: PreparedImage[] = [];
 
   // Track run context for agent event routing
-  runContexts.set(runId, { groupId: bcsGroupId, client });
+  runContexts.set(runId, { groupId: bcsGroupId, client, sawToolEvent: false });
   ensureVisibleReplyState(runId);
   armRunTerminalTimeout(runId, log);
 
@@ -2127,6 +2140,9 @@ export function initAgentEventsSubscription(log?: {
 
     const { groupId, client } = context;
     const terminalOutcome = terminalLifecycleOutcome(evt);
+    if (evt.stream === 'tool') {
+      context.sawToolEvent = true;
+    }
 
     if (!context.finalSent) {
       if (evt.stream === 'assistant') {

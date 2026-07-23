@@ -44,22 +44,26 @@ pub fn validate_definition(
         ));
     }
     if state_machine.graph_mode != StateMachineGraphMode::Acyclic {
-        return invalid("MVP only supports state_machine.graph_mode.acyclic");
+        return invalid("current runtime only supports state_machine.graph_mode.acyclic");
     }
     if state_machine.initial_node.is_some() {
-        return invalid("state_machine.initial_node is not supported in MVP");
+        return invalid("state_machine.initial_node is not supported by the current runtime");
+    }
+    if state_machine.input_schema.is_some() {
+        return invalid("state_machine.input_schema is not supported by the current runtime");
     }
     if !state_machine.variables.is_empty() {
-        return invalid("state_machine.variables is not supported in MVP");
+        return invalid("state_machine.variables is not supported by the current runtime");
     }
     if !state_machine.events.is_empty() {
-        return invalid("state_machine.events is not supported in MVP");
+        return invalid("state_machine.events is not supported by the current runtime");
     }
     if state_machine.nodes.is_empty() {
         return invalid("state_machine.nodes must not be empty");
     }
 
     let mut final_output_count = 0;
+    let mut assigned_bindings = BTreeSet::new();
     let mut upstreams: BTreeMap<String, Vec<String>> = state_machine
         .nodes
         .keys()
@@ -68,10 +72,14 @@ pub fn validate_definition(
 
     for (node_id, node) in &state_machine.nodes {
         if node.kind != StateMachineNodeKind::BotTask {
-            return invalid(format!("node {node_id} kind is not supported in MVP"));
+            return invalid(format!(
+                "node {node_id} kind is not supported by the current runtime"
+            ));
         }
         if node.action.is_some() {
-            return invalid(format!("node {node_id} action is not supported in MVP"));
+            return invalid(format!(
+                "node {node_id} action is not supported by the current runtime"
+            ));
         }
         if let Some(judge) = &node.judge {
             if judge.judge_type.as_deref().unwrap_or("llm") != "llm" {
@@ -93,8 +101,11 @@ pub fn validate_definition(
         }
         if node.output_contract.is_some() {
             return invalid(format!(
-                "node {node_id} output_contract is not supported in MVP"
+                "node {node_id} output_contract is not supported by the current runtime"
             ));
+        }
+        if node.display_name.trim().is_empty() {
+            return invalid(format!("node {node_id} display_name must not be empty"));
         }
         if node.instruction.as_deref().map(str::trim).unwrap_or("").is_empty() {
             return invalid(format!("node {node_id} instruction must not be empty"));
@@ -106,14 +117,30 @@ pub fn validate_definition(
                         "node {node_id} assignee binding not found: {binding}"
                     ))
                 })?;
+                assigned_bindings.insert(binding.as_str());
             }
             Some(StateMachineAssignee::RuntimeActor { .. }) => {
-                return invalid(format!("node {node_id} runtime_actor assignee is not supported in MVP"));
+                return invalid(format!(
+                    "node {node_id} runtime_actor assignee is not supported by the current runtime"
+                ));
             }
             None => return invalid(format!("node {node_id} assignee is required")),
         }
         if node.final_output {
             final_output_count += 1;
+            if !node.transitions.is_empty() {
+                return invalid(format!(
+                    "node {node_id} is final_output and must not define transitions"
+                ));
+            }
+        } else if node
+            .transitions
+            .values()
+            .all(|transition| transition.targets.is_empty())
+        {
+            return invalid(format!(
+                "node {node_id} is not final_output and must define a transition target"
+            ));
         }
         for (outcome, transition) in &node.transitions {
             if let Some(judge) = &node.judge {
@@ -124,18 +151,18 @@ pub fn validate_definition(
                 }
             } else if outcome != "complete" {
                 return invalid(format!(
-                    "node {node_id} only transitions.complete is supported in MVP"
+                    "node {node_id} without a judge only supports transitions.complete"
                 ));
             }
             if transition.guard.is_some() {
                 return invalid(format!(
-                    "node {node_id} guarded transitions are not supported in MVP"
+                    "node {node_id} guarded transitions are not supported by the current runtime"
                 ));
             }
             for target in &transition.targets {
                 if !state_machine.nodes.contains_key(target) {
                     return invalid(format!(
-                        "node {node_id} transitions.complete target not found: {target}"
+                        "node {node_id} transition target not found: {target}"
                     ));
                 }
                 if let Some(target_upstreams) = upstreams.get_mut(target) {
@@ -144,8 +171,15 @@ pub fn validate_definition(
             }
         }
     }
-    if final_output_count > 1 {
-        return invalid("state_machine may have at most one final_output node");
+    if final_output_count != 1 {
+        return invalid("state_machine must have exactly one final_output node");
+    }
+    for (binding, participant) in &definition.participants {
+        if participant.required && !assigned_bindings.contains(binding.as_str()) {
+            return invalid(format!(
+                "required participant {binding} must be assigned to at least one node"
+            ));
+        }
     }
 
     let initial_nodes = upstreams
@@ -158,10 +192,21 @@ pub fn validate_definition(
             }
         })
         .collect::<Vec<_>>();
-    if initial_nodes.is_empty() {
-        return invalid("state_machine must have at least one zero in-degree node");
+    if initial_nodes.len() != 1 {
+        return invalid("state_machine must have exactly one zero in-degree entry node");
     }
     ensure_acyclic(&state_machine.nodes, &upstreams)?;
+    let final_node = state_machine
+        .nodes
+        .iter()
+        .find_map(|(node_id, node)| node.final_output.then_some(node_id.as_str()))
+        .expect("final_output_count was validated");
+    ensure_all_nodes_on_entry_to_final_paths(
+        state_machine,
+        &upstreams,
+        &initial_nodes[0],
+        final_node,
+    )?;
 
     Ok(CompiledStateMachine {
         definition,
@@ -324,7 +369,61 @@ fn ensure_acyclic(
     }
 
     if visited != nodes.len() {
-        return invalid("state_machine complete-transition graph must be acyclic");
+        return invalid("state_machine transition graph must be acyclic");
+    }
+    Ok(())
+}
+
+fn ensure_all_nodes_on_entry_to_final_paths(
+    state_machine: &StateMachineDefinition,
+    upstreams: &BTreeMap<String, Vec<String>>,
+    entry: &str,
+    final_node: &str,
+) -> Result<(), CollaborationRuntimeError> {
+    let mut reachable = BTreeSet::new();
+    let mut queue = VecDeque::from([entry]);
+    while let Some(node_id) = queue.pop_front() {
+        if !reachable.insert(node_id) {
+            continue;
+        }
+        if let Some(node) = state_machine.nodes.get(node_id) {
+            for target in node
+                .transitions
+                .values()
+                .flat_map(|transition| &transition.targets)
+            {
+                queue.push_back(target);
+            }
+        }
+    }
+    if let Some(node_id) = state_machine
+        .nodes
+        .keys()
+        .find(|node_id| !reachable.contains(node_id.as_str()))
+    {
+        return invalid(format!(
+            "state_machine node {node_id} is not reachable from entry node {entry}"
+        ));
+    }
+
+    let mut can_reach_final = BTreeSet::new();
+    let mut queue = VecDeque::from([final_node]);
+    while let Some(node_id) = queue.pop_front() {
+        if !can_reach_final.insert(node_id) {
+            continue;
+        }
+        for upstream in upstreams.get(node_id).into_iter().flatten() {
+            queue.push_back(upstream);
+        }
+    }
+    if let Some(node_id) = state_machine
+        .nodes
+        .keys()
+        .find(|node_id| !can_reach_final.contains(node_id.as_str()))
+    {
+        return invalid(format!(
+            "state_machine node {node_id} cannot reach final_output node {final_node}"
+        ));
     }
     Ok(())
 }

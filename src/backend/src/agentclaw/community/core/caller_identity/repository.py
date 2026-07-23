@@ -33,7 +33,7 @@ class CallerIdentityRepositoryProtocol(Protocol):
         effective_server_codes: set[str],
         lock_key: str,
         lock_holder_user_id: str,
-        lock_epoch: int,
+        lock_epoch: int | None,
     ) -> DraftCallTypeMutationResult: ...
 
     def compensate_draft_call_type(
@@ -48,7 +48,7 @@ class CallerIdentityRepositoryProtocol(Protocol):
         expected_revision: int,
         lock_key: str,
         lock_holder_user_id: str,
-        lock_epoch: int,
+        lock_epoch: int | None,
     ) -> DraftCallTypeCompensationResult: ...
 
     def list_draft_call_types(

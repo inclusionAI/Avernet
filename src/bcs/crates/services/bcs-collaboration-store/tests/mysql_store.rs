@@ -324,6 +324,15 @@ async fn mysql_runtime_node_and_run_updates_use_cas_sql() {
         )
         .await
         .expect("mark running");
+    let artifact_recorded = store
+        .record_node_artifact_if_running(
+            "sm-run-1",
+            "answer",
+            1,
+            "candidate".to_string(),
+        )
+        .await
+        .expect("record node artifact");
     let completed = store
         .complete_node_attempt(
             "sm-run-1",
@@ -354,23 +363,28 @@ async fn mysql_runtime_node_and_run_updates_use_cas_sql() {
         .await
         .expect("skip node");
 
+    assert!(artifact_recorded);
     assert!(completed);
     assert!(updated);
     assert!(retry_scheduled);
     assert!(skipped);
     let executes = db.executes.lock().await;
-    assert_eq!(executes.len(), 5);
+    assert_eq!(executes.len(), 6);
     assert!(executes[0].sql().contains("timeout_deadline_ms = CASE"));
     assert_eq!(executes[0].params()[0], DbValue::from(1));
     assert_eq!(executes[0].params()[1], DbValue::from("delivery-1"));
+    assert!(executes[1].sql().contains("SET artifact_text = ?"));
     assert!(executes[1].sql().contains("AND attempt = ? AND status = 'running'"));
-    assert_eq!(executes[1].params()[5], DbValue::from(1));
-    assert!(executes[2].sql().contains("status NOT IN ('completed', 'failed', 'aborted')"));
-    assert!(executes[3].sql().contains("AND attempt = ? AND status = 'failed'"));
-    assert_eq!(executes[3].params()[4], DbValue::from(1));
-    assert!(executes[4].sql().contains("SET status = 'skipped'"));
-    assert!(executes[4].sql().contains("AND status = 'pending'"));
-    assert_eq!(executes[4].params()[0], DbValue::from(2_200_u64));
+    assert_eq!(executes[1].params()[0], DbValue::from("candidate"));
+    assert_eq!(executes[1].params()[4], DbValue::from(1));
+    assert!(executes[2].sql().contains("AND attempt = ? AND status = 'running'"));
+    assert_eq!(executes[2].params()[5], DbValue::from(1));
+    assert!(executes[3].sql().contains("status NOT IN ('completed', 'failed', 'aborted')"));
+    assert!(executes[4].sql().contains("AND attempt = ? AND status = 'failed'"));
+    assert_eq!(executes[4].params()[4], DbValue::from(1));
+    assert!(executes[5].sql().contains("SET status = 'skipped'"));
+    assert!(executes[5].sql().contains("AND status = 'pending'"));
+    assert_eq!(executes[5].params()[0], DbValue::from(2_200_u64));
 }
 
 #[tokio::test]
@@ -445,7 +459,7 @@ async fn mysql_runtime_delivery_correlation_and_events_are_persistent() {
 #[tokio::test]
 async fn mysql_runtime_cas_failures_return_false() {
     let db = Arc::new(RecordingDb {
-        execute_affected_rows: Mutex::new(VecDeque::from([0, 0, 0, 0])),
+        execute_affected_rows: Mutex::new(VecDeque::from([0, 0, 0, 0, 0])),
         ..RecordingDb::default()
     });
     let store = MySqlCollaborationStore::new(db, "dev".to_string());
@@ -460,6 +474,15 @@ async fn mysql_runtime_cas_failures_return_false() {
         )
         .await
         .expect("complete node");
+    let artifact_recorded = store
+        .record_node_artifact_if_running(
+            "sm-run-1",
+            "answer",
+            1,
+            "candidate".to_string(),
+        )
+        .await
+        .expect("record node artifact");
     let failed = store
         .fail_node_attempt(
             "sm-run-1",
@@ -487,6 +510,7 @@ async fn mysql_runtime_cas_failures_return_false() {
         .expect("update run");
 
     assert!(!completed);
+    assert!(!artifact_recorded);
     assert!(!failed);
     assert!(!retry_scheduled);
     assert!(!run_updated);

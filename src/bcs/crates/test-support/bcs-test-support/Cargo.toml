@@ -17,6 +17,7 @@ bcs-auth-api    = { workspace = true }
 bcs-cache-api   = { workspace = true }
 bcs-db-api      = { workspace = true }
 bcs-session     = { workspace = true }
+bcs-session-file = { workspace = true }
 axum            = { workspace = true }
 tokio           = { workspace = true }
 async-trait     = { workspace = true }

@@ -17,8 +17,17 @@ from engine.community.api.skills.router import router as skills_router
 from engine.community.core.engine.base import BaseEngine
 from engine.community.core.engine.capability import Capability, EngineCapabilities
 from engine.community.core.engine.registry import EngineRegistry
+from engine.community.core.engine.exceptions import (
+    CapabilityNotSupportedError,
+)
 from engine.community.core.skills.models import (
     CleanSymlinksResult,
+    PoolLayoutActivationResult,
+    PoolLayoutActivationStatus,
+    PoolLayoutProbeResult,
+    PoolLayoutProbeStatus,
+    PoolMappingPublishResult,
+    PoolMappingVerificationResult,
     SyncSymlinksResult,
 )
 from engine.community.manager import EngineManager
@@ -215,3 +224,141 @@ def test_ensure_center_skills_route_success(rich_manager, client):
         {"skill_uuid": "u2", "version": "2.0.0", "reason": "missing"}
     ]
     assert len(captured["items"]) == 2
+
+
+def test_runtime_layout_probe_has_no_engine_capability_dependency(
+    client, rich_manager
+):
+    plugin = MagicMock()
+    plugin.probe_pool_layout = AsyncMock(
+        return_value=PoolLayoutProbeResult(
+            status=PoolLayoutProbeStatus.READY,
+            engine="openclaw",
+            layout_contract_version="skills-pool-p3-v1",
+            preparation_id="prep-1",
+            evidence={"checks": {"pool_repo_mounted": True}},
+        )
+    )
+    rich_manager._active_engine._skills = plugin
+
+    response = client.post(
+        "/api/skills/layout/probe",
+        json={
+            "engine": "openclaw",
+            "layout_contract_version": "skills-pool-p3-v1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "READY"
+    plugin.probe_pool_layout.assert_awaited_once()
+
+
+def test_pool_activation_and_mapping_routes_are_capability_independent(
+    client, rich_manager
+):
+    plugin = MagicMock()
+    plugin.activate_pool_layout = AsyncMock(
+        return_value=PoolLayoutActivationResult(
+            committed=True,
+            status=PoolLayoutActivationStatus.COMMITTED,
+            evidence={"bridge": "valid"},
+        ),
+    )
+    plugin.publish_pool_mappings = AsyncMock(
+        return_value=PoolMappingPublishResult(
+            published=True,
+            evidence={"total": 1},
+        ),
+    )
+    plugin.verify_pool_mappings = AsyncMock(
+        return_value=PoolMappingVerificationResult(
+            valid=True,
+            evidence={"checked": 1},
+        ),
+    )
+    rich_manager._active_engine._skills = plugin
+    mappings = [{"source": "/pool/a", "target": "/skills/a"}]
+
+    activation = client.post(
+        "/api/skills/layout/activate",
+        json={
+            "migration_generation": "generation-1",
+            "preparation_id": "preparation-1",
+            "registered_local_names": ["a"],
+            "mappings": mappings,
+        },
+    )
+    published = client.post(
+        "/api/skills/layout/mappings/publish",
+        json={"mappings": mappings},
+    )
+    verified = client.post(
+        "/api/skills/layout/mappings/verify",
+        json={"mappings": mappings},
+    )
+
+    assert activation.json()["data"]["committed"] is True
+    assert published.json()["data"]["published"] is True
+    assert verified.json()["data"]["valid"] is True
+    plugin.activate_pool_layout.assert_awaited_once()
+    plugin.publish_pool_mappings.assert_awaited_once()
+    plugin.verify_pool_mappings.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        (
+            "probe_pool_layout",
+            "/api/skills/layout/probe",
+            {
+                "engine": "claude_code",
+                "layout_contract_version": "skills-pool-p3-v1",
+            },
+        ),
+        (
+            "activate_pool_layout",
+            "/api/skills/layout/activate",
+            {
+                "migration_generation": "generation-1",
+                "preparation_id": "preparation-1",
+                "registered_local_names": [],
+                "mappings": [],
+            },
+        ),
+        (
+            "publish_pool_mappings",
+            "/api/skills/layout/mappings/publish",
+            {"mappings": []},
+        ),
+        (
+            "verify_pool_mappings",
+            "/api/skills/layout/mappings/verify",
+            {"mappings": []},
+        ),
+    ],
+)
+def test_pool_routes_map_unsupported_engine_to_501(
+    client,
+    rich_manager,
+    method: str,
+    path: str,
+    payload: dict[str, object],
+) -> None:
+    plugin = MagicMock()
+    setattr(
+        plugin,
+        method,
+        AsyncMock(
+            side_effect=CapabilityNotSupportedError(
+                "claude_code",
+                Capability.SKILLS_SYNC_BINDPATHS,
+            )
+        ),
+    )
+    rich_manager._active_engine._skills = plugin
+
+    response = client.post(path, json=payload)
+
+    assert response.status_code == 501

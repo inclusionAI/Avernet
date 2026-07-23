@@ -83,3 +83,12 @@ pub struct RelationEdge {
     #[serde(default)]
     pub is_creator: bool,
 }
+
+/// A discriminated reference to an actor (bot or human). Used where a single
+/// value must carry both *who* (`actor_id`) and *what kind* (`actor_kind`),
+/// e.g. `SessionFile.owner`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActorRef {
+    pub actor_kind: ActorKind,
+    pub actor_id: String,
+}

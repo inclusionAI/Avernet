@@ -92,7 +92,7 @@ async fn start_state_machine_run_for_session(
 ///
 /// Mirrors legacy `crate::ws::human_has_group_access` semantics
 /// (server.rs:12300-12320 + ws/mod.rs).
-async fn human_has_group_access(
+pub(crate) async fn human_has_group_access(
     state: &HttpAppState,
     group: &bcs_service_api::Group,
     actor_id: &str,
@@ -1449,7 +1449,7 @@ pub async fn session_chat(
     Json(body): Json<SessionChatRequest>,
 ) -> impl IntoResponse {
     // 1. Look up session
-    let sess = match state.services.session_management.get(&sid).await {
+    let mut sess = match state.services.session_management.get(&sid).await {
         Ok(Some(s)) => s,
         Ok(None) => {
             return (
@@ -1484,23 +1484,63 @@ pub async fn session_chat(
 
     // 4. Caller must be a session participant
     let caller_id = match &caller {
-        GroupChatCaller::Bot { bot_uuid } => bot_uuid.as_str(),
-        GroupChatCaller::Human(h) => h.actor_id.as_str(),
+        GroupChatCaller::Bot { bot_uuid } => bot_uuid.clone(),
+        GroupChatCaller::Human(h) => h.actor_id.clone(),
     };
-    let is_participant = sess.participants.iter().any(|p| p.bot_uuid == caller_id);
+    let is_participant = sess
+        .participants
+        .iter()
+        .any(|p| p.bot_uuid == caller_id);
     if !is_participant {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"error": "caller is not a session participant"})),
-        )
-            .into_response();
+        // COSEC: only the authenticated Human may self-enroll. Bot callers
+        // remain fail-closed so a valid Bot token cannot expand membership.
+        let GroupChatCaller::Human(human) = &caller else {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"error": "caller is not a session participant"})),
+            )
+                .into_response();
+        };
+        let mut participant = bcs_service_api::Participant::human(
+            &human.actor_id,
+            bcs_service_api::ParticipantRole::Observer,
+        );
+        participant.mode = Some(bcs_service_api::ParticipantMode::Present);
+        participant.bot_name = human
+            .nick_name
+            .clone()
+            .or_else(|| Some(human.staff_no.clone()));
+        sess = match state
+            .services
+            .session_management
+            .add_participant(&sid, participant.clone())
+            .await
+        {
+            Ok(updated) => updated,
+            Err(error) => return session_error_to_response(&error),
+        };
+        let event = SystemMessageEvent::HumanJoined {
+            group_id: sess.group_id.clone(),
+            actor: participant.into(),
+        };
+        let _ = state
+            .services
+            .system_message
+            .notify(&sess.group_id, event, &sid, &sess.participants)
+            .await;
     }
 
     // 5. Route via MessageFlowService with session_id pinned from path
+    // COSEC: Human messages are always bound to the authenticated actor, even
+    // when the request supplies `from`; Bot callers retain legacy validation.
+    let requested_sender_id = match &caller {
+        GroupChatCaller::Human(human) => Some(human.actor_id.clone()),
+        GroupChatCaller::Bot { .. } => body.from,
+    };
     let cmd = GroupChatCommand {
         caller: group_chat_caller_context(&caller),
         group_id: sess.group_id.clone(),
-        requested_sender_id: body.from,
+        requested_sender_id,
         message: body.message,
         session_id: Some(sid.clone()),
     };
@@ -1747,7 +1787,24 @@ pub async fn delete_session(
     }
 
     match state.services.session_management.delete(&sid).await {
-        Ok(true) => Json(serde_json::json!({"deleted": true, "session_id": sid})).into_response(),
+        Ok(true) => {
+            // Best-effort session-file cleanup: count logged on success, error
+            // logged but not fatal — orphan sweep reconciles later. MUST NOT
+            // fail the session-delete response.
+            match state.services.session_files.delete_all_for_session(&sid).await {
+                Ok(n) => tracing::info!(
+                    session_id = %sid,
+                    deleted = n,
+                    "cleaned up session files after session delete"
+                ),
+                Err(e) => tracing::warn!(
+                    error = ?e,
+                    session_id = %sid,
+                    "session file cleanup partial failure (orphan sweep will reconcile)"
+                ),
+            }
+            Json(serde_json::json!({"deleted": true, "session_id": sid})).into_response()
+        }
         Ok(false) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "not_found", "message": "session not found"})),

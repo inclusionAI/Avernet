@@ -41,7 +41,7 @@ class NoopMessageDispatcher:
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         wait_result: bool = True,
-        timeout: int | None = None,
+        timeout: float,
         bot_id: str = "",
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
@@ -61,7 +61,7 @@ class NoopMessageDispatcher:
         message: str,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
-        timeout: int | None = None,
+        timeout: float,
         bot_id: str = "",
     ) -> AsyncIterator[StreamChunk]:
         logger.warning(

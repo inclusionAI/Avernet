@@ -415,6 +415,26 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         Ok(true)
     }
 
+    async fn record_node_artifact_if_running(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        artifact_text: String,
+    ) -> ServiceResult<bool> {
+        let mut inner = self.inner.write().await;
+        if !run_is_running(&inner, run_id)? {
+            return Ok(false);
+        }
+        let node = node_mut(&mut inner, run_id, node_id)?;
+        if node.status != StateMachineNodeStatus::Running || node.attempt != attempt {
+            return Ok(false);
+        }
+        node.artifact_text = Some(artifact_text);
+        node.error = None;
+        Ok(true)
+    }
+
     async fn fail_node_attempt(
         &self,
         run_id: &str,
@@ -1512,6 +1532,47 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         Ok(result.affected_rows > 0)
     }
 
+    async fn record_node_artifact_if_running(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        artifact_text: String,
+    ) -> ServiceResult<bool> {
+        let sql = format!(
+            "UPDATE bcs_state_machine_node_runs \
+             SET artifact_text = ?, error_message = NULL, {} \
+             WHERE env = ? AND run_id = ? AND node_id = ? \
+               AND attempt = ? AND status = 'running' \
+               AND record_status = 'active' \
+               AND EXISTS ( \
+                 SELECT 1 FROM bcs_state_machine_runs r \
+                 WHERE r.env = bcs_state_machine_node_runs.env \
+                   AND r.run_id = bcs_state_machine_node_runs.run_id \
+                   AND r.status = 'running' AND r.record_status = 'active' \
+               )",
+            self.flavor.set_modified_now()
+        );
+        let result = self.db
+            .execute(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(artifact_text),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(run_id),
+                    DbValue::from(node_id),
+                    DbValue::from(attempt),
+                ],
+            ))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "state machine node record artifact: {error}"
+                ))
+            })?;
+        Ok(result.affected_rows > 0)
+    }
+
     async fn fail_node_attempt(
         &self,
         run_id: &str,
@@ -2596,6 +2657,22 @@ mod tests {
         assert_eq!(node.delivery_request_id.as_deref(), Some("delivery-1"));
         assert_eq!(node.started_at, Some(2_000));
         assert_eq!(node.timeout_deadline_ms, Some(122_000));
+
+        let recorded = store
+            .record_node_artifact_if_running(
+                "run-sqlite-cas",
+                "answer",
+                0,
+                "candidate".to_string(),
+            )
+            .await?;
+        assert!(recorded);
+        let node = store
+            .get_node_run("run-sqlite-cas", "answer")
+            .await?
+            .expect("node exists");
+        assert_eq!(node.status, StateMachineNodeStatus::Running);
+        assert_eq!(node.artifact_text.as_deref(), Some("candidate"));
 
         Ok(())
     }

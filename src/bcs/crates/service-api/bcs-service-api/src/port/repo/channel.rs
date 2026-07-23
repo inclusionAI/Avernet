@@ -12,6 +12,8 @@ use bcs_domain::{
 use crate::types::ServiceResult;
 
 /// ChannelBinding 持久化。
+///
+/// Repository 实例由 composition root 绑定到单一运行环境；所有读写都只能作用于该环境。
 #[async_trait]
 pub trait ChannelBindingRepoPort: Send + Sync {
     async fn create(&self, binding: ChannelBinding) -> ServiceResult<()>;
@@ -29,6 +31,8 @@ pub trait ChannelBindingRepoPort: Send + Sync {
         target: &BindingTarget,
         channel_type: Option<&str>,
     ) -> ServiceResult<Vec<ChannelBinding>>;
+    /// Delete every binding for the exact Bot/Group target in this repository's environment.
+    async fn delete_by_target(&self, target: &BindingTarget) -> ServiceResult<u64>;
     async fn set_status(&self, id: &str, active: bool) -> ServiceResult<()>;
     async fn set_config(&self, id: &str, config: serde_json::Value) -> ServiceResult<()>;
     async fn delete(&self, id: &str) -> ServiceResult<()>;

@@ -17,6 +17,13 @@ from engine.community.api.skills.schemas import (
     BindPathRequest,
     CenterEnsureRequestSchema,
     CleanSymlinkRequest,
+    PoolLayoutActivateApiResponse,
+    PoolLayoutActivateRequest,
+    PoolLayoutActivateResponse,
+    PoolMappingVerifyRequest,
+    RuntimeLayoutProbeApiResponse,
+    RuntimeLayoutProbeRequest,
+    RuntimeLayoutProbeResponse,
     SyncSymlinkRequest,
 )
 from engine.community.core.engine.capability import Capability
@@ -25,6 +32,8 @@ from engine.community.core.skills.models import (
     CenterEnsureItem,
     CenterEnsureRequest,
     CleanSymlinksRequest,
+    PoolLayoutActivateRequest as PoolLayoutActivateCommand,
+    PoolLayoutProbeRequest as PoolLayoutProbeCommand,
     SymlinkItem,
     SyncBindPathsRequest,
     SyncSymlinksRequest,
@@ -37,6 +46,109 @@ log = logging.getLogger("api-skills")
 def _skills_plugin():
     from engine.community.manager import EngineManager
     return EngineManager.get_instance().skills
+
+
+@router.post("/layout/probe", response_model=RuntimeLayoutProbeApiResponse)
+async def probe_runtime_skills_layout(
+    body: RuntimeLayoutProbeRequest,
+) -> RuntimeLayoutProbeApiResponse:
+    """通过 Skills Service API 核验当前运行时事实。"""
+    plugin = _skills_plugin()
+    try:
+        result = await plugin.probe_pool_layout(
+            PoolLayoutProbeCommand(
+                engine=body.engine,
+                layout_contract_version=body.layout_contract_version,
+            )
+        )
+    except CapabilityNotSupportedError as error:
+        raise HTTPException(status_code=501, detail=str(error)) from error
+    return RuntimeLayoutProbeApiResponse(
+        success=True,
+        data=RuntimeLayoutProbeResponse.model_validate(result.to_data()),
+        message="运行时 Skills Pool 布局探测完成",
+    )
+
+
+@router.post(
+    "/layout/activate",
+    response_model=PoolLayoutActivateApiResponse,
+)
+async def activate_runtime_skills_layout(
+    body: PoolLayoutActivateRequest,
+) -> PoolLayoutActivateApiResponse:
+    """在当前容器的持久化文件系统上提交 OpenClaw Pool 数据面。"""
+
+    plugin = _skills_plugin()
+    try:
+        result = await plugin.activate_pool_layout(
+            PoolLayoutActivateCommand(
+                migration_generation=body.migration_generation,
+                preparation_id=body.preparation_id,
+                registered_local_names=body.registered_local_names,
+                mappings=[
+                    SymlinkItem(source=item.source, target=item.target)
+                    for item in body.mappings
+                ],
+            )
+        )
+    except CapabilityNotSupportedError as error:
+        raise HTTPException(status_code=501, detail=str(error)) from error
+    return PoolLayoutActivateApiResponse(
+        success=result.committed,
+        data=PoolLayoutActivateResponse.model_validate(result.to_data()),
+        message=(
+            "Skills Pool 数据面已提交"
+            if result.committed
+            else "Skills Pool 数据面未提交"
+        ),
+    )
+
+
+@router.post("/layout/mappings/verify", response_model=ApiResponse)
+async def verify_runtime_skill_mappings(
+    body: PoolMappingVerifyRequest,
+) -> ApiResponse:
+    """验证当前受管入口与 Pool source 一致。"""
+
+    plugin = _skills_plugin()
+    try:
+        result = await plugin.verify_pool_mappings(
+            [
+                SymlinkItem(source=item.source, target=item.target)
+                for item in body.mappings
+            ],
+        )
+    except CapabilityNotSupportedError as error:
+        raise HTTPException(status_code=501, detail=str(error)) from error
+    return ApiResponse(
+        success=result.valid,
+        data=result.to_data(),
+        message="Skill mapping 验证完成",
+    )
+
+
+@router.post("/layout/mappings/publish", response_model=ApiResponse)
+async def publish_runtime_skill_mappings(
+    body: PoolMappingVerifyRequest,
+) -> ApiResponse:
+    """全量发布 Pool 受管 mapping，保留结构桥和外部入口。"""
+
+    plugin = _skills_plugin()
+    try:
+        result = await plugin.publish_pool_mappings(
+            [
+                SymlinkItem(source=item.source, target=item.target)
+                for item in body.mappings
+            ],
+        )
+    except CapabilityNotSupportedError as error:
+        raise HTTPException(status_code=501, detail=str(error)) from error
+    return ApiResponse(
+        success=result.published,
+        data=result.to_data(),
+        message="Skill mapping 发布完成",
+    )
 
 
 @router.post("/symlink", response_model=ApiResponse)

@@ -13,12 +13,15 @@ provides:
   - "MarketSyncService"
   - "GitSyncService"
   - "SkillAuthService"
+  - "CurrentRuntimeLayoutProbeService"
 consumes:
   - "BotRepository"
   - "Events"
   - "core/mcp services"
   - "CachePlugin"
   - "DeviceAccessor"
+  - "DeviceContextResolver"
+  - "DeviceAdapterTransport"
   - "MCPCenterPlugin"
   - "ObjectStoragePlugin"
   - "SecretResolver"
@@ -38,6 +41,7 @@ internal_dependencies:
   - agentclaw.community.kernel
   - agentclaw.community.log
   - agentclaw.community.plugin_api.cache
+  - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.mcp_center
   - agentclaw.community.plugin_api.object_storage

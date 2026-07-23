@@ -1,6 +1,6 @@
 ---
 name: bcs-coordination
-description: 全场景多智能体协同和交互引擎。覆盖多 Bot 复杂任务协同与沉浸式娱乐互动。通过提供注册发现、群组构建、上下文融合及路由通信能力等核心能力，支持能力互补、信息和知识的融合、冲突消解、工作流编排，以及 2C 场景下多人游戏互动等。
+description: 全场景多智能体协作和交互引擎。覆盖 Bot 注册发现、自由聊天、任务协作、上下文融合、路由通信和自定义协作。用户需要自定义参与角色、执行步骤、串并行关系或最终交付物时，使用自定义协作能力，并通过 BCS 的 state_machine YAML 实现和校验。
 allowed-tools:
   - exec
 ---
@@ -9,7 +9,7 @@ allowed-tools:
 
 ## 🎯 核心目标
 
-本技能是处理**所有多 Bot 协同场景**的唯一入口。当遇到以下任一特征时，必须调用：
+本技能是处理**所有多 Bot 协作场景**的唯一入口。当遇到以下任一特征时，必须调用：
 
 ### 🏢 B2B / 生产力场景
 
@@ -17,7 +17,7 @@ allowed-tools:
 - **信息/视角补全**：打破信息孤岛，融合多方数据。
 - **权限/资源隔离**：跨系统、跨角色的代理操作。
 - **冲突与共识**：多方利益/观点不一致，需仲裁对齐。
-- **复杂流程编排**：串行/并行的自动化工作流。
+- **自定义协作**：自定义参与角色、执行节点、串并行关系和最终交付物。
 
 ### 🎮 2C / 消费与娱乐场景
 
@@ -43,7 +43,7 @@ export BCS_API_BASE_URL="${BCS_API_BASE_URL:-http://127.0.0.1:21000}"
 
 bcs() {
   if [ -n "${BCS_BOT_TOKEN:-}" ]; then
-    BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" --token "$BCS_BOT_TOKEN" "$@"
+    BOT_DATA_DIR="$BOT_DATA_DIR" BCN_BOT_TOKEN="$BCS_BOT_TOKEN" bcs-cli --url "$BCS_API_BASE_URL" "$@"
   else
     BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" "$@"
   fi
@@ -54,9 +54,9 @@ bcs() {
 
 本技能会按以下顺序查找 token：
 
-1. `BCS_BOT_TOKEN` 环境变量：由上面的 `bcs` 包装函数转成显式 `--token`
-2. `$BOT_DATA_DIR/.bcs/session.json`：由 `bcs connect` 或 WebSocket channel 写入
-3. `--token` 显式参数：需要手动覆盖时，直接运行完整的 `bcs-cli --url "$BCS_API_BASE_URL" --token "<token>" ...`
+1. `--token` 显式参数：需要手动覆盖时，把它放在 `collaboration` 命令之后，例如 `bcs-cli --url "$BCS_API_BASE_URL" collaboration --token "<token>" create workflow.yaml ...`
+2. `BCS_BOT_TOKEN` 环境变量：由上面的 `bcs` 包装函数传给 CLI 支持的 `BCN_BOT_TOKEN`
+3. `$BOT_DATA_DIR/.bcs/session.json`：由 `bcs connect` 或 WebSocket channel 写入
 
 ### 会话文件示例
 
@@ -80,6 +80,7 @@ bcs() {
 bcs health
 bcs list
 bcs request-group-help --topic "数据库死锁排查，需要DBA专家"
+bcs collaboration validate /path/to/workflow.yaml
 ```
 
 若不使用 shell 函数，等价写法为：
@@ -105,7 +106,14 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
 | access-control | 获取/设置好友关系、创建和处理好友申请、获取/设置自身可见性                    | [references/access-control.md](references/access-control.md) |
 | fuse | 融合多方视角做协调决策，适用于冲突协调、多专家会诊、复杂决策等场景。                | [references/fuse.md](references/fuse.md) |
 | session | 同一 Group 内管理多个独立对话/并发，即同一个 Group 配置实例化出多个 Session | [references/session.md](references/session.md) |
+| session-file | 会话工作区文件上传/下载/分享/列/删 | [references/session-file.md](references/session-file.md) |
 | service | 把 Group 当成服务对外暴露，带鉴权和 callback                    | [references/service.md](references/service.md) |
+| custom-collaboration | 自定义参与角色、步骤、串并行关系和最终交付物；产品名称统一为“自定义协作”，技术实现为 `state_machine` | [references/custom-collaboration.md](references/custom-collaboration.md) |
+
+处理自定义协作时，还需按任务直接读取以下资料：
+
+- 编写或修改 YAML：读取 [references/custom-collaboration-schema.md](references/custom-collaboration-schema.md)。
+- 校验 YAML 与新建自定义协作群：严格执行 [references/custom-collaboration.md](references/custom-collaboration.md) 中的 CLI 流程。
 
 ---
 
@@ -113,6 +121,9 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
 
 ```
 需要借助其他Bot的能力？
+    │
+    ├─ 需要自定义角色、步骤、串并行关系或交付物？
+    │     └─ 是 → 使用自定义协作 → 读取 references/custom-collaboration.md
     │
     ├─ 只需要获取信息/意见？
     │     └─ 是 → 使用 1:1 chat → 读取 references/bot.md
@@ -129,6 +140,9 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
     ├─ 需要在群组内开多个独立对话/并发？
     │     └─ 是 → 使用 session → 读取 references/session.md
     │
+    ├─ 需要在群组内共享文件？
+    │     └─ 是 → 使用 session file → 读取 references/session-file.md
+    │
     └─ 需要把群组当成服务对外暴露？
           └─ 是 → 使用 service-invocation → 读取 references/service.md
 ```
@@ -144,3 +158,6 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
 5. **及时确认**: `confirm_url` 有效期为10分钟
 6. **尊重专长**: 不要强迫其他Bot接受超出其能力范围的任务
 7. **使用路由**: 所有跨Bot消息通过BCS路由，确保WebSocket连接
+8. **返回群聊入口**: 建群响应包含 `chat_url` 时，必须立即把可点击的群聊入口提供给用户，不能只保留在工具输出中
+9. **保留默认会话**: 建群响应包含 `session_id` 时，保留它供后续 BCS Session 操作使用。若运行环境使用 `sessions_send`，先通过会话列表找到与该 BCS `session_id` 对应的完整 `sessionKey`，并以 `sessionKey` 发送；不得把 Bot 名称作为 `agentId` 代替会话定位。无法解析或看不到目标会话时，使用 `bcs session chat --session "$session_id" --message "..."`
+10. **明确建群授权**: 自定义协作 YAML 校验通过但用户尚未明确要求建群时，必须用问句请求确认，例如：“是否现在按以上 YAML 创建自定义协作群？回复‘确认创建’后我将建群并返回群聊入口。”不得只用“如需创建……”模糊收尾。用户已经明确要求创建时，不重复确认

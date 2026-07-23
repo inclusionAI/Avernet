@@ -582,7 +582,7 @@ bcs_cli() {
     local bin
     get_bcs_cli_bin >/dev/null
     bin="$BCS_CLI_BIN_PATH"
-    local sub="$1" nested="${2:-}" command_path
+    local sub="$1" nested="${2:-}" third="${3:-}" command_path
     local args=() global_args=()
     [[ "${BCS_CLI_FORCE_JSON:-0}" = "1" ]] && global_args+=(--json)
     # bcs-cli's top-level URL flag is -u/--url (NOT --base-url), and
@@ -623,10 +623,18 @@ bcs_cli() {
     fi
     command_path="$sub"
     case "$sub" in
-        friend|channel|visibility|session|service)
+        friend|channel|visibility|session|service|collaboration)
             [[ -n "$nested" && "$nested" != -* ]] && command_path="$sub $nested"
             ;;
     esac
+    # `session file <leaf>` is a 3-level command tree (session -> file ->
+    # upload/list/download/delete/share/capabilities). The case above only
+    # captures 2 levels ("session file"); promote to the full leaf path so the
+    # CLI coverage gate (which discovers full leaf paths via recursive --help)
+    # records each `session file <leaf>` invocation distinctly.
+    if [[ "$command_path" == "session file" && -n "${third:-}" && "$third" != -* ]]; then
+        command_path="session file $third"
+    fi
     if [[ -n "${BCS_CLI_COVERAGE_LOG:-}" ]]; then
         printf '%s\n' "$command_path" >> "$BCS_CLI_COVERAGE_LOG"
     fi

@@ -655,6 +655,28 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_sgi_group_id ON bcs_service_group_instances(group_id)",
     "CREATE INDEX IF NOT EXISTS idx_sgi_service_group_uuid ON bcs_service_group_instances(service_group_uuid)",
     "CREATE INDEX IF NOT EXISTS idx_sgi_callback_status ON bcs_service_group_instances(callback_status)",
+
+    // ── session_files ─────────────────────────────────────
+    "CREATE TABLE IF NOT EXISTS bcs_session_files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        env TEXT NOT NULL,
+        file_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        owner_actor_kind TEXT NOT NULL,
+        owner_actor_id TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        sha256 TEXT,
+        storage_backend TEXT NOT NULL,
+        object_handle TEXT NOT NULL,
+        status TEXT NOT NULL
+    )",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uk_session_file ON bcs_session_files (env, session_id, file_id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uk_env_file_id ON bcs_session_files (env, file_id)",
+    "CREATE INDEX IF NOT EXISTS idx_session_files_session ON bcs_session_files (env, session_id, gmt_create)",
 ];
 
 #[derive(Debug, Clone, Copy)]
@@ -683,6 +705,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration {
         version: 5,
         name: "add_session_collection_timestamp",
+    },
+    SqliteMigration {
+        version: 6,
+        name: "session_files",
     },
 ];
 
@@ -784,6 +810,7 @@ pub async fn run_sqlite_bootstrap_tables(db: &dyn DbPlugin) -> DbResult<()> {
     }
     ensure_sqlite_message_owner_bot_id(db).await?;
     ensure_sqlite_session_collected_column(db).await?;
+    ensure_bcs_session_files(db).await?;
     Ok(())
 }
 
@@ -838,6 +865,46 @@ async fn ensure_sqlite_session_collected_column(db: &dyn DbPlugin) -> DbResult<(
          ON bcs_session_participants(env, group_id, bot_uuid, collected, collected_at)",
     ))
     .await?;
+    Ok(())
+}
+
+/// Ensure bcs_session_files table exists. For fresh databases the table is created
+/// by run_sqlite_bootstrap_tables via SQLITE_DDL_STATEMENTS; this function handles
+/// legacy databases and future schema repairs for the session_files table.
+async fn ensure_bcs_session_files(db: &dyn DbPlugin) -> DbResult<()> {
+    if !table_exists(db, "bcs_session_files").await? {
+        db.execute(DbStatement::new(
+            "CREATE TABLE IF NOT EXISTS bcs_session_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                env TEXT NOT NULL,
+                file_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                owner_actor_kind TEXT NOT NULL,
+                owner_actor_id TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                sha256 TEXT,
+                storage_backend TEXT NOT NULL,
+                object_handle TEXT NOT NULL,
+                status TEXT NOT NULL
+            )"
+        )).await?;
+        db.execute(DbStatement::new(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uk_session_file \
+             ON bcs_session_files (env, session_id, file_id)"
+        )).await?;
+        db.execute(DbStatement::new(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uk_env_file_id \
+             ON bcs_session_files (env, file_id)"
+        )).await?;
+        db.execute(DbStatement::new(
+            "CREATE INDEX IF NOT EXISTS idx_session_files_session \
+             ON bcs_session_files (env, session_id, gmt_create)"
+        )).await?;
+    }
     Ok(())
 }
 
@@ -900,6 +967,9 @@ async fn apply_sqlite_migration_body(
         // collected_at column is added by ensure_sqlite_session_collected_column
         // in run_sqlite_bootstrap_tables; version 5 only records progress.
         5 => Ok(()),
+        // session_files table is created by run_sqlite_bootstrap_tables via
+        // SQLITE_DDL_STATEMENTS; version 6 only records progress.
+        6 => Ok(()),
         _ => Ok(()),
     }
 }
@@ -1125,7 +1195,8 @@ mod tests {
                     5,
                     "add_session_collection_timestamp".to_string(),
                     "sqlite".to_string()
-                )
+                ),
+                (6, "session_files".to_string(), "sqlite".to_string())
             ]
         );
         Ok(())
@@ -1137,7 +1208,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 5);
+        assert_eq!(report.pending_versions.len(), 6);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1156,6 +1227,8 @@ mod tests {
             report.pending_versions[4].name,
             "add_session_collection_timestamp"
         );
+        assert_eq!(report.pending_versions[5].version, 6);
+        assert_eq!(report.pending_versions[5].name, "session_files");
         Ok(())
     }
 
@@ -1181,7 +1254,8 @@ mod tests {
                     5,
                     "add_session_collection_timestamp".to_string(),
                     "sqlite".to_string()
-                )
+                ),
+                (6, "session_files".to_string(), "sqlite".to_string())
             ]
         );
         Ok(())

@@ -27,7 +27,11 @@ from secbaas.community.api.tenant_manage import TenantType
 
 if TYPE_CHECKING:
     from secbaas.community.api.bot_runtime import HttpConnectionInfo
-    from secbaas.community.api.device_manage import DeviceInfo, OutBoundOperationRule
+    from secbaas.community.api.device_manage import (
+        DeviceInfo,
+        OutBoundOperationRule,
+        OutBoundOperationRuleUpdatedMode,
+    )
     from secbaas.community.api.health_check.bot import TTLInfo
 
 
@@ -174,6 +178,7 @@ class PaasService(PaasServiceProtocol, ABC):
         self,
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
     ) -> bool:
         """Update outbound operation rule for a device.
 

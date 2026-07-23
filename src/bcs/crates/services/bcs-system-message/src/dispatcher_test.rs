@@ -13,7 +13,7 @@ use bcs_domain::{
 use bcs_service_api::{
     ActorStatus, AgentCredentials, BotCapabilities, BotDeliveryCommand, BotDeliveryPort,
     BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus, BotRegistryCoreService,
-    BotRunContext, BotRunContextPort,
+    BotRunContext, BotRunContextPort, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     EnsureHumanResult, ProviderStreamGrayList, ProviderTransportPreference, RegisteredBot,
     ServiceError, ServiceResult, SystemMessageDispatcherService, SystemMessageProducerService,
 };
@@ -657,10 +657,12 @@ async fn dispatch_send_system_message_records_run_context_for_provider_callback(
         .build()
         .expect("build dispatcher");
 
+    let before_dispatch_ms = bcs_protocol::now_ms();
     let outcome = dispatcher
         .dispatch(event, &group, "session-provider", &group.participants)
         .await
         .expect("dispatch succeeded");
+    let after_dispatch_ms = bcs_protocol::now_ms();
 
     assert_eq!(outcome.successful_deliveries, 1);
     let calls = delivery.calls.lock().unwrap();
@@ -674,6 +676,14 @@ async fn dispatch_send_system_message_records_run_context_for_provider_callback(
     assert_eq!(context.group_id, "group-provider");
     assert_eq!(context.bcs_session_id.as_deref(), Some("session-provider"));
     assert!(!context.terminal);
+    assert!(
+        context.deadline_ms
+            >= before_dispatch_ms.saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS)
+    );
+    assert!(
+        context.deadline_ms
+            <= after_dispatch_ms.saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS)
+    );
 }
 
 #[tokio::test]

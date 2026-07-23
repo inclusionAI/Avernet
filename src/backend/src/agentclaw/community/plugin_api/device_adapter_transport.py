@@ -27,6 +27,20 @@ class DeviceAdapterTimeoutError(TimeoutError):
     """The adapter transport exceeded its request deadline."""
 
 
+class DeviceAdapterEndpointNotFoundError(ValueError):
+    """The current runtime does not expose the requested adapter endpoint."""
+
+
+class DeviceAdapterHTTPStatusError(ValueError):
+    """The adapter returned a non-success HTTP status other than 404."""
+
+    def __init__(self, status_code: int, response_text: str) -> None:
+        self.status_code = status_code
+        super().__init__(
+            f"Adapter returned HTTP {status_code}: {response_text}"
+        )
+
+
 @runtime_checkable
 class DeviceAdapterTransport(Plugin, Protocol):
     """Forward an HTTP request to a bot's engine adapter."""
@@ -59,6 +73,8 @@ class DeviceAdapterTransport(Plugin, Protocol):
             ``{"success": bool, "data": ...}``).
 
         Raises:
+            DeviceAdapterEndpointNotFoundError: The runtime has no such endpoint.
+            DeviceAdapterHTTPStatusError: The runtime returned another HTTP error.
             DeviceAdapterTimeoutError: When an explicit ``timeout`` is exceeded.
             ValueError: On transport/HTTP failure (prod impl), so callers
                 can surface a uniform error envelope.

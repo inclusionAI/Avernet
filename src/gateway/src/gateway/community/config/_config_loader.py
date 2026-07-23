@@ -71,10 +71,7 @@ def _resolve_overlay_path(env: str) -> Path | None:
 def _merge(base: dict, overlay: dict) -> dict:
     out = dict(base)
     for key, value in (overlay or {}).items():
-        if (
-            isinstance(value, dict)
-            and isinstance(out.get(key), dict)
-        ):
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
             out[key] = _merge(out[key], value)
         else:
             out[key] = value
@@ -87,6 +84,7 @@ def _parse_config(raw: dict) -> Config:
     web = WebConfig(
         port=int(web_raw.get("port", 8888)),
         start=web_raw.get("start", WebConfig.start),
+        enable_api_docs=bool(web_raw.get("enable_api_docs", True)),
     )
     log_raw = raw.get("log_config") or {}
     log_config = LogConfig(

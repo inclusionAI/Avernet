@@ -135,6 +135,15 @@ prepare_bcs_runtime_config() {
         escaped_mock_user_name="$(toml_sed_replacement "$bcs_mock_user_name")"
         sed_args+=("-e" "s|^mock_user_name = \".*\"$|mock_user_name = \"${escaped_mock_user_name}\"|")
     fi
+    if [ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]; then
+        local escaped_e2e_judge_url
+        escaped_e2e_judge_url="$(toml_sed_replacement "${BCS_E2E_MOCK_BASE_URL}/v1")"
+        sed_args+=(
+            "-e" "/^\[llm\]/,/^\[/{s|^type = \".*\"$|type = \"openai_compatible\"|;s|^base_url = \".*\"$|base_url = \"${escaped_e2e_judge_url}\"|;s|^api_key_env = \".*\"$|api_key_env = \"BCS_E2E_JUDGE_API_KEY\"|;s|^model = \".*\"$|model = \"e2e-judge\"|;s|^timeout_ms = [0-9][0-9]*$|timeout_ms = 30000|;}"
+            "-e" "/^\[security.outbound_url\]/,/^\[/{s|^block_private_networks = .*|block_private_networks = false|;s|^allow_loopback = .*|allow_loopback = true|;}"
+        )
+        log_info "Enabling local Provider/Judge mock for BCS E2E"
+    fi
 
     local config_file tmp_file
     for config_file in "$base_config" "$local_config"; do

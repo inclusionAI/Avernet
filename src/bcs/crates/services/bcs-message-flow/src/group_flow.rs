@@ -10,6 +10,7 @@ use bcs_protocol::{
 use bcs_service_api::{
     ActorKind, ActorStatus, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
     BotDeliveryResult, BotDeliveryTarget, BotEventCommand, BotEventOutcome, BotRunContext, BotRunContextPort,
+    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     BotTerminalObserverPort, NoopBotTerminalObserver,
     BotRegistryCoreService, CallerContext, ChatAbortCommand, ChatAbortOutcome,
     DeliveryBlockContext, DeliveryBlockReason,
@@ -39,8 +40,6 @@ use tracing::{debug, info, warn};
 use crate::protocol_context::{group_context_input, group_type_wire};
 use crate::task_store::TaskStore;
 use crate::MSG_LOG_TARGET;
-
-const DEFAULT_GROUP_BOT_CALLBACK_TIMEOUT_MS: u64 = 60 * 60 * 1_000;
 
 pub struct BcsMessageFlow {
     pub group: Arc<dyn GroupCoreService>,
@@ -212,7 +211,8 @@ impl BcsMessageFlow {
                     bot_id: bot_id.to_string(),
                     group_id: group_id.to_string(),
                     bcs_session_id: bcs_session_id.map(str::to_string),
-                    deadline_ms: now_ms().saturating_add(DEFAULT_GROUP_BOT_CALLBACK_TIMEOUT_MS),
+                    deadline_ms: now_ms()
+                        .saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS),
                     terminal: false,
                 })
                 .await;
@@ -409,6 +409,39 @@ pub(crate) async fn manager_worker_self_owner(
     None
 }
 
+async fn apply_session_participant_scope(
+    flow: &BcsMessageFlow,
+    group: &mut Group,
+    session_id: Option<&str>,
+) -> ServiceResult<()> {
+    let (Some(session_id), Some(session_mgmt)) = (session_id, flow.session_management.as_ref())
+    else {
+        return Ok(());
+    };
+    let session = session_mgmt
+        .get(session_id)
+        .await
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
+    if session.group_id != group.id {
+        return Err(ServiceError::InvalidOperation {
+            message: format!(
+                "session '{}' does not belong to group '{}'",
+                session_id, group.id
+            ),
+            request_id: None,
+        });
+    }
+    if session.participants.is_empty() {
+        return Err(ServiceError::InvalidOperation {
+            message: format!("session '{}' has no participants", session_id),
+            request_id: None,
+        });
+    }
+    group.participants = session.participants;
+    Ok(())
+}
+
 pub async fn handle_web_send(
     flow: &BcsMessageFlow,
     cmd: WebSendCommand,
@@ -440,38 +473,8 @@ pub async fn handle_web_send(
     }
 
     flow.group.reset_message_count(&cmd.group_id).await?;
+    apply_session_participant_scope(flow, &mut group, cmd.session_id.as_deref()).await?;
     backfill_bot_names(flow.registry.as_ref(), &mut group).await;
-    if let Some(ref bcs_session_id) = cmd.session_id {
-        if let Some(ref session_mgmt) = flow.session_management {
-            match session_mgmt.get(bcs_session_id).await {
-                Ok(Some(sess)) => {
-                    if sess.group_id != cmd.group_id {
-                        return Err(ServiceError::InvalidOperation {
-                            message: format!(
-                                "session '{}' does not belong to group '{}'",
-                                bcs_session_id, cmd.group_id
-                            ),
-                            request_id: None,
-                        });
-                    }
-                    if sess.participants.is_empty() {
-                        return Err(ServiceError::InvalidOperation {
-                            message: format!("session '{}' has no participants", bcs_session_id),
-                            request_id: None,
-                        });
-                    }
-                    group.participants = sess.participants;
-                    backfill_bot_names(flow.registry.as_ref(), &mut group).await;
-                }
-                Ok(None) => {
-                    return Err(ServiceError::SessionNotFound(bcs_session_id.clone()));
-                }
-                Err(error) => {
-                    return Err(ServiceError::InternalError(error.to_string()));
-                }
-            }
-        }
-    }
 
     let overlay = build_route_overlay(flow, &group).await;
     let decision = if group.group_kind == GroupKind::Dm {
@@ -864,12 +867,13 @@ pub async fn handle_group_chat(
     flow: &BcsMessageFlow,
     cmd: GroupChatCommand,
 ) -> ServiceResult<GroupChatOutcome> {
-    let group = flow
+    let mut group = flow
         .group
         .get(&cmd.group_id)
         .await
         .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
 
+    apply_session_participant_scope(flow, &mut group, cmd.session_id.as_deref()).await?;
     verify_group_chat_caller_access(flow, &group, &cmd.caller).await?;
     let sender_id = resolve_group_chat_sender(&cmd)?;
     verify_group_chat_sender(flow, &group, &sender_id, &cmd.caller).await?;

@@ -17,10 +17,15 @@ E2E_TESTS_STORIES=(
     "story_provider_operator_publishes_agent"
     "story_user_validates_external_channel_setup"
     "story_operator_coordinates_with_cli"
+    "story_cli_operator_creates_custom_collaboration"
     "story_cli_operator_builds_collaboration_team"
     "story_cli_operator_runs_sessions_and_services"
     "story_cli_operator_validates_channel_management"
+    "story_session_file_workspace"
 )
+if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
+    E2E_TESTS_STORIES+=("story_provider_callback_survives_slow_judge")
+fi
 
 require_status() {
     local desc="$1" expected="$2"
@@ -52,6 +57,103 @@ except Exception:
 
 urlencode() {
     python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
+}
+
+wait_for_mock_provider_method() {
+    local method="$1" payload request
+    for _ in $(seq 1 100); do
+        payload=$(curl --noproxy '*' -fsS \
+            "${BCS_E2E_MOCK_BASE_URL}/control/provider/requests" 2>/dev/null || true)
+        request=$(printf '%s' "$payload" | python3 -c '
+import json,sys
+try:
+    target=sys.argv[1]
+    requests=json.load(sys.stdin).get("requests", [])
+    match=next((item for item in requests if item.get("body", {}).get("method") == target), None)
+    print(json.dumps(match, separators=(",", ":")) if match else "")
+except Exception:
+    print("")
+' "$method")
+        if [[ -n "$request" ]]; then
+            printf '%s\n' "$request"
+            return 0
+        fi
+        sleep 0.05
+    done
+    return 1
+}
+
+wait_for_mock_judge_start() {
+    local payload started
+    for _ in $(seq 1 100); do
+        payload=$(curl --noproxy '*' -fsS \
+            "${BCS_E2E_MOCK_BASE_URL}/control/judge/status" 2>/dev/null || true)
+        started=$(json_path "$payload" "started")
+        [[ "$started" == "True" || "$started" == "true" ]] && return 0
+        sleep 0.05
+    done
+    return 1
+}
+
+state_machine_graph_node_field() {
+    local graph="$1" node_id="$2" field="$3"
+    printf '%s' "$graph" | python3 -c '
+import json,sys
+try:
+    data=json.load(sys.stdin)
+    node=next(item for item in data.get("nodes", []) if item.get("node_id") == sys.argv[1])
+    value=node.get(sys.argv[2])
+    print("" if value is None else value)
+except Exception:
+    print("")
+' "$node_id" "$field"
+}
+
+wait_for_graph_node_sub_status() {
+    local run_id="$1" node_id="$2" expected="$3" graph actual
+    for _ in $(seq 1 100); do
+        graph=$(curl --noproxy '*' -fsS \
+            -H "X-Mock-User-Id: $BCS_MOCK_USER_ID" \
+            -H "X-Mock-Nick-Name: $BCS_MOCK_USER_NICK_NAME" \
+            "${BCS_API_BASE_URL}/state-machine-runs/${run_id}/graph" 2>/dev/null || true)
+        actual=$(state_machine_graph_node_field "$graph" "$node_id" "sub_status")
+        if [[ "$actual" == "$expected" ]]; then
+            printf '%s\n' "$graph"
+            return 0
+        fi
+        sleep 0.05
+    done
+    return 1
+}
+
+wait_for_state_machine_status() {
+    local run_id="$1" expected="$2" view actual
+    for _ in $(seq 1 100); do
+        view=$(curl --noproxy '*' -fsS \
+            -H "X-Mock-User-Id: $BCS_MOCK_USER_ID" \
+            -H "X-Mock-Nick-Name: $BCS_MOCK_USER_NICK_NAME" \
+            "${BCS_API_BASE_URL}/state-machine-runs/${run_id}" 2>/dev/null || true)
+        actual=$(json_path "$view" "run.status")
+        if [[ "$actual" == "$expected" ]]; then
+            printf '%s\n' "$view"
+            return 0
+        fi
+        sleep 0.05
+    done
+    return 1
+}
+
+provider_callback_with_timeout() {
+    local provider_id="$1" runtime_token="$2" body="$3"
+    local curl_args=(--noproxy '*' -s -o "$_RESPONSE_FILE" -D "$_RESPONSE_HEADERS_FILE"
+        -w '%{http_code}' --max-time 1 -X POST
+        -H "X-BCN-Provider-Id: ${provider_id}"
+        -H "Authorization: Bearer ${runtime_token}"
+        -H "Content-Type: application/json"
+        -d "$body")
+    HTTP_STATUS=$(curl "${curl_args[@]}" "${BCS_API_BASE_URL}/bot/events" 2>/dev/null) || HTTP_STATUS="000"
+    RESPONSE=$(cat "$_RESPONSE_FILE")
+    RESPONSE_HEADERS=$(cat "$_RESPONSE_HEADERS_FILE")
 }
 
 # User story: A signed-in user opens Avernet and prepares an owned agent for use.
@@ -609,6 +711,212 @@ print(json.dumps({
 
     api_delete "/groups/${group_id}?bot_id=${BOT_CEO_UUID}"
     require_status "structured collaboration fixture is cleaned up" "200" || return
+}
+
+# Coverage-only user story: a Provider-backed state-machine node returns while
+# its Judge is intentionally blocked. The callback must return before the
+# caller's timeout, expose both running sub-statuses, and resume after release.
+story_provider_callback_survives_slow_judge() {
+    info "Story: an HTTP Provider callback survives a slow state-machine Judge"
+
+    local control_status
+    control_status=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' \
+        -X POST "${BCS_E2E_MOCK_BASE_URL}/control/reset" 2>/dev/null) || control_status="000"
+    assert_eq "Provider/Judge mock resets before the story" "$control_status" "200"
+    [[ "$control_status" == "200" ]] || return
+
+    api_post "/providers" \
+        "{\"name\":\"Slow Judge E2E Provider\",\"webhook_url\":\"${BCS_E2E_MOCK_BASE_URL}/provider/webhook\",\"auth\":{\"mode\":\"static_bearer\"},\"protocol_version\":\"2.0\",\"coordination\":{\"mode\":\"native_tool\"}}"
+    require_status "operator registers the local HTTP Provider" "200" || return
+    local provider_id admin_token bcs_token
+    provider_id=$(json_path "$RESPONSE" "provider_id")
+    admin_token=$(json_path "$RESPONSE" "provider_admin_token")
+    bcs_token=$(json_path "$RESPONSE" "bcs_to_provider_token")
+    assert_not_empty "local Provider receives an id" "$provider_id"
+    assert_not_empty "local Provider receives an admin token" "$admin_token"
+    [[ -n "$provider_id" && -n "$admin_token" ]] || return
+
+    local provider_bot_ref="slow-judge-worker-$$-$(date +%s)"
+    api_request_headers POST "/providers/${provider_id}/bots" \
+        "{\"name\":\"Slow Judge Worker\",\"summary\":\"Returns before Judge completion\",\"owners\":[\"${BCS_MOCK_USER_ID}\"],\"provider_bot_ref\":\"${provider_bot_ref}\",\"domains\":[\"release\"],\"skills\":[\"review\"],\"scopes\":[\"local\"]}" \
+        "Authorization: Bearer ${admin_token}"
+    require_status "operator publishes the slow-Judge Provider bot" "200" || return
+    local provider_bot_uuid runtime_token
+    provider_bot_uuid=$(json_path "$RESPONSE" "bot_uuid")
+    runtime_token=$(json_path "$RESPONSE" "bot_runtime_token")
+    assert_not_empty "slow-Judge Provider bot receives a BCS id" "$provider_bot_uuid"
+    assert_not_empty "slow-Judge Provider bot receives a runtime token" "$runtime_token"
+    [[ -n "$provider_bot_uuid" && -n "$runtime_token" ]] || return
+
+    # Group membership enforces the same trust boundary for Provider-backed
+    # bots as it does for native bots. Make the fixture explicitly public and
+    # establish its relationship with the driver before creating the group.
+    api_put "/bots/${provider_bot_uuid}/visibility" '{"visibility":"public"}'
+    require_status "operator makes the slow-Judge Provider bot discoverable" "200" || return
+    api_post "/friends/request" \
+        "{\"from_bot\":\"${BOT_CEO_UUID}\",\"to_bot\":\"${provider_bot_uuid}\"}"
+    if [[ "$HTTP_STATUS" == "200" || "$HTTP_STATUS" == "201" ]]; then
+        pass "driver befriends the slow-Judge Provider bot"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        fail "driver befriends the slow-Judge Provider bot (expected 200/201, actual=${HTTP_STATUS})"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    [[ "$HTTP_STATUS" == "200" || "$HTTP_STATUS" == "201" ]] || return
+    api_get "/bots/${BOT_CEO_UUID}/friends"
+    require_status "driver reads friends after Provider trust setup" "200" || return
+    assert_contains "driver trust list contains the slow-Judge Provider bot" \
+        "$RESPONSE" "$provider_bot_uuid"
+
+    local definition_yaml create_body
+    definition_yaml="name: HTTP Provider Slow Judge E2E
+participants:
+  worker:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      review:
+        kind: bot_task
+        display_name: Review
+        assignee:
+          type: bot_binding
+          binding: worker
+        instruction: Produce a candidate response.
+        judge:
+          type: llm
+          criteria:
+            - The candidate is suitable for publishing.
+          outcomes: [approved]
+        transitions:
+          approved:
+            targets: [publish]
+      publish:
+        kind: bot_task
+        display_name: Publish
+        assignee:
+          type: bot_binding
+          binding: worker
+        instruction: Publish the approved response.
+        final_output: true"
+    create_body=$(python3 -c '
+import json,sys
+print(json.dumps({
+  "driver_bot": sys.argv[1],
+  "label": "HTTP Provider slow Judge E2E",
+  "group_strategy": "state_machine",
+  "participant_bindings": {
+    "worker": {"source": "manual", "bot_ids": [sys.argv[2]]}
+  },
+  "participants": [
+    {"bot_uuid": sys.argv[1]},
+    {"bot_uuid": sys.argv[2]}
+  ],
+  "collaboration_definition_yaml": sys.argv[3]
+}, ensure_ascii=False))
+' "$BOT_CEO_UUID" "$provider_bot_uuid" "$definition_yaml")
+    api_post "/groups" "$create_body"
+    require_status "user creates a judged Provider state-machine group" "200" || return
+    local group_id
+    group_id=$(json_path "$RESPONSE" "id")
+    assert_not_empty "judged Provider group receives an id" "$group_id"
+    [[ -n "$group_id" ]] || return
+
+    curl --noproxy '*' -fsS -X POST \
+        "${BCS_E2E_MOCK_BASE_URL}/control/provider/clear" >/dev/null || return
+    api_post "/groups/${group_id}/state-machine-runs" \
+        '{"input":{"question":"verify asynchronous callback judging"}}'
+    require_status "user starts the judged Provider workflow" "202" || return
+    local run_id
+    run_id=$(json_path "$RESPONSE" "run.run_id")
+    assert_not_empty "judged Provider workflow returns a run id" "$run_id"
+    [[ -n "$run_id" ]] || return
+
+    local review_request review_provider_run_id graph
+    review_request=$(wait_for_mock_provider_method "chat.send" || true)
+    assert_not_empty "HTTP Provider receives the review task" "$review_request"
+    [[ -n "$review_request" ]] || return
+    review_provider_run_id=$(json_path "$review_request" "body.id")
+    assert_not_empty "review task carries a Provider run id" "$review_provider_run_id"
+    assert_json_eq "Provider delivery uses its callback credential" "$review_request" \
+        "authorization" "Bearer ${bcs_token}"
+    [[ -n "$review_provider_run_id" ]] || return
+
+    graph=$(wait_for_graph_node_sub_status \
+        "$run_id" "review" "awaiting_response" || true)
+    assert_not_empty "running node exposes awaiting_response" "$graph"
+    [[ -n "$graph" ]] || return
+    assert_eq "review node remains durably running before its reply" \
+        "$(state_machine_graph_node_field "$graph" "review" "status")" "running"
+
+    curl --noproxy '*' -fsS -X POST \
+        "${BCS_E2E_MOCK_BASE_URL}/control/provider/clear" >/dev/null || return
+    provider_callback_with_timeout "$provider_id" "$runtime_token" \
+        "{\"run_id\":\"${review_provider_run_id}\",\"state\":\"final\",\"message\":{\"text\":\"candidate awaiting slow judge\"}}"
+    if ! require_status "Provider final callback returns before its one-second timeout" "200"; then
+        curl --noproxy '*' -fsS -X POST \
+            "${BCS_E2E_MOCK_BASE_URL}/control/judge/release" >/dev/null || true
+        return
+    fi
+
+    if wait_for_mock_judge_start; then
+        pass "slow Judge receives the candidate after callback acceptance"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        fail "slow Judge did not receive the candidate"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        return
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+    graph=$(wait_for_graph_node_sub_status "$run_id" "review" "judging" || true)
+    assert_not_empty "running node exposes judging while Judge is blocked" "$graph"
+    [[ -n "$graph" ]] || return
+    assert_eq "review node remains durably running during judging" \
+        "$(state_machine_graph_node_field "$graph" "review" "status")" "running"
+
+    api_get "/state-machine-runs/${run_id}/nodes/review"
+    require_status "user reads the node while Judge is blocked" "200" || return
+    assert_json_eq "node detail exposes judging" "$RESPONSE" \
+        "sub_status" "judging"
+    assert_json_eq "node detail persists the returned Provider artifact" "$RESPONSE" \
+        "node.artifact_text" "candidate awaiting slow judge"
+
+    curl --noproxy '*' -fsS -X POST \
+        "${BCS_E2E_MOCK_BASE_URL}/control/judge/release" >/dev/null || return
+    local publish_request publish_provider_run_id
+    publish_request=$(wait_for_mock_provider_method "chat.send" || true)
+    assert_not_empty "HTTP Provider receives the publish task after Judge release" "$publish_request"
+    [[ -n "$publish_request" ]] || return
+    publish_provider_run_id=$(json_path "$publish_request" "body.id")
+    assert_not_empty "publish task carries a Provider run id" "$publish_provider_run_id"
+    [[ -n "$publish_provider_run_id" ]] || return
+
+    api_request_headers POST "/bot/events" \
+        "{\"run_id\":\"${publish_provider_run_id}\",\"state\":\"final\",\"message\":{\"text\":\"published after slow judge\"}}" \
+        "X-BCN-Provider-Id: ${provider_id}" \
+        "Authorization: Bearer ${runtime_token}"
+    require_status "publish callback is accepted" "200" || return
+
+    local completed_view
+    completed_view=$(wait_for_state_machine_status "$run_id" "completed" || true)
+    assert_not_empty "Provider workflow completes after Judge release" "$completed_view"
+    [[ -n "$completed_view" ]] || return
+    assert_json_eq "completed workflow keeps the published output" "$completed_view" \
+        "run.output" "published after slow judge"
+    assert_json_eq "completed workflow records the approved Judge outcome" "$completed_view" \
+        "judge_outputs.0.decision.outcome" "approved"
+
+    api_delete "/groups/${group_id}?bot_id=${BOT_CEO_UUID}"
+    require_status "slow-Judge Provider group is cleaned up" "200" || return
+    api_request_headers DELETE "/providers/${provider_id}/bots/${provider_bot_ref}" "" \
+        "Authorization: Bearer ${admin_token}"
+    require_status "slow-Judge Provider bot is retired" "200" || return
 }
 
 # User story: A provider operator publishes, governs, and retires a provider-backed agent.

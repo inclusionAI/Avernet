@@ -18,20 +18,23 @@ use bcs_protocol::{BCN_TRANSPORT_HEADER, BcsFrame, BotDeliveryKind, RequestFrame
 use bcs_service_api::{
     BotDeliveryCommand, BotDeliveryPort, BotEventCommand, BotEventOutcome, BotRunContext,
     BotRunContextPort, ChatAbortCommand, ChatAbortOutcome, ChatEventState, GroupCallbackCommand,
-    GroupCallbackOutcome, GroupHistoryBotRequestPort, MessageFlowService, ServiceResult,
-    ProviderTransportPreference,
+    GroupCallbackOutcome, GroupHistoryBotRequestPort, MessageFlowService,
+    ProviderTransportPreference, ServiceResult, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
     TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
 };
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock};
+use tracing::Instrument;
 use tracing::field::{Field, Visit};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::{Layer, layer::Context, prelude::*};
 
 type CapturedState = Arc<Mutex<Option<CapturedRequest>>>;
 
 #[derive(Debug, Clone)]
 struct CapturedRequest {
+    traceparent: Option<String>,
     authorization: Option<String>,
     accept: Option<String>,
     transport: Option<String>,
@@ -40,6 +43,63 @@ struct CapturedRequest {
     timestamp: Option<String>,
     legacy_protocol_version: Option<String>,
     body: Value,
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn provider_delivery_injects_current_gateway_span_context() {
+    use opentelemetry::{global, trace::{TraceContextExt as _, TracerProvider as _}};
+    use opentelemetry_sdk::{
+        propagation::TraceContextPropagator,
+        trace::{InMemorySpanExporterBuilder, SdkTracerProvider},
+    };
+
+    global::set_text_map_propagator(TraceContextPropagator::new());
+    let exporter = InMemorySpanExporterBuilder::new().build();
+    let provider = SdkTracerProvider::builder()
+        .with_simple_exporter(exporter)
+        .build();
+    let tracer = provider.tracer("bcn-provider-transport-test");
+    let subscriber = tracing_subscriber::registry()
+        .with(tracing_opentelemetry::layer().with_tracer(tracer));
+    let dispatch = tracing::Dispatch::new(subscriber);
+    let _dispatch_guard = tracing::dispatcher::set_default(&dispatch);
+
+    let captured: CapturedState = Arc::new(Mutex::new(None));
+    let app = Router::new()
+        .route("/webhook", post(capture_ack))
+        .with_state(captured.clone());
+    let (webhook_url, server) = spawn_server(app).await;
+    let span = tracing::info_span!(target: "bcn_otel", "bcn.gateway.dispatch");
+    let span_context = span.context();
+    let expected_trace_id = span_context.span().span_context().trace_id().to_string();
+    let expected_parent_span_id = span_context.span().span_context().span_id().to_string();
+
+    HttpProviderTransport::allowing_private_networks_for_tests()
+        .deliver(BotDeliveryCommand {
+            target: provider_target(webhook_url),
+            run_id: "run-traced".to_string(),
+            frame: BcsFrame::Request(RequestFrame::new(
+                "run-traced",
+                "chat.send",
+                Some(json!({
+                    "session_key": "group:trace",
+                    "message": { "text": "hello" }
+                })),
+            )),
+            delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
+        })
+        .instrument(span)
+        .await
+        .unwrap();
+
+    let request = captured.lock().await.clone().unwrap();
+    let traceparent = request.traceparent.expect("traceparent header");
+    let fields: Vec<_> = traceparent.split('-').collect();
+    assert_eq!(fields[0], "00");
+    assert_eq!(fields[1], expected_trace_id);
+    assert_eq!(fields[2], expected_parent_span_id);
+    server.abort();
 }
 
 #[derive(Debug, Clone)]
@@ -515,7 +575,10 @@ async fn provider_delivery_falls_back_to_actor_id_for_sender_name() {
     assert_eq!(request.body["from"]["kind"], "bot");
     assert_eq!(request.body["from"]["name"], "sender-bot-id");
     assert_eq!(request.body["from"]["actor_id"], "sender-bot-id");
-    assert_eq!(request.body["timeout_ms"], 3_600_000);
+    assert_eq!(
+        request.body["timeout_ms"],
+        DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS
+    );
 
     server.abort();
 }
@@ -814,6 +877,10 @@ async fn capture_sse() -> Response {
 }
 
 async fn capture(captured: CapturedState, headers: HeaderMap, body: Value) {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
     let authorization = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
@@ -843,6 +910,7 @@ async fn capture(captured: CapturedState, headers: HeaderMap, body: Value) {
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
     *captured.lock().await = Some(CapturedRequest {
+        traceparent,
         authorization,
         accept,
         transport,

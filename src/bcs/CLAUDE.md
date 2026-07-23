@@ -180,6 +180,9 @@ Bots have a `created_by` field set during onboard when a user identity is availa
 ### Unprotected Endpoints (read-only)
 - `GET /bots`, `GET /bots/{id}`, `GET /bots/discover`
 
+### Authenticated Endpoints (read-only)
+- `GET /groups/my` lists formal group memberships for the authenticated human or bot; session-only memberships are excluded
+
 ### Database Migration
 ```sql
 ALTER TABLE bcs_bots ADD COLUMN created_by VARCHAR(256) DEFAULT NULL;
@@ -374,7 +377,9 @@ export BOT_DATA_DIR=/path/to/bot/data
 | `/groups/request` | POST | Request group proposal |
 | `/groups/{token}/confirm` | POST | Confirm proposal and create group |
 | `/groups` | POST | Create group directly |
+| `/collaboration/definitions/validate` | POST | Validate custom collaboration YAML |
 | `/groups` | GET | List all groups |
+| `/groups/my` | GET | List formal groups for the authenticated human or bot |
 | `/groups/{id}` | GET | Get group details |
 | `/groups/{id}` | DELETE | Delete group |
 | `/groups/{id}/members` | POST | Add member to group |
@@ -499,7 +504,15 @@ bcs-cli request-group-help --gap-type skill --description "需要数据库死锁
 bcs-cli confirm-group-help --url http://localhost:21000/groups/<token>/confirm
 
 # Create a group directly
-bcs-cli create-group --driver zhangsan --participants "zhangsan:driver,lisi:consultant"
+bcs-cli create-group --driver zhangsan --participants "lisi,wangwu"
+
+# Create a manager-worker group; participants are assigned the worker role
+bcs-cli create-group --manager zhangsan --participants "lisi,wangwu"
+
+# Validate and create a custom collaboration group
+bcs-cli collaboration validate workflow.yaml
+bcs-cli collaboration create workflow.yaml --driver zhangsan \
+  --binding planner=zhangsan --binding reviewer=lisi
 
 # Fuse contexts
 bcs-cli fuse --group <group_id> --question "如何协调？" --participants bot1,bot2

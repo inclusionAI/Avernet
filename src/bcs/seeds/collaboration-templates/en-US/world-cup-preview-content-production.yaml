@@ -1,13 +1,13 @@
-# World Cup preview media copy collaboration template.
+# World Cup preview content production collaboration template.
 # This YAML describes only the collaboration strategy. It does not store concrete bot ids.
 # When creating a group, bind the logical roles below to actual bots via CreateGroupRequest.participant_bindings.
 
-name: World Cup Preview Media Copy
+name: World Cup Preview Content Production
 
 metadata:
   description: The operations director sets the production flow, the content editor frames the brief, tactics and fact-checking run in parallel, the short-video director writes the voiceover, growth operations packages distribution assets, and the editor accepts the final publish package.
   labels:
-    scenario: world_cup_preview_media_copy
+    scenario: world_cup_preview_content_production
 
 participants:
   operations_director:
@@ -56,7 +56,7 @@ runtime:
           type: bot_binding
           binding: operations_director
         instruction: |
-          You are the World Cup operations director. Based on the user request, define the overall production direction for this World Cup match preview media copy.
+          You are the World Cup operations director. Based on the user request, define the overall direction for this World Cup match preview content production task.
 
           Return:
           1. Match topic, target audience, publishing platforms, target duration, and tone.
@@ -85,7 +85,7 @@ runtime:
           4. Facts the match data checker should verify.
           5. Delivery standards for the short-video director and growth operator.
 
-          Output only the brief, not the final copy.
+          Output only the brief, not the final content.
         transitions:
           complete:
             targets:
@@ -119,7 +119,7 @@ runtime:
           type: bot_binding
           binding: fact_researcher
         instruction: |
-          You are the World Cup match data checker. Based on the content brief, verify facts and data definitions used in the preview copy.
+          You are the World Cup match data checker. Based on the content brief, verify facts and data definitions used in the preview content.
 
           Return:
           1. Round, matchup, time, stage, and match background.

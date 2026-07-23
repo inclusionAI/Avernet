@@ -45,6 +45,8 @@ members = [
     "crates/services/bcs-secret",
     "crates/services/bcs-session",
     "crates/services/bcs-session-store",
+    "crates/services/bcs-session-file",
+    "crates/services/bcs-session-file-store",
     "crates/services/bcs-routing",
     "crates/services/bcs-system-message",
     # plugin-api
@@ -54,10 +56,12 @@ members = [
     "crates/plugin-api/bcs-db-api",
     "crates/plugin-api/bcs-llm-api",
     "crates/plugin-api/bcs-security-gateway-api",
+    "crates/plugin-api/bcs-storage-api",
     "crates/plugin-api/bcs-user-directory-api",
     # plugins
     "crates/plugins/bcs-cache-local",
     "crates/plugins/bcs-cache-redis",
+    "crates/plugins/bcs-storage-local",
     "crates/plugins/bcs-db-local",
     "crates/plugins/bcs-db-mysql",
     "crates/plugins/bcs-llm-openai-compatible",
@@ -76,6 +80,7 @@ members = [
     "crates/tools/bcs-admin",
     "crates/tools/bcs-cli",
     # auxiliary
+    "crates/auxiliary/bcs-telemetry",
     "crates/auxiliary/ding-logger",
     # test-support
     "crates/test-support/bcs-test-support",
@@ -123,6 +128,13 @@ inventory = "0.3"
 tracing            = "0.1"
 tracing-appender   = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "local-time"] }
+tracing-opentelemetry = "=0.32.0"
+
+# Distributed tracing
+opentelemetry = { version = "=0.31.0", features = ["trace"] }
+opentelemetry-http = "=0.31.0"
+opentelemetry_sdk = { version = "=0.31.0", features = ["trace"] }
+opentelemetry-otlp = { version = "=0.31.0", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client"] }
 
 # Async
 async-trait = "0.1"
@@ -160,6 +172,7 @@ sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"
 base64 = "0.22"
+ulid       = "1"
 
 # Crypto for Alipay RSA2 signing
 rsa = { version = "0.9", features = ["pem"] }
@@ -219,6 +232,7 @@ bcs-friend-store = { path = "crates/services/bcs-friend-store" }
 bcs-relation   = { path = "crates/services/bcs-relation" }
 bcs-relation-store = { path = "crates/services/bcs-relation-store" }
 bcs-secret         = { path = "crates/services/bcs-secret" }
+bcs-telemetry      = { path = "crates/auxiliary/bcs-telemetry" }
 ding-logger    = { path = "crates/auxiliary/ding-logger" }
 bcs-service-api  = { path = "crates/service-api/bcs-service-api" }
 bcs-services-container = { path = "crates/service-api/bcs-services-container" }
@@ -234,11 +248,15 @@ bcs-config                 = { path = "crates/services/bcs-config" }
 bcs-route-security         = { path = "crates/services/bcs-route-security" }
 bcs-session                = { path = "crates/services/bcs-session" }
 bcs-session-store          = { path = "crates/services/bcs-session-store" }
+bcs-session-file-store     = { path = "crates/services/bcs-session-file-store" }
+bcs-session-file           = { path = "crates/services/bcs-session-file" }
 bcs-system-message         = { path = "crates/services/bcs-system-message" }
 bcs-cache-api              = { path = "crates/plugin-api/bcs-cache-api" }
 bcs-channel-api            = { path = "crates/plugin-api/bcs-channel-api" }
 bcs-db-api                 = { path = "crates/plugin-api/bcs-db-api" }
 bcs-llm-api                = { path = "crates/plugin-api/bcs-llm-api" }
+bcs-storage-api            = { path = "crates/plugin-api/bcs-storage-api" }
+bcs-storage-local          = { path = "crates/plugins/bcs-storage-local" }
 bcs-user-directory-api     = { path = "crates/plugin-api/bcs-user-directory-api" }
 bcs-user-identity          = { path = "crates/services/bcs-user-identity" }
 bcs-auth-api               = { path = "crates/plugin-api/bcs-auth-api" }

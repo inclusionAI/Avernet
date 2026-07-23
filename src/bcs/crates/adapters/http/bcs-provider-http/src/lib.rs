@@ -16,16 +16,18 @@ use bcs_service_api::{
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotEventCommand,
     BotRunContext, BotRunContextPort, ChatEventState, GroupHistoryBotRequestPort, MessageFlowService,
     ProviderTransportPreference, ServiceError, ServiceResult,
+    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
 };
+use opentelemetry::global;
+use opentelemetry_http::HeaderInjector;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tracing::{info, warn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 mod sse;
 
 use crate::sse::{IngestKind, SeqDecision, SeqDedup, classify, parse_sse_block};
-
-const DEFAULT_PROVIDER_DOWNLINK_TIMEOUT_MS: u64 = 60 * 60 * 1_000;
 
 /// Idle timeout for an SSE read loop: if no bytes arrive within this window the
 /// run is considered stuck and closed with a synthesized error terminal (#3).
@@ -185,7 +187,7 @@ impl BotDeliveryPort for HttpProviderTransport {
         let body = provider_request_from_frame(
             &cmd.target,
             &cmd.frame,
-            DEFAULT_PROVIDER_DOWNLINK_TIMEOUT_MS,
+            DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
         )?;
         let provider_id = body.to_bot.provider_id.clone();
         let provider_bot_ref = body.to_bot.provider_bot_ref.clone();
@@ -762,6 +764,12 @@ async fn send_provider_request_with_policy(
     if protocol_version == "2.0" {
         request = request.header(BCN_TRANSPORT_HEADER, transport);
     }
+    let context = tracing::Span::current().context();
+    let mut trace_headers = reqwest::header::HeaderMap::new();
+    global::get_text_map_propagator(|propagator| {
+        propagator.inject_context(&context, &mut HeaderInjector(&mut trace_headers));
+    });
+    request = request.headers(trace_headers);
     let send = request.json(body).send();
     let response_result =
         if let Some(response_header_timeout) = client_policy.response_header_timeout {

@@ -5,7 +5,6 @@
 
 import json
 import time
-from collections.abc import AsyncIterator
 
 from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -37,7 +36,12 @@ from secbaas.community.api.bot_runtime import (
     TooManyRequestsError,
 )
 from secbaas.community.api.open_api import OpenAPICode, get_code_message
-from secbaas.community.api.sse import SseConverterFactory, SseEvent
+from secbaas.community.api.sse import (
+    SseConverterFactory,
+    SseEvent,
+    convert_chunks_to_sse,
+    with_sse_heartbeat,
+)
 from secbaas.community.bootstrap import ApplicationContainer
 from secbaas.community.logger import get_logger
 
@@ -271,35 +275,36 @@ async def deliver_message_stream(
 
     converter = converter_factory.create("default")
 
-    async def _sse_generator() -> AsyncIterator[str]:
-        # 先发送一个 ready 事件，携带 message_id 和 session_id
-        yield SseEvent(
-            event="ready",
+    ready_sse = SseEvent(
+        event="ready",
+        data=json.dumps(
+            {"message_id": message_id, "session_id": session_id},
+            ensure_ascii=False,
+        ),
+    ).to_sse()
+
+    def on_error(e: Exception) -> str:
+        logger.exception(
+            "deliver_message_stream chunk error: message_id=%s", message_id
+        )
+        return SseEvent(
+            event="error",
             data=json.dumps(
-                {"message_id": message_id, "session_id": session_id},
+                {"message_id": message_id, "error": str(e)},
                 ensure_ascii=False,
             ),
         ).to_sse()
 
-        try:
-            async for chunk in chunk_iter:
-                event = converter.convert(chunk, run_id=message_id)
-                if event is not None:
-                    yield event.to_sse()
-        except Exception as e:
-            logger.exception(
-                "deliver_message_stream chunk error: message_id=%s", message_id
-            )
-            yield SseEvent(
-                event="error",
-                data=json.dumps(
-                    {"message_id": message_id, "error": str(e)},
-                    ensure_ascii=False,
-                ),
-            ).to_sse()
-
     return StreamingResponse(
-        _sse_generator(),
+        with_sse_heartbeat(
+            convert_chunks_to_sse(
+                chunk_iter,
+                converter,
+                message_id,
+                prefix=[ready_sse],
+                on_error=on_error,
+            )
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

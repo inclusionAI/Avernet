@@ -14,6 +14,7 @@ from secbaas.community.api.device_manage import (
     CommandResult,
     DeviceCreateConfig,
     OutBoundOperationRule,
+    OutBoundOperationRuleUpdatedMode,
     PoolabCreateConfig,
     PoolabCreationResult,
     PoolabCredentials,
@@ -86,6 +87,7 @@ class PoolabPaasService(PaasService):
         self,
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
     ) -> bool:
         raise NotImplementedError(
             "Poolab platform does not support outbound operation rules"

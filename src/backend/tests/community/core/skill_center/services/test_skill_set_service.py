@@ -578,6 +578,37 @@ class TestRemoveSkillFromDefaultSet:
         )
 
     @pytest.mark.asyncio
+    async def test_default_set_deactivates_pool_local_by_entry_name(self):
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = {
+            "id": "1",
+            "is_default": True,
+            "bolt_id": "default",
+        }
+        mock_skill_repo = MagicMock()
+        mock_skill_repo.get_by_id.return_value = {
+            "id": "42",
+            "git_path": (
+                "local:///home/admin/.openclaw/workspace/"
+                "skills-pool/skills-local/my-skill"
+            ),
+        }
+        mock_skill_svc = MagicMock()
+        mock_skill_svc.deactivate_skill = AsyncMock(return_value=True)
+        svc = self._make_svc(
+            mock_repo,
+            skill_repo=mock_skill_repo,
+            skill_service=mock_skill_svc,
+        )
+
+        assert await svc.remove_skill_from_set("1", "42", user_id="user1")
+        mock_skill_svc.deactivate_skill.assert_called_once_with(
+            "my-skill",
+            bolt_id="default",
+            user_id="user1",
+        )
+
+    @pytest.mark.asyncio
     async def test_default_set_deactivate_failure_rollback(self):
         """Default set: deactivate_skill failure rolls back exclusion."""
         mock_repo = MagicMock()

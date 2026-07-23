@@ -30,6 +30,7 @@ from agentclaw.community.core.aicoding.services.architect_rebind_service import 
 
 ARCH_ID = "arch1"
 OPERATOR = "u001"
+TARGET_ID = "arch2"
 
 
 def _make_service() -> ArchitectRebindService:
@@ -114,6 +115,32 @@ class TestGetArchitectDomainOrRaise:
             svc._get_architect_domain_or_raise(ARCH_ID, OPERATOR)
 
 
+
+# ===========================================================================
+# _get_architect_domain_by_id_or_raise (target side, not owner-scoped)
+# ===========================================================================
+class TestGetArchitectDomainByIdOrRaise:
+    def test_not_found_raises_bot_not_found(self):
+        svc = _make_service()
+        svc._repository.get_by_id.return_value = None
+        with pytest.raises(BotNotFoundError):
+            svc._get_architect_domain_by_id_or_raise(TARGET_ID)
+        # not owner-scoped: never calls get_by_id_and_owner
+        svc._repository.get_by_id_and_owner.assert_not_called()
+
+    def test_not_a_domain_bot_raises_service_error(self):
+        svc = _make_service()
+        svc._repository.get_by_id.return_value = _architect_bot(TARGET_ID, is_domain=False)
+        with pytest.raises(BotServiceError):
+            svc._get_architect_domain_by_id_or_raise(TARGET_ID)
+
+    def test_success_returns_architect_without_owner_check(self):
+        svc = _make_service()
+        arch = _architect_bot(TARGET_ID)  # owner_id would be OPERATOR but irrelevant
+        svc._repository.get_by_id.return_value = arch
+        assert svc._get_architect_domain_by_id_or_raise(TARGET_ID) is arch
+        svc._repository.get_by_id_and_owner.assert_not_called()
+
 # ===========================================================================
 # _rebind_coding_bot_to_architect
 # ===========================================================================
@@ -186,103 +213,151 @@ class TestRebindCodingBotToArchitect:
 # rebind_architect_bot (single)
 # ===========================================================================
 class TestRebindArchitectBot:
+    def _setup_source_target(self, svc):
+        # SOURCE architect is owned by operator; TARGET architect exists as domain.
+        svc._repository.get_by_id_and_owner.return_value = _architect_bot(ARCH_ID)
+        svc._repository.get_by_id.return_value = _architect_bot(TARGET_ID)
+
     def test_empty_args_raises_service_error(self):
         svc = _make_service()
         with pytest.raises(BotServiceError):
-            svc.rebind_architect_bot("", ARCH_ID, OPERATOR)
+            svc.rebind_architect_bot("", ARCH_ID, TARGET_ID, OPERATOR)
         with pytest.raises(BotServiceError):
-            svc.rebind_architect_bot("c1", "", OPERATOR)
+            svc.rebind_architect_bot("c1", "", TARGET_ID, OPERATOR)
+        with pytest.raises(BotServiceError):
+            svc.rebind_architect_bot("c1", ARCH_ID, "", OPERATOR)
+
+    def test_source_equals_target_raises(self):
+        svc = _make_service()
+        with pytest.raises(BotServiceError):
+            svc.rebind_architect_bot("c1", ARCH_ID, ARCH_ID, OPERATOR)
 
     def test_coding_equals_architect_raises(self):
         svc = _make_service()
         with pytest.raises(BotServiceError):
-            svc.rebind_architect_bot(ARCH_ID, ARCH_ID, OPERATOR)
+            svc.rebind_architect_bot(ARCH_ID, ARCH_ID, TARGET_ID, OPERATOR)
+        with pytest.raises(BotServiceError):
+            svc.rebind_architect_bot(TARGET_ID, ARCH_ID, TARGET_ID, OPERATOR)
 
-    def test_architect_not_owned_raises_permission(self):
+    def test_source_not_owned_raises_permission(self):
         svc = _make_service()
         svc._repository.get_by_id_and_owner.return_value = None
         with pytest.raises(BotPermissionError):
-            svc.rebind_architect_bot("c1", ARCH_ID, OPERATOR)
-        # must not reach the coding-bot lookup
+            svc.rebind_architect_bot("c1", ARCH_ID, TARGET_ID, OPERATOR)
+        # must not reach target / coding-bot lookup
         svc._repository.get_by_id.assert_not_called()
+
+    def test_target_not_found_raises_bot_not_found(self):
+        svc = _make_service()
+        svc._repository.get_by_id_and_owner.return_value = _architect_bot(ARCH_ID)
+        svc._repository.get_by_id.return_value = None
+        with pytest.raises(BotNotFoundError):
+            svc.rebind_architect_bot("c1", ARCH_ID, TARGET_ID, OPERATOR)
+        svc._template_service.get_template.assert_not_called()
 
     def test_success_returns_change(self):
         svc = _make_service()
-        svc._repository.get_by_id_and_owner.return_value = _architect_bot()
-        svc._repository.get_by_id.return_value = _coding_bot()
+        self._setup_source_target(svc)
+        # _rebind path uses repository.get_by_id for coding-bot too; make coding distinct.
+        coding = {TARGET_ID: _architect_bot(TARGET_ID), "c1": _coding_bot("c1")}
+        svc._repository.get_by_id.side_effect = lambda bid: coding[bid]
         svc._template_service.get_template.return_value = _template(ext={"architect_bot_id": "old"})
         svc._template_service.update_template.return_value = {
-            "bot_id": "c1", "ext": {"architect_bot_id": ARCH_ID}
+            "bot_id": "c1", "ext": {"architect_bot_id": TARGET_ID}
         }
-        result = svc.rebind_architect_bot("c1", ARCH_ID, OPERATOR)
+        result = svc.rebind_architect_bot("c1", ARCH_ID, TARGET_ID, OPERATOR)
         assert result["changed"] is True
-        # architect owner check: owner-scoped exactly once
+        assert result["architect_bot_id"] == TARGET_ID
+        # source owner check exactly once
         assert svc._repository.get_by_id_and_owner.call_count == 1
-        # coding-bot existence: plain get_by_id (NOT owner-scoped) exactly once
-        svc._repository.get_by_id.assert_called_once_with("c1")
-
 
 # ===========================================================================
 # rebind_architect_bot_batch
 # ===========================================================================
 class TestRebindArchitectBotBatch:
-    def test_empty_architect_raises(self):
+    def test_empty_args_raises_service_error(self):
         svc = _make_service()
         with pytest.raises(BotServiceError):
-            svc.rebind_architect_bot_batch(["c1"], "", OPERATOR)
+            svc.rebind_architect_bot_batch(["c1"], "", TARGET_ID, OPERATOR)
+        with pytest.raises(BotServiceError):
+            svc.rebind_architect_bot_batch(["c1"], ARCH_ID, "", OPERATOR)
 
     def test_empty_coding_ids_raises(self):
         svc = _make_service()
         with pytest.raises(BotServiceError):
-            svc.rebind_architect_bot_batch([], ARCH_ID, OPERATOR)
+            svc.rebind_architect_bot_batch([], ARCH_ID, TARGET_ID, OPERATOR)
 
     def test_all_blank_coding_ids_raises(self):
         svc = _make_service()
         with pytest.raises(BotServiceError):
-            svc.rebind_architect_bot_batch(["", ""], ARCH_ID, OPERATOR)
+            svc.rebind_architect_bot_batch(["", ""], ARCH_ID, TARGET_ID, OPERATOR)
 
-    def test_architect_in_coding_ids_raises_before_lookup(self):
+    def test_source_in_coding_ids_raises_before_lookup(self):
         svc = _make_service()
         with pytest.raises(BotServiceError):
-            svc.rebind_architect_bot_batch(["c1", ARCH_ID], ARCH_ID, OPERATOR)
+            svc.rebind_architect_bot_batch(["c1", ARCH_ID], ARCH_ID, TARGET_ID, OPERATOR)
         svc._repository.get_by_id_and_owner.assert_not_called()
 
-    def test_architect_check_called_once_for_n_items(self):
+    def test_target_in_coding_ids_raises_before_lookup(self):
         svc = _make_service()
-        svc._repository.get_by_id_and_owner.return_value = _architect_bot()
-        svc._repository.get_by_id.return_value = _coding_bot()
+        with pytest.raises(BotServiceError):
+            svc.rebind_architect_bot_batch(["c1", TARGET_ID], ARCH_ID, TARGET_ID, OPERATOR)
+        svc._repository.get_by_id_and_owner.assert_not_called()
+
+    def test_source_equals_target_raises(self):
+        svc = _make_service()
+        with pytest.raises(BotServiceError):
+            svc.rebind_architect_bot_batch(["c1"], ARCH_ID, ARCH_ID, OPERATOR)
+
+    def test_source_target_checks_each_called_once_for_n_items(self):
+        svc = _make_service()
+        svc._repository.get_by_id_and_owner.return_value = _architect_bot(ARCH_ID)
+        # get_by_id used for BOTH target check (once) and per-coding-bot existence; first call = target
+        coding = {TARGET_ID: _architect_bot(TARGET_ID), "c1": _coding_bot("c1")}
+        svc._repository.get_by_id.side_effect = lambda bid: coding[bid]
         svc._template_service.get_template.return_value = _template(ext={"architect_bot_id": "old"})
         svc._template_service.update_template.return_value = {"bot_id": "x"}
-        svc.rebind_architect_bot_batch(["c1", "c2", "c3"], ARCH_ID, OPERATOR)
+        svc.rebind_architect_bot_batch(["c1"], ARCH_ID, TARGET_ID, OPERATOR)
+        # source owner check once
         assert svc._repository.get_by_id_and_owner.call_count == 1
 
     def test_dedup_preserves_order(self):
         svc = _make_service()
-        svc._repository.get_by_id_and_owner.return_value = _architect_bot()
+        svc._repository.get_by_id_and_owner.return_value = _architect_bot(ARCH_ID)
+        svc._repository.get_by_id.return_value = _architect_bot(TARGET_ID)
         svc._rebind_coding_bot_to_architect = MagicMock(
             return_value={"changed": True, "previous_architect_bot_id": "old"}
         )
-        result = svc.rebind_architect_bot_batch(["b", "a", "b", "c", "a"], ARCH_ID, OPERATOR)
+        result = svc.rebind_architect_bot_batch(["b", "a", "b", "c", "a"], ARCH_ID, TARGET_ID, OPERATOR)
         called = [c.args[0] for c in svc._rebind_coding_bot_to_architect.call_args_list]
         assert called == ["b", "a", "c"]
         assert result["total"] == 3
         assert result["succeeded"] == 3
 
-    def test_architect_not_owned_whole_batch_rejected(self):
+    def test_source_not_owned_whole_batch_rejected(self):
         svc = _make_service()
         svc._repository.get_by_id_and_owner.return_value = None
         with pytest.raises(BotPermissionError):
-            svc.rebind_architect_bot_batch(["c1"], ARCH_ID, OPERATOR)
+            svc.rebind_architect_bot_batch(["c1"], ARCH_ID, TARGET_ID, OPERATOR)
+
+    def test_target_not_found_whole_batch_rejected(self):
+        svc = _make_service()
+        svc._repository.get_by_id_and_owner.return_value = _architect_bot(ARCH_ID)
+        svc._repository.get_by_id.return_value = None
+        with pytest.raises(BotNotFoundError):
+            svc.rebind_architect_bot_batch(["c1"], ARCH_ID, TARGET_ID, OPERATOR)
 
     def test_mixed_results_per_item(self):
         svc = _make_service()
-        svc._repository.get_by_id_and_owner.return_value = _architect_bot()
+        svc._repository.get_by_id_and_owner.return_value = _architect_bot(ARCH_ID)
+        # First get_by_id call = target (arch2 exists); subsequent = coding bots.
         coding = {
-            "c1": _coding_bot("c1"),                         # success -> changed True
-            "c2": None,                                       # not_found
-            "c3": _coding_bot("c3", template_type="other"),   # invalid (non-appcoding)
-            "c4": _coding_bot("c4"),                          # forbidden (update raises BotPermissionError)
-            "c5": _coding_bot("c5"),                          # error   (update raises ValueError)
+            TARGET_ID: _architect_bot(TARGET_ID),
+            "c1": _coding_bot("c1"),
+            "c2": None,
+            "c3": _coding_bot("c3", template_type="other"),
+            "c4": _coding_bot("c4"),
+            "c5": _coding_bot("c5"),
         }
         svc._repository.get_by_id.side_effect = lambda bid: coding[bid]
         templates = {
@@ -291,7 +366,7 @@ class TestRebindArchitectBotBatch:
             "c5": _template("c5", ext={"architect_bot_id": "old"}),
         }
         svc._template_service.get_template.side_effect = lambda bid: templates[bid]
-        updated = {"bot_id": "x", "ext": {"architect_bot_id": ARCH_ID}}
+        updated = {"bot_id": "x", "ext": {"architect_bot_id": TARGET_ID}}
 
         def _update(bid, ext, template_type=None):
             if bid == "c1":
@@ -305,7 +380,7 @@ class TestRebindArchitectBotBatch:
         svc._template_service.update_template.side_effect = _update
 
         result = svc.rebind_architect_bot_batch(
-            ["c1", "c2", "c3", "c4", "c5"], ARCH_ID, OPERATOR
+            ["c1", "c2", "c3", "c4", "c5"], ARCH_ID, TARGET_ID, OPERATOR
         )
 
         assert result["total"] == 5
@@ -317,14 +392,13 @@ class TestRebindArchitectBotBatch:
             "success": True,
             "changed": True,
             "previous_architect_bot_id": "old",
-            "architect_bot_id": ARCH_ID,
+            "architect_bot_id": TARGET_ID,
         }
         assert by_id["c2"]["success"] is False and by_id["c2"]["error_code"] == "not_found"
         assert by_id["c3"]["success"] is False and by_id["c3"]["error_code"] == "invalid"
         assert by_id["c4"]["success"] is False and by_id["c4"]["error_code"] == "forbidden"
         assert by_id["c5"]["success"] is False and by_id["c5"]["error_code"] == "error"
-        # success item must never leak template / token ciphertext
         assert "template" not in by_id["c1"]
         assert "token" not in by_id["c1"]
-        # architect owner-scoped check happened exactly once for the whole batch
+        # source owner-scoped check happened exactly once for the whole batch
         assert svc._repository.get_by_id_and_owner.call_count == 1

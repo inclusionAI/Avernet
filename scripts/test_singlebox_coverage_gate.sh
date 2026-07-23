@@ -22,7 +22,7 @@ make_fake_repo() {
     "${tmp}/src/backend/src/agentclaw/community/core/cron" \
     "${tmp}/src/backend/src/agentclaw/community/plugin_api" \
     "${tmp}/src/baas" \
-    "${tmp}/src/bcs/scripts"
+    "${tmp}/src/bcs/scripts/e2e-test"
   cp "$SCRIPT" "${tmp}/scripts/ci/singlebox_coverage.sh"
   cp "$REPORTER" "${tmp}/scripts/ci/singlebox_coverage_report.py"
   cp "$MANIFEST_CHECKER" "${tmp}/scripts/ci/singlebox_coverage_manifest_check.py"
@@ -64,6 +64,15 @@ modules:
       router_min_percent: 100
 YAML
   chmod +x "${tmp}/scripts/ci/singlebox_coverage.sh"
+  cat > "${tmp}/src/bcs/scripts/e2e-test/mock_services.sh" <<'SH'
+#!/usr/bin/env bash
+bcs_e2e_mock_start() {
+  BCS_E2E_MOCK_BASE_URL="http://127.0.0.1:39090"
+  BCS_E2E_JUDGE_API_KEY="local-e2e-key"
+  export BCS_E2E_MOCK_BASE_URL BCS_E2E_JUDGE_API_KEY
+}
+bcs_e2e_mock_stop() { :; }
+SH
   cat > "${tmp}/scripts/singlebox.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -71,9 +80,13 @@ case ":${PATH}:" in
   *":${HOME}/.cargo/bin:"*) ;;
   *) echo "missing cargo path in PATH" >&2; exit 11 ;;
 esac
-if [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" != "mock" ]; then
-  echo "singlebox coverage should force SINGLEBOX_MODEL_CONFIG_MODE=mock" >&2
+if [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" != "${SINGLEBOX_EXPECTED_MODEL_CONFIG_MODE:-mock}" ]; then
+  echo "singlebox coverage model config mode mismatch" >&2
   exit 12
+fi
+if [ "${BCS_E2E_MOCK_BASE_URL:-}" != "http://127.0.0.1:39090" ]; then
+  echo "singlebox coverage should expose the Provider/Judge mock to BCS" >&2
+  exit 16
 fi
 case "${STANDALONE_OPENCLAW_ROOT:-}" in
   "${PWD}/scripts/.dependencies/coverage/singlebox/standalone-openclaw") ;;
@@ -260,6 +273,34 @@ assert summary["systems"]["bcs"]["cli_command"]["percent"] == 100.0
 PY
 }
 
+test_model_config_mode_can_use_home() {
+  local tmp log uv_log summary
+  tmp="$(mktemp -d)"
+  log="${tmp}/singlebox.log"
+  uv_log="${tmp}/uv.log"
+  summary="${tmp}/scripts/.dependencies/coverage/singlebox/reports/summary.json"
+  make_fake_repo "$tmp"
+
+  (
+    cd "$tmp"
+    PATH="${tmp}/fake-bin:$PATH" \
+      PYTHON="${ROOT}/src/backend/.venv/bin/python" \
+      SINGLEBOX_COVERAGE_MODEL_CONFIG_MODE=home \
+      SINGLEBOX_EXPECTED_MODEL_CONFIG_MODE=home \
+      SINGLEBOX_STUB_LOG="$log" \
+      UV_STUB_LOG="$uv_log" \
+      "${tmp}/scripts/ci/singlebox_coverage.sh" >/dev/null
+  )
+
+  "${ROOT}/src/backend/.venv/bin/python" - "$summary" <<'PY'
+import json
+import sys
+
+summary = json.load(open(sys.argv[1], encoding="utf-8"))
+assert summary["model_config_mode"] == "home"
+PY
+}
+
 test_bcs_e2e_failure_preserves_reports_and_fails_gate() {
   local tmp log bcs_log uv_log output rc
   tmp="$(mktemp -d)"
@@ -432,6 +473,7 @@ YAML
 }
 
 test_default_mode_runs_real_singlebox
+test_model_config_mode_can_use_home
 test_bcs_e2e_failure_preserves_reports_and_fails_gate
 test_bcs_e2e_failure_without_artifacts_preserves_original_status
 test_bcs_e2e_failure_with_malformed_artifacts_preserves_original_status

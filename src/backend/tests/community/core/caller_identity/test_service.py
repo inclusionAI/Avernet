@@ -9,6 +9,7 @@ import pytest
 from agentclaw.community.core.caller_identity.contracts import (
     CallerCallTypeInvalidError,
     CallerIdentityAmbiguousError,
+    CallerIdentityPermissionError,
     CallerIdentityStage,
     CallerIdentityReadOnlyError,
     CallerLockEpochError,
@@ -17,6 +18,7 @@ from agentclaw.community.core.caller_identity.contracts import (
     DraftCallTypeMutationResult,
     McpCallType,
 )
+from agentclaw.community.core.caller_identity import service as caller_identity_service
 from agentclaw.community.core.caller_identity.credential import CallerToken
 from agentclaw.community.core.caller_identity.repository import (
     CallerIdentityEngineChangedError,
@@ -81,10 +83,105 @@ def test_iam_context_reads_only_bot_aggregate_call_type() -> None:
     )
 
     assert context.should_exchange_caller_token is True
-    assert context.bot_call_type is McpCallType.CALLER
+    assert context.bot_call_type == McpCallType.CALLER
     assert context.binding_id == 9
     deps.repository.list_draft_call_types.assert_not_called()
     deps.mcp_provider.collect_bot_active_mcps.assert_not_called()
+
+
+def test_iam_context_should_not_exchange_when_call_type_not_caller() -> None:
+    """Verify bot_call_type uses == comparison, not is."""
+    bot = _bot(call_type="owner")
+    service, deps = _service(bot=bot)
+
+    context = service.get_iam_token_context(
+        bot_id="bot-1",
+        stage=CallerIdentityStage.DRAFT,
+    )
+
+    assert context.bot_call_type == McpCallType.OWNER
+    deps.repository.list_draft_call_types.assert_not_called()
+    deps.mcp_provider.collect_bot_active_mcps.assert_not_called()
+
+
+def test_iam_context_test_exchange_skips_bot_type_and_call_type() -> None:
+    bot = _bot(call_type="owner")
+    bot["bot_type"] = "personal"
+    bot["call_type"] = "invalid-for-test"
+    service, _ = _service(bot=bot)
+
+    context = service.get_iam_token_context(
+        bot_id="bot-1",
+        stage=CallerIdentityStage.DRAFT,
+        is_test_exchange=True,
+    )
+
+    assert context.should_exchange_caller_token is True
+    assert context.bot_call_type is McpCallType.OWNER
+
+
+def test_iam_context_test_exchange_rejects_production_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(caller_identity_service, "get_current_env", lambda: "prod")
+    service, deps = _service(bot=_bot(call_type="owner"))
+
+    with pytest.raises(CallerIdentityPermissionError):
+        service.get_iam_token_context(
+            bot_id="bot-1",
+            stage=CallerIdentityStage.DRAFT,
+            is_test_exchange=True,
+        )
+
+    deps.bot_repository.get_by_id.assert_not_called()
+
+
+def test_test_exchange_authorization_rejects_non_owner() -> None:
+    service, _ = _service(bot=_bot(call_type="owner"))
+
+    with pytest.raises(CallerIdentityPermissionError):
+        service.authorize_iam_token_exchange(
+            caller_user_id="caller-1",
+            owner_user_id="owner-1",
+            is_test_exchange=True,
+        )
+
+
+def test_test_exchange_authorization_allows_owner() -> None:
+    service, _ = _service(bot=_bot(call_type="owner"))
+
+    service.authorize_iam_token_exchange(
+        caller_user_id="owner-1",
+        owner_user_id="owner-1",
+        is_test_exchange=True,
+    )
+
+
+def test_iam_context_default_keeps_non_caller_bot_fast_path() -> None:
+    bot = _bot(call_type="owner")
+    bot["bot_type"] = "personal"
+    service, _ = _service(bot=bot)
+
+    context = service.get_iam_token_context(
+        bot_id="bot-1",
+        stage=CallerIdentityStage.DRAFT,
+    )
+
+    assert context.should_exchange_caller_token is False
+
+
+def test_iam_context_test_exchange_still_requires_active_bot() -> None:
+    bot = _bot(call_type="owner")
+    bot["status"] = "INACTIVE"
+    service, _ = _service(bot=bot)
+
+    context = service.get_iam_token_context(
+        bot_id="bot-1",
+        stage=CallerIdentityStage.DRAFT,
+        is_test_exchange=True,
+    )
+
+    assert context.should_exchange_caller_token is False
 
 
 def test_iam_context_uses_exact_entity_scoped_bot_lookup() -> None:
@@ -189,6 +286,40 @@ def test_exchange_caller_identity_uses_passport_and_installs_opaque_token() -> N
     )
 
 
+def test_exchange_caller_identity_propagates_test_exchange_to_runtime() -> None:
+    service, _ = _service(bot=_bot(call_type="owner"))
+    passport = MagicMock()
+    passport.query_token.return_value = "agent-pass-token"
+    passport.query_agent_passport.return_value = {"agent_code": "agent-code"}
+    token_provider = MagicMock()
+    caller_token = CallerToken(
+        access_token="caller-token",
+        subject_user_id="owner-1",
+        expires_at=datetime.now(),
+        fingerprint="fingerprint",
+    )
+    token_provider.exchange.return_value = caller_token
+    runtime_updater = MagicMock()
+
+    service.exchange_caller_identity(
+        iam_token="iam-token",
+        caller_user_id="owner-1",
+        bot_id="bot-1",
+        owner_user_id="owner-1",
+        passport=passport,
+        token_provider=token_provider,
+        runtime_updater=runtime_updater,
+        stage="draft",
+        publish_id=None,
+        is_test_exchange=True,
+    )
+
+    assert (
+        runtime_updater.update_caller_identity.call_args.kwargs["is_test_exchange"]
+        is True
+    )
+
+
 @pytest.mark.parametrize("stage", ["verify", "online"])
 def test_exchange_caller_identity_does_not_pass_draft_binding_outside_draft(
     stage: str,
@@ -256,7 +387,7 @@ async def test_mcp_update_syncs_complete_identity_manifest_to_agent_principal() 
         entity_id="entity-1",
     )
 
-    assert result.bot_call_type is McpCallType.CALLER
+    assert result.bot_call_type == McpCallType.CALLER
     deps.mcp_sync_service.sync_mcp_identity_to_agent_principal.assert_awaited_once_with(
         user_id="owner-1",
         entity_id="entity-1",
@@ -272,6 +403,71 @@ async def test_mcp_update_syncs_complete_identity_manifest_to_agent_principal() 
     deps.bot_repository.get_by_id_and_entity.assert_called_once_with(
         "bot-1", "entity-1"
     )
+
+
+@pytest.mark.asyncio
+async def test_mcp_update_without_lock_epoch_allows_unlocked_owner() -> None:
+    service, deps = _service(bot=_bot())
+    deps.mcp_provider.collect_bot_active_mcps.return_value = [
+        {"server_code": "calendar"}
+    ]
+    deps.lock_repository.get_by_key.return_value = None
+    deps.repository.replace_draft_call_type.return_value = DraftCallTypeMutationResult(
+        previous_explicit_call_type=None,
+        bot_call_type=McpCallType.CALLER,
+        revision=1,
+    )
+    deps.repository.list_draft_call_types.return_value = {
+        "calendar": McpCallType.CALLER,
+    }
+    deps.mcp_sync_service.sync_mcp_identity_to_agent_principal.return_value = {
+        "success": True,
+    }
+
+    result = await service.update_mcp_call_type(
+        bot_id="bot-1",
+        server_code="calendar",
+        call_type=McpCallType.CALLER,
+        actor_id="owner-1",
+    )
+
+    assert result.bot_call_type is McpCallType.CALLER
+    assert deps.repository.replace_draft_call_type.call_args.kwargs["lock_epoch"] is None
+
+
+@pytest.mark.asyncio
+async def test_mcp_update_without_lock_epoch_rejects_existing_lock() -> None:
+    service, deps = _service(bot=_bot())
+    deps.mcp_provider.collect_bot_active_mcps.return_value = [
+        {"server_code": "calendar"}
+    ]
+    deps.lock_repository.get_by_key.return_value = SimpleNamespace(
+        holder_user_id="owner-1",
+        id=7,
+    )
+
+    with pytest.raises(CallerLockEpochError):
+        await service.update_mcp_call_type(
+            bot_id="bot-1",
+            server_code="calendar",
+            call_type=McpCallType.CALLER,
+            actor_id="owner-1",
+        )
+
+    deps.repository.replace_draft_call_type.assert_not_called()
+
+
+def test_caller_context_is_editable_for_unlocked_owner() -> None:
+    service, deps = _service(bot=_bot())
+    deps.lock_repository.get_by_key.return_value = None
+
+    context = service.get_context(
+        bot_id="bot-1",
+        actor_id="owner-1",
+        stage=CallerIdentityStage.DRAFT,
+    )
+
+    assert context.editable is True
 
 
 @pytest.mark.asyncio
@@ -329,10 +525,11 @@ async def test_mcp_update_rejects_missing_mcp_and_stale_lock(
     [
         (CallerIdentityLockMismatchError(), CallerLockEpochError),
         (CallerIdentityEngineChangedError(), CallerIdentityReadOnlyError),
-        (ValueError("invalid call type"), CallerCallTypeInvalidError),
+        (TypeError("transactional session is unavailable"), TypeError),
+        (ValueError("persisted call type is corrupt"), ValueError),
     ],
 )
-async def test_mcp_update_maps_repository_concurrency_errors(
+async def test_mcp_update_only_maps_repository_domain_errors(
     repository_error: Exception,
     expected_error: type[Exception],
 ) -> None:
@@ -395,6 +592,39 @@ async def test_mcp_update_compensates_when_agent_principal_sync_fails() -> None:
         deps.repository.compensate_draft_call_type.call_args.kwargs["expected_revision"]
         == 3
     )
+
+
+@pytest.mark.asyncio
+async def test_mcp_update_without_epoch_stops_compensation_when_lock_appears() -> None:
+    service, deps = _service(bot=_bot())
+    deps.mcp_provider.collect_bot_active_mcps.return_value = [
+        {"server_code": "calendar"}
+    ]
+    deps.lock_repository.get_by_key.return_value = None
+    deps.repository.replace_draft_call_type.return_value = DraftCallTypeMutationResult(
+        previous_explicit_call_type=None,
+        bot_call_type=McpCallType.CALLER,
+        revision=3,
+    )
+    deps.repository.list_draft_call_types.return_value = {
+        "calendar": McpCallType.CALLER,
+    }
+    deps.mcp_sync_service.sync_mcp_identity_to_agent_principal.side_effect = (
+        RuntimeError("Agent Principal unavailable")
+    )
+    deps.repository.compensate_draft_call_type.side_effect = (
+        CallerIdentityLockMismatchError
+    )
+
+    with pytest.raises(CallerMcpSyncError):
+        await service.update_mcp_call_type(
+            bot_id="bot-1",
+            server_code="calendar",
+            call_type=McpCallType.CALLER,
+            actor_id="owner-1",
+        )
+
+    assert deps.repository.compensate_draft_call_type.call_args.kwargs["lock_epoch"] is None
 
 
 @pytest.mark.asyncio

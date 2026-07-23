@@ -341,13 +341,10 @@ impl GroupProposalService for GroupProposalUseCases {
             .unwrap_or(0) as u64;
         let _ = self.proposal.take(&cmd.token).await;
 
-        let chat_url = self.config.botchat_base_url.as_ref().map(|base| {
-            format!(
-                "{}/bcn/chat/detail?id={}",
-                base.trim_end_matches('/'),
-                group_id
-            )
-        });
+        let chat_url =
+            self.config.botchat_base_url.as_ref().map(|base| {
+                build_group_chat_url(base, &group_id, &proposal.driver_bot, &session.id)
+            });
 
         Ok(GroupProposalConfirmResult {
             created: true,
@@ -355,6 +352,7 @@ impl GroupProposalService for GroupProposalUseCases {
             driver_bot_id: proposal.driver_bot,
             participant_bot_ids: proposal.participants,
             chat_url,
+            session_id: session.id,
             context_injected,
         })
     }
@@ -376,6 +374,21 @@ impl GroupProposalService for GroupProposalUseCases {
             proposal,
         })
     }
+}
+
+fn build_group_chat_url(
+    base: &str,
+    group_id: &str,
+    view_actor_id: &str,
+    session_id: &str,
+) -> String {
+    format!(
+        "{}/bcn/chat/detail?id={}&bot_uuid={}&session={}",
+        base.trim_end_matches('/'),
+        urlencoding::encode(group_id),
+        urlencoding::encode(view_actor_id),
+        urlencoding::encode(session_id)
+    )
 }
 
 fn dedupe_preserving_order(participants: Vec<String>) -> Vec<String> {

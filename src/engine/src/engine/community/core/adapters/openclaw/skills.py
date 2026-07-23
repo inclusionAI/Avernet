@@ -31,6 +31,14 @@ from engine.community.core.skills.models import (
     CenterEnsureResult,
     CleanSymlinksRequest,
     CleanSymlinksResult,
+    PoolLayoutActivateRequest,
+    PoolLayoutActivationResult,
+    PoolLayoutActivationStatus,
+    PoolLayoutProbeRequest,
+    PoolLayoutProbeResult,
+    PoolLayoutProbeStatus,
+    PoolMappingPublishResult,
+    PoolMappingVerificationResult,
     Skill,
     SkillConfig,
     SkillExecutionRequest,
@@ -38,6 +46,7 @@ from engine.community.core.skills.models import (
     SyncBindPathsRequest,
     SyncSymlinksRequest,
     SyncSymlinksResult,
+    SymlinkItem,
 )
 from engine.community.core.skills.protocol import SkillsService
 from engine.community.plugin_api.openclaw.skills import OpenClawSkillsPort
@@ -130,6 +139,103 @@ class OpenClawSkillsAdapter(SkillsService):
         return CleanSymlinksResult(
             directories_scanned=raw["directories_scanned"],
             removed=raw.get("removed", []),
+        )
+
+    async def activate_pool_layout(
+        self,
+        request: PoolLayoutActivateRequest,
+        auth: AuthContext | None = None,
+    ) -> PoolLayoutActivationResult:
+        raw = await self._port.activate_pool_layout(
+            {
+                "migration_generation": request.migration_generation,
+                "preparation_id": request.preparation_id,
+                "registered_local_names": request.registered_local_names,
+                "mappings": [
+                    {"source": item.source, "target": item.target}
+                    for item in request.mappings
+                ],
+            }
+        )
+        raw_status = str(raw.get("status", ""))
+        try:
+            status = PoolLayoutActivationStatus(raw_status)
+        except ValueError:
+            status = PoolLayoutActivationStatus.UNKNOWN
+        evidence = dict(raw.get("evidence") or {})
+        if status is PoolLayoutActivationStatus.UNKNOWN:
+            evidence["raw_status"] = raw_status
+        committed = (
+            raw.get("committed") is True
+            and status
+            in {
+                PoolLayoutActivationStatus.COMMITTED,
+                PoolLayoutActivationStatus.ALREADY_COMMITTED,
+            }
+        )
+        return PoolLayoutActivationResult(
+            committed=committed,
+            status=status,
+            evidence=evidence,
+        )
+
+    async def probe_pool_layout(
+        self,
+        request: PoolLayoutProbeRequest,
+        auth: AuthContext | None = None,
+    ) -> PoolLayoutProbeResult:
+        raw = await self._port.probe_pool_layout(
+            {
+                "engine": request.engine,
+                "layout_contract_version": request.layout_contract_version,
+            }
+        )
+        return PoolLayoutProbeResult(
+            status=PoolLayoutProbeStatus(str(raw["status"])),
+            engine=str(raw["engine"]),
+            layout_contract_version=str(raw["layout_contract_version"]),
+            preparation_id=(
+                str(raw["preparation_id"])
+                if raw.get("preparation_id") is not None
+                else None
+            ),
+            evidence=dict(raw.get("evidence") or {}),
+        )
+
+    async def publish_pool_mappings(
+        self,
+        mappings: list[SymlinkItem],
+        auth: AuthContext | None = None,
+    ) -> PoolMappingPublishResult:
+        raw = await self._port.publish_pool_mappings(
+            {
+                "mappings": [
+                    {"source": item.source, "target": item.target}
+                    for item in mappings
+                ]
+            }
+        )
+        return PoolMappingPublishResult(
+            published=raw.get("published") is True,
+            evidence=dict(raw.get("evidence") or {}),
+        )
+
+    async def verify_pool_mappings(
+        self,
+        mappings: list[SymlinkItem],
+        auth: AuthContext | None = None,
+    ) -> PoolMappingVerificationResult:
+        raw = await self._port.verify_pool_mappings(
+            {
+                "mappings": [
+                    {"source": item.source, "target": item.target}
+                    for item in mappings
+                ]
+            }
+        )
+        return PoolMappingVerificationResult(
+            valid=raw.get("valid") is True,
+            evidence=dict(raw.get("evidence") or {}),
         )
 
     # ── Per-skill ops (not exposed by OpenClaw) ───────────────────────────────
