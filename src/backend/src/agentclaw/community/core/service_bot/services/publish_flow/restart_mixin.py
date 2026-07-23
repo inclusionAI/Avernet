@@ -226,10 +226,23 @@ class RestartMixin:
         delivery = self._ext_state.compose_stored(publish_record.ext or {}, stage_enum)
 
         # A prior recreate that crashed between its ext write and its
-        # complete_operation left a dangling op; this re-delivery resolves the
-        # NEW bot from ext and takes the happy path, so nothing else would ever
-        # finish that bookkeeping — finalize it here before deploying.
-        self._finalize_dangling_recreate_op(publish_id, stage_enum, ext)
+        # complete_operation left a dangling op. That crashed leg IS this restart
+        # request's deploy (ext.restart/publish.<stage> already point at its
+        # workflow), and RESTART_TASK is at-least-once — so a redelivery must
+        # finish the recreate's bookkeeping and return its existing workflow, NOT
+        # open a second RESTART op and issue another deploy (which would leave two
+        # concurrent deploy workflows for one restart). Short-circuit when found.
+        recreate_wid = self._finalize_dangling_recreate_op(publish_id, stage_enum, ext)
+        if recreate_wid is not None:
+            self.refresh_publish_handle(binding_id, recreate_wid)
+            logger.info(
+                "[PublishFlowService.execute_restart] resumed crashed recreate "
+                "(idempotent redelivery): publish_id=%s stage=%s restart_publish_id=%s",
+                publish_id, stage_enum.value, recreate_wid,
+            )
+            return {"success": True,
+                    "message": f"Restart submitted, stage: {stage_enum.value}",
+                    "stage": stage_enum.value, "restart_publish_id": recreate_wid}
 
         async def _issue():
             return await self._build_service.upgrade_async(
@@ -307,40 +320,45 @@ class RestartMixin:
 
     def _finalize_dangling_recreate_op(
         self, publish_id: int, stage_enum: PublishStage, ext: dict
-    ) -> None:
+    ) -> int | None:
         """Complete a recreate FIRST_RELEASE op stranded by a crash between its
-        ext write and its ``complete_operation``.
+        ext write and its ``complete_operation``; return its workflow id (or
+        ``None`` when there is nothing to finalize).
 
         The recreate's last two steps are the ext write (binding/publish/restart
         → the new ids) and the op completion. A crash between them leaves the op
         ``ID_RECORDED`` while ext already points at the NEW, alive bot — so the
-        re-delivered restart takes the happy (upgrade) path and the recreate leg
-        never runs again to finish its bookkeeping. Left dangling, that
-        non-terminal latest FIRST_RELEASE attempt hides the record's genuinely
-        completed release from ``is_current_online_deployment`` (which reads the
-        latest attempt per kind), and a later release for the same record/stage
-        would resume it and complete without issuing anything.
+        re-delivered restart resolves that bot and would otherwise take the happy
+        (upgrade) path, and the recreate leg never runs again to finish its
+        bookkeeping. Left dangling, that non-terminal latest FIRST_RELEASE attempt
+        hides the record's genuinely completed release from
+        ``is_current_online_deployment`` (which reads the latest attempt per
+        kind), and a later release for the same record/stage would resume it and
+        complete without issuing anything.
 
         The condition is exact: a non-terminal FIRST_RELEASE op for this
         record/stage whose recorded workflow id IS ``ext.publish.<stage>`` — the
         ext write demonstrably landed, so completing the op is pure bookkeeping
-        catch-up. ``complete`` is a CAS from ID_RECORDED; anything else no-ops."""
+        catch-up. ``complete`` is a CAS from ID_RECORDED; anything else no-ops.
+        The returned id lets ``execute_restart`` return that workflow instead of
+        issuing a redundant second deploy (idempotent task redelivery)."""
         op = self._publish_operation_repo.get_latest_by_kind(
             publish_id, str(PublishOperationKind.FIRST_RELEASE), stage_enum.value
         )
         if op is None or op.baas_publish_id is None:
-            return
+            return None
         terminal = {s.value for s in PublishOperationState.terminal()}
         if op.state in terminal:
-            return
+            return None
         if op.baas_publish_id != (ext.get("publish") or {}).get(stage_enum.value):
-            return
+            return None
         logger.info(
             "[PublishFlowService._finalize_dangling_recreate_op] completing "
             "stranded recreate op: publish_id=%s stage=%s op_id=%s baas_publish_id=%s",
             publish_id, stage_enum.value, op.id, op.baas_publish_id,
         )
         self._operation_runner.complete_operation(op)
+        return op.baas_publish_id
 
     async def _recreate_restart_target(
         self,
