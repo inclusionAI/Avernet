@@ -317,7 +317,7 @@ def test_exchange_caller_identity_propagates_test_exchange_to_runtime() -> None:
 
 
 @pytest.mark.parametrize("stage", ["verify", "online"])
-def test_exchange_caller_identity_does_not_pass_draft_binding_outside_draft(
+def test_exchange_caller_identity_passes_binding_id_in_all_stages(
     stage: str,
 ) -> None:
     service, _ = _service(bot=_bot(call_type="caller"))
@@ -343,7 +343,7 @@ def test_exchange_caller_identity_does_not_pass_draft_binding_outside_draft(
         binding_id=9,
     )
 
-    assert "binding_id" not in runtime_updater.update_caller_identity.call_args.kwargs
+    assert runtime_updater.update_caller_identity.call_args.kwargs["binding_id"] == 9
 
 
 @pytest.mark.asyncio

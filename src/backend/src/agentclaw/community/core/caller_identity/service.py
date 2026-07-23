@@ -357,12 +357,7 @@ class CallerIdentityService:
             "publish_id": publish_id,
             "entity_id": entity_id,
         }
-        if (
-            stage == CallerIdentityStage.DRAFT.value
-            and isinstance(binding_id, int)
-            and not isinstance(binding_id, bool)
-            and binding_id > 0
-        ):
+        if isinstance(binding_id, int) and not isinstance(binding_id, bool) and binding_id > 0:
             runtime_update_kwargs["binding_id"] = binding_id
         if is_test_exchange:
             # The HTTP adapter restricts this temporary path to a non-production
