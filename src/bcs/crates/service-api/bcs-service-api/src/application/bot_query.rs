@@ -92,6 +92,7 @@ pub struct BotDiscoveryCommand {
     pub scopes: Option<String>,
     pub visibility: Option<String>,
     pub collaborate_bot: Option<String>,
+    /// Authenticated bot requester. When present, discovery excludes this bot.
     pub requester_bot_id: Option<String>,
     pub organization_code: Option<String>,
     pub role: Option<String>,

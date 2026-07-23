@@ -388,6 +388,9 @@ impl BotDiscoveryService for Bot {
 
         let entries = bots
             .into_iter()
+            .filter(|candidate| {
+                command.requester_bot_id.as_deref() != Some(candidate.bot.bot_uuid.as_str())
+            })
             .filter(|candidate| matches_discovery_selector(&candidate.bot, &command))
             .filter_map(|candidate| discover_entry(candidate, &command, friend_uuids.as_ref()))
             .collect::<Vec<_>>();
@@ -821,6 +824,9 @@ impl Bot {
         let mut entries = Vec::new();
         for bot in bots {
             if bot.actor_kind != ActorKind::Bot || bot.capabilities.name.is_none() {
+                continue;
+            }
+            if bot.bot_uuid.as_str() == requester {
                 continue;
             }
             if !matches_discovery_selector(&bot, &command) {
