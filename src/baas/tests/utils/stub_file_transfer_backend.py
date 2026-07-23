@@ -82,9 +82,7 @@ class StubFileTransferBackend(FileTransferBackend):
         return transfer_id in self._storage
 
     def generate_download_url(
-        self,
-        staging_path: str,
-        expire_seconds: int,
+        self, staging_path: str, expire_seconds: int,
         response_params: dict | None = None,
     ) -> str:
         """Generate a fake presigned GET URL for the given staging path.
