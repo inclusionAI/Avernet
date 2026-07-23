@@ -33,7 +33,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from engine.community.core.engine.capability import Capability
 from engine.community.core.engine.context import AuthContext
+from engine.community.core.engine.exceptions import CapabilityNotSupportedError
 from engine.community.core.skills.models import (
     CenterEnsureFailure,
     CenterEnsureItem,
@@ -41,6 +43,12 @@ from engine.community.core.skills.models import (
     CenterEnsureResult,
     CleanSymlinksRequest,
     CleanSymlinksResult,
+    PoolLayoutActivateRequest,
+    PoolLayoutActivationResult,
+    PoolLayoutProbeRequest,
+    PoolLayoutProbeResult,
+    PoolMappingPublishResult,
+    PoolMappingVerificationResult,
     Skill,
     SkillConfig,
     SkillExecutionRequest,
@@ -50,6 +58,7 @@ from engine.community.core.skills.models import (
     SyncBindPathsRequest,
     SyncSymlinksRequest,
     SyncSymlinksResult,
+    SymlinkItem,
 )
 from engine.community.core.skills.protocol import SkillsService
 from engine.community.plugin_api.claude_code.skills import ClaudeCodeSkillsPort
@@ -303,6 +312,42 @@ class ClaudeCodeSkillsAdapter(SkillsService):
             for d in raw.get("failed", []) if isinstance(d, dict)
         ]
         return CenterEnsureResult(ok=ok, failed=failed)
+
+    async def activate_pool_layout(
+        self,
+        request: PoolLayoutActivateRequest,
+        auth: AuthContext | None = None,
+    ) -> PoolLayoutActivationResult:
+        raise CapabilityNotSupportedError(
+            "claude_code", Capability.SKILLS_SYNC_BINDPATHS
+        )
+
+    async def probe_pool_layout(
+        self,
+        request: PoolLayoutProbeRequest,
+        auth: AuthContext | None = None,
+    ) -> PoolLayoutProbeResult:
+        raise CapabilityNotSupportedError(
+            "claude_code", Capability.SKILLS_SYNC_BINDPATHS
+        )
+
+    async def publish_pool_mappings(
+        self,
+        mappings: list[SymlinkItem],
+        auth: AuthContext | None = None,
+    ) -> PoolMappingPublishResult:
+        raise CapabilityNotSupportedError(
+            "claude_code", Capability.SKILLS_SYNC_BINDPATHS
+        )
+
+    async def verify_pool_mappings(
+        self,
+        mappings: list[SymlinkItem],
+        auth: AuthContext | None = None,
+    ) -> PoolMappingVerificationResult:
+        raise CapabilityNotSupportedError(
+            "claude_code", Capability.SKILLS_SYNC_BINDPATHS
+        )
 
 
 __all__ = ["ClaudeCodeSkillsAdapter"]

@@ -335,6 +335,116 @@ class SkillRepository:
             query = query.order_by(self.Skill.gmt_created.desc())
             return [_skill_to_dict(s) for s in query.all()]
 
+    def get_bot_local_by_name(
+        self,
+        *,
+        bot_id: str,
+        name: str,
+        user_id: str | None = None,
+    ) -> dict | None:
+        """精确命中 Bot-owned local 行，禁止回退到 ``bolt_id IS NULL``。"""
+
+        with self._db.orm_session() as db:
+            query = db.query(self.Skill).filter(
+                self.Skill.env == get_current_env(),
+                self.Skill.bolt_id == bot_id,
+                self.Skill.name == name,
+                self.Skill.git_path.like("local://%"),
+            )
+            if user_id is not None:
+                query = query.filter(
+                    self.Skill.user_id == _normalize_user_id(user_id)
+                )
+            row = query.order_by(self.Skill.gmt_created.desc()).first()
+            return _skill_to_dict(row) if row is not None else None
+
+    def list_bot_local_assets(
+        self,
+        *,
+        env: str,
+        bot_id: str,
+    ):
+        """列出精确 Bot 范围内的全部 local 来源行，不包含全局记录。"""
+
+        from agentclaw.community.core.skills_pool.models import (
+            RegisteredSkillAsset,
+        )
+
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self.Skill)
+                .filter(
+                    self.Skill.env == env,
+                    self.Skill.bolt_id == bot_id,
+                    self.Skill.git_path.like("local://%"),
+                )
+                .order_by(self.Skill.id)
+                .all()
+            )
+            return [
+                RegisteredSkillAsset(
+                    skill_id=row.id,
+                    name=row.name,
+                    git_path=row.git_path,
+                )
+                for row in rows
+            ]
+
+    def list_bot_active_assets(
+        self,
+        *,
+        env: str,
+        bot_id: str,
+        user_id: str,
+        engine: str,
+    ):
+        """返回普通 active sets 与该引擎默认 set 的完整、去重来源。"""
+
+        from agentclaw.community.core.skills_pool.models import (
+            RegisteredSkillAsset,
+        )
+
+        skill_sets = SkillSetRepository(self._db)
+        active_sets = skill_sets.get_all_active_skill_sets_for_env(
+            user_id=user_id,
+            bolt_id=bot_id,
+            engine_type=engine,
+            env=env,
+        )
+        seen: set[str] = set()
+        assets: list[RegisteredSkillAsset] = []
+        for skill_set in active_sets:
+            rows = skill_sets.get_skills_in_set_for_env(
+                str(skill_set["id"]),
+                env=env,
+            )
+            if skill_set.get("is_default"):
+                excluded = set(
+                    skill_sets.get_excluded_skills(
+                        user_id=user_id,
+                        bot_id=bot_id,
+                        skill_set_id=int(skill_set["id"]),
+                    )
+                )
+                rows = [
+                    row
+                    for row in rows
+                    if int(row.get("id", 0)) not in excluded
+                ]
+            for row in rows:
+                git_path = str(row.get("git_path") or "")
+                if not git_path or git_path in seen:
+                    continue
+                seen.add(git_path)
+                assets.append(
+                    RegisteredSkillAsset(
+                        skill_id=int(row["id"]),
+                        name=str(row["name"]),
+                        git_path=git_path,
+                    )
+                )
+        return assets
+
     def create(self, skill_data: dict) -> dict:
         with self._db.orm_session() as db:
             tags = skill_data.get("tags")
@@ -1022,9 +1132,19 @@ class SkillSetRepository:
             return rowcount > 0
 
     def get_skills_in_set(self, skill_set_id: str) -> list[dict]:
+        return self.get_skills_in_set_for_env(
+            skill_set_id,
+            env=get_current_env(),
+        )
+
+    def get_skills_in_set_for_env(
+        self,
+        skill_set_id: str,
+        *,
+        env: str,
+    ) -> list[dict]:
         from agentclaw.community.core.models import Skill
 
-        env = get_current_env()
         with self._db.orm_session() as db:
             # non-center: join by skill_id
             non_center = (

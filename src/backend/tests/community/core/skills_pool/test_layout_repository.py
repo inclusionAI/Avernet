@@ -21,6 +21,7 @@ from agentclaw.community.core.skills_pool.types import (
 from agentclaw.community.core.skills_pool.repository.models import (
     BotSkillLayoutStateModel,
 )
+from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.plugins.skills_pool_layout_repository import (
     SkillsPoolLayoutRepository,
 )
@@ -231,6 +232,16 @@ def test_lease_is_fenced_by_generation_and_current_owner() -> None:
         lease_owner="worker-2",
         lease_seconds=120,
     )
+    assert repository.holds_lease(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+    )
+    assert not repository.holds_lease(
+        scope=scope,
+        migration_generation="generation-stale",
+        lease_owner="worker-1",
+    )
 
 
 def test_expired_lease_competition_has_one_new_owner(tmp_path: Path) -> None:
@@ -253,6 +264,11 @@ def test_expired_lease_competition_has_one_new_owner(tmp_path: Path) -> None:
                 )
             }
         )
+    assert not repository.holds_lease(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-original",
+    )
 
     barrier = Barrier(2)
 
@@ -271,3 +287,187 @@ def test_expired_lease_competition_has_one_new_owner(tmp_path: Path) -> None:
     assert results.count(True) == 1
     winner = ["worker-2", "worker-3"][results.index(True)]
     assert repository.get(scope).lease_owner == winner
+
+
+def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+    assert repository.record_cutover_committed(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"bridge": "valid"},
+    )
+    with database.transactional_orm_session() as session:
+        session.add_all(
+            [
+                Skill(
+                    id=1,
+                    name="local-a",
+                    git_path="local:///legacy/local-a",
+                    bolt_id="bot-1",
+                    env="pre",
+                ),
+                Skill(
+                    id=2,
+                    name="local-b",
+                    git_path="local://local-b",
+                    bolt_id="bot-1",
+                    env="pre",
+                ),
+                Skill(
+                    id=3,
+                    name="repo",
+                    git_path="git://business/repo",
+                    bolt_id="bot-1",
+                    env="pre",
+                ),
+                Skill(
+                    id=4,
+                    name="other-bot",
+                    git_path="local:///legacy/other-bot",
+                    bolt_id="bot-2",
+                    env="pre",
+                ),
+                Skill(
+                    id=5,
+                    name="other-env",
+                    git_path="local:///legacy/other-env",
+                    bolt_id="bot-1",
+                    env="prod",
+                ),
+            ]
+        )
+
+    committed = repository.commit_pool_active(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        local_locators={
+            1: (
+                "local:///home/admin/.openclaw/workspace/"
+                "skills-pool/skills-local/local-a"
+            ),
+            2: (
+                "local:///home/admin/.openclaw/workspace/"
+                "skills-pool/skills-local/local-b"
+            ),
+        },
+    )
+
+    assert committed
+    state = repository.get(scope)
+    assert state.active_layout is SkillLayout.POOL
+    assert state.target_layout is None
+    assert state.phase is SkillLayoutPhase.POOL_ACTIVE
+    assert state.pool_activated_at is not None
+    assert state.lease_owner is None
+    with database.transactional_orm_session() as session:
+        paths = {
+            row.id: row.git_path
+            for row in session.query(Skill).order_by(Skill.id).all()
+        }
+    assert paths == {
+        1: (
+            "local:///home/admin/.openclaw/workspace/"
+            "skills-pool/skills-local/local-a"
+        ),
+        2: (
+            "local:///home/admin/.openclaw/workspace/"
+            "skills-pool/skills-local/local-b"
+        ),
+        3: "git://business/repo",
+        4: "local:///legacy/other-bot",
+        5: "local:///legacy/other-env",
+    }
+
+
+def test_pool_active_commit_rejects_partial_or_stale_local_locator_set() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+    assert repository.record_cutover_committed(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={},
+    )
+    with database.transactional_orm_session() as session:
+        session.add_all(
+            [
+                Skill(
+                    id=1,
+                    name="local-a",
+                    git_path="local:///legacy/local-a",
+                    bolt_id="bot-1",
+                    env="pre",
+                ),
+                Skill(
+                    id=2,
+                    name="local-b",
+                    git_path="local:///legacy/local-b",
+                    bolt_id="bot-1",
+                    env="pre",
+                ),
+            ]
+        )
+
+    assert not repository.commit_pool_active(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        local_locators={
+            1: (
+                "local:///home/admin/.openclaw/workspace/"
+                "skills-pool/skills-local/local-a"
+            )
+        },
+    )
+    assert repository.get(scope).active_layout is SkillLayout.LEGACY

@@ -750,11 +750,13 @@ class SkillSetService:
                 git_path = skill['git_path']
                 if git_path.startswith("git://"):
                     rel_path = git_path[6:]
+                    link_name = self.skill_service.get_link_name(rel_path)
                 elif git_path.startswith("local://"):
                     rel_path = git_path[8:]
+                    link_name = rel_path.rstrip('/').split('/')[-1]
                 else:
                     rel_path = git_path
-                link_name = self.skill_service.get_link_name(rel_path)
+                    link_name = self.skill_service.get_link_name(rel_path)
                 try:
                     await self.skill_service.deactivate_skill(
                         link_name, bolt_id=self.bot_id, user_id=user_id
@@ -1228,10 +1230,11 @@ class SkillSetService:
                 if path_part.startswith('/'):
                     # 绝对路径格式: /aidesktop/.../skills-local/skill-name
                     skill_name = path_part.rstrip('/').split('/')[-1]
+                    source = path_part.rstrip('/')
                 else:
                     # 相对名称格式: skill-name
                     skill_name = path_part.split('/')[-1] if '/' in path_part else path_part
-                source = str(skills_local_dir / skill_name)
+                    source = str(skills_local_dir / skill_name)
                 target = str(base_skills_dir / skill_name)
                 symlinks.append(SynlinkMappingInfo(source=source, target=target))
 
@@ -2472,7 +2475,7 @@ class SkillSetActivator(_DeviceSyncMixin):
         if is_default:
             result.success = True
             result.message = f"默认技能集 '{skill_set_name}' 已启用"
-            logger.info(f"[SkillSetActivator.activate] Default skill set always enabled (ac_user_default_skill_set dropped)")
+            logger.info("[SkillSetActivator.activate] Default skill set always enabled (ac_user_default_skill_set dropped)")
             return result
         else:
             # 3. 普通能力集：检查 is_active 状态
@@ -2584,7 +2587,7 @@ class SkillSetActivator(_DeviceSyncMixin):
         if is_default:
             result.success = False
             result.message = f"默认技能集 '{skill_set_name}' 无法禁用，所有默认技能集保持启用状态"
-            logger.info(f"[SkillSetActivator.deactivate] Default skill set cannot be disabled (ac_user_default_skill_set dropped)")
+            logger.info("[SkillSetActivator.deactivate] Default skill set cannot be disabled (ac_user_default_skill_set dropped)")
             return result
         else:
             # 3. 普通能力集：检查 is_active 状态

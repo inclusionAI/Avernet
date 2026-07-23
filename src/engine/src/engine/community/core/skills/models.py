@@ -6,7 +6,7 @@ See src/engine/docs/heterogeneous-engine-architecture.md §7.2.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
 
 
@@ -174,6 +174,89 @@ class CenterEnsureResult:
     failed: list[CenterEnsureFailure] = field(default_factory=list)
 
 
+@dataclass
+class PoolLayoutActivateRequest:
+    """提交 OpenClaw Pool 数据面所需的稳定 Service API 请求。"""
+
+    migration_generation: str
+    preparation_id: str
+    registered_local_names: list[str] = field(default_factory=list)
+    mappings: list[SymlinkItem] = field(default_factory=list)
+
+
+@dataclass
+class PoolLayoutProbeRequest:
+    """运行时 Pool layout 核验请求。"""
+
+    engine: str
+    layout_contract_version: str
+
+
+class PoolLayoutProbeStatus(StrEnum):
+    READY = "READY"
+    NOT_CAPABLE = "NOT_CAPABLE"
+    TRANSIENT_ERROR = "TRANSIENT_ERROR"
+    INVALID = "INVALID"
+
+
+@dataclass
+class PoolLayoutProbeResult:
+    """运行时 Pool layout 核验结果。"""
+
+    status: PoolLayoutProbeStatus
+    engine: str
+    layout_contract_version: str
+    preparation_id: str | None
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_data(self) -> dict[str, Any]:
+        return {
+            "status": self.status.value,
+            "engine": self.engine,
+            "layout_contract_version": self.layout_contract_version,
+            "preparation_id": self.preparation_id,
+            "evidence": self.evidence,
+        }
+
+
+@dataclass
+class PoolLayoutActivationResult:
+    """Pool 数据面切换结果。"""
+
+    committed: bool
+    status: str
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_data(self) -> dict[str, Any]:
+        return {
+            "committed": self.committed,
+            "status": self.status,
+            "evidence": self.evidence,
+        }
+
+
+@dataclass
+class PoolMappingPublishResult:
+    """Pool mapping 全量发布结果。"""
+
+    published: bool
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_data(self) -> dict[str, Any]:
+        return {"published": self.published, "evidence": self.evidence}
+
+
+@dataclass
+class PoolMappingVerificationResult:
+    """Pool mapping 当前状态验证结果。"""
+
+    valid: bool
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_data(self) -> dict[str, Any]:
+        return {"valid": self.valid, "evidence": self.evidence}
+
+
 __all__ = [
     "CenterEnsureFailure",
     "CenterEnsureItem",
@@ -181,6 +264,13 @@ __all__ = [
     "CenterEnsureResult",
     "CleanSymlinksRequest",
     "CleanSymlinksResult",
+    "PoolLayoutActivateRequest",
+    "PoolLayoutActivationResult",
+    "PoolLayoutProbeRequest",
+    "PoolLayoutProbeResult",
+    "PoolLayoutProbeStatus",
+    "PoolMappingPublishResult",
+    "PoolMappingVerificationResult",
     "Skill",
     "SkillConfig",
     "SkillExecutionRequest",

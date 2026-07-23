@@ -1,6 +1,6 @@
 """Tests for agentclaw.community.core.skill_center.utils.skill_metadata_writer."""
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +124,16 @@ class TestGetSkillDirName:
         writer = _make_writer(tmp_path)
         assert writer._get_skill_dir_name("local://my-local-skill") == "my-local-skill"
 
+    def test_pool_local_path_uses_basename(self, tmp_path):
+        writer = _make_writer(tmp_path)
+        assert (
+            writer._get_skill_dir_name(
+                "local:///home/admin/.openclaw/workspace/"
+                "skills-pool/skills-local/my-local-skill"
+            )
+            == "my-local-skill"
+        )
+
     def test_bare_path_fallback(self, tmp_path):
         writer = _make_writer(tmp_path)
         assert writer._get_skill_dir_name("some/path/skill-name") == "skill-name"
@@ -153,6 +163,16 @@ class TestGetSkillAbsolutePath:
         result = writer._get_skill_absolute_path("local://my-local")
         expected = str(tmp_path / "skills-local" / "my-local")
         assert result == expected
+
+    def test_pool_local_absolute_path_is_not_prefixed_again(self, tmp_path):
+        writer = _make_writer(tmp_path)
+        locator_path = (
+            "/home/admin/.openclaw/workspace/"
+            "skills-pool/skills-local/my-local"
+        )
+        assert writer._get_skill_absolute_path(f"local://{locator_path}") == (
+            locator_path
+        )
 
     def test_bare_path_falls_back_to_repo_dir(self, tmp_path):
         writer = _make_writer(tmp_path)

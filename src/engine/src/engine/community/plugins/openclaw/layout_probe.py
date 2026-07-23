@@ -1,4 +1,4 @@
-"""In-runtime validation for the persistent OpenClaw Skills Pool layout."""
+"""OpenClaw 插件对持久化 Skills Pool layout 的运行时核验。"""
 
 from __future__ import annotations
 

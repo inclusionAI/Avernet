@@ -11,6 +11,11 @@ from agentclaw.community.core.skills_pool.rollout_gate import (
     RolloutDecisionReason,
     SkillsPoolRolloutGate,
 )
+from agentclaw.community.core.skills_pool.reconcile_service import (
+    SkillsPoolReconcileOutcome,
+    SkillsPoolReconcileResult,
+    SkillsPoolReconcileService,
+)
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,
@@ -31,5 +36,8 @@ __all__ = [
     "SkillLayout",
     "SkillLayoutPhase",
     "SkillsPoolMigrationClaimService",
+    "SkillsPoolReconcileOutcome",
+    "SkillsPoolReconcileResult",
+    "SkillsPoolReconcileService",
     "SkillsPoolRolloutGate",
 ]

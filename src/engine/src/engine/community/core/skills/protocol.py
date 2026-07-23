@@ -29,6 +29,12 @@ from engine.community.core.skills.models import (
     CenterEnsureResult,
     CleanSymlinksRequest,
     CleanSymlinksResult,
+    PoolLayoutActivateRequest,
+    PoolLayoutActivationResult,
+    PoolLayoutProbeRequest,
+    PoolLayoutProbeResult,
+    PoolMappingPublishResult,
+    PoolMappingVerificationResult,
     Skill,
     SkillConfig,
     SkillExecutionRequest,
@@ -36,6 +42,7 @@ from engine.community.core.skills.models import (
     SyncBindPathsRequest,
     SyncSymlinksRequest,
     SyncSymlinksResult,
+    SymlinkItem,
 )
 
 
@@ -158,6 +165,38 @@ class SkillsService(Protocol):
         returned in `failed` with a human-readable reason; individual failures
         do not abort the batch.
         """
+        ...
+
+    async def activate_pool_layout(
+        self,
+        request: PoolLayoutActivateRequest,
+        auth: AuthContext | None = None,
+    ) -> PoolLayoutActivationResult:
+        """最终同步已登记 local 并原子提交 Legacy→Pool bridge。"""
+        ...
+
+    async def probe_pool_layout(
+        self,
+        request: PoolLayoutProbeRequest,
+        auth: AuthContext | None = None,
+    ) -> PoolLayoutProbeResult:
+        """核验当前运行时的 Pool layout 能力与事实。"""
+        ...
+
+    async def publish_pool_mappings(
+        self,
+        mappings: list[SymlinkItem],
+        auth: AuthContext | None = None,
+    ) -> PoolMappingPublishResult:
+        """发布目标 Pool layout 的完整受管 mapping。"""
+        ...
+
+    async def verify_pool_mappings(
+        self,
+        mappings: list[SymlinkItem],
+        auth: AuthContext | None = None,
+    ) -> PoolMappingVerificationResult:
+        """验证当前受管入口精确指向请求中的 Pool source。"""
         ...
 
 

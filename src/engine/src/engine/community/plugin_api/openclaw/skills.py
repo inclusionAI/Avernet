@@ -85,5 +85,29 @@ class OpenClawSkillsPort(Protocol):
         """
         ...
 
+    async def activate_pool_layout(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """最终同步已登记 local 并原子提交永久兼容 bridge。"""
+        ...
+
+    async def probe_pool_layout(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """核验当前 OpenClaw Pool layout。"""
+        ...
+
+    async def publish_pool_mappings(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """发布目标 Pool layout 的完整受管 mapping。"""
+        ...
+
+    async def verify_pool_mappings(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """验证受管入口精确解析到目标 Pool source。"""
+        ...
+
 
 __all__ = ["OpenClawSkillsPort"]
