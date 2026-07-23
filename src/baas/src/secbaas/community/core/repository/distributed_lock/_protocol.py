@@ -12,30 +12,6 @@ class DistributedLockRepository(Protocol):
         """获取锁记录（只读，不加行锁）"""
         ...
 
-    def get_by_lock_name_for_update(self, lock_name: str) -> LockRecord | None:
-        """使用 FOR UPDATE 获取锁记录"""
-        ...
-
-    def insert_lock(
-        self,
-        *,
-        lock_name: str,
-        lock_holder: str,
-        expire_time: datetime,
-    ) -> int:
-        """插入新的锁记录，唯一索引冲突时返回 0"""
-        ...
-
-    def update_lock_holder(
-        self,
-        *,
-        lock_name: str,
-        lock_holder: str,
-        expire_time: datetime,
-    ) -> int:
-        """更新锁持有者和过期时间"""
-        ...
-
     def update_expire_time(
         self,
         *,
@@ -49,6 +25,16 @@ class DistributedLockRepository(Protocol):
         """删除锁记录"""
         ...
 
-    def delete_expired_locks(self, current_time: datetime) -> int:
-        """删除已过期的锁记录（供异步定时清理使用）"""
+    def try_acquire_lock(
+        self,
+        *,
+        lock_name: str,
+        lock_holder: str,
+        expire_time: datetime,
+    ) -> bool:
+        """在单一事务中尝试获取锁（SELECT → DELETE expired → INSERT）。
+
+        返回 True 表示加锁成功；False 表示锁被他人持有且未过期。
+        唯一索引冲突视为并发竞争，返回 False 而非抛异常。
+        """
         ...
