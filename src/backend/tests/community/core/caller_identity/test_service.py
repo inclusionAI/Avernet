@@ -9,6 +9,7 @@ import pytest
 from agentclaw.community.core.caller_identity.contracts import (
     CallerCallTypeInvalidError,
     CallerIdentityAmbiguousError,
+    CallerIdentityIrreversibleError,
     CallerIdentityPermissionError,
     CallerIdentityStage,
     CallerIdentityReadOnlyError,
@@ -709,3 +710,26 @@ async def test_mcp_update_rejects_non_service_bot_as_read_only() -> None:
         )
 
     deps.mcp_provider.collect_bot_active_mcps.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mcp_update_rejects_irreversible_owner_downgrade_before_sync() -> None:
+    service, deps = _service(bot=_bot(call_type="caller"))
+    deps.mcp_provider.collect_bot_active_mcps.return_value = [
+        {"server_code": "calendar"}
+    ]
+    deps.lock_repository.get_by_key.return_value = None
+    deps.repository.replace_draft_call_type.side_effect = (
+        CallerIdentityIrreversibleError()
+    )
+
+    with pytest.raises(CallerIdentityIrreversibleError):
+        await service.update_mcp_call_type(
+            bot_id="bot-1",
+            server_code="calendar",
+            call_type=McpCallType.OWNER,
+            actor_id="owner-1",
+        )
+
+    deps.mcp_sync_service.sync_mcp_identity_to_agent_principal.assert_not_awaited()
+    deps.repository.compensate_draft_call_type.assert_not_called()
