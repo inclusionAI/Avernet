@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from typing import Any
 
 import httpx
@@ -25,6 +26,12 @@ _SEMAPHORE = asyncio.Semaphore(_MAX_CONCURRENT_LLM_CALLS)
 # ── retry config ───────────────────────────────────────────
 _MAX_RETRIES = 3
 _RETRY_DELAYS = [2.0, 5.0, 10.0]  # seconds between retries
+# Fraction of each delay added as random jitter (0.0–1.0). Diagnostics and patch
+# calls run up to ``_MAX_CONCURRENT_LLM_CALLS`` in parallel; without jitter a
+# gateway blip makes every in-flight call retry on the same wall-clock tick and
+# the synchronized retry storm re-trips the gateway. Jitter spreads the retries
+# so recovery is staggered instead of herd-like.
+_RETRY_JITTER = 0.4
 
 # ── generation budget ──────────────────────────────────────
 # GLM-5.1 stalls on a huge max_tokens: the old 256_000 pushed it into a slow
@@ -40,8 +47,17 @@ _DEFAULT_MAX_TOKENS = 32768
 # request light and avoids pushing GLM into the slow-reasoning path that
 # exceeds antchat's ~90s gateway window.
 DIAGNOSTIC_MAX_TOKENS = 32768
-_TIMEOUT_MAX_RETRIES = 1
-_TIMEOUT_RETRY_MAX_TOKENS = 4096
+# Connection-level failures (gateway dropped mid send/read, or the send-hook
+# wrapper re-raised) get more retries than before — these are transient blips,
+# not "request too heavy" stalls, so giving up after one retry was premature.
+# Must stay < ``_MAX_RETRIES`` so the light-retry budget is exhausted via the
+# explicit break rather than the for-loop falling through.
+_TIMEOUT_MAX_RETRIES = 2
+# Light-retry budget: 8k covers full-file patch rewrites (largest file ~2.5k
+# tokens) with headroom, so a retried *patch* call can still complete instead of
+# being truncated to a useless stub — while staying well under the 32k default
+# that pushes GLM into the slow path that exceeds the gateway window.
+_TIMEOUT_RETRY_MAX_TOKENS = 8192
 
 # Exceptions where the request never got a usable response back: the gateway
 # closed the connection (httpx.ReadError / RemoteProtocolError) or the
@@ -51,6 +67,19 @@ _TIMEOUT_EXCEPTIONS: tuple[type[Exception], ...] = (
     httpx.TimeoutException,
     httpx.TransportError,
 )
+
+
+def _retry_delay(attempt: int) -> float:
+    """Return the (jittered) backoff delay before retry attempt ``attempt``.
+
+    ``attempt`` is the 0-indexed attempt that just failed. The base delay
+    escalates with ``_RETRY_DELAYS`` so the gateway gets progressively more
+    time to recover, then up to ``_RETRY_JITTER`` of it is added as random
+    jitter so parallel retries don't all land on the same wall-clock tick.
+    """
+    base = _RETRY_DELAYS[min(attempt, len(_RETRY_DELAYS) - 1)]
+    jitter = random.uniform(0.0, base * _RETRY_JITTER)
+    return base + jitter
 
 
 def _client_error_status(exc: BaseException) -> int | None:
@@ -207,6 +236,11 @@ class LLM:
         connection-level and route it through the light retry (see
         :func:`_client_error_status`).
 
+        Every retry sleeps a backoff from ``_retry_delay`` — escalating base
+        delay plus random jitter — so a gateway blip that knocks out several
+        in-flight parallel calls doesn't turn into a synchronized retry storm
+        that re-trips the gateway on the same tick.
+
         Exhaustion returns the ``[llm disabled]`` sentinel so callers (parser /
         PatchPlanner) treat it uniformly as "LLM unavailable"."""
         budget = max_tokens
@@ -221,7 +255,7 @@ class LLM:
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code
                 if 500 <= status < 600 and attempt < _MAX_RETRIES - 1:
-                    delay = _RETRY_DELAYS[min(attempt, len(_RETRY_DELAYS) - 1)]
+                    delay = _retry_delay(attempt)
                     logger.warning(
                         "[LLM] HTTP %d (attempt %d/%d), retrying in %.1fs",
                         status, attempt + 1, _MAX_RETRIES, delay,
@@ -233,7 +267,7 @@ class LLM:
             except _TIMEOUT_EXCEPTIONS as e:
                 if attempt < _TIMEOUT_MAX_RETRIES:
                     budget = _TIMEOUT_RETRY_MAX_TOKENS
-                    delay = _RETRY_DELAYS[0]
+                    delay = _retry_delay(attempt)
                     logger.warning(
                         "[LLM] %s (attempt %d/%d), shrinking max_tokens=%d, retrying in %.1fs",
                         type(e).__name__, attempt + 1, _MAX_RETRIES, budget, delay,
@@ -261,7 +295,7 @@ class LLM:
                 # bounded by ``_TIMEOUT_MAX_RETRIES`` instead of verbatim-retry.
                 if attempt < _TIMEOUT_MAX_RETRIES:
                     budget = _TIMEOUT_RETRY_MAX_TOKENS
-                    delay = _RETRY_DELAYS[0]
+                    delay = _retry_delay(attempt)
                     logger.warning(
                         "[LLM] %s (attempt %d/%d), shrinking max_tokens=%d, retrying in %.1fs: %r",
                         type(e).__name__, attempt + 1, _MAX_RETRIES, budget, delay, e,
