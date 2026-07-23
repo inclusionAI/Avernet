@@ -142,6 +142,16 @@ pub trait StateMachineRunRepoPort: Send + Sync {
         completed_at: u64,
     ) -> ServiceResult<bool>;
 
+    /// Persist the bot artifact while the node remains running so callers can
+    /// distinguish bot execution from the subsequent Judge evaluation.
+    async fn record_node_artifact_if_running(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        artifact_text: String,
+    ) -> ServiceResult<bool>;
+
     async fn fail_node_attempt(
         &self,
         run_id: &str,

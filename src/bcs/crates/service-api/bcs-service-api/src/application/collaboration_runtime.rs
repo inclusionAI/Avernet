@@ -177,9 +177,21 @@ pub struct StateMachineJudgeOutputView {
     pub decision: JudgeDecision,
 }
 
+/// More specific presentation state while a node's durable status is
+/// `running`. New runtime phases can be added without widening the durable
+/// state-machine status model.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StateMachineNodeSubStatus {
+    AwaitingResponse,
+    Judging,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateMachineNodeRunView {
     pub node: StateMachineNodeRun,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_status: Option<StateMachineNodeSubStatus>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub judge_outputs: Vec<StateMachineJudgeOutputView>,
 }
@@ -222,6 +234,8 @@ pub struct StateMachineGraphNodeView {
     pub started_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_status: Option<StateMachineNodeSubStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
