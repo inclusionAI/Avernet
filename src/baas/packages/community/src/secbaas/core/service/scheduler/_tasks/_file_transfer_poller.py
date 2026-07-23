@@ -260,9 +260,11 @@ class FileTransferPoller:
                     return "retention_done"
 
                 # Normal path: UPLOAD_COMPLETED -> PULLING -> pull_file -> DONE
-                # Recovery: if ticket is already UPLOAD_COMPLETED (stuck from
-                # a previous cycle), skip the redundant transition.
-                if ticket.status != "UPLOAD_COMPLETED":
+                # Recovery: if ticket is already UPLOAD_COMPLETED or PULLING
+                # (stuck from a previous cycle), skip the redundant transition.
+                # PULLING must be excluded here because PULLING → UPLOAD_COMPLETED
+                # is not a valid transition (backward rollback not allowed).
+                if ticket.status not in ("UPLOAD_COMPLETED", "PULLING"):
                     self._ticket_repo.update_status(
                         transfer_id, "UPLOAD_COMPLETED", None
                     )
