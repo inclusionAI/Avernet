@@ -453,6 +453,7 @@ def _resources_router_app(mock_ctx, tmp_path):
     device_fs.list_dir = AsyncMock(return_value=[])
     dispatcher = MagicMock()
     dispatcher.dispatch.return_value = device_fs
+    dispatcher.dispatch_addressed.return_value = device_fs
 
     bot_repo = MagicMock()
     # Force non-arca / non-baas (local) so we hit the device_fs branch.
@@ -543,10 +544,10 @@ class TestResourcesRouterUsesResolver:
             dispatcher.dispatch.assert_called_once()
             assert dispatcher.dispatch.call_args[0][0] is resolver.resolve_for_bot.return_value
 
-    def test_upload_files_legacy_endpoint_uses_resolver(
+    def test_upload_files_legacy_endpoint_addresses_workspace_data_namespace(
         self, mock_request_ctx, tmp_path
     ):
-        """resources/router.py:631 — upload_files_legacy 走 resolver+dispatch。"""
+        """The legacy upload must not send a root-relative host path to ARCA."""
         with _resources_router_app(mock_request_ctx, tmp_path) as (
             client,
             resolver,
@@ -567,7 +568,17 @@ class TestResourcesRouterUsesResolver:
                 },
             )
             resolver.resolve_for_bot.assert_called_once_with("bot-1", "user-1")
-            dispatcher.dispatch.assert_called_once()
+            dispatcher.dispatch_addressed.assert_called_once_with(
+                resolver.resolve_for_bot.return_value,
+                namespace="workspace",
+                entity_type="staff",
+                entity_id="user-1",
+                bot_id="bot-1",
+                engine_type="openclaw",
+            )
+            device_fs.write_file.assert_awaited_once_with(
+                "workspace/data/test.txt", b"hello"
+            )
 
 
 # ── resources/file_router.py ─────────────────────────────────────────

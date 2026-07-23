@@ -70,6 +70,7 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.devices.services import device_info as device_info_lookup
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
+from agentclaw.community.core.config_compose.teclaw_paths import WORKSPACE_NS
 
 logger = logging.getLogger(__name__)
 
@@ -639,7 +640,18 @@ async def upload_files_legacy(
     eid, ebid, eeng, eetype = _get_path_params(ctx, entity_id, entity_type, bot_id, engine_type, bot_repo=bot_repo)
     legacy_svc = get_legacy_resource_service(resource_repo, bot_repo, path_factory=path_factory, entity_id=eid, bot_id=ebid, engine_type=eeng, entity_type=eetype)
     ctx_dev = resolver.resolve_for_bot(ebid, ctx.user_id)
-    device_fs = device_fs_dispatcher.dispatch(ctx_dev)
+    # This compatibility endpoint still persists resource metadata through the
+    # legacy service, but file bytes must use the same logical workspace address
+    # as /files/upload.  A generic dispatcher leaves a root upload as a host path;
+    # ARCA then normalizes it to //filename and the container rejects it.
+    device_fs = device_fs_dispatcher.dispatch_addressed(
+        ctx_dev,
+        namespace=WORKSPACE_NS,
+        entity_type=eetype,
+        entity_id=eid,
+        bot_id=ebid,
+        engine_type=eeng,
+    )
 
     results, errors = [], []
     for file in files:
@@ -651,6 +663,7 @@ async def upload_files_legacy(
                 user_id=ctx.user_id,
                 created_by=ctx.user_id,
                 device_fs=device_fs,
+                device_path_prefix=f"{WORKSPACE_NS}/data",
             )
             results.append(resource)
         except ValueError as e:

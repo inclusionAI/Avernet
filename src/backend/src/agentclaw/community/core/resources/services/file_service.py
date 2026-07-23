@@ -382,6 +382,7 @@ class FileService:
         target_dir: str = "",
         preserve_structure: bool = False,
         device_fs: "DeviceFileSystem",
+        device_path_prefix: str | None = None,
     ) -> Dict:
         """Upload a single file to specified directory.
 
@@ -447,7 +448,12 @@ class FileService:
         # disk and we report its real stat; for a remote (Arca) write the
         # path is not on local disk, so we fall back to the byte count and
         # current time — matching the prior per-branch behavior.
-        await device_fs.write_file(str(file_path), data)
+        device_path = (
+            f"{device_path_prefix}/{rel_path}"
+            if device_path_prefix
+            else str(file_path)
+        )
+        await device_fs.write_file(device_path, data)
         try:
             stat = file_path.stat()
             size = stat.st_size

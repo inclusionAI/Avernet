@@ -308,6 +308,7 @@ class ResourceService:
         user_id: Optional[str] = None,
         created_by: Optional[str] = None,
         device_fs: "DeviceFileSystem",
+        device_path_prefix: str | None = None,
     ) -> Resource:
         """Upload a file and create resource record.
 
@@ -337,6 +338,7 @@ class ResourceService:
             filename=filename,
             target_dir=target_dir,
             device_fs=device_fs,
+            device_path_prefix=device_path_prefix,
         )
         logger.info(f"[ResourceService.upload_file] File saved: {file_info['path']}")
 
