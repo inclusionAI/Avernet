@@ -207,6 +207,41 @@ def test_command_output_end_converts_to_tool_result():
     }
 
 
+def test_aicoding_command_output_end_converts_to_tool_result():
+    converter = DefaultStreamConverter()
+    event = converter.convert(
+        StreamChunk(
+            type="agent",
+            engine_type="aicoding",
+            metadata={
+                "engine_frame": {
+                    "stream": "command_output",
+                    "data": {
+                        "phase": "end",
+                        "toolCallId": "tool-aicoding",
+                        "output": "received",
+                        "exitCode": 0,
+                    },
+                }
+            },
+        ),
+        run_id="run-1",
+    )
+
+    assert event is not None
+    assert event.event == "agent"
+    assert _data(event) == {
+        "runId": "run-1",
+        "seq": 1,
+        "stream": "tool",
+        "phase": "result",
+        "toolCallId": "tool-aicoding",
+        "result": {"content": [{"type": "text", "text": "received"}]},
+        "isError": False,
+        "exitCode": 0,
+    }
+
+
 def test_command_output_non_end_phase_is_dropped():
     converter = DefaultStreamConverter()
     event = converter.convert(
