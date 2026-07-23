@@ -1,0 +1,55 @@
+"""Skills Pool Bot 布局状态仓库的业务边界。"""
+
+from __future__ import annotations
+
+from typing import Protocol, runtime_checkable
+
+from agentclaw.community.core.skills_pool.types import (
+    BotSkillLayoutScope,
+    BotSkillLayoutState,
+    RolloutEvidence,
+)
+
+
+@runtime_checkable
+class SkillsPoolLayoutRepositoryProtocol(Protocol):
+    """持久化布局状态，并以 generation/lease 提供 fencing。"""
+
+    def get(self, scope: BotSkillLayoutScope) -> BotSkillLayoutState:
+        """读取状态；不存在记录时返回非持久化的 Legacy 缺省状态。"""
+        ...
+
+    def claim_pool_migration(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        layout_contract_version: str,
+        migration_generation: str,
+        rollout_evidence: RolloutEvidence,
+        lease_owner: str,
+        lease_seconds: int,
+    ) -> BotSkillLayoutState | None:
+        """仅为尚未认领的 Legacy Bot 原子创建一个迁移代际。"""
+        ...
+
+    def renew_lease(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        lease_seconds: int,
+    ) -> bool:
+        """仅允许当前 generation 的未过期持有者续租。"""
+        ...
+
+    def try_acquire_lease(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        lease_seconds: int,
+    ) -> bool:
+        """在 lease 缺失或过期时，以 CAS 竞争成为新持有者。"""
+        ...
