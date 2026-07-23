@@ -81,12 +81,16 @@ class StubFileTransferBackend(FileTransferBackend):
         transfer_id = self._extract_transfer_id(staging_path)
         return transfer_id in self._storage
 
-    def generate_download_url(self, staging_path: str, expire_seconds: int) -> str:
+    def generate_download_url(
+        self, staging_path: str, expire_seconds: int,
+        response_params: dict | None = None,
+    ) -> str:
         """Generate a fake presigned GET URL for the given staging path.
 
         Args:
             staging_path: OSS object key (e.g. ``file-transfers/{id}/{name}``).
             expire_seconds: URL validity duration in seconds (ignored by stub).
+            response_params: Optional query params dict (ignored by stub).
 
         Returns:
             Fake URL string: ``stub-download://{transfer_id}``.
