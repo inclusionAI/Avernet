@@ -1299,6 +1299,25 @@ class TestResolveEnginePython:
 
         assert result == str(configured_python)
 
+    def test_resolve_engine_python_preserves_configured_venv_symlink(
+        self, monkeypatch, tmp_path
+    ):
+        """Configured virtualenv interpreter keeps its symlink path."""
+        engine_src_dir = tmp_path / "engine" / "src"
+        engine_src_dir.mkdir(parents=True)
+        base_python = tmp_path / "uv" / "python"
+        base_python.parent.mkdir(parents=True)
+        base_python.touch()
+        base_python.chmod(base_python.stat().st_mode | stat.S_IXUSR)
+        venv_python = tmp_path / "runtime" / "bin" / "python"
+        venv_python.parent.mkdir(parents=True)
+        venv_python.symlink_to(base_python)
+        monkeypatch.setenv("LOCAL_ENGINE_PYTHON", str(venv_python))
+
+        result = pm.LocalProcessManager._resolve_engine_python(engine_src_dir)
+
+        assert result == str(venv_python)
+
     def test_resolve_engine_python_rejects_missing_configured_override(
         self, monkeypatch, tmp_path
     ):
