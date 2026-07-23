@@ -1178,3 +1178,51 @@ async def test_restart_recreate_crash_before_complete_resumes_idempotently():
     assert build_service.release_async.await_count == 1
     # Exactly one deploy workflow exists on the recreated bot.
     assert len(baas.list_bot_publishes("BOT-new")) == 1
+
+
+@pytest.mark.asyncio
+async def test_restart_does_not_finalize_normal_release_crash_window():
+    """The finalize short-circuit must be specific to restart-recreate. A normal
+    online first release that crashed after record_release_ext (ext.publish.online
+    written, op still ID_RECORDED) but before complete_operation leaves a dangling
+    FIRST_RELEASE op too — but it never wrote ext.restart. A restart in that window
+    (restart_bot accepts ONLINE_PUB) must NOT mistake it for a recreate: it must
+    actually restart the existing bot, not finalize the release op and return."""
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+
+    async def upgrade_async(**kw):
+        wid = baas.issue("BOT-live", "UPDATE")
+        return {"publish_id": wid, "success": True}
+
+    build_service.upgrade_async = AsyncMock(side_effect=upgrade_async)
+
+    # The crashed normal-release op: ID_RECORDED, workflow 850, ext.publish set
+    # to it — but NO ext.restart entry (a normal release never writes restart).
+    stranded = ledger.insert({
+        "publish_id": 1, "operation_kind": "first_release", "stage": "online",
+        "attempt": 1, "request_id": "req-rel", "bot_uuid": "BOT-live", "env": "dev",
+    })
+    ledger.record_workflow(stranded.id, baas_publish_id=850, bot_uuid="BOT-live")
+
+    record = _record(PublishStatus.ONLINE_PUB.value)
+    record.ext = {"migration_path": "/m", "config_artifact": None,
+                  "binding": {"online": 88}, "publish": {"online": 850}}
+    svc = _recreate_restart_flow(ledger, baas, build_service, record=record,
+                                 bot_uuid="BOT-live")
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    # It actually restarted: a fresh RESTART op issued a new deploy (901, the
+    # FakeBaas next id), NOT a short-circuit returning the release workflow 850.
+    build_service.upgrade_async.assert_awaited_once()
+    assert result["restart_publish_id"] == 901
+    assert result["restart_publish_id"] != 850
+    restart_op = ledger.get_latest_by_kind(1, "restart", "online")
+    assert restart_op.state == PublishOperationState.COMPLETED.value
+    assert restart_op.baas_publish_id == 901
+    # The dangling release op is left for the online_release task to finalize —
+    # not our concern here, and NOT completed by the restart.
+    assert ledger.get_by_id(stranded.id).state == PublishOperationState.ID_RECORDED.value

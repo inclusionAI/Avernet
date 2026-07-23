@@ -337,11 +337,20 @@ class RestartMixin:
         complete without issuing anything.
 
         The condition is exact: a non-terminal FIRST_RELEASE op for this
-        record/stage whose recorded workflow id IS ``ext.publish.<stage>`` — the
-        ext write demonstrably landed, so completing the op is pure bookkeeping
-        catch-up. ``complete`` is a CAS from ID_RECORDED; anything else no-ops.
-        The returned id lets ``execute_restart`` return that workflow instead of
-        issuing a redundant second deploy (idempotent task redelivery)."""
+        record/stage whose recorded workflow id IS **both** ``ext.publish.<stage>``
+        and ``ext.restart.<stage>``. Requiring the ``restart`` match too is what
+        keeps this specific to a restart-recreate redelivery: ``_recreate_restart_target``
+        writes the same workflow id into publish AND restart, whereas a *normal*
+        online first release (which can also crash after ``record_release_ext``
+        writes ``ext.publish.online`` but before ``complete_operation``, and whose
+        stage is restartable) never touches ``ext.restart`` — so without this
+        clause a restart issued in that window would finalize the release op and
+        return without actually restarting. That release op is finalized by the
+        online_release task's own redelivery, not here.
+
+        ``complete`` is a CAS from ID_RECORDED; anything else no-ops. The returned
+        id lets ``execute_restart`` return that workflow instead of issuing a
+        redundant second deploy (idempotent task redelivery)."""
         op = self._publish_operation_repo.get_latest_by_kind(
             publish_id, str(PublishOperationKind.FIRST_RELEASE), stage_enum.value
         )
@@ -351,6 +360,8 @@ class RestartMixin:
         if op.state in terminal:
             return None
         if op.baas_publish_id != (ext.get("publish") or {}).get(stage_enum.value):
+            return None
+        if op.baas_publish_id != (ext.get("restart") or {}).get(stage_enum.value):
             return None
         logger.info(
             "[PublishFlowService._finalize_dangling_recreate_op] completing "
