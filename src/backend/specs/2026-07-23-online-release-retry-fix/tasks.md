@@ -266,7 +266,15 @@
         LocalBaas.
 - **Depends on:** Tasks 3, 7
 
-## Task 9: DI-world operational scenarios — chains, rollback, restart, recreate
+## Task 9: `[x]` DI-world operational scenarios — chains, rollback, restart, recreate
+
+> Implementation note: C4 found a pre-existing production bug — the teclaw
+> POST error path (`BaasService._post_teclaw`) dropped the HTTP response when
+> normalizing to `BaasServiceError`, so `_extract_baas_error_info` could never
+> classify `BOT_NOT_FOUND` on the teclaw path and the gone-bot fallbacks
+> (upgrade first-release / restart recreate) only worked for ARCA. Fixed by
+> preserving `.response` on the raised error; covered by a focused unit test
+> plus C4/C5 end-to-end.
 
 - **Goal:** The multi-record operational flows on a shared online bot proven
   through production wiring: upgrade chains, rollback-then-re-promote,
